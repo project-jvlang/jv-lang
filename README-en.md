@@ -2,7 +2,7 @@
 
 **English** | [日本語](README.md)
 
-**jv** is a Java Sugar Language that compiles to readable Java 25 source code. It provides Kotlin-style syntax sugar while maintaining zero runtime dependencies and full JVM compatibility.
+**jv** (pronounced /jawa/, jv-lang is pronounced /jawa læŋ/) is a Java Sugar Language that compiles to readable Java 25 source code. It provides Kotlin-style syntax sugar while maintaining zero runtime dependencies and full JVM compatibility.
 
 ## Overview
 
