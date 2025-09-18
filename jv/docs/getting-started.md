@@ -1,40 +1,42 @@
-# Getting Started with jv
+# jvを始めよう
 
-This guide will help you install jv and write your first jv program.
+**日本語** | [English](getting-started-en.md)
 
-## Installation
+このガイドは、jvのインストールと最初のjvプログラムの作成を支援します。
 
-### Prerequisites
+## インストール
 
-- **Java 25+**: jv targets Java 25 LTS
-- **Rust toolchain** (for building from source)
+### 前提条件
 
-### Install from Source
+- **Java 25+**: jvはJava 25 LTSをターゲットとします
+- **Rustツールチェーン**（ソースからビルドする場合）
 
-Currently, jv must be built from source:
+### ソースからインストール
+
+現在、jvはソースからビルドする必要があります：
 
 ```bash
-# Clone the repository
+# リポジトリをクローン
 git clone https://github.com/jv-lang/jv.git
 cd jv
 
-# Build the compiler
+# コンパイラをビルド
 cargo build --release
 
-# The jv binary will be at target/release/jv
+# jvバイナリはtarget/release/jvにあります
 ./target/release/jv --help
 ```
 
-### Verify Installation
+### インストールの確認
 
 ```bash
 jv version
-# Output: jv 0.1.0 - Java Sugar Language compiler
+# 出力: jv 0.1.0 - Java Sugar Language compiler
 ```
 
-## Your First jv Program
+## 最初のjvプログラム
 
-### 1. Initialize a Project
+### 1. プロジェクトを初期化
 
 ```bash
 mkdir my-jv-project
@@ -42,75 +44,75 @@ cd my-jv-project
 jv init
 ```
 
-This creates:
+これにより作成されます：
 ```
 my-jv-project/
-├── jv.toml          # Project configuration
+├── jv.toml          # プロジェクト設定
 └── src/
-    └── main.jv      # Main source file
+    └── main.jv      # メインソースファイル
 ```
 
-### 2. Write Some Code
+### 2. コードを書く
 
-Edit `src/main.jv`:
+`src/main.jv`を編集：
 
 ```jv
 val greeting = "Hello, jv!"
 
 fun main() {
     println(greeting)
-    
+
     val numbers = listOf(1, 2, 3, 4, 5)
     val doubled = numbers.map { it * 2 }
-    
+
     println("Original: $numbers")
     println("Doubled: $doubled")
 }
 ```
 
-### 3. Build and Run
+### 3. ビルドと実行
 
 ```bash
-# Build the project (generates Java code and compiles)
+# プロジェクトをビルド（Javaコードを生成してコンパイル）
 jv build
 
-# Run the compiled program
+# コンパイル済みプログラムを実行
 jv run
 ```
 
-Output:
+出力：
 ```
 Hello, jv!
 Original: [1, 2, 3, 4, 5]
 Doubled: [2, 4, 6, 8, 10]
 ```
 
-## Understanding the Build Process
+## ビルドプロセスの理解
 
-When you run `jv build`, the following happens:
+`jv build`を実行すると、以下が実行されます：
 
-1. **Lexing**: jv source is tokenized
-2. **Parsing**: Tokens are parsed into an Abstract Syntax Tree (AST)
-3. **IR Transformation**: AST is converted to Intermediate Representation (IR) 
-4. **Java Generation**: IR is transformed into readable Java 25 source code
-5. **Java Compilation**: Generated Java is compiled with `javac`
+1. **字句解析**: jvソースがトークン化されます
+2. **構文解析**: トークンが抽象構文木（AST）に解析されます
+3. **IR変換**: ASTが中間表現（IR）に変換されます
+4. **Java生成**: IRが読みやすいJava 25ソースコードに変換されます
+5. **Javaコンパイル**: 生成されたJavaが`javac`でコンパイルされます
 
-You can see the generated Java code in the `out/` directory:
+生成されたJavaコードは`out/`ディレクトリで確認できます：
 
 ```bash
-# View generated Java
+# 生成されたJavaを表示
 cat out/Main.java
 ```
 
-## Next Steps
+## 次のステップ
 
-- Read the [Language Guide](language-guide.md) to learn jv syntax
-- Explore [CLI Reference](cli-reference.md) for all available commands
-- Check out [Examples](../examples/README.md) for more complex programs
-- Learn about [Project Structure](project-structure.md) for larger projects
+- [言語ガイド](language-guide.md)を読んでjv構文を学習
+- [CLIリファレンス](cli-reference.md)で利用可能なすべてのコマンドを確認
+- より複雑なプログラムについては[例](../examples/README.md)をチェック
+- 大規模プロジェクトについては[プロジェクト構造](project-structure.md)を学習
 
-## Getting Help
+## ヘルプの取得
 
-- **Documentation**: Browse the docs in this directory
-- **Issues**: Report bugs on [GitHub Issues](https://github.com/jv-lang/jv/issues)
-- **Discussions**: Ask questions in [GitHub Discussions](https://github.com/jv-lang/jv/discussions)
+- **ドキュメント**: このディレクトリのドキュメントを参照
+- **イシュー**: [GitHub Issues](https://github.com/jv-lang/jv/issues)でバグを報告
+- **ディスカッション**: [GitHub Discussions](https://github.com/jv-lang/jv/discussions)で質問

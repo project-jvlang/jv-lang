@@ -1,42 +1,40 @@
-# jv言語ガイド
+# jv Language Guide
 
-**日本語** | [English](language-guide-en.md)
+Complete reference for the jv (Java Sugar Language) syntax and features.
 
-jv（Java Sugar Language）の構文と機能の完全なリファレンスです。
+## Table of Contents
 
-## 目次
+1. [Variables and Types](#variables-and-types)
+2. [Functions](#functions)
+3. [Classes and Data Classes](#classes-and-data-classes)
+4. [Null Safety](#null-safety)
+5. [Control Flow](#control-flow)
+6. [Collections](#collections)
+7. [String Interpolation](#string-interpolation)
+8. [Concurrency](#concurrency)
+9. [Resource Management](#resource-management)
+10. [Extension Functions](#extension-functions)
+11. [Java Interop](#java-interop)
 
-1. [変数と型](#変数と型)
-2. [関数](#関数)
-3. [クラスとデータクラス](#クラスとデータクラス)
-4. [null安全性](#null安全性)
-5. [制御フロー](#制御フロー)
-6. [コレクション](#コレクション)
-7. [文字列補間](#文字列補間)
-8. [並行性](#並行性)
-9. [リソース管理](#リソース管理)
-10. [拡張関数](#拡張関数)
-11. [Java相互運用](#java相互運用)
+## Variables and Types
 
-## 変数と型
-
-### 変数宣言
+### Variable Declarations
 
 ```jv
-// 不変変数（Javaのfinal）
+// Immutable variable (final in Java)
 val name = "Alice"
 val age = 30
 
-// 可変変数
+// Mutable variable
 var count = 0
 var isActive = true
 
-// 明示的型（通常は推論される）
+// Explicit types (usually inferred)
 val pi: Double = 3.14159
 var items: List<String> = mutableListOf()
 ```
 
-**生成されるJava:**
+**Generated Java:**
 ```java
 final String name = "Alice";
 final int age = 30;
@@ -45,9 +43,9 @@ int count = 0;
 boolean isActive = true;
 ```
 
-### 型推論
+### Type Inference
 
-jvはほとんどの場合、型を自動的に推論します：
+jv automatically infers types in most cases:
 
 ```jv
 val numbers = listOf(1, 2, 3)        // List<Int>
@@ -55,38 +53,38 @@ val map = mapOf("key" to "value")    // Map<String, String>
 val lambda = { x: Int -> x * 2 }     // Function1<Int, Int>
 ```
 
-## 関数
+## Functions
 
-### 基本的な関数
+### Basic Functions
 
 ```jv
 fun greet(name: String): String {
     return "Hello, $name!"
 }
 
-// 式本体
+// Expression body
 fun add(a: Int, b: Int): Int = a + b
 
-// Unit戻り型（void）
+// Unit return type (void)
 fun printInfo(message: String) {
     println(message)
 }
 ```
 
-### デフォルト引数
+### Default Parameters
 
 ```jv
 fun createUser(name: String, age: Int = 18, active: Boolean = true): User {
     return User(name, age, active)
 }
 
-// 使用法
+// Usage
 val user1 = createUser("Alice")
 val user2 = createUser("Bob", 25)
 val user3 = createUser("Charlie", 30, false)
 ```
 
-**生成されるJava**（メソッドオーバーロード）:
+**Generated Java** (method overloads):
 ```java
 public static User createUser(String name) {
     return createUser(name, 18, true);
@@ -101,7 +99,7 @@ public static User createUser(String name, int age, boolean active) {
 }
 ```
 
-### 名前付き引数
+### Named Arguments
 
 ```jv
 fun configureServer(
@@ -111,7 +109,7 @@ fun configureServer(
     timeout: Int = 30
 ) { /* ... */ }
 
-// 名前付き引数を使用
+// Usage with named arguments
 configureServer(
     host = "localhost",
     port = 8080,
@@ -119,16 +117,16 @@ configureServer(
 )
 ```
 
-### トップレベル関数
+### Top-level Functions
 
 ```jv
-// トップレベル関数はユーティリティクラスの静的メソッドになります
+// Top-level functions become static methods in utility classes
 fun calculateDistance(x1: Double, y1: Double, x2: Double, y2: Double): Double {
     return sqrt((x2 - x1).pow(2) + (y2 - y1).pow(2))
 }
 ```
 
-**生成されるJava:**
+**Generated Java:**
 ```java
 public class MathUtils {
     public static double calculateDistance(double x1, double y1, double x2, double y2) {
@@ -137,29 +135,29 @@ public class MathUtils {
 }
 ```
 
-## クラスとデータクラス
+## Classes and Data Classes
 
-### 通常のクラス
+### Regular Classes
 
 ```jv
 class Person(val name: String, var age: Int) {
     fun greet(): String {
         return "Hello, I'm $name and I'm $age years old"
     }
-
+    
     fun haveBirthday() {
         age++
     }
 }
 ```
 
-### データクラス
+### Data Classes
 
 ```jv
-// 不変データクラス -> Javaレコード
+// Immutable data class -> Java record
 data class Point(val x: Double, val y: Double)
 
-// 可変データクラス -> ゲッター/セッターを持つJavaクラス
+// Mutable data class -> Java class with getters/setters
 data class mutable Counter(var value: Int) {
     fun increment() {
         value++
@@ -167,30 +165,30 @@ data class mutable Counter(var value: Int) {
 }
 ```
 
-**生成されるJava**（不変）:
+**Generated Java** (immutable):
 ```java
 public record Point(double x, double y) {}
 ```
 
-**生成されるJava**（可変）:
+**Generated Java** (mutable):
 ```java
 public class Counter {
     private int value;
-
+    
     public Counter(int value) {
         this.value = value;
     }
-
+    
     public int getValue() { return value; }
     public void setValue(int value) { this.value = value; }
-
+    
     public void increment() {
         value++;
     }
 }
 ```
 
-### 継承
+### Inheritance
 
 ```jv
 abstract class Animal(val name: String) {
@@ -211,54 +209,54 @@ class Bird(name: String) : Animal(name), Flyable {
 }
 ```
 
-## null安全性
+## Null Safety
 
-### nullable型
+### Nullable Types
 
 ```jv
 var nullableName: String? = null
 val nonNullName: String = "Alice"
 
-// コンパイルエラー: nullableName = nonNullName  // OK
-// nonNullName = nullableName  // エラー!
+// Compile error: nullableName = nonNullName  // OK
+// nonNullName = nullableName  // Error!
 ```
 
-### 安全呼び出し演算子
+### Safe Call Operator
 
 ```jv
-val length = nullableName?.length  // Int?を返す（nullableNameがnullの場合はnull）
+val length = nullableName?.length  // Returns Int? (null if nullableName is null)
 
-// チェーン
+// Chaining
 val firstChar = person?.name?.firstOrNull()?.uppercase()
 ```
 
-**生成されるJava:**
+**Generated Java:**
 ```java
 Integer length = nullableName != null ? nullableName.length() : null;
 ```
 
-### エルビス演算子
+### Elvis Operator
 
 ```jv
 val name = nullableName ?: "Default Name"
 val length = nullableName?.length ?: 0
 ```
 
-**生成されるJava:**
+**Generated Java:**
 ```java
 String name = nullableName != null ? nullableName : "Default Name";
 ```
 
-### 安全インデックスアクセス
+### Safe Index Access
 
 ```jv
 val list: List<String>? = getList()
-val firstItem = list?[0]  // 安全な配列/リストアクセス
+val firstItem = list?[0]  // Safe array/list access
 ```
 
-## 制御フロー
+## Control Flow
 
-### when式
+### When Expressions
 
 ```jv
 fun describe(x: Any): String = when (x) {
@@ -273,7 +271,7 @@ fun describe(x: Any): String = when (x) {
 }
 ```
 
-**生成されるJava**（Java 25パターンマッチング使用）:
+**Generated Java** (using Java 25 pattern matching):
 ```java
 public static String describe(Object x) {
     return switch (x) {
@@ -287,7 +285,7 @@ public static String describe(Object x) {
 }
 ```
 
-### if式
+### If Expressions
 
 ```jv
 val max = if (a > b) a else b
@@ -299,10 +297,10 @@ val status = if (user.isActive) {
 }
 ```
 
-### ループ
+### Loops
 
 ```jv
-// forループ
+// For loops
 for (i in 1..10) {
     println(i)
 }
@@ -315,7 +313,7 @@ for ((index, value) in list.withIndex()) {
     println("$index: $value")
 }
 
-// whileループ
+// While loops
 while (condition) {
     // ...
 }
@@ -325,9 +323,9 @@ do {
 } while (condition)
 ```
 
-## コレクション
+## Collections
 
-### コレクションの作成
+### Creating Collections
 
 ```jv
 val list = listOf(1, 2, 3, 4, 5)
@@ -337,7 +335,7 @@ val set = setOf(1, 2, 3, 2)  // {1, 2, 3}
 val map = mapOf("key1" to "value1", "key2" to "value2")
 ```
 
-### コレクション操作
+### Collection Operations
 
 ```jv
 val numbers = listOf(1, 2, 3, 4, 5)
@@ -351,7 +349,7 @@ val hasNegative = numbers.any { it < 0 }
 val allPositive = numbers.all { it > 0 }
 ```
 
-## 文字列補間
+## String Interpolation
 
 ```jv
 val name = "Alice"
@@ -362,27 +360,27 @@ val calculation = "The result is ${2 + 2}"
 val nested = "User: ${user.name.uppercase()}"
 ```
 
-**生成されるJava:**
+**Generated Java:**
 ```java
 String message = String.format("Hello, my name is %s and I'm %d years old", name, age);
 String calculation = "The result is " + (2 + 2);
 ```
 
-## 並行性
+## Concurrency
 
-### 仮想スレッド（spawn）
+### Virtual Threads (spawn)
 
 ```jv
 fun processData() {
     spawn {
-        // これは仮想スレッドで実行されます
+        // This runs in a virtual thread
         val result = heavyComputation()
         println("Result: $result")
     }
 }
 ```
 
-**生成されるJava:**
+**Generated Java:**
 ```java
 public void processData() {
     Thread.ofVirtual().start(() -> {
@@ -397,7 +395,7 @@ public void processData() {
 ```jv
 async fun fetchData(): CompletableFuture<String> {
     return CompletableFuture.supplyAsync {
-        // API呼び出しをシミュレート
+        // Simulate API call
         Thread.sleep(1000)
         "Data fetched"
     }
@@ -405,14 +403,14 @@ async fun fetchData(): CompletableFuture<String> {
 
 fun main() {
     val future = fetchData()
-    val result = future.await()  // 完了まで待機
+    val result = future.await()  // Blocks until complete
     println(result)
 }
 ```
 
-## リソース管理
+## Resource Management
 
-### useブロック（Try-with-resources）
+### Use Blocks (Try-with-resources)
 
 ```jv
 use(FileInputStream("file.txt")) { input ->
@@ -421,7 +419,7 @@ use(FileInputStream("file.txt")) { input ->
 }
 ```
 
-**生成されるJava:**
+**Generated Java:**
 ```java
 try (FileInputStream input = new FileInputStream("file.txt")) {
     byte[] data = input.readAllBytes();
@@ -429,28 +427,28 @@ try (FileInputStream input = new FileInputStream("file.txt")) {
 }
 ```
 
-### deferブロック
+### Defer Blocks
 
 ```jv
 fun processFile(filename: String) {
     val file = File(filename)
-
+    
     defer {
         println("Cleaning up...")
         file.delete()
     }
-
-    // ファイル処理...
-    if (error) return  // deferブロックは依然として実行される
+    
+    // Process file...
+    if (error) return  // defer block still executes
 }
 ```
 
-**生成されるJava:**
+**Generated Java:**
 ```java
 public void processFile(String filename) {
     File file = new File(filename);
     try {
-        // ファイル処理...
+        // Process file...
         if (error) return;
     } finally {
         System.out.println("Cleaning up...");
@@ -459,10 +457,10 @@ public void processFile(String filename) {
 }
 ```
 
-## 拡張関数
+## Extension Functions
 
 ```jv
-// 既存の型を拡張
+// Extend existing types
 fun String.isPalindrome(): Boolean {
     return this == this.reversed()
 }
@@ -471,7 +469,7 @@ fun <T> List<T>.secondOrNull(): T? {
     return if (size >= 2) this[1] else null
 }
 
-// 使用法
+// Usage
 val text = "racecar"
 if (text.isPalindrome()) {
     println("It's a palindrome!")
@@ -480,7 +478,7 @@ if (text.isPalindrome()) {
 val second = listOf(1, 2, 3).secondOrNull()  // 2
 ```
 
-**生成されるJava**（静的メソッド）:
+**Generated Java** (static methods):
 ```java
 public class StringExtensions {
     public static boolean isPalindrome(String self) {
@@ -495,9 +493,9 @@ public class ListExtensions {
 }
 ```
 
-## Java相互運用
+## Java Interop
 
-jvはJavaライブラリをシームレスに使用できます：
+jv can seamlessly use Java libraries:
 
 ```jv
 import java.util.concurrent.ConcurrentHashMap
@@ -506,20 +504,20 @@ import java.time.LocalDateTime
 fun useJavaLibrary() {
     val map = ConcurrentHashMap<String, String>()
     map.put("key", "value")
-
+    
     val now = LocalDateTime.now()
     println("Current time: $now")
 }
 ```
 
-生成されるJavaコードは、ラッパー層なしにこれらのJava APIを直接使用します。
+The generated Java code directly uses these Java APIs without any wrapper layers.
 
-## ベストプラクティス
+## Best Practices
 
-1. **`var`より`val`を優先**: 可能な場合は不変変数を使用
-2. **データクラスを使用**: シンプルなデータコンテナに
-3. **型推論を活用**: 不必要に型を指定しない
-4. **null安全性を使用**: nullable型と安全演算子を活用
-5. **式構文を優先**: `when`と`if`を式として使用
-6. **拡張関数を使用**: 既存の型に機能を追加
-7. **関数を純粋に保つ**: 可能な限り副作用を避ける
+1. **Prefer `val` over `var`**: Use immutable variables when possible
+2. **Use data classes**: For simple data containers
+3. **Leverage type inference**: Don't specify types unnecessarily
+4. **Use null safety**: Take advantage of nullable types and safe operators
+5. **Prefer expression syntax**: Use `when` and `if` as expressions
+6. **Use extension functions**: To add functionality to existing types
+7. **Keep functions pure**: Avoid side effects when possible

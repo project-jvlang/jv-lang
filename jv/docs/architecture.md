@@ -1,212 +1,153 @@
-# jv Compiler Architecture
+# jv コンパイラーアーキテクチャ
 
-This document describes the internal architecture of the jv compiler, including the compilation pipeline, core components, and design decisions.
+[English](architecture-en.md) | **日本語**
 
-## High-Level Architecture
+このドキュメントでは、コンパイルパイプライン、コアコンポーネント、設計決定を含むjvコンパイラーの内部アーキテクチャについて説明します。
+
+## ハイレベルアーキテクチャ
 
 ```
 ┌─────────────┐    ┌─────────────┐    ┌─────────────┐    ┌─────────────┐
-│   .jv file  │ -> │   Lexer     │ -> │   Parser    │ -> │     AST     │
+│   .jvファイル │ -> │   字句解析   │ -> │   構文解析   │ -> │     AST     │
 └─────────────┘    └─────────────┘    └─────────────┘    └─────────────┘
                                                                  │
 ┌─────────────┐    ┌─────────────┐    ┌─────────────┐    ┌─────────────┐
-│ .class file │ <- │    javac    │ <- │ Java source │ <- │     IR      │
+│ .classファイル│ <- │    javac    │ <- │ Javaソース  │ <- │     IR      │
 └─────────────┘    └─────────────┘    └─────────────┘    └─────────────┘
 ```
 
-## Compilation Pipeline
+## コンパイルパイプライン
 
-### Phase 1: Lexical Analysis (`jv_lexer`)
+### フェーズ1: 字句解析 (`jv_lexer`)
 
-**Purpose**: Convert raw jv source text into tokens.
+**目的**: 生のjvソーステキストをトークンに変換する。
 
-**Input**: Raw source code string
-**Output**: Stream of tokens
+**入力**: 生のソースコード文字列
+**出力**: トークンストリーム
 
-**Key Components**:
-- `Lexer` struct: Main tokenizer
-- `Token` enum: All jv token types
-- `Span` struct: Source location tracking
+**主要コンポーネント**:
+- `Lexer`構造体: メイントークナイザー
+- `Token`列挙型: すべてのjvトークンタイプ
+- `Span`構造体: ソース位置追跡
 
-**Token Types**:
+**トークンタイプ**:
 ```rust
 pub enum Token {
-    // Literals
+    // リテラル
     StringLiteral(String),
     IntegerLiteral(i64),
     FloatLiteral(f64),
     BooleanLiteral(bool),
-    
-    // Keywords
+
+    // キーワード
     Val, Var, Fun, Class, Data, When, If, Else,
     Null, True, False, Return, Import,
-    
-    // Operators
+
+    // 演算子
     Plus, Minus, Star, Slash, Percent,
     Equal, NotEqual, Less, Greater, LessEqual, GreaterEqual,
-    
-    // Null safety
+
+    // null安全
     Question, QuestionDot, QuestionColon,
-    
-    // Delimiters
+
+    // 区切り文字
     LeftParen, RightParen, LeftBrace, RightBrace,
     LeftBracket, RightBracket, Comma, Semicolon,
-    
-    // Special
+
+    // 特別
     Identifier(String),
     StringInterpolation(Vec<StringPart>),
     Eof,
 }
 ```
 
-**Error Handling**:
-- Lexical errors with precise source locations
-- Recovery mechanisms for malformed tokens
-- Unicode support for identifiers and strings
+**エラー処理**:
+- 正確なソース位置を持つ字句エラー
+- 不正なトークンの回復メカニズム
+- 識別子と文字列のUnicodeサポート
 
-### Phase 2: Syntax Analysis (`jv_parser`)
+### フェーズ2: 構文解析 (`jv_parser`)
 
-**Purpose**: Parse tokens into an Abstract Syntax Tree (AST).
+**目的**: トークンを抽象構文木（AST）に解析する。
 
-**Input**: Token stream from lexer
-**Output**: AST representing the program structure
+**入力**: 字句解析器からのトークンストリーム
+**出力**: プログラム構造を表すAST
 
-**Parser Implementation**:
-- Based on `chumsky` parser combinator library
-- Recursive descent parser with operator precedence
-- Error recovery for partial parsing
+**パーサー実装**:
+- `chumsky`パーサーコンビネーターライブラリーベース
+- 演算子の優先順位を持つ再帰下降パーサー
+- 部分解析のエラー回復
 
-**Key Features**:
-- **Expression parsing**: Handles precedence and associativity
-- **Statement parsing**: All jv statement types
-- **Type annotation parsing**: Optional and nullable types
-- **Pattern matching**: Complex pattern syntax
-- **String interpolation**: Embedded expressions in strings
+**主要機能**:
+- **式解析**: 優先順位と結合性を処理
+- **文解析**: すべてのjv文タイプ
+- **型注釈解析**: オプショナルとnull可能型
+- **パターンマッチング**: 複雑なパターン構文
+- **文字列補間**: 文字列内の埋め込み式
 
-**AST Node Types**:
-```rust
-pub enum Statement {
-    ValDeclaration { name: String, type_annotation: Option<TypeAnnotation>, initializer: Expression, span: Span },
-    VarDeclaration { name: String, type_annotation: Option<TypeAnnotation>, initializer: Option<Expression>, span: Span },
-    FunctionDeclaration { name: String, parameters: Vec<Parameter>, return_type: Option<TypeAnnotation>, body: Box<Expression>, span: Span },
-    ClassDeclaration { name: String, parameters: Vec<Parameter>, body: Vec<Statement>, span: Span },
-    DataClassDeclaration { name: String, parameters: Vec<Parameter>, is_mutable: bool, span: Span },
-    Return { value: Option<Box<Expression>>, span: Span },
-    Expression { expression: Box<Expression>, span: Span },
-}
+### フェーズ3: 意味解析 (`jv_ast` + `jv_checker`)
 
-pub enum Expression {
-    Literal(Literal, Span),
-    Identifier(String, Span),
-    BinaryOperation { left: Box<Expression>, operator: BinaryOperator, right: Box<Expression>, span: Span },
-    FunctionCall { function: Box<Expression>, arguments: Vec<Argument>, span: Span },
-    MemberAccess { object: Box<Expression>, property: String, span: Span },
-    WhenExpression { subject: Option<Box<Expression>>, arms: Vec<WhenArm>, span: Span },
-    StringInterpolation { parts: Vec<StringPart>, span: Span },
-    // ... more expression types
-}
-```
+**目的**: 意味を検証し、型チェックを実行する。
 
-### Phase 3: Semantic Analysis (`jv_ast` + `jv_checker`)
+**コンポーネント**:
 
-**Purpose**: Validate semantics and perform type checking.
+**型推論** (`jv_ast`):
+- Hindley-Milnerスタイルの型推論
+- ジェネリクスと制約のサポート
+- null可能型の処理
 
-**Components**:
+**静的解析** (`jv_checker`):
+- 変数スコープの検証
+- 型互換性チェック
+- null安全性の強制
+- デッドコード検出
+- パフォーマンスのアンチパターン検出
 
-**Type Inference** (`jv_ast`):
-- Hindley-Milner style type inference
-- Support for generics and constraints
-- Nullable type handling
+### フェーズ4: IR変換 (`jv_ir`)
 
-**Static Analysis** (`jv_checker`):
-- Variable scoping validation
-- Type compatibility checking
-- Null safety enforcement
-- Dead code detection
-- Performance anti-pattern detection
+**目的**: 高レベルのjv構文をJava生成に適したより単純な形式に変換する。
 
-**Type System**:
-```rust
-pub enum TypeAnnotation {
-    Simple(String),
-    Nullable(Box<TypeAnnotation>),
-    Generic { name: String, type_args: Vec<TypeAnnotation> },
-    Function { parameters: Vec<TypeAnnotation>, return_type: Box<TypeAnnotation> },
-    Array(Box<TypeAnnotation>),
-}
-```
+**主要変換**:
 
-### Phase 4: IR Transformation (`jv_ir`)
+**シンタックスシュガーの除去**:
+- 型推論付き`val/var` → 明示的型
+- `when`式 → Java switch文
+- 拡張関数 → 静的メソッド呼び出し
+- 文字列補間 → `String.format()`呼び出し
+- デフォルトパラメータ → メソッドオーバーロード
+- トップレベル関数 → ユーティリティクラスメソッド
 
-**Purpose**: Transform high-level jv constructs into simpler forms suitable for Java generation.
-
-**Key Transformations**:
-
-**Sugar Elimination**:
-- `val/var` with type inference → explicit types
-- `when` expressions → Java switch statements
-- Extension functions → static method calls
-- String interpolation → `String.format()` calls
-- Default parameters → method overloads
-- Top-level functions → utility class methods
-
-**Null Safety Desugaring**:
+**null安全性の脱糖**:
 ```jv
 user?.name?.length
 ```
-Becomes:
+は以下になる:
 ```java
 user != null ? (user.getName() != null ? user.getName().length() : null) : null
 ```
 
-**Concurrency Desugaring**:
+**並行処理の脱糖**:
 ```jv
 spawn { doWork() }
 ```
-Becomes:
+は以下になる:
 ```java
 Thread.ofVirtual().start(() -> doWork())
 ```
 
-**IR Node Types**:
-```rust
-pub enum IrStatement {
-    ClassDeclaration { name: String, modifiers: IrModifiers, fields: Vec<IrField>, methods: Vec<IrMethod> },
-    MethodDeclaration { name: String, modifiers: IrModifiers, parameters: Vec<IrParameter>, return_type: JavaType, body: Vec<IrStatement> },
-    VariableDeclaration { name: String, java_type: JavaType, initializer: Option<IrExpression> },
-    Assignment { target: String, value: IrExpression },
-    Return { value: Option<IrExpression> },
-    If { condition: IrExpression, then_branch: Vec<IrStatement>, else_branch: Option<Vec<IrStatement>> },
-    Block(Vec<IrStatement>),
-}
+### フェーズ5: Javaコード生成 (`jv_codegen_java`)
 
-pub enum IrExpression {
-    Literal(IrLiteral),
-    Variable(String),
-    MethodCall { receiver: Option<Box<IrExpression>>, method: String, arguments: Vec<IrExpression> },
-    FieldAccess { object: Box<IrExpression>, field: String },
-    BinaryOperation { left: Box<IrExpression>, operator: IrBinaryOperator, right: Box<IrExpression> },
-    SwitchExpression { discriminant: Box<IrExpression>, cases: Vec<IrSwitchCase> },
-    // Java 25 specific constructs
-    PatternMatch { value: Box<IrExpression>, patterns: Vec<IrPattern> },
-    VirtualThreadCreation { runnable: Box<IrExpression> },
-    CompletableFutureChain { future: Box<IrExpression>, operations: Vec<IrFutureOperation> },
-}
-```
+**目的**: IRから読みやすい、慣用的なJava 25ソースコードを生成する。
 
-### Phase 5: Java Code Generation (`jv_codegen_java`)
+**コード生成戦略**:
+- **読みやすい出力**: 生成されたJavaは手書きのように見える
+- **Java 25機能**: records、パターンマッチング、仮想スレッドを活用
+- **パフォーマンス**: 効率的なJavaコードを生成
+- **デバッグ**: ソース位置情報を維持
 
-**Purpose**: Generate readable, idiomatic Java 25 source code from IR.
+**Java 25機能の使用**:
 
-**Code Generation Strategy**:
-- **Readable Output**: Generated Java looks hand-written
-- **Java 25 Features**: Leverages records, pattern matching, virtual threads
-- **Performance**: Generates efficient Java code
-- **Debugging**: Maintains source location information
-
-**Java 25 Feature Usage**:
-
-**Records** (for immutable data classes):
+**Records**（不変データクラス用）:
 ```java
 public record Point(double x, double y) {
     public Point translate(double dx, double dy) {
@@ -215,7 +156,7 @@ public record Point(double x, double y) {
 }
 ```
 
-**Pattern Matching** (for when expressions):
+**パターンマッチング**（when式用）:
 ```java
 public static String describe(Object obj) {
     return switch (obj) {
@@ -228,194 +169,93 @@ public static String describe(Object obj) {
 }
 ```
 
-**Virtual Threads** (for spawn blocks):
+**仮想スレッド**（spawnブロック用）:
 ```java
 public void processAsync() {
     Thread.ofVirtual().name("worker").start(() -> {
-        // Background work
+        // バックグラウンド作業
         processData();
     });
 }
 ```
 
-**Code Generation Components**:
-```rust
-pub struct JavaCodeGenerator {
-    imports: ImportManager,
-    source_builder: JavaSourceBuilder,
-    config: JavaCodeGenConfig,
-}
+## 設計決定
 
-pub struct JavaSourceBuilder {
-    content: String,
-    indent_level: usize,
-    current_line: String,
-}
+### なぜ実装にRustを使うのか？
 
-pub struct ImportManager {
-    imports: BTreeSet<String>,
-    static_imports: BTreeSet<String>,
-}
-```
+**パフォーマンス**: Rustは高速コンパイルのためにC並みのパフォーマンスを提供
+**メモリ安全性**: バッファオーバーフローなどの一般的なコンパイラバグを防止
+**並行性**: 並列コンパイルの優れたサポート
+**エコシステム**: パーサーコンビネーター、CLIツールを含む豊富なエコシステム
 
-### Phase 6: Source Mapping (`jv_mapper`)
+### なぜJava 25をターゲットにするのか？
 
-**Purpose**: Generate source maps for debugging support.
+**モダン機能**: records、パターンマッチング、仮想スレッド
+**パフォーマンス**: 最新のJVM最適化と機能
+**互換性**: 古いJavaとの後方互換性を維持
+**将来志向**: 今後のJava機能に対してjvを位置づけ
 
-**Source Map Features**:
-- Bidirectional mapping between .jv and .java
-- Line and column precision
-- Support for IDE debugging
-- Stack trace translation
+### AST vs IR設計
 
-**Source Map Format**:
-```json
-{
-  "version": 3,
-  "file": "Main.java",
-  "sourceRoot": "",
-  "sources": ["main.jv"],
-  "sourcesContent": ["val greeting = \"Hello, jv!\""],
-  "mappings": "AAAA,MAAM,QAAQ,GAAG,YAAY"
-}
-```
+**AST（抽象構文木）**:
+- jv構文の直接的な表現
+- ツール用の元の構造を保持
+- フォーマット、リファクタリング、LSPに使用
 
-### Phase 7: Build Integration (`jv_build`)
+**IR（中間表現）**:
+- コード生成に適した簡略化された形式
+- シュガー構文を除去
+- 最適化を適用可能
 
-**Purpose**: Integrate with Java build tools and manage compilation.
+## パフォーマンス特性
 
-**Features**:
-- **JDK Detection**: Find and validate JDK installations
-- **Classpath Management**: Handle dependencies and classpaths
-- **Incremental Compilation**: Only recompile changed files
-- **Error Reporting**: Unified error messages across tools
-- **Cross-Platform**: Works on Linux, macOS, Windows
+### コンパイル速度
 
-**Build Process**:
-1. **Dependency Resolution**: Resolve jv and Maven dependencies
-2. **Source Discovery**: Find all .jv files in project
-3. **Compilation Order**: Determine compilation order based on dependencies
-4. **Java Generation**: Generate .java files with source maps
-5. **javac Invocation**: Compile Java files to bytecode
-6. **Post-processing**: Copy resources, generate manifests
+**シングルスレッド**: モダンハードウェアで約10,000行/秒
+**マルチスレッド**: CPUコアに対して線形にスケール
+**インクリメンタル**: 変更されたファイルと依存関係のみを再コンパイル
 
-## Design Decisions
+### メモリ使用量
 
-### Why Rust for Implementation?
+**字句解析器**: O(n)（nはソースファイルサイズ）
+**パーサー**: AST格納でO(n)
+**IR**: ASTサイズと類似のO(n)
+**コード生成**: 一時的な文字列バッファでO(n)
 
-**Performance**: Rust provides near-C performance for fast compilation
-**Memory Safety**: Prevents common compiler bugs like buffer overflows
-**Concurrency**: Excellent support for parallel compilation
-**Ecosystem**: Rich ecosystem with parser combinators, CLI tools
+### 生成コード品質
 
-### Why Target Java 25?
+**ランタイムパフォーマンス**: 手書きJavaに匹敵
+**バイナリサイズ**: 追加ランタイム依存関係なし
+**メモリ効率**: Javaのメモリモデルを直接使用
 
-**Modern Features**: Records, pattern matching, virtual threads
-**Performance**: Latest JVM optimizations and features
-**Compatibility**: Maintains backward compatibility with older Java
-**Future-Proof**: Positions jv for upcoming Java features
+## テスト戦略
 
-### AST vs IR Design
+### 単体テスト
 
-**AST (Abstract Syntax Tree)**:
-- Direct representation of jv syntax
-- Preserves original structure for tooling
-- Used for formatting, refactoring, LSP
+各コンポーネントには包括的な単体テストがあります：
+- **字句解析器**: トークン生成とエラーケース
+- **パーサー**: すべての構文形式のAST生成
+- **IR**: 変換の正確性
+- **コード生成**: Java出力の検証
 
-**IR (Intermediate Representation)**:
-- Simplified form suitable for code generation
-- Sugar constructs are eliminated
-- Optimizations can be applied
+### 統合テスト
 
-### Error Handling Strategy
+エンドツーエンドのコンパイルテスト：
+- **ゴールデンテスト**: 生成されたJavaを期待される出力と比較
+- **コンパイルテスト**: 生成されたJavaが正しくコンパイルされることを確認
+- **ランタイムテスト**: 生成されたJavaを実行し、動作を検証
 
-**Fail-Fast Parsing**: Stop on first syntax error for clarity
-**Error Recovery**: Attempt to continue parsing for better error messages  
-**Staged Validation**: Type checking after successful parsing
-**Rich Diagnostics**: Precise error locations with suggestions
+## 開発ワークフロー
 
-### Extension Points
+### 新しい言語機能の追加
 
-**Language Features**: Easy to add new syntax and semantics
-**Target Languages**: IR can be adapted for other targets (JavaScript, native)
-**Optimization Passes**: IR transformations for performance
-**IDE Integration**: AST suitable for language server features
+1. **設計**: 構文と意味論を指定
+2. **字句解析器**: 必要に応じて新しいトークンを追加
+3. **パーサー**: 文法とASTノードを拡張
+4. **型チェッカー**: 意味検証を追加
+5. **IR**: 脱糖変換を定義
+6. **コード生成**: Java生成を実装
+7. **テスト**: 包括的なテストケースを追加
+8. **ドキュメント**: 言語ガイドを更新
 
-## Performance Characteristics
-
-### Compilation Speed
-
-**Single-threaded**: ~10,000 lines/second on modern hardware
-**Multi-threaded**: Scales linearly with CPU cores
-**Incremental**: Only recompiles changed files and dependencies
-
-### Memory Usage
-
-**Lexer**: O(n) where n is source file size
-**Parser**: O(n) for AST storage
-**IR**: O(n) similar to AST size
-**Code Generation**: O(n) with temporary string buffers
-
-### Generated Code Quality
-
-**Runtime Performance**: Matches hand-written Java
-**Binary Size**: No additional runtime dependencies
-**Memory Efficiency**: Uses Java's memory model directly
-
-## Testing Strategy
-
-### Unit Tests
-
-Each component has comprehensive unit tests:
-- **Lexer**: Token generation and error cases
-- **Parser**: AST generation for all syntax forms
-- **IR**: Transformation correctness
-- **Code Generation**: Java output validation
-
-### Integration Tests
-
-End-to-end compilation tests:
-- **Golden Tests**: Compare generated Java against expected output
-- **Compilation Tests**: Verify generated Java compiles correctly
-- **Runtime Tests**: Execute generated Java and verify behavior
-
-### Property-Based Testing
-
-- **Round-trip Testing**: Parse and unparse should preserve semantics
-- **Fuzzing**: Random input generation to find edge cases
-- **Invariant Testing**: Type safety and memory safety properties
-
-### Performance Benchmarks
-
-- **Compilation Speed**: Track compilation performance over time
-- **Memory Usage**: Monitor memory consumption during compilation
-- **Generated Code Quality**: Benchmark generated Java performance
-
-## Development Workflow
-
-### Adding New Language Features
-
-1. **Design**: Specify syntax and semantics
-2. **Lexer**: Add new tokens if needed
-3. **Parser**: Extend grammar and AST nodes
-4. **Type Checker**: Add semantic validation
-5. **IR**: Define desugaring transformation  
-6. **Code Generation**: Implement Java generation
-7. **Tests**: Add comprehensive test cases
-8. **Documentation**: Update language guide
-
-### Debugging Compilation Issues
-
-1. **Enable Verbose Logging**: Use `JV_LOG_LEVEL=debug`
-2. **Inspect Generated Files**: Check intermediate outputs
-3. **Use Source Maps**: Trace back to original jv source
-4. **Test Minimal Examples**: Isolate the issue
-5. **Check Test Suite**: Verify existing functionality
-
-### Contributing to the Compiler
-
-See [Contributing Guide](contributing.md) for detailed instructions on:
-- Setting up development environment
-- Code style and conventions
-- Submitting pull requests
-- Writing tests
+このアーキテクチャにより、jvは高性能で保守可能なコンパイラとして、モダンなJava機能を活用しながら優れた開発者体験を提供しています。

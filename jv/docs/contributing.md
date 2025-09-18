@@ -1,69 +1,71 @@
-# Contributing to jv
+# jvへの貢献
 
-Thank you for your interest in contributing to jv! This guide will help you get started with development and contribution workflows.
+**日本語** | [English](contributing-en.md)
 
-## Table of Contents
+jvへの貢献に関心をお持ちいただき、ありがとうございます！このガイドは、開発と貢献ワークフローの開始に役立ちます。
 
-1. [Getting Started](#getting-started)
-2. [Development Setup](#development-setup)
-3. [Project Structure](#project-structure)
-4. [Development Workflow](#development-workflow)
-5. [Testing](#testing)
-6. [Code Style](#code-style)
-7. [Pull Request Process](#pull-request-process)
-8. [Issue Guidelines](#issue-guidelines)
-9. [Community](#community)
+## 目次
 
-## Getting Started
+1. [はじめに](#はじめに)
+2. [開発環境セットアップ](#開発環境セットアップ)
+3. [プロジェクト構造](#プロジェクト構造)
+4. [開発ワークフロー](#開発ワークフロー)
+5. [テスト](#テスト)
+6. [コードスタイル](#コードスタイル)
+7. [プルリクエストプロセス](#プルリクエストプロセス)
+8. [イシューガイドライン](#イシューガイドライン)
+9. [コミュニティ](#コミュニティ)
 
-### Prerequisites
+## はじめに
 
-- **Rust 1.70+**: Install via [rustup](https://rustup.rs/)
-- **Java 25+**: Required for testing generated code
-- **Git**: For version control
-- **IDE**: VS Code with rust-analyzer or IntelliJ with Rust plugin
+### 前提条件
 
-### Quick Setup
+- **Rust 1.70+**: [rustup](https://rustup.rs/)経由でインストール
+- **Java 25+**: 生成されたコードのテストに必要
+- **Git**: バージョン管理用
+- **IDE**: rust-analyzer付きVS CodeまたはRustプラグイン付きIntelliJ
+
+### クイックセットアップ
 
 ```bash
-# Clone the repository
+# リポジトリをクローン
 git clone https://github.com/jv-lang/jv.git
 cd jv
 
-# Build the project
+# プロジェクトをビルド
 cargo build
 
-# Run tests
+# テストを実行
 cargo test
 
-# Install pre-commit hooks (optional but recommended)
+# pre-commitフックをインストール（オプションですが推奨）
 cargo install --git https://github.com/jv-lang/jv-tools pre-commit
 pre-commit install
 ```
 
-## Development Setup
+## 開発環境セットアップ
 
-### Development Dependencies
+### 開発依存関係
 
 ```bash
-# Install additional development tools
-cargo install cargo-watch         # Auto-rebuild on changes
-cargo install cargo-audit         # Security auditing
-cargo install cargo-tarpaulin     # Code coverage
-cargo install cargo-deny          # Dependency checking
+# 追加の開発ツールをインストール
+cargo install cargo-watch         # 変更時の自動再ビルド
+cargo install cargo-audit         # セキュリティ監査
+cargo install cargo-tarpaulin     # コードカバレッジ
+cargo install cargo-deny          # 依存関係チェック
 ```
 
-### IDE Configuration
+### IDE設定
 
 #### VS Code
 
-Install these extensions:
-- **rust-analyzer**: Rust language support
-- **Error Lens**: Inline error display
-- **GitLens**: Git integration
-- **Better TOML**: TOML file support
+これらの拡張機能をインストール：
+- **rust-analyzer**: Rust言語サポート
+- **Error Lens**: インラインエラー表示
+- **GitLens**: Git統合
+- **Better TOML**: TOMLファイルサポート
 
-Recommended settings (`.vscode/settings.json`):
+推奨設定（`.vscode/settings.json`）：
 ```json
 {
     "rust-analyzer.checkOnSave.command": "clippy",
@@ -75,197 +77,197 @@ Recommended settings (`.vscode/settings.json`):
 
 #### IntelliJ IDEA
 
-- Install the **Rust** plugin
-- Configure **Rustfmt** for code formatting
-- Enable **Clippy** for linting
+- **Rust**プラグインをインストール
+- コードフォーマット用に**Rustfmt**を設定
+- リンティング用に**Clippy**を有効化
 
-### Environment Variables
+### 環境変数
 
 ```bash
-export RUST_LOG=debug              # Enable debug logging
-export JV_TEST_DATA=/path/to/test  # Custom test data directory
-export JAVA_HOME=/path/to/java25   # Java 25 installation
+export RUST_LOG=debug              # デバッグログを有効化
+export JV_TEST_DATA=/path/to/test  # カスタムテストデータディレクトリ
+export JAVA_HOME=/path/to/java25   # Java 25インストール
 ```
 
-## Project Structure
+## プロジェクト構造
 
 ```
 jv/
-├── crates/                    # Rust workspace crates
-│   ├── jv_lexer/             # Lexical analysis
-│   ├── jv_parser/            # Syntax parsing
-│   ├── jv_ast/               # AST definitions
-│   ├── jv_ir/                # Intermediate representation
-│   ├── jv_codegen_java/      # Java code generation
-│   ├── jv_checker/           # Static analysis
-│   ├── jv_fmt/               # Code formatting
-│   ├── jv_build/             # Build system
-│   ├── jv_mapper/            # Source mapping
-│   ├── jv_pm/                # Package manager
-│   ├── jv_lsp/               # Language server
-│   └── jv_cli/               # Command-line interface
-├── docs/                     # Documentation
-├── examples/                 # Example jv programs
-├── tests/                    # Integration tests
-├── tools/                    # Development tools
-├── Cargo.toml               # Workspace configuration
+├── crates/                    # Rustワークスペースクレート
+│   ├── jv_lexer/             # 字句解析
+│   ├── jv_parser/            # 構文解析
+│   ├── jv_ast/               # AST定義
+│   ├── jv_ir/                # 中間表現
+│   ├── jv_codegen_java/      # Javaコード生成
+│   ├── jv_checker/           # 静的解析
+│   ├── jv_fmt/               # コードフォーマット
+│   ├── jv_build/             # ビルドシステム
+│   ├── jv_mapper/            # ソースマッピング
+│   ├── jv_pm/                # パッケージマネージャー
+│   ├── jv_lsp/               # 言語サーバー
+│   └── jv_cli/               # コマンドラインインターフェース
+├── docs/                     # ドキュメント
+├── examples/                 # jvプログラム例
+├── tests/                    # 統合テスト
+├── tools/                    # 開発ツール
+├── Cargo.toml               # ワークスペース設定
 └── README.md
 ```
 
-### Crate Responsibilities
+### クレートの責任
 
-- **jv_lexer**: Tokenization of jv source code
-- **jv_parser**: Parse tokens into Abstract Syntax Tree (AST)
-- **jv_ast**: AST node definitions and utilities
-- **jv_ir**: Intermediate Representation and transformations
-- **jv_codegen_java**: Generate Java source code from IR
-- **jv_checker**: Type checking and static analysis
-- **jv_fmt**: Source code formatting
-- **jv_build**: Build system integration and javac interaction
-- **jv_mapper**: Source map generation for debugging
-- **jv_pm**: Package management and dependency resolution
-- **jv_lsp**: Language Server Protocol implementation
-- **jv_cli**: Command-line interface and main entry point
+- **jv_lexer**: jvソースコードのトークン化
+- **jv_parser**: トークンを抽象構文木（AST）に解析
+- **jv_ast**: ASTノード定義とユーティリティ
+- **jv_ir**: 中間表現と変換
+- **jv_codegen_java**: IRからJavaソースコード生成
+- **jv_checker**: 型チェックと静的解析
+- **jv_fmt**: ソースコードフォーマット
+- **jv_build**: ビルドシステム統合とjavac相互作用
+- **jv_mapper**: デバッグ用ソースマップ生成
+- **jv_pm**: パッケージ管理と依存関係解決
+- **jv_lsp**: 言語サーバープロトコル実装
+- **jv_cli**: コマンドラインインターフェースとメインエントリーポイント
 
-## Development Workflow
+## 開発ワークフロー
 
-### Branch Strategy
+### ブランチ戦略
 
-We use a simplified Git Flow:
+シンプルなGit Flowを使用：
 
-- **main**: Stable release branch
-- **develop**: Integration branch for features
-- **feature/**: Feature development branches
-- **bugfix/**: Bug fix branches
-- **hotfix/**: Critical fixes for main
+- **main**: 安定リリースブランチ
+- **develop**: フィーチャー統合ブランチ
+- **feature/**: フィーチャー開発ブランチ
+- **bugfix/**: バグ修正ブランチ
+- **hotfix/**: mainに対する重要な修正
 
-### Feature Development
+### フィーチャー開発
 
-1. **Create a feature branch**:
+1. **フィーチャーブランチを作成**:
    ```bash
    git checkout develop
    git pull origin develop
    git checkout -b feature/my-new-feature
    ```
 
-2. **Make changes with frequent commits**:
+2. **頻繁なコミットで変更を実施**:
    ```bash
    git add .
    git commit -m "Add lexer support for new operator"
    ```
 
-3. **Keep branch up-to-date**:
+3. **ブランチを最新に保つ**:
    ```bash
    git fetch origin
    git rebase origin/develop
    ```
 
-4. **Push and create Pull Request**:
+4. **プッシュしてプルリクエストを作成**:
    ```bash
    git push origin feature/my-new-feature
-   # Create PR on GitHub
+   # GitHubでPRを作成
    ```
 
-### Adding Language Features
+### 言語フィーチャーの追加
 
-When adding new jv language features, follow this sequence:
+新しいjv言語フィーチャーを追加する際は、この順序に従ってください：
 
-1. **Update the lexer** (`jv_lexer`):
-   - Add new token types if needed
-   - Update tokenization logic
+1. **lexerを更新** (`jv_lexer`):
+   - 必要に応じて新しいトークンタイプを追加
+   - トークン化ロジックを更新
 
-2. **Update the parser** (`jv_parser`):
-   - Extend grammar to handle new syntax
-   - Add AST nodes for new constructs
+2. **parserを更新** (`jv_parser`):
+   - 新しい構文を処理するため文法を拡張
+   - 新しい構造のASTノードを追加
 
-3. **Update AST definitions** (`jv_ast`):
-   - Add new node types and visitors
-   - Update serialization/deserialization
+3. **AST定義を更新** (`jv_ast`):
+   - 新しいノードタイプとビジターを追加
+   - シリアライゼーション/デシリアライゼーションを更新
 
-4. **Update type checker** (`jv_checker`):
-   - Add semantic validation
-   - Handle new type rules
+4. **型チェッカーを更新** (`jv_checker`):
+   - セマンティック検証を追加
+   - 新しい型ルールを処理
 
-5. **Update IR transformation** (`jv_ir`):
-   - Define how new constructs desugar
-   - Add transformation passes
+5. **IR変換を更新** (`jv_ir`):
+   - 新しい構造の脱糖方法を定義
+   - 変換パスを追加
 
-6. **Update code generator** (`jv_codegen_java`):
-   - Implement Java code generation
-   - Ensure idiomatic output
+6. **コードジェネレーターを更新** (`jv_codegen_java`):
+   - Javaコード生成を実装
+   - 慣用的な出力を保証
 
-7. **Update formatter** (`jv_fmt`):
-   - Add formatting rules for new syntax
+7. **フォーマッターを更新** (`jv_fmt`):
+   - 新しい構文のフォーマットルールを追加
 
-8. **Add comprehensive tests**:
-   - Unit tests for each component
-   - Integration tests for full pipeline
-   - Error case testing
+8. **包括的なテストを追加**:
+   - 各コンポーネントの単体テスト
+   - 完全パイプラインの統合テスト
+   - エラーケーステスト
 
-9. **Update documentation**:
-   - Language guide examples
-   - Specification updates
+9. **ドキュメントを更新**:
+   - 言語ガイドの例
+   - 仕様の更新
 
-### Debugging
+### デバッグ
 
-#### Compiler Debugging
+#### コンパイラデバッグ
 
-Enable verbose logging:
+詳細ログを有効化：
 ```bash
 RUST_LOG=debug cargo run -- build test.jv
 ```
 
-View intermediate representations:
+中間表現を表示：
 ```bash
-# View generated AST
+# 生成されたASTを表示
 cargo run -- build --debug-ast test.jv
 
-# View generated IR
+# 生成されたIRを表示
 cargo run -- build --debug-ir test.jv
 
-# View generated Java (before compilation)
+# 生成されたJava（コンパイル前）を表示
 cargo run -- build --preview test.jv
 ```
 
-#### Test Debugging
+#### テストデバッグ
 
-Run specific tests:
+特定のテストを実行：
 ```bash
-# Run tests for a specific crate
+# 特定のクレートのテストを実行
 cargo test -p jv_parser
 
-# Run specific test
+# 特定のテストを実行
 cargo test test_string_interpolation
 
-# Run with output
+# 出力付きで実行
 cargo test -- --nocapture
 ```
 
-## Testing
+## テスト
 
-### Test Categories
+### テストカテゴリ
 
-#### Unit Tests
-Each crate has unit tests in `src/` directories:
+#### 単体テスト
+各クレートは`src/`ディレクトリに単体テストを持ちます：
 
 ```rust
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_lexer_string_literal() {
         let input = r#""Hello, world!""#;
         let mut lexer = Lexer::new(input);
         let token = lexer.next_token();
-        
+
         assert_eq!(token.kind, TokenKind::StringLiteral("Hello, world!".to_string()));
     }
 }
 ```
 
-#### Integration Tests
-Full compilation pipeline tests in `tests/`:
+#### 統合テスト
+`tests/`の完全コンパイルパイプラインテスト：
 
 ```rust
 #[test]
@@ -275,88 +277,88 @@ fn test_compile_hello_world() {
             println("Hello, world!")
         }
     "#;
-    
+
     let result = compile_jv_to_java(jv_source);
     assert!(result.is_ok());
-    
+
     let java_code = result.unwrap();
     assert!(java_code.contains("System.out.println"));
 }
 ```
 
-#### Golden Tests
-Compare generated output against expected files:
+#### ゴールデンテスト
+生成出力を期待ファイルと比較：
 
 ```rust
 #[test]
 fn test_codegen_golden() {
     let jv_file = "tests/golden/input.jv";
     let expected_java = "tests/golden/expected.java";
-    
+
     let actual_java = compile_file(jv_file).unwrap();
     let expected = fs::read_to_string(expected_java).unwrap();
-    
+
     assert_eq!(normalize_whitespace(&actual_java), normalize_whitespace(&expected));
 }
 ```
 
-### Running Tests
+### テストの実行
 
 ```bash
-# Run all tests
+# すべてのテストを実行
 cargo test
 
-# Run tests with coverage
+# カバレッジ付きテスト実行
 cargo tarpaulin --out html
 
-# Run tests for specific crate
+# 特定のクレートのテストを実行
 cargo test -p jv_parser
 
-# Run integration tests only
+# 統合テストのみ実行
 cargo test --test integration
 
-# Run with verbose output
+# 詳細出力付き実行
 cargo test -- --nocapture
 
-# Run tests matching pattern
+# パターンマッチングテスト実行
 cargo test string_interpolation
 ```
 
-### Test Data
+### テストデータ
 
-Test files are organized in `tests/data/`:
+テストファイルは`tests/data/`に整理されています：
 ```
 tests/data/
-├── valid/              # Valid jv programs
-│   ├── basic/         # Basic language features
-│   ├── advanced/      # Advanced features
-│   └── edge_cases/    # Edge cases and corner cases
-├── invalid/           # Invalid programs (for error testing)
-├── golden/            # Golden test files
+├── valid/              # 有効なjvプログラム
+│   ├── basic/         # 基本言語フィーチャー
+│   ├── advanced/      # 高度なフィーチャー
+│   └── edge_cases/    # エッジケースとコーナーケース
+├── invalid/           # 無効なプログラム（エラーテスト用）
+├── golden/            # ゴールデンテストファイル
 │   ├── input.jv
 │   └── expected.java
-└── performance/       # Performance benchmarks
+└── performance/       # パフォーマンスベンチマーク
 ```
 
-### Writing Good Tests
+### 良いテストの書き方
 
-1. **Test naming**: Use descriptive names
+1. **テスト命名**: 説明的な名前を使用
    ```rust
    #[test]
    fn test_null_safe_member_access_with_chaining() { ... }
    ```
 
-2. **Arrange-Act-Assert pattern**:
+2. **Arrange-Act-Assertパターン**:
    ```rust
    #[test]
    fn test_parser_function_declaration() {
        // Arrange
        let input = "fun add(a: Int, b: Int): Int = a + b";
        let mut parser = Parser::new(input);
-       
+
        // Act
        let result = parser.parse_function();
-       
+
        // Assert
        assert!(result.is_ok());
        let func = result.unwrap();
@@ -365,82 +367,82 @@ tests/data/
    }
    ```
 
-3. **Test error cases**:
+3. **エラーケースのテスト**:
    ```rust
    #[test]
    fn test_parser_missing_semicolon_error() {
-       let input = "val x = 42"; // Missing semicolon
+       let input = "val x = 42"; // セミコロンが欠如
        let result = Parser::new(input).parse();
-       
+
        assert!(result.is_err());
        let error = result.unwrap_err();
        assert!(error.message.contains("Expected ';'"));
    }
    ```
 
-## Code Style
+## コードスタイル
 
-### Rust Code Style
+### Rustコードスタイル
 
-Follow standard Rust conventions:
+標準Rust規約に従う：
 
-#### Formatting
+#### フォーマット
 ```bash
-# Format all code
+# すべてのコードをフォーマット
 cargo fmt
 
-# Check formatting
+# フォーマットをチェック
 cargo fmt -- --check
 ```
 
-#### Linting
+#### リンティング
 ```bash
-# Run clippy
+# clippyを実行
 cargo clippy
 
-# Clippy with all features
+# すべてのフィーチャー付きclippy
 cargo clippy --all-features -- -D warnings
 ```
 
-#### Naming Conventions
+#### 命名規則
 
-- **Types**: `PascalCase`
-- **Functions**: `snake_case`
-- **Variables**: `snake_case`
-- **Constants**: `SCREAMING_SNAKE_CASE`
-- **Modules**: `snake_case`
+- **型**: `PascalCase`
+- **関数**: `snake_case`
+- **変数**: `snake_case`
+- **定数**: `SCREAMING_SNAKE_CASE`
+- **モジュール**: `snake_case`
 
-#### Documentation
+#### ドキュメント
 
-Use Rust doc comments:
+Rustドキュメントコメントを使用：
 ```rust
-/// Parses a jv expression into an AST node.
-/// 
-/// # Arguments
-/// 
-/// * `input` - The jv source code to parse
-/// * `options` - Parsing options and configuration
-/// 
-/// # Returns
-/// 
-/// Returns `Ok(Expression)` if parsing succeeds, or `Err(ParseError)` if parsing fails.
-/// 
-/// # Examples
-/// 
+/// jv式をASTノードに解析します。
+///
+/// # 引数
+///
+/// * `input` - 解析するjvソースコード
+/// * `options` - 解析オプションと設定
+///
+/// # 戻り値
+///
+/// 解析が成功すれば`Ok(Expression)`、失敗すれば`Err(ParseError)`を返します。
+///
+/// # 例
+///
 /// ```
 /// use jv_parser::Parser;
-/// 
+///
 /// let expr = Parser::new("1 + 2").parse_expression().unwrap();
 /// assert_eq!(expr.kind, ExpressionKind::BinaryOperation);
 /// ```
 pub fn parse_expression(input: &str, options: ParseOptions) -> Result<Expression, ParseError> {
-    // Implementation...
+    // 実装...
 }
 ```
 
-#### Error Handling
+#### エラーハンドリング
 
-Use `Result` types consistently:
+`Result`型を一貫して使用：
 
 ```rust
 use anyhow::{Result, Context};
@@ -448,20 +450,20 @@ use anyhow::{Result, Context};
 pub fn compile_file(path: &Path) -> Result<String> {
     let source = fs::read_to_string(path)
         .with_context(|| format!("Failed to read file: {}", path.display()))?;
-    
+
     let ast = parse(&source)
         .context("Failed to parse jv source")?;
-    
+
     let java_code = generate_java(&ast)
         .context("Failed to generate Java code")?;
-    
+
     Ok(java_code)
 }
 ```
 
-### Git Commit Messages
+### Gitコミットメッセージ
 
-Follow conventional commit format:
+慣用的コミット形式に従う：
 
 ```
 <type>(<scope>): <description>
@@ -471,187 +473,188 @@ Follow conventional commit format:
 [optional footer]
 ```
 
-**Types:**
-- `feat`: New feature
-- `fix`: Bug fix
-- `docs`: Documentation changes
-- `style`: Code style changes
-- `refactor`: Code refactoring
-- `test`: Adding or updating tests
-- `chore`: Build process or auxiliary tool changes
+**タイプ:**
+- `feat`: 新機能
+- `fix`: バグ修正
+- `docs`: ドキュメント変更
+- `style`: コードスタイル変更
+- `refactor`: コードリファクタリング
+- `test`: テストの追加または更新
+- `chore`: ビルドプロセスまたは補助ツール変更
 
-**Examples:**
+**例:**
 ```
-feat(parser): add support for when expressions
+feat(parser): when式のサポートを追加
 
-Implements parsing for when expressions including pattern matching
-and guard clauses. Supports both expression and statement forms.
+パターンマッチングとガード句を含むwhen式の解析を実装。
+式と文の両方の形式をサポート。
 
 Closes #123
 ```
 
 ```
-fix(codegen): handle null safety in method chaining
+fix(codegen): メソッドチェーンでのnull安全性を処理
 
-Previously, chained method calls on nullable types would generate
-incorrect Java code. Now properly generates null-safe call chains.
+以前は、nullable型でのチェーンメソッド呼び出しが不正な
+Javaコードを生成していました。今はnull安全な呼び出し
+チェーンを適切に生成します。
 
 Fixes #456
 ```
 
-## Pull Request Process
+## プルリクエストプロセス
 
-### Before Submitting
+### 提出前
 
-1. **Ensure tests pass**:
+1. **テストが通ることを確認**:
    ```bash
    cargo test
    cargo clippy -- -D warnings
    cargo fmt -- --check
    ```
 
-2. **Update documentation** if needed
+2. 必要に応じて**ドキュメントを更新**
 
-3. **Add tests** for new functionality
+3. 新機能に**テストを追加**
 
-4. **Run integration tests**:
+4. **統合テストを実行**:
    ```bash
    cargo test --test integration
    ```
 
-### Pull Request Template
+### プルリクエストテンプレート
 
-When creating a PR, include:
+PRを作成する際は、以下を含めてください：
 
 ```markdown
-## Description
-Brief description of changes
+## 説明
+変更の簡潔な説明
 
-## Type of Change
-- [ ] Bug fix (non-breaking change which fixes an issue)
-- [ ] New feature (non-breaking change which adds functionality)
-- [ ] Breaking change (fix or feature that would cause existing functionality to not work as expected)
-- [ ] Documentation update
+## 変更の種類
+- [ ] バグ修正（既存機能を壊さない問題修正）
+- [ ] 新機能（既存機能を壊さない機能追加）
+- [ ] 破壊的変更（既存機能が期待通りに動作しなくなる修正や機能）
+- [ ] ドキュメント更新
 
-## Testing
-- [ ] Unit tests added/updated
-- [ ] Integration tests added/updated
-- [ ] All tests pass locally
+## テスト
+- [ ] 単体テストを追加/更新
+- [ ] 統合テストを追加/更新
+- [ ] すべてのテストがローカルで通る
 
-## Checklist
-- [ ] Code follows style guidelines
-- [ ] Self-review completed
-- [ ] Documentation updated
-- [ ] No breaking changes (or clearly documented)
+## チェックリスト
+- [ ] コードがスタイルガイドラインに従っている
+- [ ] セルフレビューを完了
+- [ ] ドキュメントを更新
+- [ ] 破壊的変更なし（または明確に文書化）
 ```
 
-### Review Process
+### レビュープロセス
 
-1. **Automated checks** must pass (CI/CD)
-2. **Code review** by maintainer
-3. **Discussion** and feedback
-4. **Approval** and merge
+1. **自動チェック**が通る必要がある（CI/CD）
+2. メンテナーによる**コードレビュー**
+3. **議論**とフィードバック
+4. **承認**とマージ
 
-### Addressing Feedback
+### フィードバックへの対応
 
 ```bash
-# Make changes based on feedback
+# フィードバックに基づいて変更
 git add .
 git commit -m "Address PR feedback: improve error messages"
 git push origin feature/my-feature
 ```
 
-## Issue Guidelines
+## イシューガイドライン
 
-### Bug Reports
+### バグ報告
 
-Use the bug report template:
+バグ報告テンプレートを使用：
 
 ```markdown
-## Bug Description
-Clear description of the bug
+## バグの説明
+バグの明確な説明
 
-## Steps to Reproduce
-1. Create file `test.jv` with content: ...
-2. Run `jv build test.jv`
-3. Observe error: ...
+## 再現手順
+1. 内容でファイル`test.jv`を作成: ...
+2. `jv build test.jv`を実行
+3. エラーを観察: ...
 
-## Expected Behavior
-What should happen
+## 期待される動作
+何が起こるべきか
 
-## Actual Behavior
-What actually happens
+## 実際の動作
+実際に何が起こるか
 
-## Environment
-- jv version: `jv version`
+## 環境
+- jvバージョン: `jv version`
 - OS: Linux/macOS/Windows
-- Java version: `java -version`
+- Javaバージョン: `java -version`
 
-## Additional Context
-Any additional information
+## 追加コンテキスト
+その他の情報
 ```
 
-### Feature Requests
+### 機能リクエスト
 
 ```markdown
-## Feature Description
-Clear description of the proposed feature
+## 機能の説明
+提案する機能の明確な説明
 
-## Use Case
-Why is this feature needed?
+## 使用例
+なぜこの機能が必要か？
 
-## Proposed Solution
-How should this feature work?
+## 提案する解決策
+この機能はどのように動作すべきか？
 
-## Alternatives Considered
-What other solutions were considered?
+## 検討した代替案
+他にどのような解決策を検討したか？
 
-## Additional Context
-Examples, mockups, etc.
+## 追加コンテキスト
+例、モックアップなど
 ```
 
-### Labels
+### ラベル
 
-- `bug`: Something isn't working
-- `enhancement`: New feature or request
-- `documentation`: Improvements or additions to documentation
-- `good-first-issue`: Good for newcomers
-- `help-wanted`: Extra attention is needed
-- `priority-high`: High priority issue
-- `component-parser`: Parser-related issues
-- `component-codegen`: Code generation issues
+- `bug`: 何かが動作していない
+- `enhancement`: 新機能またはリクエスト
+- `documentation`: ドキュメントの改善または追加
+- `good-first-issue`: 新人に適している
+- `help-wanted`: 特別な注意が必要
+- `priority-high`: 高優先度の問題
+- `component-parser`: パーサー関連の問題
+- `component-codegen`: コード生成の問題
 
-## Community
+## コミュニティ
 
-### Communication Channels
+### コミュニケーションチャンネル
 
-- **GitHub Issues**: Bug reports and feature requests
-- **GitHub Discussions**: General questions and discussions
-- **Discord**: Real-time chat (invite in README)
-- **Reddit**: r/jv_lang community discussions
+- **GitHub Issues**: バグ報告と機能リクエスト
+- **GitHub Discussions**: 一般的な質問と議論
+- **Discord**: リアルタイムチャット（READMEの招待）
+- **Reddit**: r/jv_langコミュニティ議論
 
-### Code of Conduct
+### 行動規範
 
-We follow the [Contributor Covenant](https://www.contributor-covenant.org/):
+私たちは[Contributor Covenant](https://www.contributor-covenant.org/)に従います：
 
-- **Be respectful** and inclusive
-- **Be constructive** in feedback
-- **Be collaborative** and helpful
-- **Focus on the code**, not the person
+- **敬意**を持ち包括的である
+- フィードバックは**建設的**である
+- **協力的**で助けになる
+- 人ではなく**コードに焦点**を当てる
 
-### Getting Help
+### ヘルプの取得
 
-- **Documentation**: Check the docs first
-- **Search issues**: Someone may have had the same problem
-- **Ask questions**: Use GitHub Discussions for questions
-- **Join Discord**: Real-time help from community
+- **ドキュメント**: まずドキュメントをチェック
+- **イシューを検索**: 同じ問題を抱えた人がいるかもしれません
+- **質問する**: GitHub Discussionsを質問に使用
+- **Discordに参加**: コミュニティからのリアルタイムヘルプ
 
-### Recognition
+### 認識
 
-Contributors are recognized in:
-- **CONTRIBUTORS.md** file
-- **Release notes** for significant contributions
-- **GitHub contributors** page
-- **Discord contributor** role
+貢献者は以下で認識されます：
+- **CONTRIBUTORS.md**ファイル
+- 重要な貢献に対する**リリースノート**
+- **GitHub contributors**ページ
+- **Discord contributor**ロール
 
-Thank you for contributing to jv! 🎉
+jvへの貢献をありがとうございます！🎉

@@ -1,327 +1,329 @@
-# jv CLI Reference
+# jv CLIリファレンス
 
-Complete reference for the jv command-line interface.
+**日本語** | [English](cli-reference-en.md)
 
-## Overview
+jvコマンドラインインターフェースの完全なリファレンスです。
 
-The `jv` command is the primary interface for working with jv projects. It provides tools for project management, compilation, and development.
+## 概要
+
+`jv`コマンドは、jvプロジェクトの操作における主要なインターフェースです。プロジェクト管理、コンパイル、開発のためのツールを提供します。
 
 ```
 jv [COMMAND] [OPTIONS] [ARGUMENTS]
 ```
 
-Notes:
-- Running `jv` with no arguments starts the interactive REPL.
-- You can also start it explicitly with `jv repl`.
-- A separate `jvx` binary is available for quick execution of files/snippets.
+注意事項：
+- 引数なしで`jv`を実行すると、インタラクティブREPLが開始されます。
+- `jv repl`で明示的に開始することもできます。
+- ファイルやコードスニペットの素早い実行用に、別の`jvx`バイナリが利用可能です。
 
-## Global Options
+## グローバルオプション
 
-- `-h, --help`: Show help information
-- `-V, --version`: Show version information
-- `--verbose`: Enable verbose output
-- `--quiet`: Suppress non-essential output
+- `-h, --help`: ヘルプ情報を表示
+- `-V, --version`: バージョン情報を表示
+- `--verbose`: 詳細出力を有効化
+- `--quiet`: 必須でない出力を抑制
 
-## Commands
+## コマンド
 
 ### `jvx`
 
-Standalone quick executor for jv files or snippets.
+jvファイルやスニペット用のスタンドアロン高速実行ツール。
 
 ```bash
-# Execute a file
+# ファイルを実行
 jvx src/main.jv -- arg1 arg2
 
-# Execute inline snippet
+# インラインスニペットを実行
 jvx 'fun main(){ println("Hi") }'
 
-# Read from stdin
+# 標準入力から読み込み
 echo 'fun main(){ println("stdin") }' | jvx -
 ```
 
-Notes:
-- Mirrors the behavior of `jv x`/`jv exec` but as a separate binary.
-- Useful for shebang-style or pipeline workflows.
+注意事項：
+- `jv x`/`jv exec`の動作をミラーしますが、別のバイナリとして提供されます。
+- shebangスタイルやパイプラインワークフローに便利です。
 
-<!-- Quick exec is provided via standalone `jvx` binary, not `jv exec`. -->
+<!-- クイック実行は別の`jvx`バイナリで提供され、`jv exec`ではありません。 -->
 
 ### `jv repl`
 
-Start an interactive Read–Eval–Print Loop.
+インタラクティブRead–Eval–Print Loopを開始します。
 
 ```bash
 jv repl
-# or simply
+# または単純に
 jv
 ```
 
-Features:
-- Parses jv snippets interactively and reports parse errors.
-- Meta commands: `:help`, `:quit`.
-- Future: Java preview and execution hooks.
+機能：
+- jvスニペットをインタラクティブに解析し、パースエラーを報告します。
+- メタコマンド: `:help`、`:quit`
+- 将来: Javaプレビューと実行フック
 
 ### `jv init`
 
-Initialize a new jv project in the current directory.
+現在のディレクトリに新しいjvプロジェクトを初期化します。
 
 ```bash
 jv init [OPTIONS] [PROJECT_NAME]
 ```
 
-**Options:**
-- `--template <TEMPLATE>`: Use a specific project template
-  - `basic` (default): Simple console application
-  - `library`: Library project structure
-  - `web`: Web application template
-- `--package <PACKAGE>`: Set the package name
-- `--jdk <VERSION>`: Specify target JDK version (default: 25)
+**オプション:**
+- `--template <TEMPLATE>`: 特定のプロジェクトテンプレートを使用
+  - `basic` (デフォルト): シンプルなコンソールアプリケーション
+  - `library`: ライブラリプロジェクト構造
+  - `web`: Webアプリケーションテンプレート
+- `--package <PACKAGE>`: パッケージ名を設定
+- `--jdk <VERSION>`: ターゲットJDKバージョンを指定 (デフォルト: 25)
 
-**Examples:**
+**例:**
 ```bash
-# Initialize basic project in current directory
+# 現在のディレクトリに基本プロジェクトを初期化
 jv init
 
-# Initialize with project name
+# プロジェクト名を指定して初期化
 jv init my-project
 
-# Initialize library project
+# ライブラリプロジェクトを初期化
 jv init --template library my-lib
 
-# Initialize with specific package
+# 特定のパッケージで初期化
 jv init --package com.example.myapp
 ```
 
-**Generated Structure:**
+**生成される構造:**
 ```
 project/
-├── jv.toml          # Project configuration
+├── jv.toml          # プロジェクト設定
 ├── src/
-│   └── main.jv      # Main source file
+│   └── main.jv      # メインソースファイル
 ├── test/
-│   └── main_test.jv # Test file
-└── README.md        # Project documentation
+│   └── main_test.jv # テストファイル
+└── README.md        # プロジェクトドキュメント
 ```
 
 ### `jv build`
 
-Compile jv source code to Java and generate bytecode.
+jvソースコードをJavaにコンパイルし、バイトコードを生成します。
 
 ```bash
 jv build [OPTIONS] [FILES...]
 ```
 
-**Options:**
-- `--check`: Check code without generating output
-- `--format`: Format generated Java code
-- `--preview`: Show generated Java without compiling
-- `--output <DIR>`: Output directory (default: `out/`)
-- `--target <DIR>`: Target directory for compiled classes
-- `--classpath <PATH>`: Additional classpath entries
-- `--jdk <VERSION>`: Target JDK version
-- `--optimization <LEVEL>`: Optimization level (0-3)
-- `--debug`: Include debug information
-  
-Sample/@Sample options:
-- `--sample-mode=embed|load`: Override default `@Sample` mode (default: embed)
-- `--sample-network=allow|deny`: Allow network access for sample fetching (default: deny)
-- `--sample-embed-max-bytes=<N>`: Max bytes to embed in code (default: 1048576)
-- `--sample-embed-fallback=load|fail`: Behavior when embed exceeds limit (default: fail)
-- `--sample-cache=on|off`: Enable local cache for runtime loads (default: on)
+**オプション:**
+- `--check`: 出力を生成せずにコードをチェック
+- `--format`: 生成されたJavaコードをフォーマット
+- `--preview`: コンパイルせずに生成されたJavaを表示
+- `--output <DIR>`: 出力ディレクトリ (デフォルト: `out/`)
+- `--target <DIR>`: コンパイル済みクラスのターゲットディレクトリ
+- `--classpath <PATH>`: 追加のクラスパスエントリ
+- `--jdk <VERSION>`: ターゲットJDKバージョン
+- `--optimization <LEVEL>`: 最適化レベル (0-3)
+- `--debug`: デバッグ情報を含める
 
-Binary packaging options:
-- `--binary jar|native`: Produce a single-file artifact after compilation.
-  - `jar`: Creates `<output>/app.jar` (or `--bin-name`). Requires `jar` tool.
-  - `native`: Attempts GraalVM `native-image` to produce a native binary in `<output>`. Errors if not installed.
-- `--bin-name <NAME>`: Output base name for the artifact (default: `app`).
+Sample/@Sampleオプション:
+- `--sample-mode=embed|load`: デフォルトの`@Sample`モードを上書き (デフォルト: embed)
+- `--sample-network=allow|deny`: サンプル取得時のネットワークアクセスを許可 (デフォルト: deny)
+- `--sample-embed-max-bytes=<N>`: コードに埋め込む最大バイト数 (デフォルト: 1048576)
+- `--sample-embed-fallback=load|fail`: 埋め込みが制限を超えた場合の動作 (デフォルト: fail)
+- `--sample-cache=on|off`: ランタイムロード用のローカルキャッシュを有効化 (デフォルト: on)
 
-**Examples:**
+バイナリパッケージングオプション:
+- `--binary jar|native`: コンパイル後に単一ファイルアーティファクトを作成
+  - `jar`: `<output>/app.jar` (または`--bin-name`)を作成。`jar`ツールが必要。
+  - `native`: GraalVMの`native-image`を試行して`<output>`にネイティブバイナリを作成。インストールされていない場合はエラー。
+- `--bin-name <NAME>`: アーティファクトの出力ベース名 (デフォルト: `app`)
+
+**例:**
 ```bash
-# Build entire project
+# プロジェクト全体をビルド
 jv build
 
-# Build specific files
+# 特定のファイルをビルド
 jv build src/main.jv src/utils.jv
 
-# Build with formatting and preview
+# フォーマットとプレビューでビルド
 jv build --format --preview
 
-# Build with debug information
+# デバッグ情報付きでビルド
 jv build --debug
 
-# Build and check only (no output)
+# ビルドとチェックのみ（出力なし）
 jv build --check
 
-# Build and package into a single JAR
+# ビルドして単一JARにパッケージ
 jv build src/main.jv --binary jar --bin-name myapp
 
-# Build and attempt native image (requires GraalVM native-image)
+# ビルドしてネイティブイメージを試行（GraalVM native-imageが必要）
 jv build src/main.jv --binary native --bin-name myapp
 ```
 
-**Build Process:**
-1. **Lexical Analysis**: Tokenize jv source files
-2. **Parsing**: Generate Abstract Syntax Tree (AST)
-3. **Type Checking**: Validate types and perform inference
-4. **IR Generation**: Convert to Intermediate Representation
-5. **Java Generation**: Generate readable Java 25 source code
-6. **Java Compilation**: Compile with `javac` to bytecode
+**ビルドプロセス:**
+1. **字句解析**: jvソースファイルをトークン化
+2. **構文解析**: 抽象構文木（AST）を生成
+3. **型チェック**: 型の検証と推論を実行
+4. **IR生成**: 中間表現に変換
+5. **Java生成**: 読みやすいJava 25ソースコードを生成
+6. **Javaコンパイル**: `javac`でバイトコードにコンパイル
 
 ### `jv run`
 
-Run a compiled jv program.
+コンパイル済みjvプログラムを実行します。
 
 ```bash
 jv run [OPTIONS] [MAIN_CLASS] [PROGRAM_ARGS...]
 ```
 
-**Options:**
-- `--classpath <PATH>`: Additional classpath entries
-- `--jvm-args <ARGS>`: Arguments to pass to the JVM
-- `--main <CLASS>`: Specify main class to run
-- `--args <ARGS>`: Arguments to pass to the program
+**オプション:**
+- `--classpath <PATH>`: 追加のクラスパスエントリ
+- `--jvm-args <ARGS>`: JVMに渡す引数
+- `--main <CLASS>`: 実行するメインクラスを指定
+- `--args <ARGS>`: プログラムに渡す引数
 
-**Examples:**
+**例:**
 ```bash
-# Run main class
+# メインクラスを実行
 jv run
 
-# Run with JVM arguments
+# JVM引数付きで実行
 jv run --jvm-args "-Xmx1g -Xms512m"
 
-# Run specific class
+# 特定のクラスを実行
 jv run --main com.example.MyApp
 
-# Run with program arguments
+# プログラム引数付きで実行
 jv run --args "arg1 arg2 arg3"
 
-# Combined example
+# 複合例
 jv run --main MyApp --jvm-args "-Xmx2g" --args "input.txt output.txt"
 ```
 
 ### `jv fmt`
 
-Format jv source code according to standard style guidelines.
+標準スタイルガイドラインに従ってjvソースコードをフォーマットします。
 
 ```bash
 jv fmt [OPTIONS] [FILES...]
 ```
 
-**Options:**
-- `--check`: Check if files are formatted without modifying them
-- `--diff`: Show differences that would be made
-- `--write`: Write changes to files (default behavior)
-- `--indent <SIZE>`: Indentation size (default: 4)
-- `--line-width <WIDTH>`: Maximum line width (default: 100)
-- `--trailing-comma`: Always use trailing commas
+**オプション:**
+- `--check`: ファイルを変更せずにフォーマットされているかチェック
+- `--diff`: 行われる変更の差分を表示
+- `--write`: ファイルに変更を書き込み（デフォルトの動作）
+- `--indent <SIZE>`: インデントサイズ (デフォルト: 4)
+- `--line-width <WIDTH>`: 最大行幅 (デフォルト: 100)
+- `--trailing-comma`: 常に末尾カンマを使用
 
-**Examples:**
+**例:**
 ```bash
-# Format all jv files in project
+# プロジェクト内のすべてのjvファイルをフォーマット
 jv fmt
 
-# Format specific files
+# 特定のファイルをフォーマット
 jv fmt src/main.jv src/utils.jv
 
-# Check formatting without changes
+# 変更せずにフォーマットをチェック
 jv fmt --check
 
-# Show formatting differences
+# フォーマットの差分を表示
 jv fmt --diff
 
-# Format with custom line width
+# カスタム行幅でフォーマット
 jv fmt --line-width 80
 ```
 
-**Formatting Rules:**
-- **Indentation**: 4 spaces (configurable)
-- **Line Length**: 100 characters (configurable)  
-- **Braces**: K&R style (opening brace on same line)
-- **Spacing**: Consistent spacing around operators
-- **Import Organization**: Automatic import sorting and deduplication
+**フォーマットルール:**
+- **インデント**: 4スペース（設定可能）
+- **行長**: 100文字（設定可能）
+- **ブレース**: K&Rスタイル（開きブレースは同一行）
+- **スペース**: 演算子周りの一貫したスペース
+- **インポート整理**: 自動インポートソートと重複除去
 
 ### `jv check`
 
-Perform static analysis and type checking on jv source code.
+jvソースコードに対して静的解析と型チェックを実行します。
 
 ```bash
 jv check [OPTIONS] [FILES...]
 ```
 
-**Options:**
-- `--strict`: Enable strict checking mode
-- `--null-safety`: Enable enhanced null safety checks
-- `--unused`: Check for unused variables and imports
-- `--performance`: Check for performance anti-patterns
-- `--security`: Enable security vulnerability checks
-- `--json`: Output results in JSON format
-- `--fix`: Automatically fix issues where possible
+**オプション:**
+- `--strict`: 厳密チェックモードを有効化
+- `--null-safety`: 拡張null安全性チェックを有効化
+- `--unused`: 未使用変数とインポートをチェック
+- `--performance`: パフォーマンスアンチパターンをチェック
+- `--security`: セキュリティ脆弱性チェックを有効化
+- `--json`: 結果をJSON形式で出力
+- `--fix`: 可能な場合は自動的に問題を修正
 
-**Examples:**
+**例:**
 ```bash
-# Basic type checking
+# 基本的な型チェック
 jv check
 
-# Strict checking with all warnings
+# すべての警告を含む厳密チェック
 jv check --strict --unused --performance
 
-# Check specific files
+# 特定のファイルをチェック
 jv check src/main.jv src/models/
 
-# Security-focused checking
+# セキュリティ重視のチェック
 jv check --security --strict
 
-# Get machine-readable output
+# 機械可読な出力を取得
 jv check --json > check-results.json
 ```
 
-**Check Categories:**
-- **Type Safety**: Type mismatches, null safety violations
-- **Code Quality**: Unused variables, unreachable code, complexity
-- **Performance**: Inefficient patterns, memory leaks
-- **Security**: SQL injection, XSS vulnerabilities, insecure patterns
-- **Style**: Naming conventions, code organization
+**チェックカテゴリ:**
+- **型安全性**: 型の不一致、null安全性違反
+- **コード品質**: 未使用変数、到達不可能コード、複雑性
+- **パフォーマンス**: 非効率なパターン、メモリリーク
+- **セキュリティ**: SQLインジェクション、XSS脆弱性、安全でないパターン
+- **スタイル**: 命名規則、コード構成
 
 ### `jv version`
 
-Display version information for jv and its components.
+jvとそのコンポーネントのバージョン情報を表示します。
 
 ```bash
 jv version [OPTIONS]
 ```
 
-**Options:**
-- `--verbose`: Show detailed version information
-- `--json`: Output version information in JSON format
+**オプション:**
+- `--verbose`: 詳細なバージョン情報を表示
+- `--json`: バージョン情報をJSON形式で出力
 
-**Examples:**
+**例:**
 ```bash
-# Show basic version
+# 基本バージョンを表示
 jv version
-# Output: jv 0.1.0 - Java Sugar Language compiler
+# 出力: jv 0.1.0 - Java Sugar Language compiler
 
-# Show detailed version information
+# 詳細なバージョン情報を表示
 jv version --verbose
-# Output:
+# 出力:
 # jv 0.1.0 - Java Sugar Language compiler
 # Built: 2024-09-05
 # Rust: 1.70.0
 # Target: Java 25
 # Features: null-safety, async, pattern-matching
 
-# JSON output
+# JSON出力
 jv version --json
 ```
 
-## Configuration
+## 設定
 
-### Project Configuration (`jv.toml`)
+### プロジェクト設定 (`jv.toml`)
 
 ```toml
 [project]
 name = "my-project"
 version = "1.0.0"
 authors = ["Your Name <you@example.com>"]
-description = "A jv project"
+description = "jvプロジェクト"
 license = "MIT"
 
 [build]
@@ -331,10 +333,10 @@ debug = false
 target_dir = "out"
 
 [dependencies]
-# jv registry dependencies
+# jvレジストリ依存関係
 math-utils = "1.2.0"
 
-# Maven dependencies  
+# Maven依存関係
 [dependencies.maven]
 "org.apache.commons:commons-lang3" = "3.12.0"
 "com.fasterxml.jackson.core:jackson-core" = "2.15.0"
@@ -358,9 +360,9 @@ unused_warnings = true
 performance_warnings = true
 ```
 
-### Global Configuration
+### グローバル設定
 
-Global jv configuration is stored in:
+グローバルjv設定は以下に保存されます：
 - **Linux/macOS**: `~/.config/jv/config.toml`
 - **Windows**: `%APPDATA%\jv\config.toml`
 
@@ -386,34 +388,34 @@ default_strict = true
 auto_fix = false
 ```
 
-## Environment Variables
+## 環境変数
 
-- `JV_HOME`: jv installation directory
-- `JV_REGISTRY`: Override default registry URL
-- `JV_JDK_HOME`: Override JDK detection
-- `JV_LOG_LEVEL`: Set logging level (debug, info, warn, error)
-- `JV_NO_COLOR`: Disable colored output
-- `JV_OFFLINE`: Work in offline mode (no network requests)
+- `JV_HOME`: jvインストールディレクトリ
+- `JV_REGISTRY`: デフォルトレジストリURLを上書き
+- `JV_JDK_HOME`: JDK検出を上書き
+- `JV_LOG_LEVEL`: ログレベルを設定 (debug, info, warn, error)
+- `JV_NO_COLOR`: カラー出力を無効化
+- `JV_OFFLINE`: オフラインモードで動作（ネットワーク要求なし）
 
-## Exit Codes
+## 終了コード
 
-- `0`: Success
-- `1`: General error
-- `2`: Compilation error
-- `3`: Runtime error
-- `4`: Configuration error
-- `5`: Network error
-- `101`: Internal error (please report as bug)
+- `0`: 成功
+- `1`: 一般エラー
+- `2`: コンパイルエラー
+- `3`: ランタイムエラー
+- `4`: 設定エラー
+- `5`: ネットワークエラー
+- `101`: 内部エラー（バグとして報告してください）
 
-## Shell Completions
+## シェル補完
 
-Generate shell completions for your shell:
+お使いのシェル用の補完を生成：
 
 ```bash
 # Bash
 jv completion bash > ~/.local/share/bash-completion/completions/jv
 
-# Zsh  
+# Zsh
 jv completion zsh > ~/.local/share/zsh/site-functions/_jv
 
 # Fish
@@ -423,58 +425,58 @@ jv completion fish > ~/.config/fish/completions/jv.fish
 jv completion powershell > $PROFILE
 ```
 
-## Integration with IDEs
+## IDEとの統合
 
 ### VS Code
 
-Install the jv extension for VS Code:
-- Syntax highlighting
-- Error diagnostics
-- Code formatting
-- IntelliSense support
+VS Code用jv拡張機能をインストール：
+- 構文ハイライト
+- エラー診断
+- コードフォーマット
+- IntelliSenseサポート
 
 ### IntelliJ IDEA
 
-The jv language server provides:
-- Code completion
-- Error highlighting  
-- Refactoring support
-- Debugging integration
+jv言語サーバーが提供：
+- コード補完
+- エラーハイライト
+- リファクタリングサポート
+- デバッグ統合
 
 ### Vim/Neovim
 
-Use the `jv-vim` plugin or configure with LSP clients like `nvim-lspconfig`.
+`jv-vim`プラグインを使用するか、`nvim-lspconfig`などのLSPクライアントで設定。
 
-## Troubleshooting
+## トラブルシューティング
 
-### Common Issues
+### よくある問題
 
 **"jv: command not found"**
-- Ensure jv is in your PATH
-- Try running with full path: `./target/release/jv`
+- jvがPATHに含まれていることを確認
+- フルパスで実行を試行: `./target/release/jv`
 
 **"Java 25 required but Java X found"**
-- Install Java 25 or set `JAVA_HOME`
-- Use `jv toolchain install` to manage JDK versions
+- Java 25をインストールするか`JAVA_HOME`を設定
+- JDKバージョン管理に`jv toolchain install`を使用
 
-**Build fails with classpath errors**
-- Check dependencies in `jv.toml`
-- Verify Maven dependencies are available
+**クラスパスエラーでビルドが失敗**
+- `jv.toml`の依存関係を確認
+- Maven依存関係が利用可能であることを確認
 
-**Performance issues**
-- Use `--optimization 3` for release builds
-- Check for performance warnings with `jv check --performance`
+**パフォーマンスの問題**
+- リリースビルドには`--optimization 3`を使用
+- `jv check --performance`でパフォーマンス警告をチェック
 
-### Debug Mode
+### デバッグモード
 
-Enable verbose logging for troubleshooting:
+トラブルシューティング用の詳細ログを有効化：
 
 ```bash
 JV_LOG_LEVEL=debug jv build --verbose
 ```
 
-### Getting Help
+### ヘルプの取得
 
-- Check the [GitHub Issues](https://github.com/jv-lang/jv/issues)
-- Join the community [Discussions](https://github.com/jv-lang/jv/discussions)
-- Read the [FAQ](faq.md)
+- [GitHub Issues](https://github.com/jv-lang/jv/issues)をチェック
+- コミュニティ[Discussions](https://github.com/jv-lang/jv/discussions)に参加
+- [FAQ](faq.md)を読む

@@ -1,34 +1,36 @@
-# Java Interoperability
+# Java相互運用性
 
-This guide covers how jv interoperates with Java code, libraries, and the broader Java ecosystem.
+**日本語** | [English](java-interop-en.md)
 
-## Table of Contents
+このガイドでは、jvがJavaコード、ライブラリ、そしてより広いJavaエコシステムとどのように相互運用するかを説明します。
 
-1. [Overview](#overview)
-2. [Calling Java from jv](#calling-java-from-jv)
-3. [Generated Java Code](#generated-java-code)
-4. [Type Mapping](#type-mapping)
-5. [Null Safety Integration](#null-safety-integration)
-6. [Collections and Generics](#collections-and-generics)
-7. [Exception Handling](#exception-handling)
-8. [Annotations](#annotations)
-9. [Best Practices](#best-practices)
-10. [Common Patterns](#common-patterns)
+## 目次
 
-## Overview
+1. [概要](#概要)
+2. [jvからJavaを呼び出す](#jvからjavaを呼び出す)
+3. [生成されるJavaコード](#生成されるjavaコード)
+4. [型マッピング](#型マッピング)
+5. [null安全性統合](#null安全性統合)
+6. [コレクションとジェネリクス](#コレクションとジェネリクス)
+7. [例外処理](#例外処理)
+8. [アノテーション](#アノテーション)
+9. [ベストプラクティス](#ベストプラクティス)
+10. [共通パターン](#共通パターン)
 
-jv is designed for seamless interoperability with Java:
+## 概要
 
-- **Zero Runtime Overhead**: jv compiles to pure Java with no additional runtime
-- **Direct Library Access**: Use any Java library without wrappers
-- **Readable Output**: Generated Java looks like hand-written code
-- **Standard Compliance**: Generated code follows Java conventions
+jvはJavaとのシームレスな相互運用性を持つよう設計されています：
 
-## Calling Java from jv
+- **ゼロランタイムオーバーヘッド**: jvは追加ランタイムなしで純粋なJavaにコンパイル
+- **直接ライブラリアクセス**: ラッパーなしであらゆるJavaライブラリを使用
+- **読みやすい出力**: 生成されるJavaは手書きコードのように見える
+- **標準準拠**: 生成されるコードはJava規約に従う
 
-### Basic Java Library Usage
+## jvからJavaを呼び出す
 
-Java classes and methods can be used directly in jv:
+### 基本的なJavaライブラリ使用
+
+Javaクラスとメソッドはjvで直接使用できます：
 
 ```jv
 import java.util.ArrayList
@@ -37,34 +39,34 @@ import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 
 fun demonstrateJavaInterop() {
-    // Using Java collections
+    // Javaコレクションの使用
     val list = ArrayList<String>()
     list.add("Hello")
     list.add("World")
-    
-    // Using Java time API
+
+    // Java time APIの使用
     val now = LocalDateTime.now()
     val formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
     val formatted = now.format(formatter)
-    
+
     println("Current time: $formatted")
-    
-    // Using Java maps
+
+    // Javaマップの使用
     val map = HashMap<String, Int>()
     map.put("apple", 5)
     map.put("banana", 3)
-    
-    // Java 8+ streams
+
+    // Java 8+ ストリーム
     val total = map.values()
         .stream()
         .mapToInt { it }
         .sum()
-    
+
     println("Total fruits: $total")
 }
 ```
 
-**Generated Java:**
+**生成されるJava:**
 ```java
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -76,28 +78,28 @@ public class MainUtils {
         ArrayList<String> list = new ArrayList<>();
         list.add("Hello");
         list.add("World");
-        
+
         LocalDateTime now = LocalDateTime.now();
         DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
         String formatted = now.format(formatter);
-        
+
         System.out.println("Current time: " + formatted);
-        
+
         HashMap<String, Integer> map = new HashMap<>();
         map.put("apple", 5);
         map.put("banana", 3);
-        
+
         int total = map.values()
             .stream()
             .mapToInt(Integer::intValue)
             .sum();
-        
+
         System.out.println("Total fruits: " + total);
     }
 }
 ```
 
-### Static Methods and Fields
+### 静的メソッドとフィールド
 
 ```jv
 import java.lang.Math
@@ -105,24 +107,24 @@ import java.lang.System
 import java.util.Collections
 
 fun useStaticMembers() {
-    // Static methods
+    // 静的メソッド
     val sqrt = Math.sqrt(16.0)        // 4.0
     val max = Math.max(10, 20)        // 20
-    
-    // Static fields
+
+    // 静的フィールド
     val pi = Math.PI                  // 3.141592653589793
     val lineSeparator = System.lineSeparator()
-    
-    // Static utility methods
+
+    // 静的ユーティリティメソッド
     val list = mutableListOf(3, 1, 4, 1, 5)
     Collections.sort(list)
     println(list)  // [1, 1, 3, 4, 5]
 }
 ```
 
-### Builder Patterns
+### ビルダーパターン
 
-Java builder patterns work naturally:
+Javaビルダーパターンは自然に動作します：
 
 ```jv
 import java.time.LocalDate
@@ -137,622 +139,384 @@ fun useBuilderPattern() {
         .appendLiteral('-')
         .appendValue(ChronoField.DAY_OF_MONTH, 2)
         .toFormatter()
-    
+
     val date = LocalDate.now()
     val formatted = date.format(formatter)
     println(formatted)
 }
 ```
 
-## Generated Java Code
+## 生成されるJavaコード
 
-### Class Generation
+### クラス生成
 
-jv classes compile to standard Java classes:
+jvクラスは慣用的なJavaコードを生成：
 
 ```jv
-class Person(val name: String, var age: Int) {
-    fun greet(): String {
-        return "Hello, I'm $name and I'm $age years old"
-    }
-    
+// jvクラス
+class User(val name: String, var age: Int) {
+    fun greet(): String = "Hello, I'm $name"
+
     fun haveBirthday() {
         age++
     }
 }
 ```
 
-**Generated Java:**
+**生成されるJava:**
 ```java
-public class Person {
+public class User {
     private final String name;
     private int age;
-    
-    public Person(String name, int age) {
+
+    public User(String name, int age) {
         this.name = name;
         this.age = age;
     }
-    
-    public String getName() {
-        return name;
-    }
-    
-    public int getAge() {
-        return age;
-    }
-    
-    public void setAge(int age) {
-        this.age = age;
-    }
-    
+
+    public String getName() { return name; }
+    public int getAge() { return age; }
+    public void setAge(int age) { this.age = age; }
+
     public String greet() {
-        return "Hello, I'm " + name + " and I'm " + age + " years old";
+        return "Hello, I'm " + name;
     }
-    
+
     public void haveBirthday() {
         age++;
     }
 }
 ```
 
-### Data Classes to Records
-
-Immutable data classes become Java records:
+### データクラス
 
 ```jv
-data class Point(val x: Double, val y: Double) {
-    fun distanceFromOrigin(): Double {
-        return Math.sqrt(x * x + y * y)
-    }
-}
+// 不変データクラス
+data class Point(val x: Double, val y: Double)
+
+// 可変データクラス
+data class mutable Counter(var value: Int)
 ```
 
-**Generated Java:**
+**生成されるJava:**
 ```java
-public record Point(double x, double y) {
-    public double distanceFromOrigin() {
-        return Math.sqrt(x * x + y * y);
-    }
+// 不変 -> record
+public record Point(double x, double y) {}
+
+// 可変 -> 完全クラス
+public class Counter {
+    private int value;
+
+    public Counter(int value) { this.value = value; }
+
+    public int getValue() { return value; }
+    public void setValue(int value) { this.value = value; }
+
+    // equals, hashCode, toString...
 }
 ```
 
-### Extension Functions
+## 型マッピング
 
-Extension functions become static utility methods:
+### プリミティブ型
 
-```jv
-fun String.isPalindrome(): Boolean {
-    val cleaned = this.lowercase().replace(Regex("\\W"), "")
-    return cleaned == cleaned.reversed()
-}
+| jv型 | Java型 | 注意 |
+|------|--------|------|
+| `Int` | `int` | 32ビット整数 |
+| `Long` | `long` | 64ビット整数 |
+| `Float` | `float` | 32ビット浮動小数点 |
+| `Double` | `double` | 64ビット浮動小数点 |
+| `Boolean` | `boolean` | 真偽値 |
+| `Char` | `char` | 16ビット文字 |
+| `String` | `String` | 文字列 |
+| `Unit` | `void` | 戻り値なし |
 
-fun <T> List<T>.secondOrNull(): T? {
-    return if (size >= 2) this[1] else null
-}
-```
-
-**Generated Java:**
-```java
-public class StringExtensions {
-    public static boolean isPalindrome(String self) {
-        String cleaned = self.toLowerCase().replaceAll("\\W", "");
-        return cleaned.equals(new StringBuilder(cleaned).reverse().toString());
-    }
-}
-
-public class ListExtensions {
-    public static <T> T secondOrNull(List<T> self) {
-        return self.size() >= 2 ? self.get(1) : null;
-    }
-}
-```
-
-### Top-level Functions
-
-Top-level functions are placed in utility classes:
-
-```jv
-// In file: math_utils.jv
-fun factorial(n: Int): Long {
-    return if (n <= 1) 1L else n * factorial(n - 1)
-}
-
-fun gcd(a: Int, b: Int): Int {
-    return if (b == 0) a else gcd(b, a % b)
-}
-```
-
-**Generated Java:**
-```java
-public class MathUtils {
-    public static long factorial(int n) {
-        return n <= 1 ? 1L : n * factorial(n - 1);
-    }
-    
-    public static int gcd(int a, int b) {
-        return b == 0 ? a : gcd(b, a % b);
-    }
-}
-```
-
-## Type Mapping
-
-### Primitive Types
-
-| jv Type | Java Type | Notes |
-|---------|-----------|-------|
-| `Boolean` | `boolean` | Primitive boolean |
-| `Byte` | `byte` | 8-bit signed integer |
-| `Short` | `short` | 16-bit signed integer |
-| `Int` | `int` | 32-bit signed integer |
-| `Long` | `long` | 64-bit signed integer |
-| `Float` | `float` | 32-bit IEEE 754 |
-| `Double` | `double` | 64-bit IEEE 754 |
-| `Char` | `char` | Unicode character |
-
-### Reference Types
-
-| jv Type | Java Type | Notes |
-|---------|-----------|-------|
-| `String` | `String` | Immutable string |
-| `Array<T>` | `T[]` | Native Java arrays |
-| `List<T>` | `List<T>` | Java List interface |
-| `MutableList<T>` | `List<T>` | Mutable Java List |
-| `Set<T>` | `Set<T>` | Java Set interface |
-| `Map<K,V>` | `Map<K,V>` | Java Map interface |
-
-### Nullable Types
+### nullable型
 
 ```jv
 val nullable: String? = null
-val nonNull: String = "hello"
+val nonNull: String = "value"
 ```
 
-**Generated Java:**
+**生成されるJava:**
 ```java
-@Nullable String nullable = null;
-String nonNull = "hello";  // Non-null by convention
+String nullable = null;         // String（nullable）
+String nonNull = "value";       // String（non-null、実行時チェック）
 ```
 
-### Generic Types
+### コレクション型
+
+| jv型 | Java型 |
+|------|--------|
+| `List<T>` | `List<T>` |
+| `MutableList<T>` | `List<T>` |
+| `Set<T>` | `Set<T>` |
+| `Map<K, V>` | `Map<K, V>` |
+| `Array<T>` | `T[]` |
+
+## null安全性統合
+
+### 安全呼び出し演算子
 
 ```jv
-class Container<T>(val value: T) {
-    fun <R> map(transform: (T) -> R): Container<R> {
-        return Container(transform(value))
-    }
-}
+val user: User? = getUser()
+val name = user?.name  // 安全なアクセス
 ```
 
-**Generated Java:**
+**生成されるJava:**
 ```java
-public class Container<T> {
-    private final T value;
-    
-    public Container(T value) {
-        this.value = value;
-    }
-    
-    public T getValue() {
-        return value;
-    }
-    
-    public <R> Container<R> map(Function<T, R> transform) {
-        return new Container<>(transform.apply(value));
-    }
-}
+User user = getUser();
+String name = user != null ? user.getName() : null;
 ```
 
-## Null Safety Integration
-
-### Java Libraries with Nullable Returns
-
-When calling Java methods that may return null:
+### エルビス演算子
 
 ```jv
-import java.util.HashMap
-
-fun handleNullableJavaReturns() {
-    val map = HashMap<String, String>()
-    
-    // Java's get() can return null
-    val value: String? = map.get("key")  // Explicitly nullable
-    
-    // Safe handling
-    val length = value?.length ?: 0
-    
-    // Or with smart cast
-    if (value != null) {
-        println("Length: ${value.length}")  // value is smart-cast to String
-    }
-}
+val name = user?.name ?: "Unknown"
 ```
 
-**Generated Java:**
+**生成されるJava:**
 ```java
-import java.util.HashMap;
-
-public class MainUtils {
-    public static void handleNullableJavaReturns() {
-        HashMap<String, String> map = new HashMap<>();
-        
-        String value = map.get("key");
-        
-        int length = value != null ? value.length() : 0;
-        
-        if (value != null) {
-            System.out.println("Length: " + value.length());
-        }
-    }
-}
+String name = user != null ? user.getName() : "Unknown";
 ```
 
-### Annotations for Better Integration
-
-Use nullable annotations for clearer contracts:
+### null安全なキャスト
 
 ```jv
-import org.jetbrains.annotations.Nullable
-import org.jetbrains.annotations.NotNull
-
-// This would be in Java
-interface JavaService {
-    @Nullable 
-    fun findUser(id: String): User?
-    
-    @NotNull
-    fun createUser(name: String): User
-}
+val str = obj as? String  // 失敗時はnull
 ```
 
-In jv, this allows the compiler to understand nullability:
-
-```jv
-fun useJavaService(service: JavaService) {
-    val user = service.findUser("123")  // Compiler knows this is nullable
-    user?.let { 
-        println("Found user: ${it.name}")
-    }
-    
-    val newUser = service.createUser("Alice")  // Compiler knows this is non-null
-    println("Created user: ${newUser.name}")   // No null check needed
-}
-```
-
-## Collections and Generics
-
-### Java Collections in jv
-
-```jv
-import java.util.*
-import java.util.stream.Collectors
-
-fun workWithJavaCollections() {
-    // ArrayList
-    val list = ArrayList<String>()
-    list.addAll(listOf("a", "b", "c"))
-    
-    // HashMap  
-    val map = HashMap<String, Int>()
-    map.putAll(mapOf("x" to 1, "y" to 2))
-    
-    // Streams
-    val filtered = list.stream()
-        .filter { it.startsWith("a") }
-        .collect(Collectors.toList())
-    
-    // TreeSet (sorted)
-    val sorted = TreeSet(listOf(3, 1, 4, 1, 5))
-    println(sorted)  // [1, 3, 4, 5]
-}
-```
-
-### Converting Between jv and Java Collections
-
-```jv
-fun convertCollections() {
-    // jv list to Java
-    val jvList = listOf(1, 2, 3)
-    val javaList = ArrayList(jvList)
-    
-    // Java list to jv  
-    val javaArrayList = ArrayList<String>()
-    javaArrayList.addAll(listOf("a", "b"))
-    val jvListFromJava = javaArrayList.toList()
-    
-    // Working with both
-    val combined = jvList + javaList.map { it * 2 }
-}
-```
-
-### Generic Constraints
-
-```jv
-// Java-style bounded generics work in jv
-fun <T : Comparable<T>> sort(items: MutableList<T>) {
-    Collections.sort(items)
-}
-
-// Multiple bounds
-fun <T> process(item: T) where T : Serializable, T : Cloneable {
-    // T must implement both interfaces
-}
-```
-
-## Exception Handling
-
-### Java Checked Exceptions
-
-jv treats all Java exceptions as unchecked:
-
-```jv
-import java.io.FileInputStream
-import java.io.IOException
-
-fun readFile(filename: String): String {
-    // No need to declare throws or catch IOException
-    val input = FileInputStream(filename)
-    val content = input.readAllBytes()
-    input.close()
-    return String(content)
-}
-```
-
-**Generated Java:**
+**生成されるJava:**
 ```java
-import java.io.FileInputStream;
-import java.io.IOException;
+String str = obj instanceof String ? (String) obj : null;
+```
 
-public class FileUtils {
-    public static String readFile(String filename) {
-        try {
-            FileInputStream input = new FileInputStream(filename);
-            byte[] content = input.readAllBytes();
-            input.close();
-            return new String(content);
-        } catch (IOException e) {
-            throw new RuntimeException(e);  // Wrap checked exception
-        }
-    }
+## コレクションとジェネリクス
+
+### 型安全性
+
+```jv
+val list: List<String> = listOf("a", "b", "c")
+val map: Map<String, Int> = mapOf("key" to 1)
+```
+
+**生成されるJava:**
+```java
+List<String> list = List.of("a", "b", "c");
+Map<String, Integer> map = Map.of("key", 1);
+```
+
+### ジェネリック関数
+
+```jv
+fun <T> identity(value: T): T = value
+fun <T, R> map(list: List<T>, transform: (T) -> R): List<R> {
+    return list.map(transform)
 }
 ```
 
-### Exception Handling Patterns
+**生成されるJava:**
+```java
+public static <T> T identity(T value) {
+    return value;
+}
+
+public static <T, R> List<R> map(List<T> list, Function<T, R> transform) {
+    return list.stream().map(transform).collect(Collectors.toList());
+}
+```
+
+## 例外処理
+
+### Java例外の処理
 
 ```jv
-import java.io.File
-import java.nio.file.Files
-
-fun safeReadFile(filename: String): String? {
-    return try {
-        Files.readString(File(filename).toPath())
-    } catch (e: Exception) {
+fun readFile(path: String): String {
+    try {
+        return Files.readString(Paths.get(path))
+    } catch (e: IOException) {
         println("Error reading file: ${e.message}")
+        return ""
+    }
+}
+```
+
+**生成されるJava:**
+```java
+public static String readFile(String path) {
+    try {
+        return Files.readString(Paths.get(path));
+    } catch (IOException e) {
+        System.out.println("Error reading file: " + e.getMessage());
+        return "";
+    }
+}
+```
+
+### checked例外の処理
+
+jvはchecked例外を自動的に処理：
+
+```jv
+fun parseUrl(url: String): URL {
+    return URL(url)  // MalformedURLExceptionは自動的にthrows句に追加
+}
+```
+
+**生成されるJava:**
+```java
+public static URL parseUrl(String url) throws MalformedURLException {
+    return new URL(url);
+}
+```
+
+## アノテーション
+
+### Javaアノテーションの使用
+
+```jv
+import javax.annotation.Nullable
+import javax.annotation.Nonnull
+
+class UserService {
+    @Nullable
+    fun findUser(id: String): User? {
+        // 実装...
+        return null
+    }
+
+    @Nonnull
+    fun createUser(name: String): User {
+        return User(name, 0)
+    }
+}
+```
+
+**生成されるJava:**
+```java
+import javax.annotation.Nullable;
+import javax.annotation.Nonnull;
+
+public class UserService {
+    @Nullable
+    public User findUser(String id) {
+        // 実装...
+        return null;
+    }
+
+    @Nonnull
+    public User createUser(String name) {
+        return new User(name, 0);
+    }
+}
+```
+
+## ベストプラクティス
+
+### 1. 慣用的なJavaパターンを使用
+
+```jv
+// 良い例：Javaの慣用句に従う
+fun processItems(items: List<String>): List<String> {
+    return items
+        .stream()
+        .filter { it.isNotEmpty() }
+        .map { it.uppercase() }
+        .collect(Collectors.toList())
+}
+```
+
+### 2. null安全性を活用
+
+```jv
+// Javaライブラリを使用する際のnull安全性
+fun safeGetProperty(props: Properties, key: String): String? {
+    return props.getProperty(key)?.takeIf { it.isNotEmpty() }
+}
+```
+
+### 3. 適切な型を使用
+
+```jv
+// プリミティブ型を適切に使用
+fun calculateSum(numbers: IntArray): Long {
+    return numbers.asSequence().map { it.toLong() }.sum()
+}
+```
+
+### 4. 例外を適切に処理
+
+```jv
+// checked例外を適切に処理
+fun parseDate(dateStr: String): LocalDate? {
+    return try {
+        LocalDate.parse(dateStr)
+    } catch (e: DateTimeParseException) {
         null
     }
 }
 ```
 
-## Annotations
+## 共通パターン
 
-### Java Annotations in jv
+### 1. ファクトリーパターン
 
 ```jv
-import java.lang.Deprecated
-import java.lang.Override
-import org.junit.jupiter.api.Test
-
-class UserService {
-    @Override
-    fun toString(): String {
-        return "UserService"
-    }
-    
-    @Deprecated("Use createUser instead")
-    fun addUser(name: String): User {
-        return createUser(name)
-    }
-    
-    fun createUser(name: String): User {
-        return User(name)
-    }
-}
-
-class UserServiceTest {
-    @Test
-    fun testCreateUser() {
-        val service = UserService()
-        val user = service.createUser("Alice")
-        assert(user.name == "Alice")
+class ConnectionFactory {
+    companion object {
+        fun createConnection(url: String): Connection {
+            return DriverManager.getConnection(url)
+        }
     }
 }
 ```
 
-### Annotation Parameters
+### 2. ビルダーパターン
 
 ```jv
-import org.springframework.web.bind.annotation.RequestMapping
-import org.springframework.web.bind.annotation.RequestMethod
-import org.springframework.stereotype.Service
+class HttpRequestBuilder {
+    private var url: String = ""
+    private var method: String = "GET"
+    private val headers = mutableMapOf<String, String>()
 
-@Service("userService")
-class UserController {
-    
-    @RequestMapping(
-        value = ["/users"],
-        method = [RequestMethod.GET],
-        produces = ["application/json"]
-    )
-    fun getUsers(): List<User> {
-        return userService.findAll()
+    fun url(url: String): HttpRequestBuilder {
+        this.url = url
+        return this
+    }
+
+    fun method(method: String): HttpRequestBuilder {
+        this.method = method
+        return this
+    }
+
+    fun header(name: String, value: String): HttpRequestBuilder {
+        headers[name] = value
+        return this
+    }
+
+    fun build(): HttpRequest {
+        return HttpRequest.newBuilder()
+            .uri(URI.create(url))
+            .method(method, HttpRequest.BodyPublishers.noBody())
+            .apply {
+                headers.forEach { (name, value) ->
+                    header(name, value)
+                }
+            }
+            .build()
     }
 }
 ```
 
-### Custom Annotations
-
-Define annotations in jv:
+### 3. コールバックパターン
 
 ```jv
-@Target(AnnotationTarget.FUNCTION)
-@Retention(AnnotationRetention.RUNTIME)
-annotation class Benchmark(val iterations: Int = 1000)
-
-class MathService {
-    @Benchmark(iterations = 10000)
-    fun fibonacci(n: Int): Long {
-        return if (n <= 1) n.toLong() else fibonacci(n-1) + fibonacci(n-2)
-    }
+fun processAsync(callback: (String) -> Unit) {
+    CompletableFuture.supplyAsync {
+        // 非同期処理
+        "Result"
+    }.thenAccept(callback)
 }
 ```
 
-## Best Practices
-
-### Library Integration
-
-1. **Use Idiomatic jv**: Don't just translate Java code
-   ```jv
-   // Good: Use jv collections and null safety
-   fun processUsers(users: List<User?>): List<String> {
-       return users.mapNotNull { it?.name }
-   }
-   
-   // Less ideal: Direct Java style  
-   fun processUsersJavaStyle(users: ArrayList<User>): ArrayList<String> {
-       val result = ArrayList<String>()
-       for (user in users) {
-           if (user != null) {
-               result.add(user.name)
-           }
-       }
-       return result
-   }
-   ```
-
-2. **Leverage Extension Functions**: Add jv-style APIs to Java classes
-   ```jv
-   // Extend Java classes with jv convenience
-   fun File.readText(): String = Files.readString(this.toPath())
-   fun Path.writeText(text: String) = Files.writeString(this, text)
-   
-   // Usage becomes more jv-like
-   val content = File("config.txt").readText()
-   Paths.get("output.txt").writeText("Hello, World!")
-   ```
-
-3. **Handle Nullability Explicitly**: Be clear about nullable Java APIs
-   ```jv
-   // Make nullability explicit for Java interop
-   fun findUserById(id: String): User? {
-       return userRepository.findById(id)  // Java method that returns Optional
-           ?.orElse(null)
-   }
-   ```
-
-### Performance Considerations
-
-1. **Minimize Boxing**: Use primitives when possible
-   ```jv
-   // Good: Uses primitive int
-   fun sum(numbers: IntArray): Int {
-       return numbers.sum()
-   }
-   
-   // Less efficient: Uses Integer objects
-   fun sumBoxed(numbers: List<Int>): Int {
-       return numbers.reduce { acc, n -> acc + n }
-   }
-   ```
-
-2. **Reuse Collections**: Don't create unnecessary collections
-   ```jv
-   // Good: Transform in place
-   fun processInPlace(list: MutableList<String>) {
-       list.replaceAll { it.uppercase() }
-   }
-   
-   // Less efficient: Create new collection
-   fun processNew(list: List<String>): List<String> {
-       return list.map { it.uppercase() }
-   }
-   ```
-
-### Type Safety
-
-1. **Use Specific Types**: Prefer specific Java types over generic ones
-   ```jv
-   // Good: Specific type
-   fun processUsers(users: ArrayList<User>) { ... }
-   
-   // Less specific: Generic collection
-   fun processUsers(users: Collection<User>) { ... }
-   ```
-
-2. **Generic Constraints**: Use bounded generics for type safety
-   ```jv
-   fun <T : Number> average(numbers: List<T>): Double {
-       return numbers.map { it.toDouble() }.average()
-   }
-   ```
-
-## Common Patterns
-
-### Builder Pattern Integration
-
-```jv
-// Works seamlessly with Java builders
-import java.time.LocalDateTime
-import java.time.format.DateTimeFormatterBuilder
-
-fun createCustomFormatter(): DateTimeFormatter {
-    return DateTimeFormatterBuilder()
-        .appendValue(ChronoField.YEAR)
-        .appendLiteral("-")
-        .appendValue(ChronoField.MONTH_OF_YEAR, 2)
-        .appendLiteral("-")  
-        .appendValue(ChronoField.DAY_OF_MONTH, 2)
-        .toFormatter()
-}
-```
-
-### Spring Framework Integration
-
-```jv
-import org.springframework.stereotype.Service
-import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.web.bind.annotation.*
-
-@RestController
-@RequestMapping("/api/users")
-class UserController @Autowired constructor(
-    private val userService: UserService
-) {
-    
-    @GetMapping
-    fun getAllUsers(): List<User> = userService.findAll()
-    
-    @PostMapping  
-    fun createUser(@RequestBody user: User): User {
-        return userService.save(user)
-    }
-    
-    @GetMapping("/{id}")
-    fun getUser(@PathVariable id: Long): User? {
-        return userService.findById(id)
-    }
-}
-```
-
-### Stream API Integration
-
-```jv
-import java.util.stream.Collectors
-
-fun processData(data: List<String>): Map<Int, List<String>> {
-    return data.stream()
-        .filter { it.isNotEmpty() }
-        .collect(Collectors.groupingBy { it.length })
-}
-```
-
-This comprehensive integration makes jv a natural fit for Java ecosystems while providing modern language features and improved developer experience.
+jvとJavaの相互運用性により、既存のJavaエコシステムの豊富なライブラリとツールを活用しながら、より表現力豊かで安全なコードを書くことができます。
