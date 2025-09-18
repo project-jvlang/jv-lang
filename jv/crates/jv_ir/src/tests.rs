@@ -9,8 +9,9 @@ mod tests {
         desugar_string_interpolation, desugar_top_level_function, desugar_use_expression,
         desugar_val_declaration, desugar_var_declaration, desugar_when_expression,
         generate_extension_class_name, generate_utility_class_name, infer_java_type,
-        transform_expression, transform_program, transform_statement, IrCaseLabel, IrExpression,
-        IrModifiers, IrStatement, IrVisibility, JavaType, TransformContext, TransformError,
+        transform_expression, transform_program, transform_statement, CompletableFutureOp,
+        IrCaseLabel, IrExpression, IrModifiers, IrStatement, IrVisibility, JavaType,
+        TransformContext, TransformError, VirtualThreadOp,
     };
     use jv_ast::*;
 
@@ -311,19 +312,17 @@ mod tests {
 
     // Test for extension function desugaring
     #[test]
-    #[should_panic(expected = "not yet implemented: desugar_extension_function")]
-    fn test_desugar_extension_function_fails() {
+    fn test_desugar_extension_function_produces_static_method() {
         let mut context = test_context();
 
-        // fun String.reversed(): String = this.reversed()
         let function_decl = Statement::FunctionDeclaration {
-            name: "reversed".to_string(),
+            name: "trimmed".to_string(),
             parameters: vec![],
             return_type: Some(TypeAnnotation::Simple("String".to_string())),
             body: Box::new(Expression::Call {
                 function: Box::new(Expression::MemberAccess {
                     object: Box::new(Expression::This(dummy_span())),
-                    property: "reversed".to_string(),
+                    property: "trim".to_string(),
                     span: dummy_span(),
                 }),
                 args: vec![],
@@ -335,130 +334,347 @@ mod tests {
 
         let receiver_type = TypeAnnotation::Simple("String".to_string());
 
-        // This should fail because desugaring is not implemented yet
-        let _result = desugar_extension_function(
+        let result = desugar_extension_function(
             receiver_type,
             Box::new(function_decl),
             dummy_span(),
             &mut context,
-        );
+        )
+        .expect("extension function should desugar successfully");
+
+        match result {
+            IrStatement::MethodDeclaration {
+                parameters,
+                modifiers,
+                return_type,
+                ..
+            } => {
+                assert!(modifiers.is_static);
+                assert_eq!(parameters.len(), 1, "receiver parameter should be present");
+                assert_eq!(return_type, JavaType::string());
+            }
+            other => panic!("Expected method declaration, got {:?}", other),
+        }
     }
 
     // Test for string interpolation desugaring
     #[test]
-    #[should_panic(expected = "not yet implemented: desugar_string_interpolation")]
-    fn test_desugar_string_interpolation_fails() {
+    fn test_desugar_string_interpolation_to_format_expression() {
         let mut context = test_context();
+        context.add_variable("name".to_string(), JavaType::string());
 
-        // "Hello, ${name}!"
         let parts = vec![
             StringPart::Text("Hello, ".to_string()),
             StringPart::Expression(Expression::Identifier("name".to_string(), dummy_span())),
             StringPart::Text("!".to_string()),
         ];
 
-        // This should fail because desugaring is not implemented yet
-        let _result = desugar_string_interpolation(parts, dummy_span(), &mut context);
+        let result = desugar_string_interpolation(parts, dummy_span(), &mut context)
+            .expect("string interpolation should desugar to format");
+
+        match result {
+            IrExpression::StringFormat {
+                format_string,
+                args,
+                ..
+            } => {
+                assert_eq!(format_string, "Hello, %s!");
+                assert_eq!(args.len(), 1);
+                match &args[0] {
+                    IrExpression::Identifier { name, .. } => assert_eq!(name, "name"),
+                    other => panic!("Expected identifier argument, got {:?}", other),
+                }
+            }
+            other => panic!("Expected string format expression, got {:?}", other),
+        }
     }
 
-    // Test for spawn expression desugaring
     #[test]
-    #[should_panic(expected = "not yet implemented: desugar_spawn_expression")]
-    fn test_desugar_spawn_expression_fails() {
+    fn test_desugar_string_interpolation_without_expressions_returns_literal() {
         let mut context = test_context();
 
-        // spawn { println("Hello from virtual thread!") }
-        let body = Box::new(Expression::Block {
-            statements: vec![Statement::Expression {
-                expr: Expression::Call {
-                    function: Box::new(Expression::Identifier("println".to_string(), dummy_span())),
-                    args: vec![Argument::Positional(Expression::Literal(
-                        Literal::String("Hello from virtual thread!".to_string()),
-                        dummy_span(),
-                    ))],
-                    span: dummy_span(),
-                },
-                span: dummy_span(),
-            }],
-            span: dummy_span(),
-        });
+        let parts = vec![StringPart::Text("No expressions".to_string())];
 
-        // This should fail because desugaring is not implemented yet
-        let _result = desugar_spawn_expression(body, dummy_span(), &mut context);
+        let result = desugar_string_interpolation(parts, dummy_span(), &mut context)
+            .expect("pure text interpolation should produce literal");
+
+        match result {
+            IrExpression::Literal(Literal::String(text), _) => {
+                assert_eq!(text, "No expressions");
+            }
+            other => panic!("Expected literal string, got {:?}", other),
+        }
     }
 
-    // Test for async expression desugaring
     #[test]
-    #[should_panic(expected = "not yet implemented: desugar_async_expression")]
-    fn test_desugar_async_expression_fails() {
+    fn test_desugar_spawn_expression_produces_virtual_thread() {
         let mut context = test_context();
 
-        // async { computeValue() }
-        let body = Box::new(Expression::Call {
-            function: Box::new(Expression::Identifier(
-                "computeValue".to_string(),
+        let spawn_body = Box::new(Expression::Literal(
+            Literal::String("work".to_string()),
+            dummy_span(),
+        ));
+
+        let result = desugar_spawn_expression(spawn_body, dummy_span(), &mut context)
+            .expect("spawn expression should desugar successfully");
+
+        match result {
+            IrExpression::VirtualThread {
+                operation, args, ..
+            } => {
+                assert!(matches!(operation, VirtualThreadOp::Start));
+                assert_eq!(args.len(), 1);
+                if let IrExpression::Lambda {
+                    functional_interface,
+                    ..
+                } = &args[0]
+                {
+                    assert_eq!(functional_interface, "Runnable");
+                } else {
+                    panic!("Expected lambda argument for virtual thread");
+                }
+            }
+            other => panic!("Expected virtual thread expression, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_transform_concurrency_spawn_into_expression_statement() {
+        let mut context = test_context();
+
+        let spawn_stmt = Statement::Concurrency(ConcurrencyConstruct::Spawn {
+            body: Box::new(Expression::Literal(
+                Literal::String("task".to_string()),
                 dummy_span(),
             )),
-            args: vec![],
             span: dummy_span(),
         });
 
-        // This should fail because desugaring is not implemented yet
-        let _result = desugar_async_expression(body, dummy_span(), &mut context);
+        let result = transform_statement(spawn_stmt, &mut context)
+            .expect("transforming spawn statement should succeed");
+
+        assert_eq!(result.len(), 1);
+        match &result[0] {
+            IrStatement::Expression { expr, .. } => match expr {
+                IrExpression::VirtualThread { .. } => {}
+                other => panic!("Expected virtual thread expression, got {:?}", other),
+            },
+            other => panic!("Expected expression statement, got {:?}", other),
+        }
     }
 
-    // Test for await expression desugaring
     #[test]
-    #[should_panic(expected = "not yet implemented: desugar_await_expression")]
-    fn test_desugar_await_expression_fails() {
+    fn test_transform_concurrency_async_into_expression_statement() {
         let mut context = test_context();
 
-        // future.await()
-        let expr = Box::new(Expression::Identifier("future".to_string(), dummy_span()));
-
-        // This should fail because desugaring is not implemented yet
-        let _result = desugar_await_expression(expr, dummy_span(), &mut context);
-    }
-
-    // Test for use expression desugaring
-    #[test]
-    #[should_panic(expected = "not yet implemented: desugar_use_expression")]
-    fn test_desugar_use_expression_fails() {
-        let mut context = test_context();
-
-        // use(openFile("test.txt")) { file -> file.readLines() }
-        let resource = Box::new(Expression::Call {
-            function: Box::new(Expression::Identifier("openFile".to_string(), dummy_span())),
-            args: vec![Argument::Positional(Expression::Literal(
-                Literal::String("test.txt".to_string()),
+        let async_stmt = Statement::Concurrency(ConcurrencyConstruct::Async {
+            body: Box::new(Expression::Literal(
+                Literal::String("value".to_string()),
                 dummy_span(),
-            ))],
+            )),
             span: dummy_span(),
         });
 
-        let body = Box::new(Expression::Lambda {
-            parameters: vec![Parameter {
-                name: "file".to_string(),
-                type_annotation: None,
-                default_value: None,
-                span: dummy_span(),
-            }],
-            body: Box::new(Expression::Call {
-                function: Box::new(Expression::MemberAccess {
-                    object: Box::new(Expression::Identifier("file".to_string(), dummy_span())),
-                    property: "readLines".to_string(),
-                    span: dummy_span(),
-                }),
-                args: vec![],
+        let result = transform_statement(async_stmt, &mut context)
+            .expect("transforming async statement should succeed");
+
+        match &result[0] {
+            IrStatement::Expression { expr, .. } => match expr {
+                IrExpression::CompletableFuture { operation, .. } => {
+                    assert!(matches!(operation, CompletableFutureOp::SupplyAsync));
+                }
+                other => panic!("Expected CompletableFuture expression, got {:?}", other),
+            },
+            other => panic!("Expected expression statement, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_transform_concurrency_await_into_expression_statement() {
+        let mut context = test_context();
+        context.add_variable(
+            "future".to_string(),
+            JavaType::Reference {
+                name: "CompletableFuture".to_string(),
+                generic_args: vec![JavaType::object()],
+            },
+        );
+
+        let await_stmt = Statement::Concurrency(ConcurrencyConstruct::Await {
+            expr: Box::new(Expression::Identifier("future".to_string(), dummy_span())),
+            span: dummy_span(),
+        });
+
+        let result = transform_statement(await_stmt, &mut context)
+            .expect("transforming await statement should succeed");
+
+        match &result[0] {
+            IrStatement::Expression { expr, .. } => match expr {
+                IrExpression::CompletableFuture { operation, .. } => {
+                    assert!(matches!(operation, CompletableFutureOp::Get));
+                }
+                other => panic!("Expected CompletableFuture get expression, got {:?}", other),
+            },
+            other => panic!("Expected expression statement, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_transform_resource_management_use_into_expression_statement() {
+        let mut context = test_context();
+
+        context.add_variable(
+            "file".to_string(),
+            JavaType::Reference {
+                name: "InputStream".to_string(),
+                generic_args: vec![],
+            },
+        );
+
+        let use_stmt = Statement::ResourceManagement(ResourceManagement::Use {
+            resource: Box::new(Expression::Identifier("file".to_string(), dummy_span())),
+            body: Box::new(Expression::Block {
+                statements: vec![],
                 span: dummy_span(),
             }),
             span: dummy_span(),
         });
 
-        // This should fail because desugaring is not implemented yet
-        let _result = desugar_use_expression(resource, body, dummy_span(), &mut context);
+        let result = transform_statement(use_stmt, &mut context)
+            .expect("transforming use statement should succeed");
+
+        match &result[0] {
+            IrStatement::Expression { expr, .. } => match expr {
+                IrExpression::TryWithResources { .. } => {}
+                other => panic!("Expected try-with-resources expression, got {:?}", other),
+            },
+            other => panic!("Expected expression statement, got {:?}", other),
+        }
     }
 
+    #[test]
+    fn test_transform_resource_management_defer_into_expression_statement() {
+        let mut context = test_context();
+
+        let defer_stmt = Statement::ResourceManagement(ResourceManagement::Defer {
+            body: Box::new(Expression::Literal(
+                Literal::String("cleanup".to_string()),
+                dummy_span(),
+            )),
+            span: dummy_span(),
+        });
+
+        let result = transform_statement(defer_stmt, &mut context)
+            .expect("transforming defer statement should succeed");
+
+        match &result[0] {
+            IrStatement::Expression { expr, .. } => match expr {
+                IrExpression::Block { .. } => {}
+                other => panic!("Expected block expression, got {:?}", other),
+            },
+            other => panic!("Expected expression statement, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_block_expression_transforms_statements() {
+        let mut context = test_context();
+
+        let block_expr = Expression::Block {
+            statements: vec![Statement::Concurrency(ConcurrencyConstruct::Spawn {
+                body: Box::new(Expression::Literal(
+                    Literal::String("work".to_string()),
+                    dummy_span(),
+                )),
+                span: dummy_span(),
+            })],
+            span: dummy_span(),
+        };
+
+        let result = transform_expression(block_expr, &mut context)
+            .expect("block expression should transform successfully");
+
+        match result {
+            IrExpression::Block { statements, .. } => {
+                assert_eq!(statements.len(), 1);
+            }
+            other => panic!("Expected block IR expression, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_desugar_use_expression_with_lambda_creates_try_with_resources() {
+        let mut context = test_context();
+
+        // resource expression is an existing identifier for simplicity
+        context.add_variable(
+            "file".to_string(),
+            JavaType::Reference {
+                name: "InputStream".to_string(),
+                generic_args: vec![],
+            },
+        );
+
+        let resource = Box::new(Expression::Identifier("file".to_string(), dummy_span()));
+        let body = Box::new(Expression::Lambda {
+            parameters: vec![Parameter {
+                name: "f".to_string(),
+                type_annotation: None,
+                default_value: None,
+                span: dummy_span(),
+            }],
+            body: Box::new(Expression::Literal(
+                Literal::String("done".to_string()),
+                dummy_span(),
+            )),
+            span: dummy_span(),
+        });
+
+        let result = desugar_use_expression(resource, body, dummy_span(), &mut context)
+            .expect("use expression should desugar successfully");
+
+        match result {
+            IrExpression::TryWithResources {
+                resources,
+                body,
+                java_type,
+                ..
+            } => {
+                assert_eq!(resources.len(), 1);
+                assert_eq!(resources[0].name, "f");
+                assert_eq!(java_type, JavaType::string());
+                match *body {
+                    IrExpression::Literal(Literal::String(ref value), _) => {
+                        assert_eq!(value, "done");
+                    }
+                    other => panic!("Expected literal body, got {:?}", other),
+                }
+            }
+            other => panic!("Expected try-with-resources expression, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_desugar_defer_expression_creates_block() {
+        let mut context = test_context();
+
+        let body = Box::new(Expression::Literal(
+            Literal::String("cleanup".to_string()),
+            dummy_span(),
+        ));
+
+        let result = desugar_defer_expression(body, dummy_span(), &mut context)
+            .expect("defer expression should desugar successfully");
+
+        match result {
+            IrExpression::Block { statements, .. } => {
+                assert_eq!(statements.len(), 1);
+            }
+            other => panic!("Expected block expression, got {:?}", other),
+        }
+    }
+
+    // Test for use expression desugaring
     // Test for defer expression desugaring
     #[test]
     #[should_panic(expected = "not yet implemented: desugar_defer_expression")]
@@ -583,11 +799,9 @@ mod tests {
 
     // Test for data class desugaring
     #[test]
-    #[should_panic(expected = "not yet implemented: desugar_data_class")]
-    fn test_desugar_data_class_fails() {
+    fn test_desugar_immutable_data_class_creates_record() {
         let mut context = test_context();
 
-        // data class User(val id: Int, var name: String, val email: String?)
         let params = vec![
             Parameter {
                 name: "id".to_string(),
@@ -601,26 +815,84 @@ mod tests {
                 default_value: None,
                 span: dummy_span(),
             },
+        ];
+
+        let result = desugar_data_class(
+            "User".to_string(),
+            params,
+            vec!["T".to_string()],
+            false,
+            Modifiers::default(),
+            dummy_span(),
+            &mut context,
+        )
+        .expect("immutable data class should desugar to record");
+
+        match result {
+            IrStatement::RecordDeclaration {
+                name,
+                type_parameters,
+                components,
+                ..
+            } => {
+                assert_eq!(name, "User");
+                assert_eq!(type_parameters.len(), 1);
+                assert_eq!(components.len(), 2);
+                assert_eq!(components[0].name, "id");
+                assert_eq!(components[1].name, "name");
+            }
+            other => panic!("Expected record declaration, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_desugar_mutable_data_class_creates_class_with_fields() {
+        let mut context = test_context();
+
+        let params = vec![
             Parameter {
-                name: "email".to_string(),
-                type_annotation: Some(TypeAnnotation::Nullable(Box::new(TypeAnnotation::Simple(
-                    "String".to_string(),
-                )))),
+                name: "id".to_string(),
+                type_annotation: Some(TypeAnnotation::Simple("Int".to_string())),
                 default_value: None,
+                span: dummy_span(),
+            },
+            Parameter {
+                name: "name".to_string(),
+                type_annotation: None,
+                default_value: Some(Expression::Literal(
+                    Literal::String("unknown".to_string()),
+                    dummy_span(),
+                )),
                 span: dummy_span(),
             },
         ];
 
-        // This should fail because desugaring is not implemented yet
-        let _result = desugar_data_class(
+        let result = desugar_data_class(
             "User".to_string(),
             params,
             vec![],
-            true, // is_mutable
+            true,
             Modifiers::default(),
             dummy_span(),
             &mut context,
-        );
+        )
+        .expect("mutable data class should desugar to class");
+
+        match result {
+            IrStatement::ClassDeclaration { fields, .. } => {
+                assert_eq!(fields.len(), 2);
+                match &fields[1] {
+                    IrStatement::FieldDeclaration {
+                        name, initializer, ..
+                    } => {
+                        assert_eq!(name, "name");
+                        assert!(initializer.is_some());
+                    }
+                    other => panic!("Expected field declaration, got {:?}", other),
+                }
+            }
+            other => panic!("Expected class declaration, got {:?}", other),
+        }
     }
 
     // Test for null-safe member access desugaring
@@ -979,28 +1251,66 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "not yet implemented")]
-    fn test_async_await_chain_fails() {
+    fn test_desugar_async_expression_produces_completable_future() {
         let mut context = test_context();
 
-        // val result = async { fetchData() }.await().thenApply { data -> processData(data) }.await()
-        let fetch_async = Expression::Block {
-            statements: vec![Statement::Concurrency(ConcurrencyConstruct::Async {
-                body: Box::new(Expression::Call {
-                    function: Box::new(Expression::Identifier(
-                        "fetchData".to_string(),
-                        dummy_span(),
-                    )),
-                    args: vec![],
-                    span: dummy_span(),
-                }),
-                span: dummy_span(),
-            })],
-            span: dummy_span(),
-        };
+        let async_body = Box::new(Expression::Literal(
+            Literal::String("value".to_string()),
+            dummy_span(),
+        ));
 
-        // This complex async/await chain should fail
-        let _result = transform_expression(fetch_async, &mut context);
+        let result = desugar_async_expression(async_body, dummy_span(), &mut context)
+            .expect("async expression should desugar successfully");
+
+        match result {
+            IrExpression::CompletableFuture {
+                operation, args, ..
+            } => {
+                assert!(matches!(operation, CompletableFutureOp::SupplyAsync));
+                assert_eq!(args.len(), 1);
+                match &args[0] {
+                    IrExpression::Lambda {
+                        functional_interface,
+                        ..
+                    } => {
+                        assert_eq!(functional_interface, "Supplier");
+                    }
+                    other => panic!("Expected lambda argument, got {:?}", other),
+                }
+            }
+            other => panic!("Expected CompletableFuture expression, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_desugar_await_expression_produces_get_operation() {
+        let mut context = test_context();
+        context.add_variable(
+            "future".to_string(),
+            JavaType::Reference {
+                name: "CompletableFuture".to_string(),
+                generic_args: vec![JavaType::string()],
+            },
+        );
+
+        let await_target = Box::new(Expression::Identifier("future".to_string(), dummy_span()));
+
+        let result = desugar_await_expression(await_target, dummy_span(), &mut context)
+            .expect("await expression should desugar successfully");
+
+        match result {
+            IrExpression::CompletableFuture {
+                operation,
+                args,
+                java_type,
+                ..
+            } => {
+                assert!(matches!(operation, CompletableFutureOp::Get));
+                assert_eq!(args.len(), 1);
+                assert_eq!(java_type, JavaType::string());
+            }
+            other => panic!("Expected CompletableFuture get expression, got {:?}", other),
+        }
     }
 
     #[test]
