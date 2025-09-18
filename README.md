@@ -276,7 +276,7 @@ IDEA UltimateとCommunity用プラグインが利用可能。
 
 このプロジェクトが役に立ったら、開発を支援してください：
 
-[![Buy Me A Coffee](assets/yellow-button.png)](https://buymeacoffee.com/asopitechia)
+<a href="https://buymeacoffee.com/asopitechia"><img src="assets/yellow-button.png" alt="Buy Me A Coffee" width="150"></a>
 
 ## リンク
 

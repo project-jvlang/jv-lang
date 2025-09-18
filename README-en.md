@@ -276,7 +276,7 @@ at your option.
 
 If this project is helpful to you, please consider supporting its development:
 
-[![Buy Me A Coffee](assets/yellow-button.png)](https://buymeacoffee.com/asopitechia)
+<a href="https://buymeacoffee.com/asopitechia"><img src="assets/yellow-button.png" alt="Buy Me A Coffee" width="150"></a>
 
 ## Links
 
