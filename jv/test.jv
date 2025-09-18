@@ -1,0 +1,3 @@
+val x = 42
+val message = "Hello, World!"
+val result = x + 10
