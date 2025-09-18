@@ -276,7 +276,7 @@ at your option.
 
 If this project is helpful to you, please consider supporting its development:
 
-<script type="text/javascript" src="https://cdnjs.buymeacoffee.com/1.0.0/button.prod.min.js" data-name="bmc-button" data-slug="asopitechia" data-color="#5F7FFF" data-emoji="🍕"  data-font="Bree" data-text="Buy me a pizza" data-outline-color="#000000" data-font-color="#ffffff" data-coffee-color="#FFDD00" ></script>
+[![Buy Me A Coffee](assets/yellow-button.png)](https://buymeacoffee.com/asopitechia)
 
 ## Links
 
