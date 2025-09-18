@@ -29,8 +29,8 @@ jvへの貢献に関心をお持ちいただき、ありがとうございます
 
 ```bash
 # リポジトリをクローン
-git clone https://github.com/jv-lang/jv.git
-cd jv
+git clone https://github.com/project-jvlang/jv-lang.git
+cd jv-lang
 
 # プロジェクトをビルド
 cargo build
@@ -39,7 +39,7 @@ cargo build
 cargo test
 
 # pre-commitフックをインストール（オプションですが推奨）
-cargo install --git https://github.com/jv-lang/jv-tools pre-commit
+cargo install --git https://github.com/project-jvlang/jv-tools pre-commit
 pre-commit install
 ```
 

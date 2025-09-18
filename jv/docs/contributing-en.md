@@ -29,8 +29,8 @@ Thank you for your interest in contributing to jv! This guide will help you get 
 
 ```bash
 # Clone the repository
-git clone https://github.com/jv-lang/jv.git
-cd jv
+git clone https://github.com/project-jvlang/jv-lang.git
+cd jv-lang
 
 # Build the project
 cargo build
@@ -39,7 +39,7 @@ cargo build
 cargo test
 
 # Install pre-commit hooks (optional but recommended)
-cargo install --git https://github.com/jv-lang/jv-tools pre-commit
+cargo install --git https://github.com/project-jvlang/jv-tools pre-commit
 pre-commit install
 ```
 

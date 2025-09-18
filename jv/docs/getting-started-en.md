@@ -15,8 +15,8 @@ Currently, jv must be built from source:
 
 ```bash
 # Clone the repository
-git clone https://github.com/jv-lang/jv.git
-cd jv
+git clone https://github.com/project-jvlang/jv-lang.git
+cd jv-lang
 
 # Build the compiler
 cargo build --release
@@ -112,5 +112,5 @@ cat out/Main.java
 ## Getting Help
 
 - **Documentation**: Browse the docs in this directory
-- **Issues**: Report bugs on [GitHub Issues](https://github.com/jv-lang/jv/issues)
-- **Discussions**: Ask questions in [GitHub Discussions](https://github.com/jv-lang/jv/discussions)
+- **Issues**: Report bugs on [GitHub Issues](https://github.com/project-jvlang/jv-lang/issues)
+- **Discussions**: Ask questions in [GitHub Discussions](https://github.com/project-jvlang/jv-lang/discussions)

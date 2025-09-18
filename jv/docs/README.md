@@ -1,44 +1,56 @@
-# jv Documentation
+# jvドキュメント
 
-Welcome to the jv (Java Sugar Language) documentation.
+**日本語** | [English](README-en.md)
 
-## Table of Contents
+jv（Java Sugar Language）のドキュメントへようこそ。
 
-### User Guide
-- [Getting Started](getting-started-en.md) - Installation and first steps
-- [Language Guide](language-guide-en.md) - Complete jv language reference
-- [CLI Reference](cli-reference-en.md) - Command-line interface documentation
-- [Project Structure](project-structure-en.md) - How to organize jv projects
+## 目次
 
-### Developer Guide
-- [Architecture](architecture-en.md) - Compiler architecture overview
-- [Contributing](contributing-en.md) - How to contribute to jv
-- Build System documentation (coming soon)
-- Testing guide (coming soon)
+### ユーザーガイド
+- [はじめに](getting-started.md) - インストールと最初のステップ
+- [言語ガイド](language-guide.md) - jv言語リファレンス
+- [CLIリファレンス](cli-reference.md) - コマンドラインの使い方
+- [プロジェクト構成](project-structure.md) - jvプロジェクトの整理方法
 
-### Reference
-- [Language Specification](language-spec-en.md) - Formal jv language specification
-- [Java Interop](java-interop-en.md) - Working with Java libraries
-- Error Reference (coming soon)
-- Migration Guide (coming soon)
+### 開発者ガイド
+- [アーキテクチャ](architecture.md) - コンパイラの概要
+- [コントリビュートガイド](contributing.md) - jvへの貢献方法
+- ビルドシステムドキュメント（準備中）
+- テストガイド（準備中）
 
-### Examples
-- [Examples](../examples/) - Sample jv programs
-- Advanced examples (coming soon)
-- Best practices (coming soon)
+### リファレンス
+- [言語仕様](language-spec.md) - jvの形式的仕様
+- [Java連携](java-interop.md) - Javaライブラリとの連携方法
+- エラーリファレンス（準備中）
+- 移行ガイド（準備中）
 
-## Quick Links
+### サンプル
+- [サンプル集](../examples/) - jvプログラム例
+- 応用サンプル（準備中）
+- ベストプラクティス（準備中）
 
-- **GitHub Repository**: [jv-lang/jv](https://github.com/jv-lang/jv)
-- **Issue Tracker**: [GitHub Issues](https://github.com/jv-lang/jv/issues)
-- **Community**: [Discussions](https://github.com/jv-lang/jv/discussions)
+## jvについて
 
-## About jv
+**jv** 言語（**やわ-らんぐ**）は、読みやすいJava 25ソースコードにコンパイルされるJava Sugar Languageです。Kotlinスタイルのシンタックスシュガーを提供しながら、ランタイム依存関係ゼロで完全なJVM互換性を維持します。
 
-jv is a Java Sugar Language that compiles to readable Java 25 source code. It provides Kotlin-style syntax sugar while maintaining zero runtime dependencies and full JVM compatibility.
+jvは、モダンで簡潔な構文を純粋なJava 25ソースコードにトランスパイルし、Kotlinライクな機能による開発者の生産性と、シームレスなJavaエコシステム統合という両方の利点を提供します。
 
-Key features:
-- **Zero Runtime**: Output is pure Java 25 source code
-- **Static Typing**: No dynamic dispatch, fully static
-- **Java 25 Optimization**: Leverages records, pattern matching, virtual threads
-- **Unified Environment**: Manages dependencies, JDK, and JRE
+### 概要
+- **ターゲット**: Java 25 LTS
+- **出力**: 純粋なJavaソースコード（追加ランタイムなし）
+- **実装**: Rust製コンパイラツールチェーン
+- **哲学**: ランタイムオーバーヘッドゼロ、最大限の互換性
+
+### 主な機能
+- **ゼロランタイム**: 出力は純粋なJava 25ソースコード
+- **静的型付け**: ダイナミックディスパッチなしで完全静的
+- **Java 25最適化**: レコード、パターンマッチング、仮想スレッドを活用
+- **統合環境**: 依存関係、JDK、JREを一括管理
+
+## クイックリンク
+
+- **GitHubリポジトリ**: [project-jvlang/jv-lang](https://github.com/project-jvlang/jv-lang)
+- **課題トラッカー**: [GitHub Issues](https://github.com/project-jvlang/jv-lang/issues)
+- **コミュニティ**: [Discussions](https://github.com/project-jvlang/jv-lang/discussions)
+
+詳細な背景情報はプロジェクトルートの[README](../../README.md)を参照してください。

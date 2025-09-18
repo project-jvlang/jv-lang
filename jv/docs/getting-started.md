@@ -17,8 +17,8 @@
 
 ```bash
 # リポジトリをクローン
-git clone https://github.com/jv-lang/jv.git
-cd jv
+git clone https://github.com/project-jvlang/jv-lang.git
+cd jv-lang
 
 # コンパイラをビルド
 cargo build --release
@@ -114,5 +114,5 @@ cat out/Main.java
 ## ヘルプの取得
 
 - **ドキュメント**: このディレクトリのドキュメントを参照
-- **イシュー**: [GitHub Issues](https://github.com/jv-lang/jv/issues)でバグを報告
-- **ディスカッション**: [GitHub Discussions](https://github.com/jv-lang/jv/discussions)で質問
+- **イシュー**: [GitHub Issues](https://github.com/project-jvlang/jv-lang/issues)でバグを報告
+- **ディスカッション**: [GitHub Discussions](https://github.com/project-jvlang/jv-lang/discussions)で質問

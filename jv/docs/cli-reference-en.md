@@ -477,5 +477,5 @@ JV_LOG_LEVEL=debug jv build --verbose
 
 ### Getting Help
 
-- Check the [GitHub Issues](https://github.com/jv-lang/jv/issues)
-- Join the community [Discussions](https://github.com/jv-lang/jv/discussions)
+- Check the [GitHub Issues](https://github.com/project-jvlang/jv-lang/issues)
+- Join the community [Discussions](https://github.com/project-jvlang/jv-lang/discussions)
