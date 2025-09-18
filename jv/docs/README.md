@@ -5,27 +5,27 @@ Welcome to the jv (Java Sugar Language) documentation.
 ## Table of Contents
 
 ### User Guide
-- [Getting Started](getting-started.md) - Installation and first steps
-- [Language Guide](language-guide.md) - Complete jv language reference
-- [CLI Reference](cli-reference.md) - Command-line interface documentation
-- [Project Structure](project-structure.md) - How to organize jv projects
+- [Getting Started](getting-started-en.md) - Installation and first steps
+- [Language Guide](language-guide-en.md) - Complete jv language reference
+- [CLI Reference](cli-reference-en.md) - Command-line interface documentation
+- [Project Structure](project-structure-en.md) - How to organize jv projects
 
 ### Developer Guide
-- [Architecture](architecture.md) - Compiler architecture overview
-- [Contributing](contributing.md) - How to contribute to jv
-- [Build System](build-system.md) - Building jv from source
-- [Testing](testing.md) - Testing guidelines and frameworks
+- [Architecture](architecture-en.md) - Compiler architecture overview
+- [Contributing](contributing-en.md) - How to contribute to jv
+- Build System documentation (coming soon)
+- Testing guide (coming soon)
 
 ### Reference
-- [Language Specification](language-spec.md) - Formal jv language specification
-- [Java Interop](java-interop.md) - Working with Java libraries
-- [Error Reference](error-reference.md) - Common errors and solutions
-- [Migration Guide](migration-guide.md) - Migrating from Java/Kotlin to jv
+- [Language Specification](language-spec-en.md) - Formal jv language specification
+- [Java Interop](java-interop-en.md) - Working with Java libraries
+- Error Reference (coming soon)
+- Migration Guide (coming soon)
 
 ### Examples
-- [Basic Examples](../examples/README.md) - Simple jv programs
-- [Advanced Examples](advanced-examples.md) - Complex use cases
-- [Best Practices](best-practices.md) - Recommended patterns and practices
+- [Examples](../examples/) - Sample jv programs
+- Advanced examples (coming soon)
+- Best practices (coming soon)
 
 ## Quick Links
 

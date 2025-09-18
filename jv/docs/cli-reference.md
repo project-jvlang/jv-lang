@@ -479,4 +479,3 @@ JV_LOG_LEVEL=debug jv build --verbose
 
 - [GitHub Issues](https://github.com/jv-lang/jv/issues)をチェック
 - コミュニティ[Discussions](https://github.com/jv-lang/jv/discussions)に参加
-- [FAQ](faq.md)を読む

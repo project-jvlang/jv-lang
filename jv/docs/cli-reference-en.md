@@ -1,5 +1,7 @@
 # jv CLI Reference
 
+**English** | [日本語](cli-reference.md)
+
 Complete reference for the jv command-line interface.
 
 ## Overview
@@ -477,4 +479,3 @@ JV_LOG_LEVEL=debug jv build --verbose
 
 - Check the [GitHub Issues](https://github.com/jv-lang/jv/issues)
 - Join the community [Discussions](https://github.com/jv-lang/jv/discussions)
-- Read the [FAQ](faq.md)

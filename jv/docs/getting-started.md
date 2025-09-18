@@ -108,7 +108,7 @@ cat out/Main.java
 
 - [言語ガイド](language-guide.md)を読んでjv構文を学習
 - [CLIリファレンス](cli-reference.md)で利用可能なすべてのコマンドを確認
-- より複雑なプログラムについては[例](../examples/README.md)をチェック
+- より複雑なプログラムについては[例ディレクトリ](../examples/)をチェック
 - 大規模プロジェクトについては[プロジェクト構造](project-structure.md)を学習
 
 ## ヘルプの取得

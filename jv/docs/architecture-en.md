@@ -1,5 +1,7 @@
 # jv Compiler Architecture
 
+**English** | [日本語](architecture.md)
+
 This document describes the internal architecture of the jv compiler, including the compilation pipeline, core components, and design decisions.
 
 ## High-Level Architecture
@@ -414,7 +416,7 @@ End-to-end compilation tests:
 
 ### Contributing to the Compiler
 
-See [Contributing Guide](contributing.md) for detailed instructions on:
+See [Contributing Guide](contributing-en.md) for detailed instructions on:
 - Setting up development environment
 - Code style and conventions
 - Submitting pull requests

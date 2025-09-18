@@ -1,5 +1,7 @@
 # Contributing to jv
 
+**English** | [日本語](contributing.md)
+
 Thank you for your interest in contributing to jv! This guide will help you get started with development and contribution workflows.
 
 ## Table of Contents

@@ -104,10 +104,10 @@ cat out/Main.java
 
 ## Next Steps
 
-- Read the [Language Guide](language-guide.md) to learn jv syntax
-- Explore [CLI Reference](cli-reference.md) for all available commands
-- Check out [Examples](../examples/README.md) for more complex programs
-- Learn about [Project Structure](project-structure.md) for larger projects
+- Read the [Language Guide](language-guide-en.md) to learn jv syntax
+- Explore [CLI Reference](cli-reference-en.md) for all available commands
+- Check out the [examples directory](../examples/) for more complex programs
+- Learn about [Project Structure](project-structure-en.md) for larger projects
 
 ## Getting Help
 
