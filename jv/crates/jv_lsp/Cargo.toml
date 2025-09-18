@@ -1,0 +1,13 @@
+[package]
+name = "jv_lsp"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+tower-lsp.workspace = true
+tokio.workspace = true
+thiserror.workspace = true
+serde.workspace = true
