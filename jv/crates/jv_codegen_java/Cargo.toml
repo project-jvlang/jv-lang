@@ -1,0 +1,11 @@
+[package]
+name = "jv_codegen_java"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+jv_ir.workspace = true
+jv_ast.workspace = true
+serde.workspace = true
+thiserror.workspace = true
