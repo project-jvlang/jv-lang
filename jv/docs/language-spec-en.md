@@ -1,6 +1,6 @@
 # jv Language Specification
 
-Formal specification for the jv (Java Sugar Language) programming language.
+Formal specification for the jv (Java Syntactic Sugar) programming language.
 
 ## Table of Contents
 

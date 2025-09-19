@@ -299,12 +299,12 @@ jv version [OPTIONS]
 ```bash
 # 基本バージョンを表示
 jv version
-# 出力: jv 0.1.0 - Java Sugar Language compiler
+# 出力: jv 0.1.0 - Javaシンタックスシュガーコンパイラ
 
 # 詳細なバージョン情報を表示
 jv version --verbose
 # 出力:
-# jv 0.1.0 - Java Sugar Language compiler
+# jv 0.1.0 - Javaシンタックスシュガーコンパイラ
 # Built: 2024-09-05
 # Rust: 1.70.0
 # Target: Java 25

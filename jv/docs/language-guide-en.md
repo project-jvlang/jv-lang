@@ -1,6 +1,6 @@
 # jv Language Guide
 
-Complete reference for the jv (Java Sugar Language) syntax and features.
+Complete reference for the jv (Java Syntactic Sugar) syntax and features.
 
 ## Table of Contents
 

@@ -2,7 +2,7 @@
 
 **日本語** | [English](language-spec-en.md)
 
-jv（Java Sugar Language）プログラミング言語の正式仕様です。
+jv（Javaシンタックスシュガー）プログラミング言語の正式仕様です。
 
 ## 目次
 

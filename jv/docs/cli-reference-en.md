@@ -299,12 +299,12 @@ jv version [OPTIONS]
 ```bash
 # Show basic version
 jv version
-# Output: jv 0.1.0 - Java Sugar Language compiler
+# Output: jv 0.1.0 - Java Syntactic Sugar compiler
 
 # Show detailed version information
 jv version --verbose
 # Output:
-# jv 0.1.0 - Java Sugar Language compiler
+# jv 0.1.0 - Java Syntactic Sugar compiler
 # Built: 2024-09-05
 # Rust: 1.70.0
 # Target: Java 25

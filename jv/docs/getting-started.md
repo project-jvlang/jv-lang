@@ -31,7 +31,7 @@ cargo build --release
 
 ```bash
 jv version
-# 出力: jv 0.1.0 - Java Sugar Language compiler
+# 出力: jv 0.1.0 - Javaシンタックスシュガーコンパイラ
 ```
 
 ## 最初のjvプログラム

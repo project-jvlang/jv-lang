@@ -2,7 +2,7 @@
 
 **English** | [日本語](README.md)
 
-Welcome to the jv (Java Sugar Language) documentation.
+Welcome to the jv (Java Syntactic Sugar) documentation.
 
 ## Table of Contents
 
@@ -31,7 +31,7 @@ Welcome to the jv (Java Sugar Language) documentation.
 
 ## About jv
 
-**jv** (pronounced /jawa/, jv-lang is pronounced /jawa læŋ/) is a Java Sugar Language that compiles to readable Java 25 source code. It provides Kotlin-style syntax sugar while maintaining zero runtime dependencies and full JVM compatibility.
+**jv** (pronounced /jawa/, jv-lang is pronounced /jawa læŋ/) is Java syntactic sugar that compiles to readable Java 25 source code. It provides Kotlin-style syntax sugar while maintaining zero runtime dependencies and full JVM compatibility.
 
 jv transpiles modern, concise syntax into pure Java 25 source code, giving you the best of both worlds: developer productivity through Kotlin-like features and seamless integration with the Java ecosystem.
 

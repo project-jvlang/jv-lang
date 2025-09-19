@@ -2,7 +2,7 @@
 
 **日本語** | [English](language-guide-en.md)
 
-jv（Java Sugar Language）の構文と機能の完全なリファレンスです。
+jv（Javaシンタックスシュガー）の構文と機能の完全なリファレンスです。
 
 ## 目次
 

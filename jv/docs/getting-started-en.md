@@ -29,7 +29,7 @@ cargo build --release
 
 ```bash
 jv version
-# Output: jv 0.1.0 - Java Sugar Language compiler
+# Output: jv 0.1.0 - Java Syntactic Sugar compiler
 ```
 
 ## Your First jv Program
