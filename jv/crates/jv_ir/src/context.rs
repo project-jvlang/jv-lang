@@ -20,6 +20,23 @@ pub struct TransformContext {
 }
 
 impl TransformContext {
+    /// Create a fresh transformation context with an initial scope.
+    ///
+    /// ```
+    /// use jv_ir::{TransformContext, JavaType};
+    ///
+    /// let mut ctx = TransformContext::new();
+    /// let int_type = JavaType::int();
+    /// ctx.add_variable("answer".to_string(), int_type.clone());
+    /// assert_eq!(ctx.lookup_variable("answer"), Some(&int_type));
+    ///
+    /// ctx.enter_scope();
+    /// let string_type = JavaType::string();
+    /// ctx.add_variable("message".to_string(), string_type.clone());
+    /// assert!(ctx.lookup_variable("message").is_some());
+    /// ctx.exit_scope();
+    /// assert!(ctx.lookup_variable("message").is_none());
+    /// ```
     pub fn new() -> Self {
         Self {
             type_info: HashMap::new(),

@@ -117,6 +117,12 @@ pub fn validate_file_exists(path: &str) -> Result<()> {
     Ok(())
 }
 
+/// Retrieve the CLI version string.
+///
+/// ```
+/// let banner = jv_cli::get_version();
+/// assert!(banner.starts_with("jv "));
+/// ```
 pub fn get_version() -> String {
     format!(
         "jv {} - Java Sugar Language compiler",
@@ -177,8 +183,7 @@ pub mod pipeline {
         let source = fs::read_to_string(&options.input)
             .with_context(|| format!("Failed to read file: {}", options.input.display()))?;
 
-        let program = JvParser::parse(&source)
-            .map_err(|e| anyhow!("Parser error: {:?}", e))?;
+        let program = JvParser::parse(&source).map_err(|e| anyhow!("Parser error: {:?}", e))?;
 
         let mut warnings = Vec::new();
 
@@ -196,8 +201,8 @@ pub mod pipeline {
             warnings.extend(type_checker.check_null_safety(&program));
         }
 
-        let ir_program = transform_program(program)
-            .map_err(|e| anyhow!("IR transformation error: {:?}", e))?;
+        let ir_program =
+            transform_program(program).map_err(|e| anyhow!("IR transformation error: {:?}", e))?;
 
         let mut code_generator = JavaCodeGenerator::new();
         let java_unit = code_generator
@@ -237,9 +242,8 @@ pub mod pipeline {
                     .unwrap_or(java_content);
             }
 
-            fs::write(&java_path, java_content).with_context(|| {
-                format!("Failed to write Java file: {}", java_path.display())
-            })?;
+            fs::write(&java_path, java_content)
+                .with_context(|| format!("Failed to write Java file: {}", java_path.display()))?;
 
             java_files.push(java_path);
         }
@@ -268,13 +272,12 @@ pub mod pipeline {
                             .compile_java_files(java_paths)
                             .map_err(|e| anyhow!("Java compilation failed: {}", e))?;
 
-                        let entries = fs::read_dir(&options.output_dir)
-                            .with_context(|| {
-                                format!(
-                                    "Failed to enumerate output directory: {}",
-                                    options.output_dir.display()
-                                )
-                            })?;
+                        let entries = fs::read_dir(&options.output_dir).with_context(|| {
+                            format!(
+                                "Failed to enumerate output directory: {}",
+                                options.output_dir.display()
+                            )
+                        })?;
 
                         let mut class_files = Vec::new();
                         for entry in entries {
@@ -322,9 +325,7 @@ pub mod pipeline {
         let main_class = temp_dir.join("GeneratedMain.class");
         if !main_class.exists() {
             let _ = fs::remove_dir_all(&temp_dir);
-            bail!(
-                "No compiled .class file found. Make sure javac is available for execution."
-            );
+            bail!("No compiled .class file found. Make sure javac is available for execution.");
         }
 
         let classpath = temp_dir.to_string_lossy().to_string();
@@ -347,9 +348,7 @@ pub mod pipeline {
 
         // Warn the caller if javac step was skipped
         if compile_result.class_files.is_empty() {
-            bail!(
-                "Java compilation step did not produce class files; cannot execute program"
-            );
+            bail!("Java compilation step did not produce class files; cannot execute program");
         }
 
         Ok(())
@@ -364,9 +363,9 @@ pub mod pipeline {
                     .args([
                         "--create",
                         "--file",
-                        jar_path.to_str().ok_or_else(|| {
-                            anyhow!("Non-UTF8 path encountered for jar output")
-                        })?,
+                        jar_path
+                            .to_str()
+                            .ok_or_else(|| anyhow!("Non-UTF8 path encountered for jar output"))?,
                         "--main-class",
                         "GeneratedMain",
                         "-C",
@@ -394,9 +393,9 @@ pub mod pipeline {
 
                 match status {
                     Ok(code) if code.success() => Ok(native_out),
-                    Ok(_) => bail!(
-                        "native-image failed. Ensure GraalVM native-image is installed."
-                    ),
+                    Ok(_) => {
+                        bail!("native-image failed. Ensure GraalVM native-image is installed.")
+                    }
                     Err(_) => bail!(
                         "native-image not found. Install GraalVM native-image or use --binary jar"
                     ),

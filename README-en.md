@@ -13,6 +13,10 @@ jv transpiles modern, concise syntax into pure Java 25 source code, giving you t
 - **Implementation**: Rust-based compiler toolchain
 - **Philosophy**: Zero runtime overhead, maximum compatibility
 
+## Release Status
+
+The `ir-java-codegen` milestone is feature-complete and tagged for the 0.1.0 release. All transform, code generation, mapper, and CLI integration tasks are shipped. Release verification runs `cargo fmt --all` and the targeted test suites `cargo test -p jv_ir -p jv_codegen_java -p jv_mapper -p jv_cli` (remaining workspace crates stay in active development). See [CHANGELOG.md](CHANGELOG.md) and the detailed [release notes](jv/docs/release-notes-ir-java-codegen-en.md) for what landed in this milestone.
+
 ## Features
 
 ### Language Features

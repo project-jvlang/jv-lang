@@ -9,8 +9,8 @@ use jv_checker::TypeChecker;
 use jv_fmt::JavaFormatter;
 use jv_parser::Parser as JvParser;
 
-use jv_cli::{get_version, init_project as cli_init_project, Cli, Commands};
 use jv_cli::pipeline::{compile, produce_binary, run_program, BuildOptions};
+use jv_cli::{get_version, init_project as cli_init_project, Cli, Commands};
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
@@ -48,8 +48,8 @@ fn main() -> Result<()> {
             options.check = check;
             options.format = format;
 
-            let artifacts = compile(&options)
-                .with_context(|| format!("Failed to compile {}", input))?;
+            let artifacts =
+                compile(&options).with_context(|| format!("Failed to compile {}", input))?;
 
             for java_file in &artifacts.java_files {
                 println!("Generated: {}", java_file.display());
@@ -72,13 +72,8 @@ fn main() -> Result<()> {
             }
 
             if let Some(kind) = binary {
-                let artifact_path =
-                    produce_binary(&options.output_dir, &bin_name, &kind)?;
-                println!(
-                    "Produced {} artifact at {}",
-                    kind,
-                    artifact_path.display()
-                );
+                let artifact_path = produce_binary(&options.output_dir, &bin_name, &kind)?;
+                println!("Produced {} artifact at {}", kind, artifact_path.display());
             }
         }
         Some(Commands::Run { input, args }) => {

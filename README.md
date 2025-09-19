@@ -13,6 +13,10 @@ jvは、モダンで簡潔な構文を純粋なJava 25ソースコードにト�
 - **実装**: Rustベースのコンパイラツールチェーン
 - **哲学**: ランタイムオーバーヘッドゼロ、最大限の互換性
 
+## リリース状況
+
+`ir-java-codegen`マイルストーンを完了し、0.1.0リリースに向けた機能が揃いました。変換・コード生成・ソースマップ・CLI統合の全タスクを出荷し、`cargo fmt --all` と `cargo test -p jv_ir -p jv_codegen_java -p jv_mapper -p jv_cli` を通過しています（その他のクレートは引き続き開発中です）。反映された内容は [CHANGELOG.md](CHANGELOG.md) と [release notes](jv/docs/release-notes-ir-java-codegen-en.md) を参照してください。
+
 ## 機能
 
 ### 言語機能

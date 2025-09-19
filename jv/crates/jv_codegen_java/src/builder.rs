@@ -9,6 +9,20 @@ pub struct JavaSourceBuilder {
 }
 
 impl JavaSourceBuilder {
+    /// Construct a builder that emits Java source with the provided indentation string.
+    ///
+    /// ```
+    /// use jv_codegen_java::{JavaSourceBuilder, JavaCompilationUnit, JavaCodeGenConfig};
+    ///
+    /// let mut builder = JavaSourceBuilder::new("    ".to_string());
+    /// builder.push_line("public class Demo {}");
+    ///
+    /// let mut unit = JavaCompilationUnit::new();
+    /// unit.type_declarations.push(builder.build());
+    ///
+    /// let source = unit.to_source(&JavaCodeGenConfig::default());
+    /// assert!(source.contains("public class Demo"));
+    /// ```
     pub fn new(indent: String) -> Self {
         Self {
             content: String::new(),

@@ -110,6 +110,22 @@ pub struct SourceMap {
 impl SourceMap {
     pub const VERSION: u8 = 1;
 
+    /// Create an empty source map that associates the given source and generated files.
+    ///
+    /// ```
+    /// use jv_mapper::{SourceMap, MappingEntry, MappingCategory, JavaSpan, JavaPosition};
+    /// use jv_ast::Span;
+    ///
+    /// let mut map = SourceMap::new("example.jv", "Example.java");
+    /// map.entries.push(MappingEntry {
+    ///     ir_span: Span::new(1, 0, 1, 5),
+    ///     java_span: JavaSpan::new(JavaPosition::new(1, 0), JavaPosition::new(1, 5)).unwrap(),
+    ///     category: MappingCategory::Statement,
+    ///     ir_node: Some("println".to_string()),
+    /// });
+    ///
+    /// assert!(map.find_by_java_position(1, 2).is_some());
+    /// ```
     pub fn new(source_file: impl Into<String>, generated_file: impl Into<String>) -> Self {
         Self {
             version: Self::VERSION,
