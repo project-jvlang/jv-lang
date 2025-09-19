@@ -1,5 +1,6 @@
 use crate::types::{IrExpression, IrModifiers, IrVisibility, JavaType};
 use jv_ast::{Literal, Modifiers, Span, TypeAnnotation, Visibility};
+use std::path::Path;
 
 pub(crate) fn convert_modifiers(modifiers: &Modifiers) -> IrModifiers {
     let mut ir_modifiers = IrModifiers::default();
@@ -95,10 +96,81 @@ fn literal_to_java_type(literal: &Literal) -> JavaType {
     }
 }
 
-pub fn generate_utility_class_name(_package: Option<&str>, _source_file: &str) -> String {
-    panic!("not yet implemented: generate_utility_class_name")
+pub fn generate_utility_class_name(package: Option<&str>, source_file: &str) -> String {
+    let file_stem = Path::new(source_file)
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .unwrap_or(source_file);
+
+    let mut class_name = sanitize_type_identifier(file_stem);
+    if !class_name.ends_with("Kt") {
+        class_name.push_str("Kt");
+    }
+
+    match package {
+        Some(pkg) if !pkg.is_empty() => format!("{}.{}", pkg, class_name),
+        _ => class_name,
+    }
 }
 
-pub fn generate_extension_class_name(_receiver_type: &TypeAnnotation) -> String {
-    panic!("not yet implemented: generate_extension_class_name")
+pub fn generate_extension_class_name(receiver_type: &TypeAnnotation) -> String {
+    let base = type_annotation_base_name(receiver_type);
+    let mut class_name = sanitize_type_identifier(&base);
+    class_name.push_str("Extensions");
+    class_name
+}
+
+fn type_annotation_base_name(annotation: &TypeAnnotation) -> String {
+    match annotation {
+        TypeAnnotation::Simple(name) => simple_type_name(name),
+        TypeAnnotation::Nullable(inner) => type_annotation_base_name(inner),
+        TypeAnnotation::Generic { name, .. } => simple_type_name(name),
+        TypeAnnotation::Function { .. } => "Function".to_string(),
+        TypeAnnotation::Array(inner) => format!("{}Array", type_annotation_base_name(inner)),
+    }
+}
+
+fn simple_type_name(name: &str) -> String {
+    name.rsplit('.').next().unwrap_or(name).to_string()
+}
+
+fn sanitize_type_identifier(raw: &str) -> String {
+    let mut result = String::new();
+    let mut current = String::new();
+
+    for ch in raw.chars() {
+        if ch.is_alphanumeric() {
+            current.push(ch);
+        } else if !current.is_empty() {
+            push_component(&mut result, &current);
+            current.clear();
+        }
+    }
+
+    if !current.is_empty() {
+        push_component(&mut result, &current);
+    }
+
+    if result.is_empty() {
+        result.push_str("Generated");
+    }
+
+    if result
+        .chars()
+        .next()
+        .map(|c| c.is_ascii_digit())
+        .unwrap_or(false)
+    {
+        result.insert(0, '_');
+    }
+
+    result
+}
+
+fn push_component(result: &mut String, component: &str) {
+    let mut chars = component.chars();
+    if let Some(first) = chars.next() {
+        result.extend(first.to_uppercase());
+        result.extend(chars);
+    }
 }

@@ -1,6 +1,5 @@
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::{
         convert_type_annotation, desugar_async_expression, desugar_await_expression,
         desugar_data_class, desugar_default_parameters, desugar_defer_expression,
@@ -677,19 +676,20 @@ mod tests {
     // Test for use expression desugaring
     // Test for defer expression desugaring
     #[test]
-    #[should_panic(expected = "not yet implemented: desugar_defer_expression")]
-    fn test_desugar_defer_expression_fails() {
+    fn test_desugar_defer_expression_propagates_body_errors() {
         let mut context = test_context();
 
-        // defer { cleanup() }
-        let body = Box::new(Expression::Call {
-            function: Box::new(Expression::Identifier("cleanup".to_string(), dummy_span())),
-            args: vec![],
-            span: dummy_span(),
-        });
+        let body = Box::new(Expression::Identifier("missing".to_string(), dummy_span()));
 
-        // This should fail because desugaring is not implemented yet
-        let _result = desugar_defer_expression(body, dummy_span(), &mut context);
+        let error = desugar_defer_expression(body, dummy_span(), &mut context)
+            .expect_err("defer expression should propagate inner transform errors");
+
+        match error {
+            TransformError::ScopeError { message, .. } => {
+                assert!(message.contains("missing"));
+            }
+            other => panic!("Expected scope error, got {:?}", other),
+        }
     }
 
     // Test for default parameters desugaring
@@ -1068,56 +1068,64 @@ mod tests {
 
     // Test for type inference
     #[test]
-    #[should_panic(expected = "not yet implemented: infer_java_type")]
-    fn test_infer_java_type_fails() {
+    fn test_infer_java_type_uses_initializer_type() {
         let context = test_context();
 
-        // Should infer String from string literal - convert to IrExpression first
-        let initializer = Expression::Literal(Literal::String("hello".to_string()), dummy_span());
         let ir_initializer =
             IrExpression::Literal(Literal::String("hello".to_string()), dummy_span());
 
-        // This should fail because type inference is not implemented yet
-        let _result = infer_java_type(None, Some(&ir_initializer), &context);
+        let inferred = infer_java_type(None, Some(&ir_initializer), &context)
+            .expect("type inference should succeed for string literal");
+
+        assert_eq!(inferred, JavaType::string());
     }
 
     // Test for type annotation conversion
     #[test]
-    #[should_panic(expected = "not yet implemented: convert_type_annotation")]
-    fn test_convert_type_annotation_fails() {
-        // Convert jv type annotation to Java type
+    fn test_convert_type_annotation_handles_generic_erasure() {
         let type_annotation = TypeAnnotation::Generic {
             name: "List".to_string(),
             type_args: vec![TypeAnnotation::Simple("String".to_string())],
         };
 
-        // This should fail because type conversion is not implemented yet
-        let _result = convert_type_annotation(type_annotation);
+        let java_type = convert_type_annotation(type_annotation)
+            .expect("generic annotations should currently erase to Object");
+
+        assert_eq!(java_type, JavaType::object());
     }
 
     // Test for utility class name generation
     #[test]
-    #[should_panic(expected = "not yet implemented: generate_utility_class_name")]
-    fn test_generate_utility_class_name_fails() {
-        // Should generate something like "com.example.MyFileKt"
-        let _result = generate_utility_class_name(Some("com.example"), "MyFile.jv");
+    fn test_generate_utility_class_name_formats_with_suffix() {
+        let class_name =
+            generate_utility_class_name(Some("com.example"), "src/foo/bar-user_profile.jv");
+        assert_eq!(class_name, "com.example.BarUserProfileKt");
+
+        let default_package = generate_utility_class_name(None, "2d_scene.jv");
+        assert_eq!(default_package, "_2dSceneKt");
     }
 
     // Test for extension class name generation
     #[test]
-    #[should_panic(expected = "not yet implemented: generate_extension_class_name")]
-    fn test_generate_extension_class_name_fails() {
-        let receiver_type = TypeAnnotation::Simple("String".to_string());
+    fn test_generate_extension_class_name_handles_complex_types() {
+        let simple = TypeAnnotation::Simple("String".to_string());
+        assert_eq!(generate_extension_class_name(&simple), "StringExtensions");
 
-        // Should generate something like "StringExtensions"
-        let _result = generate_extension_class_name(&receiver_type);
+        let complex = TypeAnnotation::Nullable(Box::new(TypeAnnotation::Array(Box::new(
+            TypeAnnotation::Generic {
+                name: "java.util.List".to_string(),
+                type_args: vec![TypeAnnotation::Simple("User".to_string())],
+            },
+        ))));
+        assert_eq!(
+            generate_extension_class_name(&complex),
+            "ListArrayExtensions"
+        );
     }
 
     // Test for main transformation functions
     #[test]
-    #[should_panic(expected = "not yet implemented: transform_program_with_context")]
-    fn test_transform_program_fails() {
-        // Create a simple program
+    fn test_transform_program_produces_ir_program() {
         let program = Program {
             package: Some("com.example".to_string()),
             imports: vec![],
@@ -1134,13 +1142,12 @@ mod tests {
             span: dummy_span(),
         };
 
-        // This should fail because transformation is not implemented yet
-        let _result = transform_program(program);
+        let ir_program = transform_program(program).expect("program transformation should succeed");
+        assert_eq!(ir_program.type_declarations.len(), 1);
     }
 
     #[test]
-    #[should_panic(expected = "not yet implemented: transform_statement")]
-    fn test_transform_statement_fails() {
+    fn test_transform_statement_handles_val_declaration() {
         let mut context = test_context();
 
         let stmt = Statement::ValDeclaration {
@@ -1151,13 +1158,13 @@ mod tests {
             span: dummy_span(),
         };
 
-        // This should fail because statement transformation is not implemented yet
-        let _result = transform_statement(stmt, &mut context);
+        let result = transform_statement(stmt, &mut context)
+            .expect("statement transformation should succeed");
+        assert_eq!(result.len(), 1);
     }
 
     #[test]
-    #[should_panic(expected = "not yet implemented: transform_expression")]
-    fn test_transform_expression_fails() {
+    fn test_transform_expression_binary_operation_creates_ir() {
         let mut context = test_context();
 
         let expr = Expression::Binary {
@@ -1173,22 +1180,22 @@ mod tests {
             span: dummy_span(),
         };
 
-        // This should fail because expression transformation is not implemented yet
-        let _result = transform_expression(expr, &mut context);
+        let ir_expr = transform_expression(expr, &mut context)
+            .expect("expression transformation should succeed");
+
+        match ir_expr {
+            IrExpression::Binary { .. } => {}
+            other => panic!("Expected binary IR expression, got {:?}", other),
+        }
     }
 
     // Complex integration tests for combined desugaring
 
     #[test]
-    #[should_panic(expected = "not yet implemented")]
-    fn test_complex_when_with_patterns_and_guards_fails() {
+    fn test_complex_when_with_patterns_and_guards_returns_error() {
         let mut context = test_context();
+        context.add_variable("value".to_string(), JavaType::int());
 
-        // when (value) {
-        //     1..10 -> "small"
-        //     is String if it.length > 5 -> "long string"
-        //     else -> "other"
-        // }
         let subject = Some(Box::new(Expression::Identifier(
             "value".to_string(),
             dummy_span(),
@@ -1246,8 +1253,15 @@ mod tests {
             dummy_span(),
         )));
 
-        // This should fail because complex pattern desugaring is not implemented yet
-        let _result = desugar_when_expression(subject, arms, else_arm, dummy_span(), &mut context);
+        let err = desugar_when_expression(subject, arms, else_arm, dummy_span(), &mut context)
+            .expect_err("complex patterns should currently be unsupported");
+
+        match err {
+            TransformError::UnsupportedConstruct { construct, .. } => {
+                assert!(construct.contains("Unsupported when pattern"));
+            }
+            other => panic!("Expected unsupported construct error, got {:?}", other),
+        }
     }
 
     #[test]
@@ -1314,11 +1328,9 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "not yet implemented")]
-    fn test_extension_function_with_generics_fails() {
+    fn test_desugar_extension_function_with_generics_succeeds() {
         let mut context = test_context();
 
-        // fun <T> List<T>.secondOrNull(): T? = if (this.size >= 2) this[1] else null
         let receiver_type = TypeAnnotation::Generic {
             name: "List".to_string(),
             type_args: vec![TypeAnnotation::Simple("T".to_string())],
@@ -1359,21 +1371,31 @@ mod tests {
             span: dummy_span(),
         };
 
-        // This should fail because generic extension function desugaring is not implemented yet
-        let _result = desugar_extension_function(
+        let method = desugar_extension_function(
             receiver_type,
             Box::new(function_decl),
             dummy_span(),
             &mut context,
-        );
+        )
+        .expect("generic extension functions should be desugared");
+
+        match method {
+            IrStatement::MethodDeclaration { parameters, return_type, .. } => {
+                assert_eq!(parameters.len(), 1);
+                match return_type {
+                    JavaType::Reference { ref name, .. } => assert_eq!(name, "T"),
+                    other => panic!("Expected reference return type, got {:?}", other),
+                }
+            }
+            other => panic!("Expected method declaration, got {:?}", other),
+        }
     }
 
     #[test]
-    #[should_panic(expected = "not yet implemented")]
-    fn test_nested_null_safe_operations_fails() {
+    fn test_transform_expression_handles_nested_null_safe_operations() {
         let mut context = test_context();
+        context.add_variable("user".to_string(), JavaType::object());
 
-        // user?.profile?.address?.street
         let nested_access = Expression::NullSafeMemberAccess {
             object: Box::new(Expression::NullSafeMemberAccess {
                 object: Box::new(Expression::NullSafeMemberAccess {
@@ -1388,16 +1410,29 @@ mod tests {
             span: dummy_span(),
         };
 
-        // This should fail because nested null-safe operation desugaring is not implemented yet
-        let _result = transform_expression(nested_access, &mut context);
+        let result = transform_expression(nested_access, &mut context)
+            .expect("nested null-safe member access should desugar");
+
+        fn assert_null_safe_chain(expr: &IrExpression, depth: usize) {
+            if depth == 0 {
+                return;
+            }
+            match expr {
+                IrExpression::NullSafeOperation { operation, .. } => {
+                    assert_null_safe_chain(operation.as_ref(), depth - 1);
+                }
+                IrExpression::FieldAccess { .. } => {}
+                other => panic!("Expected null-safe chain, got {:?}", other),
+            }
+        }
+
+        assert_null_safe_chain(&result, 3);
     }
 
     #[test]
-    #[should_panic(expected = "not yet implemented")]
-    fn test_data_class_with_default_parameters_fails() {
+    fn test_desugar_data_class_with_default_parameters_creates_record() {
         let mut context = test_context();
 
-        // data class Config(val host: String = "localhost", val port: Int = 8080, val ssl: Boolean = false)
         let params = vec![
             Parameter {
                 name: "host".to_string(),
@@ -1425,29 +1460,34 @@ mod tests {
             },
         ];
 
-        // This should fail because data class with default parameters desugaring is not implemented yet
-        let _result = desugar_data_class(
+        let result = desugar_data_class(
             "Config".to_string(),
             params,
             vec![],
-            false, // immutable
+            false,
             Modifiers::default(),
             dummy_span(),
             &mut context,
-        );
+        )
+        .expect("data class with defaults should desugar to record");
+
+        match result {
+            IrStatement::RecordDeclaration { components, .. } => {
+                assert_eq!(components.len(), 3);
+                assert_eq!(components[0].name, "host");
+                assert_eq!(components[1].name, "port");
+                assert_eq!(components[2].name, "ssl");
+            }
+            other => panic!("Expected record declaration, got {:?}", other),
+        }
     }
 
     #[test]
-    #[should_panic(expected = "not yet implemented")]
-    fn test_spawn_with_use_resource_fails() {
+    fn test_spawn_with_use_resource_produces_virtual_thread() {
         let mut context = test_context();
 
-        // spawn {
-        //     use(openConnection()) { conn ->
-        //         conn.sendData("Hello")
-        //         defer { conn.cleanup() }
-        //     }
-        // }
+        context.add_variable("openConnection".to_string(), JavaType::object());
+
         let use_expr = Expression::Block {
             statements: vec![Statement::ResourceManagement(ResourceManagement::Use {
                 resource: Box::new(Expression::Call {
@@ -1510,8 +1550,31 @@ mod tests {
             span: dummy_span(),
         };
 
-        // This should fail because complex resource management in spawn is not implemented yet
-        let _result = desugar_spawn_expression(Box::new(use_expr), dummy_span(), &mut context);
+        let ir = desugar_spawn_expression(Box::new(use_expr), dummy_span(), &mut context)
+            .expect("spawn with use should desugar");
+
+        match ir {
+            IrExpression::VirtualThread { args, .. } => {
+                assert_eq!(args.len(), 1);
+                match &args[0] {
+                    IrExpression::Lambda { body, .. } => match body.as_ref() {
+                        IrExpression::Block { statements, .. } => {
+                            assert_eq!(statements.len(), 1);
+                            match &statements[0] {
+                                IrStatement::Expression { expr, .. } => match expr {
+                                    IrExpression::TryWithResources { .. } => {}
+                                    other => panic!("Expected try-with-resources, got {:?}", other),
+                                },
+                                other => panic!("Expected expression statement, got {:?}", other),
+                            }
+                        }
+                        other => panic!("Expected lambda body block, got {:?}", other),
+                    },
+                    other => panic!("Expected lambda argument, got {:?}", other),
+                }
+            }
+            other => panic!("Expected virtual thread expression, got {:?}", other),
+        }
     }
 
     // Error type tests

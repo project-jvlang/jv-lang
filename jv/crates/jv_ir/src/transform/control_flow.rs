@@ -24,7 +24,7 @@ pub fn desugar_when_expression(
     let mut has_default_case = false;
 
     for arm in arms {
-        let (labels, is_default) = convert_when_pattern(&arm.pattern, arm.span.clone())?;
+        let (mut labels, is_default) = convert_when_pattern(&arm.pattern, arm.span.clone())?;
 
         if is_default {
             if has_default_case {
@@ -34,6 +34,9 @@ pub fn desugar_when_expression(
                 });
             }
             has_default_case = true;
+            if labels.is_empty() {
+                labels.push(IrCaseLabel::Default);
+            }
         }
 
         let body = transform_expression(arm.body, context)?;
@@ -64,7 +67,7 @@ pub fn desugar_when_expression(
         }
 
         cases.push(IrSwitchCase {
-            labels: vec![],
+            labels: vec![IrCaseLabel::Default],
             guard: None,
             body,
             span: span.clone(),
@@ -93,7 +96,7 @@ fn convert_when_pattern(
     span: Span,
 ) -> Result<(Vec<IrCaseLabel>, bool), TransformError> {
     match pattern {
-        Pattern::Wildcard(_) => Ok((vec![], true)),
+        Pattern::Wildcard(_) => Ok((vec![IrCaseLabel::Default], true)),
         Pattern::Literal(literal, _) => Ok((vec![IrCaseLabel::Literal(literal.clone())], false)),
         Pattern::Identifier(_, _)
         | Pattern::Constructor { .. }
