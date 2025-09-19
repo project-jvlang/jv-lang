@@ -1,6 +1,9 @@
 // jv_mapper - Source mapping (.jv ↔ .java)
+use jv_ast::Span;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::fs;
+use std::path::Path;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -9,416 +12,501 @@ pub enum MappingError {
     InvalidPosition(String),
     #[error("Source map generation error: {0}")]
     GenerationError(String),
+    #[error("Serialization error: {0}")]
+    SerializationError(#[from] serde_json::Error),
     #[error("I/O error: {0}")]
     IoError(#[from] std::io::Error),
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct SourceMap {
-    pub source_file: String,
-    pub generated_file: String,
-    pub mappings: Vec<Mapping>,
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct JavaPosition {
+    pub line: usize,
+    pub column: usize,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct Mapping {
-    pub jv_line: usize,
-    pub java_line: usize,
-    pub jv_column: usize,
-    pub java_column: usize,
-    pub original_text: String,
-    pub generated_text: String,
+impl JavaPosition {
+    pub const fn new(line: usize, column: usize) -> Self {
+        Self { line, column }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct JavaSpan {
+    pub start: JavaPosition,
+    pub end: JavaPosition,
+}
+
+impl JavaSpan {
+    pub fn new(start: JavaPosition, end: JavaPosition) -> Result<Self, MappingError> {
+        let span = Self { start, end };
+        span.validate()?;
+        Ok(span)
+    }
+
+    pub fn contains(&self, line: usize, column: usize) -> bool {
+        if line < self.start.line || line > self.end.line {
+            return false;
+        }
+        if line == self.start.line && column < self.start.column {
+            return false;
+        }
+        if line == self.end.line && column > self.end.column {
+            return false;
+        }
+        true
+    }
+
+    pub fn validate(&self) -> Result<(), MappingError> {
+        if self.end.line < self.start.line
+            || (self.end.line == self.start.line && self.end.column < self.start.column)
+        {
+            return Err(MappingError::InvalidPosition(
+                "Java span end precedes start".to_string(),
+            ));
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "category", content = "detail")]
+pub enum MappingCategory {
+    #[serde(rename = "package")]
+    Package,
+    #[serde(rename = "import")]
+    Import,
+    #[serde(rename = "type_declaration")]
+    TypeDeclaration,
+    #[serde(rename = "method")]
+    Method,
+    #[serde(rename = "field")]
+    Field,
+    #[serde(rename = "statement")]
+    Statement,
+    #[serde(rename = "expression")]
+    Expression,
+    #[serde(rename = "custom")]
+    Custom(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MappingEntry {
+    pub ir_span: Span,
+    pub java_span: JavaSpan,
+    pub category: MappingCategory,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ir_node: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SourceMap {
+    pub version: u8,
+    pub source_file: String,
+    pub generated_file: String,
+    #[serde(default)]
+    pub entries: Vec<MappingEntry>,
 }
 
 impl SourceMap {
-    pub fn new(source_file: String, generated_file: String) -> Self {
+    pub const VERSION: u8 = 1;
+
+    pub fn new(source_file: impl Into<String>, generated_file: impl Into<String>) -> Self {
         Self {
-            source_file,
-            generated_file,
-            mappings: Vec::new(),
+            version: Self::VERSION,
+            source_file: source_file.into(),
+            generated_file: generated_file.into(),
+            entries: Vec::new(),
         }
     }
 
-    pub fn add_mapping(&mut self, mapping: Mapping) {
-        self.mappings.push(mapping);
+    pub fn to_json_pretty(&self) -> Result<String, MappingError> {
+        serde_json::to_string_pretty(self).map_err(MappingError::from)
     }
 
-    /// Find Java line for a given .jv line
-    pub fn find_java_line(&self, jv_line: usize) -> Option<usize> {
-        self.mappings
-            .iter()
-            .find(|m| m.jv_line == jv_line)
-            .map(|m| m.java_line)
+    pub fn from_json(json: &str) -> Result<Self, MappingError> {
+        let mut map: SourceMap = serde_json::from_str(json)?;
+        map.version = Self::VERSION;
+        Ok(map)
     }
 
-    /// Find .jv line for a given Java line
-    pub fn find_jv_line(&self, java_line: usize) -> Option<usize> {
-        self.mappings
+    pub fn find_by_ir_position(&self, line: usize, column: usize) -> Option<&MappingEntry> {
+        self.entries
             .iter()
-            .find(|m| m.java_line == java_line)
-            .map(|m| m.jv_line)
+            .find(|entry| span_contains(&entry.ir_span, line, column))
+    }
+
+    pub fn find_by_java_position(&self, line: usize, column: usize) -> Option<&MappingEntry> {
+        self.entries
+            .iter()
+            .find(|entry| entry.java_span.contains(line, column))
     }
 }
 
-impl Mapping {
-    pub fn new(
-        jv_line: usize,
-        java_line: usize,
-        jv_column: usize,
-        java_column: usize,
-        original_text: String,
-        generated_text: String,
-    ) -> Self {
-        Self {
-            jv_line,
-            java_line,
-            jv_column,
-            java_column,
-            original_text,
-            generated_text,
-        }
-    }
-
-    pub fn simple_line_mapping(
-        jv_line: usize,
-        java_line: usize,
-        original_text: String,
-        generated_text: String,
-    ) -> Self {
-        Self {
-            jv_line,
-            java_line,
-            jv_column: 0,
-            java_column: 0,
-            original_text,
-            generated_text,
-        }
-    }
-}
-
-/// Source map builder for incremental construction
+#[derive(Debug)]
 pub struct SourceMapBuilder {
     source_file: String,
     generated_file: String,
-    mappings: Vec<Mapping>,
+    entries: Vec<MappingEntry>,
+    current_java: JavaPosition,
 }
 
 impl SourceMapBuilder {
-    pub fn new(source_file: String, generated_file: String) -> Self {
+    pub fn new(source_file: impl Into<String>, generated_file: impl Into<String>) -> Self {
         Self {
-            source_file,
-            generated_file,
-            mappings: Vec::new(),
+            source_file: source_file.into(),
+            generated_file: generated_file.into(),
+            entries: Vec::new(),
+            current_java: JavaPosition::new(1, 0),
         }
     }
 
-    /// Add a simple line-to-line mapping
-    pub fn add_line_mapping(
-        &mut self,
-        jv_line: usize,
-        java_line: usize,
-        original_text: String,
-        generated_text: String,
-    ) {
-        let mapping =
-            Mapping::simple_line_mapping(jv_line, java_line, original_text, generated_text);
-        self.mappings.push(mapping);
+    pub fn current_java(&self) -> JavaPosition {
+        self.current_java
     }
 
-    /// Build the final source map
-    pub fn build(self) -> SourceMap {
+    pub fn set_java_position(&mut self, position: JavaPosition) {
+        self.current_java = position;
+    }
+
+    pub fn record_mapping(
+        &mut self,
+        ir_span: Span,
+        java_span: JavaSpan,
+        category: MappingCategory,
+        ir_node: Option<String>,
+    ) -> Result<(), MappingError> {
+        validate_ir_span(&ir_span)?;
+        java_span.validate()?;
+
+        if !self.entries.iter().any(|entry| {
+            entry.ir_span == ir_span
+                && entry.java_span == java_span
+                && entry.category == category
+                && entry.ir_node == ir_node
+        }) {
+            self.entries.push(MappingEntry {
+                ir_span,
+                java_span,
+                category,
+                ir_node,
+            });
+        }
+
+        Ok(())
+    }
+
+    pub fn record_generated_segment(
+        &mut self,
+        ir_span: Span,
+        segment: &str,
+        category: MappingCategory,
+        ir_node: Option<String>,
+    ) -> Result<JavaSpan, MappingError> {
+        validate_ir_span(&ir_span)?;
+        let java_span = self.consume_java(segment);
+        self.entries.push(MappingEntry {
+            ir_span,
+            java_span: java_span.clone(),
+            category,
+            ir_node,
+        });
+        Ok(java_span)
+    }
+
+    pub fn advance_unmapped(&mut self, segment: &str) -> JavaSpan {
+        self.consume_java(segment)
+    }
+
+    pub fn build(mut self) -> SourceMap {
+        self.entries.sort_by(|a, b| {
+            a.java_span
+                .start
+                .line
+                .cmp(&b.java_span.start.line)
+                .then(a.java_span.start.column.cmp(&b.java_span.start.column))
+                .then(a.ir_span.start_line.cmp(&b.ir_span.start_line))
+                .then(a.ir_span.start_column.cmp(&b.ir_span.start_column))
+        });
+
         SourceMap {
+            version: SourceMap::VERSION,
             source_file: self.source_file,
             generated_file: self.generated_file,
-            mappings: self.mappings,
+            entries: self.entries,
+        }
+    }
+
+    fn consume_java(&mut self, segment: &str) -> JavaSpan {
+        let start = self.current_java;
+        advance_java_position(&mut self.current_java, segment);
+        JavaSpan {
+            start,
+            end: self.current_java,
         }
     }
 }
 
-/// Source map manager for handling multiple compilation units
+#[derive(Debug, Default)]
 pub struct SourceMapManager {
     source_maps: HashMap<String, SourceMap>,
 }
 
 impl SourceMapManager {
     pub fn new() -> Self {
-        Self {
-            source_maps: HashMap::new(),
+        Self::default()
+    }
+
+    pub fn add_source_map(&mut self, source_file: String, source_map: SourceMap) {
+        if source_map.source_file != source_file {
+            // Keep the provided key authoritative to preserve backward compatibility.
+            let mut map = source_map;
+            map.source_file = source_file.clone();
+            self.source_maps.insert(source_file, map);
+        } else {
+            self.source_maps.insert(source_file, source_map);
         }
     }
 
-    /// Add a source map for a compilation unit
-    pub fn add_source_map(&mut self, source_file: String, source_map: SourceMap) {
-        self.source_maps.insert(source_file, source_map);
+    pub fn add(&mut self, source_map: SourceMap) {
+        let key = source_map.source_file.clone();
+        self.source_maps.insert(key, source_map);
     }
 
-    /// Get source map for a file
     pub fn get_source_map(&self, source_file: &str) -> Option<&SourceMap> {
         self.source_maps.get(source_file)
     }
 
-    /// Save all source maps to disk
+    pub fn iter(&self) -> impl Iterator<Item = (&String, &SourceMap)> {
+        self.source_maps.iter()
+    }
+
     pub fn save_all(&self, output_dir: &str) -> Result<(), MappingError> {
-        std::fs::create_dir_all(output_dir)?;
+        fs::create_dir_all(output_dir)?;
 
-        for (source_file, source_map) in &self.source_maps {
-            let map_filename = format!(
-                "{}.map",
-                std::path::Path::new(source_file)
-                    .file_stem()
-                    .unwrap_or_default()
-                    .to_string_lossy()
-            );
-            let map_path = std::path::Path::new(output_dir).join(map_filename);
-
-            let json = serde_json::to_string_pretty(source_map)
-                .map_err(|e| MappingError::GenerationError(e.to_string()))?;
-            std::fs::write(map_path, json)?;
+        for source_map in self.source_maps.values() {
+            let file_name = map_file_name(&source_map.generated_file, &source_map.source_file);
+            let map_path = Path::new(output_dir).join(file_name);
+            let json = source_map.to_json_pretty()?;
+            fs::write(map_path, json)?;
         }
 
         Ok(())
     }
 }
 
-impl Default for SourceMapManager {
-    fn default() -> Self {
-        Self::new()
+fn validate_ir_span(span: &Span) -> Result<(), MappingError> {
+    if span.end_line < span.start_line
+        || (span.end_line == span.start_line && span.end_column < span.start_column)
+    {
+        return Err(MappingError::InvalidPosition(
+            "IR span end precedes start".to_string(),
+        ));
     }
+    Ok(())
+}
+
+fn span_contains(span: &Span, line: usize, column: usize) -> bool {
+    if line < span.start_line || line > span.end_line {
+        return false;
+    }
+    if line == span.start_line && column < span.start_column {
+        return false;
+    }
+    if line == span.end_line && column > span.end_column {
+        return false;
+    }
+    true
+}
+
+fn advance_java_position(position: &mut JavaPosition, segment: &str) {
+    let mut chars = segment.chars().peekable();
+    while let Some(ch) = chars.next() {
+        match ch {
+            '\r' => {
+                if let Some(&'\n') = chars.peek() {
+                    chars.next();
+                }
+                position.line += 1;
+                position.column = 0;
+            }
+            '\n' => {
+                position.line += 1;
+                position.column = 0;
+            }
+            _ => {
+                position.column += 1;
+            }
+        }
+    }
+}
+
+fn map_file_name(generated_file: &str, source_file: &str) -> String {
+    let generated = Path::new(generated_file)
+        .file_name()
+        .map(|name| name.to_string_lossy().to_string());
+
+    let base = generated.unwrap_or_else(|| {
+        Path::new(source_file)
+            .file_name()
+            .map(|name| name.to_string_lossy().to_string())
+            .unwrap_or_else(|| "source".to_string())
+    });
+
+    format!("{}.map.json", base)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
 
-    #[test]
-    fn test_source_map_creation() {
-        let mut source_map = SourceMap::new("test.jv".to_string(), "Test.java".to_string());
-
-        let mapping = Mapping::simple_line_mapping(
-            0,
-            2,
-            "val x = 42".to_string(),
-            "final int x = 42;".to_string(),
-        );
-        source_map.add_mapping(mapping);
-
-        assert_eq!(source_map.mappings.len(), 1);
-        assert_eq!(source_map.find_java_line(0), Some(2));
-        assert_eq!(source_map.find_jv_line(2), Some(0));
+    fn span(start_line: usize, start_column: usize, end_line: usize, end_column: usize) -> Span {
+        Span::new(start_line, start_column, end_line, end_column)
     }
 
     #[test]
-    fn test_source_map_builder() {
-        let mut builder = SourceMapBuilder::new("test.jv".to_string(), "Test.java".to_string());
-        builder.add_line_mapping(
-            0,
-            2,
-            "val x = 42".to_string(),
-            "final int x = 42;".to_string(),
-        );
+    fn record_generated_segment_tracks_position() -> Result<(), MappingError> {
+        let mut builder = SourceMapBuilder::new("src/main.jv", "Main.java");
+        let ir_span = span(1, 0, 1, 10);
+        let java_span = builder.record_generated_segment(
+            ir_span.clone(),
+            "final int x = 1;\n",
+            MappingCategory::Statement,
+            Some("IrStatement::VariableDeclaration".to_string()),
+        )?;
 
+        assert_eq!(java_span.start, JavaPosition::new(1, 0));
+        assert_eq!(java_span.end, JavaPosition::new(2, 0));
+        assert_eq!(builder.current_java(), JavaPosition::new(2, 0));
+        Ok(())
+    }
+
+    #[test]
+    fn record_mapping_deduplicates_entries() -> Result<(), MappingError> {
+        let mut builder = SourceMapBuilder::new("src/main.jv", "Main.java");
+        let ir_span = span(2, 0, 2, 5);
+        let java_span = JavaSpan::new(JavaPosition::new(3, 0), JavaPosition::new(3, 20))?;
+
+        builder.record_mapping(
+            ir_span.clone(),
+            java_span.clone(),
+            MappingCategory::Method,
+            Some("IrStatement::MethodDeclaration".to_string()),
+        )?;
+        builder.record_mapping(
+            ir_span.clone(),
+            java_span.clone(),
+            MappingCategory::Method,
+            Some("IrStatement::MethodDeclaration".to_string()),
+        )?;
+
+        let map = builder.build();
+        assert_eq!(map.entries.len(), 1);
+        Ok(())
+    }
+
+    #[test]
+    fn find_by_positions_returns_expected_entry() -> Result<(), MappingError> {
+        let mut builder = SourceMapBuilder::new("src/main.jv", "Main.java");
+        let ir_span = span(5, 2, 5, 12);
+        let java_span = builder.record_generated_segment(
+            ir_span.clone(),
+            "System.out.println(value);\n",
+            MappingCategory::Statement,
+            Some("IrStatement::Expression".to_string()),
+        )?;
         let source_map = builder.build();
 
-        assert_eq!(source_map.mappings.len(), 1);
-        assert_eq!(source_map.source_file, "test.jv");
-        assert_eq!(source_map.generated_file, "Test.java");
+        let ir_hit = source_map.find_by_ir_position(5, 5).unwrap();
+        assert_eq!(ir_hit.ir_span, ir_span);
+
+        let java_hit = source_map
+            .find_by_java_position(java_span.start.line, java_span.start.column)
+            .unwrap();
+        assert_eq!(java_hit.ir_span, ir_span);
+        Ok(())
     }
 
     #[test]
-    fn test_source_map_manager() {
-        let mut manager = SourceMapManager::new();
-        let source_map = SourceMap::new("test.jv".to_string(), "Test.java".to_string());
+    fn json_roundtrip_preserves_entries() -> Result<(), MappingError> {
+        let mut builder = SourceMapBuilder::new("src/main.jv", "Main.java");
+        builder.record_generated_segment(
+            span(1, 0, 1, 3),
+            "class Main {\n",
+            MappingCategory::TypeDeclaration,
+            Some("IrStatement::ClassDeclaration".to_string()),
+        )?;
+        let map = builder.build();
 
-        manager.add_source_map("test.jv".to_string(), source_map);
+        let json = map.to_json_pretty()?;
+        let restored = SourceMap::from_json(&json)?;
 
-        assert!(manager.get_source_map("test.jv").is_some());
-        assert!(manager.get_source_map("nonexistent.jv").is_none());
+        assert_eq!(map.source_file, restored.source_file);
+        assert_eq!(map.generated_file, restored.generated_file);
+        assert_eq!(map.entries, restored.entries);
+        Ok(())
     }
 
     #[test]
-    fn test_mapping_creation() {
-        let mapping = Mapping::new(
-            5,
-            10,
-            15,
-            20,
-            "original".to_string(),
-            "generated".to_string(),
+    fn invalid_ir_span_returns_error() {
+        let mut builder = SourceMapBuilder::new("a.jv", "A.java");
+        let result = builder.record_generated_segment(
+            span(2, 5, 1, 0),
+            "broken",
+            MappingCategory::Statement,
+            None,
         );
 
-        assert_eq!(mapping.jv_line, 5);
-        assert_eq!(mapping.java_line, 10);
-        assert_eq!(mapping.jv_column, 15);
-        assert_eq!(mapping.java_column, 20);
-        assert_eq!(mapping.original_text, "original");
-        assert_eq!(mapping.generated_text, "generated");
+        assert!(matches!(result, Err(MappingError::InvalidPosition(_))));
     }
 
     #[test]
-    fn test_simple_line_mapping() {
-        let mapping =
-            Mapping::simple_line_mapping(3, 7, "jv code".to_string(), "java code".to_string());
+    fn invalid_java_span_is_rejected() {
+        let mut builder = SourceMapBuilder::new("a.jv", "A.java");
+        let java_span = JavaSpan::new(JavaPosition::new(3, 5), JavaPosition::new(2, 0));
+        assert!(java_span.is_err());
 
-        assert_eq!(mapping.jv_line, 3);
-        assert_eq!(mapping.java_line, 7);
-        assert_eq!(mapping.jv_column, 0);
-        assert_eq!(mapping.java_column, 0);
-        assert_eq!(mapping.original_text, "jv code");
-        assert_eq!(mapping.generated_text, "java code");
+        let ir_span = span(1, 0, 1, 1);
+        let result = builder.record_mapping(
+            ir_span,
+            JavaSpan {
+                start: JavaPosition::new(3, 5),
+                end: JavaPosition::new(2, 0),
+            },
+            MappingCategory::Statement,
+            None,
+        );
+        assert!(matches!(result, Err(MappingError::InvalidPosition(_))));
     }
 
     #[test]
-    fn test_multiple_mappings() {
-        let mut source_map = SourceMap::new("test.jv".to_string(), "Test.java".to_string());
+    fn manager_saves_maps_to_disk() -> Result<(), MappingError> {
+        let mut builder = SourceMapBuilder::new("src/main.jv", "Main.java");
+        builder.record_generated_segment(
+            span(1, 0, 1, 5),
+            "class Main {}\n",
+            MappingCategory::TypeDeclaration,
+            None,
+        )?;
+        let map = builder.build();
 
-        // Add multiple mappings
-        source_map.add_mapping(Mapping::simple_line_mapping(
-            0,
-            2,
-            "val x = 1".to_string(),
-            "final int x = 1;".to_string(),
-        ));
-        source_map.add_mapping(Mapping::simple_line_mapping(
-            1,
-            3,
-            "val y = 2".to_string(),
-            "final int y = 2;".to_string(),
-        ));
-        source_map.add_mapping(Mapping::simple_line_mapping(
-            2,
-            4,
-            "val z = x + y".to_string(),
-            "final int z = x + y;".to_string(),
-        ));
+        let mut manager = SourceMapManager::new();
+        manager.add_source_map("src/main.jv".to_string(), map);
 
-        assert_eq!(source_map.mappings.len(), 3);
+        let temp_dir = std::env::temp_dir().join("jv_mapper_test");
+        if temp_dir.exists() {
+            fs::remove_dir_all(&temp_dir).ok();
+        }
+        manager.save_all(temp_dir.to_str().unwrap())?;
 
-        // Test lookups
-        assert_eq!(source_map.find_java_line(0), Some(2));
-        assert_eq!(source_map.find_java_line(1), Some(3));
-        assert_eq!(source_map.find_java_line(2), Some(4));
-        assert_eq!(source_map.find_java_line(999), None);
+        let saved_files = fs::read_dir(&temp_dir)
+            .expect("temp dir should exist")
+            .filter_map(|entry| entry.ok())
+            .map(|entry| entry.file_name().to_string_lossy().to_string())
+            .collect::<Vec<_>>();
 
-        assert_eq!(source_map.find_jv_line(2), Some(0));
-        assert_eq!(source_map.find_jv_line(3), Some(1));
-        assert_eq!(source_map.find_jv_line(4), Some(2));
-        assert_eq!(source_map.find_jv_line(999), None);
-    }
-
-    #[test]
-    fn test_source_map_serialization() {
-        let mut source_map = SourceMap::new("test.jv".to_string(), "Test.java".to_string());
-        source_map.add_mapping(Mapping::simple_line_mapping(
-            0,
-            1,
-            "jv".to_string(),
-            "java".to_string(),
-        ));
-
-        // Test serialization
-        let json = serde_json::to_string(&source_map).unwrap();
-        assert!(json.contains("test.jv"));
-        assert!(json.contains("Test.java"));
-
-        // Test deserialization
-        let deserialized: SourceMap = serde_json::from_str(&json).unwrap();
-        assert_eq!(deserialized.source_file, source_map.source_file);
-        assert_eq!(deserialized.generated_file, source_map.generated_file);
-        assert_eq!(deserialized.mappings.len(), source_map.mappings.len());
-    }
-
-    #[test]
-    fn test_complex_jv_to_java_mappings() {
-        let mut source_map = SourceMap::new("complex.jv".to_string(), "Complex.java".to_string());
-
-        // Test various jv language construct mappings
-        source_map.add_mapping(Mapping::new(
-            0,
-            5,
-            0,
-            4,
-            "val name = \"John\"".to_string(),
-            "final String name = \"John\";".to_string(),
-        ));
-
-        source_map.add_mapping(Mapping::new(
-            1,
-            6,
-            0,
-            4,
-            "fun greet(name: String) = println(\"Hello, $name\")".to_string(),
-            "public static void greet(String name) { System.out.println(\"Hello, \" + name); }"
-                .to_string(),
-        ));
-
-        source_map.add_mapping(Mapping::new(
-            2,
-            8,
-            0,
-            4,
-            "when (x) { 1 -> \"one\" else -> \"other\" }".to_string(),
-            "switch (x) { case 1: return \"one\"; default: return \"other\"; }".to_string(),
-        ));
-
-        // Test complex lookups
-        assert_eq!(source_map.find_java_line(0), Some(5));
-        assert_eq!(source_map.find_java_line(1), Some(6));
-        assert_eq!(source_map.find_java_line(2), Some(8));
-
-        assert_eq!(source_map.find_jv_line(5), Some(0));
-        assert_eq!(source_map.find_jv_line(6), Some(1));
-        assert_eq!(source_map.find_jv_line(8), Some(2));
-    }
-
-    #[test]
-    fn test_edge_cases() {
-        let mut source_map = SourceMap::new("edge.jv".to_string(), "Edge.java".to_string());
-
-        // Empty strings
-        source_map.add_mapping(Mapping::simple_line_mapping(
-            0,
-            0,
-            "".to_string(),
-            "".to_string(),
-        ));
-
-        // Very long lines
-        let long_original = "x".repeat(1000);
-        let long_generated = "y".repeat(1500);
-        source_map.add_mapping(Mapping::simple_line_mapping(
-            1,
-            1,
-            long_original.clone(),
-            long_generated.clone(),
-        ));
-
-        // Unicode content
-        source_map.add_mapping(Mapping::simple_line_mapping(
-            2,
-            2,
-            "変数 = 値".to_string(),
-            "variable = value".to_string(),
-        ));
-
-        assert_eq!(source_map.mappings.len(), 3);
-        assert_eq!(source_map.mappings[1].original_text, long_original);
-        assert_eq!(source_map.mappings[1].generated_text, long_generated);
-        assert_eq!(source_map.mappings[2].original_text, "変数 = 値");
-    }
-
-    #[test]
-    fn test_error_handling() {
-        use std::io::{Error, ErrorKind};
-
-        // Test MappingError variants
-        let pos_error = MappingError::InvalidPosition("test position".to_string());
-        let gen_error = MappingError::GenerationError("test generation".to_string());
-        let io_error = MappingError::IoError(Error::new(ErrorKind::NotFound, "test io"));
-
-        assert!(pos_error.to_string().contains("Invalid source position"));
-        assert!(gen_error
-            .to_string()
-            .contains("Source map generation error"));
-        assert!(io_error.to_string().contains("I/O error"));
+        assert!(saved_files.iter().any(|name| name.ends_with(".map.json")));
+        fs::remove_dir_all(&temp_dir).ok();
+        Ok(())
     }
 }
