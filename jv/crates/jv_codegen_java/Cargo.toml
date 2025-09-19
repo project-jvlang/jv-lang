@@ -9,3 +9,7 @@ jv_ir.workspace = true
 jv_ast.workspace = true
 serde.workspace = true
 thiserror.workspace = true
+
+[dev-dependencies]
+insta = { version = "1.39", features = ["redactions"] }
+serde_json.workspace = true
