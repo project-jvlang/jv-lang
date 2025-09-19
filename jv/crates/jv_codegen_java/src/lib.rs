@@ -8,7 +8,9 @@ pub use builder::{JavaCompilationUnit, JavaSourceBuilder};
 pub use config::JavaCodeGenConfig;
 pub use error::CodeGenError;
 pub use generator::JavaCodeGenerator;
-pub use types::{ImportManager, Java25FeatureGenerator, JavaTypeMapper, NullSafetyGenerator, StandardImport};
+pub use types::{
+    ImportManager, Java25FeatureGenerator, JavaTypeMapper, NullSafetyGenerator, StandardImport,
+};
 
 use jv_ir::IrProgram;
 

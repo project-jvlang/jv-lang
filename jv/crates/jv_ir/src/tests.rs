@@ -1380,7 +1380,11 @@ mod tests {
         .expect("generic extension functions should be desugared");
 
         match method {
-            IrStatement::MethodDeclaration { parameters, return_type, .. } => {
+            IrStatement::MethodDeclaration {
+                parameters,
+                return_type,
+                ..
+            } => {
                 assert_eq!(parameters.len(), 1);
                 match return_type {
                     JavaType::Reference { ref name, .. } => assert_eq!(name, "T"),

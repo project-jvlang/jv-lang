@@ -60,9 +60,7 @@ impl JavaCodeGenerator {
         for declaration in &program.type_declarations {
             let code = match declaration {
                 IrStatement::ClassDeclaration { .. } => self.generate_class(declaration)?,
-                IrStatement::InterfaceDeclaration { .. } => {
-                    self.generate_interface(declaration)?
-                }
+                IrStatement::InterfaceDeclaration { .. } => self.generate_interface(declaration)?,
                 IrStatement::RecordDeclaration { .. } => self.generate_record(declaration)?,
                 IrStatement::MethodDeclaration { .. }
                 | IrStatement::VariableDeclaration { .. }
@@ -516,9 +514,14 @@ impl JavaCodeGenerator {
                 builder.push_line("}");
                 builder.build()
             }
-            IrStatement::While { condition, body, .. } => {
+            IrStatement::While {
+                condition, body, ..
+            } => {
                 let mut builder = self.builder();
-                builder.push_line(&format!("while ({}) {{", self.generate_expression(condition)?));
+                builder.push_line(&format!(
+                    "while ({}) {{",
+                    self.generate_expression(condition)?
+                ));
                 builder.indent();
                 let body_code = self.generate_statement(body)?;
                 Self::push_lines(&mut builder, &body_code);
@@ -616,7 +619,12 @@ impl JavaCodeGenerator {
                 None => "continue;".to_string(),
             },
             IrStatement::Package { name, .. } => format!("package {};", name),
-            IrStatement::Import { path, is_static, is_wildcard, .. } => {
+            IrStatement::Import {
+                path,
+                is_static,
+                is_wildcard,
+                ..
+            } => {
                 let mut stmt = String::from("import ");
                 if *is_static {
                     stmt.push_str("static ");
@@ -667,7 +675,9 @@ impl JavaCodeGenerator {
                 self.generate_expression(array)?,
                 self.generate_expression(index)?
             )),
-            IrExpression::Binary { left, op, right, .. } => {
+            IrExpression::Binary {
+                left, op, right, ..
+            } => {
                 if matches!(op, BinaryOp::Elvis) {
                     let left_expr = self.generate_expression(left)?;
                     let right_expr = self.generate_expression(right)?;
@@ -763,9 +773,7 @@ impl JavaCodeGenerator {
                 Ok(expr_str)
             }
             IrExpression::Lambda {
-                param_names,
-                body,
-                ..
+                param_names, body, ..
             } => {
                 let params = param_names.join(", ");
                 let body_str = self.generate_expression(body)?;
@@ -777,18 +785,14 @@ impl JavaCodeGenerator {
             }
             IrExpression::Switch { .. } => self.generate_switch_expression(expr),
             IrExpression::Cast {
-                expr,
-                target_type,
-                ..
+                expr, target_type, ..
             } => Ok(format!(
                 "({}) {}",
                 self.generate_type(target_type)?,
                 self.generate_expression(expr)?
             )),
             IrExpression::InstanceOf {
-                expr,
-                target_type,
-                ..
+                expr, target_type, ..
             } => Ok(format!(
                 "{} instanceof {}",
                 self.generate_expression(expr)?,
@@ -808,17 +812,13 @@ impl JavaCodeGenerator {
                 ..
             } => self.generate_string_format(format_string, args),
             IrExpression::CompletableFuture {
-                operation,
-                args,
-                ..
+                operation, args, ..
             } => self.generate_completable_future(operation.clone(), args),
-            IrExpression::VirtualThread { operation, args, .. } => {
-                self.generate_virtual_thread(operation.clone(), args)
-            }
+            IrExpression::VirtualThread {
+                operation, args, ..
+            } => self.generate_virtual_thread(operation.clone(), args),
             IrExpression::TryWithResources {
-                resources,
-                body,
-                ..
+                resources, body, ..
             } => self.generate_try_with_resources_expression(resources, body),
         }
     }
@@ -874,10 +874,12 @@ impl JavaCodeGenerator {
             BinaryOp::MinusAssign => "-=".to_string(),
             BinaryOp::MultiplyAssign => "*=".to_string(),
             BinaryOp::DivideAssign => "/=".to_string(),
-            BinaryOp::Elvis => return Err(CodeGenError::UnsupportedConstruct {
-                construct: "Elvis operator requires specialised lowering".to_string(),
-                span: None,
-            }),
+            BinaryOp::Elvis => {
+                return Err(CodeGenError::UnsupportedConstruct {
+                    construct: "Elvis operator requires specialised lowering".to_string(),
+                    span: None,
+                })
+            }
         })
     }
 
@@ -923,12 +925,17 @@ impl JavaCodeGenerator {
         } = switch
         {
             let mut builder = self.builder();
-            builder.push_line(&format!("switch ({}) {{", self.generate_expression(discriminant)?));
+            builder.push_line(&format!(
+                "switch ({}) {{",
+                self.generate_expression(discriminant)?
+            ));
             builder.indent();
             for case in cases {
                 let labels = self.render_case_labels(&case.labels)?;
                 let guard = match &case.guard {
-                    Some(guard_expr) => format!(" when ({})", self.generate_expression(guard_expr)?),
+                    Some(guard_expr) => {
+                        format!(" when ({})", self.generate_expression(guard_expr)?)
+                    }
                     None => String::new(),
                 };
                 let body_expr = self.generate_expression(&case.body)?;
@@ -962,7 +969,12 @@ impl JavaCodeGenerator {
             Some(value) => self.generate_expression(value)?,
             None => "null".to_string(),
         };
-        Ok(format!("({expr} != null ? {op} : {default})", expr = expr_code, op = op_code, default = default_code))
+        Ok(format!(
+            "({expr} != null ? {op} : {default})",
+            expr = expr_code,
+            op = op_code,
+            default = default_code
+        ))
     }
 
     /// Generate CompletableFuture operations (from async/await).
@@ -1073,7 +1085,10 @@ impl JavaCodeGenerator {
         cases: &[IrSwitchCase],
     ) -> Result<String, CodeGenError> {
         let mut builder = self.builder();
-        builder.push_line(&format!("switch ({}) {{", self.generate_expression(discriminant)?));
+        builder.push_line(&format!(
+            "switch ({}) {{",
+            self.generate_expression(discriminant)?
+        ));
         builder.indent();
         for case in cases {
             let labels = self.render_case_labels(&case.labels)?;
@@ -1264,10 +1279,7 @@ impl JavaCodeGenerator {
         Ok(rendered.join(", "))
     }
 
-    fn render_argument_vec(
-        &mut self,
-        args: &[IrExpression],
-    ) -> Result<Vec<String>, CodeGenError> {
+    fn render_argument_vec(&mut self, args: &[IrExpression]) -> Result<Vec<String>, CodeGenError> {
         let mut rendered = Vec::new();
         for arg in args {
             rendered.push(self.generate_expression(arg)?);
@@ -1280,9 +1292,10 @@ impl JavaCodeGenerator {
         for label in labels {
             match label {
                 IrCaseLabel::Literal(literal) => rendered.push(Self::literal_to_string(literal)),
-                IrCaseLabel::TypePattern { type_name, variable } => {
-                    rendered.push(format!("{} {}", type_name, variable))
-                }
+                IrCaseLabel::TypePattern {
+                    type_name,
+                    variable,
+                } => rendered.push(format!("{} {}", type_name, variable)),
                 IrCaseLabel::Range { .. } => {
                     return Err(CodeGenError::UnsupportedConstruct {
                         construct: "Range switch labels".to_string(),
