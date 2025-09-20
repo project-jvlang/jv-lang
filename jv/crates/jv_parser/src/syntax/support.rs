@@ -1,6 +1,8 @@
 use chumsky::prelude::*;
 use chumsky::Parser as ChumskyParser;
-use jv_ast::{ConcurrencyConstruct, Expression, ResourceManagement, Span, Statement};
+use jv_ast::{
+    ConcurrencyConstruct, Expression, ResourceManagement, Span, Statement, TypeAnnotation,
+};
 use jv_lexer::{Token, TokenType};
 
 pub(crate) fn token_val() -> impl ChumskyParser<Token, Token, Error = Simple<Token>> + Clone {
@@ -21,6 +23,26 @@ pub(crate) fn token_data() -> impl ChumskyParser<Token, Token, Error = Simple<To
 
 pub(crate) fn token_class() -> impl ChumskyParser<Token, Token, Error = Simple<Token>> + Clone {
     filter(|token: &Token| matches!(token.token_type, TokenType::Class))
+}
+
+pub(crate) fn token_return() -> impl ChumskyParser<Token, Token, Error = Simple<Token>> + Clone {
+    filter(|token: &Token| match &token.token_type {
+        TokenType::Return => true,
+        TokenType::Identifier(name) => name == "return",
+        _ => false,
+    })
+}
+
+pub(crate) fn token_use() -> impl ChumskyParser<Token, Token, Error = Simple<Token>> + Clone {
+    keyword("use")
+}
+
+pub(crate) fn token_defer() -> impl ChumskyParser<Token, Token, Error = Simple<Token>> + Clone {
+    keyword("defer")
+}
+
+pub(crate) fn token_spawn() -> impl ChumskyParser<Token, Token, Error = Simple<Token>> + Clone {
+    keyword("spawn")
 }
 
 pub(crate) fn token_when() -> impl ChumskyParser<Token, Token, Error = Simple<Token>> + Clone {
@@ -163,4 +185,18 @@ pub(crate) fn statement_span(stmt: &Statement) -> Span {
             ResourceManagement::Defer { span, .. } => span.clone(),
         },
     }
+}
+
+pub(crate) fn keyword(
+    expected: &'static str,
+) -> impl ChumskyParser<Token, Token, Error = Simple<Token>> + Clone {
+    filter(move |token: &Token| match &token.token_type {
+        TokenType::Identifier(name) => name == expected,
+        _ => false,
+    })
+}
+
+pub(crate) fn type_annotation_simple(
+) -> impl ChumskyParser<Token, TypeAnnotation, Error = Simple<Token>> + Clone {
+    identifier().map(TypeAnnotation::Simple)
 }
