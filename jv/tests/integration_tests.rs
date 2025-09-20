@@ -1,4 +1,5 @@
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -40,6 +41,16 @@ fn workspace_file(relative: &str) -> PathBuf {
 
 fn has_javac() -> bool {
     Command::new("javac")
+        .arg("-version")
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false)
+}
+
+fn has_java_runtime() -> bool {
+    Command::new("java")
         .arg("-version")
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -132,4 +143,119 @@ fn pipeline_runs_javac_when_available() {
     for file in &artifacts.class_files {
         assert!(file.exists(), "Class file missing: {}", file.display());
     }
+}
+
+#[test]
+fn cli_all_subcommands_smoke_test() {
+    let Some(cli_path) = std::env::var_os("CARGO_BIN_EXE_jv").map(PathBuf::from) else {
+        eprintln!("Skipping CLI integration test: CARGO_BIN_EXE_jv not set");
+        return;
+    };
+
+    let temp_dir = TempDirGuard::new("cli-all").expect("Failed to create temp dir");
+    let project_dir = temp_dir.path().join("cli-demo");
+
+    let version_output = Command::new(&cli_path)
+        .arg("version")
+        .output()
+        .expect("Failed to run jv version");
+    assert!(version_output.status.success());
+    let version_stdout = String::from_utf8_lossy(&version_output.stdout);
+    assert!(
+        version_stdout.contains("jv "),
+        "Expected version banner, got: {}",
+        version_stdout
+    );
+
+    let init_status = Command::new(&cli_path)
+        .arg("init")
+        .arg(&project_dir)
+        .status()
+        .expect("Failed to run jv init");
+    assert!(init_status.success());
+    assert!(project_dir.join("jv.toml").exists());
+    assert!(project_dir.join("src/main.jv").exists());
+
+    let main_path = project_dir.join("src/main.jv");
+    let main_source = r#"fun main() {
+    val message = "Hello from CLI"
+    println(message)
+}
+"#;
+    fs::write(&main_path, main_source).expect("Failed to write main.jv");
+
+    let fmt_status = Command::new(&cli_path)
+        .arg("fmt")
+        .arg(&main_path)
+        .status()
+        .expect("Failed to run jv fmt");
+    assert!(fmt_status.success());
+    let formatted = fs::read_to_string(&main_path).expect("Failed to read formatted file");
+    assert!(formatted.contains("Hello from CLI"));
+
+    let check_status = Command::new(&cli_path)
+        .arg("check")
+        .arg(&main_path)
+        .status()
+        .expect("Failed to run jv check");
+    assert!(check_status.success());
+
+    let output_dir = project_dir.join("out");
+    let build_output = Command::new(&cli_path)
+        .arg("build")
+        .arg(&main_path)
+        .arg("-o")
+        .arg(&output_dir)
+        .arg("--java-only")
+        .arg("--check")
+        .arg("--format")
+        .output()
+        .expect("Failed to run jv build");
+    assert!(build_output.status.success());
+    let generated_java: Vec<_> = fs::read_dir(&output_dir)
+        .expect("Failed to read build output")
+        .filter_map(|entry| entry.ok())
+        .map(|entry| entry.path())
+        .filter(|path| path.extension().and_then(|ext| ext.to_str()) == Some("java"))
+        .collect();
+    assert!(
+        !generated_java.is_empty(),
+        "Expected generated Java files, build stdout: {}",
+        String::from_utf8_lossy(&build_output.stdout)
+    );
+
+    if has_javac() && has_java_runtime() {
+        let run_output = Command::new(&cli_path)
+            .arg("run")
+            .arg(&main_path)
+            .output()
+            .expect("Failed to run jv run");
+        assert!(run_output.status.success());
+    } else {
+        eprintln!("Skipping jv run command: java runtime or javac missing");
+    }
+
+    let mut repl_child = Command::new(&cli_path)
+        .arg("repl")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("Failed to start jv repl");
+
+    {
+        let mut stdin = repl_child.stdin.take().expect("Failed to access repl stdin");
+        stdin
+            .write_all(b":help\n:q\n")
+            .expect("Failed to send commands to repl");
+    }
+
+    let repl_output = repl_child
+        .wait_with_output()
+        .expect("Failed to wait for repl");
+    assert!(repl_output.status.success());
+    let repl_stdout = String::from_utf8_lossy(&repl_output.stdout);
+    assert!(repl_stdout.contains("jv REPL"));
+    assert!(repl_stdout.contains("Commands:"));
+    assert!(repl_stdout.contains("Bye"));
 }

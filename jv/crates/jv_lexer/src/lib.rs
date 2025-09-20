@@ -460,7 +460,7 @@ impl Lexer {
 
                 // Numbers
                 c if c.is_ascii_digit() => {
-                    let number = self.read_number();
+                    let number = self.read_number()?;
                     tokens.push(self.make_token(
                         TokenType::Number(number.clone()),
                         &number,
@@ -541,27 +541,72 @@ impl Lexer {
         chars[start..self.current].iter().collect()
     }
 
-    fn read_number(&mut self) -> String {
+    fn read_number(&mut self) -> Result<String, LexError> {
         let start = self.current;
         let chars: Vec<char> = self.input.chars().collect();
+        let len = chars.len();
 
-        while self.current < chars.len() && chars[self.current].is_ascii_digit() {
+        // Handle prefixed numeric literals (hex, binary)
+        if self.current < len && chars[self.current] == '0' && self.current + 1 < len {
+            match chars[self.current + 1] {
+                'x' | 'X' => {
+                    self.advance(); // consume '0'
+                    self.advance(); // consume 'x'
+                    let digits_start = self.current;
+                    while self.current < len && chars[self.current].is_ascii_hexdigit() {
+                        self.advance();
+                    }
+                    if self.current == digits_start {
+                        let offending = chars.get(self.current).copied().unwrap_or('x');
+                        return Err(LexError::UnexpectedChar(offending, self.line, self.column));
+                    }
+                    return Ok(chars[start..self.current].iter().collect());
+                }
+                'b' | 'B' => {
+                    self.advance(); // consume '0'
+                    self.advance(); // consume 'b'
+                    let digits_start = self.current;
+                    while self.current < len && matches!(chars[self.current], '0' | '1') {
+                        self.advance();
+                    }
+                    if self.current == digits_start {
+                        let offending = chars.get(self.current).copied().unwrap_or('b');
+                        return Err(LexError::UnexpectedChar(offending, self.line, self.column));
+                    }
+                    return Ok(chars[start..self.current].iter().collect());
+                }
+                _ => {}
+            }
+        }
+
+        let mut seen_dot = false;
+        while self.current < len && chars[self.current].is_ascii_digit() {
             self.advance();
         }
 
         // Handle decimal point
-        if self.current < chars.len()
+        if self.current < len
             && chars[self.current] == '.'
-            && self.current + 1 < chars.len()
+            && self.current + 1 < len
             && chars[self.current + 1].is_ascii_digit()
         {
+            seen_dot = true;
             self.advance(); // consume '.'
-            while self.current < chars.len() && chars[self.current].is_ascii_digit() {
+            while self.current < len && chars[self.current].is_ascii_digit() {
                 self.advance();
             }
         }
 
-        chars[start..self.current].iter().collect()
+        if seen_dot
+            && self.current < len
+            && chars[self.current] == '.'
+            && self.current + 1 < len
+            && chars[self.current + 1].is_ascii_digit()
+        {
+            return Err(LexError::UnexpectedChar('.', self.line, self.column));
+        }
+
+        Ok(chars[start..self.current].iter().collect())
     }
 
     fn read_line_comment(&mut self) -> String {

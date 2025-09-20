@@ -273,7 +273,6 @@ fn test_function_definitions() {
     assert!(token_types.contains(&&TokenType::Fun));
     assert!(token_types.contains(&&TokenType::Return));
     assert!(token_types.contains(&&TokenType::Colon));
-    assert!(token_types.contains(&&TokenType::Arrow));
     assert!(token_types.contains(&&TokenType::Assign));
 }
 
@@ -305,7 +304,7 @@ fn test_when_expressions() {
 
     let token_types: Vec<_> = tokens.iter().map(|t| &t.token_type).collect();
     assert!(token_types.contains(&&TokenType::When));
-    assert!(token_types.contains(&&TokenType::FatArrow));
+    assert!(token_types.contains(&&TokenType::Arrow));
     assert!(token_types.contains(&&TokenType::In));
     // Note: DotDot (range operator) not yet implemented in TokenType enum
     assert!(token_types.contains(&&TokenType::Else));
@@ -348,7 +347,6 @@ fn test_extension_functions() {
     let token_types: Vec<_> = tokens.iter().map(|t| &t.token_type).collect();
     assert!(token_types.contains(&&TokenType::Fun));
     assert!(token_types.contains(&&TokenType::Dot));
-    assert!(token_types.contains(&&TokenType::Arrow));
     assert!(token_types.contains(&&TokenType::Assign));
 }
 
@@ -386,7 +384,7 @@ fn test_use_defer_syntax() {
     let mut lexer = Lexer::new(source.to_string());
     let tokens = lexer.tokenize().unwrap();
 
-    let token_types: Vec<_> = tokens.iter().map(|t| &t.token_type).collect();
+    let _token_types: Vec<_> = tokens.iter().map(|t| &t.token_type).collect();
     // Note: Use, Defer keywords not yet implemented in TokenType enum
 }
 

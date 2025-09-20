@@ -2,6 +2,7 @@ use super::*;
 
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 struct TempDirGuard {
@@ -28,6 +29,11 @@ impl Drop for TempDirGuard {
     fn drop(&mut self) {
         let _ = fs::remove_dir_all(&self.path);
     }
+}
+
+fn current_dir_lock() -> &'static Mutex<()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(()))
 }
 
 #[test]
@@ -121,6 +127,7 @@ fn test_no_command() {
 
 #[test]
 fn test_init_project_in_temp_dir() {
+    let _guard = current_dir_lock().lock().unwrap();
     let temp_dir = TempDirGuard::new("init-temp");
     let temp_path = temp_dir.path().to_path_buf();
 
@@ -153,6 +160,7 @@ fn test_init_project_in_temp_dir() {
 
 #[test]
 fn test_init_project_with_name() {
+    let _guard = current_dir_lock().lock().unwrap();
     let temp_dir = TempDirGuard::new("init-named");
     let temp_path = temp_dir.path().to_path_buf();
 
