@@ -164,12 +164,12 @@ fn test_nullable_type_annotation() {
     let int_type = checker.type_annotation_to_inferred(&nullable_int);
 
     match string_type {
-        InferredType::Optional(inner) => assert_eq!(**inner, InferredType::String),
+        InferredType::Optional(inner) => assert_eq!(*inner, InferredType::String),
         _ => panic!("Expected optional string type"),
     }
 
     match int_type {
-        InferredType::Optional(inner) => assert_eq!(**inner, InferredType::Int),
+        InferredType::Optional(inner) => assert_eq!(*inner, InferredType::Int),
         _ => panic!("Expected optional int type"),
     }
 }
@@ -183,6 +183,7 @@ fn test_variable_declaration_checking() {
         name: "x".to_string(),
         type_annotation: Some(TypeAnnotation::Simple("String".to_string())),
         initializer: Expression::Literal(Literal::String("hello".to_string()), Span::default()),
+        modifiers: Modifiers::default(),
         span: Span::default(),
     };
 
@@ -204,6 +205,7 @@ fn test_var_declaration_checking() {
             Literal::Number("42".to_string()),
             Span::default(),
         )),
+        modifiers: Modifiers::default(),
         span: Span::default(),
     };
 
@@ -220,7 +222,6 @@ fn test_function_declaration_checking() {
 
     let func_stmt = Statement::FunctionDeclaration {
         name: "test".to_string(),
-        type_parameters: vec![],
         parameters: vec![Parameter {
             name: "param".to_string(),
             type_annotation: Some(TypeAnnotation::Simple("String".to_string())),
@@ -228,7 +229,10 @@ fn test_function_declaration_checking() {
             span: Span::default(),
         }],
         return_type: Some(TypeAnnotation::Simple("Int".to_string())),
-        body: Expression::Literal(Literal::Number("42".to_string()), Span::default()),
+        body: Box::new(Expression::Literal(
+            Literal::Number("42".to_string()),
+            Span::default(),
+        )),
         modifiers: Modifiers::default(),
         span: Span::default(),
     };
@@ -247,6 +251,8 @@ fn test_program_checking() {
     let checker = TypeChecker::new();
 
     let program = Program {
+        package: None,
+        imports: vec![],
         statements: vec![
             Statement::ValDeclaration {
                 name: "x".to_string(),
@@ -255,6 +261,7 @@ fn test_program_checking() {
                     Literal::String("hello".to_string()),
                     Span::default(),
                 ),
+                modifiers: Modifiers::default(),
                 span: Span::default(),
             },
             Statement::VarDeclaration {
@@ -264,6 +271,7 @@ fn test_program_checking() {
                     Literal::Number("42".to_string()),
                     Span::default(),
                 )),
+                modifiers: Modifiers::default(),
                 span: Span::default(),
             },
         ],
@@ -279,11 +287,14 @@ fn test_null_safety_checking() {
     let checker = TypeChecker::new();
 
     let program = Program {
+        package: None,
+        imports: vec![],
         statements: vec![
             Statement::ValDeclaration {
                 name: "nullable".to_string(),
                 type_annotation: Some(TypeAnnotation::Simple("String".to_string())),
                 initializer: Expression::Literal(Literal::Null, Span::default()),
+                modifiers: Modifiers::default(),
                 span: Span::default(),
             },
             Statement::ValDeclaration {
@@ -293,6 +304,7 @@ fn test_null_safety_checking() {
                     Literal::String("hello".to_string()),
                     Span::default(),
                 ),
+                modifiers: Modifiers::default(),
                 span: Span::default(),
             },
         ],
@@ -308,6 +320,8 @@ fn test_null_safety_checking() {
 fn test_forbidden_syntax_checking() {
     let checker = TypeChecker::new();
     let program = Program {
+        package: None,
+        imports: vec![],
         statements: vec![],
         span: Span::default(),
     };

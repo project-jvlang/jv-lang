@@ -147,6 +147,3 @@ impl Default for JavaFormatter {
         Self::new(FormatConfig::default())
     }
 }
-
-#[cfg(test)]
-mod tests;

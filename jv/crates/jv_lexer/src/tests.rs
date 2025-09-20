@@ -325,8 +325,18 @@ fn test_async_spawn_syntax() {
     let mut lexer = Lexer::new(source.to_string());
     let tokens = lexer.tokenize().unwrap();
 
-    let token_types: Vec<_> = tokens.iter().map(|t| &t.token_type).collect();
-    // Note: Spawn, Async, Await keywords not yet implemented in TokenType enum
+    let identifiers: Vec<_> = tokens
+        .iter()
+        .filter_map(|t| match &t.token_type {
+            TokenType::Identifier(name) => Some(name.as_str()),
+            _ => None,
+        })
+        .collect();
+
+    // Spawn/async/await should currently lex as identifiers until dedicated keywords are added
+    assert!(identifiers.contains(&"spawn"));
+    assert!(identifiers.contains(&"async"));
+    assert!(identifiers.contains(&"await"));
 }
 
 #[test]
