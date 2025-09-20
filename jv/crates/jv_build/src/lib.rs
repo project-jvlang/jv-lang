@@ -1,5 +1,5 @@
 // jv_build - Build system and javac integration
-use anyhow::{Context, Result};
+use anyhow::Result;
 use std::path::Path;
 use std::process::{Command, Stdio};
 use thiserror::Error;

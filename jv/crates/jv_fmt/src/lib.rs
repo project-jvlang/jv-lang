@@ -513,7 +513,7 @@ System.err.println("Skipping null or empty item");
             let expected_indent = "    ".repeat(depth - 1 - i);
             let closing_line = &lines[depth + i];
             if expected_indent.is_empty() {
-                assert_eq!(closing_line, "}");
+                assert_eq!(*closing_line, "}");
             } else {
                 assert!(closing_line.starts_with(&expected_indent));
             }

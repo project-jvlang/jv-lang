@@ -36,4 +36,20 @@ pub enum CodeGenError {
 
     #[error("Pattern matching error: {message}")]
     PatternMatchingError { message: String, span: Option<Span> },
+
+    #[error("Unsupported type: {type_name} - {message}")]
+    UnsupportedType { type_name: String, message: String },
+
+    #[error("Invalid generic arity: expected {expected}, got {actual} for type {type_name}")]
+    InvalidGenericArity {
+        expected: usize,
+        actual: usize,
+        type_name: String,
+    },
+
+    #[error("Invalid switch cases: {message}")]
+    InvalidSwitchCases { message: String },
+
+    #[error("Invalid pattern: {message}")]
+    InvalidPattern { message: String },
 }

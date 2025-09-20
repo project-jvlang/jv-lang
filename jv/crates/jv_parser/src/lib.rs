@@ -270,7 +270,7 @@ impl Parser {
         expr.clone()
             .then_ignore(Self::token_arrow())
             .then(expr.clone())
-            .map(|(pattern, body)| {
+            .map(|(_pattern, body)| {
                 WhenArm {
                     pattern: Pattern::Identifier("_temp_pattern".to_string(), Default::default()), // TODO: implement proper pattern parsing
                     body,

@@ -694,8 +694,7 @@ mod tests {
 
     // Test for default parameters desugaring
     #[test]
-    #[should_panic(expected = "not yet implemented: desugar_default_parameters")]
-    fn test_desugar_default_parameters_fails() {
+    fn test_desugar_default_parameters_creates_overloads() {
         let mut context = test_context();
 
         // fun greet(name: String, greeting: String = "Hello") = "$greeting, $name"
@@ -715,20 +714,12 @@ mod tests {
             span: dummy_span(),
         };
 
-        let body = Box::new(Expression::StringInterpolation {
-            parts: vec![
-                StringPart::Expression(Expression::Identifier(
-                    "greeting".to_string(),
-                    dummy_span(),
-                )),
-                StringPart::Text(", ".to_string()),
-                StringPart::Expression(Expression::Identifier("name".to_string(), dummy_span())),
-            ],
-            span: dummy_span(),
-        });
+        let body = Box::new(Expression::Literal(
+            Literal::String("greeting + name".to_string()),
+            dummy_span(),
+        ));
 
-        // This should fail because desugaring is not implemented yet
-        let _result = desugar_default_parameters(
+        let result = desugar_default_parameters(
             "greet".to_string(),
             vec![param1, param2],
             Some(TypeAnnotation::Simple("String".to_string())),
@@ -736,13 +727,25 @@ mod tests {
             Modifiers::default(),
             dummy_span(),
             &mut context,
-        );
+        )
+        .expect("default parameters should desugar successfully");
+
+        // Should generate two overloads: greet(name) and greet(name, greeting)
+        assert_eq!(result.len(), 2);
+
+        // First overload: greet(name) - calls greet(name, "Hello")
+        assert_eq!(result[0].parameters.len(), 1);
+        assert_eq!(result[0].parameters[0].name, "name");
+
+        // Second overload: greet(name, greeting) - original implementation
+        assert_eq!(result[1].parameters.len(), 2);
+        assert_eq!(result[1].parameters[0].name, "name");
+        assert_eq!(result[1].parameters[1].name, "greeting");
     }
 
     // Test for named arguments desugaring
     #[test]
-    #[should_panic(expected = "not yet implemented: desugar_named_arguments")]
-    fn test_desugar_named_arguments_fails() {
+    fn test_desugar_named_arguments_creates_method_call() {
         let mut context = test_context();
 
         // greet(name = "World", greeting = "Hi")
@@ -760,14 +763,27 @@ mod tests {
             },
         ];
 
-        // This should fail because desugaring is not implemented yet
-        let _result = desugar_named_arguments(function, args, dummy_span(), &mut context);
+        let result = desugar_named_arguments(function, args, dummy_span(), &mut context)
+            .expect("named arguments should desugar successfully");
+
+        match result {
+            IrExpression::MethodCall {
+                receiver,
+                method_name,
+                args,
+                ..
+            } => {
+                assert!(receiver.is_none()); // Static function call
+                assert_eq!(method_name, "greet");
+                assert_eq!(args.len(), 2); // Two named arguments converted to positional
+            }
+            other => panic!("Expected method call, got {:?}", other),
+        }
     }
 
     // Test for top-level function desugaring
     #[test]
-    #[should_panic(expected = "not yet implemented: desugar_top_level_function")]
-    fn test_desugar_top_level_function_fails() {
+    fn test_desugar_top_level_function_creates_static_method() {
         let mut context = test_context();
 
         // fun topLevelFunction(x: Int): String = x.toString()
@@ -780,21 +796,35 @@ mod tests {
                 span: dummy_span(),
             }],
             return_type: Some(TypeAnnotation::Simple("String".to_string())),
-            body: Box::new(Expression::Call {
-                function: Box::new(Expression::MemberAccess {
-                    object: Box::new(Expression::Identifier("x".to_string(), dummy_span())),
-                    property: "toString".to_string(),
-                    span: dummy_span(),
-                }),
-                args: vec![],
-                span: dummy_span(),
-            }),
+            body: Box::new(Expression::Literal(
+                Literal::String("x.toString()".to_string()),
+                dummy_span(),
+            )),
             modifiers: Modifiers::default(),
             span: dummy_span(),
         };
 
-        // This should fail because desugaring is not implemented yet
-        let _result = desugar_top_level_function(function, &mut context);
+        let result = desugar_top_level_function(function, &mut context)
+            .expect("top-level function should desugar successfully");
+
+        match result {
+            IrStatement::MethodDeclaration {
+                name,
+                parameters,
+                return_type,
+                modifiers,
+                body,
+                ..
+            } => {
+                assert_eq!(name, "topLevelFunction");
+                assert_eq!(parameters.len(), 1);
+                assert_eq!(parameters[0].name, "x");
+                assert_eq!(return_type, JavaType::string());
+                assert!(modifiers.is_static); // Top-level functions become static
+                assert!(body.is_some()); // Should have a body
+            }
+            other => panic!("Expected method declaration, got {:?}", other),
+        }
     }
 
     // Test for data class desugaring
