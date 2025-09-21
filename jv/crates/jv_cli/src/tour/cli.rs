@@ -124,7 +124,7 @@ impl<P: JdkProbe> TourCli<P> {
             let trimmed = buffer.trim();
             match parse_selection(trimmed) {
                 Some(MenuAction::Section(section)) => {
-                    render_section(writer, section)?;
+                    render_section(reader, writer, section)?;
                     prompt_return_to_menu(reader, writer)?;
                 }
                 Some(MenuAction::Progress) => {
@@ -231,12 +231,17 @@ fn render_menu<W: Write>(writer: &mut W, entries: &[MenuEntry]) -> Result<()> {
     Ok(())
 }
 
-fn render_section<W: Write>(writer: &mut W, section: SectionId) -> Result<()> {
+fn render_section<R, W>(reader: &mut R, writer: &mut W, section: SectionId) -> Result<()>
+where
+    R: BufRead,
+    W: Write,
+{
     match section {
         SectionId::BasicSyntax => sections::basic_syntax::render(writer),
         SectionId::ControlFlow => sections::control_flow::render(writer),
         SectionId::DataClasses => sections::data_classes::render(writer),
         SectionId::BuildTools => sections::build_tools::render(writer),
+        SectionId::InteractiveEditor => sections::interactive::render(reader, writer),
         _ => render_placeholder_for_section(writer, section),
     }
 }
