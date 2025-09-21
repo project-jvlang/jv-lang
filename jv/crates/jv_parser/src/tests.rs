@@ -302,7 +302,8 @@ fn test_lambda_expression() {
                 assert_eq!(args.len(), 1);
                 match &args[0] {
                     Argument::Positional(Expression::Lambda { parameters, .. }) => {
-                        assert_eq!(parameters.len(), 1);
+                        dbg!(parameters);
+                        assert_eq!(parameters.len(), 1, "parameters = {:?}", parameters);
                         assert_eq!(parameters[0].name, "x");
                     }
                     _ => panic!("Expected lambda expression"),

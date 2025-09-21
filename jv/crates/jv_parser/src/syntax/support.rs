@@ -109,6 +109,89 @@ pub(crate) fn token_multiply() -> impl ChumskyParser<Token, Token, Error = Simpl
     filter(|token: &Token| matches!(token.token_type, TokenType::Multiply))
 }
 
+pub(crate) fn token_divide() -> impl ChumskyParser<Token, Token, Error = Simple<Token>> + Clone {
+    filter(|token: &Token| matches!(token.token_type, TokenType::Divide))
+}
+
+pub(crate) fn token_modulo() -> impl ChumskyParser<Token, Token, Error = Simple<Token>> + Clone {
+    filter(|token: &Token| matches!(token.token_type, TokenType::Modulo))
+}
+
+pub(crate) fn token_equal() -> impl ChumskyParser<Token, Token, Error = Simple<Token>> + Clone {
+    filter(|token: &Token| matches!(token.token_type, TokenType::Equal))
+}
+
+pub(crate) fn token_not_equal() -> impl ChumskyParser<Token, Token, Error = Simple<Token>> + Clone {
+    filter(|token: &Token| matches!(token.token_type, TokenType::NotEqual))
+}
+
+pub(crate) fn token_less() -> impl ChumskyParser<Token, Token, Error = Simple<Token>> + Clone {
+    filter(|token: &Token| matches!(token.token_type, TokenType::Less))
+}
+
+pub(crate) fn token_less_equal() -> impl ChumskyParser<Token, Token, Error = Simple<Token>> + Clone
+{
+    filter(|token: &Token| matches!(token.token_type, TokenType::LessEqual))
+}
+
+pub(crate) fn token_greater() -> impl ChumskyParser<Token, Token, Error = Simple<Token>> + Clone {
+    filter(|token: &Token| matches!(token.token_type, TokenType::Greater))
+}
+
+pub(crate) fn token_greater_equal(
+) -> impl ChumskyParser<Token, Token, Error = Simple<Token>> + Clone {
+    filter(|token: &Token| matches!(token.token_type, TokenType::GreaterEqual))
+}
+
+pub(crate) fn token_and() -> impl ChumskyParser<Token, Token, Error = Simple<Token>> + Clone {
+    filter(|token: &Token| matches!(token.token_type, TokenType::And))
+}
+
+pub(crate) fn token_or() -> impl ChumskyParser<Token, Token, Error = Simple<Token>> + Clone {
+    filter(|token: &Token| matches!(token.token_type, TokenType::Or))
+}
+
+pub(crate) fn token_not() -> impl ChumskyParser<Token, Token, Error = Simple<Token>> + Clone {
+    filter(|token: &Token| matches!(token.token_type, TokenType::Not))
+}
+
+pub(crate) fn token_question() -> impl ChumskyParser<Token, Token, Error = Simple<Token>> + Clone {
+    filter(|token: &Token| matches!(token.token_type, TokenType::Question))
+}
+
+pub(crate) fn token_elvis() -> impl ChumskyParser<Token, Token, Error = Simple<Token>> + Clone {
+    filter(|token: &Token| matches!(token.token_type, TokenType::Elvis))
+}
+
+pub(crate) fn token_if() -> impl ChumskyParser<Token, Token, Error = Simple<Token>> + Clone {
+    filter(|token: &Token| matches!(token.token_type, TokenType::If))
+}
+
+pub(crate) fn token_left_bracket() -> impl ChumskyParser<Token, Token, Error = Simple<Token>> + Clone
+{
+    filter(|token: &Token| matches!(token.token_type, TokenType::LeftBracket))
+}
+
+pub(crate) fn token_right_bracket(
+) -> impl ChumskyParser<Token, Token, Error = Simple<Token>> + Clone {
+    filter(|token: &Token| matches!(token.token_type, TokenType::RightBracket))
+}
+
+pub(crate) fn token_string_start() -> impl ChumskyParser<Token, Token, Error = Simple<Token>> + Clone
+{
+    filter(|token: &Token| matches!(token.token_type, TokenType::StringStart))
+}
+
+pub(crate) fn token_string_mid() -> impl ChumskyParser<Token, Token, Error = Simple<Token>> + Clone
+{
+    filter(|token: &Token| matches!(token.token_type, TokenType::StringMid))
+}
+
+pub(crate) fn token_string_end() -> impl ChumskyParser<Token, Token, Error = Simple<Token>> + Clone
+{
+    filter(|token: &Token| matches!(token.token_type, TokenType::StringEnd))
+}
+
 pub(crate) fn identifier() -> impl ChumskyParser<Token, String, Error = Simple<Token>> + Clone {
     filter_map(|span, token: Token| match token.token_type {
         TokenType::Identifier(name) => Ok(name),
