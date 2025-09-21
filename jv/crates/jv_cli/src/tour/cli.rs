@@ -3,6 +3,7 @@ use std::io::{self, BufRead, Write};
 use anyhow::{Context, Result};
 
 use super::environment::{EnvironmentManager, JdkProbe, JdkStatus};
+use super::sections;
 
 /// Identifier for tour sections that are accessible from the main menu.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -123,7 +124,7 @@ impl<P: JdkProbe> TourCli<P> {
             let trimmed = buffer.trim();
             match parse_selection(trimmed) {
                 Some(MenuAction::Section(section)) => {
-                    render_placeholder_for_section(writer, section)?;
+                    render_section(writer, section)?;
                     prompt_return_to_menu(reader, writer)?;
                 }
                 Some(MenuAction::Progress) => {
@@ -230,6 +231,13 @@ fn render_menu<W: Write>(writer: &mut W, entries: &[MenuEntry]) -> Result<()> {
     Ok(())
 }
 
+fn render_section<W: Write>(writer: &mut W, section: SectionId) -> Result<()> {
+    match section {
+        SectionId::BasicSyntax => sections::basic_syntax::render(writer),
+        _ => render_placeholder_for_section(writer, section),
+    }
+}
+
 fn render_placeholder_for_section<W: Write>(writer: &mut W, section: SectionId) -> Result<()> {
     writeln!(writer, "--- {} セクション ---", section.title())?;
     writeln!(writer, "このセクションの詳細コンテンツは現在準備中です。")?;
@@ -289,6 +297,7 @@ fn render_setup_guide<W: Write>(
     writer: &mut W,
     guide: &super::environment::SetupGuide<'_>,
 ) -> Result<()> {
+    writeln!(writer, "JDKセットアップガイド")?;
     writeln!(writer, "--- {} ---", guide.headline)?;
     for step in &guide.steps {
         writeln!(writer, "{}", step)?;
