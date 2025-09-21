@@ -27,3 +27,6 @@ jv_fmt.workspace = true
 jv_checker.workspace = true
 jv_mapper.workspace = true
 jv_pm.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true

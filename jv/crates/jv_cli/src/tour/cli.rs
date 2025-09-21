@@ -1,12 +1,16 @@
+use std::cell::RefCell;
 use std::io::{self, BufRead, Write};
 
 use anyhow::{Context, Result};
+use chrono::Local;
+use serde::{Deserialize, Serialize};
 
 use super::environment::{EnvironmentManager, JdkProbe, JdkStatus};
+use super::progress::{CompletionOutcome, ProgressSummary, ProgressTracker};
 use super::sections;
 
 /// Identifier for tour sections that are accessible from the main menu.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum SectionId {
     BasicSyntax,
     ControlFlow,
@@ -20,7 +24,23 @@ pub enum SectionId {
 }
 
 impl SectionId {
-    fn title(self) -> &'static str {
+    pub const ALL: [SectionId; 9] = [
+        SectionId::BasicSyntax,
+        SectionId::ControlFlow,
+        SectionId::DataClasses,
+        SectionId::Functions,
+        SectionId::Concurrency,
+        SectionId::AsyncProgramming,
+        SectionId::BuildTools,
+        SectionId::InteractiveEditor,
+        SectionId::MiniProjectBuilder,
+    ];
+
+    pub fn all() -> &'static [SectionId] {
+        &Self::ALL
+    }
+
+    pub fn title(self) -> &'static str {
         match self {
             SectionId::BasicSyntax => "基本構文",
             SectionId::ControlFlow => "制御フロー",
@@ -34,7 +54,7 @@ impl SectionId {
         }
     }
 
-    fn description(self) -> &'static str {
+    pub fn description(self) -> &'static str {
         match self {
             SectionId::BasicSyntax => {
                 "Hello Worldやval/var宣言、型推論、null安全性を学ぶセクション"
@@ -49,6 +69,36 @@ impl SectionId {
                 "リアルタイムにコードを編集して検証するインタラクティブ体験"
             }
             SectionId::MiniProjectBuilder => "ToDoアプリなどのミニプロジェクトを段階的に構築",
+        }
+    }
+}
+
+impl SectionId {
+    pub fn slug(self) -> &'static str {
+        match self {
+            SectionId::BasicSyntax => "basic-syntax",
+            SectionId::ControlFlow => "control-flow",
+            SectionId::DataClasses => "data-classes",
+            SectionId::Functions => "functions",
+            SectionId::Concurrency => "concurrency",
+            SectionId::AsyncProgramming => "async-programming",
+            SectionId::BuildTools => "build-tools",
+            SectionId::InteractiveEditor => "interactive-editor",
+            SectionId::MiniProjectBuilder => "mini-project-builder",
+        }
+    }
+
+    pub fn order(self) -> usize {
+        match self {
+            SectionId::BasicSyntax => 1,
+            SectionId::ControlFlow => 2,
+            SectionId::DataClasses => 3,
+            SectionId::Functions => 4,
+            SectionId::Concurrency => 5,
+            SectionId::AsyncProgramming => 6,
+            SectionId::BuildTools => 7,
+            SectionId::InteractiveEditor => 8,
+            SectionId::MiniProjectBuilder => 9,
         }
     }
 }
@@ -78,6 +128,7 @@ pub enum MenuAction {
 #[derive(Debug, Clone)]
 pub struct TourCli<P: JdkProbe = super::environment::BuildSystemProbe> {
     environment: EnvironmentManager<P>,
+    progress: RefCell<ProgressTracker>,
 }
 
 impl TourCli {
@@ -85,6 +136,7 @@ impl TourCli {
     pub fn new() -> Self {
         Self {
             environment: EnvironmentManager::new(),
+            progress: RefCell::new(ProgressTracker::load_default()),
         }
     }
 }
@@ -92,7 +144,10 @@ impl TourCli {
 impl<P: JdkProbe> TourCli<P> {
     /// Create a CLI instance with a custom environment manager (mainly for testing).
     pub fn with_environment_manager(environment: EnvironmentManager<P>) -> Self {
-        Self { environment }
+        Self {
+            environment,
+            progress: RefCell::new(ProgressTracker::ephemeral()),
+        }
     }
 
     /// Entry point that locks stdin/stdout and runs the interactive menu loop.
@@ -113,7 +168,10 @@ impl<P: JdkProbe> TourCli<P> {
 
         let entries = menu_entries();
         loop {
-            render_menu(writer, &entries)?;
+            {
+                let progress = self.progress.borrow();
+                render_menu(writer, &entries, &progress)?;
+            }
             writer.flush().context("Failed to flush menu output")?;
 
             let mut buffer = String::new();
@@ -124,11 +182,15 @@ impl<P: JdkProbe> TourCli<P> {
             let trimmed = buffer.trim();
             match parse_selection(trimmed) {
                 Some(MenuAction::Section(section)) => {
-                    render_section(reader, writer, section)?;
+                    {
+                        let mut progress = self.progress.borrow_mut();
+                        progress.mark_section_started(section)?;
+                    }
+                    self.run_section(reader, writer, section)?;
                     prompt_return_to_menu(reader, writer)?;
                 }
                 Some(MenuAction::Progress) => {
-                    render_progress_placeholder(writer)?;
+                    self.render_progress(writer)?;
                     prompt_return_to_menu(reader, writer)?;
                 }
                 Some(MenuAction::Exit) => {
@@ -189,6 +251,82 @@ impl<P: JdkProbe> TourCli<P> {
             prompt_for_setup_retry(reader, writer, report.completion_message)?;
         }
     }
+
+    fn run_section<R, W>(&self, reader: &mut R, writer: &mut W, section: SectionId) -> Result<()>
+    where
+        R: BufRead,
+        W: Write,
+    {
+        render_section_content(reader, writer, section)?;
+
+        let quiz_outcome = {
+            let mut progress = self.progress.borrow_mut();
+            progress.run_quiz(section, reader, writer)?
+        };
+
+        for line in &quiz_outcome.feedback {
+            writeln!(writer, "{}", line)?;
+        }
+
+        if quiz_outcome.passed {
+            let completion = {
+                let mut progress = self.progress.borrow_mut();
+                progress.complete_section(section)?
+            };
+            self.render_completion_feedback(writer, section, completion)?;
+        } else {
+            writeln!(writer, "🔄 クイズに正解すると完了マークが付きます。")?;
+        }
+
+        Ok(())
+    }
+
+    fn render_progress<W: Write>(&self, writer: &mut W) -> Result<()> {
+        let summary = self.progress.borrow().summary();
+        render_progress_view(writer, &summary)
+    }
+
+    fn render_completion_feedback<W: Write>(
+        &self,
+        writer: &mut W,
+        section: SectionId,
+        outcome: CompletionOutcome,
+    ) -> Result<()> {
+        writeln!(
+            writer,
+            "\n✅ {} セクションを完了として記録しました。",
+            section.title()
+        )?;
+
+        if let Some(path) = outcome.note_path {
+            writeln!(
+                writer,
+                "💾 学習メモを {} に保存しました。必要に応じて追記してください。",
+                path.display()
+            )?;
+        }
+
+        if !outcome.achievements.is_empty() {
+            writeln!(writer, "🏅 新しい実績を獲得しました:")?;
+            for achievement in outcome.achievements {
+                writeln!(
+                    writer,
+                    "  - {} ({})",
+                    achievement.title, achievement.description
+                )?;
+            }
+        }
+
+        if let Some(certificate) = outcome.certificate {
+            writeln!(
+                writer,
+                "\n📜 {}\n{}",
+                certificate.title, certificate.message
+            )?;
+        }
+
+        Ok(())
+    }
 }
 
 fn display_welcome<W: Write>(writer: &mut W) -> Result<()> {
@@ -205,33 +343,55 @@ fn display_welcome<W: Write>(writer: &mut W) -> Result<()> {
     Ok(())
 }
 
-fn render_menu<W: Write>(writer: &mut W, entries: &[MenuEntry]) -> Result<()> {
+const SECTION_MENU_KEYS: [(SectionId, &str); 9] = [
+    (SectionId::BasicSyntax, "1"),
+    (SectionId::ControlFlow, "2"),
+    (SectionId::DataClasses, "3"),
+    (SectionId::Functions, "4"),
+    (SectionId::Concurrency, "5"),
+    (SectionId::AsyncProgramming, "6"),
+    (SectionId::BuildTools, "7"),
+    (SectionId::InteractiveEditor, "8"),
+    (SectionId::MiniProjectBuilder, "9"),
+];
+
+fn render_menu<W: Write>(
+    writer: &mut W,
+    entries: &[MenuEntry],
+    progress: &ProgressTracker,
+) -> Result<()> {
     writeln!(writer, "📚 学習メニュー")?;
-    for entry in entries
-        .iter()
-        .filter(|e| matches!(e.action, MenuAction::Section(_)))
-    {
-        writeln!(
-            writer,
-            "  {}. {} — {}",
-            entry.key, entry.title, entry.description
-        )?;
-    }
-    if let Some(progress) = entries.iter().find(|e| e.action == MenuAction::Progress) {
-        writeln!(
-            writer,
-            "  {}. {} — {}",
-            progress.key, progress.title, progress.description
-        )?;
-    }
-    if let Some(exit) = entries.iter().find(|e| e.action == MenuAction::Exit) {
-        writeln!(writer, "  {}. {}", exit.key, exit.title)?;
+    for entry in entries {
+        match entry.action {
+            MenuAction::Section(section) => {
+                let status = progress.status_of(section);
+                writeln!(
+                    writer,
+                    "  {}. {} {} — {} [{}]",
+                    entry.key,
+                    status.icon(),
+                    entry.title,
+                    entry.description,
+                    status.label()
+                )?;
+            }
+            MenuAction::Progress => {
+                writeln!(
+                    writer,
+                    "  {}. {} — {}",
+                    entry.key, entry.title, entry.description
+                )?;
+            }
+            MenuAction::Exit => {
+                writeln!(writer, "  {}. {}", entry.key, entry.title)?;
+            }
+        }
     }
     write!(writer, "> ")?;
     Ok(())
 }
 
-fn render_section<R, W>(reader: &mut R, writer: &mut W, section: SectionId) -> Result<()>
+fn render_section_content<R, W>(reader: &mut R, writer: &mut W, section: SectionId) -> Result<()>
 where
     R: BufRead,
     W: Write,
@@ -256,17 +416,81 @@ fn render_placeholder_for_section<W: Write>(writer: &mut W, section: SectionId) 
     Ok(())
 }
 
-fn render_progress_placeholder<W: Write>(writer: &mut W) -> Result<()> {
-    writeln!(writer, "--- 進捗確認 ---")?;
-    writeln!(
-        writer,
-        "学習進捗の保存と可視化機能は別タスクで実装されます。"
-    )?;
-    writeln!(
-        writer,
-        "完了済みのセクションはメニュー上で✅等のマークで表示予定です。"
-    )?;
+fn render_progress_view<W: Write>(writer: &mut W, summary: &ProgressSummary) -> Result<()> {
+    writeln!(writer, "--- 学習進捗ダッシュボード ---")?;
+    if let Some(section) = summary.last_active_section {
+        writeln!(
+            writer,
+            "直近の学習: {} ({})",
+            section.title(),
+            section.slug()
+        )?;
+    }
+
+    writeln!(writer, "\n📊 セクション状況")?;
+    for info in &summary.sections {
+        writeln!(
+            writer,
+            "{} {} [{}]",
+            info.icon,
+            info.title,
+            info.status.label()
+        )?;
+        writeln!(writer, "    {}", info.description)?;
+        writeln!(
+            writer,
+            "    開始: {} / 完了: {} / クイズ: {}",
+            format_timestamp(info.started_at),
+            format_timestamp(info.completed_at),
+            if info.quiz_passed {
+                "合格"
+            } else {
+                "未合格"
+            }
+        )?;
+    }
+
+    writeln!(writer, "\n🏅 実績")?;
+    if summary.achievements.is_empty() {
+        writeln!(writer, "  (まだ獲得していません)")?;
+    } else {
+        for achievement in &summary.achievements {
+            writeln!(
+                writer,
+                "  - {} [{}]",
+                achievement.title,
+                format_timestamp(Some(achievement.awarded_at))
+            )?;
+            writeln!(writer, "    {}", achievement.description)?;
+        }
+    }
+
+    writeln!(writer, "\n📜 達成証明")?;
+    if summary.certificates.is_empty() {
+        writeln!(writer, "  (証明書はまだ発行されていません)")?;
+    } else {
+        for certificate in &summary.certificates {
+            writeln!(
+                writer,
+                "  - {} [{}]",
+                certificate.title,
+                format_timestamp(Some(certificate.awarded_at))
+            )?;
+            writeln!(writer, "    {}", certificate.message)?;
+        }
+    }
+
     Ok(())
+}
+
+fn format_timestamp(value: Option<chrono::DateTime<chrono::Utc>>) -> String {
+    value
+        .map(|ts| {
+            ts.with_timezone(&Local)
+                .format("%Y-%m-%d %H:%M")
+                .to_string()
+        })
+        .unwrap_or_else(|| "-".to_string())
 }
 
 fn prompt_return_to_menu<R, W>(reader: &mut R, writer: &mut W) -> Result<()>
@@ -327,74 +551,31 @@ fn render_setup_guide<W: Write>(
 }
 
 fn menu_entries() -> Vec<MenuEntry> {
-    vec![
-        MenuEntry {
-            key: "1",
-            title: "基本構文",
-            description: SectionId::BasicSyntax.description(),
-            action: MenuAction::Section(SectionId::BasicSyntax),
-        },
-        MenuEntry {
-            key: "2",
-            title: "制御フロー",
-            description: SectionId::ControlFlow.description(),
-            action: MenuAction::Section(SectionId::ControlFlow),
-        },
-        MenuEntry {
-            key: "3",
-            title: "データクラス",
-            description: SectionId::DataClasses.description(),
-            action: MenuAction::Section(SectionId::DataClasses),
-        },
-        MenuEntry {
-            key: "4",
-            title: "関数",
-            description: SectionId::Functions.description(),
-            action: MenuAction::Section(SectionId::Functions),
-        },
-        MenuEntry {
-            key: "5",
-            title: "並行性",
-            description: SectionId::Concurrency.description(),
-            action: MenuAction::Section(SectionId::Concurrency),
-        },
-        MenuEntry {
-            key: "6",
-            title: "非同期プログラミング",
-            description: SectionId::AsyncProgramming.description(),
-            action: MenuAction::Section(SectionId::AsyncProgramming),
-        },
-        MenuEntry {
-            key: "7",
-            title: "ビルドツール体験",
-            description: SectionId::BuildTools.description(),
-            action: MenuAction::Section(SectionId::BuildTools),
-        },
-        MenuEntry {
-            key: "8",
-            title: "インタラクティブ編集",
-            description: SectionId::InteractiveEditor.description(),
-            action: MenuAction::Section(SectionId::InteractiveEditor),
-        },
-        MenuEntry {
-            key: "9",
-            title: "ミニプロジェクト",
-            description: SectionId::MiniProjectBuilder.description(),
-            action: MenuAction::Section(SectionId::MiniProjectBuilder),
-        },
-        MenuEntry {
-            key: "P",
-            title: "進捗確認",
-            description: "完了したセクションのステータスと達成状況を表示",
-            action: MenuAction::Progress,
-        },
-        MenuEntry {
-            key: "0",
-            title: "終了",
-            description: "",
-            action: MenuAction::Exit,
-        },
-    ]
+    let mut entries: Vec<MenuEntry> = SECTION_MENU_KEYS
+        .iter()
+        .map(|(section, key)| MenuEntry {
+            key: *key,
+            title: section.title(),
+            description: section.description(),
+            action: MenuAction::Section(*section),
+        })
+        .collect();
+
+    entries.push(MenuEntry {
+        key: "P",
+        title: "進捗確認",
+        description: "完了ステータス、実績、証明書を表示",
+        action: MenuAction::Progress,
+    });
+
+    entries.push(MenuEntry {
+        key: "0",
+        title: "終了",
+        description: "",
+        action: MenuAction::Exit,
+    });
+
+    entries
 }
 
 fn parse_selection(input: &str) -> Option<MenuAction> {
