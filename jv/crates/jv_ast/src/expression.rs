@@ -124,6 +124,29 @@ pub enum Argument {
     },
 }
 
+/// Annotation arguments support literal and named values (e.g., @Sample("path", mode=Load))
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum AnnotationArgument {
+    PositionalLiteral {
+        value: Literal,
+        span: Span,
+    },
+    Named {
+        name: String,
+        value: Expression,
+        span: Span,
+    },
+}
+
+impl AnnotationArgument {
+    pub fn span(&self) -> &Span {
+        match self {
+            AnnotationArgument::PositionalLiteral { span, .. }
+            | AnnotationArgument::Named { span, .. } => span,
+        }
+    }
+}
+
 /// String interpolation parts
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum StringPart {

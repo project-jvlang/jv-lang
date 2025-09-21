@@ -16,7 +16,11 @@ pub(crate) fn convert_modifiers(modifiers: &Modifiers) -> IrModifiers {
     ir_modifiers.is_final = modifiers.is_final;
     ir_modifiers.is_abstract = modifiers.is_abstract;
 
-    if modifiers.is_override {
+    for annotation in &modifiers.annotations {
+        ir_modifiers.annotations.push(annotation.name.clone());
+    }
+
+    if modifiers.is_override && !ir_modifiers.annotations.iter().any(|a| a == "Override") {
         ir_modifiers.annotations.push("Override".to_string());
     }
 

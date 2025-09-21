@@ -133,6 +133,8 @@ pub struct Modifiers {
     pub is_static: bool,
     pub is_override: bool,
     pub is_open: bool,
+    #[serde(default)]
+    pub annotations: Vec<Annotation>,
 }
 
 impl Default for Modifiers {
@@ -144,6 +146,16 @@ impl Default for Modifiers {
             is_static: false,
             is_override: false,
             is_open: false,
+            annotations: Vec::new(),
         }
     }
+}
+
+/// Annotation attached to declarations (e.g., @Sample)
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Annotation {
+    pub name: String,
+    #[serde(default)]
+    pub arguments: Vec<crate::expression::AnnotationArgument>,
+    pub span: Span,
 }
