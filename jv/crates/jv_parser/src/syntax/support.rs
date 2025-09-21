@@ -199,6 +199,17 @@ pub(crate) fn identifier() -> impl ChumskyParser<Token, String, Error = Simple<T
     })
 }
 
+pub(crate) fn identifier_with_span(
+) -> impl ChumskyParser<Token, (String, Span), Error = Simple<Token>> + Clone {
+    filter_map(|span, token: Token| {
+        let token_span = span_from_token(&token);
+        match token.token_type {
+            TokenType::Identifier(name) => Ok((name, token_span)),
+            _ => Err(Simple::expected_input_found(span, Vec::new(), Some(token))),
+        }
+    })
+}
+
 pub(crate) fn span_from_token(token: &Token) -> Span {
     Span {
         start_line: token.line,

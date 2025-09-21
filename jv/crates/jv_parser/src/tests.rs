@@ -154,6 +154,30 @@ fn test_null_safety_operators() {
 }
 
 #[test]
+fn test_null_safe_index_access() {
+    let input = "val value = items?[index]";
+    let result = Parser::parse(input).unwrap();
+
+    assert_eq!(result.statements.len(), 1);
+    match &result.statements[0] {
+        Statement::ValDeclaration { initializer, .. } => match initializer {
+            Expression::NullSafeIndexAccess { object, index, .. } => {
+                match object.as_ref() {
+                    Expression::Identifier(name, _) => assert_eq!(name, "items"),
+                    _ => panic!("Expected identifier 'items'"),
+                }
+                match index.as_ref() {
+                    Expression::Identifier(name, _) => assert_eq!(name, "index"),
+                    _ => panic!("Expected identifier 'index'"),
+                }
+            }
+            _ => panic!("Expected null-safe index access"),
+        },
+        _ => panic!("Expected val declaration"),
+    }
+}
+
+#[test]
 fn test_string_interpolation() {
     let input = r#"println("Hello, ${name}!")"#;
     let result = Parser::parse(input).unwrap();

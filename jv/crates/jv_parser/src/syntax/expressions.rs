@@ -5,15 +5,16 @@ use jv_ast::{
 };
 use jv_lexer::{Token, TokenType};
 
-use super::patterns;
+use super::patterns::{self, pattern_span};
 use super::support::{
-    expression_span, identifier, keyword, merge_spans, span_from_token, token_and, token_arrow,
-    token_assign, token_colon, token_comma, token_divide, token_dot, token_else, token_elvis,
-    token_equal, token_greater, token_greater_equal, token_if, token_left_brace,
-    token_left_bracket, token_left_paren, token_less, token_less_equal, token_minus, token_modulo,
-    token_multiply, token_not, token_not_equal, token_null_safe, token_or, token_plus,
-    token_question, token_right_brace, token_right_bracket, token_right_paren, token_string_end,
-    token_string_mid, token_string_start, token_when, type_annotation_simple,
+    expression_span, identifier, identifier_with_span, keyword, merge_spans, span_from_token,
+    token_and, token_arrow, token_assign, token_colon, token_comma, token_divide, token_dot,
+    token_else, token_elvis, token_equal, token_greater, token_greater_equal, token_if,
+    token_left_brace, token_left_bracket, token_left_paren, token_less, token_less_equal,
+    token_minus, token_modulo, token_multiply, token_not, token_not_equal, token_null_safe,
+    token_or, token_plus, token_question, token_right_brace, token_right_bracket,
+    token_right_paren, token_string_end, token_string_mid, token_string_start, token_when,
+    type_annotation_simple,
 };
 
 pub(crate) fn expression_parser(
@@ -56,14 +57,15 @@ fn when_expression_parser(
     expr: impl ChumskyParser<Token, Expression, Error = Simple<Token>> + Clone + 'static,
 ) -> impl ChumskyParser<Token, Expression, Error = Simple<Token>> + Clone {
     token_when()
-        .ignore_then(
+        .map(|token| span_from_token(&token))
+        .then(
             token_left_paren()
                 .ignore_then(expr.clone())
                 .then_ignore(token_right_paren())
                 .or_not(),
         )
         .then_ignore(token_left_brace())
-        .then(when_arm_parser(expr.clone()).repeated())
+        .then(when_arm_parser(expr.clone()).repeated().at_least(1))
         .then(
             token_else()
                 .ignore_then(token_arrow())
@@ -71,12 +73,15 @@ fn when_expression_parser(
                 .map(Box::new)
                 .or_not(),
         )
-        .then_ignore(token_right_brace())
-        .map(|((subject, arms), else_arm)| Expression::When {
-            expr: subject.map(|s| Box::new(s)),
-            arms,
-            else_arm,
-            span: Span::default(),
+        .then(token_right_brace().map(|token| span_from_token(&token)))
+        .map(|((((when_span, subject), arms), else_arm), end_span)| {
+            let span = merge_spans(&when_span, &end_span);
+            Expression::When {
+                expr: subject.map(Box::new),
+                arms,
+                else_arm,
+                span,
+            }
         })
 }
 
@@ -86,10 +91,15 @@ fn when_arm_parser(
     patterns::when_pattern_parser(expr.clone())
         .then_ignore(token_arrow())
         .then(expr)
-        .map(|(pattern, body)| WhenArm {
-            pattern,
-            body,
-            span: Span::default(),
+        .map(|(pattern, body)| {
+            let pattern_span = pattern_span(&pattern);
+            let body_span = expression_span(&body);
+            let span = merge_spans(&pattern_span, &body_span);
+            WhenArm {
+                pattern,
+                body,
+                span,
+            }
         })
 }
 
@@ -97,16 +107,29 @@ fn if_expression_parser(
     expr: impl ChumskyParser<Token, Expression, Error = Simple<Token>> + Clone,
 ) -> impl ChumskyParser<Token, Expression, Error = Simple<Token>> + Clone {
     token_if()
-        .ignore_then(token_left_paren())
-        .ignore_then(expr.clone())
-        .then_ignore(token_right_paren())
+        .map(|token| span_from_token(&token))
+        .then(
+            token_left_paren()
+                .ignore_then(expr.clone())
+                .then_ignore(token_right_paren()),
+        )
         .then(expr.clone())
         .then(token_else().ignore_then(expr.clone()).or_not())
-        .map(|((condition, then_branch), else_branch)| Expression::If {
-            condition: Box::new(condition),
-            then_branch: Box::new(then_branch),
-            else_branch: else_branch.map(Box::new),
-            span: Span::default(),
+        .map(|(((if_span, condition), then_branch), else_branch)| {
+            let then_span = expression_span(&then_branch);
+            let mut span = merge_spans(&if_span, &then_span);
+
+            let else_branch = else_branch.map(|branch| {
+                span = merge_spans(&span, &expression_span(&branch));
+                Box::new(branch)
+            });
+
+            Expression::If {
+                condition: Box::new(condition),
+                then_branch: Box::new(then_branch),
+                else_branch,
+                span,
+            }
         })
 }
 
@@ -114,17 +137,21 @@ fn lambda_literal_parser(
     expr: impl ChumskyParser<Token, Expression, Error = Simple<Token>> + Clone,
 ) -> impl ChumskyParser<Token, Expression, Error = Simple<Token>> + Clone {
     token_left_brace()
-        .ignore_then(
+        .map(|token| span_from_token(&token))
+        .then(
             lambda_parameter_clause()
                 .then_ignore(token_arrow())
-                .then(expr)
-                .map(|(parameters, body)| Expression::Lambda {
-                    parameters,
-                    body: Box::new(body),
-                    span: Span::default(),
-                }),
+                .then(expr.clone()),
         )
-        .then_ignore(token_right_brace())
+        .then(token_right_brace().map(|token| span_from_token(&token)))
+        .map(|((left_span, (parameters, body)), right_span)| {
+            let span = merge_spans(&left_span, &right_span);
+            Expression::Lambda {
+                parameters,
+                body: Box::new(body),
+                span,
+            }
+        })
 }
 
 fn lambda_parameter_clause(
@@ -155,11 +182,12 @@ fn array_literal_parser(
     expr: impl ChumskyParser<Token, Expression, Error = Simple<Token>> + Clone,
 ) -> impl ChumskyParser<Token, Expression, Error = Simple<Token>> + Clone {
     token_left_bracket()
-        .ignore_then(expr.clone().separated_by(token_comma()).allow_trailing())
-        .then_ignore(token_right_bracket())
-        .map(|elements| Expression::Array {
-            elements,
-            span: Span::default(),
+        .map(|token| span_from_token(&token))
+        .then(expr.clone().separated_by(token_comma()).allow_trailing())
+        .then(token_right_bracket().map(|token| span_from_token(&token)))
+        .map(|((left_span, elements), right_span)| {
+            let span = merge_spans(&left_span, &right_span);
+            Expression::Array { elements, span }
         })
 }
 
@@ -176,11 +204,14 @@ fn string_interpolation_parser(
                 .repeated(),
         )
         .then(token_string_end().map(|token| (token.lexeme.clone(), span_from_token(&token))))
-        .map(|(((start_text, first_expr), segments), end_text)| {
+        .map(|(((start_segment, first_expr), segments), end_segment)| {
+            let (start_text, mut start_span) = start_segment;
+            let (end_text, mut end_span) = end_segment;
+
             let mut parts = Vec::new();
 
-            if !start_text.0.is_empty() {
-                parts.push(StringPart::Text(start_text.0));
+            if !start_text.is_empty() {
+                parts.push(StringPart::Text(start_text));
             }
 
             parts.push(StringPart::Expression(first_expr));
@@ -192,14 +223,20 @@ fn string_interpolation_parser(
                 parts.push(StringPart::Expression(expr_part));
             }
 
-            if !end_text.0.is_empty() {
-                parts.push(StringPart::Text(end_text.0));
+            if !end_text.is_empty() {
+                parts.push(StringPart::Text(end_text));
             }
 
-            Expression::StringInterpolation {
-                parts,
-                span: Span::default(),
+            if start_span.end_column == start_span.start_column {
+                start_span.end_column += 1;
             }
+            if end_span.end_column == end_span.start_column {
+                end_span.end_column += 1;
+            }
+
+            let span = merge_spans(&start_span, &end_span);
+
+            Expression::StringInterpolation { parts, span }
         })
 }
 
@@ -230,17 +267,17 @@ fn super_expression_parser() -> impl ChumskyParser<Token, Expression, Error = Si
 
 fn identifier_expression_parser(
 ) -> impl ChumskyParser<Token, Expression, Error = Simple<Token>> + Clone {
-    identifier().map(|name| Expression::Identifier(name, Span::default()))
+    identifier_with_span().map(|(name, span)| Expression::Identifier(name, span))
 }
 
 #[derive(Clone)]
 enum PostfixOp {
-    Call { args: Vec<Argument> },
-    Member { property: String },
-    NullSafeMember { property: String },
-    Index { index: Expression },
-    NullSafeIndex { index: Expression },
-    TrailingLambda { lambda: Expression },
+    Call { args: Vec<Argument>, span: Span },
+    Member { property: String, span: Span },
+    NullSafeMember { property: String, span: Span },
+    Index { index: Expression, span: Span },
+    NullSafeIndex { index: Expression, span: Span },
+    TrailingLambda { lambda: Expression, span: Span },
 }
 
 fn postfix_expression_parser(
@@ -266,9 +303,13 @@ fn call_suffix(
     expr: impl ChumskyParser<Token, Expression, Error = Simple<Token>> + Clone,
 ) -> impl ChumskyParser<Token, PostfixOp, Error = Simple<Token>> + Clone {
     token_left_paren()
-        .ignore_then(argument_list(expr))
-        .then_ignore(token_right_paren())
-        .map(|args| PostfixOp::Call { args })
+        .map(|token| span_from_token(&token))
+        .then(argument_list(expr.clone()))
+        .then(token_right_paren().map(|token| span_from_token(&token)))
+        .map(|((left_span, args), right_span)| {
+            let span = merge_spans(&left_span, &right_span);
+            PostfixOp::Call { args, span }
+        })
 }
 
 fn argument_list(
@@ -283,13 +324,13 @@ fn argument_list(
 fn argument(
     expr: impl ChumskyParser<Token, Expression, Error = Simple<Token>> + Clone,
 ) -> impl ChumskyParser<Token, Argument, Error = Simple<Token>> + Clone {
-    let named = identifier()
+    let named = identifier_with_span()
         .then_ignore(token_assign())
         .then(expr.clone())
-        .map(|(name, value)| Argument::Named {
-            name,
-            value,
-            span: Span::default(),
+        .map(|((name, name_span), value)| {
+            let value_span = expression_span(&value);
+            let span = merge_spans(&name_span, &value_span);
+            Argument::Named { name, value, span }
         });
 
     named.or(expr.map(Argument::Positional))
@@ -297,99 +338,129 @@ fn argument(
 
 fn member_suffix() -> impl ChumskyParser<Token, PostfixOp, Error = Simple<Token>> + Clone {
     token_dot()
-        .ignore_then(identifier())
-        .map(|property| PostfixOp::Member { property })
+        .map(|token| span_from_token(&token))
+        .then(identifier_with_span())
+        .map(|(dot_span, (property, property_span))| {
+            let span = merge_spans(&dot_span, &property_span);
+            PostfixOp::Member { property, span }
+        })
 }
 
 fn null_safe_member_suffix() -> impl ChumskyParser<Token, PostfixOp, Error = Simple<Token>> + Clone
 {
     token_null_safe()
-        .ignore_then(identifier())
-        .map(|property| PostfixOp::NullSafeMember { property })
+        .map(|token| span_from_token(&token))
+        .then(identifier_with_span())
+        .map(|(op_span, (property, property_span))| {
+            let span = merge_spans(&op_span, &property_span);
+            PostfixOp::NullSafeMember { property, span }
+        })
 }
 
 fn index_suffix(
     expr: impl ChumskyParser<Token, Expression, Error = Simple<Token>> + Clone,
 ) -> impl ChumskyParser<Token, PostfixOp, Error = Simple<Token>> + Clone {
     token_left_bracket()
-        .ignore_then(expr.clone())
-        .then_ignore(token_right_bracket())
-        .map(|index| PostfixOp::Index { index })
+        .map(|token| span_from_token(&token))
+        .then(expr.clone())
+        .then(token_right_bracket().map(|token| span_from_token(&token)))
+        .map(|((left_span, index), right_span)| {
+            let span = merge_spans(&left_span, &right_span);
+            PostfixOp::Index { index, span }
+        })
 }
 
 fn null_safe_index_suffix(
     expr: impl ChumskyParser<Token, Expression, Error = Simple<Token>> + Clone,
 ) -> impl ChumskyParser<Token, PostfixOp, Error = Simple<Token>> + Clone {
     token_question()
-        .ignore_then(token_left_bracket())
-        .ignore_then(expr.clone())
-        .then_ignore(token_right_bracket())
-        .map(|index| PostfixOp::NullSafeIndex { index })
+        .map(|token| span_from_token(&token))
+        .then(token_left_bracket().map(|token| span_from_token(&token)))
+        .then(expr.clone())
+        .then(token_right_bracket().map(|token| span_from_token(&token)))
+        .map(|(((question_span, left_span), index), right_span)| {
+            let prefix_span = merge_spans(&question_span, &left_span);
+            let span = merge_spans(&prefix_span, &right_span);
+            PostfixOp::NullSafeIndex { index, span }
+        })
 }
 
 fn trailing_lambda_suffix(
     expr: impl ChumskyParser<Token, Expression, Error = Simple<Token>> + Clone,
 ) -> impl ChumskyParser<Token, PostfixOp, Error = Simple<Token>> + Clone {
-    lambda_literal_parser(expr).map(|lambda| PostfixOp::TrailingLambda { lambda })
+    lambda_literal_parser(expr).map(|lambda| {
+        let span = expression_span(&lambda);
+        PostfixOp::TrailingLambda { lambda, span }
+    })
 }
 
 fn apply_postfix(base: Expression, op: PostfixOp) -> Expression {
     match op {
-        PostfixOp::Call { args } => {
-            let span = args
-                .last()
-                .map(|argument| match argument {
-                    Argument::Positional(expr) => expression_span(expr),
-                    Argument::Named { value, .. } => expression_span(value),
-                })
-                .map(|end_span| merge_spans(&expression_span(&base), &end_span))
-                .unwrap_or_else(|| expression_span(&base));
-
+        PostfixOp::Call {
+            args,
+            span: suffix_span,
+        } => {
+            let span = merge_spans(&expression_span(&base), &suffix_span);
             Expression::Call {
                 function: Box::new(base),
                 args,
                 span,
             }
         }
-        PostfixOp::Member { property } => {
-            let span = expression_span(&base);
+        PostfixOp::Member {
+            property,
+            span: suffix_span,
+        } => {
+            let span = merge_spans(&expression_span(&base), &suffix_span);
             Expression::MemberAccess {
                 object: Box::new(base),
                 property,
                 span,
             }
         }
-        PostfixOp::NullSafeMember { property } => {
-            let span = expression_span(&base);
+        PostfixOp::NullSafeMember {
+            property,
+            span: suffix_span,
+        } => {
+            let span = merge_spans(&expression_span(&base), &suffix_span);
             Expression::NullSafeMemberAccess {
                 object: Box::new(base),
                 property,
                 span,
             }
         }
-        PostfixOp::Index { index } => {
-            let span = merge_spans(&expression_span(&base), &expression_span(&index));
+        PostfixOp::Index {
+            index,
+            span: suffix_span,
+        } => {
+            let span = merge_spans(&expression_span(&base), &suffix_span);
             Expression::IndexAccess {
                 object: Box::new(base),
                 index: Box::new(index),
                 span,
             }
         }
-        PostfixOp::NullSafeIndex { index } => {
-            let span = merge_spans(&expression_span(&base), &expression_span(&index));
+        PostfixOp::NullSafeIndex {
+            index,
+            span: suffix_span,
+        } => {
+            let span = merge_spans(&expression_span(&base), &suffix_span);
             Expression::NullSafeIndexAccess {
                 object: Box::new(base),
                 index: Box::new(index),
                 span,
             }
         }
-        PostfixOp::TrailingLambda { lambda } => match base {
+        PostfixOp::TrailingLambda {
+            lambda,
+            span: lambda_span,
+        } => match base {
             Expression::Call {
                 function,
                 mut args,
                 span,
             } => {
-                let new_span = merge_spans(&span, &expression_span(&lambda));
+                let new_span = merge_spans(&span, &lambda_span);
                 args.push(Argument::Positional(lambda));
                 Expression::Call {
                     function,
@@ -398,7 +469,7 @@ fn apply_postfix(base: Expression, op: PostfixOp) -> Expression {
                 }
             }
             other => {
-                let span = merge_spans(&expression_span(&other), &expression_span(&lambda));
+                let span = merge_spans(&expression_span(&other), &lambda_span);
                 Expression::Call {
                     function: Box::new(other),
                     args: vec![Argument::Positional(lambda)],
