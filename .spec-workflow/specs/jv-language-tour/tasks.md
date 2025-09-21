@@ -101,7 +101,7 @@
   - _Requirements: 1.1, 1.2, 1.5, All modules integration_
   - _Prompt: Implement the task for spec jv-language-tour, first run spec-workflow-guide to get the workflow guide then implement the task: Role: System Integration Engineer and CLI Architecture Specialist | Task: Create main tour orchestrator integrating all modules with jv CLI following requirements 1.1-1.2, 1.5 and ensuring seamless module coordination, using clap for CLI integration and anyhow for error handling | Restrictions: Must not break existing jv CLI functionality, ensure consistent error handling across modules, maintain performance standards | _Leverage: clap for CLI framework, anyhow for error handling, all implemented tour modules | _Requirements: 1.1-1.2, 1.5 (CLI integration) and coordination of all tour modules | Success: Tour integrates seamlessly with jv CLI, all modules work together cohesively, user experience is smooth and consistent | Instructions: Set this task to in-progress [-] when starting and mark complete [x] when finished_
 
-- [ ] 12. Comprehensive Testing and Documentation
+- [x] 12. Comprehensive Testing and Documentation
   - File: crates/jv_cli/tests/tour_tests.rs, README.md updates
   - 全モジュールの統合テスト、E2Eテスト、ドキュメント更新
   - クロスプラットフォーム動作確認とパフォーマンス検証
