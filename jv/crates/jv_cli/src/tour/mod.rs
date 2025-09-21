@@ -25,7 +25,9 @@ pub struct TourOrchestrator {
 impl TourOrchestrator {
     /// Create an orchestrator backed by the default CLI implementation.
     pub fn new() -> Self {
-        Self { cli: TourCli::new() }
+        Self {
+            cli: TourCli::new(),
+        }
     }
 
     /// Inject a pre-configured CLI facade (useful for testing scenarios).
