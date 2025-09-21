@@ -1,6 +1,7 @@
 pub mod cli;
 pub mod environment;
 pub mod progress;
+pub mod projects;
 pub mod sections;
 
 pub use cli::{MenuAction, MenuEntry, SectionId, TourCli};
@@ -9,3 +10,4 @@ pub use environment::{
     SetupGuide,
 };
 pub use progress::{ProgressSummary, ProgressTracker, SectionDisplay, SectionStatus};
+pub use projects::{Feature, JarArtifact, MiniProject, Project, ProjectStep, ProjectType};

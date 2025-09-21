@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use super::environment::{EnvironmentManager, JdkProbe, JdkStatus};
 use super::progress::{CompletionOutcome, ProgressSummary, ProgressTracker};
+use super::projects;
 use super::sections;
 
 /// Identifier for tour sections that are accessible from the main menu.
@@ -402,6 +403,7 @@ where
         SectionId::DataClasses => sections::data_classes::render(writer),
         SectionId::BuildTools => sections::build_tools::render(writer),
         SectionId::InteractiveEditor => sections::interactive::render(reader, writer),
+        SectionId::MiniProjectBuilder => projects::render(writer),
         _ => render_placeholder_for_section(writer, section),
     }
 }
