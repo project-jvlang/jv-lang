@@ -30,3 +30,19 @@ pub enum TransformError {
     #[error("Resource management error: {message}")]
     ResourceManagementError { message: String, span: Span },
 }
+
+impl TransformError {
+    pub fn span(&self) -> &Span {
+        match self {
+            TransformError::TypeInferenceError { span, .. }
+            | TransformError::UnsupportedConstruct { span, .. }
+            | TransformError::InvalidPattern { span, .. }
+            | TransformError::NullSafetyError { span, .. }
+            | TransformError::ScopeError { span, .. }
+            | TransformError::DefaultParameterError { span, .. }
+            | TransformError::ExtensionFunctionError { span, .. }
+            | TransformError::ConcurrencyError { span, .. }
+            | TransformError::ResourceManagementError { span, .. } => span,
+        }
+    }
+}

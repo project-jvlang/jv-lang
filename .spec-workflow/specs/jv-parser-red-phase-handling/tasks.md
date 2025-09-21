@@ -46,7 +46,7 @@
   - _Requirements: 要件 1, 要件 3_
   - _Prompt: Role: Developer Advocate with Rust tooling expertise | Task: Implement the task for spec jv-parser-red-phase-handling, first run spec-workflow-guide to get the workflow guide then implement the task: Generate/curate deferred syntax documentation from the inventory and add doc-sync tests so drift is caught automatically. | Restrictions: Keep documentation bilingual conventions if applicable, do not introduce new external tooling, ensure tests fail loudly on mismatch. | _Leverage: jv/crates/jv_parser/docs, planned inventory helpers, cargo test doc sync harness | _Requirements: 要件 1, 要件 3 | Success: Deferred syntax doc reflects current inventory, doc-sync test passes, README/crate docs reference the new note. | Instructions: Change this task checkbox to [-] before editing and to [x] after finishing docs and tests._
 
-- [ ] 6. スパン情報を活かした診断/IR マッピングの強化
+- [x] 6. スパン情報を活かした診断/IR マッピングの強化
   - File: jv/crates/jv_parser/src/syntax/expressions.rs
   - File: jv/crates/jv_parser/src/syntax/patterns.rs
   - File: jv/crates/jv_ir/src/transform (既存各モジュール)

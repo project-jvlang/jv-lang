@@ -309,6 +309,157 @@ mod tests {
         }
     }
 
+    #[test]
+    fn test_desugar_when_expression_preserves_case_spans() {
+        let mut context = test_context();
+        context.add_variable("subject".to_string(), JavaType::int());
+
+        let subject = Some(Box::new(Expression::Identifier(
+            "subject".to_string(),
+            Span::new(2, 1, 2, 8),
+        )));
+
+        let pattern_span = Span::new(2, 5, 2, 6);
+        let body_span = Span::new(2, 10, 2, 13);
+        let arm_span = Span::new(2, 5, 2, 13);
+        let when_span = Span::new(2, 1, 2, 20);
+
+        let arm = WhenArm {
+            pattern: Pattern::Literal(Literal::Number("1".to_string()), pattern_span.clone()),
+            body: Expression::Literal(Literal::String("one".to_string()), body_span),
+            span: arm_span.clone(),
+        };
+
+        let else_arm = Some(Box::new(Expression::Literal(
+            Literal::String("other".to_string()),
+            Span::new(2, 16, 2, 21),
+        )));
+
+        let result = desugar_when_expression(
+            subject,
+            vec![arm],
+            else_arm,
+            when_span.clone(),
+            &mut context,
+        )
+        .expect("when expression should desugar successfully");
+
+        match result {
+            IrExpression::Switch { span, cases, .. } => {
+                assert_eq!(span, when_span);
+                assert_eq!(cases.len(), 2);
+                assert_eq!(cases[0].span, arm_span);
+                assert_eq!(cases[1].span, when_span);
+            }
+            other => panic!("Expected switch expression with spans, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_desugar_when_expression_error_uses_arm_span() {
+        let mut context = test_context();
+        context.add_variable("subject".to_string(), JavaType::int());
+
+        let subject = Some(Box::new(Expression::Identifier(
+            "subject".to_string(),
+            Span::new(3, 1, 3, 8),
+        )));
+
+        let arm_span = Span::new(3, 5, 3, 12);
+        let arm = WhenArm {
+            pattern: Pattern::Identifier("it".to_string(), arm_span.clone()),
+            body: Expression::Literal(
+                Literal::String("body".to_string()),
+                Span::new(3, 10, 3, 14),
+            ),
+            span: arm_span.clone(),
+        };
+
+        let error = desugar_when_expression(
+            subject,
+            vec![arm],
+            None,
+            Span::new(3, 1, 3, 18),
+            &mut context,
+        )
+        .expect_err("unsupported when pattern should produce an error");
+
+        match error {
+            TransformError::UnsupportedConstruct { span, .. } => assert_eq!(span, arm_span),
+            other => panic!("Expected unsupported construct error with span, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_desugar_null_safe_member_access_span_propagation() {
+        let mut context = test_context();
+        context.add_variable("user".to_string(), JavaType::object());
+
+        let receiver_span = Span::new(5, 3, 5, 7);
+        let expression_span = Span::new(5, 3, 5, 15);
+
+        let result = desugar_null_safe_member_access(
+            Box::new(Expression::Identifier(
+                "user".to_string(),
+                receiver_span,
+            )),
+            "name".to_string(),
+            expression_span.clone(),
+            &mut context,
+        )
+        .expect("null-safe member access should succeed");
+
+        match result {
+            IrExpression::NullSafeOperation {
+                span,
+                operation,
+                default_value,
+                ..
+            } => {
+                assert_eq!(span, expression_span);
+                match *operation {
+                    IrExpression::FieldAccess { span: field_span, .. } => {
+                        assert_eq!(field_span, expression_span);
+                    }
+                    other => panic!(
+                        "Expected field access as operation span carrier, got {:?}",
+                        other
+                    ),
+                }
+
+                let default = default_value.expect("expected default value for nullable type");
+                match *default {
+                    IrExpression::Literal(_, literal_span) => {
+                        assert_eq!(literal_span, expression_span);
+                    }
+                    other => panic!("Expected literal default preserving span, got {:?}", other),
+                }
+            }
+            other => panic!("Expected null-safe operation with spans, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_desugar_null_safe_member_access_error_span() {
+        let mut context = test_context();
+        context.add_variable("number".to_string(), JavaType::int());
+
+        let span = Span::new(6, 1, 6, 12);
+
+        let error = desugar_null_safe_member_access(
+            Box::new(Expression::Identifier("number".to_string(), span.clone())),
+            "length".to_string(),
+            span.clone(),
+            &mut context,
+        )
+        .expect_err("null-safe member access on primitive should fail");
+
+        match error {
+            TransformError::NullSafetyError { span: err_span, .. } => assert_eq!(err_span, span),
+            other => panic!("Expected null safety error carrying span, got {:?}", other),
+        }
+    }
+
     // Test for extension function desugaring
     #[test]
     fn test_desugar_extension_function_produces_static_method() {

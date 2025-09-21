@@ -17,6 +17,7 @@
 //! 延期構文の最新状況は `docs/deferred-syntax.md` を参照してください。
 //! The up-to-date deferred syntax inventory lives in `docs/deferred-syntax.md`.
 
+use chumsky::error::Simple;
 use chumsky::prelude::*;
 use chumsky::Parser as ChumskyParser;
 use jv_ast::*;
@@ -25,14 +26,16 @@ use thiserror::Error;
 
 mod syntax;
 
+use crate::syntax::support::{merge_spans, span_from_token};
+
 #[derive(Error, Debug)]
 pub enum ParseError {
     #[error("Lexical error: {0}")]
     LexError(#[from] LexError),
-    #[error("Parse error: {0}")]
-    ParseError(String),
-    #[error("Unexpected end of input")]
-    UnexpectedEof,
+    #[error("Parse error at {span:?}: {message}")]
+    Syntax { message: String, span: Span },
+    #[error("Unexpected end of input at {span:?}")]
+    UnexpectedEof { span: Span },
 }
 
 pub struct Parser;
@@ -60,15 +63,39 @@ impl Parser {
 
         let parser = Self::program_parser();
 
-        match parser.parse(tokens) {
+        match parser.parse(tokens.clone()) {
             Ok(program) => Ok(program),
             Err(errors) => {
-                let error_msg = errors
-                    .into_iter()
-                    .map(|e| format!("{:?}", e))
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                Err(ParseError::ParseError(error_msg))
+                let mut errors_iter = errors.into_iter();
+
+                if let Some(error) = errors_iter.next() {
+                    let error_span = simple_error_span(&error, &tokens);
+                    let mut message = format!("{:?}", error);
+                    for extra in errors_iter {
+                        message.push_str("; ");
+                        message.push_str(&format!("{:?}", extra));
+                    }
+
+                    let is_eof = match error.found() {
+                        None => true,
+                        Some(token) => matches!(&token.token_type, TokenType::Eof),
+                    };
+
+                    if is_eof {
+                        Err(ParseError::UnexpectedEof { span: error_span })
+                    } else {
+                        Err(ParseError::Syntax {
+                            message,
+                            span: error_span,
+                        })
+                    }
+                } else {
+                    let span = tokens
+                        .last()
+                        .map(|token| span_from_token(token))
+                        .unwrap_or_else(Span::dummy);
+                    Err(ParseError::UnexpectedEof { span })
+                }
             }
         }
     }
@@ -102,6 +129,45 @@ impl Parser {
                 }
             })
     }
+}
+
+impl ParseError {
+    pub fn span(&self) -> Option<&Span> {
+        match self {
+            ParseError::LexError(_) => None,
+            ParseError::Syntax { span, .. } => Some(span),
+            ParseError::UnexpectedEof { span } => Some(span),
+        }
+    }
+}
+
+fn simple_error_span(error: &Simple<Token>, tokens: &[Token]) -> Span {
+    if tokens.is_empty() {
+        return Span::dummy();
+    }
+
+    let range = error.span();
+    let tokens_len = tokens.len();
+
+    let start_index = range.start.min(tokens_len - 1);
+    let raw_end = if range.end == range.start {
+        range.start
+    } else {
+        range.end.saturating_sub(1)
+    };
+    let end_index = raw_end.min(tokens_len - 1).max(start_index);
+
+    let start_token = tokens
+        .get(start_index)
+        .unwrap_or_else(|| tokens.last().unwrap());
+    let end_token = tokens
+        .get(end_index)
+        .unwrap_or_else(|| tokens.last().unwrap());
+
+    let start_span = span_from_token(start_token);
+    let end_span = span_from_token(end_token);
+
+    merge_spans(&start_span, &end_span)
 }
 
 #[cfg(test)]
