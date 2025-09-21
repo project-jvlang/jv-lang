@@ -368,10 +368,7 @@ mod tests {
         let arm_span = Span::new(3, 5, 3, 12);
         let arm = WhenArm {
             pattern: Pattern::Identifier("it".to_string(), arm_span.clone()),
-            body: Expression::Literal(
-                Literal::String("body".to_string()),
-                Span::new(3, 10, 3, 14),
-            ),
+            body: Expression::Literal(Literal::String("body".to_string()), Span::new(3, 10, 3, 14)),
             span: arm_span.clone(),
         };
 
@@ -386,7 +383,10 @@ mod tests {
 
         match error {
             TransformError::UnsupportedConstruct { span, .. } => assert_eq!(span, arm_span),
-            other => panic!("Expected unsupported construct error with span, got {:?}", other),
+            other => panic!(
+                "Expected unsupported construct error with span, got {:?}",
+                other
+            ),
         }
     }
 
@@ -399,10 +399,7 @@ mod tests {
         let expression_span = Span::new(5, 3, 5, 15);
 
         let result = desugar_null_safe_member_access(
-            Box::new(Expression::Identifier(
-                "user".to_string(),
-                receiver_span,
-            )),
+            Box::new(Expression::Identifier("user".to_string(), receiver_span)),
             "name".to_string(),
             expression_span.clone(),
             &mut context,
@@ -418,7 +415,9 @@ mod tests {
             } => {
                 assert_eq!(span, expression_span);
                 match *operation {
-                    IrExpression::FieldAccess { span: field_span, .. } => {
+                    IrExpression::FieldAccess {
+                        span: field_span, ..
+                    } => {
                         assert_eq!(field_span, expression_span);
                     }
                     other => panic!(
