@@ -130,6 +130,8 @@ pub fn get_version() -> String {
     )
 }
 
+pub mod tour;
+
 pub mod pipeline {
     use super::*;
     use anyhow::{anyhow, bail};
