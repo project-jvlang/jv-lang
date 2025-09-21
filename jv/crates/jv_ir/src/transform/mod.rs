@@ -12,6 +12,7 @@ mod declarations;
 mod functions;
 mod null_safety;
 mod resources;
+mod sample;
 mod strings;
 mod type_system;
 mod utils;
@@ -31,6 +32,9 @@ pub use null_safety::{
     desugar_elvis_operator, desugar_null_safe_index_access, desugar_null_safe_member_access,
 };
 pub use resources::{desugar_defer_expression, desugar_use_expression};
+pub use sample::{
+    fetch_sample_data, SampleFetchError, SampleFetchRequest, SampleFetchResult, SampleSourceKind,
+};
 pub use strings::desugar_string_interpolation;
 pub use type_system::{convert_type_annotation, infer_java_type};
 pub use utils::{generate_extension_class_name, generate_utility_class_name};

@@ -414,7 +414,7 @@ fn test_edge_cases_and_errors() {
         ("\"\"", true),         // Empty string literal
         ("''", false),          // Single quotes not supported
         ("123.456.789", false), // Invalid number
-        ("@invalid", false),    // Invalid character
+        ("@invalid", true),     // Annotation tokens should be supported
     ];
 
     for (input, should_succeed) in test_cases {
@@ -431,6 +431,22 @@ fn test_edge_cases_and_errors() {
             );
         }
     }
+}
+
+#[test]
+fn test_annotation_tokens() {
+    let source = "@Sample(\"data/users.json\", mode = Load)";
+    let mut lexer = Lexer::new(source.to_string());
+    let tokens = lexer.tokenize().unwrap();
+
+    assert_eq!(tokens[0].token_type, TokenType::At);
+    assert_eq!(tokens[1].token_type, TokenType::Identifier("Sample".to_string()));
+
+    let has_mode_identifier = tokens.iter().any(|token| match &token.token_type {
+        TokenType::Identifier(name) => name == "mode",
+        _ => false,
+    });
+    assert!(has_mode_identifier, "Expected to find 'mode' identifier token");
 }
 
 #[test]

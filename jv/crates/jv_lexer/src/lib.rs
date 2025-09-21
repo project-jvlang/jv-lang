@@ -359,6 +359,10 @@ impl Lexer {
                     ));
                     self.advance();
                 }
+                '@' => {
+                    tokens.push(self.make_token(TokenType::At, "@", start_line, start_column));
+                    self.advance();
+                }
                 '.' => {
                     tokens.push(self.make_token(TokenType::Dot, ".", start_line, start_column));
                     self.advance();
