@@ -665,25 +665,23 @@ impl Lexer {
                 && self.current + 1 < chars.len()
                 && chars[self.current + 1] == '{'
             {
-                // End current string part if any content
-                if !current_string.is_empty() {
-                    if tokens.is_empty() {
-                        tokens.push(self.make_token(
-                            TokenType::StringStart,
-                            &current_string,
-                            start_line,
-                            start_column,
-                        ));
-                    } else {
-                        tokens.push(self.make_token(
-                            TokenType::StringMid,
-                            &current_string,
-                            self.line,
-                            self.column,
-                        ));
-                    }
-                    current_string.clear();
+                // Emit a segment marker for the content collected so far (even if empty).
+                if tokens.is_empty() {
+                    tokens.push(self.make_token(
+                        TokenType::StringStart,
+                        &current_string,
+                        start_line,
+                        start_column,
+                    ));
+                } else {
+                    tokens.push(self.make_token(
+                        TokenType::StringMid,
+                        &current_string,
+                        self.line,
+                        self.column,
+                    ));
                 }
+                current_string.clear();
 
                 // Skip ${
                 self.advance(); // $

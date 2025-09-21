@@ -18,7 +18,7 @@
   - _Requirements: 要件 1, 要件 2_
   - _Prompt: Role: Rust Compiler Engineer | Task: Implement the task for spec jv-parser-red-phase-handling, first run spec-workflow-guide to get the workflow guide then implement the task: Add full statement parsing coverage for functions, data classes, resource constructs, and variable declarations using the new syntax modules. | Restrictions: Follow chumsky combinator style established in the codebase, keep error reporting informative, ensure no regression for existing passing tests. | _Leverage: jv/crates/jv_parser/src/syntax/mod.rs scaffolding, jv_ast::Statement variants, tests from jv/crates/jv_parser/src/tests.rs | _Requirements: 要件 1, 要件 2 | Success: All statement-level tests compile and pass once converted to green, parser produces correct AST for representative inputs, new code covered by unit tests. | Instructions: Before starting, change this task’s checkbox to [-]; revert to [x] only after implementation and tests are complete._
 
-- [-] 3. 式レイヤー（when/null安全/配列/ラムダ/文字列補間）の実装強化
+- [x] 3. 式レイヤー（when/null安全/配列/ラムダ/文字列補間）の実装強化
   - File: jv/crates/jv_parser/src/syntax/expressions.rs
   - File: jv/crates/jv_parser/src/syntax/patterns.rs
   - 内容: when 式のアーム解析、null セーフティ演算子、配列リテラル、ラムダ式、文字列補間、演算子優先順位を完全対応させる。必要に応じて `Pattern` や `Expression` の補助型を拡張し、エラーケースを包括的にハンドリングする。

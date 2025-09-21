@@ -208,6 +208,65 @@ fn test_string_interpolation() {
 }
 
 #[test]
+fn test_string_interpolation_leading_expression() {
+    let input = r#"val message = "${name}!""#;
+    let result = Parser::parse(input);
+
+    assert!(result.is_ok());
+    let program = result.unwrap();
+    assert_eq!(program.statements.len(), 1);
+
+    match &program.statements[0] {
+        Statement::ValDeclaration { initializer, .. } => match initializer {
+            Expression::StringInterpolation { parts, .. } => {
+                assert_eq!(parts.len(), 2);
+                match &parts[0] {
+                    StringPart::Expression(Expression::Identifier(name, _)) => {
+                        assert_eq!(name, "name");
+                    }
+                    other => panic!("Expected identifier interpolation, found {:?}", other),
+                }
+                match &parts[1] {
+                    StringPart::Text(s) => assert_eq!(s, "!"),
+                    other => panic!("Expected trailing text part, found {:?}", other),
+                }
+            }
+            other => panic!("Expected string interpolation, found {:?}", other),
+        },
+        other => panic!("Expected val declaration, found {:?}", other),
+    }
+}
+
+#[test]
+fn test_string_interpolation_multiple_expressions_no_text() {
+    let input = r#"val message = "${first}${last}""#;
+    let result = Parser::parse(input).unwrap();
+
+    assert_eq!(result.statements.len(), 1);
+    match &result.statements[0] {
+        Statement::ValDeclaration { initializer, .. } => match initializer {
+            Expression::StringInterpolation { parts, .. } => {
+                assert_eq!(parts.len(), 2);
+                match &parts[0] {
+                    StringPart::Expression(Expression::Identifier(name, _)) => {
+                        assert_eq!(name, "first");
+                    }
+                    other => panic!("Expected first identifier expression, found {:?}", other),
+                }
+                match &parts[1] {
+                    StringPart::Expression(Expression::Identifier(name, _)) => {
+                        assert_eq!(name, "last");
+                    }
+                    other => panic!("Expected second identifier expression, found {:?}", other),
+                }
+            }
+            other => panic!("Expected string interpolation, found {:?}", other),
+        },
+        other => panic!("Expected val declaration, found {:?}", other),
+    }
+}
+
+#[test]
 fn test_extension_function() {
     let input = "fun String.reversed(): String = StringBuilder(this).reverse().toString()";
     let result = Parser::parse(input).unwrap();
