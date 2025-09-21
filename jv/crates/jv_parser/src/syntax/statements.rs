@@ -1,18 +1,19 @@
 use chumsky::prelude::*;
 use chumsky::Parser as ChumskyParser;
 use jv_ast::{
-    ConcurrencyConstruct, Expression, ExtensionFunction, Modifiers, Parameter, ResourceManagement,
-    Span, Statement, TypeAnnotation, Visibility,
+    Annotation, AnnotationArgument, ConcurrencyConstruct, Expression, ExtensionFunction, Literal,
+    Modifiers, Parameter, ResourceManagement, Span, Statement, TypeAnnotation, Visibility,
 };
-use jv_lexer::Token;
+use jv_lexer::{Token, TokenType};
 
 use super::expressions;
 use super::parameters::parameter_list;
 use super::support::{
-    expression_span, identifier, keyword as support_keyword, merge_spans, span_from_token,
-    statement_span, token_assign, token_class, token_colon, token_data, token_defer, token_dot,
-    token_fun, token_left_brace, token_left_paren, token_return, token_right_brace,
-    token_right_paren, token_spawn, token_use, token_val, token_var, type_annotation_simple,
+    expression_span, identifier, identifier_with_span, keyword as support_keyword, merge_spans,
+    span_from_token, statement_span, token_assign, token_at, token_class, token_colon, token_comma,
+    token_data, token_defer, token_dot, token_fun, token_left_brace, token_left_paren,
+    token_return, token_right_brace, token_right_paren, token_spawn, token_use, token_val,
+    token_var, type_annotation_simple,
 };
 
 pub(crate) fn statement_parser(
@@ -317,20 +318,175 @@ fn type_annotation_clause(
 }
 
 fn modifiers_parser() -> impl ChumskyParser<Token, Modifiers, Error = Simple<Token>> + Clone {
-    modifier_keyword().repeated().map(|keywords| {
-        let mut modifiers = Modifiers::default();
-        for keyword in keywords {
-            match keyword {
-                ModifierToken::Visibility(vis) => modifiers.visibility = vis,
-                ModifierToken::Abstract => modifiers.is_abstract = true,
-                ModifierToken::Final => modifiers.is_final = true,
-                ModifierToken::Static => modifiers.is_static = true,
-                ModifierToken::Override => modifiers.is_override = true,
-                ModifierToken::Open => modifiers.is_open = true,
+    annotation_parser()
+        .repeated()
+        .then(modifier_keyword().repeated())
+        .map(|(annotations, keywords)| {
+            let mut modifiers = Modifiers::default();
+            modifiers.annotations = annotations;
+            for keyword in keywords {
+                match keyword {
+                    ModifierToken::Visibility(vis) => modifiers.visibility = vis,
+                    ModifierToken::Abstract => modifiers.is_abstract = true,
+                    ModifierToken::Final => modifiers.is_final = true,
+                    ModifierToken::Static => modifiers.is_static = true,
+                    ModifierToken::Override => modifiers.is_override = true,
+                    ModifierToken::Open => modifiers.is_open = true,
+                }
             }
+            modifiers
+        })
+}
+
+fn annotation_parser() -> impl ChumskyParser<Token, Annotation, Error = Simple<Token>> + Clone {
+    let expr = expressions::expression_parser();
+
+    token_at()
+        .map(|token| span_from_token(&token))
+        .then(identifier_with_span())
+        .then(annotation_argument_list(expr.clone()).or_not())
+        .map(|((at_span, (name, name_span)), maybe_args)| {
+            let (arguments, end_span) =
+                maybe_args.unwrap_or_else(|| (Vec::new(), name_span.clone()));
+            let span = merge_spans(&at_span, &end_span);
+            Annotation {
+                name,
+                arguments,
+                span,
+            }
+        })
+}
+
+fn annotation_argument_list(
+    expr: impl ChumskyParser<Token, Expression, Error = Simple<Token>> + Clone,
+) -> impl ChumskyParser<Token, (Vec<AnnotationArgument>, Span), Error = Simple<Token>> + Clone {
+    token_left_paren()
+        .map(|token| span_from_token(&token))
+        .then(
+            annotation_argument(expr)
+                .separated_by(token_comma())
+                .allow_trailing(),
+        )
+        .then(token_right_paren().map(|token| span_from_token(&token)))
+        .map(|((_left_span, arguments), right_span)| (arguments, right_span))
+}
+
+fn annotation_argument(
+    expr: impl ChumskyParser<Token, Expression, Error = Simple<Token>> + Clone,
+) -> impl ChumskyParser<Token, AnnotationArgument, Error = Simple<Token>> + Clone {
+    let positional = annotation_literal()
+        .map(|(value, span)| AnnotationArgument::PositionalLiteral { value, span });
+
+    let named = identifier_with_span()
+        .then_ignore(token_assign())
+        .then(expr)
+        .map(|((name, name_span), value)| {
+            let value_span = expression_span(&value);
+            let span = merge_spans(&name_span, &value_span);
+            AnnotationArgument::Named { name, value, span }
+        });
+
+    choice((named, positional))
+}
+
+fn annotation_literal() -> impl ChumskyParser<Token, (Literal, Span), Error = Simple<Token>> + Clone
+{
+    filter_map(|span, token: Token| {
+        let token_span = span_from_token(&token);
+        match token.token_type {
+            TokenType::String(value) => Ok((Literal::String(value), token_span)),
+            TokenType::Number(value) => Ok((Literal::Number(value), token_span)),
+            TokenType::Boolean(value) => Ok((Literal::Boolean(value), token_span)),
+            TokenType::Null => Ok((Literal::Null, token_span)),
+            _ => Err(Simple::expected_input_found(span, Vec::new(), Some(token))),
         }
-        modifiers
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chumsky::Parser as ChumskyParser;
+
+    fn make_token(token_type: TokenType, lexeme: &str, column: usize) -> Token {
+        Token {
+            token_type,
+            lexeme: lexeme.to_string(),
+            line: 1,
+            column,
+        }
+    }
+
+    #[test]
+    fn annotation_parser_supports_positional_and_named_arguments() {
+        let parser = annotation_parser();
+
+        let tokens = vec![
+            make_token(TokenType::At, "@", 1),
+            make_token(TokenType::Identifier("Sample".to_string()), "Sample", 2),
+            make_token(TokenType::LeftParen, "(", 8),
+            make_token(
+                TokenType::String("examples/users.json".to_string()),
+                "examples/users.json",
+                9,
+            ),
+            make_token(TokenType::Comma, ",", 31),
+            make_token(TokenType::Identifier("mode".to_string()), "mode", 33),
+            make_token(TokenType::Assign, "=", 37),
+            make_token(TokenType::Identifier("Load".to_string()), "Load", 38),
+            make_token(TokenType::RightParen, ")", 42),
+        ];
+
+        let annotation = parser.parse(tokens).expect("parse annotation");
+
+        assert_eq!(annotation.name, "Sample");
+        assert_eq!(annotation.arguments.len(), 2);
+
+        match &annotation.arguments[0] {
+            AnnotationArgument::PositionalLiteral { value, .. } => match value {
+                Literal::String(path) => assert_eq!(path, "examples/users.json"),
+                other => panic!("expected string literal, found {:?}", other),
+            },
+            other => panic!("expected positional literal, found {:?}", other),
+        }
+
+        match &annotation.arguments[1] {
+            AnnotationArgument::Named { name, value, .. } => {
+                assert_eq!(name, "mode");
+                match value {
+                    Expression::Identifier(identifier, _) => assert_eq!(identifier, "Load"),
+                    other => panic!("expected identifier expression, found {:?}", other),
+                }
+            }
+            other => panic!("expected named argument, found {:?}", other),
+        }
+
+        assert_eq!(annotation.span.start_column, 1);
+        assert!(annotation.span.end_column >= 42);
+    }
+
+    #[test]
+    fn modifiers_parser_collects_annotations_and_keywords() {
+        let parser = modifiers_parser();
+
+        let tokens = vec![
+            make_token(TokenType::At, "@", 1),
+            make_token(TokenType::Identifier("Sample".to_string()), "Sample", 2),
+            make_token(TokenType::LeftParen, "(", 8),
+            make_token(TokenType::String("data.json".to_string()), "data.json", 9),
+            make_token(TokenType::RightParen, ")", 21),
+            make_token(TokenType::Identifier("public".to_string()), "public", 23),
+            make_token(TokenType::Identifier("final".to_string()), "final", 30),
+        ];
+
+        let modifiers = parser.parse(tokens).expect("parse modifiers");
+
+        assert_eq!(modifiers.annotations.len(), 1);
+        assert_eq!(modifiers.annotations[0].name, "Sample");
+        assert_eq!(modifiers.visibility, Visibility::Public);
+        assert!(modifiers.is_final);
+        assert_eq!(modifiers.annotations[0].arguments.len(), 1);
+    }
 }
 
 fn modifier_keyword() -> impl ChumskyParser<Token, ModifierToken, Error = Simple<Token>> + Clone {

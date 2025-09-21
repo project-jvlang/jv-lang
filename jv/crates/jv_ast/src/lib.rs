@@ -15,3 +15,6 @@ pub use expression::*;
 pub use statement::*;
 pub use types::*;
 pub use utils::*;
+
+#[cfg(test)]
+mod tests;

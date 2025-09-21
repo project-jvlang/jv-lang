@@ -71,6 +71,7 @@ pub enum TokenType {
     Semicolon,    // ;
     Colon,        // :
     DoubleColon,  // ::
+    At,           // @
 
     // String interpolation tokens
     StringStart, // "...${

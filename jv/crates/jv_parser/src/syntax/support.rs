@@ -85,6 +85,10 @@ pub(crate) fn token_colon() -> impl ChumskyParser<Token, Token, Error = Simple<T
     filter(|token: &Token| matches!(token.token_type, TokenType::Colon))
 }
 
+pub(crate) fn token_at() -> impl ChumskyParser<Token, Token, Error = Simple<Token>> + Clone {
+    filter(|token: &Token| matches!(token.token_type, TokenType::At))
+}
+
 pub(crate) fn token_dot() -> impl ChumskyParser<Token, Token, Error = Simple<Token>> + Clone {
     filter(|token: &Token| matches!(token.token_type, TokenType::Dot))
 }
