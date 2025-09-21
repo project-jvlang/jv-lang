@@ -37,7 +37,7 @@
   - _Requirements: 要件 1, 要件 2_
   - _Prompt: Role: Rust Testing Strategist | Task: Implement the task for spec jv-parser-red-phase-handling, first run spec-workflow-guide to get the workflow guide then implement the task: Restructure parser tests into green and legacy modules, convert passing red-phase tests, and ensure default cargo test runs green. | Restrictions: Keep assertions as strict as before or stronger, document any remaining ignored tests with TODO referencing inventory IDs, do not delete coverage without replacement. | _Leverage: jv/crates/jv_parser/src/tests.rs, new syntax modules, cargo test workflow | _Requirements: 要件 1, 要件 2 | Success: `cargo test -p jv_parser` passes without filters, remaining ignored tests list inventory references, helpers reduce duplication. | Instructions: Toggle this task to [-] when starting and to [x] only after tests and documentation updates are complete._
 
-- [ ] 5. 延期構文ドキュメントと同期テスト整備
+- [x] 5. 延期構文ドキュメントと同期テスト整備
   - File: jv/crates/jv_parser/docs/deferred-syntax.md
   - File: jv/crates/jv_parser/src/tests/doc_sync.rs (新規)
   - 内容: 実装完了後に残った未対応構文があれば最小限に整理し、Markdown へ反映する。同時に `render_markdown_table()`（仮称）を用いた同期テストを追加し、ドキュメントが常に最新であるか検証する。README やクレートドキュメントからのリンクも更新する。

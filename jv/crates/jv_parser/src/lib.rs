@@ -14,6 +14,9 @@
 // Implementation uses recursive descent parsing with chumsky combinators for clean,
 // composable parser construction.
 
+//! 延期構文の最新状況は `docs/deferred-syntax.md` を参照してください。
+//! The up-to-date deferred syntax inventory lives in `docs/deferred-syntax.md`.
+
 use chumsky::prelude::*;
 use chumsky::Parser as ChumskyParser;
 use jv_ast::*;

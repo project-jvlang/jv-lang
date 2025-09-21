@@ -120,6 +120,8 @@ crates/
 └── jv_cli           # CLIエントリポイント（jv/jvlangコマンド）
 ```
 
+`jv_parser` の延期構文状況は `jv/crates/jv_parser/docs/deferred-syntax.md` を参照してください。
+
 ## 開発
 
 ### 前提条件
