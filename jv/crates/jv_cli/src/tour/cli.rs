@@ -234,6 +234,8 @@ fn render_menu<W: Write>(writer: &mut W, entries: &[MenuEntry]) -> Result<()> {
 fn render_section<W: Write>(writer: &mut W, section: SectionId) -> Result<()> {
     match section {
         SectionId::BasicSyntax => sections::basic_syntax::render(writer),
+        SectionId::ControlFlow => sections::control_flow::render(writer),
+        SectionId::DataClasses => sections::data_classes::render(writer),
         _ => render_placeholder_for_section(writer, section),
     }
 }
