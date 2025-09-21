@@ -10,6 +10,7 @@ use jv_fmt::JavaFormatter;
 use jv_parser::Parser as JvParser;
 
 use jv_cli::pipeline::{compile, produce_binary, run_program, BuildOptions};
+use jv_cli::tour::TourOrchestrator;
 use jv_cli::{get_version, init_project as cli_init_project, Cli, Commands};
 
 fn main() -> Result<()> {
@@ -85,6 +86,11 @@ fn main() -> Result<()> {
         }
         Some(Commands::Check { input }) => {
             check_jv_file(&input)?;
+        }
+        Some(Commands::Tour) => {
+            TourOrchestrator::default()
+                .run()
+                .context("Failed to launch jv language tour")?;
         }
         Some(Commands::Version) => {
             println!("{}", get_version());

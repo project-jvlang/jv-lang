@@ -92,7 +92,7 @@
   - _Requirements: 9.1, 9.2, 9.3, 9.4, 9.5_
   - _Prompt: Implement the task for spec jv-language-tour, first run spec-workflow-guide to get the workflow guide then implement the task: Role: Technical Documentation Specialist and Portfolio Developer | Task: Create Portfolio Generator with GitHub-style organization, automatic documentation, and zip packaging following requirements 9.1-9.5, using filesystem operations and zip compression | Restrictions: Must create professional-quality documentation, ensure proper file organization, maintain cross-platform compatibility | _Leverage: std::fs for file operations, zip crate for packaging | _Requirements: 9.1-9.5 (portfolio generation and packaging) | Success: Portfolio structure is professional and organized, documentation is comprehensive and clear, zip package is complete and portable | Instructions: Set this task to in-progress [-] when starting and mark complete [x] when finished_
 
-- [ ] 11. Main Tour Orchestrator and CLI Integration
+- [x] 11. Main Tour Orchestrator and CLI Integration
   - File: crates/jv_cli/src/tour/mod.rs, main.rs (modify)
   - `jv tour`サブコマンド統合とモジュール間調整
   - エラーハンドリングとユーザーエクスペリエンス最適化

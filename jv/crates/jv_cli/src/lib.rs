@@ -65,6 +65,8 @@ pub enum Commands {
     Version,
     /// Start interactive REPL
     Repl,
+    /// Launch the interactive language tour experience
+    Tour,
 }
 
 pub fn init_project(name: &str) -> Result<String> {
