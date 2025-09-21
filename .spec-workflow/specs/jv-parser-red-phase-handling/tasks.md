@@ -27,7 +27,7 @@
   - _Requirements: 要件 1, 要件 2_
   - _Prompt: Role: Rust Expression Parsing Specialist | Task: Implement the task for spec jv-parser-red-phase-handling, first run spec-workflow-guide to get the workflow guide then implement the task: Complete expression parsing support for when, null-safe chains, arrays, lambdas, string interpolation, and operator precedence using the refactored modules. | Restrictions: Maintain clean separation between expression stages, ensure new parser branches reuse shared helpers, avoid introducing panics for recoverable parse errors. | _Leverage: jv/crates/jv_parser/src/syntax/support.rs, existing expression parser code, test expectations in tests.rs | _Requirements: 要件 1, 要件 2 | Success: All expression-focused tests parse successfully and validate AST structure, precedence behaves per design, coverage tools show exercised paths. | Instructions: Mark this task as [-] before coding and flip to [x] once validations succeed._
 
-- [ ] 4. テストスイート再編とレッドフェーズ緑化
+- [x] 4. テストスイート再編とレッドフェーズ緑化
   - File: jv/crates/jv_parser/src/tests/green_phase.rs (新規)
   - File: jv/crates/jv_parser/src/tests/legacy_red_phase.rs
   - File: jv/crates/jv_parser/src/tests/mod.rs
