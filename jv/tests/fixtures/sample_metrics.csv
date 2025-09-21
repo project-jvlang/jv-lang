@@ -1,0 +1,4 @@
+id,name,latency_ms,error_rate
+1,ingest,12.4,0.001
+2,transform,18.9,0.0025
+3,export,9.7,0.0
