@@ -133,7 +133,7 @@ fun formatHeadline() {
             "デフォルト引数で後処理を任意化できる",
             "Java では `java.util.function` を利用する",
         ],
-    jv_code: r#"fun measure(label: String, block: () -> Unit, finallyDo: () -> Unit = {}) {
+        jv_code: r#"fun measure(label: String, block: () -> Unit, finallyDo: () -> Unit = {}) {
     val start = System.currentTimeMillis()
     block()
     val elapsed = System.currentTimeMillis() - start

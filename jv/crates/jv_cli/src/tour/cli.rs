@@ -236,6 +236,7 @@ fn render_section<W: Write>(writer: &mut W, section: SectionId) -> Result<()> {
         SectionId::BasicSyntax => sections::basic_syntax::render(writer),
         SectionId::ControlFlow => sections::control_flow::render(writer),
         SectionId::DataClasses => sections::data_classes::render(writer),
+        SectionId::BuildTools => sections::build_tools::render(writer),
         _ => render_placeholder_for_section(writer, section),
     }
 }

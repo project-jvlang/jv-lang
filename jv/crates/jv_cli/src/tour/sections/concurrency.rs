@@ -178,15 +178,11 @@ mod tests {
 
     #[test]
     fn virtual_thread_is_highlighted() {
-        assert!(LESSONS[0]
-            .java_output
-            .contains("Thread.ofVirtual().start"));
+        assert!(LESSONS[0].java_output.contains("Thread.ofVirtual().start"));
     }
 
     #[test]
     fn structured_scope_example_mentions_scope() {
-        assert!(LESSONS[1]
-            .java_output
-            .contains("StructuredTaskScope"));
+        assert!(LESSONS[1].java_output.contains("StructuredTaskScope"));
     }
 }

@@ -26,3 +26,4 @@ jv_build.workspace = true
 jv_fmt.workspace = true
 jv_checker.workspace = true
 jv_mapper.workspace = true
+jv_pm.workspace = true
