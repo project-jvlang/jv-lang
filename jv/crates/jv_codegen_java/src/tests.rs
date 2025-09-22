@@ -8,6 +8,7 @@ use jv_ir::{
 };
 use serde_json::to_string_pretty;
 use std::collections::{BTreeMap, BTreeSet};
+use std::path::PathBuf;
 
 fn dummy_span() -> Span {
     Span::dummy()
@@ -150,6 +151,35 @@ fn sample_declaration_tsv() -> IrSampleDeclaration {
         "users.tsv",
         sample_tsv_bytes(),
     )
+}
+
+fn sample_sha256() -> String {
+    "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef".to_string()
+}
+
+fn sample_load_declaration_with(
+    format: DataFormat,
+    source: &str,
+    source_kind: SampleSourceKind,
+    cache_path: Option<&str>,
+    limit_bytes: Option<u64>,
+) -> IrSampleDeclaration {
+    IrSampleDeclaration {
+        variable_name: "users".to_string(),
+        java_type: user_sample_list_type(),
+        format,
+        mode: SampleMode::Load,
+        source: source.to_string(),
+        source_kind,
+        sha256: sample_sha256(),
+        cache_path: cache_path.map(PathBuf::from),
+        limit_bytes,
+        embedded_data: None,
+        schema: sample_schema(),
+        records: vec![sample_record_descriptor()],
+        root_record_name: Some("UserSample".to_string()),
+        span: dummy_span(),
+    }
 }
 
 fn user_sample_constructor(name: &str, age: i32, email: &str) -> IrExpression {
@@ -1194,5 +1224,141 @@ public class UserSampleLoader {
     
 }
 "###
+    );
+}
+
+#[test]
+fn load_mode_sample_declaration_generates_http_fetch_pipeline() {
+    let declaration = sample_load_declaration_with(
+        DataFormat::Json,
+        "https://example.com/users.json",
+        SampleSourceKind::Http,
+        Some("/tmp/sample-cache/users.json"),
+        Some(4096),
+    );
+    let program = IrProgram {
+        package: Some("sample.load.http".to_string()),
+        imports: vec![],
+        type_declarations: vec![IrStatement::SampleDeclaration(declaration)],
+        span: dummy_span(),
+    };
+
+    let unit = generate_java_code(&program).expect("generate load helper from sample declaration");
+
+    for expected_import in [
+        "java.net.http.HttpClient",
+        "java.net.http.HttpRequest",
+        "java.net.http.HttpResponse",
+    ] {
+        assert!(
+            unit.imports.iter().any(|import| import == expected_import),
+            "expected import {expected_import} to be generated: {:?}",
+            unit.imports
+        );
+    }
+
+    let source = unit.to_source(&JavaCodeGenConfig::default());
+    assert!(
+        source.contains(
+            "private static final String SOURCE = \"https://example.com/users.json\";"
+        ),
+        "source constant should reference remote URI: {source}"
+    );
+    assert!(
+        source.contains(
+            "private static final String CACHE_PATH = \"/tmp/sample-cache/users.json\";"
+        ),
+        "cache constant should be set when cache path is supplied: {source}"
+    );
+    assert!(
+        source.contains("private static final long LIMIT_BYTES = 4096L;"),
+        "limit constant should preserve configured byte ceiling: {source}"
+    );
+    assert!(
+        source.contains("private static final java.net.http.HttpClient HTTP_CLIENT"),
+        "HTTP client helper should be initialised: {source}"
+    );
+    assert!(
+        source.contains(
+            "public static java.util.List<UserSample> loadUsers() throws java.io.IOException {"
+        ),
+        "load helper should expose typed list loader: {source}"
+    );
+    assert!(
+        source.contains("return fetchHttp(SOURCE);"),
+        "primary fetch should invoke HTTP path: {source}"
+    );
+    assert!(
+        source.contains("return decodeJson(bytes);"),
+        "JSON loader should decode via decodeJson: {source}"
+    );
+    assert!(
+        source.contains("verifySha(data);"),
+        "sha256 verification should be enforced before decode: {source}"
+    );
+    assert!(
+        source.contains("enforceLimit(data.length);"),
+        "byte limit enforcement should be generated: {source}"
+    );
+    assert!(
+        source.contains("public record UserSample"),
+        "record descriptor should be emitted alongside loader: {source}"
+    );
+}
+
+#[test]
+fn load_mode_sample_declaration_supports_s3_and_tabular_decoding() {
+    let declaration = sample_load_declaration_with(
+        DataFormat::Csv,
+        "s3://bucket/data/users.csv",
+        SampleSourceKind::S3,
+        None,
+        None,
+    );
+    let program = IrProgram {
+        package: Some("sample.load.s3".to_string()),
+        imports: vec![],
+        type_declarations: vec![IrStatement::SampleDeclaration(declaration)],
+        span: dummy_span(),
+    };
+
+    let unit = generate_java_code(&program).expect("generate S3 load helper from sample declaration");
+    let source = unit.to_source(&JavaCodeGenConfig::default());
+
+    assert!(
+        source.contains("private static final String CACHE_PATH = null;"),
+        "cache constant should be null when cache path omitted: {source}"
+    );
+    assert!(
+        source.contains("private static final long LIMIT_BYTES = -1L;"),
+        "limit constant should disable enforcement when unspecified: {source}"
+    );
+    assert!(
+        source.contains("return fetchS3(SOURCE);"),
+        "S3 fetch branch should be emitted for s3:// sources: {source}"
+    );
+    assert!(
+        source.contains("return decodeTabular(bytes, ',');"),
+        "CSV load helpers should decode via decodeTabular: {source}"
+    );
+    assert!(
+        source.contains(
+            "ProcessBuilder builder = new ProcessBuilder(\"aws\", \"s3\", \"cp\", uri, \"-\", \"--no-progress\");"
+        ),
+        "aws CLI invocation should be generated for S3 fetch: {source}"
+    );
+    assert!(
+        source.contains("throw new java.io.IOException(\"aws s3 cp が失敗しました"),
+        "S3 helper should surface CLI failure diagnostics: {source}"
+    );
+    assert!(
+        source.contains(
+            "public static java.util.List<UserSample> loadUsers() throws java.io.IOException {"
+        ),
+        "loader should expose typed CSV results: {source}"
+    );
+    assert!(
+        source.contains("public record UserSample"),
+        "record definition should accompany S3 loader: {source}"
     );
 }
