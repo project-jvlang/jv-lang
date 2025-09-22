@@ -10,14 +10,21 @@ mod tests {
         generate_extension_class_name, generate_utility_class_name, infer_java_type,
         transform_expression, transform_program, transform_statement, CompletableFutureOp,
         DataFormat, IrCaseLabel, IrExpression, IrModifiers, IrStatement, IrVisibility, JavaType,
-        SampleMode, TransformContext, TransformError, VirtualThreadOp,
+        SampleMode, SampleSourceKind, Schema, TransformContext, TransformError, VirtualThreadOp,
     };
     use jv_ast::*;
     use std::fs;
+    use sha2::{Digest, Sha256};
     use tempfile::tempdir;
 
     fn dummy_span() -> Span {
         Span::dummy()
+    }
+
+    fn sha256_hex(bytes: &[u8]) -> String {
+        let mut hasher = Sha256::new();
+        hasher.update(bytes);
+        format!("{:x}", hasher.finalize())
     }
 
     #[test]
@@ -93,6 +100,246 @@ mod tests {
         match registered {
             JavaType::Reference { name, .. } => assert_eq!(name, "java.util.List"),
             other => panic!("unexpected registered type: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn sample_annotation_embed_mode_embeds_data_and_generates_records() {
+        let temp_dir = tempdir().expect("temp dir");
+        let file_name = "users.json";
+        let file_path = temp_dir.path().join(file_name);
+        let payload = r#"[{"id":1,"name":"Alice"},{"id":2,"name":"Bob"}]"#;
+        fs::write(&file_path, payload).expect("write payload");
+        let file_bytes = fs::read(&file_path).expect("read payload");
+        let expected_sha = sha256_hex(&file_bytes);
+
+        let mut context = TransformContext::new();
+        {
+            let options = context.sample_options_mut();
+            options.base_dir = Some(temp_dir.path().to_path_buf());
+            options.cache_dir = Some(temp_dir.path().join("cache"));
+        }
+
+        let annotation = Annotation {
+            name: "Sample".to_string(),
+            arguments: vec![
+                AnnotationArgument::PositionalLiteral {
+                    value: Literal::String(file_name.to_string()),
+                    span: dummy_span(),
+                },
+                AnnotationArgument::Named {
+                    name: "sha256".to_string(),
+                    value: Expression::Literal(
+                        Literal::String(expected_sha.clone()),
+                        dummy_span(),
+                    ),
+                    span: dummy_span(),
+                },
+            ],
+            span: dummy_span(),
+        };
+
+        let mut modifiers = Modifiers::default();
+        modifiers.annotations.push(annotation);
+
+        let ir = desugar_val_declaration(
+            "users".to_string(),
+            None,
+            Expression::Literal(Literal::Null, dummy_span()),
+            modifiers,
+            dummy_span(),
+            &mut context,
+        )
+        .expect("desugar embed sample");
+
+        let IrStatement::SampleDeclaration(decl) = ir else {
+            panic!("expected sample declaration");
+        };
+
+        assert_eq!(decl.variable_name, "users");
+        assert_eq!(decl.mode, SampleMode::Embed);
+        assert_eq!(decl.format, DataFormat::Json);
+        assert_eq!(decl.source, file_name);
+        assert_eq!(decl.source_kind, SampleSourceKind::LocalFile);
+        assert_eq!(decl.sha256, expected_sha);
+        assert_eq!(decl.embedded_data.as_deref(), Some(file_bytes.as_slice()));
+
+        let cache_path = decl.cache_path.as_ref().expect("cache path");
+        assert!(cache_path.as_path().exists());
+        assert_eq!(
+            cache_path.file_name().and_then(|name| name.to_str()),
+            Some(decl.sha256.as_str())
+        );
+
+        assert_eq!(context.lookup_variable("users"), Some(&decl.java_type));
+
+        match &decl.java_type {
+            JavaType::Reference { name, generic_args } => {
+                assert_eq!(name, "java.util.List");
+                assert_eq!(generic_args.len(), 1);
+                match &generic_args[0] {
+                    JavaType::Reference { name, .. } => {
+                        assert!(name.ends_with("Sample"));
+                    }
+                    other => panic!("unexpected element type: {:?}", other),
+                }
+            }
+            other => panic!("expected list type, got {:?}", other),
+        }
+
+        let root_name = decl
+            .root_record_name
+            .as_ref()
+            .expect("root record name");
+        let descriptor = decl
+            .records
+            .iter()
+            .find(|record| &record.name == root_name)
+            .expect("root record descriptor");
+
+        let id_field = descriptor
+            .fields
+            .iter()
+            .find(|field| field.name == "id")
+            .expect("id field");
+        assert!(!id_field.is_optional);
+
+        let name_field = descriptor
+            .fields
+            .iter()
+            .find(|field| field.name == "name")
+            .expect("name field");
+        assert!(!name_field.is_optional);
+
+        match &decl.schema {
+            Schema::Array { element_type } => match element_type.as_ref() {
+                Schema::Object { fields, required } => {
+                    assert!(required.contains("id"));
+                    assert!(required.contains("name"));
+                    assert!(fields.contains_key("id"));
+                    assert!(fields.contains_key("name"));
+                }
+                other => panic!("unexpected element schema: {:?}", other),
+            },
+            other => panic!("unexpected schema: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn sample_annotation_load_mode_skips_embedding_and_respects_limit_bytes() {
+        let temp_dir = tempdir().expect("temp dir");
+        let file_name = "metrics.csv";
+        let file_path = temp_dir.path().join(file_name);
+        let payload = "name,requests\napi,42\napi,43\n";
+        fs::write(&file_path, payload).expect("write payload");
+        let file_bytes = fs::read(&file_path).expect("read payload");
+        let expected_sha = sha256_hex(&file_bytes);
+
+        let mut context = TransformContext::new();
+        context.sample_options_mut().base_dir = Some(temp_dir.path().to_path_buf());
+
+        let annotation = Annotation {
+            name: "Sample".to_string(),
+            arguments: vec![
+                AnnotationArgument::PositionalLiteral {
+                    value: Literal::String(file_name.to_string()),
+                    span: dummy_span(),
+                },
+                AnnotationArgument::Named {
+                    name: "mode".to_string(),
+                    value: Expression::Identifier("Load".to_string(), dummy_span()),
+                    span: dummy_span(),
+                },
+                AnnotationArgument::Named {
+                    name: "limitBytes".to_string(),
+                    value: Expression::Literal(Literal::Number("128".to_string()), dummy_span()),
+                    span: dummy_span(),
+                },
+                AnnotationArgument::Named {
+                    name: "format".to_string(),
+                    value: Expression::Literal(Literal::String("csv".to_string()), dummy_span()),
+                    span: dummy_span(),
+                },
+            ],
+            span: dummy_span(),
+        };
+
+        let mut modifiers = Modifiers::default();
+        modifiers.annotations.push(annotation);
+
+        let ir = desugar_val_declaration(
+            "metrics".to_string(),
+            None,
+            Expression::Literal(Literal::Null, dummy_span()),
+            modifiers,
+            dummy_span(),
+            &mut context,
+        )
+        .expect("desugar load sample");
+
+        let IrStatement::SampleDeclaration(decl) = ir else {
+            panic!("expected sample declaration");
+        };
+
+        assert_eq!(decl.variable_name, "metrics");
+        assert_eq!(decl.mode, SampleMode::Load);
+        assert_eq!(decl.format, DataFormat::Csv);
+        assert_eq!(decl.limit_bytes, Some(128));
+        assert!(decl.embedded_data.is_none());
+        assert!(decl.cache_path.is_none());
+        assert_eq!(decl.source, file_name);
+        assert_eq!(decl.source_kind, SampleSourceKind::LocalFile);
+        assert_eq!(decl.sha256, expected_sha);
+        assert_eq!(context.lookup_variable("metrics"), Some(&decl.java_type));
+
+        match &decl.java_type {
+            JavaType::Reference { name, generic_args } => {
+                assert_eq!(name, "java.util.List");
+                assert_eq!(generic_args.len(), 1);
+            }
+            other => panic!("expected list type, got {:?}", other),
+        }
+
+        match &decl.schema {
+            Schema::Array { element_type } => match element_type.as_ref() {
+                Schema::Object { fields, required } => {
+                    assert!(required.contains("name"));
+                    assert!(required.contains("requests"));
+                    assert!(fields.contains_key("name"));
+                    assert!(fields.contains_key("requests"));
+                }
+                other => panic!("unexpected element schema: {:?}", other),
+            },
+            other => panic!("unexpected schema: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn sample_annotation_rejects_explicit_type_annotation() {
+        let mut context = TransformContext::new();
+
+        let mut modifiers = Modifiers::default();
+        modifiers.annotations.push(Annotation {
+            name: "Sample".to_string(),
+            arguments: Vec::new(),
+            span: dummy_span(),
+        });
+
+        let error = desugar_val_declaration(
+            "data".to_string(),
+            Some(TypeAnnotation::Simple("String".to_string())),
+            Expression::Literal(Literal::Null, dummy_span()),
+            modifiers,
+            dummy_span(),
+            &mut context,
+        )
+        .expect_err("type annotation should be rejected");
+
+        match error {
+            TransformError::SampleAnnotationError { message, .. } => {
+                assert!(message.contains("型注釈"));
+            }
+            other => panic!("unexpected error: {:?}", other),
         }
     }
 
