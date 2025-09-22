@@ -1,4 +1,11 @@
 // jv_build - Build system and javac integration
+mod config;
+
+pub use config::{
+    BuildConfig, CliRequirement, NetworkPolicy, SampleCliDependencies, SampleConfig,
+    SampleConfigError, SampleDependency, SampleProtocol,
+};
+
 use anyhow::Result;
 use std::path::Path;
 use std::process::{Command, Stdio};
@@ -14,25 +21,6 @@ pub enum BuildError {
     JdkNotFound(String),
     #[error("IO error: {0}")]
     IoError(#[from] std::io::Error),
-}
-
-#[derive(Debug, Clone)]
-pub struct BuildConfig {
-    pub java_version: String,
-    pub output_dir: String,
-    pub classpath: Vec<String>,
-    pub compiler_options: Vec<String>,
-}
-
-impl Default for BuildConfig {
-    fn default() -> Self {
-        Self {
-            java_version: "25".to_string(),
-            output_dir: "./out".to_string(),
-            classpath: vec![],
-            compiler_options: vec!["--release".to_string(), "25".to_string()],
-        }
-    }
 }
 
 pub struct BuildSystem {
