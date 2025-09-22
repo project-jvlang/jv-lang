@@ -9,13 +9,89 @@ mod tests {
         desugar_val_declaration, desugar_var_declaration, desugar_when_expression,
         generate_extension_class_name, generate_utility_class_name, infer_java_type,
         transform_expression, transform_program, transform_statement, CompletableFutureOp,
-        IrCaseLabel, IrExpression, IrModifiers, IrStatement, IrVisibility, JavaType,
-        TransformContext, TransformError, VirtualThreadOp,
+        DataFormat, IrCaseLabel, IrExpression, IrModifiers, IrStatement, IrVisibility, JavaType,
+        SampleMode, TransformContext, TransformError, VirtualThreadOp,
     };
     use jv_ast::*;
+    use std::fs;
+    use tempfile::tempdir;
 
     fn dummy_span() -> Span {
         Span::dummy()
+    }
+
+    #[test]
+    fn sample_annotation_desugars_to_ir_declaration() {
+        let temp_dir = tempdir().expect("create temp dir");
+        let sample_path = temp_dir.path().join("users.json");
+        fs::write(&sample_path, r#"[{"id":1,"name":"Alice"}]"#)
+            .expect("write sample data");
+
+        let mut context = TransformContext::new();
+        context.sample_options_mut().base_dir = Some(temp_dir.path().to_path_buf());
+
+        let annotation = Annotation {
+            name: "Sample".to_string(),
+            arguments: vec![AnnotationArgument::PositionalLiteral {
+                value: Literal::String("users.json".to_string()),
+                span: dummy_span(),
+            }],
+            span: dummy_span(),
+        };
+
+        let mut modifiers = Modifiers::default();
+        modifiers.annotations.push(annotation);
+
+        let initializer = Expression::Literal(Literal::Null, dummy_span());
+
+        let result = desugar_val_declaration(
+            "users".to_string(),
+            None,
+            initializer,
+            modifiers,
+            dummy_span(),
+            &mut context,
+        )
+        .expect("desugar sample annotation");
+
+        match result {
+            IrStatement::SampleDeclaration(decl) => {
+                assert_eq!(decl.variable_name, "users");
+                assert_eq!(decl.mode, SampleMode::Embed);
+                assert_eq!(decl.format, DataFormat::Json);
+                assert!(decl.embedded_data.as_ref().is_some(), "embed mode stores data");
+                let list_type = decl.java_type.clone();
+                match list_type {
+                    JavaType::Reference { name, generic_args } => {
+                        assert_eq!(name, "java.util.List");
+                        assert_eq!(generic_args.len(), 1);
+                        match &generic_args[0] {
+                            JavaType::Reference { name, .. } => {
+                                assert_eq!(name, "UserSample");
+                            }
+                            other => panic!("unexpected element type: {:?}", other),
+                        }
+                    }
+                    other => panic!("expected list type, got {:?}", other),
+                }
+
+                assert!(
+                    decl.records
+                        .iter()
+                        .any(|record| record.name == "UserSample"),
+                    "expected inferred record descriptor"
+                );
+            }
+            other => panic!("expected sample declaration, got {:?}", other),
+        }
+
+        let registered = context
+            .lookup_variable("users")
+            .expect("variable registered in context");
+        match registered {
+            JavaType::Reference { name, .. } => assert_eq!(name, "java.util.List"),
+            other => panic!("unexpected registered type: {:?}", other),
+        }
     }
 
     // Helper to create a simple transform context

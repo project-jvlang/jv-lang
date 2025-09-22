@@ -1,3 +1,4 @@
+use super::sample::desugar_sample_annotation;
 use super::transform_expression;
 use super::type_system::{convert_type_annotation, infer_java_type};
 use super::utils::{convert_modifiers, extract_java_type};
@@ -17,6 +18,34 @@ pub fn desugar_val_declaration(
     span: Span,
     context: &mut TransformContext,
 ) -> Result<IrStatement, TransformError> {
+    let sample_annotations: Vec<_> = modifiers
+        .annotations
+        .iter()
+        .filter(|annotation| annotation.name == "Sample")
+        .cloned()
+        .collect();
+
+    if !sample_annotations.is_empty() {
+        if sample_annotations.len() > 1 {
+            return Err(TransformError::SampleAnnotationError {
+                message: "@Sample は一度だけ指定してください".to_string(),
+                span: span.clone(),
+            });
+        }
+
+        let declaration = desugar_sample_annotation(
+            name,
+            type_annotation,
+            initializer,
+            &modifiers,
+            sample_annotations[0].clone(),
+            span,
+            context,
+        )?;
+
+        return Ok(IrStatement::SampleDeclaration(declaration));
+    }
+
     let ir_initializer = transform_expression(initializer, context)?;
     let java_type = infer_java_type(type_annotation, Some(&ir_initializer), context)?;
 

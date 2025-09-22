@@ -1,6 +1,10 @@
 // jv_ir - Intermediate representation for desugaring jv language constructs
 use jv_ast::*;
 use serde::{Deserialize, Serialize};
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::PathBuf;
+use std::time::Duration;
+use thiserror::Error;
 
 /// Java-compatible type representation after desugaring
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -206,6 +210,219 @@ pub enum IrExpression {
     },
 }
 
+/// Sample data mode selected via @Sample annotation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SampleMode {
+    Embed,
+    Load,
+}
+
+/// Supported external data formats for @Sample.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DataFormat {
+    Json,
+    Csv,
+    Tsv,
+}
+
+impl std::fmt::Display for DataFormat {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            DataFormat::Json => write!(f, "JSON"),
+            DataFormat::Csv => write!(f, "CSV"),
+            DataFormat::Tsv => write!(f, "TSV"),
+        }
+    }
+}
+
+/// Source classification for fetched sample data.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SampleSourceKind {
+    LocalFile,
+    Http,
+    S3,
+    GitSsh,
+    CachedFile,
+}
+
+/// Request parameters controlling sample data fetching.
+#[derive(Debug, Clone)]
+pub struct SampleFetchRequest {
+    pub source: String,
+    pub base_dir: Option<PathBuf>,
+    pub allow_network: bool,
+    pub expected_sha256: Option<String>,
+    pub max_bytes: Option<u64>,
+    pub cache_dir: Option<PathBuf>,
+    pub aws_cli_path: Option<PathBuf>,
+    pub git_cli_path: Option<PathBuf>,
+    pub timeout: Duration,
+}
+
+impl SampleFetchRequest {
+    pub fn new(source: impl Into<String>) -> Self {
+        Self {
+            source: source.into(),
+            base_dir: None,
+            allow_network: false,
+            expected_sha256: None,
+            max_bytes: None,
+            cache_dir: None,
+            aws_cli_path: None,
+            git_cli_path: None,
+            timeout: Duration::from_secs(30),
+        }
+    }
+}
+
+/// Result payload containing fetched bytes and metadata.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SampleFetchResult {
+    pub bytes: Vec<u8>,
+    pub sha256: String,
+    pub source_kind: SampleSourceKind,
+    pub origin: String,
+    pub cache_path: Option<PathBuf>,
+}
+
+#[derive(Debug, Error)]
+pub enum SampleFetchError {
+    #[error("無効なURIです: {uri} ({message})")]
+    InvalidUri { uri: String, message: String },
+
+    #[error("ネットワークアクセスが許可されていません: {uri}")]
+    NetworkDisabled { uri: String },
+
+    #[error("HTTPリクエストに失敗しました: {uri} ({message})")]
+    HttpRequest { uri: String, message: String },
+
+    #[error("HTTPレスポンスエラーです: {uri} (status={status})")]
+    HttpResponse { uri: String, status: u16 },
+
+    #[error("ファイルアクセスに失敗しました: {path} ({error})")]
+    Io {
+        path: PathBuf,
+        #[source]
+        error: std::io::Error,
+    },
+
+    #[error("CLIが見つかりません: {command}")]
+    CommandMissing { command: String },
+
+    #[error("CLI実行に失敗しました: {command} (status={status:?}) {stderr}")]
+    CommandFailed {
+        command: String,
+        status: Option<i32>,
+        stderr: String,
+    },
+
+    #[error("サイズ上限を超えています (limit={limit} bytes, actual={actual} bytes)")]
+    SizeLimitExceeded { limit: u64, actual: u64 },
+
+    #[error("SHA256ハッシュが一致しません (expected={expected}, actual={actual})")]
+    Sha256Mismatch { expected: String, actual: String },
+
+    #[error("git+ssh URIにpathクエリがありません: {uri}")]
+    GitPathMissing { uri: String },
+
+    #[error("サポートされていないスキームです: {scheme}")]
+    UnsupportedScheme { scheme: String },
+}
+
+/// サポートされているデータフォーマット。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PrimitiveType {
+    String,
+    Boolean,
+    Integer,
+    Long,
+    BigInteger,
+    Double,
+    BigDecimal,
+    Null,
+}
+
+impl PrimitiveType {
+    pub fn is_integral(self) -> bool {
+        matches!(
+            self,
+            PrimitiveType::Integer | PrimitiveType::Long | PrimitiveType::BigInteger
+        )
+    }
+
+    pub fn is_decimal(self) -> bool {
+        matches!(self, PrimitiveType::Double | PrimitiveType::BigDecimal)
+    }
+
+    pub fn is_numeric(self) -> bool {
+        self.is_integral() || self.is_decimal()
+    }
+}
+
+/// 推論されたスキーマ表現。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Schema {
+    Primitive(PrimitiveType),
+    Object {
+        fields: BTreeMap<String, Schema>,
+        required: BTreeSet<String>,
+    },
+    Array {
+        element_type: Box<Schema>,
+    },
+    Optional(Box<Schema>),
+    Union(Vec<Schema>),
+}
+
+#[derive(Debug, Error)]
+pub enum SchemaError {
+    #[error("JSONデータの解析に失敗しました: {message}")]
+    InvalidJson { message: String },
+
+    #[error("{format}データの解析に失敗しました: {message}")]
+    InvalidTabular { format: DataFormat, message: String },
+
+    #[error("カラムヘッダーが見つかりません")]
+    MissingHeaders,
+
+    #[error("データセットが空です")]
+    EmptyDataset,
+}
+
+/// Record field descriptor derived from schema.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SampleRecordField {
+    pub name: String,
+    pub java_type: JavaType,
+    pub is_optional: bool,
+}
+
+/// Record description used for Java code generation of @Sample data structures.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SampleRecordDescriptor {
+    pub name: String,
+    pub fields: Vec<SampleRecordField>,
+}
+
+/// IR representation for @Sample annotated declarations.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct IrSampleDeclaration {
+    pub variable_name: String,
+    pub java_type: JavaType,
+    pub format: DataFormat,
+    pub mode: SampleMode,
+    pub source: String,
+    pub source_kind: SampleSourceKind,
+    pub sha256: String,
+    pub cache_path: Option<PathBuf>,
+    pub limit_bytes: Option<u64>,
+    pub embedded_data: Option<Vec<u8>>,
+    pub schema: Schema,
+    pub records: Vec<SampleRecordDescriptor>,
+    pub root_record_name: Option<String>,
+    pub span: Span,
+}
+
 /// Switch cases for desugared when expressions
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct IrSwitchCase {
@@ -276,6 +493,9 @@ pub enum IrStatement {
         modifiers: IrModifiers,
         span: Span,
     },
+
+    // @Sample annotated declaration descriptor
+    SampleDeclaration(IrSampleDeclaration),
 
     // Method declarations
     MethodDeclaration {

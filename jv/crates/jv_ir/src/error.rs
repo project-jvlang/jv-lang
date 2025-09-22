@@ -29,6 +29,12 @@ pub enum TransformError {
 
     #[error("Resource management error: {message}")]
     ResourceManagementError { message: String, span: Span },
+
+    #[error("@Sample注釈エラー: {message}")]
+    SampleAnnotationError { message: String, span: Span },
+
+    #[error("@Sample処理エラー: {message}")]
+    SampleProcessingError { message: String, span: Span },
 }
 
 impl TransformError {
@@ -42,7 +48,9 @@ impl TransformError {
             | TransformError::DefaultParameterError { span, .. }
             | TransformError::ExtensionFunctionError { span, .. }
             | TransformError::ConcurrencyError { span, .. }
-            | TransformError::ResourceManagementError { span, .. } => span,
+            | TransformError::ResourceManagementError { span, .. }
+            | TransformError::SampleAnnotationError { span, .. }
+            | TransformError::SampleProcessingError { span, .. } => span,
         }
     }
 }

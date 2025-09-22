@@ -1,189 +1,22 @@
-use std::collections::{BTreeMap, BTreeSet};
-use std::fmt;
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::fs;
-use std::io::{self, Cursor};
+use std::io::Cursor;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::time::Duration;
 
+use crate::context::TransformContext;
+use crate::error::TransformError;
+use crate::types::{
+    DataFormat, IrSampleDeclaration, JavaType, PrimitiveType, SampleFetchError,
+    SampleFetchRequest, SampleFetchResult, SampleMode, SampleRecordDescriptor,
+    SampleRecordField, SampleSourceKind, Schema, SchemaError,
+};
+use jv_ast::{Annotation, AnnotationArgument, Expression, Literal, Modifiers, Span, TypeAnnotation};
 use reqwest::blocking::Client;
 use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
 use tempfile::TempDir;
-use thiserror::Error;
 use url::Url;
-
-/// Source classification for fetched sample data.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum SampleSourceKind {
-    LocalFile,
-    Http,
-    S3,
-    GitSsh,
-    CachedFile,
-}
-
-/// Request parameters controlling sample data fetching.
-#[derive(Debug, Clone)]
-pub struct SampleFetchRequest {
-    pub source: String,
-    pub base_dir: Option<PathBuf>,
-    pub allow_network: bool,
-    pub expected_sha256: Option<String>,
-    pub max_bytes: Option<u64>,
-    pub cache_dir: Option<PathBuf>,
-    pub aws_cli_path: Option<PathBuf>,
-    pub git_cli_path: Option<PathBuf>,
-    pub timeout: Duration,
-}
-
-impl SampleFetchRequest {
-    pub fn new(source: impl Into<String>) -> Self {
-        Self {
-            source: source.into(),
-            base_dir: None,
-            allow_network: false,
-            expected_sha256: None,
-            max_bytes: None,
-            cache_dir: None,
-            aws_cli_path: None,
-            git_cli_path: None,
-            timeout: Duration::from_secs(30),
-        }
-    }
-}
-
-/// Result payload containing fetched bytes and metadata.
-#[derive(Debug, Clone)]
-pub struct SampleFetchResult {
-    pub bytes: Vec<u8>,
-    pub sha256: String,
-    pub source_kind: SampleSourceKind,
-    pub origin: String,
-    pub cache_path: Option<PathBuf>,
-}
-
-#[derive(Debug, Error)]
-pub enum SampleFetchError {
-    #[error("無効なURIです: {uri} ({message})")]
-    InvalidUri { uri: String, message: String },
-
-    #[error("ネットワークアクセスが許可されていません: {uri}")]
-    NetworkDisabled { uri: String },
-
-    #[error("HTTPリクエストに失敗しました: {uri} ({message})")]
-    HttpRequest { uri: String, message: String },
-
-    #[error("HTTPレスポンスエラーです: {uri} (status={status})")]
-    HttpResponse { uri: String, status: u16 },
-
-    #[error("ファイルアクセスに失敗しました: {path} ({error})")]
-    Io {
-        path: PathBuf,
-        #[source]
-        error: io::Error,
-    },
-
-    #[error("CLIが見つかりません: {command}")]
-    CommandMissing { command: String },
-
-    #[error("CLI実行に失敗しました: {command} (status={status:?}) {stderr}")]
-    CommandFailed {
-        command: String,
-        status: Option<i32>,
-        stderr: String,
-    },
-
-    #[error("サイズ上限を超えています (limit={limit} bytes, actual={actual} bytes)")]
-    SizeLimitExceeded { limit: u64, actual: u64 },
-
-    #[error("SHA256ハッシュが一致しません (expected={expected}, actual={actual})")]
-    Sha256Mismatch { expected: String, actual: String },
-
-    #[error("git+ssh URIにpathクエリがありません: {uri}")]
-    GitPathMissing { uri: String },
-
-    #[error("サポートされていないスキームです: {scheme}")]
-    UnsupportedScheme { scheme: String },
-}
-
-/// サポートされているデータフォーマット。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DataFormat {
-    Json,
-    Csv,
-    Tsv,
-}
-
-impl fmt::Display for DataFormat {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            DataFormat::Json => write!(f, "JSON"),
-            DataFormat::Csv => write!(f, "CSV"),
-            DataFormat::Tsv => write!(f, "TSV"),
-        }
-    }
-}
-
-/// 推論されたスキーマ表現。
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Schema {
-    Primitive(PrimitiveType),
-    Object {
-        fields: BTreeMap<String, Schema>,
-        required: BTreeSet<String>,
-    },
-    Array {
-        element_type: Box<Schema>,
-    },
-    Optional(Box<Schema>),
-    Union(Vec<Schema>),
-}
-
-/// プリミティブ型の分類。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub enum PrimitiveType {
-    String,
-    Boolean,
-    Integer,
-    Long,
-    BigInteger,
-    Double,
-    BigDecimal,
-    Null,
-}
-
-impl PrimitiveType {
-    fn is_integral(self) -> bool {
-        matches!(
-            self,
-            PrimitiveType::Integer | PrimitiveType::Long | PrimitiveType::BigInteger
-        )
-    }
-
-    fn is_decimal(self) -> bool {
-        matches!(self, PrimitiveType::Double | PrimitiveType::BigDecimal)
-    }
-
-    fn is_numeric(self) -> bool {
-        self.is_integral() || self.is_decimal()
-    }
-}
-
-#[derive(Debug, Error)]
-pub enum SchemaError {
-    #[error("JSONデータの解析に失敗しました: {message}")]
-    InvalidJson { message: String },
-
-    #[error("{format}データの解析に失敗しました: {message}")]
-    InvalidTabular { format: DataFormat, message: String },
-
-    #[error("カラムヘッダーが見つかりません")]
-    MissingHeaders,
-
-    #[error("データセットが空です")]
-    EmptyDataset,
-}
 
 /// サンプルデータのフォーマットに応じてスキーマを推論する。
 pub fn infer_schema(data: &[u8], format: DataFormat) -> Result<Schema, SchemaError> {
@@ -586,6 +419,646 @@ fn schema_sort_key(schema: &Schema) -> String {
             format!("object:{{{}}}|req:{required_key}", field_parts.join(","))
         }
     }
+}
+
+struct SampleAnnotationConfig {
+    source: String,
+    mode: Option<SampleMode>,
+    format: Option<DataFormat>,
+    sha256: Option<String>,
+    limit_bytes: Option<u64>,
+}
+
+fn sample_annotation_error(span: &Span, message: impl Into<String>) -> TransformError {
+    TransformError::SampleAnnotationError {
+        message: message.into(),
+        span: span.clone(),
+    }
+}
+
+fn sample_processing_error(span: &Span, message: impl Into<String>) -> TransformError {
+    TransformError::SampleProcessingError {
+        message: message.into(),
+        span: span.clone(),
+    }
+}
+
+fn parse_sample_annotation(annotation: &Annotation) -> Result<SampleAnnotationConfig, TransformError> {
+    let mut source: Option<String> = None;
+    let mut mode: Option<SampleMode> = None;
+    let mut format: Option<DataFormat> = None;
+    let mut sha256: Option<String> = None;
+    let mut limit_bytes: Option<u64> = None;
+
+    for argument in &annotation.arguments {
+        match argument {
+            AnnotationArgument::PositionalLiteral { value, span } => {
+                if source.is_some() {
+                    return Err(sample_annotation_error(
+                        span,
+                        "@Sample にはソース引数を一度だけ指定できます",
+                    ));
+                }
+                match value {
+                    Literal::String(path) => {
+                        source = Some(path.clone());
+                    }
+                    _ => {
+                        return Err(sample_annotation_error(
+                            span,
+                            "@Sample の最初の位置引数は文字列リテラルである必要があります",
+                        ));
+                    }
+                }
+            }
+            AnnotationArgument::Named { name, value, span } => match name.as_str() {
+                "source" => {
+                    if source.is_some() {
+                        return Err(sample_annotation_error(
+                            span,
+                            "source 引数が重複しています",
+                        ));
+                    }
+                    if let Some(path) = extract_string_literal(value) {
+                        source = Some(path);
+                    } else {
+                        return Err(sample_annotation_error(
+                            span,
+                            "source 引数は文字列リテラルで指定してください",
+                        ));
+                    }
+                }
+                "mode" => {
+                    if mode.is_some() {
+                        return Err(sample_annotation_error(
+                            span,
+                            "mode 引数が重複しています",
+                        ));
+                    }
+                    if let Some(parsed) = parse_mode_expression(value) {
+                        mode = Some(parsed);
+                    } else {
+                        return Err(sample_annotation_error(
+                            span,
+                            "mode 引数は Embed または Load を指定してください",
+                        ));
+                    }
+                }
+                "format" => {
+                    if format.is_some() {
+                        return Err(sample_annotation_error(
+                            span,
+                            "format 引数が重複しています",
+                        ));
+                    }
+                    let maybe_string = extract_string_literal(value).or_else(|| {
+                        if let Expression::Identifier(identifier, _) = value {
+                            Some(identifier.clone())
+                        } else {
+                            None
+                        }
+                    });
+                    if let Some(fmt) = maybe_string
+                        .as_deref()
+                        .and_then(parse_format_literal)
+                    {
+                        format = Some(fmt);
+                    } else {
+                        return Err(sample_annotation_error(
+                            span,
+                            "format 引数は json/csv/tsv のいずれかを指定してください",
+                        ));
+                    }
+                }
+                "sha256" => {
+                    if sha256.is_some() {
+                        return Err(sample_annotation_error(
+                            span,
+                            "sha256 引数が重複しています",
+                        ));
+                    }
+                    if let Some(hash) = extract_string_literal(value) {
+                        sha256 = Some(hash);
+                    } else {
+                        return Err(sample_annotation_error(
+                            span,
+                            "sha256 引数は文字列リテラルで指定してください",
+                        ));
+                    }
+                }
+                "limitBytes" | "limit_bytes" => {
+                    if limit_bytes.is_some() {
+                        return Err(sample_annotation_error(
+                            span,
+                            "limitBytes 引数が重複しています",
+                        ));
+                    }
+                    if let Some(parsed) = extract_u64_literal(value) {
+                        limit_bytes = Some(parsed);
+                    } else {
+                        return Err(sample_annotation_error(
+                            span,
+                            "limitBytes 引数は正の整数リテラルで指定してください",
+                        ));
+                    }
+                }
+                other => {
+                    return Err(sample_annotation_error(
+                        span,
+                        format!("未対応の@Sample引数 '{other}' が指定されました"),
+                    ));
+                }
+            },
+        }
+    }
+
+    let source = source.ok_or_else(|| {
+        sample_annotation_error(
+            &annotation.span,
+            "@Sample にはサンプルソースを指定してください",
+        )
+    })?;
+
+    Ok(SampleAnnotationConfig {
+        source,
+        mode,
+        format,
+        sha256,
+        limit_bytes,
+    })
+}
+
+fn parse_mode_expression(expr: &Expression) -> Option<SampleMode> {
+    match expr {
+        Expression::Identifier(name, _) => parse_mode_literal(name),
+        Expression::Literal(Literal::String(value), _) => parse_mode_literal(value),
+        _ => None,
+    }
+}
+
+fn parse_mode_literal(value: &str) -> Option<SampleMode> {
+    match value.to_ascii_lowercase().as_str() {
+        "embed" => Some(SampleMode::Embed),
+        "load" => Some(SampleMode::Load),
+        _ => None,
+    }
+}
+
+fn parse_format_literal(value: &str) -> Option<DataFormat> {
+    match value.to_ascii_lowercase().as_str() {
+        "json" => Some(DataFormat::Json),
+        "csv" => Some(DataFormat::Csv),
+        "tsv" => Some(DataFormat::Tsv),
+        _ => None,
+    }
+}
+
+fn extract_string_literal(expr: &Expression) -> Option<String> {
+    match expr {
+        Expression::Literal(Literal::String(value), _) => Some(value.clone()),
+        _ => None,
+    }
+}
+
+fn extract_u64_literal(expr: &Expression) -> Option<u64> {
+    match expr {
+        Expression::Literal(Literal::Number(value), _) => {
+            let digits: String = value.chars().filter(|c| *c != '_').collect();
+            digits.parse::<u64>().ok()
+        }
+        _ => None,
+    }
+}
+
+fn detect_data_format(
+    source: &str,
+    bytes: &[u8],
+    span: &Span,
+) -> Result<DataFormat, TransformError> {
+    if let Some(ext) = Path::new(source)
+        .extension()
+        .and_then(|ext| ext.to_str())
+    {
+        match ext.to_ascii_lowercase().as_str() {
+            "json" | "jsonl" => return Ok(DataFormat::Json),
+            "csv" => return Ok(DataFormat::Csv),
+            "tsv" => return Ok(DataFormat::Tsv),
+            _ => {}
+        }
+    }
+
+    if serde_json::from_slice::<serde_json::Value>(bytes).is_ok() {
+        return Ok(DataFormat::Json);
+    }
+
+    let preview = String::from_utf8_lossy(&bytes[..bytes.len().min(1024)]);
+    if preview.contains('\t') {
+        return Ok(DataFormat::Tsv);
+    }
+    if preview.contains(',') {
+        return Ok(DataFormat::Csv);
+    }
+
+    Err(sample_processing_error(
+        span,
+        format!("データフォーマットを自動判定できません: {source}"),
+    ))
+}
+
+struct SampleTypeBuilder {
+    base_name: String,
+    records: Vec<SampleRecordDescriptor>,
+    used_names: HashSet<String>,
+}
+
+#[derive(Clone)]
+struct PathSegment {
+    name: String,
+    is_collection: bool,
+}
+
+struct TypeInfo {
+    java_type: JavaType,
+    is_optional: bool,
+    record_name: Option<String>,
+}
+
+impl SampleTypeBuilder {
+    fn new(variable_name: &str) -> Self {
+        let base = to_pascal_case(&singularize(variable_name));
+        let base = if base.is_empty() { "Sample".to_string() } else { base };
+        Self {
+            base_name: base,
+            records: Vec::new(),
+            used_names: HashSet::new(),
+        }
+    }
+
+    fn ensure_unique_name(&mut self, base: String) -> String {
+        if self.used_names.insert(base.clone()) {
+            return base;
+        }
+        let mut counter = 2;
+        loop {
+            let candidate = format!("{}{}", base, counter);
+            if self.used_names.insert(candidate.clone()) {
+                return candidate;
+            }
+            counter += 1;
+        }
+    }
+
+    fn record_name_for_path(&mut self, path: &[PathSegment]) -> String {
+        let mut name = self.base_name.clone();
+        let mut start_index = 0;
+
+        if name.is_empty() && !path.is_empty() {
+            let component = if path[0].is_collection {
+                singularize(&path[0].name)
+            } else {
+                path[0].name.to_ascii_lowercase()
+            };
+            name.push_str(&to_pascal_case(&component));
+            start_index = 1;
+        } else if !name.is_empty() {
+            start_index = 1;
+        }
+
+        for segment in path.iter().skip(start_index) {
+            let component = if segment.is_collection {
+                singularize(&segment.name)
+            } else {
+                segment.name.to_ascii_lowercase()
+            };
+            name.push_str(&to_pascal_case(&component));
+        }
+
+        if name.is_empty() {
+            name.push_str("Sample");
+        }
+        if !name.ends_with("Sample") {
+            name.push_str("Sample");
+        }
+
+        self.ensure_unique_name(name)
+    }
+
+    fn add_record(&mut self, name: String, fields: Vec<SampleRecordField>) {
+        self.records
+            .push(SampleRecordDescriptor { name, fields });
+    }
+
+    fn build_root(&mut self, schema: &Schema, variable_name: &str) -> TypeInfo {
+        let mut path = Vec::new();
+        path.push(PathSegment {
+            name: variable_name.to_string(),
+            is_collection: is_collection_schema(schema),
+        });
+        self.build_schema(schema, &mut path)
+    }
+
+    fn build_schema(&mut self, schema: &Schema, path: &mut Vec<PathSegment>) -> TypeInfo {
+        match schema {
+            Schema::Optional(inner) => {
+                let mut info = self.build_schema(inner, path);
+                info.is_optional = true;
+                info
+            }
+            Schema::Primitive(primitive) => TypeInfo {
+                java_type: primitive_to_java_type(*primitive),
+                is_optional: false,
+                record_name: None,
+            },
+            Schema::Array { element_type } => {
+                let element_info = self.build_schema(element_type, path);
+                TypeInfo {
+                    java_type: list_type(element_info.java_type.clone()),
+                    is_optional: false,
+                    record_name: element_info.record_name,
+                }
+            }
+            Schema::Object { fields, required } => {
+                let record_name = self.record_name_for_path(path);
+                let mut record_fields = Vec::new();
+
+                for (field_name, field_schema) in fields {
+                    let (core_schema, schema_optional) = unwrap_optional_schema(field_schema);
+                    let is_collection = is_collection_schema(core_schema);
+                    path.push(PathSegment {
+                        name: field_name.clone(),
+                        is_collection,
+                    });
+                    let child_info = self.build_schema(core_schema, path);
+                    path.pop();
+
+                    let is_optional = schema_optional
+                        || !required.contains(field_name)
+                        || child_info.is_optional;
+
+                    let mut field_type = child_info.java_type.clone();
+                    if is_optional {
+                        field_type = optional_type(field_type);
+                    }
+
+                    record_fields.push(SampleRecordField {
+                        name: field_name.clone(),
+                        java_type: field_type,
+                        is_optional,
+                    });
+                }
+
+                self.add_record(record_name.clone(), record_fields);
+
+                TypeInfo {
+                    java_type: JavaType::Reference {
+                        name: record_name.clone(),
+                        generic_args: Vec::new(),
+                    },
+                    is_optional: false,
+                    record_name: Some(record_name),
+                }
+            }
+            Schema::Union(variants) => {
+                let mut result: Option<TypeInfo> = None;
+                let mut saw_null = false;
+
+                for variant in variants {
+                    if matches!(variant, Schema::Primitive(PrimitiveType::Null)) {
+                        saw_null = true;
+                        continue;
+                    }
+                    let info = self.build_schema(variant, path);
+                    if result.is_some() {
+                        return TypeInfo {
+                            java_type: JavaType::object(),
+                            is_optional: true,
+                            record_name: None,
+                        };
+                    }
+                    result = Some(info);
+                }
+
+                if let Some(mut info) = result {
+                    if saw_null {
+                        info.is_optional = true;
+                    }
+                    info
+                } else {
+                    TypeInfo {
+                        java_type: JavaType::object(),
+                        is_optional: true,
+                        record_name: None,
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn compute_type_layout(
+    schema: &Schema,
+    variable_name: &str,
+) -> (JavaType, Vec<SampleRecordDescriptor>, Option<String>) {
+    let mut builder = SampleTypeBuilder::new(variable_name);
+    let info = builder.build_root(schema, variable_name);
+
+    let mut java_type = info.java_type;
+    if info.is_optional {
+        java_type = optional_type(java_type);
+    }
+
+    (java_type, builder.records, info.record_name)
+}
+
+fn primitive_to_java_type(primitive: PrimitiveType) -> JavaType {
+    match primitive {
+        PrimitiveType::String => JavaType::string(),
+        PrimitiveType::Boolean => JavaType::boolean(),
+        PrimitiveType::Integer => JavaType::int(),
+        PrimitiveType::Long => JavaType::Primitive("long".to_string()),
+        PrimitiveType::BigInteger => JavaType::Reference {
+            name: "java.math.BigInteger".to_string(),
+            generic_args: Vec::new(),
+        },
+        PrimitiveType::Double => JavaType::Primitive("double".to_string()),
+        PrimitiveType::BigDecimal => JavaType::Reference {
+            name: "java.math.BigDecimal".to_string(),
+            generic_args: Vec::new(),
+        },
+        PrimitiveType::Null => JavaType::object(),
+    }
+}
+
+fn list_type(inner: JavaType) -> JavaType {
+    JavaType::Reference {
+        name: "java.util.List".to_string(),
+        generic_args: vec![inner],
+    }
+}
+
+fn optional_type(inner: JavaType) -> JavaType {
+    JavaType::Reference {
+        name: "java.util.Optional".to_string(),
+        generic_args: vec![inner],
+    }
+}
+
+fn unwrap_optional_schema<'a>(schema: &'a Schema) -> (&'a Schema, bool) {
+    match schema {
+        Schema::Optional(inner) => (inner, true),
+        Schema::Union(variants) => {
+            let mut non_null = variants
+                .iter()
+                .filter(|variant| !matches!(variant, Schema::Primitive(PrimitiveType::Null)))
+                .collect::<Vec<_>>();
+            if non_null.len() == 1 && variants.len() == 2 {
+                (non_null.remove(0), true)
+            } else if variants
+                .iter()
+                .any(|variant| matches!(variant, Schema::Primitive(PrimitiveType::Null)))
+            {
+                (schema, true)
+            } else {
+                (schema, false)
+            }
+        }
+        _ => (schema, false),
+    }
+}
+
+fn is_collection_schema(schema: &Schema) -> bool {
+    match schema {
+        Schema::Array { .. } => true,
+        Schema::Optional(inner) => is_collection_schema(inner),
+        Schema::Union(variants) => variants.iter().any(is_collection_schema),
+        _ => false,
+    }
+}
+
+fn to_pascal_case(value: &str) -> String {
+    let mut result = String::new();
+    let mut capitalize_next = true;
+    for ch in value.chars() {
+        if ch.is_ascii_alphanumeric() {
+            if capitalize_next {
+                for upper in ch.to_uppercase() {
+                    result.push(upper);
+                }
+                capitalize_next = false;
+            } else {
+                for lower in ch.to_lowercase() {
+                    result.push(lower);
+                }
+            }
+        } else {
+            capitalize_next = true;
+        }
+    }
+    result
+}
+
+fn singularize(name: &str) -> String {
+    let lower = name.to_ascii_lowercase();
+    if lower.ends_with("ies") && lower.len() > 3 {
+        format!("{}y", &lower[..lower.len() - 3])
+    } else if (lower.ends_with("ses")
+        || lower.ends_with("xes")
+        || lower.ends_with("zes"))
+        && lower.len() > 2
+    {
+        lower[..lower.len() - 2].to_string()
+    } else if lower.ends_with('s') && lower.len() > 1 {
+        lower[..lower.len() - 1].to_string()
+    } else {
+        lower
+    }
+}
+
+pub fn desugar_sample_annotation(
+    name: String,
+    type_annotation: Option<TypeAnnotation>,
+    initializer: Expression,
+    modifiers: &Modifiers,
+    annotation: Annotation,
+    span: Span,
+    context: &mut TransformContext,
+) -> Result<IrSampleDeclaration, TransformError> {
+    let _ = (initializer, modifiers);
+
+    if type_annotation.is_some() {
+        return Err(sample_annotation_error(
+            &span,
+            "@Sample を付与した val に型注釈は指定できません",
+        ));
+    }
+
+    let config = parse_sample_annotation(&annotation)?;
+    let options = context.sample_options().clone();
+    let mode = config.mode.unwrap_or(options.default_mode);
+
+    let mut request = SampleFetchRequest::new(config.source.clone());
+    request.base_dir = options.base_dir.clone();
+    request.allow_network = options.allow_network;
+    request.expected_sha256 = config.sha256.clone();
+    request.cache_dir = options.cache_dir.clone();
+    request.aws_cli_path = options.aws_cli_path.clone();
+    request.git_cli_path = options.git_cli_path.clone();
+    request.timeout = options.timeout;
+    request.max_bytes = config
+        .limit_bytes
+        .or_else(|| if mode == SampleMode::Embed { options.embed_max_bytes } else { None });
+
+    let fetch_result = fetch_sample_data(&request)
+        .map_err(|error| sample_processing_error(&annotation.span, error.to_string()))?;
+
+    let format = if let Some(explicit) = config.format.or(options.default_format) {
+        explicit
+    } else {
+        detect_data_format(&config.source, &fetch_result.bytes, &annotation.span)?
+    };
+
+    let schema = infer_schema(&fetch_result.bytes, format)
+        .map_err(|error| sample_processing_error(&annotation.span, error.to_string()))?;
+
+    let (java_type, records, root_record_name) = compute_type_layout(&schema, &name);
+
+    let SampleFetchResult {
+        bytes,
+        sha256,
+        source_kind,
+        origin,
+        cache_path,
+    } = fetch_result;
+
+    let embedded_data = if mode == SampleMode::Embed {
+        Some(bytes)
+    } else {
+        None
+    };
+
+    let variable_java_type = java_type.clone();
+    let variable_name = name.clone();
+
+    let declaration = IrSampleDeclaration {
+        variable_name: variable_name.clone(),
+        java_type,
+        format,
+        mode,
+        source: origin,
+        source_kind,
+        sha256,
+        cache_path,
+        limit_bytes: request.max_bytes,
+        embedded_data,
+        schema,
+        records,
+        root_record_name,
+        span,
+    };
+
+    context.add_variable(variable_name, variable_java_type);
+
+    Ok(declaration)
 }
 
 /// フェッチと検証を一括で実行する。

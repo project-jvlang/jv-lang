@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 
-use crate::types::{JavaType, MethodOverload, StaticMethodCall, UtilityClass};
+use crate::types::{DataFormat, JavaType, MethodOverload, SampleMode, StaticMethodCall, UtilityClass};
+use std::path::PathBuf;
+use std::time::Duration;
 
 /// Transformation context for desugaring
 #[derive(Debug, Clone)]
@@ -17,6 +19,8 @@ pub struct TransformContext {
     pub extension_methods: HashMap<String, StaticMethodCall>,
     /// Current package
     pub current_package: Option<String>,
+    /// Options controlling @Sample transformation behaviour
+    pub sample_options: SampleOptions,
 }
 
 impl TransformContext {
@@ -45,6 +49,7 @@ impl TransformContext {
             method_overloads: Vec::new(),
             extension_methods: HashMap::new(),
             current_package: None,
+            sample_options: SampleOptions::default(),
         }
     }
 
@@ -70,11 +75,48 @@ impl TransformContext {
         }
         self.type_info.get(name)
     }
+
+    pub fn sample_options(&self) -> &SampleOptions {
+        &self.sample_options
+    }
+
+    pub fn sample_options_mut(&mut self) -> &mut SampleOptions {
+        &mut self.sample_options
+    }
 }
 
 // Helper implementations
 impl Default for TransformContext {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct SampleOptions {
+    pub base_dir: Option<PathBuf>,
+    pub allow_network: bool,
+    pub default_mode: SampleMode,
+    pub default_format: Option<DataFormat>,
+    pub cache_dir: Option<PathBuf>,
+    pub aws_cli_path: Option<PathBuf>,
+    pub git_cli_path: Option<PathBuf>,
+    pub timeout: Duration,
+    pub embed_max_bytes: Option<u64>,
+}
+
+impl Default for SampleOptions {
+    fn default() -> Self {
+        Self {
+            base_dir: None,
+            allow_network: false,
+            default_mode: SampleMode::Embed,
+            default_format: None,
+            cache_dir: None,
+            aws_cli_path: None,
+            git_cli_path: None,
+            timeout: Duration::from_secs(30),
+            embed_max_bytes: None,
+        }
     }
 }
