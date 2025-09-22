@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::io::Write;
 
 use anyhow::Result;
-use jv_build::BuildConfig;
+use jv_build::{BuildConfig, SampleConfig};
 use jv_pm::{BuildInfo, Manifest, PackageInfo, PackageManager};
 
 /// Render the Build Tools learning module demonstrating the full workflow.
@@ -144,6 +144,7 @@ fn sample_build_config() -> BuildConfig {
         output_dir: "target/jv/hello-jv-tour/classes".to_string(),
         classpath: vec!["target/jv/hello-jv-tour/deps/junit-5.10.2.jar".to_string()],
         compiler_options: vec!["--release".to_string(), "25".to_string()],
+        sample: SampleConfig::default(),
     }
 }
 
