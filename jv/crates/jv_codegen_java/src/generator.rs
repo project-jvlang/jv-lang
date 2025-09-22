@@ -13,6 +13,11 @@ pub struct JavaCodeGenerator {
     config: JavaCodeGenConfig,
 }
 
+#[derive(Default)]
+struct SampleArtifacts {
+    type_declarations: Vec<String>,
+}
+
 impl JavaCodeGenerator {
     pub fn new() -> Self {
         Self::with_config(JavaCodeGenConfig::default())
@@ -58,6 +63,12 @@ impl JavaCodeGenerator {
         }
 
         for declaration in &program.type_declarations {
+            if let IrStatement::SampleDeclaration(sample) = declaration {
+                let artifacts = self.generate_sample_declaration(sample)?;
+                unit.type_declarations.extend(artifacts.type_declarations);
+                continue;
+            }
+
             let code = match declaration {
                 IrStatement::ClassDeclaration { .. } => self.generate_class(declaration)?,
                 IrStatement::InterfaceDeclaration { .. } => self.generate_interface(declaration)?,
@@ -80,6 +91,7 @@ impl JavaCodeGenerator {
                 | IrStatement::FieldDeclaration { .. }
                 | IrStatement::Package { .. }
                 | IrStatement::Import { .. } => self.generate_statement(declaration)?,
+                IrStatement::SampleDeclaration { .. } => unreachable!(),
             };
             unit.type_declarations.push(code);
         }
@@ -469,6 +481,17 @@ impl JavaCodeGenerator {
             IrStatement::ClassDeclaration { .. } => self.generate_class(stmt)?,
             IrStatement::InterfaceDeclaration { .. } => self.generate_interface(stmt)?,
             IrStatement::RecordDeclaration { .. } => self.generate_record(stmt)?,
+            IrStatement::SampleDeclaration(declaration) => {
+                let artifacts = self.generate_sample_declaration(declaration)?;
+                let mut builder = self.builder();
+                for (index, record_code) in artifacts.type_declarations.iter().enumerate() {
+                    if index > 0 {
+                        builder.push_line("");
+                    }
+                    Self::push_lines(&mut builder, record_code);
+                }
+                builder.build()
+            }
             IrStatement::Expression { expr, .. } => {
                 let mut line = self.generate_expression(expr)?;
                 if !line.ends_with(';') {
@@ -1415,5 +1438,42 @@ impl JavaCodeGenerator {
         }
         result.push(')');
         Ok(result)
+    }
+
+    fn generate_sample_declaration(
+        &mut self,
+        declaration: &IrSampleDeclaration,
+    ) -> Result<SampleArtifacts, CodeGenError> {
+        let mut artifacts = SampleArtifacts::default();
+
+        for descriptor in &declaration.records {
+            let components = descriptor
+                .fields
+                .iter()
+                .map(|field| IrRecordComponent {
+                    name: field.name.clone(),
+                    java_type: field.java_type.clone(),
+                    span: declaration.span.clone(),
+                })
+                .collect::<Vec<_>>();
+
+            let record_statement = IrStatement::RecordDeclaration {
+                name: descriptor.name.clone(),
+                type_parameters: Vec::new(),
+                components,
+                interfaces: Vec::new(),
+                methods: Vec::new(),
+                modifiers: IrModifiers {
+                    visibility: IrVisibility::Public,
+                    ..IrModifiers::default()
+                },
+                span: declaration.span.clone(),
+            };
+
+            let rendered = self.generate_record(&record_statement)?;
+            artifacts.type_declarations.push(rendered);
+        }
+
+        Ok(artifacts)
     }
 }

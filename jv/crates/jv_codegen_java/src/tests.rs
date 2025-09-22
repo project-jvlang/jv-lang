@@ -2,10 +2,12 @@ use super::*;
 use insta::assert_snapshot;
 use jv_ast::{Literal, Span};
 use jv_ir::{
-    IrExpression, IrModifiers, IrParameter, IrProgram, IrRecordComponent, IrStatement,
-    IrVisibility, JavaType, MethodOverload,
+    DataFormat, IrExpression, IrModifiers, IrParameter, IrProgram, IrRecordComponent,
+    IrSampleDeclaration, IrStatement, IrVisibility, JavaType, MethodOverload, PrimitiveType,
+    SampleMode, SampleRecordDescriptor, SampleRecordField, SampleSourceKind, Schema,
 };
 use serde_json::to_string_pretty;
+use std::collections::{BTreeMap, BTreeSet};
 
 fn dummy_span() -> Span {
     Span::dummy()
@@ -42,6 +44,230 @@ fn user_sample_type() -> JavaType {
 
 fn user_sample_list_type() -> JavaType {
     list_type(user_sample_type())
+}
+
+fn sample_record_descriptor() -> SampleRecordDescriptor {
+    SampleRecordDescriptor {
+        name: "UserSample".to_string(),
+        fields: vec![
+            SampleRecordField {
+                name: "id".to_string(),
+                java_type: JavaType::Primitive("int".to_string()),
+                is_optional: false,
+            },
+            SampleRecordField {
+                name: "name".to_string(),
+                java_type: string_type(),
+                is_optional: false,
+            },
+            SampleRecordField {
+                name: "email".to_string(),
+                java_type: string_type(),
+                is_optional: false,
+            },
+        ],
+    }
+}
+
+fn sample_schema() -> Schema {
+    let mut fields = BTreeMap::new();
+    fields.insert("id".to_string(), Schema::Primitive(PrimitiveType::Integer));
+    fields.insert("name".to_string(), Schema::Primitive(PrimitiveType::String));
+    fields.insert("email".to_string(), Schema::Primitive(PrimitiveType::String));
+
+    let mut required = BTreeSet::new();
+    required.insert("id".to_string());
+    required.insert("name".to_string());
+    required.insert("email".to_string());
+
+    Schema::Array {
+        element_type: Box::new(Schema::Object { fields, required }),
+    }
+}
+
+fn sample_declaration(records: Vec<SampleRecordDescriptor>) -> IrSampleDeclaration {
+    IrSampleDeclaration {
+        variable_name: "users".to_string(),
+        java_type: user_sample_list_type(),
+        format: DataFormat::Json,
+        mode: SampleMode::Embed,
+        source: "users.json".to_string(),
+        source_kind: SampleSourceKind::LocalFile,
+        sha256: "deadbeef".to_string(),
+        cache_path: None,
+        limit_bytes: Some(1024),
+        embedded_data: Some(br"{}".to_vec()),
+        schema: sample_schema(),
+        records,
+        root_record_name: Some("UserSample".to_string()),
+        span: dummy_span(),
+    }
+}
+
+fn user_sample_constructor(name: &str, age: i32, email: &str) -> IrExpression {
+    IrExpression::ObjectCreation {
+        class_name: "UserSample".to_string(),
+        generic_args: vec![],
+        args: vec![
+            IrExpression::Literal(Literal::String(name.to_string()), dummy_span()),
+            IrExpression::Literal(Literal::Number(age.to_string()), dummy_span()),
+            IrExpression::Literal(Literal::String(email.to_string()), dummy_span()),
+        ],
+        java_type: user_sample_type(),
+        span: dummy_span(),
+    }
+}
+
+fn embed_raw_json_field() -> IrStatement {
+    IrStatement::FieldDeclaration {
+        name: "RAW_JSON".to_string(),
+        java_type: string_type(),
+        initializer: Some(IrExpression::Literal(
+            Literal::String("{\"users\": 2}".to_string()),
+            dummy_span(),
+        )),
+        modifiers: IrModifiers {
+            visibility: IrVisibility::Private,
+            is_static: true,
+            is_final: true,
+            ..IrModifiers::default()
+        },
+        span: dummy_span(),
+    }
+}
+
+fn embed_users_field() -> IrStatement {
+    IrStatement::FieldDeclaration {
+        name: "USERS".to_string(),
+        java_type: user_sample_list_type(),
+        initializer: Some(IrExpression::MethodCall {
+            receiver: Some(Box::new(IrExpression::Identifier {
+                name: "java.util.List".to_string(),
+                java_type: reference_type("java.util.List"),
+                span: dummy_span(),
+            })),
+            method_name: "of".to_string(),
+            args: vec![
+                user_sample_constructor("Alice", 28, "alice@example.com"),
+                user_sample_constructor("Bob", 31, "bob@example.com"),
+            ],
+            java_type: user_sample_list_type(),
+            span: dummy_span(),
+        }),
+        modifiers: IrModifiers {
+            visibility: IrVisibility::Public,
+            is_static: true,
+            is_final: true,
+            ..IrModifiers::default()
+        },
+        span: dummy_span(),
+    }
+}
+
+fn embed_data_class() -> IrStatement {
+    IrStatement::ClassDeclaration {
+        name: "UserSampleData".to_string(),
+        type_parameters: vec![],
+        superclass: None,
+        interfaces: vec![],
+        fields: vec![embed_raw_json_field(), embed_users_field()],
+        methods: vec![],
+        nested_classes: vec![],
+        modifiers: IrModifiers {
+            visibility: IrVisibility::Public,
+            ..IrModifiers::default()
+        },
+        span: dummy_span(),
+    }
+}
+
+fn sample_embed_program() -> IrProgram {
+    IrProgram {
+        package: Some("sample.embed".to_string()),
+        imports: vec![],
+        type_declarations: vec![user_sample_record(), embed_data_class()],
+        span: dummy_span(),
+    }
+}
+
+fn load_path_of_call() -> IrExpression {
+    IrExpression::MethodCall {
+        receiver: Some(Box::new(IrExpression::Identifier {
+            name: "java.nio.file.Path".to_string(),
+            java_type: reference_type("java.nio.file.Path"),
+            span: dummy_span(),
+        })),
+        method_name: "of".to_string(),
+        args: vec![IrExpression::Literal(
+            Literal::String("/data/users.json".to_string()),
+            dummy_span(),
+        )],
+        java_type: reference_type("java.nio.file.Path"),
+        span: dummy_span(),
+    }
+}
+
+fn load_read_string_call() -> IrExpression {
+    IrExpression::MethodCall {
+        receiver: Some(Box::new(IrExpression::Identifier {
+            name: "java.nio.file.Files".to_string(),
+            java_type: reference_type("java.nio.file.Files"),
+            span: dummy_span(),
+        })),
+        method_name: "readString".to_string(),
+        args: vec![load_path_of_call()],
+        java_type: string_type(),
+        span: dummy_span(),
+    }
+}
+
+fn load_users_method() -> IrStatement {
+    IrStatement::MethodDeclaration {
+        name: "loadUsers".to_string(),
+        parameters: vec![],
+        return_type: string_type(),
+        body: Some(IrExpression::Block {
+            statements: vec![IrStatement::Return {
+                value: Some(load_read_string_call()),
+                span: dummy_span(),
+            }],
+            java_type: string_type(),
+            span: dummy_span(),
+        }),
+        modifiers: IrModifiers {
+            visibility: IrVisibility::Public,
+            is_static: true,
+            ..IrModifiers::default()
+        },
+        throws: vec!["java.io.IOException".to_string()],
+        span: dummy_span(),
+    }
+}
+
+fn load_helper_class() -> IrStatement {
+    IrStatement::ClassDeclaration {
+        name: "UserSampleLoader".to_string(),
+        type_parameters: vec![],
+        superclass: None,
+        interfaces: vec![],
+        fields: vec![],
+        methods: vec![load_users_method()],
+        nested_classes: vec![],
+        modifiers: IrModifiers {
+            visibility: IrVisibility::Public,
+            ..IrModifiers::default()
+        },
+        span: dummy_span(),
+    }
+}
+
+fn sample_load_program() -> IrProgram {
+    IrProgram {
+        package: Some("sample.load".to_string()),
+        imports: vec![],
+        type_declarations: vec![load_helper_class()],
+        span: dummy_span(),
+    }
 }
 
 fn user_sample_record() -> IrStatement {
@@ -721,112 +947,38 @@ fn sample_record_generation_emits_expected_record() {
 }
 
 #[test]
-fn embed_mode_generates_inline_data_class() {
-    let raw_json_field = IrStatement::FieldDeclaration {
-        name: "RAW_JSON".to_string(),
-        java_type: string_type(),
-        initializer: Some(IrExpression::Literal(
-            Literal::String("{\"users\": 2}".to_string()),
-            dummy_span(),
-        )),
-        modifiers: IrModifiers {
-            visibility: IrVisibility::Private,
-            is_static: true,
-            is_final: true,
-            ..IrModifiers::default()
-        },
-        span: dummy_span(),
-    };
-
-    let users_field = IrStatement::FieldDeclaration {
-        name: "USERS".to_string(),
-        java_type: user_sample_list_type(),
-        initializer: Some(IrExpression::MethodCall {
-            receiver: Some(Box::new(IrExpression::Identifier {
-                name: "java.util.List".to_string(),
-                java_type: reference_type("java.util.List"),
-                span: dummy_span(),
-            })),
-            method_name: "of".to_string(),
-            args: vec![
-                IrExpression::ObjectCreation {
-                    class_name: "UserSample".to_string(),
-                    generic_args: vec![],
-                    args: vec![
-                        IrExpression::Literal(
-                            Literal::String("Alice".to_string()),
-                            dummy_span(),
-                        ),
-                        IrExpression::Literal(
-                            Literal::Number("28".to_string()),
-                            dummy_span(),
-                        ),
-                        IrExpression::Literal(
-                            Literal::String("alice@example.com".to_string()),
-                            dummy_span(),
-                        ),
-                    ],
-                    java_type: user_sample_type(),
-                    span: dummy_span(),
-                },
-                IrExpression::ObjectCreation {
-                    class_name: "UserSample".to_string(),
-                    generic_args: vec![],
-                    args: vec![
-                        IrExpression::Literal(
-                            Literal::String("Bob".to_string()),
-                            dummy_span(),
-                        ),
-                        IrExpression::Literal(
-                            Literal::Number("31".to_string()),
-                            dummy_span(),
-                        ),
-                        IrExpression::Literal(
-                            Literal::String("bob@example.com".to_string()),
-                            dummy_span(),
-                        ),
-                    ],
-                    java_type: user_sample_type(),
-                    span: dummy_span(),
-                },
-            ],
-            java_type: user_sample_list_type(),
-            span: dummy_span(),
-        }),
-        modifiers: IrModifiers {
-            visibility: IrVisibility::Public,
-            is_static: true,
-            is_final: true,
-            ..IrModifiers::default()
-        },
-        span: dummy_span(),
-    };
-
-    let embed_class = IrStatement::ClassDeclaration {
-        name: "UserSampleData".to_string(),
-        type_parameters: vec![],
-        superclass: None,
-        interfaces: vec![],
-        fields: vec![raw_json_field, users_field],
-        methods: vec![],
-        nested_classes: vec![],
-        modifiers: IrModifiers {
-            visibility: IrVisibility::Public,
-            ..IrModifiers::default()
-        },
-        span: dummy_span(),
-    };
-
+fn sample_declaration_generates_records_from_descriptors() {
+    let declaration = sample_declaration(vec![sample_record_descriptor()]);
     let program = IrProgram {
-        package: Some("sample.embed".to_string()),
+        package: Some("sample.generated".to_string()),
         imports: vec![],
-        type_declarations: vec![user_sample_record(), embed_class],
+        type_declarations: vec![IrStatement::SampleDeclaration(declaration)],
         span: dummy_span(),
     };
 
+    let unit = generate_java_code(&program).expect("generate records from sample declaration");
+    assert_eq!(unit.type_declarations.len(), 1, "one record should be emitted");
+
+    let source = unit.to_source(&JavaCodeGenConfig::default());
+    assert!(
+        source.contains("public record UserSample(int id, String name, String email)"),
+        "generated source should contain inferred record: {source}"
+    );
+}
+
+#[test]
+fn embed_mode_generates_inline_data_class() {
+    let program = sample_embed_program();
     let unit = generate_java_code(&program).expect("generate embed-mode helpers");
     let source = unit.to_source(&JavaCodeGenConfig::default());
 
+    assert_eq!(unit.type_declarations.len(), 2, "record + data helper expected");
+    assert!(
+        unit.type_declarations
+            .iter()
+            .any(|decl| decl.contains("class UserSampleData")),
+        "embed helper class should be present"
+    );
     assert!(
         source.contains("private static final String RAW_JSON = \"{\\\"users\\\": 2}\";"),
         "embedded JSON should be inlined: {source}"
@@ -840,80 +992,31 @@ fn embed_mode_generates_inline_data_class() {
 }
 
 #[test]
+fn embed_mode_java_source_snapshot() {
+    let program = sample_embed_program();
+    let source = generate_java_source(&program).expect("render embed-mode source");
+
+    assert_snapshot!(
+        source.as_str(),
+        @r###"package sample.embed;
+
+public record UserSample(int id, String name, String email);
+
+public class UserSampleData {
+    private static final String RAW_JSON = "{\"users\": 2}";
+    public static final java.util.List<UserSample> USERS = java.util.List.of(new UserSample("Alice", 28, "alice@example.com"), new UserSample("Bob", 31, "bob@example.com"));
+}
+"###
+    );
+}
+
+#[test]
 fn load_mode_generates_filesystem_loader() {
-    let path_of_call = IrExpression::MethodCall {
-        receiver: Some(Box::new(IrExpression::Identifier {
-            name: "java.nio.file.Path".to_string(),
-            java_type: reference_type("java.nio.file.Path"),
-            span: dummy_span(),
-        })),
-        method_name: "of".to_string(),
-        args: vec![IrExpression::Literal(
-            Literal::String("/data/users.json".to_string()),
-            dummy_span(),
-        )],
-        java_type: reference_type("java.nio.file.Path"),
-        span: dummy_span(),
-    };
-
-    let read_string_call = IrExpression::MethodCall {
-        receiver: Some(Box::new(IrExpression::Identifier {
-            name: "java.nio.file.Files".to_string(),
-            java_type: reference_type("java.nio.file.Files"),
-            span: dummy_span(),
-        })),
-        method_name: "readString".to_string(),
-        args: vec![path_of_call],
-        java_type: string_type(),
-        span: dummy_span(),
-    };
-
-    let loader_method = IrStatement::MethodDeclaration {
-        name: "loadUsers".to_string(),
-        parameters: vec![],
-        return_type: string_type(),
-        body: Some(IrExpression::Block {
-            statements: vec![IrStatement::Return {
-                value: Some(read_string_call),
-                span: dummy_span(),
-            }],
-            java_type: string_type(),
-            span: dummy_span(),
-        }),
-        modifiers: IrModifiers {
-            visibility: IrVisibility::Public,
-            is_static: true,
-            ..IrModifiers::default()
-        },
-        throws: vec!["java.io.IOException".to_string()],
-        span: dummy_span(),
-    };
-
-    let loader_class = IrStatement::ClassDeclaration {
-        name: "UserSampleLoader".to_string(),
-        type_parameters: vec![],
-        superclass: None,
-        interfaces: vec![],
-        fields: vec![],
-        methods: vec![loader_method],
-        nested_classes: vec![],
-        modifiers: IrModifiers {
-            visibility: IrVisibility::Public,
-            ..IrModifiers::default()
-        },
-        span: dummy_span(),
-    };
-
-    let program = IrProgram {
-        package: Some("sample.load".to_string()),
-        imports: vec![],
-        type_declarations: vec![loader_class],
-        span: dummy_span(),
-    };
-
+    let program = sample_load_program();
     let unit = generate_java_code(&program).expect("generate load-mode helpers");
     let source = unit.to_source(&JavaCodeGenConfig::default());
 
+    assert_eq!(unit.type_declarations.len(), 1, "only loader helper expected");
     assert!(
         source.contains(
             "public static String loadUsers() throws java.io.IOException {"
@@ -925,5 +1028,24 @@ fn load_mode_generates_filesystem_loader() {
             "return java.nio.file.Files.readString(java.nio.file.Path.of(\"/data/users.json\"));"
         ),
         "load mode should delegate to Files.readString: {source}"
+    );
+}
+
+#[test]
+fn load_mode_java_source_snapshot() {
+    let program = sample_load_program();
+    let source = generate_java_source(&program).expect("render load-mode source");
+
+    assert_snapshot!(
+        source.as_str(),
+        @r###"package sample.load;
+
+public class UserSampleLoader {
+    public static String loadUsers() throws java.io.IOException {
+        return java.nio.file.Files.readString(java.nio.file.Path.of("/data/users.json"));
+    }
+    
+}
+"###
     );
 }
