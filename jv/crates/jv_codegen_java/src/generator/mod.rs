@@ -64,8 +64,8 @@ impl JavaCodeGenerator {
 
         for declaration in &program.type_declarations {
             if let IrStatement::SampleDeclaration(sample) = declaration {
-                let records = self.generate_sample_declaration_records(sample)?;
-                unit.type_declarations.extend(records);
+                let artifacts = self.generate_sample_declaration_artifacts(sample)?;
+                unit.type_declarations.extend(artifacts);
                 continue;
             }
 

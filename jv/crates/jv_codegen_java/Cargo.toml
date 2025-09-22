@@ -8,6 +8,8 @@ license.workspace = true
 jv_ir.workspace = true
 jv_ast.workspace = true
 serde.workspace = true
+serde_json.workspace = true
+csv = "1.3"
 thiserror.workspace = true
 
 [dev-dependencies]

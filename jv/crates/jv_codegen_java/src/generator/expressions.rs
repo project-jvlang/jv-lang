@@ -345,10 +345,7 @@ impl JavaCodeGenerator {
         Ok(rendered.join(", "))
     }
 
-    fn render_argument_vec(
-        &mut self,
-        args: &[IrExpression],
-    ) -> Result<Vec<String>, CodeGenError> {
+    fn render_argument_vec(&mut self, args: &[IrExpression]) -> Result<Vec<String>, CodeGenError> {
         let mut rendered = Vec::new();
         for arg in args {
             rendered.push(self.generate_expression(arg)?);

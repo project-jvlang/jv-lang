@@ -53,13 +53,13 @@ impl JavaCodeGenerator {
             IrStatement::InterfaceDeclaration { .. } => self.generate_interface(stmt)?,
             IrStatement::RecordDeclaration { .. } => self.generate_record(stmt)?,
             IrStatement::SampleDeclaration(declaration) => {
-                let records = self.generate_sample_declaration_records(declaration)?;
+                let artifacts = self.generate_sample_declaration_artifacts(declaration)?;
                 let mut builder = self.builder();
-                for (index, record_code) in records.iter().enumerate() {
+                for (index, code) in artifacts.iter().enumerate() {
                     if index > 0 {
                         builder.push_line("");
                     }
-                    Self::push_lines(&mut builder, record_code);
+                    Self::push_lines(&mut builder, code);
                 }
                 builder.build()
             }
@@ -188,11 +188,7 @@ impl JavaCodeGenerator {
                 catch_clauses,
                 finally_block,
                 ..
-            } => self.generate_try_statement(
-                body,
-                catch_clauses,
-                finally_block.as_deref(),
-            )?,
+            } => self.generate_try_statement(body, catch_clauses, finally_block.as_deref())?,
             IrStatement::TryWithResources {
                 resources,
                 body,

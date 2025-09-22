@@ -17,6 +17,11 @@ mod strings;
 mod type_system;
 mod utils;
 
+pub use crate::types::{
+    DataFormat, IrSampleDeclaration, PrimitiveType, SampleFetchError, SampleFetchRequest,
+    SampleFetchResult, SampleMode, SampleRecordDescriptor, SampleRecordField, SampleSourceKind,
+    Schema, SchemaError,
+};
 pub use concurrency::{
     desugar_async_expression, desugar_await_expression, desugar_spawn_expression,
 };
@@ -32,11 +37,6 @@ pub use null_safety::{
     desugar_elvis_operator, desugar_null_safe_index_access, desugar_null_safe_member_access,
 };
 pub use resources::{desugar_defer_expression, desugar_use_expression};
-pub use crate::types::{
-    DataFormat, IrSampleDeclaration, PrimitiveType, SampleFetchError, SampleFetchRequest,
-    SampleFetchResult, SampleMode, SampleRecordDescriptor, SampleRecordField, SampleSourceKind,
-    Schema, SchemaError,
-};
 pub use sample::{fetch_sample_data, infer_schema};
 pub use strings::desugar_string_interpolation;
 pub use type_system::{convert_type_annotation, infer_java_type};

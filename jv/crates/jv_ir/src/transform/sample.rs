@@ -7,11 +7,13 @@ use std::process::{Command, Stdio};
 use crate::context::TransformContext;
 use crate::error::TransformError;
 use crate::types::{
-    DataFormat, IrSampleDeclaration, JavaType, PrimitiveType, SampleFetchError,
-    SampleFetchRequest, SampleFetchResult, SampleMode, SampleRecordDescriptor,
-    SampleRecordField, SampleSourceKind, Schema, SchemaError,
+    DataFormat, IrSampleDeclaration, JavaType, PrimitiveType, SampleFetchError, SampleFetchRequest,
+    SampleFetchResult, SampleMode, SampleRecordDescriptor, SampleRecordField, SampleSourceKind,
+    Schema, SchemaError,
 };
-use jv_ast::{Annotation, AnnotationArgument, Expression, Literal, Modifiers, Span, TypeAnnotation};
+use jv_ast::{
+    Annotation, AnnotationArgument, Expression, Literal, Modifiers, Span, TypeAnnotation,
+};
 use reqwest::blocking::Client;
 use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
@@ -443,7 +445,9 @@ fn sample_processing_error(span: &Span, message: impl Into<String>) -> Transform
     }
 }
 
-fn parse_sample_annotation(annotation: &Annotation) -> Result<SampleAnnotationConfig, TransformError> {
+fn parse_sample_annotation(
+    annotation: &Annotation,
+) -> Result<SampleAnnotationConfig, TransformError> {
     let mut source: Option<String> = None;
     let mut mode: Option<SampleMode> = None;
     let mut format: Option<DataFormat> = None;
@@ -474,10 +478,7 @@ fn parse_sample_annotation(annotation: &Annotation) -> Result<SampleAnnotationCo
             AnnotationArgument::Named { name, value, span } => match name.as_str() {
                 "source" => {
                     if source.is_some() {
-                        return Err(sample_annotation_error(
-                            span,
-                            "source 引数が重複しています",
-                        ));
+                        return Err(sample_annotation_error(span, "source 引数が重複しています"));
                     }
                     if let Some(path) = extract_string_literal(value) {
                         source = Some(path);
@@ -490,10 +491,7 @@ fn parse_sample_annotation(annotation: &Annotation) -> Result<SampleAnnotationCo
                 }
                 "mode" => {
                     if mode.is_some() {
-                        return Err(sample_annotation_error(
-                            span,
-                            "mode 引数が重複しています",
-                        ));
+                        return Err(sample_annotation_error(span, "mode 引数が重複しています"));
                     }
                     if let Some(parsed) = parse_mode_expression(value) {
                         mode = Some(parsed);
@@ -506,10 +504,7 @@ fn parse_sample_annotation(annotation: &Annotation) -> Result<SampleAnnotationCo
                 }
                 "format" => {
                     if format.is_some() {
-                        return Err(sample_annotation_error(
-                            span,
-                            "format 引数が重複しています",
-                        ));
+                        return Err(sample_annotation_error(span, "format 引数が重複しています"));
                     }
                     let maybe_string = extract_string_literal(value).or_else(|| {
                         if let Expression::Identifier(identifier, _) = value {
@@ -518,10 +513,7 @@ fn parse_sample_annotation(annotation: &Annotation) -> Result<SampleAnnotationCo
                             None
                         }
                     });
-                    if let Some(fmt) = maybe_string
-                        .as_deref()
-                        .and_then(parse_format_literal)
-                    {
+                    if let Some(fmt) = maybe_string.as_deref().and_then(parse_format_literal) {
                         format = Some(fmt);
                     } else {
                         return Err(sample_annotation_error(
@@ -532,10 +524,7 @@ fn parse_sample_annotation(annotation: &Annotation) -> Result<SampleAnnotationCo
                 }
                 "sha256" => {
                     if sha256.is_some() {
-                        return Err(sample_annotation_error(
-                            span,
-                            "sha256 引数が重複しています",
-                        ));
+                        return Err(sample_annotation_error(span, "sha256 引数が重複しています"));
                     }
                     if let Some(hash) = extract_string_literal(value) {
                         sha256 = Some(hash);
@@ -635,10 +624,7 @@ fn detect_data_format(
     bytes: &[u8],
     span: &Span,
 ) -> Result<DataFormat, TransformError> {
-    if let Some(ext) = Path::new(source)
-        .extension()
-        .and_then(|ext| ext.to_str())
-    {
+    if let Some(ext) = Path::new(source).extension().and_then(|ext| ext.to_str()) {
         match ext.to_ascii_lowercase().as_str() {
             "json" | "jsonl" => return Ok(DataFormat::Json),
             "csv" => return Ok(DataFormat::Csv),
@@ -686,7 +672,11 @@ struct TypeInfo {
 impl SampleTypeBuilder {
     fn new(variable_name: &str) -> Self {
         let base = to_pascal_case(&singularize(variable_name));
-        let base = if base.is_empty() { "Sample".to_string() } else { base };
+        let base = if base.is_empty() {
+            "Sample".to_string()
+        } else {
+            base
+        };
         Self {
             base_name: base,
             records: Vec::new(),
@@ -744,8 +734,7 @@ impl SampleTypeBuilder {
     }
 
     fn add_record(&mut self, name: String, fields: Vec<SampleRecordField>) {
-        self.records
-            .push(SampleRecordDescriptor { name, fields });
+        self.records.push(SampleRecordDescriptor { name, fields });
     }
 
     fn build_root(&mut self, schema: &Schema, variable_name: &str) -> TypeInfo {
@@ -791,9 +780,8 @@ impl SampleTypeBuilder {
                     let child_info = self.build_schema(core_schema, path);
                     path.pop();
 
-                    let is_optional = schema_optional
-                        || !required.contains(field_name)
-                        || child_info.is_optional;
+                    let is_optional =
+                        schema_optional || !required.contains(field_name) || child_info.is_optional;
 
                     let mut field_type = child_info.java_type.clone();
                     if is_optional {
@@ -961,9 +949,7 @@ fn singularize(name: &str) -> String {
     let lower = name.to_ascii_lowercase();
     if lower.ends_with("ies") && lower.len() > 3 {
         format!("{}y", &lower[..lower.len() - 3])
-    } else if (lower.ends_with("ses")
-        || lower.ends_with("xes")
-        || lower.ends_with("zes"))
+    } else if (lower.ends_with("ses") || lower.ends_with("xes") || lower.ends_with("zes"))
         && lower.len() > 2
     {
         lower[..lower.len() - 2].to_string()
@@ -1004,9 +990,13 @@ pub fn desugar_sample_annotation(
     request.aws_cli_path = options.aws_cli_path.clone();
     request.git_cli_path = options.git_cli_path.clone();
     request.timeout = options.timeout;
-    request.max_bytes = config
-        .limit_bytes
-        .or_else(|| if mode == SampleMode::Embed { options.embed_max_bytes } else { None });
+    request.max_bytes = config.limit_bytes.or_else(|| {
+        if mode == SampleMode::Embed {
+            options.embed_max_bytes
+        } else {
+            None
+        }
+    });
 
     let fetch_result = fetch_sample_data(&request)
         .map_err(|error| sample_processing_error(&annotation.span, error.to_string()))?;

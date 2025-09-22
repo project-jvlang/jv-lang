@@ -24,8 +24,7 @@ mod tests {
     fn sample_annotation_desugars_to_ir_declaration() {
         let temp_dir = tempdir().expect("create temp dir");
         let sample_path = temp_dir.path().join("users.json");
-        fs::write(&sample_path, r#"[{"id":1,"name":"Alice"}]"#)
-            .expect("write sample data");
+        fs::write(&sample_path, r#"[{"id":1,"name":"Alice"}]"#).expect("write sample data");
 
         let mut context = TransformContext::new();
         context.sample_options_mut().base_dir = Some(temp_dir.path().to_path_buf());
@@ -59,7 +58,10 @@ mod tests {
                 assert_eq!(decl.variable_name, "users");
                 assert_eq!(decl.mode, SampleMode::Embed);
                 assert_eq!(decl.format, DataFormat::Json);
-                assert!(decl.embedded_data.as_ref().is_some(), "embed mode stores data");
+                assert!(
+                    decl.embedded_data.as_ref().is_some(),
+                    "embed mode stores data"
+                );
                 let list_type = decl.java_type.clone();
                 match list_type {
                     JavaType::Reference { name, generic_args } => {

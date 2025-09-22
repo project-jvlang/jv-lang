@@ -73,7 +73,10 @@ fn sample_schema() -> Schema {
     let mut fields = BTreeMap::new();
     fields.insert("id".to_string(), Schema::Primitive(PrimitiveType::Integer));
     fields.insert("name".to_string(), Schema::Primitive(PrimitiveType::String));
-    fields.insert("email".to_string(), Schema::Primitive(PrimitiveType::String));
+    fields.insert(
+        "email".to_string(),
+        Schema::Primitive(PrimitiveType::String),
+    );
 
     let mut required = BTreeSet::new();
     required.insert("id".to_string());
@@ -85,23 +88,68 @@ fn sample_schema() -> Schema {
     }
 }
 
+fn sample_embed_bytes() -> Vec<u8> {
+    br#"[{"id":1,"name":"Alice","email":"alice@example.com"},{"id":2,"name":"Bob","email":"bob@example.com"}]"#
+        .to_vec()
+}
+
 fn sample_declaration(records: Vec<SampleRecordDescriptor>) -> IrSampleDeclaration {
+    sample_declaration_with(
+        records,
+        DataFormat::Json,
+        "users.json",
+        sample_embed_bytes(),
+    )
+}
+
+fn sample_csv_bytes() -> Vec<u8> {
+    b"id,name,email\n1,Alice,alice@example.com\n2,Bob,bob@example.com\n".to_vec()
+}
+
+fn sample_tsv_bytes() -> Vec<u8> {
+    b"id\tname\temail\n1\tAlice\talice@example.com\n2\tBob\tbob@example.com\n".to_vec()
+}
+
+fn sample_declaration_with(
+    records: Vec<SampleRecordDescriptor>,
+    format: DataFormat,
+    source: &str,
+    embedded_data: Vec<u8>,
+) -> IrSampleDeclaration {
     IrSampleDeclaration {
         variable_name: "users".to_string(),
         java_type: user_sample_list_type(),
-        format: DataFormat::Json,
+        format,
         mode: SampleMode::Embed,
-        source: "users.json".to_string(),
+        source: source.to_string(),
         source_kind: SampleSourceKind::LocalFile,
         sha256: "deadbeef".to_string(),
         cache_path: None,
         limit_bytes: Some(1024),
-        embedded_data: Some(br"{}".to_vec()),
+        embedded_data: Some(embedded_data),
         schema: sample_schema(),
         records,
         root_record_name: Some("UserSample".to_string()),
         span: dummy_span(),
     }
+}
+
+fn sample_declaration_csv() -> IrSampleDeclaration {
+    sample_declaration_with(
+        vec![sample_record_descriptor()],
+        DataFormat::Csv,
+        "users.csv",
+        sample_csv_bytes(),
+    )
+}
+
+fn sample_declaration_tsv() -> IrSampleDeclaration {
+    sample_declaration_with(
+        vec![sample_record_descriptor()],
+        DataFormat::Tsv,
+        "users.tsv",
+        sample_tsv_bytes(),
+    )
 }
 
 fn user_sample_constructor(name: &str, age: i32, email: &str) -> IrExpression {
@@ -957,7 +1005,11 @@ fn sample_declaration_generates_records_from_descriptors() {
     };
 
     let unit = generate_java_code(&program).expect("generate records from sample declaration");
-    assert_eq!(unit.type_declarations.len(), 1, "one record should be emitted");
+    assert_eq!(
+        unit.type_declarations.len(),
+        2,
+        "record and helper class should be emitted"
+    );
 
     let source = unit.to_source(&JavaCodeGenConfig::default());
     assert!(
@@ -967,12 +1019,105 @@ fn sample_declaration_generates_records_from_descriptors() {
 }
 
 #[test]
+fn embed_mode_sample_declaration_handles_csv() {
+    let declaration = sample_declaration_csv();
+    let program = IrProgram {
+        package: Some("sample.embed".to_string()),
+        imports: vec![],
+        type_declarations: vec![IrStatement::SampleDeclaration(declaration)],
+        span: dummy_span(),
+    };
+
+    let unit =
+        generate_java_code(&program).expect("generate embed helper from CSV sample declaration");
+    let source = unit.to_source(&JavaCodeGenConfig::default());
+
+    assert!(
+        source.contains("private static final String RAW_CSV"),
+        "embedded CSV constant should be generated: {source}"
+    );
+    assert!(
+        source.contains("public static final java.util.List<UserSample> USERS = java.util.List.of"),
+        "CSV data should initialise the record list via List.of: {source}"
+    );
+    assert!(
+        source.contains("new UserSample(1, \"Alice\", \"alice@example.com\")"),
+        "CSV rows should be materialised as UserSample records: {source}"
+    );
+}
+
+#[test]
+fn embed_mode_sample_declaration_handles_tsv() {
+    let declaration = sample_declaration_tsv();
+    let program = IrProgram {
+        package: Some("sample.embed".to_string()),
+        imports: vec![],
+        type_declarations: vec![IrStatement::SampleDeclaration(declaration)],
+        span: dummy_span(),
+    };
+
+    let unit =
+        generate_java_code(&program).expect("generate embed helper from TSV sample declaration");
+    let source = unit.to_source(&JavaCodeGenConfig::default());
+
+    assert!(
+        source.contains("private static final String RAW_TSV"),
+        "embedded TSV constant should be generated: {source}"
+    );
+    assert!(
+        source.contains("public static final java.util.List<UserSample> USERS = java.util.List.of"),
+        "TSV data should initialise the record list via List.of: {source}"
+    );
+    assert!(
+        source.contains("new UserSample(2, \"Bob\", \"bob@example.com\")"),
+        "TSV rows should be materialised as UserSample records: {source}"
+    );
+}
+
+#[test]
+fn embed_mode_sample_declaration_produces_helper_class() {
+    let declaration = sample_declaration(vec![sample_record_descriptor()]);
+    let program = IrProgram {
+        package: Some("sample.embed".to_string()),
+        imports: vec![],
+        type_declarations: vec![IrStatement::SampleDeclaration(declaration)],
+        span: dummy_span(),
+    };
+
+    let unit = generate_java_code(&program).expect("generate embed helper from sample declaration");
+    assert!(
+        unit.type_declarations
+            .iter()
+            .any(|decl| decl.contains("class UserSampleData")),
+        "helper class should be generated alongside records"
+    );
+
+    let source = unit.to_source(&JavaCodeGenConfig::default());
+    assert!(
+        source.contains("private static final String RAW_JSON"),
+        "embedded raw JSON constant should exist: {source}"
+    );
+    assert!(
+        source.contains("public static final java.util.List<UserSample> USERS = java.util.List.of"),
+        "embedded data list should be initialised using List.of: {source}"
+    );
+    assert!(
+        source.contains("new UserSample(1, \"Alice\", \"alice@example.com\")"),
+        "embedded list should contain deserialised record instances: {source}"
+    );
+}
+
+#[test]
 fn embed_mode_generates_inline_data_class() {
     let program = sample_embed_program();
     let unit = generate_java_code(&program).expect("generate embed-mode helpers");
     let source = unit.to_source(&JavaCodeGenConfig::default());
 
-    assert_eq!(unit.type_declarations.len(), 2, "record + data helper expected");
+    assert_eq!(
+        unit.type_declarations.len(),
+        2,
+        "record + data helper expected"
+    );
     assert!(
         unit.type_declarations
             .iter()
@@ -1016,11 +1161,13 @@ fn load_mode_generates_filesystem_loader() {
     let unit = generate_java_code(&program).expect("generate load-mode helpers");
     let source = unit.to_source(&JavaCodeGenConfig::default());
 
-    assert_eq!(unit.type_declarations.len(), 1, "only loader helper expected");
+    assert_eq!(
+        unit.type_declarations.len(),
+        1,
+        "only loader helper expected"
+    );
     assert!(
-        source.contains(
-            "public static String loadUsers() throws java.io.IOException {"
-        ),
+        source.contains("public static String loadUsers() throws java.io.IOException {"),
         "load mode method signature should include IOException: {source}"
     );
     assert!(

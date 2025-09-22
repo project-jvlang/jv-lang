@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 
-use crate::types::{DataFormat, JavaType, MethodOverload, SampleMode, StaticMethodCall, UtilityClass};
+use crate::types::{
+    DataFormat, JavaType, MethodOverload, SampleMode, StaticMethodCall, UtilityClass,
+};
 use std::path::PathBuf;
 use std::time::Duration;
 

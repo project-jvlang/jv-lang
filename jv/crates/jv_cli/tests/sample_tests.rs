@@ -2,9 +2,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-use jv_ir::transform::{
-    fetch_sample_data, SampleFetchError, SampleFetchRequest, SampleSourceKind,
-};
+use jv_ir::transform::{fetch_sample_data, SampleFetchError, SampleFetchRequest, SampleSourceKind};
 use sha2::{Digest, Sha256};
 use tempfile::tempdir;
 
