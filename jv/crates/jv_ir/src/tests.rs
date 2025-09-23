@@ -12,6 +12,7 @@ mod tests {
         DataFormat, IrCaseLabel, IrExpression, IrModifiers, IrStatement, IrVisibility, JavaType,
         SampleMode, SampleSourceKind, Schema, TransformContext, TransformError, VirtualThreadOp,
     };
+    use crate::context::SequenceStyleCache;
     use jv_ast::*;
     use sha2::{Digest, Sha256};
     use std::fs;
@@ -2256,5 +2257,42 @@ mod tests {
         };
         assert_eq!(modifiers.visibility, IrVisibility::Public);
         assert!(modifiers.is_static);
+    }
+
+    #[test]
+    fn sequence_style_cache_reuses_array_entries_until_cleared() {
+        let mut cache = SequenceStyleCache::with_capacity();
+        let span = Span::new(1, 1, 1, 15);
+
+        let first_insert = cache.lookup_or_insert_array(&span, JavaType::int());
+        assert!(first_insert.is_none(), "first insert should miss cache");
+
+        let reused = cache.lookup_or_insert_array(&span, JavaType::string());
+        assert_eq!(reused, Some(JavaType::int()));
+
+        cache.clear();
+
+        let after_clear = cache.lookup_or_insert_array(&span, JavaType::string());
+        assert!(
+            after_clear.is_none(),
+            "cache should forget entry after clear"
+        );
+    }
+
+    #[test]
+    fn sequence_style_cache_reuses_call_entries_until_cleared() {
+        let mut cache = SequenceStyleCache::with_capacity();
+        let span = Span::new(2, 4, 2, 12);
+
+        let first_insert = cache.lookup_or_insert_call(&span, JavaType::int());
+        assert!(first_insert.is_none());
+
+        let reused = cache.lookup_or_insert_call(&span, JavaType::string());
+        assert_eq!(reused, Some(JavaType::int()));
+
+        cache.clear();
+
+        let after_clear = cache.lookup_or_insert_call(&span, JavaType::string());
+        assert!(after_clear.is_none());
     }
 }
