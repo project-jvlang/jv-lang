@@ -1,7 +1,7 @@
 use super::support::{first_statement, parse_program, parse_program_result};
 use jv_ast::{
-    Argument, BinaryOp, ConcurrencyConstruct, Expression, Literal, ResourceManagement, Statement,
-    StringPart, TypeAnnotation,
+    Argument, BinaryOp, ConcurrencyConstruct, Expression, Literal, ResourceManagement,
+    SequenceDelimiter, Statement, StringPart, TypeAnnotation,
 };
 
 use test_case::test_case;
@@ -516,6 +516,48 @@ fn test_array_literal() {
                     Expression::Literal(Literal::Number(value), _) => assert_eq!(value, "1"),
                     other => panic!("expected numeric literal, found {:?}", other),
                 }
+            }
+            other => panic!("expected array expression, found {:?}", other),
+        },
+        other => panic!("expected val declaration, found {:?}", other),
+    }
+}
+
+#[test]
+fn test_whitespace_array_literal() {
+    let program = parse_program("val numbers = [1 2 3]");
+    let statement = first_statement(&program);
+
+    match statement {
+        Statement::ValDeclaration { initializer, .. } => match initializer {
+            Expression::Array {
+                elements,
+                delimiter,
+                ..
+            } => {
+                assert_eq!(elements.len(), 3);
+                assert_eq!(*delimiter, SequenceDelimiter::Whitespace);
+            }
+            other => panic!("expected array expression, found {:?}", other),
+        },
+        other => panic!("expected val declaration, found {:?}", other),
+    }
+}
+
+#[test]
+fn test_whitespace_array_literal_with_comment() {
+    let program = parse_program("val numbers = [1 /* note */ 2]");
+    let statement = first_statement(&program);
+
+    match statement {
+        Statement::ValDeclaration { initializer, .. } => match initializer {
+            Expression::Array {
+                elements,
+                delimiter,
+                ..
+            } => {
+                assert_eq!(elements.len(), 2);
+                assert_eq!(*delimiter, SequenceDelimiter::Whitespace);
             }
             other => panic!("expected array expression, found {:?}", other),
         },

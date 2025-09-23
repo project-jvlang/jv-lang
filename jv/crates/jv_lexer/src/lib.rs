@@ -67,6 +67,7 @@ pub enum TokenType {
     LeftBracket,  // [
     RightBracket, // ]
     Comma,        // ,
+    LayoutComma,  // synthetic comma for layout-delimited sequences
     Dot,          // .
     Semicolon,    // ;
     Colon,        // :
@@ -527,7 +528,11 @@ impl Lexer {
                 // String literals
                 '"' => {
                     let leading_trivia = trivia.take();
-                    tokens.extend(self.tokenize_string(start_line, start_column, leading_trivia)?);
+                    tokens.extend(self.tokenize_string(
+                        start_line,
+                        start_column,
+                        leading_trivia,
+                    )?);
                 }
 
                 // Comments

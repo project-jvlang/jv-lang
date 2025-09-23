@@ -1,8 +1,8 @@
 use chumsky::prelude::*;
 use chumsky::Parser as ChumskyParser;
 use jv_ast::{
-    Argument, BinaryOp, CallArgumentStyle, Expression, Literal, Parameter, SequenceDelimiter,
-    Span, StringPart, UnaryOp, WhenArm,
+    Argument, BinaryOp, CallArgumentStyle, Expression, Literal, Parameter, SequenceDelimiter, Span,
+    StringPart, UnaryOp, WhenArm,
 };
 use jv_lexer::{Token, TokenType};
 
@@ -11,9 +11,9 @@ use super::support::{
     expression_span, identifier, identifier_with_span, keyword, merge_spans, span_from_token,
     token_and, token_arrow, token_assign, token_colon, token_comma, token_divide, token_dot,
     token_else, token_elvis, token_equal, token_greater, token_greater_equal, token_if,
-    token_left_brace, token_left_bracket, token_left_paren, token_less, token_less_equal,
-    token_minus, token_modulo, token_multiply, token_not, token_not_equal, token_null_safe,
-    token_or, token_plus, token_question, token_right_brace, token_right_bracket,
+    token_layout_comma, token_left_brace, token_left_bracket, token_left_paren, token_less,
+    token_less_equal, token_minus, token_modulo, token_multiply, token_not, token_not_equal,
+    token_null_safe, token_or, token_plus, token_question, token_right_brace, token_right_bracket,
     token_right_paren, token_string_end, token_string_mid, token_string_start, token_when,
     type_annotation_simple,
 };
@@ -184,16 +184,65 @@ fn array_literal_parser(
 ) -> impl ChumskyParser<Token, Expression, Error = Simple<Token>> + Clone {
     token_left_bracket()
         .map(|token| span_from_token(&token))
-        .then(expr.clone().separated_by(token_comma()).allow_trailing())
+        .then(array_elements(expr.clone()))
         .then(token_right_bracket().map(|token| span_from_token(&token)))
-        .map(|((left_span, elements), right_span)| {
+        .map(|((left_span, (elements, delimiter)), right_span)| {
             let span = merge_spans(&left_span, &right_span);
             Expression::Array {
                 elements,
-                delimiter: SequenceDelimiter::Comma,
+                delimiter,
                 span,
             }
         })
+}
+
+fn array_elements<P>(
+    expr: P,
+) -> impl ChumskyParser<Token, (Vec<Expression>, SequenceDelimiter), Error = Simple<Token>> + Clone
+where
+    P: ChumskyParser<Token, Expression, Error = Simple<Token>> + Clone,
+{
+    let separator = choice((
+        token_comma().to(SequenceDelimiter::Comma),
+        token_layout_comma().to(SequenceDelimiter::Whitespace),
+    ));
+
+    expr.clone()
+        .then(separator.clone().then(expr.clone()).repeated())
+        .then(token_comma().or_not())
+        .try_map(|((first, rest), trailing_comma), span| {
+            let mut elements = Vec::with_capacity(rest.len() + 1);
+            let mut saw_comma = false;
+            let mut saw_layout = false;
+
+            elements.push(first);
+
+            for (separator_kind, expr) in rest {
+                match separator_kind {
+                    SequenceDelimiter::Comma => saw_comma = true,
+                    SequenceDelimiter::Whitespace => saw_layout = true,
+                }
+                elements.push(expr);
+            }
+
+            if trailing_comma.is_some() {
+                saw_comma = true;
+            }
+
+            let delimiter = match (saw_comma, saw_layout) {
+                (true, true) => {
+                    let message = "JV1007: mixed comma and whitespace delimiters in array literal"
+                        .to_string();
+                    return Err(Simple::custom(span, message));
+                }
+                (false, true) => SequenceDelimiter::Whitespace,
+                _ => SequenceDelimiter::Comma,
+            };
+
+            Ok((elements, delimiter))
+        })
+        .or_not()
+        .map(|result| result.unwrap_or_else(|| (Vec::new(), SequenceDelimiter::Comma)))
 }
 
 fn string_interpolation_parser(
