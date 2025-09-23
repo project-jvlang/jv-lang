@@ -1,7 +1,9 @@
 use crate::context::TransformContext;
 use crate::error::TransformError;
 use crate::types::{IrExpression, IrStatement, JavaType, MethodOverload};
-use jv_ast::{Argument, Expression, Modifiers, Parameter, Span, Statement, TypeAnnotation};
+use jv_ast::{
+    Argument, CallArgumentStyle, Expression, Modifiers, Parameter, Span, Statement, TypeAnnotation,
+};
 
 pub fn desugar_default_parameters(
     function_name: String,
@@ -216,6 +218,7 @@ fn create_delegating_call(
         receiver: None, // Static call to overloaded method
         method_name: function_name.to_string(),
         args,
+        argument_style: CallArgumentStyle::Comma,
         java_type: JavaType::object(), // Return type would be inferred
         span: Span::dummy(),
     })
@@ -268,6 +271,7 @@ pub fn desugar_named_arguments(
                 receiver: None, // Static function call
                 method_name: name,
                 args: final_args,
+                argument_style: CallArgumentStyle::Comma,
                 java_type: JavaType::object(), // Would be inferred from function signature
                 span,
             })
@@ -282,6 +286,7 @@ pub fn desugar_named_arguments(
                 receiver: Some(receiver),
                 method_name: field_name,
                 args: final_args,
+                argument_style: CallArgumentStyle::Comma,
                 java_type: JavaType::object(),
                 span,
             })
@@ -297,6 +302,7 @@ pub fn desugar_named_arguments(
                 receiver: None,
                 method_name: "call".to_string(), // Generic call method
                 args: all_args,
+                argument_style: CallArgumentStyle::Comma,
                 java_type: JavaType::object(),
                 span,
             })

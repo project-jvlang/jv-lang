@@ -47,6 +47,7 @@ pub enum IrExpression {
         receiver: Option<Box<IrExpression>>, // None for static calls
         method_name: String,
         args: Vec<IrExpression>,
+        argument_style: CallArgumentStyle,
         java_type: JavaType,
         span: Span,
     },
@@ -113,6 +114,7 @@ pub enum IrExpression {
         element_type: JavaType,
         dimensions: Vec<Option<IrExpression>>, // None for unsized dimensions
         initializer: Option<Vec<IrExpression>>,
+        delimiter: SequenceDelimiter,
         span: Span,
     },
 

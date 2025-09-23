@@ -35,6 +35,13 @@ pub enum TransformError {
 
     #[error("@Sample処理エラー: {message}")]
     SampleProcessingError { message: String, span: Span },
+
+    #[error("JV1008: whitespace-delimited sequence must be homogeneous. expected {expected}, found {found}")]
+    WhitespaceSequenceTypeMismatch {
+        expected: String,
+        found: String,
+        span: Span,
+    },
 }
 
 impl TransformError {
@@ -50,7 +57,8 @@ impl TransformError {
             | TransformError::ConcurrencyError { span, .. }
             | TransformError::ResourceManagementError { span, .. }
             | TransformError::SampleAnnotationError { span, .. }
-            | TransformError::SampleProcessingError { span, .. } => span,
+            | TransformError::SampleProcessingError { span, .. }
+            | TransformError::WhitespaceSequenceTypeMismatch { span, .. } => span,
         }
     }
 }

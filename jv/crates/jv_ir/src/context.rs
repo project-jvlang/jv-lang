@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use crate::types::{
     DataFormat, JavaType, MethodOverload, SampleMode, StaticMethodCall, UtilityClass,
 };
+use jv_ast::Span;
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -23,6 +24,8 @@ pub struct TransformContext {
     pub current_package: Option<String>,
     /// Options controlling @Sample transformation behaviour
     pub sample_options: SampleOptions,
+    /// Cache tracking whitespace-delimited sequence element types to avoid recomputation
+    pub sequence_style_cache: SequenceStyleCache,
 }
 
 impl TransformContext {
@@ -52,6 +55,7 @@ impl TransformContext {
             extension_methods: HashMap::new(),
             current_package: None,
             sample_options: SampleOptions::default(),
+            sequence_style_cache: SequenceStyleCache::with_capacity(),
         }
     }
 
@@ -84,6 +88,14 @@ impl TransformContext {
 
     pub fn sample_options_mut(&mut self) -> &mut SampleOptions {
         &mut self.sample_options
+    }
+
+    pub fn sequence_style_cache(&self) -> &SequenceStyleCache {
+        &self.sequence_style_cache
+    }
+
+    pub fn sequence_style_cache_mut(&mut self) -> &mut SequenceStyleCache {
+        &mut self.sequence_style_cache
     }
 }
 
@@ -119,6 +131,75 @@ impl Default for SampleOptions {
             git_cli_path: None,
             timeout: Duration::from_secs(30),
             embed_max_bytes: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct SequenceStyleCache {
+    array_elements: HashMap<SpanKey, JavaType>,
+    call_arguments: HashMap<SpanKey, JavaType>,
+}
+
+impl SequenceStyleCache {
+    pub fn with_capacity() -> Self {
+        Self {
+            array_elements: HashMap::new(),
+            call_arguments: HashMap::new(),
+        }
+    }
+
+    pub fn lookup_or_insert_array(
+        &mut self,
+        span: &Span,
+        element_type: JavaType,
+    ) -> Option<JavaType> {
+        let key = SpanKey::from(span);
+        match self.array_elements.get(&key) {
+            Some(existing) => Some(existing.clone()),
+            None => {
+                self.array_elements.insert(key, element_type);
+                None
+            }
+        }
+    }
+
+    pub fn lookup_or_insert_call(
+        &mut self,
+        span: &Span,
+        element_type: JavaType,
+    ) -> Option<JavaType> {
+        let key = SpanKey::from(span);
+        match self.call_arguments.get(&key) {
+            Some(existing) => Some(existing.clone()),
+            None => {
+                self.call_arguments.insert(key, element_type);
+                None
+            }
+        }
+    }
+
+    pub fn clear(&mut self) {
+        self.array_elements.clear();
+        self.call_arguments.clear();
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct SpanKey {
+    start_line: usize,
+    start_column: usize,
+    end_line: usize,
+    end_column: usize,
+}
+
+impl From<&Span> for SpanKey {
+    fn from(span: &Span) -> Self {
+        Self {
+            start_line: span.start_line,
+            start_column: span.start_column,
+            end_line: span.end_line,
+            end_column: span.end_column,
         }
     }
 }

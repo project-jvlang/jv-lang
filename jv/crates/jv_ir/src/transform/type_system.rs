@@ -2,18 +2,20 @@ use super::utils::{extract_java_type, ir_expression_span};
 use crate::context::TransformContext;
 use crate::error::TransformError;
 use crate::types::{IrExpression, JavaType};
-use jv_ast::{Span, TypeAnnotation};
+use jv_ast::{CallArgumentStyle, SequenceDelimiter, Span, TypeAnnotation};
 
 pub fn infer_java_type(
     type_annotation: Option<TypeAnnotation>,
     initializer: Option<&IrExpression>,
-    _context: &TransformContext,
+    context: &mut TransformContext,
 ) -> Result<JavaType, TransformError> {
     if let Some(ta) = type_annotation {
         return convert_type_annotation(ta);
     }
 
     if let Some(expr) = initializer {
+        validate_sequence_styles(expr, context)?;
+
         if let Some(java_type) = extract_java_type(expr) {
             return Ok(java_type);
         }
@@ -64,5 +66,155 @@ pub fn convert_type_annotation(
             name: "Object".to_string(),
             generic_args: vec![],
         }),
+    }
+}
+
+fn validate_sequence_styles(
+    expr: &IrExpression,
+    context: &mut TransformContext,
+) -> Result<(), TransformError> {
+    match expr {
+        IrExpression::ArrayCreation {
+            initializer,
+            delimiter,
+            span,
+            ..
+        } => {
+            if *delimiter == SequenceDelimiter::Whitespace {
+                if let Some(elements) = initializer {
+                    validate_whitespace_array(elements, span, context)?;
+                }
+            }
+
+            if let Some(elements) = initializer {
+                for element in elements {
+                    validate_sequence_styles(element, context)?;
+                }
+            }
+        }
+        IrExpression::MethodCall {
+            args,
+            argument_style,
+            span,
+            ..
+        } => {
+            if *argument_style == CallArgumentStyle::Whitespace {
+                validate_whitespace_call(args, span, context)?;
+            }
+
+            for arg in args {
+                validate_sequence_styles(arg, context)?;
+            }
+        }
+        _ => {}
+    }
+
+    Ok(())
+}
+
+fn validate_whitespace_array(
+    elements: &[IrExpression],
+    span: &Span,
+    context: &mut TransformContext,
+) -> Result<(), TransformError> {
+    let mut canonical: Option<JavaType> = None;
+
+    for element in elements {
+        if let Some(element_type) = extract_java_type(element) {
+            match &canonical {
+                Some(expected) if *expected != element_type => {
+                    return Err(sequence_type_mismatch(expected, &element_type, span));
+                }
+                None => canonical = Some(element_type.clone()),
+                _ => {}
+            }
+        }
+    }
+
+    if let Some(element_type) = canonical {
+        let cache = context.sequence_style_cache_mut();
+        if let Some(existing) = cache.lookup_or_insert_array(span, element_type.clone()) {
+            if existing != element_type {
+                return Err(sequence_type_mismatch(&existing, &element_type, span));
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn validate_whitespace_call(
+    args: &[IrExpression],
+    span: &Span,
+    context: &mut TransformContext,
+) -> Result<(), TransformError> {
+    let mut canonical: Option<JavaType> = None;
+
+    for arg in args {
+        if let Some(arg_type) = extract_java_type(arg) {
+            match &canonical {
+                Some(expected) if *expected != arg_type => {
+                    return Err(sequence_type_mismatch(expected, &arg_type, span));
+                }
+                None => canonical = Some(arg_type.clone()),
+                _ => {}
+            }
+        }
+    }
+
+    if let Some(arg_type) = canonical {
+        let cache = context.sequence_style_cache_mut();
+        if let Some(existing) = cache.lookup_or_insert_call(span, arg_type.clone()) {
+            if existing != arg_type {
+                return Err(sequence_type_mismatch(&existing, &arg_type, span));
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn sequence_type_mismatch(
+    expected: &JavaType,
+    found: &JavaType,
+    span: &Span,
+) -> TransformError {
+    TransformError::WhitespaceSequenceTypeMismatch {
+        expected: describe_java_type(expected),
+        found: describe_java_type(found),
+        span: span.clone(),
+    }
+}
+
+fn describe_java_type(java_type: &JavaType) -> String {
+    match java_type {
+        JavaType::Primitive(name) => name.clone(),
+        JavaType::Reference { name, generic_args } => {
+            if generic_args.is_empty() {
+                name.clone()
+            } else {
+                let args = generic_args
+                    .iter()
+                    .map(describe_java_type)
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("{}<{}>", name, args)
+            }
+        }
+        JavaType::Array {
+            element_type,
+            dimensions,
+        } => {
+            let mut descriptor = describe_java_type(element_type);
+            for _ in 0..*dimensions {
+                descriptor.push_str("[]");
+            }
+            descriptor
+        }
+        JavaType::Functional {
+            interface_name,
+            ..
+        } => interface_name.clone(),
+        JavaType::Void => "void".to_string(),
     }
 }

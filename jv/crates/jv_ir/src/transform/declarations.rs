@@ -294,6 +294,7 @@ fn replace_this_ir_expression(
             receiver,
             method_name,
             args,
+            argument_style,
             java_type,
             span,
         } => IrExpression::MethodCall {
@@ -309,6 +310,7 @@ fn replace_this_ir_expression(
                 .into_iter()
                 .map(|arg| replace_this_ir_expression(arg, replacement_name, replacement_type))
                 .collect(),
+            argument_style,
             java_type,
             span,
         },
@@ -442,6 +444,7 @@ fn replace_this_ir_expression(
             element_type,
             dimensions,
             initializer,
+            delimiter,
             span,
         } => IrExpression::ArrayCreation {
             element_type,
@@ -461,6 +464,7 @@ fn replace_this_ir_expression(
                     })
                     .collect()
             }),
+            delimiter,
             span,
         },
         IrExpression::ObjectCreation {

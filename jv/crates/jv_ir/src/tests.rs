@@ -1569,15 +1569,98 @@ mod tests {
     // Test for type inference
     #[test]
     fn test_infer_java_type_uses_initializer_type() {
-        let context = test_context();
+        let mut context = test_context();
 
         let ir_initializer =
             IrExpression::Literal(Literal::String("hello".to_string()), dummy_span());
 
-        let inferred = infer_java_type(None, Some(&ir_initializer), &context)
+        let inferred = infer_java_type(None, Some(&ir_initializer), &mut context)
             .expect("type inference should succeed for string literal");
 
         assert_eq!(inferred, JavaType::string());
+    }
+
+    #[test]
+    fn test_whitespace_array_homogeneous_allows_inference() {
+        let mut context = test_context();
+
+        let whitespace_array = IrExpression::ArrayCreation {
+            element_type: JavaType::int(),
+            dimensions: vec![None],
+            initializer: Some(vec![
+                IrExpression::Literal(Literal::Number("1".to_string()), dummy_span()),
+                IrExpression::Literal(Literal::Number("2".to_string()), dummy_span()),
+            ]),
+            delimiter: SequenceDelimiter::Whitespace,
+            span: dummy_span(),
+        };
+
+        let inferred = infer_java_type(None, Some(&whitespace_array), &mut context)
+            .expect("homogeneous whitespace array should infer type");
+
+        assert_eq!(
+            inferred,
+            JavaType::Array {
+                element_type: Box::new(JavaType::int()),
+                dimensions: 1,
+            }
+        );
+    }
+
+    #[test]
+    fn test_whitespace_array_mixed_type_returns_error() {
+        let mut context = test_context();
+
+        let whitespace_array = IrExpression::ArrayCreation {
+            element_type: JavaType::object(),
+            dimensions: vec![None],
+            initializer: Some(vec![
+                IrExpression::Literal(Literal::Number("1".to_string()), dummy_span()),
+                IrExpression::Literal(Literal::String("oops".to_string()), dummy_span()),
+            ]),
+            delimiter: SequenceDelimiter::Whitespace,
+            span: dummy_span(),
+        };
+
+        let error = infer_java_type(None, Some(&whitespace_array), &mut context)
+            .expect_err("mixed whitespace array should error");
+
+        match error {
+            TransformError::WhitespaceSequenceTypeMismatch { expected, found, .. } => {
+                assert!(expected.contains("int") || expected.contains("Int"));
+                assert!(found.contains("String"));
+            }
+            other => panic!("expected whitespace sequence mismatch error, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_whitespace_call_mixed_type_returns_error() {
+        let mut context = test_context();
+
+        let whitespace_call = IrExpression::MethodCall {
+            receiver: None,
+            method_name: "printAll".to_string(),
+            args: vec![
+                IrExpression::Literal(Literal::Number("1".to_string()), dummy_span()),
+                IrExpression::Literal(Literal::Number("2".to_string()), dummy_span()),
+                IrExpression::Literal(Literal::String("oops".to_string()), dummy_span()),
+            ],
+            argument_style: CallArgumentStyle::Whitespace,
+            java_type: JavaType::void(),
+            span: dummy_span(),
+        };
+
+        let error = infer_java_type(None, Some(&whitespace_call), &mut context)
+            .expect_err("mixed whitespace call should error");
+
+        match error {
+            TransformError::WhitespaceSequenceTypeMismatch { expected, found, .. } => {
+                assert!(expected.contains("int") || expected.contains("Int"));
+                assert!(found.contains("String"));
+            }
+            other => panic!("expected whitespace sequence mismatch error, got {:?}", other),
+        }
     }
 
     // Test for type annotation conversion
@@ -2144,6 +2227,7 @@ mod tests {
             receiver: None,
             method_name: "staticMethod".to_string(),
             args: vec![],
+            argument_style: CallArgumentStyle::Comma,
             java_type: JavaType::void(),
             span: dummy_span(),
         };
