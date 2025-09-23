@@ -124,9 +124,7 @@ fn write_exec_script(content: &str) -> std::path::PathBuf {
     let path = std::env::temp_dir().join(filename);
     fs::write(&path, content).expect("write script");
 
-    let mut permissions = fs::metadata(&path)
-        .expect("metadata")
-        .permissions();
+    let mut permissions = fs::metadata(&path).expect("metadata").permissions();
     permissions.set_mode(0o755);
     fs::set_permissions(&path, permissions).expect("set permissions");
 

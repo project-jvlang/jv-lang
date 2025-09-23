@@ -48,7 +48,10 @@ impl SampleConfig {
     ///
     /// Returns the detected protocol when the source is permitted. Any violation
     /// (network disabled or missing CLI dependency) yields a `SampleConfigError`.
-    pub fn enforce_source_security(&self, source: &str) -> Result<SampleProtocol, SampleConfigError> {
+    pub fn enforce_source_security(
+        &self,
+        source: &str,
+    ) -> Result<SampleProtocol, SampleConfigError> {
         let protocol = SampleProtocol::detect(source);
 
         if protocol.requires_network() && self.network_policy == NetworkPolicy::Deny {
@@ -146,7 +149,11 @@ impl SampleProtocol {
     pub fn requires_network(self) -> bool {
         matches!(
             self,
-            SampleProtocol::Http | SampleProtocol::Https | SampleProtocol::S3 | SampleProtocol::GitSsh | SampleProtocol::Unknown
+            SampleProtocol::Http
+                | SampleProtocol::Https
+                | SampleProtocol::S3
+                | SampleProtocol::GitSsh
+                | SampleProtocol::Unknown
         )
     }
 }
@@ -194,8 +201,7 @@ impl Default for SampleCliDependencies {
         Self {
             aws: CliRequirement::new("aws")
                 .with_hint("Install the AWS CLI and ensure it is on PATH."),
-            git: CliRequirement::new("git")
-                .with_hint("Install Git and ensure it is on PATH."),
+            git: CliRequirement::new("git").with_hint("Install Git and ensure it is on PATH."),
         }
     }
 }
@@ -304,10 +310,7 @@ mod tests {
         let error = config
             .enforce_source_security("https://example.com/data.json")
             .expect_err("network should be disabled by default");
-        assert!(matches!(
-            error,
-            SampleConfigError::NetworkNotAllowed { .. }
-        ));
+        assert!(matches!(error, SampleConfigError::NetworkNotAllowed { .. }));
     }
 
     #[test]
@@ -343,9 +346,6 @@ mod tests {
         let error = config
             .enforce_source_security("s3://bucket/data.json")
             .expect_err("missing CLI should be reported");
-        assert!(matches!(
-            error,
-            SampleConfigError::InvalidOverride { .. }
-        ));
+        assert!(matches!(error, SampleConfigError::InvalidOverride { .. }));
     }
 }

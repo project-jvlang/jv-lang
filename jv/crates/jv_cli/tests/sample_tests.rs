@@ -45,8 +45,7 @@ fn has_java_runtime() -> bool {
 }
 
 fn escape_path_for_annotation(path: &Path) -> String {
-    path
-        .to_str()
+    path.to_str()
         .expect("fixture path should be valid UTF-8")
         .replace('\\', "\\\\")
 }
@@ -375,7 +374,10 @@ fn end_to_end_sample_annotation_csv_embed_workflow() {
             .map(|contents| contents.contains("RAW_CSV"))
             .unwrap_or(false)
     });
-    assert!(embeds_csv_literal, "embed mode should emit RAW_CSV literal for tabular data");
+    assert!(
+        embeds_csv_literal,
+        "embed mode should emit RAW_CSV literal for tabular data"
+    );
 
     assert!(
         output_dir.join("GeneratedMain.class").exists(),

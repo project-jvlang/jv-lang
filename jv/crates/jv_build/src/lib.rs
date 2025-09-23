@@ -144,10 +144,7 @@ impl BuildSystem {
     }
 
     /// Ensure required CLIs are available for the given protocol.
-    pub fn ensure_protocol_dependencies(
-        &self,
-        protocol: SampleProtocol,
-    ) -> Result<(), BuildError> {
+    pub fn ensure_protocol_dependencies(&self, protocol: SampleProtocol) -> Result<(), BuildError> {
         match protocol {
             SampleProtocol::S3 => {
                 let _ = self.resolve_sample_dependency(SampleDependency::AwsCli)?;
@@ -187,9 +184,7 @@ impl BuildSystem {
             })?;
 
         if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr)
-                .trim()
-                .to_string();
+            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
             return Err(BuildError::CliExecutionError {
                 command: resolved.command,
                 status: output.status.code(),

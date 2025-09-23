@@ -906,7 +906,9 @@ impl JavaCodeGenerator {
 
     fn unwrap_optional_java_type<'a>(java_type: &'a JavaType) -> (&'a JavaType, bool) {
         match java_type {
-            JavaType::Reference { name, generic_args } if name == "java.util.Optional" && generic_args.len() == 1 => {
+            JavaType::Reference { name, generic_args }
+                if name == "java.util.Optional" && generic_args.len() == 1 =>
+            {
                 (&generic_args[0], true)
             }
             _ => (java_type, false),
@@ -945,10 +947,7 @@ impl JavaCodeGenerator {
         let (core_type, _) = Self::unwrap_optional_java_type(java_type);
 
         match (core_schema, core_type) {
-            (
-                Schema::Object { fields, required },
-                JavaType::Reference { name, .. },
-            ) => {
+            (Schema::Object { fields, required }, JavaType::Reference { name, .. }) => {
                 if !map.contains_key(name) {
                     map.insert(
                         name.clone(),
@@ -1037,10 +1036,7 @@ impl JavaCodeGenerator {
                     Self::collect_list_types(variant, core_type, descriptors, results);
                 }
             }
-            (
-                Schema::Object { fields, .. },
-                JavaType::Reference { name, .. },
-            ) => {
+            (Schema::Object { fields, .. }, JavaType::Reference { name, .. }) => {
                 if let Some(descriptor) = descriptors.get(&name) {
                     for field in &descriptor.fields {
                         if let Some(field_schema) = fields.get(&field.name) {
@@ -1170,8 +1166,10 @@ impl<'a> LoadHelperGenerator<'a> {
             .map(|path| JavaCodeGenerator::escape_string(&path.to_string_lossy()));
         let limit_bytes = self.declaration.limit_bytes.unwrap_or(0);
 
-        self.builder
-            .push_line(&format!("private static final String SOURCE = \"{}\";", source_literal));
+        self.builder.push_line(&format!(
+            "private static final String SOURCE = \"{}\";",
+            source_literal
+        ));
         if !expected_sha.is_empty() {
             self.builder.push_line(&format!(
                 "private static final String EXPECTED_SHA256 = \"{}\";",
@@ -1193,8 +1191,10 @@ impl<'a> LoadHelperGenerator<'a> {
         }
 
         if limit_bytes > 0 {
-            self.builder
-                .push_line(&format!("private static final long LIMIT_BYTES = {}L;", limit_bytes));
+            self.builder.push_line(&format!(
+                "private static final long LIMIT_BYTES = {}L;",
+                limit_bytes
+            ));
         } else {
             self.builder
                 .push_line("private static final long LIMIT_BYTES = -1L;");
@@ -1228,7 +1228,8 @@ impl<'a> LoadHelperGenerator<'a> {
         self.builder.dedent();
         self.builder.push_line("} catch (InterruptedException e) {");
         self.builder.indent();
-        self.builder.push_line("Thread.currentThread().interrupt();");
+        self.builder
+            .push_line("Thread.currentThread().interrupt();");
         self.builder.push_line(
             "throw new java.io.IOException(\"サンプルデータの取得が割り込みされました\", e);",
         );
@@ -1238,7 +1239,8 @@ impl<'a> LoadHelperGenerator<'a> {
         self.builder.indent();
         self.builder.push_line("return decodeData(bytes);");
         self.builder.dedent();
-        self.builder.push_line("} catch (IllegalArgumentException e) {");
+        self.builder
+            .push_line("} catch (IllegalArgumentException e) {");
         self.builder.indent();
         self.builder.push_line(
             "throw new java.io.IOException(\"サンプルデータの解析に失敗しました: \" + e.getMessage(), e);",
@@ -1267,13 +1269,10 @@ impl<'a> LoadHelperGenerator<'a> {
         self.builder.indent();
         match self.declaration.format {
             DataFormat::Json => {
-                self.builder.push_line(
-                    "return decodeJson(bytes);",
-                );
+                self.builder.push_line("return decodeJson(bytes);");
             }
             DataFormat::Csv => {
-                self.builder
-                    .push_line("return decodeTabular(bytes, ',');");
+                self.builder.push_line("return decodeTabular(bytes, ',');");
             }
             DataFormat::Tsv => {
                 self.builder
@@ -1298,21 +1297,25 @@ impl<'a> LoadHelperGenerator<'a> {
         self.builder.push_line("enforceLimit(data.length);");
         self.builder.push_line("return data;");
         self.builder.dedent();
-        self.builder.push_line("} catch (java.io.IOException primaryError) {");
+        self.builder
+            .push_line("} catch (java.io.IOException primaryError) {");
         self.builder.indent();
         self.builder.push_line("if (CACHE_PATH != null) {");
         self.builder.indent();
         self.builder.push_line("try {");
         self.builder.indent();
-        self.builder
-            .push_line("byte[] cached = java.nio.file.Files.readAllBytes(java.nio.file.Path.of(CACHE_PATH));");
+        self.builder.push_line(
+            "byte[] cached = java.nio.file.Files.readAllBytes(java.nio.file.Path.of(CACHE_PATH));",
+        );
         self.builder.push_line("verifySha(cached);");
         self.builder.push_line("enforceLimit(cached.length);");
         self.builder.push_line("return cached;");
         self.builder.dedent();
-        self.builder.push_line("} catch (java.io.IOException cacheError) {");
+        self.builder
+            .push_line("} catch (java.io.IOException cacheError) {");
         self.builder.indent();
-        self.builder.push_line("primaryError.addSuppressed(cacheError);");
+        self.builder
+            .push_line("primaryError.addSuppressed(cacheError);");
         self.builder.dedent();
         self.builder.push_line("}");
         self.builder.dedent();
@@ -1328,8 +1331,10 @@ impl<'a> LoadHelperGenerator<'a> {
             "private static byte[] fetchPrimary() throws java.io.IOException, InterruptedException {",
         );
         self.builder.indent();
-        self.builder.push_line("String lower = SOURCE.toLowerCase(java.util.Locale.ROOT);");
-        self.builder.push_line("if (lower.startsWith(\"http://\") || lower.startsWith(\"https://\")) {");
+        self.builder
+            .push_line("String lower = SOURCE.toLowerCase(java.util.Locale.ROOT);");
+        self.builder
+            .push_line("if (lower.startsWith(\"http://\") || lower.startsWith(\"https://\")) {");
         self.builder.indent();
         self.builder.push_line("return fetchHttp(SOURCE);");
         self.builder.dedent();
@@ -1339,12 +1344,14 @@ impl<'a> LoadHelperGenerator<'a> {
         self.builder.push_line("return fetchS3(SOURCE);");
         self.builder.dedent();
         self.builder.push_line("}");
-        self.builder.push_line("if (lower.startsWith(\"git+ssh://\")) {");
+        self.builder
+            .push_line("if (lower.startsWith(\"git+ssh://\")) {");
         self.builder.indent();
         self.builder.push_line("return fetchGitSsh(SOURCE);");
         self.builder.dedent();
         self.builder.push_line("}");
-        self.builder.push_line("if (lower.startsWith(\"file://\")) {");
+        self.builder
+            .push_line("if (lower.startsWith(\"file://\")) {");
         self.builder.indent();
         self.builder.push_line("return fetchFileUri(SOURCE);");
         self.builder.dedent();
@@ -1364,7 +1371,8 @@ impl<'a> LoadHelperGenerator<'a> {
         self.builder.push_line(
             "java.net.http.HttpResponse<byte[]> response = HTTP_CLIENT.send(request, java.net.http.HttpResponse.BodyHandlers.ofByteArray());",
         );
-        self.builder.push_line("int status = response.statusCode();");
+        self.builder
+            .push_line("int status = response.statusCode();");
         self.builder.push_line("if (status / 100 != 2) {");
         self.builder.indent();
         self.builder.push_line(
@@ -1399,7 +1407,8 @@ impl<'a> LoadHelperGenerator<'a> {
         self.builder
             .push_line("return java.nio.file.Files.readAllBytes(path);");
         self.builder.dedent();
-        self.builder.push_line("} catch (IllegalArgumentException ex) {");
+        self.builder
+            .push_line("} catch (IllegalArgumentException ex) {");
         self.builder.indent();
         self.builder.push_line(
             "throw new java.io.IOException(\"file:// URI をパスに変換できませんでした\", ex);",
@@ -1419,12 +1428,14 @@ impl<'a> LoadHelperGenerator<'a> {
         );
         self.builder.push_line("Process process = builder.start();");
         self.builder.push_line("byte[] stdout; byte[] stderr;");
-        self.builder.push_line("try (java.io.InputStream out = process.getInputStream()) {");
+        self.builder
+            .push_line("try (java.io.InputStream out = process.getInputStream()) {");
         self.builder.indent();
         self.builder.push_line("stdout = readAll(out);");
         self.builder.dedent();
         self.builder.push_line("}");
-        self.builder.push_line("try (java.io.InputStream err = process.getErrorStream()) {");
+        self.builder
+            .push_line("try (java.io.InputStream err = process.getErrorStream()) {");
         self.builder.indent();
         self.builder.push_line("stderr = readAll(err);");
         self.builder.dedent();
@@ -1446,9 +1457,12 @@ impl<'a> LoadHelperGenerator<'a> {
             "private static byte[] fetchGitSsh(String uri) throws java.io.IOException, InterruptedException {",
         );
         self.builder.indent();
-        self.builder.push_line("java.net.URI parsed = java.net.URI.create(uri);");
-        self.builder.push_line("java.util.Map<String, String> query = parseQuery(parsed.getRawQuery());");
-        self.builder.push_line("String filePath = query.get(\"path\");");
+        self.builder
+            .push_line("java.net.URI parsed = java.net.URI.create(uri);");
+        self.builder
+            .push_line("java.util.Map<String, String> query = parseQuery(parsed.getRawQuery());");
+        self.builder
+            .push_line("String filePath = query.get(\"path\");");
         self.builder.push_line("if (filePath == null) {");
         self.builder.indent();
         self.builder.push_line(
@@ -1456,13 +1470,19 @@ impl<'a> LoadHelperGenerator<'a> {
         );
         self.builder.dedent();
         self.builder.push_line("}");
-        self.builder.push_line("String reference = query.get(\"ref\");");
+        self.builder
+            .push_line("String reference = query.get(\"ref\");");
 
-        self.builder.push_line("StringBuilder repo = new StringBuilder();");
+        self.builder
+            .push_line("StringBuilder repo = new StringBuilder();");
         self.builder.push_line("repo.append(\"ssh://\");");
-        self.builder.push_line("if (parsed.getUserInfo() != null) { repo.append(parsed.getUserInfo()).append('@'); }");
+        self.builder.push_line(
+            "if (parsed.getUserInfo() != null) { repo.append(parsed.getUserInfo()).append('@'); }",
+        );
         self.builder.push_line("repo.append(parsed.getHost());");
-        self.builder.push_line("if (parsed.getPort() != -1) { repo.append(':').append(parsed.getPort()); }");
+        self.builder.push_line(
+            "if (parsed.getPort() != -1) { repo.append(':').append(parsed.getPort()); }",
+        );
         self.builder.push_line("repo.append(parsed.getPath());");
 
         self.builder.push_line(
@@ -1473,15 +1493,20 @@ impl<'a> LoadHelperGenerator<'a> {
 
         self.builder.push_line("try {");
         self.builder.indent();
-        self.builder.push_line("java.util.List<String> command = new java.util.ArrayList<>();");
+        self.builder
+            .push_line("java.util.List<String> command = new java.util.ArrayList<>();");
         self.builder.push_line("command.add(\"git\");");
         self.builder.push_line("command.add(\"clone\");");
         self.builder.push_line("command.add(\"--depth\");");
         self.builder.push_line("command.add(\"1\");");
-        self.builder.push_line("if (reference != null) { command.add(\"--branch\"); command.add(reference); }");
+        self.builder.push_line(
+            "if (reference != null) { command.add(\"--branch\"); command.add(reference); }",
+        );
         self.builder.push_line("command.add(repo.toString());");
         self.builder.push_line("command.add(repoDir.toString());");
-        self.builder.push_line("Process clone = new ProcessBuilder(command).redirectErrorStream(true).start();");
+        self.builder.push_line(
+            "Process clone = new ProcessBuilder(command).redirectErrorStream(true).start();",
+        );
         self.builder.push_line(
             "byte[] cloneOut; try (java.io.InputStream out = clone.getInputStream()) { cloneOut = readAll(out); }",
         );
@@ -1493,19 +1518,18 @@ impl<'a> LoadHelperGenerator<'a> {
         );
         self.builder.dedent();
         self.builder.push_line("}");
-        self.builder.push_line(
-            "java.nio.file.Path target = repoDir.resolve(filePath);",
-        );
-        self.builder.push_line("if (!java.nio.file.Files.exists(target)) {");
+        self.builder
+            .push_line("java.nio.file.Path target = repoDir.resolve(filePath);");
+        self.builder
+            .push_line("if (!java.nio.file.Files.exists(target)) {");
         self.builder.indent();
         self.builder.push_line(
             "throw new java.io.IOException(\"指定されたパスがリポジトリ内に存在しません: \" + filePath);",
         );
         self.builder.dedent();
         self.builder.push_line("}");
-        self.builder.push_line(
-            "return java.nio.file.Files.readAllBytes(target);",
-        );
+        self.builder
+            .push_line("return java.nio.file.Files.readAllBytes(target);");
         self.builder.dedent();
         self.builder.push_line("} finally {");
         self.builder.indent();
@@ -1525,13 +1549,15 @@ impl<'a> LoadHelperGenerator<'a> {
         self.builder.push_line("}");
         self.builder.push_line("");
 
-        self.builder.push_line(
-            "private static void verifySha(byte[] data) throws java.io.IOException {",
-        );
+        self.builder
+            .push_line("private static void verifySha(byte[] data) throws java.io.IOException {");
         self.builder.indent();
-        self.builder.push_line("if (EXPECTED_SHA256.isEmpty()) { return; }");
-        self.builder.push_line("String actual = computeSha256(data);");
-        self.builder.push_line("if (!EXPECTED_SHA256.equals(actual)) {");
+        self.builder
+            .push_line("if (EXPECTED_SHA256.isEmpty()) { return; }");
+        self.builder
+            .push_line("String actual = computeSha256(data);");
+        self.builder
+            .push_line("if (!EXPECTED_SHA256.equals(actual)) {");
         self.builder.indent();
         self.builder.push_line(
             "throw new java.io.IOException(\"SHA256不一致です: expected=\" + EXPECTED_SHA256 + \", actual=\" + actual);",
@@ -1542,11 +1568,11 @@ impl<'a> LoadHelperGenerator<'a> {
         self.builder.push_line("}");
         self.builder.push_line("");
 
-        self.builder.push_line(
-            "private static void enforceLimit(long size) throws java.io.IOException {",
-        );
+        self.builder
+            .push_line("private static void enforceLimit(long size) throws java.io.IOException {");
         self.builder.indent();
-        self.builder.push_line("if (LIMIT_BYTES > 0 && size > LIMIT_BYTES) {");
+        self.builder
+            .push_line("if (LIMIT_BYTES > 0 && size > LIMIT_BYTES) {");
         self.builder.indent();
         self.builder.push_line(
             "throw new java.io.IOException(\"SampleデータがlimitBytesを超えています (limit=\" + LIMIT_BYTES + \", actual=\" + size + \")\");",
@@ -1557,9 +1583,8 @@ impl<'a> LoadHelperGenerator<'a> {
         self.builder.push_line("}");
         self.builder.push_line("");
 
-        self.builder.push_line(
-            "private static String computeSha256(byte[] data) {",
-        );
+        self.builder
+            .push_line("private static String computeSha256(byte[] data) {");
         self.builder.indent();
         self.builder.push_line("try {");
         self.builder.indent();
@@ -1567,36 +1592,44 @@ impl<'a> LoadHelperGenerator<'a> {
             "java.security.MessageDigest digest = java.security.MessageDigest.getInstance(\"SHA-256\");",
         );
         self.builder.push_line("byte[] hash = digest.digest(data);");
-        self.builder.push_line("StringBuilder hex = new StringBuilder(hash.length * 2);");
+        self.builder
+            .push_line("StringBuilder hex = new StringBuilder(hash.length * 2);");
         self.builder.push_line("for (byte b : hash) {");
         self.builder.indent();
-        self.builder.push_line("hex.append(String.format(java.util.Locale.ROOT, \"%02x\", b));");
+        self.builder
+            .push_line("hex.append(String.format(java.util.Locale.ROOT, \"%02x\", b));");
         self.builder.dedent();
         self.builder.push_line("}");
         self.builder.push_line("return hex.toString();");
         self.builder.dedent();
-        self.builder.push_line("} catch (java.security.NoSuchAlgorithmException e) {");
+        self.builder
+            .push_line("} catch (java.security.NoSuchAlgorithmException e) {");
         self.builder.indent();
-        self.builder.push_line("throw new IllegalStateException(\"SHA-256 not available\", e);");
+        self.builder
+            .push_line("throw new IllegalStateException(\"SHA-256 not available\", e);");
         self.builder.dedent();
         self.builder.push_line("}");
         self.builder.dedent();
         self.builder.push_line("}");
         self.builder.push_line("");
 
-        self.builder.push_line(
-            "private static java.util.Map<String, String> parseQuery(String query) {",
-        );
+        self.builder
+            .push_line("private static java.util.Map<String, String> parseQuery(String query) {");
         self.builder.indent();
-        self.builder.push_line("java.util.Map<String, String> map = new java.util.HashMap<>();");
-        self.builder.push_line("if (query == null || query.isEmpty()) { return map; }");
-        self.builder.push_line("String[] pairs = query.split(\"&\");");
+        self.builder
+            .push_line("java.util.Map<String, String> map = new java.util.HashMap<>();");
+        self.builder
+            .push_line("if (query == null || query.isEmpty()) { return map; }");
+        self.builder
+            .push_line("String[] pairs = query.split(\"&\");");
         self.builder.push_line("for (String pair : pairs) {");
         self.builder.indent();
         self.builder.push_line("int idx = pair.indexOf('=');");
         self.builder.push_line("if (idx < 0) { continue; }");
-        self.builder.push_line("String key = pair.substring(0, idx);");
-        self.builder.push_line("String value = pair.substring(idx + 1);");
+        self.builder
+            .push_line("String key = pair.substring(0, idx);");
+        self.builder
+            .push_line("String value = pair.substring(idx + 1);");
         self.builder.push_line("map.put(key, java.net.URLDecoder.decode(value, java.nio.charset.StandardCharsets.UTF_8));");
         self.builder.dedent();
         self.builder.push_line("}");
@@ -1609,7 +1642,8 @@ impl<'a> LoadHelperGenerator<'a> {
             "private static void deleteDirectory(java.nio.file.Path root) throws java.io.IOException {",
         );
         self.builder.indent();
-        self.builder.push_line("if (root == null || !java.nio.file.Files.exists(root)) { return; }");
+        self.builder
+            .push_line("if (root == null || !java.nio.file.Files.exists(root)) { return; }");
         self.builder.push_line(
             "try (java.util.stream.Stream<java.nio.file.Path> walk = java.nio.file.Files.walk(root)) {",
         );
@@ -1629,9 +1663,8 @@ impl<'a> LoadHelperGenerator<'a> {
             "private static IllegalArgumentException error(String path, String expected, Object actual) {",
         );
         self.builder.indent();
-        self.builder.push_line(
-            "String actualDesc = actual == null ? \"null\" : actual.toString();",
-        );
+        self.builder
+            .push_line("String actualDesc = actual == null ? \"null\" : actual.toString();");
         self.builder.push_line(
             "return new IllegalArgumentException(path + \": \" + expected + \" を期待しましたが、実際は \" + actualDesc);",
         );
@@ -1639,43 +1672,50 @@ impl<'a> LoadHelperGenerator<'a> {
         self.builder.push_line("}");
         self.builder.push_line("");
 
-        self.builder.push_line("private static boolean isJsonNull(Object value) {");
+        self.builder
+            .push_line("private static boolean isJsonNull(Object value) {");
         self.builder.indent();
-        self.builder.push_line("return value == JsonRuntime.JsonNull.INSTANCE;");
+        self.builder
+            .push_line("return value == JsonRuntime.JsonNull.INSTANCE;");
         self.builder.dedent();
         self.builder.push_line("}");
         self.builder.push_line("");
 
-        self.builder.push_line("private static String requireString(Object node, String path) {");
+        self.builder
+            .push_line("private static String requireString(Object node, String path) {");
         self.builder.indent();
-        self.builder.push_line("if (node instanceof String str) { return str; }");
-        self.builder.push_line("throw error(path, \"文字列\", node);");
+        self.builder
+            .push_line("if (node instanceof String str) { return str; }");
+        self.builder
+            .push_line("throw error(path, \"文字列\", node);");
         self.builder.dedent();
         self.builder.push_line("}");
         self.builder.push_line("");
 
-        self.builder.push_line("private static boolean requireBoolean(Object node, String path) {");
+        self.builder
+            .push_line("private static boolean requireBoolean(Object node, String path) {");
         self.builder.indent();
-        self.builder.push_line("if (node instanceof Boolean bool) { return bool; }");
-        self.builder.push_line("throw error(path, \"真偽値\", node);");
+        self.builder
+            .push_line("if (node instanceof Boolean bool) { return bool; }");
+        self.builder
+            .push_line("throw error(path, \"真偽値\", node);");
         self.builder.dedent();
         self.builder.push_line("}");
         self.builder.push_line("");
 
         self.builder.push_line(
-            "private static JsonRuntime.JsonNumber requireNumber(Object node, String path) {");
-        self.builder.indent();
-        self.builder.push_line(
-            "if (node instanceof JsonRuntime.JsonNumber num) { return num; }",
+            "private static JsonRuntime.JsonNumber requireNumber(Object node, String path) {",
         );
+        self.builder.indent();
+        self.builder
+            .push_line("if (node instanceof JsonRuntime.JsonNumber num) { return num; }");
         self.builder.push_line("throw error(path, \"数値\", node);");
         self.builder.dedent();
         self.builder.push_line("}");
         self.builder.push_line("");
 
-        self.builder.push_line(
-            "private static int parseInt(JsonRuntime.JsonNumber number, String path) {",
-        );
+        self.builder
+            .push_line("private static int parseInt(JsonRuntime.JsonNumber number, String path) {");
         self.builder.indent();
         self.builder.push_line("try { return Integer.parseInt(number.literal()); } catch (NumberFormatException ex) { throw error(path, \"整数\", number.literal()); }");
         self.builder.dedent();
@@ -1724,24 +1764,30 @@ impl<'a> LoadHelperGenerator<'a> {
     }
 
     fn write_json_runtime(&mut self) {
-        self.builder.push_line("private static final class JsonRuntime {");
+        self.builder
+            .push_line("private static final class JsonRuntime {");
         self.builder.indent();
         self.builder.push_line("private final String input;");
         self.builder.push_line("private int index;");
         self.builder.push_line("");
 
-        self.builder.push_line("private JsonRuntime(String input) { this.input = input; }");
+        self.builder
+            .push_line("private JsonRuntime(String input) { this.input = input; }");
         self.builder.push_line("");
 
-        self.builder.push_line("static Object parse(String input) {");
+        self.builder
+            .push_line("static Object parse(String input) {");
         self.builder.indent();
-        self.builder.push_line("JsonRuntime parser = new JsonRuntime(input);");
+        self.builder
+            .push_line("JsonRuntime parser = new JsonRuntime(input);");
         self.builder.push_line("parser.skipWhitespace();");
-        self.builder.push_line("Object value = parser.parseValue();");
+        self.builder
+            .push_line("Object value = parser.parseValue();");
         self.builder.push_line("parser.skipWhitespace();");
         self.builder.push_line("if (!parser.isEnd()) {");
         self.builder.indent();
-        self.builder.push_line("throw new IllegalArgumentException(\"JSONに余分なデータがあります\");");
+        self.builder
+            .push_line("throw new IllegalArgumentException(\"JSONに余分なデータがあります\");");
         self.builder.dedent();
         self.builder.push_line("}");
         self.builder.push_line("return value;");
@@ -1751,9 +1797,12 @@ impl<'a> LoadHelperGenerator<'a> {
 
         self.builder.push_line("private Object parseValue() {");
         self.builder.indent();
-        self.builder.push_line("if (isEnd()) { throw new IllegalArgumentException(\"JSONが途中で終了しました\"); }");
+        self.builder.push_line(
+            "if (isEnd()) { throw new IllegalArgumentException(\"JSONが途中で終了しました\"); }",
+        );
         self.builder.push_line("char ch = peek();");
-        self.builder.push_line("if (ch == 0x22) { return parseString(); }");
+        self.builder
+            .push_line("if (ch == 0x22) { return parseString(); }");
         self.builder.push_line("switch (ch) {");
         self.builder.indent();
         self.builder.push_line("case '{': return parseObject();");
@@ -1772,8 +1821,10 @@ impl<'a> LoadHelperGenerator<'a> {
         self.builder.indent();
         self.builder.push_line("consume('{');");
         self.builder.push_line("skipWhitespace();");
-        self.builder.push_line("java.util.Map<String, Object> map = new java.util.HashMap<>();");
-        self.builder.push_line("if (peek() == '}') { consume('}'); return map; }");
+        self.builder
+            .push_line("java.util.Map<String, Object> map = new java.util.HashMap<>();");
+        self.builder
+            .push_line("if (peek() == '}') { consume('}'); return map; }");
         self.builder.push_line("while (true) {");
         self.builder.indent();
         self.builder.push_line("String key = parseString();");
@@ -1797,8 +1848,10 @@ impl<'a> LoadHelperGenerator<'a> {
         self.builder.indent();
         self.builder.push_line("consume('[');");
         self.builder.push_line("skipWhitespace();");
-        self.builder.push_line("java.util.List<Object> list = new java.util.ArrayList<>();");
-        self.builder.push_line("if (peek() == ']') { consume(']'); return list; }");
+        self.builder
+            .push_line("java.util.List<Object> list = new java.util.ArrayList<>();");
+        self.builder
+            .push_line("if (peek() == ']') { consume(']'); return list; }");
         self.builder.push_line("while (true) {");
         self.builder.indent();
         self.builder.push_line("Object value = parseValue();");
@@ -1817,7 +1870,8 @@ impl<'a> LoadHelperGenerator<'a> {
         self.builder.push_line("private String parseString() {");
         self.builder.indent();
         self.builder.push_line("consume(0x22);");
-        self.builder.push_line("StringBuilder sb = new StringBuilder();");
+        self.builder
+            .push_line("StringBuilder sb = new StringBuilder();");
         self.builder.push_line("while (!isEnd()) {");
         self.builder.indent();
         self.builder.push_line("char ch = next();");
@@ -1828,7 +1882,8 @@ impl<'a> LoadHelperGenerator<'a> {
         self.builder.push_line("char esc = next();");
         self.builder.push_line("switch (esc) {");
         self.builder.indent();
-        self.builder.push_line("case 0x22: sb.append((char) 0x22); break;");
+        self.builder
+            .push_line("case 0x22: sb.append((char) 0x22); break;");
         self.builder.push_line("case '\\': sb.append('\\'); break;");
         self.builder.push_line("case '/': sb.append('/'); break;");
         self.builder.push_line("case 'b': sb.append('\\b'); break;");
@@ -1836,8 +1891,11 @@ impl<'a> LoadHelperGenerator<'a> {
         self.builder.push_line("case 'n': sb.append('\\n'); break;");
         self.builder.push_line("case 'r': sb.append('\\r'); break;");
         self.builder.push_line("case 't': sb.append('\\t'); break;");
-        self.builder.push_line("case 'u': sb.append(parseUnicode()); break;");
-        self.builder.push_line("default: throw new IllegalArgumentException(\"未知のエスケープ: \" + esc);");
+        self.builder
+            .push_line("case 'u': sb.append(parseUnicode()); break;");
+        self.builder.push_line(
+            "default: throw new IllegalArgumentException(\"未知のエスケープ: \" + esc);",
+        );
         self.builder.dedent();
         self.builder.push_line("}");
         self.builder.push_line("continue;");
@@ -1854,9 +1912,11 @@ impl<'a> LoadHelperGenerator<'a> {
         self.builder.push_line("private char parseUnicode() {");
         self.builder.indent();
         self.builder.push_line("if (index + 4 > input.length()) { throw new IllegalArgumentException(\"Unicodeエスケープが短すぎます\"); }");
-        self.builder.push_line("String hex = input.substring(index, index + 4);");
+        self.builder
+            .push_line("String hex = input.substring(index, index + 4);");
         self.builder.push_line("index += 4;");
-        self.builder.push_line("return (char) Integer.parseInt(hex, 16);");
+        self.builder
+            .push_line("return (char) Integer.parseInt(hex, 16);");
         self.builder.dedent();
         self.builder.push_line("}");
         self.builder.push_line("");
@@ -1865,16 +1925,21 @@ impl<'a> LoadHelperGenerator<'a> {
         self.builder.indent();
         self.builder.push_line("int start = index;");
         self.builder.push_line("if (peek() == '-') { next(); }");
-        self.builder.push_line("while (!isEnd() && Character.isDigit(peek())) { next(); }");
+        self.builder
+            .push_line("while (!isEnd() && Character.isDigit(peek())) { next(); }");
         self.builder.push_line("if (!isEnd() && peek() == '.') { next(); while (!isEnd() && Character.isDigit(peek())) { next(); } }");
-        self.builder.push_line("if (!isEnd() && (peek() == 'e' || peek() == 'E')) {");
+        self.builder
+            .push_line("if (!isEnd() && (peek() == 'e' || peek() == 'E')) {");
         self.builder.indent();
         self.builder.push_line("next();");
-        self.builder.push_line("if (!isEnd() && (peek() == '+' || peek() == '-')) { next(); }");
-        self.builder.push_line("while (!isEnd() && Character.isDigit(peek())) { next(); }");
+        self.builder
+            .push_line("if (!isEnd() && (peek() == '+' || peek() == '-')) { next(); }");
+        self.builder
+            .push_line("while (!isEnd() && Character.isDigit(peek())) { next(); }");
         self.builder.dedent();
         self.builder.push_line("}");
-        self.builder.push_line("String literal = input.substring(start, index);");
+        self.builder
+            .push_line("String literal = input.substring(start, index);");
         self.builder.push_line("return new JsonNumber(literal);");
         self.builder.dedent();
         self.builder.push_line("}");
@@ -1885,7 +1950,8 @@ impl<'a> LoadHelperGenerator<'a> {
         self.builder.push_line("private JsonNull parseNull() { expect('n'); expect('u'); expect('l'); expect('l'); return JsonNull.INSTANCE; }");
         self.builder.push_line("");
 
-        self.builder.push_line("private char consume(char expected) {");
+        self.builder
+            .push_line("private char consume(char expected) {");
         self.builder.indent();
         self.builder.push_line("char ch = next();");
         self.builder.push_line("if (ch != expected) { throw new IllegalArgumentException(\"期待した文字 '\" + expected + \"' ではありません\"); }");
@@ -1894,7 +1960,8 @@ impl<'a> LoadHelperGenerator<'a> {
         self.builder.push_line("}");
         self.builder.push_line("");
 
-        self.builder.push_line("private char consume(char option1, char option2) {");
+        self.builder
+            .push_line("private char consume(char option1, char option2) {");
         self.builder.indent();
         self.builder.push_line("char ch = next();");
         self.builder.push_line("if (ch != option1 && ch != option2) { throw new IllegalArgumentException(\"期待した文字 '\" + option1 + \"' または '\" + option2 + \"' ではありません\"); }");
@@ -1903,7 +1970,8 @@ impl<'a> LoadHelperGenerator<'a> {
         self.builder.push_line("}");
         self.builder.push_line("");
 
-        self.builder.push_line("private void expect(char expected) {");
+        self.builder
+            .push_line("private void expect(char expected) {");
         self.builder.indent();
         self.builder.push_line("char ch = next();");
         self.builder.push_line("if (ch != expected) { throw new IllegalArgumentException(\"期待した文字 '\" + expected + \"' ではありません\"); }");
@@ -1911,19 +1979,25 @@ impl<'a> LoadHelperGenerator<'a> {
         self.builder.push_line("}");
         self.builder.push_line("");
 
-        self.builder.push_line("private char peek() { return input.charAt(index); }");
-        self.builder.push_line("private char next() { return input.charAt(index++); }");
-        self.builder.push_line("private boolean isEnd() { return index >= input.length(); }");
+        self.builder
+            .push_line("private char peek() { return input.charAt(index); }");
+        self.builder
+            .push_line("private char next() { return input.charAt(index++); }");
+        self.builder
+            .push_line("private boolean isEnd() { return index >= input.length(); }");
         self.builder.push_line("private void skipWhitespace() { while (!isEnd()) { char ch = peek(); if (ch == ' ' || ch == '\\t' || ch == '\\r' || ch == '\\n') { index++; } else { break; } } }");
         self.builder.dedent();
         self.builder.push_line("}");
         self.builder.push_line("");
 
-        self.builder.push_line("private static final class JsonNumber {");
+        self.builder
+            .push_line("private static final class JsonNumber {");
         self.builder.indent();
         self.builder.push_line("private final String literal;");
-        self.builder.push_line("JsonNumber(String literal) { this.literal = literal; }");
-        self.builder.push_line("String literal() { return literal; }");
+        self.builder
+            .push_line("JsonNumber(String literal) { this.literal = literal; }");
+        self.builder
+            .push_line("String literal() { return literal; }");
         self.builder.dedent();
         self.builder.push_line("}");
         self.builder.push_line("");
@@ -1933,25 +2007,35 @@ impl<'a> LoadHelperGenerator<'a> {
     }
 
     fn write_tabular_runtime(&mut self) {
-        self.builder.push_line("private static final class TabularRuntime {");
+        self.builder
+            .push_line("private static final class TabularRuntime {");
         self.builder.indent();
         self.builder.push_line(
             "static java.util.List<java.util.Map<String, String>> parse(String raw, char delimiter) {",
         );
         self.builder.indent();
-        self.builder.push_line("java.util.List<String[]> rows = split(raw, delimiter);");
-        self.builder.push_line("java.util.List<java.util.Map<String, String>> result = new java.util.ArrayList<>();");
-        self.builder.push_line("if (rows.isEmpty()) { return result; }");
+        self.builder
+            .push_line("java.util.List<String[]> rows = split(raw, delimiter);");
+        self.builder.push_line(
+            "java.util.List<java.util.Map<String, String>> result = new java.util.ArrayList<>();",
+        );
+        self.builder
+            .push_line("if (rows.isEmpty()) { return result; }");
         self.builder.push_line("String[] header = rows.get(0);");
-        self.builder.push_line("for (int i = 1; i < rows.size(); i++) {");
+        self.builder
+            .push_line("for (int i = 1; i < rows.size(); i++) {");
         self.builder.indent();
         self.builder.push_line("String[] row = rows.get(i);");
-        self.builder.push_line("java.util.Map<String, String> entry = new java.util.HashMap<>();");
-        self.builder.push_line("for (int col = 0; col < header.length; col++) {");
+        self.builder
+            .push_line("java.util.Map<String, String> entry = new java.util.HashMap<>();");
+        self.builder
+            .push_line("for (int col = 0; col < header.length; col++) {");
         self.builder.indent();
-        self.builder.push_line("String key = header[col] == null ? \"\" : header[col].trim();");
+        self.builder
+            .push_line("String key = header[col] == null ? \"\" : header[col].trim();");
         self.builder.push_line("if (key.isEmpty()) { continue; }");
-        self.builder.push_line("String value = col < row.length ? row[col] : \"\";");
+        self.builder
+            .push_line("String value = col < row.length ? row[col] : \"\";");
         self.builder.push_line("entry.put(key, value);");
         self.builder.dedent();
         self.builder.push_line("}");
@@ -1963,20 +2047,27 @@ impl<'a> LoadHelperGenerator<'a> {
         self.builder.push_line("}");
         self.builder.push_line("");
 
-        self.builder.push_line("private static java.util.List<String[]> split(String raw, char delimiter) {");
+        self.builder.push_line(
+            "private static java.util.List<String[]> split(String raw, char delimiter) {",
+        );
         self.builder.indent();
-        self.builder.push_line("java.util.List<String[]> rows = new java.util.ArrayList<>();");
-        self.builder.push_line("java.util.List<String> current = new java.util.ArrayList<>();");
-        self.builder.push_line("StringBuilder field = new StringBuilder();");
+        self.builder
+            .push_line("java.util.List<String[]> rows = new java.util.ArrayList<>();");
+        self.builder
+            .push_line("java.util.List<String> current = new java.util.ArrayList<>();");
+        self.builder
+            .push_line("StringBuilder field = new StringBuilder();");
         self.builder.push_line("boolean inQuotes = false;");
-        self.builder.push_line("for (int i = 0; i < raw.length(); i++) {");
+        self.builder
+            .push_line("for (int i = 0; i < raw.length(); i++) {");
         self.builder.indent();
         self.builder.push_line("char ch = raw.charAt(i);");
         self.builder.push_line("if (inQuotes) {");
         self.builder.indent();
         self.builder.push_line("if (ch == 0x22) {");
         self.builder.indent();
-        self.builder.push_line("if (i + 1 < raw.length() && raw.charAt(i + 1) == 0x22) {");
+        self.builder
+            .push_line("if (i + 1 < raw.length() && raw.charAt(i + 1) == 0x22) {");
         self.builder.indent();
         self.builder.push_line("field.append((char) 0x22);");
         self.builder.push_line("i++;");
@@ -2008,11 +2099,14 @@ impl<'a> LoadHelperGenerator<'a> {
         self.builder.push_line("}");
         self.builder.push_line("if (ch == '\\r') {");
         self.builder.indent();
-        self.builder.push_line("if (i + 1 < raw.length() && raw.charAt(i + 1) == '\\n') { i++; }");
+        self.builder
+            .push_line("if (i + 1 < raw.length() && raw.charAt(i + 1) == '\\n') { i++; }");
         self.builder.push_line("current.add(field.toString());");
         self.builder.push_line("field.setLength(0);");
-        self.builder.push_line("rows.add(current.toArray(new String[0]));");
-        self.builder.push_line("current = new java.util.ArrayList<>();");
+        self.builder
+            .push_line("rows.add(current.toArray(new String[0]));");
+        self.builder
+            .push_line("current = new java.util.ArrayList<>();");
         self.builder.push_line("continue;");
         self.builder.dedent();
         self.builder.push_line("}");
@@ -2020,8 +2114,10 @@ impl<'a> LoadHelperGenerator<'a> {
         self.builder.indent();
         self.builder.push_line("current.add(field.toString());");
         self.builder.push_line("field.setLength(0);");
-        self.builder.push_line("rows.add(current.toArray(new String[0]));");
-        self.builder.push_line("current = new java.util.ArrayList<>();");
+        self.builder
+            .push_line("rows.add(current.toArray(new String[0]));");
+        self.builder
+            .push_line("current = new java.util.ArrayList<>();");
         self.builder.push_line("continue;");
         self.builder.dedent();
         self.builder.push_line("}");
@@ -2031,7 +2127,8 @@ impl<'a> LoadHelperGenerator<'a> {
         self.builder.dedent();
         self.builder.push_line("}");
         self.builder.push_line("current.add(field.toString());");
-        self.builder.push_line("rows.add(current.toArray(new String[0]));");
+        self.builder
+            .push_line("rows.add(current.toArray(new String[0]));");
         self.builder.push_line("return rows;");
         self.builder.dedent();
         self.builder.push_line("}");
@@ -2045,49 +2142,64 @@ impl<'a> LoadHelperGenerator<'a> {
         self.builder.push_line("private static boolean isEmpty(String value) { return value == null || value.trim().isEmpty(); }");
         self.builder.push_line("");
 
-        self.builder.push_line("private static int parseIntColumn(String raw, String label) {");
+        self.builder
+            .push_line("private static int parseIntColumn(String raw, String label) {");
         self.builder.indent();
-        self.builder.push_line("String normalized = normalizeColumn(raw);");
+        self.builder
+            .push_line("String normalized = normalizeColumn(raw);");
         self.builder.push_line("try { return Integer.parseInt(normalized); } catch (NumberFormatException ex) { throw new IllegalArgumentException(label + \" は整数として解析できません: \" + normalized); }");
         self.builder.dedent();
         self.builder.push_line("}");
         self.builder.push_line("");
 
-        self.builder.push_line("private static long parseLongColumn(String raw, String label) {");
+        self.builder
+            .push_line("private static long parseLongColumn(String raw, String label) {");
         self.builder.indent();
-        self.builder.push_line("String normalized = normalizeColumn(raw);");
+        self.builder
+            .push_line("String normalized = normalizeColumn(raw);");
         self.builder.push_line("try { return Long.parseLong(normalized); } catch (NumberFormatException ex) { throw new IllegalArgumentException(label + \" はlongとして解析できません: \" + normalized); }");
         self.builder.dedent();
         self.builder.push_line("}");
         self.builder.push_line("");
 
-        self.builder.push_line("private static boolean parseBooleanColumn(String raw, String label) {");
+        self.builder
+            .push_line("private static boolean parseBooleanColumn(String raw, String label) {");
         self.builder.indent();
-        self.builder.push_line("String normalized = normalizeColumn(raw).toLowerCase(java.util.Locale.ROOT);");
+        self.builder.push_line(
+            "String normalized = normalizeColumn(raw).toLowerCase(java.util.Locale.ROOT);",
+        );
         self.builder.push_line("return switch (normalized) { case \"true\", \"1\", \"yes\" -> true; case \"false\", \"0\", \"no\" -> false; default -> throw new IllegalArgumentException(label + \" は真偽値として解析できません: \" + raw); };");
         self.builder.dedent();
         self.builder.push_line("}");
         self.builder.push_line("");
 
-        self.builder.push_line("private static java.math.BigInteger parseBigIntegerColumn(String raw, String label) {");
+        self.builder.push_line(
+            "private static java.math.BigInteger parseBigIntegerColumn(String raw, String label) {",
+        );
         self.builder.indent();
-        self.builder.push_line("String normalized = normalizeColumn(raw);");
+        self.builder
+            .push_line("String normalized = normalizeColumn(raw);");
         self.builder.push_line("try { return new java.math.BigInteger(normalized); } catch (NumberFormatException ex) { throw new IllegalArgumentException(label + \" は大きな整数として解析できません: \" + raw); }");
         self.builder.dedent();
         self.builder.push_line("}");
         self.builder.push_line("");
 
-        self.builder.push_line("private static java.math.BigDecimal parseBigDecimalColumn(String raw, String label) {");
+        self.builder.push_line(
+            "private static java.math.BigDecimal parseBigDecimalColumn(String raw, String label) {",
+        );
         self.builder.indent();
-        self.builder.push_line("String normalized = normalizeColumn(raw);");
+        self.builder
+            .push_line("String normalized = normalizeColumn(raw);");
         self.builder.push_line("try { return new java.math.BigDecimal(normalized); } catch (NumberFormatException ex) { throw new IllegalArgumentException(label + \" は小数として解析できません: \" + raw); }");
         self.builder.dedent();
         self.builder.push_line("}");
         self.builder.push_line("");
 
-        self.builder.push_line("private static double parseDoubleColumn(String raw, String label) {");
+        self.builder
+            .push_line("private static double parseDoubleColumn(String raw, String label) {");
         self.builder.indent();
-        self.builder.push_line("String normalized = normalizeColumn(raw);");
+        self.builder
+            .push_line("String normalized = normalizeColumn(raw);");
         self.builder.push_line("try { double value = Double.parseDouble(normalized); if (Double.isFinite(value)) { return value; } throw new NumberFormatException(); } catch (NumberFormatException ex) { throw new IllegalArgumentException(label + \" は浮動小数として解析できません: \" + raw); }");
         self.builder.dedent();
         self.builder.push_line("}");
@@ -2115,23 +2227,16 @@ impl<'a> LoadHelperGenerator<'a> {
     }
 
     fn json_record_decoder_name(&self, record_name: &str) -> String {
-        format!(
-            "decodeJson{}",
-            Self::sanitize_identifier(record_name)
-        )
+        format!("decodeJson{}", Self::sanitize_identifier(record_name))
     }
 
     fn json_list_decoder_name(&self, list_type: &JavaType) -> Result<String, CodeGenError> {
         match list_type {
-            JavaType::Reference { name, .. } => Ok(format!(
-                "decodeJsonList{}",
-                Self::sanitize_identifier(name)
-            )),
+            JavaType::Reference { name, .. } => {
+                Ok(format!("decodeJsonList{}", Self::sanitize_identifier(name)))
+            }
             _ => Err(CodeGenError::UnsupportedConstruct {
-                construct: format!(
-                    "Json list decoderに対応していない型です: {:?}",
-                    list_type
-                ),
+                construct: format!("Json list decoderに対応していない型です: {:?}", list_type),
                 span: Some(self.declaration.span.clone()),
             }),
         }
@@ -2148,7 +2253,8 @@ impl<'a> LoadHelperGenerator<'a> {
         let (core_type, type_optional) = JavaCodeGenerator::unwrap_optional_java_type(java_type);
 
         if type_optional || schema_optional {
-            let inner_expr = self.json_value_expression(value_expr, path_expr, core_schema, core_type)?;
+            let inner_expr =
+                self.json_value_expression(value_expr, path_expr, core_schema, core_type)?;
             return Ok(format!(
                 "(isJsonNull({0}) ? java.util.Optional.empty() : java.util.Optional.of({1}))",
                 value_expr, inner_expr
@@ -2242,7 +2348,8 @@ impl<'a> LoadHelperGenerator<'a> {
         let (core_type, type_optional) = JavaCodeGenerator::unwrap_optional_java_type(java_type);
 
         if type_optional || schema_optional {
-            let inner = self.tabular_value_expression(raw_expr, core_schema, core_type, label_expr)?;
+            let inner =
+                self.tabular_value_expression(raw_expr, core_schema, core_type, label_expr)?;
             return Ok(format!("java.util.Optional.of({})", inner));
         }
 
@@ -2259,12 +2366,14 @@ impl<'a> LoadHelperGenerator<'a> {
             Schema::Primitive(PrimitiveType::Long) => {
                 Ok(format!("parseLongColumn({}, {})", raw_expr, label_expr))
             }
-            Schema::Primitive(PrimitiveType::BigInteger) => {
-                Ok(format!("parseBigIntegerColumn({}, {})", raw_expr, label_expr))
-            }
-            Schema::Primitive(PrimitiveType::BigDecimal) => {
-                Ok(format!("parseBigDecimalColumn({}, {})", raw_expr, label_expr))
-            }
+            Schema::Primitive(PrimitiveType::BigInteger) => Ok(format!(
+                "parseBigIntegerColumn({}, {})",
+                raw_expr, label_expr
+            )),
+            Schema::Primitive(PrimitiveType::BigDecimal) => Ok(format!(
+                "parseBigDecimalColumn({}, {})",
+                raw_expr, label_expr
+            )),
             Schema::Primitive(PrimitiveType::Double) => {
                 Ok(format!("parseDoubleColumn({}, {})", raw_expr, label_expr))
             }
@@ -2284,11 +2393,12 @@ impl<'a> LoadHelperGenerator<'a> {
             self.return_type
         ));
         self.builder.indent();
-        self.builder.push_line(
-            "String raw = new String(bytes, java.nio.charset.StandardCharsets.UTF_8);",
-        );
-        self.builder.push_line("Object node = JsonRuntime.parse(raw);");
-        self.builder.push_line("return decodeJsonRoot(node, \"$\");");
+        self.builder
+            .push_line("String raw = new String(bytes, java.nio.charset.StandardCharsets.UTF_8);");
+        self.builder
+            .push_line("Object node = JsonRuntime.parse(raw);");
+        self.builder
+            .push_line("return decodeJsonRoot(node, \"$\");");
         self.builder.dedent();
         self.builder.push_line("}");
         self.builder.push_line("");
@@ -2306,9 +2416,8 @@ impl<'a> LoadHelperGenerator<'a> {
             self.return_type
         ));
         self.builder.indent();
-        self.builder.push_line(
-            "String raw = new String(bytes, java.nio.charset.StandardCharsets.UTF_8);",
-        );
+        self.builder
+            .push_line("String raw = new String(bytes, java.nio.charset.StandardCharsets.UTF_8);");
         self.builder.push_line(
             "java.util.List<java.util.Map<String, String>> rows = TabularRuntime.parse(raw, delimiter);",
         );
@@ -2345,23 +2454,18 @@ impl<'a> LoadHelperGenerator<'a> {
 
     fn write_json_record_decoders(&mut self) -> Result<(), CodeGenError> {
         for descriptor in self.descriptor_lookup.values() {
-            let method_name = format!(
-                "decodeJson{}",
-                Self::sanitize_identifier(&descriptor.name)
-            );
+            let method_name = format!("decodeJson{}", Self::sanitize_identifier(&descriptor.name));
             self.builder.push_line("@SuppressWarnings(\"unchecked\")");
             self.builder.push_line(&format!(
                 "private static {} {}(Object node, String path) {{",
                 descriptor.name, method_name
             ));
             self.builder.indent();
-            self.builder.push_line(
-                "if (!(node instanceof java.util.Map<?, ?> raw)) {",
-            );
+            self.builder
+                .push_line("if (!(node instanceof java.util.Map<?, ?> raw)) {");
             self.builder.indent();
-            self.builder.push_line(
-                "throw error(path, \"JSON object\", node);",
-            );
+            self.builder
+                .push_line("throw error(path, \"JSON object\", node);");
             self.builder.dedent();
             self.builder.push_line("}");
             self.builder.push_line(
@@ -2382,21 +2486,19 @@ impl<'a> LoadHelperGenerator<'a> {
 
             let mut field_exprs = Vec::new();
             for field in &descriptor.fields {
-                let field_schema = schema_info
-                    .fields
-                    .get(&field.name)
-                    .ok_or_else(|| CodeGenError::UnsupportedConstruct {
+                let field_schema = schema_info.fields.get(&field.name).ok_or_else(|| {
+                    CodeGenError::UnsupportedConstruct {
                         construct: format!(
                             "フィールド {} のスキーマ情報が見つかりません",
                             field.name
                         ),
                         span: Some(self.declaration.span.clone()),
-                    })?;
+                    }
+                })?;
                 let field_path = format!("path + \".{}\"", field.name);
                 self.builder.push_line(&format!(
                     "Object {}Value = object.get(\"{}\");",
-                    field.name,
-                    field.name
+                    field.name, field.name
                 ));
                 self.builder.push_line(&format!(
                     "boolean has{} = object.containsKey(\"{}\");",
@@ -2415,14 +2517,13 @@ impl<'a> LoadHelperGenerator<'a> {
                         field.name
                     ));
                     self.builder.indent();
-                    self.builder.push_line(&format!(
-                        "{} = java.util.Optional.empty();",
-                        field.name
-                    ));
+                    self.builder
+                        .push_line(&format!("{} = java.util.Optional.empty();", field.name));
                     self.builder.dedent();
                     self.builder.push_line("} else {");
                     self.builder.indent();
-                    let inner_type = JavaCodeGenerator::unwrap_optional_java_type(&field.java_type).0;
+                    let inner_type =
+                        JavaCodeGenerator::unwrap_optional_java_type(&field.java_type).0;
                     let expr = self.json_value_expression(
                         &format!("{}Value", field.name),
                         &field_path,
@@ -2464,7 +2565,8 @@ impl<'a> LoadHelperGenerator<'a> {
                 field_exprs.push(field.name.clone());
             }
             let args = field_exprs.join(", ");
-            self.builder.push_line(&format!("return new {}({});", descriptor.name, args));
+            self.builder
+                .push_line(&format!("return new {}({});", descriptor.name, args));
             self.builder.dedent();
             self.builder.push_line("}");
             self.builder.push_line("");
@@ -2475,10 +2577,7 @@ impl<'a> LoadHelperGenerator<'a> {
     fn write_json_list_decoders(&mut self) -> Result<(), CodeGenError> {
         for info in &self.list_types {
             if let JavaType::Reference { name, .. } = &info.list_type {
-                let method_name = format!(
-                    "decodeJsonList{}",
-                    Self::sanitize_identifier(name)
-                );
+                let method_name = format!("decodeJsonList{}", Self::sanitize_identifier(name));
                 let list_type_str = self.generator.generate_type(&info.list_type)?;
                 let element_type_str = self.generator.generate_type(&info.element_type)?;
                 self.builder.push_line("@SuppressWarnings(\"unchecked\")");
@@ -2487,23 +2586,21 @@ impl<'a> LoadHelperGenerator<'a> {
                     list_type_str, method_name
                 ));
                 self.builder.indent();
-                self.builder.push_line(
-                    "if (!(node instanceof java.util.List<?> raw)) {",
-                );
+                self.builder
+                    .push_line("if (!(node instanceof java.util.List<?> raw)) {");
                 self.builder.indent();
-                self.builder.push_line(
-                    "throw error(path, \"JSON array\", node);",
-                );
+                self.builder
+                    .push_line("throw error(path, \"JSON array\", node);");
                 self.builder.dedent();
                 self.builder.push_line("}");
-                self.builder.push_line(
-                    "java.util.List<Object> array = (java.util.List<Object>) raw;",
-                );
+                self.builder
+                    .push_line("java.util.List<Object> array = (java.util.List<Object>) raw;");
                 self.builder.push_line(&format!(
                     "java.util.List<{}> result = new java.util.ArrayList<>(array.size());",
                     element_type_str
                 ));
-                self.builder.push_line("for (int i = 0; i < array.size(); i++) {");
+                self.builder
+                    .push_line("for (int i = 0; i < array.size(); i++) {");
                 self.builder.indent();
                 self.builder.push_line("Object element = array.get(i);");
                 let element_expr = self.json_value_expression(
@@ -2534,13 +2631,13 @@ impl<'a> LoadHelperGenerator<'a> {
                 let element_type = &generic_args[0];
                 let type_str = self.generator.generate_type(element_type)?;
                 let method_name = match element_type {
-                    JavaType::Reference { name: record_name, .. } => format!(
-                        "decodeTabular{}",
-                        Self::sanitize_identifier(record_name)
-                    ),
+                    JavaType::Reference {
+                        name: record_name, ..
+                    } => format!("decodeTabular{}", Self::sanitize_identifier(record_name)),
                     _ => {
                         return Err(CodeGenError::UnsupportedConstruct {
-                            construct: "CSV/TSVルートはRecordリストのみサポートされています".to_string(),
+                            construct: "CSV/TSVルートはRecordリストのみサポートされています"
+                                .to_string(),
                             span: Some(self.declaration.span.clone()),
                         })
                     }
@@ -2565,7 +2662,8 @@ impl<'a> LoadHelperGenerator<'a> {
             element_type_str
         ));
         self.builder.push_line("int rowIndex = 0;");
-        self.builder.push_line("for (java.util.Map<String, String> row : rows) {");
+        self.builder
+            .push_line("for (java.util.Map<String, String> row : rows) {");
         self.builder.indent();
         self.builder
             .push_line(&format!("result.add({}(row, rowIndex));", list_method));
@@ -2609,39 +2707,39 @@ impl<'a> LoadHelperGenerator<'a> {
                 let type_str = self.generator.generate_type(&field.java_type)?;
                 let raw_var = format!("{}Raw", field.name);
                 let label_var = format!("{}Label", field.name);
-                self.builder
-                    .push_line(&format!("String {} = row.get(\"{}\");", raw_var, field.name));
+                self.builder.push_line(&format!(
+                    "String {} = row.get(\"{}\");",
+                    raw_var, field.name
+                ));
                 self.builder.push_line(&format!(
                     "String {} = String.format(java.util.Locale.ROOT, \"列 '{}' (row %d)\", rowIndex + 1);",
                     label_var,
                     field.name
                 ));
 
-                let field_schema = schema_info
-                    .fields
-                    .get(&field.name)
-                    .ok_or_else(|| CodeGenError::UnsupportedConstruct {
+                let field_schema = schema_info.fields.get(&field.name).ok_or_else(|| {
+                    CodeGenError::UnsupportedConstruct {
                         construct: format!(
                             "フィールド {} のスキーマ情報が見つかりません",
                             field.name
                         ),
                         span: Some(self.declaration.span.clone()),
-                    })?;
+                    }
+                })?;
 
                 if field.is_optional {
                     self.builder
                         .push_line(&format!("{} {};", type_str, field.name));
-                    self.builder.push_line(&format!(
-                        "if (isEmpty({})) {{",
-                        raw_var
-                    ));
+                    self.builder
+                        .push_line(&format!("if (isEmpty({})) {{", raw_var));
                     self.builder.indent();
                     self.builder
                         .push_line(&format!("{} = java.util.Optional.empty();", field.name));
                     self.builder.dedent();
                     self.builder.push_line("} else {");
                     self.builder.indent();
-                    let inner_type = JavaCodeGenerator::unwrap_optional_java_type(&field.java_type).0;
+                    let inner_type =
+                        JavaCodeGenerator::unwrap_optional_java_type(&field.java_type).0;
                     let expr = self.tabular_value_expression(
                         &raw_var,
                         field_schema,

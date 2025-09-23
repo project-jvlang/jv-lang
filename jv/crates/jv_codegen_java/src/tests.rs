@@ -1259,15 +1259,12 @@ fn load_mode_sample_declaration_generates_http_fetch_pipeline() {
 
     let source = unit.to_source(&JavaCodeGenConfig::default());
     assert!(
-        source.contains(
-            "private static final String SOURCE = \"https://example.com/users.json\";"
-        ),
+        source.contains("private static final String SOURCE = \"https://example.com/users.json\";"),
         "source constant should reference remote URI: {source}"
     );
     assert!(
-        source.contains(
-            "private static final String CACHE_PATH = \"/tmp/sample-cache/users.json\";"
-        ),
+        source
+            .contains("private static final String CACHE_PATH = \"/tmp/sample-cache/users.json\";"),
         "cache constant should be set when cache path is supplied: {source}"
     );
     assert!(
@@ -1322,7 +1319,8 @@ fn load_mode_sample_declaration_supports_s3_and_tabular_decoding() {
         span: dummy_span(),
     };
 
-    let unit = generate_java_code(&program).expect("generate S3 load helper from sample declaration");
+    let unit =
+        generate_java_code(&program).expect("generate S3 load helper from sample declaration");
     let source = unit.to_source(&JavaCodeGenConfig::default());
 
     assert!(

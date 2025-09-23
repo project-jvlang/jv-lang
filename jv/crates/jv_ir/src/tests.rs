@@ -13,8 +13,8 @@ mod tests {
         SampleMode, SampleSourceKind, Schema, TransformContext, TransformError, VirtualThreadOp,
     };
     use jv_ast::*;
-    use std::fs;
     use sha2::{Digest, Sha256};
+    use std::fs;
     use tempfile::tempdir;
 
     fn dummy_span() -> Span {
@@ -129,10 +129,7 @@ mod tests {
                 },
                 AnnotationArgument::Named {
                     name: "sha256".to_string(),
-                    value: Expression::Literal(
-                        Literal::String(expected_sha.clone()),
-                        dummy_span(),
-                    ),
+                    value: Expression::Literal(Literal::String(expected_sha.clone()), dummy_span()),
                     span: dummy_span(),
                 },
             ],
@@ -187,10 +184,7 @@ mod tests {
             other => panic!("expected list type, got {:?}", other),
         }
 
-        let root_name = decl
-            .root_record_name
-            .as_ref()
-            .expect("root record name");
+        let root_name = decl.root_record_name.as_ref().expect("root record name");
         let descriptor = decl
             .records
             .iter()
