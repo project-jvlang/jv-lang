@@ -36,6 +36,11 @@ const DIAGNOSTICS: &[DiagnosticDescriptor] = &[
         title: "空白区切りの引数に不正な形式があります",
         help: "空白区切りの呼び出しでは位置引数のみを並べ、名前付き引数やカンマとの混在を避けてください。",
     },
+    DiagnosticDescriptor {
+        code: "JV2000",
+        title: "jv.toml の Java target が不正です",
+        help: "jv.toml の [build].java_version には 21 または 25 を指定してください。",
+    },
 ];
 
 /// 診断コードに対応するディスクリプタを取得します。

@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::io::Write;
 
 use anyhow::Result;
-use jv_build::{BuildConfig, SampleConfig};
+use jv_build::{BuildConfig, JavaTarget, SampleConfig};
 use jv_pm::{BuildInfo, Manifest, PackageInfo, PackageManager};
 
 /// Render the Build Tools learning module demonstrating the full workflow.
@@ -133,19 +133,17 @@ fn sample_manifest() -> Manifest {
             dependencies,
         },
         build: Some(BuildInfo {
-            java_version: "25".to_string(),
+            java_version: JavaTarget::Java25,
         }),
     }
 }
 
 fn sample_build_config() -> BuildConfig {
-    BuildConfig {
-        java_version: "25".to_string(),
-        output_dir: "target/jv/hello-jv-tour/classes".to_string(),
-        classpath: vec!["target/jv/hello-jv-tour/deps/junit-5.10.2.jar".to_string()],
-        compiler_options: vec!["--release".to_string(), "25".to_string()],
-        sample: SampleConfig::default(),
-    }
+    let mut config = BuildConfig::with_target(JavaTarget::Java25);
+    config.output_dir = "target/jv/hello-jv-tour/classes".to_string();
+    config.classpath = vec!["target/jv/hello-jv-tour/deps/junit-5.10.2.jar".to_string()];
+    config.sample = SampleConfig::default();
+    config
 }
 
 fn render_manifest(manifest: &Manifest) -> String {

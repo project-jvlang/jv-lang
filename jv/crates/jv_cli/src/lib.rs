@@ -5,6 +5,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use jv_checker::diagnostics::{from_parse_error, from_transform_error, ToolingDiagnostic};
+use jv_pm::JavaTarget;
 
 #[derive(Parser, Debug, Clone)]
 #[command(name = "jv")]
@@ -44,6 +45,9 @@ pub enum Commands {
         /// Output name (without extension) for --binary; default: 'app'
         #[arg(long, default_value = "app")]
         bin_name: String,
+        /// Override the Java target (e.g., 21 or 25)
+        #[arg(long, value_name = "java-target")]
+        target: Option<JavaTarget>,
     },
     /// Run a compiled jv program
     Run {
@@ -116,15 +120,17 @@ pub fn init_project(name: &str) -> Result<String> {
         .to_string();
 
     // Create jv.toml
+    let default_target = JavaTarget::default();
     let jv_toml = format!(
         r#"[package]
 name = "{}"
 version = "0.1.0"
 
 [build]
-java_version = "25"
+java_version = "{}"
 "#,
-        project_name
+        project_name,
+        default_target
     );
 
     fs::write(project_dir.join("jv.toml"), jv_toml)?;
@@ -168,12 +174,13 @@ pub mod tour;
 pub mod pipeline {
     use super::*;
     use anyhow::{anyhow, bail};
-    use jv_build::{BuildConfig, BuildSystem};
+    use jv_build::{BuildConfig, BuildSystem, JavaTarget};
     use jv_checker::TypeChecker;
-    use jv_codegen_java::JavaCodeGenerator;
+    use jv_codegen_java::{JavaCodeGenConfig, JavaCodeGenerator};
     use jv_fmt::JavaFormatter;
     use jv_ir::transform_program;
     use jv_parser::Parser as JvParser;
+    use jv_pm::{Manifest, PackageError};
     use std::ffi::OsStr;
     use std::process::Command;
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -186,6 +193,7 @@ pub mod pipeline {
         pub java_only: bool,
         pub check: bool,
         pub format: bool,
+        pub target_override: Option<JavaTarget>,
     }
 
     impl BuildOptions {
@@ -196,6 +204,7 @@ pub mod pipeline {
                 java_only: false,
                 check: false,
                 format: false,
+                target_override: None,
             }
         }
     }
@@ -214,6 +223,8 @@ pub mod pipeline {
         if !options.input.exists() {
             bail!("Input file '{}' not found", options.input.display());
         }
+
+        let target = resolve_java_target(options)?;
 
         let source = fs::read_to_string(&options.input)
             .with_context(|| format!("Failed to read file: {}", options.input.display()))?;
@@ -254,7 +265,10 @@ pub mod pipeline {
             }
         };
 
-        let mut code_generator = JavaCodeGenerator::new();
+        let mut code_generator = JavaCodeGenerator::with_config(JavaCodeGenConfig {
+            use_modern_features: target.enables_modern_features(),
+            ..JavaCodeGenConfig::default()
+        });
         let java_unit = code_generator
             .generate_compilation_unit(&ir_program)
             .map_err(|e| anyhow!("Code generation error: {:?}", e))?;
@@ -306,10 +320,8 @@ pub mod pipeline {
         };
 
         if !options.java_only {
-            let build_config = BuildConfig {
-                output_dir: options.output_dir.to_string_lossy().into_owned(),
-                ..BuildConfig::default()
-            };
+            let mut build_config = BuildConfig::with_target(target);
+            build_config.output_dir = options.output_dir.to_string_lossy().into_owned();
             let build_system = BuildSystem::new(build_config);
 
             match build_system.check_javac_availability() {
@@ -348,6 +360,56 @@ pub mod pipeline {
         }
 
         Ok(artifacts)
+    }
+
+    fn resolve_java_target(options: &BuildOptions) -> Result<JavaTarget> {
+        if let Some(target) = options.target_override {
+            return Ok(target);
+        }
+
+        let Some(manifest_path) = discover_manifest(&options.input) else {
+            return Ok(JavaTarget::default());
+        };
+
+        match Manifest::load_from_path(&manifest_path) {
+            Ok(manifest) => Ok(manifest.java_target()),
+            Err(PackageError::InvalidManifest(message)) => {
+                let diagnostic = ToolingDiagnostic {
+                    code: "JV2000",
+                    title: "jv.toml の Java target が不正です",
+                    message,
+                    help: "jv.toml の [build].java_version には 21 または 25 を指定してください。",
+                    span: None,
+                };
+                Err(tooling_failure(&manifest_path, diagnostic))
+            }
+            Err(error) => Err(anyhow!(error)),
+        }
+    }
+
+    fn discover_manifest(input: &Path) -> Option<PathBuf> {
+        let mut current = if input.is_dir() {
+            input.to_path_buf()
+        } else {
+            input
+                .parent()
+                .map(Path::to_path_buf)
+                .filter(|path| !path.as_os_str().is_empty())
+                .unwrap_or_else(|| PathBuf::from("."))
+        };
+
+        loop {
+            let candidate = current.join("jv.toml");
+            if candidate.exists() {
+                return Some(candidate);
+            }
+
+            if !current.pop() {
+                break;
+            }
+        }
+
+        None
     }
 
     /// Compile and execute a `.jv` program using the Java runtime.

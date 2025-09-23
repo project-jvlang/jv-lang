@@ -1,4 +1,6 @@
 use super::*;
+use std::fs;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 #[test]
 fn test_package_info_creation() {
@@ -43,7 +45,7 @@ fn test_manifest_creation() {
     };
 
     let build_info = BuildInfo {
-        java_version: "25".to_string(),
+        java_version: JavaTarget::Java25,
     };
 
     let manifest = Manifest {
@@ -52,7 +54,7 @@ fn test_manifest_creation() {
     };
 
     assert_eq!(manifest.package.name, "test");
-    assert_eq!(manifest.build.as_ref().unwrap().java_version, "25");
+    assert_eq!(manifest.build.as_ref().unwrap().java_version, JavaTarget::Java25);
 }
 
 #[test]
@@ -117,4 +119,58 @@ fn test_resolve_dependencies_placeholder() {
     let result = pm.resolve_dependencies(&manifest);
     assert!(result.is_ok());
     assert!(result.unwrap().is_empty());
+}
+
+#[test]
+fn manifest_loads_java_target_with_default() {
+    let path = manifest_path("java25");
+    fs::write(&path, r#"[package]
+name = "sample"
+version = "0.1.0"
+
+[package.dependencies]
+
+[build]
+java_version = "25"
+"#)
+    .unwrap();
+
+    let manifest = Manifest::load_from_path(&path).expect("load manifest");
+    assert_eq!(manifest.java_target(), JavaTarget::Java25);
+
+    let _ = fs::remove_file(path);
+}
+
+#[test]
+fn manifest_rejects_invalid_java_target() {
+    let path = manifest_path("invalid");
+    fs::write(&path, r#"[package]
+name = "broken"
+version = "0.1.0"
+
+[package.dependencies]
+
+[build]
+java_version = "99"
+"#)
+    .unwrap();
+
+    let error = Manifest::load_from_path(&path)
+        .expect_err("invalid java target should error");
+    match error {
+        PackageError::InvalidManifest(message) => {
+            assert!(message.contains("Unsupported java target"));
+        }
+        other => panic!("unexpected error: {other:?}"),
+    }
+
+    let _ = fs::remove_file(path);
+}
+
+fn manifest_path(suffix: &str) -> std::path::PathBuf {
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    std::env::temp_dir().join(format!("jv-pm-manifest-{suffix}-{timestamp}.toml"))
 }

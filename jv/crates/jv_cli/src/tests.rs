@@ -289,6 +289,19 @@ fn test_java_only_flag() {
 }
 
 #[test]
+fn test_build_command_target_override() {
+    let build_args = vec!["jv", "build", "test.jv", "--target", "21"];
+    let cli = Cli::try_parse_from(build_args).unwrap();
+
+    match cli.command {
+        Some(Commands::Build { target, .. }) => {
+            assert_eq!(target, Some(JavaTarget::Java21));
+        }
+        _ => panic!("Expected Build command"),
+    }
+}
+
+#[test]
 fn test_multiple_files_fmt() {
     let fmt_args = vec!["jv", "fmt", "a.jv", "b.jv", "c.jv"];
     let cli = Cli::try_parse_from(fmt_args).unwrap();

@@ -45,11 +45,13 @@ fn main() -> Result<()> {
             format,
             binary,
             bin_name,
+            target,
         }) => {
             let mut options = BuildOptions::new(input.as_str(), output.as_str());
             options.java_only = java_only;
             options.check = check;
             options.format = format;
+            options.target_override = target;
 
             let artifacts =
                 compile(&options).with_context(|| format!("Failed to compile {}", input))?;

@@ -1,4 +1,5 @@
 use crate::BuildError;
+pub use jv_pm::JavaTarget;
 use std::fmt;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -7,7 +8,7 @@ use thiserror::Error;
 /// Top-level configuration shared by the build system.
 #[derive(Debug, Clone)]
 pub struct BuildConfig {
-    pub java_version: String,
+    pub target: JavaTarget,
     pub output_dir: String,
     pub classpath: Vec<String>,
     pub compiler_options: Vec<String>,
@@ -16,11 +17,12 @@ pub struct BuildConfig {
 
 impl Default for BuildConfig {
     fn default() -> Self {
+        let target = JavaTarget::default();
         Self {
-            java_version: "25".to_string(),
+            target,
             output_dir: "./out".to_string(),
             classpath: vec![],
-            compiler_options: vec!["--release".to_string(), "25".to_string()],
+            compiler_options: compiler_options_for(target),
             sample: SampleConfig::default(),
         }
     }
@@ -78,6 +80,21 @@ impl SampleConfig {
 }
 
 impl BuildConfig {
+    pub fn with_target(target: JavaTarget) -> Self {
+        let mut config = Self::default();
+        config.set_target(target);
+        config
+    }
+
+    pub fn set_target(&mut self, target: JavaTarget) {
+        self.target = target;
+        self.compiler_options = compiler_options_for(target);
+    }
+
+    pub fn java_release(&self) -> &'static str {
+        self.target.release_flag()
+    }
+
     /// Convenience wrapper that enforces security controls for a source and
     /// maps violations into the crate-level `BuildError` type.
     pub fn enforce_sample_source(&self, source: &str) -> Result<SampleProtocol, BuildError> {
@@ -85,6 +102,10 @@ impl BuildConfig {
             .enforce_source_security(source)
             .map_err(|error| BuildError::ConfigError(error.to_string()))
     }
+}
+
+fn compiler_options_for(target: JavaTarget) -> Vec<String> {
+    vec!["--release".to_string(), target.release_flag().to_string()]
 }
 
 impl Default for SampleConfig {

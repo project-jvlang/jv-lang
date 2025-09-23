@@ -2,7 +2,7 @@
 mod config;
 
 pub use config::{
-    BuildConfig, CliRequirement, NetworkPolicy, SampleCliDependencies, SampleConfig,
+    BuildConfig, CliRequirement, JavaTarget, NetworkPolicy, SampleCliDependencies, SampleConfig,
     SampleConfigError, SampleDependency, SampleProtocol,
 };
 
