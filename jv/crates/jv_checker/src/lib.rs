@@ -1,4 +1,6 @@
 // jv_checker - Static analysis and validation
+pub mod diagnostics;
+
 use jv_ast::*;
 use std::collections::HashMap;
 use thiserror::Error;

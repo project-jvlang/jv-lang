@@ -4,13 +4,13 @@ use jv_ast::{
     Annotation, AnnotationArgument, ConcurrencyConstruct, Expression, ExtensionFunction, Literal,
     Modifiers, Parameter, ResourceManagement, Span, Statement, TypeAnnotation, Visibility,
 };
-use jv_lexer::{Token, TokenTrivia, TokenType};
+use jv_lexer::{Token, TokenType};
 
 use super::expressions;
 use super::parameters::parameter_list;
 use super::support::{
     expression_span, identifier, identifier_with_span, keyword as support_keyword, merge_spans,
-    span_from_token, statement_span, token_assign, token_at, token_class, token_colon, token_comma,
+    span_from_token, statement_span, token_any_comma, token_assign, token_at, token_class, token_colon,
     token_data, token_defer, token_dot, token_fun, token_left_brace, token_left_paren,
     token_return, token_right_brace, token_right_paren, token_spawn, token_use, token_val,
     token_var, type_annotation_simple,
@@ -364,7 +364,7 @@ fn annotation_argument_list(
         .map(|token| span_from_token(&token))
         .then(
             annotation_argument(expr)
-                .separated_by(token_comma())
+                .separated_by(token_any_comma())
                 .allow_trailing(),
         )
         .then(token_right_paren().map(|token| span_from_token(&token)))
@@ -407,6 +407,7 @@ fn annotation_literal() -> impl ChumskyParser<Token, (Literal, Span), Error = Si
 mod tests {
     use super::*;
     use chumsky::Parser as ChumskyParser;
+    use jv_lexer::TokenTrivia;
 
     fn make_token(token_type: TokenType, lexeme: &str, column: usize) -> Token {
         Token {

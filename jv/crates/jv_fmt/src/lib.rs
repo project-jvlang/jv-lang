@@ -1,4 +1,5 @@
 // jv_fmt - Code formatter for generated Java code
+use jv_checker::diagnostics;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -145,5 +146,26 @@ impl JavaFormatter {
 impl Default for JavaFormatter {
     fn default() -> Self {
         Self::new(FormatConfig::default())
+    }
+}
+
+/// 新しい診断コードの補足テキストを取得するユーティリティ。
+pub fn diagnostic_note(code: &str) -> Option<&'static str> {
+    diagnostics::lookup(code).map(|descriptor| descriptor.help)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn diagnostic_note_returns_help_for_jv1007() {
+        let help = diagnostic_note("JV1007").expect("expected help text for JV1007");
+        assert!(help.contains("配列"));
+    }
+
+    #[test]
+    fn diagnostic_note_returns_none_for_unknown_code() {
+        assert!(diagnostic_note("JV9999").is_none());
     }
 }

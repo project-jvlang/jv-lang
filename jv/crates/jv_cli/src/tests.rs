@@ -197,6 +197,24 @@ fn test_validate_file_exists() {
 }
 
 #[test]
+fn compile_reports_whitespace_diagnostic() {
+    let temp_dir = TempDirGuard::new("diag");
+    let input_path = temp_dir.path().join("whitespace_mix.jv");
+    fs::write(&input_path, "val numbers = [1, 2 3]").unwrap();
+
+    let mut options = pipeline::BuildOptions::new(&input_path, temp_dir.path());
+    options.check = false;
+    options.format = false;
+
+    let result = pipeline::compile(&options);
+    assert!(result.is_err());
+
+    let message = result.unwrap_err().to_string();
+    assert!(message.contains("JV1007"));
+    assert!(message.contains("配列"));
+}
+
+#[test]
 fn test_get_version() {
     let version = get_version();
     assert!(version.contains("jv"));

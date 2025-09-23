@@ -66,14 +66,19 @@ impl Parser {
         match parser.parse(tokens.clone()) {
             Ok(program) => Ok(program),
             Err(errors) => {
+                let format_simple = |error: &Simple<Token>| match error.reason() {
+                    SimpleReason::Custom(message) => message.clone(),
+                    _ => format!("{:?}", error),
+                };
+
                 let mut errors_iter = errors.into_iter();
 
                 if let Some(error) = errors_iter.next() {
                     let error_span = simple_error_span(&error, &tokens);
-                    let mut message = format!("{:?}", error);
+                    let mut message = format_simple(&error);
                     for extra in errors_iter {
                         message.push_str("; ");
-                        message.push_str(&format!("{:?}", extra));
+                        message.push_str(&format_simple(&extra));
                     }
 
                     let is_custom = matches!(error.reason(), SimpleReason::Custom(_));
@@ -181,10 +186,25 @@ fn allows_call_suffix(token_type: &TokenType) -> bool {
     )
 }
 
+fn is_sequence_layout_candidate(token_type: &TokenType) -> bool {
+    !matches!(
+        token_type,
+        TokenType::Comma
+            | TokenType::RightBracket
+            | TokenType::RightParen
+            | TokenType::Assign
+            | TokenType::Colon
+            | TokenType::Dot
+            | TokenType::Arrow
+            | TokenType::FatArrow
+    )
+}
+
 fn preprocess_tokens(tokens: Vec<Token>) -> Vec<Token> {
     let mut result = Vec::with_capacity(tokens.len());
     let mut stack: Vec<SequenceContext> = Vec::new();
     let mut call_eligible = false;
+    let mut suppress_definition_call = false;
 
     for token in tokens {
         if matches!(
@@ -198,7 +218,21 @@ fn preprocess_tokens(tokens: Vec<Token>) -> Vec<Token> {
         }
 
         let token_type_ref = &token.token_type;
-        let is_call_left_paren = matches!(token_type_ref, TokenType::LeftParen) && call_eligible;
+        if matches!(
+            token_type_ref,
+            TokenType::Fun | TokenType::Class | TokenType::Data
+        ) {
+            suppress_definition_call = true;
+        }
+
+        let mut is_call_left_paren = matches!(token_type_ref, TokenType::LeftParen) && call_eligible;
+        if is_call_left_paren && suppress_definition_call {
+            is_call_left_paren = false;
+            suppress_definition_call = false;
+        }
+        if matches!(token_type_ref, TokenType::LeftParen) {
+            suppress_definition_call = false;
+        }
         let mut next_call_state = allows_call_suffix(token_type_ref);
 
         if let Some(ctx) = stack.last_mut() {
@@ -209,7 +243,7 @@ fn preprocess_tokens(tokens: Vec<Token>) -> Vec<Token> {
                 SequenceContextKind::Call => {
                     !matches!(token.token_type, TokenType::Comma | TokenType::RightParen)
                 }
-            };
+            } && is_sequence_layout_candidate(token_type_ref);
             if eligible {
                 let layout_needed = !ctx.prev_was_separator
                     && (ctx.pending_layout || has_layout_trivia(&token.leading_trivia));

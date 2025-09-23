@@ -122,10 +122,24 @@ fn test_multiple_documents() {
 }
 
 #[test]
-fn test_diagnostics_placeholder() {
-    let server = JvLanguageServer::new();
-    let diagnostics = server.get_diagnostics("file:///test.jv");
+fn test_diagnostics_for_clean_source() {
+    let mut server = JvLanguageServer::new();
+    let uri = "file:///test.jv".to_string();
+    server.open_document(uri.clone(), "val numbers = [1, 2, 3]".to_string());
+
+    let diagnostics = server.get_diagnostics(&uri);
     assert!(diagnostics.is_empty());
+}
+
+#[test]
+fn test_diagnostics_for_mixed_delimiters() {
+    let mut server = JvLanguageServer::new();
+    let uri = "file:///test.jv".to_string();
+    server.open_document(uri.clone(), "val numbers = [1, 2 3]".to_string());
+
+    let diagnostics = server.get_diagnostics(&uri);
+    assert_eq!(diagnostics.len(), 1);
+    assert!(diagnostics[0].message.contains("JV1007"));
 }
 
 #[test]

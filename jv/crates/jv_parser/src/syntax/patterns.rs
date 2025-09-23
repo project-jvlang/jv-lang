@@ -4,7 +4,7 @@ use jv_ast::{Expression, Literal, Pattern, Span};
 use jv_lexer::{Token, TokenType};
 
 use super::support::{
-    expression_span, identifier_with_span, keyword, merge_spans, span_from_token, token_comma,
+    expression_span, identifier_with_span, keyword, merge_spans, span_from_token, token_any_comma,
     token_if, token_left_paren, token_right_paren,
 };
 
@@ -48,7 +48,7 @@ pub(crate) fn when_pattern_parser(
             .then(
                 token_left_paren()
                     .map(|token| span_from_token(&token))
-                    .then(pattern.clone().separated_by(token_comma()).allow_trailing())
+                    .then(pattern.clone().separated_by(token_any_comma()).allow_trailing())
                     .then(token_right_paren().map(|token| span_from_token(&token)))
                     .map(|((left_span, arguments), right_span)| {
                         let span = merge_spans(&left_span, &right_span);

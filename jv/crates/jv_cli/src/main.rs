@@ -5,9 +5,11 @@ use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
+use jv_checker::diagnostics::{from_parse_error, from_transform_error};
 use jv_checker::TypeChecker;
 use jv_fmt::JavaFormatter;
 use jv_parser::Parser as JvParser;
+use jv_ir::transform_program;
 
 use jv_cli::pipeline::{compile, produce_binary, run_program, BuildOptions};
 use jv_cli::tour::TourOrchestrator;
@@ -161,6 +163,35 @@ fn format_jv_files(files: Vec<String>) -> Result<()> {
         let source =
             fs::read_to_string(file).with_context(|| format!("Failed to read file: {}", file))?;
 
+        if file.ends_with(".jv") {
+            match JvParser::parse(&source) {
+                Ok(program) => {
+                    if let Err(error) = transform_program(program) {
+                        if let Some(diagnostic) = from_transform_error(&error) {
+                            println!(
+                                "{}",
+                                jv_cli::format_tooling_diagnostic(Path::new(file), &diagnostic)
+                            );
+                            continue;
+                        }
+                        println!("IR transformation error for {}: {:?}", file, error);
+                        continue;
+                    }
+                }
+                Err(error) => {
+                    if let Some(diagnostic) = from_parse_error(&error) {
+                        println!(
+                            "{}",
+                            jv_cli::format_tooling_diagnostic(Path::new(file), &diagnostic)
+                        );
+                        continue;
+                    }
+                    println!("Parser error for {}: {:?}", file, error);
+                    continue;
+                }
+            }
+        }
+
         let formatter = JavaFormatter::default();
         let formatted = formatter.format_compilation_unit(&source).unwrap_or(source);
 
@@ -183,7 +214,22 @@ fn check_jv_file(input: &str) -> Result<()> {
     let source =
         fs::read_to_string(input).with_context(|| format!("Failed to read file: {}", input))?;
 
-    let program = JvParser::parse(&source).map_err(|e| anyhow::anyhow!("Parser error: {:?}", e))?;
+    let program = match JvParser::parse(&source) {
+        Ok(program) => program,
+        Err(error) => {
+            if let Some(diagnostic) = from_parse_error(&error) {
+                return Err(jv_cli::tooling_failure(Path::new(input), diagnostic));
+            }
+            return Err(anyhow::anyhow!("Parser error: {:?}", error));
+        }
+    };
+
+    if let Err(error) = transform_program(program.clone()) {
+        if let Some(diagnostic) = from_transform_error(&error) {
+            return Err(jv_cli::tooling_failure(Path::new(input), diagnostic));
+        }
+        return Err(anyhow::anyhow!("IR transformation error: {:?}", error));
+    }
 
     let type_checker = TypeChecker::new();
     match type_checker.check_program(&program) {

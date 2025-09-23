@@ -4,6 +4,8 @@ use clap::Parser;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use jv_checker::diagnostics::{from_parse_error, from_transform_error, ToolingDiagnostic};
+
 #[derive(Parser, Debug, Clone)]
 #[command(name = "jv")]
 #[command(about = "A Java Sugar Language compiler")]
@@ -67,6 +69,35 @@ pub enum Commands {
     Repl,
     /// Launch the interactive language tour experience
     Tour,
+}
+
+pub fn tooling_failure(path: &Path, diagnostic: ToolingDiagnostic) -> anyhow::Error {
+    anyhow::anyhow!(format_tooling_diagnostic(path, &diagnostic))
+}
+
+pub fn format_tooling_diagnostic(path: &Path, diagnostic: &ToolingDiagnostic) -> String {
+    let location = diagnostic
+        .span
+        .as_ref()
+        .map(|span| {
+            format!(
+                " (L{}C{}-L{}C{})",
+                span.start_line,
+                span.start_column,
+                span.end_line,
+                span.end_column
+            )
+        })
+        .unwrap_or_default();
+
+    format!(
+        "{code}: {title}{location}\n  ファイル: {file}\n  詳細: {detail}\n  対処: {help}",
+        code = diagnostic.code,
+        title = diagnostic.title,
+        file = path.display(),
+        detail = diagnostic.message,
+        help = diagnostic.help
+    )
 }
 
 pub fn init_project(name: &str) -> Result<String> {
@@ -187,7 +218,15 @@ pub mod pipeline {
         let source = fs::read_to_string(&options.input)
             .with_context(|| format!("Failed to read file: {}", options.input.display()))?;
 
-        let program = JvParser::parse(&source).map_err(|e| anyhow!("Parser error: {:?}", e))?;
+        let program = match JvParser::parse(&source) {
+            Ok(program) => program,
+            Err(error) => {
+                if let Some(diagnostic) = from_parse_error(&error) {
+                    return Err(tooling_failure(&options.input, diagnostic));
+                }
+                return Err(anyhow!("Parser error: {:?}", error));
+            }
+        };
 
         let mut warnings = Vec::new();
 
@@ -205,8 +244,15 @@ pub mod pipeline {
             warnings.extend(type_checker.check_null_safety(&program));
         }
 
-        let ir_program =
-            transform_program(program).map_err(|e| anyhow!("IR transformation error: {:?}", e))?;
+        let ir_program = match transform_program(program) {
+            Ok(ir) => ir,
+            Err(error) => {
+                if let Some(diagnostic) = from_transform_error(&error) {
+                    return Err(tooling_failure(&options.input, diagnostic));
+                }
+                return Err(anyhow!("IR transformation error: {:?}", error));
+            }
+        };
 
         let mut code_generator = JavaCodeGenerator::new();
         let java_unit = code_generator

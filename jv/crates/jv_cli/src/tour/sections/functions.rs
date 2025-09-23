@@ -66,11 +66,11 @@ fn validate_jv(source: &str) -> Result<()> {
 
 const LESSONS: [LessonExample; 3] = [
     LessonExample {
-        title: "デフォルト引数と名前付き引数",
-        description: "引数にデフォルト値を指定し、呼び出し側で必要な値だけを上書きします。",
+        title: "デフォルト引数と柔軟な呼び出し",
+        description: "引数にデフォルト値を指定し、最小限の指定で関数を呼び出します。",
         takeaways: &[
             "デフォルト値は呼び出し時に自動で補われる",
-            "名前付き引数により読みやすさと順序の柔軟性が向上",
+            "必要な値だけを順序通りに渡せば振る舞いを上書きできる",
             "Java ではオーバーロードとビルダー的ヘルパーに展開される",
         ],
         jv_code: r#"fun greet(name: String, prefix: String = "Hello", punctuation: String = "!") {
@@ -79,7 +79,7 @@ const LESSONS: [LessonExample; 3] = [
 
 fun showcase() {
     greet("Kira")
-    greet(name = "Alex", prefix = "Welcome", punctuation = "!!")
+    greet("Alex", "Welcome", "!!")
 }"#,
         java_output: r#"public final class FunctionDefaults {
     public static void greet(String name, String prefix, String punctuation) {

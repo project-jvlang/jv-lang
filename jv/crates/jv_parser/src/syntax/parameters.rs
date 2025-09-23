@@ -4,7 +4,7 @@ use jv_ast::{Expression, Parameter, Span};
 use jv_lexer::Token;
 
 use super::support::{
-    identifier, token_assign, token_colon, token_comma, token_val, token_var,
+    identifier, token_any_comma, token_assign, token_colon, token_val, token_var,
     type_annotation_simple,
 };
 
@@ -12,7 +12,7 @@ pub(crate) fn parameter_list(
     expr: impl ChumskyParser<Token, Expression, Error = Simple<Token>> + Clone,
 ) -> impl ChumskyParser<Token, Vec<Parameter>, Error = Simple<Token>> + Clone {
     parameter(expr)
-        .separated_by(token_comma())
+        .separated_by(token_any_comma())
         .allow_trailing()
         .collect()
 }
