@@ -1,9 +1,13 @@
 use super::*;
 
 use std::fs;
+use std::fs::File;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
+use jv_build::{BuildConfig, BuildSystem, JavaTarget};
+use zip::write::FileOptions;
 
 struct TempDirGuard {
     path: PathBuf,
@@ -212,6 +216,36 @@ fn compile_reports_whitespace_diagnostic() {
     let message = result.unwrap_err().to_string();
     assert!(message.contains("JV1007"));
     assert!(message.contains("配列"));
+}
+
+#[test]
+fn preflight_blocks_incompatible_classpath() {
+    let temp_dir = TempDirGuard::new("compat-preflight");
+    let jar_path = temp_dir.path().join("requires25.jar");
+
+    {
+        let file = File::create(&jar_path).unwrap();
+        let mut writer = zip::ZipWriter::new(file);
+        let options = FileOptions::default();
+        writer
+            .start_file("META-INF/MANIFEST.MF", options)
+            .unwrap();
+        writer
+            .write_all(b"Manifest-Version: 1.0\nBuild-Jdk: 25.0.0\n")
+            .unwrap();
+        writer.finish().unwrap();
+    }
+
+    let mut build_config = BuildConfig::with_target(JavaTarget::Java21);
+    build_config.classpath = vec![jar_path.to_string_lossy().into_owned()];
+    let build_system = BuildSystem::new(build_config);
+
+    let error = pipeline::compat::preflight(&build_system, Path::new("dummy.jv"))
+        .expect_err("expected compatibility failure");
+
+    let message = error.to_string();
+    assert!(message.contains("JV2001"));
+    assert!(message.contains("Java 25"));
 }
 
 #[test]

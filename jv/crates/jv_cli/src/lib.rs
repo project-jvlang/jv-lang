@@ -172,6 +172,10 @@ pub fn get_version() -> String {
 pub mod tour;
 
 pub mod pipeline {
+    pub mod compat {
+        include!("pipeline/compat.rs");
+    }
+
     use super::*;
     use anyhow::{anyhow, bail};
     use jv_build::{BuildConfig, BuildSystem, JavaTarget};
@@ -226,6 +230,15 @@ pub mod pipeline {
 
         let target = resolve_java_target(options)?;
 
+        let mut warnings = Vec::new();
+        let output_dir_string = options.output_dir.to_string_lossy().into_owned();
+        let mut build_config = BuildConfig::with_target(target);
+        build_config.output_dir = output_dir_string;
+
+        let compatibility_report =
+            compat::preflight(&BuildSystem::new(build_config.clone()), &options.input)?;
+        warnings.extend(compatibility_report.warnings.clone());
+
         let source = fs::read_to_string(&options.input)
             .with_context(|| format!("Failed to read file: {}", options.input.display()))?;
 
@@ -238,8 +251,6 @@ pub mod pipeline {
                 return Err(anyhow!("Parser error: {:?}", error));
             }
         };
-
-        let mut warnings = Vec::new();
 
         if options.check {
             let type_checker = TypeChecker::new();
@@ -320,9 +331,7 @@ pub mod pipeline {
         };
 
         if !options.java_only {
-            let mut build_config = BuildConfig::with_target(target);
-            build_config.output_dir = options.output_dir.to_string_lossy().into_owned();
-            let build_system = BuildSystem::new(build_config);
+            let build_system = BuildSystem::new(build_config.clone());
 
             match build_system.check_javac_availability() {
                 Ok(version) => {

@@ -1,9 +1,14 @@
 // jv_build - Build system and javac integration
+mod compat;
 mod config;
 
 pub use config::{
     BuildConfig, CliRequirement, JavaTarget, NetworkPolicy, SampleCliDependencies, SampleConfig,
     SampleConfigError, SampleDependency, SampleProtocol,
+};
+pub use compat::{
+    CompatibilityAnalyzer, CompatibilityError, CompatibilityEvidence, CompatibilityFinding,
+    CompatibilityReport, CompatibilityStatus, DetectedVersion,
 };
 
 use anyhow::Result;
@@ -21,6 +26,8 @@ pub enum BuildError {
     JdkNotFound(String),
     #[error("IO error: {0}")]
     IoError(#[from] std::io::Error),
+    #[error("Compatibility analysis error: {0}")]
+    Compatibility(#[from] CompatibilityError),
     #[error("Failed to spawn CLI '{command}': {source}")]
     CliSpawnError {
         command: String,
@@ -54,6 +61,12 @@ pub struct ResolvedCli {
 impl BuildSystem {
     pub fn new(config: BuildConfig) -> Self {
         Self { config }
+    }
+
+    /// Analyze classpath artifacts and confirm they meet the configured Java target.
+    pub fn analyze_compatibility(&self) -> Result<CompatibilityReport, BuildError> {
+        let analyzer = CompatibilityAnalyzer::new(self.config.target);
+        analyzer.analyze_config(&self.config).map_err(Into::into)
     }
 
     /// Compile Java files using javac

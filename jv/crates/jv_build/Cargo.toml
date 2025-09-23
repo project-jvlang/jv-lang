@@ -12,3 +12,4 @@ serde.workspace = true
 anyhow.workspace = true
 which = "4.4"
 jv_pm.workspace = true
+zip = "0.6"
