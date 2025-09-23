@@ -142,24 +142,49 @@ impl ParseError {
     }
 }
 
-#[derive(Default)]
-struct ArrayContext {
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SequenceContextKind {
+    Array,
+    Call,
+}
+
+struct SequenceContext {
+    kind: SequenceContextKind,
     prev_was_separator: bool,
     pending_layout: bool,
 }
 
-impl ArrayContext {
-    fn new() -> Self {
+impl SequenceContext {
+    fn new(kind: SequenceContextKind) -> Self {
         Self {
+            kind,
             prev_was_separator: true,
             pending_layout: false,
         }
     }
 }
 
+fn allows_call_suffix(token_type: &TokenType) -> bool {
+    matches!(
+        token_type,
+        TokenType::Identifier(_)
+            | TokenType::Number(_)
+            | TokenType::String(_)
+            | TokenType::StringInterpolation(_)
+            | TokenType::Boolean(_)
+            | TokenType::Null
+            | TokenType::RightParen
+            | TokenType::RightBracket
+            | TokenType::RightBrace
+            | TokenType::StringEnd
+            | TokenType::Greater
+    )
+}
+
 fn preprocess_tokens(tokens: Vec<Token>) -> Vec<Token> {
     let mut result = Vec::with_capacity(tokens.len());
-    let mut stack: Vec<ArrayContext> = Vec::new();
+    let mut stack: Vec<SequenceContext> = Vec::new();
+    let mut call_eligible = false;
 
     for token in tokens {
         if matches!(
@@ -172,8 +197,19 @@ fn preprocess_tokens(tokens: Vec<Token>) -> Vec<Token> {
             continue;
         }
 
+        let token_type_ref = &token.token_type;
+        let is_call_left_paren = matches!(token_type_ref, TokenType::LeftParen) && call_eligible;
+        let mut next_call_state = allows_call_suffix(token_type_ref);
+
         if let Some(ctx) = stack.last_mut() {
-            let eligible = !matches!(token.token_type, TokenType::Comma | TokenType::RightBracket);
+            let eligible = match ctx.kind {
+                SequenceContextKind::Array => {
+                    !matches!(token.token_type, TokenType::Comma | TokenType::RightBracket)
+                }
+                SequenceContextKind::Call => {
+                    !matches!(token.token_type, TokenType::Comma | TokenType::RightParen)
+                }
+            };
             if eligible {
                 let layout_needed = !ctx.prev_was_separator
                     && (ctx.pending_layout || has_layout_trivia(&token.leading_trivia));
@@ -192,11 +228,35 @@ fn preprocess_tokens(tokens: Vec<Token>) -> Vec<Token> {
                 if let Some(ctx) = stack.last_mut() {
                     ctx.prev_was_separator = false;
                 }
-                stack.push(ArrayContext::new());
+                stack.push(SequenceContext::new(SequenceContextKind::Array));
+                next_call_state = false;
                 result.push(token);
             }
             TokenType::RightBracket => {
-                stack.pop();
+                if matches!(stack.last().map(|ctx| ctx.kind), Some(SequenceContextKind::Array)) {
+                    stack.pop();
+                }
+                if let Some(ctx) = stack.last_mut() {
+                    ctx.prev_was_separator = false;
+                }
+                result.push(token);
+            }
+            TokenType::LeftParen => {
+                if let Some(ctx) = stack.last_mut() {
+                    ctx.prev_was_separator = false;
+                }
+
+                if is_call_left_paren {
+                    stack.push(SequenceContext::new(SequenceContextKind::Call));
+                }
+
+                next_call_state = false;
+                result.push(token);
+            }
+            TokenType::RightParen => {
+                if matches!(stack.last().map(|ctx| ctx.kind), Some(SequenceContextKind::Call)) {
+                    stack.pop();
+                }
                 if let Some(ctx) = stack.last_mut() {
                     ctx.prev_was_separator = false;
                 }
@@ -207,6 +267,7 @@ fn preprocess_tokens(tokens: Vec<Token>) -> Vec<Token> {
                     ctx.prev_was_separator = true;
                     ctx.pending_layout = false;
                 }
+                next_call_state = false;
                 result.push(token);
             }
             _ => {
@@ -216,6 +277,8 @@ fn preprocess_tokens(tokens: Vec<Token>) -> Vec<Token> {
                 result.push(token);
             }
         }
+
+        call_eligible = next_call_state;
     }
 
     result

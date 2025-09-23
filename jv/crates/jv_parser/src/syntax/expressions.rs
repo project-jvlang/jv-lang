@@ -326,7 +326,11 @@ fn identifier_expression_parser(
 
 #[derive(Clone)]
 enum PostfixOp {
-    Call { args: Vec<Argument>, span: Span },
+    Call {
+        args: Vec<Argument>,
+        style: CallArgumentStyle,
+        span: Span,
+    },
     Member { property: String, span: Span },
     NullSafeMember { property: String, span: Span },
     Index { index: Expression, span: Span },
@@ -360,19 +364,73 @@ fn call_suffix(
         .map(|token| span_from_token(&token))
         .then(argument_list(expr.clone()))
         .then(token_right_paren().map(|token| span_from_token(&token)))
-        .map(|((left_span, args), right_span)| {
+        .map(|((left_span, (args, style)), right_span)| {
             let span = merge_spans(&left_span, &right_span);
-            PostfixOp::Call { args, span }
+            PostfixOp::Call { args, style, span }
         })
 }
 
 fn argument_list(
     expr: impl ChumskyParser<Token, Expression, Error = Simple<Token>> + Clone,
-) -> impl ChumskyParser<Token, Vec<Argument>, Error = Simple<Token>> + Clone {
-    argument(expr)
-        .separated_by(token_comma())
-        .allow_trailing()
-        .collect()
+) -> impl ChumskyParser<Token, (Vec<Argument>, CallArgumentStyle), Error = Simple<Token>> + Clone {
+    // Layout-aware parsing: allow either comma separators or lexer-emitted layout commas.
+    let separator = choice((
+        token_comma().to(CallArgumentStyle::Comma),
+        token_layout_comma().to(CallArgumentStyle::Whitespace),
+    ));
+
+    argument(expr.clone())
+        .then(separator.clone().then(argument(expr.clone())).repeated())
+        .then(token_comma().or_not())
+        .try_map(|((first, rest), trailing_comma), span| {
+            let mut args = Vec::with_capacity(rest.len() + 1);
+            let mut saw_comma = false;
+            let mut saw_layout = false;
+            let mut saw_named = matches!(first, Argument::Named { .. });
+
+            args.push(first);
+
+            for (separator_kind, argument) in rest {
+                match separator_kind {
+                    CallArgumentStyle::Comma => saw_comma = true,
+                    CallArgumentStyle::Whitespace => saw_layout = true,
+                }
+
+                if matches!(argument, Argument::Named { .. }) {
+                    saw_named = true;
+                }
+
+                args.push(argument);
+            }
+
+            if trailing_comma.is_some() {
+                saw_comma = true;
+            }
+
+            if saw_layout {
+                if saw_comma {
+                    let message = "JV1009: mixed comma and whitespace delimiters in call arguments"
+                        .to_string();
+                    return Err(Simple::custom(span, message));
+                }
+
+                if saw_named {
+                    let message = "JV1009: whitespace-delimited argument lists cannot include named arguments"
+                        .to_string();
+                    return Err(Simple::custom(span, message));
+                }
+            }
+
+            let style = if saw_layout {
+                CallArgumentStyle::Whitespace
+            } else {
+                CallArgumentStyle::Comma
+            };
+
+            Ok((args, style))
+        })
+        .or_not()
+        .map(|result| result.unwrap_or_else(|| (Vec::new(), CallArgumentStyle::Comma)))
 }
 
 fn argument(
@@ -452,13 +510,14 @@ fn apply_postfix(base: Expression, op: PostfixOp) -> Expression {
     match op {
         PostfixOp::Call {
             args,
+            style,
             span: suffix_span,
         } => {
             let span = merge_spans(&expression_span(&base), &suffix_span);
             Expression::Call {
                 function: Box::new(base),
                 args,
-                argument_style: CallArgumentStyle::Comma,
+                argument_style: style,
                 span,
             }
         }

@@ -1,7 +1,7 @@
 use super::support::{first_statement, parse_program, parse_program_result};
 use jv_ast::{
-    Argument, BinaryOp, ConcurrencyConstruct, Expression, Literal, ResourceManagement,
-    SequenceDelimiter, Statement, StringPart, TypeAnnotation,
+    Argument, BinaryOp, CallArgumentStyle, ConcurrencyConstruct, Expression, Literal,
+    ResourceManagement, SequenceDelimiter, Statement, StringPart, TypeAnnotation,
 };
 
 use test_case::test_case;
@@ -560,6 +560,54 @@ fn test_whitespace_array_literal_with_comment() {
                 assert_eq!(*delimiter, SequenceDelimiter::Whitespace);
             }
             other => panic!("expected array expression, found {:?}", other),
+        },
+        other => panic!("expected val declaration, found {:?}", other),
+    }
+}
+
+#[test]
+fn test_whitespace_call_arguments() {
+    let program = parse_program("val result = plot(1 2 3)");
+    let statement = first_statement(&program);
+
+    match statement {
+        Statement::ValDeclaration { initializer, .. } => match initializer {
+            Expression::Call {
+                args,
+                argument_style,
+                ..
+            } => {
+                assert_eq!(args.len(), 3);
+                assert_eq!(*argument_style, CallArgumentStyle::Whitespace);
+            }
+            other => panic!("expected call expression, found {:?}", other),
+        },
+        other => panic!("expected val declaration, found {:?}", other),
+    }
+}
+
+#[test]
+fn test_whitespace_call_preserves_trailing_lambda() {
+    let program = parse_program(
+        "val result = plot(1 2) { sample -> sample * sample }",
+    );
+    let statement = first_statement(&program);
+
+    match statement {
+        Statement::ValDeclaration { initializer, .. } => match initializer {
+            Expression::Call {
+                args,
+                argument_style,
+                ..
+            } => {
+                assert_eq!(*argument_style, CallArgumentStyle::Whitespace);
+                assert_eq!(args.len(), 3);
+                match &args[2] {
+                    Argument::Positional(Expression::Lambda { .. }) => {}
+                    other => panic!("expected trailing lambda argument, found {:?}", other),
+                }
+            }
+            other => panic!("expected call expression, found {:?}", other),
         },
         other => panic!("expected val declaration, found {:?}", other),
     }
