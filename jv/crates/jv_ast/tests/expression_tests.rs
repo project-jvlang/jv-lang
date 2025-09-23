@@ -65,6 +65,7 @@ fn test_expression_call() {
     let expr = Expression::Call {
         function: Box::new(function),
         args: vec![arg],
+        argument_style: CallArgumentStyle::Comma,
         span: dummy_span(),
     };
     match expr {
@@ -246,6 +247,7 @@ fn test_expression_array() {
     ];
     let expr = Expression::Array {
         elements,
+        delimiter: SequenceDelimiter::Comma,
         span: dummy_span(),
     };
     match expr {
@@ -290,6 +292,7 @@ fn test_expression_try() {
             dummy_span(),
         )),
         args: vec![],
+        argument_style: CallArgumentStyle::Comma,
         span: dummy_span(),
     };
     let expr = Expression::Try {

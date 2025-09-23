@@ -30,6 +30,7 @@ pub enum Expression {
     Call {
         function: Box<Expression>,
         args: Vec<Argument>,
+        argument_style: CallArgumentStyle,
         span: Span,
     },
 
@@ -92,6 +93,7 @@ pub enum Expression {
     // Array literals
     Array {
         elements: Vec<Expression>,
+        delimiter: SequenceDelimiter,
         span: Span,
     },
 
@@ -111,6 +113,36 @@ pub enum Expression {
     // This/super references
     This(Span),
     Super(Span),
+}
+
+/// Delimiter metadata describing how a sequence literal separated its elements.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SequenceDelimiter {
+    /// Elements are comma-delimited (default behaviour).
+    Comma,
+    /// Elements are separated through layout-aware trivia such as whitespace.
+    Whitespace,
+}
+
+impl Default for SequenceDelimiter {
+    fn default() -> Self {
+        SequenceDelimiter::Comma
+    }
+}
+
+/// Metadata describing how arguments were grouped for a function call.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CallArgumentStyle {
+    /// Arguments are comma-delimited (current default).
+    Comma,
+    /// Arguments rely on layout-aware grouping (whitespace informed).
+    Whitespace,
+}
+
+impl Default for CallArgumentStyle {
+    fn default() -> Self {
+        CallArgumentStyle::Comma
+    }
 }
 
 /// Function call arguments (supports named arguments)

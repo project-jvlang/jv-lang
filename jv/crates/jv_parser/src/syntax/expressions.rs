@@ -1,7 +1,8 @@
 use chumsky::prelude::*;
 use chumsky::Parser as ChumskyParser;
 use jv_ast::{
-    Argument, BinaryOp, Expression, Literal, Parameter, Span, StringPart, UnaryOp, WhenArm,
+    Argument, BinaryOp, CallArgumentStyle, Expression, Literal, Parameter, SequenceDelimiter,
+    Span, StringPart, UnaryOp, WhenArm,
 };
 use jv_lexer::{Token, TokenType};
 
@@ -187,7 +188,11 @@ fn array_literal_parser(
         .then(token_right_bracket().map(|token| span_from_token(&token)))
         .map(|((left_span, elements), right_span)| {
             let span = merge_spans(&left_span, &right_span);
-            Expression::Array { elements, span }
+            Expression::Array {
+                elements,
+                delimiter: SequenceDelimiter::Comma,
+                span,
+            }
         })
 }
 
@@ -404,6 +409,7 @@ fn apply_postfix(base: Expression, op: PostfixOp) -> Expression {
             Expression::Call {
                 function: Box::new(base),
                 args,
+                argument_style: CallArgumentStyle::Comma,
                 span,
             }
         }
@@ -458,6 +464,7 @@ fn apply_postfix(base: Expression, op: PostfixOp) -> Expression {
             Expression::Call {
                 function,
                 mut args,
+                argument_style,
                 span,
             } => {
                 let new_span = merge_spans(&span, &lambda_span);
@@ -465,6 +472,7 @@ fn apply_postfix(base: Expression, op: PostfixOp) -> Expression {
                 Expression::Call {
                     function,
                     args,
+                    argument_style,
                     span: new_span,
                 }
             }
@@ -473,6 +481,7 @@ fn apply_postfix(base: Expression, op: PostfixOp) -> Expression {
                 Expression::Call {
                     function: Box::new(other),
                     args: vec![Argument::Positional(lambda)],
+                    argument_style: CallArgumentStyle::Comma,
                     span,
                 }
             }

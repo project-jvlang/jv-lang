@@ -220,6 +220,7 @@ fn test_statement_while() {
 fn test_statement_for() {
     let iterable = Expression::Array {
         elements: vec![],
+        delimiter: SequenceDelimiter::Comma,
         span: dummy_span(),
     };
     let body = Expression::Block {
@@ -404,6 +405,7 @@ fn test_concurrency_await() {
             dummy_span(),
         )),
         args: vec![],
+        argument_style: CallArgumentStyle::Comma,
         span: dummy_span(),
     };
     let construct = ConcurrencyConstruct::Await {
@@ -422,6 +424,7 @@ fn test_resource_use() {
     let resource = Expression::Call {
         function: Box::new(Expression::Identifier("open".to_string(), dummy_span())),
         args: vec![],
+        argument_style: CallArgumentStyle::Comma,
         span: dummy_span(),
     };
     let body = Expression::Block {
@@ -444,6 +447,7 @@ fn test_resource_defer() {
     let body = Expression::Call {
         function: Box::new(Expression::Identifier("cleanup".to_string(), dummy_span())),
         args: vec![],
+        argument_style: CallArgumentStyle::Comma,
         span: dummy_span(),
     };
     let construct = ResourceManagement::Defer {
