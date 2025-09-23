@@ -91,12 +91,52 @@ pub enum TokenType {
     Invalid(String),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+pub struct TokenTrivia {
+    pub spaces: u16,
+    pub newlines: u16,
+    pub comments: bool,
+}
+
+impl TokenTrivia {
+    pub fn merge_line_breaks(&mut self, count: u16) {
+        self.newlines = self.newlines.saturating_add(count);
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Token {
     pub token_type: TokenType,
     pub lexeme: String,
     pub line: usize,
     pub column: usize,
+    pub leading_trivia: TokenTrivia,
+}
+
+#[derive(Debug, Default, Clone, Copy)]
+struct TriviaTracker {
+    trivia: TokenTrivia,
+}
+
+impl TriviaTracker {
+    fn record_space(&mut self) {
+        self.trivia.spaces = self.trivia.spaces.saturating_add(1);
+    }
+
+    fn record_newline(&mut self) {
+        self.trivia.newlines = self.trivia.newlines.saturating_add(1);
+        self.trivia.spaces = 0;
+    }
+
+    fn record_comment(&mut self) {
+        self.trivia.comments = true;
+    }
+
+    fn take(&mut self) -> TokenTrivia {
+        let trivia = self.trivia;
+        self.trivia = TokenTrivia::default();
+        trivia
+    }
 }
 
 #[derive(Error, Debug)]
@@ -127,6 +167,7 @@ impl Lexer {
     pub fn tokenize(&mut self) -> Result<Vec<Token>, LexError> {
         let mut tokens = Vec::new();
         let chars: Vec<char> = self.input.chars().collect();
+        let mut trivia = TriviaTracker::default();
 
         while self.current < chars.len() {
             let start_line = self.line;
@@ -135,14 +176,17 @@ impl Lexer {
             match chars[self.current] {
                 // Whitespace
                 ' ' | '\t' => {
+                    trivia.record_space();
                     self.advance();
                 }
                 '\n' => {
+                    trivia.record_newline();
                     self.advance();
                     self.line += 1;
                     self.column = 1;
                 }
                 '\r' => {
+                    trivia.record_newline();
                     self.advance();
                     if self.current < chars.len() && chars[self.current] == '\n' {
                         self.advance();
@@ -158,6 +202,7 @@ impl Lexer {
                         "(",
                         start_line,
                         start_column,
+                        trivia.take(),
                     ));
                     self.advance();
                 }
@@ -167,6 +212,7 @@ impl Lexer {
                         ")",
                         start_line,
                         start_column,
+                        trivia.take(),
                     ));
                     self.advance();
                 }
@@ -176,6 +222,7 @@ impl Lexer {
                         "{",
                         start_line,
                         start_column,
+                        trivia.take(),
                     ));
                     self.advance();
                 }
@@ -185,6 +232,7 @@ impl Lexer {
                         "}",
                         start_line,
                         start_column,
+                        trivia.take(),
                     ));
                     self.advance();
                 }
@@ -194,6 +242,7 @@ impl Lexer {
                         "[",
                         start_line,
                         start_column,
+                        trivia.take(),
                     ));
                     self.advance();
                 }
@@ -203,11 +252,18 @@ impl Lexer {
                         "]",
                         start_line,
                         start_column,
+                        trivia.take(),
                     ));
                     self.advance();
                 }
                 ',' => {
-                    tokens.push(self.make_token(TokenType::Comma, ",", start_line, start_column));
+                    tokens.push(self.make_token(
+                        TokenType::Comma,
+                        ",",
+                        start_line,
+                        start_column,
+                        trivia.take(),
+                    ));
                     self.advance();
                 }
                 ';' => {
@@ -216,15 +272,28 @@ impl Lexer {
                         ";",
                         start_line,
                         start_column,
+                        trivia.take(),
                     ));
                     self.advance();
                 }
                 '+' => {
-                    tokens.push(self.make_token(TokenType::Plus, "+", start_line, start_column));
+                    tokens.push(self.make_token(
+                        TokenType::Plus,
+                        "+",
+                        start_line,
+                        start_column,
+                        trivia.take(),
+                    ));
                     self.advance();
                 }
                 '%' => {
-                    tokens.push(self.make_token(TokenType::Modulo, "%", start_line, start_column));
+                    tokens.push(self.make_token(
+                        TokenType::Modulo,
+                        "%",
+                        start_line,
+                        start_column,
+                        trivia.take(),
+                    ));
                     self.advance();
                 }
 
@@ -237,6 +306,7 @@ impl Lexer {
                             "==",
                             start_line,
                             start_column,
+                            trivia.take(),
                         ));
                         self.advance();
                     } else if self.current < chars.len() && chars[self.current] == '>' {
@@ -245,6 +315,7 @@ impl Lexer {
                             "=>",
                             start_line,
                             start_column,
+                            trivia.take(),
                         ));
                         self.advance();
                     } else {
@@ -253,6 +324,7 @@ impl Lexer {
                             "=",
                             start_line,
                             start_column,
+                            trivia.take(),
                         ));
                     }
                 }
@@ -264,10 +336,17 @@ impl Lexer {
                             "!=",
                             start_line,
                             start_column,
+                            trivia.take(),
                         ));
                         self.advance();
                     } else {
-                        tokens.push(self.make_token(TokenType::Not, "!", start_line, start_column));
+                        tokens.push(self.make_token(
+                            TokenType::Not,
+                            "!",
+                            start_line,
+                            start_column,
+                            trivia.take(),
+                        ));
                     }
                 }
                 '<' => {
@@ -278,6 +357,7 @@ impl Lexer {
                             "<=",
                             start_line,
                             start_column,
+                            trivia.take(),
                         ));
                         self.advance();
                     } else {
@@ -286,6 +366,7 @@ impl Lexer {
                             "<",
                             start_line,
                             start_column,
+                            trivia.take(),
                         ));
                     }
                 }
@@ -297,6 +378,7 @@ impl Lexer {
                             ">=",
                             start_line,
                             start_column,
+                            trivia.take(),
                         ));
                         self.advance();
                     } else {
@@ -305,6 +387,7 @@ impl Lexer {
                             ">",
                             start_line,
                             start_column,
+                            trivia.take(),
                         ));
                     }
                 }
@@ -316,6 +399,7 @@ impl Lexer {
                             "&&",
                             start_line,
                             start_column,
+                            trivia.take(),
                         ));
                         self.advance();
                     } else {
@@ -325,7 +409,13 @@ impl Lexer {
                 '|' => {
                     self.advance();
                     if self.current < chars.len() && chars[self.current] == '|' {
-                        tokens.push(self.make_token(TokenType::Or, "||", start_line, start_column));
+                        tokens.push(self.make_token(
+                            TokenType::Or,
+                            "||",
+                            start_line,
+                            start_column,
+                            trivia.take(),
+                        ));
                         self.advance();
                     } else {
                         return Err(LexError::UnexpectedChar('|', start_line, start_column));
@@ -339,6 +429,7 @@ impl Lexer {
                             "->",
                             start_line,
                             start_column,
+                            trivia.take(),
                         ));
                         self.advance();
                     } else {
@@ -347,6 +438,7 @@ impl Lexer {
                             "-",
                             start_line,
                             start_column,
+                            trivia.take(),
                         ));
                     }
                 }
@@ -356,15 +448,28 @@ impl Lexer {
                         "*",
                         start_line,
                         start_column,
+                        trivia.take(),
                     ));
                     self.advance();
                 }
                 '@' => {
-                    tokens.push(self.make_token(TokenType::At, "@", start_line, start_column));
+                    tokens.push(self.make_token(
+                        TokenType::At,
+                        "@",
+                        start_line,
+                        start_column,
+                        trivia.take(),
+                    ));
                     self.advance();
                 }
                 '.' => {
-                    tokens.push(self.make_token(TokenType::Dot, ".", start_line, start_column));
+                    tokens.push(self.make_token(
+                        TokenType::Dot,
+                        ".",
+                        start_line,
+                        start_column,
+                        trivia.take(),
+                    ));
                     self.advance();
                 }
                 ':' => {
@@ -375,6 +480,7 @@ impl Lexer {
                             "::",
                             start_line,
                             start_column,
+                            trivia.take(),
                         ));
                         self.advance();
                     } else {
@@ -383,6 +489,7 @@ impl Lexer {
                             ":",
                             start_line,
                             start_column,
+                            trivia.take(),
                         ));
                     }
                 }
@@ -394,6 +501,7 @@ impl Lexer {
                             "?.",
                             start_line,
                             start_column,
+                            trivia.take(),
                         ));
                         self.advance();
                     } else if self.current < chars.len() && chars[self.current] == ':' {
@@ -402,6 +510,7 @@ impl Lexer {
                             "?:",
                             start_line,
                             start_column,
+                            trivia.take(),
                         ));
                         self.advance();
                     } else {
@@ -410,13 +519,15 @@ impl Lexer {
                             "?",
                             start_line,
                             start_column,
+                            trivia.take(),
                         ));
                     }
                 }
 
                 // String literals
                 '"' => {
-                    tokens.extend(self.tokenize_string(start_line, start_column)?);
+                    let leading_trivia = trivia.take();
+                    tokens.extend(self.tokenize_string(start_line, start_column, leading_trivia)?);
                 }
 
                 // Comments
@@ -432,7 +543,9 @@ impl Lexer {
                                     &comment,
                                     start_line,
                                     start_column,
+                                    trivia.take(),
                                 ));
+                                trivia.record_comment();
                             }
                             '*' => {
                                 // Block comment
@@ -442,7 +555,9 @@ impl Lexer {
                                     &comment,
                                     start_line,
                                     start_column,
+                                    trivia.take(),
                                 ));
+                                trivia.record_comment();
                             }
                             _ => {
                                 tokens.push(self.make_token(
@@ -450,6 +565,7 @@ impl Lexer {
                                     "/",
                                     start_line,
                                     start_column,
+                                    trivia.take(),
                                 ));
                             }
                         }
@@ -459,6 +575,7 @@ impl Lexer {
                             "/",
                             start_line,
                             start_column,
+                            trivia.take(),
                         ));
                     }
                 }
@@ -471,6 +588,7 @@ impl Lexer {
                         &number,
                         start_line,
                         start_column,
+                        trivia.take(),
                     ));
                 }
 
@@ -497,7 +615,13 @@ impl Lexer {
                         "null" => TokenType::Null,
                         _ => TokenType::Identifier(identifier.clone()),
                     };
-                    tokens.push(self.make_token(token_type, &identifier, start_line, start_column));
+                    tokens.push(self.make_token(
+                        token_type,
+                        &identifier,
+                        start_line,
+                        start_column,
+                        trivia.take(),
+                    ));
                 }
 
                 c => {
@@ -512,6 +636,7 @@ impl Lexer {
             lexeme: "".to_string(),
             line: self.line,
             column: self.column,
+            leading_trivia: trivia.take(),
         });
 
         Ok(tokens)
@@ -524,12 +649,20 @@ impl Lexer {
         }
     }
 
-    fn make_token(&self, token_type: TokenType, lexeme: &str, line: usize, column: usize) -> Token {
+    fn make_token(
+        &self,
+        token_type: TokenType,
+        lexeme: &str,
+        line: usize,
+        column: usize,
+        leading_trivia: TokenTrivia,
+    ) -> Token {
         Token {
             token_type,
             lexeme: lexeme.to_string(),
             line,
             column,
+            leading_trivia,
         }
     }
 
@@ -657,11 +790,13 @@ impl Lexer {
         &mut self,
         start_line: usize,
         start_column: usize,
+        initial_trivia: TokenTrivia,
     ) -> Result<Vec<Token>, LexError> {
         let chars: Vec<char> = self.input.chars().collect();
         let mut tokens = Vec::new();
         let mut current_string = String::new();
         let mut _string_start_pos = self.current;
+        let mut leading_trivia = Some(initial_trivia);
 
         self.advance(); // consume opening '"'
 
@@ -677,6 +812,7 @@ impl Lexer {
                         &current_string,
                         start_line,
                         start_column,
+                        leading_trivia.take().unwrap_or_default(),
                     ));
                 } else {
                     tokens.push(self.make_token(
@@ -684,6 +820,7 @@ impl Lexer {
                         &current_string,
                         self.line,
                         self.column,
+                        TokenTrivia::default(),
                     ));
                 }
                 current_string.clear();
@@ -750,6 +887,7 @@ impl Lexer {
                 &string_content,
                 start_line,
                 start_column,
+                leading_trivia.take().unwrap_or_default(),
             ));
         } else {
             // String with interpolation - add final part
@@ -758,6 +896,7 @@ impl Lexer {
                 &current_string,
                 self.line,
                 self.column,
+                TokenTrivia::default(),
             ));
         }
 

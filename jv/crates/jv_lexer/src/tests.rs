@@ -487,3 +487,93 @@ fn test_unicode_identifiers() {
     assert!(identifiers.contains(&"β"));
     assert!(identifiers.contains(&"γ"));
 }
+
+#[test]
+fn trivia_records_whitespace_for_array_elements() {
+    let mut lexer = Lexer::new("[1 2 3]".to_string());
+    let tokens = lexer.tokenize().unwrap();
+    let numbers: Vec<&Token> = tokens
+        .iter()
+        .filter(|token| matches!(token.token_type, TokenType::Number(_)))
+        .collect();
+
+    assert_eq!(numbers.len(), 3);
+    assert_eq!(numbers[0].leading_trivia.spaces, 0);
+    assert!(numbers[1].leading_trivia.spaces > 0);
+    assert_eq!(numbers[1].leading_trivia.newlines, 0);
+    assert!(numbers[2].leading_trivia.spaces > 0);
+}
+
+#[test]
+fn trivia_records_absence_of_whitespace_for_comma_arrays() {
+    let mut lexer = Lexer::new("[1,2,3]".to_string());
+    let tokens = lexer.tokenize().unwrap();
+    let numbers: Vec<&Token> = tokens
+        .iter()
+        .filter(|token| matches!(token.token_type, TokenType::Number(_)))
+        .collect();
+
+    assert_eq!(numbers.len(), 3);
+    assert_eq!(numbers[1].leading_trivia.spaces, 0);
+    assert_eq!(numbers[1].leading_trivia.newlines, 0);
+    assert!(!numbers[1].leading_trivia.comments);
+    assert_eq!(numbers[2].leading_trivia.spaces, 0);
+}
+
+#[test]
+fn trivia_records_newlines_between_array_elements() {
+    let mut lexer = Lexer::new("[1\n 2]".to_string());
+    let tokens = lexer.tokenize().unwrap();
+    let numbers: Vec<&Token> = tokens
+        .iter()
+        .filter(|token| matches!(token.token_type, TokenType::Number(_)))
+        .collect();
+
+    assert_eq!(numbers.len(), 2);
+    assert!(numbers[1].leading_trivia.newlines > 0);
+    assert!(numbers[1].leading_trivia.spaces > 0);
+    assert!(!numbers[1].leading_trivia.comments);
+}
+
+#[test]
+fn trivia_records_comments_between_array_elements() {
+    let mut lexer = Lexer::new("[1 /* note */ 2]".to_string());
+    let tokens = lexer.tokenize().unwrap();
+    let numbers: Vec<&Token> = tokens
+        .iter()
+        .filter(|token| matches!(token.token_type, TokenType::Number(_)))
+        .collect();
+
+    assert_eq!(numbers.len(), 2);
+    assert!(numbers[1].leading_trivia.comments);
+    assert!(numbers[1].leading_trivia.spaces > 0);
+}
+
+#[test]
+fn trivia_records_whitespace_for_call_arguments() {
+    let mut lexer = Lexer::new("plot(1 2 3)".to_string());
+    let tokens = lexer.tokenize().unwrap();
+    let numbers: Vec<&Token> = tokens
+        .iter()
+        .filter(|token| matches!(token.token_type, TokenType::Number(_)))
+        .collect();
+
+    assert_eq!(numbers.len(), 3);
+    assert_eq!(numbers[0].leading_trivia.spaces, 0);
+    assert!(numbers[1].leading_trivia.spaces > 0);
+    assert!(numbers[2].leading_trivia.spaces > 0);
+}
+
+#[test]
+fn trivia_records_absence_of_whitespace_for_comma_arguments() {
+    let mut lexer = Lexer::new("plot(1,2,3)".to_string());
+    let tokens = lexer.tokenize().unwrap();
+    let numbers: Vec<&Token> = tokens
+        .iter()
+        .filter(|token| matches!(token.token_type, TokenType::Number(_)))
+        .collect();
+
+    assert_eq!(numbers.len(), 3);
+    assert_eq!(numbers[1].leading_trivia.spaces, 0);
+    assert_eq!(numbers[2].leading_trivia.spaces, 0);
+}

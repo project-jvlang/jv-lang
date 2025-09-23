@@ -4,7 +4,7 @@ use jv_ast::{
     Annotation, AnnotationArgument, ConcurrencyConstruct, Expression, ExtensionFunction, Literal,
     Modifiers, Parameter, ResourceManagement, Span, Statement, TypeAnnotation, Visibility,
 };
-use jv_lexer::{Token, TokenType};
+use jv_lexer::{Token, TokenTrivia, TokenType};
 
 use super::expressions;
 use super::parameters::parameter_list;
@@ -414,6 +414,7 @@ mod tests {
             lexeme: lexeme.to_string(),
             line: 1,
             column,
+            leading_trivia: TokenTrivia::default(),
         }
     }
 
