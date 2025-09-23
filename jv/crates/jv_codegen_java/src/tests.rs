@@ -1,6 +1,6 @@
 use super::*;
 use insta::assert_snapshot;
-use jv_ast::{Literal, Span};
+use jv_ast::{CallArgumentStyle, Literal, SequenceDelimiter, Span};
 use jv_ir::{
     DataFormat, IrExpression, IrModifiers, IrParameter, IrProgram, IrRecordComponent,
     IrSampleDeclaration, IrStatement, IrVisibility, JavaType, MethodOverload, PrimitiveType,
@@ -229,6 +229,7 @@ fn embed_users_field() -> IrStatement {
                 user_sample_constructor("Alice", 28, "alice@example.com"),
                 user_sample_constructor("Bob", 31, "bob@example.com"),
             ],
+            argument_style: CallArgumentStyle::Comma,
             java_type: user_sample_list_type(),
             span: dummy_span(),
         }),
@@ -280,6 +281,7 @@ fn load_path_of_call() -> IrExpression {
             Literal::String("/data/users.json".to_string()),
             dummy_span(),
         )],
+        argument_style: CallArgumentStyle::Comma,
         java_type: reference_type("java.nio.file.Path"),
         span: dummy_span(),
     }
@@ -294,6 +296,7 @@ fn load_read_string_call() -> IrExpression {
         })),
         method_name: "readString".to_string(),
         args: vec![load_path_of_call()],
+        argument_style: CallArgumentStyle::Comma,
         java_type: string_type(),
         span: dummy_span(),
     }
@@ -602,6 +605,79 @@ fn expression_generation_handles_binary_arithmetic() {
         .expect("expression generation should succeed");
 
     assert_eq!(generated, "a + b");
+}
+
+#[test]
+fn whitespace_array_uses_list_of_when_modern_features_enabled() {
+    let mut config = JavaCodeGenConfig::default();
+    config.use_modern_features = true;
+    let mut generator = JavaCodeGenerator::with_config(config);
+
+    let expression = IrExpression::ArrayCreation {
+        element_type: int_type(),
+        dimensions: vec![],
+        initializer: Some(vec![
+            IrExpression::Literal(Literal::Number("1".to_string()), dummy_span()),
+            IrExpression::Literal(Literal::Number("2".to_string()), dummy_span()),
+            IrExpression::Literal(Literal::Number("3".to_string()), dummy_span()),
+        ]),
+        delimiter: SequenceDelimiter::Whitespace,
+        span: dummy_span(),
+    };
+
+    let generated = generator
+        .generate_expression(&expression)
+        .expect("whitespace array should render");
+
+    assert_eq!(generated, "List.of(1, 2, 3)");
+}
+
+#[test]
+fn whitespace_array_uses_java21_fallback_when_modern_features_disabled() {
+    let mut config = JavaCodeGenConfig::default();
+    config.use_modern_features = false;
+    let mut generator = JavaCodeGenerator::with_config(config);
+
+    let expression = IrExpression::ArrayCreation {
+        element_type: int_type(),
+        dimensions: vec![],
+        initializer: Some(vec![
+            IrExpression::Literal(Literal::Number("1".to_string()), dummy_span()),
+            IrExpression::Literal(Literal::Number("2".to_string()), dummy_span()),
+            IrExpression::Literal(Literal::Number("3".to_string()), dummy_span()),
+        ]),
+        delimiter: SequenceDelimiter::Whitespace,
+        span: dummy_span(),
+    };
+
+    let generated = generator
+        .generate_expression(&expression)
+        .expect("whitespace array should render with fallback");
+
+    assert_eq!(generated, "Arrays.asList(1, 2, 3).stream().toList()");
+}
+
+#[test]
+fn whitespace_call_arguments_render_multiline_for_readability() {
+    let mut generator = JavaCodeGenerator::new();
+    let expression = IrExpression::MethodCall {
+        receiver: None,
+        method_name: "plot".to_string(),
+        args: vec![
+            IrExpression::Literal(Literal::Number("1".to_string()), dummy_span()),
+            IrExpression::Literal(Literal::Number("2".to_string()), dummy_span()),
+            IrExpression::Literal(Literal::Number("3".to_string()), dummy_span()),
+        ],
+        argument_style: CallArgumentStyle::Whitespace,
+        java_type: JavaType::void(),
+        span: dummy_span(),
+    };
+
+    let generated = generator
+        .generate_expression(&expression)
+        .expect("whitespace call should render");
+
+    assert_eq!(generated, "plot(\n    1,\n    2,\n    3\n)");
 }
 
 #[test]

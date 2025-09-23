@@ -530,6 +530,7 @@ impl JavaCodeGenerator {
                     })),
                     method_name: "of".to_string(),
                     args,
+                    argument_style: CallArgumentStyle::Comma,
                     java_type: java_type.clone(),
                     span: span.clone(),
                 })
@@ -614,6 +615,7 @@ impl JavaCodeGenerator {
             })),
             method_name: "ofNullable".to_string(),
             args: vec![inner_expr],
+            argument_style: CallArgumentStyle::Comma,
             java_type: java_type.clone(),
             span: span.clone(),
         })
@@ -796,6 +798,7 @@ impl JavaCodeGenerator {
             })),
             method_name: "empty".to_string(),
             args: Vec::new(),
+            argument_style: CallArgumentStyle::Comma,
             java_type: java_type.clone(),
             span: span.clone(),
         }
