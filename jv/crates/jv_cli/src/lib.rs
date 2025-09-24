@@ -184,6 +184,10 @@ pub mod pipeline {
         pub mod manifest {
             include!("pipeline/project/manifest.rs");
         }
+
+        pub mod layout {
+            include!("pipeline/project/layout.rs");
+        }
     }
 
     use super::*;
