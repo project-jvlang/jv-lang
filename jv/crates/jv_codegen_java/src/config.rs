@@ -1,3 +1,4 @@
+use jv_pm::JavaTarget;
 use serde::{Deserialize, Serialize};
 
 /// Configuration options that drive Java code generation behaviour.
@@ -7,10 +8,10 @@ pub struct JavaCodeGenConfig {
     pub indent: String,
     /// Whether to emit additional null-safety checks around potentially nullable expressions.
     pub extra_null_checks: bool,
-    /// Whether the generator should leverage modern Java 25 language features when available.
-    pub use_modern_features: bool,
     /// Whether to include source comments that help with debugging emitted code.
     pub include_source_comments: bool,
+    /// Target Java release that guides feature selection and fallbacks.
+    pub target: JavaTarget,
 }
 
 impl Default for JavaCodeGenConfig {
@@ -18,8 +19,19 @@ impl Default for JavaCodeGenConfig {
         Self {
             indent: "    ".to_string(),
             extra_null_checks: true,
-            use_modern_features: true,
             include_source_comments: false,
+            target: JavaTarget::default(),
+        }
+    }
+}
+
+impl JavaCodeGenConfig {
+    /// Construct a configuration tailored for a specific Java target while keeping other
+    /// settings at their defaults.
+    pub fn for_target(target: JavaTarget) -> Self {
+        Self {
+            target,
+            ..Self::default()
         }
     }
 }

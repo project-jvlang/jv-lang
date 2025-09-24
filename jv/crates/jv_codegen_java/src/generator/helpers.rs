@@ -70,6 +70,13 @@ impl JavaCodeGenerator {
         if modifiers.is_abstract {
             parts.push("abstract");
         }
+        if modifiers.is_sealed {
+            if self.targeting.supports_sealed_types() {
+                parts.push("sealed");
+            } else if !modifiers.is_final {
+                parts.push("final");
+            }
+        }
         if modifiers.is_static {
             parts.push("static");
         }

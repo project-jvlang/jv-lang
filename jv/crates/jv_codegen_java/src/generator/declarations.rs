@@ -36,8 +36,23 @@ impl JavaCodeGenerator {
             let implements = self.render_interface_clause("implements", interfaces)?;
             header.push_str(&implements);
 
+            let mut fallback_comment = None;
+            if modifiers.is_sealed {
+                if let Some(clause) = self.targeting.permits_clause(&modifiers.permitted_types) {
+                    header.push_str(&clause);
+                } else {
+                    fallback_comment = self
+                        .targeting
+                        .sealed_fallback_comment(&modifiers.permitted_types);
+                }
+            }
+
             builder.push_line(&format!("{} {{", header.trim()));
             builder.indent();
+
+            if let Some(comment) = fallback_comment {
+                builder.push_line(&comment);
+            }
 
             for field in fields {
                 let field_code = self.generate_statement(field)?;
@@ -161,8 +176,23 @@ impl JavaCodeGenerator {
             let extends = self.render_interface_clause("extends", superinterfaces)?;
             header.push_str(&extends);
 
+            let mut fallback_comment = None;
+            if modifiers.is_sealed {
+                if let Some(clause) = self.targeting.permits_clause(&modifiers.permitted_types) {
+                    header.push_str(&clause);
+                } else {
+                    fallback_comment = self
+                        .targeting
+                        .sealed_fallback_comment(&modifiers.permitted_types);
+                }
+            }
+
             builder.push_line(&format!("{} {{", header.trim()));
             builder.indent();
+
+            if let Some(comment) = fallback_comment {
+                builder.push_line(&comment);
+            }
 
             for field in fields {
                 let field_code = self.generate_statement(field)?;

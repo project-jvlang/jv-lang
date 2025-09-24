@@ -1,0 +1,16 @@
+---
+source: crates/jv_codegen_java/src/tests/target_matrix.rs
+assertion_line: 86
+expression: source
+---
+package com.example;
+
+public final class Result {
+    // Fallback: sealed hierarchy permits [Success, Failure] emulated for Java 21
+}
+
+public class Success extends Result {
+}
+
+public class Failure extends Result {
+}

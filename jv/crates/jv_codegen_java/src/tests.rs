@@ -608,10 +608,9 @@ fn expression_generation_handles_binary_arithmetic() {
 }
 
 #[test]
-fn whitespace_array_uses_list_of_when_modern_features_enabled() {
-    let mut config = JavaCodeGenConfig::default();
-    config.use_modern_features = true;
-    let mut generator = JavaCodeGenerator::with_config(config);
+fn whitespace_array_uses_list_of_for_java25_target() {
+    let mut generator =
+        JavaCodeGenerator::with_config(JavaCodeGenConfig::for_target(JavaTarget::Java25));
 
     let expression = IrExpression::ArrayCreation {
         element_type: int_type(),
@@ -633,10 +632,9 @@ fn whitespace_array_uses_list_of_when_modern_features_enabled() {
 }
 
 #[test]
-fn whitespace_array_uses_java21_fallback_when_modern_features_disabled() {
-    let mut config = JavaCodeGenConfig::default();
-    config.use_modern_features = false;
-    let mut generator = JavaCodeGenerator::with_config(config);
+fn whitespace_array_uses_java21_fallback_for_legacy_target() {
+    let mut generator =
+        JavaCodeGenerator::with_config(JavaCodeGenConfig::for_target(JavaTarget::Java21));
 
     let expression = IrExpression::ArrayCreation {
         element_type: int_type(),
@@ -768,7 +766,9 @@ fn snapshot_ir_program() {
                     "is_synchronized": false,
                     "is_native": false,
                     "is_strictfp": false,
-                    "annotations": []
+                    "annotations": [],
+                    "is_sealed": false,
+                    "permitted_types": []
                   },
                   "span": {
                     "start_line": 0,
@@ -818,7 +818,9 @@ fn snapshot_ir_program() {
                           "is_synchronized": false,
                           "is_native": false,
                           "is_strictfp": false,
-                          "annotations": []
+                          "annotations": [],
+                          "is_sealed": false,
+                          "permitted_types": []
                         },
                         "span": {
                           "start_line": 0,
@@ -1010,7 +1012,9 @@ fn snapshot_ir_program() {
                 "is_synchronized": false,
                 "is_native": false,
                 "is_strictfp": false,
-                "annotations": []
+                "annotations": [],
+                "is_sealed": false,
+                "permitted_types": []
               },
               "throws": [],
               "span": {
@@ -1031,7 +1035,9 @@ fn snapshot_ir_program() {
           "is_synchronized": false,
           "is_native": false,
           "is_strictfp": false,
-          "annotations": []
+          "annotations": [],
+          "is_sealed": false,
+          "permitted_types": []
         },
         "span": {
           "start_line": 0,
@@ -1436,3 +1442,5 @@ fn load_mode_sample_declaration_supports_s3_and_tabular_decoding() {
         "record definition should accompany S3 loader: {source}"
     );
 }
+
+mod target_matrix;

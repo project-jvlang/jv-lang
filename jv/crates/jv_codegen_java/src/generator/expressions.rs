@@ -400,16 +400,13 @@ impl JavaCodeGenerator {
         Ok(rendered)
     }
 
-    fn render_whitespace_array(
-        &mut self,
-        values: &[IrExpression],
-    ) -> Result<String, CodeGenError> {
+    fn render_whitespace_array(&mut self, values: &[IrExpression]) -> Result<String, CodeGenError> {
         let rendered = self.render_argument_vec(values)?;
         let joined = rendered.join(", ");
 
         self.add_import("java.util.List");
 
-        if self.config.use_modern_features {
+        if self.targeting.supports_collection_factories() {
             Ok(format!("List.of({})", joined))
         } else {
             self.add_import("java.util.Arrays");

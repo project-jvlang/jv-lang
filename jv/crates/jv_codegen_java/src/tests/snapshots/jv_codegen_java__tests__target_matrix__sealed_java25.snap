@@ -1,0 +1,15 @@
+---
+source: crates/jv_codegen_java/src/tests/target_matrix.rs
+assertion_line: 73
+expression: source
+---
+package com.example;
+
+public sealed class Result permits Success, Failure {
+}
+
+public class Success extends Result {
+}
+
+public class Failure extends Result {
+}

@@ -707,6 +707,10 @@ pub struct IrModifiers {
     pub is_native: bool,
     pub is_strictfp: bool,
     pub annotations: Vec<String>, // Annotation names
+    #[serde(default)]
+    pub is_sealed: bool,
+    #[serde(default)]
+    pub permitted_types: Vec<String>,
 }
 
 /// Java visibility modifiers

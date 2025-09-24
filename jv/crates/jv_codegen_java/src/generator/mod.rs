@@ -14,10 +14,14 @@ mod expressions;
 mod helpers;
 mod sample;
 mod statements;
+mod targeting;
+
+use targeting::TargetedJavaEmitter;
 
 pub struct JavaCodeGenerator {
     imports: HashMap<String, String>,
     config: JavaCodeGenConfig,
+    targeting: TargetedJavaEmitter,
 }
 
 impl JavaCodeGenerator {
@@ -26,9 +30,11 @@ impl JavaCodeGenerator {
     }
 
     pub fn with_config(config: JavaCodeGenConfig) -> Self {
+        let target = config.target;
         Self {
             imports: HashMap::new(),
             config,
+            targeting: TargetedJavaEmitter::new(target),
         }
     }
 

@@ -86,10 +86,7 @@ pub fn format_tooling_diagnostic(path: &Path, diagnostic: &ToolingDiagnostic) ->
         .map(|span| {
             format!(
                 " (L{}C{}-L{}C{})",
-                span.start_line,
-                span.start_column,
-                span.end_line,
-                span.end_column
+                span.start_line, span.start_column, span.end_line, span.end_column
             )
         })
         .unwrap_or_default();
@@ -129,8 +126,7 @@ version = "0.1.0"
 [build]
 java_version = "{}"
 "#,
-        project_name,
-        default_target
+        project_name, default_target
     );
 
     fs::write(project_dir.join("jv.toml"), jv_toml)?;
@@ -276,10 +272,8 @@ pub mod pipeline {
             }
         };
 
-        let mut code_generator = JavaCodeGenerator::with_config(JavaCodeGenConfig {
-            use_modern_features: target.enables_modern_features(),
-            ..JavaCodeGenConfig::default()
-        });
+        let mut code_generator =
+            JavaCodeGenerator::with_config(JavaCodeGenConfig::for_target(target));
         let java_unit = code_generator
             .generate_compilation_unit(&ir_program)
             .map_err(|e| anyhow!("Code generation error: {:?}", e))?;
