@@ -169,6 +169,8 @@ pub struct PackageInfo {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Manifest {
     pub package: PackageInfo,
+    #[serde(default)]
+    pub project: ProjectSection,
     pub build: Option<BuildInfo>,
 }
 
@@ -176,9 +178,7 @@ impl Manifest {
     pub fn load_from_path(path: impl AsRef<Path>) -> Result<Self, PackageError> {
         let path = path.as_ref();
         let content = fs::read_to_string(path)?;
-        toml::from_str(&content).map_err(|error| {
-            PackageError::InvalidManifest(error.to_string())
-        })
+        toml::from_str(&content).map_err(|error| PackageError::InvalidManifest(error.to_string()))
     }
 
     pub fn java_target(&self) -> JavaTarget {
@@ -189,11 +189,67 @@ impl Manifest {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct BuildInfo {
     #[serde(default)]
     #[serde(rename = "java_version")]
     pub java_version: JavaTarget,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct ProjectSection {
+    pub sources: SourceSection,
+    pub output: OutputSection,
+    pub entrypoint: Option<String>,
+}
+
+impl Default for ProjectSection {
+    fn default() -> Self {
+        Self {
+            sources: SourceSection::default(),
+            output: OutputSection::default(),
+            entrypoint: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct SourceSection {
+    pub include: Vec<String>,
+    pub exclude: Vec<String>,
+}
+
+impl Default for SourceSection {
+    fn default() -> Self {
+        Self {
+            include: vec!["src/**/*.jv".to_string()],
+            exclude: Vec::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct OutputSection {
+    #[serde(default = "default_output_directory")]
+    pub directory: String,
+    #[serde(default)]
+    pub clean: bool,
+}
+
+impl Default for OutputSection {
+    fn default() -> Self {
+        Self {
+            directory: default_output_directory(),
+            clean: false,
+        }
+    }
+}
+
+fn default_output_directory() -> String {
+    "out/java".to_string()
 }
 
 pub struct PackageManager {

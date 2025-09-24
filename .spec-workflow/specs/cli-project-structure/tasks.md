@@ -8,7 +8,7 @@
   - _Requirements: 要件 2_
   - _Prompt: Implement the task for spec cli-project-structure, first run spec-workflow-guide to get the workflow guide then implement the task: Role: Rust CLI Infrastructure Engineer | Task: Add a reusable `ProjectLocator` that climbs directories to find `jv.toml`, returning a typed `ProjectRoot` and surfacing `JV1001` diagnostics when detection fails | Restrictions: Keep filesystem operations side-effect free (read-only), ensure relative paths stay within the workspace, and add focused unit tests under `jv/crates/jv_cli/src/tests/project_locator.rs` | _Leverage: `jv_cli::tooling_failure`, CLI command wiring | _Requirements: 要件 2 | Success: Locator resolves roots from nested paths, errors carry span/context, and new tests cover success/failure cases | Workflow: Mark this task as [-] in tasks.md before editing and flip to [x] after code/tests are complete_
 
-- [ ] 2. マニフェスト読込と設定モデルを拡張
+- [x] 2. マニフェスト読込と設定モデルを拡張
   - Files: jv/crates/jv_cli/src/pipeline/project/manifest.rs (新規), jv/crates/jv_pm/src/lib.rs, jv/crates/jv_pm/tests/manifest_project.rs (新規)
   - `ManifestLoader` を実装し、`jv.toml` から `include`/`exclude`/`output`/`entrypoint` を読み込んで `ProjectSettings` にマッピングする
   - 不正な設定値や欠落項目を検出した際に `ToolingDiagnostic(JV1001)` を生成し CLI へ返す

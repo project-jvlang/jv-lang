@@ -180,6 +180,10 @@ pub mod pipeline {
         pub mod locator {
             include!("pipeline/project/locator.rs");
         }
+
+        pub mod manifest {
+            include!("pipeline/project/manifest.rs");
+        }
     }
 
     use super::*;
