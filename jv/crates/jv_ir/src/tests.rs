@@ -1,5 +1,6 @@
 #[cfg(test)]
 mod tests {
+    use crate::context::SequenceStyleCache;
     use crate::{
         convert_type_annotation, desugar_async_expression, desugar_await_expression,
         desugar_data_class, desugar_default_parameters, desugar_defer_expression,
@@ -12,7 +13,6 @@ mod tests {
         DataFormat, IrCaseLabel, IrExpression, IrModifiers, IrStatement, IrVisibility, JavaType,
         SampleMode, SampleSourceKind, Schema, TransformContext, TransformError, VirtualThreadOp,
     };
-    use crate::context::SequenceStyleCache;
     use jv_ast::*;
     use sha2::{Digest, Sha256};
     use std::fs;
@@ -1627,11 +1627,16 @@ mod tests {
             .expect_err("mixed whitespace array should error");
 
         match error {
-            TransformError::WhitespaceSequenceTypeMismatch { expected, found, .. } => {
+            TransformError::WhitespaceSequenceTypeMismatch {
+                expected, found, ..
+            } => {
                 assert!(expected.contains("int") || expected.contains("Int"));
                 assert!(found.contains("String"));
             }
-            other => panic!("expected whitespace sequence mismatch error, got {:?}", other),
+            other => panic!(
+                "expected whitespace sequence mismatch error, got {:?}",
+                other
+            ),
         }
     }
 
@@ -1656,11 +1661,16 @@ mod tests {
             .expect_err("mixed whitespace call should error");
 
         match error {
-            TransformError::WhitespaceSequenceTypeMismatch { expected, found, .. } => {
+            TransformError::WhitespaceSequenceTypeMismatch {
+                expected, found, ..
+            } => {
                 assert!(expected.contains("int") || expected.contains("Int"));
                 assert!(found.contains("String"));
             }
-            other => panic!("expected whitespace sequence mismatch error, got {:?}", other),
+            other => panic!(
+                "expected whitespace sequence mismatch error, got {:?}",
+                other
+            ),
         }
     }
 

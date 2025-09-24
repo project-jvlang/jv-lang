@@ -96,7 +96,10 @@ impl Default for JvLanguageServer {
     }
 }
 
-fn tooling_diagnostic_to_lsp(uri: &str, diagnostic: jv_checker::diagnostics::ToolingDiagnostic) -> Diagnostic {
+fn tooling_diagnostic_to_lsp(
+    uri: &str,
+    diagnostic: jv_checker::diagnostics::ToolingDiagnostic,
+) -> Diagnostic {
     let range = diagnostic
         .span
         .as_ref()

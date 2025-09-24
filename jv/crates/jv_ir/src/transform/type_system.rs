@@ -174,11 +174,7 @@ fn validate_whitespace_call(
     Ok(())
 }
 
-fn sequence_type_mismatch(
-    expected: &JavaType,
-    found: &JavaType,
-    span: &Span,
-) -> TransformError {
+fn sequence_type_mismatch(expected: &JavaType, found: &JavaType, span: &Span) -> TransformError {
     TransformError::WhitespaceSequenceTypeMismatch {
         expected: describe_java_type(expected),
         found: describe_java_type(found),
@@ -211,10 +207,7 @@ fn describe_java_type(java_type: &JavaType) -> String {
             }
             descriptor
         }
-        JavaType::Functional {
-            interface_name,
-            ..
-        } => interface_name.clone(),
+        JavaType::Functional { interface_name, .. } => interface_name.clone(),
         JavaType::Void => "void".to_string(),
     }
 }

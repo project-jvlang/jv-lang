@@ -225,7 +225,8 @@ fn preprocess_tokens(tokens: Vec<Token>) -> Vec<Token> {
             suppress_definition_call = true;
         }
 
-        let mut is_call_left_paren = matches!(token_type_ref, TokenType::LeftParen) && call_eligible;
+        let mut is_call_left_paren =
+            matches!(token_type_ref, TokenType::LeftParen) && call_eligible;
         if is_call_left_paren && suppress_definition_call {
             is_call_left_paren = false;
             suppress_definition_call = false;
@@ -267,7 +268,10 @@ fn preprocess_tokens(tokens: Vec<Token>) -> Vec<Token> {
                 result.push(token);
             }
             TokenType::RightBracket => {
-                if matches!(stack.last().map(|ctx| ctx.kind), Some(SequenceContextKind::Array)) {
+                if matches!(
+                    stack.last().map(|ctx| ctx.kind),
+                    Some(SequenceContextKind::Array)
+                ) {
                     stack.pop();
                 }
                 if let Some(ctx) = stack.last_mut() {
@@ -288,7 +292,10 @@ fn preprocess_tokens(tokens: Vec<Token>) -> Vec<Token> {
                 result.push(token);
             }
             TokenType::RightParen => {
-                if matches!(stack.last().map(|ctx| ctx.kind), Some(SequenceContextKind::Call)) {
+                if matches!(
+                    stack.last().map(|ctx| ctx.kind),
+                    Some(SequenceContextKind::Call)
+                ) {
                     stack.pop();
                 }
                 if let Some(ctx) = stack.last_mut() {

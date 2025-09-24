@@ -2,13 +2,13 @@
 mod compat;
 mod config;
 
-pub use config::{
-    BuildConfig, CliRequirement, JavaTarget, NetworkPolicy, SampleCliDependencies, SampleConfig,
-    SampleConfigError, SampleDependency, SampleProtocol,
-};
 pub use compat::{
     CompatibilityAnalyzer, CompatibilityError, CompatibilityEvidence, CompatibilityFinding,
     CompatibilityReport, CompatibilityStatus, DetectedVersion,
+};
+pub use config::{
+    BuildConfig, CliRequirement, JavaTarget, NetworkPolicy, SampleCliDependencies, SampleConfig,
+    SampleConfigError, SampleDependency, SampleProtocol,
 };
 
 use anyhow::Result;

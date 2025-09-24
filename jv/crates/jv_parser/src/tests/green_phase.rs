@@ -588,9 +588,7 @@ fn test_whitespace_call_arguments() {
 
 #[test]
 fn test_whitespace_call_preserves_trailing_lambda() {
-    let program = parse_program(
-        "val result = plot(1 2) { sample -> sample * sample }",
-    );
+    let program = parse_program("val result = plot(1 2) { sample -> sample * sample }");
     let statement = first_statement(&program);
 
     match statement {

@@ -3,9 +3,7 @@ use jv_ast::{CallArgumentStyle, Expression, SequenceDelimiter, Statement};
 
 #[test]
 fn whitespace_array_does_not_leak_into_comma_array() {
-    let program = parse_program(
-        "val layout_first = [1 2 3]\nval comma_second = [4, 5, 6]",
-    );
+    let program = parse_program("val layout_first = [1 2 3]\nval comma_second = [4, 5, 6]");
 
     let first = program
         .statements
@@ -39,9 +37,7 @@ fn whitespace_array_does_not_leak_into_comma_array() {
 
 #[test]
 fn whitespace_call_does_not_force_following_calls_to_layout_style() {
-    let program = parse_program(
-        "val layout_call = plot(1 2 3)\nval comma_call = plot(4, 5, 6)",
-    );
+    let program = parse_program("val layout_call = plot(1 2 3)\nval comma_call = plot(4, 5, 6)");
 
     let first = program
         .statements
@@ -54,9 +50,7 @@ fn whitespace_call_does_not_force_following_calls_to_layout_style() {
 
     match first {
         Statement::ValDeclaration { initializer, .. } => match initializer {
-            Expression::Call {
-                argument_style, ..
-            } => {
+            Expression::Call { argument_style, .. } => {
                 assert_eq!(*argument_style, CallArgumentStyle::Whitespace);
             }
             other => panic!("expected call initializer, found {:?}", other),
@@ -66,9 +60,7 @@ fn whitespace_call_does_not_force_following_calls_to_layout_style() {
 
     match second {
         Statement::ValDeclaration { initializer, .. } => match initializer {
-            Expression::Call {
-                argument_style, ..
-            } => {
+            Expression::Call { argument_style, .. } => {
                 assert_eq!(*argument_style, CallArgumentStyle::Comma);
             }
             other => panic!("expected call initializer, found {:?}", other),

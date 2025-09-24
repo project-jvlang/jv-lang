@@ -105,7 +105,10 @@ impl CompatibilityAnalyzer {
         Self { target }
     }
 
-    pub fn analyze_config(&self, config: &BuildConfig) -> Result<CompatibilityReport, CompatibilityError> {
+    pub fn analyze_config(
+        &self,
+        config: &BuildConfig,
+    ) -> Result<CompatibilityReport, CompatibilityError> {
         let classpath = config.classpath.iter().map(PathBuf::from);
         self.analyze_classpath(classpath)
     }
@@ -157,7 +160,10 @@ impl CompatibilityAnalyzer {
         highest_major: &mut Option<u16>,
     ) -> Result<(), CompatibilityError> {
         if !path.exists() {
-            warnings.push(format!("クラスパス項目が見つかりません: {}", path.display()));
+            warnings.push(format!(
+                "クラスパス項目が見つかりません: {}",
+                path.display()
+            ));
             return Ok(());
         }
 
@@ -175,7 +181,11 @@ impl CompatibilityAnalyzer {
             return Ok(());
         }
 
-        match path.extension().and_then(|ext| ext.to_str()).map(|s| s.to_ascii_lowercase()) {
+        match path
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .map(|s| s.to_ascii_lowercase())
+        {
             Some(ref ext) if ext == "jar" || ext == "zip" => {
                 self.inspect_archive(path, findings, highest_major)?;
             }
@@ -205,10 +215,12 @@ impl CompatibilityAnalyzer {
         })?;
 
         for index in 0..archive.len() {
-            let mut entry = archive.by_index(index).map_err(|source| CompatibilityError::Zip {
-                path: path.to_path_buf(),
-                source,
-            })?;
+            let mut entry = archive
+                .by_index(index)
+                .map_err(|source| CompatibilityError::Zip {
+                    path: path.to_path_buf(),
+                    source,
+                })?;
 
             if entry.name().eq_ignore_ascii_case("META-INF/MANIFEST.MF") {
                 if let Some(version) = extract_manifest_version(&mut entry) {
@@ -429,9 +441,7 @@ mod tests {
             let file = File::create(&jar_path).unwrap();
             let mut writer = zip::ZipWriter::new(file);
             let options = FileOptions::default();
-            writer
-                .start_file("META-INF/MANIFEST.MF", options)
-                .unwrap();
+            writer.start_file("META-INF/MANIFEST.MF", options).unwrap();
             writer
                 .write_all(b"Manifest-Version: 1.0\nBuild-Jdk: 25.0.1\n")
                 .unwrap();
@@ -439,15 +449,11 @@ mod tests {
         }
 
         let analyzer = CompatibilityAnalyzer::new(JavaTarget::Java21);
-        let report = analyzer
-            .analyze_classpath([jar_path.clone()])
-            .unwrap();
+        let report = analyzer.analyze_classpath([jar_path.clone()]).unwrap();
 
         assert!(matches!(
             report.status,
-            CompatibilityStatus::RequiresHigherTarget {
-                required_major: 69
-            }
+            CompatibilityStatus::RequiresHigherTarget { required_major: 69 }
         ));
         assert_eq!(report.required_release(), Some(25));
         assert!(report
@@ -467,15 +473,11 @@ mod tests {
         fs::write(&class_path, bytes).unwrap();
 
         let analyzer = CompatibilityAnalyzer::new(JavaTarget::Java21);
-        let report = analyzer
-            .analyze_classpath([class_path.clone()])
-            .unwrap();
+        let report = analyzer.analyze_classpath([class_path.clone()]).unwrap();
 
         assert!(matches!(
             report.status,
-            CompatibilityStatus::RequiresHigherTarget {
-                required_major: 69
-            }
+            CompatibilityStatus::RequiresHigherTarget { required_major: 69 }
         ));
         assert_eq!(report.required_release(), Some(25));
 
@@ -491,9 +493,7 @@ mod tests {
         fs::write(&class_path, bytes).unwrap();
 
         let analyzer = CompatibilityAnalyzer::new(JavaTarget::Java21);
-        let report = analyzer
-            .analyze_classpath([class_path.clone()])
-            .unwrap();
+        let report = analyzer.analyze_classpath([class_path.clone()]).unwrap();
 
         assert!(report.is_compatible());
         assert!(report

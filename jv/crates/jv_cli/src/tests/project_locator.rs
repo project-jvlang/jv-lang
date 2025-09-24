@@ -64,7 +64,11 @@ fn locate_blocks_relative_escape_outside_workspace() {
     let temp_dir = TempDirGuard::new("project-locator-escape");
     let nested = temp_dir.path().join("nested/inner");
     fs::create_dir_all(&nested).unwrap();
-    fs::write(temp_dir.path().join("jv.toml"), "[package]\nname = \"demo\"\n").unwrap();
+    fs::write(
+        temp_dir.path().join("jv.toml"),
+        "[package]\nname = \"demo\"\n",
+    )
+    .unwrap();
 
     let _dir_guard = WorkingDirGuard::change_to(&nested);
 

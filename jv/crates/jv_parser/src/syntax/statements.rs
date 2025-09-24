@@ -10,8 +10,8 @@ use super::expressions;
 use super::parameters::parameter_list;
 use super::support::{
     expression_span, identifier, identifier_with_span, keyword as support_keyword, merge_spans,
-    span_from_token, statement_span, token_any_comma, token_assign, token_at, token_class, token_colon,
-    token_data, token_defer, token_dot, token_fun, token_left_brace, token_left_paren,
+    span_from_token, statement_span, token_any_comma, token_assign, token_at, token_class,
+    token_colon, token_data, token_defer, token_dot, token_fun, token_left_brace, token_left_paren,
     token_return, token_right_brace, token_right_paren, token_spawn, token_use, token_val,
     token_var, type_annotation_simple,
 };

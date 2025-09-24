@@ -30,13 +30,7 @@ impl TempFixture {
             .start_file("META-INF/MANIFEST.MF", options)
             .expect("start manifest");
         writer
-            .write_all(
-                format!(
-                    "Manifest-Version: 1.0\nBuild-Jdk: {}\n",
-                    build_jdk
-                )
-                .as_bytes(),
-            )
+            .write_all(format!("Manifest-Version: 1.0\nBuild-Jdk: {}\n", build_jdk).as_bytes())
             .expect("write manifest");
         writer.finish().expect("finish jar");
         jar_path
@@ -61,11 +55,17 @@ impl Drop for TempFixture {
 fn set_target_refreshes_release_flags() {
     let mut config = BuildConfig::default();
     assert_eq!(config.target, JavaTarget::Java25);
-    assert_eq!(config.compiler_options, vec!["--release".to_string(), "25".to_string()]);
+    assert_eq!(
+        config.compiler_options,
+        vec!["--release".to_string(), "25".to_string()]
+    );
 
     config.set_target(JavaTarget::Java21);
     assert_eq!(config.target, JavaTarget::Java21);
-    assert_eq!(config.compiler_options, vec!["--release".to_string(), "21".to_string()]);
+    assert_eq!(
+        config.compiler_options,
+        vec!["--release".to_string(), "21".to_string()]
+    );
 
     config.set_target(JavaTarget::Java25);
     assert_eq!(config.compiler_options[1], "25");

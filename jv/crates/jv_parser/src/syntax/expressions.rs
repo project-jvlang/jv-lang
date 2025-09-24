@@ -9,8 +9,8 @@ use jv_lexer::{Token, TokenType};
 use super::patterns::{self, pattern_span};
 use super::support::{
     expression_span, identifier, identifier_with_span, keyword, merge_spans, span_from_token,
-    token_and, token_any_comma, token_arrow, token_assign, token_colon, token_comma, token_divide, token_dot,
-    token_else, token_elvis, token_equal, token_greater, token_greater_equal, token_if,
+    token_and, token_any_comma, token_arrow, token_assign, token_colon, token_comma, token_divide,
+    token_dot, token_else, token_elvis, token_equal, token_greater, token_greater_equal, token_if,
     token_layout_comma, token_left_brace, token_left_bracket, token_left_paren, token_less,
     token_less_equal, token_minus, token_modulo, token_multiply, token_not, token_not_equal,
     token_null_safe, token_or, token_plus, token_question, token_right_brace, token_right_bracket,
@@ -331,11 +331,26 @@ enum PostfixOp {
         style: CallArgumentStyle,
         span: Span,
     },
-    Member { property: String, span: Span },
-    NullSafeMember { property: String, span: Span },
-    Index { index: Expression, span: Span },
-    NullSafeIndex { index: Expression, span: Span },
-    TrailingLambda { lambda: Expression, span: Span },
+    Member {
+        property: String,
+        span: Span,
+    },
+    NullSafeMember {
+        property: String,
+        span: Span,
+    },
+    Index {
+        index: Expression,
+        span: Span,
+    },
+    NullSafeIndex {
+        index: Expression,
+        span: Span,
+    },
+    TrailingLambda {
+        lambda: Expression,
+        span: Span,
+    },
 }
 
 fn postfix_expression_parser(

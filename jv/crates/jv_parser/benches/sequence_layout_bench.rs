@@ -7,7 +7,10 @@ use jv_parser::Parser;
 fn first_whitespace_array_span(program: &Program) -> Option<Span> {
     program.statements.iter().find_map(|statement| {
         if let Statement::ValDeclaration { initializer, .. } = statement {
-            if let Expression::Array { delimiter, span, .. } = initializer {
+            if let Expression::Array {
+                delimiter, span, ..
+            } = initializer
+            {
                 if matches!(delimiter, jv_ast::SequenceDelimiter::Whitespace) {
                     return Some(span.clone());
                 }

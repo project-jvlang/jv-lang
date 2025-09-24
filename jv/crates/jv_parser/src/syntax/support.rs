@@ -86,8 +86,7 @@ pub(crate) fn token_layout_comma() -> impl ChumskyParser<Token, Token, Error = S
     filter(|token: &Token| matches!(token.token_type, TokenType::LayoutComma))
 }
 
-pub(crate) fn token_any_comma() -> impl ChumskyParser<Token, Token, Error = Simple<Token>> + Clone
-{
+pub(crate) fn token_any_comma() -> impl ChumskyParser<Token, Token, Error = Simple<Token>> + Clone {
     choice((token_comma(), token_layout_comma()))
 }
 

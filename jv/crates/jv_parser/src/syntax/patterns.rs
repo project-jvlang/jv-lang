@@ -48,7 +48,12 @@ pub(crate) fn when_pattern_parser(
             .then(
                 token_left_paren()
                     .map(|token| span_from_token(&token))
-                    .then(pattern.clone().separated_by(token_any_comma()).allow_trailing())
+                    .then(
+                        pattern
+                            .clone()
+                            .separated_by(token_any_comma())
+                            .allow_trailing(),
+                    )
                     .then(token_right_paren().map(|token| span_from_token(&token)))
                     .map(|((left_span, arguments), right_span)| {
                         let span = merge_spans(&left_span, &right_span);
