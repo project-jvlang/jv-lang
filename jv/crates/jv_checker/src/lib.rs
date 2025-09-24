@@ -1,4 +1,5 @@
 // jv_checker - Static analysis and validation
+pub mod compat;
 pub mod diagnostics;
 
 use jv_ast::*;

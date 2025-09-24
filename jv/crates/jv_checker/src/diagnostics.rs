@@ -45,7 +45,10 @@ const DIAGNOSTICS: &[DiagnosticDescriptor] = &[
 
 /// 診断コードに対応するディスクリプタを取得します。
 pub fn lookup(code: &str) -> Option<&'static DiagnosticDescriptor> {
-    DIAGNOSTICS.iter().find(|desc| desc.code == code)
+    DIAGNOSTICS
+        .iter()
+        .chain(crate::compat::diagnostics::ENTRIES.iter())
+        .find(|desc| desc.code == code)
 }
 
 /// パーサーのエラーからホワイトスペース関連診断を抽出します。
@@ -68,15 +71,16 @@ pub fn from_transform_error(error: &TransformError) -> Option<ToolingDiagnostic>
 }
 
 fn detect_in_message(message: &str, span: Option<Span>) -> Option<ToolingDiagnostic> {
-    let code = DIAGNOSTICS
+    let descriptor = DIAGNOSTICS
         .iter()
+        .chain(crate::compat::diagnostics::ENTRIES.iter())
         .find(|descriptor| message.contains(descriptor.code))?;
 
     Some(ToolingDiagnostic {
-        code: code.code,
-        title: code.title,
+        code: descriptor.code,
+        title: descriptor.title,
         message: message.to_string(),
-        help: code.help,
+        help: descriptor.help,
         span,
     })
 }

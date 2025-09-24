@@ -1,12 +1,14 @@
 use super::*;
 
+mod compat;
+
+use jv_build::{BuildConfig, BuildSystem, JavaTarget};
 use std::fs;
 use std::fs::File;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
-use jv_build::{BuildConfig, BuildSystem, JavaTarget};
 use zip::write::FileOptions;
 
 struct TempDirGuard {
@@ -227,9 +229,7 @@ fn preflight_blocks_incompatible_classpath() {
         let file = File::create(&jar_path).unwrap();
         let mut writer = zip::ZipWriter::new(file);
         let options = FileOptions::default();
-        writer
-            .start_file("META-INF/MANIFEST.MF", options)
-            .unwrap();
+        writer.start_file("META-INF/MANIFEST.MF", options).unwrap();
         writer
             .write_all(b"Manifest-Version: 1.0\nBuild-Jdk: 25.0.0\n")
             .unwrap();

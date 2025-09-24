@@ -1,5 +1,5 @@
 // jv_cli - CLI functionality (library interface for testing)
-use anyhow::{Context, Result};
+use anyhow::Result;
 use clap::Parser;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -172,9 +172,14 @@ pub mod pipeline {
         include!("pipeline/compat.rs");
     }
 
+    pub mod report {
+        include!("pipeline/report.rs");
+    }
+
     use super::*;
-    use anyhow::{anyhow, bail};
+    use anyhow::{anyhow, bail, Context};
     use jv_build::{BuildConfig, BuildSystem, JavaTarget};
+    use jv_checker::compat::diagnostics as compat_diagnostics;
     use jv_checker::TypeChecker;
     use jv_codegen_java::{JavaCodeGenConfig, JavaCodeGenerator};
     use jv_fmt::JavaFormatter;
@@ -216,6 +221,8 @@ pub mod pipeline {
         pub class_files: Vec<PathBuf>,
         pub javac_version: Option<String>,
         pub warnings: Vec<String>,
+        pub compatibility: Option<report::RenderedCompatibilityReport>,
+        pub compatibility_diagnostics: Vec<ToolingDiagnostic>,
     }
 
     /// Compile a `.jv` file end-to-end into Java (and optionally `.class`) outputs.
@@ -233,7 +240,12 @@ pub mod pipeline {
 
         let compatibility_report =
             compat::preflight(&BuildSystem::new(build_config.clone()), &options.input)?;
-        warnings.extend(compatibility_report.warnings.clone());
+        let target_label = format!("Java{}", compatibility_report.target);
+        let compatibility_diagnostics = compatibility_report
+            .warnings
+            .iter()
+            .map(|warning| compat_diagnostics::fallback_applied(&target_label, warning))
+            .collect::<Vec<_>>();
 
         let source = fs::read_to_string(&options.input)
             .with_context(|| format!("Failed to read file: {}", options.input.display()))?;
@@ -322,6 +334,8 @@ pub mod pipeline {
             class_files: Vec::new(),
             javac_version: None,
             warnings,
+            compatibility: None,
+            compatibility_diagnostics,
         };
 
         if !options.java_only {
@@ -361,6 +375,15 @@ pub mod pipeline {
                 }
             }
         }
+
+        let rendered_report = report::render(&compatibility_report, &options.output_dir)
+            .with_context(|| {
+                format!(
+                    "Failed to render compatibility report into {}",
+                    options.output_dir.display()
+                )
+            })?;
+        artifacts.compatibility = Some(rendered_report);
 
         Ok(artifacts)
     }

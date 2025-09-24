@@ -8,8 +8,8 @@ use std::path::{Path, PathBuf};
 use jv_checker::diagnostics::{from_parse_error, from_transform_error};
 use jv_checker::TypeChecker;
 use jv_fmt::JavaFormatter;
-use jv_parser::Parser as JvParser;
 use jv_ir::transform_program;
+use jv_parser::Parser as JvParser;
 
 use jv_cli::pipeline::{compile, produce_binary, run_program, BuildOptions};
 use jv_cli::tour::TourOrchestrator;
@@ -64,6 +64,13 @@ fn main() -> Result<()> {
                 println!("Using javac: {}", version);
             }
 
+            for diagnostic in &artifacts.compatibility_diagnostics {
+                println!(
+                    "{}",
+                    jv_cli::format_tooling_diagnostic(options.input.as_path(), diagnostic)
+                );
+            }
+
             for warning in &artifacts.warnings {
                 println!("Warning: {}", warning);
             }
@@ -79,6 +86,16 @@ fn main() -> Result<()> {
             if let Some(kind) = binary {
                 let artifact_path = produce_binary(&options.output_dir, &bin_name, &kind)?;
                 println!("Produced {} artifact at {}", kind, artifact_path.display());
+            }
+
+            if let Some(compat) = &artifacts.compatibility {
+                println!();
+                println!("{}", compat.summary);
+                println!("{}", compat.table);
+                println!(
+                    "互換性レポート出力先 / Compatibility report: {}",
+                    compat.json_path.display()
+                );
             }
         }
         Some(Commands::Run { input, args }) => {

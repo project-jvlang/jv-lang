@@ -1,7 +1,7 @@
 use super::*;
 use anyhow::Result;
 use jv_build::{BuildSystem, CompatibilityReport, CompatibilityStatus};
-use jv_checker::diagnostics::ToolingDiagnostic;
+use jv_checker::compat::diagnostics as compat_diagnostics;
 use std::path::Path;
 
 pub fn preflight(build_system: &BuildSystem, input_path: &Path) -> Result<CompatibilityReport> {
@@ -23,18 +23,12 @@ pub fn preflight(build_system: &BuildSystem, input_path: &Path) -> Result<Compat
             .map(|finding| finding.artifact.as_str())
             .unwrap_or("クラスパス項目");
 
-        let diagnostic = ToolingDiagnostic {
-            code: "JV2001",
-            title: "依存ライブラリが要求する Java バージョンに未対応です",
-            message: format!(
-                "{} は {} 以上を必要とするため、ターゲット {} ではビルドできません。",
-                artifact,
-                required_label,
-                report.target
-            ),
-            help: "jv.toml の [build].java_version または CLI オプション --target を必要なバージョンへ更新するか、互換性のある依存ライブラリへ置き換えてください。",
-            span: None,
-        };
+        let target_label = format!("Java{}", report.target);
+        let diagnostic = compat_diagnostics::requires_higher_target(
+            artifact,
+            &required_label,
+            &target_label,
+        );
 
         return Err(tooling_failure(input_path, diagnostic));
     }
