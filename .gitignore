@@ -1,6 +1,7 @@
 # Rust build artifacts
 /target/
 /jv/target/
+**/target/
 Cargo.lock
 
 # Rust debugging and profiling

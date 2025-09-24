@@ -1,5 +1,7 @@
 use super::*;
 
+mod java_target_matrix;
+
 #[test]
 fn test_build_config_default() {
     let config = BuildConfig::default();

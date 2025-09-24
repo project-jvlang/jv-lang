@@ -85,3 +85,30 @@ fn sealed_type_falls_back_to_final_for_java21() {
 
     assert_snapshot!("sealed_java21", source);
 }
+
+#[test]
+fn sealed_type_permits_clause_aligns_with_target() {
+    let program = sealed_program();
+
+    let mut modern =
+        JavaCodeGenerator::with_config(JavaCodeGenConfig::for_target(JavaTarget::Java25));
+    let modern_source = modern
+        .generate_compilation_unit(&program)
+        .expect("java 25 generation")
+        .to_source(&JavaCodeGenConfig::for_target(JavaTarget::Java25));
+    assert!(
+        modern_source.contains("public sealed class Result permits Success, Failure"),
+        "Java 25 should retain sealed permits clause"
+    );
+
+    let mut legacy =
+        JavaCodeGenerator::with_config(JavaCodeGenConfig::for_target(JavaTarget::Java21));
+    let legacy_source = legacy
+        .generate_compilation_unit(&program)
+        .expect("java 21 generation")
+        .to_source(&JavaCodeGenConfig::for_target(JavaTarget::Java21));
+    assert!(
+        legacy_source.contains("public final class Result {"),
+        "Java 21 fallback should emit final class declaration"
+    );
+}
