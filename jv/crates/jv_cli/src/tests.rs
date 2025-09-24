@@ -1,6 +1,7 @@
 use super::*;
 
 mod compat;
+mod project_locator;
 
 use jv_build::{BuildConfig, BuildSystem, JavaTarget};
 use std::fs;

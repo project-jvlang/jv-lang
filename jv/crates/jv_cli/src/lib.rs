@@ -176,6 +176,12 @@ pub mod pipeline {
         include!("pipeline/report.rs");
     }
 
+    pub mod project {
+        pub mod locator {
+            include!("pipeline/project/locator.rs");
+        }
+    }
+
     use super::*;
     use anyhow::{anyhow, bail, Context};
     use jv_build::{BuildConfig, BuildSystem, JavaTarget};
@@ -414,28 +420,10 @@ pub mod pipeline {
     }
 
     fn discover_manifest(input: &Path) -> Option<PathBuf> {
-        let mut current = if input.is_dir() {
-            input.to_path_buf()
-        } else {
-            input
-                .parent()
-                .map(Path::to_path_buf)
-                .filter(|path| !path.as_os_str().is_empty())
-                .unwrap_or_else(|| PathBuf::from("."))
-        };
-
-        loop {
-            let candidate = current.join("jv.toml");
-            if candidate.exists() {
-                return Some(candidate);
-            }
-
-            if !current.pop() {
-                break;
-            }
-        }
-
-        None
+        project::locator::ProjectLocator::new()
+            .locate(input)
+            .map(|root| root.manifest_path().to_path_buf())
+            .ok()
     }
 
     /// Compile and execute a `.jv` program using the Java runtime.
