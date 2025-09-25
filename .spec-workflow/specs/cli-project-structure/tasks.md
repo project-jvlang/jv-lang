@@ -16,7 +16,7 @@
   - _Requirements: 要件 1_
   - _Prompt: Implement the task for spec cli-project-structure, first run spec-workflow-guide to get the workflow guide then implement the task: Role: Rust Configuration Engineer | Task: Extend manifest parsing so `jv.toml` feeds `ProjectSettings` with include/exclude patterns, output options, and entrypoint metadata while validating values against requirement 1 | Restrictions: Reuse existing serde/toml infrastructure, add serde structs instead of ad-hoc parsing, and cover edge cases via unit tests in `jv_pm` | _Leverage: Manifest loader, BuildInfo structures | _Requirements: 要件 1 | Success: Valid manifests hydrate settings correctly, invalid fields yield JV1001 diagnostics with location data, and tests document behaviour | Workflow: Mark this task as [-] before editing and to [x] after code/tests are complete_
 
-- [ ] 3. ソース列挙とレイアウト構築を実装
+- [x] 3. ソース列挙とレイアウト構築を実装
   - Files: jv/crates/jv_cli/src/pipeline/project/layout.rs (新規), jv/crates/jv_cli/src/tests/project_layout.rs (新規)
   - `ProjectLayout` を実装し、`ProjectSettings` の include/exclude を適用して `.jv` ソースを列挙、エントリポイント推論を行う
   - ソースがゼロ件の場合やエントリポイント不明時には `ToolingDiagnostic(JV1002)` を返す
@@ -24,7 +24,7 @@
   - _Requirements: 要件 2_
   - _Prompt: Implement the task for spec cli-project-structure, first run spec-workflow-guide to get the workflow guide then implement the task: Role: Rust Build Pipeline Engineer | Task: Create `ProjectLayout` that applies include/exclude patterns, deduplicates sources, resolves entrypoints, and raises JV1002 when nothing is buildable | Restrictions: Avoid introducing heavy glob dependencies (prefer `globset` if already in tree, otherwise implement lightweight matching), ensure deterministic ordering, and add unit tests covering pattern precedence | _Leverage: CLI test helpers, standard fs utilities | _Requirements: 要件 2 | Success: Layout returns ordered sources and a valid entrypoint, diagnostics fire on empty sets, and tests verify pattern handling | Workflow: Mark this task as [-] before editing and to [x] after verification_
 
-- [ ] 4. BuildOptions統合とパイプライン接続を実装
+- [x] 4. BuildOptions統合とパイプライン接続を実装
   - Files: jv/crates/jv_cli/src/pipeline/build_plan.rs (新規), jv/crates/jv_cli/src/pipeline/mod.rs, jv/crates/jv_cli/src/main.rs, jv/crates/jv_cli/src/tests/build_plan.rs (新規)
   - `BuildOptionsFactory` を実装し、`ProjectLayout` + CLIオーバーライドから `BuildOptions` と `BuildConfig` を構築する
   - `Commands::Build`/`Run` で新しいプロジェクト解決フローを呼び出し、既存の `compile` / `run_program` が `BuildPlan` を受け取るように改修する

@@ -11,7 +11,10 @@ use jv_fmt::JavaFormatter;
 use jv_ir::transform_program;
 use jv_parser::Parser as JvParser;
 
-use jv_cli::pipeline::{compile, produce_binary, run_program, BuildOptions};
+use jv_cli::pipeline::project::{
+    layout::ProjectLayout, locator::ProjectLocator, manifest::ManifestLoader,
+};
+use jv_cli::pipeline::{compile, produce_binary, run_program, BuildOptionsFactory, CliOverrides};
 use jv_cli::tour::TourOrchestrator;
 use jv_cli::{get_version, init_project as cli_init_project, Cli, Commands};
 
@@ -47,14 +50,43 @@ fn main() -> Result<()> {
             bin_name,
             target,
         }) => {
-            let mut options = BuildOptions::new(input.as_str(), output.as_str());
-            options.java_only = java_only;
-            options.check = check;
-            options.format = format;
-            options.target_override = target;
+            let cwd = std::env::current_dir()?;
+            let start_path = input
+                .as_ref()
+                .map(|value| {
+                    let candidate = PathBuf::from(value);
+                    if candidate.is_absolute() {
+                        candidate
+                    } else {
+                        cwd.join(candidate)
+                    }
+                })
+                .unwrap_or_else(|| cwd.clone());
 
-            let artifacts =
-                compile(&options).with_context(|| format!("Failed to compile {}", input))?;
+            let project_root = ProjectLocator::new()
+                .locate(&start_path)
+                .map_err(|diagnostic| tooling_failure(&start_path, diagnostic))?;
+            let manifest_path = project_root.manifest_path().to_path_buf();
+
+            let settings = ManifestLoader::load(&manifest_path)
+                .map_err(|diagnostic| tooling_failure(&manifest_path, diagnostic))?;
+            let layout = ProjectLayout::from_settings(&project_root, &settings)
+                .map_err(|diagnostic| tooling_failure(&manifest_path, diagnostic))?;
+
+            let overrides = CliOverrides {
+                entrypoint: input.clone().map(PathBuf::from),
+                output: output.clone().map(PathBuf::from),
+                java_only,
+                check,
+                format,
+                target,
+            };
+
+            let plan = BuildOptionsFactory::compose(project_root, settings, layout, overrides)
+                .map_err(|diagnostic| tooling_failure(&manifest_path, diagnostic))?;
+
+            let artifacts = compile(&plan)
+                .with_context(|| format!("Failed to compile {}", plan.entrypoint().display()))?;
 
             for java_file in &artifacts.java_files {
                 println!("Generated: {}", java_file.display());
@@ -67,7 +99,7 @@ fn main() -> Result<()> {
             for diagnostic in &artifacts.compatibility_diagnostics {
                 println!(
                     "{}",
-                    jv_cli::format_tooling_diagnostic(options.input.as_path(), diagnostic)
+                    jv_cli::format_tooling_diagnostic(plan.entrypoint(), diagnostic)
                 );
             }
 
@@ -84,7 +116,7 @@ fn main() -> Result<()> {
             }
 
             if let Some(kind) = binary {
-                let artifact_path = produce_binary(&options.output_dir, &bin_name, &kind)?;
+                let artifact_path = produce_binary(plan.output_dir(), &bin_name, &kind)?;
                 println!("Produced {} artifact at {}", kind, artifact_path.display());
             }
 
@@ -99,8 +131,40 @@ fn main() -> Result<()> {
             }
         }
         Some(Commands::Run { input, args }) => {
-            run_program(input.as_str(), &args)
-                .with_context(|| format!("Failed to run {}", input))?;
+            let cwd = std::env::current_dir()?;
+            let start_path = {
+                let candidate = PathBuf::from(&input);
+                if candidate.is_absolute() {
+                    candidate
+                } else {
+                    cwd.join(candidate)
+                }
+            };
+
+            let project_root = ProjectLocator::new()
+                .locate(&start_path)
+                .map_err(|diagnostic| tooling_failure(&start_path, diagnostic))?;
+            let manifest_path = project_root.manifest_path().to_path_buf();
+
+            let settings = ManifestLoader::load(&manifest_path)
+                .map_err(|diagnostic| tooling_failure(&manifest_path, diagnostic))?;
+            let layout = ProjectLayout::from_settings(&project_root, &settings)
+                .map_err(|diagnostic| tooling_failure(&manifest_path, diagnostic))?;
+
+            let overrides = CliOverrides {
+                entrypoint: Some(PathBuf::from(&input)),
+                output: None,
+                java_only: false,
+                check: false,
+                format: false,
+                target: None,
+            };
+
+            let plan = BuildOptionsFactory::compose(project_root, settings, layout, overrides)
+                .map_err(|diagnostic| tooling_failure(&manifest_path, diagnostic))?;
+
+            run_program(&plan, &args)
+                .with_context(|| format!("Failed to run {}", plan.entrypoint().display()))?;
         }
         Some(Commands::Fmt { files }) => {
             format_jv_files(files)?;

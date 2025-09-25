@@ -2,7 +2,7 @@
 use anyhow::Result;
 use clap::Parser;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use jv_checker::diagnostics::{from_parse_error, from_transform_error, ToolingDiagnostic};
 use jv_pm::JavaTarget;
@@ -25,11 +25,12 @@ pub enum Commands {
     },
     /// Build jv source to Java and compile with javac
     Build {
-        /// Input .jv file
-        input: String,
+        /// Input .jv file (optional; defaults to manifest entrypoint)
+        #[arg(value_name = "entrypoint")]
+        input: Option<String>,
         /// Output directory for .java files
-        #[arg(short, long, default_value = "./out")]
-        output: String,
+        #[arg(short, long)]
+        output: Option<String>,
         /// Skip javac compilation
         #[arg(long)]
         java_only: bool,
@@ -190,43 +191,25 @@ pub mod pipeline {
         }
     }
 
+    pub mod build_plan {
+        include!("pipeline/build_plan.rs");
+    }
+
+    pub use build_plan::{BuildOptions, BuildOptionsFactory, BuildPlan, CliOverrides};
+
     use super::*;
     use anyhow::{anyhow, bail, Context};
-    use jv_build::{BuildConfig, BuildSystem, JavaTarget};
+    use jv_build::BuildSystem;
     use jv_checker::compat::diagnostics as compat_diagnostics;
     use jv_checker::TypeChecker;
     use jv_codegen_java::{JavaCodeGenConfig, JavaCodeGenerator};
     use jv_fmt::JavaFormatter;
     use jv_ir::transform_program;
     use jv_parser::Parser as JvParser;
-    use jv_pm::{Manifest, PackageError};
     use std::ffi::OsStr;
+    use std::path::{Path, PathBuf};
     use std::process::Command;
     use std::time::{SystemTime, UNIX_EPOCH};
-
-    /// Options that control how the CLI build pipeline executes.
-    #[derive(Debug, Clone)]
-    pub struct BuildOptions {
-        pub input: PathBuf,
-        pub output_dir: PathBuf,
-        pub java_only: bool,
-        pub check: bool,
-        pub format: bool,
-        pub target_override: Option<JavaTarget>,
-    }
-
-    impl BuildOptions {
-        pub fn new(input: impl Into<PathBuf>, output_dir: impl Into<PathBuf>) -> Self {
-            Self {
-                input: input.into(),
-                output_dir: output_dir.into(),
-                java_only: false,
-                check: false,
-                format: false,
-                target_override: None,
-            }
-        }
-    }
 
     /// Resulting artifacts and diagnostics from the build pipeline.
     #[derive(Debug, Default, Clone)]
@@ -240,20 +223,20 @@ pub mod pipeline {
     }
 
     /// Compile a `.jv` file end-to-end into Java (and optionally `.class`) outputs.
-    pub fn compile(options: &BuildOptions) -> Result<BuildArtifacts> {
-        if !options.input.exists() {
-            bail!("Input file '{}' not found", options.input.display());
+    pub fn compile(plan: &BuildPlan) -> Result<BuildArtifacts> {
+        let options = &plan.options;
+        let entrypoint = options.entrypoint.as_path();
+
+        if !entrypoint.exists() {
+            bail!("Input file '{}' not found", entrypoint.display());
         }
 
-        let target = resolve_java_target(options)?;
-
         let mut warnings = Vec::new();
-        let output_dir_string = options.output_dir.to_string_lossy().into_owned();
-        let mut build_config = BuildConfig::with_target(target);
-        build_config.output_dir = output_dir_string;
+        let mut build_config = plan.build_config.clone();
+        build_config.output_dir = options.output_dir.to_string_lossy().into_owned();
 
         let compatibility_report =
-            compat::preflight(&BuildSystem::new(build_config.clone()), &options.input)?;
+            compat::preflight(&BuildSystem::new(build_config.clone()), entrypoint)?;
         let target_label = format!("Java{}", compatibility_report.target);
         let compatibility_diagnostics = compatibility_report
             .warnings
@@ -261,14 +244,14 @@ pub mod pipeline {
             .map(|warning| compat_diagnostics::fallback_applied(&target_label, warning))
             .collect::<Vec<_>>();
 
-        let source = fs::read_to_string(&options.input)
-            .with_context(|| format!("Failed to read file: {}", options.input.display()))?;
+        let source = fs::read_to_string(entrypoint)
+            .with_context(|| format!("Failed to read file: {}", entrypoint.display()))?;
 
         let program = match JvParser::parse(&source) {
             Ok(program) => program,
             Err(error) => {
                 if let Some(diagnostic) = from_parse_error(&error) {
-                    return Err(tooling_failure(&options.input, diagnostic));
+                    return Err(tooling_failure(entrypoint, diagnostic));
                 }
                 return Err(anyhow!("Parser error: {:?}", error));
             }
@@ -292,14 +275,14 @@ pub mod pipeline {
             Ok(ir) => ir,
             Err(error) => {
                 if let Some(diagnostic) = from_transform_error(&error) {
-                    return Err(tooling_failure(&options.input, diagnostic));
+                    return Err(tooling_failure(entrypoint, diagnostic));
                 }
                 return Err(anyhow!("IR transformation error: {:?}", error));
             }
         };
 
         let mut code_generator =
-            JavaCodeGenerator::with_config(JavaCodeGenConfig::for_target(target));
+            JavaCodeGenerator::with_config(JavaCodeGenConfig::for_target(build_config.target));
         let java_unit = code_generator
             .generate_compilation_unit(&ir_program)
             .map_err(|e| anyhow!("Code generation error: {:?}", e))?;
@@ -402,40 +385,8 @@ pub mod pipeline {
         Ok(artifacts)
     }
 
-    fn resolve_java_target(options: &BuildOptions) -> Result<JavaTarget> {
-        if let Some(target) = options.target_override {
-            return Ok(target);
-        }
-
-        let Some(manifest_path) = discover_manifest(&options.input) else {
-            return Ok(JavaTarget::default());
-        };
-
-        match Manifest::load_from_path(&manifest_path) {
-            Ok(manifest) => Ok(manifest.java_target()),
-            Err(PackageError::InvalidManifest(message)) => {
-                let diagnostic = ToolingDiagnostic {
-                    code: "JV2000",
-                    title: "jv.toml の Java target が不正です",
-                    message,
-                    help: "jv.toml の [build].java_version には 21 または 25 を指定してください。",
-                    span: None,
-                };
-                Err(tooling_failure(&manifest_path, diagnostic))
-            }
-            Err(error) => Err(anyhow!(error)),
-        }
-    }
-
-    fn discover_manifest(input: &Path) -> Option<PathBuf> {
-        project::locator::ProjectLocator::new()
-            .locate(input)
-            .map(|root| root.manifest_path().to_path_buf())
-            .ok()
-    }
-
     /// Compile and execute a `.jv` program using the Java runtime.
-    pub fn run_program(input: impl AsRef<Path>, args: &[String]) -> Result<()> {
+    pub fn run_program(plan: &BuildPlan, args: &[String]) -> Result<()> {
         let timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
@@ -443,12 +394,12 @@ pub mod pipeline {
         let temp_dir = std::env::temp_dir().join(format!("jv-cli-{}", timestamp));
         fs::create_dir_all(&temp_dir)?;
 
-        let mut options = BuildOptions::new(input.as_ref(), &temp_dir);
-        options.java_only = false;
-        options.check = false;
-        options.format = false;
+        let mut temp_plan = plan.with_output_dir(temp_dir.clone());
+        temp_plan.options.java_only = false;
+        temp_plan.options.check = false;
+        temp_plan.options.format = false;
 
-        let compile_result = match compile(&options) {
+        let compile_result = match compile(&temp_plan) {
             Ok(result) => result,
             Err(err) => {
                 let _ = fs::remove_dir_all(&temp_dir);

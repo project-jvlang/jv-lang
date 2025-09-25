@@ -1,4 +1,5 @@
-use jv_cli::pipeline::{compile, BuildOptions};
+use jv_cli::pipeline::{compile, BuildOptionsFactory, CliOverrides};
+use jv_cli::pipeline::project::{layout::ProjectLayout, locator::ProjectRoot, manifest::ManifestLoader};
 use jv_pm::JavaTarget;
 use serde_json::Value;
 use std::fs;
@@ -46,16 +47,49 @@ impl Drop for TempDirGuard {
 
 fn compile_with_target(label: &str, target: JavaTarget) -> (String, Value) {
     let fixture = TempDirGuard::new(label).expect("temp dir");
-    let input_path = fixture.path().join("program.jv");
-    let output_dir = fixture.path().join("out");
+    let root = fixture.path();
+    let src_dir = root.join("src");
+    fs::create_dir_all(&src_dir).expect("create src dir");
+    let input_path = src_dir.join("main.jv");
     fs::write(&input_path, SAMPLE_SOURCE).expect("write sample source");
 
-    let mut options = BuildOptions::new(&input_path, &output_dir);
-    options.java_only = true;
-    options.format = false;
-    options.target_override = Some(target);
+    let manifest_path = root.join("jv.toml");
+    fs::write(
+        &manifest_path,
+        r#"[package]
+name = "matrix"
+version = "0.1.0"
 
-    let artifacts = compile(&options).expect("pipeline compile succeeds");
+[package.dependencies]
+
+[project]
+entrypoint = "src/main.jv"
+
+[project.sources]
+include = ["src/**/*.jv"]
+"#,
+    )
+    .expect("write manifest");
+
+    let project_root = ProjectRoot::new(root.to_path_buf(), manifest_path.clone());
+    let settings = ManifestLoader::load(&manifest_path).expect("manifest loads");
+    let layout = ProjectLayout::from_settings(&project_root, &settings)
+        .expect("layout resolves sources");
+
+    let output_dir = root.join("out");
+    let overrides = CliOverrides {
+        entrypoint: Some(input_path.clone()),
+        output: Some(output_dir.clone()),
+        java_only: true,
+        check: false,
+        format: false,
+        target: Some(target),
+    };
+
+    let plan = BuildOptionsFactory::compose(project_root, settings, layout, overrides)
+        .expect("plan composition succeeds");
+
+    let artifacts = compile(&plan).expect("pipeline compile succeeds");
     let java_path = artifacts
         .java_files
         .first()

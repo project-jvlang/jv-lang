@@ -4,7 +4,8 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use jv_cli::pipeline::{compile, BuildOptions};
+use jv_cli::pipeline::{compile, BuildOptionsFactory, CliOverrides};
+use jv_cli::pipeline::project::{layout::ProjectLayout, locator::ProjectRoot, manifest::ManifestLoader};
 
 struct TempDirGuard {
     path: PathBuf,
@@ -30,6 +31,50 @@ impl Drop for TempDirGuard {
     fn drop(&mut self) {
         let _ = fs::remove_dir_all(&self.path);
     }
+}
+
+fn compose_plan_from_fixture(
+    project_dir: &Path,
+    fixture: &Path,
+    mut overrides: CliOverrides,
+) -> jv_cli::pipeline::BuildPlan {
+    let manifest_path = project_dir.join("jv.toml");
+    fs::write(
+        &manifest_path,
+        r#"[package]
+name = "integration"
+version = "0.1.0"
+
+[package.dependencies]
+
+[project]
+entrypoint = "src/main.jv"
+
+[project.sources]
+include = ["src/**/*.jv"]
+"#,
+    )
+    .expect("write manifest");
+
+    let src_dir = project_dir.join("src");
+    fs::create_dir_all(&src_dir).expect("create src directory");
+    let entrypoint_path = src_dir.join("main.jv");
+    fs::copy(fixture, &entrypoint_path).expect("copy fixture source");
+
+    let project_root = ProjectRoot::new(project_dir.to_path_buf(), manifest_path.clone());
+    let settings = ManifestLoader::load(&manifest_path).expect("manifest loads");
+    let layout = ProjectLayout::from_settings(&project_root, &settings)
+        .expect("layout enumerates sources");
+
+    if overrides.entrypoint.is_none() {
+        overrides.entrypoint = Some(entrypoint_path);
+    }
+    if overrides.output.is_none() {
+        overrides.output = Some(project_dir.join("out/java"));
+    }
+
+    BuildOptionsFactory::compose(project_root, settings, layout, overrides)
+        .expect("plan composition succeeds")
 }
 
 fn workspace_file(relative: &str) -> PathBuf {
@@ -67,20 +112,40 @@ fn cli_build_generates_java_sources() {
     };
 
     let temp_dir = TempDirGuard::new("cli-build").expect("Failed to create temp dir");
-    let input = workspace_file("test_simple.jv");
+    let project_dir = temp_dir.path().join("project");
+    fs::create_dir_all(project_dir.join("src")).expect("Failed to create project src");
+    fs::copy(
+        workspace_file("test_simple.jv"),
+        project_dir.join("src/main.jv"),
+    )
+    .expect("Failed to copy fixture source");
+    fs::write(
+        project_dir.join("jv.toml"),
+        r#"[package]
+name = "cli"
+version = "0.1.0"
+
+[package.dependencies]
+
+[project]
+entrypoint = "src/main.jv"
+
+[project.sources]
+include = ["src/**/*.jv"]
+"#,
+    )
+    .expect("Failed to write manifest");
 
     let status = Command::new(&cli_path)
+        .current_dir(&project_dir)
         .arg("build")
-        .arg(&input)
         .arg("--java-only")
-        .arg("-o")
-        .arg(temp_dir.path())
         .status()
         .expect("Failed to execute CLI");
 
     assert!(status.success(), "CLI build failed with status: {}", status);
 
-    let java_files: Vec<_> = fs::read_dir(temp_dir.path())
+    let java_files: Vec<_> = fs::read_dir(project_dir.join("out/java"))
         .expect("Failed to read output directory")
         .filter_map(|entry| entry.ok())
         .map(|entry| entry.path())
@@ -102,11 +167,20 @@ fn pipeline_compile_produces_artifacts() {
     let temp_dir = TempDirGuard::new("pipeline").expect("Failed to create temp dir");
     let input = workspace_file("test_simple.jv");
 
-    let mut options = BuildOptions::new(input.as_path(), temp_dir.path());
-    options.java_only = true;
-    options.format = true;
+    let plan = compose_plan_from_fixture(
+        temp_dir.path(),
+        &input,
+        CliOverrides {
+            entrypoint: None,
+            output: None,
+            java_only: true,
+            check: false,
+            format: true,
+            target: None,
+        },
+    );
 
-    let artifacts = compile(&options).expect("Pipeline compilation failed");
+    let artifacts = compile(&plan).expect("Pipeline compilation failed");
 
     assert!(
         !artifacts.java_files.is_empty(),
@@ -129,10 +203,20 @@ fn pipeline_runs_javac_when_available() {
     let temp_dir = TempDirGuard::new("javac").expect("Failed to create temp dir");
     let input = workspace_file("test_simple.jv");
 
-    let mut options = BuildOptions::new(input.as_path(), temp_dir.path());
-    options.java_only = false;
+    let plan = compose_plan_from_fixture(
+        temp_dir.path(),
+        &input,
+        CliOverrides {
+            entrypoint: None,
+            output: None,
+            java_only: false,
+            check: false,
+            format: false,
+            target: None,
+        },
+    );
 
-    let artifacts = compile(&options).expect("Pipeline compilation with javac failed");
+    let artifacts = compile(&plan).expect("Pipeline compilation with javac failed");
 
     assert!(artifacts.javac_version.is_some());
     assert!(

@@ -76,8 +76,8 @@ fn test_build_command_parsing() {
             format,
             ..
         }) => {
-            assert_eq!(input, "test.jv");
-            assert_eq!(output, "output");
+            assert_eq!(input.as_deref(), Some("test.jv"));
+            assert_eq!(output.as_deref(), Some("output"));
             assert!(!java_only);
             assert!(check);
             assert!(format);
@@ -207,14 +207,52 @@ fn test_validate_file_exists() {
 #[test]
 fn compile_reports_whitespace_diagnostic() {
     let temp_dir = TempDirGuard::new("diag");
-    let input_path = temp_dir.path().join("whitespace_mix.jv");
+    let project_root_path = temp_dir.path();
+    let manifest_path = project_root_path.join("jv.toml");
+    fs::write(
+        &manifest_path,
+        r#"[package]
+name = "diag"
+version = "0.1.0"
+
+[package.dependencies]
+
+[project]
+entrypoint = "src/whitespace_mix.jv"
+
+[project.sources]
+include = ["src/**/*.jv"]
+"#,
+    )
+    .unwrap();
+
+    let src_dir = project_root_path.join("src");
+    fs::create_dir_all(&src_dir).unwrap();
+    let input_path = src_dir.join("whitespace_mix.jv");
     fs::write(&input_path, "val numbers = [1, 2 3]").unwrap();
 
-    let mut options = pipeline::BuildOptions::new(&input_path, temp_dir.path());
-    options.check = false;
-    options.format = false;
+    let project_root = pipeline::project::locator::ProjectRoot::new(
+        project_root_path.to_path_buf(),
+        manifest_path.clone(),
+    );
+    let settings =
+        pipeline::project::manifest::ManifestLoader::load(&manifest_path).expect("manifest loads");
+    let layout = pipeline::project::layout::ProjectLayout::from_settings(&project_root, &settings)
+        .expect("layout resolves");
 
-    let result = pipeline::compile(&options);
+    let overrides = pipeline::CliOverrides {
+        entrypoint: Some(input_path.clone()),
+        output: Some(project_root.root_dir().join("out/diag")),
+        java_only: true,
+        check: false,
+        format: false,
+        target: None,
+    };
+
+    let plan = pipeline::BuildOptionsFactory::compose(project_root, settings, layout, overrides)
+        .expect("plan composition succeeds");
+
+    let result = pipeline::compile(&plan);
     assert!(result.is_err());
 
     let message = result.unwrap_err().to_string();
@@ -272,8 +310,8 @@ fn test_build_command_defaults() {
             format,
             ..
         }) => {
-            assert_eq!(input, "test.jv");
-            assert_eq!(output, "./out");
+            assert_eq!(input.as_deref(), Some("test.jv"));
+            assert!(output.is_none());
             assert!(!java_only);
             assert!(!check);
             assert!(!format);
@@ -302,10 +340,13 @@ fn test_invalid_command() {
 
 #[test]
 fn test_missing_required_args() {
-    // Test build without input file
-    let invalid_build = vec!["jv", "build"];
-    let result = Cli::try_parse_from(invalid_build);
-    assert!(result.is_err());
+    // Build without entrypoint should succeed and defer to manifest defaults
+    let build_args = vec!["jv", "build"];
+    let cli = Cli::try_parse_from(build_args).unwrap();
+    match cli.command {
+        Some(Commands::Build { input, .. }) => assert!(input.is_none()),
+        _ => panic!("Expected Build command"),
+    }
 
     // Test check without input file
     let invalid_check = vec!["jv", "check"];
