@@ -1,0 +1,57 @@
+# Cargo configuration for disk space optimization
+
+[build]
+# Use a shared target directory for all projects to avoid duplication
+# target-dir = "../target"  # Uncomment if you want shared target directory
+
+# Reduce the number of parallel jobs to save memory and disk I/O
+# jobs = 4  # Uncomment and adjust based on your system
+
+# Enable sparse registry for faster index downloads and less disk usage
+[registries.crates-io]
+protocol = "sparse"
+
+# Cache configuration to manage disk usage
+[http]
+# Set HTTP timeout to avoid hanging downloads
+timeout = 30
+# Retry failed downloads
+retry = 3
+# Enable HTTP/2 multiplexing for better performance
+multiplexing = true
+
+# Git configuration for dependency fetching
+[net]
+# Use shallow clones for git dependencies to save disk space
+git-fetch-with-cli = true
+# Enable offline mode to work offline and save bandwidth
+# offline = false
+
+# Target-specific settings
+[target.'cfg(target_os = "linux")']
+# Use system allocator on Linux to potentially save memory
+rustflags = ["-C", "target-cpu=native"]
+
+[target.'cfg(target_os = "windows")']
+# Windows-specific optimizations
+rustflags = ["-C", "target-cpu=native"]
+
+[target.'cfg(target_os = "macos")']
+# macOS-specific optimizations
+rustflags = ["-C", "target-cpu=native"]
+
+# Environment variables for build optimization
+[env]
+# Reduce LLVM backend memory usage
+RUST_BACKTRACE = "0"
+# Disable incremental compilation for release builds to save disk space
+# CARGO_INCREMENTAL = "0"  # Uncomment for release builds only
+
+# Custom commands for disk space management
+[alias]
+# Clean all build artifacts and Cargo cache
+deep-clean = "!rm -rf target/ ~/.cargo/registry/cache/"
+# Build with full debug info temporarily (when intensive debugging needed)
+debug-build = "build --config profile.dev.debug=true"
+# Check disk usage of target directory
+disk-usage = "!du -sh target/ 2>/dev/null || echo 'No target directory found'"

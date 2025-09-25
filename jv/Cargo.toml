@@ -20,7 +20,7 @@ version = "0.1.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 authors = ["jv Language Team"]
-repository = "https://github.com/jvlang/jv"
+repository = "https://github.com/project-jvlang/jv-lang"
 
 [workspace.dependencies]
 # Parser framework
@@ -63,3 +63,37 @@ jv_pm = { path = "crates/jv_pm" }
 jv_build = { path = "crates/jv_build" }
 jv_lsp = { path = "crates/jv_lsp" }
 jv_cli = { path = "crates/jv_cli" }
+
+[profile.dev]
+# Reduce debug info to save disk space
+debug = 1
+# Use fewer optimization passes to reduce build time and disk usage
+opt-level = 0
+# Reduce parallel codegen units to save disk space (at cost of build time)
+codegen-units = 256
+# Enable LTO for smaller binaries
+lto = "thin"
+# Enable incremental compilation for faster rebuilds
+incremental = true
+
+[profile.release]
+# Full debug info for production builds
+debug = false
+# Enable all optimizations
+opt-level = 3
+# Use fewer codegen units for better optimization
+codegen-units = 1
+# Enable full LTO for smallest binary size
+lto = "fat"
+# Strip symbols to reduce binary size
+strip = true
+# Enable panic=abort for smaller binary size
+panic = "abort"
+
+# Optimize dependencies even in dev builds
+[profile.dev.package."*"]
+opt-level = 1
+
+# Optimize build dependencies
+[profile.dev.build-override]
+opt-level = 1
