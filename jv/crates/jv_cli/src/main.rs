@@ -18,9 +18,7 @@ use jv_cli::pipeline::{
     compile, produce_binary, run_program, BuildOptionsFactory, CliOverrides, OutputManager,
 };
 use jv_cli::tour::TourOrchestrator;
-use jv_cli::{
-    get_version, init_project as cli_init_project, tooling_failure, Cli, Commands,
-};
+use jv_cli::{get_version, init_project as cli_init_project, tooling_failure, Cli, Commands};
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
