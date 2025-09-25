@@ -40,6 +40,9 @@ pub enum Commands {
         /// Format output Java code
         #[arg(long)]
         format: bool,
+        /// Clean output directory before building
+        #[arg(long)]
+        clean: bool,
         /// Produce a single-file binary artifact: 'jar' or 'native'
         #[arg(long, value_parser = ["jar", "native"])]
         binary: Option<String>,
@@ -189,6 +192,10 @@ pub mod pipeline {
         pub mod layout {
             include!("pipeline/project/layout.rs");
         }
+
+        pub mod output {
+            include!("pipeline/project/output.rs");
+        }
     }
 
     pub mod build_plan {
@@ -196,6 +203,7 @@ pub mod pipeline {
     }
 
     pub use build_plan::{BuildOptions, BuildOptionsFactory, BuildPlan, CliOverrides};
+    pub use project::output::{OutputManager, PreparedOutput};
 
     use super::*;
     use anyhow::{anyhow, bail, Context};

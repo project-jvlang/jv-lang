@@ -14,9 +14,13 @@ use jv_parser::Parser as JvParser;
 use jv_cli::pipeline::project::{
     layout::ProjectLayout, locator::ProjectLocator, manifest::ManifestLoader,
 };
-use jv_cli::pipeline::{compile, produce_binary, run_program, BuildOptionsFactory, CliOverrides};
+use jv_cli::pipeline::{
+    compile, produce_binary, run_program, BuildOptionsFactory, CliOverrides, OutputManager,
+};
 use jv_cli::tour::TourOrchestrator;
-use jv_cli::{get_version, init_project as cli_init_project, Cli, Commands};
+use jv_cli::{
+    get_version, init_project as cli_init_project, tooling_failure, Cli, Commands,
+};
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
@@ -46,6 +50,7 @@ fn main() -> Result<()> {
             java_only,
             check,
             format,
+            clean,
             binary,
             bin_name,
             target,
@@ -80,12 +85,28 @@ fn main() -> Result<()> {
                 check,
                 format,
                 target,
+                clean,
             };
 
             let plan = BuildOptionsFactory::compose(project_root, settings, layout, overrides)
                 .map_err(|diagnostic| tooling_failure(&manifest_path, diagnostic))?;
 
-            let artifacts = compile(&plan)
+            let manifest_path_for_output = manifest_path.clone();
+            let mut prepared_output = OutputManager::prepare(plan)
+                .map_err(|diagnostic| tooling_failure(&manifest_path_for_output, diagnostic))?;
+            let plan = prepared_output.plan();
+
+            println!(
+                "出力ディレクトリ: {} (Java{})\nOutput directory: {}",
+                prepared_output.target_dir().display(),
+                plan.build_config.target,
+                prepared_output.target_dir().display()
+            );
+            if prepared_output.clean_applied() {
+                println!("クリーンビルド: 実行しました / Clean build: applied");
+            }
+
+            let artifacts = compile(plan)
                 .with_context(|| format!("Failed to compile {}", plan.entrypoint().display()))?;
 
             for java_file in &artifacts.java_files {
@@ -129,6 +150,8 @@ fn main() -> Result<()> {
                     compat.json_path.display()
                 );
             }
+
+            prepared_output.mark_success();
         }
         Some(Commands::Run { input, args }) => {
             let cwd = std::env::current_dir()?;
@@ -158,6 +181,7 @@ fn main() -> Result<()> {
                 check: false,
                 format: false,
                 target: None,
+                clean: false,
             };
 
             let plan = BuildOptionsFactory::compose(project_root, settings, layout, overrides)

@@ -32,7 +32,7 @@
   - _Requirements: 要件 1, 要件 2_
   - _Prompt: Implement the task for spec cli-project-structure, first run spec-workflow-guide to get the workflow guide then implement the task: Role: Rust Application Architect | Task: Wire the new project context into `BuildOptions` so CLI overrides merge with manifest defaults, propagate the plan through compile/run, and maintain backward compatibility | Restrictions: Keep public CLI API stable, update integration tests to reflect new flow, and ensure diagnostics bubble up unchanged | _Leverage: BuildConfig setters, current pipeline::compile | _Requirements: 要件 1, 要件 2 | Success: CLI commands work from subdirectories without extra flags, BuildConfig reflects manifest overrides, and tests prove the new wiring | Workflow: Mark this task as [-] before editing and flip to [x] once code/tests pass_
 
-- [ ] 5. 出力ディレクトリ管理とクリーニングを実装
+- [x] 5. 出力ディレクトリ管理とクリーニングを実装
   - Files: jv/crates/jv_cli/src/pipeline/project/output.rs (新規), jv/crates/jv_cli/src/tests/project_output.rs (新規), docs/cli-project-structure.md (新規)
   - `OutputManager` を導入し、ターゲットごとの出力ディレクトリ分離、`--clean` オプション処理、失敗時のクリーンアップを実装する
   - CLI ログとドキュメントに出力ポリシーと利用方法を追記する

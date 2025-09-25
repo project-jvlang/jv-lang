@@ -177,6 +177,7 @@ fn pipeline_compile_produces_artifacts() {
             check: false,
             format: true,
             target: None,
+            clean: false,
         },
     );
 
@@ -213,6 +214,7 @@ fn pipeline_runs_javac_when_available() {
             check: false,
             format: false,
             target: None,
+            clean: false,
         },
     );
 

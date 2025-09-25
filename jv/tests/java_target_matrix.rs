@@ -84,6 +84,7 @@ include = ["src/**/*.jv"]
         check: false,
         format: false,
         target: Some(target),
+        clean: false,
     };
 
     let plan = BuildOptionsFactory::compose(project_root, settings, layout, overrides)

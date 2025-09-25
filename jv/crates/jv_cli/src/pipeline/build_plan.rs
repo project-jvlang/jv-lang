@@ -28,6 +28,7 @@ pub struct CliOverrides {
     pub check: bool,
     pub format: bool,
     pub target: Option<JavaTarget>,
+    pub clean: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -37,6 +38,7 @@ pub struct BuildOptions {
     pub java_only: bool,
     pub check: bool,
     pub format: bool,
+    pub clean: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -89,6 +91,7 @@ impl BuildOptionsFactory {
             java_only: overrides.java_only,
             check: overrides.check,
             format: overrides.format,
+            clean: overrides.clean || settings.output.clean,
         };
 
         Ok(BuildPlan {

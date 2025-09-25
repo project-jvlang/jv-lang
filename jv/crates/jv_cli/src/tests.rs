@@ -3,6 +3,7 @@ use super::*;
 mod compat;
 mod project_layout;
 mod project_locator;
+mod project_output;
 
 use jv_build::{BuildConfig, BuildSystem, JavaTarget};
 use std::fs;
@@ -74,6 +75,7 @@ fn test_build_command_parsing() {
             java_only,
             check,
             format,
+            clean,
             ..
         }) => {
             assert_eq!(input.as_deref(), Some("test.jv"));
@@ -81,6 +83,7 @@ fn test_build_command_parsing() {
             assert!(!java_only);
             assert!(check);
             assert!(format);
+            assert!(!clean);
         }
         _ => panic!("Expected Build command"),
     }
@@ -247,6 +250,7 @@ include = ["src/**/*.jv"]
         check: false,
         format: false,
         target: None,
+        clean: false,
     };
 
     let plan = pipeline::BuildOptionsFactory::compose(project_root, settings, layout, overrides)
@@ -308,6 +312,7 @@ fn test_build_command_defaults() {
             java_only,
             check,
             format,
+            clean,
             ..
         }) => {
             assert_eq!(input.as_deref(), Some("test.jv"));
@@ -315,6 +320,7 @@ fn test_build_command_defaults() {
             assert!(!java_only);
             assert!(!check);
             assert!(!format);
+            assert!(!clean);
         }
         _ => panic!("Expected Build command"),
     }
@@ -374,6 +380,17 @@ fn test_build_command_target_override() {
         Some(Commands::Build { target, .. }) => {
             assert_eq!(target, Some(JavaTarget::Java21));
         }
+        _ => panic!("Expected Build command"),
+    }
+}
+
+#[test]
+fn test_build_command_clean_flag() {
+    let build_args = vec!["jv", "build", "test.jv", "--clean"];
+    let cli = Cli::try_parse_from(build_args).unwrap();
+
+    match cli.command {
+        Some(Commands::Build { clean, .. }) => assert!(clean),
         _ => panic!("Expected Build command"),
     }
 }
