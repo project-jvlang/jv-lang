@@ -113,6 +113,8 @@ fn write_ephemeral_manifest(dir: &Path, entry: &str) -> Result<()> {
 name = "jvx-snippet"
 version = "0.0.0"
 
+[package.dependencies]
+
 [project]
 entrypoint = "{}"
 
@@ -153,6 +155,8 @@ mod tests {
         let manifest = r#"[package]
 name = "jvx-test"
 version = "0.1.0"
+
+[package.dependencies]
 
 [project]
 entrypoint = "src/main.jv"
