@@ -1,6 +1,7 @@
 # Cargo configuration for disk space optimization
 
 [build]
+rustflags = ["-C", "link-arg=-Wl,--no-keep-memory"]  # ldのメモリ保持を抑える(ELF系)
 # Use a shared target directory for all projects to avoid duplication
 # target-dir = "../target"  # Uncomment if you want shared target directory
 
@@ -46,6 +47,10 @@ rustflags = ["-C", "target-cpu=native"]
 RUST_BACKTRACE = "0"
 # Disable incremental compilation for release builds to save disk space
 # CARGO_INCREMENTAL = "0"  # Uncomment for release builds only
+
+[profile.dev]
+debug = 1
+incremental = false
 
 # Custom commands for disk space management
 [alias]
