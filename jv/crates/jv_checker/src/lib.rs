@@ -1,6 +1,11 @@
 // jv_checker - Static analysis and validation
 pub mod compat;
 pub mod diagnostics;
+pub mod inference;
+
+pub use inference::{
+    InferenceEngine, InferenceError, InferenceResult, TypeEnvironment, TypeId, TypeKind, TypeScheme,
+};
 
 use jv_ast::*;
 use std::collections::HashMap;

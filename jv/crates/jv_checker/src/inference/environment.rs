@@ -1,0 +1,219 @@
+//! 型推論におけるスコープと型スキームを管理する環境。
+//!
+//! `TypeEnvironment` は val/var などのシンボルに対応する型スキームを保持し、
+//! スコープ境界の push/pop、型変数の払い出し、一般化（generalization）と
+//! インスタンス化（instantiation）を提供する。これにより制約ジェネレータや
+//! 単一化ソルバが決定的で借用しやすい API を通じて推論状態へアクセスできる。
+
+use crate::inference::types::{TypeId, TypeKind};
+use crate::inference::utils::TypeIdGenerator;
+use std::collections::{HashMap, HashSet};
+
+/// 汎用型を表現する型スキーム。
+#[derive(Debug, Clone, PartialEq)]
+pub struct TypeScheme {
+    /// スキームが束縛する型変数の集合。
+    pub quantifiers: Vec<TypeId>,
+    /// 本体となる型表現。
+    pub ty: TypeKind,
+}
+
+impl TypeScheme {
+    /// 任意の量化子と型本体からスキームを構築する。
+    pub fn new(mut quantifiers: Vec<TypeId>, ty: TypeKind) -> Self {
+        quantifiers.sort_by_key(|id| id.to_raw());
+        quantifiers.dedup();
+        Self { quantifiers, ty }
+    }
+
+    /// モノタイプ（量化子なし）としてスキームを作成する。
+    pub fn monotype(ty: TypeKind) -> Self {
+        Self {
+            quantifiers: Vec::new(),
+            ty,
+        }
+    }
+
+    /// スキームが多相かどうかを判定する。
+    pub fn is_polymorphic(&self) -> bool {
+        !self.quantifiers.is_empty()
+    }
+}
+
+/// スコープごとの型スキームと型変数IDを管理する。
+#[derive(Debug, Default)]
+pub struct TypeEnvironment {
+    scopes: Vec<HashMap<String, TypeScheme>>,
+    generator: TypeIdGenerator,
+}
+
+impl TypeEnvironment {
+    /// 新しい環境を構築する。グローバルスコープを1つ持った状態で初期化する。
+    pub fn new() -> Self {
+        Self {
+            scopes: vec![HashMap::new()],
+            generator: TypeIdGenerator::new(),
+        }
+    }
+
+    /// 現在のスコープ深度を取得する。
+    pub fn depth(&self) -> usize {
+        self.scopes.len()
+    }
+
+    /// スコープを1段深くする。
+    pub fn enter_scope(&mut self) {
+        self.scopes.push(HashMap::new());
+    }
+
+    /// スコープを1段戻る。グローバルスコープは破棄しない。
+    pub fn leave_scope(&mut self) -> bool {
+        if self.scopes.len() > 1 {
+            self.scopes.pop();
+            true
+        } else {
+            false
+        }
+    }
+
+    /// 現在のスコープへ型スキームを登録する。
+    pub fn define_scheme(&mut self, name: impl Into<String>, scheme: TypeScheme) {
+        if let Some(scope) = self.scopes.last_mut() {
+            scope.insert(name.into(), scheme);
+        }
+    }
+
+    /// モノタイプを渡してシンボルを登録するユーティリティ。
+    pub fn define_monotype(&mut self, name: impl Into<String>, ty: TypeKind) {
+        self.define_scheme(name, TypeScheme::monotype(ty));
+    }
+
+    /// もっとも内側のスコープから順にシンボルを探索する。
+    pub fn lookup(&self, name: &str) -> Option<&TypeScheme> {
+        self.scopes.iter().rev().find_map(|scope| scope.get(name))
+    }
+
+    /// 新しい型変数IDを払い出す。
+    pub fn fresh_type_id(&mut self) -> TypeId {
+        self.generator.allocate()
+    }
+
+    /// 型変数を表す `TypeKind` を生成する。
+    pub fn fresh_type_variable(&mut self) -> TypeKind {
+        TypeKind::Variable(self.fresh_type_id())
+    }
+
+    /// 型を一般化し、環境に閉じた型スキームへ変換する。
+    pub fn generalize(&self, ty: TypeKind) -> TypeScheme {
+        let mut free_vars = HashSet::new();
+        collect_free_type_vars(&ty, &mut free_vars);
+
+        let env_free_vars = self.environment_free_type_vars();
+        let mut quantifiers: Vec<TypeId> = free_vars
+            .into_iter()
+            .filter(|id| !env_free_vars.contains(id))
+            .collect();
+        quantifiers.sort_by_key(|id| id.to_raw());
+
+        TypeScheme::new(quantifiers, ty)
+    }
+
+    /// 型スキームをインスタンス化し、新しい型を生成する。
+    pub fn instantiate(&mut self, scheme: &TypeScheme) -> TypeKind {
+        let substitutions: HashMap<TypeId, TypeKind> = scheme
+            .quantifiers
+            .iter()
+            .map(|id| (*id, TypeKind::Variable(self.fresh_type_id())))
+            .collect();
+
+        substitute_type(&scheme.ty, &substitutions)
+    }
+
+    /// 環境全体で自由な型変数を収集する。
+    fn environment_free_type_vars(&self) -> HashSet<TypeId> {
+        let mut acc = HashSet::new();
+        for scope in &self.scopes {
+            for scheme in scope.values() {
+                let mut scheme_free = HashSet::new();
+                collect_free_type_vars(&scheme.ty, &mut scheme_free);
+                for quantifier in &scheme.quantifiers {
+                    scheme_free.remove(quantifier);
+                }
+                acc.extend(scheme_free);
+            }
+        }
+        acc
+    }
+}
+
+fn collect_free_type_vars(ty: &TypeKind, acc: &mut HashSet<TypeId>) {
+    match ty {
+        TypeKind::Primitive(_) | TypeKind::Unknown => {}
+        TypeKind::Optional(inner) => collect_free_type_vars(inner, acc),
+        TypeKind::Variable(id) => {
+            acc.insert(*id);
+        }
+    }
+}
+
+fn substitute_type(ty: &TypeKind, subs: &HashMap<TypeId, TypeKind>) -> TypeKind {
+    match ty {
+        TypeKind::Primitive(name) => TypeKind::Primitive(name),
+        TypeKind::Optional(inner) => TypeKind::Optional(Box::new(substitute_type(inner, subs))),
+        TypeKind::Variable(id) => subs
+            .get(id)
+            .cloned()
+            .unwrap_or_else(|| TypeKind::Variable(*id)),
+        TypeKind::Unknown => TypeKind::Unknown,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn scope_push_and_pop_respects_shadowing() {
+        let mut env = TypeEnvironment::new();
+        env.define_monotype("x", TypeKind::Primitive("Int"));
+        assert!(env.lookup("x").is_some());
+
+        env.enter_scope();
+        env.define_monotype("y", TypeKind::Primitive("Boolean"));
+        assert!(env.lookup("y").is_some());
+
+        env.leave_scope();
+        assert!(env.lookup("y").is_none());
+        assert!(env.lookup("x").is_some());
+    }
+
+    #[test]
+    fn generalize_respects_environment_free_variables() {
+        let mut env = TypeEnvironment::new();
+        let shared_id = env.fresh_type_id();
+        env.define_scheme(
+            "existing",
+            TypeScheme::monotype(TypeKind::Variable(shared_id)),
+        );
+
+        let scheme = env.generalize(TypeKind::Variable(shared_id));
+        assert!(scheme.quantifiers.is_empty());
+    }
+
+    #[test]
+    fn instantiate_produces_fresh_type_variables() {
+        let mut env = TypeEnvironment::new();
+        let alpha = env.fresh_type_id();
+        let scheme = env.generalize(TypeKind::Variable(alpha));
+
+        let first = env.instantiate(&scheme);
+        let second = env.instantiate(&scheme);
+
+        match (first, second) {
+            (TypeKind::Variable(a), TypeKind::Variable(b)) => {
+                assert_ne!(a.to_raw(), b.to_raw());
+            }
+            _ => panic!("expected type variables"),
+        }
+    }
+}
