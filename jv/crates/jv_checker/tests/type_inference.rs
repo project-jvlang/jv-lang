@@ -69,5 +69,5 @@ fn reports_null_safety_violation_for_non_nullable_binding() {
     assert!(diagnostics.iter().any(|error| matches!(
         error,
         CheckError::NullSafetyError(message) if message.contains("message")
-    ))));
+    )));
 }
