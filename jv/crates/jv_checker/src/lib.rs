@@ -7,6 +7,7 @@ pub use inference::{
     InferenceEngine, InferenceError, InferenceResult, TypeEnvironment, TypeId, TypeKind, TypeScheme,
 };
 
+use crate::inference::NullabilityAnalyzer;
 use jv_ast::*;
 use std::collections::HashMap;
 use thiserror::Error;
@@ -309,19 +310,10 @@ impl TypeChecker {
 
     /// Validate null safety rules
     pub fn check_null_safety(&self, program: &Program) -> Vec<String> {
-        let mut warnings = Vec::new();
-        // Simplified null safety checking - would need more sophisticated analysis
-        for statement in &program.statements {
-            match statement {
-                Statement::ValDeclaration { initializer, .. } => {
-                    if matches!(initializer, Expression::Literal(Literal::Null, _)) {
-                        warnings.push("Assigning null to val declaration".to_string());
-                    }
-                }
-                _ => {}
-            }
-        }
-        warnings
+        NullabilityAnalyzer::analyze(program)
+            .into_iter()
+            .map(|error| error.to_string())
+            .collect()
     }
 
     /// Check for forbidden Java syntax or patterns

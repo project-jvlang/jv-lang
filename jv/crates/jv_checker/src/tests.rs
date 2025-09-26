@@ -313,7 +313,8 @@ fn test_null_safety_checking() {
 
     let warnings = checker.check_null_safety(&program);
     assert_eq!(warnings.len(), 1);
-    assert!(warnings[0].contains("Assigning null to val declaration"));
+    assert!(warnings[0].contains("Null safety violation"));
+    assert!(warnings[0].contains("nullable"));
 }
 
 #[test]
