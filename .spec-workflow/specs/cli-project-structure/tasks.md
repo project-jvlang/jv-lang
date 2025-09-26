@@ -40,7 +40,7 @@
   - _Requirements: 要件 3_
   - _Prompt: Implement the task for spec cli-project-structure, first run spec-workflow-guide to get the workflow guide then implement the task: Role: Rust DevOps Tooling Engineer | Task: Add an `OutputManager` that prepares/cleans target-specific directories, honours manifest/CLI overrides, and documents the behaviour for users | Restrictions: Prevent directory traversal outside the project root, ensure clean runs leave no stale artifacts, and update docs bilingually (JA/EN) | _Leverage: Existing report writers, std::fs utilities | _Requirements: 要件 3 | Success: Builds isolate outputs per target, `--clean` removes stale files safely, documentation reflects new workflow, and unit tests cover success/error paths | Workflow: Mark this task as [-] before editing and to [x] after validation_
 
-- [ ] 6. 統合テストとE2Eシナリオを追加
+- [x] 6. 統合テストとE2Eシナリオを追加
   - Files: jv/crates/jv_cli/tests/project_integration.rs (新規), jv/tests/cli_project_structure.rs (新規)
   - 新しいプロジェクト解決フローを通す統合テスト・端到端テストを追加し、複数ターゲットと `--clean` シナリオを検証する
   - ビルド失敗時に部分生成物が残らないこと、ログに検出結果が表示されることを確認する
