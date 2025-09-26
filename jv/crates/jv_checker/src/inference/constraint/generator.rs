@@ -5,9 +5,13 @@
 
 use crate::inference::constraint::{Constraint, ConstraintKind, ConstraintSet};
 use crate::inference::environment::{TypeEnvironment, TypeScheme};
+use crate::inference::iteration::{
+    classify_loop, expression_can_yield_iterable, LoopClassification,
+};
 use crate::inference::types::TypeKind;
 use jv_ast::{
-    Argument, BinaryOp, Expression, Literal, Program, Statement, TypeAnnotation, UnaryOp,
+    Argument, BinaryOp, Expression, ForInStatement, Literal, Program, Statement, TypeAnnotation,
+    UnaryOp,
 };
 
 /// AST から制約を抽出するジェネレータ。
@@ -16,6 +20,12 @@ pub struct ConstraintGenerator<'env> {
     env: &'env mut TypeEnvironment,
     constraints: ConstraintSet,
 }
+
+const DIAG_RANGE_BOUNDS: &str = "E_LOOP_002: numeric range bounds must resolve to the same type";
+const DIAG_RANGE_BINDING: &str =
+    "E_LOOP_002: loop binding must align with the numeric range element type";
+const DIAG_ITERABLE_PROTOCOL: &str =
+    "E_LOOP_003: loop target expression does not expose iterable semantics";
 
 impl<'env> ConstraintGenerator<'env> {
     /// 環境への可変参照を受け取ってジェネレータを初期化する。
@@ -65,19 +75,8 @@ impl<'env> ConstraintGenerator<'env> {
                     Some("assignment target and value must align"),
                 );
             }
-            Statement::While {
-                condition, body, ..
-            } => {
-                let cond_ty = self.infer_expression(condition);
-                self.push_constraint(
-                    ConstraintKind::Equal(cond_ty, TypeKind::Primitive("Boolean")),
-                    Some("while condition requires boolean"),
-                );
-                self.infer_expression(body);
-            }
-            Statement::For { iterable, body, .. } => {
-                self.infer_expression(iterable);
-                self.infer_expression(body);
+            Statement::ForIn(for_in) => {
+                self.handle_for_in(for_in);
             }
             Statement::Return { value, .. } => {
                 if let Some(expr) = value {
@@ -136,6 +135,57 @@ impl<'env> ConstraintGenerator<'env> {
                 // そのほかの文でも子ノードを可能な範囲で評価しておく。
             }
         }
+    }
+
+    fn handle_for_in(&mut self, for_in: &ForInStatement) {
+        self.env.enter_scope();
+
+        let binding_ty = if let Some(annotation) = &for_in.binding.type_annotation {
+            self.type_from_annotation(annotation)
+        } else {
+            self.env.fresh_type_variable()
+        };
+
+        self.env.define_scheme(
+            for_in.binding.name.clone(),
+            TypeScheme::monotype(binding_ty.clone()),
+        );
+
+        match classify_loop(for_in) {
+            LoopClassification::NumericRange { range } => {
+                let start_ty = self.infer_expression(&range.start);
+                let end_ty = self.infer_expression(&range.end);
+                self.push_constraint(
+                    ConstraintKind::Equal(start_ty.clone(), end_ty.clone()),
+                    Some(DIAG_RANGE_BOUNDS),
+                );
+                self.push_constraint(
+                    ConstraintKind::Equal(binding_ty.clone(), start_ty),
+                    Some(DIAG_RANGE_BINDING),
+                );
+            }
+            LoopClassification::Iterable => {
+                self.infer_expression(&for_in.iterable);
+                if !expression_can_yield_iterable(&for_in.iterable) {
+                    self.constraints
+                        .push(Constraint::new(ConstraintKind::Placeholder(
+                            DIAG_ITERABLE_PROTOCOL,
+                        )));
+                }
+            }
+            LoopClassification::LazySequence { .. } => {
+                self.infer_expression(&for_in.iterable);
+                if !expression_can_yield_iterable(&for_in.iterable) {
+                    self.constraints
+                        .push(Constraint::new(ConstraintKind::Placeholder(
+                            DIAG_ITERABLE_PROTOCOL,
+                        )));
+                }
+            }
+        }
+
+        self.infer_expression(&for_in.body);
+        self.env.leave_scope();
     }
 
     fn bind_symbol(
@@ -347,6 +397,13 @@ impl<'env> ConstraintGenerator<'env> {
                     Some("comparison operands must share the same type"),
                 );
                 TypeKind::Primitive("Boolean")
+            }
+            RangeExclusive | RangeInclusive => {
+                self.push_constraint(
+                    ConstraintKind::Equal(left_ty.clone(), right_ty.clone()),
+                    Some(DIAG_RANGE_BOUNDS),
+                );
+                TypeKind::Unknown
             }
             Elvis => {
                 let result_inner = self.env.fresh_type_variable();

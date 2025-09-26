@@ -56,6 +56,9 @@ pub enum BinaryOp {
     Or,
     // Null safety
     Elvis, // ?:
+    // Range operators
+    RangeExclusive,
+    RangeInclusive,
     // Bitwise
     BitAnd,
     BitOr,

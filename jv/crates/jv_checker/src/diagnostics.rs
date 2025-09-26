@@ -22,6 +22,21 @@ pub struct ToolingDiagnostic {
 
 const DIAGNOSTICS: &[DiagnosticDescriptor] = &[
     DiagnosticDescriptor {
+        code: "E_LOOP_001",
+        title: "`while`/`do-while` loops have been removed from the language",
+        help: "Replace legacy loops with `for (item in ...)` and consult docs/language/loops.md for migration examples.",
+    },
+    DiagnosticDescriptor {
+        code: "E_LOOP_002",
+        title: "Numeric range bounds must resolve to the same type",
+        help: "Ensure both range endpoints share a compatible numeric type and that the loop binding matches that element type.",
+    },
+    DiagnosticDescriptor {
+        code: "E_LOOP_003",
+        title: "Loop target does not expose iterable semantics",
+        help: "Provide a value implementing the iterable protocol (e.g., Sequence/Iterable) or convert the expression using `into_iter`.",
+    },
+    DiagnosticDescriptor {
         code: "JV1007",
         title: "配列リテラルの区切り記号が混在しています",
         help: "配列全体をカンマ区切りにするか、空白区切りに統一してください。コメントを挟む場合はカンマ区切りに戻すと安全です。",

@@ -1,8 +1,9 @@
 use chumsky::prelude::*;
 use chumsky::Parser as ChumskyParser;
 use jv_ast::{
-    Annotation, AnnotationArgument, ConcurrencyConstruct, Expression, ExtensionFunction, Literal,
-    Modifiers, Parameter, ResourceManagement, Span, Statement, TypeAnnotation, Visibility,
+    Annotation, AnnotationArgument, BinaryOp, ConcurrencyConstruct, Expression, ExtensionFunction,
+    ForInStatement, Literal, LoopBinding, LoopStrategy, Modifiers, NumericRangeLoop, Parameter,
+    ResourceManagement, Span, Statement, TypeAnnotation, Visibility,
 };
 use jv_lexer::{Token, TokenType};
 
@@ -11,9 +12,10 @@ use super::parameters::parameter_list;
 use super::support::{
     expression_span, identifier, identifier_with_span, keyword as support_keyword, merge_spans,
     span_from_token, statement_span, token_any_comma, token_assign, token_at, token_class,
-    token_colon, token_data, token_defer, token_dot, token_fun, token_left_brace, token_left_paren,
-    token_return, token_right_brace, token_right_paren, token_spawn, token_use, token_val,
-    token_var, type_annotation_simple,
+    token_colon, token_data, token_defer, token_do_keyword, token_dot, token_for, token_fun,
+    token_in_keyword, token_left_brace, token_left_paren, token_return, token_right_brace,
+    token_right_paren, token_spawn, token_use, token_val, token_var, token_while_keyword,
+    type_annotation_simple,
 };
 
 pub(crate) fn statement_parser(
@@ -30,6 +32,8 @@ pub(crate) fn statement_parser(
         let defer_stmt = defer_statement_parser(statement.clone());
         let spawn_stmt = spawn_statement_parser(statement.clone());
         let return_stmt = return_statement_parser(expr.clone());
+        let for_in_stmt = for_in_statement_parser(statement.clone(), expr.clone());
+        let legacy_loop = legacy_loop_parser();
         let expression_stmt = expression_statement_parser(expr);
 
         choice((
@@ -41,7 +45,9 @@ pub(crate) fn statement_parser(
             use_stmt,
             defer_stmt,
             spawn_stmt,
+            for_in_stmt,
             return_stmt,
+            legacy_loop,
             expression_stmt,
         ))
         .boxed()
@@ -262,6 +268,44 @@ fn assignment_target_parser() -> impl ChumskyParser<Token, Expression, Error = S
         })
 }
 
+fn loop_binding_parser() -> impl ChumskyParser<Token, LoopBinding, Error = Simple<Token>> + Clone {
+    identifier_with_span()
+        .then(type_annotation_clause())
+        .map(|((name, span), type_annotation)| LoopBinding {
+            name,
+            type_annotation,
+            span,
+        })
+}
+
+fn infer_loop_strategy(iterable: &Expression) -> LoopStrategy {
+    match iterable {
+        Expression::Binary {
+            left,
+            right,
+            op: BinaryOp::RangeExclusive,
+            span,
+        } => LoopStrategy::NumericRange(NumericRangeLoop {
+            start: (*left.clone()),
+            end: (*right.clone()),
+            inclusive: false,
+            span: span.clone(),
+        }),
+        Expression::Binary {
+            left,
+            right,
+            op: BinaryOp::RangeInclusive,
+            span,
+        } => LoopStrategy::NumericRange(NumericRangeLoop {
+            start: (*left.clone()),
+            end: (*right.clone()),
+            inclusive: true,
+            span: span.clone(),
+        }),
+        _ => LoopStrategy::Iterable,
+    }
+}
+
 fn block_expression_parser(
     statement: impl ChumskyParser<Token, Statement, Error = Simple<Token>> + Clone,
 ) -> impl ChumskyParser<Token, Expression, Error = Simple<Token>> + Clone {
@@ -286,6 +330,50 @@ fn function_body(
     expr: impl ChumskyParser<Token, Expression, Error = Simple<Token>> + Clone,
 ) -> impl ChumskyParser<Token, Expression, Error = Simple<Token>> + Clone {
     block_expression_parser(statement.clone()).or(token_assign().ignore_then(expr))
+}
+
+fn for_in_statement_parser(
+    statement: impl ChumskyParser<Token, Statement, Error = Simple<Token>> + Clone,
+    expr: impl ChumskyParser<Token, Expression, Error = Simple<Token>> + Clone,
+) -> impl ChumskyParser<Token, Statement, Error = Simple<Token>> + Clone {
+    token_for()
+        .map(|token| span_from_token(&token))
+        .then(
+            token_left_paren()
+                .ignore_then(loop_binding_parser())
+                .then_ignore(token_in_keyword())
+                .then(expr.clone())
+                .then_ignore(token_right_paren()),
+        )
+        .then(block_expression_parser(statement.clone()))
+        .map(|((for_span, (binding, iterable)), body)| {
+            let strategy = infer_loop_strategy(&iterable);
+            let body_span = expression_span(&body);
+            let span = merge_spans(&for_span, &body_span);
+
+            Statement::ForIn(ForInStatement {
+                binding,
+                iterable,
+                strategy,
+                body: Box::new(body),
+                span,
+            })
+        })
+}
+
+fn legacy_loop_parser() -> impl ChumskyParser<Token, Statement, Error = Simple<Token>> + Clone {
+    choice((token_while_keyword(), token_do_keyword())).try_map(|token, span| {
+        let keyword = match token.token_type {
+            TokenType::While => "while",
+            TokenType::Do => "do-while",
+            _ => "legacy loop",
+        };
+        let message = format!(
+            "E_LOOP_001: `{}` loops are no longer supported. Use `for (item in ...)` with ranges or iterables instead.",
+            keyword
+        );
+        Err(Simple::custom(span, message))
+    })
 }
 
 fn function_signature(
@@ -416,6 +504,7 @@ mod tests {
             line: 1,
             column,
             leading_trivia: TokenTrivia::default(),
+            diagnostic: None,
         }
     }
 

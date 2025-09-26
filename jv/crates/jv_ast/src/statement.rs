@@ -46,6 +46,42 @@ pub enum ResourceManagement {
     },
 }
 
+/// Loop binding metadata describing the identifier used in iteration and optional annotation.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LoopBinding {
+    pub name: String,
+    pub type_annotation: Option<TypeAnnotation>,
+    pub span: Span,
+}
+
+/// Numeric range bounds for `for-in` loops.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct NumericRangeLoop {
+    pub start: Expression,
+    pub end: Expression,
+    pub inclusive: bool,
+    pub span: Span,
+}
+
+/// Loop strategy describing how the iterable expression should be interpreted.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum LoopStrategy {
+    NumericRange(NumericRangeLoop),
+    Iterable,
+    LazySequence { needs_cleanup: bool },
+    Unknown,
+}
+
+/// Structured representation of a `for-in` loop.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ForInStatement {
+    pub binding: LoopBinding,
+    pub iterable: Expression,
+    pub strategy: LoopStrategy,
+    pub body: Box<Expression>,
+    pub span: Span,
+}
+
 /// Statements in jv language
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Statement {
@@ -131,20 +167,8 @@ pub enum Statement {
         span: Span,
     },
 
-    // While loops
-    While {
-        condition: Expression,
-        body: Box<Expression>,
-        span: Span,
-    },
-
-    // For loops
-    For {
-        variable: String,
-        iterable: Expression,
-        body: Box<Expression>,
-        span: Span,
-    },
+    // For-in loops with strategy metadata
+    ForIn(ForInStatement),
 
     // Break/continue
     Break(Span),

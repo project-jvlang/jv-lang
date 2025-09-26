@@ -17,6 +17,25 @@ pub(crate) fn token_fun() -> impl ChumskyParser<Token, Token, Error = Simple<Tok
     filter(|token: &Token| matches!(token.token_type, TokenType::Fun))
 }
 
+pub(crate) fn token_for() -> impl ChumskyParser<Token, Token, Error = Simple<Token>> + Clone {
+    filter(|token: &Token| matches!(token.token_type, TokenType::For))
+}
+
+pub(crate) fn token_in_keyword() -> impl ChumskyParser<Token, Token, Error = Simple<Token>> + Clone
+{
+    filter(|token: &Token| matches!(token.token_type, TokenType::In))
+}
+
+pub(crate) fn token_while_keyword(
+) -> impl ChumskyParser<Token, Token, Error = Simple<Token>> + Clone {
+    filter(|token: &Token| matches!(token.token_type, TokenType::While))
+}
+
+pub(crate) fn token_do_keyword() -> impl ChumskyParser<Token, Token, Error = Simple<Token>> + Clone
+{
+    filter(|token: &Token| matches!(token.token_type, TokenType::Do))
+}
+
 pub(crate) fn token_data() -> impl ChumskyParser<Token, Token, Error = Simple<Token>> + Clone {
     filter(|token: &Token| matches!(token.token_type, TokenType::Data))
 }
@@ -100,6 +119,16 @@ pub(crate) fn token_at() -> impl ChumskyParser<Token, Token, Error = Simple<Toke
 
 pub(crate) fn token_dot() -> impl ChumskyParser<Token, Token, Error = Simple<Token>> + Clone {
     filter(|token: &Token| matches!(token.token_type, TokenType::Dot))
+}
+
+pub(crate) fn token_range_exclusive(
+) -> impl ChumskyParser<Token, Token, Error = Simple<Token>> + Clone {
+    filter(|token: &Token| matches!(token.token_type, TokenType::RangeExclusive))
+}
+
+pub(crate) fn token_range_inclusive(
+) -> impl ChumskyParser<Token, Token, Error = Simple<Token>> + Clone {
+    filter(|token: &Token| matches!(token.token_type, TokenType::RangeInclusive))
 }
 
 pub(crate) fn token_null_safe() -> impl ChumskyParser<Token, Token, Error = Simple<Token>> + Clone {
@@ -277,8 +306,7 @@ pub(crate) fn statement_span(stmt: &Statement) -> Span {
         Statement::InterfaceDeclaration { span, .. } => span.clone(),
         Statement::ExtensionFunction(ef) => ef.span.clone(),
         Statement::Import { span, .. } => span.clone(),
-        Statement::While { span, .. } => span.clone(),
-        Statement::For { span, .. } => span.clone(),
+        Statement::ForIn(for_in) => for_in.span.clone(),
         Statement::Break(span) => span.clone(),
         Statement::Continue(span) => span.clone(),
         Statement::Package { span, .. } => span.clone(),

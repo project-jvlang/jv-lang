@@ -90,3 +90,35 @@ fn whitespace_arguments_with_comma_emit_jv1009() {
         ),
     }
 }
+
+#[test]
+fn legacy_while_loop_reports_e_loop_001() {
+    let result = Parser::parse("while (true) { val x = 1 }");
+
+    match result {
+        Err(ParseError::Syntax { message, .. }) => {
+            assert!(
+                message.contains("E_LOOP_001"),
+                "expected E_LOOP_001 diagnostic for legacy while loop, got {}",
+                message
+            );
+        }
+        other => panic!("expected syntax error for while loop, got {:?}", other),
+    }
+}
+
+#[test]
+fn legacy_do_while_loop_reports_e_loop_001() {
+    let result = Parser::parse("do { val x = 1 } while (x < 10)");
+
+    match result {
+        Err(ParseError::Syntax { message, .. }) => {
+            assert!(
+                message.contains("E_LOOP_001"),
+                "expected E_LOOP_001 diagnostic for legacy do-while loop, got {}",
+                message
+            );
+        }
+        other => panic!("expected syntax error for do-while loop, got {:?}", other),
+    }
+}

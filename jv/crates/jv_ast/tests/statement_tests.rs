@@ -199,43 +199,75 @@ fn test_statement_assignment() {
 }
 
 #[test]
-fn test_statement_while() {
-    let condition = Expression::Literal(Literal::Boolean(true), dummy_span());
+fn test_statement_for_in_iterable_strategy() {
+    let binding = LoopBinding {
+        name: "item".to_string(),
+        type_annotation: None,
+        span: dummy_span(),
+    };
+    let iterable = Expression::Identifier("items".to_string(), dummy_span());
     let body = Expression::Block {
         statements: vec![],
         span: dummy_span(),
     };
-    let stmt = Statement::While {
-        condition,
+    let stmt = Statement::ForIn(ForInStatement {
+        binding,
+        iterable: iterable.clone(),
+        strategy: LoopStrategy::Iterable,
         body: Box::new(body),
         span: dummy_span(),
-    };
+    });
+
     match stmt {
-        Statement::While { .. } => assert!(true),
-        _ => panic!("Expected while statement"),
+        Statement::ForIn(for_in) => {
+            assert_eq!(for_in.binding.name, "item");
+            assert!(matches!(for_in.strategy, LoopStrategy::Iterable));
+            if let Expression::Identifier(name, _) = for_in.iterable {
+                assert_eq!(name, "items");
+            } else {
+                panic!("Expected iterable expression to be identifier");
+            }
+        }
+        _ => panic!("Expected for-in statement"),
     }
 }
 
 #[test]
-fn test_statement_for() {
-    let iterable = Expression::Array {
-        elements: vec![],
-        delimiter: SequenceDelimiter::Comma,
+fn test_statement_for_in_numeric_range_strategy() {
+    let binding = LoopBinding {
+        name: "index".to_string(),
+        type_annotation: Some(TypeAnnotation::Simple("Int".to_string())),
         span: dummy_span(),
     };
+    let range_span = dummy_span();
+    let strategy = LoopStrategy::NumericRange(NumericRangeLoop {
+        start: Expression::Literal(Literal::Number("0".to_string()), dummy_span()),
+        end: Expression::Literal(Literal::Number("10".to_string()), dummy_span()),
+        inclusive: false,
+        span: range_span.clone(),
+    });
+    let iterable = Expression::Identifier("range".to_string(), dummy_span());
     let body = Expression::Block {
         statements: vec![],
         span: dummy_span(),
     };
-    let stmt = Statement::For {
-        variable: "item".to_string(),
+    let stmt = Statement::ForIn(ForInStatement {
+        binding,
         iterable,
+        strategy,
         body: Box::new(body),
         span: dummy_span(),
-    };
+    });
+
     match stmt {
-        Statement::For { variable, .. } => assert_eq!(variable, "item"),
-        _ => panic!("Expected for statement"),
+        Statement::ForIn(for_in) => match for_in.strategy {
+            LoopStrategy::NumericRange(ref meta) => {
+                assert_eq!(meta.inclusive, false);
+                assert_eq!(meta.span, range_span);
+            }
+            _ => panic!("Expected numeric range strategy"),
+        },
+        _ => panic!("Expected for-in statement"),
     }
 }
 

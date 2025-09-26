@@ -13,9 +13,9 @@ use super::support::{
     token_dot, token_else, token_elvis, token_equal, token_greater, token_greater_equal, token_if,
     token_layout_comma, token_left_brace, token_left_bracket, token_left_paren, token_less,
     token_less_equal, token_minus, token_modulo, token_multiply, token_not, token_not_equal,
-    token_null_safe, token_or, token_plus, token_question, token_right_brace, token_right_bracket,
-    token_right_paren, token_string_end, token_string_mid, token_string_start, token_when,
-    type_annotation_simple,
+    token_null_safe, token_or, token_plus, token_question, token_range_exclusive,
+    token_range_inclusive, token_right_brace, token_right_bracket, token_right_paren,
+    token_string_end, token_string_mid, token_string_start, token_when, type_annotation_simple,
 };
 
 pub(crate) fn expression_parser(
@@ -39,7 +39,8 @@ pub(crate) fn expression_parser(
         let unary = unary_expression_parser(postfix.clone());
         let multiplicative = multiplicative_expression_parser(unary.clone());
         let additive = additive_expression_parser(multiplicative.clone());
-        let comparison = comparison_expression_parser(additive.clone());
+        let range = range_expression_parser(additive.clone());
+        let comparison = comparison_expression_parser(range.clone());
         let equality = equality_expression_parser(comparison.clone());
         let logical_and = logical_and_expression_parser(equality.clone());
         let logical_or = logical_or_expression_parser(logical_and.clone());
@@ -661,6 +662,22 @@ fn additive_expression_parser(
             choice((
                 token_plus().to(BinaryOp::Add),
                 token_minus().to(BinaryOp::Subtract),
+            ))
+            .then(operand)
+            .repeated(),
+        )
+        .foldl(|left, (op, right)| build_binary(left, op, right))
+}
+
+fn range_expression_parser(
+    operand: impl ChumskyParser<Token, Expression, Error = Simple<Token>> + Clone,
+) -> impl ChumskyParser<Token, Expression, Error = Simple<Token>> + Clone {
+    operand
+        .clone()
+        .then(
+            choice((
+                token_range_exclusive().to(BinaryOp::RangeExclusive),
+                token_range_inclusive().to(BinaryOp::RangeInclusive),
             ))
             .then(operand)
             .repeated(),

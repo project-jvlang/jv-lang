@@ -306,8 +306,51 @@ fn test_when_expressions() {
     assert!(token_types.contains(&&TokenType::When));
     assert!(token_types.contains(&&TokenType::Arrow));
     assert!(token_types.contains(&&TokenType::In));
-    // Note: DotDot (range operator) not yet implemented in TokenType enum
+    assert!(token_types.contains(&&TokenType::RangeExclusive));
     assert!(token_types.contains(&&TokenType::Else));
+}
+
+#[test]
+fn test_range_tokens() {
+    let source = "for (i in 0..10) { a[i] } for (j in 0..=limit) { use(j) }";
+    let mut lexer = Lexer::new(source.to_string());
+    let tokens = lexer.tokenize().unwrap();
+
+    assert!(tokens
+        .iter()
+        .any(|t| matches!(t.token_type, TokenType::RangeExclusive)));
+    assert!(tokens
+        .iter()
+        .any(|t| matches!(t.token_type, TokenType::RangeInclusive)));
+}
+
+#[test]
+fn test_legacy_loop_diagnostic_metadata() {
+    let source = "while (true) { break } do { continue } while (false)";
+    let mut lexer = Lexer::new(source.to_string());
+    let tokens = lexer.tokenize().unwrap();
+
+    let while_token = tokens
+        .iter()
+        .find(|t| matches!(t.token_type, TokenType::While))
+        .expect("while token missing");
+    assert!(matches!(
+        while_token.diagnostic,
+        Some(TokenDiagnostic::LegacyLoop {
+            keyword: LegacyLoopKeyword::While,
+        })
+    ));
+
+    let do_token = tokens
+        .iter()
+        .find(|t| matches!(t.token_type, TokenType::Do))
+        .expect("do token missing");
+    assert!(matches!(
+        do_token.diagnostic,
+        Some(TokenDiagnostic::LegacyLoop {
+            keyword: LegacyLoopKeyword::Do,
+        })
+    ));
 }
 
 #[test]

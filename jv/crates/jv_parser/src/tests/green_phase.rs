@@ -1,6 +1,6 @@
 use super::support::{first_statement, parse_program, parse_program_result};
 use jv_ast::{
-    Argument, BinaryOp, CallArgumentStyle, ConcurrencyConstruct, Expression, Literal,
+    Argument, BinaryOp, CallArgumentStyle, ConcurrencyConstruct, Expression, Literal, LoopStrategy,
     ResourceManagement, SequenceDelimiter, Statement, StringPart, TypeAnnotation,
 };
 
@@ -678,6 +678,114 @@ fn test_complex_nested_expression() {
     "#,
     );
     assert_eq!(program.statements.len(), 1);
+}
+
+#[test]
+fn test_for_in_iterable_statement() {
+    let program = parse_program(
+        r#"
+        for (item in items) {
+            val x = item
+        }
+    "#,
+    );
+    let statement = first_statement(&program);
+
+    match statement {
+        Statement::ForIn(for_in) => {
+            assert_eq!(for_in.binding.name, "item");
+            assert!(for_in.binding.type_annotation.is_none());
+            assert!(matches!(for_in.strategy, LoopStrategy::Iterable));
+            match &for_in.iterable {
+                Expression::Identifier(name, _) => assert_eq!(name, "items"),
+                other => panic!("expected identifier iterable, found {:?}", other),
+            }
+            if let Expression::Block { statements, .. } = for_in.body.as_ref() {
+                assert!(!statements.is_empty());
+            } else {
+                panic!("expected block body in for-in loop");
+            }
+        }
+        other => panic!("expected for-in statement, found {:?}", other),
+    }
+}
+
+#[test]
+fn test_for_in_numeric_range_statement_exclusive() {
+    let program = parse_program(
+        r#"
+        for (index: Int in 0..10) {
+            val current = index
+        }
+    "#,
+    );
+    let statement = first_statement(&program);
+
+    match statement {
+        Statement::ForIn(for_in) => {
+            assert_eq!(for_in.binding.name, "index");
+            assert!(matches!(
+                for_in.binding.type_annotation,
+                Some(TypeAnnotation::Simple(ref name)) if name == "Int"
+            ));
+            match &for_in.strategy {
+                LoopStrategy::NumericRange(meta) => {
+                    assert!(!meta.inclusive);
+                    match (&meta.start, &meta.end) {
+                        (
+                            Expression::Literal(Literal::Number(start), _),
+                            Expression::Literal(Literal::Number(end), _),
+                        ) => {
+                            assert_eq!(start, "0");
+                            assert_eq!(end, "10");
+                        }
+                        other => panic!(
+                            "expected numeric literals for range bounds, found {:?}",
+                            other
+                        ),
+                    }
+                }
+                other => panic!("expected numeric range strategy, found {:?}", other),
+            }
+        }
+        other => panic!("expected for-in statement, found {:?}", other),
+    }
+}
+
+#[test]
+fn test_for_in_numeric_range_statement_inclusive() {
+    let program = parse_program(
+        r#"
+        for (day in 1..=7) {
+            val label = day
+        }
+    "#,
+    );
+    let statement = first_statement(&program);
+
+    match statement {
+        Statement::ForIn(for_in) => match &for_in.strategy {
+            LoopStrategy::NumericRange(meta) => assert!(meta.inclusive),
+            other => panic!("expected inclusive numeric range, found {:?}", other),
+        },
+        other => panic!("expected for-in statement, found {:?}", other),
+    }
+}
+
+#[test]
+fn test_range_expression_in_val_declaration() {
+    let program = parse_program("val range = 1..=10");
+    let statement = first_statement(&program);
+
+    match statement {
+        Statement::ValDeclaration { initializer, .. } => match initializer {
+            Expression::Binary { op, .. } => {
+                assert!(matches!(op, BinaryOp::RangeInclusive));
+            }
+            other => panic!("expected binary range expression, found {:?}", other),
+        },
+        other => panic!("expected val declaration, found {:?}", other),
+    }
 }
 
 #[test]

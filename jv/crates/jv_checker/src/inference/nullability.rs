@@ -140,23 +140,16 @@ impl NullabilityAnalyzer {
                     None
                 }
             }
-            Statement::While {
-                condition, body, ..
-            } => {
-                self.evaluate_expression(condition);
-                self.evaluate_expression(body);
-                None
-            }
-            Statement::For {
-                variable,
-                iterable,
-                body,
-                ..
-            } => {
-                self.evaluate_expression(iterable);
+            Statement::ForIn(for_in) => {
+                self.evaluate_expression(&for_in.iterable);
                 self.enter_scope();
-                self.define(variable.clone(), Nullability::Unknown);
-                self.evaluate_expression(body);
+                let annotated = for_in
+                    .binding
+                    .type_annotation
+                    .as_ref()
+                    .map_or(Nullability::Unknown, Nullability::from_annotation);
+                self.define(for_in.binding.name.clone(), annotated);
+                self.evaluate_expression(&for_in.body);
                 self.leave_scope();
                 None
             }

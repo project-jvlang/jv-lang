@@ -336,6 +336,7 @@ fn make_layout_comma_token(reference: &Token) -> Token {
         line: reference.line,
         column: reference.column,
         leading_trivia: TokenTrivia::default(),
+        diagnostic: None,
     }
 }
 

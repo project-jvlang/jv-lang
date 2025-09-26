@@ -26,7 +26,10 @@ fn infers_local_binding_from_literal() {
         .lookup("counter")
         .expect("local binding should be registered");
 
-    assert!(scheme.quantifiers.is_empty(), "literal binding stays monomorphic");
+    assert!(
+        scheme.quantifiers.is_empty(),
+        "literal binding stays monomorphic"
+    );
     assert_eq!(scheme.ty, TypeKind::Primitive("Int"));
 }
 
@@ -46,7 +49,11 @@ fn generalizes_identity_function() {
         .function_scheme("identity")
         .expect("function scheme should be generalized");
 
-    assert_eq!(scheme.quantifiers.len(), 1, "identity should remain polymorphic");
+    assert_eq!(
+        scheme.quantifiers.len(),
+        1,
+        "identity should remain polymorphic"
+    );
     match &scheme.ty {
         TypeKind::Function(params, return_ty) => {
             assert_eq!(params.len(), 1, "identity has a single parameter");

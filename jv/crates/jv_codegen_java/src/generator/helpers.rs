@@ -50,6 +50,12 @@ impl JavaCodeGenerator {
             BinaryOp::MinusAssign => "-=".to_string(),
             BinaryOp::MultiplyAssign => "*=".to_string(),
             BinaryOp::DivideAssign => "/=".to_string(),
+            BinaryOp::RangeExclusive | BinaryOp::RangeInclusive => {
+                return Err(CodeGenError::UnsupportedConstruct {
+                    construct: "Range operators must be lowered before Java emission".to_string(),
+                    span: None,
+                })
+            }
             BinaryOp::Elvis => {
                 return Err(CodeGenError::UnsupportedConstruct {
                     construct: "Elvis operator requires specialised lowering".to_string(),

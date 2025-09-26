@@ -26,6 +26,7 @@ pub enum TokenType {
     For,
     In,
     While,
+    Do,
     Return,
     Break,
     Continue,
@@ -34,21 +35,23 @@ pub enum TokenType {
     Null,
 
     // Operators
-    Assign,       // =
-    Plus,         // +
-    Minus,        // -
-    Multiply,     // *
-    Divide,       // /
-    Modulo,       // %
-    Equal,        // ==
-    NotEqual,     // !=
-    Less,         // <
-    LessEqual,    // <=
-    Greater,      // >
-    GreaterEqual, // >=
-    And,          // &&
-    Or,           // ||
-    Not,          // !
+    Assign,         // =
+    Plus,           // +
+    Minus,          // -
+    Multiply,       // *
+    Divide,         // /
+    Modulo,         // %
+    Equal,          // ==
+    NotEqual,       // !=
+    Less,           // <
+    LessEqual,      // <=
+    Greater,        // >
+    GreaterEqual,   // >=
+    And,            // &&
+    Or,             // ||
+    Not,            // !
+    RangeExclusive, // ..
+    RangeInclusive, // ..=
 
     // Null safety operators
     Question, // ?
@@ -106,12 +109,24 @@ impl TokenTrivia {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum LegacyLoopKeyword {
+    While,
+    Do,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum TokenDiagnostic {
+    LegacyLoop { keyword: LegacyLoopKeyword },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Token {
     pub token_type: TokenType,
     pub lexeme: String,
     pub line: usize,
     pub column: usize,
     pub leading_trivia: TokenTrivia,
+    pub diagnostic: Option<TokenDiagnostic>,
 }
 
 #[derive(Debug, Default, Clone, Copy)]
@@ -464,14 +479,36 @@ impl Lexer {
                     self.advance();
                 }
                 '.' => {
-                    tokens.push(self.make_token(
-                        TokenType::Dot,
-                        ".",
-                        start_line,
-                        start_column,
-                        trivia.take(),
-                    ));
                     self.advance();
+                    if self.current < chars.len() && chars[self.current] == '.' {
+                        self.advance();
+                        if self.current < chars.len() && chars[self.current] == '=' {
+                            self.advance();
+                            tokens.push(self.make_token(
+                                TokenType::RangeInclusive,
+                                "..=",
+                                start_line,
+                                start_column,
+                                trivia.take(),
+                            ));
+                        } else {
+                            tokens.push(self.make_token(
+                                TokenType::RangeExclusive,
+                                "..",
+                                start_line,
+                                start_column,
+                                trivia.take(),
+                            ));
+                        }
+                    } else {
+                        tokens.push(self.make_token(
+                            TokenType::Dot,
+                            ".",
+                            start_line,
+                            start_column,
+                            trivia.take(),
+                        ));
+                    }
                 }
                 ':' => {
                     self.advance();
@@ -611,6 +648,7 @@ impl Lexer {
                         "else" => TokenType::Else,
                         "for" => TokenType::For,
                         "in" => TokenType::In,
+                        "do" => TokenType::Do,
                         "while" => TokenType::While,
                         "return" => TokenType::Return,
                         "break" => TokenType::Break,
@@ -642,6 +680,7 @@ impl Lexer {
             line: self.line,
             column: self.column,
             leading_trivia: trivia.take(),
+            diagnostic: None,
         });
 
         Ok(tokens)
@@ -662,12 +701,26 @@ impl Lexer {
         column: usize,
         leading_trivia: TokenTrivia,
     ) -> Token {
+        let diagnostic = Self::diagnostic_for(&token_type);
         Token {
             token_type,
             lexeme: lexeme.to_string(),
             line,
             column,
             leading_trivia,
+            diagnostic,
+        }
+    }
+
+    fn diagnostic_for(token_type: &TokenType) -> Option<TokenDiagnostic> {
+        match token_type {
+            TokenType::While => Some(TokenDiagnostic::LegacyLoop {
+                keyword: LegacyLoopKeyword::While,
+            }),
+            TokenType::Do => Some(TokenDiagnostic::LegacyLoop {
+                keyword: LegacyLoopKeyword::Do,
+            }),
+            _ => None,
         }
     }
 
