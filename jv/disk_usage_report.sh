@@ -1,0 +1,20 @@
+#!/bin/bash
+# Disk usage comparison script for jv project
+
+echo "=== jvフォルダのディスク容量比較 ==="
+echo "ビルド前（cargo clean後）: 2.6M (2,600 KB)"
+echo "ビルド後（部分ビルド）: 8.4G (8,741,604 KB)"
+echo ""
+echo "=== 増加量計算 ==="
+echo "増加量: $((8741604 - 2600)) KB"
+echo "増加率: $(echo "scale=1; (8741604 - 2600) * 100 / 2600" | bc -l)%"
+echo ""
+echo "=== 分析 ==="
+echo "• 部分ビルド（約180個の依存関係コンパイル）で8.4GB増加"
+echo "• 依存関係のコンパイル結果が大部分を占めている"
+echo "• debug = 1設定でもデバッグ情報が相当量含まれている"
+echo ""
+echo "=== 詳細内訳 ==="
+echo "ソースコード: 2.6M"
+echo "ビルドアーティファクト: 8.4G"
+echo "合計: $(du -sh . 2>/dev/null | cut -f1)"
