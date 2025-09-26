@@ -3,6 +3,8 @@
 //! 制約生成や単一化ソルバから利用されるキュー構造をここで提供し、
 //! 後続タスクで詳細ロジックを追加しやすい形にしておく。
 
+pub mod generator;
+
 use crate::inference::types::{TypeId, TypeKind};
 use std::collections::VecDeque;
 
@@ -71,3 +73,5 @@ impl ConstraintSet {
         self.queue.len()
     }
 }
+
+pub use generator::ConstraintGenerator;

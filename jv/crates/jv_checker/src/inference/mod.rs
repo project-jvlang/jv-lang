@@ -9,7 +9,7 @@ pub mod environment;
 pub mod types;
 pub mod utils;
 
-pub use constraint::{Constraint, ConstraintKind, ConstraintSet};
+pub use constraint::{Constraint, ConstraintGenerator, ConstraintKind, ConstraintSet};
 pub use engine::{InferenceEngine, InferenceError, InferenceResult};
 pub use environment::{TypeEnvironment, TypeScheme};
 pub use types::{TypeBinding, TypeId, TypeKind, TypeVariable, TypeVariableKind};
