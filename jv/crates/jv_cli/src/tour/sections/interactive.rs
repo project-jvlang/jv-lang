@@ -236,7 +236,7 @@ impl SessionState {
             }
         };
 
-        let checker = TypeChecker::new();
+        let mut checker = TypeChecker::new();
         if let Err(errors) = checker.check_program(&program) {
             writeln!(writer, "❌ 型チェックで問題が見つかりました:")?;
             for issue in errors {

@@ -4,11 +4,11 @@ pub mod diagnostics;
 pub mod inference;
 
 pub use inference::{
-    InferenceEngine, InferenceError, InferenceResult, TypeEnvironment, TypeId, TypeKind, TypeScheme,
+    InferenceEngine, InferenceError, InferenceResult, NullabilityAnalyzer, TypeBinding,
+    TypeEnvironment, TypeId, TypeKind, TypeScheme,
 };
 
-use crate::inference::NullabilityAnalyzer;
-use jv_ast::*;
+use jv_ast::Program;
 use std::collections::HashMap;
 use thiserror::Error;
 
@@ -26,297 +26,118 @@ pub enum CheckError {
     ValidationError(String),
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub enum InferredType {
-    String,
-    Int,
-    Double,
-    Boolean,
-    Null,
-    Unknown,
-    Optional(Box<InferredType>),
+/// 型推論の結果を外部コンシューマへ提供するためのスナップショット。
+#[derive(Debug, Clone)]
+pub struct InferenceSnapshot {
+    environment: TypeEnvironment,
+    bindings: Vec<TypeBinding>,
+    function_schemes: HashMap<String, TypeScheme>,
+    result_type: Option<TypeKind>,
 }
 
-#[derive(Debug)]
-pub struct CheckContext {
-    variables: HashMap<String, InferredType>,
-    scopes: Vec<HashMap<String, InferredType>>,
-    errors: Vec<CheckError>,
-    warnings: Vec<String>,
-}
-
-impl CheckContext {
-    pub fn new() -> Self {
+impl InferenceSnapshot {
+    fn from_engine(engine: &InferenceEngine) -> Self {
         Self {
-            variables: HashMap::new(),
-            scopes: vec![HashMap::new()],
-            errors: Vec::new(),
-            warnings: Vec::new(),
+            environment: engine.environment().clone(),
+            bindings: engine.bindings().to_vec(),
+            function_schemes: engine.function_schemes().clone(),
+            result_type: engine.result_type().cloned(),
         }
-    }
-
-    pub fn push_scope(&mut self) {
-        self.scopes.push(HashMap::new());
-    }
-
-    pub fn pop_scope(&mut self) {
-        self.scopes.pop();
-    }
-
-    pub fn declare_variable(&mut self, name: String, var_type: InferredType) {
-        if let Some(current_scope) = self.scopes.last_mut() {
-            current_scope.insert(name, var_type);
-        }
-    }
-
-    pub fn get_variable_type(&self, name: &str) -> Option<&InferredType> {
-        // Check scopes from most recent to oldest
-        for scope in self.scopes.iter().rev() {
-            if let Some(var_type) = scope.get(name) {
-                return Some(var_type);
-            }
-        }
-        None
-    }
-
-    pub fn add_error(&mut self, error: CheckError) {
-        self.errors.push(error);
-    }
-
-    pub fn add_warning(&mut self, warning: String) {
-        self.warnings.push(warning);
-    }
-
-    pub fn has_errors(&self) -> bool {
-        !self.errors.is_empty()
-    }
-
-    pub fn get_errors(&self) -> &[CheckError] {
-        &self.errors
-    }
-
-    pub fn get_warnings(&self) -> &[String] {
-        &self.warnings
     }
 }
 
-pub struct TypeChecker;
+/// 推論済み情報へアクセスするためのサービスレイヤ。
+pub trait TypeInferenceService {
+    /// すべての型束縛を取得する。
+    fn bindings(&self) -> &[TypeBinding];
+
+    /// 型環境全体を参照する。
+    fn environment(&self) -> &TypeEnvironment;
+
+    /// 指定された関数シグネチャを取得する。
+    fn function_scheme(&self, name: &str) -> Option<&TypeScheme>;
+
+    /// 利用可能な関数シグネチャ一覧を返す。
+    fn function_schemes(&self) -> &HashMap<String, TypeScheme>;
+
+    /// 推論済みのトップレベル型を返す。
+    fn result_type(&self) -> Option<&TypeKind>;
+}
+
+impl TypeInferenceService for InferenceSnapshot {
+    fn bindings(&self) -> &[TypeBinding] {
+        &self.bindings
+    }
+
+    fn environment(&self) -> &TypeEnvironment {
+        &self.environment
+    }
+
+    fn function_scheme(&self, name: &str) -> Option<&TypeScheme> {
+        self.function_schemes.get(name)
+    }
+
+    fn function_schemes(&self) -> &HashMap<String, TypeScheme> {
+        &self.function_schemes
+    }
+
+    fn result_type(&self) -> Option<&TypeKind> {
+        self.result_type.as_ref()
+    }
+}
+
+/// TypeChecker orchestrates the inference engine and exposes analysis results.
+#[derive(Debug)]
+pub struct TypeChecker {
+    engine: InferenceEngine,
+    snapshot: Option<InferenceSnapshot>,
+}
 
 impl TypeChecker {
     pub fn new() -> Self {
-        Self
-    }
-
-    /// Check a complete program for type safety and other validation rules
-    pub fn check_program(&self, program: &Program) -> Result<(), Vec<CheckError>> {
-        let mut context = CheckContext::new();
-
-        // Check all statements
-        for statement in &program.statements {
-            self.check_statement(statement, &mut context);
-        }
-
-        if context.has_errors() {
-            Err(context.errors)
-        } else {
-            Ok(())
+        Self {
+            engine: InferenceEngine::new(),
+            snapshot: None,
         }
     }
 
-    /// Check a single statement
-    fn check_statement(&self, statement: &Statement, context: &mut CheckContext) {
-        match statement {
-            Statement::ValDeclaration {
-                name, initializer, ..
-            } => {
-                let expr_type = self.infer_expression_type(initializer, context);
-                context.declare_variable(name.clone(), expr_type);
+    /// 型推論と整合性検証を実行する。
+    pub fn check_program(&mut self, program: &Program) -> Result<(), Vec<CheckError>> {
+        match self.engine.infer_program(program) {
+            Ok(()) => {
+                self.snapshot = Some(InferenceSnapshot::from_engine(&self.engine));
+                Ok(())
             }
-            Statement::VarDeclaration {
-                name, initializer, ..
-            } => {
-                if let Some(init) = initializer {
-                    let expr_type = self.infer_expression_type(init, context);
-                    context.declare_variable(name.clone(), expr_type);
-                } else {
-                    context.declare_variable(name.clone(), InferredType::Unknown);
-                }
-            }
-            Statement::FunctionDeclaration {
-                name,
-                parameters,
-                body,
-                ..
-            } => {
-                context.push_scope();
-
-                // Add parameters to scope
-                for param in parameters {
-                    let param_type = self.type_annotation_to_inferred(&param.type_annotation);
-                    context.declare_variable(param.name.clone(), param_type);
-                }
-
-                // Check function body
-                self.check_expression(body.as_ref(), context);
-
-                context.pop_scope();
-
-                // Declare function in parent scope (simplified)
-                context.declare_variable(name.clone(), InferredType::Unknown);
-            }
-            Statement::DataClassDeclaration { name, .. } => {
-                // For data classes, we just declare the type exists
-                context.declare_variable(name.clone(), InferredType::Unknown);
-            }
-            Statement::Expression { expr, .. } => {
-                self.check_expression(expr, context);
-            }
-            _ => {
-                // Other statement types - basic validation
+            Err(error) => {
+                self.snapshot = None;
+                Err(vec![CheckError::TypeError(error.to_string())])
             }
         }
     }
 
-    /// Check an expression and return any errors found
-    fn check_expression(&self, expression: &Expression, context: &mut CheckContext) {
-        match expression {
-            Expression::Identifier(name, _) => {
-                if context.get_variable_type(name).is_none() {
-                    context.add_error(CheckError::UndefinedVariable(name.clone()));
-                }
-            }
-            Expression::Binary { left, right, .. } => {
-                self.check_expression(left, context);
-                self.check_expression(right, context);
-                // Could add type compatibility checking here
-            }
-            Expression::Call { function, args, .. } => {
-                self.check_expression(function, context);
-                for arg in args {
-                    match arg {
-                        Argument::Positional(expr) => self.check_expression(expr, context),
-                        Argument::Named { value, .. } => self.check_expression(value, context),
-                    }
-                }
-            }
-            Expression::MemberAccess { object, .. } => {
-                self.check_expression(object, context);
-            }
-            Expression::NullSafeMemberAccess { object, .. } => {
-                self.check_expression(object, context);
-                // This is safe by design - no additional checks needed
-            }
-            _ => {
-                // Other expression types
-            }
-        }
-    }
-
-    /// Infer the type of an expression
-    fn infer_expression_type(
-        &self,
-        expression: &Expression,
-        context: &CheckContext,
-    ) -> InferredType {
-        match expression {
-            Expression::Literal(literal, _) => {
-                match literal {
-                    Literal::String(_) => InferredType::String,
-                    Literal::Number(n) => {
-                        if n.contains('.') {
-                            InferredType::Double
-                        } else {
-                            InferredType::Int
-                        }
-                    }
-                    Literal::Boolean(_) => InferredType::Boolean,
-                    Literal::Character(_) => InferredType::String, // Treat char as string
-                    Literal::Null => InferredType::Null,
-                }
-            }
-            Expression::Identifier(name, _) => context
-                .get_variable_type(name)
-                .cloned()
-                .unwrap_or(InferredType::Unknown),
-            Expression::Binary {
-                left, right, op, ..
-            } => {
-                let left_type = self.infer_expression_type(left, context);
-                let right_type = self.infer_expression_type(right, context);
-
-                match op {
-                    BinaryOp::Add
-                    | BinaryOp::Subtract
-                    | BinaryOp::Multiply
-                    | BinaryOp::Divide
-                    | BinaryOp::Modulo => {
-                        // Simplified: assume numeric operations return the same type
-                        if matches!(left_type, InferredType::Double)
-                            || matches!(right_type, InferredType::Double)
-                        {
-                            InferredType::Double
-                        } else {
-                            InferredType::Int
-                        }
-                    }
-                    BinaryOp::Equal
-                    | BinaryOp::NotEqual
-                    | BinaryOp::Less
-                    | BinaryOp::LessEqual
-                    | BinaryOp::Greater
-                    | BinaryOp::GreaterEqual => InferredType::Boolean,
-                    BinaryOp::And | BinaryOp::Or => InferredType::Boolean,
-                    BinaryOp::Elvis => {
-                        // Elvis operator returns the left type if non-null, right type otherwise
-                        left_type
-                    }
-                    BinaryOp::BitAnd | BinaryOp::BitOr | BinaryOp::BitXor => InferredType::Int,
-                    BinaryOp::PlusAssign
-                    | BinaryOp::MinusAssign
-                    | BinaryOp::MultiplyAssign
-                    | BinaryOp::DivideAssign => {
-                        // Assignment operators return the left operand type
-                        left_type
-                    }
-                }
-            }
-            _ => InferredType::Unknown,
-        }
-    }
-
-    /// Convert a type annotation to an inferred type
-    fn type_annotation_to_inferred(
-        &self,
-        type_annotation: &Option<TypeAnnotation>,
-    ) -> InferredType {
-        match type_annotation {
-            Some(TypeAnnotation::Simple(name)) => match name.as_str() {
-                "String" => InferredType::String,
-                "Int" | "Integer" => InferredType::Int,
-                "Double" | "Float" => InferredType::Double,
-                "Boolean" | "Bool" => InferredType::Boolean,
-                _ => InferredType::Unknown,
-            },
-            Some(TypeAnnotation::Nullable(inner)) => {
-                let inner_type = self.type_annotation_to_inferred(&Some(inner.as_ref().clone()));
-                InferredType::Optional(Box::new(inner_type))
-            }
-            Some(TypeAnnotation::Generic { .. }) => InferredType::Unknown,
-            Some(TypeAnnotation::Function { .. }) => InferredType::Unknown,
-            Some(TypeAnnotation::Array(_)) => InferredType::Unknown,
-            None => InferredType::Unknown,
-        }
-    }
-
-    /// Validate null safety rules
-    pub fn check_null_safety(&self, program: &Program) -> Vec<String> {
+    /// null 安全診断を推論結果に基づかず AST から直接実行する。
+    pub fn check_null_safety(&self, program: &Program) -> Vec<CheckError> {
         NullabilityAnalyzer::analyze(program)
-            .into_iter()
-            .map(|error| error.to_string())
-            .collect()
     }
 
-    /// Check for forbidden Java syntax or patterns
+    /// 現在保持している推論スナップショットを取得する。
+    pub fn inference_snapshot(&self) -> Option<&InferenceSnapshot> {
+        self.snapshot.as_ref()
+    }
+
+    /// 推論サービスとしてアクセスする。
+    pub fn inference_service(&self) -> Option<&dyn TypeInferenceService> {
+        self.snapshot
+            .as_ref()
+            .map(|snapshot| snapshot as &dyn TypeInferenceService)
+    }
+
+    /// 推論スナップショットを引き渡し、内部状態からは破棄する。
+    pub fn take_inference_snapshot(&mut self) -> Option<InferenceSnapshot> {
+        self.snapshot.take()
+    }
+
+    /// Check for forbidden Java syntax or patterns.
     pub fn check_forbidden_syntax(&self, _program: &Program) -> Vec<String> {
         let violations = Vec::new();
         // This would check for patterns that shouldn't appear in jv code

@@ -41,7 +41,7 @@ impl TypeScheme {
 }
 
 /// スコープごとの型スキームと型変数IDを管理する。
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct TypeEnvironment {
     scopes: Vec<HashMap<String, TypeScheme>>,
     generator: TypeIdGenerator,

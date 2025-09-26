@@ -209,7 +209,7 @@ pub mod pipeline {
     use anyhow::{anyhow, bail, Context};
     use jv_build::BuildSystem;
     use jv_checker::compat::diagnostics as compat_diagnostics;
-    use jv_checker::TypeChecker;
+    use jv_checker::{InferenceSnapshot, TypeChecker};
     use jv_codegen_java::{JavaCodeGenConfig, JavaCodeGenerator};
     use jv_fmt::JavaFormatter;
     use jv_ir::transform_program;
@@ -228,6 +228,7 @@ pub mod pipeline {
         pub warnings: Vec<String>,
         pub compatibility: Option<report::RenderedCompatibilityReport>,
         pub compatibility_diagnostics: Vec<ToolingDiagnostic>,
+        pub inference: Option<InferenceSnapshot>,
     }
 
     /// Compile a `.jv` file end-to-end into Java (and optionally `.class`) outputs.
@@ -240,6 +241,7 @@ pub mod pipeline {
         }
 
         let mut warnings = Vec::new();
+        let mut inference_snapshot: Option<InferenceSnapshot> = None;
         let mut build_config = plan.build_config.clone();
         build_config.output_dir = options.output_dir.to_string_lossy().into_owned();
 
@@ -266,7 +268,7 @@ pub mod pipeline {
         };
 
         if options.check {
-            let type_checker = TypeChecker::new();
+            let mut type_checker = TypeChecker::new();
             if let Err(errors) = type_checker.check_program(&program) {
                 let details = errors
                     .iter()
@@ -276,7 +278,13 @@ pub mod pipeline {
                 bail!("Type checking failed:\n  - {}", details);
             }
 
-            warnings.extend(type_checker.check_null_safety(&program));
+            warnings.extend(
+                type_checker
+                    .check_null_safety(&program)
+                    .into_iter()
+                    .map(|warning| warning.to_string()),
+            );
+            inference_snapshot = type_checker.take_inference_snapshot();
         }
 
         let ir_program = match transform_program(program) {
@@ -341,6 +349,7 @@ pub mod pipeline {
             warnings,
             compatibility: None,
             compatibility_diagnostics,
+            inference: inference_snapshot,
         };
 
         if !options.java_only {

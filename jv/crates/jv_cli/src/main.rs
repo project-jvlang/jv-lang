@@ -336,7 +336,7 @@ fn check_jv_file(input: &str) -> Result<()> {
         return Err(anyhow::anyhow!("IR transformation error: {:?}", error));
     }
 
-    let type_checker = TypeChecker::new();
+    let mut type_checker = TypeChecker::new();
     match type_checker.check_program(&program) {
         Ok(_) => {
             println!("✓ No errors found");

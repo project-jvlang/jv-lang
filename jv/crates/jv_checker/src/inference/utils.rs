@@ -5,7 +5,7 @@
 use crate::inference::types::TypeId;
 
 /// 型変数IDを連番で払い出すジェネレータ。
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct TypeIdGenerator {
     next: u32,
 }
