@@ -26,6 +26,8 @@ pub struct TransformContext {
     pub sample_options: SampleOptions,
     /// Cache tracking whitespace-delimited sequence element types to avoid recomputation
     pub sequence_style_cache: SequenceStyleCache,
+    /// Counter for synthesised local identifiers
+    temp_counter: usize,
 }
 
 impl TransformContext {
@@ -56,6 +58,7 @@ impl TransformContext {
             current_package: None,
             sample_options: SampleOptions::default(),
             sequence_style_cache: SequenceStyleCache::with_capacity(),
+            temp_counter: 0,
         }
     }
 
@@ -80,6 +83,12 @@ impl TransformContext {
             }
         }
         self.type_info.get(name)
+    }
+
+    pub fn fresh_identifier(&mut self, prefix: &str) -> String {
+        let name = format!("{}{}", prefix, self.temp_counter);
+        self.temp_counter += 1;
+        name
     }
 
     pub fn sample_options(&self) -> &SampleOptions {

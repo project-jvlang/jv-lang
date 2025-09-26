@@ -10,6 +10,7 @@ mod concurrency;
 mod control_flow;
 mod declarations;
 mod functions;
+mod loops;
 mod null_safety;
 mod resources;
 mod sample;
@@ -154,6 +155,7 @@ pub fn transform_statement(
                 }])
             }
         },
+        Statement::ForIn(for_in) => loops::desugar_for_in_statement(for_in, context),
         _ => Ok(vec![]),
     }
 }

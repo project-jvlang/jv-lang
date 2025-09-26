@@ -589,6 +589,7 @@ pub enum IrStatement {
         variable_type: JavaType,
         iterable: IrExpression,
         body: Box<IrStatement>,
+        iterable_kind: IrForEachKind,
         span: Span,
     },
 
@@ -598,6 +599,7 @@ pub enum IrStatement {
         condition: Option<IrExpression>,
         update: Option<IrExpression>,
         body: Box<IrStatement>,
+        metadata: Option<IrForLoopMetadata>,
         span: Span,
     },
 
@@ -660,6 +662,27 @@ pub enum IrStatement {
         name: String,
         span: Span,
     },
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum IrForEachKind {
+    Iterable,
+    LazySequence { needs_cleanup: bool },
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum IrForLoopMetadata {
+    NumericRange(IrNumericRangeLoop),
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct IrNumericRangeLoop {
+    pub binding: String,
+    pub binding_type: JavaType,
+    pub end_variable: String,
+    pub end_type: JavaType,
+    pub inclusive: bool,
+    pub span: Span,
 }
 
 /// Method/constructor parameters

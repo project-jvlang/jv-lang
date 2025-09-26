@@ -10,8 +10,9 @@ mod tests {
         desugar_val_declaration, desugar_var_declaration, desugar_when_expression,
         generate_extension_class_name, generate_utility_class_name, infer_java_type,
         transform_expression, transform_program, transform_statement, CompletableFutureOp,
-        DataFormat, IrCaseLabel, IrExpression, IrModifiers, IrStatement, IrVisibility, JavaType,
-        SampleMode, SampleSourceKind, Schema, TransformContext, TransformError, VirtualThreadOp,
+        DataFormat, IrCaseLabel, IrExpression, IrForEachKind, IrForLoopMetadata, IrModifiers,
+        IrNumericRangeLoop, IrStatement, IrVisibility, JavaType, SampleMode, SampleSourceKind,
+        Schema, TransformContext, TransformError, VirtualThreadOp,
     };
     use jv_ast::*;
     use sha2::{Digest, Sha256};
@@ -2304,5 +2305,201 @@ mod tests {
 
         let after_clear = cache.lookup_or_insert_call(&span, JavaType::string());
         assert!(after_clear.is_none());
+    }
+    #[test]
+    fn numeric_range_lowering_produces_metadata_and_conditions() {
+        let mut context = TransformContext::new();
+        let span = dummy_span();
+
+        let binding = LoopBinding {
+            name: "idx".to_string(),
+            type_annotation: None,
+            span: span.clone(),
+        };
+
+        let range = NumericRangeLoop {
+            start: Expression::Literal(Literal::Number("0".to_string()), span.clone()),
+            end: Expression::Literal(Literal::Number("5".to_string()), span.clone()),
+            inclusive: false,
+            span: span.clone(),
+        };
+
+        let body_expr = Expression::Block {
+            statements: vec![Statement::Expression {
+                expr: Expression::Literal(Literal::Number("1".to_string()), span.clone()),
+                span: span.clone(),
+            }],
+            span: span.clone(),
+        };
+
+        let stmt = Statement::ForIn(ForInStatement {
+            binding,
+            iterable: Expression::Literal(Literal::Null, span.clone()),
+            strategy: LoopStrategy::NumericRange(range),
+            body: Box::new(body_expr),
+            span: span.clone(),
+        });
+
+        let ir = transform_statement(stmt, &mut context).expect("transform numeric range");
+        assert_eq!(ir.len(), 1, "expected outer block");
+
+        let block_statements = match &ir[0] {
+            IrStatement::Block { statements, .. } => statements,
+            other => panic!("expected block, got {:?}", other),
+        };
+        assert_eq!(
+            block_statements.len(),
+            2,
+            "range lowering should emit temp + loop"
+        );
+
+        match &block_statements[0] {
+            IrStatement::VariableDeclaration { is_final, .. } => assert!(*is_final),
+            other => panic!("expected range bound declaration, got {:?}", other),
+        }
+
+        match &block_statements[1] {
+            IrStatement::For {
+                condition,
+                metadata,
+                ..
+            } => {
+                let metadata = metadata
+                    .as_ref()
+                    .expect("numeric range should attach metadata");
+                let IrForLoopMetadata::NumericRange(IrNumericRangeLoop {
+                    inclusive, binding, ..
+                }) = metadata;
+                assert!(!inclusive, "exclusive range should mark inclusive=false");
+                assert_eq!(binding, "idx");
+
+                let condition = condition.as_ref().expect("loop condition required");
+                match condition {
+                    IrExpression::Binary { op, .. } => assert!(matches!(op, BinaryOp::Less)),
+                    other => panic!("expected binary comparison, got {:?}", other),
+                }
+            }
+            other => panic!("expected for statement, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn inclusive_range_uses_less_equal() {
+        let mut context = TransformContext::new();
+        let span = dummy_span();
+
+        let stmt = Statement::ForIn(ForInStatement {
+            binding: LoopBinding {
+                name: "idx".to_string(),
+                type_annotation: None,
+                span: span.clone(),
+            },
+            iterable: Expression::Literal(Literal::Null, span.clone()),
+            strategy: LoopStrategy::NumericRange(NumericRangeLoop {
+                start: Expression::Literal(Literal::Number("0".to_string()), span.clone()),
+                end: Expression::Literal(Literal::Number("5".to_string()), span.clone()),
+                inclusive: true,
+                span: span.clone(),
+            }),
+            body: Box::new(Expression::Literal(
+                Literal::Number("2".to_string()),
+                span.clone(),
+            )),
+            span: span.clone(),
+        });
+
+        let ir = transform_statement(stmt, &mut context).expect("transform inclusive range");
+        let block_statements = match &ir[0] {
+            IrStatement::Block { statements, .. } => statements,
+            other => panic!("expected block, got {:?}", other),
+        };
+        let condition = match &block_statements[1] {
+            IrStatement::For {
+                condition,
+                metadata,
+                ..
+            } => {
+                if let Some(IrForLoopMetadata::NumericRange(meta)) = metadata {
+                    assert!(meta.inclusive);
+                } else {
+                    panic!("expected numeric range metadata");
+                }
+                condition.as_ref().expect("condition present")
+            }
+            other => panic!("expected for statement, got {:?}", other),
+        };
+
+        match condition {
+            IrExpression::Binary { op, .. } => assert!(matches!(op, BinaryOp::LessEqual)),
+            other => panic!("expected binary condition, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn lazy_sequence_lowering_wraps_with_temp_and_metadata() {
+        let mut context = TransformContext::new();
+        let span = dummy_span();
+        context.add_variable("items".to_string(), JavaType::object());
+
+        let stmt = Statement::ForIn(ForInStatement {
+            binding: LoopBinding {
+                name: "item".to_string(),
+                type_annotation: None,
+                span: span.clone(),
+            },
+            iterable: Expression::Identifier("items".to_string(), span.clone()),
+            strategy: LoopStrategy::LazySequence {
+                needs_cleanup: true,
+            },
+            body: Box::new(Expression::Literal(Literal::Null, span.clone())),
+            span: span.clone(),
+        });
+
+        let ir = transform_statement(stmt, &mut context).expect("transform lazy sequence");
+        assert_eq!(ir.len(), 1);
+        let block_statements = match &ir[0] {
+            IrStatement::Block { statements, .. } => statements,
+            other => panic!("expected block, got {:?}", other),
+        };
+        assert_eq!(block_statements.len(), 2, "temp + foreach expected");
+
+        let foreach_kind = match &block_statements[1] {
+            IrStatement::ForEach { iterable_kind, .. } => iterable_kind,
+            other => panic!("expected foreach, got {:?}", other),
+        };
+
+        match foreach_kind {
+            IrForEachKind::LazySequence { needs_cleanup } => assert!(*needs_cleanup),
+            other => panic!("expected lazy sequence metadata, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn iterable_strategy_returns_single_foreach_statement() {
+        let mut context = TransformContext::new();
+        let span = dummy_span();
+        context.add_variable("values".to_string(), JavaType::object());
+
+        let stmt = Statement::ForIn(ForInStatement {
+            binding: LoopBinding {
+                name: "value".to_string(),
+                type_annotation: None,
+                span: span.clone(),
+            },
+            iterable: Expression::Identifier("values".to_string(), span.clone()),
+            strategy: LoopStrategy::Iterable,
+            body: Box::new(Expression::Literal(Literal::Null, span.clone())),
+            span: span.clone(),
+        });
+
+        let ir = transform_statement(stmt, &mut context).expect("transform iterable");
+        assert_eq!(ir.len(), 1);
+        match &ir[0] {
+            IrStatement::ForEach { iterable_kind, .. } => match iterable_kind {
+                IrForEachKind::Iterable => {}
+                other => panic!("expected iterable kind, got {:?}", other),
+            },
+            other => panic!("expected foreach, got {:?}", other),
+        }
     }
 }
