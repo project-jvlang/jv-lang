@@ -106,7 +106,7 @@ impl TypeEnvironment {
     /// 型を一般化し、環境に閉じた型スキームへ変換する。
     pub fn generalize(&self, ty: TypeKind) -> TypeScheme {
         let mut free_vars = HashSet::new();
-        collect_free_type_vars(&ty, &mut free_vars);
+        ty.collect_free_type_vars_into(&mut free_vars);
 
         let env_free_vars = self.environment_free_type_vars();
         let mut quantifiers: Vec<TypeId> = free_vars
@@ -135,7 +135,7 @@ impl TypeEnvironment {
         for scope in &self.scopes {
             for scheme in scope.values() {
                 let mut scheme_free = HashSet::new();
-                collect_free_type_vars(&scheme.ty, &mut scheme_free);
+                scheme.ty.collect_free_type_vars_into(&mut scheme_free);
                 for quantifier in &scheme.quantifiers {
                     scheme_free.remove(quantifier);
                 }
@@ -143,16 +143,6 @@ impl TypeEnvironment {
             }
         }
         acc
-    }
-}
-
-fn collect_free_type_vars(ty: &TypeKind, acc: &mut HashSet<TypeId>) {
-    match ty {
-        TypeKind::Primitive(_) | TypeKind::Unknown => {}
-        TypeKind::Optional(inner) => collect_free_type_vars(inner, acc),
-        TypeKind::Variable(id) => {
-            acc.insert(*id);
-        }
     }
 }
 
@@ -164,6 +154,13 @@ fn substitute_type(ty: &TypeKind, subs: &HashMap<TypeId, TypeKind>) -> TypeKind 
             .get(id)
             .cloned()
             .unwrap_or_else(|| TypeKind::Variable(*id)),
+        TypeKind::Function(params, ret) => TypeKind::Function(
+            params
+                .iter()
+                .map(|param| substitute_type(param, subs))
+                .collect(),
+            Box::new(substitute_type(ret, subs)),
+        ),
         TypeKind::Unknown => TypeKind::Unknown,
     }
 }

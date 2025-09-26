@@ -91,29 +91,46 @@ impl<'env> ConstraintGenerator<'env> {
                 body,
                 ..
             } => {
-                self.env.enter_scope();
+                let mut param_types = Vec::with_capacity(parameters.len());
                 for param in parameters {
-                    let param_ty = param
+                    let ty = param
                         .type_annotation
                         .as_ref()
                         .map(|ann| self.type_from_annotation(ann))
                         .unwrap_or_else(|| self.env.fresh_type_variable());
+                    param_types.push(ty);
+                }
+
+                let return_ty = return_type
+                    .as_ref()
+                    .map(|ann| self.type_from_annotation(ann))
+                    .unwrap_or_else(|| self.env.fresh_type_variable());
+
+                let function_type = TypeKind::function(param_types.clone(), return_ty.clone());
+                self.env
+                    .define_scheme(name.clone(), TypeScheme::monotype(function_type));
+
+                self.env.enter_scope();
+                for (param, param_ty) in parameters.iter().zip(param_types.iter()) {
                     self.env
-                        .define_scheme(&param.name, TypeScheme::monotype(param_ty));
+                        .define_scheme(&param.name, TypeScheme::monotype(param_ty.clone()));
+
+                    if let Some(default_expr) = &param.default_value {
+                        let default_ty = self.infer_expression(default_expr);
+                        self.push_constraint(
+                            ConstraintKind::Equal(param_ty.clone(), default_ty),
+                            Some("parameter default must match declared type"),
+                        );
+                    }
                 }
 
                 let body_ty = self.infer_expression(body);
-                if let Some(annotation) = return_type.as_ref() {
-                    let annotated = self.type_from_annotation(annotation);
-                    self.push_constraint(
-                        ConstraintKind::Equal(body_ty, annotated),
-                        Some("function body must satisfy return annotation"),
-                    );
-                }
-                self.env.leave_scope();
+                self.push_constraint(
+                    ConstraintKind::Equal(body_ty, return_ty.clone()),
+                    Some("function body must satisfy return type"),
+                );
 
-                self.env
-                    .define_scheme(name, TypeScheme::monotype(TypeKind::Unknown));
+                self.env.leave_scope();
             }
             _ => {
                 // そのほかの文でも子ノードを可能な範囲で評価しておく。
@@ -170,18 +187,23 @@ impl<'env> ConstraintGenerator<'env> {
             } => self.infer_binary_expression(op, left, right),
             Expression::Unary { op, operand, .. } => self.infer_unary_expression(op, operand),
             Expression::Call { function, args, .. } => {
-                self.infer_expression(function);
+                let fn_ty = self.infer_expression(function);
+                let mut argument_types = Vec::with_capacity(args.len());
                 for arg in args {
-                    match arg {
-                        Argument::Positional(expr) => {
-                            self.infer_expression(expr);
-                        }
-                        Argument::Named { value, .. } => {
-                            self.infer_expression(value);
-                        }
-                    }
+                    let ty = match arg {
+                        Argument::Positional(expr) => self.infer_expression(expr),
+                        Argument::Named { value, .. } => self.infer_expression(value),
+                    };
+                    argument_types.push(ty);
                 }
-                TypeKind::Unknown
+
+                let result_ty = self.env.fresh_type_variable();
+                let expected_fn = TypeKind::function(argument_types, result_ty.clone());
+                self.push_constraint(
+                    ConstraintKind::Equal(fn_ty, expected_fn),
+                    Some("call target must be compatible with argument list"),
+                );
+                result_ty
             }
             Expression::Block { statements, .. } => self.infer_block(statements),
             Expression::If {
@@ -388,6 +410,17 @@ impl<'env> ConstraintGenerator<'env> {
             TypeAnnotation::Nullable(inner) => {
                 let inner_ty = self.type_from_annotation(inner);
                 TypeKind::Optional(Box::new(inner_ty))
+            }
+            TypeAnnotation::Function {
+                params,
+                return_type,
+            } => {
+                let param_types = params
+                    .iter()
+                    .map(|ann| self.type_from_annotation(ann))
+                    .collect();
+                let ret_ty = self.type_from_annotation(return_type.as_ref());
+                TypeKind::function(param_types, ret_ty)
             }
             _ => TypeKind::Unknown,
         }

@@ -1,5 +1,6 @@
 //! 型推論で扱う型表現・型変数・束縛を定義する。
 
+use std::collections::HashSet;
 use std::fmt;
 
 /// 推論で利用する型変数ID。
@@ -30,12 +31,57 @@ pub enum TypeKind {
     Primitive(&'static str),
     Optional(Box<TypeKind>),
     Variable(TypeId),
+    Function(Vec<TypeKind>, Box<TypeKind>),
     Unknown,
 }
 
 impl Default for TypeKind {
     fn default() -> Self {
         TypeKind::Unknown
+    }
+}
+
+impl TypeKind {
+    /// ヘルパー: 関数型を生成する。
+    pub fn function(params: Vec<TypeKind>, return_type: TypeKind) -> Self {
+        TypeKind::Function(params, Box::new(return_type))
+    }
+
+    /// 型表現に未決定な `Unknown` が含まれているか判定する。
+    pub fn contains_unknown(&self) -> bool {
+        match self {
+            TypeKind::Unknown => true,
+            TypeKind::Optional(inner) => inner.contains_unknown(),
+            TypeKind::Function(params, ret) => {
+                params.iter().any(TypeKind::contains_unknown) || ret.contains_unknown()
+            }
+            TypeKind::Primitive(_) | TypeKind::Variable(_) => false,
+        }
+    }
+
+    /// 自由型変数を収集し、ソート済みベクタで返す。
+    pub fn free_type_vars(&self) -> Vec<TypeId> {
+        let mut vars = HashSet::new();
+        self.collect_free_type_vars_into(&mut vars);
+        let mut vars: Vec<_> = vars.into_iter().collect();
+        vars.sort_by_key(|id| id.to_raw());
+        vars
+    }
+
+    pub(crate) fn collect_free_type_vars_into(&self, acc: &mut HashSet<TypeId>) {
+        match self {
+            TypeKind::Primitive(_) | TypeKind::Unknown => {}
+            TypeKind::Variable(id) => {
+                acc.insert(*id);
+            }
+            TypeKind::Optional(inner) => inner.collect_free_type_vars_into(acc),
+            TypeKind::Function(params, ret) => {
+                for param in params {
+                    param.collect_free_type_vars_into(acc);
+                }
+                ret.collect_free_type_vars_into(acc);
+            }
+        }
     }
 }
 

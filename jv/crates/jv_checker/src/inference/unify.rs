@@ -159,6 +159,24 @@ impl ConstraintSolver {
                     })
                 }
             }
+            (TypeKind::Function(mut params_a, ret_a), TypeKind::Function(mut params_b, ret_b)) => {
+                if params_a.len() != params_b.len() {
+                    return Err(SolveError::TypeMismatch {
+                        left: TypeKind::Function(params_a, ret_a),
+                        right: TypeKind::Function(params_b, ret_b),
+                        note,
+                    });
+                }
+
+                let mut unified_params = Vec::with_capacity(params_a.len());
+                for (a, b) in params_a.drain(..).zip(params_b.drain(..)) {
+                    let unified = self.unify(a, b, note.clone())?;
+                    unified_params.push(unified);
+                }
+
+                let unified_return = self.unify(*ret_a, *ret_b, note)?;
+                Ok(TypeKind::Function(unified_params, Box::new(unified_return)))
+            }
             (TypeKind::Optional(left_inner), TypeKind::Optional(right_inner)) => {
                 let unified = self.unify(*left_inner, *right_inner, note)?;
                 Ok(TypeKind::Optional(Box::new(unified)))
@@ -173,6 +191,11 @@ impl ConstraintSolver {
             }
             (TypeKind::Unknown, _) => Ok(right),
             (_, TypeKind::Unknown) => Ok(left),
+            (l, r) => Err(SolveError::TypeMismatch {
+                left: l,
+                right: r,
+                note,
+            }),
         }
     }
 
@@ -222,6 +245,9 @@ impl ConstraintSolver {
                 }
             }
             TypeKind::Optional(inner) => self.occurs_in(id, inner),
+            TypeKind::Function(params, ret) => {
+                params.iter().any(|param| self.occurs_in(id, param)) || self.occurs_in(id, ret)
+            }
             TypeKind::Primitive(_) | TypeKind::Unknown => false,
         }
     }
