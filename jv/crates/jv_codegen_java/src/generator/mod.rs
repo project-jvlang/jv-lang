@@ -3,9 +3,10 @@ use crate::config::JavaCodeGenConfig;
 use crate::error::CodeGenError;
 use jv_ast::{BinaryOp, CallArgumentStyle, Literal, SequenceDelimiter, UnaryOp};
 use jv_ir::{
-    CompletableFutureOp, IrCaseLabel, IrCatchClause, IrExpression, IrModifiers, IrParameter,
-    IrProgram, IrRecordComponent, IrResource, IrSampleDeclaration, IrStatement, IrSwitchCase,
-    IrTypeParameter, IrVisibility, JavaType, MethodOverload, UtilityClass, VirtualThreadOp,
+    CompletableFutureOp, IrCaseLabel, IrCatchClause, IrExpression, IrForEachKind,
+    IrForLoopMetadata, IrModifiers, IrNumericRangeLoop, IrParameter, IrProgram, IrRecordComponent,
+    IrResource, IrSampleDeclaration, IrStatement, IrSwitchCase, IrTypeParameter, IrVisibility,
+    JavaType, MethodOverload, UtilityClass, VirtualThreadOp,
 };
 use std::collections::HashMap;
 

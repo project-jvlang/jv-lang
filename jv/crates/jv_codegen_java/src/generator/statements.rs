@@ -128,56 +128,25 @@ impl JavaCodeGenerator {
                 variable_type,
                 iterable,
                 body,
+                iterable_kind,
                 ..
             } => {
-                let mut builder = self.builder();
-                builder.push_line(&format!(
-                    "for ({} {} : {}) {{",
-                    self.generate_type(variable_type)?,
-                    variable,
-                    self.generate_expression(iterable)?
-                ));
-                builder.indent();
-                let body_code = self.generate_statement(body)?;
-                Self::push_lines(&mut builder, &body_code);
-                builder.dedent();
-                builder.push_line("}");
-                builder.build()
+                self.generate_for_each_loop(variable, variable_type, iterable, body, iterable_kind)?
             }
             IrStatement::For {
                 init,
                 condition,
                 update,
                 body,
+                metadata,
                 ..
-            } => {
-                let init_str = match init {
-                    Some(stmt) => {
-                        let rendered = self.generate_statement(stmt)?;
-                        rendered.trim_end_matches(';').to_string()
-                    }
-                    None => String::new(),
-                };
-                let condition_str = match condition {
-                    Some(expr) => self.generate_expression(expr)?,
-                    None => String::new(),
-                };
-                let update_str = match update {
-                    Some(expr) => self.generate_expression(expr)?,
-                    None => String::new(),
-                };
-                let mut builder = self.builder();
-                builder.push_line(&format!(
-                    "for ({}; {}; {}) {{",
-                    init_str, condition_str, update_str
-                ));
-                builder.indent();
-                let body_code = self.generate_statement(body)?;
-                Self::push_lines(&mut builder, &body_code);
-                builder.dedent();
-                builder.push_line("}");
-                builder.build()
-            }
+            } => self.generate_for_loop(
+                init.as_deref(),
+                condition.as_ref(),
+                update.as_ref(),
+                body,
+                metadata,
+            )?,
             IrStatement::Switch {
                 discriminant,
                 cases,
@@ -231,6 +200,185 @@ impl JavaCodeGenerator {
                 stmt
             }
         })
+    }
+
+    fn generate_for_each_loop(
+        &mut self,
+        variable: &str,
+        variable_type: &JavaType,
+        iterable: &IrExpression,
+        body: &IrStatement,
+        iterable_kind: &IrForEachKind,
+    ) -> Result<String, CodeGenError> {
+        match iterable_kind {
+            IrForEachKind::Iterable => {
+                self.render_enhanced_for_loop(variable, variable_type, iterable, body)
+            }
+            IrForEachKind::LazySequence { needs_cleanup } => {
+                if *needs_cleanup {
+                    self.render_lazy_sequence_loop(variable, variable_type, iterable, body)
+                } else {
+                    self.render_enhanced_for_loop(variable, variable_type, iterable, body)
+                }
+            }
+        }
+    }
+
+    fn render_enhanced_for_loop(
+        &mut self,
+        variable: &str,
+        variable_type: &JavaType,
+        iterable: &IrExpression,
+        body: &IrStatement,
+    ) -> Result<String, CodeGenError> {
+        let mut builder = self.builder();
+        builder.push_line(&format!(
+            "for ({} {} : {}) {{",
+            self.generate_type(variable_type)?,
+            variable,
+            self.generate_expression(iterable)?
+        ));
+        builder.indent();
+        let body_code = self.generate_statement(body)?;
+        Self::push_lines(&mut builder, &body_code);
+        builder.dedent();
+        builder.push_line("}");
+        Ok(builder.build())
+    }
+
+    fn render_lazy_sequence_loop(
+        &mut self,
+        variable: &str,
+        variable_type: &JavaType,
+        iterable: &IrExpression,
+        body: &IrStatement,
+    ) -> Result<String, CodeGenError> {
+        let iterable_source = self.generate_expression(iterable)?;
+        let item_type = self.generate_type(variable_type)?;
+        let mut builder = self.builder();
+        builder.push_line("{");
+        builder.indent();
+        builder.push_line(&format!("final var __jvSequence = {};", iterable_source));
+        builder.push_line("try {");
+        builder.indent();
+        builder.push_line(&format!(
+            "for ({} {} : __jvSequence) {{",
+            item_type, variable
+        ));
+        builder.indent();
+        let body_code = self.generate_statement(body)?;
+        Self::push_lines(&mut builder, &body_code);
+        builder.dedent();
+        builder.push_line("}");
+        builder.dedent();
+        builder.push_line("} finally {");
+        builder.indent();
+        builder.push_line("if (__jvSequence instanceof AutoCloseable closeable) {");
+        builder.indent();
+        builder.push_line("try {");
+        builder.indent();
+        builder.push_line("closeable.close();");
+        builder.dedent();
+        builder.push_line("} catch (Exception closeError) {");
+        builder.indent();
+        builder.push_line("throw new RuntimeException(closeError);");
+        builder.dedent();
+        builder.push_line("}");
+        builder.dedent();
+        builder.push_line("}");
+        builder.dedent();
+        builder.push_line("}");
+        builder.dedent();
+        builder.push_line("}");
+        Ok(builder.build())
+    }
+
+    fn generate_for_loop(
+        &mut self,
+        init: Option<&IrStatement>,
+        condition: Option<&IrExpression>,
+        update: Option<&IrExpression>,
+        body: &IrStatement,
+        metadata: &Option<IrForLoopMetadata>,
+    ) -> Result<String, CodeGenError> {
+        let init_str = init.map(|stmt| self.generate_statement(stmt)).transpose()?;
+        let init_str = init_str
+            .as_deref()
+            .map(|rendered| rendered.trim_end_matches(';').to_string())
+            .unwrap_or_default();
+
+        let condition_str = match condition {
+            Some(expr) => self.generate_expression(expr)?,
+            None => String::new(),
+        };
+
+        let update_str = match update {
+            Some(expr) => self.render_for_update(expr, metadata)?,
+            None => String::new(),
+        };
+
+        let mut builder = self.builder();
+        builder.push_line(&format!(
+            "for ({}; {}; {}) {{",
+            init_str, condition_str, update_str
+        ));
+        builder.indent();
+        let body_code = self.generate_statement(body)?;
+        Self::push_lines(&mut builder, &body_code);
+        builder.dedent();
+        builder.push_line("}");
+        Ok(builder.build())
+    }
+
+    fn render_for_update(
+        &mut self,
+        update: &IrExpression,
+        metadata: &Option<IrForLoopMetadata>,
+    ) -> Result<String, CodeGenError> {
+        if let Some(IrForLoopMetadata::NumericRange(meta)) = metadata {
+            if let Some(compact) = self.try_render_numeric_update(update, meta) {
+                return Ok(compact);
+            }
+        }
+        self.generate_expression(update)
+    }
+
+    fn try_render_numeric_update(
+        &self,
+        update: &IrExpression,
+        metadata: &IrNumericRangeLoop,
+    ) -> Option<String> {
+        if let IrExpression::Assignment { target, value, .. } = update {
+            if let IrExpression::Identifier {
+                name: target_name, ..
+            } = target.as_ref()
+            {
+                if target_name == &metadata.binding {
+                    if let IrExpression::Binary {
+                        left, op, right, ..
+                    } = value.as_ref()
+                    {
+                        if matches!(op, BinaryOp::Add) {
+                            if let IrExpression::Identifier {
+                                name: left_name, ..
+                            } = left.as_ref()
+                            {
+                                if left_name == target_name {
+                                    if let IrExpression::Literal(literal, _) = right.as_ref() {
+                                        if let Literal::Number(number) = literal {
+                                            if number == "1" {
+                                                return Some(format!("{}++", target_name));
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        None
     }
 
     fn generate_switch_statement(
