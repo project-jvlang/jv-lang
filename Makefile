@@ -91,6 +91,9 @@ test-ast: ## Test AST crate only
 test-ir: ## Test IR crate only
 	cargo test --lib -p jv_ir $(CARGO_FLAGS)
 
+test-support: ## Test support crate only
+	cargo test --lib -p jv_support $(CARGO_FLAGS)
+
 test-codegen: ## Test code generator crate only
 	cargo test --lib -p jv_codegen_java $(CARGO_FLAGS)
 

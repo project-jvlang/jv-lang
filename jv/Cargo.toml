@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
+    "crates/jv_support",
     "crates/jv_lexer",
     "crates/jv_parser", 
     "crates/jv_ast",
@@ -63,6 +64,7 @@ jv_pm = { path = "crates/jv_pm" }
 jv_build = { path = "crates/jv_build" }
 jv_lsp = { path = "crates/jv_lsp" }
 jv_cli = { path = "crates/jv_cli" }
+jv_support = { path = "crates/jv_support" }
 
 [profile.dev]
 # Reduce debug info to save disk space
