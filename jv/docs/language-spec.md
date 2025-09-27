@@ -406,15 +406,6 @@ for ((index, value) in list.withIndex()) {
     println("$index: $value")
 }
 
-// while ループ
-while (condition) {
-    // ...
-}
-
-// do-while ループ
-do {
-    // ...
-} while (condition)
 ```
 
 #### try-catch
