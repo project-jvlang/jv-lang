@@ -195,6 +195,43 @@ fn pipeline_compile_produces_artifacts() {
 }
 
 #[test]
+fn pipeline_reports_missing_else_in_value_when() {
+    let temp_dir = TempDirGuard::new("pipeline-missing-else").expect("create temp dir");
+    let fixture = temp_dir.path().join("missing_else.jv");
+    fs::write(
+        &fixture,
+        r#"fun compute(flag: Boolean): Int {
+    return when (flag) {
+        true -> 1
+    }
+}
+"#,
+    )
+    .expect("write fixture");
+
+    let plan = compose_plan_from_fixture(
+        temp_dir.path(),
+        &fixture,
+        CliOverrides {
+            entrypoint: None,
+            output: None,
+            java_only: true,
+            check: true,
+            format: false,
+            target: None,
+            clean: false,
+        },
+    );
+
+    let err = compile(&plan).expect_err("compile should fail for missing else");
+    let message = err.to_string();
+    assert!(
+        message.contains("E_WHEN_002"),
+        "expected E_WHEN_002 in tooling error, got {message}"
+    );
+}
+
+#[test]
 fn pipeline_runs_javac_when_available() {
     if !has_javac() {
         eprintln!("Skipping javac integration test: javac not available");
@@ -229,6 +266,79 @@ fn pipeline_runs_javac_when_available() {
     for file in &artifacts.class_files {
         assert!(file.exists(), "Class file missing: {}", file.display());
     }
+}
+
+#[test]
+fn cli_check_reports_missing_else_diagnostic() {
+    let Some(cli_path) = std::env::var_os("CARGO_BIN_EXE_jv").map(PathBuf::from) else {
+        eprintln!("Skipping CLI diagnostic test: CARGO_BIN_EXE_jv not set");
+        return;
+    };
+
+    let temp_dir = TempDirGuard::new("cli-check-when").expect("create temp dir");
+    let source_path = temp_dir.path().join("missing_else.jv");
+    fs::write(
+        &source_path,
+        r#"fun main(flag: Boolean) {
+    val value = when (flag) {
+        true -> 1
+    }
+    println(value)
+}
+"#,
+    )
+    .expect("write source");
+
+    let output = Command::new(&cli_path)
+        .arg("check")
+        .arg(&source_path)
+        .output()
+        .expect("execute jv check");
+
+    assert!(
+        !output.status.success(),
+        "CLI check should fail for missing else, status: {:?}",
+        output.status
+    );
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("E_WHEN_002"),
+        "expected E_WHEN_002 in CLI output, got: {stderr}"
+    );
+}
+
+#[test]
+fn cli_check_reports_forbidden_if_expression() {
+    let Some(cli_path) = std::env::var_os("CARGO_BIN_EXE_jv").map(PathBuf::from) else {
+        eprintln!("Skipping CLI diagnostic test: CARGO_BIN_EXE_jv not set");
+        return;
+    };
+
+    let temp_dir = TempDirGuard::new("cli-check-if").expect("create temp dir");
+    let source_path = temp_dir.path().join("forbidden_if.jv");
+    fs::write(
+        &source_path,
+        "fun main() { val value = if (true) 1 else 0 }\n",
+    )
+    .expect("write source");
+
+    let output = Command::new(&cli_path)
+        .arg("check")
+        .arg(&source_path)
+        .output()
+        .expect("execute jv check");
+
+    assert!(
+        !output.status.success(),
+        "CLI check should fail for forbidden if expression"
+    );
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("E_COND_001"),
+        "expected E_COND_001 in CLI output, got: {stderr}"
+    );
 }
 
 #[test]

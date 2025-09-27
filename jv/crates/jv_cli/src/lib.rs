@@ -4,7 +4,9 @@ use clap::Parser;
 use std::fs;
 use std::path::Path;
 
-use jv_checker::diagnostics::{from_parse_error, from_transform_error, ToolingDiagnostic};
+use jv_checker::diagnostics::{
+    from_check_error, from_parse_error, from_transform_error, ToolingDiagnostic,
+};
 use jv_pm::JavaTarget;
 
 #[derive(Parser, Debug, Clone)]
@@ -270,6 +272,9 @@ pub mod pipeline {
         if options.check {
             let mut type_checker = TypeChecker::new();
             if let Err(errors) = type_checker.check_program(&program) {
+                if let Some(diagnostic) = errors.iter().find_map(from_check_error) {
+                    return Err(tooling_failure(entrypoint, diagnostic));
+                }
                 let details = errors
                     .iter()
                     .map(|err| err.to_string())

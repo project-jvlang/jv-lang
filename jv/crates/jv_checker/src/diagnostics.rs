@@ -1,3 +1,4 @@
+use crate::CheckError;
 use jv_ast::Span;
 use jv_ir::error::TransformError;
 use jv_parser::ParseError;
@@ -25,6 +26,16 @@ const DIAGNOSTICS: &[DiagnosticDescriptor] = &[
         code: "E_LOOP_001",
         title: "`while`/`do-while` loops have been removed from the language",
         help: "Replace legacy loops with `for (item in ...)` and consult docs/language/loops.md for migration examples.",
+    },
+    DiagnosticDescriptor {
+        code: "E_COND_001",
+        title: "`if` expressions are not available / `if` 式は廃止されました",
+        help: "Use `when` for branching. See docs/language-guide.md#when-expression and docs/language-guide-en.md#when-expression.",
+    },
+    DiagnosticDescriptor {
+        code: "E_WHEN_002",
+        title: "`when` in value position requires `else` / 値コンテキストの`when`には`else`が必要",
+        help: "Add an `else` branch or keep the `when` in a Unit context. See docs/language-guide.md#when-expression and docs/language-guide-en.md#when-expression.",
     },
     DiagnosticDescriptor {
         code: "E_LOOP_002",
@@ -98,4 +109,14 @@ fn detect_in_message(message: &str, span: Option<Span>) -> Option<ToolingDiagnos
         help: descriptor.help,
         span,
     })
+}
+
+pub fn from_check_error(error: &CheckError) -> Option<ToolingDiagnostic> {
+    match error {
+        CheckError::TypeError(message)
+        | CheckError::NullSafetyError(message)
+        | CheckError::UndefinedVariable(message)
+        | CheckError::SyntaxError(message) => detect_in_message(message, None),
+        CheckError::ValidationError { message, span } => detect_in_message(message, span.clone()),
+    }
 }

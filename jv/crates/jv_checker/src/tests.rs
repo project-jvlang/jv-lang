@@ -1,6 +1,7 @@
 use super::*;
 use jv_ast::{
-    BinaryOp, Expression, Literal, Modifiers, Parameter, Program, Span, Statement, TypeAnnotation,
+    BinaryOp, Expression, Literal, Modifiers, Parameter, Pattern, Program, Span, Statement,
+    TypeAnnotation, WhenArm,
 };
 
 fn dummy_span() -> Span {
@@ -132,4 +133,118 @@ fn null_safety_violation_is_reported() {
     assert!(diagnostics.iter().any(
         |error| matches!(error, CheckError::NullSafetyError(message) if message.contains("null"))
     ));
+}
+
+fn sample_when_arm(span: &Span) -> WhenArm {
+    WhenArm {
+        pattern: Pattern::Literal(Literal::Number("1".into()), span.clone()),
+        guard: None,
+        body: Expression::Literal(Literal::Number("1".into()), span.clone()),
+        span: span.clone(),
+    }
+}
+
+#[test]
+fn when_without_else_in_value_position_emits_validation_error() {
+    let span = dummy_span();
+    let when_expr = Expression::When {
+        expr: None,
+        arms: vec![sample_when_arm(&span)],
+        else_arm: None,
+        implicit_end: None,
+        span: span.clone(),
+    };
+
+    let program = Program {
+        package: None,
+        imports: Vec::new(),
+        statements: vec![Statement::ValDeclaration {
+            name: "result".into(),
+            type_annotation: None,
+            initializer: when_expr,
+            modifiers: default_modifiers(),
+            span: span.clone(),
+        }],
+        span: span.clone(),
+    };
+
+    let mut checker = TypeChecker::new();
+    let errors = checker
+        .check_program(&program)
+        .expect_err("when without else in value context should fail");
+
+    assert!(
+        matches!(
+            errors.first(),
+            Some(CheckError::ValidationError {
+                message,
+                span: Some(error_span),
+            }) if message.contains("E_WHEN_002") && *error_span == span
+        ),
+        "expected E_WHEN_002 validation error with span info",
+    );
+}
+
+#[test]
+fn when_with_else_in_value_position_passes_validation() {
+    let span = dummy_span();
+    let when_expr = Expression::When {
+        expr: None,
+        arms: vec![sample_when_arm(&span)],
+        else_arm: Some(Box::new(Expression::Literal(
+            Literal::Number("0".into()),
+            span.clone(),
+        ))),
+        implicit_end: None,
+        span: span.clone(),
+    };
+
+    let program = Program {
+        package: None,
+        imports: Vec::new(),
+        statements: vec![Statement::ValDeclaration {
+            name: "result".into(),
+            type_annotation: None,
+            initializer: when_expr,
+            modifiers: default_modifiers(),
+            span: span.clone(),
+        }],
+        span,
+    };
+
+    let mut checker = TypeChecker::new();
+    let result = checker.check_program(&program);
+    assert!(
+        result.is_ok(),
+        "when with explicit else should pass validation"
+    );
+}
+
+#[test]
+fn when_without_else_in_statement_position_is_allowed() {
+    let span = dummy_span();
+    let when_expr = Expression::When {
+        expr: None,
+        arms: vec![sample_when_arm(&span)],
+        else_arm: None,
+        implicit_end: None,
+        span: span.clone(),
+    };
+
+    let program = Program {
+        package: None,
+        imports: Vec::new(),
+        statements: vec![Statement::Expression {
+            expr: when_expr,
+            span: span.clone(),
+        }],
+        span,
+    };
+
+    let mut checker = TypeChecker::new();
+    let result = checker.check_program(&program);
+    assert!(
+        result.is_ok(),
+        "statement-position when without else should be permitted"
+    );
 }

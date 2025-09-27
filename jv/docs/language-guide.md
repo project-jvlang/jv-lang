@@ -287,17 +287,21 @@ public static String describe(Object x) {
 }
 ```
 
-### if式
+### when式による条件分岐
 
 ```jv
-val max = if (a > b) a else b
+val max = when {
+    a > b -> a
+    else -> b
+}
 
-val status = if (user.isActive) {
-    "User is active"
-} else {
-    "User is inactive"
+val status = when {
+    user.isActive -> "User is active"
+    else -> "User is inactive"
 }
 ```
+
+> メモ: `when` を式として使う場合は必ず `else` を記述してください。欠落していると `E_WHEN_002` が発生します（文コンテキストでは暗黙に `else -> Unit` が補完されます）。`if` を記述すると `E_COND_001` が報告されるため、条件分岐は `when` に統一してください。
 
 ### ループ
 
@@ -358,7 +362,9 @@ for (index in generateSequence(start) { it + step }.takeWhile { it < limit }) {
 
 // 明示的な終了条件を持つループ
 for (_ in sequenceOf(Unit).repeat()) {
-    if (done()) break
+    when {
+        done() -> break
+    }
     performWork()
 }
 ```
@@ -490,7 +496,9 @@ fun processFile(filename: String) {
     }
 
     // ファイル処理...
-    if (error) return  // deferブロックは依然として実行される
+    when {
+        error -> return  // deferブロックは依然として実行される
+    }
 }
 ```
 
@@ -517,13 +525,16 @@ fun String.isPalindrome(): Boolean {
 }
 
 fun <T> List<T>.secondOrNull(): T? {
-    return if (size >= 2) this[1] else null
+    return when {
+        size >= 2 -> this[1]
+        else -> null
+    }
 }
 
 // 使用法
 val text = "racecar"
-if (text.isPalindrome()) {
-    println("It's a palindrome!")
+when {
+    text.isPalindrome() -> println("It's a palindrome!")
 }
 
 val second = listOf(1, 2, 3).secondOrNull()  // 2
@@ -569,6 +580,6 @@ fun useJavaLibrary() {
 2. **データクラスを使用**: シンプルなデータコンテナに
 3. **型推論を活用**: 不必要に型を指定しない
 4. **null安全性を使用**: nullable型と安全演算子を活用
-5. **式構文を優先**: `when`と`if`を式として使用
+5. **式構文を優先**: 条件分岐は `when` の式で表現
 6. **拡張関数を使用**: 既存の型に機能を追加
 7. **関数を純粋に保つ**: 可能な限り副作用を避ける

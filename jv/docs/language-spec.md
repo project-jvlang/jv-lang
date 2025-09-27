@@ -65,7 +65,7 @@ digit      ::= '0'..'9'
 **予約語:**
 ```
 abstract, async, await, break, class, continue, data, defer, do, else,
-enum, false, final, for, fun, if, import, in, interface, is, null,
+enum, false, final, for, fun, import, in, interface, is, null,
 object, override, package, private, protected, public, return, spawn,
 super, this, throw, true, try, use, val, var, when, while
 ```
@@ -362,7 +362,7 @@ val or = condition1 || condition2
 val not = !condition
 ```
 
-#### when式
+#### when式（主語あり）
 
 ```jv
 val result = when (value) {
@@ -374,15 +374,27 @@ val result = when (value) {
 }
 ```
 
-#### if式
+#### when式（主語なし・ガード付き）
 
 ```jv
-val max = if (a > b) a else b
+val status = when {
+    user.isActive -> "active"
+    user.isPending && !user.hasTicket -> "pending without ticket"
+    else -> "inactive"
+}
+```
 
-val status = if (user.isActive) {
-    "active"
-} else {
-    "inactive"
+> 注意:
+> - `when` を式として使用する場合は必ず `else` 分岐を記述してください。`else` が欠落していると `E_WHEN_002` 診断が報告されます（`Unit` 文脈では暗黙に `else -> Unit` が補完されます）。
+> - 旧来の `if` 構文は jv から削除されており、`if` を記述すると `E_COND_001` が発生します。条件分岐はすべて `when` で表現してください。
+
+`Unit` 文脈で副作用だけを実行する場合、`else` を省略すると暗黙の `else -> Unit` が適用されます。
+
+```jv
+when {
+    shouldRetry() -> return retry()
+    payload.isEmpty() -> log("empty payload")
+    // else は暗黙に Unit を返します
 }
 ```
 

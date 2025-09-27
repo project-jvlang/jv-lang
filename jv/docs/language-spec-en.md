@@ -65,7 +65,7 @@ digit      ::= '0'..'9'
 **Reserved Words:**
 ```
 abstract, async, await, break, class, continue, data, defer, do, else,
-enum, false, final, for, fun, if, import, in, interface, is, null,
+enum, false, final, for, fun, import, in, interface, is, null,
 object, override, package, private, protected, public, return, spawn,
 super, this, throw, true, try, use, val, var, when, while
 ```
@@ -362,7 +362,7 @@ val or = condition1 || condition2
 val not = !condition
 ```
 
-#### when Expressions
+#### when Expressions (with subject)
 
 ```jv
 val result = when (value) {
@@ -374,15 +374,27 @@ val result = when (value) {
 }
 ```
 
-#### if Expressions
+#### when Expressions (subjectless guards)
 
 ```jv
-val max = if (a > b) a else b
+val status = when {
+    user.isActive -> "active"
+    user.isPending && !user.hasTicket -> "pending without ticket"
+    else -> "inactive"
+}
+```
 
-val status = if (user.isActive) {
-    "active"
-} else {
-    "inactive"
+> Notes:
+> - When used as an expression, `when` must include an `else` branch. Missing `else` triggers diagnostic `E_WHEN_002` (an implicit `else -> Unit` is injected automatically in `Unit` contexts).
+> - The legacy `if` syntax has been removed. Writing `if` now emits diagnostic `E_COND_001`; use `when` for every conditional.
+
+For side-effect only scenarios you may omit `else`. The compiler treats the expression as returning `Unit` and inserts an implicit `else -> Unit`.
+
+```jv
+when {
+    shouldRetry() -> return retry()
+    payload.isEmpty() -> log("empty payload")
+    // else implicitly yields Unit
 }
 ```
 

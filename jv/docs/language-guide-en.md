@@ -285,17 +285,21 @@ public static String describe(Object x) {
 }
 ```
 
-### If Expressions
+### Conditional logic with `when`
 
 ```jv
-val max = if (a > b) a else b
+val max = when {
+    a > b -> a
+    else -> b
+}
 
-val status = if (user.isActive) {
-    "User is active"
-} else {
-    "User is inactive"
+val status = when {
+    user.isActive -> "User is active"
+    else -> "User is inactive"
 }
 ```
+
+> Note: Always include an `else` branch when using `when` as an expression. Missing `else` triggers diagnostic `E_WHEN_002` (an implicit `else -> Unit` is inserted for `Unit` contexts). The legacy `if` syntax has been removed—writing `if` now emits diagnostic `E_COND_001`. Use `when` for every conditional.
 
 ### Loops
 
@@ -356,7 +360,9 @@ for (index in generateSequence(start) { it + step }.takeWhile { it < limit }) {
 
 // Sentinel-driven loops remain explicit
 for (_ in sequenceOf(Unit).repeat()) {
-    if (done()) break
+    when {
+        done() -> break
+    }
     performWork()
 }
 ```
@@ -488,7 +494,9 @@ fun processFile(filename: String) {
     }
     
     // Process file...
-    if (error) return  // defer block still executes
+    when {
+        error -> return  // defer block still executes
+    }
 }
 ```
 
@@ -515,13 +523,16 @@ fun String.isPalindrome(): Boolean {
 }
 
 fun <T> List<T>.secondOrNull(): T? {
-    return if (size >= 2) this[1] else null
+    return when {
+        size >= 2 -> this[1]
+        else -> null
+    }
 }
 
 // Usage
 val text = "racecar"
-if (text.isPalindrome()) {
-    println("It's a palindrome!")
+when {
+    text.isPalindrome() -> println("It's a palindrome!")
 }
 
 val second = listOf(1, 2, 3).secondOrNull()  // 2
@@ -567,6 +578,6 @@ The generated Java code directly uses these Java APIs without any wrapper layers
 2. **Use data classes**: For simple data containers
 3. **Leverage type inference**: Don't specify types unnecessarily
 4. **Use null safety**: Take advantage of nullable types and safe operators
-5. **Prefer expression syntax**: Use `when` and `if` as expressions
+5. **Prefer expression syntax**: Model conditionals with `when` expressions
 6. **Use extension functions**: To add functionality to existing types
 7. **Keep functions pure**: Avoid side effects when possible
