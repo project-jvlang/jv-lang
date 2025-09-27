@@ -1,8 +1,8 @@
 use chumsky::prelude::*;
 use chumsky::Parser as ChumskyParser;
 use jv_ast::{
-    Argument, BinaryOp, CallArgumentStyle, Expression, Literal, Parameter, SequenceDelimiter, Span,
-    StringPart, UnaryOp, WhenArm,
+    Argument, BinaryOp, CallArgumentStyle, Expression, Literal, Parameter, Pattern,
+    SequenceDelimiter, Span, StringPart, UnaryOp, WhenArm,
 };
 use jv_lexer::{Token, TokenType};
 
@@ -23,7 +23,7 @@ pub(crate) fn expression_parser(
     recursive(|expr| {
         let primary = choice((
             when_expression_parser(expr.clone()),
-            if_expression_parser(expr.clone()),
+            forbidden_if_expression_parser(),
             lambda_literal_parser(expr.clone()),
             array_literal_parser(expr.clone()),
             string_interpolation_parser(expr.clone()),
@@ -58,16 +58,30 @@ fn parenthesized_expression_parser(
 fn when_expression_parser(
     expr: impl ChumskyParser<Token, Expression, Error = Simple<Token>> + Clone + 'static,
 ) -> impl ChumskyParser<Token, Expression, Error = Simple<Token>> + Clone {
+    choice((
+        when_expression_with_subject_parser(expr.clone()),
+        when_expression_subjectless_parser(expr),
+    ))
+    .boxed()
+}
+
+fn when_expression_with_subject_parser(
+    expr: impl ChumskyParser<Token, Expression, Error = Simple<Token>> + Clone + 'static,
+) -> impl ChumskyParser<Token, Expression, Error = Simple<Token>> + Clone {
     token_when()
         .map(|token| span_from_token(&token))
         .then(
             token_left_paren()
                 .ignore_then(expr.clone())
                 .then_ignore(token_right_paren())
-                .or_not(),
+                .map(Box::new),
         )
         .then_ignore(token_left_brace())
-        .then(when_arm_parser(expr.clone()).repeated().at_least(1))
+        .then(
+            when_arm_with_subject_parser(expr.clone())
+                .repeated()
+                .at_least(1),
+        )
         .then(
             token_else()
                 .ignore_then(token_arrow())
@@ -79,7 +93,7 @@ fn when_expression_parser(
         .map(|((((when_span, subject), arms), else_arm), end_span)| {
             let span = merge_spans(&when_span, &end_span);
             Expression::When {
-                expr: subject.map(Box::new),
+                expr: Some(subject),
                 arms,
                 else_arm,
                 span,
@@ -87,7 +101,37 @@ fn when_expression_parser(
         })
 }
 
-fn when_arm_parser(
+fn when_expression_subjectless_parser(
+    expr: impl ChumskyParser<Token, Expression, Error = Simple<Token>> + Clone + 'static,
+) -> impl ChumskyParser<Token, Expression, Error = Simple<Token>> + Clone {
+    token_when()
+        .map(|token| span_from_token(&token))
+        .then_ignore(token_left_brace())
+        .then(
+            when_arm_subjectless_parser(expr.clone())
+                .repeated()
+                .at_least(1),
+        )
+        .then(
+            token_else()
+                .ignore_then(token_arrow())
+                .ignore_then(expr.clone())
+                .map(Box::new)
+                .or_not(),
+        )
+        .then(token_right_brace().map(|token| span_from_token(&token)))
+        .map(|(((when_span, arms), else_arm), end_span)| {
+            let span = merge_spans(&when_span, &end_span);
+            Expression::When {
+                expr: None,
+                arms,
+                else_arm,
+                span,
+            }
+        })
+}
+
+fn when_arm_with_subject_parser(
     expr: impl ChumskyParser<Token, Expression, Error = Simple<Token>> + Clone + 'static,
 ) -> impl ChumskyParser<Token, WhenArm, Error = Simple<Token>> + Clone {
     patterns::when_pattern_parser(expr.clone())
@@ -103,35 +147,42 @@ fn when_arm_parser(
                 span,
             }
         })
+        .boxed()
 }
 
-fn if_expression_parser(
-    expr: impl ChumskyParser<Token, Expression, Error = Simple<Token>> + Clone,
+fn when_arm_subjectless_parser(
+    expr: impl ChumskyParser<Token, Expression, Error = Simple<Token>> + Clone + 'static,
+) -> impl ChumskyParser<Token, WhenArm, Error = Simple<Token>> + Clone {
+    expr.clone()
+        .then_ignore(token_arrow())
+        .then(expr)
+        .map(|(condition, body)| {
+            let condition_span = expression_span(&condition);
+            let body_span = expression_span(&body);
+            let span = merge_spans(&condition_span, &body_span);
+            let pattern = Pattern::Guard {
+                pattern: Box::new(Pattern::Wildcard(condition_span.clone())),
+                condition,
+                span: condition_span.clone(),
+            };
+
+            WhenArm {
+                pattern,
+                body,
+                span,
+            }
+        })
+        .boxed()
+}
+
+fn forbidden_if_expression_parser(
 ) -> impl ChumskyParser<Token, Expression, Error = Simple<Token>> + Clone {
     token_if()
         .map(|token| span_from_token(&token))
-        .then(
-            token_left_paren()
-                .ignore_then(expr.clone())
-                .then_ignore(token_right_paren()),
-        )
-        .then(expr.clone())
-        .then(token_else().ignore_then(expr.clone()).or_not())
-        .map(|(((if_span, condition), then_branch), else_branch)| {
-            let then_span = expression_span(&then_branch);
-            let mut span = merge_spans(&if_span, &then_span);
-
-            let else_branch = else_branch.map(|branch| {
-                span = merge_spans(&span, &expression_span(&branch));
-                Box::new(branch)
-            });
-
-            Expression::If {
-                condition: Box::new(condition),
-                then_branch: Box::new(then_branch),
-                else_branch,
-                span,
-            }
+        .try_map(|_span, error_span| {
+            let message =
+                "E_COND_001: 'if' expressions are not supported in jv; use 'when' instead";
+            Err(Simple::custom(error_span, message.to_string()))
         })
 }
 

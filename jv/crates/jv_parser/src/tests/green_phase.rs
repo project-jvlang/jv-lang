@@ -1,7 +1,7 @@
 use super::support::{first_statement, parse_program, parse_program_result};
 use jv_ast::{
     Argument, BinaryOp, CallArgumentStyle, ConcurrencyConstruct, Expression, Literal, LoopStrategy,
-    ResourceManagement, SequenceDelimiter, Statement, StringPart, TypeAnnotation,
+    Pattern, ResourceManagement, SequenceDelimiter, Statement, StringPart, TypeAnnotation,
 };
 
 use test_case::test_case;
@@ -202,6 +202,102 @@ fn test_when_expression_in_val_declaration() {
                 assert!(else_arm.is_some());
             }
             other => panic!("expected when initializer, found {:?}", other),
+        },
+        other => panic!("expected val declaration, found {:?}", other),
+    }
+}
+
+#[test]
+fn test_when_expression_with_guard_uses_logical_and() {
+    let program = parse_program(
+        r#"val result = when (value) {
+            is String && value.length > 5 -> "long"
+            else -> "other"
+        }"#,
+    );
+    let statement = first_statement(&program);
+
+    match statement {
+        Statement::ValDeclaration { initializer, .. } => match initializer {
+            Expression::When {
+                expr,
+                arms,
+                else_arm,
+                ..
+            } => {
+                assert!(matches!(
+                    expr,
+                    Some(subject)
+                        if matches!(subject.as_ref(), Expression::Identifier(name, _) if name == "value")
+                ));
+                assert_eq!(arms.len(), 1);
+                assert!(else_arm.is_some());
+
+                match &arms[0].pattern {
+                    Pattern::Guard {
+                        pattern, condition, ..
+                    } => {
+                        match pattern.as_ref() {
+                            Pattern::Constructor { name, .. } => assert_eq!(name, "String"),
+                            other => panic!("expected constructor pattern, found {:?}", other),
+                        }
+
+                        match condition {
+                            Expression::Binary { op, .. } => assert_eq!(*op, BinaryOp::Greater),
+                            other => panic!("expected binary guard condition, found {:?}", other),
+                        }
+                    }
+                    other => panic!("expected guard pattern, found {:?}", other),
+                }
+            }
+            other => panic!("expected when expression, found {:?}", other),
+        },
+        other => panic!("expected val declaration, found {:?}", other),
+    }
+}
+
+#[test]
+fn test_subjectless_when_expression_parses_conditions() {
+    let program = parse_program(
+        r#"val result = when {
+            shouldHandle() -> "yes"
+            else -> "no"
+        }"#,
+    );
+    let statement = first_statement(&program);
+
+    match statement {
+        Statement::ValDeclaration { initializer, .. } => match initializer {
+            Expression::When {
+                expr,
+                arms,
+                else_arm,
+                ..
+            } => {
+                assert!(expr.is_none());
+                assert_eq!(arms.len(), 1);
+                assert!(else_arm.is_some());
+
+                match &arms[0].pattern {
+                    Pattern::Guard {
+                        pattern, condition, ..
+                    } => {
+                        assert!(matches!(pattern.as_ref(), Pattern::Wildcard(_)));
+
+                        match condition {
+                            Expression::Call { function, .. } => match function.as_ref() {
+                                Expression::Identifier(name, _) => assert_eq!(name, "shouldHandle"),
+                                other => {
+                                    panic!("expected identifier function call, found {:?}", other)
+                                }
+                            },
+                            other => panic!("expected call expression guard, found {:?}", other),
+                        }
+                    }
+                    other => panic!("expected guard pattern, found {:?}", other),
+                }
+            }
+            other => panic!("expected when expression, found {:?}", other),
         },
         other => panic!("expected val declaration, found {:?}", other),
     }
@@ -671,7 +767,10 @@ fn test_complex_nested_expression() {
         r#"
         val result = when (getValue()) {
             is String -> str.length
-            is Int -> if (it > 0) it * 2 else 0
+            is Int -> when {
+                isPositive() -> doubled()
+                else -> zero()
+            }
             null -> 0
             else -> -1
         }

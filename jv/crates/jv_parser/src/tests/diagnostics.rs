@@ -122,3 +122,24 @@ fn legacy_do_while_loop_reports_e_loop_001() {
         other => panic!("expected syntax error for do-while loop, got {:?}", other),
     }
 }
+
+#[test]
+fn legacy_if_expression_reports_e_cond_001() {
+    let result = Parser::parse("val result = if (true) 1 else 0");
+
+    match result {
+        Err(ParseError::Syntax { message, .. }) => {
+            assert!(
+                message.contains("E_COND_001"),
+                "expected E_COND_001 diagnostic for if expression, got {}",
+                message
+            );
+            assert!(
+                message.contains("when"),
+                "expected guidance to use when expression, got {}",
+                message
+            );
+        }
+        other => panic!("expected syntax error for if expression, got {:?}", other),
+    }
+}

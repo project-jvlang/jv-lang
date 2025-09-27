@@ -313,8 +313,8 @@ clean = false
         root_path.to_path_buf(),
         manifest_path.clone(),
     );
-    let settings = pipeline::project::manifest::ManifestLoader::load(&manifest_path)
-        .expect("manifest loads");
+    let settings =
+        pipeline::project::manifest::ManifestLoader::load(&manifest_path).expect("manifest loads");
     let layout = pipeline::project::layout::ProjectLayout::from_settings(&project_root, &settings)
         .expect("layout resolves");
 

@@ -4,8 +4,8 @@ use jv_ast::{Expression, Literal, Pattern, Span};
 use jv_lexer::{Token, TokenType};
 
 use super::support::{
-    expression_span, identifier_with_span, keyword, merge_spans, span_from_token, token_any_comma,
-    token_if, token_left_paren, token_right_paren,
+    expression_span, identifier_with_span, keyword, merge_spans, span_from_token, token_and,
+    token_any_comma, token_left_paren, token_right_paren,
 };
 
 /// Parser for patterns used in `when` expressions.
@@ -73,7 +73,7 @@ pub(crate) fn when_pattern_parser(
         let base = choice((wildcard, literal, is_pattern, identifier_or_constructor)).boxed();
 
         base.clone()
-            .then(token_if().ignore_then(expr.clone()).or_not())
+            .then(token_and().ignore_then(expr.clone()).or_not())
             .map(|(base_pattern, guard)| match guard {
                 Some(condition) => {
                     let base_span = pattern_span(&base_pattern);
