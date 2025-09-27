@@ -232,22 +232,18 @@ fn test_when_expression_with_guard_uses_logical_and() {
                 ));
                 assert_eq!(arms.len(), 1);
                 assert!(else_arm.is_some());
+                let arm = &arms[0];
+                match &arm.pattern {
+                    Pattern::Constructor { name, .. } => assert_eq!(name, "String"),
+                    other => panic!("expected constructor pattern, found {:?}", other),
+                }
 
-                match &arms[0].pattern {
-                    Pattern::Guard {
-                        pattern, condition, ..
-                    } => {
-                        match pattern.as_ref() {
-                            Pattern::Constructor { name, .. } => assert_eq!(name, "String"),
-                            other => panic!("expected constructor pattern, found {:?}", other),
-                        }
-
-                        match condition {
-                            Expression::Binary { op, .. } => assert_eq!(*op, BinaryOp::Greater),
-                            other => panic!("expected binary guard condition, found {:?}", other),
-                        }
+                match arm.guard.as_ref() {
+                    Some(Expression::Binary { op, .. }) => assert_eq!(*op, BinaryOp::Greater),
+                    Some(other) => {
+                        panic!("expected binary guard condition, found {:?}", other)
                     }
-                    other => panic!("expected guard pattern, found {:?}", other),
+                    None => panic!("expected guard expression for when arm"),
                 }
             }
             other => panic!("expected when expression, found {:?}", other),
@@ -277,24 +273,18 @@ fn test_subjectless_when_expression_parses_conditions() {
                 assert!(expr.is_none());
                 assert_eq!(arms.len(), 1);
                 assert!(else_arm.is_some());
+                let arm = &arms[0];
+                assert!(matches!(arm.pattern, Pattern::Wildcard(_)));
 
-                match &arms[0].pattern {
-                    Pattern::Guard {
-                        pattern, condition, ..
-                    } => {
-                        assert!(matches!(pattern.as_ref(), Pattern::Wildcard(_)));
-
-                        match condition {
-                            Expression::Call { function, .. } => match function.as_ref() {
-                                Expression::Identifier(name, _) => assert_eq!(name, "shouldHandle"),
-                                other => {
-                                    panic!("expected identifier function call, found {:?}", other)
-                                }
-                            },
-                            other => panic!("expected call expression guard, found {:?}", other),
+                match arm.guard.as_ref() {
+                    Some(Expression::Call { function, .. }) => match function.as_ref() {
+                        Expression::Identifier(name, _) => assert_eq!(name, "shouldHandle"),
+                        other => {
+                            panic!("expected identifier function call, found {:?}", other)
                         }
-                    }
-                    other => panic!("expected guard pattern, found {:?}", other),
+                    },
+                    Some(other) => panic!("expected call expression guard, found {:?}", other),
+                    None => panic!("expected guard expression for subjectless when"),
                 }
             }
             other => panic!("expected when expression, found {:?}", other),

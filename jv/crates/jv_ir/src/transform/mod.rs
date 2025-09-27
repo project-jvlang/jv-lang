@@ -238,6 +238,13 @@ pub fn transform_expression(
                 })
             }
         }
+        Expression::When {
+            expr: subject,
+            arms,
+            else_arm,
+            implicit_end,
+            span,
+        } => desugar_when_expression(subject, arms, else_arm, implicit_end, span, context),
         _ => Ok(IrExpression::Literal(Literal::Null, Span::default())),
     }
 }

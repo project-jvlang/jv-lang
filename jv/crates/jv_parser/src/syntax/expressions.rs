@@ -96,6 +96,7 @@ fn when_expression_with_subject_parser(
                 expr: Some(subject),
                 arms,
                 else_arm,
+                implicit_end: None,
                 span,
             }
         })
@@ -126,9 +127,19 @@ fn when_expression_subjectless_parser(
                 expr: None,
                 arms,
                 else_arm,
+                implicit_end: None,
                 span,
             }
         })
+}
+
+fn split_when_guard(pattern: Pattern) -> (Pattern, Option<Expression>) {
+    match pattern {
+        Pattern::Guard {
+            pattern, condition, ..
+        } => (*pattern, Some(condition)),
+        other => (other, None),
+    }
 }
 
 fn when_arm_with_subject_parser(
@@ -141,8 +152,10 @@ fn when_arm_with_subject_parser(
             let pattern_span = pattern_span(&pattern);
             let body_span = expression_span(&body);
             let span = merge_spans(&pattern_span, &body_span);
+            let (pattern, guard) = split_when_guard(pattern);
             WhenArm {
                 pattern,
+                guard,
                 body,
                 span,
             }
@@ -165,9 +178,11 @@ fn when_arm_subjectless_parser(
                 condition,
                 span: condition_span.clone(),
             };
+            let (pattern, guard) = split_when_guard(pattern);
 
             WhenArm {
                 pattern,
+                guard,
                 body,
                 span,
             }

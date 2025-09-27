@@ -10,9 +10,9 @@ mod tests {
         desugar_val_declaration, desugar_var_declaration, desugar_when_expression,
         generate_extension_class_name, generate_utility_class_name, infer_java_type,
         transform_expression, transform_program, transform_statement, CompletableFutureOp,
-        DataFormat, IrCaseLabel, IrExpression, IrForEachKind, IrForLoopMetadata, IrModifiers,
-        IrNumericRangeLoop, IrStatement, IrVisibility, JavaType, SampleMode, SampleSourceKind,
-        Schema, TransformContext, TransformError, VirtualThreadOp,
+        DataFormat, IrCaseLabel, IrExpression, IrForEachKind, IrForLoopMetadata, IrImplicitWhenEnd,
+        IrModifiers, IrNumericRangeLoop, IrStatement, IrVisibility, JavaType, SampleMode,
+        SampleSourceKind, Schema, TransformContext, TransformError, VirtualThreadOp,
     };
     use jv_ast::*;
     use sha2::{Digest, Sha256};
@@ -516,11 +516,13 @@ mod tests {
 
         let arm1 = WhenArm {
             pattern: Pattern::Literal(Literal::Number("1".to_string()), dummy_span()),
+            guard: None,
             body: Expression::Literal(Literal::String("one".to_string()), dummy_span()),
             span: dummy_span(),
         };
         let arm2 = WhenArm {
             pattern: Pattern::Literal(Literal::Number("2".to_string()), dummy_span()),
+            guard: None,
             body: Expression::Literal(Literal::String("two".to_string()), dummy_span()),
             span: dummy_span(),
         };
@@ -534,6 +536,7 @@ mod tests {
             subject,
             vec![arm1, arm2],
             else_arm,
+            None,
             dummy_span(),
             &mut context,
         )
@@ -568,6 +571,92 @@ mod tests {
     }
 
     #[test]
+    fn test_desugar_when_expression_with_guard_emits_guard_ir() {
+        let mut context = test_context();
+        context.add_variable("x".to_string(), JavaType::int());
+
+        let subject = Some(Box::new(Expression::Identifier(
+            "x".to_string(),
+            dummy_span(),
+        )));
+
+        let guard_expr = Expression::Literal(Literal::Boolean(true), dummy_span());
+        let arm = WhenArm {
+            pattern: Pattern::Literal(Literal::Number("1".to_string()), dummy_span()),
+            guard: Some(guard_expr),
+            body: Expression::Literal(Literal::String("one".to_string()), dummy_span()),
+            span: dummy_span(),
+        };
+
+        let else_arm = Some(Box::new(Expression::Literal(
+            Literal::String("other".to_string()),
+            dummy_span(),
+        )));
+
+        let result = desugar_when_expression(
+            subject,
+            vec![arm],
+            else_arm,
+            None,
+            dummy_span(),
+            &mut context,
+        )
+        .expect("when expression with guard should desugar successfully");
+
+        match result {
+            IrExpression::Switch { cases, .. } => {
+                let guard_ir = cases[0]
+                    .guard
+                    .as_ref()
+                    .expect("guard expression should be preserved");
+                match guard_ir {
+                    IrExpression::Literal(Literal::Boolean(true), _) => {}
+                    other => panic!("Expected boolean literal guard, got {:?}", other),
+                }
+            }
+            other => panic!("Expected switch expression, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_desugar_when_expression_records_implicit_end() {
+        let mut context = test_context();
+        context.add_variable("x".to_string(), JavaType::int());
+
+        let subject = Some(Box::new(Expression::Identifier(
+            "x".to_string(),
+            dummy_span(),
+        )));
+
+        let arm = WhenArm {
+            pattern: Pattern::Literal(Literal::Number("1".to_string()), dummy_span()),
+            guard: None,
+            body: Expression::Literal(Literal::String("one".to_string()), dummy_span()),
+            span: dummy_span(),
+        };
+
+        let implicit_end = Some(ImplicitWhenEnd::Unit { span: dummy_span() });
+
+        let result = desugar_when_expression(
+            subject,
+            vec![arm],
+            None,
+            implicit_end,
+            dummy_span(),
+            &mut context,
+        )
+        .expect("when expression should desugar successfully");
+
+        match result {
+            IrExpression::Switch { implicit_end, .. } => match implicit_end {
+                Some(IrImplicitWhenEnd::Unit { .. }) => {}
+                other => panic!("Expected implicit unit end, got {:?}", other),
+            },
+            other => panic!("Expected switch expression, got {:?}", other),
+        }
+    }
+
+    #[test]
     fn test_desugar_when_expression_with_wildcard_default() {
         let mut context = test_context();
         context.add_variable("value".to_string(), JavaType::int());
@@ -579,11 +668,13 @@ mod tests {
 
         let arm1 = WhenArm {
             pattern: Pattern::Literal(Literal::Number("1".to_string()), dummy_span()),
+            guard: None,
             body: Expression::Literal(Literal::String("one".to_string()), dummy_span()),
             span: dummy_span(),
         };
         let default_arm = WhenArm {
             pattern: Pattern::Wildcard(dummy_span()),
+            guard: None,
             body: Expression::Literal(Literal::String("other".to_string()), dummy_span()),
             span: dummy_span(),
         };
@@ -591,6 +682,7 @@ mod tests {
         let result = desugar_when_expression(
             subject,
             vec![arm1, default_arm],
+            None,
             None,
             dummy_span(),
             &mut context,
@@ -615,12 +707,14 @@ mod tests {
 
         let arm = WhenArm {
             pattern: Pattern::Literal(Literal::Number("1".to_string()), dummy_span()),
+            guard: None,
             body: Expression::Literal(Literal::String("one".to_string()), dummy_span()),
             span: dummy_span(),
         };
 
-        let error = desugar_when_expression(None, vec![arm], None, dummy_span(), &mut context)
-            .expect_err("when without subject should be unsupported");
+        let error =
+            desugar_when_expression(None, vec![arm], None, None, dummy_span(), &mut context)
+                .expect_err("when without subject should be unsupported");
 
         match error {
             TransformError::UnsupportedConstruct { construct, .. } => {
@@ -647,6 +741,7 @@ mod tests {
 
         let arm = WhenArm {
             pattern: Pattern::Literal(Literal::Number("1".to_string()), pattern_span.clone()),
+            guard: None,
             body: Expression::Literal(Literal::String("one".to_string()), body_span),
             span: arm_span.clone(),
         };
@@ -660,6 +755,7 @@ mod tests {
             subject,
             vec![arm],
             else_arm,
+            None,
             when_span.clone(),
             &mut context,
         )
@@ -689,6 +785,7 @@ mod tests {
         let arm_span = Span::new(3, 5, 3, 12);
         let arm = WhenArm {
             pattern: Pattern::Identifier("it".to_string(), arm_span.clone()),
+            guard: None,
             body: Expression::Literal(Literal::String("body".to_string()), Span::new(3, 10, 3, 14)),
             span: arm_span.clone(),
         };
@@ -696,6 +793,7 @@ mod tests {
         let error = desugar_when_expression(
             subject,
             vec![arm],
+            None,
             None,
             Span::new(3, 1, 3, 18),
             &mut context,
@@ -1833,11 +1931,13 @@ mod tests {
         let arms = vec![
             WhenArm {
                 pattern: range_pattern,
+                guard: None,
                 body: Expression::Literal(Literal::String("small".to_string()), dummy_span()),
                 span: dummy_span(),
             },
             WhenArm {
                 pattern: guard_pattern,
+                guard: None,
                 body: Expression::Literal(Literal::String("long string".to_string()), dummy_span()),
                 span: dummy_span(),
             },
@@ -1848,8 +1948,9 @@ mod tests {
             dummy_span(),
         )));
 
-        let err = desugar_when_expression(subject, arms, else_arm, dummy_span(), &mut context)
-            .expect_err("complex patterns should currently be unsupported");
+        let err =
+            desugar_when_expression(subject, arms, else_arm, None, dummy_span(), &mut context)
+                .expect_err("complex patterns should currently be unsupported");
 
         match err {
             TransformError::UnsupportedConstruct { construct, .. } => {

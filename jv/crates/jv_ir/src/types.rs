@@ -142,6 +142,8 @@ pub enum IrExpression {
         discriminant: Box<IrExpression>,
         cases: Vec<IrSwitchCase>,
         java_type: JavaType,
+        #[serde(default)]
+        implicit_end: Option<IrImplicitWhenEnd>,
         span: Span,
     },
 
@@ -423,6 +425,13 @@ pub struct IrSampleDeclaration {
     pub records: Vec<SampleRecordDescriptor>,
     pub root_record_name: Option<String>,
     pub span: Span,
+}
+
+/// Metadata describing implicitly inserted termination for when expressions.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum IrImplicitWhenEnd {
+    /// Represents an implicit `else -> Unit` branch.
+    Unit { span: Span },
 }
 
 /// Switch cases for desugared when expressions

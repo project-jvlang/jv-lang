@@ -155,6 +155,7 @@ fn test_expression_when_with_subject() {
     let pattern = Pattern::Literal(Literal::Number("1".to_string()), dummy_span());
     let arm = WhenArm {
         pattern,
+        guard: None,
         body: Expression::Literal(Literal::String("one".to_string()), dummy_span()),
         span: dummy_span(),
     };
@@ -162,6 +163,7 @@ fn test_expression_when_with_subject() {
         expr: Some(Box::new(subject)),
         arms: vec![arm],
         else_arm: None,
+        implicit_end: None,
         span: dummy_span(),
     };
     match expr {
@@ -178,6 +180,7 @@ fn test_expression_when_without_subject() {
     let pattern = Pattern::Literal(Literal::Boolean(true), dummy_span());
     let arm = WhenArm {
         pattern,
+        guard: None,
         body: Expression::Literal(Literal::String("true case".to_string()), dummy_span()),
         span: dummy_span(),
     };
@@ -188,6 +191,7 @@ fn test_expression_when_without_subject() {
             Literal::String("default".to_string()),
             dummy_span(),
         ))),
+        implicit_end: None,
         span: dummy_span(),
     };
     match expr {
@@ -375,6 +379,7 @@ fn test_when_arm() {
     let body = Expression::Literal(Literal::String("matched".to_string()), dummy_span());
     let arm = WhenArm {
         pattern,
+        guard: None,
         body,
         span: dummy_span(),
     };

@@ -73,6 +73,8 @@ pub enum Expression {
         expr: Option<Box<Expression>>,
         arms: Vec<WhenArm>,
         else_arm: Option<Box<Expression>>,
+        #[serde(default)]
+        implicit_end: Option<ImplicitWhenEnd>,
         span: Span,
     },
 
@@ -190,8 +192,17 @@ pub enum StringPart {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct WhenArm {
     pub pattern: Pattern,
+    #[serde(default)]
+    pub guard: Option<Expression>,
     pub body: Expression,
     pub span: Span,
+}
+
+/// Metadata describing implicit termination inserted for a `when` expression.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum ImplicitWhenEnd {
+    /// Represents an implicit `else -> Unit` branch materialised by later stages.
+    Unit { span: Span },
 }
 
 /// Function parameters with default values and named parameter support

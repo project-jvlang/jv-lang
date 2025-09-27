@@ -2,13 +2,14 @@ use super::transform_expression;
 use super::utils::extract_java_type;
 use crate::context::TransformContext;
 use crate::error::TransformError;
-use crate::types::{IrCaseLabel, IrExpression, IrSwitchCase, JavaType};
-use jv_ast::{Expression, Pattern, Span, WhenArm};
+use crate::types::{IrCaseLabel, IrExpression, IrImplicitWhenEnd, IrSwitchCase, JavaType};
+use jv_ast::{Expression, ImplicitWhenEnd, Pattern, Span, WhenArm};
 
 pub fn desugar_when_expression(
     expr: Option<Box<Expression>>,
     arms: Vec<WhenArm>,
     else_arm: Option<Box<Expression>>,
+    implicit_end: Option<ImplicitWhenEnd>,
     span: Span,
     context: &mut TransformContext,
 ) -> Result<IrExpression, TransformError> {
@@ -22,6 +23,8 @@ pub fn desugar_when_expression(
     let mut cases = Vec::new();
     let mut result_type: Option<JavaType> = None;
     let mut has_default_case = false;
+
+    let mut implicit_ir_end = implicit_end.map(convert_implicit_end);
 
     for arm in arms {
         let (mut labels, is_default) = convert_when_pattern(&arm.pattern, arm.span.clone())?;
@@ -39,6 +42,11 @@ pub fn desugar_when_expression(
             }
         }
 
+        let guard = match arm.guard {
+            Some(guard_expr) => Some(transform_expression(guard_expr, context)?),
+            None => None,
+        };
+
         let body = transform_expression(arm.body, context)?;
         if result_type.is_none() {
             result_type = extract_java_type(&body);
@@ -46,7 +54,7 @@ pub fn desugar_when_expression(
 
         cases.push(IrSwitchCase {
             labels,
-            guard: None,
+            guard,
             body,
             span: arm.span,
         });
@@ -72,6 +80,7 @@ pub fn desugar_when_expression(
             body,
             span: span.clone(),
         });
+        implicit_ir_end = None;
     }
 
     if cases.is_empty() {
@@ -87,8 +96,15 @@ pub fn desugar_when_expression(
         discriminant: Box::new(discriminant),
         cases,
         java_type,
+        implicit_end: implicit_ir_end,
         span,
     })
+}
+
+fn convert_implicit_end(end: ImplicitWhenEnd) -> IrImplicitWhenEnd {
+    match end {
+        ImplicitWhenEnd::Unit { span } => IrImplicitWhenEnd::Unit { span },
+    }
 }
 
 fn convert_when_pattern(

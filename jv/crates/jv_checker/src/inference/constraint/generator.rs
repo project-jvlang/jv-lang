@@ -298,12 +298,20 @@ impl<'env> ConstraintGenerator<'env> {
                 expr,
                 arms,
                 else_arm,
+                implicit_end: _,
                 ..
             } => {
                 if let Some(scrutinee) = expr {
                     self.infer_expression(scrutinee);
                 }
                 for arm in arms {
+                    if let Some(guard_expr) = &arm.guard {
+                        let guard_ty = self.infer_expression(guard_expr);
+                        self.push_constraint(
+                            ConstraintKind::Equal(guard_ty, TypeKind::Primitive("Boolean")),
+                            Some("when guard must evaluate to boolean"),
+                        );
+                    }
                     self.infer_expression(&arm.body);
                 }
                 if let Some(else_body) = else_arm {

@@ -296,6 +296,7 @@ impl NullabilityAnalyzer {
                 expr: scrutinee,
                 arms,
                 else_arm,
+                implicit_end: _,
                 ..
             } => {
                 if let Some(condition) = scrutinee {
@@ -303,6 +304,9 @@ impl NullabilityAnalyzer {
                 }
                 let mut result = Nullability::Unknown;
                 for arm in arms {
+                    if let Some(guard_expr) = &arm.guard {
+                        self.evaluate_expression(guard_expr);
+                    }
                     let body_null = self.evaluate_expression(&arm.body);
                     result = Nullability::combine(result, body_null);
                 }

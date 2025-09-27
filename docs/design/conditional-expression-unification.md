@@ -133,6 +133,7 @@ pub enum Expression {
         expr: Option<Box<Expression>>,    // 評価対象（オプション）
         arms: Vec<WhenArm>,              // パターンマッチングアーム
         else_arm: Option<Box<Expression>>, // else節
+        implicit_end: Option<ImplicitWhenEnd>, // 暗黙終端メタデータ
         span: Span,
     },
 
@@ -142,6 +143,7 @@ pub enum Expression {
 #[derive(Debug, Clone, PartialEq)]
 pub struct WhenArm {
     pub pattern: Pattern,    // マッチングパターン
+    pub guard: Option<Expression>, // ガード条件（オプション）
     pub body: Expression,    // 実行する式
     pub span: Span,
 }
