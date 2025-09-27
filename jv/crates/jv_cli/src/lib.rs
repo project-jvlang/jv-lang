@@ -9,6 +9,7 @@ use jv_checker::diagnostics::{
 };
 use jv_pm::JavaTarget;
 
+pub mod commands;
 #[derive(Parser, Debug, Clone)]
 #[command(name = "jv")]
 #[command(about = "A Java Sugar Language compiler")]
@@ -79,6 +80,8 @@ pub enum Commands {
     Repl,
     /// Launch the interactive language tour experience
     Tour,
+    /// Inspect compiler artifacts for debugging
+    Debug(commands::debug::DebugArgs),
 }
 
 pub fn tooling_failure(path: &Path, diagnostic: ToolingDiagnostic) -> anyhow::Error {

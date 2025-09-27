@@ -11,6 +11,7 @@ use jv_fmt::JavaFormatter;
 use jv_ir::transform_program;
 use jv_parser::Parser as JvParser;
 
+use jv_cli::commands;
 use jv_cli::pipeline::project::{
     layout::ProjectLayout, locator::ProjectLocator, manifest::ManifestLoader,
 };
@@ -201,6 +202,9 @@ fn main() -> Result<()> {
         }
         Some(Commands::Version) => {
             println!("{}", get_version());
+        }
+        Some(Commands::Debug(args)) => {
+            commands::debug::run(args).context("Failed to run debug command")?;
         }
         Some(Commands::Repl) | None => {
             repl()?;
