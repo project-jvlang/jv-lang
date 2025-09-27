@@ -9,10 +9,11 @@ mod tests {
         desugar_string_interpolation, desugar_top_level_function, desugar_use_expression,
         desugar_val_declaration, desugar_var_declaration, desugar_when_expression,
         generate_extension_class_name, generate_utility_class_name, infer_java_type,
-        transform_expression, transform_program, transform_statement, CompletableFutureOp,
-        DataFormat, IrCaseLabel, IrExpression, IrForEachKind, IrForLoopMetadata, IrImplicitWhenEnd,
-        IrModifiers, IrNumericRangeLoop, IrStatement, IrVisibility, JavaType, SampleMode,
-        SampleSourceKind, Schema, TransformContext, TransformError, VirtualThreadOp,
+        transform_expression, transform_program, transform_program_with_context,
+        transform_statement, CompletableFutureOp, DataFormat, IrCaseLabel, IrExpression,
+        IrForEachKind, IrForLoopMetadata, IrImplicitWhenEnd, IrModifiers, IrNumericRangeLoop,
+        IrStatement, IrVisibility, JavaType, SampleMode, SampleSourceKind, Schema,
+        TransformContext, TransformError, TransformPools, VirtualThreadOp,
     };
     use jv_ast::*;
     use sha2::{Digest, Sha256};
@@ -21,6 +22,18 @@ mod tests {
 
     fn dummy_span() -> Span {
         Span::dummy()
+    }
+
+    fn simple_program() -> Program {
+        Program {
+            package: Some("demo".to_string()),
+            imports: Vec::new(),
+            statements: vec![Statement::Expression {
+                expr: Expression::Literal(Literal::Number("1".to_string()), dummy_span()),
+                span: dummy_span(),
+            }],
+            span: dummy_span(),
+        }
     }
 
     fn sha256_hex(bytes: &[u8]) -> String {
@@ -219,6 +232,31 @@ mod tests {
             },
             other => panic!("unexpected schema: {:?}", other),
         }
+    }
+
+    #[test]
+    fn transform_pools_capture_reuse_between_runs() {
+        let pools = TransformPools::with_chunk_capacity(8 * 1024);
+        let mut context = TransformContext::with_pools(pools);
+        let program = simple_program();
+
+        transform_program_with_context(program.clone(), &mut context)
+            .expect("first lowering succeeds");
+
+        let _first_session = context
+            .last_pool_session()
+            .expect("first session metrics recorded");
+        // Metrics snapshot existence verifies pools were engaged.
+        assert_eq!(context.last_pool_warm_start(), Some(false));
+
+        transform_program_with_context(program, &mut context).expect("second lowering succeeds");
+
+        let metrics = context.pool_metrics().expect("pooled metrics available");
+        assert_eq!(metrics.sessions, 2);
+        assert!(metrics.warm_sessions >= 1);
+        assert!(context.last_pool_warm_start().unwrap_or(false));
+        let reuse_ratio = context.pool_reuse_ratio().unwrap_or(0.0);
+        assert!(reuse_ratio >= 0.5);
     }
 
     #[test]

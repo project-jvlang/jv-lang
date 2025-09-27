@@ -1,5 +1,7 @@
 use bumpalo::Bump;
+use std::cell::{RefCell, RefMut};
 use std::num::NonZeroUsize;
+use std::rc::Rc;
 
 const DEFAULT_CHUNK_BYTES: usize = 64 * 1024;
 const MIN_CHUNK_BYTES: usize = 4 * 1024;
@@ -66,13 +68,18 @@ impl PoolSessionMetrics {
 }
 
 /// Shared memory pools used by AST→IR lowering.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct TransformPools {
-    ast_pool: Bump,
-    ir_pool: Bump,
-    metrics: PoolMetrics,
+    inner: Rc<TransformPoolsInner>,
+}
+
+#[derive(Debug)]
+struct TransformPoolsInner {
+    ast_pool: RefCell<Bump>,
+    ir_pool: RefCell<Bump>,
+    metrics: RefCell<PoolMetrics>,
     chunk_bytes: NonZeroUsize,
-    last_session: Option<PoolSessionMetrics>,
+    last_session: RefCell<Option<PoolSessionMetrics>>,
 }
 
 impl TransformPools {
@@ -89,34 +96,36 @@ impl TransformPools {
         let chunk = bytes.max(MIN_CHUNK_BYTES);
         let chunk_bytes = NonZeroUsize::new(chunk).expect("chunk size must be non-zero");
         Self {
-            ast_pool: Bump::with_capacity(chunk),
-            ir_pool: Bump::with_capacity(chunk),
-            metrics: PoolMetrics::default(),
-            chunk_bytes,
-            last_session: None,
+            inner: Rc::new(TransformPoolsInner {
+                ast_pool: RefCell::new(Bump::with_capacity(chunk)),
+                ir_pool: RefCell::new(Bump::with_capacity(chunk)),
+                metrics: RefCell::new(PoolMetrics::default()),
+                chunk_bytes,
+                last_session: RefCell::new(None),
+            }),
         }
     }
 
     /// Returns the configured chunk size used when growing arenas.
     pub fn chunk_bytes(&self) -> usize {
-        self.chunk_bytes.get()
+        self.inner.chunk_bytes.get()
     }
 
     /// Returns aggregated metrics collected so far.
-    pub fn metrics(&self) -> &PoolMetrics {
-        &self.metrics
+    pub fn metrics(&self) -> PoolMetrics {
+        self.inner.metrics.borrow().clone()
     }
 
     /// Returns the metrics from the most recent session, if any.
-    pub fn last_session(&self) -> Option<&PoolSessionMetrics> {
-        self.last_session.as_ref()
+    pub fn last_session(&self) -> Option<PoolSessionMetrics> {
+        self.inner.last_session.borrow().clone()
     }
 
     /// Borrows the pools for a single lowering session.
-    pub fn acquire(&mut self) -> TransformPoolsGuard<'_> {
-        let warm_start = self.metrics.sessions > 0;
+    pub fn acquire(&self) -> TransformPoolsGuard {
+        let warm_start = self.inner.metrics.borrow().sessions > 0;
         TransformPoolsGuard {
-            parent: self,
+            pools: self.clone(),
             session_metrics: PoolSessionMetrics::default(),
             warm_start,
         }
@@ -125,30 +134,30 @@ impl TransformPools {
 
 /// Session guard that provides scoped access to the pools.
 #[derive(Debug)]
-pub struct TransformPoolsGuard<'a> {
-    parent: &'a mut TransformPools,
+pub struct TransformPoolsGuard {
+    pools: TransformPools,
     session_metrics: PoolSessionMetrics,
     warm_start: bool,
 }
 
-impl<'a> TransformPoolsGuard<'a> {
+impl TransformPoolsGuard {
     /// Returns true when this session reused an arena from a prior run.
     pub fn is_warm_start(&self) -> bool {
         self.warm_start
     }
 
     /// Provides access to the AST arena for allocations within the session.
-    pub fn ast(&mut self) -> ArenaAccessor<'_, '_> {
+    pub fn ast(&mut self) -> ArenaAccessor<'_> {
         ArenaAccessor {
-            bump: &self.parent.ast_pool,
+            bump: self.pools.inner.ast_pool.borrow_mut(),
             metrics: &mut self.session_metrics.ast,
         }
     }
 
     /// Provides access to the IR arena for allocations within the session.
-    pub fn ir(&mut self) -> ArenaAccessor<'_, '_> {
+    pub fn ir(&mut self) -> ArenaAccessor<'_> {
         ArenaAccessor {
-            bump: &self.parent.ir_pool,
+            bump: self.pools.inner.ir_pool.borrow_mut(),
             metrics: &mut self.session_metrics.ir,
         }
     }
@@ -159,39 +168,42 @@ impl<'a> TransformPoolsGuard<'a> {
     }
 }
 
-impl Drop for TransformPoolsGuard<'_> {
+impl Drop for TransformPoolsGuard {
     fn drop(&mut self) {
-        self.parent.metrics.sessions += 1;
+        let mut metrics = self.pools.inner.metrics.borrow_mut();
+        metrics.sessions += 1;
         if self.warm_start {
-            self.parent.metrics.warm_sessions += 1;
+            metrics.warm_sessions += 1;
         }
-        self.parent.metrics.total_allocations += self.session_metrics.total_allocations();
-        self.parent.metrics.total_bytes += self.session_metrics.total_bytes();
-        self.parent.last_session = Some(self.session_metrics.clone());
+        metrics.total_allocations += self.session_metrics.total_allocations();
+        metrics.total_bytes += self.session_metrics.total_bytes();
+        drop(metrics);
+
+        *self.pools.inner.last_session.borrow_mut() = Some(self.session_metrics.clone());
 
         // All references issued from the arenas must be dropped before this runs.
-        self.parent.ast_pool.reset();
-        self.parent.ir_pool.reset();
+        self.pools.inner.ast_pool.borrow_mut().reset();
+        self.pools.inner.ir_pool.borrow_mut().reset();
     }
 }
 
 /// Accessor around a bump arena with bookkeeping helpers.
 #[derive(Debug)]
-pub struct ArenaAccessor<'arena, 'metrics> {
-    bump: &'arena Bump,
-    metrics: &'metrics mut ArenaMetrics,
+pub struct ArenaAccessor<'pool> {
+    bump: RefMut<'pool, Bump>,
+    metrics: &'pool mut ArenaMetrics,
 }
 
-impl<'arena, 'metrics> ArenaAccessor<'arena, 'metrics> {
+impl<'pool> ArenaAccessor<'pool> {
     /// Allocates a single value inside the arena, returning a mutable reference.
-    pub fn alloc<T>(&mut self, value: T) -> &'arena mut T {
+    pub fn alloc<T>(&mut self, value: T) -> &mut T {
         let bytes = std::mem::size_of_val(&value);
         self.metrics.record(bytes);
         self.bump.alloc(value)
     }
 
     /// Allocates a slice filled by repeatedly invoking the generator.
-    pub fn alloc_slice_with<T, F>(&mut self, len: usize, mut generator: F) -> &'arena mut [T]
+    pub fn alloc_slice_with<T, F>(&mut self, len: usize, mut generator: F) -> &mut [T]
     where
         F: FnMut(usize) -> T,
     {
@@ -201,19 +213,19 @@ impl<'arena, 'metrics> ArenaAccessor<'arena, 'metrics> {
     }
 
     /// Allocates a slice by cloning a template value.
-    pub fn alloc_slice_clone<T: Clone>(&mut self, len: usize, value: &T) -> &'arena mut [T] {
+    pub fn alloc_slice_clone<T: Clone>(&mut self, len: usize, value: &T) -> &mut [T] {
         self.alloc_slice_with(len, |_| value.clone())
     }
 
     /// Allocates a slice by copying a `Copy` value.
-    pub fn alloc_slice_copy<T: Copy>(&mut self, len: usize, value: T) -> &'arena mut [T] {
+    pub fn alloc_slice_copy<T: Copy>(&mut self, len: usize, value: T) -> &mut [T] {
         let bytes = std::mem::size_of::<T>() * len;
         self.metrics.record(bytes);
         self.bump.alloc_slice_fill_copy(len, value)
     }
 
     /// Allocates a UTF-8 string copy inside the arena.
-    pub fn alloc_str(&mut self, value: &str) -> &'arena mut str {
+    pub fn alloc_str(&mut self, value: &str) -> &mut str {
         self.metrics.record(value.len());
         self.bump.alloc_str(value)
     }
@@ -229,7 +241,7 @@ impl<'arena, 'metrics> ArenaAccessor<'arena, 'metrics> {
     /// Exposes the underlying bump arena for advanced use cases.
     /// Call [`record_manual_allocation`] to keep metrics accurate when
     /// performing manual allocations.
-    pub fn bump(&self) -> &'arena Bump {
+    pub fn into_raw(self) -> RefMut<'pool, Bump> {
         self.bump
     }
 }
@@ -240,7 +252,7 @@ mod tests {
 
     #[test]
     fn records_metrics_and_reuse_across_sessions() {
-        let mut pools = TransformPools::new();
+        let pools = TransformPools::new();
 
         {
             let mut session = pools.acquire();

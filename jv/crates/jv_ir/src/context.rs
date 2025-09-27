@@ -1,14 +1,18 @@
 use std::collections::HashMap;
+use std::path::PathBuf;
+use std::time::Duration;
 
 use crate::types::{
     DataFormat, JavaType, MethodOverload, SampleMode, StaticMethodCall, UtilityClass,
 };
 use jv_ast::Span;
-use std::path::PathBuf;
-use std::time::Duration;
+use jv_support::arena::{
+    PoolMetrics as TransformPoolMetrics, PoolSessionMetrics as TransformPoolSessionMetrics,
+    TransformPools, TransformPoolsGuard,
+};
 
 /// Transformation context for desugaring
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct TransformContext {
     /// Type information gathered from analysis
     pub type_info: HashMap<String, JavaType>,
@@ -28,6 +32,8 @@ pub struct TransformContext {
     pub sequence_style_cache: SequenceStyleCache,
     /// Counter for synthesised local identifiers
     temp_counter: usize,
+    /// Optional arena pools shared across lowering sessions
+    pool_state: Option<TransformPoolState>,
 }
 
 impl TransformContext {
@@ -59,6 +65,7 @@ impl TransformContext {
             sample_options: SampleOptions::default(),
             sequence_style_cache: SequenceStyleCache::with_capacity(),
             temp_counter: 0,
+            pool_state: None,
         }
     }
 
@@ -106,12 +113,91 @@ impl TransformContext {
     pub fn sequence_style_cache_mut(&mut self) -> &mut SequenceStyleCache {
         &mut self.sequence_style_cache
     }
+
+    /// Creates a transformation context that owns arena-backed pools.
+    pub fn with_pools(pools: TransformPools) -> Self {
+        let mut ctx = Self::new();
+        ctx.pool_state = Some(TransformPoolState::new(pools));
+        ctx
+    }
+
+    /// Enables pooling for an existing context.
+    pub fn configure_pools(&mut self, pools: TransformPools) {
+        self.pool_state = Some(TransformPoolState::new(pools));
+    }
+
+    /// Disables pooling for the context.
+    pub fn disable_pools(&mut self) {
+        self.pool_state = None;
+    }
+
+    /// Returns true when pools are configured.
+    pub fn pools_enabled(&self) -> bool {
+        self.pool_state.is_some()
+    }
+
+    /// Starts a lowering session, clearing cached state and borrowing pools if available.
+    pub fn begin_lowering_session(&mut self) -> Option<TransformPoolsGuard> {
+        self.sequence_style_cache.clear();
+        self.pool_state.as_mut().map(|state| state.acquire())
+    }
+
+    /// Captures metrics produced by the most recent lowering session.
+    pub fn finish_lowering_session(&mut self) {
+        // Metrics are materialised when the guard drops; nothing further required here.
+    }
+
+    /// Returns metrics for the most recent session, if pooling is enabled and a session ran.
+    pub fn last_pool_session(&self) -> Option<TransformPoolSessionMetrics> {
+        self.pool_state
+            .as_ref()
+            .and_then(|state| state.last_session())
+    }
+
+    /// Indicates whether the most recent session reused arena capacity.
+    pub fn last_pool_warm_start(&self) -> Option<bool> {
+        self.pool_state
+            .as_ref()
+            .and_then(|state| state.last_warm_start())
+    }
+
+    /// Returns cumulative pool metrics collected so far.
+    pub fn pool_metrics(&self) -> Option<TransformPoolMetrics> {
+        self.pool_state.as_ref().map(|state| state.metrics())
+    }
+
+    /// Convenience helper exposing the current reuse ratio across sessions.
+    pub fn pool_reuse_ratio(&self) -> Option<f64> {
+        self.pool_state
+            .as_ref()
+            .map(|state| state.metrics().reuse_ratio())
+    }
 }
 
 // Helper implementations
 impl Default for TransformContext {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl Clone for TransformContext {
+    fn clone(&self) -> Self {
+        Self {
+            type_info: self.type_info.clone(),
+            scope_stack: self.scope_stack.clone(),
+            utility_classes: self.utility_classes.clone(),
+            method_overloads: self.method_overloads.clone(),
+            extension_methods: self.extension_methods.clone(),
+            current_package: self.current_package.clone(),
+            sample_options: self.sample_options.clone(),
+            sequence_style_cache: self.sequence_style_cache.clone(),
+            temp_counter: self.temp_counter,
+            pool_state: self
+                .pool_state
+                .as_ref()
+                .map(TransformPoolState::shallow_clone),
+        }
     }
 }
 
@@ -191,6 +277,46 @@ impl SequenceStyleCache {
     pub fn clear(&mut self) {
         self.array_elements.clear();
         self.call_arguments.clear();
+    }
+}
+
+#[derive(Debug)]
+struct TransformPoolState {
+    pools: TransformPools,
+    last_warm_start: Option<bool>,
+}
+
+impl TransformPoolState {
+    fn new(pools: TransformPools) -> Self {
+        Self {
+            pools,
+            last_warm_start: None,
+        }
+    }
+
+    fn acquire(&mut self) -> TransformPoolsGuard {
+        let guard = self.pools.acquire();
+        self.last_warm_start = Some(guard.is_warm_start());
+        guard
+    }
+
+    fn last_session(&self) -> Option<TransformPoolSessionMetrics> {
+        self.pools.last_session()
+    }
+
+    fn last_warm_start(&self) -> Option<bool> {
+        self.last_warm_start
+    }
+
+    fn metrics(&self) -> TransformPoolMetrics {
+        self.pools.metrics()
+    }
+
+    fn shallow_clone(&self) -> Self {
+        let chunk = self.pools.chunk_bytes();
+        let mut cloned = Self::new(TransformPools::with_chunk_capacity(chunk));
+        cloned.last_warm_start = self.last_warm_start;
+        cloned
     }
 }
 

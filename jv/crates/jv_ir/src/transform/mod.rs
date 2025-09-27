@@ -52,12 +52,16 @@ pub fn transform_program_with_context(
     program: Program,
     context: &mut TransformContext,
 ) -> Result<IrProgram, TransformError> {
+    let pool_guard = context.begin_lowering_session();
     let mut ir_statements = Vec::new();
 
     for stmt in program.statements {
         let mut transformed = transform_statement(stmt, context)?;
         ir_statements.append(&mut transformed);
     }
+
+    drop(pool_guard);
+    context.finish_lowering_session();
 
     Ok(IrProgram {
         package: program.package,
