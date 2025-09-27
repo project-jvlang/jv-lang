@@ -6,6 +6,8 @@ Cargo.lock
 
 # Rust debugging and profiling
 debug/
+!jv/crates/jv_ir/src/debug/
+!jv/crates/jv_ir/src/debug/mod.rs
 release/
 **/*.pdb
 
