@@ -285,6 +285,61 @@ public static String describe(Object x) {
 }
 ```
 
+### Subjectless `when` blocks
+
+Use `when { ... }` without a subject when the branch conditions come from standalone boolean guards. Each arrow arm is checked in order and evaluation short-circuits on the first match.
+
+```jv
+when {
+    request.isAuthenticated -> allow(request)
+    request.hasSession -> resume(request)
+    else -> reject(request)
+}
+```
+
+**Generated Java:**
+```java
+if (request.isAuthenticated()) {
+    allow(request);
+} else if (request.hasSession()) {
+    resume(request);
+} else {
+    reject(request);
+}
+```
+
+### Guarded branches with `&&`
+
+Branch patterns can add boolean guards with `&&`. Guard expressions may reference smart-cast variables that originate from the pattern on the same line.
+
+```jv
+fun render(model: Any): String = when (model) {
+    is User && model.isActive -> "Welcome back, ${model.displayName}"
+    is User -> "Please activate your account"
+    is Error && model.isRecoverable -> "Retry later"
+    else -> "Unsupported"
+}
+```
+
+The guard is preserved through AST, type checking, and IR so that code generation evaluates it exactly once. If every branch fails in an expression context, diagnostic `E_WHEN_002` asks for an explicit `else` branch.
+
+### Implicit `else -> Unit`
+
+When a `when` appears in a `Unit` context (statements, `Unit`-returning functions), the compiler inserts an implicit `else -> Unit`. You may therefore omit a final branch and still pass control-flow analysis.
+
+```jv
+fun process(messages: List<Message>) {
+    when {
+        messages.isEmpty() -> log("Nothing to do")
+        messages.size > 100 -> warn("Large batch")
+        messages.any { it.isError } -> report(messages)
+        // No explicit else needed: implicit else -> Unit is inserted
+    }
+}
+```
+
+In expression contexts (non-`Unit` return types), omitting `else` still triggers `E_WHEN_002`, mirroring the requirement that every code path produce a value.
+
 ### Conditional logic with `when`
 
 ```jv
