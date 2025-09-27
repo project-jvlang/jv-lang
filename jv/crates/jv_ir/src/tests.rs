@@ -10,18 +10,36 @@ mod tests {
         desugar_val_declaration, desugar_var_declaration, desugar_when_expression,
         generate_extension_class_name, generate_utility_class_name, infer_java_type,
         transform_expression, transform_program, transform_program_with_context,
-        transform_statement, CompletableFutureOp, DataFormat, IrCaseLabel, IrExpression,
-        IrForEachKind, IrForLoopMetadata, IrImplicitWhenEnd, IrModifiers, IrNumericRangeLoop,
-        IrStatement, IrVisibility, JavaType, SampleMode, SampleSourceKind, Schema,
-        TransformContext, TransformError, TransformPools, VirtualThreadOp,
+        transform_program_with_context_profiled, transform_statement, CompletableFutureOp,
+        DataFormat, IrCaseLabel, IrExpression, IrForEachKind, IrForLoopMetadata, IrImplicitWhenEnd,
+        IrModifiers, IrNumericRangeLoop, IrStatement, IrVisibility, JavaType, SampleMode,
+        SampleSourceKind, Schema, TransformContext, TransformError, TransformPools,
+        TransformProfiler, VirtualThreadOp,
     };
     use jv_ast::*;
     use sha2::{Digest, Sha256};
     use std::fs;
+    use std::time::Duration;
     use tempfile::tempdir;
 
     fn dummy_span() -> Span {
         Span::dummy()
+    }
+
+    #[test]
+    fn transform_profiler_collects_metrics() {
+        let program = simple_program();
+        let mut context = TransformContext::new();
+        let mut profiler = TransformProfiler::new();
+
+        let (ir_program, metrics) =
+            transform_program_with_context_profiled(program, &mut context, &mut profiler)
+                .expect("profiled lowering succeeds");
+
+        assert_eq!(ir_program.type_declarations.len(), 1);
+        assert!(metrics.total_duration() >= Duration::ZERO);
+        assert!(metrics.stage("lowering").is_some());
+        assert!(profiler.latest_metrics().is_some());
     }
 
     fn simple_program() -> Program {

@@ -1,5 +1,6 @@
 pub mod context;
 pub mod error;
+pub mod profiling;
 pub mod transform;
 pub mod types;
 
@@ -11,6 +12,8 @@ pub use jv_support::arena::{
     PoolSessionMetrics as TransformPoolSessionMetrics, TransformPools, TransformPoolsGuard,
 };
 
+pub use profiling::{PerfMetrics, StageTiming, TransformProfiler};
+
 /// Convenience re-exports for common IR types and transformation helpers.
 pub mod prelude {
     pub use crate::context::TransformContext;
@@ -18,8 +21,8 @@ pub mod prelude {
     pub use crate::transform::*;
     pub use crate::types::*;
     pub use crate::{
-        TransformArenaAccessor, TransformPoolMetrics, TransformPoolSessionMetrics, TransformPools,
-        TransformPoolsGuard,
+        PerfMetrics, StageTiming, TransformArenaAccessor, TransformPoolMetrics,
+        TransformPoolSessionMetrics, TransformPools, TransformPoolsGuard, TransformProfiler,
     };
 }
 

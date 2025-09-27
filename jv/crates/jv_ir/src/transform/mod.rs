@@ -1,5 +1,6 @@
 use crate::context::TransformContext;
 use crate::error::TransformError;
+use crate::profiling::{PerfMetrics, TransformProfiler};
 use crate::types::{IrExpression, IrProgram, IrStatement, JavaType};
 use jv_ast::{
     BinaryOp, ConcurrencyConstruct, Expression, Literal, Program, ResourceManagement, Span,
@@ -52,23 +53,37 @@ pub fn transform_program_with_context(
     program: Program,
     context: &mut TransformContext,
 ) -> Result<IrProgram, TransformError> {
-    let pool_guard = context.begin_lowering_session();
-    let mut ir_statements = Vec::new();
+    lower_program(program, context)
+}
 
-    for stmt in program.statements {
-        let mut transformed = transform_statement(stmt, context)?;
-        ir_statements.append(&mut transformed);
+/// Lowers a program while collecting profiling metrics.
+pub fn transform_program_profiled(
+    program: Program,
+    profiler: &mut TransformProfiler,
+) -> Result<(IrProgram, PerfMetrics), TransformError> {
+    let mut context = TransformContext::new();
+    transform_program_with_context_profiled(program, &mut context, profiler)
+}
+
+/// Lowers a program using the provided context while recording metrics into the profiler.
+pub fn transform_program_with_context_profiled(
+    program: Program,
+    context: &mut TransformContext,
+    profiler: &mut TransformProfiler,
+) -> Result<(IrProgram, PerfMetrics), TransformError> {
+    profiler.begin_session();
+    let result = profiler.measure_stage("lowering", || lower_program(program, context));
+
+    match result {
+        Ok(ir_program) => {
+            let metrics = profiler.finish_session(context);
+            Ok((ir_program, metrics))
+        }
+        Err(err) => {
+            profiler.abort_session();
+            Err(err)
+        }
     }
-
-    drop(pool_guard);
-    context.finish_lowering_session();
-
-    Ok(IrProgram {
-        package: program.package,
-        imports: Vec::new(),
-        type_declarations: ir_statements,
-        span: program.span,
-    })
 }
 
 pub fn transform_statement(
@@ -162,6 +177,36 @@ pub fn transform_statement(
         Statement::ForIn(for_in) => loops::desugar_for_in_statement(for_in, context),
         _ => Ok(vec![]),
     }
+}
+
+fn lower_program(
+    program: Program,
+    context: &mut TransformContext,
+) -> Result<IrProgram, TransformError> {
+    let Program {
+        package,
+        statements,
+        span,
+        ..
+    } = program;
+
+    let pool_guard = context.begin_lowering_session();
+    let mut ir_statements = Vec::new();
+
+    for stmt in statements {
+        let mut transformed = transform_statement(stmt, context)?;
+        ir_statements.append(&mut transformed);
+    }
+
+    drop(pool_guard);
+    context.finish_lowering_session();
+
+    Ok(IrProgram {
+        package,
+        imports: Vec::new(),
+        type_declarations: ir_statements,
+        span,
+    })
 }
 
 pub fn transform_expression(
