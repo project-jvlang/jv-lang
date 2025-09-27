@@ -70,7 +70,7 @@ debug = 1
 # Use fewer optimization passes to reduce build time and disk usage
 opt-level = 0
 # Reduce parallel codegen units to save disk space (at cost of build time)
-codegen-units = 256
+codegen-units = 16
 # Enable LTO for smaller binaries
 lto = "thin"
 # Enable incremental compilation for faster rebuilds
