@@ -46,6 +46,9 @@ pub enum Commands {
         /// Clean output directory before building
         #[arg(long)]
         clean: bool,
+        /// Capture AST→IR performance metrics and persist a report
+        #[arg(long)]
+        perf: bool,
         /// Produce a single-file binary artifact: 'jar' or 'native'
         #[arg(long, value_parser = ["jar", "native"])]
         binary: Option<String>,
@@ -185,6 +188,10 @@ pub mod pipeline {
         include!("pipeline/report.rs");
     }
 
+    pub mod perf {
+        include!("pipeline/perf.rs");
+    }
+
     pub mod project {
         pub mod locator {
             include!("pipeline/project/locator.rs");
@@ -208,6 +215,7 @@ pub mod pipeline {
     }
 
     pub use build_plan::{BuildOptions, BuildOptionsFactory, BuildPlan, CliOverrides};
+    pub use perf::{persist_single_run_report, PerfCapture};
     pub use project::output::{OutputManager, PreparedOutput};
 
     use super::*;
@@ -217,11 +225,16 @@ pub mod pipeline {
     use jv_checker::{InferenceSnapshot, TypeChecker};
     use jv_codegen_java::{JavaCodeGenConfig, JavaCodeGenerator};
     use jv_fmt::JavaFormatter;
-    use jv_ir::transform_program;
+    use jv_ir::TransformContext;
+    use jv_ir::{
+        transform_program, transform_program_with_context_profiled, TransformPools,
+        TransformProfiler,
+    };
     use jv_parser::Parser as JvParser;
     use std::ffi::OsStr;
     use std::path::{Path, PathBuf};
     use std::process::Command;
+    use std::time::Instant;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     /// Resulting artifacts and diagnostics from the build pipeline.
@@ -234,6 +247,7 @@ pub mod pipeline {
         pub compatibility: Option<report::RenderedCompatibilityReport>,
         pub compatibility_diagnostics: Vec<ToolingDiagnostic>,
         pub inference: Option<InferenceSnapshot>,
+        pub perf_capture: Option<PerfCapture>,
     }
 
     /// Compile a `.jv` file end-to-end into Java (and optionally `.class`) outputs.
@@ -262,6 +276,7 @@ pub mod pipeline {
         let source = fs::read_to_string(entrypoint)
             .with_context(|| format!("Failed to read file: {}", entrypoint.display()))?;
 
+        let parse_start = Instant::now();
         let program = match JvParser::parse(&source) {
             Ok(program) => program,
             Err(error) => {
@@ -271,6 +286,7 @@ pub mod pipeline {
                 return Err(anyhow!("Parser error: {:?}", error));
             }
         };
+        let parse_duration = parse_start.elapsed();
 
         if options.check {
             let mut type_checker = TypeChecker::new();
@@ -295,13 +311,38 @@ pub mod pipeline {
             inference_snapshot = type_checker.take_inference_snapshot();
         }
 
-        let ir_program = match transform_program(program) {
-            Ok(ir) => ir,
-            Err(error) => {
-                if let Some(diagnostic) = from_transform_error(&error) {
-                    return Err(tooling_failure(entrypoint, diagnostic));
+        let mut perf_capture: Option<PerfCapture> = None;
+        let ir_program = if options.perf {
+            let pools = TransformPools::with_chunk_capacity(256 * 1024);
+            let mut context = TransformContext::with_pools(pools);
+            let mut profiler = TransformProfiler::new();
+            match transform_program_with_context_profiled(program, &mut context, &mut profiler) {
+                Ok((ir, metrics)) => {
+                    let capture = persist_single_run_report(
+                        plan.root.root_dir(),
+                        entrypoint,
+                        parse_duration,
+                        &metrics,
+                    )?;
+                    perf_capture = Some(capture);
+                    ir
                 }
-                return Err(anyhow!("IR transformation error: {:?}", error));
+                Err(error) => {
+                    if let Some(diagnostic) = from_transform_error(&error) {
+                        return Err(tooling_failure(entrypoint, diagnostic));
+                    }
+                    return Err(anyhow!("IR transformation error: {:?}", error));
+                }
+            }
+        } else {
+            match transform_program(program) {
+                Ok(ir) => ir,
+                Err(error) => {
+                    if let Some(diagnostic) = from_transform_error(&error) {
+                        return Err(tooling_failure(entrypoint, diagnostic));
+                    }
+                    return Err(anyhow!("IR transformation error: {:?}", error));
+                }
             }
         };
 
@@ -358,6 +399,7 @@ pub mod pipeline {
             compatibility: None,
             compatibility_diagnostics,
             inference: inference_snapshot,
+            perf_capture,
         };
 
         if !options.java_only {

@@ -1,0 +1,70 @@
+name: perf_phase1
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  ast_ir_perf:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Run phase1 performance harness
+        run: make perf-phase1
+
+      - name: Run jv build with perf profiling
+        run: make perf-build
+
+      - name: Validate perf report freshness
+        run: |
+          REPORT="jv/tests/performance/target/perf-reports/ast-ir-phase1.json"
+          if [ ! -f "$REPORT" ]; then
+            ALT="jv/target/perf-reports/ast-ir-phase1.json"
+            if [ -f "$ALT" ]; then
+              REPORT="$ALT"
+            else
+              echo "::error ::Performance report not found at $REPORT or $ALT" >&2
+              exit 1
+            fi
+          fi
+
+          jq -e '.pass == true' "$REPORT" >/dev/null || {
+            echo "::error ::AST→IR performance budget exceeded. See $REPORT" >&2
+            exit 1
+          }
+
+          TS=$(jq -r '.timestamp_ms' "$REPORT")
+          if [ "$TS" = "null" ]; then
+            echo "::error ::timestamp_ms missing in perf report" >&2
+            exit 1
+          fi
+
+          NOW=$(python -c 'import time; print(int(time.time() * 1000))')
+          DIFF=$((NOW - TS))
+          THIRTY_DAYS=$((30 * 24 * 60 * 60 * 1000))
+          if [ "$DIFF" -gt "$THIRTY_DAYS" ]; then
+            echo "::error ::Performance report is older than 30 days. Refresh the baseline." >&2
+            exit 1
+          fi
+
+          echo "Using perf report at $REPORT"
+          echo "report-path=$REPORT" >> "$GITHUB_OUTPUT"
+        shell: bash
+
+      - name: Upload perf report artifact
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ast-ir-perf-report
+          path: |
+            jv/tests/performance/target/perf-reports/ast-ir-phase1.json
+            jv/target/perf-reports/ast-ir-phase1.json
+          if-no-files-found: ignore

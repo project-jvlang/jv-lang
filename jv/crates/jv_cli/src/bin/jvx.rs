@@ -88,6 +88,7 @@ fn build_plan_for_input(input_path: &Path) -> Result<BuildPlan> {
         format: false,
         target: None,
         clean: false,
+        perf: false,
     };
 
     BuildOptionsFactory::compose(project_root, settings, layout, overrides)

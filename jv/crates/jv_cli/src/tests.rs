@@ -76,6 +76,7 @@ fn test_build_command_parsing() {
             check,
             format,
             clean,
+            perf,
             ..
         }) => {
             assert_eq!(input.as_deref(), Some("test.jv"));
@@ -84,6 +85,20 @@ fn test_build_command_parsing() {
             assert!(check);
             assert!(format);
             assert!(!clean);
+            assert!(!perf);
+        }
+        _ => panic!("Expected Build command"),
+    }
+}
+
+#[test]
+fn test_build_command_perf_flag() {
+    let build_args = vec!["jv", "build", "test.jv", "--perf"];
+    let cli = Cli::try_parse_from(build_args).unwrap();
+
+    match cli.command {
+        Some(Commands::Build { perf, .. }) => {
+            assert!(perf);
         }
         _ => panic!("Expected Build command"),
     }
@@ -251,6 +266,7 @@ include = ["src/**/*.jv"]
         format: false,
         target: None,
         clean: false,
+        perf: false,
     };
 
     let plan = pipeline::BuildOptionsFactory::compose(project_root, settings, layout, overrides)
@@ -326,6 +342,7 @@ clean = false
         format: false,
         target: None,
         clean: false,
+        perf: false,
     };
 
     let plan = pipeline::BuildOptionsFactory::compose(project_root, settings, layout, overrides)

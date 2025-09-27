@@ -1,0 +1,18 @@
+[package]
+name = "perf-phase1"
+version = "0.1.0"
+
+[package.dependencies]
+
+[project]
+entrypoint = "phase1.jv"
+
+[project.sources]
+include = ["*.jv"]
+
+[project.output]
+directory = "out/java"
+clean = false
+
+[build]
+java_version = "25"

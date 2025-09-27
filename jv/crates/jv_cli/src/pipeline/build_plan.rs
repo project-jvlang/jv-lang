@@ -29,6 +29,7 @@ pub struct CliOverrides {
     pub format: bool,
     pub target: Option<JavaTarget>,
     pub clean: bool,
+    pub perf: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -39,6 +40,7 @@ pub struct BuildOptions {
     pub check: bool,
     pub format: bool,
     pub clean: bool,
+    pub perf: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -92,6 +94,7 @@ impl BuildOptionsFactory {
             check: overrides.check,
             format: overrides.format,
             clean: overrides.clean || settings.output.clean,
+            perf: overrides.perf,
         };
 
         Ok(BuildPlan {

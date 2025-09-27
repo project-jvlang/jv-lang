@@ -122,6 +122,7 @@ jv build [OPTIONS] [FILES...]
 - `--jdk <VERSION>`: ターゲットJDKバージョン
 - `--optimization <LEVEL>`: 最適化レベル (0-3)
 - `--debug`: デバッグ情報を含める
+- `--perf`: AST→IR性能メトリクスを計測し `target/perf-reports/ast-ir-phase1.json` に保存
 
 Sample/@Sampleオプション:
 - `--sample-mode=embed|load`: デフォルトの`@Sample`モードを上書き (デフォルト: embed)

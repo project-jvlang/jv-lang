@@ -2,9 +2,11 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
-use jv_ir::{transform_program_with_context_profiled, TransformContext, TransformPools, TransformProfiler};
+use jv_ir::{
+    transform_program_with_context_profiled, TransformContext, TransformPools, TransformProfiler,
+};
 use jv_parser::Parser;
-use serde::Serialize;
+use jv_support::perf::report::{BudgetChecks, PerfBudget, PerfReport, RunSample, Summary};
 
 const ITERATIONS: usize = 12;
 const REPORT_FILENAME: &str = "ast-ir-phase1.json";
@@ -12,56 +14,6 @@ const REPORT_FILENAME: &str = "ast-ir-phase1.json";
 const MAX_ELAPSED_MS: f64 = 3_000.0;
 const MAX_PEAK_RSS_MB: f64 = 100.0;
 const MIN_REUSE_RATIO: f64 = 0.90;
-
-#[derive(Debug, Serialize)]
-struct PerfBudget {
-    max_elapsed_ms: f64,
-    max_peak_rss_mb: f64,
-    min_reuse_ratio: f64,
-}
-
-#[derive(Debug, Serialize)]
-struct RunSample {
-    iteration: usize,
-    parse_ms: f64,
-    lowering_ms: f64,
-    total_ms: f64,
-    warm_start: bool,
-}
-
-#[derive(Debug, Serialize)]
-struct Summary {
-    cold_total_ms: f64,
-    warm_average_ms: f64,
-    warm_min_ms: f64,
-    warm_max_ms: f64,
-    reuse_ratio: f64,
-    peak_rss_mb: Option<f64>,
-    sessions: u64,
-    warm_sessions: u64,
-}
-
-#[derive(Debug, Serialize)]
-struct BudgetChecks {
-    cold_within_budget: bool,
-    warm_within_budget: bool,
-    reuse_ratio_ok: bool,
-    peak_rss_ok: Option<bool>,
-}
-
-#[derive(Debug, Serialize)]
-struct PerfReport {
-    report_version: u32,
-    fixture: String,
-    iterations: usize,
-    runs: Vec<RunSample>,
-    budget: PerfBudget,
-    summary: Summary,
-    checks: BudgetChecks,
-    pass: bool,
-    timestamp_ms: u128,
-    report_path: String,
-}
 
 #[test]
 #[ignore]
@@ -99,8 +51,9 @@ fn perf_phase1() {
         let program = Parser::parse(&source).expect("fixture should parse");
         let parse_ms = duration_to_millis(parse_start.elapsed());
 
-        let (_ir, metrics) = transform_program_with_context_profiled(program, &mut context, &mut profiler)
-            .expect("fixture should lower to IR");
+        let (_ir, metrics) =
+            transform_program_with_context_profiled(program, &mut context, &mut profiler)
+                .expect("fixture should lower to IR");
 
         let lowering_ms = metrics
             .stage("lowering")
@@ -142,10 +95,7 @@ fn perf_phase1() {
     let (warm_min_ms, warm_max_ms) = if warm_totals.is_empty() {
         (cold_total_ms, cold_total_ms)
     } else {
-        let min = warm_totals
-            .iter()
-            .copied()
-            .fold(f64::INFINITY, f64::min);
+        let min = warm_totals.iter().copied().fold(f64::INFINITY, f64::min);
         let max = warm_totals
             .iter()
             .copied()
@@ -153,9 +103,7 @@ fn perf_phase1() {
         (min, max)
     };
 
-    let warm_within_budget = warm_totals
-        .iter()
-        .all(|ms| *ms <= budget.max_elapsed_ms);
+    let warm_within_budget = warm_totals.iter().all(|ms| *ms <= budget.max_elapsed_ms);
 
     let checks = BudgetChecks {
         cold_within_budget: cold_total_ms <= budget.max_elapsed_ms,

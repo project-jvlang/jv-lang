@@ -50,6 +50,7 @@ fn main() -> Result<()> {
             check,
             format,
             clean,
+            perf,
             binary,
             bin_name,
             target,
@@ -85,6 +86,7 @@ fn main() -> Result<()> {
                 format,
                 target,
                 clean,
+                perf,
             };
 
             let plan = BuildOptionsFactory::compose(project_root, settings, layout, overrides)
@@ -125,6 +127,31 @@ fn main() -> Result<()> {
 
             for warning in &artifacts.warnings {
                 println!("Warning: {}", warning);
+            }
+
+            if let Some(perf) = &artifacts.perf_capture {
+                let summary = &perf.report.summary;
+                let checks = &perf.report.checks;
+                println!(
+                    "性能: total={:.2}ms lowering={:.2}ms reuse={:.3} (sessions {}/{})",
+                    summary.cold_total_ms,
+                    summary.warm_average_ms,
+                    summary.reuse_ratio,
+                    summary.warm_sessions,
+                    summary.sessions
+                );
+
+                if !perf.report.pass {
+                    println!(
+                        "警告: AST→IR性能予算を超過しています (cold={}, warm={}, reuse={}, peak={:?})",
+                        checks.cold_within_budget,
+                        checks.warm_within_budget,
+                        checks.reuse_ratio_ok,
+                        checks.peak_rss_ok
+                    );
+                }
+
+                println!("Perf report saved to {}", perf.report_path.display());
             }
 
             if !java_only {
@@ -181,6 +208,7 @@ fn main() -> Result<()> {
                 format: false,
                 target: None,
                 clean: false,
+                perf: false,
             };
 
             let plan = BuildOptionsFactory::compose(project_root, settings, layout, overrides)

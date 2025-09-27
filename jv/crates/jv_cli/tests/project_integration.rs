@@ -132,6 +132,7 @@ fn project_pipeline_supports_multi_target_builds() {
         format: false,
         target: Some(JavaTarget::Java21),
         clean: false,
+        perf: false,
     };
 
     let plan21 = BuildOptionsFactory::compose(
@@ -163,6 +164,7 @@ fn project_pipeline_supports_multi_target_builds() {
         format: true,
         target: Some(JavaTarget::Java25),
         clean: false,
+        perf: false,
     };
 
     let plan25 = BuildOptionsFactory::compose(project_root, settings, layout, overrides25)
@@ -206,6 +208,7 @@ fn clean_option_removes_stale_target_artifacts() {
         format: false,
         target: Some(JavaTarget::Java21),
         clean,
+        perf: false,
     };
 
     let plan_initial = BuildOptionsFactory::compose(

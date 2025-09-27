@@ -122,6 +122,7 @@ jv build [OPTIONS] [FILES...]
 - `--jdk <VERSION>`: Target JDK version
 - `--optimization <LEVEL>`: Optimization level (0-3)
 - `--debug`: Include debug information
+- `--perf`: Collect AST→IR performance metrics and persist `target/perf-reports/ast-ir-phase1.json`
   
 Sample/@Sample options:
 - `--sample-mode=embed|load`: Override default `@Sample` mode (default: embed)
