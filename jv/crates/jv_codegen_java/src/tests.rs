@@ -1,10 +1,11 @@
 use super::*;
 use insta::assert_snapshot;
-use jv_ast::{CallArgumentStyle, Literal, SequenceDelimiter, Span};
+use jv_ast::{BinaryOp, CallArgumentStyle, Literal, SequenceDelimiter, Span};
 use jv_ir::{
-    DataFormat, IrExpression, IrModifiers, IrParameter, IrProgram, IrRecordComponent,
-    IrSampleDeclaration, IrStatement, IrVisibility, JavaType, MethodOverload, PrimitiveType,
-    SampleMode, SampleRecordDescriptor, SampleRecordField, SampleSourceKind, Schema,
+    DataFormat, IrCaseLabel, IrExpression, IrImplicitWhenEnd, IrModifiers, IrParameter, IrProgram,
+    IrRecordComponent, IrSampleDeclaration, IrStatement, IrSwitchCase, IrVisibility, JavaType,
+    MethodOverload, PrimitiveType, SampleMode, SampleRecordDescriptor, SampleRecordField,
+    SampleSourceKind, Schema,
 };
 use serde_json::to_string_pretty;
 use std::collections::{BTreeMap, BTreeSet};
@@ -1440,6 +1441,160 @@ fn load_mode_sample_declaration_supports_s3_and_tabular_decoding() {
     assert!(
         source.contains("public record UserSample"),
         "record definition should accompany S3 loader: {source}"
+    );
+}
+
+fn ir_identifier(name: &str, ty: &JavaType) -> IrExpression {
+    IrExpression::Identifier {
+        name: name.to_string(),
+        java_type: ty.clone(),
+        span: dummy_span(),
+    }
+}
+
+fn switch_case(
+    labels: Vec<IrCaseLabel>,
+    guard: Option<IrExpression>,
+    body: IrExpression,
+) -> IrSwitchCase {
+    IrSwitchCase {
+        labels,
+        guard,
+        body,
+        span: dummy_span(),
+    }
+}
+
+fn string_literal(value: &str) -> IrExpression {
+    IrExpression::Literal(Literal::String(value.to_string()), dummy_span())
+}
+
+#[test]
+fn switch_expression_renders_guards_and_default_branch() {
+    let int_type = JavaType::Primitive("int".to_string());
+
+    let expression = IrExpression::Switch {
+        discriminant: Box::new(ir_identifier("x", &int_type)),
+        cases: vec![
+            switch_case(
+                vec![IrCaseLabel::Literal(Literal::Number("1".to_string()))],
+                Some(IrExpression::Binary {
+                    left: Box::new(ir_identifier("x", &int_type)),
+                    op: BinaryOp::Greater,
+                    right: Box::new(IrExpression::Literal(
+                        Literal::Number("0".to_string()),
+                        dummy_span(),
+                    )),
+                    java_type: JavaType::boolean(),
+                    span: dummy_span(),
+                }),
+                string_literal("positive"),
+            ),
+            switch_case(vec![IrCaseLabel::Default], None, string_literal("fallback")),
+        ],
+        java_type: JavaType::string(),
+        implicit_end: None,
+        span: dummy_span(),
+    };
+
+    let mut generator = JavaCodeGenerator::new();
+    let rendered = generator
+        .generate_expression(&expression)
+        .expect("switch expression generation should succeed");
+
+    let expected =
+        "switch (x) {\n    case 1 when (x > 0) -> \"positive\"\n    default -> \"fallback\"\n}\n";
+    assert_eq!(
+        rendered, expected,
+        "switch with guard/default should render"
+    );
+}
+
+#[test]
+fn switch_expression_appends_implicit_unit_branch_when_missing_default() {
+    let int_type = JavaType::Primitive("int".to_string());
+
+    let expression = IrExpression::Switch {
+        discriminant: Box::new(ir_identifier("x", &int_type)),
+        cases: vec![switch_case(
+            vec![IrCaseLabel::Literal(Literal::Number("1".to_string()))],
+            None,
+            string_literal("one"),
+        )],
+        java_type: JavaType::string(),
+        implicit_end: Some(IrImplicitWhenEnd::Unit { span: dummy_span() }),
+        span: dummy_span(),
+    };
+
+    let mut generator = JavaCodeGenerator::new();
+    let rendered = generator
+        .generate_expression(&expression)
+        .expect("implicit end should render");
+
+    let expected = "switch (x) {\n    case 1 -> \"one\"\n    default -> { }\n}\n";
+    assert_eq!(
+        rendered, expected,
+        "implicit Unit branch should emit default"
+    );
+}
+
+#[test]
+fn switch_expression_respects_existing_default_over_implicit_unit() {
+    let int_type = JavaType::Primitive("int".to_string());
+
+    let expression = IrExpression::Switch {
+        discriminant: Box::new(ir_identifier("x", &int_type)),
+        cases: vec![
+            switch_case(
+                vec![IrCaseLabel::Literal(Literal::Number("1".to_string()))],
+                None,
+                string_literal("one"),
+            ),
+            switch_case(vec![IrCaseLabel::Default], None, string_literal("other")),
+        ],
+        java_type: JavaType::string(),
+        implicit_end: Some(IrImplicitWhenEnd::Unit { span: dummy_span() }),
+        span: dummy_span(),
+    };
+
+    let mut generator = JavaCodeGenerator::new();
+    let rendered = generator
+        .generate_expression(&expression)
+        .expect("explicit default should win");
+
+    let expected = "switch (x) {\n    case 1 -> \"one\"\n    default -> \"other\"\n}\n";
+    assert_eq!(
+        rendered, expected,
+        "implicit end must not duplicate default"
+    );
+}
+
+#[test]
+fn switch_expression_implicit_unit_renders_for_java21_target() {
+    let int_type = JavaType::Primitive("int".to_string());
+
+    let expression = IrExpression::Switch {
+        discriminant: Box::new(ir_identifier("x", &int_type)),
+        cases: vec![switch_case(
+            vec![IrCaseLabel::Literal(Literal::Number("1".to_string()))],
+            None,
+            string_literal("one"),
+        )],
+        java_type: JavaType::string(),
+        implicit_end: Some(IrImplicitWhenEnd::Unit { span: dummy_span() }),
+        span: dummy_span(),
+    };
+
+    let mut generator =
+        JavaCodeGenerator::with_config(JavaCodeGenConfig::for_target(JavaTarget::Java21));
+    let rendered = generator
+        .generate_expression(&expression)
+        .expect("java21 switch generation should succeed");
+
+    let expected = "switch (x) {\n    case 1 -> \"one\"\n    default -> { }\n}\n";
+    assert_eq!(
+        rendered, expected,
+        "java21 fallback should match java25 rendering"
     );
 }
 

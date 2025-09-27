@@ -144,4 +144,8 @@ impl JavaCodeGenerator {
             builder.push_line(line);
         }
     }
+
+    pub(super) fn is_default_only_case(case: &IrSwitchCase) -> bool {
+        case.labels.len() == 1 && matches!(case.labels[0], IrCaseLabel::Default)
+    }
 }

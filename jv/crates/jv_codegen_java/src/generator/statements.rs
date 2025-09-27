@@ -393,12 +393,16 @@ impl JavaCodeGenerator {
         ));
         builder.indent();
         for case in cases {
-            let labels = self.render_case_labels(&case.labels)?;
             let guard = match &case.guard {
                 Some(cond) => format!(" when ({})", self.generate_expression(cond)?),
                 None => String::new(),
             };
-            builder.push_line(&format!("case {}{}:", labels, guard));
+            if Self::is_default_only_case(case) {
+                builder.push_line(&format!("default{}:", guard));
+            } else {
+                let labels = self.render_case_labels(&case.labels)?;
+                builder.push_line(&format!("case {}{}:", labels, guard));
+            }
             builder.indent();
             let body_expr = self.generate_expression(&case.body)?;
             builder.push_line(&format!("{};", body_expr));

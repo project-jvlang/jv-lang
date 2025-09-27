@@ -195,6 +195,7 @@ impl JavaCodeGenerator {
         if let IrExpression::Switch {
             discriminant,
             cases,
+            implicit_end,
             ..
         } = switch
         {
@@ -205,7 +206,6 @@ impl JavaCodeGenerator {
             ));
             builder.indent();
             for case in cases {
-                let labels = self.render_case_labels(&case.labels)?;
                 let guard = match &case.guard {
                     Some(guard_expr) => {
                         format!(" when ({})", self.generate_expression(guard_expr)?)
@@ -213,7 +213,17 @@ impl JavaCodeGenerator {
                     None => String::new(),
                 };
                 let body_expr = self.generate_expression(&case.body)?;
-                builder.push_line(&format!("case {}{} -> {}", labels, guard, body_expr));
+                if Self::is_default_only_case(case) {
+                    builder.push_line(&format!("default{} -> {}", guard, body_expr));
+                } else {
+                    let labels = self.render_case_labels(&case.labels)?;
+                    builder.push_line(&format!("case {}{} -> {}", labels, guard, body_expr));
+                }
+            }
+            if let Some(implicit) = implicit_end.as_ref() {
+                if let Some(rendered) = self.render_implicit_when_end_case(implicit, cases)? {
+                    builder.push_line(&rendered);
+                }
             }
             builder.dedent();
             builder.push_line("}");
@@ -440,6 +450,30 @@ impl JavaCodeGenerator {
             }
         }
         Ok(rendered.join(", "))
+    }
+
+    fn render_implicit_when_end_case(
+        &self,
+        end: &IrImplicitWhenEnd,
+        cases: &[IrSwitchCase],
+    ) -> Result<Option<String>, CodeGenError> {
+        if Self::has_default_case(cases) {
+            return Ok(None);
+        }
+
+        let rendered = match end {
+            IrImplicitWhenEnd::Unit { .. } => "default -> { }".to_string(),
+        };
+
+        Ok(Some(rendered))
+    }
+
+    fn has_default_case(cases: &[IrSwitchCase]) -> bool {
+        cases.iter().any(|case| {
+            case.labels
+                .iter()
+                .any(|label| matches!(label, IrCaseLabel::Default))
+        })
     }
 
     fn generate_string_format(
