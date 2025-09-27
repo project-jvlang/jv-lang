@@ -1,0 +1,24 @@
+{
+  "program": {
+    "package": null,
+    "imports": [],
+    "statements": [],
+    "span": {
+      "start_line": 0,
+      "start_column": 0,
+      "end_line": 0,
+      "end_column": 0
+    }
+  },
+  "warnings": [],
+  "stats": {
+    "total_nodes": 1,
+    "reconstructed_nodes": 1,
+    "placeholder_nodes": 0,
+    "elapsed_millis": 0
+  },
+  "summary": {
+    "total": 0,
+    "by_kind": []
+  }
+}

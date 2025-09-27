@@ -200,6 +200,30 @@ jv run --args "arg1 arg2 arg3"
 jv run --main MyApp --jvm-args "-Xmx2g" --args "input.txt output.txt"
 ```
 
+### `jv debug --stage ir --emit ast`
+
+デシュガリング済み IR から AST を再構築し、警告と統計を含むデバッグレポートを生成します。
+
+```bash
+jv debug --stage ir --emit ast \\
+  --input build/fixtures/sample.ir.json \\
+  --output - \\
+  --format json
+```
+
+主なオプション:
+- `--stage ir`: 対象ステージを指定（現状は IR のみ対応）。
+- `--emit ast`: 出力アーティファクトを AST に設定。
+- `--input <PATH>`: IR JSON の入力元。`-` または未指定で標準入力を利用。
+- `--output <PATH>`: 出力先。`-` で標準出力、ファイルパス指定で保存。
+- `--format json|pretty`: JSON か整形テキストを選択（デフォルト: `json`）。
+- `--no-stats`: サマリーフッター出力を抑制。
+- `--fail-on-timeout <ms>`: 実行時間が閾値を超えた場合に非ゼロ終了。
+
+JSON 出力例は `jv/crates/jv_cli/tests/fixtures/debug_ir_expected.json` のゴールデンスナップショットを参照してください。`--format pretty` を指定すると統計値・警告一覧・AST を段階的に表示し、デフォルトでは標準エラーへサマリーを出力します。
+
+回帰テストは `jv/crates/jv_cli/tests/debug_ir.rs` に配置されており、`cargo test -p jv_cli` で実行できます。
+
 ### `jv fmt`
 
 標準スタイルガイドラインに従ってjvソースコードをフォーマットします。

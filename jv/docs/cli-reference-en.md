@@ -200,6 +200,30 @@ jv run --args "arg1 arg2 arg3"
 jv run --main MyApp --jvm-args "-Xmx2g" --args "input.txt output.txt"
 ```
 
+### `jv debug --stage ir --emit ast`
+
+Reconstructs AST artifacts from desugared IR and emits diagnostics for debugging the pipeline.
+
+```bash
+jv debug --stage ir --emit ast \\
+  --input build/fixtures/sample.ir.json \\
+  --output - \\
+  --format json
+```
+
+Key options:
+- `--stage ir`: Selects the IR stage (currently the only supported stage).
+- `--emit ast`: Emits the reconstructed AST artifact.
+- `--input <PATH>`: IR JSON source. Use `-` (or omit) to read from stdin.
+- `--output <PATH>`: Destination for the artifact. Use `-` for stdout or provide a file path.
+- `--format json|pretty`: Choose JSON or human-readable output (`json` by default).
+- `--no-stats`: Suppress the summary footer.
+- `--fail-on-timeout <ms>`: Exit with a non-zero status if reconstruction exceeds the timeout.
+
+See the golden snapshot at `jv/crates/jv_cli/tests/fixtures/debug_ir_expected.json` for a canonical JSON example. With `--format pretty`, the tool prints statistics, warning summaries, and the AST in a readable layout while writing the summary footer to stderr by default.
+
+Regression coverage lives in `jv/crates/jv_cli/tests/debug_ir.rs`. Run `cargo test -p jv_cli` to execute the suite.
+
 ### `jv fmt`
 
 Format jv source code according to standard style guidelines.
