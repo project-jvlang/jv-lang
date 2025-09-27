@@ -11,8 +11,8 @@ mod emit;
 pub mod loader;
 mod reconstruct;
 
-use crate::types::{IrProgram, Span};
-use jv_ast::Program;
+use crate::types::IrProgram;
+use jv_ast::{Program, Span};
 use thiserror::Error;
 
 /// Configuration flags that control how IR artifacts should be reconstructed.
@@ -82,7 +82,7 @@ impl fmt::Display for WarningKind {
 }
 
 /// Structured warning produced when reconstruction encounters unexpected input.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ReconstructionWarning {
     pub span: Option<Span>,
     pub node_path: String,
@@ -195,135 +195,4 @@ impl Default for IrAstRebuilder {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::types::{
-        IrExpression, IrModifiers, IrProgram, IrStatement, IrVisibility, JavaType, Span,
-    };
-    use jv_ast::{Expression as AstExpression, Literal, Statement as AstStatement};
-
-    fn span() -> Span {
-        Span::new(1, 0, 1, 1)
-    }
-
-    #[test]
-    fn reconstructs_basic_program_with_variable_and_expression() {
-        let program = IrProgram {
-            package: Some("com.example".to_string()),
-            imports: vec![IrStatement::Import {
-                path: "java.util.List".to_string(),
-                is_static: false,
-                is_wildcard: false,
-                span: span(),
-            }],
-            type_declarations: vec![
-                IrStatement::VariableDeclaration {
-                    name: "answer".to_string(),
-                    java_type: JavaType::Primitive("int".into()),
-                    initializer: Some(IrExpression::Literal(Literal::Number("42".into()), span())),
-                    is_final: true,
-                    modifiers: IrModifiers {
-                        visibility: IrVisibility::Public,
-                        ..IrModifiers::default()
-                    },
-                    span: span(),
-                },
-                IrStatement::Expression {
-                    expr: IrExpression::Identifier {
-                        name: "answer".into(),
-                        java_type: JavaType::Primitive("int".into()),
-                        span: span(),
-                    },
-                    span: span(),
-                },
-            ],
-            span: span(),
-        };
-
-        let rebuilder = IrAstRebuilder::default();
-        let result = rebuilder
-            .reconstruct_program(&program)
-            .expect("should rebuild");
-
-        assert_eq!(result.program.package.as_deref(), Some("com.example"));
-        assert_eq!(result.program.imports.len(), 1);
-        assert_eq!(result.program.statements.len(), 2);
-
-        match &result.program.statements[0] {
-            AstStatement::ValDeclaration {
-                name, initializer, ..
-            } => {
-                assert_eq!(name, "answer");
-                match initializer {
-                    AstExpression::Literal(Literal::Number(value), _) => assert_eq!(value, "42"),
-                    other => panic!("unexpected initializer: {other:?}"),
-                }
-            }
-            other => panic!("expected val declaration, found {other:?}"),
-        }
-
-        assert!(result.warnings.is_empty(), "warnings were not expected");
-        assert_eq!(
-            result.stats.reconstructed_nodes,
-            result.stats.total_nodes - result.stats.placeholder_nodes
-        );
-    }
-
-    #[test]
-    fn errors_when_placeholders_disallowed() {
-        let program = IrProgram {
-            package: None,
-            imports: vec![],
-            type_declarations: vec![IrStatement::VariableDeclaration {
-                name: "missing".to_string(),
-                java_type: JavaType::Primitive("int".into()),
-                initializer: None,
-                is_final: true,
-                modifiers: IrModifiers::default(),
-                span: span(),
-            }],
-            span: span(),
-        };
-
-        let rebuilder = IrAstRebuilder::new(ReconstructionOptions {
-            allow_placeholders: false,
-            ..ReconstructionOptions::default()
-        });
-
-        let err = rebuilder
-            .reconstruct_program(&program)
-            .expect_err("placeholders should be rejected");
-
-        assert!(matches!(err, ReconstructionError::InsufficientMetadata));
-    }
-
-    #[test]
-    fn produces_warning_for_unsupported_statement() {
-        let program = IrProgram {
-            package: None,
-            imports: vec![],
-            type_declarations: vec![IrStatement::While {
-                condition: IrExpression::Literal(Literal::Boolean(true), span()),
-                body: Box::new(IrStatement::Expression {
-                    expr: IrExpression::Literal(Literal::Number("1".into()), span()),
-                    span: span(),
-                }),
-                span: span(),
-            }],
-            span: span(),
-        };
-
-        let rebuilder = IrAstRebuilder::default();
-        let result = rebuilder
-            .reconstruct_program(&program)
-            .expect("should rebuild with placeholder");
-
-        assert_eq!(result.warnings.len(), 1);
-        assert_eq!(result.stats.placeholder_nodes, 1);
-        assert!(matches!(
-            result.program.statements[0],
-            AstStatement::Expression { .. }
-        ));
-        assert_eq!(result.warnings[0].kind, WarningKind::UnsupportedNode);
-    }
-}
+mod tests;

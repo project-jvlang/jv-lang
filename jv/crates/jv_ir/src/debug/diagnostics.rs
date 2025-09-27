@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use super::{ReconstructedAst, ReconstructionStats, ReconstructionWarning};
-use crate::types::Span;
+use jv_ast::Span;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WarningSummary {

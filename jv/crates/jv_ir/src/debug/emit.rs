@@ -5,7 +5,7 @@ use serde_json::json;
 
 use super::diagnostics::{format_span, DiagnosticsSummary};
 use super::ReconstructedAst;
-use crate::types::Span;
+use jv_ast::Span;
 
 #[derive(Debug, Default, Clone, Copy)]
 pub struct AstArtifactWriter;
@@ -50,7 +50,7 @@ impl AstArtifactWriter {
             "summary": summary_value,
         });
 
-        serde_json::to_writer_pretty(writer, &root)
+        serde_json::to_writer_pretty(&mut *writer, &root)
             .context("failed to stream reconstructed artifact as JSON")?;
         writer
             .write_all(b"\n")
@@ -152,8 +152,8 @@ fn span_to_json(span: &Span) -> serde_json::Value {
 mod tests {
     use super::*;
     use crate::debug::{ReconstructionWarning, WarningKind};
-    use crate::types::Span;
     use jv_ast::Program;
+    use jv_ast::Span;
     use std::time::Duration;
 
     fn build_artifact() -> ReconstructedAst {

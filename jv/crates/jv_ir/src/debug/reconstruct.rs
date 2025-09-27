@@ -1,11 +1,11 @@
 use std::borrow::Cow;
 
 use crate::types::{
-    IrExpression, IrModifiers, IrParameter, IrProgram, IrStatement, IrVisibility, JavaType, Span,
+    IrExpression, IrModifiers, IrParameter, IrProgram, IrStatement, IrVisibility, JavaType,
 };
 use jv_ast::{
-    Argument, Expression, Literal, Modifiers, Program, SequenceDelimiter, Statement, StringPart,
-    TypeAnnotation, Visibility,
+    Argument, Expression, Literal, Modifiers, Program, Span, Statement, StringPart, TypeAnnotation,
+    Visibility,
 };
 
 use super::{
@@ -26,10 +26,14 @@ pub(crate) fn reconstruct_program(
     let mut ctx = ReconstructionContext::new(opts);
     let program = ctx.with_segment("program", |ctx| ctx.convert_program(program))?;
 
+    let ReconstructionContext {
+        warnings, stats, ..
+    } = ctx;
+
     Ok(ReconstructionOutput {
         program,
-        warnings: ctx.warnings,
-        stats: ctx.into_stats(),
+        warnings,
+        stats,
     })
 }
 
@@ -48,10 +52,6 @@ impl<'a> ReconstructionContext<'a> {
             stats: ReconstructionStats::default(),
             path: Vec::new(),
         }
-    }
-
-    fn into_stats(self) -> ReconstructionStats {
-        self.stats
     }
 
     fn visit_node(&mut self) {
