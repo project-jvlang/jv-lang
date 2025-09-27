@@ -119,6 +119,23 @@ build-lowmem: ## Build with reduced parallelism for low-memory systems
 test-lowmem: ## Test with reduced parallelism for low-memory systems
 	CARGO_INCREMENTAL=0 cargo test $(TEST_FLAGS) -j 2
 
+# Ultra low-memory builds (for constrained CI environments)
+build-minimal: ## Build with single thread for minimal memory usage
+	CARGO_INCREMENTAL=0 cargo build $(CARGO_FLAGS) -j 1
+
+test-minimal: ## Test with single thread for minimal memory usage
+	CARGO_INCREMENTAL=0 cargo test $(TEST_FLAGS) -j 1
+
+# Performance testing with memory constraints
+perf-phase1: clean ## Run phase1 performance tests with memory optimization
+	@echo "Running AST→IR performance tests with memory constraints..."
+	CARGO_INCREMENTAL=0 cargo test $(CARGO_FLAGS) --package jv_ir -- --ignored perf_phase1
+
+perf-build: ## Run performance build with memory optimization
+	@echo "Running jv build with performance profiling..."
+	CARGO_INCREMENTAL=0 cargo run $(CARGO_FLAGS) --bin jv -- \
+		build jv/tests/performance/phase1.jv --java-only --perf
+
 # Watch commands (requires cargo-watch)
 watch: ## Watch for changes and rebuild
 	cargo watch -x 'check $(CARGO_FLAGS)'
