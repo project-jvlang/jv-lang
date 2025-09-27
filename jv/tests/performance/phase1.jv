@@ -1,0 +1,1287 @@
+package perf.phase1
+
+fun main() {
+    var checksum = 0
+    checksum = checksum + scenario0()
+    checksum = checksum + scenario1()
+    checksum = checksum + scenario2()
+    checksum = checksum + scenario3()
+    checksum = checksum + scenario4()
+    checksum = checksum + scenario5()
+    checksum = checksum + scenario6()
+    checksum = checksum + scenario7()
+    checksum = checksum + scenario8()
+    checksum = checksum + scenario9()
+    checksum = checksum + scenario10()
+    checksum = checksum + scenario11()
+    checksum = checksum + scenario12()
+    checksum = checksum + scenario13()
+    checksum = checksum + scenario14()
+    checksum = checksum + scenario15()
+    checksum = checksum + scenario16()
+    checksum = checksum + scenario17()
+    checksum = checksum + scenario18()
+    checksum = checksum + scenario19()
+    checksum = checksum + scenario20()
+    checksum = checksum + scenario21()
+    checksum = checksum + scenario22()
+    checksum = checksum + scenario23()
+    checksum = checksum + scenario24()
+    checksum = checksum + scenario25()
+    checksum = checksum + scenario26()
+    checksum = checksum + scenario27()
+    checksum = checksum + scenario28()
+    checksum = checksum + scenario29()
+    checksum = checksum + scenario30()
+    checksum = checksum + scenario31()
+    checksum = checksum + scenario32()
+    checksum = checksum + scenario33()
+    checksum = checksum + scenario34()
+    checksum = checksum + scenario35()
+    checksum = checksum + scenario36()
+    checksum = checksum + scenario37()
+    checksum = checksum + scenario38()
+    checksum = checksum + scenario39()
+    checksum = checksum + scenario40()
+    checksum = checksum + scenario41()
+    checksum = checksum + scenario42()
+    checksum = checksum + scenario43()
+    checksum = checksum + scenario44()
+    checksum = checksum + scenario45()
+    checksum = checksum + scenario46()
+    checksum = checksum + scenario47()
+    checksum = checksum + scenario48()
+    checksum = checksum + scenario49()
+    checksum = checksum + scenario50()
+    checksum = checksum + scenario51()
+    checksum = checksum + scenario52()
+    checksum = checksum + scenario53()
+    checksum = checksum + scenario54()
+    checksum = checksum + scenario55()
+    checksum = checksum + scenario56()
+    checksum = checksum + scenario57()
+    checksum = checksum + scenario58()
+    checksum = checksum + scenario59()
+    checksum = checksum + scenario60()
+    checksum = checksum + scenario61()
+    checksum = checksum + scenario62()
+    checksum = checksum + scenario63()
+    checksum = checksum + scenario64()
+    checksum = checksum + scenario65()
+    checksum = checksum + scenario66()
+    checksum = checksum + scenario67()
+    checksum = checksum + scenario68()
+    checksum = checksum + scenario69()
+    checksum = checksum + scenario70()
+    checksum = checksum + scenario71()
+    checksum = checksum + scenario72()
+    checksum = checksum + scenario73()
+    checksum = checksum + scenario74()
+    checksum = checksum + scenario75()
+    checksum = checksum + scenario76()
+    checksum = checksum + scenario77()
+    checksum = checksum + scenario78()
+    checksum = checksum + scenario79()
+    val sentinel = checksum
+}
+
+fun scenario0(): Int {
+    var total = 0
+    for (value in 0..60) {
+        val bucket = value % 7
+        total = total + bucket + (value / 3)
+    }
+    return when (total % 5) {
+        0 -> total / 2
+        1 -> total + 3
+        2 -> total - 5
+        3 -> total * 2
+        else -> total
+    }
+}
+
+fun scenario1(): Int {
+    var total = 0
+    for (value in 0..61) {
+        val bucket = value % 7
+        total = total + bucket + (value / 3)
+    }
+    return when (total % 5) {
+        0 -> total / 2
+        1 -> total + 3
+        2 -> total - 5
+        3 -> total * 2
+        else -> total
+    }
+}
+
+fun scenario2(): Int {
+    var total = 0
+    for (value in 0..62) {
+        val bucket = value % 7
+        total = total + bucket + (value / 3)
+    }
+    return when (total % 5) {
+        0 -> total / 2
+        1 -> total + 3
+        2 -> total - 5
+        3 -> total * 2
+        else -> total
+    }
+}
+
+fun scenario3(): Int {
+    var total = 0
+    for (value in 0..63) {
+        val bucket = value % 7
+        total = total + bucket + (value / 3)
+    }
+    return when (total % 5) {
+        0 -> total / 2
+        1 -> total + 3
+        2 -> total - 5
+        3 -> total * 2
+        else -> total
+    }
+}
+
+fun scenario4(): Int {
+    var total = 0
+    for (value in 0..64) {
+        val bucket = value % 7
+        total = total + bucket + (value / 3)
+    }
+    return when (total % 5) {
+        0 -> total / 2
+        1 -> total + 3
+        2 -> total - 5
+        3 -> total * 2
+        else -> total
+    }
+}
+
+fun scenario5(): Int {
+    var total = 0
+    for (value in 0..65) {
+        val bucket = value % 7
+        total = total + bucket + (value / 3)
+    }
+    return when (total % 5) {
+        0 -> total / 2
+        1 -> total + 3
+        2 -> total - 5
+        3 -> total * 2
+        else -> total
+    }
+}
+
+fun scenario6(): Int {
+    var total = 0
+    for (value in 0..66) {
+        val bucket = value % 7
+        total = total + bucket + (value / 3)
+    }
+    return when (total % 5) {
+        0 -> total / 2
+        1 -> total + 3
+        2 -> total - 5
+        3 -> total * 2
+        else -> total
+    }
+}
+
+fun scenario7(): Int {
+    var total = 0
+    for (value in 0..67) {
+        val bucket = value % 7
+        total = total + bucket + (value / 3)
+    }
+    return when (total % 5) {
+        0 -> total / 2
+        1 -> total + 3
+        2 -> total - 5
+        3 -> total * 2
+        else -> total
+    }
+}
+
+fun scenario8(): Int {
+    var total = 0
+    for (value in 0..68) {
+        val bucket = value % 7
+        total = total + bucket + (value / 3)
+    }
+    return when (total % 5) {
+        0 -> total / 2
+        1 -> total + 3
+        2 -> total - 5
+        3 -> total * 2
+        else -> total
+    }
+}
+
+fun scenario9(): Int {
+    var total = 0
+    for (value in 0..69) {
+        val bucket = value % 7
+        total = total + bucket + (value / 3)
+    }
+    return when (total % 5) {
+        0 -> total / 2
+        1 -> total + 3
+        2 -> total - 5
+        3 -> total * 2
+        else -> total
+    }
+}
+
+fun scenario10(): Int {
+    var total = 0
+    for (value in 0..70) {
+        val bucket = value % 7
+        total = total + bucket + (value / 3)
+    }
+    return when (total % 5) {
+        0 -> total / 2
+        1 -> total + 3
+        2 -> total - 5
+        3 -> total * 2
+        else -> total
+    }
+}
+
+fun scenario11(): Int {
+    var total = 0
+    for (value in 0..71) {
+        val bucket = value % 7
+        total = total + bucket + (value / 3)
+    }
+    return when (total % 5) {
+        0 -> total / 2
+        1 -> total + 3
+        2 -> total - 5
+        3 -> total * 2
+        else -> total
+    }
+}
+
+fun scenario12(): Int {
+    var total = 0
+    for (value in 0..72) {
+        val bucket = value % 7
+        total = total + bucket + (value / 3)
+    }
+    return when (total % 5) {
+        0 -> total / 2
+        1 -> total + 3
+        2 -> total - 5
+        3 -> total * 2
+        else -> total
+    }
+}
+
+fun scenario13(): Int {
+    var total = 0
+    for (value in 0..73) {
+        val bucket = value % 7
+        total = total + bucket + (value / 3)
+    }
+    return when (total % 5) {
+        0 -> total / 2
+        1 -> total + 3
+        2 -> total - 5
+        3 -> total * 2
+        else -> total
+    }
+}
+
+fun scenario14(): Int {
+    var total = 0
+    for (value in 0..74) {
+        val bucket = value % 7
+        total = total + bucket + (value / 3)
+    }
+    return when (total % 5) {
+        0 -> total / 2
+        1 -> total + 3
+        2 -> total - 5
+        3 -> total * 2
+        else -> total
+    }
+}
+
+fun scenario15(): Int {
+    var total = 0
+    for (value in 0..75) {
+        val bucket = value % 7
+        total = total + bucket + (value / 3)
+    }
+    return when (total % 5) {
+        0 -> total / 2
+        1 -> total + 3
+        2 -> total - 5
+        3 -> total * 2
+        else -> total
+    }
+}
+
+fun scenario16(): Int {
+    var total = 0
+    for (value in 0..76) {
+        val bucket = value % 7
+        total = total + bucket + (value / 3)
+    }
+    return when (total % 5) {
+        0 -> total / 2
+        1 -> total + 3
+        2 -> total - 5
+        3 -> total * 2
+        else -> total
+    }
+}
+
+fun scenario17(): Int {
+    var total = 0
+    for (value in 0..77) {
+        val bucket = value % 7
+        total = total + bucket + (value / 3)
+    }
+    return when (total % 5) {
+        0 -> total / 2
+        1 -> total + 3
+        2 -> total - 5
+        3 -> total * 2
+        else -> total
+    }
+}
+
+fun scenario18(): Int {
+    var total = 0
+    for (value in 0..78) {
+        val bucket = value % 7
+        total = total + bucket + (value / 3)
+    }
+    return when (total % 5) {
+        0 -> total / 2
+        1 -> total + 3
+        2 -> total - 5
+        3 -> total * 2
+        else -> total
+    }
+}
+
+fun scenario19(): Int {
+    var total = 0
+    for (value in 0..79) {
+        val bucket = value % 7
+        total = total + bucket + (value / 3)
+    }
+    return when (total % 5) {
+        0 -> total / 2
+        1 -> total + 3
+        2 -> total - 5
+        3 -> total * 2
+        else -> total
+    }
+}
+
+fun scenario20(): Int {
+    var total = 0
+    for (value in 0..80) {
+        val bucket = value % 7
+        total = total + bucket + (value / 3)
+    }
+    return when (total % 5) {
+        0 -> total / 2
+        1 -> total + 3
+        2 -> total - 5
+        3 -> total * 2
+        else -> total
+    }
+}
+
+fun scenario21(): Int {
+    var total = 0
+    for (value in 0..81) {
+        val bucket = value % 7
+        total = total + bucket + (value / 3)
+    }
+    return when (total % 5) {
+        0 -> total / 2
+        1 -> total + 3
+        2 -> total - 5
+        3 -> total * 2
+        else -> total
+    }
+}
+
+fun scenario22(): Int {
+    var total = 0
+    for (value in 0..82) {
+        val bucket = value % 7
+        total = total + bucket + (value / 3)
+    }
+    return when (total % 5) {
+        0 -> total / 2
+        1 -> total + 3
+        2 -> total - 5
+        3 -> total * 2
+        else -> total
+    }
+}
+
+fun scenario23(): Int {
+    var total = 0
+    for (value in 0..83) {
+        val bucket = value % 7
+        total = total + bucket + (value / 3)
+    }
+    return when (total % 5) {
+        0 -> total / 2
+        1 -> total + 3
+        2 -> total - 5
+        3 -> total * 2
+        else -> total
+    }
+}
+
+fun scenario24(): Int {
+    var total = 0
+    for (value in 0..84) {
+        val bucket = value % 7
+        total = total + bucket + (value / 3)
+    }
+    return when (total % 5) {
+        0 -> total / 2
+        1 -> total + 3
+        2 -> total - 5
+        3 -> total * 2
+        else -> total
+    }
+}
+
+fun scenario25(): Int {
+    var total = 0
+    for (value in 0..85) {
+        val bucket = value % 7
+        total = total + bucket + (value / 3)
+    }
+    return when (total % 5) {
+        0 -> total / 2
+        1 -> total + 3
+        2 -> total - 5
+        3 -> total * 2
+        else -> total
+    }
+}
+
+fun scenario26(): Int {
+    var total = 0
+    for (value in 0..86) {
+        val bucket = value % 7
+        total = total + bucket + (value / 3)
+    }
+    return when (total % 5) {
+        0 -> total / 2
+        1 -> total + 3
+        2 -> total - 5
+        3 -> total * 2
+        else -> total
+    }
+}
+
+fun scenario27(): Int {
+    var total = 0
+    for (value in 0..87) {
+        val bucket = value % 7
+        total = total + bucket + (value / 3)
+    }
+    return when (total % 5) {
+        0 -> total / 2
+        1 -> total + 3
+        2 -> total - 5
+        3 -> total * 2
+        else -> total
+    }
+}
+
+fun scenario28(): Int {
+    var total = 0
+    for (value in 0..88) {
+        val bucket = value % 7
+        total = total + bucket + (value / 3)
+    }
+    return when (total % 5) {
+        0 -> total / 2
+        1 -> total + 3
+        2 -> total - 5
+        3 -> total * 2
+        else -> total
+    }
+}
+
+fun scenario29(): Int {
+    var total = 0
+    for (value in 0..89) {
+        val bucket = value % 7
+        total = total + bucket + (value / 3)
+    }
+    return when (total % 5) {
+        0 -> total / 2
+        1 -> total + 3
+        2 -> total - 5
+        3 -> total * 2
+        else -> total
+    }
+}
+
+fun scenario30(): Int {
+    var total = 0
+    for (value in 0..90) {
+        val bucket = value % 7
+        total = total + bucket + (value / 3)
+    }
+    return when (total % 5) {
+        0 -> total / 2
+        1 -> total + 3
+        2 -> total - 5
+        3 -> total * 2
+        else -> total
+    }
+}
+
+fun scenario31(): Int {
+    var total = 0
+    for (value in 0..91) {
+        val bucket = value % 7
+        total = total + bucket + (value / 3)
+    }
+    return when (total % 5) {
+        0 -> total / 2
+        1 -> total + 3
+        2 -> total - 5
+        3 -> total * 2
+        else -> total
+    }
+}
+
+fun scenario32(): Int {
+    var total = 0
+    for (value in 0..92) {
+        val bucket = value % 7
+        total = total + bucket + (value / 3)
+    }
+    return when (total % 5) {
+        0 -> total / 2
+        1 -> total + 3
+        2 -> total - 5
+        3 -> total * 2
+        else -> total
+    }
+}
+
+fun scenario33(): Int {
+    var total = 0
+    for (value in 0..93) {
+        val bucket = value % 7
+        total = total + bucket + (value / 3)
+    }
+    return when (total % 5) {
+        0 -> total / 2
+        1 -> total + 3
+        2 -> total - 5
+        3 -> total * 2
+        else -> total
+    }
+}
+
+fun scenario34(): Int {
+    var total = 0
+    for (value in 0..94) {
+        val bucket = value % 7
+        total = total + bucket + (value / 3)
+    }
+    return when (total % 5) {
+        0 -> total / 2
+        1 -> total + 3
+        2 -> total - 5
+        3 -> total * 2
+        else -> total
+    }
+}
+
+fun scenario35(): Int {
+    var total = 0
+    for (value in 0..95) {
+        val bucket = value % 7
+        total = total + bucket + (value / 3)
+    }
+    return when (total % 5) {
+        0 -> total / 2
+        1 -> total + 3
+        2 -> total - 5
+        3 -> total * 2
+        else -> total
+    }
+}
+
+fun scenario36(): Int {
+    var total = 0
+    for (value in 0..96) {
+        val bucket = value % 7
+        total = total + bucket + (value / 3)
+    }
+    return when (total % 5) {
+        0 -> total / 2
+        1 -> total + 3
+        2 -> total - 5
+        3 -> total * 2
+        else -> total
+    }
+}
+
+fun scenario37(): Int {
+    var total = 0
+    for (value in 0..97) {
+        val bucket = value % 7
+        total = total + bucket + (value / 3)
+    }
+    return when (total % 5) {
+        0 -> total / 2
+        1 -> total + 3
+        2 -> total - 5
+        3 -> total * 2
+        else -> total
+    }
+}
+
+fun scenario38(): Int {
+    var total = 0
+    for (value in 0..98) {
+        val bucket = value % 7
+        total = total + bucket + (value / 3)
+    }
+    return when (total % 5) {
+        0 -> total / 2
+        1 -> total + 3
+        2 -> total - 5
+        3 -> total * 2
+        else -> total
+    }
+}
+
+fun scenario39(): Int {
+    var total = 0
+    for (value in 0..99) {
+        val bucket = value % 7
+        total = total + bucket + (value / 3)
+    }
+    return when (total % 5) {
+        0 -> total / 2
+        1 -> total + 3
+        2 -> total - 5
+        3 -> total * 2
+        else -> total
+    }
+}
+
+fun scenario40(): Int {
+    var total = 0
+    for (value in 0..100) {
+        val bucket = value % 7
+        total = total + bucket + (value / 3)
+    }
+    return when (total % 5) {
+        0 -> total / 2
+        1 -> total + 3
+        2 -> total - 5
+        3 -> total * 2
+        else -> total
+    }
+}
+
+fun scenario41(): Int {
+    var total = 0
+    for (value in 0..101) {
+        val bucket = value % 7
+        total = total + bucket + (value / 3)
+    }
+    return when (total % 5) {
+        0 -> total / 2
+        1 -> total + 3
+        2 -> total - 5
+        3 -> total * 2
+        else -> total
+    }
+}
+
+fun scenario42(): Int {
+    var total = 0
+    for (value in 0..102) {
+        val bucket = value % 7
+        total = total + bucket + (value / 3)
+    }
+    return when (total % 5) {
+        0 -> total / 2
+        1 -> total + 3
+        2 -> total - 5
+        3 -> total * 2
+        else -> total
+    }
+}
+
+fun scenario43(): Int {
+    var total = 0
+    for (value in 0..103) {
+        val bucket = value % 7
+        total = total + bucket + (value / 3)
+    }
+    return when (total % 5) {
+        0 -> total / 2
+        1 -> total + 3
+        2 -> total - 5
+        3 -> total * 2
+        else -> total
+    }
+}
+
+fun scenario44(): Int {
+    var total = 0
+    for (value in 0..104) {
+        val bucket = value % 7
+        total = total + bucket + (value / 3)
+    }
+    return when (total % 5) {
+        0 -> total / 2
+        1 -> total + 3
+        2 -> total - 5
+        3 -> total * 2
+        else -> total
+    }
+}
+
+fun scenario45(): Int {
+    var total = 0
+    for (value in 0..105) {
+        val bucket = value % 7
+        total = total + bucket + (value / 3)
+    }
+    return when (total % 5) {
+        0 -> total / 2
+        1 -> total + 3
+        2 -> total - 5
+        3 -> total * 2
+        else -> total
+    }
+}
+
+fun scenario46(): Int {
+    var total = 0
+    for (value in 0..106) {
+        val bucket = value % 7
+        total = total + bucket + (value / 3)
+    }
+    return when (total % 5) {
+        0 -> total / 2
+        1 -> total + 3
+        2 -> total - 5
+        3 -> total * 2
+        else -> total
+    }
+}
+
+fun scenario47(): Int {
+    var total = 0
+    for (value in 0..107) {
+        val bucket = value % 7
+        total = total + bucket + (value / 3)
+    }
+    return when (total % 5) {
+        0 -> total / 2
+        1 -> total + 3
+        2 -> total - 5
+        3 -> total * 2
+        else -> total
+    }
+}
+
+fun scenario48(): Int {
+    var total = 0
+    for (value in 0..108) {
+        val bucket = value % 7
+        total = total + bucket + (value / 3)
+    }
+    return when (total % 5) {
+        0 -> total / 2
+        1 -> total + 3
+        2 -> total - 5
+        3 -> total * 2
+        else -> total
+    }
+}
+
+fun scenario49(): Int {
+    var total = 0
+    for (value in 0..109) {
+        val bucket = value % 7
+        total = total + bucket + (value / 3)
+    }
+    return when (total % 5) {
+        0 -> total / 2
+        1 -> total + 3
+        2 -> total - 5
+        3 -> total * 2
+        else -> total
+    }
+}
+
+fun scenario50(): Int {
+    var total = 0
+    for (value in 0..110) {
+        val bucket = value % 7
+        total = total + bucket + (value / 3)
+    }
+    return when (total % 5) {
+        0 -> total / 2
+        1 -> total + 3
+        2 -> total - 5
+        3 -> total * 2
+        else -> total
+    }
+}
+
+fun scenario51(): Int {
+    var total = 0
+    for (value in 0..111) {
+        val bucket = value % 7
+        total = total + bucket + (value / 3)
+    }
+    return when (total % 5) {
+        0 -> total / 2
+        1 -> total + 3
+        2 -> total - 5
+        3 -> total * 2
+        else -> total
+    }
+}
+
+fun scenario52(): Int {
+    var total = 0
+    for (value in 0..112) {
+        val bucket = value % 7
+        total = total + bucket + (value / 3)
+    }
+    return when (total % 5) {
+        0 -> total / 2
+        1 -> total + 3
+        2 -> total - 5
+        3 -> total * 2
+        else -> total
+    }
+}
+
+fun scenario53(): Int {
+    var total = 0
+    for (value in 0..113) {
+        val bucket = value % 7
+        total = total + bucket + (value / 3)
+    }
+    return when (total % 5) {
+        0 -> total / 2
+        1 -> total + 3
+        2 -> total - 5
+        3 -> total * 2
+        else -> total
+    }
+}
+
+fun scenario54(): Int {
+    var total = 0
+    for (value in 0..114) {
+        val bucket = value % 7
+        total = total + bucket + (value / 3)
+    }
+    return when (total % 5) {
+        0 -> total / 2
+        1 -> total + 3
+        2 -> total - 5
+        3 -> total * 2
+        else -> total
+    }
+}
+
+fun scenario55(): Int {
+    var total = 0
+    for (value in 0..115) {
+        val bucket = value % 7
+        total = total + bucket + (value / 3)
+    }
+    return when (total % 5) {
+        0 -> total / 2
+        1 -> total + 3
+        2 -> total - 5
+        3 -> total * 2
+        else -> total
+    }
+}
+
+fun scenario56(): Int {
+    var total = 0
+    for (value in 0..116) {
+        val bucket = value % 7
+        total = total + bucket + (value / 3)
+    }
+    return when (total % 5) {
+        0 -> total / 2
+        1 -> total + 3
+        2 -> total - 5
+        3 -> total * 2
+        else -> total
+    }
+}
+
+fun scenario57(): Int {
+    var total = 0
+    for (value in 0..117) {
+        val bucket = value % 7
+        total = total + bucket + (value / 3)
+    }
+    return when (total % 5) {
+        0 -> total / 2
+        1 -> total + 3
+        2 -> total - 5
+        3 -> total * 2
+        else -> total
+    }
+}
+
+fun scenario58(): Int {
+    var total = 0
+    for (value in 0..118) {
+        val bucket = value % 7
+        total = total + bucket + (value / 3)
+    }
+    return when (total % 5) {
+        0 -> total / 2
+        1 -> total + 3
+        2 -> total - 5
+        3 -> total * 2
+        else -> total
+    }
+}
+
+fun scenario59(): Int {
+    var total = 0
+    for (value in 0..119) {
+        val bucket = value % 7
+        total = total + bucket + (value / 3)
+    }
+    return when (total % 5) {
+        0 -> total / 2
+        1 -> total + 3
+        2 -> total - 5
+        3 -> total * 2
+        else -> total
+    }
+}
+
+fun scenario60(): Int {
+    var total = 0
+    for (value in 0..120) {
+        val bucket = value % 7
+        total = total + bucket + (value / 3)
+    }
+    return when (total % 5) {
+        0 -> total / 2
+        1 -> total + 3
+        2 -> total - 5
+        3 -> total * 2
+        else -> total
+    }
+}
+
+fun scenario61(): Int {
+    var total = 0
+    for (value in 0..121) {
+        val bucket = value % 7
+        total = total + bucket + (value / 3)
+    }
+    return when (total % 5) {
+        0 -> total / 2
+        1 -> total + 3
+        2 -> total - 5
+        3 -> total * 2
+        else -> total
+    }
+}
+
+fun scenario62(): Int {
+    var total = 0
+    for (value in 0..122) {
+        val bucket = value % 7
+        total = total + bucket + (value / 3)
+    }
+    return when (total % 5) {
+        0 -> total / 2
+        1 -> total + 3
+        2 -> total - 5
+        3 -> total * 2
+        else -> total
+    }
+}
+
+fun scenario63(): Int {
+    var total = 0
+    for (value in 0..123) {
+        val bucket = value % 7
+        total = total + bucket + (value / 3)
+    }
+    return when (total % 5) {
+        0 -> total / 2
+        1 -> total + 3
+        2 -> total - 5
+        3 -> total * 2
+        else -> total
+    }
+}
+
+fun scenario64(): Int {
+    var total = 0
+    for (value in 0..124) {
+        val bucket = value % 7
+        total = total + bucket + (value / 3)
+    }
+    return when (total % 5) {
+        0 -> total / 2
+        1 -> total + 3
+        2 -> total - 5
+        3 -> total * 2
+        else -> total
+    }
+}
+
+fun scenario65(): Int {
+    var total = 0
+    for (value in 0..125) {
+        val bucket = value % 7
+        total = total + bucket + (value / 3)
+    }
+    return when (total % 5) {
+        0 -> total / 2
+        1 -> total + 3
+        2 -> total - 5
+        3 -> total * 2
+        else -> total
+    }
+}
+
+fun scenario66(): Int {
+    var total = 0
+    for (value in 0..126) {
+        val bucket = value % 7
+        total = total + bucket + (value / 3)
+    }
+    return when (total % 5) {
+        0 -> total / 2
+        1 -> total + 3
+        2 -> total - 5
+        3 -> total * 2
+        else -> total
+    }
+}
+
+fun scenario67(): Int {
+    var total = 0
+    for (value in 0..127) {
+        val bucket = value % 7
+        total = total + bucket + (value / 3)
+    }
+    return when (total % 5) {
+        0 -> total / 2
+        1 -> total + 3
+        2 -> total - 5
+        3 -> total * 2
+        else -> total
+    }
+}
+
+fun scenario68(): Int {
+    var total = 0
+    for (value in 0..128) {
+        val bucket = value % 7
+        total = total + bucket + (value / 3)
+    }
+    return when (total % 5) {
+        0 -> total / 2
+        1 -> total + 3
+        2 -> total - 5
+        3 -> total * 2
+        else -> total
+    }
+}
+
+fun scenario69(): Int {
+    var total = 0
+    for (value in 0..129) {
+        val bucket = value % 7
+        total = total + bucket + (value / 3)
+    }
+    return when (total % 5) {
+        0 -> total / 2
+        1 -> total + 3
+        2 -> total - 5
+        3 -> total * 2
+        else -> total
+    }
+}
+
+fun scenario70(): Int {
+    var total = 0
+    for (value in 0..130) {
+        val bucket = value % 7
+        total = total + bucket + (value / 3)
+    }
+    return when (total % 5) {
+        0 -> total / 2
+        1 -> total + 3
+        2 -> total - 5
+        3 -> total * 2
+        else -> total
+    }
+}
+
+fun scenario71(): Int {
+    var total = 0
+    for (value in 0..131) {
+        val bucket = value % 7
+        total = total + bucket + (value / 3)
+    }
+    return when (total % 5) {
+        0 -> total / 2
+        1 -> total + 3
+        2 -> total - 5
+        3 -> total * 2
+        else -> total
+    }
+}
+
+fun scenario72(): Int {
+    var total = 0
+    for (value in 0..132) {
+        val bucket = value % 7
+        total = total + bucket + (value / 3)
+    }
+    return when (total % 5) {
+        0 -> total / 2
+        1 -> total + 3
+        2 -> total - 5
+        3 -> total * 2
+        else -> total
+    }
+}
+
+fun scenario73(): Int {
+    var total = 0
+    for (value in 0..133) {
+        val bucket = value % 7
+        total = total + bucket + (value / 3)
+    }
+    return when (total % 5) {
+        0 -> total / 2
+        1 -> total + 3
+        2 -> total - 5
+        3 -> total * 2
+        else -> total
+    }
+}
+
+fun scenario74(): Int {
+    var total = 0
+    for (value in 0..134) {
+        val bucket = value % 7
+        total = total + bucket + (value / 3)
+    }
+    return when (total % 5) {
+        0 -> total / 2
+        1 -> total + 3
+        2 -> total - 5
+        3 -> total * 2
+        else -> total
+    }
+}
+
+fun scenario75(): Int {
+    var total = 0
+    for (value in 0..135) {
+        val bucket = value % 7
+        total = total + bucket + (value / 3)
+    }
+    return when (total % 5) {
+        0 -> total / 2
+        1 -> total + 3
+        2 -> total - 5
+        3 -> total * 2
+        else -> total
+    }
+}
+
+fun scenario76(): Int {
+    var total = 0
+    for (value in 0..136) {
+        val bucket = value % 7
+        total = total + bucket + (value / 3)
+    }
+    return when (total % 5) {
+        0 -> total / 2
+        1 -> total + 3
+        2 -> total - 5
+        3 -> total * 2
+        else -> total
+    }
+}
+
+fun scenario77(): Int {
+    var total = 0
+    for (value in 0..137) {
+        val bucket = value % 7
+        total = total + bucket + (value / 3)
+    }
+    return when (total % 5) {
+        0 -> total / 2
+        1 -> total + 3
+        2 -> total - 5
+        3 -> total * 2
+        else -> total
+    }
+}
+
+fun scenario78(): Int {
+    var total = 0
+    for (value in 0..138) {
+        val bucket = value % 7
+        total = total + bucket + (value / 3)
+    }
+    return when (total % 5) {
+        0 -> total / 2
+        1 -> total + 3
+        2 -> total - 5
+        3 -> total * 2
+        else -> total
+    }
+}
+
+fun scenario79(): Int {
+    var total = 0
+    for (value in 0..139) {
+        val bucket = value % 7
+        total = total + bucket + (value / 3)
+    }
+    return when (total % 5) {
+        0 -> total / 2
+        1 -> total + 3
+        2 -> total - 5
+        3 -> total * 2
+        else -> total
+    }
+}
+

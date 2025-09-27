@@ -9,6 +9,10 @@ default = []
 debug-ir = []
 perf-metrics = []
 
+[[test]]
+name = "perf_phase1"
+path = "../../tests/performance/phase1.rs"
+
 [dependencies]
 anyhow = { workspace = true }
 jv_ast.workspace = true
