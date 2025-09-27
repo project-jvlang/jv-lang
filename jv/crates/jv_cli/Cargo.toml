@@ -14,6 +14,10 @@ path = "src/main.rs"
 name = "jvx"
 path = "src/bin/jvx.rs"
 
+[[test]]
+name = "performance_regression"
+path = "../../tests/performance_regression.rs"
+
 [dependencies]
 clap.workspace = true
 anyhow.workspace = true

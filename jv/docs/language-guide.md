@@ -301,29 +301,78 @@ val status = if (user.isActive) {
 
 ### ループ
 
+ループは`for (binding in source)`構文で記述し、数値レンジおよびイテラブル値の双方に
+対応します。
+
+#### 数値レンジ
+
 ```jv
-// forループ
-for (i in 1..10) {
-    println(i)
+for (index in 0..limit) {
+    println(index) // 上限は含まない
 }
 
-for (item in list) {
-    println(item)
+for (day in 1..=7) {
+    println(day) // 上限を含む
 }
-
-for ((index, value) in list.withIndex()) {
-    println("$index: $value")
-}
-
-// whileループ
-while (condition) {
-    // ...
-}
-
-do {
-    // ...
-} while (condition)
 ```
+
+- `a..b`は`a < b`の間を走査し、`a..=b`は終端値を含みます。
+- レンジの開始値と終了値は同じ数値型でなければならず、型が一致しない場合は
+  `E_LOOP_002`が発生します。
+
+#### イテラブルソース
+
+```jv
+val items = arrayOf("north", "south", "east", "west")
+
+for (direction in items) {
+    println(direction)
+}
+```
+
+- ループ対象は配列・シーケンス・`iterator`を公開する独自型など、型チェッカーが
+  認識するイテラブルプロトコルを実装している必要があります。未対応の場合は
+  `E_LOOP_003`が報告されます。
+- `AutoCloseable`を実装する遅延シーケンスはJavaコード生成時にクリーンアップ処理
+  が自動付与されます。
+
+#### 条件付き反復の表現
+
+`while (condition)`に相当する反復も、`for`構文とシーケンス操作で記述できます。
+
+```jv
+// 条件が成り立つ間だけ要素を読み込む
+for (token in scanner.intoSequence().takeWhile { it != null }) {
+    process(token)
+}
+
+// 型が期待通りである間だけ処理を続ける (while (node is Tree) ...)
+for (node in generateSequence(root) { it?.parent }.takeWhile { it is Tree }) {
+    visit(node as Tree)
+}
+
+// カウンタを任意のステップで更新しながら走査する
+for (index in generateSequence(start) { it + step }.takeWhile { it < limit }) {
+    println(index)
+}
+
+// 明示的な終了条件を持つループ
+for (_ in sequenceOf(Unit).repeat()) {
+    if (done()) break
+    performWork()
+}
+```
+
+- イテレータ由来の反復では`intoSequence()`や`takeWhile`で条件を宣言的に表現できます。
+- 連続する数値領域は`start until end`、`start..=end`、`generateSequence`などで生成するのが
+  推奨です。
+- センチネル条件を扱う場合でも、本体で`break`/`continue`を使用した明示的制御が可能です。
+
+#### 診断コード
+
+- `E_LOOP_001`: サポート対象外のループ構文（`while`/`do-while`など）が検出された場合。
+- `E_LOOP_002`: レンジ境界の数値型が一致しない場合。
+- `E_LOOP_003`: ループ対象がイテラブルとして認識されない場合。
 
 ## コレクション
 

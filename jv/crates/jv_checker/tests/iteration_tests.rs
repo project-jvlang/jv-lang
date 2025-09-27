@@ -24,6 +24,22 @@ fn numeric_range_loop_with_matching_bounds_succeeds() {
 }
 
 #[test]
+fn inclusive_numeric_range_loop_with_matching_bounds_succeeds() {
+    let program = parse_program(
+        r#"
+        for (index in 0..=10) {
+            val snapshot = index
+        }
+    "#,
+    );
+
+    let mut checker = TypeChecker::new();
+    if let Err(errors) = checker.check_program(&program) {
+        panic!("expected inclusive loop to type-check, got {errors:?}");
+    }
+}
+
+#[test]
 fn numeric_range_bounds_type_mismatch_reports_e_loop_002() {
     let program = parse_program(
         r#"

@@ -265,6 +265,80 @@ include = ["src/**/*.jv"]
 }
 
 #[test]
+fn compile_accepts_for_in_loops() {
+    let temp_dir = TempDirGuard::new("compile-for-in");
+    let root_path = temp_dir.path();
+    let manifest_path = root_path.join("jv.toml");
+
+    fs::write(
+        &manifest_path,
+        r#"[package]
+name = "loop-test"
+version = "0.1.0"
+
+[package.dependencies]
+
+[project]
+entrypoint = "src/main.jv"
+
+[project.sources]
+include = ["src/**/*.jv"]
+
+[project.output]
+directory = "out/java"
+clean = false
+"#,
+    )
+    .expect("write manifest");
+
+    let src_dir = root_path.join("src");
+    fs::create_dir_all(&src_dir).expect("create src directory");
+    let entrypoint = src_dir.join("main.jv");
+    fs::write(
+        &entrypoint,
+        r#"fun main() {
+    for (exclusive in 0..3) {
+        val copy = exclusive
+    }
+
+    for (inclusive in 1..=3) {
+        val echo = inclusive
+    }
+}
+"#,
+    )
+    .expect("write source");
+
+    let project_root = pipeline::project::locator::ProjectRoot::new(
+        root_path.to_path_buf(),
+        manifest_path.clone(),
+    );
+    let settings = pipeline::project::manifest::ManifestLoader::load(&manifest_path)
+        .expect("manifest loads");
+    let layout = pipeline::project::layout::ProjectLayout::from_settings(&project_root, &settings)
+        .expect("layout resolves");
+
+    let overrides = pipeline::CliOverrides {
+        entrypoint: Some(entrypoint.clone()),
+        output: Some(root_path.join("out/java")),
+        java_only: true,
+        check: false,
+        format: false,
+        target: None,
+        clean: false,
+    };
+
+    let plan = pipeline::BuildOptionsFactory::compose(project_root, settings, layout, overrides)
+        .expect("plan composition succeeds");
+
+    let _artifacts = pipeline::compile(&plan).expect("loop program should compile");
+    assert!(
+        plan.output_dir().exists(),
+        "loop compilation should create the configured output directory"
+    );
+}
+
+#[test]
 fn preflight_blocks_incompatible_classpath() {
     let temp_dir = TempDirGuard::new("compat-preflight");
     let jar_path = temp_dir.path().join("requires25.jar");

@@ -299,29 +299,78 @@ val status = if (user.isActive) {
 
 ### Loops
 
+Loops in jv use the `for (binding in source)` syntax, which works with numeric ranges and
+iterable values.
+
+#### Numeric Ranges
+
 ```jv
-// For loops
-for (i in 1..10) {
-    println(i)
+for (index in 0..limit) {
+    println(index) // exclusive upper bound
 }
 
-for (item in list) {
-    println(item)
+for (day in 1..=7) {
+    println(day) // inclusive upper bound
 }
-
-for ((index, value) in list.withIndex()) {
-    println("$index: $value")
-}
-
-// While loops
-while (condition) {
-    // ...
-}
-
-do {
-    // ...
-} while (condition)
 ```
+
+- `a..b` iterates while `a < b`; `a..=b` includes the final value.
+- Range endpoints must resolve to the same numeric type. Mismatches trigger diagnostic
+  `E_LOOP_002`.
+
+#### Iterable Sources
+
+```jv
+val items = arrayOf("north", "south", "east", "west")
+
+for (direction in items) {
+    println(direction)
+}
+```
+
+- The source expression must expose the iterable protocol (arrays, sequences, or custom
+  types with `iterator`). Missing protocol support emits `E_LOOP_003`.
+- Lazy sequences that implement `AutoCloseable` automatically gain cleanup logic in the
+  generated Java code.
+
+#### Replacing Classic `while` Patterns
+
+Conditional loops that would otherwise use `while (condition)` can be expressed with
+`for` and sequence utilities:
+
+```jv
+// Read values while a predicate holds
+for (token in scanner.intoSequence().takeWhile { it != null }) {
+    process(token)
+}
+
+// Traverse ancestors while they match a type (while (node is Tree) ...)
+for (node in generateSequence(root) { it?.parent }.takeWhile { it is Tree }) {
+    visit(node as Tree)
+}
+
+// Counter progression with custom steps
+for (index in generateSequence(start) { it + step }.takeWhile { it < limit }) {
+    println(index)
+}
+
+// Sentinel-driven loops remain explicit
+for (_ in sequenceOf(Unit).repeat()) {
+    if (done()) break
+    performWork()
+}
+```
+
+- Pull-state loops map naturally to sequences created from iterators or generators and
+  can use `takeWhile` / `takeUntil` helpers to stop when the condition becomes false.
+- Counter-based loops should become numeric ranges (`start until end`, `start..=end`).
+- Sentinel-style loops can keep explicit `break` statements inside the `for` body.
+
+#### Diagnostics
+
+- `E_LOOP_001`: A non-supported loop construct (such as `while`/`do-while`) was detected.
+- `E_LOOP_002`: Numeric range bounds use incompatible types.
+- `E_LOOP_003`: Loop source is not iterable.
 
 ## Collections
 
