@@ -16,6 +16,8 @@ use jv_ast::{
 use std::collections::HashMap;
 use thiserror::Error;
 
+use jv_inference::TypeFacts;
+
 #[derive(Error, Debug)]
 pub enum CheckError {
     #[error("Type error: {0}")]
@@ -86,6 +88,41 @@ impl TypeInferenceService for InferenceSnapshot {
     }
 
     fn result_type(&self) -> Option<&TypeKind> {
+        self.result_type.as_ref()
+    }
+}
+
+impl TypeFacts for InferenceSnapshot {
+    type NodeId = usize;
+    type Environment = TypeEnvironment;
+    type Binding = TypeBinding;
+    type Scheme = TypeScheme;
+    type Type = TypeKind;
+
+    fn environment(&self) -> &Self::Environment {
+        &self.environment
+    }
+
+    fn bindings(&self) -> &[Self::Binding] {
+        &self.bindings
+    }
+
+    fn scheme_for(&self, name: &str) -> Option<&Self::Scheme> {
+        self.function_schemes.get(name)
+    }
+
+    fn all_schemes(&self) -> Vec<(&str, &Self::Scheme)> {
+        self.function_schemes
+            .iter()
+            .map(|(name, scheme)| (name.as_str(), scheme))
+            .collect()
+    }
+
+    fn type_for_node(&self, _node: Self::NodeId) -> Option<&Self::Type> {
+        None
+    }
+
+    fn root_type(&self) -> Option<&Self::Type> {
         self.result_type.as_ref()
     }
 }

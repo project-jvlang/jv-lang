@@ -3,9 +3,10 @@ resolver = "2"
 members = [
     "crates/jv_support",
     "crates/jv_lexer",
-    "crates/jv_parser", 
+    "crates/jv_parser",
     "crates/jv_ast",
     "crates/jv_ir",
+    "crates/jv_inference",
     "crates/jv_codegen_java",
     "crates/jv_mapper",
     "crates/jv_checker",
@@ -56,6 +57,7 @@ jv_lexer = { path = "crates/jv_lexer" }
 jv_parser = { path = "crates/jv_parser" }
 jv_ast = { path = "crates/jv_ast" }
 jv_ir = { path = "crates/jv_ir" }
+jv_inference = { path = "crates/jv_inference" }
 jv_codegen_java = { path = "crates/jv_codegen_java" }
 jv_mapper = { path = "crates/jv_mapper" }
 jv_checker = { path = "crates/jv_checker" }
