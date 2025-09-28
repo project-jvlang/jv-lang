@@ -141,6 +141,13 @@ cargo test
 cargo check
 ```
 
+### AST→IR Performance Harness
+
+- Local regression guard: `cargo test --package jv_ir --lib` and `cargo test --package jv_ir -- --ignored perf_phase1`
+- CLI-driven metrics: `jv build --perf` (or `cargo run --bin jv_cli -- build --perf`)
+- Generated report: `target/perf-reports/ast-ir-phase1.json` containing `summary` / `checks` with budgets of 3,000ms / 100MB / reuse ratio ≥ 0.90
+- Operational workflow and baseline refresh steps live in the [AST→IR Performance Baseline Guide](jv/docs/perf-baselines-en.md)
+
 ### CLI Commands (Target Implementation)
 
 ```bash

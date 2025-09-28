@@ -143,6 +143,13 @@ cargo test
 cargo check
 ```
 
+### AST→IR性能ハーネス
+
+- ローカルでの回帰検知: `cargo test --package jv_ir --lib` と `cargo test --package jv_ir -- --ignored perf_phase1`
+- CLI経由のメトリクス採取: `jv build --perf`（または `cargo run --bin jv_cli -- build --perf`）
+- 生成レポート: `target/perf-reports/ast-ir-phase1.json` に `summary` / `checks` が保存され、3,000ms / 100MB / 再利用率0.90が閾値
+- 運用フローとベースライン更新は [AST→IR性能ベースラインガイド](jv/docs/perf-baselines.md) を参照
+
 ### 言語ツアーの品質検証
 
 新しい統合テストスイート `crates/jv_cli/tests/tour_tests.rs` は、`jv tour` のメインフロー・環境チェック・ポートフォリオ生成を通して学習体験を検証します。以下のコマンドで再現可能です。

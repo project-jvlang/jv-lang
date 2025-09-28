@@ -15,6 +15,7 @@ Welcome to the jv (Java Syntactic Sugar) documentation.
 ### Developer Guide
 - [Architecture](architecture-en.md) - Compiler architecture overview
 - [Contributing](contributing-en.md) - How to contribute to jv
+- [AST→IR Performance Baseline Guide](perf-baselines-en.md) - Operating the performance harness and managing baselines
 - Build system documentation (coming soon)
 - Testing guide (coming soon)
 

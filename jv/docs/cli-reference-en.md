@@ -124,6 +124,21 @@ jv build [OPTIONS] [FILES...]
 - `--debug`: Include debug information
 - `--perf`: Collect AST→IR performance metrics and persist `target/perf-reports/ast-ir-phase1.json`
   
+#### Performance Mode (`--perf`)
+
+Passing `--perf` instructs the build to profile the AST→IR lowering pipeline. The command records parse time, lowering time, allocator reuse ratio, and peak RSS (when available) into a JSON report. The hard limits are 3,000ms / 100MB / reuse ratio ≥ 0.90. If the run misses any budget, the CLI exits with a non-zero status and prints the failing checks.
+
+- Output: `target/perf-reports/ast-ir-phase1.json`
+- Schema: `jv_support::perf::report::PerfReport`
+- Consumers: Local runs, CI workflow `perf_phase1`
+
+For interpreting results, updating baselines, and triage instructions see the [AST→IR Performance Baseline Guide](perf-baselines-en.md). On failure, check the `checks` section in the JSON as well as the freshness of the stored baseline.
+
+```bash
+# Collect AST→IR metrics while previewing the generated Java
+jv build --perf --preview
+```
+
 Sample/@Sample options:
 - `--sample-mode=embed|load`: Override default `@Sample` mode (default: embed)
 - `--sample-network=allow|deny`: Allow network access for sample fetching (default: deny)

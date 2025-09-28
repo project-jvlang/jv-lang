@@ -124,6 +124,21 @@ jv build [OPTIONS] [FILES...]
 - `--debug`: デバッグ情報を含める
 - `--perf`: AST→IR性能メトリクスを計測し `target/perf-reports/ast-ir-phase1.json` に保存
 
+#### パフォーマンスモード (`--perf`)
+
+`--perf` を付けると AST→IR ローアリングの性能を収集し、パース時間・ローアリング時間・メモリアロケータの再利用率・ピークRSS（対応プラットフォームのみ）を JSON レポートに保存します。閾値は 3,000ms / 100MB /再利用率 0.90 で、失敗すると CLI がリターンコードで通知します。
+
+- 出力先: `target/perf-reports/ast-ir-phase1.json`
+- レポート形式: `jv_support::perf::report::PerfReport`
+- 利用フェーズ: ローカル検証、CI ワークフロー `perf_phase1`
+
+結果の読み方・ベースライン更新手順・トリアージフローは [AST→IR性能ベースラインガイド](perf-baselines.md) に集約しています。失敗時は `checks` セクションの失敗項目を確認し、ベースライン鮮度や `target/perf-reports` の内容を照合してください。
+
+```bash
+# AST→IR 性能を計測しつつプレビューする
+jv build --perf --preview
+```
+
 Sample/@Sampleオプション:
 - `--sample-mode=embed|load`: デフォルトの`@Sample`モードを上書き (デフォルト: embed)
 - `--sample-network=allow|deny`: サンプル取得時のネットワークアクセスを許可 (デフォルト: deny)
