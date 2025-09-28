@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::fs;
-use std::io::Cursor;
+use std::io::{Cursor, Read};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
@@ -14,10 +14,10 @@ use crate::types::{
 use jv_ast::{
     Annotation, AnnotationArgument, Expression, Literal, Modifiers, Span, TypeAnnotation,
 };
-use reqwest::blocking::Client;
 use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
 use tempfile::TempDir;
+use ureq::AgentBuilder;
 use url::Url;
 
 /// サンプルデータのフォーマットに応じてスキーマを推論する。
@@ -1200,37 +1200,29 @@ fn read_file(path: &Path) -> Result<Vec<u8>, SampleFetchError> {
 fn fetch_http(url: &Url, request: &SampleFetchRequest) -> Result<Vec<u8>, SampleFetchError> {
     ensure_network_allowed(url.as_str(), request)?;
 
-    let client = Client::builder()
-        .timeout(request.timeout)
-        .build()
+    let agent = AgentBuilder::new().timeout(request.timeout).build();
+
+    let response = agent.get(url.as_str()).call().map_err(|err| match err {
+        ureq::Error::Status(status, _) => SampleFetchError::HttpResponse {
+            uri: url.to_string(),
+            status: status as u16,
+        },
+        ureq::Error::Transport(transport) => SampleFetchError::HttpRequest {
+            uri: url.to_string(),
+            message: transport.to_string(),
+        },
+    })?;
+
+    let mut reader = response.into_reader();
+    let mut buffer = Vec::new();
+    reader
+        .read_to_end(&mut buffer)
         .map_err(|err| SampleFetchError::HttpRequest {
             uri: url.to_string(),
             message: err.to_string(),
         })?;
 
-    let response = client
-        .get(url.clone())
-        .send()
-        .map_err(|err| SampleFetchError::HttpRequest {
-            uri: url.to_string(),
-            message: err.to_string(),
-        })?;
-
-    let status = response.status();
-    if !status.is_success() {
-        return Err(SampleFetchError::HttpResponse {
-            uri: url.to_string(),
-            status: status.as_u16(),
-        });
-    }
-
-    response
-        .bytes()
-        .map(|bytes| bytes.to_vec())
-        .map_err(|err| SampleFetchError::HttpRequest {
-            uri: url.to_string(),
-            message: err.to_string(),
-        })
+    Ok(buffer)
 }
 
 fn fetch_s3(source: &str, request: &SampleFetchRequest) -> Result<Vec<u8>, SampleFetchError> {
