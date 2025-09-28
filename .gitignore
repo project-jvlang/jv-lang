@@ -2,6 +2,7 @@
 /target/
 /jv/target/
 **/target/
+/jv/codex-target/
 Cargo.lock
 
 # Rust debugging and profiling
