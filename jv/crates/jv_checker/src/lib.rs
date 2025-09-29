@@ -2,6 +2,7 @@
 pub mod compat;
 pub mod diagnostics;
 pub mod inference;
+pub mod null_safety;
 
 pub use inference::{
     InferenceEngine, InferenceError, InferenceResult, NullabilityAnalyzer, TypeBinding,
@@ -14,6 +15,7 @@ use jv_ast::{
     Pattern, Program, Property, ResourceManagement, Span, Statement, StringPart, TypeAnnotation,
     WhenArm,
 };
+use null_safety::NullSafetyCoordinator;
 use std::collections::HashMap;
 use thiserror::Error;
 
@@ -201,9 +203,16 @@ impl TypeChecker {
         }
     }
 
-    /// null 安全診断を推論結果に基づかず AST から直接実行する。
-    pub fn check_null_safety(&self, program: &Program) -> Vec<CheckError> {
-        NullabilityAnalyzer::analyze(program)
+    /// null 安全診断を実行し、推論スナップショットがあればそれを連携する。
+    pub fn check_null_safety(
+        &self,
+        program: &Program,
+        snapshot: Option<&InferenceSnapshot>,
+    ) -> Vec<CheckError> {
+        let snapshot = snapshot.or_else(|| self.inference_snapshot());
+        NullSafetyCoordinator::new(snapshot)
+            .run(program)
+            .into_diagnostics()
     }
 
     /// 現在保持している推論スナップショットを取得する。

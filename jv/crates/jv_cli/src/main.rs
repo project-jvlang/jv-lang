@@ -429,7 +429,7 @@ fn check_jv_file(input: &str) -> Result<()> {
         }
     }
 
-    let warnings = type_checker.check_null_safety(&program);
+    let warnings = type_checker.check_null_safety(&program, type_checker.inference_snapshot());
     if !warnings.is_empty() {
         println!("Null safety warnings:");
         for warning in &warnings {
