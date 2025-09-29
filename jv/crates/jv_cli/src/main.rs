@@ -5,7 +5,9 @@ use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
-use jv_checker::diagnostics::{from_check_error, from_parse_error, from_transform_error};
+use jv_checker::diagnostics::{
+    from_check_error, from_parse_error, from_transform_error, DiagnosticStrategy,
+};
 use jv_checker::TypeChecker;
 use jv_fmt::JavaFormatter;
 use jv_ir::transform_program;

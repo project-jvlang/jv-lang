@@ -24,13 +24,13 @@ build: ## Build all crates in debug mode
 check: ## Check all crates without building
 	cargo check $(CARGO_FLAGS)
 
-test: ## Run library tests for all crates
+test: check ## Run library tests for all crates
 	cargo test $(TEST_FLAGS)
 
-test-parser: ## Run tests for jv_parser specifically
+test-parser: check ## Run tests for jv_parser specifically
 	cargo test --lib -p jv_parser $(CARGO_FLAGS)
 
-test-all: ## Run all tests including integration tests
+test-all: check ## Run all tests including integration tests
 	cargo test $(CARGO_FLAGS)
 
 clean: ## Clean build artifacts
@@ -120,47 +120,47 @@ build-binaries: ## Build all binaries (jv, jvx, jv-lsp)
 	cargo build --bin jv-lsp $(CARGO_FLAGS)
 
 # Testing individual crates
-test-lexer: ## Test lexer crate only
+test-lexer: check ## Test lexer crate only
 	cargo test --lib -p jv_lexer $(CARGO_FLAGS)
 
-test-ast: ## Test AST crate only
+test-ast: check ## Test AST crate only
 	cargo test --lib -p jv_ast $(CARGO_FLAGS)
 
-test-ir: ## Test IR crate only
+test-ir: check ## Test IR crate only
 	cargo test --lib -p jv_ir $(CARGO_FLAGS)
 
-test-support: ## Test support crate only
+test-support: check ## Test support crate only
 	cargo test --lib -p jv_support $(CARGO_FLAGS)
 
-test-codegen: ## Test code generator crate only
+test-codegen: check ## Test code generator crate only
 	cargo test --lib -p jv_codegen_java $(CARGO_FLAGS)
 
-test-checker: ## Test checker crate only
+test-checker: check ## Test checker crate only
 	cargo test --lib -p jv_checker $(CARGO_FLAGS)
 
-test-fmt: ## Test formatter crate only
+test-fmt: check ## Test formatter crate only
 	cargo test --lib -p jv_fmt $(CARGO_FLAGS)
 
-test-inference: ## Test inference crate only
+test-inference: check ## Test inference crate only
 	cargo test --lib -p jv_inference $(CARGO_FLAGS)
 
-test-cli: ## Test CLI crate only
+test-cli: check ## Test CLI crate only
 	cargo test --lib -p jv_cli $(CARGO_FLAGS)
 
-test-lsp: ## Test LSP server crate only
+test-lsp: check ## Test LSP server crate only
 	cargo test --lib -p jv_lsp $(CARGO_FLAGS)
 
 # Binary testing commands
-test-jv-bin: ## Test jv binary integration
+test-jv-bin: check ## Test jv binary integration
 	cargo test --bin jv $(CARGO_FLAGS)
 
-test-jvx-bin: ## Test jvx binary integration
+test-jvx-bin: check ## Test jvx binary integration
 	cargo test --bin jvx $(CARGO_FLAGS)
 
-test-jv-lsp-bin: ## Test jv-lsp binary integration
+test-jv-lsp-bin: check ## Test jv-lsp binary integration
 	cargo test --bin jv-lsp $(CARGO_FLAGS)
 
-test-all-binaries: ## Test all binaries
+test-all-binaries: check ## Test all binaries
 	cargo test --bin jv $(CARGO_FLAGS)
 	cargo test --bin jvx $(CARGO_FLAGS)
 	cargo test --bin jv-lsp $(CARGO_FLAGS)
@@ -173,8 +173,11 @@ build-lowmem: ## Build with reduced parallelism for low-memory systems
 	cargo build $(CARGO_FLAGS) -j 2
 
 test-lowmem: ## Test with reduced parallelism for low-memory systems
+	CARGO_INCREMENTAL=0 cargo check $(CARGO_FLAGS) --workspace --exclude jv_cli --exclude jv_lsp -j 2
 	CARGO_INCREMENTAL=0 cargo test $(CARGO_FLAGS) --workspace --exclude jv_cli --exclude jv_lsp --lib -j 2
+	CARGO_INCREMENTAL=0 cargo check $(CARGO_FLAGS) --lib -p jv_cli -j 1
 	CARGO_INCREMENTAL=0 cargo test $(CARGO_FLAGS) --lib -p jv_cli -j 1
+	CARGO_INCREMENTAL=0 cargo check $(CARGO_FLAGS) --lib -p jv_lsp -j 1
 	CARGO_INCREMENTAL=0 cargo test $(CARGO_FLAGS) --lib -p jv_lsp -j 1
 
 # Ultra low-memory builds (for constrained CI environments)
@@ -182,11 +185,13 @@ build-minimal: ## Build with single thread for minimal memory usage
 	CARGO_INCREMENTAL=0 cargo build $(CARGO_FLAGS) -j 1
 
 test-minimal: ## Test with single thread for minimal memory usage
+	CARGO_INCREMENTAL=0 cargo check $(CARGO_FLAGS) -j 1
 	CARGO_INCREMENTAL=0 cargo test $(TEST_FLAGS) -j 1
 
 # Performance testing with memory constraints
 perf-phase1: clean ## Run phase1 performance tests with memory optimization
 	@echo "Running AST→IR performance tests with memory constraints..."
+	CARGO_INCREMENTAL=0 cargo check $(CARGO_FLAGS) --package jv_ir -j 1
 	CARGO_INCREMENTAL=0 cargo test $(CARGO_FLAGS) --package jv_ir -- --ignored perf_phase1
 
 perf-build: ## Run performance build with memory optimization
