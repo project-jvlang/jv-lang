@@ -6,6 +6,8 @@
 //! from the source node. When the fingerprint remains unchanged we can re-use
 //! the cached signature and skip constraint regeneration.
 
+mod dependency_tracker;
+
 use crate::constraint::AstId;
 use crate::service::{FactSpan, TypeScheme};
 use crate::types::{TypeId, TypeKind};
@@ -16,6 +18,8 @@ use std::cell::Cell;
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::time::Instant;
+
+pub use dependency_tracker::DependencyTracker;
 
 /// Tuple describing a single type substitution `(type_variable, resolved_type)`.
 pub type Substitution = (TypeId, TypeKind);
@@ -292,6 +296,21 @@ impl InferenceCache {
         }
     }
 
+    /// Uses a [`DependencyTracker`] to expand the dirty set before performing an
+    /// invalidation. Returns the cascade of nodes that were considered dirty.
+    pub fn invalidate_with_tracker<I>(
+        &mut self,
+        tracker: &mut DependencyTracker,
+        dirty: I,
+    ) -> Vec<AstId>
+    where
+        I: IntoIterator<Item = AstId>,
+    {
+        let cascade = tracker.invalidate_from(dirty);
+        self.invalidate(cascade.as_slice());
+        cascade
+    }
+
     /// Returns the current number of cached entries.
     pub fn len(&self) -> usize {
         self.entries.len()
@@ -403,5 +422,27 @@ mod tests {
             .substitutions
             .push((TypeId::new(10), sample_type("String")));
         assert_eq!(cache.lookup(1).unwrap().substitutions.len(), 1);
+    }
+
+    #[test]
+    fn invalidate_with_tracker_cascades_dependencies() {
+        let mut cache = InferenceCache::new();
+        let mut tracker = DependencyTracker::new();
+        tracker.set_dependencies(2, [1]);
+        tracker.set_dependencies(3, [2]);
+
+        let scheme = sample_scheme();
+        cache.update(&[
+            SignatureUpdate::new(1, FingerprintHash::new(1), scheme.clone()),
+            SignatureUpdate::new(2, FingerprintHash::new(2), scheme.clone()),
+            SignatureUpdate::new(3, FingerprintHash::new(3), scheme),
+        ]);
+
+        let cascade = cache.invalidate_with_tracker(&mut tracker, [1]);
+        assert_eq!(cascade, vec![1, 2, 3]);
+        assert!(cache.lookup(1).is_none());
+        assert!(cache.lookup(2).is_none());
+        assert!(cache.lookup(3).is_none());
+        assert_eq!(cache.metrics().invalidations, 3);
     }
 }

@@ -14,7 +14,7 @@ use std::collections::{HashMap, HashSet};
 pub struct TypeNodeId(u32);
 
 impl TypeNodeId {
-    fn new(raw: usize) -> Self {
+    pub(crate) fn new(raw: usize) -> Self {
         Self(raw as u32)
     }
 
@@ -29,7 +29,7 @@ impl TypeNodeId {
 pub struct ConstraintNodeId(u32);
 
 impl ConstraintNodeId {
-    fn new(raw: usize) -> Self {
+    pub(crate) fn new(raw: usize) -> Self {
         Self(raw as u32)
     }
 

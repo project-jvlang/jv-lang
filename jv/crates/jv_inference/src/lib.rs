@@ -14,9 +14,10 @@ pub mod solver;
 pub mod types;
 
 pub use cache::{
-    CacheMetrics, CachedDiagnostic, CachedSignature, FingerprintHash, InferenceCache,
-    SignatureUpdate,
+    CacheMetrics, CachedDiagnostic, CachedSignature, DependencyTracker, FingerprintHash,
+    InferenceCache, SignatureUpdate,
 };
+pub use constraint::CompactConstraintGraph;
 pub use service::{FactSpan, TypeFacts};
 pub use types::{
     BoundConstraint, BoundPredicate, BoundsMatrix, FieldType, NullabilityFlag, TypeId, TypeKind,
