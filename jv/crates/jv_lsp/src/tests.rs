@@ -66,6 +66,9 @@ fn test_diagnostic_creation() {
         },
         severity: Some(DiagnosticSeverity::Error),
         message: "Type error".to_string(),
+        help: None,
+        suggestions: Vec::new(),
+        strategy: None,
     };
 
     assert_eq!(diagnostic.message, "Type error");

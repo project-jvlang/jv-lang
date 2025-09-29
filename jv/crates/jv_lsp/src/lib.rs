@@ -1,7 +1,10 @@
 // jv_lsp - Language Server Protocol implementation
-use jv_checker::diagnostics::{from_check_error, from_parse_error, from_transform_error};
+use jv_checker::diagnostics::{
+    from_check_error, from_parse_error, from_transform_error, DiagnosticStrategy,
+    EnhancedDiagnostic,
+};
 use jv_checker::{CheckError, TypeChecker};
-use jv_inference::service::TypeFactsSnapshot;
+use jv_inference::{service::TypeFactsSnapshot, ParallelInferenceConfig};
 use jv_ir::transform_program;
 use jv_parser::Parser as JvParser;
 use serde::{Deserialize, Serialize};
@@ -41,6 +44,12 @@ pub struct Diagnostic {
     pub range: Range,
     pub severity: Option<DiagnosticSeverity>,
     pub message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub help: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub suggestions: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub strategy: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -54,14 +63,24 @@ pub enum DiagnosticSeverity {
 pub struct JvLanguageServer {
     documents: HashMap<String, String>,
     type_facts: HashMap<String, TypeFactsSnapshot>,
+    parallel_config: ParallelInferenceConfig,
 }
 
 impl JvLanguageServer {
     pub fn new() -> Self {
+        Self::with_parallel_config(ParallelInferenceConfig::default())
+    }
+
+    pub fn with_parallel_config(config: ParallelInferenceConfig) -> Self {
         Self {
             documents: HashMap::new(),
             type_facts: HashMap::new(),
+            parallel_config: config,
         }
+    }
+
+    pub fn set_parallel_config(&mut self, config: ParallelInferenceConfig) {
+        self.parallel_config = config;
     }
 
     pub fn open_document(&mut self, uri: String, content: String) {
@@ -79,7 +98,10 @@ impl JvLanguageServer {
             Err(error) => {
                 self.type_facts.remove(uri);
                 return match from_parse_error(&error) {
-                    Some(diagnostic) => vec![tooling_diagnostic_to_lsp(uri, diagnostic)],
+                    Some(diagnostic) => vec![tooling_diagnostic_to_lsp(
+                        uri,
+                        diagnostic.with_strategy(DiagnosticStrategy::Interactive),
+                    )],
                     None => vec![fallback_diagnostic(uri, "Parser error")],
                 };
             }
@@ -88,7 +110,7 @@ impl JvLanguageServer {
         let mut diagnostics = Vec::new();
         let mut type_facts_snapshot: Option<TypeFactsSnapshot> = None;
 
-        let mut checker = TypeChecker::new();
+        let mut checker = TypeChecker::with_parallel_config(self.parallel_config);
         match checker.check_program(&program) {
             Ok(_) => {
                 if let Some(snapshot) = checker.take_inference_snapshot() {
@@ -116,7 +138,10 @@ impl JvLanguageServer {
             Ok(_) => {}
             Err(error) => {
                 diagnostics.push(match from_transform_error(&error) {
-                    Some(diagnostic) => tooling_diagnostic_to_lsp(uri, diagnostic),
+                    Some(diagnostic) => tooling_diagnostic_to_lsp(
+                        uri,
+                        diagnostic.with_strategy(DiagnosticStrategy::Interactive),
+                    ),
                     None => fallback_diagnostic(uri, "IR transformation error"),
                 });
             }
@@ -145,10 +170,7 @@ impl Default for JvLanguageServer {
     }
 }
 
-fn tooling_diagnostic_to_lsp(
-    uri: &str,
-    diagnostic: jv_checker::diagnostics::ToolingDiagnostic,
-) -> Diagnostic {
+fn tooling_diagnostic_to_lsp(uri: &str, diagnostic: EnhancedDiagnostic) -> Diagnostic {
     let range = diagnostic
         .span
         .as_ref()
@@ -157,15 +179,17 @@ fn tooling_diagnostic_to_lsp(
 
     Diagnostic {
         range,
-        severity: Some(DiagnosticSeverity::Error),
+        severity: Some(map_severity(diagnostic.severity)),
         message: format!(
-            "{code}: {title}\nSource: {uri}\n{detail}\nHint: {help}",
+            "{code}: {title}\nSource: {uri}\n{detail}",
             code = diagnostic.code,
             title = diagnostic.title,
             uri = uri,
             detail = diagnostic.message,
-            help = diagnostic.help
         ),
+        help: Some(diagnostic.help.to_string()),
+        suggestions: diagnostic.suggestions.clone(),
+        strategy: Some(format!("{:?}", diagnostic.strategy)),
     }
 }
 
@@ -175,6 +199,9 @@ fn fallback_diagnostic(uri: &str, label: &str) -> Diagnostic {
         range: default_range(),
         severity: Some(DiagnosticSeverity::Warning),
         message,
+        help: None,
+        suggestions: Vec::new(),
+        strategy: Some("Immediate".to_string()),
     }
 }
 
@@ -183,18 +210,36 @@ fn warning_diagnostic(uri: &str, warning: CheckError) -> Diagnostic {
         range: default_range(),
         severity: Some(DiagnosticSeverity::Warning),
         message: format!("Warning ({uri}): {warning}"),
+        help: None,
+        suggestions: Vec::new(),
+        strategy: Some("Deferred".to_string()),
     }
 }
 
 fn type_error_to_diagnostic(uri: &str, error: CheckError) -> Diagnostic {
     if let Some(diagnostic) = from_check_error(&error) {
-        tooling_diagnostic_to_lsp(uri, diagnostic)
+        tooling_diagnostic_to_lsp(
+            uri,
+            diagnostic.with_strategy(DiagnosticStrategy::Interactive),
+        )
     } else {
         Diagnostic {
             range: default_range(),
             severity: Some(DiagnosticSeverity::Error),
             message: format!("Type error: {error}"),
+            help: None,
+            suggestions: Vec::new(),
+            strategy: Some("Immediate".to_string()),
         }
+    }
+}
+
+fn map_severity(severity: jv_checker::diagnostics::DiagnosticSeverity) -> DiagnosticSeverity {
+    match severity {
+        jv_checker::diagnostics::DiagnosticSeverity::Error => DiagnosticSeverity::Error,
+        jv_checker::diagnostics::DiagnosticSeverity::Warning => DiagnosticSeverity::Warning,
+        jv_checker::diagnostics::DiagnosticSeverity::Information => DiagnosticSeverity::Information,
+        jv_checker::diagnostics::DiagnosticSeverity::Hint => DiagnosticSeverity::Hint,
     }
 }
 

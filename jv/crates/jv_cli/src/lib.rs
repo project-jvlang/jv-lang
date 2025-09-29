@@ -5,7 +5,8 @@ use std::fs;
 use std::path::Path;
 
 use jv_checker::diagnostics::{
-    from_check_error, from_parse_error, from_transform_error, ToolingDiagnostic,
+    from_check_error, from_parse_error, from_transform_error, DiagnosticStrategy,
+    EnhancedDiagnostic,
 };
 use jv_pm::JavaTarget;
 
@@ -52,6 +53,18 @@ pub enum Commands {
         /// Emit type inference facts as JSON (implies --check)
         #[arg(long)]
         emit_types: bool,
+        /// Emit inference telemetry summary to stdout
+        #[arg(long)]
+        emit_telemetry: bool,
+        /// Enable module-level parallel type inference
+        #[arg(long)]
+        parallel_inference: bool,
+        /// Override worker threads used for inference (requires --parallel-inference)
+        #[arg(long, value_name = "threads")]
+        inference_workers: Option<usize>,
+        /// Override constraint batch size for inference
+        #[arg(long, value_name = "batch")]
+        constraint_batch: Option<usize>,
         /// Produce a single-file binary artifact: 'jar' or 'native'
         #[arg(long, value_parser = ["jar", "native"])]
         binary: Option<String>,
@@ -90,11 +103,11 @@ pub enum Commands {
     Debug(commands::debug::DebugArgs),
 }
 
-pub fn tooling_failure(path: &Path, diagnostic: ToolingDiagnostic) -> anyhow::Error {
+pub fn tooling_failure(path: &Path, diagnostic: EnhancedDiagnostic) -> anyhow::Error {
     anyhow::anyhow!(format_tooling_diagnostic(path, &diagnostic))
 }
 
-pub fn format_tooling_diagnostic(path: &Path, diagnostic: &ToolingDiagnostic) -> String {
+pub fn format_tooling_diagnostic(path: &Path, diagnostic: &EnhancedDiagnostic) -> String {
     let location = diagnostic
         .span
         .as_ref()
@@ -107,13 +120,36 @@ pub fn format_tooling_diagnostic(path: &Path, diagnostic: &ToolingDiagnostic) ->
         .unwrap_or_default();
 
     format!(
-        "{code}: {title}{location}\n  ファイル: {file}\n  詳細: {detail}\n  対処: {help}",
+        "[{severity:?}] {code}: {title}{location}\n  戦略: {strategy:?}\n  ファイル: {file}\n  詳細: {detail}\n  対処: {help}{suggestions}{hint}",
+        severity = diagnostic.severity,
         code = diagnostic.code,
         title = diagnostic.title,
+        strategy = diagnostic.strategy,
         file = path.display(),
         detail = diagnostic.message,
-        help = diagnostic.help
+        help = diagnostic.help,
+        suggestions = format_suggestions(&diagnostic.suggestions),
+        hint = format_learning_hint(diagnostic.learning_hints.as_deref()),
     )
+}
+
+fn format_suggestions(suggestions: &[String]) -> String {
+    if suggestions.is_empty() {
+        return String::new();
+    }
+
+    let joined = suggestions
+        .iter()
+        .map(|suggestion| format!("\n  提案: {suggestion}"))
+        .collect::<String>();
+    joined
+}
+
+fn format_learning_hint(hint: Option<&str>) -> String {
+    match hint {
+        Some(value) => format!("\n  学習ヒント: {value}"),
+        None => String::new(),
+    }
 }
 
 pub fn init_project(name: &str) -> Result<String> {
@@ -225,7 +261,7 @@ pub mod pipeline {
     use anyhow::{anyhow, bail, Context};
     use jv_build::BuildSystem;
     use jv_checker::compat::diagnostics as compat_diagnostics;
-    use jv_checker::{InferenceSnapshot, TypeChecker};
+    use jv_checker::{InferenceSnapshot, InferenceTelemetry, TypeChecker};
     use jv_codegen_java::{JavaCodeGenConfig, JavaCodeGenerator};
     use jv_fmt::JavaFormatter;
     use jv_ir::TransformContext;
@@ -248,7 +284,7 @@ pub mod pipeline {
         pub javac_version: Option<String>,
         pub warnings: Vec<String>,
         pub compatibility: Option<report::RenderedCompatibilityReport>,
-        pub compatibility_diagnostics: Vec<ToolingDiagnostic>,
+        pub compatibility_diagnostics: Vec<EnhancedDiagnostic>,
         pub inference: Option<InferenceSnapshot>,
         pub perf_capture: Option<PerfCapture>,
     }
@@ -284,7 +320,10 @@ pub mod pipeline {
             Ok(program) => program,
             Err(error) => {
                 if let Some(diagnostic) = from_parse_error(&error) {
-                    return Err(tooling_failure(entrypoint, diagnostic));
+                    return Err(tooling_failure(
+                        entrypoint,
+                        diagnostic.with_strategy(DiagnosticStrategy::Deferred),
+                    ));
                 }
                 return Err(anyhow!("Parser error: {:?}", error));
             }
@@ -292,10 +331,13 @@ pub mod pipeline {
         let parse_duration = parse_start.elapsed();
 
         if options.check {
-            let mut type_checker = TypeChecker::new();
+            let mut type_checker = TypeChecker::with_parallel_config(options.parallel_config);
             if let Err(errors) = type_checker.check_program(&program) {
                 if let Some(diagnostic) = errors.iter().find_map(from_check_error) {
-                    return Err(tooling_failure(entrypoint, diagnostic));
+                    return Err(tooling_failure(
+                        entrypoint,
+                        diagnostic.with_strategy(DiagnosticStrategy::Deferred),
+                    ));
                 }
                 let details = errors
                     .iter()
@@ -311,6 +353,10 @@ pub mod pipeline {
                     .into_iter()
                     .map(|warning| warning.to_string()),
             );
+            let telemetry_snapshot = type_checker.telemetry().clone();
+            if options.emit_telemetry {
+                print_inference_telemetry(entrypoint, &telemetry_snapshot);
+            }
             inference_snapshot = type_checker.take_inference_snapshot();
         }
 
@@ -332,7 +378,10 @@ pub mod pipeline {
                 }
                 Err(error) => {
                     if let Some(diagnostic) = from_transform_error(&error) {
-                        return Err(tooling_failure(entrypoint, diagnostic));
+                        return Err(tooling_failure(
+                            entrypoint,
+                            diagnostic.with_strategy(DiagnosticStrategy::Deferred),
+                        ));
                     }
                     return Err(anyhow!("IR transformation error: {:?}", error));
                 }
@@ -342,7 +391,10 @@ pub mod pipeline {
                 Ok(ir) => ir,
                 Err(error) => {
                     if let Some(diagnostic) = from_transform_error(&error) {
-                        return Err(tooling_failure(entrypoint, diagnostic));
+                        return Err(tooling_failure(
+                            entrypoint,
+                            diagnostic.with_strategy(DiagnosticStrategy::Deferred),
+                        ));
                     }
                     return Err(anyhow!("IR transformation error: {:?}", error));
                 }
@@ -453,6 +505,22 @@ pub mod pipeline {
         artifacts.compatibility = Some(rendered_report);
 
         Ok(artifacts)
+    }
+
+    fn print_inference_telemetry(entrypoint: &Path, telemetry: &InferenceTelemetry) {
+        println!(
+            "Telemetry ({}):\n  constraints_emitted: {}\n  bindings_resolved: {}\n  inference_duration_ms: {:.3}\n  preserved_constraints: {}\n  cache_hit_rate: {}\n  invalidation_cascade_depth: {}",
+            entrypoint.display(),
+            telemetry.constraints_emitted,
+            telemetry.bindings_resolved,
+            telemetry.inference_duration_ms,
+            telemetry.preserved_constraints,
+            telemetry
+                .cache_hit_rate
+                .map(|rate| format!("{:.2}%", rate * 100.0))
+                .unwrap_or_else(|| "n/a".to_string()),
+            telemetry.invalidation_cascade_depth
+        );
     }
 
     /// Compile and execute a `.jv` program using the Java runtime.

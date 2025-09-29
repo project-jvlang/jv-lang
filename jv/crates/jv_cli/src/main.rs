@@ -52,6 +52,10 @@ fn main() -> Result<()> {
             clean,
             perf,
             emit_types,
+            emit_telemetry,
+            parallel_inference,
+            inference_workers,
+            constraint_batch,
             binary,
             bin_name,
             target,
@@ -94,6 +98,10 @@ fn main() -> Result<()> {
                 clean,
                 perf,
                 emit_types,
+                emit_telemetry,
+                parallel_inference,
+                inference_workers,
+                constraint_batch,
             };
 
             let plan = BuildOptionsFactory::compose(project_root, settings, layout, overrides)
@@ -230,6 +238,10 @@ fn main() -> Result<()> {
                 clean: false,
                 perf: false,
                 emit_types: false,
+                emit_telemetry: false,
+                parallel_inference: false,
+                inference_workers: None,
+                constraint_batch: None,
             };
 
             let plan = BuildOptionsFactory::compose(project_root, settings, layout, overrides)
@@ -376,7 +388,10 @@ fn check_jv_file(input: &str) -> Result<()> {
         Ok(program) => program,
         Err(error) => {
             if let Some(diagnostic) = from_parse_error(&error) {
-                return Err(jv_cli::tooling_failure(Path::new(input), diagnostic));
+                return Err(jv_cli::tooling_failure(
+                    Path::new(input),
+                    diagnostic.with_strategy(DiagnosticStrategy::Deferred),
+                ));
             }
             return Err(anyhow::anyhow!("Parser error: {:?}", error));
         }
@@ -384,7 +399,10 @@ fn check_jv_file(input: &str) -> Result<()> {
 
     if let Err(error) = transform_program(program.clone()) {
         if let Some(diagnostic) = from_transform_error(&error) {
-            return Err(jv_cli::tooling_failure(Path::new(input), diagnostic));
+            return Err(jv_cli::tooling_failure(
+                Path::new(input),
+                diagnostic.with_strategy(DiagnosticStrategy::Deferred),
+            ));
         }
         return Err(anyhow::anyhow!("IR transformation error: {:?}", error));
     }
@@ -396,7 +414,10 @@ fn check_jv_file(input: &str) -> Result<()> {
         }
         Err(errors) => {
             if let Some(diagnostic) = errors.iter().find_map(from_check_error) {
-                return Err(jv_cli::tooling_failure(Path::new(input), diagnostic));
+                return Err(jv_cli::tooling_failure(
+                    Path::new(input),
+                    diagnostic.with_strategy(DiagnosticStrategy::Deferred),
+                ));
             }
             println!("Found {} error(s):", errors.len());
             for error in &errors {

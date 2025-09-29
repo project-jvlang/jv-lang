@@ -7,6 +7,7 @@ pub use inference::{
     InferenceEngine, InferenceError, InferenceResult, NullabilityAnalyzer, TypeBinding,
     TypeEnvironment, TypeId, TypeKind, TypeScheme,
 };
+pub use jv_inference::ParallelInferenceConfig;
 
 use jv_ast::{
     Argument, ConcurrencyConstruct, Expression, ForInStatement, LoopStrategy, NumericRangeLoop,
@@ -114,23 +115,75 @@ impl TypeInferenceService for InferenceSnapshot {
     }
 }
 
+/// Telemetry captured during the most recent inference run.
+#[derive(Debug, Clone)]
+pub struct InferenceTelemetry {
+    pub constraints_emitted: usize,
+    pub bindings_resolved: usize,
+    pub inference_duration_ms: f64,
+    pub preserved_constraints: usize,
+    pub cache_hit_rate: Option<f64>,
+    pub invalidation_cascade_depth: usize,
+}
+
+impl Default for InferenceTelemetry {
+    fn default() -> Self {
+        Self {
+            constraints_emitted: 0,
+            bindings_resolved: 0,
+            inference_duration_ms: 0.0,
+            preserved_constraints: 0,
+            cache_hit_rate: None,
+            invalidation_cascade_depth: 0,
+        }
+    }
+}
+
 /// TypeChecker orchestrates the inference engine and exposes analysis results.
 #[derive(Debug)]
 pub struct TypeChecker {
     engine: InferenceEngine,
     snapshot: Option<InferenceSnapshot>,
+    parallel_config: ParallelInferenceConfig,
 }
 
 impl TypeChecker {
     pub fn new() -> Self {
+        Self::with_parallel_config(ParallelInferenceConfig::default())
+    }
+
+    /// Constructs a type checker with an explicit parallel inference configuration.
+    pub fn with_parallel_config(config: ParallelInferenceConfig) -> Self {
+        let config = config.sanitized();
+        let mut engine = InferenceEngine::new();
+        engine.set_parallel_config(config);
         Self {
-            engine: InferenceEngine::new(),
+            engine,
             snapshot: None,
+            parallel_config: config,
         }
+    }
+
+    /// Updates the parallel inference configuration and applies it to the engine.
+    pub fn set_parallel_config(&mut self, config: ParallelInferenceConfig) {
+        let config = config.sanitized();
+        self.parallel_config = config;
+        self.engine.set_parallel_config(config);
+    }
+
+    /// Returns the current parallel inference configuration.
+    pub fn parallel_config(&self) -> ParallelInferenceConfig {
+        self.parallel_config
+    }
+
+    /// Provides access to the latest telemetry captured during inference.
+    pub fn telemetry(&self) -> &InferenceTelemetry {
+        self.engine.telemetry()
     }
 
     /// 型推論と整合性検証を実行する。
     pub fn check_program(&mut self, program: &Program) -> Result<(), Vec<CheckError>> {
+        self.engine.set_parallel_config(self.parallel_config);
         match self.engine.infer_program(program) {
             Ok(()) => {
                 let validation_errors = WhenUsageValidator::validate(program);

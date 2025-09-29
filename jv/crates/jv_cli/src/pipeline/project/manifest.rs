@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use jv_checker::diagnostics::ToolingDiagnostic;
+use jv_checker::diagnostics::{DiagnosticSeverity, DiagnosticStrategy, EnhancedDiagnostic};
 use jv_pm::{Manifest, OutputSection, PackageError, SourceSection};
 
 const JV1001_CODE: &str = "JV1001";
@@ -31,7 +31,7 @@ pub struct OutputConfig {
 pub struct ManifestLoader;
 
 impl ManifestLoader {
-    pub fn load(manifest_path: impl AsRef<Path>) -> Result<ProjectSettings, ToolingDiagnostic> {
+    pub fn load(manifest_path: impl AsRef<Path>) -> Result<ProjectSettings, EnhancedDiagnostic> {
         let manifest_path = manifest_path.as_ref();
         let manifest = Manifest::load_from_path(manifest_path)
             .map_err(|error| Self::map_package_error(manifest_path, error))?;
@@ -42,7 +42,7 @@ impl ManifestLoader {
     fn build_settings(
         manifest: Manifest,
         manifest_path: &Path,
-    ) -> Result<ProjectSettings, ToolingDiagnostic> {
+    ) -> Result<ProjectSettings, EnhancedDiagnostic> {
         let project = manifest.project.clone();
 
         Self::validate_sources(manifest_path, &project.sources)?;
@@ -70,7 +70,7 @@ impl ManifestLoader {
     fn validate_sources(
         manifest_path: &Path,
         sources: &SourceSection,
-    ) -> Result<(), ToolingDiagnostic> {
+    ) -> Result<(), EnhancedDiagnostic> {
         Self::validate_patterns(manifest_path, "project.sources.include", &sources.include)?;
         Self::validate_patterns(manifest_path, "project.sources.exclude", &sources.exclude)?;
         Ok(())
@@ -80,7 +80,7 @@ impl ManifestLoader {
         manifest_path: &Path,
         field: &str,
         patterns: &[String],
-    ) -> Result<(), ToolingDiagnostic> {
+    ) -> Result<(), EnhancedDiagnostic> {
         for pattern in patterns {
             let trimmed = pattern.trim();
             if trimmed.is_empty() {
@@ -114,7 +114,7 @@ impl ManifestLoader {
     fn validate_entrypoint(
         manifest_path: &Path,
         value: &str,
-    ) -> Result<PathBuf, ToolingDiagnostic> {
+    ) -> Result<PathBuf, EnhancedDiagnostic> {
         let trimmed = value.trim();
         if trimmed.is_empty() {
             return Err(Self::invalid_field(
@@ -154,7 +154,7 @@ impl ManifestLoader {
     fn validate_output(
         manifest_path: &Path,
         output: &OutputSection,
-    ) -> Result<PathBuf, ToolingDiagnostic> {
+    ) -> Result<PathBuf, EnhancedDiagnostic> {
         let trimmed = output.directory.trim();
         if trimmed.is_empty() {
             return Err(Self::invalid_field(
@@ -183,7 +183,7 @@ impl ManifestLoader {
         Ok(PathBuf::from(trimmed))
     }
 
-    fn map_package_error(manifest_path: &Path, error: PackageError) -> ToolingDiagnostic {
+    fn map_package_error(manifest_path: &Path, error: PackageError) -> EnhancedDiagnostic {
         let detail = match error {
             PackageError::InvalidManifest(message) => message,
             PackageError::IoError(err) => err.to_string(),
@@ -200,7 +200,7 @@ impl ManifestLoader {
         manifest_path: &Path,
         field: &str,
         detail: impl Into<String>,
-    ) -> ToolingDiagnostic {
+    ) -> EnhancedDiagnostic {
         Self::diagnostic(format!(
             "{} の {} は無効です: {}",
             manifest_path.display(),
@@ -209,13 +209,18 @@ impl ManifestLoader {
         ))
     }
 
-    fn diagnostic(message: String) -> ToolingDiagnostic {
-        ToolingDiagnostic {
+    fn diagnostic(message: String) -> EnhancedDiagnostic {
+        EnhancedDiagnostic {
             code: JV1001_CODE,
             title: JV1001_TITLE,
             message,
             help: JV1001_HELP,
+            severity: DiagnosticSeverity::Error,
+            strategy: DiagnosticStrategy::Immediate,
             span: None,
+            related_locations: Vec::new(),
+            suggestions: Vec::new(),
+            learning_hints: None,
         }
     }
 }

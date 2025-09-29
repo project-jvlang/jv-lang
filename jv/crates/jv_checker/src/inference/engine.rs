@@ -8,8 +8,11 @@ use crate::inference::constraint::ConstraintGenerator;
 use crate::inference::environment::{TypeEnvironment, TypeScheme};
 use crate::inference::types::{TypeBinding, TypeId, TypeKind};
 use crate::inference::unify::{ConstraintSolver, SolveError};
+use crate::InferenceTelemetry;
 use jv_ast::{Program, Statement};
+use jv_inference::ParallelInferenceConfig;
 use std::collections::{HashMap, HashSet};
+use std::time::Instant;
 
 /// 型推論処理で発生し得るエラーを表す。
 #[derive(thiserror::Error, Debug)]
@@ -32,6 +35,8 @@ pub struct InferenceEngine {
     bindings: Vec<TypeBinding>,
     result_type: Option<TypeKind>,
     function_schemes: HashMap<String, TypeScheme>,
+    parallel_config: ParallelInferenceConfig,
+    telemetry: InferenceTelemetry,
 }
 
 impl Default for InferenceEngine {
@@ -41,6 +46,8 @@ impl Default for InferenceEngine {
             bindings: Vec::new(),
             result_type: None,
             function_schemes: HashMap::new(),
+            parallel_config: ParallelInferenceConfig::default(),
+            telemetry: InferenceTelemetry::default(),
         }
     }
 }
@@ -51,15 +58,39 @@ impl InferenceEngine {
         Self::default()
     }
 
+    /// Updates the parallel inference configuration. The value is sanitized to
+    /// ensure deterministic fallbacks when parallel execution is disabled.
+    pub fn set_parallel_config(&mut self, config: ParallelInferenceConfig) {
+        self.parallel_config = config.sanitized();
+    }
+
+    /// Returns the currently configured parallel inference settings.
+    pub fn parallel_config(&self) -> ParallelInferenceConfig {
+        self.parallel_config
+    }
+
+    /// Returns telemetry for the most recent inference invocation.
+    pub fn telemetry(&self) -> &InferenceTelemetry {
+        &self.telemetry
+    }
+
     /// AST 全体に対する推論を実行し、各種結果を内部状態へ保持する。
     pub fn infer_program(&mut self, program: &Program) -> InferenceResult<()> {
         let mut environment = TypeEnvironment::new();
-        let constraints = ConstraintGenerator::new(&mut environment).generate(program);
+        let generator = ConstraintGenerator::new(&mut environment);
+        let constraints = generator.generate(program);
+        let constraint_count = constraints.len();
+        let inference_start = Instant::now();
 
         // 制約を解決し、型変数への束縛を得る。
-        let solve_result = ConstraintSolver::new()
-            .solve(constraints)
-            .map_err(InferenceError::from)?;
+        let solve_result =
+            match ConstraintSolver::with_config(self.parallel_config).solve(constraints) {
+                Ok(result) => result,
+                Err(error) => {
+                    self.telemetry = InferenceTelemetry::default();
+                    return Err(InferenceError::from(error));
+                }
+            };
         let substitutions = build_substitution_map(&solve_result.bindings);
 
         // 関数シグネチャを精算し、曖昧さを検出する。
@@ -81,6 +112,13 @@ impl InferenceEngine {
         self.environment = environment;
         self.function_schemes = function_schemes;
         self.result_type = None;
+        let duration_ms = inference_start.elapsed().as_secs_f64() * 1_000.0;
+        self.telemetry = InferenceTelemetry {
+            constraints_emitted: constraint_count,
+            bindings_resolved: self.bindings.len(),
+            inference_duration_ms: duration_ms,
+            ..InferenceTelemetry::default()
+        };
         Ok(())
     }
 

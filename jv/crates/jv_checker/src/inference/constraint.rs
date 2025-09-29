@@ -63,6 +63,17 @@ impl ConstraintSet {
         self.queue.pop_front()
     }
 
+    /// Removes up to `batch_size` constraints from the front of the queue and
+    /// returns them in FIFO order.
+    pub fn pop_batch(&mut self, batch_size: usize) -> Vec<Constraint> {
+        if batch_size <= 1 {
+            return self.pop().into_iter().collect();
+        }
+
+        let actual = batch_size.min(self.queue.len());
+        (0..actual).filter_map(|_| self.queue.pop_front()).collect()
+    }
+
     /// 残っている制約の有無を確認する。
     pub fn is_empty(&self) -> bool {
         self.queue.is_empty()
@@ -75,3 +86,22 @@ impl ConstraintSet {
 }
 
 pub use generator::ConstraintGenerator;
+
+#[cfg(test)]
+mod tests {
+    use super::{Constraint, ConstraintKind, ConstraintSet};
+
+    #[test]
+    fn pop_batch_respects_limit() {
+        let mut set = ConstraintSet::new();
+        set.push(Constraint::new(ConstraintKind::Placeholder("a")));
+        set.push(Constraint::new(ConstraintKind::Placeholder("b")));
+        set.push(Constraint::new(ConstraintKind::Placeholder("c")));
+
+        let batch = set.pop_batch(2);
+        assert_eq!(batch.len(), 2);
+
+        let remaining = set.pop_batch(4);
+        assert_eq!(remaining.len(), 1);
+    }
+}

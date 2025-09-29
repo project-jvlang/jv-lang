@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 
-use jv_checker::diagnostics::ToolingDiagnostic;
+use jv_checker::diagnostics::{DiagnosticSeverity, DiagnosticStrategy, EnhancedDiagnostic};
 
 const MANIFEST_FILE: &str = "jv.toml";
 const JV1001_CODE: &str = "JV1001";
@@ -53,7 +53,7 @@ impl ProjectLocator {
         self
     }
 
-    pub fn locate(&self, start: impl AsRef<Path>) -> Result<ProjectRoot, ToolingDiagnostic> {
+    pub fn locate(&self, start: impl AsRef<Path>) -> Result<ProjectRoot, EnhancedDiagnostic> {
         let start_path = start.as_ref();
         let search_origin = self.normalize_start(start_path)?;
         let mut current = search_origin.clone();
@@ -94,7 +94,7 @@ impl ProjectLocator {
         Err(self.not_found_diagnostic(&search_origin))
     }
 
-    fn normalize_start(&self, start: &Path) -> Result<PathBuf, ToolingDiagnostic> {
+    fn normalize_start(&self, start: &Path) -> Result<PathBuf, EnhancedDiagnostic> {
         let cwd = std::env::current_dir().map_err(|_| self.not_found_diagnostic(start))?;
         let cwd_canonical = fs::canonicalize(&cwd).map_err(|_| self.not_found_diagnostic(&cwd))?;
 
@@ -122,8 +122,8 @@ impl ProjectLocator {
         Ok(strip_trailing_dot_components(&canonical))
     }
 
-    fn not_found_diagnostic(&self, start: &Path) -> ToolingDiagnostic {
-        ToolingDiagnostic {
+    fn not_found_diagnostic(&self, start: &Path) -> EnhancedDiagnostic {
+        EnhancedDiagnostic {
             code: JV1001_CODE,
             title: JV1001_TITLE,
             message: format!(
@@ -132,12 +132,17 @@ impl ProjectLocator {
                 self.manifest_name
             ),
             help: JV1001_HELP,
+            severity: DiagnosticSeverity::Error,
+            strategy: DiagnosticStrategy::Immediate,
             span: None,
+            related_locations: Vec::new(),
+            suggestions: Vec::new(),
+            learning_hints: None,
         }
     }
 
-    fn outside_workspace_diagnostic(&self, start: &Path) -> ToolingDiagnostic {
-        ToolingDiagnostic {
+    fn outside_workspace_diagnostic(&self, start: &Path) -> EnhancedDiagnostic {
+        EnhancedDiagnostic {
             code: JV1001_CODE,
             title: JV1001_TITLE,
             message: format!(
@@ -146,7 +151,12 @@ impl ProjectLocator {
                 self.manifest_name
             ),
             help: JV1001_HELP,
+            severity: DiagnosticSeverity::Error,
+            strategy: DiagnosticStrategy::Immediate,
             span: None,
+            related_locations: Vec::new(),
+            suggestions: Vec::new(),
+            learning_hints: None,
         }
     }
 

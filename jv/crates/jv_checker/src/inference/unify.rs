@@ -6,6 +6,7 @@
 
 use crate::inference::constraint::{Constraint, ConstraintKind, ConstraintSet};
 use crate::inference::types::{TypeBinding, TypeId, TypeKind, TypeVariable, TypeVariableKind};
+use jv_inference::ParallelInferenceConfig;
 use std::collections::HashMap;
 use std::fmt;
 
@@ -73,23 +74,46 @@ pub struct SolveResult {
 }
 
 /// 単一化ソルバ本体。
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct ConstraintSolver {
     substitutions: HashMap<TypeId, TypeKind>,
+    parallel_config: ParallelInferenceConfig,
+}
+
+impl Default for ConstraintSolver {
+    fn default() -> Self {
+        Self::with_config(ParallelInferenceConfig::default())
+    }
 }
 
 impl ConstraintSolver {
     /// 新しいソルバを構築する。
     pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// 並列設定を指定してソルバを構築する。
+    pub fn with_config(config: ParallelInferenceConfig) -> Self {
         Self {
             substitutions: HashMap::new(),
+            parallel_config: config.sanitized(),
         }
     }
 
     /// 制約集合を解決し、型束縛を返す。
     pub fn solve(mut self, mut constraints: ConstraintSet) -> Result<SolveResult, SolveError> {
-        while let Some(constraint) = constraints.pop() {
-            self.process_constraint(&constraint)?;
+        let batch_size = self.parallel_config.constraint_batching.max(1);
+
+        while !constraints.is_empty() {
+            let batch = constraints.pop_batch(batch_size);
+
+            if batch.is_empty() {
+                break;
+            }
+
+            for constraint in batch {
+                self.process_constraint(&constraint)?;
+            }
         }
 
         let mut bindings: Vec<_> = self
@@ -342,5 +366,22 @@ mod tests {
             bindings[0].1,
             TypeKind::Optional(Box::new(TypeKind::Primitive("Boolean")))
         );
+    }
+
+    #[test]
+    fn solver_handles_batched_mode() {
+        let mut set = ConstraintSet::new();
+        set.push(constraint_assign(
+            TypeId::new(4),
+            TypeKind::Primitive("Int"),
+        ));
+        set.push(constraint_equal(
+            TypeKind::Variable(TypeId::new(4)),
+            TypeKind::Primitive("Int"),
+        ));
+
+        let solver = ConstraintSolver::with_config(ParallelInferenceConfig::new(false, 8, 1));
+        let result = solver.solve(set).expect("batched solving should succeed");
+        assert!(!collect_bindings(result).is_empty());
     }
 }

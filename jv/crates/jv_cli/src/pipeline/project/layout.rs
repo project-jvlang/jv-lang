@@ -2,7 +2,7 @@ use std::ffi::OsStr;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 
-use jv_checker::diagnostics::ToolingDiagnostic;
+use jv_checker::diagnostics::{DiagnosticSeverity, DiagnosticStrategy, EnhancedDiagnostic};
 
 use super::locator::ProjectRoot;
 use super::manifest::ProjectSettings;
@@ -23,7 +23,7 @@ impl ProjectLayout {
     pub fn from_settings(
         root: &ProjectRoot,
         settings: &ProjectSettings,
-    ) -> Result<Self, ToolingDiagnostic> {
+    ) -> Result<Self, EnhancedDiagnostic> {
         let include_patterns = compile_patterns(&settings.sources.include);
         let exclude_patterns = compile_patterns(&settings.sources.exclude);
 
@@ -90,7 +90,7 @@ fn resolve_entrypoint(
     root: &ProjectRoot,
     settings: &ProjectSettings,
     sources: &[PathBuf],
-) -> Result<PathBuf, ToolingDiagnostic> {
+) -> Result<PathBuf, EnhancedDiagnostic> {
     if let Some(explicit) = &settings.entrypoint {
         let absolute = root.join(explicit);
         if sources.iter().any(|candidate| same_file(candidate, &absolute)) {
@@ -115,7 +115,7 @@ fn resolve_entrypoint(
     Err(entrypoint_inference_failed())
 }
 
-fn enumerate_sources(root: &Path) -> Result<Vec<PathBuf>, ToolingDiagnostic> {
+fn enumerate_sources(root: &Path) -> Result<Vec<PathBuf>, EnhancedDiagnostic> {
     let mut results = Vec::new();
     visit_directory(root, root, &mut results)?;
     Ok(results)
@@ -125,7 +125,7 @@ fn visit_directory(
     root: &Path,
     directory: &Path,
     results: &mut Vec<PathBuf>,
-) -> Result<(), ToolingDiagnostic> {
+) -> Result<(), EnhancedDiagnostic> {
     let entries = fs::read_dir(directory)
         .map_err(|error| io_diagnostic(root, directory, Some(error)))?;
 
@@ -186,8 +186,8 @@ fn no_sources_diagnostic(
     root: &Path,
     include: &[String],
     exclude: &[String],
-) -> ToolingDiagnostic {
-    ToolingDiagnostic {
+) -> EnhancedDiagnostic {
+    EnhancedDiagnostic {
         code: JV1002_CODE,
         title: JV1002_TITLE,
         message: format!(
@@ -195,12 +195,17 @@ fn no_sources_diagnostic(
             root.display(), include, exclude
         ),
         help: JV1002_HELP,
+        severity: DiagnosticSeverity::Error,
+        strategy: DiagnosticStrategy::Immediate,
         span: None,
+        related_locations: Vec::new(),
+        suggestions: Vec::new(),
+        learning_hints: None,
     }
 }
 
-fn entrypoint_not_found_diagnostic(entrypoint: &Path) -> ToolingDiagnostic {
-    ToolingDiagnostic {
+fn entrypoint_not_found_diagnostic(entrypoint: &Path) -> EnhancedDiagnostic {
+    EnhancedDiagnostic {
         code: JV1002_CODE,
         title: JV1002_TITLE,
         message: format!(
@@ -208,27 +213,37 @@ fn entrypoint_not_found_diagnostic(entrypoint: &Path) -> ToolingDiagnostic {
             entrypoint.display()
         ),
         help: JV1002_HELP,
+        severity: DiagnosticSeverity::Error,
+        strategy: DiagnosticStrategy::Immediate,
         span: None,
+        related_locations: Vec::new(),
+        suggestions: Vec::new(),
+        learning_hints: None,
     }
 }
 
-fn entrypoint_inference_failed() -> ToolingDiagnostic {
-    ToolingDiagnostic {
+fn entrypoint_inference_failed() -> EnhancedDiagnostic {
+    EnhancedDiagnostic {
         code: JV1002_CODE,
         title: JV1002_TITLE,
         message: "エントリポイントを推論できませんでした。project.entrypoint を設定してください。"
             .to_string(),
         help: JV1002_HELP,
+        severity: DiagnosticSeverity::Error,
+        strategy: DiagnosticStrategy::Immediate,
         span: None,
+        related_locations: Vec::new(),
+        suggestions: Vec::new(),
+        learning_hints: None,
     }
 }
 
-fn io_diagnostic(root: &Path, path: &Path, error: Option<std::io::Error>) -> ToolingDiagnostic {
+fn io_diagnostic(root: &Path, path: &Path, error: Option<std::io::Error>) -> EnhancedDiagnostic {
     let detail = error
         .map(|err| err.to_string())
         .unwrap_or_else(|| "不明なエラー".to_string());
 
-    ToolingDiagnostic {
+    EnhancedDiagnostic {
         code: JV1002_CODE,
         title: JV1002_TITLE,
         message: format!(
@@ -238,7 +253,12 @@ fn io_diagnostic(root: &Path, path: &Path, error: Option<std::io::Error>) -> Too
             detail
         ),
         help: JV1002_HELP,
+        severity: DiagnosticSeverity::Error,
+        strategy: DiagnosticStrategy::Immediate,
         span: None,
+        related_locations: Vec::new(),
+        suggestions: Vec::new(),
+        learning_hints: None,
     }
 }
 
@@ -333,4 +353,3 @@ fn matches_component(pattern: &str, component: &str) -> bool {
 
     p_idx == pattern_chars.len()
 }
-

@@ -2,7 +2,10 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use jv_build::{BuildConfig, JavaTarget};
-use jv_checker::diagnostics::ToolingDiagnostic;
+use jv_checker::{
+    diagnostics::{DiagnosticSeverity, DiagnosticStrategy, EnhancedDiagnostic},
+    ParallelInferenceConfig,
+};
 
 use super::project::{
     layout::ProjectLayout,
@@ -31,6 +34,10 @@ pub struct CliOverrides {
     pub clean: bool,
     pub perf: bool,
     pub emit_types: bool,
+    pub emit_telemetry: bool,
+    pub parallel_inference: bool,
+    pub inference_workers: Option<usize>,
+    pub constraint_batch: Option<usize>,
 }
 
 #[derive(Debug, Clone)]
@@ -43,6 +50,8 @@ pub struct BuildOptions {
     pub clean: bool,
     pub perf: bool,
     pub emit_types: bool,
+    pub parallel_config: ParallelInferenceConfig,
+    pub emit_telemetry: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -79,7 +88,7 @@ impl BuildOptionsFactory {
         settings: ProjectSettings,
         layout: ProjectLayout,
         overrides: CliOverrides,
-    ) -> Result<BuildPlan, ToolingDiagnostic> {
+    ) -> Result<BuildPlan, EnhancedDiagnostic> {
         let entrypoint = resolve_entrypoint(&root, &layout, overrides.entrypoint)?;
         let output_dir = resolve_output_dir(&root, &settings.output, overrides.output)?;
         let target = overrides
@@ -90,6 +99,18 @@ impl BuildOptionsFactory {
         build_config.output_dir = stringify_path(&output_dir);
 
         let emit_types = overrides.emit_types;
+        let emit_telemetry = overrides.emit_telemetry;
+        let mut parallel_config = ParallelInferenceConfig::default();
+        if overrides.parallel_inference {
+            parallel_config.module_parallelism = true;
+        }
+        if let Some(workers) = overrides.inference_workers {
+            parallel_config.worker_threads = workers;
+        }
+        if let Some(batch) = overrides.constraint_batch {
+            parallel_config.constraint_batching = batch;
+        }
+        parallel_config = parallel_config.sanitized();
         let options = BuildOptions {
             entrypoint,
             output_dir,
@@ -99,6 +120,8 @@ impl BuildOptionsFactory {
             clean: overrides.clean || settings.output.clean,
             perf: overrides.perf,
             emit_types,
+            parallel_config,
+            emit_telemetry,
         };
 
         Ok(BuildPlan {
@@ -115,7 +138,7 @@ fn resolve_entrypoint(
     root: &ProjectRoot,
     layout: &ProjectLayout,
     override_path: Option<PathBuf>,
-) -> Result<PathBuf, ToolingDiagnostic> {
+) -> Result<PathBuf, EnhancedDiagnostic> {
     match override_path {
         Some(path) => {
             let absolute = absolutize(&path)?;
@@ -133,7 +156,7 @@ fn resolve_output_dir(
     root: &ProjectRoot,
     output: &OutputConfig,
     override_path: Option<PathBuf>,
-) -> Result<PathBuf, ToolingDiagnostic> {
+) -> Result<PathBuf, EnhancedDiagnostic> {
     let candidate = match override_path {
         Some(path) => absolutize(&path)?,
         None => root.join(&output.directory),
@@ -143,38 +166,29 @@ fn resolve_output_dir(
     Ok(candidate)
 }
 
-fn guard_within_root(root: &Path, candidate: &Path) -> Result<(), ToolingDiagnostic> {
+fn guard_within_root(root: &Path, candidate: &Path) -> Result<(), EnhancedDiagnostic> {
     if !path_within(root, candidate) {
-        return Err(ToolingDiagnostic {
-            code: JV1001_CODE,
-            title: JV1001_TITLE,
-            message: format!(
-                "パス '{}' はプロジェクトルート '{}' の外部を指しています。",
-                candidate.display(),
-                root.display()
-            ),
-            help: JV1001_HELP,
-            span: None,
-        });
+        return Err(root_diagnostic(format!(
+            "パス '{}' はプロジェクトルート '{}' の外部を指しています。",
+            candidate.display(),
+            root.display()
+        )));
     }
     Ok(())
 }
 
-fn guard_exists(path: &Path) -> Result<(), ToolingDiagnostic> {
+fn guard_exists(path: &Path) -> Result<(), EnhancedDiagnostic> {
     if path.is_file() {
         return Ok(());
     }
 
-    Err(ToolingDiagnostic {
-        code: JV1002_CODE,
-        title: JV1002_TITLE,
-        message: format!("エントリポイント '{}' が見つかりません。", path.display()),
-        help: JV1002_HELP,
-        span: None,
-    })
+    Err(source_diagnostic(format!(
+        "エントリポイント '{}' が見つかりません。",
+        path.display()
+    )))
 }
 
-fn guard_extension(path: &Path, expected: &str) -> Result<(), ToolingDiagnostic> {
+fn guard_extension(path: &Path, expected: &str) -> Result<(), EnhancedDiagnostic> {
     if path
         .extension()
         .and_then(|ext| ext.to_str())
@@ -184,22 +198,16 @@ fn guard_extension(path: &Path, expected: &str) -> Result<(), ToolingDiagnostic>
         return Ok(());
     }
 
-    Err(ToolingDiagnostic {
-        code: JV1002_CODE,
-        title: JV1002_TITLE,
-        message: format!(
-            "エントリポイント '{}' は .{} ファイルではありません。",
-            path.display(), expected
-        ),
-        help: JV1002_HELP,
-        span: None,
-    })
+    Err(source_diagnostic(format!(
+        "エントリポイント '{}' は .{} ファイルではありません。",
+        path.display(), expected
+    )))
 }
 
 fn guard_listed_in_layout(
     layout: &ProjectLayout,
     entrypoint: &Path,
-) -> Result<(), ToolingDiagnostic> {
+) -> Result<(), EnhancedDiagnostic> {
     if layout
         .sources()
         .iter()
@@ -209,32 +217,18 @@ fn guard_listed_in_layout(
         return Ok(());
     }
 
-    Err(ToolingDiagnostic {
-        code: JV1002_CODE,
-        title: JV1002_TITLE,
-        message: format!(
-            "エントリポイント '{}' は manifest の include/exclude 設定に含まれていません。",
-            entrypoint.display()
-        ),
-        help: JV1002_HELP,
-        span: None,
-    })
+    Err(source_diagnostic(format!(
+        "エントリポイント '{}' は manifest の include/exclude 設定に含まれていません。",
+        entrypoint.display()
+    )))
 }
 
-fn absolutize(path: &Path) -> Result<PathBuf, ToolingDiagnostic> {
+fn absolutize(path: &Path) -> Result<PathBuf, EnhancedDiagnostic> {
     if path.is_absolute() {
         Ok(path.to_path_buf())
     } else {
-        let cwd = std::env::current_dir().map_err(|error| ToolingDiagnostic {
-            code: JV1001_CODE,
-            title: JV1001_TITLE,
-            message: format!(
-                "カレントディレクトリを取得できません: {}",
-                error.to_string()
-            ),
-            help: JV1001_HELP,
-            span: None,
-        })?;
+        let cwd = std::env::current_dir()
+            .map_err(|error| root_diagnostic(format!("カレントディレクトリを取得できません: {}", error)))?;
         Ok(cwd.join(path))
     }
 }
@@ -259,4 +253,32 @@ fn path_within(root: &Path, candidate: &Path) -> bool {
 
 fn stringify_path(path: &Path) -> String {
     path.to_string_lossy().into_owned()
+}
+
+fn plan_diagnostic_with(
+    code: &'static str,
+    title: &'static str,
+    message: impl Into<String>,
+    help: &'static str,
+) -> EnhancedDiagnostic {
+    EnhancedDiagnostic {
+        code,
+        title,
+        message: message.into(),
+        help,
+        severity: DiagnosticSeverity::Error,
+        strategy: DiagnosticStrategy::Immediate,
+        span: None,
+        related_locations: Vec::new(),
+        suggestions: Vec::new(),
+        learning_hints: None,
+    }
+}
+
+fn root_diagnostic(message: impl Into<String>) -> EnhancedDiagnostic {
+    plan_diagnostic_with(JV1001_CODE, JV1001_TITLE, message, JV1001_HELP)
+}
+
+fn source_diagnostic(message: impl Into<String>) -> EnhancedDiagnostic {
+    plan_diagnostic_with(JV1002_CODE, JV1002_TITLE, message, JV1002_HELP)
 }

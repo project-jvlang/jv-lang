@@ -124,6 +124,7 @@ jv build [OPTIONS] [FILES...]
 - `--debug`: Include debug information
 - `--perf`: Collect AST→IR performance metrics and persist `target/perf-reports/ast-ir-phase1.json`
 - `--emit-types`: Emit inferred type facts as JSON to stdout (implicitly enables `--check`)
+- `--emit-telemetry`: Print inference telemetry summary to stdout (implicitly runs `--check`)
   
 #### Performance Mode (`--perf`)
 
@@ -158,6 +159,30 @@ Output directory: ...
 ```
 
 Our integration tests (`cargo test -p jv_checker`, `cargo test -p jv_inference`) assert that the emitted snapshot reflects code edits—rebuilding the same plan after adding `val incremented = base + 1` exposes the new binding immediately in the JSON output.
+
+#### Inference Telemetry (`--emit-telemetry`)
+
+Enable `--emit-telemetry` to get a concise telemetry snapshot of the most recent inference pass. The current release emits the following fields:
+
+- `constraints_emitted`: Number of constraints produced by the generator
+- `bindings_resolved`: Count of type variables resolved by the solver
+- `inference_duration_ms`: Wall-clock time spent in inference (milliseconds)
+- `preserved_constraints`: Constraints reused by incremental inference (currently 0 until incremental mode lands)
+- `cache_hit_rate`: Hit ratio for the inference cache (reported when available, otherwise `n/a`)
+- `invalidation_cascade_depth`: Depth of cache invalidation cascades (0 when no incremental data is present)
+
+```bash
+jv build src/app/main.jv --check --emit-telemetry
+Telemetry (src/app/main.jv):
+  constraints_emitted: 42
+  bindings_resolved: 37
+  inference_duration_ms: 3.215
+  preserved_constraints: 0
+  cache_hit_rate: n/a
+  invalidation_cascade_depth: 0
+```
+
+As incremental inference evolves, the preserved constraint count and cache hit rate will begin to reflect real measurements. For now, zero or `n/a` indicates that those signals are not yet collected for the current build.
 
 Sample/@Sample options:
 - `--sample-mode=embed|load`: Override default `@Sample` mode (default: embed)

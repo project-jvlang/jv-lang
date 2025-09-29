@@ -136,6 +136,10 @@ fn project_pipeline_supports_multi_target_builds() {
         clean: false,
         perf: false,
         emit_types: false,
+        emit_telemetry: false,
+        parallel_inference: false,
+        inference_workers: None,
+        constraint_batch: None,
     };
 
     let plan21 = BuildOptionsFactory::compose(
@@ -169,6 +173,10 @@ fn project_pipeline_supports_multi_target_builds() {
         clean: false,
         perf: false,
         emit_types: false,
+        emit_telemetry: false,
+        parallel_inference: false,
+        inference_workers: None,
+        constraint_batch: None,
     };
 
     let plan25 = BuildOptionsFactory::compose(project_root, settings, layout, overrides25)
@@ -214,6 +222,10 @@ fn clean_option_removes_stale_target_artifacts() {
         clean,
         perf: false,
         emit_types: false,
+        emit_telemetry: false,
+        parallel_inference: false,
+        inference_workers: None,
+        constraint_batch: None,
     };
 
     let plan_initial = BuildOptionsFactory::compose(

@@ -126,11 +126,33 @@ pub struct TypeBinding {
 }
 
 /// Telemetry collected during solving for performance monitoring.
-#[derive(Debug, Default, Clone, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, PartialEq)]
 pub struct SolverTelemetry {
     pub constraints_processed: usize,
     pub nullability_merges: usize,
     pub optional_propagations: usize,
+    pub preserved_constraints: usize,
+    pub cache_hit_rate: Option<f64>,
+    pub reinference_duration_ms: Option<f64>,
+    pub invalidation_cascade_depth: usize,
+}
+
+impl SolverTelemetry {
+    pub fn record_preserved_constraints(&mut self, preserved: usize) {
+        self.preserved_constraints = preserved;
+    }
+
+    pub fn set_cache_hit_rate(&mut self, rate: Option<f64>) {
+        self.cache_hit_rate = rate;
+    }
+
+    pub fn set_reinference_duration(&mut self, duration_ms: f64) {
+        self.reinference_duration_ms = Some(duration_ms);
+    }
+
+    pub fn set_invalidation_cascade_depth(&mut self, depth: usize) {
+        self.invalidation_cascade_depth = depth;
+    }
 }
 
 /// Final result returned by the solver.

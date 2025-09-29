@@ -5,6 +5,7 @@
 //! initial scaffold focuses on the public module layout and service-facing contracts.
 
 pub mod cache;
+pub mod config;
 pub mod constraint;
 pub mod diagnostics;
 pub mod environment;
@@ -17,6 +18,7 @@ pub use cache::{
     CacheMetrics, CachedDiagnostic, CachedSignature, DependencyTracker, FingerprintHash,
     InferenceCache, SignatureUpdate,
 };
+pub use config::ParallelInferenceConfig;
 pub use constraint::CompactConstraintGraph;
 pub use service::{FactSpan, TypeFacts};
 pub use types::{

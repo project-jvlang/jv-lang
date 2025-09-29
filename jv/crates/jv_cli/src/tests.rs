@@ -268,6 +268,10 @@ include = ["src/**/*.jv"]
         clean: false,
         perf: false,
         emit_types: false,
+        emit_telemetry: false,
+        parallel_inference: false,
+        inference_workers: None,
+        constraint_batch: None,
     };
 
     let plan = pipeline::BuildOptionsFactory::compose(project_root, settings, layout, overrides)
@@ -345,6 +349,10 @@ clean = false
         clean: false,
         perf: false,
         emit_types: false,
+        emit_telemetry: false,
+        parallel_inference: false,
+        inference_workers: None,
+        constraint_batch: None,
     };
 
     let plan = pipeline::BuildOptionsFactory::compose(project_root, settings, layout, overrides)

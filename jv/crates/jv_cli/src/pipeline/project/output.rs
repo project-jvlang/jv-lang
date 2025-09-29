@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use jv_checker::diagnostics::ToolingDiagnostic;
+use jv_checker::diagnostics::{DiagnosticSeverity, DiagnosticStrategy, EnhancedDiagnostic};
 
 use crate::pipeline::BuildPlan;
 
@@ -22,7 +22,7 @@ pub struct PreparedOutput {
 }
 
 impl OutputManager {
-    pub fn prepare(plan: BuildPlan) -> Result<PreparedOutput, ToolingDiagnostic> {
+    pub fn prepare(plan: BuildPlan) -> Result<PreparedOutput, EnhancedDiagnostic> {
         let base_dir = plan.options.output_dir.clone();
         let target_label = format!("java{}", plan.build_config.target.as_str());
         let target_dir = base_dir.join(&target_label);
@@ -81,7 +81,7 @@ impl Drop for PreparedOutput {
     }
 }
 
-fn ensure_within_workspace(root: &Path, candidate: &Path) -> Result<(), ToolingDiagnostic> {
+fn ensure_within_workspace(root: &Path, candidate: &Path) -> Result<(), EnhancedDiagnostic> {
     if path_within(root, candidate) {
         Ok(())
     } else {
@@ -104,12 +104,17 @@ fn path_within(root: &Path, candidate: &Path) -> bool {
     }
 }
 
-fn io_diagnostic(path: &Path, action: &str, error: std::io::Error) -> ToolingDiagnostic {
-    ToolingDiagnostic {
+fn io_diagnostic(path: &Path, action: &str, error: std::io::Error) -> EnhancedDiagnostic {
+    EnhancedDiagnostic {
         code: JV1003_CODE,
         title: JV1003_TITLE,
         message: format!("{} {} 中にエラーが発生しました: {}", path.display(), action, error),
         help: JV1003_HELP,
+        severity: DiagnosticSeverity::Error,
+        strategy: DiagnosticStrategy::Immediate,
         span: None,
+        related_locations: Vec::new(),
+        suggestions: Vec::new(),
+        learning_hints: None,
     }
 }

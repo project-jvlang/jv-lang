@@ -124,6 +124,7 @@ jv build [OPTIONS] [FILES...]
 - `--debug`: デバッグ情報を含める
 - `--perf`: AST→IR性能メトリクスを計測し `target/perf-reports/ast-ir-phase1.json` に保存
 - `--emit-types`: 型推論結果を JSON で標準出力へ書き出す（`--check` を暗黙的に有効化）
+- `--emit-telemetry`: 推論テレメトリの概要を標準出力へ表示（`--check` が暗黙に実行）
 
 #### パフォーマンスモード (`--perf`)
 
@@ -158,6 +159,30 @@ jv build src/app/main.jv --java-only --check --emit-types
 ```
 
 テストスイートでは `cargo test -p jv_checker` / `-p jv_inference` の統合テストが TypeFacts の差分更新を検証しており、同じビルドプランでファイルを書き換えると `incremented` などの新規バインディングが JSON 出力に反映されることを確認できます。
+
+#### 推論テレメトリ (`--emit-telemetry`)
+
+`--emit-telemetry` を指定すると、最後に実行した推論パスのサマリーメトリクスを標準出力に表示します。現行リリースでは以下の項目が確認できます。
+
+- `constraints_emitted`: 推論フェーズが生成した制約数
+- `bindings_resolved`: 解決済み型変数の総数
+- `inference_duration_ms`: 型推論に要した時間（ミリ秒）
+- `preserved_constraints`: 差分推論において再利用された制約数（将来の増分推論対応で増加予定）
+- `cache_hit_rate`: 型情報キャッシュのヒット率（現状は未収集の場合 `n/a` 表示）
+- `invalidation_cascade_depth`: キャッシュ失効の連鎖深度（未収集の場合は 0）
+
+```bash
+jv build src/app/main.jv --check --emit-telemetry
+Telemetry (src/app/main.jv):
+  constraints_emitted: 42
+  bindings_resolved: 37
+  inference_duration_ms: 3.215
+  preserved_constraints: 0
+  cache_hit_rate: n/a
+  invalidation_cascade_depth: 0
+```
+
+複数回ビルドした際に値が変化しない場合は、インクリメンタル推論がまだ有効化されていないかキャッシュ測定が未収集であることを示します。将来のタスクで `preserved_constraints` や `cache_hit_rate` に実測値が流れる予定です。
 
 Sample/@Sampleオプション:
 - `--sample-mode=embed|load`: デフォルトの`@Sample`モードを上書き (デフォルト: embed)
