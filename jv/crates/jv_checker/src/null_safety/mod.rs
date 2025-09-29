@@ -1,6 +1,10 @@
+mod context;
+
 use crate::inference::nullability::NullabilityAnalyzer;
 use crate::{CheckError, InferenceSnapshot};
 use jv_ast::Program;
+
+pub use context::{NullSafetyContext, NullabilityKind, NullabilityLattice};
 
 /// Aggregated outcome of the null safety pipeline.
 #[derive(Default)]
@@ -57,9 +61,12 @@ impl<'snapshot> NullSafetyCoordinator<'snapshot> {
 
     pub fn run(&self, program: &Program) -> NullSafetyReport {
         let mut report = NullSafetyReport::new();
+        let context = NullSafetyContext::hydrate(self.snapshot);
 
-        if self.snapshot.is_none() {
-            // Flow-aware analysis will attach diagnostics for degraded precision in later tasks.
+        if context.is_degraded() {
+            report.push_warning(CheckError::NullSafetyError(
+                "型推論スナップショットが見つからないため、null安全解析を簡易モードで実行しました。".into(),
+            ));
         }
 
         report.extend_diagnostics(NullabilityAnalyzer::analyze(program));
