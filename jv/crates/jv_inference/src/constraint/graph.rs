@@ -1,0 +1,449 @@
+//! Constraint graph representation and Tarjan SCC traversal utilities.
+//!
+//! The graph models both type-level nodes and constraint nodes. Each edge preserves
+//! the original constraint semantics via [`EdgeKind`], and source spans are attached
+//! through [`SourceSpanTable`] for high quality diagnostics.
+
+use crate::types::{TypeId, TypeKind};
+use jv_ast::Span;
+use std::cell::RefCell;
+use std::collections::{HashMap, HashSet};
+
+/// Identifier assigned to type nodes within the constraint graph.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct TypeNodeId(u32);
+
+impl TypeNodeId {
+    fn new(raw: usize) -> Self {
+        Self(raw as u32)
+    }
+
+    /// Returns the raw index associated with the node.
+    pub fn to_raw(self) -> usize {
+        self.0 as usize
+    }
+}
+
+/// Identifier assigned to constraint nodes within the graph.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct ConstraintNodeId(u32);
+
+impl ConstraintNodeId {
+    fn new(raw: usize) -> Self {
+        Self(raw as u32)
+    }
+
+    /// Returns the raw index associated with the node.
+    pub fn to_raw(self) -> usize {
+        self.0 as usize
+    }
+}
+
+/// Unified node identifier used when traversing the graph.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum NodeId {
+    Type(TypeNodeId),
+    Constraint(ConstraintNodeId),
+}
+
+/// Record describing a type node and the underlying inferred type.
+#[derive(Debug, Clone)]
+pub struct TypeNode {
+    pub type_id: TypeId,
+    pub ty: TypeKind,
+}
+
+impl TypeNode {
+    pub fn new(type_id: TypeId, ty: TypeKind) -> Self {
+        Self { type_id, ty }
+    }
+}
+
+/// Categories of constraint nodes handled by the graph.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ConstraintKind {
+    Equality { left: TypeId, right: TypeId },
+    Assignment { from: TypeId, to: TypeId },
+    BoundSatisfaction { subject: TypeId, bound: String },
+    Custom(String),
+}
+
+/// Constraint node payload containing the high-level constraint semantics.
+#[derive(Debug, Clone)]
+pub struct ConstraintNode {
+    pub kind: ConstraintKind,
+}
+
+impl ConstraintNode {
+    pub fn new(kind: ConstraintKind) -> Self {
+        Self { kind }
+    }
+}
+
+/// Edge categories tracked in the constraint graph.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EdgeKind {
+    Equality,
+    Assignment,
+    BoundSatisfaction,
+}
+
+/// Edge connecting two nodes in the constraint graph.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Edge {
+    pub from: NodeId,
+    pub to: NodeId,
+    pub kind: EdgeKind,
+}
+
+impl Edge {
+    pub fn new(from: NodeId, to: NodeId, kind: EdgeKind) -> Self {
+        Self { from, to, kind }
+    }
+}
+
+/// Table mapping nodes to their source spans for diagnostics.
+#[derive(Debug, Clone, Default)]
+pub struct SourceSpanTable {
+    spans: HashMap<NodeId, Span>,
+}
+
+impl SourceSpanTable {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn insert(&mut self, node: NodeId, span: Span) {
+        self.spans.insert(node, span);
+    }
+
+    pub fn get(&self, node: &NodeId) -> Option<&Span> {
+        self.spans.get(node)
+    }
+}
+
+/// Cache containing SCC information computed via Tarjan's algorithm.
+#[derive(Debug, Clone)]
+pub struct SccCache {
+    components: Vec<Vec<NodeId>>,
+    component_lookup: HashMap<NodeId, usize>,
+}
+
+impl SccCache {
+    fn new(components: Vec<Vec<NodeId>>) -> Self {
+        let mut component_lookup = HashMap::new();
+        for (idx, component) in components.iter().enumerate() {
+            for node in component {
+                component_lookup.insert(*node, idx);
+            }
+        }
+        Self {
+            components,
+            component_lookup,
+        }
+    }
+
+    /// Total number of strongly connected components cached.
+    pub fn len(&self) -> usize {
+        self.components.len()
+    }
+
+    /// Returns true when no components have been recorded.
+    pub fn is_empty(&self) -> bool {
+        self.components.is_empty()
+    }
+
+    /// Returns the component containing the specified node.
+    pub fn component_for(&self, node: NodeId) -> Option<&[NodeId]> {
+        self.component_lookup
+            .get(&node)
+            .and_then(|idx| self.components.get(*idx))
+            .map(|component| component.as_slice())
+    }
+
+    /// Returns an iterator over all components.
+    pub fn components(&self) -> impl Iterator<Item = &[NodeId]> {
+        self.components.iter().map(|component| component.as_slice())
+    }
+}
+
+/// Constraint graph storing nodes, edges, and SCC metadata.
+#[derive(Debug, Default)]
+pub struct ConstraintGraph {
+    type_nodes: Vec<TypeNode>,
+    constraint_nodes: Vec<ConstraintNode>,
+    edges: Vec<Edge>,
+    metadata: SourceSpanTable,
+    scc_cache: RefCell<Option<SccCache>>,
+}
+
+impl ConstraintGraph {
+    /// Creates an empty constraint graph.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Returns the number of type nodes present in the graph.
+    pub fn type_node_count(&self) -> usize {
+        self.type_nodes.len()
+    }
+
+    /// Returns the number of constraint nodes present in the graph.
+    pub fn constraint_node_count(&self) -> usize {
+        self.constraint_nodes.len()
+    }
+
+    /// Adds a new type node to the graph.
+    pub fn add_type_node(&mut self, node: TypeNode) -> TypeNodeId {
+        self.type_nodes.push(node);
+        self.invalidate_scc_cache();
+        TypeNodeId::new(self.type_nodes.len() - 1)
+    }
+
+    /// Adds a new constraint node to the graph.
+    pub fn add_constraint_node(&mut self, node: ConstraintNode) -> ConstraintNodeId {
+        self.constraint_nodes.push(node);
+        self.invalidate_scc_cache();
+        ConstraintNodeId::new(self.constraint_nodes.len() - 1)
+    }
+
+    /// Records an edge between two nodes.
+    pub fn add_edge(&mut self, from: NodeId, to: NodeId, kind: EdgeKind) {
+        self.edges.push(Edge::new(from, to, kind));
+        self.invalidate_scc_cache();
+    }
+
+    /// Returns all edges originating from the provided node.
+    pub fn edges_from<'graph>(&'graph self, node: NodeId) -> impl Iterator<Item = Edge> + 'graph {
+        self.edges
+            .iter()
+            .copied()
+            .filter(move |edge| edge.from == node)
+    }
+
+    /// Returns a reference to the stored source metadata.
+    pub fn metadata(&self) -> &SourceSpanTable {
+        &self.metadata
+    }
+
+    /// Returns a mutable reference to the stored source metadata.
+    pub fn metadata_mut(&mut self) -> &mut SourceSpanTable {
+        &mut self.metadata
+    }
+
+    /// Returns the cached SCC data, computing it if necessary.
+    pub fn strongly_connected_components(&self) -> SccCache {
+        if let Some(cache) = self.scc_cache.borrow().clone() {
+            return cache;
+        }
+
+        let cache = self.compute_scc();
+        *self.scc_cache.borrow_mut() = Some(cache.clone());
+        cache
+    }
+
+    /// Builds a simple adjacency list for all nodes.
+    fn adjacency_map(&self) -> HashMap<NodeId, Vec<NodeId>> {
+        let mut adjacency: HashMap<NodeId, Vec<NodeId>> = HashMap::new();
+        for edge in &self.edges {
+            adjacency.entry(edge.from).or_default().push(edge.to);
+        }
+        adjacency
+    }
+
+    fn compute_scc(&self) -> SccCache {
+        let adjacency = self.adjacency_map();
+        let mut state = TarjanState::new(adjacency);
+        for node in self.all_nodes() {
+            if !state.has_index(node) {
+                state.strong_connect(node);
+            }
+        }
+        SccCache::new(state.into_components())
+    }
+
+    fn all_nodes(&self) -> Vec<NodeId> {
+        let mut nodes = Vec::with_capacity(self.type_nodes.len() + self.constraint_nodes.len());
+        for idx in 0..self.type_nodes.len() {
+            nodes.push(NodeId::Type(TypeNodeId::new(idx)));
+        }
+        for idx in 0..self.constraint_nodes.len() {
+            nodes.push(NodeId::Constraint(ConstraintNodeId::new(idx)));
+        }
+        nodes
+    }
+
+    fn invalidate_scc_cache(&mut self) {
+        self.scc_cache.borrow_mut().take();
+    }
+}
+
+struct TarjanState {
+    next_index: usize,
+    stack: Vec<NodeId>,
+    on_stack: HashSet<NodeId>,
+    indices: HashMap<NodeId, usize>,
+    lowlinks: HashMap<NodeId, usize>,
+    components: Vec<Vec<NodeId>>,
+    adjacency: HashMap<NodeId, Vec<NodeId>>,
+}
+
+impl TarjanState {
+    fn new(adjacency: HashMap<NodeId, Vec<NodeId>>) -> Self {
+        Self {
+            next_index: 0,
+            stack: Vec::new(),
+            on_stack: HashSet::new(),
+            indices: HashMap::new(),
+            lowlinks: HashMap::new(),
+            components: Vec::new(),
+            adjacency,
+        }
+    }
+
+    fn has_index(&self, node: NodeId) -> bool {
+        self.indices.contains_key(&node)
+    }
+
+    fn strong_connect(&mut self, node: NodeId) {
+        self.indices.insert(node, self.next_index);
+        self.lowlinks.insert(node, self.next_index);
+        self.next_index += 1;
+
+        self.stack.push(node);
+        self.on_stack.insert(node);
+
+        let neighbours = self.adjacency.get(&node).cloned().unwrap_or_default();
+        for target in neighbours {
+            if !self.has_index(target) {
+                self.strong_connect(target);
+                self.update_lowlink(node, target);
+            } else if self.on_stack.contains(&target) {
+                self.update_lowlink_index(node, target);
+            }
+        }
+
+        if self.index_of(node) == self.lowlink_of(node) {
+            let mut component = Vec::new();
+            loop {
+                let popped = self.stack.pop().expect("stack must contain node");
+                self.on_stack.remove(&popped);
+                component.push(popped);
+                if popped == node {
+                    break;
+                }
+            }
+            self.components.push(component);
+        }
+    }
+
+    fn update_lowlink(&mut self, node: NodeId, neighbour: NodeId) {
+        let neighbour_lowlink = self.lowlink_of(neighbour);
+        let entry = self
+            .lowlinks
+            .get_mut(&node)
+            .expect("node must have lowlink");
+        *entry = (*entry).min(neighbour_lowlink);
+    }
+
+    fn update_lowlink_index(&mut self, node: NodeId, neighbour: NodeId) {
+        let neighbour_index = self.index_of(neighbour);
+        let entry = self
+            .lowlinks
+            .get_mut(&node)
+            .expect("node must have lowlink");
+        *entry = (*entry).min(neighbour_index);
+    }
+
+    fn index_of(&self, node: NodeId) -> usize {
+        self.indices[&node]
+    }
+
+    fn lowlink_of(&self, node: NodeId) -> usize {
+        self.lowlinks[&node]
+    }
+
+    fn into_components(self) -> Vec<Vec<NodeId>> {
+        self.components
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn dummy_span(line: usize) -> Span {
+        Span::new(line, 0, line, 10)
+    }
+
+    #[test]
+    fn scc_detects_single_cycle() {
+        let mut graph = ConstraintGraph::new();
+        let t1 = graph.add_type_node(TypeNode::new(TypeId::new(0), TypeKind::default()));
+        let t2 = graph.add_type_node(TypeNode::new(TypeId::new(1), TypeKind::default()));
+
+        let c1 = graph.add_constraint_node(ConstraintNode::new(ConstraintKind::Equality {
+            left: TypeId::new(0),
+            right: TypeId::new(1),
+        }));
+
+        graph.add_edge(NodeId::Type(t1), NodeId::Constraint(c1), EdgeKind::Equality);
+        graph.add_edge(NodeId::Constraint(c1), NodeId::Type(t2), EdgeKind::Equality);
+        graph.add_edge(NodeId::Type(t2), NodeId::Type(t1), EdgeKind::Assignment);
+
+        let cache = graph.strongly_connected_components();
+        assert_eq!(cache.len(), 1);
+        let component = cache.component_for(NodeId::Type(t1)).expect("component");
+        assert_eq!(component.len(), 3);
+    }
+
+    #[test]
+    fn metadata_records_span() {
+        let mut graph = ConstraintGraph::new();
+        let t1 = graph.add_type_node(TypeNode::new(TypeId::new(0), TypeKind::default()));
+        let span = dummy_span(1);
+        graph.metadata_mut().insert(NodeId::Type(t1), span.clone());
+
+        let fetched = graph.metadata().get(&NodeId::Type(t1)).expect("span");
+        assert_eq!(fetched.start_line, 1);
+        assert_eq!(fetched.end_line, 1);
+    }
+
+    #[test]
+    fn scc_cache_is_invalidated_on_edge_addition() {
+        let mut graph = ConstraintGraph::new();
+        let t1 = graph.add_type_node(TypeNode::new(TypeId::new(0), TypeKind::default()));
+        let t2 = graph.add_type_node(TypeNode::new(TypeId::new(1), TypeKind::default()));
+
+        let cache_initial = graph.strongly_connected_components();
+        assert_eq!(cache_initial.len(), 2);
+
+        graph.add_edge(NodeId::Type(t1), NodeId::Type(t2), EdgeKind::Assignment);
+        let cache_one_direction = graph.strongly_connected_components();
+        assert_eq!(
+            cache_one_direction
+                .component_for(NodeId::Type(t1))
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(
+            cache_one_direction
+                .component_for(NodeId::Type(t2))
+                .unwrap()
+                .len(),
+            1
+        );
+
+        graph.add_edge(NodeId::Type(t2), NodeId::Type(t1), EdgeKind::Assignment);
+        let cache_cycle = graph.strongly_connected_components();
+        assert_eq!(
+            cache_cycle.component_for(NodeId::Type(t1)).unwrap().len(),
+            2
+        );
+        assert_eq!(
+            cache_cycle.component_for(NodeId::Type(t2)).unwrap().len(),
+            2
+        );
+    }
+}
