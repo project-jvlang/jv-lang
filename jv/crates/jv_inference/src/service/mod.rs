@@ -4,6 +4,7 @@
 //! consumers such as the checker, code generator, and LSP server. Concrete implementations
 //! live outside this crate so that each consumer can decide how to persist and surface data.
 
+use crate::cache::CacheMetrics;
 use crate::solver::TypeBinding;
 use crate::types::{TypeId, TypeKind};
 use serde_json::{json, Value};
@@ -93,6 +94,7 @@ pub struct TypeFactsSnapshot {
     schemes: Arc<HashMap<String, TypeScheme>>,
     node_types: Arc<HashMap<TypeFactsNodeId, TypeKind>>,
     root_type: Option<TypeKind>,
+    cache_metrics: Option<CacheMetrics>,
 }
 
 impl TypeFactsSnapshot {
@@ -102,6 +104,7 @@ impl TypeFactsSnapshot {
         schemes: Arc<HashMap<String, TypeScheme>>,
         node_types: Arc<HashMap<TypeFactsNodeId, TypeKind>>,
         root_type: Option<TypeKind>,
+        cache_metrics: Option<CacheMetrics>,
     ) -> Self {
         Self {
             environment,
@@ -109,6 +112,7 @@ impl TypeFactsSnapshot {
             schemes,
             node_types,
             root_type,
+            cache_metrics,
         }
     }
 
@@ -154,18 +158,35 @@ impl TypeFactsSnapshot {
             .map(|(id, ty)| (id.to_string(), format_type(ty)))
             .collect::<HashMap<_, _>>();
 
+        let cache_metrics = self.cache_metrics.map(|metrics| {
+            json!({
+                "lookups": metrics.lookups,
+                "hits": metrics.hits,
+                "misses": metrics.misses,
+                "invalidations": metrics.invalidations,
+                "preserved_constraints": metrics.preserved_constraints,
+                "hit_rate": metrics.hit_rate(),
+            })
+        });
+
         json!({
             "environment": environment,
             "bindings": bindings,
             "schemes": schemes,
             "node_types": node_types,
             "root_type": self.root_type.as_ref().map(format_type),
+            "cache_metrics": cache_metrics,
         })
     }
 
     /// Serialises the facts as a pretty JSON string for CLI debug output.
     pub fn to_pretty_json(&self) -> serde_json::Result<String> {
         serde_json::to_string_pretty(&self.to_json())
+    }
+
+    /// Returns cache telemetry captured during the inference run if available.
+    pub fn cache_metrics(&self) -> Option<CacheMetrics> {
+        self.cache_metrics
     }
 }
 
@@ -212,6 +233,7 @@ pub struct TypeFactsBuilder {
     schemes: HashMap<String, TypeScheme>,
     node_types: HashMap<TypeFactsNodeId, TypeKind>,
     root_type: Option<TypeKind>,
+    cache_metrics: Option<CacheMetrics>,
 }
 
 impl TypeFactsBuilder {
@@ -249,6 +271,11 @@ impl TypeFactsBuilder {
         self
     }
 
+    pub fn set_cache_metrics(&mut self, metrics: CacheMetrics) -> &mut Self {
+        self.cache_metrics = Some(metrics);
+        self
+    }
+
     pub fn build(self) -> TypeFactsSnapshot {
         TypeFactsSnapshot::new(
             Arc::new(TypeEnvironmentSnapshot::new(self.environment)),
@@ -256,6 +283,7 @@ impl TypeFactsBuilder {
             Arc::new(self.schemes),
             Arc::new(self.node_types),
             self.root_type,
+            self.cache_metrics,
         )
     }
 }
@@ -295,6 +323,7 @@ fn format_type(ty: &TypeKind) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cache::CacheMetrics;
     use crate::types::TypeVariant;
 
     fn sample_type(name: &'static str) -> TypeKind {
@@ -323,16 +352,19 @@ mod tests {
         assert!(snapshot.type_for_node(1).is_some());
         assert!(snapshot.environment().values().contains_key("x"));
         assert!(snapshot.root_type().is_some());
+        assert!(snapshot.cache_metrics().is_none());
     }
 
     #[test]
     fn snapshot_produces_json() {
         let mut builder = TypeFactsBuilder::new();
         builder.environment_entry("x", sample_type("Int"));
+        builder.set_cache_metrics(CacheMetrics::default());
         let snapshot = builder.build();
 
         let json = snapshot.to_pretty_json().expect("json");
         assert!(json.contains("\"environment\""));
+        assert!(json.contains("\"cache_metrics\""));
     }
 
     #[test]

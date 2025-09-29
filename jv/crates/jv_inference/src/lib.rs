@@ -13,6 +13,10 @@ pub mod service;
 pub mod solver;
 pub mod types;
 
+pub use cache::{
+    CacheMetrics, CachedDiagnostic, CachedSignature, FingerprintHash, InferenceCache,
+    SignatureUpdate,
+};
 pub use service::{FactSpan, TypeFacts};
 pub use types::{
     BoundConstraint, BoundPredicate, BoundsMatrix, FieldType, NullabilityFlag, TypeId, TypeKind,
