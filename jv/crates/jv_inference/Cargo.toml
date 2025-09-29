@@ -9,3 +9,5 @@ description = "Hindley-Milner type inference engine for the jv language"
 
 [dependencies]
 jv_ast = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
