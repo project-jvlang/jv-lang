@@ -139,6 +139,9 @@ test-checker: ## Test checker crate only
 test-fmt: ## Test formatter crate only
 	cargo test --lib -p jv_fmt $(CARGO_FLAGS)
 
+test-inference: ## Test inference crate only
+	cargo test --lib -p jv_inference $(CARGO_FLAGS)
+
 test-cli: ## Test CLI crate only
 	cargo test --lib -p jv_cli $(CARGO_FLAGS)
 
