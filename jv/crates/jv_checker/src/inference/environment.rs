@@ -129,6 +129,17 @@ impl TypeEnvironment {
         substitute_type(&scheme.ty, &substitutions)
     }
 
+    /// すべてのスコープを走査し、可視なシンボルとその型スキームを収集する。
+    pub fn flattened_bindings(&self) -> HashMap<String, TypeScheme> {
+        let mut merged = HashMap::new();
+        for scope in &self.scopes {
+            for (name, scheme) in scope {
+                merged.insert(name.clone(), scheme.clone());
+            }
+        }
+        merged
+    }
+
     /// 環境全体で自由な型変数を収集する。
     fn environment_free_type_vars(&self) -> HashSet<TypeId> {
         let mut acc = HashSet::new();

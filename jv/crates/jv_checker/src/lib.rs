@@ -16,7 +16,11 @@ use jv_ast::{
 use std::collections::HashMap;
 use thiserror::Error;
 
-use jv_inference::TypeFacts;
+use jv_inference::service::{TypeFactsBuilder, TypeFactsSnapshot, TypeScheme as FactsTypeScheme};
+use jv_inference::solver::TypeBinding as FactsTypeBinding;
+use jv_inference::types::{
+    TypeId as FactsTypeId, TypeKind as FactsTypeKind, TypeVariant as FactsTypeVariant,
+};
 
 #[derive(Error, Debug)]
 pub enum CheckError {
@@ -39,16 +43,34 @@ pub struct InferenceSnapshot {
     bindings: Vec<TypeBinding>,
     function_schemes: HashMap<String, TypeScheme>,
     result_type: Option<TypeKind>,
+    facts: TypeFactsSnapshot,
 }
 
 impl InferenceSnapshot {
     fn from_engine(engine: &InferenceEngine) -> Self {
+        let environment = engine.environment().clone();
+        let bindings = engine.bindings().to_vec();
+        let function_schemes = engine.function_schemes().clone();
+        let result_type = engine.result_type().cloned();
+
+        let facts = build_type_facts(
+            &environment,
+            &bindings,
+            &function_schemes,
+            result_type.as_ref(),
+        );
+
         Self {
-            environment: engine.environment().clone(),
-            bindings: engine.bindings().to_vec(),
-            function_schemes: engine.function_schemes().clone(),
-            result_type: engine.result_type().cloned(),
+            environment,
+            bindings,
+            function_schemes,
+            result_type,
+            facts,
         }
+    }
+
+    pub fn type_facts(&self) -> &TypeFactsSnapshot {
+        &self.facts
     }
 }
 
@@ -88,41 +110,6 @@ impl TypeInferenceService for InferenceSnapshot {
     }
 
     fn result_type(&self) -> Option<&TypeKind> {
-        self.result_type.as_ref()
-    }
-}
-
-impl TypeFacts for InferenceSnapshot {
-    type NodeId = usize;
-    type Environment = TypeEnvironment;
-    type Binding = TypeBinding;
-    type Scheme = TypeScheme;
-    type Type = TypeKind;
-
-    fn environment(&self) -> &Self::Environment {
-        &self.environment
-    }
-
-    fn bindings(&self) -> &[Self::Binding] {
-        &self.bindings
-    }
-
-    fn scheme_for(&self, name: &str) -> Option<&Self::Scheme> {
-        self.function_schemes.get(name)
-    }
-
-    fn all_schemes(&self) -> Vec<(&str, &Self::Scheme)> {
-        self.function_schemes
-            .iter()
-            .map(|(name, scheme)| (name.as_str(), scheme))
-            .collect()
-    }
-
-    fn type_for_node(&self, _node: Self::NodeId) -> Option<&Self::Type> {
-        None
-    }
-
-    fn root_type(&self) -> Option<&Self::Type> {
         self.result_type.as_ref()
     }
 }
@@ -178,6 +165,11 @@ impl TypeChecker {
             .map(|snapshot| snapshot as &dyn TypeInferenceService)
     }
 
+    /// 新しい TypeFacts スナップショットへアクセスする。
+    pub fn type_facts(&self) -> Option<&TypeFactsSnapshot> {
+        self.snapshot.as_ref().map(|snapshot| snapshot.type_facts())
+    }
+
     /// 推論スナップショットを引き渡し、内部状態からは破棄する。
     pub fn take_inference_snapshot(&mut self) -> Option<InferenceSnapshot> {
         self.snapshot.take()
@@ -189,6 +181,68 @@ impl TypeChecker {
         // This would check for patterns that shouldn't appear in jv code
         // For example: raw Java generics syntax, null checks without ?. operator, etc.
         violations
+    }
+}
+
+fn build_type_facts(
+    environment: &TypeEnvironment,
+    bindings: &[TypeBinding],
+    function_schemes: &HashMap<String, TypeScheme>,
+    result_type: Option<&TypeKind>,
+) -> TypeFactsSnapshot {
+    let mut builder = TypeFactsBuilder::new();
+
+    let env_map = environment
+        .flattened_bindings()
+        .into_iter()
+        .map(|(name, scheme)| (name, convert_type_kind(&scheme.ty)))
+        .collect::<HashMap<_, _>>();
+    builder.set_environment(env_map);
+
+    for binding in bindings {
+        builder.add_binding(convert_binding(binding));
+    }
+
+    for (name, scheme) in function_schemes {
+        builder.add_scheme(name.clone(), convert_scheme(scheme));
+    }
+
+    if let Some(root) = result_type {
+        builder.set_root_type(convert_type_kind(root));
+    }
+
+    builder.build()
+}
+
+fn convert_binding(binding: &TypeBinding) -> FactsTypeBinding {
+    FactsTypeBinding {
+        id: FactsTypeId::new(binding.variable.id.to_raw()),
+        ty: convert_type_kind(&binding.ty),
+    }
+}
+
+fn convert_scheme(scheme: &TypeScheme) -> FactsTypeScheme {
+    let generics = scheme
+        .quantifiers
+        .iter()
+        .map(|id| FactsTypeId::new(id.to_raw()))
+        .collect::<Vec<_>>();
+    FactsTypeScheme::new(generics, convert_type_kind(&scheme.ty))
+}
+
+fn convert_type_kind(ty: &TypeKind) -> FactsTypeKind {
+    match ty {
+        TypeKind::Primitive(name) => FactsTypeKind::new(FactsTypeVariant::Primitive(name)),
+        TypeKind::Optional(inner) => FactsTypeKind::optional(convert_type_kind(inner)),
+        TypeKind::Variable(id) => {
+            FactsTypeKind::new(FactsTypeVariant::Variable(FactsTypeId::new(id.to_raw())))
+        }
+        TypeKind::Function(params, ret) => {
+            let converted_params = params.iter().map(convert_type_kind).collect::<Vec<_>>();
+            let converted_ret = convert_type_kind(ret);
+            FactsTypeKind::function(converted_params, converted_ret)
+        }
+        TypeKind::Unknown => FactsTypeKind::default(),
     }
 }
 
