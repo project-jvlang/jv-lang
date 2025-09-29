@@ -1,26 +1,28 @@
 {
-  description = "jvlang dev environment (Rust + JDK)";
+  description = "jvlang dev environment (Rust 1.90 + JDK)";
 
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-24.05";
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     flake-utils.url = "github:numtide/flake-utils";
+    rust-overlay.url = "github:oxalica/rust-overlay";
+    rust-overlay.inputs.nixpkgs.follows = "nixpkgs";
   };
 
-  outputs = { self, nixpkgs, flake-utils }:
+  outputs = { self, nixpkgs, flake-utils, rust-overlay }:
     flake-utils.lib.eachDefaultSystem (system:
       let
-        pkgs = import nixpkgs { inherit system; };
+        overlays = [ (import rust-overlay) ];
+        pkgs = import nixpkgs { inherit system overlays; };
         jdk = pkgs.jdk; # System default JDK (provides javac/jar); adjust if JDK 25 available
+        rustToolchain = pkgs.rust-bin.stable."1.90.0".default.override {
+          extensions = [ "rust-src" "clippy" "rustfmt" "rust-analyzer" ];
+        };
       in
       {
         devShells.default = pkgs.mkShell {
           packages = [
-            # Rust toolchain
-            pkgs.rustc
-            pkgs.cargo
-            pkgs.clippy
-            pkgs.rustfmt
-            pkgs.rust-analyzer
+            # Rust 1.90.0 toolchain
+            rustToolchain
 
             # Java toolchain
             jdk
