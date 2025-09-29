@@ -267,6 +267,7 @@ include = ["src/**/*.jv"]
         target: None,
         clean: false,
         perf: false,
+        emit_types: false,
     };
 
     let plan = pipeline::BuildOptionsFactory::compose(project_root, settings, layout, overrides)
@@ -343,6 +344,7 @@ clean = false
         target: None,
         clean: false,
         perf: false,
+        emit_types: false,
     };
 
     let plan = pipeline::BuildOptionsFactory::compose(project_root, settings, layout, overrides)

@@ -3,7 +3,9 @@
 //! Run with: `cargo test --lib -p jv_checker`.
 
 use jv_checker::{CheckError, TypeChecker, TypeInferenceService, TypeKind};
+use jv_inference::service::TypeFacts;
 use jv_parser::Parser;
+use serde_json::Value;
 
 fn parse_program(source: &str) -> jv_ast::Program {
     Parser::parse(source).expect("source snippet should be valid")
@@ -77,4 +79,97 @@ fn reports_null_safety_violation_for_non_nullable_binding() {
         error,
         CheckError::NullSafetyError(message) if message.contains("message")
     )));
+}
+
+#[test]
+fn type_facts_snapshot_contains_environment() {
+    let program = parse_program("val greeting = \"hello\"\n");
+
+    let mut checker = TypeChecker::new();
+    checker
+        .check_program(&program)
+        .expect("program should type-check");
+
+    let facts = checker
+        .type_facts()
+        .expect("type facts snapshot should be available");
+
+    let json = facts.to_json();
+    let environment = json
+        .get("environment")
+        .and_then(Value::as_object)
+        .expect("environment section present");
+    let greeting_entry = environment
+        .get("greeting")
+        .and_then(Value::as_str)
+        .expect("greeting binding exported");
+    assert!(
+        greeting_entry.contains("Primitive(\"String\")"),
+        "unexpected environment entry: {greeting_entry}"
+    );
+    let pretty = facts.to_pretty_json().expect("serialize facts to json");
+    assert!(
+        pretty.contains("greeting"),
+        "json output should mention binding: {pretty}"
+    );
+    assert!(facts.bindings().len() >= 1);
+}
+
+#[test]
+fn reports_ambiguous_function_signature_error() {
+    let program = parse_program("fun ambiguous(value) { null }\n");
+
+    let mut checker = TypeChecker::new();
+    let errors = checker
+        .check_program(&program)
+        .expect_err("ambiguous function must yield type error");
+
+    assert!(errors.iter().any(|error| matches!(
+        error,
+        CheckError::TypeError(message) if message.contains("ambiguous function signature")
+    )));
+}
+
+#[test]
+fn type_facts_update_after_rechecking_program() {
+    let program_v1 = parse_program("val counter = 1\n");
+    let mut checker = TypeChecker::new();
+    checker
+        .check_program(&program_v1)
+        .expect("first pass should succeed");
+
+    let first_snapshot = checker
+        .type_facts()
+        .expect("first snapshot available")
+        .to_json();
+    let first_env = first_snapshot
+        .get("environment")
+        .and_then(Value::as_object)
+        .expect("environment exists in first snapshot");
+    assert!(first_env.get("counter").is_some());
+    assert!(first_env.get("incremented").is_none());
+
+    let program_v2 = parse_program("val counter = 1\nval incremented = counter + 1\n");
+    checker
+        .check_program(&program_v2)
+        .expect("second pass should succeed");
+
+    let second_snapshot = checker
+        .type_facts()
+        .expect("second snapshot available")
+        .to_json();
+    let second_env = second_snapshot
+        .get("environment")
+        .and_then(Value::as_object)
+        .expect("environment exists in second snapshot");
+
+    assert!(second_env.get("counter").is_some());
+    let incremented = second_env
+        .get("incremented")
+        .and_then(Value::as_str)
+        .expect("incremented binding exported after second run");
+    assert!(
+        incremented.contains("Primitive(\"Int\")"),
+        "expected incremented binding to be inferred as Int"
+    );
 }

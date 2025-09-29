@@ -123,6 +123,7 @@ jv build [OPTIONS] [FILES...]
 - `--optimization <LEVEL>`: 最適化レベル (0-3)
 - `--debug`: デバッグ情報を含める
 - `--perf`: AST→IR性能メトリクスを計測し `target/perf-reports/ast-ir-phase1.json` に保存
+- `--emit-types`: 型推論結果を JSON で標準出力へ書き出す（`--check` を暗黙的に有効化）
 
 #### パフォーマンスモード (`--perf`)
 
@@ -138,6 +139,25 @@ jv build [OPTIONS] [FILES...]
 # AST→IR 性能を計測しつつプレビューする
 jv build --perf --preview
 ```
+
+#### 型推論ファクト出力 (`--emit-types`)
+
+`--emit-types` を指定すると型推論の結果が Pretty JSON で標準出力に追記されます。`--check` が暗黙に有効化されるため、コードは Java 生成前に型検証されます。
+
+```bash
+jv build src/app/main.jv --java-only --check --emit-types
+出力ディレクトリ: ...
+{
+  "environment": {
+    "greeting": "Primitive(\"String\")"
+  },
+  "bindings": [ ... ],
+  "schemes": { ... },
+  "node_types": { ... }
+}
+```
+
+テストスイートでは `cargo test -p jv_checker` / `-p jv_inference` の統合テストが TypeFacts の差分更新を検証しており、同じビルドプランでファイルを書き換えると `incremented` などの新規バインディングが JSON 出力に反映されることを確認できます。
 
 Sample/@Sampleオプション:
 - `--sample-mode=embed|load`: デフォルトの`@Sample`モードを上書き (デフォルト: embed)

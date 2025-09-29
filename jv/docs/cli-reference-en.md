@@ -123,6 +123,7 @@ jv build [OPTIONS] [FILES...]
 - `--optimization <LEVEL>`: Optimization level (0-3)
 - `--debug`: Include debug information
 - `--perf`: Collect AST→IR performance metrics and persist `target/perf-reports/ast-ir-phase1.json`
+- `--emit-types`: Emit inferred type facts as JSON to stdout (implicitly enables `--check`)
   
 #### Performance Mode (`--perf`)
 
@@ -138,6 +139,25 @@ For interpreting results, updating baselines, and triage instructions see the [A
 # Collect AST→IR metrics while previewing the generated Java
 jv build --perf --preview
 ```
+
+#### Type Facts Output (`--emit-types`)
+
+Passing `--emit-types` serialises the `TypeFacts` snapshot as pretty JSON to stdout. The flag implicitly enables `--check`, so type inference always runs before Java generation.
+
+```bash
+jv build src/app/main.jv --java-only --check --emit-types
+Output directory: ...
+{
+  "environment": {
+    "greeting": "Primitive(\"String\")"
+  },
+  "bindings": [ ... ],
+  "schemes": { ... },
+  "node_types": { ... }
+}
+```
+
+Our integration tests (`cargo test -p jv_checker`, `cargo test -p jv_inference`) assert that the emitted snapshot reflects code edits—rebuilding the same plan after adding `val incremented = base + 1` exposes the new binding immediately in the JSON output.
 
 Sample/@Sample options:
 - `--sample-mode=embed|load`: Override default `@Sample` mode (default: embed)

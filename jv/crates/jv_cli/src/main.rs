@@ -51,6 +51,7 @@ fn main() -> Result<()> {
             format,
             clean,
             perf,
+            emit_types,
             binary,
             bin_name,
             target,
@@ -78,6 +79,11 @@ fn main() -> Result<()> {
             let layout = ProjectLayout::from_settings(&project_root, &settings)
                 .map_err(|diagnostic| tooling_failure(&manifest_path, diagnostic))?;
 
+            let mut check = check;
+            if emit_types {
+                check = true;
+            }
+
             let overrides = CliOverrides {
                 entrypoint: input.clone().map(PathBuf::from),
                 output: output.clone().map(PathBuf::from),
@@ -87,6 +93,7 @@ fn main() -> Result<()> {
                 target,
                 clean,
                 perf,
+                emit_types,
             };
 
             let plan = BuildOptionsFactory::compose(project_root, settings, layout, overrides)
@@ -177,6 +184,19 @@ fn main() -> Result<()> {
                 );
             }
 
+            if plan.options.emit_types {
+                if let Some(snapshot) = &artifacts.inference {
+                    match snapshot.type_facts().to_pretty_json() {
+                        Ok(json) => println!("{}", json),
+                        Err(error) => eprintln!("Failed to serialize type facts: {}", error),
+                    }
+                } else {
+                    eprintln!(
+                        "Type facts unavailable: type checking did not produce an inference snapshot",
+                    );
+                }
+            }
+
             prepared_output.mark_success();
         }
         Some(Commands::Run { input, args }) => {
@@ -209,6 +229,7 @@ fn main() -> Result<()> {
                 target: None,
                 clean: false,
                 perf: false,
+                emit_types: false,
             };
 
             let plan = BuildOptionsFactory::compose(project_root, settings, layout, overrides)

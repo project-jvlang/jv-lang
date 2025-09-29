@@ -49,6 +49,9 @@ pub enum Commands {
         /// Capture AST→IR performance metrics and persist a report
         #[arg(long)]
         perf: bool,
+        /// Emit type inference facts as JSON (implies --check)
+        #[arg(long)]
+        emit_types: bool,
         /// Produce a single-file binary artifact: 'jar' or 'native'
         #[arg(long, value_parser = ["jar", "native"])]
         binary: Option<String>,

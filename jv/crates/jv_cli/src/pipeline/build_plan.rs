@@ -30,6 +30,7 @@ pub struct CliOverrides {
     pub target: Option<JavaTarget>,
     pub clean: bool,
     pub perf: bool,
+    pub emit_types: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -41,6 +42,7 @@ pub struct BuildOptions {
     pub format: bool,
     pub clean: bool,
     pub perf: bool,
+    pub emit_types: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -87,14 +89,16 @@ impl BuildOptionsFactory {
         let mut build_config = BuildConfig::with_target(target);
         build_config.output_dir = stringify_path(&output_dir);
 
+        let emit_types = overrides.emit_types;
         let options = BuildOptions {
             entrypoint,
             output_dir,
             java_only: overrides.java_only,
-            check: overrides.check,
+            check: overrides.check || emit_types,
             format: overrides.format,
             clean: overrides.clean || settings.output.clean,
             perf: overrides.perf,
+            emit_types,
         };
 
         Ok(BuildPlan {

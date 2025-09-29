@@ -195,32 +195,6 @@ impl Backend {
 
     async fn get_diagnostics_for_document(&self, uri: &str) -> Vec<Diagnostic> {
         // Placeholder - in a real implementation you'd retrieve stored document content
-        let temp_server = JvLanguageServer::new();
-        let diagnostics = temp_server.get_diagnostics(uri);
-
-        diagnostics
-            .into_iter()
-            .map(|diag| Diagnostic {
-                range: Range {
-                    start: Position {
-                        line: diag.range.start.line,
-                        character: diag.range.start.character,
-                    },
-                    end: Position {
-                        line: diag.range.end.line,
-                        character: diag.range.end.character,
-                    },
-                },
-                severity: diag.severity.map(|sev| match sev {
-                    jv_lsp::DiagnosticSeverity::Error => DiagnosticSeverity::ERROR,
-                    jv_lsp::DiagnosticSeverity::Warning => DiagnosticSeverity::WARNING,
-                    jv_lsp::DiagnosticSeverity::Information => DiagnosticSeverity::INFORMATION,
-                    jv_lsp::DiagnosticSeverity::Hint => DiagnosticSeverity::HINT,
-                }),
-                message: diag.message,
-                source: Some("jv-lsp".to_string()),
-                ..Default::default()
-            })
-            .collect()
+        Vec::new()
     }
 }

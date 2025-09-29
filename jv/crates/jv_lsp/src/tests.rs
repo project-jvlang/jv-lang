@@ -194,3 +194,54 @@ fn test_document_update() {
     server.open_document(uri.clone(), "val x = 42".to_string());
     assert_eq!(server.documents.get(&uri), Some(&"val x = 42".to_string()));
 }
+
+#[test]
+fn caches_type_facts_after_successful_inference() {
+    let mut server = JvLanguageServer::new();
+    let uri = "file:///facts.jv".to_string();
+    server.open_document(uri.clone(), "val greeting = \"hello\"".to_string());
+
+    let diagnostics = server.get_diagnostics(&uri);
+    assert!(diagnostics.is_empty());
+
+    let facts = server
+        .type_facts(&uri)
+        .expect("type facts should be cached");
+    let environment = facts.to_json();
+    let bindings = environment
+        .get("environment")
+        .and_then(serde_json::Value::as_object)
+        .expect("environment map present");
+    let greeting = bindings
+        .get("greeting")
+        .and_then(serde_json::Value::as_str)
+        .expect("greeting binding exported");
+    assert!(greeting.contains("Primitive(\"String\")"));
+}
+
+#[test]
+fn reports_type_error_for_ambiguous_function() {
+    let mut server = JvLanguageServer::new();
+    let uri = "file:///ambiguous.jv".to_string();
+    server.open_document(uri.clone(), "fun ambiguous(x) { null }".to_string());
+
+    let diagnostics = server.get_diagnostics(&uri);
+    assert!(!diagnostics.is_empty());
+    assert!(diagnostics
+        .iter()
+        .any(|diag| diag.message.contains("ambiguous function signature")));
+    assert!(server.type_facts(&uri).is_none());
+}
+
+#[test]
+fn surfaces_null_safety_warning() {
+    let mut server = JvLanguageServer::new();
+    let uri = "file:///null.jv".to_string();
+    server.open_document(uri.clone(), "val message: String = null".to_string());
+
+    let diagnostics = server.get_diagnostics(&uri);
+    assert!(diagnostics.iter().any(|diag| matches!(
+        diag.severity,
+        Some(DiagnosticSeverity::Warning)
+    ) && diag.message.contains("Null safety")));
+}

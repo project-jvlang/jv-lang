@@ -58,6 +58,8 @@ fn write_manifest(root: &Path) {
 name = "cli-project-structure"
 version = "0.1.0"
 
+[package.dependencies]
+
 [build]
 java_version = "21"
 
@@ -128,11 +130,12 @@ fn project_pipeline_supports_multi_target_builds() {
         entrypoint: None,
         output: Some(output_base.clone()),
         java_only: true,
-        check: false,
+        check: true,
         format: false,
         target: Some(JavaTarget::Java21),
         clean: false,
         perf: false,
+        emit_types: false,
     };
 
     let plan21 = BuildOptionsFactory::compose(
@@ -160,11 +163,12 @@ fn project_pipeline_supports_multi_target_builds() {
         entrypoint: None,
         output: Some(output_base.clone()),
         java_only: true,
-        check: false,
+        check: true,
         format: true,
         target: Some(JavaTarget::Java25),
         clean: false,
         perf: false,
+        emit_types: false,
     };
 
     let plan25 = BuildOptionsFactory::compose(project_root, settings, layout, overrides25)
@@ -204,11 +208,12 @@ fn clean_option_removes_stale_target_artifacts() {
         entrypoint: None,
         output: Some(output_base.clone()),
         java_only: true,
-        check: false,
+        check: true,
         format: false,
         target: Some(JavaTarget::Java21),
         clean,
         perf: false,
+        emit_types: false,
     };
 
     let plan_initial = BuildOptionsFactory::compose(

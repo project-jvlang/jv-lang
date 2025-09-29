@@ -9,6 +9,8 @@ MANIFEST_PATH := jv/Cargo.toml
 CARGO_FLAGS := --manifest-path $(MANIFEST_PATH)
 TEST_FLAGS := $(CARGO_FLAGS) --lib
 RELEASE_FLAGS := $(CARGO_FLAGS) --release
+# Reduce debug info size to avoid linker overflows during tests
+export RUSTFLAGS := -C debuginfo=0 -C strip=debuginfo
 
 help: ## Show this help message
 	@echo "jv Language Project Build Commands"

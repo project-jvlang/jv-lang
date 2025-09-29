@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use jv_checker::{TypeInferenceService, TypeKind};
 use jv_cli::pipeline::{compile, BuildOptionsFactory, CliOverrides};
 use jv_cli::pipeline::project::{layout::ProjectLayout, locator::ProjectRoot, manifest::ManifestLoader};
 
@@ -178,6 +179,8 @@ fn pipeline_compile_produces_artifacts() {
             format: true,
             target: None,
             clean: false,
+            perf: false,
+            emit_types: false,
         },
     );
 
@@ -192,6 +195,182 @@ fn pipeline_compile_produces_artifacts() {
     for file in &artifacts.java_files {
         assert!(file.exists(), "Java file missing: {}", file.display());
     }
+}
+
+#[test]
+fn pipeline_emit_types_produces_type_facts_json() {
+    let temp_dir = TempDirGuard::new("pipeline-emit-types").expect("create temp dir");
+    let input = workspace_file("test_simple.jv");
+
+    let plan = compose_plan_from_fixture(
+        temp_dir.path(),
+        &input,
+        CliOverrides {
+            entrypoint: None,
+            output: None,
+            java_only: true,
+            check: false,
+            format: false,
+            target: None,
+            clean: false,
+            perf: false,
+            emit_types: true,
+        },
+    );
+
+    let artifacts = compile(&plan).expect("emit-types compilation succeeds");
+    let snapshot = artifacts
+        .inference
+        .expect("emit-types should retain inference snapshot");
+    let json = snapshot
+        .type_facts()
+        .to_pretty_json()
+        .expect("serialize type facts");
+
+    assert!(json.contains("environment"), "missing environment: {json}");
+    assert!(json.contains("message"), "expected binding entry in json: {json}");
+}
+
+#[test]
+fn type_inference_snapshot_emitted_with_emit_types() {
+    let temp_dir = TempDirGuard::new("type-facts").expect("temp dir");
+    let snippet = temp_dir.path().join("snippet.jv");
+    fs::write(&snippet, "val answer = 42\n").expect("write snippet");
+
+    let plan = compose_plan_from_fixture(
+        temp_dir.path(),
+        &snippet,
+        CliOverrides {
+            entrypoint: None,
+            output: None,
+            java_only: true,
+            check: true,
+            format: false,
+            target: None,
+            clean: false,
+            perf: false,
+            emit_types: true,
+        },
+    );
+
+    let artifacts = compile(&plan).expect("compile with emit-types succeeds");
+    let snapshot = artifacts
+        .inference
+        .as_ref()
+        .expect("inference snapshot present");
+
+    let environment = snapshot.environment().flattened_bindings();
+    let scheme = environment
+        .get("answer")
+        .expect("answer binding exported in environment");
+    assert!(matches!(scheme.ty, TypeKind::Primitive("Int")));
+    assert!(snapshot.bindings().len() >= 1);
+}
+
+#[test]
+fn type_inference_snapshot_tracks_program_changes() {
+    let temp_dir = TempDirGuard::new("type-facts-diff").expect("temp dir");
+    let snippet = temp_dir.path().join("main.jv");
+    fs::write(&snippet, "val base = 1\n").expect("write initial snippet");
+
+    let plan = compose_plan_from_fixture(
+        temp_dir.path(),
+        &snippet,
+        CliOverrides {
+            entrypoint: None,
+            output: None,
+            java_only: true,
+            check: true,
+            format: false,
+            target: None,
+            clean: false,
+            perf: false,
+            emit_types: true,
+        },
+    );
+
+    let first = compile(&plan).expect("first compile succeeds");
+    let first_env = first
+        .inference
+        .as_ref()
+        .expect("first inference snapshot")
+        .environment()
+        .flattened_bindings();
+    assert!(first_env.contains_key("base"));
+    assert!(!first_env.contains_key("incremented"));
+
+    fs::write(&snippet, "val base = 1\nval incremented = base + 1\n")
+        .expect("write updated snippet");
+
+    let second = compile(&plan).expect("second compile succeeds");
+    let second_env = second
+        .inference
+        .as_ref()
+        .expect("second inference snapshot")
+        .environment()
+        .flattened_bindings();
+    assert!(second_env.contains_key("base"));
+    let incremented = second_env
+        .get("incremented")
+        .expect("incremented binding present");
+    assert!(matches!(incremented.ty, TypeKind::Primitive("Int")));
+}
+
+#[test]
+fn null_safety_warnings_survive_pipeline() {
+    let temp_dir = TempDirGuard::new("null-safety").expect("temp dir");
+    let snippet = temp_dir.path().join("main.jv");
+    fs::write(&snippet, "val message: String = null\n").expect("write snippet");
+
+    let plan = compose_plan_from_fixture(
+        temp_dir.path(),
+        &snippet,
+        CliOverrides {
+            entrypoint: None,
+            output: None,
+            java_only: true,
+            check: true,
+            format: false,
+            target: None,
+            clean: false,
+            perf: false,
+            emit_types: false,
+        },
+    );
+
+    let artifacts = compile(&plan).expect("compile succeeds with null warning");
+    assert!(artifacts
+        .warnings
+        .iter()
+        .any(|warning| warning.contains("Null safety violation")));
+}
+
+#[test]
+fn ambiguous_function_causes_type_error() {
+    let temp_dir = TempDirGuard::new("ambiguous").expect("temp dir");
+    let snippet = temp_dir.path().join("main.jv");
+    fs::write(&snippet, "fun ambiguous(x) { null }\n").expect("write snippet");
+
+    let plan = compose_plan_from_fixture(
+        temp_dir.path(),
+        &snippet,
+        CliOverrides {
+            entrypoint: None,
+            output: None,
+            java_only: true,
+            check: true,
+            format: false,
+            target: None,
+            clean: false,
+            perf: false,
+            emit_types: false,
+        },
+    );
+
+    let error = compile(&plan).expect_err("type error expected for ambiguous function");
+    let message = error.to_string();
+    assert!(message.contains("Type checking failed"));
+    assert!(message.contains("ambiguous function signature"));
 }
 
 #[test]
@@ -220,6 +399,8 @@ fn pipeline_reports_missing_else_in_value_when() {
             format: false,
             target: None,
             clean: false,
+            perf: false,
+            emit_types: false,
         },
     );
 
@@ -252,6 +433,8 @@ fn pipeline_runs_javac_when_available() {
             format: false,
             target: None,
             clean: false,
+            perf: false,
+            emit_types: false,
         },
     );
 
