@@ -44,8 +44,29 @@ lint: ## Run clippy linter
 release: ## Build optimized release binaries
 	cargo build $(RELEASE_FLAGS)
 
-install: ## Install jv CLI tools locally
-	cargo install --path jv/crates/jv_cli $(CARGO_FLAGS)
+release-binaries: ## Build all release binaries (jv, jvx, jv-lsp)
+	cargo build --bin jv $(RELEASE_FLAGS)
+	cargo build --bin jvx $(RELEASE_FLAGS)
+	cargo build --bin jv-lsp $(RELEASE_FLAGS)
+
+release-jv: ## Build jv release binary only
+	cargo build --bin jv $(RELEASE_FLAGS)
+
+release-jvx: ## Build jvx release binary only
+	cargo build --bin jvx $(RELEASE_FLAGS)
+
+release-jv-lsp: ## Build jv-lsp release binary only
+	cargo build --bin jv-lsp $(RELEASE_FLAGS)
+
+install: ## Install all jv tools locally (jv, jvx, jv-lsp)
+	cargo install --path jv/crates/jv_cli
+	cargo install --path jv/crates/jv_lsp
+
+install-cli: ## Install jv CLI tools only (jv, jvx)
+	cargo install --path jv/crates/jv_cli
+
+install-lsp: ## Install jv-lsp Language Server only
+	cargo install --path jv/crates/jv_lsp
 
 # Documentation
 docs: ## Generate documentation
@@ -81,6 +102,21 @@ build-cli: ## Build CLI crate only
 build-lsp: ## Build LSP server crate only
 	cargo build -p jv_lsp $(CARGO_FLAGS)
 
+# Binary-specific builds
+build-jv: ## Build jv binary only
+	cargo build --bin jv $(CARGO_FLAGS)
+
+build-jvx: ## Build jvx binary only
+	cargo build --bin jvx $(CARGO_FLAGS)
+
+build-jv-lsp: ## Build jv-lsp binary only
+	cargo build --bin jv-lsp $(CARGO_FLAGS)
+
+build-binaries: ## Build all binaries (jv, jvx, jv-lsp)
+	cargo build --bin jv $(CARGO_FLAGS)
+	cargo build --bin jvx $(CARGO_FLAGS)
+	cargo build --bin jv-lsp $(CARGO_FLAGS)
+
 # Testing individual crates
 test-lexer: ## Test lexer crate only
 	cargo test --lib -p jv_lexer $(CARGO_FLAGS)
@@ -109,6 +145,21 @@ test-cli: ## Test CLI crate only
 test-lsp: ## Test LSP server crate only
 	cargo test --lib -p jv_lsp $(CARGO_FLAGS)
 
+# Binary testing commands
+test-jv-bin: ## Test jv binary integration
+	cargo test --bin jv $(CARGO_FLAGS)
+
+test-jvx-bin: ## Test jvx binary integration
+	cargo test --bin jvx $(CARGO_FLAGS)
+
+test-jv-lsp-bin: ## Test jv-lsp binary integration
+	cargo test --bin jv-lsp $(CARGO_FLAGS)
+
+test-all-binaries: ## Test all binaries
+	cargo test --bin jv $(CARGO_FLAGS)
+	cargo test --bin jvx $(CARGO_FLAGS)
+	cargo test --bin jv-lsp $(CARGO_FLAGS)
+
 # CI/CD commands
 ci: check test lint ## Run CI checks (check + test + lint)
 
@@ -117,7 +168,9 @@ build-lowmem: ## Build with reduced parallelism for low-memory systems
 	cargo build $(CARGO_FLAGS) -j 2
 
 test-lowmem: ## Test with reduced parallelism for low-memory systems
-	CARGO_INCREMENTAL=0 cargo test $(TEST_FLAGS) -j 2
+	CARGO_INCREMENTAL=0 cargo test $(CARGO_FLAGS) --workspace --exclude jv_cli --exclude jv_lsp --lib -j 2
+	CARGO_INCREMENTAL=0 cargo test $(CARGO_FLAGS) --lib -p jv_cli -j 1
+	CARGO_INCREMENTAL=0 cargo test $(CARGO_FLAGS) --lib -p jv_lsp -j 1
 
 # Ultra low-memory builds (for constrained CI environments)
 build-minimal: ## Build with single thread for minimal memory usage
@@ -147,6 +200,25 @@ watch-test: ## Watch for changes and run tests
 tree: ## Show dependency tree
 	cargo tree $(CARGO_FLAGS)
 
+# Verification commands
+verify-binaries: ## Verify all binaries can be built
+	@echo "Verifying binary builds..."
+	cargo build --bin jv $(CARGO_FLAGS)
+	cargo build --bin jvx $(CARGO_FLAGS)
+	cargo build --bin jv-lsp $(CARGO_FLAGS)
+	@echo "✅ All binaries built successfully"
+
+verify-structure: ## Verify project structure and files
+	@echo "Verifying project structure..."
+	@test -f jv/crates/jv_cli/src/main.rs || (echo "❌ Missing jv CLI main.rs" && exit 1)
+	@test -f jv/crates/jv_cli/src/bin/jvx.rs || (echo "❌ Missing jvx binary" && exit 1)
+	@test -f jv/crates/jv_lsp/src/main.rs || (echo "❌ Missing jv-lsp main.rs" && exit 1)
+	@test -f jv/crates/jv_lsp/src/lib.rs || (echo "❌ Missing jv-lsp lib.rs" && exit 1)
+	@echo "✅ Project structure verified"
+
+verify-all: verify-structure verify-binaries ## Run all verification checks
+	@echo "✅ All verification checks passed"
+
 outdated: ## Check for outdated dependencies (requires cargo-outdated)
 	cargo outdated $(CARGO_FLAGS)
 
@@ -160,6 +232,11 @@ info: ## Show project information
 	@echo "Workspace: $(shell pwd)/jv"
 	@echo "Crates:"
 	@find jv/crates -name Cargo.toml -exec dirname {} \; | sed 's|jv/crates/|  - |'
+	@echo ""
+	@echo "Binaries:"
+	@echo "  - jv       (Main CLI - project management, build, run)"
+	@echo "  - jvx      (Quick execution - snippets, testing)"
+	@echo "  - jv-lsp   (Language Server - editor integration)"
 	@echo ""
 	@echo "Build Configuration:"
 	@echo "  Debug codegen-units: 16 (memory optimized)"
