@@ -116,7 +116,11 @@ impl tower_lsp::LanguageServer for Backend {
     }
 
     async fn hover(&self, params: HoverParams) -> LspResult<Option<Hover>> {
-        let _uri = params.text_document_position_params.text_document.uri.to_string();
+        let _uri = params
+            .text_document_position_params
+            .text_document
+            .uri
+            .to_string();
         let _position = params.text_document_position_params.position;
 
         // Placeholder hover implementation
