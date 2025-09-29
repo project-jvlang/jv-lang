@@ -11,5 +11,10 @@ pub mod environment;
 pub mod generalize;
 pub mod service;
 pub mod solver;
+pub mod types;
 
 pub use service::{FactSpan, TypeFacts};
+pub use types::{
+    BoundConstraint, BoundPredicate, BoundsMatrix, FieldType, NullabilityFlag, TypeId, TypeKind,
+    TypeVariant,
+};
