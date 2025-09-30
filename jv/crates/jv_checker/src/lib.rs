@@ -126,6 +126,7 @@ pub struct InferenceTelemetry {
     pub invalidation_cascade_depth: usize,
     pub pattern_cache_hits: u64,
     pub pattern_cache_misses: u64,
+    pub pattern_bridge_ms: f64,
 }
 
 impl Default for InferenceTelemetry {
@@ -139,6 +140,7 @@ impl Default for InferenceTelemetry {
             invalidation_cascade_depth: 0,
             pattern_cache_hits: 0,
             pattern_cache_misses: 0,
+            pattern_bridge_ms: 0.0,
         }
     }
 }
@@ -226,11 +228,21 @@ impl TypeChecker {
         program: &Program,
         snapshot: Option<&InferenceSnapshot>,
     ) -> Vec<CheckError> {
-        let snapshot = snapshot.or_else(|| self.inference_snapshot());
-        let mut report = NullSafetyCoordinator::new(snapshot).run(program);
+        let snapshot_owned = match snapshot {
+            Some(existing) => Some(existing.clone()),
+            None => self.inference_snapshot().cloned(),
+        };
+        let mut coordinator =
+            NullSafetyCoordinator::new(snapshot_owned, Some(&mut self.pattern_service));
+        let mut report = coordinator.run(program);
         self.null_safety_hints = report.take_java_hints();
         if let Some(facts) = report.take_type_facts() {
             self.merged_facts = Some(facts);
+        }
+        if let Some(duration) = report.pattern_bridge_duration_ms() {
+            self.engine.telemetry_mut().pattern_bridge_ms = duration;
+        } else {
+            self.engine.telemetry_mut().pattern_bridge_ms = 0.0;
         }
         report.take_diagnostics()
     }

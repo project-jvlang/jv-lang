@@ -115,6 +115,12 @@ const DIAGNOSTICS: &[DiagnosticDescriptor] = &[
         severity: DiagnosticSeverity::Error,
     },
     DiagnosticDescriptor {
+        code: "JV3108",
+        title: "`when` null branch contradicts non-null type / non-null 型と null 分岐が矛盾しています",
+        help: "変数が non-null として推論されている場合、`null` 分岐は到達不能です。分岐を削除するか、型を nullable へ変更してください。/ The value is inferred as non-null, so a `null` branch is unreachable. Remove the branch or update the type to be nullable.",
+        severity: DiagnosticSeverity::Warning,
+    },
+    DiagnosticDescriptor {
         code: "E_WHEN_002",
         title: "`when` in value position requires `else` / 値コンテキストの`when`には`else`が必要",
         help: "Add an `else` branch or keep the `when` in a Unit context. See docs/language-guide.md#when-expression and docs/language-guide-en.md#when-expression.",

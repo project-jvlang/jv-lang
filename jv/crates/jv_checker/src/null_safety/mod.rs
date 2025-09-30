@@ -4,9 +4,11 @@ mod diagnostics;
 mod flow;
 mod graph;
 mod operators;
+mod pattern_bridge;
 mod patterns;
 
 use crate::inference::nullability::NullabilityAnalyzer;
+use crate::pattern::PatternMatchService;
 use crate::{CheckError, InferenceSnapshot};
 use boundary::BoundaryChecker;
 use diagnostics::DiagnosticsEmitter;
@@ -14,6 +16,9 @@ use flow::{build_graph, FlowSolver};
 use jv_ast::Program;
 use jv_inference::service::TypeFactsSnapshot;
 pub use operators::{JavaLoweringHint, JavaLoweringStrategy};
+use pattern_bridge::PatternFactsBridge;
+
+use std::time::Instant;
 
 pub use context::{NullSafetyContext, NullabilityKind, NullabilityLattice};
 
@@ -24,6 +29,7 @@ pub struct NullSafetyReport {
     warnings: Vec<CheckError>,
     java_hints: Vec<JavaLoweringHint>,
     type_facts: Option<TypeFactsSnapshot>,
+    pattern_bridge_duration_ms: Option<f64>,
 }
 
 impl NullSafetyReport {
@@ -37,6 +43,7 @@ impl NullSafetyReport {
             warnings: Vec::new(),
             java_hints: Vec::new(),
             type_facts: None,
+            pattern_bridge_duration_ms: None,
         }
     }
 
@@ -89,22 +96,51 @@ impl NullSafetyReport {
     pub fn take_type_facts(&mut self) -> Option<TypeFactsSnapshot> {
         self.type_facts.take()
     }
-}
 
-/// Coordinates context hydration, flow analysis, and diagnostics emission.
-pub struct NullSafetyCoordinator<'snapshot> {
-    snapshot: Option<&'snapshot InferenceSnapshot>,
-}
-
-impl<'snapshot> NullSafetyCoordinator<'snapshot> {
-    pub fn new(snapshot: Option<&'snapshot InferenceSnapshot>) -> Self {
-        Self { snapshot }
+    pub fn set_pattern_bridge_duration_ms(&mut self, duration: f64) {
+        self.pattern_bridge_duration_ms = Some(duration);
     }
 
-    pub fn run(&self, program: &Program) -> NullSafetyReport {
+    pub fn pattern_bridge_duration_ms(&self) -> Option<f64> {
+        self.pattern_bridge_duration_ms
+    }
+}
+
+/// Coordinates context hydration, pattern bridging, flow analysis, and diagnostics emission.
+pub struct NullSafetyCoordinator<'service> {
+    snapshot: Option<InferenceSnapshot>,
+    pattern_service: Option<&'service mut PatternMatchService>,
+}
+
+impl<'service> NullSafetyCoordinator<'service> {
+    pub fn new(
+        snapshot: Option<InferenceSnapshot>,
+        pattern_service: Option<&'service mut PatternMatchService>,
+    ) -> Self {
+        Self {
+            snapshot,
+            pattern_service,
+        }
+    }
+
+    pub fn run(&mut self, program: &Program) -> NullSafetyReport {
         let mut report = NullSafetyReport::new();
-        let mut context = NullSafetyContext::hydrate(self.snapshot);
-        let graph = build_graph(program, context.late_init_mut());
+        let snapshot_ref = self.snapshot.as_ref();
+        let mut context = NullSafetyContext::hydrate(snapshot_ref);
+
+        let mut bridge_duration = None;
+
+        if let Some(service) = self.pattern_service.as_deref_mut() {
+            let mut bridge = PatternFactsBridge::new();
+            let started = Instant::now();
+            let outcome = bridge.apply_program(program, service, &mut context);
+            bridge_duration = Some(started.elapsed().as_secs_f64() * 1_000.0);
+            if !outcome.diagnostics.is_empty() {
+                report.extend_diagnostics(outcome.diagnostics);
+            }
+        }
+
+        let graph = build_graph(program, &mut context);
         let analysis = FlowSolver::new(&graph, &context).solve();
         let emitter = DiagnosticsEmitter::new(&context);
         let payload = emitter.emit(&analysis);
@@ -120,6 +156,9 @@ impl<'snapshot> NullSafetyCoordinator<'snapshot> {
         }
         report.extend_java_hints(analysis.java_hints);
         report.extend_diagnostics(NullabilityAnalyzer::analyze(program));
+        if let Some(duration) = bridge_duration {
+            report.set_pattern_bridge_duration_ms(duration);
+        }
         report
     }
 }

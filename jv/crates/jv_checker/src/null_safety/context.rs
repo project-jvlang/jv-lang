@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::inference::{TypeEnvironment, TypeKind as CheckerTypeKind, TypeScheme};
+use crate::pattern::PatternMatchFacts;
 use crate::{InferenceSnapshot, TypeInferenceService};
 use jv_inference::service::{TypeFacts, TypeFactsSnapshot};
 use jv_inference::types::{
@@ -182,6 +183,7 @@ pub struct NullSafetyContext<'facts> {
     degraded: bool,
     late_init: LateInitRegistry,
     java_metadata: HashMap<String, JavaSymbolMetadata>,
+    pattern_facts: HashMap<u64, PatternMatchFacts>,
 }
 
 impl<'facts> NullSafetyContext<'facts> {
@@ -235,6 +237,7 @@ impl<'facts> NullSafetyContext<'facts> {
             degraded: facts.is_none() || environment.is_none(),
             late_init,
             java_metadata,
+            pattern_facts: HashMap::new(),
         }
     }
 
@@ -245,6 +248,7 @@ impl<'facts> NullSafetyContext<'facts> {
             degraded: true,
             late_init: LateInitRegistry::default(),
             java_metadata: HashMap::new(),
+            pattern_facts: HashMap::new(),
         }
     }
 
@@ -293,6 +297,14 @@ impl<'facts> NullSafetyContext<'facts> {
         self.java_metadata
             .iter()
             .filter_map(|(symbol, meta)| meta.boundary.map(|kind| (symbol, kind)))
+    }
+
+    pub fn register_pattern_facts(&mut self, node_id: u64, facts: PatternMatchFacts) {
+        self.pattern_facts.insert(node_id, facts);
+    }
+
+    pub fn pattern_facts(&self, node_id: u64) -> Option<&PatternMatchFacts> {
+        self.pattern_facts.get(&node_id)
     }
 }
 

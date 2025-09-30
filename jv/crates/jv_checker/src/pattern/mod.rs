@@ -2,6 +2,7 @@
 
 mod exhaustiveness;
 mod facts;
+mod narrowing;
 mod normalizer;
 mod validator;
 
@@ -10,7 +11,10 @@ use jv_ast::{Expression, Program, Span};
 use std::collections::{hash_map::DefaultHasher, HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 
-pub use facts::{MissingBooleanCase, MissingCase, PatternCacheMetrics, PatternMatchFacts};
+pub use facts::{
+    ArmId, MissingBooleanCase, MissingCase, NarrowedBinding, NarrowedNullability, NarrowingFacts,
+    NarrowingSnapshot, PatternCacheMetrics, PatternMatchFacts,
+};
 pub use normalizer::PatternNormalizer;
 
 const DEFAULT_CACHE_CAPACITY: usize = 256;
@@ -60,7 +64,9 @@ impl PatternMatchService {
         }
 
         self.metrics.record_miss();
-        let facts = exhaustiveness::analyze(expression);
+        let mut facts = exhaustiveness::analyze(expression);
+        let narrowing_facts = narrowing::analyze(expression);
+        facts.set_narrowing(narrowing_facts);
         self.cache.insert(key, facts.clone());
         facts
     }
@@ -148,7 +154,7 @@ impl PatternCacheKey {
     }
 }
 
-fn expression_span(expression: &Expression) -> Option<&Span> {
+pub(crate) fn expression_span(expression: &Expression) -> Option<&Span> {
     match expression {
         Expression::Literal(_, span)
         | Expression::Identifier(_, span)
@@ -171,7 +177,7 @@ fn expression_span(expression: &Expression) -> Option<&Span> {
     }
 }
 
-fn node_identifier(span: &Span) -> u64 {
+pub(crate) fn node_identifier(span: &Span) -> u64 {
     ((span.start_line as u64) << 32) | span.start_column as u64
 }
 

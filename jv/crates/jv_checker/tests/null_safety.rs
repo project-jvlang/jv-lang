@@ -69,3 +69,32 @@ fn null_safety_retains_type_facts_snapshot() {
         panic!("expected environment section in exported type facts");
     }
 }
+
+#[test]
+fn when_null_branch_conflict_emits_jv3108() {
+    let program = parse_program(
+        "val token: String = \"hello\"\n\
+         val label = when (token) {\n\
+             null -> \"none\"\n\
+             else -> token\n\
+         }\n",
+    );
+
+    let mut checker = TypeChecker::new();
+    checker
+        .check_program(&program)
+        .expect("program should type-check");
+
+    let diagnostics = checker.check_null_safety(&program, None);
+    let messages = collect_null_safety_messages(&diagnostics);
+
+    assert!(
+        messages.iter().any(|message| message.contains("JV3108")),
+        "expected JV3108 conflict diagnostic, got: {messages:?}"
+    );
+
+    assert!(
+        checker.telemetry().pattern_bridge_ms >= 0.0,
+        "pattern bridge telemetry should be recorded"
+    );
+}

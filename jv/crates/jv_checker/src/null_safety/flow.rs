@@ -6,9 +6,8 @@ use jv_ast::{
     BinaryOp, Expression, Program, Statement, TryCatchClause, WhenArm,
 };
 
-use super::{
-    context::LateInitRegistry, patterns, NullSafetyContext, NullabilityKind, NullabilityLattice,
-};
+use super::{patterns, NullSafetyContext, NullabilityKind, NullabilityLattice};
+use crate::pattern::{self, ArmId, NarrowedBinding, NarrowedNullability, NarrowingSnapshot};
 use crate::CheckError;
 
 use crate::null_safety::graph::{
@@ -28,13 +27,13 @@ pub struct FlowAnalysisOutcome {
     pub exit_state: Option<FlowStateSnapshot>,
 }
 
-pub fn build_graph(program: &Program, late_init: &mut LateInitRegistry) -> FlowGraph {
+pub fn build_graph(program: &Program, context: &mut NullSafetyContext) -> FlowGraph {
     let mut graph = FlowGraph::new(program.span.clone());
     let entry = graph.entry();
     let exit = graph.exit();
 
     {
-        let mut builder = FlowGraphBuilder::new(&mut graph, late_init);
+        let mut builder = FlowGraphBuilder::new(&mut graph, context);
         let mut current = entry;
         for statement in &program.statements {
             current = builder.handle_statement(current, statement);
@@ -134,14 +133,14 @@ impl<'ctx> FlowSolver<'ctx> {
     }
 }
 
-struct FlowGraphBuilder<'g, 'r> {
+struct FlowGraphBuilder<'g, 'ctx, 'facts> {
     graph: &'g mut FlowGraph,
-    late_init: &'r mut LateInitRegistry,
+    context: &'ctx mut NullSafetyContext<'facts>,
 }
 
-impl<'g, 'r> FlowGraphBuilder<'g, 'r> {
-    fn new(graph: &'g mut FlowGraph, late_init: &'r mut LateInitRegistry) -> Self {
-        Self { graph, late_init }
+impl<'g, 'ctx, 'facts> FlowGraphBuilder<'g, 'ctx, 'facts> {
+    fn new(graph: &'g mut FlowGraph, context: &'ctx mut NullSafetyContext<'facts>) -> Self {
+        Self { graph, context }
     }
 
     fn finish(&mut self) {
@@ -158,7 +157,9 @@ impl<'g, 'r> FlowGraphBuilder<'g, 'r> {
             .iter()
             .any(|annotation| annotation.name.eq_ignore_ascii_case("LateInit"))
         {
-            self.late_init.allow_late_init(name.to_string());
+            self.context
+                .late_init_mut()
+                .allow_late_init(name.to_string());
         }
     }
 
@@ -336,6 +337,8 @@ impl<'g, 'r> FlowGraphBuilder<'g, 'r> {
         else_branch: Option<&Expression>,
         span: Span,
     ) -> FlowNodeId {
+        let node_key = pattern::node_identifier(&span);
+
         let mut cursor = if let Some(subject_expr) = subject {
             self.handle_expression(current, subject_expr, None)
         } else {
@@ -369,7 +372,12 @@ impl<'g, 'r> FlowGraphBuilder<'g, 'r> {
                 test_node,
                 branch_entry,
                 FlowEdgeKind::TrueBranch {
-                    assumption: assumptions.on_match.clone(),
+                    assumption: select_true_assumption(
+                        assumptions.on_match.clone(),
+                        self.context
+                            .pattern_facts(node_key)
+                            .and_then(|facts| facts.arm_narrowing(index as ArmId)),
+                    ),
                 },
             );
 
@@ -397,7 +405,12 @@ impl<'g, 'r> FlowGraphBuilder<'g, 'r> {
                         test_node,
                         target,
                         FlowEdgeKind::FalseBranch {
-                            assumption: assumptions.on_mismatch.clone(),
+                            assumption: select_false_assumption(
+                                assumptions.on_mismatch.clone(),
+                                self.context
+                                    .pattern_facts(node_key)
+                                    .and_then(|facts| facts.arm_narrowing(index as ArmId)),
+                            ),
                         },
                     );
                     cursor = target;
@@ -407,7 +420,12 @@ impl<'g, 'r> FlowGraphBuilder<'g, 'r> {
                         test_node,
                         merge_node,
                         FlowEdgeKind::FalseBranch {
-                            assumption: assumptions.on_mismatch.clone(),
+                            assumption: select_false_assumption(
+                                assumptions.on_mismatch.clone(),
+                                self.context
+                                    .pattern_facts(node_key)
+                                    .and_then(|facts| facts.arm_narrowing(index as ArmId)),
+                            ),
                         },
                     );
                     cursor = merge_node;
@@ -604,6 +622,57 @@ impl<'g, 'r> FlowGraphBuilder<'g, 'r> {
     }
 }
 
+fn select_true_assumption(
+    existing: Option<BranchAssumption>,
+    snapshot: Option<&NarrowingSnapshot>,
+) -> Option<BranchAssumption> {
+    if existing.is_some() {
+        return existing;
+    }
+
+    snapshot
+        .and_then(|snap| first_meaningful_binding(snap.on_match()))
+        .and_then(|binding| binding_to_assumption(binding, true))
+}
+
+fn select_false_assumption(
+    existing: Option<BranchAssumption>,
+    snapshot: Option<&NarrowingSnapshot>,
+) -> Option<BranchAssumption> {
+    if existing.is_some() {
+        return existing;
+    }
+
+    snapshot
+        .and_then(|snap| first_meaningful_binding(snap.on_mismatch()))
+        .and_then(|binding| binding_to_assumption(binding, false))
+}
+
+fn first_meaningful_binding(bindings: &[NarrowedBinding]) -> Option<&NarrowedBinding> {
+    bindings
+        .iter()
+        .find(|binding| binding.nullability != NarrowedNullability::Unknown)
+}
+
+fn binding_to_assumption(
+    binding: &NarrowedBinding,
+    is_true_branch: bool,
+) -> Option<BranchAssumption> {
+    let state = match binding.nullability {
+        NarrowedNullability::NonNull => NullabilityKind::NonNull,
+        NarrowedNullability::Nullable => NullabilityKind::Nullable,
+        NarrowedNullability::Unknown => return None,
+    };
+
+    let variable = binding.variable.clone();
+    let assumption = if is_true_branch {
+        BranchAssumption::Equals { variable, state }
+    } else {
+        BranchAssumption::NotEquals { variable, state }
+    };
+    Some(assumption)
+}
+
 struct ConditionAssumptions {
     true_assumption: Option<BranchAssumption>,
     false_assumption: Option<BranchAssumption>,
@@ -737,7 +806,7 @@ impl ExpressionInfo {
 }
 
 fn apply_operator_outcome(
-    builder: &mut FlowGraphBuilder<'_, '_>,
+    builder: &mut FlowGraphBuilder<'_, '_, '_>,
     outcome: OperatorOutcome,
 ) -> NullabilityKind {
     if let Some(hint) = outcome.hint {
@@ -747,7 +816,7 @@ fn apply_operator_outcome(
 }
 
 fn classify_expression(
-    builder: &mut FlowGraphBuilder<'_, '_>,
+    builder: &mut FlowGraphBuilder<'_, '_, '_>,
     expr: &Expression,
 ) -> ExpressionInfo {
     match expr {
@@ -867,7 +936,7 @@ fn classify_expression(
 }
 
 fn classify_statement_expression(
-    builder: &mut FlowGraphBuilder<'_, '_>,
+    builder: &mut FlowGraphBuilder<'_, '_, '_>,
     statement: &Statement,
 ) -> ExpressionInfo {
     match statement {
@@ -931,8 +1000,8 @@ mod tests {
             span: Span::dummy(),
         };
 
-        let mut registry = LateInitRegistry::default();
-        let graph = build_graph(&program, &mut registry);
+        let mut context = NullSafetyContext::hydrate(None);
+        let graph = build_graph(&program, &mut context);
         assert!(graph.adjacency(graph.entry()).len() > 0);
     }
 
@@ -982,8 +1051,8 @@ mod tests {
             span: span.clone(),
         };
 
-        let mut registry = LateInitRegistry::default();
-        let graph = build_graph(&program, &mut registry);
+        let mut context = NullSafetyContext::hydrate(None);
+        let graph = build_graph(&program, &mut context);
         let catch_node = graph
             .nodes()
             .iter()
@@ -1044,8 +1113,8 @@ mod tests {
             span: span.clone(),
         };
 
-        let mut registry = LateInitRegistry::default();
-        let graph = build_graph(&program, &mut registry);
+        let mut context = NullSafetyContext::hydrate(None);
+        let graph = build_graph(&program, &mut context);
         let exit_id = graph.exit();
         let exceptional_to_exit = (0..graph.node_count()).any(|id| {
             graph
@@ -1079,8 +1148,8 @@ mod tests {
             span,
         };
 
-        let mut registry = LateInitRegistry::default();
-        let graph = build_graph(&program, &mut registry);
+        let mut context = NullSafetyContext::hydrate(None);
+        let graph = build_graph(&program, &mut context);
         let mut assigned_states = Vec::new();
         for node in graph.nodes() {
             for constraint in node.constraints() {
@@ -1130,8 +1199,8 @@ mod tests {
             span,
         };
 
-        let mut registry = LateInitRegistry::default();
-        let graph = build_graph(&program, &mut registry);
+        let mut context = NullSafetyContext::hydrate(None);
+        let graph = build_graph(&program, &mut context);
         let mut assigned_states = Vec::new();
         for node in graph.nodes() {
             for constraint in node.constraints() {
@@ -1206,8 +1275,8 @@ mod tests {
             span: Span::new(1, 1, 6, 1),
         };
 
-        let mut registry = LateInitRegistry::default();
-        let graph = build_graph(&program, &mut registry);
+        let mut context = NullSafetyContext::hydrate(None);
+        let graph = build_graph(&program, &mut context);
         let context = NullSafetyContext::hydrate(None);
         let outcome = FlowSolver::new(&graph, &context).solve();
 
