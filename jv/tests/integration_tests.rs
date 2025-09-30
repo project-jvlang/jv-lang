@@ -181,6 +181,10 @@ fn pipeline_compile_produces_artifacts() {
             clean: false,
             perf: false,
             emit_types: false,
+            emit_telemetry: false,
+            parallel_inference: false,
+            inference_workers: None,
+            constraint_batch: None,
         },
     );
 
@@ -215,6 +219,10 @@ fn pipeline_emit_types_produces_type_facts_json() {
             clean: false,
             perf: false,
             emit_types: true,
+            emit_telemetry: false,
+            parallel_inference: false,
+            inference_workers: None,
+            constraint_batch: None,
         },
     );
 
@@ -250,6 +258,10 @@ fn type_inference_snapshot_emitted_with_emit_types() {
             clean: false,
             perf: false,
             emit_types: true,
+            emit_telemetry: false,
+            parallel_inference: false,
+            inference_workers: None,
+            constraint_batch: None,
         },
     );
 
@@ -286,6 +298,10 @@ fn type_inference_snapshot_tracks_program_changes() {
             clean: false,
             perf: false,
             emit_types: true,
+            emit_telemetry: false,
+            parallel_inference: false,
+            inference_workers: None,
+            constraint_batch: None,
         },
     );
 
@@ -301,6 +317,8 @@ fn type_inference_snapshot_tracks_program_changes() {
 
     fs::write(&snippet, "val base = 1\nval incremented = base + 1\n")
         .expect("write updated snippet");
+    fs::copy(&snippet, &plan.options.entrypoint)
+        .expect("sync updated snippet to entrypoint");
 
     let second = compile(&plan).expect("second compile succeeds");
     let second_env = second
@@ -335,6 +353,10 @@ fn null_safety_warnings_survive_pipeline() {
             clean: false,
             perf: false,
             emit_types: false,
+            emit_telemetry: false,
+            parallel_inference: false,
+            inference_workers: None,
+            constraint_batch: None,
         },
     );
 
@@ -364,6 +386,10 @@ fn ambiguous_function_causes_type_error() {
             clean: false,
             perf: false,
             emit_types: false,
+            emit_telemetry: false,
+            parallel_inference: false,
+            inference_workers: None,
+            constraint_batch: None,
         },
     );
 
@@ -401,6 +427,10 @@ fn pipeline_reports_missing_else_in_value_when() {
             clean: false,
             perf: false,
             emit_types: false,
+            emit_telemetry: false,
+            parallel_inference: false,
+            inference_workers: None,
+            constraint_batch: None,
         },
     );
 
@@ -435,6 +465,10 @@ fn pipeline_runs_javac_when_available() {
             clean: false,
             perf: false,
             emit_types: false,
+            emit_telemetry: false,
+            parallel_inference: false,
+            inference_workers: None,
+            constraint_batch: None,
         },
     );
 

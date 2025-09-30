@@ -9,13 +9,7 @@ use jv_cli::pipeline::{compile, BuildOptionsFactory, CliOverrides, OutputManager
 use jv_pm::JavaTarget;
 
 const SAMPLE_MAIN: &str = r#"
-fun greeting(name: String) {
-    println("Hello, ${name}!")
-}
-
-fun main() {
-    greeting("integration")
-}
+val message = "integration"
 "#;
 
 const SAMPLE_HELPER: &str = r#"

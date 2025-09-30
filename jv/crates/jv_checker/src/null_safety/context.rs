@@ -16,7 +16,7 @@ pub enum NullabilityKind {
 }
 
 impl NullabilityKind {
-    fn join(self, other: Self) -> Self {
+    pub fn join(self, other: Self) -> Self {
         use NullabilityKind::*;
         match (self, other) {
             (Nullable, _) | (_, Nullable) => Nullable,

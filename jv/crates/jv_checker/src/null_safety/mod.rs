@@ -1,7 +1,10 @@
 mod context;
+mod flow;
+mod graph;
 
 use crate::inference::nullability::NullabilityAnalyzer;
 use crate::{CheckError, InferenceSnapshot};
+use flow::{build_graph, FlowSolver};
 use jv_ast::Program;
 
 pub use context::{NullSafetyContext, NullabilityKind, NullabilityLattice};
@@ -69,6 +72,9 @@ impl<'snapshot> NullSafetyCoordinator<'snapshot> {
             ));
         }
 
+        let graph = build_graph(program);
+        let analysis = FlowSolver::new(&graph, &context).solve();
+        report.extend_diagnostics(analysis.diagnostics);
         report.extend_diagnostics(NullabilityAnalyzer::analyze(program));
         report
     }
