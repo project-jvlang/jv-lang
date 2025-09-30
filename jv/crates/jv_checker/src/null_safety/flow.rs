@@ -3,7 +3,7 @@ use std::collections::{HashMap, VecDeque};
 use jv_ast::{
     expression::Argument,
     types::{Literal, Span},
-    BinaryOp, Expression, Program, Statement, WhenArm,
+    BinaryOp, Expression, Program, Statement, TryCatchClause, WhenArm,
 };
 
 use super::{patterns, NullSafetyContext, NullabilityKind, NullabilityLattice};
@@ -21,6 +21,7 @@ pub struct FlowAnalysisOutcome {
     pub states: HashMap<FlowNodeId, FlowStateSnapshot>,
     pub diagnostics: Vec<CheckError>,
     pub java_hints: Vec<JavaLoweringHint>,
+    pub exit_state: Option<FlowStateSnapshot>,
 }
 
 pub fn build_graph(program: &Program) -> FlowGraph {
@@ -108,6 +109,7 @@ impl<'ctx> FlowSolver<'ctx> {
             }
         }
 
+        outcome.exit_state = out_states.get(&self.graph.exit()).cloned();
         outcome
     }
 
@@ -244,6 +246,18 @@ impl<'g> FlowGraphBuilder<'g> {
                 expr.as_deref(),
                 arms,
                 else_arm.as_deref(),
+                expr_span.clone(),
+            ),
+            Expression::Try {
+                body,
+                catch_clauses,
+                finally_block,
+                span: expr_span,
+            } => self.build_try_expression(
+                current,
+                body,
+                catch_clauses,
+                finally_block.as_deref(),
                 expr_span.clone(),
             ),
             _ => self.emit_passthrough(current, FlowNodeKind::Expression, span),
@@ -392,6 +406,100 @@ impl<'g> FlowGraphBuilder<'g> {
         }
 
         merge_node
+    }
+
+    fn build_try_expression(
+        &mut self,
+        current: FlowNodeId,
+        body: &Expression,
+        catch_clauses: &[TryCatchClause],
+        finally_block: Option<&Expression>,
+        span: Span,
+    ) -> FlowNodeId {
+        let base_count = self.graph.node_count();
+        let try_entry = self
+            .graph
+            .add_node(FlowNodeKind::Expression, Some(span.clone()));
+        self.connect(current, try_entry, FlowEdgeKind::Normal);
+
+        let body_end = self.handle_expression(try_entry, body, None);
+        let after_body_count = self.graph.node_count();
+
+        let mut exceptional_sources: Vec<FlowNodeId> = (base_count..after_body_count)
+            .map(|id| id as FlowNodeId)
+            .filter(|&id| id != body_end)
+            .collect();
+
+        exceptional_sources.dedup();
+        if exceptional_sources.is_empty() {
+            exceptional_sources.push(try_entry);
+        }
+
+        let mut normal_targets = vec![body_end];
+
+        if !catch_clauses.is_empty() {
+            for clause in catch_clauses {
+                let catch_entry = self
+                    .graph
+                    .add_node(FlowNodeKind::Expression, Some(clause.span.clone()));
+
+                for &source in &exceptional_sources {
+                    self.connect(source, catch_entry, FlowEdgeKind::Exceptional);
+                }
+
+                if let Some(param) = &clause.parameter {
+                    self.graph
+                        .node_mut(catch_entry)
+                        .push_constraint(FlowConstraint::Assign {
+                            variable: param.name.clone(),
+                            state: NullabilityKind::NonNull,
+                        });
+                }
+
+                let catch_end = self.handle_expression(catch_entry, &clause.body, None);
+                normal_targets.push(catch_end);
+            }
+        }
+
+        if let Some(finally_expr) = finally_block {
+            let finally_entry = self
+                .graph
+                .add_node(FlowNodeKind::Expression, Some(span.clone()));
+
+            for target in &normal_targets {
+                self.connect(*target, finally_entry, FlowEdgeKind::Normal);
+            }
+
+            if catch_clauses.is_empty() {
+                for &source in &exceptional_sources {
+                    self.connect(source, finally_entry, FlowEdgeKind::Exceptional);
+                }
+            }
+
+            let finally_end = self.handle_expression(finally_entry, finally_expr, None);
+            let merge_after_finally = self.graph.add_node(FlowNodeKind::Merge, Some(span.clone()));
+            self.connect(finally_end, merge_after_finally, FlowEdgeKind::Normal);
+
+            if catch_clauses.is_empty() {
+                self.connect(finally_end, self.graph.exit(), FlowEdgeKind::Exceptional);
+            }
+
+            merge_after_finally
+        } else {
+            let merge_node = self.graph.add_node(FlowNodeKind::Merge, Some(span.clone()));
+
+            for target in &normal_targets {
+                self.connect(*target, merge_node, FlowEdgeKind::Normal);
+            }
+
+            if catch_clauses.is_empty() {
+                for &source in &exceptional_sources {
+                    self.connect(source, self.graph.exit(), FlowEdgeKind::Exceptional);
+                }
+            }
+
+            merge_node
+        }
     }
 
     fn build_for_in(&mut self, current: FlowNodeId, for_in: &jv_ast::ForInStatement) -> FlowNodeId {
@@ -687,7 +795,21 @@ fn classify_expression(builder: &mut FlowGraphBuilder<'_>, expr: &Expression) ->
         }
         Expression::Lambda { .. } => NullabilityKind::NonNull,
         Expression::Array { .. } => NullabilityKind::NonNull,
-        Expression::Try { expr, .. } => classify_expression(builder, expr),
+        Expression::Try {
+            body,
+            catch_clauses,
+            finally_block,
+            ..
+        } => {
+            let mut state = classify_expression(builder, body);
+            for clause in catch_clauses {
+                state = state.join(classify_expression(builder, &clause.body));
+            }
+            if let Some(finally_expr) = finally_block.as_deref() {
+                state = state.join(classify_expression(builder, finally_expr));
+            }
+            state
+        }
         Expression::MemberAccess { .. } | Expression::IndexAccess { .. } => {
             NullabilityKind::Unknown
         }
@@ -717,7 +839,7 @@ fn apply_edge_kind(kind: &FlowEdgeKind, state: &mut FlowStateSnapshot) {
                 assumption.apply(state);
             }
         }
-        FlowEdgeKind::LoopBack | FlowEdgeKind::Normal => {}
+        FlowEdgeKind::LoopBack | FlowEdgeKind::Normal | FlowEdgeKind::Exceptional => {}
     }
 }
 
@@ -744,7 +866,7 @@ mod tests {
     use super::*;
     use crate::null_safety::graph::BranchAssumption;
     use crate::null_safety::JavaLoweringStrategy;
-    use jv_ast::{types::Span, Expression, Pattern, Program, Statement, WhenArm};
+    use jv_ast::{types::Span, Expression, Pattern, Program, Statement, TryCatchClause, WhenArm};
 
     #[test]
     fn build_graph_with_linear_statements() {
@@ -763,6 +885,127 @@ mod tests {
 
         let graph = build_graph(&program);
         assert!(graph.adjacency(graph.entry()).len() > 0);
+    }
+
+    #[test]
+    fn try_with_catch_creates_exceptional_edges() {
+        let span = Span::dummy();
+        let try_body = Expression::Block {
+            statements: vec![Statement::VarDeclaration {
+                name: "value".into(),
+                type_annotation: None,
+                initializer: Some(Expression::Literal(Literal::Null, span.clone())),
+                modifiers: Default::default(),
+                span: span.clone(),
+            }],
+            span: span.clone(),
+        };
+
+        let catch_clause = TryCatchClause {
+            parameter: Some(jv_ast::Parameter {
+                name: "error".into(),
+                type_annotation: None,
+                default_value: None,
+                span: span.clone(),
+            }),
+            body: Box::new(Expression::Block {
+                statements: vec![Statement::Expression {
+                    expr: Expression::Identifier("value".into(), span.clone()),
+                    span: span.clone(),
+                }],
+                span: span.clone(),
+            }),
+            span: span.clone(),
+        };
+
+        let program = Program {
+            package: None,
+            imports: vec![],
+            statements: vec![Statement::Expression {
+                expr: Expression::Try {
+                    body: Box::new(try_body),
+                    catch_clauses: vec![catch_clause],
+                    finally_block: None,
+                    span: span.clone(),
+                },
+                span: span.clone(),
+            }],
+            span: span.clone(),
+        };
+
+        let graph = build_graph(&program);
+        let catch_node = graph
+            .nodes()
+            .iter()
+            .enumerate()
+            .find(|(_, node)| {
+                node.constraints()
+                    .iter()
+                    .any(|constraint| match constraint {
+                        FlowConstraint::Assign { variable, .. } => variable == "error",
+                    })
+            })
+            .map(|(id, _)| id)
+            .expect("catch entry node present");
+
+        let has_exception_edge = (0..graph.node_count()).any(|id| {
+            graph
+                .adjacency(id)
+                .iter()
+                .any(|edge| edge.to == catch_node && matches!(edge.kind, FlowEdgeKind::Exceptional))
+        });
+
+        assert!(
+            has_exception_edge,
+            "expected exceptional edge into catch block"
+        );
+    }
+
+    #[test]
+    fn try_without_catch_routes_exception_to_exit() {
+        let span = Span::dummy();
+        let program = Program {
+            package: None,
+            imports: vec![],
+            statements: vec![Statement::Expression {
+                expr: Expression::Try {
+                    body: Box::new(Expression::Block {
+                        statements: vec![Statement::VarDeclaration {
+                            name: "flag".into(),
+                            type_annotation: None,
+                            initializer: Some(Expression::Literal(Literal::Null, span.clone())),
+                            modifiers: Default::default(),
+                            span: span.clone(),
+                        }],
+                        span: span.clone(),
+                    }),
+                    catch_clauses: vec![],
+                    finally_block: Some(Box::new(Expression::Block {
+                        statements: vec![Statement::Expression {
+                            expr: Expression::Identifier("flag".into(), span.clone()),
+                            span: span.clone(),
+                        }],
+                        span: span.clone(),
+                    })),
+                    span: span.clone(),
+                },
+                span: span.clone(),
+            }],
+            span: span.clone(),
+        };
+
+        let graph = build_graph(&program);
+        let exit_id = graph.exit();
+        let exceptional_to_exit = (0..graph.node_count()).any(|id| {
+            graph
+                .adjacency(id)
+                .iter()
+                .any(|edge| edge.to == exit_id && matches!(edge.kind, FlowEdgeKind::Exceptional))
+        });
+        assert!(
+            exceptional_to_exit,
+            "expected exceptional edge to exit from try without catch"
+        );
     }
 
     #[test]

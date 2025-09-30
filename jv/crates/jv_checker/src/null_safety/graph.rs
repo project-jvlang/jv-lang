@@ -76,6 +76,10 @@ impl FlowGraph {
         self.hints.push(hint);
     }
 
+    pub fn node_count(&self) -> usize {
+        self.nodes.len()
+    }
+
     #[cfg(test)]
     pub(crate) fn nodes(&self) -> &[FlowNode] {
         &self.nodes
@@ -143,6 +147,7 @@ pub enum FlowEdgeKind {
         assumption: Option<BranchAssumption>,
     },
     LoopBack,
+    Exceptional,
 }
 
 #[derive(Clone, Debug)]

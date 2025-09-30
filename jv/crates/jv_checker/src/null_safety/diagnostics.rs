@@ -2,6 +2,7 @@ use std::collections::{hash_map::Entry, HashMap};
 
 use super::context::NullSafetyContext;
 use super::flow::FlowAnalysisOutcome;
+use super::graph::FlowStateSnapshot;
 use super::NullabilityKind;
 use crate::CheckError;
 use jv_inference::service::{TypeFactsBuilder, TypeFactsSnapshot};
@@ -29,14 +30,11 @@ impl<'ctx> DiagnosticsEmitter<'ctx> {
 
     pub fn emit(&self, outcome: &FlowAnalysisOutcome) -> DiagnosticsPayload {
         let overrides = aggregate_states(outcome);
-        let errors = outcome
-            .diagnostics
-            .iter()
-            .map(|error| {
-                let message = ensure_code(&error.to_string(), DEFAULT_ERROR_CODE);
-                CheckError::NullSafetyError(message)
-            })
-            .collect::<Vec<_>>();
+        let mut errors = self.verify_exit_state(outcome.exit_state.as_ref());
+        for error in &outcome.diagnostics {
+            let message = ensure_code(&error.to_string(), DEFAULT_ERROR_CODE);
+            errors.push(CheckError::NullSafetyError(message));
+        }
 
         let mut warnings = Vec::new();
         if self.context.is_degraded() {
@@ -89,6 +87,34 @@ impl<'ctx> DiagnosticsEmitter<'ctx> {
 
         Some(builder.build())
     }
+
+    fn verify_exit_state(
+        &self,
+        exit_state: Option<&FlowStateSnapshot>,
+    ) -> Vec<CheckError> {
+        let mut diagnostics = Vec::new();
+        let Some(state) = exit_state else {
+            return diagnostics;
+        };
+
+        for (name, contract) in self.context.lattice().iter() {
+            if !matches!(contract, NullabilityKind::NonNull) {
+                continue;
+            }
+
+            let observed = state
+                .states
+                .get(name)
+                .copied()
+                .unwrap_or(NullabilityKind::Unknown);
+
+            if matches!(observed, NullabilityKind::Nullable) {
+                diagnostics.push(CheckError::NullSafetyError(exit_violation_message(name)));
+            }
+        }
+
+        diagnostics
+    }
 }
 
 fn aggregate_states(outcome: &FlowAnalysisOutcome) -> HashMap<String, NullabilityKind> {
@@ -138,6 +164,12 @@ fn platform_warning(name: &str) -> CheckError {
     ))
 }
 
+fn exit_violation_message(name: &str) -> String {
+    format!(
+        "JV3002: 非 null として宣言された値 `{name}` がスコープ終了時に null になる可能性があります。確実に non-null へ初期化するか、Nullable 型へ更新してください。\nJV3002: Value `{name}` declared non-null may be null when control leaves this scope. Ensure it is initialised with a non-null value or relax the type to nullable."
+    )
+}
+
 fn ensure_code(message: &str, default_code: &str) -> String {
     if message.contains("JV3") {
         message.to_string()
@@ -158,7 +190,9 @@ mod tests {
     use crate::inference::TypeEnvironment;
     use crate::null_safety::graph::FlowStateSnapshot;
     use jv_inference::service::TypeFactsBuilder;
-    use jv_inference::types::{TypeKind as FactsTypeKind, TypeVariant as FactsTypeVariant};
+    use jv_inference::types::{
+        NullabilityFlag, TypeKind as FactsTypeKind, TypeVariant as FactsTypeVariant,
+    };
 
     #[test]
     fn degraded_mode_emits_warning() {
@@ -226,5 +260,67 @@ mod tests {
         assert_eq!(payload.warnings.len(), 1);
         assert!(payload.warnings[0].to_string().contains("JV3005"));
         assert!(payload.warnings[0].to_string().contains("external_api"));
+    }
+
+    #[test]
+    fn exit_violation_emits_error() {
+        let mut env = TypeEnvironment::new();
+        env.define_monotype("token", crate::inference::TypeKind::Primitive("String"));
+
+        let mut builder = TypeFactsBuilder::new();
+        builder.environment_entry(
+            "token",
+            FactsTypeKind::new(FactsTypeVariant::Primitive("String"))
+                .with_nullability(NullabilityFlag::NonNull),
+        );
+        let facts = builder.build();
+        let context = NullSafetyContext::from_parts(Some(&facts), Some(&env));
+
+        let mut outcome = FlowAnalysisOutcome::default();
+        let mut exit_state = FlowStateSnapshot::new();
+        exit_state.assign("token".into(), NullabilityKind::Nullable);
+        outcome.exit_state = Some(exit_state);
+
+        let emitter = DiagnosticsEmitter::new(&context);
+        let payload = emitter.emit(&outcome);
+
+        assert!(
+            payload
+                .errors
+                .iter()
+                .any(|error| error.to_string().contains("JV3002")
+                    && error.to_string().contains("token")),
+            "expected JV3002 exit diagnostic for token, got {:?}",
+            payload
+                .errors
+                .iter()
+                .map(|err| err.to_string())
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn exit_nonnull_state_is_ok() {
+        let mut env = TypeEnvironment::new();
+        env.define_monotype("token", crate::inference::TypeKind::Primitive("String"));
+
+        let mut builder = TypeFactsBuilder::new();
+        builder.environment_entry(
+            "token",
+            FactsTypeKind::new(FactsTypeVariant::Primitive("String"))
+                .with_nullability(NullabilityFlag::NonNull),
+        );
+        let facts = builder.build();
+        let context = NullSafetyContext::from_parts(Some(&facts), Some(&env));
+
+        let mut outcome = FlowAnalysisOutcome::default();
+        let mut exit_state = FlowStateSnapshot::new();
+        exit_state.assign("token".into(), NullabilityKind::NonNull);
+        outcome.exit_state = Some(exit_state);
+
+        let emitter = DiagnosticsEmitter::new(&context);
+        let payload = emitter.emit(&outcome);
+
+        assert!(payload.errors.is_empty());
     }
 }

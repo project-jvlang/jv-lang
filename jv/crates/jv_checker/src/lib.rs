@@ -482,7 +482,20 @@ impl WhenUsageValidator {
                 }
                 self.visit_expression(body, true);
             }
-            Expression::Try { expr, .. } => self.visit_expression(expr, expects_value),
+            Expression::Try {
+                body,
+                catch_clauses,
+                finally_block,
+                ..
+            } => {
+                self.visit_expression(body, expects_value);
+                for clause in catch_clauses {
+                    self.visit_expression(&clause.body, expects_value);
+                }
+                if let Some(finally_expr) = finally_block.as_deref() {
+                    self.visit_expression(finally_expr, expects_value);
+                }
+            }
             Expression::Block { statements, .. } => {
                 for (index, statement) in statements.iter().enumerate() {
                     let is_last = index == statements.len().saturating_sub(1);

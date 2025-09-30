@@ -293,7 +293,25 @@ impl<'env> ConstraintGenerator<'env> {
                 TypeKind::Unknown
             }
             Expression::Lambda { body, .. } => self.infer_expression(body),
-            Expression::Try { expr, .. } => self.infer_expression(expr),
+            Expression::Try {
+                body,
+                catch_clauses,
+                finally_block,
+                ..
+            } => {
+                let body_ty = self.infer_expression(body);
+                for clause in catch_clauses {
+                    let catch_ty = self.infer_expression(&clause.body);
+                    self.push_constraint(
+                        ConstraintKind::Equal(body_ty.clone(), catch_ty),
+                        Some("try/catch branches must agree"),
+                    );
+                }
+                if let Some(finally_expr) = finally_block.as_deref() {
+                    self.infer_expression(finally_expr);
+                }
+                body_ty
+            }
             Expression::When {
                 expr,
                 arms,

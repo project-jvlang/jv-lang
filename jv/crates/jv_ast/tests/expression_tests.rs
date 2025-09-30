@@ -299,12 +299,34 @@ fn test_expression_try() {
         argument_style: CallArgumentStyle::Comma,
         span: dummy_span(),
     };
+    let catch_clause = TryCatchClause {
+        parameter: Some(Parameter {
+            name: "error".to_string(),
+            type_annotation: None,
+            default_value: None,
+            span: dummy_span(),
+        }),
+        body: Box::new(Expression::Identifier("handled".to_string(), dummy_span())),
+        span: dummy_span(),
+    };
     let expr = Expression::Try {
-        expr: Box::new(inner_expr),
+        body: Box::new(inner_expr),
+        catch_clauses: vec![catch_clause],
+        finally_block: Some(Box::new(Expression::Literal(
+            Literal::Number("0".to_string()),
+            dummy_span(),
+        ))),
         span: dummy_span(),
     };
     match expr {
-        Expression::Try { .. } => assert!(true),
+        Expression::Try {
+            catch_clauses,
+            finally_block,
+            ..
+        } => {
+            assert_eq!(catch_clauses.len(), 1);
+            assert!(finally_block.is_some());
+        }
         _ => panic!("Expected try expression"),
     }
 }

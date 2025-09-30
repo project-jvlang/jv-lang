@@ -108,7 +108,11 @@ pub enum Expression {
 
     // Try expressions for error handling
     Try {
-        expr: Box<Expression>,
+        body: Box<Expression>,
+        #[serde(default)]
+        catch_clauses: Vec<TryCatchClause>,
+        #[serde(default)]
+        finally_block: Option<Box<Expression>>,
         span: Span,
     },
 
@@ -211,5 +215,13 @@ pub struct Parameter {
     pub name: String,
     pub type_annotation: Option<TypeAnnotation>,
     pub default_value: Option<Expression>,
+    pub span: Span,
+}
+
+/// Catch clause used within try expressions.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TryCatchClause {
+    pub parameter: Option<Parameter>,
+    pub body: Box<Expression>,
     pub span: Span,
 }

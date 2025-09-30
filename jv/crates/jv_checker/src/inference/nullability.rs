@@ -362,7 +362,23 @@ impl NullabilityAnalyzer {
                 self.leave_scope();
                 Nullability::NonNull
             }
-            Expression::Try { expr, .. } => self.evaluate_expression(expr),
+            Expression::Try {
+                body,
+                catch_clauses,
+                finally_block,
+                ..
+            } => {
+                let mut state = self.evaluate_expression(body);
+                for clause in catch_clauses {
+                    let catch_state = self.evaluate_expression(&clause.body);
+                    state = Nullability::combine(state, catch_state);
+                }
+                if let Some(finally_expr) = finally_block.as_deref() {
+                    let finally_state = self.evaluate_expression(finally_expr);
+                    state = Nullability::combine(state, finally_state);
+                }
+                state
+            }
             Expression::This(_) | Expression::Super(_) => Nullability::NonNull,
         }
     }
