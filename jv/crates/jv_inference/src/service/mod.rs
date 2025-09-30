@@ -381,6 +381,30 @@ mod tests {
     }
 
     #[test]
+    fn builder_from_snapshot_preserves_entries() {
+        let mut original = TypeFactsBuilder::new();
+        original.environment_entry("user", sample_type("String"));
+        original.add_binding(TypeBinding {
+            id: TypeId::new(4),
+            ty: sample_type("String"),
+        });
+        original.record_node_type(9, sample_type("Bool"));
+        let snapshot = original.build();
+
+        let cloned = TypeFactsBuilder::from_snapshot(&snapshot).build();
+
+        assert_eq!(
+            cloned.environment().values(),
+            snapshot.environment().values()
+        );
+        assert_eq!(cloned.bindings(), snapshot.bindings());
+        assert_eq!(
+            cloned.type_for_node(9).map(format_type),
+            snapshot.type_for_node(9).map(format_type)
+        );
+    }
+
+    #[test]
     fn cache_stores_snapshots() {
         let snapshot = TypeFactsBuilder::new().build();
         let mut cache = TypeFactsCache::new();
