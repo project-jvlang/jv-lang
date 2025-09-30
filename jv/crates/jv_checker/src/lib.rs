@@ -13,7 +13,7 @@ pub use jv_inference::ParallelInferenceConfig;
 
 use jv_ast::{Program, Span};
 use null_safety::{JavaLoweringHint, NullSafetyCoordinator};
-use pattern::{PatternCacheMetrics, PatternMatchService};
+use pattern::{PatternCacheMetrics, PatternMatchFacts, PatternMatchService, PatternTarget};
 use std::collections::HashMap;
 use thiserror::Error;
 
@@ -45,10 +45,14 @@ pub struct InferenceSnapshot {
     function_schemes: HashMap<String, TypeScheme>,
     result_type: Option<TypeKind>,
     facts: TypeFactsSnapshot,
+    pattern_facts: HashMap<(u64, PatternTarget), PatternMatchFacts>,
 }
 
 impl InferenceSnapshot {
-    fn from_engine(engine: &InferenceEngine) -> Self {
+    fn from_engine(
+        engine: &InferenceEngine,
+        pattern_facts: HashMap<(u64, PatternTarget), PatternMatchFacts>,
+    ) -> Self {
         let environment = engine.environment().clone();
         let bindings = engine.bindings().to_vec();
         let function_schemes = engine.function_schemes().clone();
@@ -67,11 +71,20 @@ impl InferenceSnapshot {
             function_schemes,
             result_type,
             facts,
+            pattern_facts,
         }
     }
 
     pub fn type_facts(&self) -> &TypeFactsSnapshot {
         &self.facts
+    }
+
+    pub fn pattern_facts(&self) -> &HashMap<(u64, PatternTarget), PatternMatchFacts> {
+        &self.pattern_facts
+    }
+
+    pub fn pattern_fact(&self, node_id: u64, target: PatternTarget) -> Option<&PatternMatchFacts> {
+        self.pattern_facts.get(&(node_id, target))
     }
 }
 
@@ -200,6 +213,7 @@ impl TypeChecker {
         match self.engine.infer_program(program) {
             Ok(()) => {
                 let validation_errors = self.pattern_service.validate_program(program);
+                let pattern_facts = self.pattern_service.take_recorded_facts();
                 let metrics = self.pattern_service.take_cache_metrics();
                 self.record_pattern_cache_metrics(metrics);
                 if !validation_errors.is_empty() {
@@ -207,7 +221,7 @@ impl TypeChecker {
                     self.merged_facts = None;
                     return Err(validation_errors);
                 }
-                self.snapshot = Some(InferenceSnapshot::from_engine(&self.engine));
+                self.snapshot = Some(InferenceSnapshot::from_engine(&self.engine, pattern_facts));
                 self.merged_facts = self
                     .snapshot
                     .as_ref()

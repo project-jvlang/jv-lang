@@ -243,10 +243,26 @@ impl PatternFactsBridge {
                 ..
             } => {
                 let mut outcome = BridgeOutcome::default();
-                let facts = service.analyze(expression, self.target);
-                if let Some(span) = pattern::expression_span(expression) {
+                let (facts, node_id) = if let Some(span) = pattern::expression_span(expression) {
                     let node_id = pattern::node_identifier(span);
-                    context.register_pattern_facts(node_id, facts.clone());
+                    if let Some(existing) = context.pattern_facts(node_id) {
+                        (existing.clone(), Some(node_id))
+                    } else {
+                        let analyzed = service.analyze(expression, self.target);
+                        context.register_pattern_facts(node_id, analyzed.clone());
+                        (analyzed, Some(node_id))
+                    }
+                } else {
+                    (service.analyze(expression, self.target), None)
+                };
+                if let Some(id) = node_id {
+                    outcome.assumptions_applied += facts.narrowing().arms().count();
+                    outcome
+                        .diagnostics
+                        .extend(detect_conflicts(&facts, context));
+                    context.register_pattern_facts(id, facts.clone());
+                }
+                if node_id.is_none() {
                     outcome.assumptions_applied += facts.narrowing().arms().count();
                     outcome
                         .diagnostics

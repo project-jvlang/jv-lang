@@ -319,23 +319,21 @@ impl<'a> WhenUsageValidator<'a> {
         expects_value: bool,
         has_subject: bool,
     ) {
-        if !expects_value || !has_subject {
-            return;
-        }
-
         let facts = self.service.analyze(expression, PatternTarget::Java25);
-        self.emit_exhaustiveness_diagnostics(span, facts);
+        if expects_value && has_subject {
+            self.emit_exhaustiveness_diagnostics(span, &facts);
+        }
     }
 
-    fn emit_exhaustiveness_diagnostics(&mut self, span: &Span, facts: PatternMatchFacts) {
+    fn emit_exhaustiveness_diagnostics(&mut self, span: &Span, facts: &PatternMatchFacts) {
         if facts.is_exhaustive() {
             return;
         }
 
-        for case in facts.into_missing_cases() {
+        for case in facts.missing_cases() {
             match case {
                 MissingCase::Boolean { missing } => {
-                    let (label_en, label_ja) = boolean_labels(missing);
+                    let (label_en, label_ja) = boolean_labels(*missing);
                     let message = format!(
                         "JV3100: when 式が boolean の `{label_ja}` ケースを網羅していません。`{label_ja}` を処理する分岐を追加してください。\nJV3100: Non-exhaustive boolean when expression missing `{label_en}` branch. Add a branch handling `{label_en}`."
                     );

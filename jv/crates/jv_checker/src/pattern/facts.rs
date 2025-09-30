@@ -63,7 +63,7 @@ pub enum MissingCase {
     Boolean { missing: MissingBooleanCase },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MissingBooleanCase {
     True,
     False,

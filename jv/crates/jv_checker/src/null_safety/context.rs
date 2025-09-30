@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::inference::{TypeEnvironment, TypeKind as CheckerTypeKind, TypeScheme};
-use crate::pattern::PatternMatchFacts;
+use crate::pattern::{PatternMatchFacts, PatternTarget};
 use crate::{InferenceSnapshot, TypeInferenceService};
 use jv_inference::service::{TypeFacts, TypeFactsSnapshot};
 use jv_inference::types::{
@@ -191,7 +191,14 @@ impl<'facts> NullSafetyContext<'facts> {
     pub fn hydrate(snapshot: Option<&'facts InferenceSnapshot>) -> Self {
         match snapshot {
             Some(snapshot) => {
-                Self::from_parts(Some(snapshot.type_facts()), Some(snapshot.environment()))
+                let mut context =
+                    Self::from_parts(Some(snapshot.type_facts()), Some(snapshot.environment()));
+                for ((node_id, target), facts) in snapshot.pattern_facts() {
+                    if *target == PatternTarget::Java25 {
+                        context.register_pattern_facts(*node_id, facts.clone());
+                    }
+                }
+                context
             }
             None => Self::fallback(),
         }

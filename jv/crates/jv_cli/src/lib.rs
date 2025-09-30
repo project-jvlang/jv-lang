@@ -509,7 +509,7 @@ pub mod pipeline {
 
     fn print_inference_telemetry(entrypoint: &Path, telemetry: &InferenceTelemetry) {
         println!(
-            "Telemetry ({}):\n  constraints_emitted: {}\n  bindings_resolved: {}\n  inference_duration_ms: {:.3}\n  preserved_constraints: {}\n  cache_hit_rate: {}\n  invalidation_cascade_depth: {}",
+            "Telemetry ({}):\n  constraints_emitted: {}\n  bindings_resolved: {}\n  inference_duration_ms: {:.3}\n  preserved_constraints: {}\n  cache_hit_rate: {}\n  invalidation_cascade_depth: {}\n  pattern_cache_hits: {}\n  pattern_cache_misses: {}\n  pattern_bridge_ms: {:.3}",
             entrypoint.display(),
             telemetry.constraints_emitted,
             telemetry.bindings_resolved,
@@ -519,7 +519,10 @@ pub mod pipeline {
                 .cache_hit_rate
                 .map(|rate| format!("{:.2}%", rate * 100.0))
                 .unwrap_or_else(|| "n/a".to_string()),
-            telemetry.invalidation_cascade_depth
+            telemetry.invalidation_cascade_depth,
+            telemetry.pattern_cache_hits,
+            telemetry.pattern_cache_misses,
+            telemetry.pattern_bridge_ms
         );
     }
 

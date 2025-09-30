@@ -1,11 +1,12 @@
 use super::*;
+use crate::pattern::{self, PatternTarget};
 use jv_ast::{
     BinaryOp, Expression, Literal, Modifiers, Parameter, Pattern, Program, Span, Statement,
     TypeAnnotation, WhenArm,
 };
 
 fn dummy_span() -> Span {
-    Span::dummy()
+    Span::new(1, 0, 1, 5)
 }
 
 fn default_modifiers() -> Modifiers {
@@ -62,7 +63,7 @@ fn check_program_populates_inference_snapshot() {
                 span: span.clone(),
             },
         ],
-        span,
+        span: span.clone(),
     };
 
     let mut checker = TypeChecker::new();
@@ -99,7 +100,7 @@ fn check_program_reports_type_error_on_mismatch() {
             modifiers: default_modifiers(),
             span: span.clone(),
         }],
-        span,
+        span: span.clone(),
     };
 
     let mut checker = TypeChecker::new();
@@ -125,7 +126,7 @@ fn null_safety_violation_is_reported() {
             modifiers: default_modifiers(),
             span: span.clone(),
         }],
-        span,
+        span: span.clone(),
     };
 
     let mut checker = TypeChecker::new();
@@ -209,14 +210,24 @@ fn when_with_else_in_value_position_passes_validation() {
             modifiers: default_modifiers(),
             span: span.clone(),
         }],
-        span,
+        span: span.clone(),
     };
 
     let mut checker = TypeChecker::new();
-    let result = checker.check_program(&program);
+    checker
+        .check_program(&program)
+        .expect("when with explicit else should pass validation");
+
+    let snapshot = checker
+        .inference_snapshot()
+        .expect("snapshot should include pattern facts");
+    let node_id = pattern::node_identifier(&span);
+    let facts = snapshot
+        .pattern_fact(node_id, PatternTarget::Java25)
+        .expect("pattern facts recorded for when expression");
     assert!(
-        result.is_ok(),
-        "when with explicit else should pass validation"
+        facts.is_exhaustive(),
+        "else branch should render exhaustive"
     );
 }
 

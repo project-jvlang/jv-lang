@@ -35,6 +35,7 @@ pub struct PatternMatchService {
     cache: PatternFactsCache,
     metrics: PatternCacheMetrics,
     normalizer: PatternNormalizer,
+    recorded_facts: HashMap<(u64, PatternTarget), PatternMatchFacts>,
 }
 
 impl PatternMatchService {
@@ -43,6 +44,7 @@ impl PatternMatchService {
             cache: PatternFactsCache::with_capacity(DEFAULT_CACHE_CAPACITY),
             metrics: PatternCacheMetrics::default(),
             normalizer: PatternNormalizer::new(),
+            recorded_facts: HashMap::new(),
         }
     }
 
@@ -58,15 +60,17 @@ impl PatternMatchService {
     pub fn analyze(&mut self, expression: &Expression, target: PatternTarget) -> PatternMatchFacts {
         self.normalizer.normalize(expression);
         let key = PatternCacheKey::from_expression(expression, target);
-        if let Some(facts) = self.cache.get(&key) {
+        if let Some(facts) = self.cache.get(&key).cloned() {
             self.metrics.record_hit();
-            return facts.clone();
+            self.record_facts(&key, &facts);
+            return facts;
         }
 
         self.metrics.record_miss();
         let mut facts = exhaustiveness::analyze(expression);
         let narrowing_facts = narrowing::analyze(expression);
         facts.set_narrowing(narrowing_facts);
+        self.record_facts(&key, &facts);
         self.cache.insert(key, facts.clone());
         facts
     }
@@ -74,11 +78,19 @@ impl PatternMatchService {
     /// Removes cached entries that belong to invalidated AST nodes.
     pub fn invalidate_dirty_nodes(&mut self, dirty_nodes: &[u64]) {
         self.cache.invalidate_nodes(dirty_nodes);
+        if dirty_nodes.is_empty() {
+            return;
+        }
+        let dirty: HashSet<u64> = dirty_nodes.iter().copied().collect();
+        self.recorded_facts
+            .retain(|(node_id, _), _| !dirty.contains(node_id));
     }
 
     /// Clears cached analyses for a specific lowering target.
     pub fn invalidate_target(&mut self, target: PatternTarget) {
         self.cache.invalidate_target(target);
+        self.recorded_facts
+            .retain(|(_, recorded_target), _| *recorded_target != target);
     }
 
     /// Extracts cache metrics, resetting the internal counters.
@@ -90,6 +102,22 @@ impl PatternMatchService {
 
     pub fn cache_capacity(&self) -> usize {
         self.cache.capacity
+    }
+
+    pub fn take_recorded_facts(&mut self) -> HashMap<(u64, PatternTarget), PatternMatchFacts> {
+        std::mem::take(&mut self.recorded_facts)
+    }
+
+    pub fn recorded_facts(&self) -> &HashMap<(u64, PatternTarget), PatternMatchFacts> {
+        &self.recorded_facts
+    }
+
+    fn record_facts(&mut self, key: &PatternCacheKey, facts: &PatternMatchFacts) {
+        if key.node_id == 0 {
+            return;
+        }
+        self.recorded_facts
+            .insert((key.node_id, key.target), facts.clone());
     }
 }
 
