@@ -74,6 +74,11 @@ impl InferenceEngine {
         &self.telemetry
     }
 
+    /// Provides mutable access to telemetry for downstream stages.
+    pub fn telemetry_mut(&mut self) -> &mut InferenceTelemetry {
+        &mut self.telemetry
+    }
+
     /// AST 全体に対する推論を実行し、各種結果を内部状態へ保持する。
     pub fn infer_program(&mut self, program: &Program) -> InferenceResult<()> {
         let mut environment = TypeEnvironment::new();
