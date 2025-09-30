@@ -2,6 +2,7 @@ mod context;
 mod flow;
 mod graph;
 mod operators;
+mod patterns;
 
 use crate::inference::nullability::NullabilityAnalyzer;
 use crate::{CheckError, InferenceSnapshot};

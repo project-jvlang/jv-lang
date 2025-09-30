@@ -3,10 +3,10 @@ use std::collections::{HashMap, VecDeque};
 use jv_ast::{
     expression::Argument,
     types::{Literal, Span},
-    BinaryOp, Expression, Program, Statement,
+    BinaryOp, Expression, Program, Statement, WhenArm,
 };
 
-use super::{NullSafetyContext, NullabilityKind, NullabilityLattice};
+use super::{patterns, NullSafetyContext, NullabilityKind, NullabilityLattice};
 use crate::CheckError;
 
 use crate::null_safety::graph::{
@@ -68,16 +68,9 @@ impl<'ctx> FlowSolver<'ctx> {
         worklist.push_back(self.graph.entry());
 
         while let Some(node_id) = worklist.pop_front() {
-            let mut state_in = in_states
-                .get(&node_id)
-                .cloned()
+            let state_in = in_states
+                .remove(&node_id)
                 .unwrap_or_else(FlowStateSnapshot::new);
-
-            for edge in self.graph.predecessors(node_id) {
-                if let Some(pred_state) = out_states.get(&edge.from) {
-                    state_in.merge_with(pred_state);
-                }
-            }
 
             let mut state_out = state_in.clone();
             self.apply_constraints(node_id, &mut state_out);
@@ -240,10 +233,19 @@ impl<'g> FlowGraphBuilder<'g> {
                 }
                 self.emit_passthrough(cursor, FlowNodeKind::Expression, Some(block_span.clone()))
             }
-            Expression::When { .. } => {
-                // Placeholder: currently treat when as expression node without branches
-                self.emit_passthrough(current, FlowNodeKind::Expression, span)
-            }
+            Expression::When {
+                expr,
+                arms,
+                else_arm,
+                span: expr_span,
+                ..
+            } => self.build_when_expression(
+                current,
+                expr.as_deref(),
+                arms,
+                else_arm.as_deref(),
+                expr_span.clone(),
+            ),
             _ => self.emit_passthrough(current, FlowNodeKind::Expression, span),
         }
     }
@@ -291,6 +293,103 @@ impl<'g> FlowGraphBuilder<'g> {
 
         self.connect(then_end, merge_node, FlowEdgeKind::Normal);
         let _ = else_target;
+
+        merge_node
+    }
+
+    fn build_when_expression(
+        &mut self,
+        current: FlowNodeId,
+        subject: Option<&Expression>,
+        arms: &[WhenArm],
+        else_branch: Option<&Expression>,
+        span: Span,
+    ) -> FlowNodeId {
+        let mut cursor = if let Some(subject_expr) = subject {
+            self.handle_expression(current, subject_expr, None)
+        } else {
+            current
+        };
+
+        let merge_node = self.graph.add_node(FlowNodeKind::Merge, Some(span.clone()));
+
+        if arms.is_empty() {
+            if let Some(else_expr) = else_branch {
+                let else_end = self.handle_expression(cursor, else_expr, None);
+                self.connect(else_end, merge_node, FlowEdgeKind::Normal);
+            } else {
+                self.connect(cursor, merge_node, FlowEdgeKind::Normal);
+            }
+            return merge_node;
+        }
+
+        for (index, arm) in arms.iter().enumerate() {
+            let test_node = self
+                .graph
+                .add_node(FlowNodeKind::Expression, Some(arm.span.clone()));
+            self.connect(cursor, test_node, FlowEdgeKind::Normal);
+
+            let assumptions = patterns::analyze_pattern(subject, &arm.pattern);
+
+            let branch_entry = self
+                .graph
+                .add_node(FlowNodeKind::Merge, Some(arm.span.clone()));
+            self.connect(
+                test_node,
+                branch_entry,
+                FlowEdgeKind::TrueBranch {
+                    assumption: assumptions.on_match.clone(),
+                },
+            );
+
+            let mut branch_cursor = branch_entry;
+            if let Some(guard) = &arm.guard {
+                // Guards are evaluated for side-effect tracking; boolean gating is handled in a later task.
+                branch_cursor = self.handle_expression(branch_cursor, guard, None);
+            }
+
+            let branch_end = self.handle_expression(branch_cursor, &arm.body, None);
+            self.connect(branch_end, merge_node, FlowEdgeKind::Normal);
+
+            let is_last_arm = index == arms.len() - 1;
+            let fallback_target = if !is_last_arm {
+                Some(self.graph.add_node(FlowNodeKind::Merge, None))
+            } else if else_branch.is_some() {
+                Some(self.graph.add_node(FlowNodeKind::Merge, Some(span.clone())))
+            } else {
+                None
+            };
+
+            match fallback_target {
+                Some(target) => {
+                    self.connect(
+                        test_node,
+                        target,
+                        FlowEdgeKind::FalseBranch {
+                            assumption: assumptions.on_mismatch.clone(),
+                        },
+                    );
+                    cursor = target;
+                }
+                None => {
+                    self.connect(
+                        test_node,
+                        merge_node,
+                        FlowEdgeKind::FalseBranch {
+                            assumption: assumptions.on_mismatch.clone(),
+                        },
+                    );
+                    cursor = merge_node;
+                }
+            }
+        }
+
+        if let Some(else_expr) = else_branch {
+            let else_end = self.handle_expression(cursor, else_expr, None);
+            self.connect(else_end, merge_node, FlowEdgeKind::Normal);
+        } else if cursor != merge_node {
+            self.connect(cursor, merge_node, FlowEdgeKind::Normal);
+        }
 
         merge_node
     }
@@ -643,8 +742,9 @@ impl FlowStateSnapshot {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::null_safety::graph::BranchAssumption;
     use crate::null_safety::JavaLoweringStrategy;
-    use jv_ast::types::Span;
+    use jv_ast::{types::Span, Expression, Pattern, Program, Statement, WhenArm};
 
     #[test]
     fn build_graph_with_linear_statements() {
@@ -753,5 +853,101 @@ mod tests {
                 .find(|hint| matches!(hint.strategy, JavaLoweringStrategy::ElvisOperator)),
             Some(_)
         ));
+    }
+
+    #[test]
+    fn when_null_pattern_narrows_branch_states() {
+        let decl_span = Span::new(1, 1, 1, 5);
+        let when_span = Span::new(2, 1, 6, 1);
+        let null_arm_span = Span::new(3, 1, 3, 10);
+        let else_span = Span::new(5, 1, 5, 10);
+        let id_span = Span::new(2, 5, 2, 9);
+
+        let when_expression = Expression::When {
+            expr: Some(Box::new(Expression::Identifier(
+                "x".into(),
+                id_span.clone(),
+            ))),
+            arms: vec![WhenArm {
+                pattern: Pattern::Literal(Literal::Null, null_arm_span.clone()),
+                guard: None,
+                body: Expression::Block {
+                    statements: vec![Statement::Expression {
+                        expr: Expression::Identifier("x".into(), id_span.clone()),
+                        span: null_arm_span.clone(),
+                    }],
+                    span: null_arm_span.clone(),
+                },
+                span: null_arm_span.clone(),
+            }],
+            else_arm: Some(Box::new(Expression::Block {
+                statements: vec![Statement::Expression {
+                    expr: Expression::Identifier("x".into(), id_span.clone()),
+                    span: else_span.clone(),
+                }],
+                span: else_span.clone(),
+            })),
+            implicit_end: None,
+            span: when_span.clone(),
+        };
+
+        let program = Program {
+            package: None,
+            imports: vec![],
+            statements: vec![
+                Statement::VarDeclaration {
+                    name: "x".into(),
+                    type_annotation: None,
+                    initializer: Some(Expression::Literal(Literal::Null, decl_span.clone())),
+                    modifiers: Default::default(),
+                    span: decl_span.clone(),
+                },
+                Statement::Expression {
+                    expr: when_expression,
+                    span: when_span.clone(),
+                },
+            ],
+            span: Span::new(1, 1, 6, 1),
+        };
+
+        let graph = build_graph(&program);
+        let context = NullSafetyContext::hydrate(None);
+        let outcome = FlowSolver::new(&graph, &context).solve();
+
+        let mut null_branch_node = None;
+        let mut not_null_node = None;
+
+        for node_id in 0..graph.nodes().len() {
+            for edge in graph.adjacency(node_id) {
+                match &edge.kind {
+                    FlowEdgeKind::TrueBranch {
+                        assumption: Some(BranchAssumption::Equals { variable, state }),
+                    } if variable == "x" && *state == NullabilityKind::Nullable => {
+                        null_branch_node = Some(edge.to);
+                    }
+                    FlowEdgeKind::FalseBranch {
+                        assumption: Some(BranchAssumption::NotEquals { variable, state }),
+                    } if variable == "x" && *state == NullabilityKind::NonNull => {
+                        not_null_node = Some(edge.to);
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        let null_state = outcome
+            .states
+            .get(&null_branch_node.expect("null branch target"))
+            .expect("state for null arm");
+        assert_eq!(null_state.states.get("x"), Some(&NullabilityKind::Nullable));
+
+        let non_null_state = outcome
+            .states
+            .get(&not_null_node.expect("non-null branch target"))
+            .expect("state for else arm");
+        assert_eq!(
+            non_null_state.states.get("x"),
+            Some(&NullabilityKind::NonNull)
+        );
     }
 }

@@ -49,6 +49,7 @@ impl FlowGraph {
         &self.adjacency[id]
     }
 
+    #[allow(dead_code)]
     pub fn predecessors(&self, id: FlowNodeId) -> &[FlowEdge] {
         &self.predecessors[id]
     }
@@ -126,6 +127,7 @@ pub enum FlowNodeKind {
 
 #[derive(Clone, Debug)]
 pub struct FlowEdge {
+    #[allow(dead_code)]
     pub from: FlowNodeId,
     pub to: FlowNodeId,
     pub kind: FlowEdgeKind,
