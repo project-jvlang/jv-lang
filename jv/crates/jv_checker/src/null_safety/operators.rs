@@ -56,7 +56,9 @@ impl OperatorSemantics {
     pub fn null_safe_member_access(object_state: NullabilityKind, span: Span) -> OperatorOutcome {
         let nullability = match object_state {
             NullabilityKind::NonNull => NullabilityKind::Unknown,
-            NullabilityKind::Nullable | NullabilityKind::Unknown => NullabilityKind::Nullable,
+            NullabilityKind::Nullable | NullabilityKind::Platform | NullabilityKind::Unknown => {
+                NullabilityKind::Nullable
+            }
         };
 
         let hint = JavaLoweringHint::new(
@@ -72,7 +74,9 @@ impl OperatorSemantics {
     pub fn null_safe_index_access(object_state: NullabilityKind, span: Span) -> OperatorOutcome {
         let nullability = match object_state {
             NullabilityKind::NonNull => NullabilityKind::Unknown,
-            NullabilityKind::Nullable | NullabilityKind::Unknown => NullabilityKind::Nullable,
+            NullabilityKind::Nullable | NullabilityKind::Platform | NullabilityKind::Unknown => {
+                NullabilityKind::Nullable
+            }
         };
 
         let hint = JavaLoweringHint::new(
@@ -94,12 +98,16 @@ impl OperatorSemantics {
 
         let nullability = match left_state {
             NonNull => NonNull,
-            Nullable => match right_state {
+            Nullable | Platform => match right_state {
                 NonNull => NonNull,
                 Nullable => Nullable,
+                Platform => Platform,
                 Unknown => Unknown,
             },
-            Unknown => right_state,
+            Unknown => match right_state {
+                Platform => Platform,
+                other => other,
+            },
         };
 
         let hint = JavaLoweringHint::new(
@@ -151,6 +159,13 @@ mod tests {
     }
 
     #[test]
+    fn platform_member_access_is_treated_as_nullable() {
+        let outcome =
+            OperatorSemantics::null_safe_member_access(NullabilityKind::Platform, dummy_span());
+        assert_eq!(outcome.nullability, NullabilityKind::Nullable);
+    }
+
+    #[test]
     fn elvis_operator_prefers_non_null_and_emits_hint() {
         let outcome = OperatorSemantics::elvis(
             NullabilityKind::Nullable,
@@ -165,6 +180,23 @@ mod tests {
                 ..
             })
         ));
+    }
+
+    #[test]
+    fn elvis_platform_operand_propagates_platform_when_right_uncertain() {
+        let outcome = OperatorSemantics::elvis(
+            NullabilityKind::Platform,
+            NullabilityKind::Unknown,
+            dummy_span(),
+        );
+        assert_eq!(outcome.nullability, NullabilityKind::Unknown);
+
+        let platform_outcome = OperatorSemantics::elvis(
+            NullabilityKind::Platform,
+            NullabilityKind::Platform,
+            dummy_span(),
+        );
+        assert_eq!(platform_outcome.nullability, NullabilityKind::Platform);
     }
 
     #[test]

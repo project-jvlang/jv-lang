@@ -12,6 +12,7 @@ use jv_inference::types::{
 pub enum NullabilityKind {
     NonNull,
     Nullable,
+    Platform,
     Unknown,
 }
 
@@ -20,6 +21,7 @@ impl NullabilityKind {
         use NullabilityKind::*;
         match (self, other) {
             (Nullable, _) | (_, Nullable) => Nullable,
+            (Platform, _) | (_, Platform) => Platform,
             (Unknown, _) | (_, Unknown) => Unknown,
             _ => NonNull,
         }
@@ -36,14 +38,23 @@ impl NullabilityKind {
     }
 
     fn from_facts_type(ty: &FactsTypeKind) -> Self {
+        use FactsTypeVariant::*;
+
+        if matches!(ty.variant(), Optional(_)) {
+            return NullabilityKind::Nullable;
+        }
+
         match ty.nullability() {
             NullabilityFlag::Nullable => NullabilityKind::Nullable,
-            NullabilityFlag::Unknown => NullabilityKind::Unknown,
-            NullabilityFlag::NonNull => match ty.variant() {
-                FactsTypeVariant::Optional(_) => NullabilityKind::Nullable,
-                FactsTypeVariant::Unknown | FactsTypeVariant::Variable(_) => {
+            NullabilityFlag::Unknown => {
+                if is_platform_candidate(ty) {
+                    NullabilityKind::Platform
+                } else {
                     NullabilityKind::Unknown
                 }
+            }
+            NullabilityFlag::NonNull => match ty.variant() {
+                Unknown | Variable(_) => NullabilityKind::Unknown,
                 _ => NullabilityKind::NonNull,
             },
         }
@@ -59,6 +70,16 @@ impl NullabilityKind {
         } else {
             NullabilityKind::from_checker_type(&scheme.ty)
         }
+    }
+}
+
+fn is_platform_candidate(ty: &FactsTypeKind) -> bool {
+    use FactsTypeVariant::*;
+
+    match ty.variant() {
+        Unknown | Variable(_) => false,
+        Optional(_) => false, // handled earlier
+        _ => true,
     }
 }
 
@@ -225,7 +246,7 @@ mod tests {
         assert_eq!(context.lattice().len(), 3);
         assert_eq!(
             context.lattice().get("user_id"),
-            Some(NullabilityKind::Unknown)
+            Some(NullabilityKind::Platform)
         );
         assert_eq!(
             context.lattice().get("maybe_email"),
@@ -242,5 +263,30 @@ mod tests {
         let context = NullSafetyContext::hydrate(None);
         assert!(context.is_degraded());
         assert!(context.lattice().is_empty());
+    }
+
+    #[test]
+    fn marks_unknown_facts_as_platform_when_metadata_missing() {
+        let mut builder = TypeFactsBuilder::new();
+        builder.environment_entry(
+            "external",
+            FactsTypeKind::new(TypeVariant::Primitive("java.lang.String")),
+        );
+        let facts = builder.build();
+
+        let context = NullSafetyContext::from_parts(Some(&facts), None);
+        assert!(context.is_degraded());
+        assert_eq!(
+            context.lattice().get("external"),
+            Some(NullabilityKind::Platform)
+        );
+    }
+
+    #[test]
+    fn join_prefers_nullable_then_platform_then_unknown() {
+        use NullabilityKind::*;
+        assert_eq!(Nullable.join(Platform), Nullable);
+        assert_eq!(Platform.join(NonNull), Platform);
+        assert_eq!(Unknown.join(NonNull), Unknown);
     }
 }

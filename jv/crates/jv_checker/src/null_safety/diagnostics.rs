@@ -28,6 +28,7 @@ impl<'ctx> DiagnosticsEmitter<'ctx> {
     }
 
     pub fn emit(&self, outcome: &FlowAnalysisOutcome) -> DiagnosticsPayload {
+        let overrides = aggregate_states(outcome);
         let errors = outcome
             .diagnostics
             .iter()
@@ -41,17 +42,19 @@ impl<'ctx> DiagnosticsEmitter<'ctx> {
         if self.context.is_degraded() {
             warnings.push(degraded_warning());
         }
+        warnings.extend(platform_warnings(&overrides));
 
         DiagnosticsPayload {
             errors,
             warnings,
-            facts: self.collect_facts(outcome),
+            facts: self.collect_facts(&overrides),
         }
     }
 
-    fn collect_facts(&self, outcome: &FlowAnalysisOutcome) -> Option<TypeFactsSnapshot> {
-        let overrides = aggregate_states(outcome);
-
+    fn collect_facts(
+        &self,
+        overrides: &HashMap<String, NullabilityKind>,
+    ) -> Option<TypeFactsSnapshot> {
         match (self.context.facts(), overrides.is_empty()) {
             (Some(snapshot), true) => return Some(snapshot.clone()),
             (None, true) => return None,
@@ -116,8 +119,23 @@ fn to_flag(state: NullabilityKind) -> NullabilityFlag {
     match state {
         NullabilityKind::NonNull => NullabilityFlag::NonNull,
         NullabilityKind::Nullable => NullabilityFlag::Nullable,
+        NullabilityKind::Platform => NullabilityFlag::Unknown,
         NullabilityKind::Unknown => NullabilityFlag::Unknown,
     }
+}
+
+fn platform_warnings(overrides: &HashMap<String, NullabilityKind>) -> Vec<CheckError> {
+    overrides
+        .iter()
+        .filter(|(_, state)| matches!(state, NullabilityKind::Platform))
+        .map(|(name, _)| platform_warning(name))
+        .collect()
+}
+
+fn platform_warning(name: &str) -> CheckError {
+    CheckError::NullSafetyError(format!(
+        "JV3005: プラットフォーム型 `{name}` の null 安全性が不明です。境界に注釈を追加するか、jv で型をラップしてください。\nJV3005: Null safety for platform type `{name}` is unknown. Add annotations at the boundary or wrap the type in jv."
+    ))
 }
 
 fn ensure_code(message: &str, default_code: &str) -> String {
@@ -188,5 +206,25 @@ mod tests {
         assert_eq!(ty.nullability(), NullabilityFlag::Nullable);
         assert!(!payload.errors.is_empty());
         assert!(payload.errors[0].to_string().contains(DEFAULT_ERROR_CODE));
+    }
+
+    #[test]
+    fn platform_states_emit_jv3005_information_warning() {
+        let env = TypeEnvironment::new();
+        let facts = TypeFactsBuilder::new().build();
+        let context = NullSafetyContext::from_parts(Some(&facts), Some(&env));
+
+        let mut outcome = FlowAnalysisOutcome::default();
+        let mut state = FlowStateSnapshot::new();
+        state.assign("external_api".into(), NullabilityKind::Platform);
+        outcome.states.insert(0, state);
+
+        let emitter = DiagnosticsEmitter::new(&context);
+        let payload = emitter.emit(&outcome);
+
+        assert_eq!(payload.errors.len(), 0);
+        assert_eq!(payload.warnings.len(), 1);
+        assert!(payload.warnings[0].to_string().contains("JV3005"));
+        assert!(payload.warnings[0].to_string().contains("external_api"));
     }
 }
