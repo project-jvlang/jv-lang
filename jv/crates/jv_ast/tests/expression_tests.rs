@@ -411,6 +411,27 @@ fn test_when_arm() {
     }
 }
 
+#[test]
+fn test_pattern_range_inclusive_flag() {
+    let pattern = Pattern::Range {
+        start: Box::new(Expression::Literal(
+            Literal::Number("0".to_string()),
+            dummy_span(),
+        )),
+        end: Box::new(Expression::Literal(
+            Literal::Number("10".to_string()),
+            dummy_span(),
+        )),
+        inclusive_end: true,
+        span: dummy_span(),
+    };
+
+    match pattern {
+        Pattern::Range { inclusive_end, .. } => assert!(inclusive_end),
+        _ => panic!("Expected range pattern"),
+    }
+}
+
 // Parameter tests
 #[test]
 fn test_parameter_simple() {

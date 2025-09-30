@@ -253,6 +253,52 @@ fn test_when_expression_with_guard_uses_logical_and() {
 }
 
 #[test]
+fn test_when_expression_with_range_patterns() {
+    let program = parse_program(
+        r#"val result = when (value) {
+            in 0..10 -> "small"
+            in 10..=20 -> "medium"
+            else -> "large"
+        }"#,
+    );
+    let statement = first_statement(&program);
+
+    match statement {
+        Statement::ValDeclaration { initializer, .. } => match initializer {
+            Expression::When { arms, .. } => {
+                assert_eq!(arms.len(), 2);
+                match &arms[0].pattern {
+                    Pattern::Range {
+                        inclusive_end,
+                        start,
+                        end,
+                        ..
+                    } => {
+                        assert!(!inclusive_end);
+                        assert!(matches!(
+                            start.as_ref(),
+                            Expression::Literal(Literal::Number(value), _) if value == "0"
+                        ));
+                        assert!(matches!(
+                            end.as_ref(),
+                            Expression::Literal(Literal::Number(value), _) if value == "10"
+                        ));
+                    }
+                    other => panic!("expected range pattern, found {:?}", other),
+                }
+
+                match &arms[1].pattern {
+                    Pattern::Range { inclusive_end, .. } => assert!(*inclusive_end),
+                    other => panic!("expected inclusive range pattern, found {:?}", other),
+                }
+            }
+            other => panic!("expected when expression, found {:?}", other),
+        },
+        other => panic!("expected val declaration, found {:?}", other),
+    }
+}
+
+#[test]
 fn test_subjectless_when_expression_parses_conditions() {
     let program = parse_program(
         r#"val result = when {

@@ -103,9 +103,9 @@ const DIAGNOSTICS: &[DiagnosticDescriptor] = &[
         severity: DiagnosticSeverity::Error,
     },
     DiagnosticDescriptor {
-        code: "E_COND_001",
-        title: "`if` expressions are not available / `if` 式は廃止されました",
-        help: "Use `when` for branching. See docs/language-guide.md#when-expression and docs/language-guide-en.md#when-expression.",
+        code: "JV3103",
+        title: "`if` expressions are forbidden / `if` 式は使用できません",
+        help: "Rewrite the branch using `when`. Quick Fix: when.convert.if. See docs/language-guide.md#when-expression and docs/language-guide-en.md#when-expression.",
         severity: DiagnosticSeverity::Error,
     },
     DiagnosticDescriptor {

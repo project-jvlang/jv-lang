@@ -1959,6 +1959,7 @@ mod tests {
                 Literal::Number("10".to_string()),
                 dummy_span(),
             )),
+            inclusive_end: false,
             span: dummy_span(),
         };
 

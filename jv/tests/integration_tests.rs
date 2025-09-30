@@ -553,8 +553,8 @@ fn cli_check_reports_forbidden_if_expression() {
 
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        stderr.contains("E_COND_001"),
-        "expected E_COND_001 in CLI output, got: {stderr}"
+        stderr.contains("JV3103"),
+        "expected JV3103 in CLI output, got: {stderr}"
     );
 }
 

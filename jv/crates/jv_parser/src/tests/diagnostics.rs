@@ -124,19 +124,24 @@ fn legacy_do_while_loop_reports_e_loop_001() {
 }
 
 #[test]
-fn legacy_if_expression_reports_e_cond_001() {
+fn legacy_if_expression_reports_jv3103() {
     let result = Parser::parse("val result = if (true) 1 else 0");
 
     match result {
         Err(ParseError::Syntax { message, .. }) => {
             assert!(
-                message.contains("E_COND_001"),
-                "expected E_COND_001 diagnostic for if expression, got {}",
+                message.contains("JV3103"),
+                "expected JV3103 diagnostic for if expression, got {}",
                 message
             );
             assert!(
                 message.contains("when"),
                 "expected guidance to use when expression, got {}",
+                message
+            );
+            assert!(
+                message.contains("Quick Fix"),
+                "expected Quick Fix hint in diagnostic message, got {}",
                 message
             );
         }

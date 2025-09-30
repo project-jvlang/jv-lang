@@ -1,11 +1,11 @@
 use chumsky::prelude::*;
 use chumsky::Parser as ChumskyParser;
-use jv_ast::{Expression, Literal, Pattern, Span};
+use jv_ast::{BinaryOp, Expression, Literal, Pattern, Span};
 use jv_lexer::{Token, TokenType};
 
 use super::support::{
     expression_span, identifier_with_span, keyword, merge_spans, span_from_token, token_and,
-    token_any_comma, token_left_paren, token_right_paren,
+    token_any_comma, token_in_keyword, token_left_paren, token_right_paren,
 };
 
 /// Parser for patterns used in `when` expressions.
@@ -70,7 +70,54 @@ pub(crate) fn when_pattern_parser(
                 None => Pattern::Identifier(name, name_span),
             });
 
-        let base = choice((wildcard, literal, is_pattern, identifier_or_constructor)).boxed();
+        let range_pattern = token_in_keyword()
+            .map(|token| span_from_token(&token))
+            .then(expr.clone())
+            .try_map(|(in_span, range_expr), span| match range_expr {
+                Expression::Binary {
+                    left,
+                    op: BinaryOp::RangeExclusive,
+                    right,
+                    span: range_span,
+                } => {
+                    let span = merge_spans(&in_span, &range_span);
+                    Ok(Pattern::Range {
+                        start: left,
+                        end: right,
+                        inclusive_end: false,
+                        span,
+                    })
+                }
+                Expression::Binary {
+                    left,
+                    op: BinaryOp::RangeInclusive,
+                    right,
+                    span: range_span,
+                } => {
+                    let span = merge_spans(&in_span, &range_span);
+                    Ok(Pattern::Range {
+                        start: left,
+                        end: right,
+                        inclusive_end: true,
+                        span,
+                    })
+                }
+                other => {
+                    let message = "JV3104: `in` パターンには範囲式が必要です / `in` patterns require a range expression";
+                    let detail = format!("invalid range pattern: {:?}", other);
+                    Err(Simple::custom(span, format!("{} ({})", message, detail)))
+                }
+            })
+            .boxed();
+
+        let base = choice((
+            wildcard,
+            literal,
+            is_pattern,
+            identifier_or_constructor,
+            range_pattern,
+        ))
+        .boxed();
 
         base.clone()
             .then(token_and().ignore_then(expr.clone()).or_not())

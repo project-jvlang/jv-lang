@@ -195,8 +195,7 @@ fn forbidden_if_expression_parser(
     token_if()
         .map(|token| span_from_token(&token))
         .try_map(|_span, error_span| {
-            let message =
-                "E_COND_001: 'if' expressions are not supported in jv; use 'when' instead";
+            let message = "JV3103: `if` 式は jv では禁止されています。`when` 式へ書き換えてください。Quick Fix: when.convert.if\nJV3103: `if` expressions are forbidden in jv. Rewrite this branch using `when`. Quick Fix: when.convert.if";
             Err(Simple::custom(error_span, message.to_string()))
         })
 }

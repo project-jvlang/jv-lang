@@ -354,7 +354,7 @@ val status = when {
 }
 ```
 
-> Note: Always include an `else` branch when using `when` as an expression. Missing `else` triggers diagnostic `E_WHEN_002` (an implicit `else -> Unit` is inserted for `Unit` contexts). The legacy `if` syntax has been removed—writing `if` now emits diagnostic `E_COND_001`. Use `when` for every conditional.
+> Note: Always include an `else` branch when using `when` as an expression. Missing `else` triggers diagnostic `E_WHEN_002` (an implicit `else -> Unit` is inserted for `Unit` contexts). jv does not ship an `if` syntax—writing `if` emits diagnostic `JV3103`. Use `when` for every conditional.
 
 ### Loops
 

@@ -109,6 +109,7 @@ pub enum Pattern {
     Range {
         start: Box<crate::Expression>,
         end: Box<crate::Expression>,
+        inclusive_end: bool,
         span: Span,
     },
     Guard {
