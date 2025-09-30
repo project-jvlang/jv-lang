@@ -46,7 +46,8 @@ fn null_safety_retains_type_facts_snapshot() {
         .expect("inference snapshot should expose facts")
         .to_json();
 
-    let diagnostics = checker.check_null_safety(&program, checker.inference_snapshot());
+    let snapshot = checker.inference_snapshot().cloned();
+    let diagnostics = checker.check_null_safety(&program, snapshot.as_ref());
     assert!(
         diagnostics.is_empty(),
         "no diagnostics expected for safe program"
