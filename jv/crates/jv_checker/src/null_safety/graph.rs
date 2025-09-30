@@ -1,6 +1,6 @@
 use jv_ast::types::Span;
 
-use super::NullabilityKind;
+use super::{JavaLoweringHint, NullabilityKind};
 
 pub type FlowNodeId = usize;
 
@@ -11,6 +11,7 @@ pub struct FlowGraph {
     predecessors: Vec<Vec<FlowEdge>>, // incoming edges
     entry: FlowNodeId,
     exit: FlowNodeId,
+    hints: Vec<JavaLoweringHint>,
 }
 
 impl FlowGraph {
@@ -24,6 +25,7 @@ impl FlowGraph {
             predecessors: vec![Vec::new(), Vec::new()],
             entry: 0,
             exit: 1,
+            hints: Vec::new(),
         }
     }
 
@@ -63,6 +65,19 @@ impl FlowGraph {
         let edge = FlowEdge { from, to, kind };
         self.adjacency[from].push(edge.clone());
         self.predecessors[to].push(edge);
+    }
+
+    pub fn hints(&self) -> &[JavaLoweringHint] {
+        &self.hints
+    }
+
+    pub fn add_hint(&mut self, hint: JavaLoweringHint) {
+        self.hints.push(hint);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn nodes(&self) -> &[FlowNode] {
+        &self.nodes
     }
 }
 

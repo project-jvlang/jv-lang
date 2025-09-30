@@ -349,7 +349,7 @@ pub mod pipeline {
 
             warnings.extend(
                 type_checker
-                    .check_null_safety(&program, type_checker.inference_snapshot())
+                    .check_null_safety(&program, None)
                     .into_iter()
                     .map(|warning| warning.to_string()),
             );

@@ -72,8 +72,8 @@ fn generalizes_identity_function() {
 fn reports_null_safety_violation_for_non_nullable_binding() {
     let program = parse_program("val message: String = null\n");
 
-    let checker = TypeChecker::new();
-    let diagnostics = checker.check_null_safety(&program, checker.inference_snapshot());
+    let mut checker = TypeChecker::new();
+    let diagnostics = checker.check_null_safety(&program, None);
 
     assert!(diagnostics.iter().any(|error| matches!(
         error,

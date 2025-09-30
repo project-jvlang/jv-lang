@@ -13,12 +13,14 @@ use crate::null_safety::graph::{
     BranchAssumption, FlowConstraint, FlowEdgeKind, FlowGraph, FlowNodeId, FlowNodeKind,
     FlowStateSnapshot,
 };
+use crate::null_safety::operators::{JavaLoweringHint, OperatorOutcome, OperatorSemantics};
 
 /// Outcome of running the flow solver. Diagnostics are placeholders for upcoming tasks.
 #[derive(Default)]
 pub struct FlowAnalysisOutcome {
     pub states: HashMap<FlowNodeId, FlowStateSnapshot>,
     pub diagnostics: Vec<CheckError>,
+    pub java_hints: Vec<JavaLoweringHint>,
 }
 
 pub fn build_graph(program: &Program) -> FlowGraph {
@@ -52,6 +54,9 @@ impl<'ctx> FlowSolver<'ctx> {
 
     pub fn solve(&self) -> FlowAnalysisOutcome {
         let mut outcome = FlowAnalysisOutcome::default();
+        outcome
+            .java_hints
+            .extend(self.graph.hints().iter().cloned());
         let mut worklist = VecDeque::new();
         let mut in_states: HashMap<FlowNodeId, FlowStateSnapshot> = HashMap::new();
         let mut out_states: HashMap<FlowNodeId, FlowStateSnapshot> = HashMap::new();
@@ -163,7 +168,7 @@ impl<'g> FlowGraphBuilder<'g> {
             } => {
                 let state = initializer
                     .as_ref()
-                    .map(|expr| classify_expression(expr))
+                    .map(|expr| classify_expression(self, expr))
                     .unwrap_or(NullabilityKind::Unknown);
                 self.emit_constraint(
                     current,
@@ -181,12 +186,13 @@ impl<'g> FlowGraphBuilder<'g> {
                 span,
             } => {
                 if let Some(identifier) = extract_assignment_target(target) {
+                    let value_state = classify_expression(self, value);
                     self.emit_constraint(
                         current,
                         FlowNodeKind::Statement,
                         FlowConstraint::Assign {
                             variable: identifier,
-                            state: classify_expression(value),
+                            state: value_state,
                         },
                         Some(span.clone()),
                     )
@@ -337,12 +343,13 @@ impl<'g> FlowGraphBuilder<'g> {
         initializer: &Expression,
         span: &Span,
     ) -> FlowNodeId {
+        let assignment_state = classify_expression(self, initializer);
         self.emit_constraint(
             current,
             FlowNodeKind::Statement,
             FlowConstraint::Assign {
                 variable: name.to_string(),
-                state: classify_expression(initializer),
+                state: assignment_state,
             },
             Some(span.clone()),
         )
@@ -478,7 +485,17 @@ fn extract_assignment_target(expr: &Expression) -> Option<String> {
     }
 }
 
-fn classify_expression(expr: &Expression) -> NullabilityKind {
+fn apply_operator_outcome(
+    builder: &mut FlowGraphBuilder<'_>,
+    outcome: OperatorOutcome,
+) -> NullabilityKind {
+    if let Some(hint) = outcome.hint {
+        builder.graph.add_hint(hint);
+    }
+    outcome.nullability
+}
+
+fn classify_expression(builder: &mut FlowGraphBuilder<'_>, expr: &Expression) -> NullabilityKind {
     match expr {
         Expression::Literal(literal, _) => match literal {
             Literal::Null => NullabilityKind::Nullable,
@@ -488,22 +505,54 @@ fn classify_expression(expr: &Expression) -> NullabilityKind {
             | Literal::String(_) => NullabilityKind::NonNull,
         },
         Expression::Identifier(_, _) => NullabilityKind::Unknown,
-        Expression::NullSafeMemberAccess { .. } | Expression::NullSafeIndexAccess { .. } => {
-            NullabilityKind::Nullable
+        Expression::NullSafeMemberAccess { object, span, .. } => {
+            let object_state = classify_expression(builder, object);
+            apply_operator_outcome(
+                builder,
+                OperatorSemantics::null_safe_member_access(object_state, span.clone()),
+            )
         }
-        Expression::Binary { left, right, .. } => {
-            classify_expression(left).join(classify_expression(right))
+        Expression::NullSafeIndexAccess {
+            object,
+            index,
+            span,
+        } => {
+            let object_state = classify_expression(builder, object);
+            // Evaluate index for completeness even though it does not impact nullability directly.
+            let _ = classify_expression(builder, index);
+            apply_operator_outcome(
+                builder,
+                OperatorSemantics::null_safe_index_access(object_state, span.clone()),
+            )
         }
-        Expression::Unary { operand, .. } => classify_expression(operand),
+        Expression::Binary {
+            left,
+            op,
+            right,
+            span,
+        } => {
+            let left_state = classify_expression(builder, left);
+            let right_state = classify_expression(builder, right);
+
+            if matches!(op, BinaryOp::Elvis) {
+                apply_operator_outcome(
+                    builder,
+                    OperatorSemantics::elvis(left_state, right_state, span.clone()),
+                )
+            } else {
+                left_state.join(right_state)
+            }
+        }
+        Expression::Unary { operand, .. } => classify_expression(builder, operand),
         Expression::Call { function, args, .. } => {
-            let mut state = classify_expression(function);
+            let mut state = classify_expression(builder, function);
             for arg in args {
                 match arg {
                     Argument::Positional(expr) => {
-                        state = state.join(classify_expression(expr));
+                        state = state.join(classify_expression(builder, expr));
                     }
                     Argument::Named { value, .. } => {
-                        state = state.join(classify_expression(value));
+                        state = state.join(classify_expression(builder, value));
                     }
                 }
             }
@@ -514,32 +563,32 @@ fn classify_expression(expr: &Expression) -> NullabilityKind {
             else_branch,
             ..
         } => {
-            let mut state = classify_expression(then_branch);
+            let mut state = classify_expression(builder, then_branch);
             if let Some(else_branch) = else_branch {
-                state = state.join(classify_expression(else_branch));
+                state = state.join(classify_expression(builder, else_branch));
             }
             state
         }
         Expression::Block { statements, .. } => {
             let mut state = NullabilityKind::Unknown;
             for statement in statements {
-                state = state.join(classify_statement_expression(statement));
+                state = state.join(classify_statement_expression(builder, statement));
             }
             state
         }
         Expression::When { arms, else_arm, .. } => {
             let mut state = NullabilityKind::Unknown;
             for arm in arms {
-                state = state.join(classify_expression(&arm.body));
+                state = state.join(classify_expression(builder, &arm.body));
             }
             if let Some(else_expr) = else_arm {
-                state = state.join(classify_expression(else_expr));
+                state = state.join(classify_expression(builder, else_expr));
             }
             state
         }
         Expression::Lambda { .. } => NullabilityKind::NonNull,
         Expression::Array { .. } => NullabilityKind::NonNull,
-        Expression::Try { expr, .. } => classify_expression(expr),
+        Expression::Try { expr, .. } => classify_expression(builder, expr),
         Expression::MemberAccess { .. } | Expression::IndexAccess { .. } => {
             NullabilityKind::Unknown
         }
@@ -548,12 +597,15 @@ fn classify_expression(expr: &Expression) -> NullabilityKind {
     }
 }
 
-fn classify_statement_expression(statement: &Statement) -> NullabilityKind {
+fn classify_statement_expression(
+    builder: &mut FlowGraphBuilder<'_>,
+    statement: &Statement,
+) -> NullabilityKind {
     match statement {
-        Statement::Expression { expr, .. } => classify_expression(expr),
+        Statement::Expression { expr, .. } => classify_expression(builder, expr),
         Statement::Return { value, .. } => value
             .as_ref()
-            .map(|expr| classify_expression(expr))
+            .map(|expr| classify_expression(builder, expr))
             .unwrap_or(NullabilityKind::Unknown),
         _ => NullabilityKind::Unknown,
     }
@@ -591,6 +643,7 @@ impl FlowStateSnapshot {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::null_safety::JavaLoweringStrategy;
     use jv_ast::types::Span;
 
     #[test]
@@ -610,5 +663,95 @@ mod tests {
 
         let graph = build_graph(&program);
         assert!(graph.adjacency(graph.entry()).len() > 0);
+    }
+
+    #[test]
+    fn null_safe_member_access_records_nullable_state_and_hint() {
+        let span = Span::dummy();
+        let program = Program {
+            package: None,
+            imports: vec![],
+            statements: vec![Statement::VarDeclaration {
+                name: "result".into(),
+                type_annotation: None,
+                initializer: Some(Expression::NullSafeMemberAccess {
+                    object: Box::new(Expression::Identifier("user".into(), span.clone())),
+                    property: "name".into(),
+                    span: span.clone(),
+                }),
+                modifiers: Default::default(),
+                span: span.clone(),
+            }],
+            span,
+        };
+
+        let graph = build_graph(&program);
+        let mut assigned_states = Vec::new();
+        for node in graph.nodes() {
+            for constraint in node.constraints() {
+                let FlowConstraint::Assign { state, .. } = constraint;
+                assigned_states.push(*state);
+            }
+        }
+
+        assert_eq!(assigned_states.len(), 1);
+        assert_eq!(assigned_states[0], NullabilityKind::Nullable);
+        assert!(matches!(
+            graph
+                .hints()
+                .iter()
+                .find(|hint| matches!(hint.strategy, JavaLoweringStrategy::NullSafeMemberAccess)),
+            Some(_)
+        ));
+    }
+
+    #[test]
+    fn elvis_operator_prefers_non_null_and_emits_hint() {
+        let span = Span::dummy();
+        let elvis_expr = Expression::Binary {
+            left: Box::new(Expression::NullSafeMemberAccess {
+                object: Box::new(Expression::Identifier("user".into(), span.clone())),
+                property: "nickname".into(),
+                span: span.clone(),
+            }),
+            op: BinaryOp::Elvis,
+            right: Box::new(Expression::Literal(
+                Literal::String("guest".into()),
+                span.clone(),
+            )),
+            span: span.clone(),
+        };
+
+        let program = Program {
+            package: None,
+            imports: vec![],
+            statements: vec![Statement::VarDeclaration {
+                name: "display".into(),
+                type_annotation: None,
+                initializer: Some(elvis_expr),
+                modifiers: Default::default(),
+                span: span.clone(),
+            }],
+            span,
+        };
+
+        let graph = build_graph(&program);
+        let mut assigned_states = Vec::new();
+        for node in graph.nodes() {
+            for constraint in node.constraints() {
+                let FlowConstraint::Assign { state, .. } = constraint;
+                assigned_states.push(*state);
+            }
+        }
+
+        assert_eq!(assigned_states.len(), 1);
+        assert_eq!(assigned_states[0], NullabilityKind::NonNull);
+        assert!(matches!(
+            graph
+                .hints()
+                .iter()
+                .find(|hint| matches!(hint.strategy, JavaLoweringStrategy::ElvisOperator)),
+            Some(_)
+        ));
     }
 }

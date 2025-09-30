@@ -1,11 +1,13 @@
 mod context;
 mod flow;
 mod graph;
+mod operators;
 
 use crate::inference::nullability::NullabilityAnalyzer;
 use crate::{CheckError, InferenceSnapshot};
 use flow::{build_graph, FlowSolver};
 use jv_ast::Program;
+pub use operators::{JavaLoweringHint, JavaLoweringStrategy};
 
 pub use context::{NullSafetyContext, NullabilityKind, NullabilityLattice};
 
@@ -14,6 +16,7 @@ pub use context::{NullSafetyContext, NullabilityKind, NullabilityLattice};
 pub struct NullSafetyReport {
     diagnostics: Vec<CheckError>,
     warnings: Vec<CheckError>,
+    java_hints: Vec<JavaLoweringHint>,
 }
 
 impl NullSafetyReport {
@@ -25,6 +28,7 @@ impl NullSafetyReport {
         Self {
             diagnostics,
             warnings: Vec::new(),
+            java_hints: Vec::new(),
         }
     }
 
@@ -34,6 +38,10 @@ impl NullSafetyReport {
 
     pub fn warnings(&self) -> &[CheckError] {
         &self.warnings
+    }
+
+    pub fn java_hints(&self) -> &[JavaLoweringHint] {
+        &self.java_hints
     }
 
     pub fn into_diagnostics(self) -> Vec<CheckError> {
@@ -49,6 +57,21 @@ impl NullSafetyReport {
         I: IntoIterator<Item = CheckError>,
     {
         self.diagnostics.extend(diagnostics);
+    }
+
+    pub fn extend_java_hints<I>(&mut self, hints: I)
+    where
+        I: IntoIterator<Item = JavaLoweringHint>,
+    {
+        self.java_hints.extend(hints);
+    }
+
+    pub fn take_diagnostics(&mut self) -> Vec<CheckError> {
+        std::mem::take(&mut self.diagnostics)
+    }
+
+    pub fn take_java_hints(&mut self) -> Vec<JavaLoweringHint> {
+        std::mem::take(&mut self.java_hints)
     }
 }
 
@@ -75,6 +98,7 @@ impl<'snapshot> NullSafetyCoordinator<'snapshot> {
         let graph = build_graph(program);
         let analysis = FlowSolver::new(&graph, &context).solve();
         report.extend_diagnostics(analysis.diagnostics);
+        report.extend_java_hints(analysis.java_hints);
         report.extend_diagnostics(NullabilityAnalyzer::analyze(program));
         report
     }

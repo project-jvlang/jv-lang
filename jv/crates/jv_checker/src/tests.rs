@@ -128,8 +128,8 @@ fn null_safety_violation_is_reported() {
         span,
     };
 
-    let checker = TypeChecker::new();
-    let diagnostics = checker.check_null_safety(&program, checker.inference_snapshot());
+    let mut checker = TypeChecker::new();
+    let diagnostics = checker.check_null_safety(&program, None);
     assert!(diagnostics.iter().any(
         |error| matches!(error, CheckError::NullSafetyError(message) if message.contains("null"))
     ));

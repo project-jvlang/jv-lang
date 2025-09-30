@@ -15,7 +15,7 @@ use jv_ast::{
     Pattern, Program, Property, ResourceManagement, Span, Statement, StringPart, TypeAnnotation,
     WhenArm,
 };
-use null_safety::NullSafetyCoordinator;
+use null_safety::{JavaLoweringHint, NullSafetyCoordinator};
 use std::collections::HashMap;
 use thiserror::Error;
 
@@ -147,6 +147,7 @@ pub struct TypeChecker {
     engine: InferenceEngine,
     snapshot: Option<InferenceSnapshot>,
     parallel_config: ParallelInferenceConfig,
+    null_safety_hints: Vec<JavaLoweringHint>,
 }
 
 impl TypeChecker {
@@ -163,6 +164,7 @@ impl TypeChecker {
             engine,
             snapshot: None,
             parallel_config: config,
+            null_safety_hints: Vec::new(),
         }
     }
 
@@ -186,6 +188,7 @@ impl TypeChecker {
     /// 型推論と整合性検証を実行する。
     pub fn check_program(&mut self, program: &Program) -> Result<(), Vec<CheckError>> {
         self.engine.set_parallel_config(self.parallel_config);
+        self.null_safety_hints.clear();
         match self.engine.infer_program(program) {
             Ok(()) => {
                 let validation_errors = WhenUsageValidator::validate(program);
@@ -205,19 +208,24 @@ impl TypeChecker {
 
     /// null 安全診断を実行し、推論スナップショットがあればそれを連携する。
     pub fn check_null_safety(
-        &self,
+        &mut self,
         program: &Program,
         snapshot: Option<&InferenceSnapshot>,
     ) -> Vec<CheckError> {
         let snapshot = snapshot.or_else(|| self.inference_snapshot());
-        NullSafetyCoordinator::new(snapshot)
-            .run(program)
-            .into_diagnostics()
+        let mut report = NullSafetyCoordinator::new(snapshot).run(program);
+        self.null_safety_hints = report.take_java_hints();
+        report.take_diagnostics()
     }
 
     /// 現在保持している推論スナップショットを取得する。
     pub fn inference_snapshot(&self) -> Option<&InferenceSnapshot> {
         self.snapshot.as_ref()
+    }
+
+    /// Returns Java lowering hints from the most recent null safety analysis.
+    pub fn null_safety_hints(&self) -> &[JavaLoweringHint] {
+        &self.null_safety_hints
     }
 
     /// 推論サービスとしてアクセスする。
