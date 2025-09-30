@@ -2,14 +2,12 @@
 
 /// Analysis facts produced by the pattern matcher.
 ///
-/// The structure intentionally starts empty in Task 2 so that later phases can
-/// extend it with exhaustiveness, narrowing, and telemetry payloads without
-/// breaking the API surface. Keeping the type clonable allows callers to cache
-/// and re-use results across compiler stages.
+/// The structure now tracks missing cases discovered during exhaustiveness
+/// analysis. Subsequent tasks will extend it with narrowing facts and telemetry
+/// payloads that other compiler stages can consume.
 #[derive(Debug, Clone, Default)]
 pub struct PatternMatchFacts {
-    // Placeholder field to keep the struct non-empty and future-proof.
-    _reserved: (),
+    missing_cases: Vec<MissingCase>,
 }
 
 impl PatternMatchFacts {
@@ -17,6 +15,34 @@ impl PatternMatchFacts {
     pub fn empty() -> Self {
         Self::default()
     }
+
+    /// Constructs a fact set with the provided missing-case information.
+    pub fn with_missing_cases(missing_cases: Vec<MissingCase>) -> Self {
+        Self { missing_cases }
+    }
+
+    pub fn missing_cases(&self) -> &[MissingCase] {
+        &self.missing_cases
+    }
+
+    pub fn into_missing_cases(self) -> Vec<MissingCase> {
+        self.missing_cases
+    }
+
+    pub fn is_exhaustive(&self) -> bool {
+        self.missing_cases.is_empty()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MissingCase {
+    Boolean { missing: MissingBooleanCase },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MissingBooleanCase {
+    True,
+    False,
 }
 
 /// Aggregated metrics describing cache behaviour for pattern analysis.

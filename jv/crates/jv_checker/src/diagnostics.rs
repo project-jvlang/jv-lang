@@ -103,6 +103,12 @@ const DIAGNOSTICS: &[DiagnosticDescriptor] = &[
         severity: DiagnosticSeverity::Error,
     },
     DiagnosticDescriptor {
+        code: "JV3100",
+        title: "`when` expression is not exhaustive / `when` 式が未網羅です",
+        help: "欠落している分岐を追加し、すべての boolean ケースを網羅してください。docs/language-guide.md#when-expression / docs/language-guide-en.md#when-expression を参照。/ Add the missing branches so every boolean case is handled. See docs/language-guide.md#when-expression and docs/language-guide-en.md#when-expression.",
+        severity: DiagnosticSeverity::Error,
+    },
+    DiagnosticDescriptor {
         code: "JV3103",
         title: "`if` expressions are forbidden / `if` 式は使用できません",
         help: "Rewrite the branch using `when`. Quick Fix: when.convert.if. See docs/language-guide.md#when-expression and docs/language-guide-en.md#when-expression.",

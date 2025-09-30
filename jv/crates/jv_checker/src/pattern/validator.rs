@@ -1,3 +1,6 @@
+use super::{
+    MissingBooleanCase, MissingCase, PatternMatchFacts, PatternMatchService, PatternTarget,
+};
 use crate::CheckError;
 use jv_ast::{
     Argument, ConcurrencyConstruct, Expression, ForInStatement, LoopStrategy, NumericRangeLoop,
@@ -5,17 +8,24 @@ use jv_ast::{
     WhenArm,
 };
 
-pub(super) fn validate_program(program: &Program) -> Vec<CheckError> {
-    WhenUsageValidator::validate(program)
+pub(super) fn validate_program(
+    service: &mut PatternMatchService,
+    program: &Program,
+) -> Vec<CheckError> {
+    WhenUsageValidator::validate(service, program)
 }
 
-struct WhenUsageValidator {
+struct WhenUsageValidator<'a> {
+    service: &'a mut PatternMatchService,
     errors: Vec<CheckError>,
 }
 
-impl WhenUsageValidator {
-    fn validate(program: &Program) -> Vec<CheckError> {
-        let mut validator = Self { errors: Vec::new() };
+impl<'a> WhenUsageValidator<'a> {
+    fn validate(service: &'a mut PatternMatchService, program: &Program) -> Vec<CheckError> {
+        let mut validator = Self {
+            service,
+            errors: Vec::new(),
+        };
         validator.visit_program(program);
         validator.errors
     }
@@ -210,6 +220,7 @@ impl WhenUsageValidator {
                 } else if expects_value && implicit_end.is_none() {
                     self.record_missing_else(span);
                 }
+                self.analyze_when_expression(expression, span, expects_value, expr.is_some());
             }
         }
     }
@@ -300,6 +311,42 @@ impl WhenUsageValidator {
             span: Some(span.clone()),
         });
     }
+
+    fn analyze_when_expression(
+        &mut self,
+        expression: &Expression,
+        span: &Span,
+        expects_value: bool,
+        has_subject: bool,
+    ) {
+        if !expects_value || !has_subject {
+            return;
+        }
+
+        let facts = self.service.analyze(expression, PatternTarget::Java25);
+        self.emit_exhaustiveness_diagnostics(span, facts);
+    }
+
+    fn emit_exhaustiveness_diagnostics(&mut self, span: &Span, facts: PatternMatchFacts) {
+        if facts.is_exhaustive() {
+            return;
+        }
+
+        for case in facts.into_missing_cases() {
+            match case {
+                MissingCase::Boolean { missing } => {
+                    let (label_en, label_ja) = boolean_labels(missing);
+                    let message = format!(
+                        "JV3100: when 式が boolean の `{label_ja}` ケースを網羅していません。`{label_ja}` を処理する分岐を追加してください。\nJV3100: Non-exhaustive boolean when expression missing `{label_en}` branch. Add a branch handling `{label_en}`."
+                    );
+                    self.errors.push(CheckError::ValidationError {
+                        message,
+                        span: Some(span.clone()),
+                    });
+                }
+            }
+        }
+    }
 }
 
 fn type_annotation_is_unit(annotation: &TypeAnnotation) -> bool {
@@ -307,5 +354,12 @@ fn type_annotation_is_unit(annotation: &TypeAnnotation) -> bool {
         TypeAnnotation::Simple(name) => name == "Unit",
         TypeAnnotation::Nullable(inner) => type_annotation_is_unit(inner),
         _ => false,
+    }
+}
+
+fn boolean_labels(case: MissingBooleanCase) -> (&'static str, &'static str) {
+    match case {
+        MissingBooleanCase::True => ("true", "true"),
+        MissingBooleanCase::False => ("false", "false"),
     }
 }

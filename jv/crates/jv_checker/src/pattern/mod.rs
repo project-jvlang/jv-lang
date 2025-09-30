@@ -1,5 +1,6 @@
 //! Pattern analysis service scaffold.
 
+mod exhaustiveness;
 mod facts;
 mod normalizer;
 mod validator;
@@ -9,7 +10,7 @@ use jv_ast::{Expression, Program, Span};
 use std::collections::{hash_map::DefaultHasher, HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 
-pub use facts::{PatternCacheMetrics, PatternMatchFacts};
+pub use facts::{MissingBooleanCase, MissingCase, PatternCacheMetrics, PatternMatchFacts};
 pub use normalizer::PatternNormalizer;
 
 const DEFAULT_CACHE_CAPACITY: usize = 256;
@@ -44,7 +45,7 @@ impl PatternMatchService {
     /// Delegates structural validation (legacy WhenUsageValidator) to the new
     /// module, keeping existing diagnostics intact.
     pub fn validate_program(&mut self, program: &Program) -> Vec<CheckError> {
-        validator::validate_program(program)
+        validator::validate_program(self, program)
     }
 
     /// Analyzes the provided `when` expression. The current task returns stub
@@ -59,7 +60,7 @@ impl PatternMatchService {
         }
 
         self.metrics.record_miss();
-        let facts = PatternMatchFacts::empty();
+        let facts = exhaustiveness::analyze(expression);
         self.cache.insert(key, facts.clone());
         facts
     }
