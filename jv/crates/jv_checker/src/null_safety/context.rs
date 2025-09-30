@@ -109,6 +109,11 @@ impl NullabilityLattice {
         }
     }
 
+    /// Overrides the recorded nullability state for the specified symbol.
+    pub fn set(&mut self, name: impl Into<String>, state: NullabilityKind) {
+        self.symbols.insert(name.into(), state);
+    }
+
     pub fn get(&self, name: &str) -> Option<NullabilityKind> {
         self.symbols.get(name).copied()
     }
@@ -176,6 +181,7 @@ pub struct NullSafetyContext<'facts> {
     lattice: NullabilityLattice,
     degraded: bool,
     late_init: LateInitRegistry,
+    java_metadata: HashMap<String, JavaSymbolMetadata>,
 }
 
 impl<'facts> NullSafetyContext<'facts> {
@@ -215,6 +221,12 @@ impl<'facts> NullSafetyContext<'facts> {
             }
         }
 
+        let mut java_metadata = HashMap::new();
+
+        if let Some(facts) = facts {
+            hydrate_java_annotations(facts, &mut lattice, &mut java_metadata);
+        }
+
         let late_init = LateInitRegistry::new(&lattice);
 
         Self {
@@ -222,6 +234,7 @@ impl<'facts> NullSafetyContext<'facts> {
             lattice,
             degraded: facts.is_none() || environment.is_none(),
             late_init,
+            java_metadata,
         }
     }
 
@@ -231,6 +244,7 @@ impl<'facts> NullSafetyContext<'facts> {
             lattice: NullabilityLattice::new(),
             degraded: true,
             late_init: LateInitRegistry::default(),
+            java_metadata: HashMap::new(),
         }
     }
 
@@ -257,6 +271,147 @@ impl<'facts> NullSafetyContext<'facts> {
     pub fn late_init_mut(&mut self) -> &mut LateInitRegistry {
         &mut self.late_init
     }
+
+    /// Returns Java interop metadata collected during context hydration.
+    pub fn java_metadata(&self) -> &HashMap<String, JavaSymbolMetadata> {
+        &self.java_metadata
+    }
+
+    /// Returns iterator over unknown Java annotations discovered during hydration.
+    pub fn unknown_java_annotations(&self) -> impl Iterator<Item = (&String, &String)> {
+        self.java_metadata.iter().flat_map(|(symbol, meta)| {
+            meta.unknown_annotations
+                .iter()
+                .map(move |annotation| (symbol, annotation))
+        })
+    }
+
+    /// Returns boundary metadata derived from Java annotations.
+    pub fn boundary_entries(
+        &self,
+    ) -> impl Iterator<Item = (&String, super::boundary::BoundaryKind)> {
+        self.java_metadata
+            .iter()
+            .filter_map(|(symbol, meta)| meta.boundary.map(|kind| (symbol, kind)))
+    }
+}
+
+fn hydrate_java_annotations(
+    facts: &TypeFactsSnapshot,
+    lattice: &mut NullabilityLattice,
+    metadata: &mut HashMap<String, JavaSymbolMetadata>,
+) {
+    for (symbol, annotations) in facts.java_annotations().iter() {
+        if annotations.is_empty() {
+            continue;
+        }
+
+        let mut meta = JavaSymbolMetadata::new();
+        for annotation in annotations {
+            meta.record_annotation(annotation);
+        }
+
+        if let Some(kind) = meta.nullability_kind() {
+            lattice.set(symbol.clone(), kind);
+        }
+
+        if !meta.is_empty() {
+            metadata.insert(symbol.clone(), meta);
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct JavaSymbolMetadata {
+    annotations: Vec<String>,
+    nullability_hint: Option<JavaNullabilityHint>,
+    unknown_annotations: Vec<String>,
+    boundary: Option<super::boundary::BoundaryKind>,
+}
+
+impl JavaSymbolMetadata {
+    fn new() -> Self {
+        Self {
+            annotations: Vec::new(),
+            nullability_hint: None,
+            unknown_annotations: Vec::new(),
+            boundary: None,
+        }
+    }
+
+    fn record_annotation(&mut self, annotation: &str) {
+        let trimmed = annotation.trim().trim_start_matches('@');
+        self.annotations.push(trimmed.to_string());
+
+        let normalized = trimmed.to_ascii_lowercase();
+        match normalized.as_str() {
+            "nullable"
+            | "javax.annotation.nullable"
+            | "jakarta.annotation.nullable"
+            | "org.jetbrains.annotations.nullable" => {
+                self.nullability_hint = Some(JavaNullabilityHint::Nullable);
+            }
+            "nonnull"
+            | "notnull"
+            | "jakarta.annotation.nonnull"
+            | "javax.annotation.nonnull"
+            | "edu.umd.cs.findbugs.annotations.nonnull"
+            | "org.jetbrains.annotations.notnull" => {
+                if !matches!(self.nullability_hint, Some(JavaNullabilityHint::Nullable)) {
+                    self.nullability_hint = Some(JavaNullabilityHint::NonNull);
+                }
+            }
+            "nullmarked" | "org.jspecify.annotations.nullmarked" => {
+                if !matches!(self.nullability_hint, Some(JavaNullabilityHint::Nullable)) {
+                    self.nullability_hint = Some(JavaNullabilityHint::NullMarked);
+                }
+            }
+            "jni" | "jnifunction" | "jdk.jni" => {
+                self.boundary = Some(super::boundary::BoundaryKind::Jni);
+            }
+            "ffm" | "foreignfunction" | "foreignmemory" | "jdk.incubator.foreign" => {
+                self.boundary = Some(super::boundary::BoundaryKind::Foreign);
+            }
+            _ => self.unknown_annotations.push(trimmed.to_string()),
+        }
+    }
+
+    fn nullability_kind(&self) -> Option<NullabilityKind> {
+        match self.nullability_hint {
+            Some(JavaNullabilityHint::Nullable) => Some(NullabilityKind::Nullable),
+            Some(JavaNullabilityHint::NonNull | JavaNullabilityHint::NullMarked) => {
+                Some(NullabilityKind::NonNull)
+            }
+            None => None,
+        }
+    }
+
+    pub fn nullability_hint(&self) -> Option<JavaNullabilityHint> {
+        self.nullability_hint
+    }
+
+    pub fn boundary(&self) -> Option<super::boundary::BoundaryKind> {
+        self.boundary
+    }
+
+    pub fn annotations(&self) -> &[String] {
+        &self.annotations
+    }
+
+    pub fn unknown_annotations(&self) -> &[String] {
+        &self.unknown_annotations
+    }
+
+    fn is_empty(&self) -> bool {
+        self.annotations.is_empty() && self.unknown_annotations.is_empty()
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum JavaNullabilityHint {
+    Nullable,
+    NonNull,
+    NullMarked,
 }
 
 #[cfg(test)]
@@ -339,6 +494,53 @@ mod tests {
             context.lattice().get("external"),
             Some(NullabilityKind::Platform)
         );
+    }
+
+    #[test]
+    fn applies_java_annotations_to_lattice() {
+        let env = TypeEnvironment::new();
+        let mut builder = TypeFactsBuilder::new();
+        builder.environment_entry(
+            "external",
+            FactsTypeKind::new(TypeVariant::Primitive("java.lang.String")),
+        );
+        builder.add_java_annotation("external", "@NotNull");
+        let facts = builder.build();
+
+        let context = NullSafetyContext::from_parts(Some(&facts), Some(&env));
+
+        assert_eq!(
+            context.lattice().get("external"),
+            Some(NullabilityKind::NonNull)
+        );
+
+        let metadata = context
+            .java_metadata()
+            .get("external")
+            .expect("metadata present");
+        assert_eq!(
+            metadata.nullability_hint(),
+            Some(JavaNullabilityHint::NonNull)
+        );
+    }
+
+    #[test]
+    fn unknown_annotations_are_exposed_for_diagnostics() {
+        let env = TypeEnvironment::new();
+        let mut builder = TypeFactsBuilder::new();
+        builder.environment_entry(
+            "mystery",
+            FactsTypeKind::new(TypeVariant::Primitive("java.lang.Object")),
+        );
+        builder.add_java_annotation("mystery", "@MaybeNull");
+        let facts = builder.build();
+
+        let context = NullSafetyContext::from_parts(Some(&facts), Some(&env));
+        let unknowns: Vec<_> = context.unknown_java_annotations().collect();
+
+        assert_eq!(unknowns.len(), 1);
+        assert_eq!(unknowns[0].0, "mystery");
+        assert_eq!(unknowns[0].1, "MaybeNull");
     }
 
     #[test]

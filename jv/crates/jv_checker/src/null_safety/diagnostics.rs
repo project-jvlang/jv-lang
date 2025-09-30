@@ -1,6 +1,6 @@
 use std::collections::{hash_map::Entry, HashMap};
 
-use super::context::NullSafetyContext;
+use super::context::{JavaNullabilityHint, NullSafetyContext};
 use super::flow::FlowAnalysisOutcome;
 use super::graph::FlowStateSnapshot;
 use super::operators::{JavaLoweringHint, JavaLoweringStrategy, OperatorOperand};
@@ -30,7 +30,7 @@ impl<'ctx> DiagnosticsEmitter<'ctx> {
     }
 
     pub fn emit(&self, outcome: &FlowAnalysisOutcome) -> DiagnosticsPayload {
-        let overrides = aggregate_states(outcome);
+        let mut overrides = aggregate_states(outcome);
         let mut errors = self.verify_exit_state(outcome.exit_state.as_ref());
         for error in &outcome.diagnostics {
             let message = ensure_code(&error.to_string(), DEFAULT_ERROR_CODE);
@@ -41,6 +41,8 @@ impl<'ctx> DiagnosticsEmitter<'ctx> {
         if self.context.is_degraded() {
             warnings.push(degraded_warning());
         }
+        warnings.extend(self.unknown_annotation_warnings());
+        warnings.extend(self.reconcile_external_signatures(&mut overrides));
         warnings.extend(platform_warnings(&overrides));
         warnings.extend(redundant_operator_warnings(
             self.context,
@@ -129,6 +131,37 @@ impl<'ctx> DiagnosticsEmitter<'ctx> {
 
         diagnostics
     }
+
+    fn unknown_annotation_warnings(&self) -> Vec<CheckError> {
+        self.context
+            .unknown_java_annotations()
+            .map(|(symbol, annotation)| unknown_annotation_warning(symbol, annotation))
+            .collect()
+    }
+
+    fn reconcile_external_signatures(
+        &self,
+        overrides: &mut HashMap<String, NullabilityKind>,
+    ) -> Vec<CheckError> {
+        let mut warnings = Vec::new();
+
+        for (symbol, meta) in self.context.java_metadata() {
+            let Some(hint) = meta.nullability_hint() else {
+                continue;
+            };
+
+            let Some(observed) = overrides.get_mut(symbol) else {
+                continue;
+            };
+
+            if external_mismatch_detected(hint, *observed) {
+                *observed = NullabilityKind::Unknown;
+                warnings.push(external_mismatch_warning(symbol, hint));
+            }
+        }
+
+        warnings
+    }
 }
 
 fn aggregate_states(outcome: &FlowAnalysisOutcome) -> HashMap<String, NullabilityKind> {
@@ -175,6 +208,36 @@ fn platform_warnings(overrides: &HashMap<String, NullabilityKind>) -> Vec<CheckE
 fn platform_warning(name: &str) -> CheckError {
     CheckError::NullSafetyError(format!(
         "JV3005: プラットフォーム型 `{name}` の null 安全性が不明です。境界に注釈を追加するか、jv で型をラップしてください。\nJV3005: Null safety for platform type `{name}` is unknown. Add annotations at the boundary or wrap the type in jv."
+    ))
+}
+
+fn unknown_annotation_warning(symbol: &str, annotation: &str) -> CheckError {
+    CheckError::NullSafetyError(format!(
+        "JV3005: `{annotation}` 注釈の null 意味が分からないため、シンボル `{symbol}` を危険側で扱います。注釈を標準の null 安全注釈へ置き換えるか、境界に安全なラッパーを追加してください。\nJV3005: Null semantics for annotation `{annotation}` on symbol `{symbol}` are unknown. Replace it with a recognised null-safety annotation or wrap the boundary defensively."
+    ))
+}
+
+fn external_mismatch_detected(hint: JavaNullabilityHint, observed: NullabilityKind) -> bool {
+    match hint {
+        JavaNullabilityHint::Nullable => matches!(observed, NullabilityKind::NonNull),
+        JavaNullabilityHint::NonNull | JavaNullabilityHint::NullMarked => {
+            matches!(observed, NullabilityKind::Nullable)
+        }
+    }
+}
+
+fn external_mismatch_warning(symbol: &str, hint: JavaNullabilityHint) -> CheckError {
+    let (expected_ja, expected_en) = match hint {
+        JavaNullabilityHint::Nullable => ("@Nullable".to_string(), "@Nullable".to_string()),
+        JavaNullabilityHint::NonNull => (
+            "@NotNull/@NonNull".to_string(),
+            "@NotNull/@NonNull".to_string(),
+        ),
+        JavaNullabilityHint::NullMarked => ("@NullMarked".to_string(), "@NullMarked".to_string()),
+    };
+
+    CheckError::NullSafetyError(format!(
+        "JV3005: Java 境界 `{symbol}` は {expected_ja} として宣言されていますが、解析結果と矛盾しました。境界の注釈を確認し、必要であれば jv 側で null チェックを追加してください。\nJV3005: Java boundary `{symbol}` is declared as {expected_en} but the analysis observed conflicting nullability. Review the annotation or add defensive null handling in jv."
     ))
 }
 
@@ -366,6 +429,57 @@ mod tests {
         assert_eq!(payload.warnings.len(), 1);
         assert!(payload.warnings[0].to_string().contains("JV3005"));
         assert!(payload.warnings[0].to_string().contains("external_api"));
+    }
+
+    #[test]
+    fn unknown_java_annotations_trigger_warning() {
+        let env = TypeEnvironment::new();
+        let mut builder = TypeFactsBuilder::new();
+        builder.environment_entry(
+            "mystery",
+            FactsTypeKind::new(FactsTypeVariant::Primitive("java.lang.Object")),
+        );
+        builder.add_java_annotation("mystery", "@MaybeNull");
+        let facts = builder.build();
+
+        let context = NullSafetyContext::from_parts(Some(&facts), Some(&env));
+        let outcome = FlowAnalysisOutcome::default();
+        let emitter = DiagnosticsEmitter::new(&context);
+        let payload = emitter.emit(&outcome);
+
+        assert!(payload
+            .warnings
+            .iter()
+            .any(|warning| warning.to_string().contains("JV3005")
+                && warning.to_string().contains("MaybeNull")));
+    }
+
+    #[test]
+    fn external_annotation_mismatch_emits_warning() {
+        let env = TypeEnvironment::new();
+        let mut builder = TypeFactsBuilder::new();
+        builder.environment_entry(
+            "external",
+            FactsTypeKind::new(FactsTypeVariant::Primitive("java.lang.String")),
+        );
+        builder.add_java_annotation("external", "@NotNull");
+        let facts = builder.build();
+
+        let context = NullSafetyContext::from_parts(Some(&facts), Some(&env));
+
+        let mut outcome = FlowAnalysisOutcome::default();
+        let mut state = FlowStateSnapshot::new();
+        state.assign("external".into(), NullabilityKind::Nullable);
+        outcome.states.insert(0, state);
+
+        let emitter = DiagnosticsEmitter::new(&context);
+        let payload = emitter.emit(&outcome);
+
+        assert!(payload
+            .warnings
+            .iter()
+            .any(|warning| warning.to_string().contains("JV3005")
+                && warning.to_string().contains("external")));
     }
 
     #[test]

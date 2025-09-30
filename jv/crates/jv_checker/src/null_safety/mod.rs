@@ -1,3 +1,4 @@
+mod boundary;
 mod context;
 mod diagnostics;
 mod flow;
@@ -7,6 +8,7 @@ mod patterns;
 
 use crate::inference::nullability::NullabilityAnalyzer;
 use crate::{CheckError, InferenceSnapshot};
+use boundary::BoundaryChecker;
 use diagnostics::DiagnosticsEmitter;
 use flow::{build_graph, FlowSolver};
 use jv_ast::Program;
@@ -108,6 +110,9 @@ impl<'snapshot> NullSafetyCoordinator<'snapshot> {
         let payload = emitter.emit(&analysis);
         report.extend_diagnostics(payload.errors);
         for warning in payload.warnings {
+            report.push_warning(warning);
+        }
+        for warning in BoundaryChecker::new(&context).evaluate(&analysis) {
             report.push_warning(warning);
         }
         if let Some(facts) = payload.facts {

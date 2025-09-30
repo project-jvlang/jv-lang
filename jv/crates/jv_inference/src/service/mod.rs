@@ -95,6 +95,7 @@ pub struct TypeFactsSnapshot {
     node_types: Arc<HashMap<TypeFactsNodeId, TypeKind>>,
     root_type: Option<TypeKind>,
     cache_metrics: Option<CacheMetrics>,
+    java_annotations: Arc<HashMap<String, Vec<String>>>,
 }
 
 impl TypeFactsSnapshot {
@@ -105,6 +106,7 @@ impl TypeFactsSnapshot {
         node_types: Arc<HashMap<TypeFactsNodeId, TypeKind>>,
         root_type: Option<TypeKind>,
         cache_metrics: Option<CacheMetrics>,
+        java_annotations: Arc<HashMap<String, Vec<String>>>,
     ) -> Self {
         Self {
             environment,
@@ -113,6 +115,7 @@ impl TypeFactsSnapshot {
             node_types,
             root_type,
             cache_metrics,
+            java_annotations,
         }
     }
 
@@ -169,6 +172,12 @@ impl TypeFactsSnapshot {
             })
         });
 
+        let java_annotations = self
+            .java_annotations
+            .iter()
+            .map(|(symbol, annotations)| (symbol.clone(), annotations.clone()))
+            .collect::<HashMap<_, _>>();
+
         json!({
             "environment": environment,
             "bindings": bindings,
@@ -176,6 +185,7 @@ impl TypeFactsSnapshot {
             "node_types": node_types,
             "root_type": self.root_type.as_ref().map(format_type),
             "cache_metrics": cache_metrics,
+            "java_annotations": java_annotations,
         })
     }
 
@@ -187,6 +197,11 @@ impl TypeFactsSnapshot {
     /// Returns cache telemetry captured during the inference run if available.
     pub fn cache_metrics(&self) -> Option<CacheMetrics> {
         self.cache_metrics
+    }
+
+    /// Returns raw Java annotation metadata captured for external symbols.
+    pub fn java_annotations(&self) -> &HashMap<String, Vec<String>> {
+        self.java_annotations.as_ref()
     }
 }
 
@@ -234,6 +249,7 @@ pub struct TypeFactsBuilder {
     node_types: HashMap<TypeFactsNodeId, TypeKind>,
     root_type: Option<TypeKind>,
     cache_metrics: Option<CacheMetrics>,
+    java_annotations: HashMap<String, Vec<String>>,
 }
 
 impl TypeFactsBuilder {
@@ -251,6 +267,7 @@ impl TypeFactsBuilder {
             node_types: snapshot.node_types.as_ref().clone(),
             root_type: snapshot.root_type.clone(),
             cache_metrics: snapshot.cache_metrics,
+            java_annotations: snapshot.java_annotations.as_ref().clone(),
         }
     }
 
@@ -289,6 +306,26 @@ impl TypeFactsBuilder {
         self
     }
 
+    /// Registers Java annotation metadata associated with the provided symbol.
+    pub fn add_java_annotation(
+        &mut self,
+        symbol: impl Into<String>,
+        annotation: impl Into<String>,
+    ) -> &mut Self {
+        let entry = self
+            .java_annotations
+            .entry(symbol.into())
+            .or_insert_with(Vec::new);
+        entry.push(annotation.into());
+        self
+    }
+
+    /// Replaces the entire Java annotation mapping.
+    pub fn set_java_annotations(&mut self, annotations: HashMap<String, Vec<String>>) -> &mut Self {
+        self.java_annotations = annotations;
+        self
+    }
+
     pub fn build(self) -> TypeFactsSnapshot {
         TypeFactsSnapshot::new(
             Arc::new(TypeEnvironmentSnapshot::new(self.environment)),
@@ -297,6 +334,7 @@ impl TypeFactsBuilder {
             Arc::new(self.node_types),
             self.root_type,
             self.cache_metrics,
+            Arc::new(self.java_annotations),
         )
     }
 }

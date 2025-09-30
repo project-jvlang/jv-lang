@@ -746,7 +746,10 @@ fn apply_operator_outcome(
     outcome.nullability
 }
 
-fn classify_expression(builder: &mut FlowGraphBuilder<'_, '_>, expr: &Expression) -> ExpressionInfo {
+fn classify_expression(
+    builder: &mut FlowGraphBuilder<'_, '_>,
+    expr: &Expression,
+) -> ExpressionInfo {
     match expr {
         Expression::Literal(literal, _) => match literal {
             Literal::Null => ExpressionInfo::new(NullabilityKind::Nullable),
