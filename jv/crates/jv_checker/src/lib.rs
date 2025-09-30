@@ -148,6 +148,7 @@ pub struct TypeChecker {
     snapshot: Option<InferenceSnapshot>,
     parallel_config: ParallelInferenceConfig,
     null_safety_hints: Vec<JavaLoweringHint>,
+    merged_facts: Option<TypeFactsSnapshot>,
 }
 
 impl TypeChecker {
@@ -165,6 +166,7 @@ impl TypeChecker {
             snapshot: None,
             parallel_config: config,
             null_safety_hints: Vec::new(),
+            merged_facts: None,
         }
     }
 
@@ -194,13 +196,19 @@ impl TypeChecker {
                 let validation_errors = WhenUsageValidator::validate(program);
                 if !validation_errors.is_empty() {
                     self.snapshot = None;
+                    self.merged_facts = None;
                     return Err(validation_errors);
                 }
                 self.snapshot = Some(InferenceSnapshot::from_engine(&self.engine));
+                self.merged_facts = self
+                    .snapshot
+                    .as_ref()
+                    .map(|snapshot| snapshot.type_facts().clone());
                 Ok(())
             }
             Err(error) => {
                 self.snapshot = None;
+                self.merged_facts = None;
                 Err(vec![CheckError::TypeError(error.to_string())])
             }
         }
@@ -215,6 +223,9 @@ impl TypeChecker {
         let snapshot = snapshot.or_else(|| self.inference_snapshot());
         let mut report = NullSafetyCoordinator::new(snapshot).run(program);
         self.null_safety_hints = report.take_java_hints();
+        if let Some(facts) = report.take_type_facts() {
+            self.merged_facts = Some(facts);
+        }
         report.take_diagnostics()
     }
 
@@ -237,7 +248,9 @@ impl TypeChecker {
 
     /// 新しい TypeFacts スナップショットへアクセスする。
     pub fn type_facts(&self) -> Option<&TypeFactsSnapshot> {
-        self.snapshot.as_ref().map(|snapshot| snapshot.type_facts())
+        self.merged_facts
+            .as_ref()
+            .or_else(|| self.snapshot.as_ref().map(|snapshot| snapshot.type_facts()))
     }
 
     /// 推論スナップショットを引き渡し、内部状態からは破棄する。

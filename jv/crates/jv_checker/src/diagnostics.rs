@@ -150,6 +150,36 @@ const DIAGNOSTICS: &[DiagnosticDescriptor] = &[
         help: "jv.toml の [build].java_version には 21 または 25 を指定してください。",
         severity: DiagnosticSeverity::Error,
     },
+    DiagnosticDescriptor {
+        code: "JV3001",
+        title: "null安全演算子の使用が不正です / Invalid null-safety operator usage",
+        help: "`?.` や `!!` の適用対象を見直し、null チェックの順序を修正してください。/ Review how `?.` and `!!` are applied and add explicit null checks before dereferencing.",
+        severity: DiagnosticSeverity::Error,
+    },
+    DiagnosticDescriptor {
+        code: "JV3002",
+        title: "null 参照の可能性があります / Potential null dereference detected",
+        help: "対象値を `?.` でガードするか、null を排除する条件分岐を追加してください。/ Guard the value with `?.` or insert a branch that excludes null before use.",
+        severity: DiagnosticSeverity::Error,
+    },
+    DiagnosticDescriptor {
+        code: "JV3003",
+        title: "null ケースが分岐で未処理です / Null case is not covered in control flow",
+        help: "`when` や `if` の分岐に null ケースを追加し、全経路で値を初期化してください。/ Add a null branch to `when`/`if` so every execution path initialises the value.",
+        severity: DiagnosticSeverity::Warning,
+    },
+    DiagnosticDescriptor {
+        code: "JV3004",
+        title: "null メタデータが不整合です / Nullability metadata is inconsistent",
+        help: "生成対象の POJO 定義を再確認し、フィールドの型と null 属性を揃えてください。/ Align generated POJO field types with their declared nullability annotations before emitting code.",
+        severity: DiagnosticSeverity::Warning,
+    },
+    DiagnosticDescriptor {
+        code: "JV3005",
+        title: "型推論情報が不足しています / Inference snapshot unavailable",
+        help: "`cargo check` などで最新の型推論を実行し、DSL 境界に注釈を追加してください。/ Re-run inference (e.g., `cargo check`) and annotate DSL boundaries to restore full null-safety precision.",
+        severity: DiagnosticSeverity::Information,
+    },
 ];
 
 /// 診断コードに対応するディスクリプタを取得します。

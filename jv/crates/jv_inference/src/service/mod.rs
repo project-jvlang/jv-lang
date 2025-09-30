@@ -241,6 +241,19 @@ impl TypeFactsBuilder {
         Self::default()
     }
 
+    /// Creates a builder pre-populated with the contents of an existing snapshot so callers
+    /// can apply incremental overrides (e.g. nullability refinements) before rebuilding.
+    pub fn from_snapshot(snapshot: &TypeFactsSnapshot) -> Self {
+        Self {
+            environment: snapshot.environment.as_ref().values().clone(),
+            bindings: snapshot.bindings.as_ref().clone(),
+            schemes: snapshot.schemes.as_ref().clone(),
+            node_types: snapshot.node_types.as_ref().clone(),
+            root_type: snapshot.root_type.clone(),
+            cache_metrics: snapshot.cache_metrics,
+        }
+    }
+
     pub fn environment_entry(&mut self, name: impl Into<String>, ty: TypeKind) -> &mut Self {
         self.environment.insert(name.into(), ty);
         self

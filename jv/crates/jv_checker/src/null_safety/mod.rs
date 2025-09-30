@@ -1,4 +1,5 @@
 mod context;
+mod diagnostics;
 mod flow;
 mod graph;
 mod operators;
@@ -6,8 +7,10 @@ mod patterns;
 
 use crate::inference::nullability::NullabilityAnalyzer;
 use crate::{CheckError, InferenceSnapshot};
+use diagnostics::DiagnosticsEmitter;
 use flow::{build_graph, FlowSolver};
 use jv_ast::Program;
+use jv_inference::service::TypeFactsSnapshot;
 pub use operators::{JavaLoweringHint, JavaLoweringStrategy};
 
 pub use context::{NullSafetyContext, NullabilityKind, NullabilityLattice};
@@ -18,6 +21,7 @@ pub struct NullSafetyReport {
     diagnostics: Vec<CheckError>,
     warnings: Vec<CheckError>,
     java_hints: Vec<JavaLoweringHint>,
+    type_facts: Option<TypeFactsSnapshot>,
 }
 
 impl NullSafetyReport {
@@ -30,6 +34,7 @@ impl NullSafetyReport {
             diagnostics,
             warnings: Vec::new(),
             java_hints: Vec::new(),
+            type_facts: None,
         }
     }
 
@@ -74,6 +79,14 @@ impl NullSafetyReport {
     pub fn take_java_hints(&mut self) -> Vec<JavaLoweringHint> {
         std::mem::take(&mut self.java_hints)
     }
+
+    pub fn set_type_facts(&mut self, snapshot: TypeFactsSnapshot) {
+        self.type_facts = Some(snapshot);
+    }
+
+    pub fn take_type_facts(&mut self) -> Option<TypeFactsSnapshot> {
+        self.type_facts.take()
+    }
 }
 
 /// Coordinates context hydration, flow analysis, and diagnostics emission.
@@ -89,16 +102,17 @@ impl<'snapshot> NullSafetyCoordinator<'snapshot> {
     pub fn run(&self, program: &Program) -> NullSafetyReport {
         let mut report = NullSafetyReport::new();
         let context = NullSafetyContext::hydrate(self.snapshot);
-
-        if context.is_degraded() {
-            report.push_warning(CheckError::NullSafetyError(
-                "型推論スナップショットが見つからないため、null安全解析を簡易モードで実行しました。".into(),
-            ));
-        }
-
         let graph = build_graph(program);
         let analysis = FlowSolver::new(&graph, &context).solve();
-        report.extend_diagnostics(analysis.diagnostics);
+        let emitter = DiagnosticsEmitter::new(&context);
+        let payload = emitter.emit(&analysis);
+        report.extend_diagnostics(payload.errors);
+        for warning in payload.warnings {
+            report.push_warning(warning);
+        }
+        if let Some(facts) = payload.facts {
+            report.set_type_facts(facts);
+        }
         report.extend_java_hints(analysis.java_hints);
         report.extend_diagnostics(NullabilityAnalyzer::analyze(program));
         report
