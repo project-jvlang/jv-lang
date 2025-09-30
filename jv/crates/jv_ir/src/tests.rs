@@ -603,6 +603,7 @@ mod tests {
                 discriminant,
                 cases,
                 java_type,
+                strategy_description,
                 ..
             } => {
                 match *discriminant {
@@ -621,9 +622,17 @@ mod tests {
                 }
 
                 assert_eq!(java_type, JavaType::string());
+                let description = strategy_description
+                    .expect("strategy description should be present for switch lowering");
+                assert!(description.contains("strategy=Switch"));
+                assert!(description.contains("guards=0"));
             }
             other => panic!("Expected switch expression, got {:?}", other),
         }
+
+        let strategies = context.when_strategies();
+        assert_eq!(strategies.len(), 1);
+        assert!(strategies[0].description.contains("strategy=Switch"));
     }
 
     #[test]
@@ -660,7 +669,11 @@ mod tests {
         .expect("when expression with guard should desugar successfully");
 
         match result {
-            IrExpression::Switch { cases, .. } => {
+            IrExpression::Switch {
+                cases,
+                strategy_description,
+                ..
+            } => {
                 let guard_ir = cases[0]
                     .guard
                     .as_ref()
@@ -669,9 +682,153 @@ mod tests {
                     IrExpression::Literal(Literal::Boolean(true), _) => {}
                     other => panic!("Expected boolean literal guard, got {:?}", other),
                 }
+
+                let description = strategy_description
+                    .expect("strategy description should be recorded for guard lowering");
+                assert!(description.contains("strategy=Hybrid"));
+                assert!(description.contains("guards=1"));
             }
             other => panic!("Expected switch expression, got {:?}", other),
         }
+
+        let strategies = context.when_strategies();
+        assert_eq!(strategies.len(), 1);
+        assert!(strategies[0].description.contains("strategy=Hybrid"));
+    }
+
+    #[test]
+    fn test_desugar_when_expression_with_range_pattern_uses_hybrid_strategy() {
+        let mut context = test_context();
+        context.add_variable("x".to_string(), JavaType::int());
+
+        let subject = Some(Box::new(Expression::Identifier(
+            "x".to_string(),
+            dummy_span(),
+        )));
+
+        let range_arm = WhenArm {
+            pattern: Pattern::Range {
+                start: Box::new(Expression::Literal(
+                    Literal::Number("0".to_string()),
+                    dummy_span(),
+                )),
+                end: Box::new(Expression::Literal(
+                    Literal::Number("10".to_string()),
+                    dummy_span(),
+                )),
+                inclusive_end: false,
+                span: dummy_span(),
+            },
+            guard: None,
+            body: Expression::Literal(Literal::String("small".to_string()), dummy_span()),
+            span: dummy_span(),
+        };
+
+        let else_arm = Some(Box::new(Expression::Literal(
+            Literal::String("other".to_string()),
+            dummy_span(),
+        )));
+
+        let result = desugar_when_expression(
+            subject,
+            vec![range_arm],
+            else_arm,
+            None,
+            dummy_span(),
+            &mut context,
+        )
+        .expect("range pattern should lower successfully");
+
+        match result {
+            IrExpression::Switch {
+                cases,
+                strategy_description,
+                ..
+            } => {
+                assert_eq!(cases.len(), 2);
+                match &cases[0].labels[0] {
+                    IrCaseLabel::TypePattern { type_name, .. } => assert_eq!(type_name, "int"),
+                    other => panic!("Expected type pattern label, got {:?}", other),
+                }
+                let guard = cases[0]
+                    .guard
+                    .as_ref()
+                    .expect("range guard should be generated");
+                match guard {
+                    IrExpression::Binary {
+                        op: BinaryOp::And, ..
+                    } => {}
+                    other => panic!("Expected guard to be boolean AND, got {:?}", other),
+                }
+                let description = strategy_description
+                    .expect("strategy description should exist for hybrid lowering");
+                assert!(description.contains("strategy=Hybrid"));
+                assert!(description.contains("guards=1"));
+            }
+            other => panic!("Expected switch expression, got {:?}", other),
+        }
+
+        let strategies = context.when_strategies();
+        assert_eq!(strategies.len(), 1);
+        assert!(strategies[0].description.contains("strategy=Hybrid"));
+    }
+
+    #[test]
+    fn test_desugar_when_expression_with_constructor_pattern_uses_switch_strategy() {
+        let mut context = test_context();
+        context.add_variable("value".to_string(), JavaType::string());
+
+        let subject = Some(Box::new(Expression::Identifier(
+            "value".to_string(),
+            dummy_span(),
+        )));
+
+        let arm = WhenArm {
+            pattern: Pattern::Constructor {
+                name: "String".to_string(),
+                patterns: vec![],
+                span: dummy_span(),
+            },
+            guard: None,
+            body: Expression::Literal(Literal::String("text".to_string()), dummy_span()),
+            span: dummy_span(),
+        };
+
+        let else_arm = Some(Box::new(Expression::Literal(
+            Literal::String("other".to_string()),
+            dummy_span(),
+        )));
+
+        let result = desugar_when_expression(
+            subject,
+            vec![arm],
+            else_arm,
+            None,
+            dummy_span(),
+            &mut context,
+        )
+        .expect("constructor pattern should lower successfully");
+
+        match result {
+            IrExpression::Switch {
+                cases,
+                strategy_description,
+                ..
+            } => {
+                match &cases[0].labels[0] {
+                    IrCaseLabel::TypePattern { type_name, .. } => assert_eq!(type_name, "String"),
+                    other => panic!("Expected type pattern label, got {:?}", other),
+                }
+                let description =
+                    strategy_description.expect("strategy description should be present");
+                assert!(description.contains("strategy=Switch"));
+            }
+            other => panic!("Expected switch expression, got {:?}", other),
+        }
+
+        let strategies = context.when_strategies();
+        assert_eq!(strategies.len(), 1);
+        assert!(strategies[0].description.contains("strategy=Switch"));
     }
 
     #[test]
@@ -758,26 +915,39 @@ mod tests {
     }
 
     #[test]
-    fn test_desugar_when_expression_without_subject_is_unsupported() {
+    fn test_subjectless_when_expression_lowers_to_if_chain() {
         let mut context = test_context();
 
         let arm = WhenArm {
-            pattern: Pattern::Literal(Literal::Number("1".to_string()), dummy_span()),
+            pattern: Pattern::Guard {
+                pattern: Box::new(Pattern::Wildcard(dummy_span())),
+                condition: Expression::Literal(Literal::Boolean(true), dummy_span()),
+                span: dummy_span(),
+            },
             guard: None,
-            body: Expression::Literal(Literal::String("one".to_string()), dummy_span()),
+            body: Expression::Literal(Literal::String("matched".to_string()), dummy_span()),
             span: dummy_span(),
         };
 
-        let error =
-            desugar_when_expression(None, vec![arm], None, None, dummy_span(), &mut context)
-                .expect_err("when without subject should be unsupported");
+        let else_arm = Some(Box::new(Expression::Literal(
+            Literal::String("fallback".to_string()),
+            dummy_span(),
+        )));
 
-        match error {
-            TransformError::UnsupportedConstruct { construct, .. } => {
-                assert!(construct.contains("without subject"));
+        let result =
+            desugar_when_expression(None, vec![arm], else_arm, None, dummy_span(), &mut context)
+                .expect("subjectless when should lower to conditional chain");
+
+        match result {
+            IrExpression::Conditional { java_type, .. } => {
+                assert_eq!(java_type, JavaType::string());
             }
-            other => panic!("Expected unsupported construct error, got {:?}", other),
+            other => panic!("Expected conditional expression, got {:?}", other),
         }
+
+        let strategies = context.when_strategies();
+        assert_eq!(strategies.len(), 1);
+        assert!(strategies[0].description.contains("strategy=IfChain"));
     }
 
     #[test]
@@ -2011,7 +2181,7 @@ mod tests {
 
         match err {
             TransformError::UnsupportedConstruct { construct, .. } => {
-                assert!(construct.contains("Unsupported when pattern"));
+                assert!(construct.contains("Destructuring constructor patterns"));
             }
             other => panic!("Expected unsupported construct error, got {:?}", other),
         }

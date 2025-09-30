@@ -18,6 +18,7 @@ mod sample;
 mod strings;
 mod type_system;
 mod utils;
+mod when_lowering_planner;
 
 pub use crate::types::{
     DataFormat, IrSampleDeclaration, PrimitiveType, SampleFetchError, SampleFetchRequest,

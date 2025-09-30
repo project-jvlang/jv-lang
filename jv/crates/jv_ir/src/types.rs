@@ -144,6 +144,8 @@ pub enum IrExpression {
         java_type: JavaType,
         #[serde(default)]
         implicit_end: Option<IrImplicitWhenEnd>,
+        #[serde(default)]
+        strategy_description: Option<String>,
         span: Span,
     },
 

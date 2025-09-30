@@ -1494,6 +1494,7 @@ fn switch_expression_renders_guards_and_default_branch() {
         ],
         java_type: JavaType::string(),
         implicit_end: None,
+        strategy_description: None,
         span: dummy_span(),
     };
 
@@ -1523,6 +1524,7 @@ fn switch_expression_appends_implicit_unit_branch_when_missing_default() {
         )],
         java_type: JavaType::string(),
         implicit_end: Some(IrImplicitWhenEnd::Unit { span: dummy_span() }),
+        strategy_description: None,
         span: dummy_span(),
     };
 
@@ -1554,6 +1556,7 @@ fn switch_expression_respects_existing_default_over_implicit_unit() {
         ],
         java_type: JavaType::string(),
         implicit_end: Some(IrImplicitWhenEnd::Unit { span: dummy_span() }),
+        strategy_description: None,
         span: dummy_span(),
     };
 
@@ -1582,6 +1585,7 @@ fn switch_expression_implicit_unit_renders_for_java21_target() {
         )],
         java_type: JavaType::string(),
         implicit_end: Some(IrImplicitWhenEnd::Unit { span: dummy_span() }),
+        strategy_description: None,
         span: dummy_span(),
     };
 

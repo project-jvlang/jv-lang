@@ -34,6 +34,8 @@ pub struct TransformContext {
     temp_counter: usize,
     /// Optional arena pools shared across lowering sessions
     pool_state: Option<TransformPoolState>,
+    /// Recorded lowering strategies for `when` expressions (telemetry & debugging)
+    when_strategies: Vec<WhenStrategyRecord>,
 }
 
 impl TransformContext {
@@ -66,6 +68,7 @@ impl TransformContext {
             sequence_style_cache: SequenceStyleCache::with_capacity(),
             temp_counter: 0,
             pool_state: None,
+            when_strategies: Vec::new(),
         }
     }
 
@@ -172,6 +175,24 @@ impl TransformContext {
             .as_ref()
             .map(|state| state.metrics().reuse_ratio())
     }
+
+    /// Records the lowering strategy applied to a `when` expression for later inspection.
+    pub fn record_when_strategy(&mut self, span: Span, description: impl Into<String>) {
+        self.when_strategies.push(WhenStrategyRecord {
+            span,
+            description: description.into(),
+        });
+    }
+
+    /// Returns the list of recorded lowering strategies without consuming them.
+    pub fn when_strategies(&self) -> &[WhenStrategyRecord] {
+        &self.when_strategies
+    }
+
+    /// Consumes and returns the recorded lowering strategies.
+    pub fn take_when_strategies(&mut self) -> Vec<WhenStrategyRecord> {
+        std::mem::take(&mut self.when_strategies)
+    }
 }
 
 // Helper implementations
@@ -197,8 +218,16 @@ impl Clone for TransformContext {
                 .pool_state
                 .as_ref()
                 .map(TransformPoolState::shallow_clone),
+            when_strategies: self.when_strategies.clone(),
         }
     }
+}
+
+/// Metadata describing the lowering strategy chosen for a `when` expression.
+#[derive(Debug, Clone)]
+pub struct WhenStrategyRecord {
+    pub span: Span,
+    pub description: String,
 }
 
 #[derive(Debug, Clone)]
