@@ -101,8 +101,8 @@ impl<'snapshot> NullSafetyCoordinator<'snapshot> {
 
     pub fn run(&self, program: &Program) -> NullSafetyReport {
         let mut report = NullSafetyReport::new();
-        let context = NullSafetyContext::hydrate(self.snapshot);
-        let graph = build_graph(program);
+        let mut context = NullSafetyContext::hydrate(self.snapshot);
+        let graph = build_graph(program, context.late_init_mut());
         let analysis = FlowSolver::new(&graph, &context).solve();
         let emitter = DiagnosticsEmitter::new(&context);
         let payload = emitter.emit(&analysis);

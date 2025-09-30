@@ -1,6 +1,23 @@
 use super::NullabilityKind;
 use jv_ast::types::Span;
 
+/// Details about the operand supplied to a null safety operator.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OperatorOperand {
+    pub state: NullabilityKind,
+    pub symbol: Option<String>,
+}
+
+impl OperatorOperand {
+    pub fn new(state: NullabilityKind, symbol: Option<String>) -> Self {
+        Self { state, symbol }
+    }
+
+    pub fn state(&self) -> NullabilityKind {
+        self.state
+    }
+}
+
 /// Enumerates the null safety operators that require Java lowering guidance.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum JavaLoweringStrategy {
@@ -20,14 +37,21 @@ pub struct JavaLoweringHint {
     pub span: Span,
     pub strategy: JavaLoweringStrategy,
     pub description: String,
+    pub operand: Option<OperatorOperand>,
 }
 
 impl JavaLoweringHint {
-    pub fn new(span: Span, strategy: JavaLoweringStrategy, description: impl Into<String>) -> Self {
+    pub fn new(
+        span: Span,
+        strategy: JavaLoweringStrategy,
+        description: impl Into<String>,
+        operand: Option<OperatorOperand>,
+    ) -> Self {
         Self {
             span,
             strategy,
             description: description.into(),
+            operand,
         }
     }
 }
@@ -53,8 +77,8 @@ pub struct OperatorSemantics;
 
 impl OperatorSemantics {
     /// Applies semantics for a null-safe member access (`obj?.property`).
-    pub fn null_safe_member_access(object_state: NullabilityKind, span: Span) -> OperatorOutcome {
-        let nullability = match object_state {
+    pub fn null_safe_member_access(object: OperatorOperand, span: Span) -> OperatorOutcome {
+        let nullability = match object.state {
             NullabilityKind::NonNull => NullabilityKind::Unknown,
             NullabilityKind::Nullable | NullabilityKind::Platform | NullabilityKind::Unknown => {
                 NullabilityKind::Nullable
@@ -65,14 +89,15 @@ impl OperatorSemantics {
             span,
             JavaLoweringStrategy::NullSafeMemberAccess,
             "Javaローワリング: ?. 演算子を (receiver != null ? receiver.member : default) 形式へ変換する",
+            Some(object),
         );
 
         OperatorOutcome::with_hint(nullability, hint)
     }
 
     /// Applies semantics for a null-safe index access (`array?[index]`).
-    pub fn null_safe_index_access(object_state: NullabilityKind, span: Span) -> OperatorOutcome {
-        let nullability = match object_state {
+    pub fn null_safe_index_access(object: OperatorOperand, span: Span) -> OperatorOutcome {
+        let nullability = match object.state {
             NullabilityKind::NonNull => NullabilityKind::Unknown,
             NullabilityKind::Nullable | NullabilityKind::Platform | NullabilityKind::Unknown => {
                 NullabilityKind::Nullable
@@ -83,6 +108,7 @@ impl OperatorSemantics {
             span,
             JavaLoweringStrategy::NullSafeIndexAccess,
             "Javaローワリング: ?[ ] 演算子を (receiver != null ? receiver[index] : default) 形式へ変換する",
+            Some(object),
         );
 
         OperatorOutcome::with_hint(nullability, hint)
@@ -114,6 +140,7 @@ impl OperatorSemantics {
             span,
             JavaLoweringStrategy::ElvisOperator,
             "Javaローワリング: ?: 演算子を (lhs != null ? lhs : rhs) 三項演算子へ変換する",
+            None,
         );
 
         OperatorOutcome::with_hint(nullability, hint)
@@ -124,12 +151,12 @@ impl OperatorSemantics {
     /// Currently we treat the result as non-null irrespective of the operand's
     /// state while preserving lowering guidance for downstream stages.
     #[allow(dead_code)]
-    pub fn not_null_assertion(operand_state: NullabilityKind, span: Span) -> OperatorOutcome {
-        let _ = operand_state;
+    pub fn not_null_assertion(operand: OperatorOperand, span: Span) -> OperatorOutcome {
         let hint = JavaLoweringHint::new(
             span,
             JavaLoweringStrategy::NotNullAssertion,
             "Javaローワリング: !! 演算子を Objects.requireNonNull もしくは適切な静的アサートへ変換する",
+            Some(operand),
         );
 
         OperatorOutcome::with_hint(NullabilityKind::NonNull, hint)
@@ -146,8 +173,8 @@ mod tests {
 
     #[test]
     fn safe_member_access_marks_nullable_and_emits_hint() {
-        let outcome =
-            OperatorSemantics::null_safe_member_access(NullabilityKind::Nullable, dummy_span());
+        let operand = OperatorOperand::new(NullabilityKind::Nullable, None);
+        let outcome = OperatorSemantics::null_safe_member_access(operand, dummy_span());
         assert_eq!(outcome.nullability, NullabilityKind::Nullable);
         assert!(matches!(
             outcome.hint,
@@ -160,8 +187,8 @@ mod tests {
 
     #[test]
     fn platform_member_access_is_treated_as_nullable() {
-        let outcome =
-            OperatorSemantics::null_safe_member_access(NullabilityKind::Platform, dummy_span());
+        let operand = OperatorOperand::new(NullabilityKind::Platform, None);
+        let outcome = OperatorSemantics::null_safe_member_access(operand, dummy_span());
         assert_eq!(outcome.nullability, NullabilityKind::Nullable);
     }
 
@@ -201,7 +228,8 @@ mod tests {
 
     #[test]
     fn not_null_assertion_force_non_null() {
-        let outcome = OperatorSemantics::not_null_assertion(NullabilityKind::Unknown, dummy_span());
+        let operand = OperatorOperand::new(NullabilityKind::Unknown, None);
+        let outcome = OperatorSemantics::not_null_assertion(operand, dummy_span());
         assert_eq!(outcome.nullability, NullabilityKind::NonNull);
         assert!(matches!(
             outcome.hint,

@@ -3,6 +3,7 @@ use std::collections::{hash_map::Entry, HashMap};
 use super::context::NullSafetyContext;
 use super::flow::FlowAnalysisOutcome;
 use super::graph::FlowStateSnapshot;
+use super::operators::{JavaLoweringHint, JavaLoweringStrategy, OperatorOperand};
 use super::NullabilityKind;
 use crate::CheckError;
 use jv_inference::service::{TypeFactsBuilder, TypeFactsSnapshot};
@@ -41,6 +42,11 @@ impl<'ctx> DiagnosticsEmitter<'ctx> {
             warnings.push(degraded_warning());
         }
         warnings.extend(platform_warnings(&overrides));
+        warnings.extend(redundant_operator_warnings(
+            self.context,
+            &overrides,
+            &outcome.java_hints,
+        ));
 
         DiagnosticsPayload {
             errors,
@@ -88,10 +94,7 @@ impl<'ctx> DiagnosticsEmitter<'ctx> {
         Some(builder.build())
     }
 
-    fn verify_exit_state(
-        &self,
-        exit_state: Option<&FlowStateSnapshot>,
-    ) -> Vec<CheckError> {
+    fn verify_exit_state(&self, exit_state: Option<&FlowStateSnapshot>) -> Vec<CheckError> {
         let mut diagnostics = Vec::new();
         let Some(state) = exit_state else {
             return diagnostics;
@@ -110,6 +113,17 @@ impl<'ctx> DiagnosticsEmitter<'ctx> {
 
             if matches!(observed, NullabilityKind::Nullable) {
                 diagnostics.push(CheckError::NullSafetyError(exit_violation_message(name)));
+                continue;
+            }
+
+            if self.context.late_init().is_tracked(name)
+                && !self.context.is_degraded()
+                && matches!(
+                    observed,
+                    NullabilityKind::Unknown | NullabilityKind::Platform
+                )
+            {
+                diagnostics.push(CheckError::NullSafetyError(late_init_message(name)));
             }
         }
 
@@ -164,9 +178,99 @@ fn platform_warning(name: &str) -> CheckError {
     ))
 }
 
+fn redundant_operator_warnings(
+    context: &NullSafetyContext<'_>,
+    overrides: &HashMap<String, NullabilityKind>,
+    hints: &[JavaLoweringHint],
+) -> Vec<CheckError> {
+    let mut warnings = Vec::new();
+
+    for hint in hints {
+        if !matches!(
+            hint.strategy,
+            JavaLoweringStrategy::NullSafeMemberAccess
+                | JavaLoweringStrategy::NullSafeIndexAccess
+                | JavaLoweringStrategy::NotNullAssertion
+        ) {
+            continue;
+        }
+
+        let Some(operand) = &hint.operand else {
+            continue;
+        };
+
+        if !operand_is_non_null(context, overrides, operand) {
+            continue;
+        }
+
+        if let Some(message) = redundant_operator_message(hint, operand) {
+            warnings.push(CheckError::NullSafetyError(message));
+        }
+    }
+
+    warnings
+}
+
+fn operand_is_non_null(
+    context: &NullSafetyContext<'_>,
+    overrides: &HashMap<String, NullabilityKind>,
+    operand: &OperatorOperand,
+) -> bool {
+    if matches!(operand.state(), NullabilityKind::NonNull) {
+        return true;
+    }
+
+    if let Some(symbol) = operand.symbol.as_deref() {
+        if matches!(
+            context.lattice().get(symbol),
+            Some(NullabilityKind::NonNull)
+        ) {
+            return true;
+        }
+
+        if matches!(overrides.get(symbol), Some(NullabilityKind::NonNull)) {
+            return true;
+        }
+    }
+
+    false
+}
+
+fn redundant_operator_message(
+    hint: &JavaLoweringHint,
+    operand: &OperatorOperand,
+) -> Option<String> {
+    let (target_ja, target_en) = operand
+        .symbol
+        .as_ref()
+        .map(|name| (format!("`{name}`"), format!("`{name}`")))
+        .unwrap_or_else(|| ("この値".to_string(), "this value".to_string()));
+
+    let message = match hint.strategy {
+        JavaLoweringStrategy::NullSafeMemberAccess => format!(
+            "JV3001: 値 {target_ja} は non-null と判定されているため `?.` 演算子は冗長です。`.` アクセスへ書き換えてください。\nJV3001: Null-safe operator `?.` is redundant because {target_en} is already non-null. Replace it with a regular `.` access."
+        ),
+        JavaLoweringStrategy::NullSafeIndexAccess => format!(
+            "JV3001: 値 {target_ja} は non-null と判定されているため `?[ ]` 演算子は冗長です。通常のインデックスアクセスへ置き換えてください。\nJV3001: Null-safe operator `?[ ]` is redundant because {target_en} is already non-null. Replace it with a standard index access."
+        ),
+        JavaLoweringStrategy::NotNullAssertion => format!(
+            "JV3001: 値 {target_ja} は non-null と判定されているため `!!` 演算子は冗長です。演算子を削除するか Elvis 演算子 `?:` でフォールバックを提供してください。\nJV3001: Non-null assertion `!!` is redundant because {target_en} is already non-null. Drop the operator or provide a fallback using `?:`."
+        ),
+        _ => return None,
+    };
+
+    Some(message)
+}
+
 fn exit_violation_message(name: &str) -> String {
     format!(
         "JV3002: 非 null として宣言された値 `{name}` がスコープ終了時に null になる可能性があります。確実に non-null へ初期化するか、Nullable 型へ更新してください。\nJV3002: Value `{name}` declared non-null may be null when control leaves this scope. Ensure it is initialised with a non-null value or relax the type to nullable."
+    )
+}
+
+fn late_init_message(name: &str) -> String {
+    format!(
+        "JV3003: 値 `{name}` は non-null と宣言されていますが、すべての経路で初期化されるとは限りません。即時に初期化するか `@LateInit` 注釈を追加し、安全な初期化手順を提供してください。\nJV3003: Value `{name}` is declared non-null but may bypass initialisation on some paths. Initialise it eagerly or add an `@LateInit` annotation with a safe initialisation strategy."
     )
 }
 
@@ -189,6 +293,8 @@ mod tests {
     use super::*;
     use crate::inference::TypeEnvironment;
     use crate::null_safety::graph::FlowStateSnapshot;
+    use crate::null_safety::operators::{JavaLoweringHint, JavaLoweringStrategy, OperatorOperand};
+    use jv_ast::types::Span;
     use jv_inference::service::TypeFactsBuilder;
     use jv_inference::types::{
         NullabilityFlag, TypeKind as FactsTypeKind, TypeVariant as FactsTypeVariant,
@@ -263,6 +369,79 @@ mod tests {
     }
 
     #[test]
+    fn redundant_null_safe_member_access_emits_warning() {
+        let mut env = TypeEnvironment::new();
+        env.define_monotype("user", crate::inference::TypeKind::Primitive("User"));
+
+        let mut facts_builder = TypeFactsBuilder::new();
+        facts_builder.environment_entry(
+            "user",
+            FactsTypeKind::new(FactsTypeVariant::Primitive("User"))
+                .with_nullability(NullabilityFlag::NonNull),
+        );
+        let facts = facts_builder.build();
+        let context = NullSafetyContext::from_parts(Some(&facts), Some(&env));
+
+        let operand = OperatorOperand::new(NullabilityKind::NonNull, Some("user".into()));
+        let hint = JavaLoweringHint::new(
+            Span::dummy(),
+            JavaLoweringStrategy::NullSafeMemberAccess,
+            "hint",
+            Some(operand),
+        );
+
+        let mut outcome = FlowAnalysisOutcome::default();
+        outcome.java_hints.push(hint);
+
+        let emitter = DiagnosticsEmitter::new(&context);
+        let payload = emitter.emit(&outcome);
+
+        assert_eq!(payload.errors.len(), 0);
+        assert!(payload
+            .warnings
+            .iter()
+            .any(|warning| warning.to_string().contains("JV3001")
+                && warning.to_string().contains("?.")
+                && warning.to_string().contains("user")));
+    }
+
+    #[test]
+    fn redundant_not_null_assertion_emits_warning() {
+        let mut env = TypeEnvironment::new();
+        env.define_monotype("value", crate::inference::TypeKind::Primitive("String"));
+
+        let mut facts_builder = TypeFactsBuilder::new();
+        facts_builder.environment_entry(
+            "value",
+            FactsTypeKind::new(FactsTypeVariant::Primitive("String"))
+                .with_nullability(NullabilityFlag::NonNull),
+        );
+        let facts = facts_builder.build();
+        let context = NullSafetyContext::from_parts(Some(&facts), Some(&env));
+
+        let operand = OperatorOperand::new(NullabilityKind::NonNull, Some("value".into()));
+        let hint = JavaLoweringHint::new(
+            Span::dummy(),
+            JavaLoweringStrategy::NotNullAssertion,
+            "hint",
+            Some(operand),
+        );
+
+        let mut outcome = FlowAnalysisOutcome::default();
+        outcome.java_hints.push(hint);
+
+        let emitter = DiagnosticsEmitter::new(&context);
+        let payload = emitter.emit(&outcome);
+
+        assert!(payload
+            .warnings
+            .iter()
+            .any(|warning| warning.to_string().contains("JV3001")
+                && warning.to_string().contains("!!")
+                && warning.to_string().contains("value")));
+    }
+
+    #[test]
     fn exit_violation_emits_error() {
         let mut env = TypeEnvironment::new();
         env.define_monotype("token", crate::inference::TypeKind::Primitive("String"));
@@ -322,5 +501,83 @@ mod tests {
         let payload = emitter.emit(&outcome);
 
         assert!(payload.errors.is_empty());
+    }
+
+    #[test]
+    fn exit_unknown_emits_late_init_guidance() {
+        let mut env = TypeEnvironment::new();
+        env.define_monotype("session", crate::inference::TypeKind::Primitive("Session"));
+
+        let mut builder = TypeFactsBuilder::new();
+        builder.environment_entry(
+            "session",
+            FactsTypeKind::new(FactsTypeVariant::Primitive("Session"))
+                .with_nullability(NullabilityFlag::NonNull),
+        );
+        let facts = builder.build();
+        let context = NullSafetyContext::from_parts(Some(&facts), Some(&env));
+
+        let mut outcome = FlowAnalysisOutcome::default();
+        outcome.exit_state = Some(FlowStateSnapshot::new());
+
+        let emitter = DiagnosticsEmitter::new(&context);
+        let payload = emitter.emit(&outcome);
+
+        assert!(payload.errors.iter().any(|error| {
+            let message = error.to_string();
+            message.contains("JV3003")
+                && message.contains("session")
+                && message.contains("@LateInit")
+        }));
+    }
+
+    #[test]
+    fn degraded_mode_skips_late_init_guidance() {
+        let mut builder = TypeFactsBuilder::new();
+        builder.environment_entry(
+            "session",
+            FactsTypeKind::new(FactsTypeVariant::Primitive("Session"))
+                .with_nullability(NullabilityFlag::NonNull),
+        );
+        let facts = builder.build();
+        let context = NullSafetyContext::from_parts(Some(&facts), None);
+
+        let mut outcome = FlowAnalysisOutcome::default();
+        outcome.exit_state = Some(FlowStateSnapshot::new());
+
+        let emitter = DiagnosticsEmitter::new(&context);
+        let payload = emitter.emit(&outcome);
+
+        assert!(payload
+            .errors
+            .iter()
+            .all(|error| !error.to_string().contains("JV3003")));
+    }
+
+    #[test]
+    fn annotated_late_init_suppresses_guidance() {
+        let mut env = TypeEnvironment::new();
+        env.define_monotype("session", crate::inference::TypeKind::Primitive("Session"));
+
+        let mut builder = TypeFactsBuilder::new();
+        builder.environment_entry(
+            "session",
+            FactsTypeKind::new(FactsTypeVariant::Primitive("Session"))
+                .with_nullability(NullabilityFlag::NonNull),
+        );
+        let facts = builder.build();
+        let mut context = NullSafetyContext::from_parts(Some(&facts), Some(&env));
+        context.late_init_mut().allow_late_init("session");
+
+        let mut outcome = FlowAnalysisOutcome::default();
+        outcome.exit_state = Some(FlowStateSnapshot::new());
+
+        let emitter = DiagnosticsEmitter::new(&context);
+        let payload = emitter.emit(&outcome);
+
+        assert!(payload
+            .errors
+            .iter()
+            .all(|error| !error.to_string().contains("JV3003")));
     }
 }

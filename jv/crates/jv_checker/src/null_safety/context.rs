@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::inference::{TypeEnvironment, TypeKind as CheckerTypeKind, TypeScheme};
 use crate::{InferenceSnapshot, TypeInferenceService};
@@ -126,11 +126,56 @@ impl NullabilityLattice {
     }
 }
 
+#[derive(Debug, Default, Clone)]
+pub struct LateInitRegistry {
+    required: HashSet<String>,
+    exempt: HashSet<String>,
+}
+
+impl LateInitRegistry {
+    pub fn new(lattice: &NullabilityLattice) -> Self {
+        let required = lattice
+            .iter()
+            .filter_map(|(name, state)| {
+                if matches!(state, NullabilityKind::NonNull) {
+                    Some(name.clone())
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        Self {
+            required,
+            exempt: HashSet::new(),
+        }
+    }
+
+    pub fn is_tracked(&self, name: &str) -> bool {
+        self.required.contains(name) && !self.exempt.contains(name)
+    }
+
+    pub fn allow_late_init(&mut self, name: impl Into<String>) {
+        self.exempt.insert(name.into());
+    }
+
+    #[cfg(test)]
+    pub fn tracked_names(&self) -> impl Iterator<Item = &String> {
+        self.required.iter()
+    }
+
+    #[cfg(test)]
+    pub fn exempt_names(&self) -> impl Iterator<Item = &String> {
+        self.exempt.iter()
+    }
+}
+
 /// Hydrates symbol tables and lattice state from inference snapshots for downstream flow analysis.
 pub struct NullSafetyContext<'facts> {
     facts: Option<&'facts TypeFactsSnapshot>,
     lattice: NullabilityLattice,
     degraded: bool,
+    late_init: LateInitRegistry,
 }
 
 impl<'facts> NullSafetyContext<'facts> {
@@ -170,10 +215,13 @@ impl<'facts> NullSafetyContext<'facts> {
             }
         }
 
+        let late_init = LateInitRegistry::new(&lattice);
+
         Self {
             facts,
             lattice,
             degraded: facts.is_none() || environment.is_none(),
+            late_init,
         }
     }
 
@@ -182,6 +230,7 @@ impl<'facts> NullSafetyContext<'facts> {
             facts: None,
             lattice: NullabilityLattice::new(),
             degraded: true,
+            late_init: LateInitRegistry::default(),
         }
     }
 
@@ -198,6 +247,15 @@ impl<'facts> NullSafetyContext<'facts> {
     /// Returns true when the context is operating in degraded mode due to missing inference data.
     pub fn is_degraded(&self) -> bool {
         self.degraded
+    }
+
+    /// Returns registry describing declarations that must be initialised on every path.
+    pub fn late_init(&self) -> &LateInitRegistry {
+        &self.late_init
+    }
+
+    pub fn late_init_mut(&mut self) -> &mut LateInitRegistry {
+        &mut self.late_init
     }
 }
 
@@ -256,6 +314,7 @@ mod tests {
             context.lattice().get("User::lookup"),
             Some(NullabilityKind::NonNull)
         );
+        assert!(context.late_init().is_tracked("User::lookup"));
     }
 
     #[test]
