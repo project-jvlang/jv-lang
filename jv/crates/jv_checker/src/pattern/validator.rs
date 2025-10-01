@@ -332,10 +332,48 @@ impl<'a> WhenUsageValidator<'a> {
 
         for case in facts.missing_cases() {
             match case {
-                MissingCase::Boolean { missing } => {
+                MissingCase::Boolean {
+                    missing,
+                    suggestion,
+                } => {
                     let (label_en, label_ja) = boolean_labels(*missing);
                     let message = format!(
-                        "JV3100: when 式が boolean の `{label_ja}` ケースを網羅していません。欠落した分岐を追加してください。\nJV3100: `when` expression is missing the `{label_en}` branch; add an arm covering it.\nQuick Fix: when.add.branch -> `{label_ja}` ケースの分岐テンプレートを挿入\nQuick Fix: when.add.branch -> insert branch template for `{label_en}`"
+                        "JV3100: when 式が boolean の `{label_ja}` ケースを網羅していません。欠落した分岐を追加してください。\nJV3100: `when` expression is missing the `{label_en}` branch; add an arm covering it.\nQuick Fix: {quick_fix} -> {quick_fix_label_ja}\nQuick Fix: {quick_fix} -> {quick_fix_label_en}",
+                        quick_fix = suggestion.quick_fix_id,
+                        quick_fix_label_ja = suggestion.label_ja,
+                        quick_fix_label_en = suggestion.label_en,
+                    );
+                    self.errors.push(CheckError::ValidationError {
+                        message,
+                        span: Some(span.clone()),
+                    });
+                }
+                MissingCase::SealedVariant {
+                    type_name,
+                    variant,
+                    suggestion,
+                } => {
+                    let message = format!(
+                        "JV3100: sealed 型 `{type_name}` の `{variant}` ケースを網羅していません。分岐を追加してください。\nJV3100: `when` expression is missing the `{variant}` branch of sealed type `{type_name}`; add an arm covering it.\nQuick Fix: {quick_fix} -> {quick_fix_label_ja}\nQuick Fix: {quick_fix} -> {quick_fix_label_en}",
+                        quick_fix = suggestion.quick_fix_id,
+                        quick_fix_label_ja = suggestion.label_ja,
+                        quick_fix_label_en = suggestion.label_en,
+                    );
+                    self.errors.push(CheckError::ValidationError {
+                        message,
+                        span: Some(span.clone()),
+                    });
+                }
+                MissingCase::EnumConstant {
+                    enum_type,
+                    constant,
+                    suggestion,
+                } => {
+                    let message = format!(
+                        "JV3100: enum 型 `{enum_type}` の `{constant}` ケースを網羅していません。分岐を追加してください。\nJV3100: `when` expression is missing the `{constant}` branch of enum `{enum_type}`; add an arm covering it.\nQuick Fix: {quick_fix} -> {quick_fix_label_ja}\nQuick Fix: {quick_fix} -> {quick_fix_label_en}",
+                        quick_fix = suggestion.quick_fix_id,
+                        quick_fix_label_ja = suggestion.label_ja,
+                        quick_fix_label_en = suggestion.label_en,
                     );
                     self.errors.push(CheckError::ValidationError {
                         message,

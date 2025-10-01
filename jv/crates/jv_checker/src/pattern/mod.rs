@@ -1,5 +1,6 @@
 //! Pattern analysis service scaffold.
 
+mod catalog;
 mod exhaustiveness;
 mod facts;
 mod narrowing;
@@ -11,6 +12,7 @@ use jv_ast::{Expression, Program, Span};
 use std::collections::{hash_map::DefaultHasher, HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 
+use catalog::PatternTypeCatalog;
 pub use facts::{
     ArmId, MissingBooleanCase, MissingCase, NarrowedBinding, NarrowedNullability, NarrowingFacts,
     NarrowingSnapshot, PatternCacheMetrics, PatternMatchFacts,
@@ -36,6 +38,7 @@ pub struct PatternMatchService {
     metrics: PatternCacheMetrics,
     normalizer: PatternNormalizer,
     recorded_facts: HashMap<(u64, PatternTarget), PatternMatchFacts>,
+    catalog: PatternTypeCatalog,
 }
 
 impl PatternMatchService {
@@ -45,6 +48,7 @@ impl PatternMatchService {
             metrics: PatternCacheMetrics::default(),
             normalizer: PatternNormalizer::new(),
             recorded_facts: HashMap::new(),
+            catalog: PatternTypeCatalog::default(),
         }
     }
 
@@ -67,12 +71,35 @@ impl PatternMatchService {
         }
 
         self.metrics.record_miss();
-        let mut facts = exhaustiveness::analyze(expression);
+        let mut facts = exhaustiveness::analyze(expression, &self.catalog);
         let narrowing_facts = narrowing::analyze(expression);
         facts.set_narrowing(narrowing_facts);
         self.record_facts(&key, &facts);
         self.cache.insert(key, facts.clone());
         facts
+    }
+
+    /// Registers the variants of a sealed type so exhaustiveness analysis can
+    /// surface missing-case suggestions. This hook will eventually be fed by
+    /// the type checker but is exposed now for focused unit tests.
+    pub fn register_sealed_type(
+        &mut self,
+        type_name: impl Into<String>,
+        variants: impl IntoIterator<Item = impl Into<String>>,
+    ) {
+        self.catalog
+            .register_sealed_type(type_name.into(), variants.into_iter().map(Into::into));
+    }
+
+    /// Registers the constants belonging to an enum so the analyzer can report
+    /// missing branches when a subset is matched.
+    pub fn register_enum(
+        &mut self,
+        enum_name: impl Into<String>,
+        constants: impl IntoIterator<Item = impl Into<String>>,
+    ) {
+        self.catalog
+            .register_enum(enum_name.into(), constants.into_iter().map(Into::into));
     }
 
     /// Removes cached entries that belong to invalidated AST nodes.

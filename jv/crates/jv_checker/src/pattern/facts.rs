@@ -60,13 +60,57 @@ impl PatternMatchFacts {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MissingCase {
-    Boolean { missing: MissingBooleanCase },
+    Boolean {
+        missing: MissingBooleanCase,
+        suggestion: MissingCaseSuggestion,
+    },
+    SealedVariant {
+        type_name: String,
+        variant: String,
+        suggestion: MissingCaseSuggestion,
+    },
+    EnumConstant {
+        enum_type: String,
+        constant: String,
+        suggestion: MissingCaseSuggestion,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MissingBooleanCase {
     True,
     False,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MissingCaseSuggestion {
+    pub quick_fix_id: &'static str,
+    pub label_en: String,
+    pub label_ja: String,
+}
+
+impl MissingCaseSuggestion {
+    pub fn new(
+        quick_fix_id: &'static str,
+        label_en: impl Into<String>,
+        label_ja: impl Into<String>,
+    ) -> Self {
+        Self {
+            quick_fix_id,
+            label_en: label_en.into(),
+            label_ja: label_ja.into(),
+        }
+    }
+}
+
+impl MissingCase {
+    pub fn suggestion(&self) -> Option<&MissingCaseSuggestion> {
+        match self {
+            MissingCase::Boolean { suggestion, .. } => Some(suggestion),
+            MissingCase::SealedVariant { suggestion, .. } => Some(suggestion),
+            MissingCase::EnumConstant { suggestion, .. } => Some(suggestion),
+        }
+    }
 }
 
 /// Aggregated metrics describing cache behaviour for pattern analysis.
