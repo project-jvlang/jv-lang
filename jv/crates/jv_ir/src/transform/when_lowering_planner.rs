@@ -8,6 +8,12 @@ use crate::types::{
 };
 use jv_ast::{BinaryOp, Expression, ImplicitWhenEnd, Literal, Pattern, Span, WhenArm};
 
+/// Maximum supported destructuring depth inside a single `when` arm. The outer
+/// constructor counts as depth = 1; each nested constructor increments the
+/// depth. Values above this constant are surfaced as JV3199 until Phase 5 adds
+/// full support.
+const MAX_DECONSTRUCTION_DEPTH: usize = 2;
+
 #[derive(Debug, Default, Clone)]
 pub struct PatternAnalysisSummary {
     pub is_exhaustive: Option<bool>,
@@ -315,11 +321,11 @@ fn lower_pattern_case(
         Pattern::Constructor {
             name,
             patterns,
-            span: _span,
+            span,
         } => {
             let binding = CaseBinding::new(context.fresh_identifier("it"), subject_type.clone());
             let (deconstruction, nested_guard) =
-                lower_constructor_deconstruction(patterns, context)?;
+                lower_constructor_deconstruction(patterns, context, &span, 1)?;
             Ok(PatternLowering {
                 labels: vec![IrCaseLabel::TypePattern {
                     type_name: name,
@@ -488,14 +494,30 @@ fn convert_implicit_end(end: ImplicitWhenEnd) -> IrImplicitWhenEnd {
 fn lower_constructor_deconstruction(
     patterns: Vec<Pattern>,
     context: &mut TransformContext,
+    span: &Span,
+    current_depth: usize,
 ) -> Result<(Option<IrDeconstructionPattern>, Option<IrExpression>), TransformError> {
     if patterns.is_empty() {
         return Ok((None, None));
     }
 
+    if current_depth > MAX_DECONSTRUCTION_DEPTH {
+        return Err(TransformError::UnsupportedConstruct {
+            construct: unsupported_pattern_message(
+                "Destructuring depth ≥ 3 is not supported yet",
+                "分解パターンの深さ（深度3以上）はまだサポートされていません",
+            ),
+            span: span.clone(),
+        });
+    }
+
     let mut components = Vec::new();
     for nested in patterns {
-        components.push(lower_deconstruction_component(nested, context)?);
+        components.push(lower_deconstruction_component(
+            nested,
+            context,
+            current_depth + 1,
+        )?);
     }
 
     Ok((Some(IrDeconstructionPattern { components }), None))
@@ -504,6 +526,7 @@ fn lower_constructor_deconstruction(
 fn lower_deconstruction_component(
     pattern: Pattern,
     context: &mut TransformContext,
+    current_depth: usize,
 ) -> Result<IrDeconstructionComponent, TransformError> {
     match pattern {
         Pattern::Wildcard(_) => Ok(IrDeconstructionComponent::Wildcard),
@@ -514,7 +537,8 @@ fn lower_deconstruction_component(
             patterns,
             span,
         } => {
-            let (nested, nested_guard) = lower_constructor_deconstruction(patterns, context)?;
+            let (nested, nested_guard) =
+                lower_constructor_deconstruction(patterns, context, &span, current_depth)?;
             if nested_guard.is_some() {
                 return Err(TransformError::UnsupportedConstruct {
                     construct: unsupported_nested_feature_message(

@@ -243,7 +243,7 @@ const DIAGNOSTICS: &[DiagnosticDescriptor] = &[
     DiagnosticDescriptor {
         code: "JV3199",
         title: "Advanced pattern matching not yet supported / 高度なパターンマッチングは未対応",
-        help: "深度2以上の分解パターンや複合ガードは段階的に提供されます。サポート済みの構文へ書き換えるか今後のアップデートをお待ちください。/ Deep destructuring (depth ≥ 2) and complex guards are still rolling out. Rewrite the pattern using supported constructs or wait for a forthcoming update. (--explain JV3199)",
+        help: "深度3以上の分解パターンや複合ガードは段階的に提供されます。サポート済みの構文へ書き換えるか今後のアップデートをお待ちください。/ Deep destructuring (depth ≥ 3) and complex guards are still rolling out. Rewrite the pattern using supported constructs or wait for a forthcoming update. (--explain JV3199)",
         severity: DiagnosticSeverity::Error,
     },
 ];
