@@ -11,10 +11,10 @@ mod tests {
         generate_extension_class_name, generate_utility_class_name, infer_java_type,
         transform_expression, transform_program, transform_program_with_context,
         transform_program_with_context_profiled, transform_statement, CompletableFutureOp,
-        DataFormat, IrCaseLabel, IrDeconstructionComponent, IrExpression, IrForEachKind,
-        IrForLoopMetadata, IrImplicitWhenEnd, IrModifiers, IrNumericRangeLoop, IrStatement,
-        IrVisibility, JavaType, SampleMode, SampleSourceKind, Schema, TransformContext,
-        TransformError, TransformPools, TransformProfiler, VirtualThreadOp,
+        DataFormat, IrCaseLabel, IrDeconstructionComponent, IrDeconstructionPattern, IrExpression,
+        IrForEachKind, IrForLoopMetadata, IrImplicitWhenEnd, IrModifiers, IrNumericRangeLoop,
+        IrStatement, IrVisibility, JavaType, SampleMode, SampleSourceKind, Schema,
+        TransformContext, TransformError, TransformPools, TransformProfiler, VirtualThreadOp,
     };
     use jv_ast::*;
     use jv_parser::Parser;
@@ -3249,8 +3249,35 @@ mod tests {
         );
     }
 
+    fn nested_constructor_pattern(depth: usize, span: &Span) -> Pattern {
+        assert!(depth >= 1, "depth must be at least 1");
+        let mut current = Pattern::Identifier("leaf".to_string(), span.clone());
+        for level in (1..=depth).rev() {
+            current = Pattern::Constructor {
+                name: format!("Ctor{level}"),
+                patterns: vec![current],
+                span: span.clone(),
+            };
+        }
+        current
+    }
+
+    fn nested_deconstruction_depth(pattern: &IrDeconstructionPattern) -> usize {
+        let mut depth = 1;
+        let mut current = pattern;
+        while let Some(IrDeconstructionComponent::Type {
+            pattern: Some(inner),
+            ..
+        }) = current.components.first()
+        {
+            depth += 1;
+            current = inner;
+        }
+        depth
+    }
+
     #[test]
-    fn depth_two_destructuring_lowering_succeeds() {
+    fn depth_ten_destructuring_lowering_succeeds() {
         let span = dummy_span();
         let when_expr = Expression::When {
             expr: Some(Box::new(Expression::Identifier(
@@ -3258,18 +3285,7 @@ mod tests {
                 span.clone(),
             ))),
             arms: vec![WhenArm {
-                pattern: Pattern::Constructor {
-                    name: "Wrapper".to_string(),
-                    patterns: vec![Pattern::Constructor {
-                        name: "Pair".to_string(),
-                        patterns: vec![
-                            Pattern::Identifier("x".to_string(), span.clone()),
-                            Pattern::Identifier("y".to_string(), span.clone()),
-                        ],
-                        span: span.clone(),
-                    }],
-                    span: span.clone(),
-                },
+                pattern: nested_constructor_pattern(10, &span),
                 guard: None,
                 body: Expression::Literal(Literal::Number("1".to_string()), span.clone()),
                 span: span.clone(),
@@ -3300,7 +3316,7 @@ mod tests {
             span.clone(),
             &mut context,
         )
-        .expect("depth-two destructuring should lower successfully");
+        .expect("depth-10 destructuring should lower successfully");
 
         let IrExpression::Switch { cases, .. } = result else {
             panic!("expected when lowering to produce a switch expression");
@@ -3311,42 +3327,22 @@ mod tests {
             1,
             "single arm should lower to single switch case"
         );
-        let IrCaseLabel::TypePattern {
-            type_name,
-            deconstruction,
-            ..
-        } = &cases[0].labels[0]
-        else {
+        let IrCaseLabel::TypePattern { deconstruction, .. } = &cases[0].labels[0] else {
             panic!("expected type pattern label for destructuring case");
         };
-        assert_eq!(type_name, "Wrapper");
 
         let pattern = deconstruction
             .as_ref()
-            .expect("Wrapper pattern should carry deconstruction metadata");
-        assert_eq!(pattern.components.len(), 1);
-        match &pattern.components[0] {
-            IrDeconstructionComponent::Type {
-                type_name,
-                pattern: Some(inner),
-            } => {
-                assert_eq!(type_name, "Pair");
-                assert_eq!(inner.components.len(), 2);
-                match &inner.components[0] {
-                    IrDeconstructionComponent::Binding { name } => assert_eq!(name, "x"),
-                    other => panic!("expected binding for first component, got {other:?}"),
-                }
-                match &inner.components[1] {
-                    IrDeconstructionComponent::Binding { name } => assert_eq!(name, "y"),
-                    other => panic!("expected binding for second component, got {other:?}"),
-                }
-            }
-            other => panic!("expected nested Pair deconstruction, got {other:?}"),
-        }
+            .expect("top-level case should record deconstruction metadata");
+        assert_eq!(
+            nested_deconstruction_depth(pattern),
+            10,
+            "deconstruction metadata should preserve full depth"
+        );
     }
 
     #[test]
-    fn depth_three_destructuring_emits_jv3199() {
+    fn depth_eleven_destructuring_emits_jv3199() {
         let span = dummy_span();
         let when_expr = Expression::When {
             expr: Some(Box::new(Expression::Identifier(
@@ -3354,19 +3350,7 @@ mod tests {
                 span.clone(),
             ))),
             arms: vec![WhenArm {
-                pattern: Pattern::Constructor {
-                    name: "Outer".to_string(),
-                    patterns: vec![Pattern::Constructor {
-                        name: "Middle".to_string(),
-                        patterns: vec![Pattern::Constructor {
-                            name: "Inner".to_string(),
-                            patterns: vec![Pattern::Identifier("leaf".to_string(), span.clone())],
-                            span: span.clone(),
-                        }],
-                        span: span.clone(),
-                    }],
-                    span: span.clone(),
-                },
+                pattern: nested_constructor_pattern(11, &span),
                 guard: None,
                 body: Expression::Literal(Literal::Number("1".to_string()), span.clone()),
                 span: span.clone(),
@@ -3399,15 +3383,15 @@ mod tests {
         );
 
         let Err(TransformError::UnsupportedConstruct { construct, .. }) = result else {
-            panic!("expected depth-three destructuring to raise JV3199");
+            panic!("expected depth-11 destructuring to raise JV3199");
         };
         assert!(
             construct.contains("JV3199"),
-            "depth-three error should embed JV3199 diagnostic code"
+            "depth-11 error should embed JV3199 diagnostic code"
         );
         assert!(
             construct.contains("--explain JV3199"),
-            "depth-three error should include explain metadata"
+            "depth-11 error should include explain metadata"
         );
     }
 }

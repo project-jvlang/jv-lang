@@ -10,9 +10,9 @@ use jv_ast::{BinaryOp, Expression, ImplicitWhenEnd, Literal, Pattern, Span, When
 
 /// Maximum supported destructuring depth inside a single `when` arm. The outer
 /// constructor counts as depth = 1; each nested constructor increments the
-/// depth. Values above this constant are surfaced as JV3199 until Phase 5 adds
-/// full support.
-const MAX_DECONSTRUCTION_DEPTH: usize = 2;
+/// depth. Values above this constant are surfaced as JV3199 until later phases
+/// extend support.
+const MAX_DECONSTRUCTION_DEPTH: usize = 10;
 
 #[derive(Debug, Default, Clone)]
 pub struct PatternAnalysisSummary {
@@ -504,8 +504,8 @@ fn lower_constructor_deconstruction(
     if current_depth > MAX_DECONSTRUCTION_DEPTH {
         return Err(TransformError::UnsupportedConstruct {
             construct: unsupported_pattern_message(
-                "Destructuring depth ≥ 3 is not supported yet",
-                "分解パターンの深さ（深度3以上）はまだサポートされていません",
+                "Destructuring depth ≥ 11 is not supported yet",
+                "分解パターンの深さ（深度11以上）はまだサポートされていません",
             ),
             span: span.clone(),
         });
