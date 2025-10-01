@@ -747,8 +747,17 @@ mod tests {
             } => {
                 assert_eq!(cases.len(), 2);
                 match &cases[0].labels[0] {
-                    IrCaseLabel::TypePattern { type_name, .. } => assert_eq!(type_name, "int"),
-                    other => panic!("Expected type pattern label, got {:?}", other),
+                    IrCaseLabel::Range {
+                        type_name,
+                        variable,
+                        inclusive_end,
+                        ..
+                    } => {
+                        assert_eq!(type_name, "int");
+                        assert!(variable.starts_with("it"));
+                        assert!(!*inclusive_end);
+                    }
+                    other => panic!("Expected range label, got {:?}", other),
                 }
                 let guard = cases[0]
                     .guard

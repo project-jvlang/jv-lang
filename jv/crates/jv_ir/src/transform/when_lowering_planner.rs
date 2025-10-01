@@ -340,24 +340,34 @@ fn lower_pattern_case(
             let binding = CaseBinding::new(context.fresh_identifier("it"), subject_type.clone());
             let start_ir = transform_expression(*start, context)?;
             let end_ir = transform_expression(*end, context)?;
-            let lower = comparison_expression(
+
+            let lower_guard = comparison_expression(
                 binding.identifier(&span),
                 BinaryOp::GreaterEqual,
-                start_ir,
+                start_ir.clone(),
                 span.clone(),
             );
+
             let upper_op = if inclusive_end {
                 BinaryOp::LessEqual
             } else {
                 BinaryOp::Less
             };
-            let upper =
-                comparison_expression(binding.identifier(&span), upper_op, end_ir, span.clone());
-            let guard = Some(and_expression(lower, upper, span.clone()));
+            let upper_guard = comparison_expression(
+                binding.identifier(&span),
+                upper_op,
+                end_ir.clone(),
+                span.clone(),
+            );
+
+            let guard = Some(and_expression(lower_guard, upper_guard, span.clone()));
             Ok(PatternLowering {
-                labels: vec![IrCaseLabel::TypePattern {
+                labels: vec![IrCaseLabel::Range {
                     type_name: type_name_for_case(subject_type),
                     variable: binding.name.clone(),
+                    lower: Box::new(start_ir),
+                    upper: Box::new(end_ir),
+                    inclusive_end,
                 }],
                 guard,
                 is_default: false,

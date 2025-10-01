@@ -1573,6 +1573,103 @@ fn switch_expression_respects_existing_default_over_implicit_unit() {
 }
 
 #[test]
+fn switch_expression_includes_strategy_comment_when_present() {
+    let int_type = JavaType::Primitive("int".to_string());
+
+    let expression = IrExpression::Switch {
+        discriminant: Box::new(ir_identifier("x", &int_type)),
+        cases: vec![switch_case(
+            vec![IrCaseLabel::Literal(Literal::Number("1".to_string()))],
+            None,
+            string_literal("one"),
+        )],
+        java_type: JavaType::string(),
+        implicit_end: Some(IrImplicitWhenEnd::Unit { span: dummy_span() }),
+        strategy_description: Some(
+            "strategy=Switch arms=1 guards=0 default=false exhaustive=unknown".to_string(),
+        ),
+        span: dummy_span(),
+    };
+
+    let mut generator = JavaCodeGenerator::new();
+    let rendered = generator
+        .generate_expression(&expression)
+        .expect("strategy comment should render");
+
+    let expected = "// strategy=Switch arms=1 guards=0 default=false exhaustive=unknown\nswitch (x) {\n    case 1 -> \"one\"\n    default -> { }\n}\n";
+    assert_eq!(rendered, expected, "strategy comment missing");
+}
+
+#[test]
+fn switch_expression_renders_range_case_with_comment() {
+    let int_type = JavaType::Primitive("int".to_string());
+    let bool_type = JavaType::Primitive("boolean".to_string());
+
+    let binding_identifier = |name: &str| IrExpression::Identifier {
+        name: name.to_string(),
+        java_type: int_type.clone(),
+        span: dummy_span(),
+    };
+
+    let range_lower = IrExpression::Literal(Literal::Number("0".to_string()), dummy_span());
+    let range_upper = IrExpression::Literal(Literal::Number("10".to_string()), dummy_span());
+
+    let lower_guard = IrExpression::Binary {
+        left: Box::new(binding_identifier("it")),
+        op: BinaryOp::GreaterEqual,
+        right: Box::new(range_lower.clone()),
+        java_type: bool_type.clone(),
+        span: dummy_span(),
+    };
+
+    let upper_guard = IrExpression::Binary {
+        left: Box::new(binding_identifier("it")),
+        op: BinaryOp::LessEqual,
+        right: Box::new(range_upper.clone()),
+        java_type: bool_type.clone(),
+        span: dummy_span(),
+    };
+
+    let guard = IrExpression::Binary {
+        left: Box::new(lower_guard),
+        op: BinaryOp::And,
+        right: Box::new(upper_guard),
+        java_type: bool_type,
+        span: dummy_span(),
+    };
+
+    let expression = IrExpression::Switch {
+        discriminant: Box::new(ir_identifier("x", &int_type)),
+        cases: vec![
+            switch_case(
+                vec![IrCaseLabel::Range {
+                    type_name: "int".to_string(),
+                    variable: "it".to_string(),
+                    lower: Box::new(range_lower),
+                    upper: Box::new(range_upper),
+                    inclusive_end: true,
+                }],
+                Some(guard),
+                string_literal("small"),
+            ),
+            switch_case(vec![IrCaseLabel::Default], None, string_literal("fallback")),
+        ],
+        java_type: JavaType::string(),
+        implicit_end: None,
+        strategy_description: None,
+        span: dummy_span(),
+    };
+
+    let mut generator = JavaCodeGenerator::new();
+    let rendered = generator
+        .generate_expression(&expression)
+        .expect("range case should render");
+
+    let expected = "switch (x) {\n    // range: 0..=10\n    case int it when (it >= 0 && it <= 10) -> \"small\"\n    default -> \"fallback\"\n}\n";
+    assert_eq!(rendered, expected, "range case output mismatch");
+}
+
+#[test]
 fn switch_expression_implicit_unit_renders_for_java21_target() {
     let int_type = JavaType::Primitive("int".to_string());
 

@@ -196,16 +196,23 @@ impl JavaCodeGenerator {
             discriminant,
             cases,
             implicit_end,
+            strategy_description,
             ..
         } = switch
         {
             let mut builder = self.builder();
+            if let Some(description) = strategy_description {
+                builder.push_line(&format!("// {}", description));
+            }
             builder.push_line(&format!(
                 "switch ({}) {{",
                 self.generate_expression(discriminant)?
             ));
             builder.indent();
             for case in cases {
+                if let Some(comment) = self.render_case_leading_comment(case)? {
+                    builder.push_line(&comment);
+                }
                 let guard = match &case.guard {
                     Some(guard_expr) => {
                         format!(" when ({})", self.generate_expression(guard_expr)?)
@@ -234,6 +241,31 @@ impl JavaCodeGenerator {
                 span: None,
             })
         }
+    }
+
+    fn render_case_leading_comment(
+        &mut self,
+        case: &IrSwitchCase,
+    ) -> Result<Option<String>, CodeGenError> {
+        for label in &case.labels {
+            if let IrCaseLabel::Range {
+                lower,
+                upper,
+                inclusive_end,
+                ..
+            } = label
+            {
+                let lower_rendered = self.generate_expression(lower.as_ref())?;
+                let upper_rendered = self.generate_expression(upper.as_ref())?;
+                let operator = if *inclusive_end { "..=" } else { ".." };
+                return Ok(Some(format!(
+                    "// range: {}{}{}",
+                    lower_rendered, operator, upper_rendered
+                )));
+            }
+        }
+
+        Ok(None)
     }
 
     pub fn generate_null_safe_operation(
@@ -440,12 +472,11 @@ impl JavaCodeGenerator {
                     type_name,
                     variable,
                 } => rendered.push(format!("{} {}", type_name, variable)),
-                IrCaseLabel::Range { .. } => {
-                    return Err(CodeGenError::UnsupportedConstruct {
-                        construct: "Range switch labels".to_string(),
-                        span: None,
-                    })
-                }
+                IrCaseLabel::Range {
+                    type_name,
+                    variable,
+                    ..
+                } => rendered.push(format!("{} {}", type_name, variable)),
                 IrCaseLabel::Default => rendered.push("default".to_string()),
             }
         }

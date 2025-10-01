@@ -455,8 +455,14 @@ pub enum IrCaseLabel {
     Literal(Literal),
     /// Type pattern: case String s:
     TypePattern { type_name: String, variable: String },
-    /// Range becomes multiple cases or guard
-    Range { start: Literal, end: Literal },
+    /// Range pattern using guard semantics with explicit bounds
+    Range {
+        type_name: String,
+        variable: String,
+        lower: Box<IrExpression>,
+        upper: Box<IrExpression>,
+        inclusive_end: bool,
+    },
     /// Default case
     Default,
 }

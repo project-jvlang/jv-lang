@@ -225,9 +225,18 @@ impl Java25FeatureGenerator {
                             type_name, variable
                         ));
                     }
-                    IrCaseLabel::Range { start, end } => {
-                        result
-                            .push_str(&format!("    case {:?}..{:?} -> /* body */;\n", start, end));
+                    IrCaseLabel::Range {
+                        lower,
+                        upper,
+                        inclusive_end,
+                        ..
+                    } => {
+                        result.push_str(&format!(
+                            "    case RANGE[{:?}{}{:?}] -> /* body */;\n",
+                            lower,
+                            if *inclusive_end { "..=" } else { ".." },
+                            upper
+                        ));
                     }
                     IrCaseLabel::Default => {
                         result.push_str("    default -> /* body */;\n");
@@ -249,7 +258,17 @@ impl Java25FeatureGenerator {
                     variable,
                 } => Ok(format!("{} {}", type_name, variable)),
                 IrCaseLabel::Literal(l) => Ok(format!("{:?}", l)),
-                IrCaseLabel::Range { start, end } => Ok(format!("{:?}..{:?}", start, end)),
+                IrCaseLabel::Range {
+                    lower,
+                    upper,
+                    inclusive_end,
+                    ..
+                } => Ok(format!(
+                    "{:?}{}{:?}",
+                    lower,
+                    if *inclusive_end { "..=" } else { ".." },
+                    upper
+                )),
                 IrCaseLabel::Default => Ok("_".to_string()),
             })
             .collect();
