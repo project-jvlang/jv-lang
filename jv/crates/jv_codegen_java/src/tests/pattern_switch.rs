@@ -1,6 +1,9 @@
 use super::*;
 use insta::assert_snapshot;
-use jv_ir::{IrExpression, IrProgram, IrStatement, JavaType};
+use jv_ir::{
+    IrCaseLabel, IrDeconstructionComponent, IrDeconstructionPattern, IrExpression, IrModifiers,
+    IrParameter, IrProgram, IrRecordComponent, IrStatement, IrVisibility, JavaType,
+};
 use jv_pm::JavaTarget;
 
 fn render_program(program: &IrProgram, target: JavaTarget) -> String {
@@ -267,6 +270,168 @@ fn example2_program() -> IrProgram {
     }
 }
 
+fn example5_program() -> IrProgram {
+    let int = int_type();
+    let inner_type = reference_type("Inner");
+    let outer_type = reference_type("Outer");
+
+    let outer_record = IrStatement::RecordDeclaration {
+        name: "Outer".to_string(),
+        type_parameters: vec![],
+        components: vec![
+            record_component("inner", inner_type.clone()),
+            record_component("count", int.clone()),
+        ],
+        interfaces: vec![],
+        methods: vec![],
+        modifiers: public_modifiers(),
+        span: dummy_span(),
+    };
+
+    let inner_record = IrStatement::RecordDeclaration {
+        name: "Inner".to_string(),
+        type_parameters: vec![],
+        components: vec![
+            record_component("x", int.clone()),
+            record_component("y", int.clone()),
+        ],
+        interfaces: vec![],
+        methods: vec![],
+        modifiers: public_modifiers(),
+        span: dummy_span(),
+    };
+
+    let nested_pattern = IrDeconstructionPattern {
+        components: vec![
+            IrDeconstructionComponent::Type {
+                type_name: "Inner".to_string(),
+                pattern: Some(Box::new(IrDeconstructionPattern {
+                    components: vec![
+                        IrDeconstructionComponent::Binding {
+                            name: "x".to_string(),
+                        },
+                        IrDeconstructionComponent::Binding {
+                            name: "y".to_string(),
+                        },
+                    ],
+                })),
+            },
+            IrDeconstructionComponent::Binding {
+                name: "count".to_string(),
+            },
+        ],
+    };
+
+    let sum_xy = IrExpression::Binary {
+        left: Box::new(ir_identifier("x", &int)),
+        op: BinaryOp::Add,
+        right: Box::new(ir_identifier("y", &int)),
+        java_type: int.clone(),
+        span: dummy_span(),
+    };
+
+    let total_body = IrExpression::Binary {
+        left: Box::new(sum_xy),
+        op: BinaryOp::Add,
+        right: Box::new(ir_identifier("count", &int)),
+        java_type: int.clone(),
+        span: dummy_span(),
+    };
+
+    let match_case = switch_case(
+        vec![IrCaseLabel::TypePattern {
+            type_name: "Outer".to_string(),
+            variable: "outer".to_string(),
+            deconstruction: Some(nested_pattern),
+        }],
+        None,
+        total_body,
+    );
+
+    let default_case = switch_case(vec![IrCaseLabel::Default], None, number_literal("0"));
+
+    let switch_expr = IrExpression::Switch {
+        discriminant: Box::new(ir_identifier("value", &outer_type)),
+        cases: vec![match_case, default_case],
+        java_type: int.clone(),
+        implicit_end: None,
+        strategy_description: Some(
+            "strategy=Switch arms=2 guards=0 default=true exhaustive=true".to_string(),
+        ),
+        span: dummy_span(),
+    };
+
+    let return_stmt = IrStatement::Return {
+        value: Some(switch_expr),
+        span: dummy_span(),
+    };
+
+    let total_method = IrStatement::MethodDeclaration {
+        name: "total".to_string(),
+        parameters: vec![IrParameter {
+            name: "value".to_string(),
+            java_type: outer_type,
+            modifiers: IrModifiers::default(),
+            span: dummy_span(),
+        }],
+        return_type: int.clone(),
+        body: Some(IrExpression::Block {
+            statements: vec![return_stmt],
+            java_type: int.clone(),
+            span: dummy_span(),
+        }),
+        modifiers: method_modifiers(),
+        throws: vec![],
+        span: dummy_span(),
+    };
+
+    let example_class = IrStatement::ClassDeclaration {
+        name: "Example5".to_string(),
+        type_parameters: vec![],
+        superclass: None,
+        interfaces: vec![],
+        fields: vec![],
+        methods: vec![total_method],
+        nested_classes: vec![],
+        modifiers: public_modifiers(),
+        span: dummy_span(),
+    };
+
+    IrProgram {
+        package: Some("patterns".to_string()),
+        imports: vec![],
+        type_declarations: vec![inner_record, outer_record, example_class],
+        span: dummy_span(),
+    }
+}
+
+fn method_modifiers() -> IrModifiers {
+    IrModifiers {
+        visibility: IrVisibility::Public,
+        is_static: true,
+        ..IrModifiers::default()
+    }
+}
+
+fn public_modifiers() -> IrModifiers {
+    IrModifiers {
+        visibility: IrVisibility::Public,
+        ..IrModifiers::default()
+    }
+}
+
+fn record_component(name: &str, java_type: JavaType) -> IrRecordComponent {
+    IrRecordComponent {
+        name: name.to_string(),
+        java_type,
+        span: dummy_span(),
+    }
+}
+
+fn number_literal(value: &str) -> IrExpression {
+    IrExpression::Literal(Literal::Number(value.to_string()), dummy_span())
+}
+
 #[test]
 fn pattern_example1_type_patterns() {
     snapshot_program("pattern_example1_type_patterns", example1_program());
@@ -275,4 +440,12 @@ fn pattern_example1_type_patterns() {
 #[test]
 fn pattern_example2_range_patterns() {
     snapshot_program("pattern_example2_range_patterns", example2_program());
+}
+
+#[test]
+fn pattern_example5_destructuring_patterns() {
+    snapshot_program(
+        "pattern_example5_destructuring_patterns",
+        example5_program(),
+    );
 }

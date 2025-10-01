@@ -7,8 +7,8 @@ use anyhow::{Context, Result};
 use jv_ast::{BinaryOp, CallArgumentStyle, Literal, Span};
 use jv_codegen_java::{JavaCodeGenConfig, JavaCodeGenerator};
 use jv_ir::{
-    IrCaseLabel, IrExpression, IrModifiers, IrParameter, IrProgram, IrStatement, IrSwitchCase,
-    IrVisibility, JavaType,
+    IrCaseLabel, IrDeconstructionComponent, IrDeconstructionPattern, IrExpression, IrModifiers,
+    IrParameter, IrProgram, IrRecordComponent, IrStatement, IrSwitchCase, IrVisibility, JavaType,
 };
 use jv_pm::JavaTarget;
 use tempfile::tempdir;
@@ -157,6 +157,7 @@ fn generate_fixture_source(stem: &str, target: JavaTarget) -> Option<String> {
     let program = match stem {
         "example1" => Some(example1_program()),
         "example2" => Some(example2_program()),
+        "example5" => Some(example5_program()),
         _ => None,
     }?;
     let mut generator = JavaCodeGenerator::with_config(JavaCodeGenConfig::for_target(target));
@@ -267,6 +268,37 @@ fn switch_case(
     }
 }
 
+fn string_literal(value: &str) -> IrExpression {
+    IrExpression::Literal(Literal::String(value.to_string()), dummy_span())
+}
+
+fn number_literal(value: &str) -> IrExpression {
+    IrExpression::Literal(Literal::Number(value.to_string()), dummy_span())
+}
+
+fn record_component(name: &str, java_type: JavaType) -> IrRecordComponent {
+    IrRecordComponent {
+        name: name.to_string(),
+        java_type,
+        span: dummy_span(),
+    }
+}
+
+fn public_modifiers() -> IrModifiers {
+    IrModifiers {
+        visibility: IrVisibility::Public,
+        ..IrModifiers::default()
+    }
+}
+
+fn static_public_method() -> IrModifiers {
+    IrModifiers {
+        visibility: IrVisibility::Public,
+        is_static: true,
+        ..IrModifiers::default()
+    }
+}
+
 fn example1_program() -> IrProgram {
     let object_type = reference_type("Object");
     let string = string_type();
@@ -313,7 +345,7 @@ fn example1_program() -> IrProgram {
     let default_case = switch_case(
         vec![IrCaseLabel::Default],
         None,
-        IrExpression::Literal(Literal::Number("0".to_string()), dummy_span()),
+        number_literal("0"),
     );
 
     let switch_expr = IrExpression::Switch {
@@ -388,7 +420,7 @@ fn example2_program() -> IrProgram {
     cases.push(switch_case(
         vec![IrCaseLabel::Default],
         None,
-        IrExpression::Literal(Literal::String("Invalid".to_string()), dummy_span()),
+        string_literal("Invalid"),
     ));
 
     let switch_expr = IrExpression::Switch {
@@ -494,19 +526,146 @@ fn range_case(lower: &str, upper: &str, inclusive: bool, label: &str) -> IrSwitc
         vec![IrCaseLabel::Range {
             type_name: "int".to_string(),
             variable: "it0".to_string(),
-            lower: Box::new(IrExpression::Literal(
-                Literal::Number(lower.to_string()),
-                dummy_span(),
-            )),
-            upper: Box::new(IrExpression::Literal(
-                Literal::Number(upper.to_string()),
-                dummy_span(),
-            )),
+            lower: Box::new(number_literal(lower)),
+            upper: Box::new(number_literal(upper)),
             inclusive_end: inclusive,
         }],
         Some(condition),
-        IrExpression::Literal(Literal::String(label.to_string()), dummy_span()),
+        string_literal(label),
     )
+}
+
+fn example5_program() -> IrProgram {
+    let int = int_type();
+    let inner_type = reference_type("Inner");
+    let outer_type = reference_type("Outer");
+
+    let inner_record = IrStatement::RecordDeclaration {
+        name: "Inner".to_string(),
+        type_parameters: vec![],
+        components: vec![
+            record_component("x", int.clone()),
+            record_component("y", int.clone()),
+        ],
+        interfaces: vec![],
+        methods: vec![],
+        modifiers: public_modifiers(),
+        span: dummy_span(),
+    };
+
+    let outer_record = IrStatement::RecordDeclaration {
+        name: "Outer".to_string(),
+        type_parameters: vec![],
+        components: vec![
+            record_component("inner", inner_type.clone()),
+            record_component("count", int.clone()),
+        ],
+        interfaces: vec![],
+        methods: vec![],
+        modifiers: public_modifiers(),
+        span: dummy_span(),
+    };
+
+    let nested_pattern = IrDeconstructionPattern {
+        components: vec![
+            IrDeconstructionComponent::Type {
+                type_name: "Inner".to_string(),
+                pattern: Some(Box::new(IrDeconstructionPattern {
+                    components: vec![
+                        IrDeconstructionComponent::Binding {
+                            name: "x".to_string(),
+                        },
+                        IrDeconstructionComponent::Binding {
+                            name: "y".to_string(),
+                        },
+                    ],
+                })),
+            },
+            IrDeconstructionComponent::Binding {
+                name: "count".to_string(),
+            },
+        ],
+    };
+
+    let sum_xy = IrExpression::Binary {
+        left: Box::new(ir_identifier("x", &int)),
+        op: BinaryOp::Add,
+        right: Box::new(ir_identifier("y", &int)),
+        java_type: int.clone(),
+        span: dummy_span(),
+    };
+
+    let match_value = IrExpression::Binary {
+        left: Box::new(sum_xy),
+        op: BinaryOp::Add,
+        right: Box::new(ir_identifier("count", &int)),
+        java_type: int.clone(),
+        span: dummy_span(),
+    };
+
+    let match_case = switch_case(
+        vec![IrCaseLabel::TypePattern {
+            type_name: "Outer".to_string(),
+            variable: "outer".to_string(),
+            deconstruction: Some(nested_pattern),
+        }],
+        None,
+        match_value,
+    );
+
+    let default_case = switch_case(vec![IrCaseLabel::Default], None, number_literal("0"));
+
+    let switch_expr = IrExpression::Switch {
+        discriminant: Box::new(ir_identifier("value", &outer_type)),
+        cases: vec![match_case, default_case],
+        java_type: int.clone(),
+        implicit_end: None,
+        strategy_description: Some(
+            "strategy=Switch arms=2 guards=0 default=true exhaustive=true".to_string(),
+        ),
+        span: dummy_span(),
+    };
+
+    let total_method = IrStatement::MethodDeclaration {
+        name: "total".to_string(),
+        parameters: vec![IrParameter {
+            name: "value".to_string(),
+            java_type: outer_type,
+            modifiers: IrModifiers::default(),
+            span: dummy_span(),
+        }],
+        return_type: int.clone(),
+        body: Some(IrExpression::Block {
+            statements: vec![IrStatement::Return {
+                value: Some(switch_expr),
+                span: dummy_span(),
+            }],
+            java_type: int.clone(),
+            span: dummy_span(),
+        }),
+        modifiers: static_public_method(),
+        throws: vec![],
+        span: dummy_span(),
+    };
+
+    let example_class = IrStatement::ClassDeclaration {
+        name: "Example5".to_string(),
+        type_parameters: vec![],
+        superclass: None,
+        interfaces: vec![],
+        fields: vec![],
+        methods: vec![total_method],
+        nested_classes: vec![],
+        modifiers: public_modifiers(),
+        span: dummy_span(),
+    };
+
+    IrProgram {
+        package: Some("patterns".to_string()),
+        imports: vec![],
+        type_declarations: vec![inner_record, outer_record, example_class],
+        span: dummy_span(),
+    }
 }
 
 fn workspace_root() -> PathBuf {

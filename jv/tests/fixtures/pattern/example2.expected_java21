@@ -7,17 +7,28 @@ public class Example2 {
             String matchExpr() {
                 final var __subject = score;
                 final String __matchResult;
-                if ((__subject instanceof int it0) && (score >= 0 && score < 60)) {
-                    __matchResult = "Fail";
+                boolean __matched = false;
+                if (!__matched) {
+                    if ((__subject instanceof int it0) && (score >= 0 && score < 60)) {
+                        __matchResult = "Fail";
+                        __matched = true;
+                    }
                 }
-                else if ((__subject instanceof int it0) && (score >= 60 && score < 80)) {
-                    __matchResult = "Pass";
+                if (!__matched) {
+                    if ((__subject instanceof int it0) && (score >= 60 && score < 80)) {
+                        __matchResult = "Pass";
+                        __matched = true;
+                    }
                 }
-                else if ((__subject instanceof int it0) && (score >= 80 && score <= 100)) {
-                    __matchResult = "Excellent";
+                if (!__matched) {
+                    if ((__subject instanceof int it0) && (score >= 80 && score <= 100)) {
+                        __matchResult = "Excellent";
+                        __matched = true;
+                    }
                 }
-                else {
+                if (!__matched) {
                     __matchResult = "Invalid";
+                    __matched = true;
                 }
                 return __matchResult;
             }

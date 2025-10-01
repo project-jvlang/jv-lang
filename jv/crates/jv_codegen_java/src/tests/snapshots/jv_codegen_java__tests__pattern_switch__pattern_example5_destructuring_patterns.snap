@@ -1,3 +1,28 @@
+---
+source: crates/jv_codegen_java/src/tests/pattern_switch.rs
+assertion_line: 25
+expression: combined
+---
+// ---- Java 25 ----
+package patterns;
+
+public record Inner(int x, int y);
+
+public record Outer(Inner inner, int count);
+
+public class Example5 {
+    public static int total(Outer value) {
+        return // strategy=Switch arms=2 guards=0 default=true exhaustive=true
+        switch (value) {
+            case Outer(Inner(var x, var y), var count) -> x + y + count
+            default -> 0
+        }
+        ;
+    }
+    
+}
+
+// ---- Java 21 ----
 package patterns;
 
 public record Inner(int x, int y);
