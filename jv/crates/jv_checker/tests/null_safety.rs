@@ -3,6 +3,7 @@
 use jv_checker::{CheckError, TypeChecker};
 use jv_parser::Parser;
 use serde_json::Value;
+use test_case::test_case;
 
 fn parse_program(source: &str) -> jv_ast::Program {
     Parser::parse(source).expect("source snippet should parse")
@@ -16,6 +17,29 @@ fn collect_null_safety_messages(errors: &[CheckError]) -> Vec<String> {
             _ => None,
         })
         .collect()
+}
+
+struct NullSafetyCaseResult {
+    messages: Vec<String>,
+    telemetry_ms: f64,
+}
+
+fn run_null_safety_case(source: &str) -> NullSafetyCaseResult {
+    let program = parse_program(source);
+
+    let mut checker = TypeChecker::new();
+    checker
+        .check_program(&program)
+        .expect("program should type-check");
+
+    let diagnostics = checker.check_null_safety(&program, None);
+    let messages = collect_null_safety_messages(&diagnostics);
+    let telemetry_ms = checker.telemetry().pattern_bridge_ms;
+
+    NullSafetyCaseResult {
+        messages,
+        telemetry_ms,
+    }
 }
 
 #[test]
@@ -96,5 +120,287 @@ fn when_null_branch_conflict_emits_jv3108() {
     assert!(
         checker.telemetry().pattern_bridge_ms >= 0.0,
         "pattern bridge telemetry should be recorded"
+    );
+}
+
+#[test_case(
+    r#"
+fun provide(): String? = null
+fun consume(value: String): Int = 1
+
+val maybe = provide()
+val result = when (maybe) {
+    is String -> consume(maybe)
+    else -> 0
+}
+"#;
+    "subject_when_smart_cast"
+)]
+#[test_case(
+    r#"
+fun provide(): String? = null
+fun consume(value: String): Int = 1
+
+val maybe = provide()
+val result = when {
+    maybe is String -> consume(maybe)
+    else -> 0
+}
+"#;
+    "subjectless_when_smart_cast"
+)]
+#[test_case(
+    r#"
+fun provide(): String? = null
+fun consume(value: String): Int = 1
+
+val maybe = provide()
+val result = when (maybe) {
+    is String -> {
+        val inner = maybe
+        consume(inner)
+    }
+    else -> 0
+}
+"#;
+    "block_expression_branch"
+)]
+#[test_case(
+    r#"
+fun provide(): String? = null
+
+val maybe = provide()
+val label: String = when (maybe) {
+    is String -> maybe
+    else -> "fallback"
+}
+"#;
+    "smart_cast_result_assignment"
+)]
+fn pattern_bridge_allows_smart_casts(source: &str) {
+    let result = run_null_safety_case(source);
+    assert!(
+        result.messages.is_empty(),
+        "expected no null safety diagnostics, got: {:?}",
+        result.messages
+    );
+    assert!(
+        result.telemetry_ms > 0.0,
+        "pattern bridge telemetry should record elapsed time"
+    );
+}
+
+#[test_case(
+    r#"
+val token: String = "hello"
+val label = when (token) {
+    null -> "none"
+    else -> token
+}
+"#;
+    "simple_null_branch"
+)]
+#[test_case(
+    r#"
+fun isPositive(value: String): Boolean = true
+
+val token: String = "hello"
+val label = when (token) {
+    null -> "none"
+    is String && isPositive(token) -> token
+    else -> token
+}
+"#;
+    "null_branch_with_guard"
+)]
+#[test_case(
+    r#"
+fun sizeOf(value: String): Int = 1
+
+val token: String = "hello"
+val count = when (token) {
+    null -> 0
+    else -> sizeOf(token)
+}
+"#;
+    "null_branch_numeric"
+)]
+#[test_case(
+    r#"
+fun label(token: String): String = when (token) {
+    null -> "none"
+    else -> token
+}
+
+val status = label("input")
+"#;
+    "null_branch_in_function"
+)]
+fn pattern_bridge_reports_null_branch_conflicts(source: &str) {
+    let result = run_null_safety_case(source);
+    assert!(
+        result
+            .messages
+            .iter()
+            .any(|message| message.contains("JV3108")),
+        "expected JV3108 conflict diagnostic, got: {:?}",
+        result.messages
+    );
+    assert!(
+        result.telemetry_ms > 0.0,
+        "pattern bridge telemetry should record elapsed time"
+    );
+}
+
+#[test_case(
+    r#"
+fun provide(): String? = null
+fun accept(value: String): Int = 1
+fun longEnough(value: String): Boolean = true
+
+val maybe = provide()
+val result = when (maybe) {
+    is String && longEnough(maybe) -> accept(maybe)
+    else -> 0
+}
+"#;
+    "single_guard_propagation"
+)]
+#[test_case(
+    r#"
+fun provide(): String? = null
+fun accept(value: String): Int = 1
+fun longEnough(value: String): Boolean = true
+fun hasCapital(value: String): Boolean = true
+
+val maybe = provide()
+val result = when (maybe) {
+    is String && longEnough(maybe) && hasCapital(maybe) -> accept(maybe)
+    is String -> accept(maybe)
+    else -> 0
+}
+"#;
+    "chained_guard_propagation"
+)]
+#[test_case(
+    r#"
+fun provide(): String? = null
+fun accept(value: String): Int = 1
+fun stable(value: String): Boolean = true
+
+val maybe = provide()
+val result = when {
+    maybe is String && stable(maybe) -> accept(maybe)
+    else -> 0
+}
+"#;
+    "subjectless_guard_propagation"
+)]
+fn pattern_bridge_propagates_guard_narrowing(source: &str) {
+    let result = run_null_safety_case(source);
+    assert!(
+        result.messages.is_empty(),
+        "expected guard propagation to avoid diagnostics, got: {:?}",
+        result.messages
+    );
+    assert!(
+        result.telemetry_ms > 0.0,
+        "pattern bridge telemetry should record elapsed time"
+    );
+}
+
+#[test_case(
+    r#"
+fun provide(): String? = null
+fun consume(value: String): Int = 1
+
+val maybe = provide()
+when (maybe) {
+    is String -> {}
+    else -> {}
+}
+
+consume(maybe)
+"#,
+    Some("JV3002");
+    "post_when_nullable_usage"
+)]
+#[test_case(
+    r#"
+fun provide(): String? = null
+fun consume(value: String): Int = 1
+
+var maybe = provide()
+when (maybe) {
+    is String -> {}
+    else -> {
+        maybe = "fallback"
+    }
+}
+
+consume(maybe)
+"#,
+    None;
+    "else_branch_initialises_non_null"
+)]
+#[test_case(
+    r#"
+fun provide(): String? = null
+fun consume(value: String): Int = 1
+
+var maybe = provide()
+val value = when (maybe) {
+    is String -> {
+        consume(maybe)
+        maybe
+    }
+    else -> {
+        maybe = null
+        "fallback"
+    }
+}
+
+consume(maybe)
+"#,
+    Some("JV3002");
+    "else_branch_forces_null"
+)]
+#[test_case(
+    r#"
+fun provide(): String? = null
+fun consume(value: String): Int = 1
+
+var maybe = provide()
+when (maybe) {
+    is String -> {
+        maybe = maybe
+    }
+    else -> {
+        maybe = "fallback"
+    }
+}
+
+consume(maybe)
+"#,
+    None;
+    "all_paths_initialise_non_null"
+)]
+fn pattern_bridge_merges_flow_states(source: &str, expected_code: Option<&str>) {
+    let result = run_null_safety_case(source);
+    match expected_code {
+        Some(code) => assert!(
+            result.messages.iter().any(|message| message.contains(code)),
+            "expected diagnostic {code}, got: {:?}",
+            result.messages
+        ),
+        None => assert!(
+            result.messages.is_empty(),
+            "expected no diagnostics, got: {:?}",
+            result.messages
+        ),
+    }
+    assert!(
+        result.telemetry_ms > 0.0,
+        "pattern bridge telemetry should record elapsed time"
     );
 }
