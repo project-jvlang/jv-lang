@@ -296,6 +296,23 @@ impl JavaCodeGenerator {
         Ok(None)
     }
 
+    fn java21_incompatibility_error(
+        &self,
+        span: &Span,
+        detail_ja: &str,
+        detail_en: &str,
+    ) -> CodeGenError {
+        let target = self.targeting.target().as_str();
+        let message = format!(
+            "JV3105: Java {target} では {detail_ja}。ターゲットを Java 25 に上げるか、パターンを単純化してください。\nJV3105: Target Java {target} cannot lower this when arm because {detail_en}. Raise the target to Java 25 or simplify the branch.\n--explain JV3105: Java 21 fallback supports only literal labels, simple type patterns, and range guards. Advanced pattern forms require Java 25 pattern switches."
+        );
+
+        CodeGenError::PatternMatchingError {
+            message,
+            span: Some(span.clone()),
+        }
+    }
+
     fn render_switch_expression_java21(
         &mut self,
         discriminant: &IrExpression,
@@ -388,11 +405,11 @@ impl JavaCodeGenerator {
                 builder.push_line("}");
                 emitted_branch = true;
             } else {
-                return Err(CodeGenError::UnsupportedConstruct {
-                    construct: "Encountered pattern branch without condition in Java 21 fallback"
-                        .to_string(),
-                    span: Some(case.span.clone()),
-                });
+                return Err(self.java21_incompatibility_error(
+                    &case.span,
+                    "Java 21 フォールバックがこの分岐の条件を構築できません",
+                    "Java 21 fallback could not derive a condition for this branch",
+                ));
             }
         }
 
@@ -447,10 +464,11 @@ impl JavaCodeGenerator {
                     variable,
                 } => {
                     if !literal_conditions.is_empty() || type_pattern_condition.is_some() {
-                        return Err(CodeGenError::UnsupportedConstruct {
-                            construct: "Java 21 fallback does not support combining multiple type patterns or mixing literals with type patterns in a single when arm".to_string(),
-                            span: Some(case.span.clone()),
-                        });
+                        return Err(self.java21_incompatibility_error(
+                            &case.span,
+                            "同じ when 分岐で複数の型パターンやリテラルと組み合わせることはできません",
+                            "this branch mixes literals or multiple type patterns",
+                        ));
                     }
                     type_pattern_condition = Some(format!(
                         "{} instanceof {} {}",
@@ -463,10 +481,11 @@ impl JavaCodeGenerator {
                     ..
                 } => {
                     if !literal_conditions.is_empty() || type_pattern_condition.is_some() {
-                        return Err(CodeGenError::UnsupportedConstruct {
-                            construct: "Java 21 fallback does not support mixing range patterns with other labels in a single arm".to_string(),
-                            span: Some(case.span.clone()),
-                        });
+                        return Err(self.java21_incompatibility_error(
+                            &case.span,
+                            "範囲パターンを同じ分岐の他のラベルと混在させることはできません",
+                            "range patterns cannot be combined with other labels in the same branch",
+                        ));
                     }
                     type_pattern_condition = Some(format!(
                         "{} instanceof {} {}",
@@ -536,10 +555,11 @@ impl JavaCodeGenerator {
             }
         } else {
             if body_is_block {
-                return Err(CodeGenError::UnsupportedConstruct {
-                    construct: "Java 21 fallback does not yet support block expressions as when arm results".to_string(),
-                    span: Some(case.span.clone()),
-                });
+                return Err(self.java21_incompatibility_error(
+                    &case.span,
+                    "Java 21 フォールバックでは値分岐にブロック式を使用できません",
+                    "block expressions as branch results are not supported when targeting Java 21",
+                ));
             }
             let mut assignment = format!("{} = {}", result_binding, body_expr);
             if !assignment.trim_end().ends_with(';') {

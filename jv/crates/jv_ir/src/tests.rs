@@ -2190,7 +2190,7 @@ mod tests {
 
         match err {
             TransformError::UnsupportedConstruct { construct, .. } => {
-                assert!(construct.contains("Destructuring constructor patterns"));
+                assert!(construct.contains("JV3199"));
             }
             other => panic!("Expected unsupported construct error, got {:?}", other),
         }

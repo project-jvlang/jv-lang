@@ -1824,4 +1824,48 @@ fn switch_expression_java21_range_pattern_fallback() {
     );
 }
 
+#[test]
+fn switch_expression_java21_mixed_labels_emits_jv3105() {
+    let int_type = JavaType::Primitive("int".to_string());
+
+    let expression = IrExpression::Switch {
+        discriminant: Box::new(ir_identifier("x", &int_type)),
+        cases: vec![switch_case(
+            vec![
+                IrCaseLabel::Literal(Literal::Number("1".to_string())),
+                IrCaseLabel::TypePattern {
+                    type_name: "String".to_string(),
+                    variable: "value".to_string(),
+                },
+            ],
+            None,
+            string_literal("mixed"),
+        )],
+        java_type: JavaType::string(),
+        implicit_end: None,
+        strategy_description: None,
+        span: dummy_span(),
+    };
+
+    let mut generator =
+        JavaCodeGenerator::with_config(JavaCodeGenConfig::for_target(JavaTarget::Java21));
+    let error = generator
+        .generate_expression(&expression)
+        .expect_err("mixed labels must error");
+
+    match error {
+        CodeGenError::PatternMatchingError { message, .. } => {
+            assert!(
+                message.contains("JV3105"),
+                "expected JV3105 diagnostic message, got {message}"
+            );
+            assert!(
+                message.contains("--explain JV3105"),
+                "message should include explain hint: {message}"
+            );
+        }
+        other => panic!("expected pattern matching error, got {other:?}"),
+    }
+}
+
 mod target_matrix;

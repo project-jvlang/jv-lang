@@ -121,6 +121,12 @@ const DIAGNOSTICS: &[DiagnosticDescriptor] = &[
         severity: DiagnosticSeverity::Warning,
     },
     DiagnosticDescriptor {
+        code: "JV3105",
+        title: "Pattern requires Java 25 target / パターンが Java 25 を要求しています",
+        help: "Java 21 フォールバックではこのパターンを表現できません。`jv.toml` で target を 25 に上げるか、分岐を単純化してください。/ Java 21 fallback cannot represent this pattern. Raise the target to 25 in jv.toml or simplify the branch. (--explain JV3105)",
+        severity: DiagnosticSeverity::Error,
+    },
+    DiagnosticDescriptor {
         code: "E_WHEN_002",
         title: "`when` in value position requires `else` / 値コンテキストの`when`には`else`が必要",
         help: "Add an `else` branch or keep the `when` in a Unit context. See docs/language-guide.md#when-expression and docs/language-guide-en.md#when-expression.",
@@ -191,6 +197,12 @@ const DIAGNOSTICS: &[DiagnosticDescriptor] = &[
         title: "型推論情報が不足しています / Inference snapshot unavailable",
         help: "`cargo check` などで最新の型推論を実行し、DSL 境界に注釈を追加してください。/ Re-run inference (e.g., `cargo check`) and annotate DSL boundaries to restore full null-safety precision.",
         severity: DiagnosticSeverity::Information,
+    },
+    DiagnosticDescriptor {
+        code: "JV3199",
+        title: "Advanced pattern matching not yet supported / 高度なパターンマッチングは未対応",
+        help: "分解の深さを 1 までに制限するか、将来の Phase 4 対応を待ってください。/ Limit destructuring depth to 1 or wait for the Phase 4 update. (--explain JV3199)",
+        severity: DiagnosticSeverity::Error,
     },
 ];
 

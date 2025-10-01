@@ -316,8 +316,10 @@ fn lower_pattern_case(
         } => {
             if !patterns.is_empty() {
                 return Err(TransformError::UnsupportedConstruct {
-                    construct: "Destructuring constructor patterns are not supported yet"
-                        .to_string(),
+                    construct: unsupported_pattern_message(
+                        "Nested destructuring patterns are not yet supported",
+                        "分解パターンのネストは現在サポートされていません",
+                    ),
                     span,
                 });
             }
@@ -385,7 +387,10 @@ fn lower_pattern_case(
             Ok(lowered)
         }
         Pattern::Identifier(name, span) => Err(TransformError::UnsupportedConstruct {
-            construct: format!("Identifier pattern '{name}' is not supported"),
+            construct: unsupported_pattern_message(
+                &format!("Identifier pattern '{name}' is not supported"),
+                &format!("識別子パターン '{name}' はまだ利用できません"),
+            ),
             span,
         }),
     }
@@ -410,15 +415,20 @@ fn lower_subjectless_pattern(
         } => {
             if !matches!(*pattern, Pattern::Wildcard(_)) {
                 return Err(TransformError::UnsupportedConstruct {
-                    construct: "Only guard patterns wrapping `_` are supported in subjectless when"
-                        .to_string(),
+                    construct: unsupported_pattern_message(
+                        "Subjectless when requires guards to wrap `_`",
+                        "主題なし when では guard は常に `_` を包む必要があります",
+                    ),
                     span: guard_span,
                 });
             }
             transform_expression(condition, context)
         }
         other => Err(TransformError::UnsupportedConstruct {
-            construct: format!("Unsupported subjectless when pattern: {:?}", other),
+            construct: unsupported_pattern_message(
+                &format!("Unsupported subjectless when pattern: {:?}", other),
+                "主題なし when でサポートされていないパターンです",
+            ),
             span: span.clone(),
         }),
     }
@@ -496,4 +506,10 @@ fn type_name_for_case(java_type: &JavaType) -> String {
         JavaType::Functional { interface_name, .. } => interface_name.clone(),
         JavaType::Void => "Object".to_string(),
     }
+}
+
+fn unsupported_pattern_message(reason_en: &str, reason_ja: &str) -> String {
+    format!(
+        "JV3199: {reason_ja}。Phase 4 で対応予定です。\nJV3199: {reason_en}. This construct will be supported in Phase 4.\n--explain JV3199: Pattern matching currently supports depth-1 shapes only. Simplify the pattern or upgrade once extended pattern support lands."
+    )
 }

@@ -11,6 +11,10 @@ impl TargetedJavaEmitter {
         Self { target }
     }
 
+    pub const fn target(&self) -> JavaTarget {
+        self.target
+    }
+
     pub const fn supports_sealed_types(&self) -> bool {
         matches!(self.target, JavaTarget::Java25)
     }
