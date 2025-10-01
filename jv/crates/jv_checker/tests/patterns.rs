@@ -1,5 +1,9 @@
 use jv_ast::{Expression, Literal, Pattern, Span, Statement, WhenArm};
-use jv_checker::pattern::{NarrowedNullability, PatternMatchService, PatternTarget};
+use jv_checker::{
+    diagnostics::from_transform_error,
+    pattern::{NarrowedNullability, PatternMatchService, PatternTarget},
+};
+use jv_ir::{context::TransformContext, transform::desugar_when_expression, types::JavaType};
 use jv_parser::Parser;
 
 fn parse_when_expression(source: &str) -> Expression {
@@ -366,4 +370,66 @@ fn when_without_span_is_not_cached() {
         service.recorded_facts().is_empty(),
         "when expressions without a stable span (e.g. JV3199 fallback paths) must not be cached"
     );
+}
+
+#[test]
+fn transform_error_maps_to_jv3199_diagnostic() {
+    let span = Span::dummy();
+    let when_expr = Expression::When {
+        expr: Some(Box::new(Expression::Identifier(
+            "value".to_string(),
+            span.clone(),
+        ))),
+        arms: vec![WhenArm {
+            pattern: Pattern::Constructor {
+                name: "Pair".to_string(),
+                patterns: vec![
+                    Pattern::Guard {
+                        pattern: Box::new(Pattern::Identifier("x".to_string(), span.clone())),
+                        condition: Expression::Literal(Literal::Boolean(true), span.clone()),
+                        span: span.clone(),
+                    },
+                    Pattern::Identifier("y".to_string(), span.clone()),
+                ],
+                span: span.clone(),
+            },
+            guard: None,
+            body: Expression::Literal(Literal::Number("1".to_string()), span.clone()),
+            span: span.clone(),
+        }],
+        else_arm: Some(Box::new(Expression::Literal(
+            Literal::Number("0".to_string()),
+            span.clone(),
+        ))),
+        implicit_end: None,
+        span: span.clone(),
+    };
+
+    let Expression::When {
+        expr: subject,
+        arms,
+        else_arm,
+        implicit_end,
+        ..
+    } = when_expr
+    else {
+        unreachable!("constructed expression should be a when expression");
+    };
+
+    let mut context = TransformContext::new();
+    context.add_variable("value".to_string(), JavaType::object());
+    let error = desugar_when_expression(
+        subject,
+        arms,
+        else_arm,
+        implicit_end,
+        span.clone(),
+        &mut context,
+    )
+    .expect_err("nested guard should raise unsupported construct error");
+
+    let diagnostic = from_transform_error(&error)
+        .expect("diagnostic should be generated for JV3199 transform error");
+    assert_eq!(diagnostic.code, "JV3199");
+    assert_eq!(diagnostic.span, Some(span));
 }

@@ -271,7 +271,23 @@ pub fn from_transform_error(error: &TransformError) -> Option<EnhancedDiagnostic
             let message = error.to_string();
             detect_in_message(&message, Some(span.clone()))
         }
-        _ => None,
+        TransformError::UnsupportedConstruct { construct, span } => {
+            detect_in_message(construct, Some(span.clone()))
+                .or_else(|| detect_in_message(&error.to_string(), Some(span.clone())))
+        }
+        TransformError::InvalidPattern { message, span }
+        | TransformError::NullSafetyError { message, span }
+        | TransformError::ScopeError { message, span }
+        | TransformError::DefaultParameterError { message, span }
+        | TransformError::ExtensionFunctionError { message, span }
+        | TransformError::ConcurrencyError { message, span }
+        | TransformError::ResourceManagementError { message, span }
+        | TransformError::SampleAnnotationError { message, span }
+        | TransformError::SampleProcessingError { message, span }
+        | TransformError::TypeInferenceError { message, span } => {
+            detect_in_message(message, Some(span.clone()))
+                .or_else(|| detect_in_message(&error.to_string(), Some(span.clone())))
+        }
     }
 }
 
