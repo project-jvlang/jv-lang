@@ -335,7 +335,7 @@ impl<'a> WhenUsageValidator<'a> {
                 MissingCase::Boolean { missing } => {
                     let (label_en, label_ja) = boolean_labels(*missing);
                     let message = format!(
-                        "JV3100: when 式が boolean の `{label_ja}` ケースを網羅していません。`{label_ja}` を処理する分岐を追加してください。\nJV3100: Non-exhaustive boolean when expression missing `{label_en}` branch. Add a branch handling `{label_en}`."
+                        "JV3100: when 式が boolean の `{label_ja}` ケースを網羅していません。欠落した分岐を追加してください。\nJV3100: `when` expression is missing the `{label_en}` branch; add an arm covering it.\nQuick Fix: when.add.branch -> `{label_ja}` ケースの分岐テンプレートを挿入\nQuick Fix: when.add.branch -> insert branch template for `{label_en}`"
                     );
                     self.errors.push(CheckError::ValidationError {
                         message,

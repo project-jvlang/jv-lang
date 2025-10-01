@@ -105,19 +105,31 @@ const DIAGNOSTICS: &[DiagnosticDescriptor] = &[
     DiagnosticDescriptor {
         code: "JV3100",
         title: "`when` expression is not exhaustive / `when` 式が未網羅です",
-        help: "欠落している分岐を追加し、すべての boolean ケースを網羅してください。docs/language-guide.md#when-expression / docs/language-guide-en.md#when-expression を参照。/ Add the missing branches so every boolean case is handled. See docs/language-guide.md#when-expression and docs/language-guide-en.md#when-expression.",
+        help: "欠落している sealed / enum / boolean ケースを網羅する分岐を追加してください。/ Add branches covering the missing sealed, enum, or boolean cases. (--explain JV3100)",
+        severity: DiagnosticSeverity::Error,
+    },
+    DiagnosticDescriptor {
+        code: "JV3101",
+        title: "`when` branch is unreachable / 到達不能な `when` 分岐です",
+        help: "前の分岐が同じケースを先に処理しているため、この分岐には到達しません。分岐を削除するか条件を調整してください。/ A preceding arm already matches this case. Remove the branch or refine its guard. (--explain JV3101)",
+        severity: DiagnosticSeverity::Warning,
+    },
+    DiagnosticDescriptor {
+        code: "JV3102",
+        title: "Range pattern boundary type mismatch / 範囲パターンの境界型が不一致です",
+        help: "範囲の上下限は同じ比較可能な型でなければなりません。境界を揃えるか guard へ書き換えてください。/ Range bounds must share a comparable type. Align the endpoints or rewrite the check as a guard. (--explain JV3102)",
         severity: DiagnosticSeverity::Error,
     },
     DiagnosticDescriptor {
         code: "JV3103",
-        title: "`if` expressions are forbidden / `if` 式は使用できません",
-        help: "Rewrite the branch using `when`. Quick Fix: when.convert.if. See docs/language-guide.md#when-expression and docs/language-guide-en.md#when-expression.",
+        title: "`if` expressions are not supported / `if` 式はサポートされていません",
+        help: "条件分岐は `when` 式を使用してください。Quick Fix: when.convert.if. / Use a `when` expression for branching. Quick Fix: when.convert.if. (--explain JV3103)",
         severity: DiagnosticSeverity::Error,
     },
     DiagnosticDescriptor {
-        code: "JV3108",
-        title: "`when` null branch contradicts non-null type / non-null 型と null 分岐が矛盾しています",
-        help: "変数が non-null として推論されている場合、`null` 分岐は到達不能です。分岐を削除するか、型を nullable へ変更してください。/ The value is inferred as non-null, so a `null` branch is unreachable. Remove the branch or update the type to be nullable.",
+        code: "JV3104",
+        title: "Unused pattern binding / 未使用のパターン束縛です",
+        help: "未使用の変数は削除するか `_` へ置き換えてください。/ Remove the binding or rename it to `_`. (--explain JV3104)",
         severity: DiagnosticSeverity::Warning,
     },
     DiagnosticDescriptor {
@@ -125,6 +137,36 @@ const DIAGNOSTICS: &[DiagnosticDescriptor] = &[
         title: "Pattern requires Java 25 target / パターンが Java 25 を要求しています",
         help: "Java 21 フォールバックではこのパターンを表現できません。`jv.toml` で target を 25 に上げるか、分岐を単純化してください。/ Java 21 fallback cannot represent this pattern. Raise the target to 25 in jv.toml or simplify the branch. (--explain JV3105)",
         severity: DiagnosticSeverity::Error,
+    },
+    DiagnosticDescriptor {
+        code: "JV3106",
+        title: "`when` expression missing `else` branch / `when` 式に `else` 分岐が必要です",
+        help: "値コンテキストでは `else` 分岐を追加して網羅性を確保してください。/ Add an `else` branch to cover the default case in value positions. (--explain JV3106)",
+        severity: DiagnosticSeverity::Information,
+    },
+    DiagnosticDescriptor {
+        code: "JV3107",
+        title: "Overlapping range patterns detected / 範囲パターンが重複しています",
+        help: "重複する範囲を統合するか順序を調整してください。/ Merge the overlapping ranges or adjust their order. (--explain JV3107)",
+        severity: DiagnosticSeverity::Warning,
+    },
+    DiagnosticDescriptor {
+        code: "JV3108",
+        title: "`when` null branch contradicts non-null type / non-null 型と null 分岐が矛盾しています",
+        help: "変数が non-null と推論されている場合、`null` 分岐は到達不能です。分岐を削除するか型を nullable へ変更してください。/ The value is inferred as non-null, so a `null` branch is unreachable. Remove the branch or update the type to be nullable. (--explain JV3108)",
+        severity: DiagnosticSeverity::Error,
+    },
+    DiagnosticDescriptor {
+        code: "JV3109",
+        title: "Pattern binding type inference failed / パターン束縛の型推論に失敗しました",
+        help: "束縛に型注釈を追加するか、データクラスの宣言を更新してください。/ Annotate the bindings or update the data class declaration. (--explain JV3109)",
+        severity: DiagnosticSeverity::Warning,
+    },
+    DiagnosticDescriptor {
+        code: "JV3110",
+        title: "Pattern analysis exceeded performance budget / パターン解析が性能予算を超過しました",
+        help: "when 式を簡素化するか `pattern_cache` 設定を調整して再試行してください。/ Simplify the `when` expression or adjust pattern cache settings, then retry. (--explain JV3110)",
+        severity: DiagnosticSeverity::Warning,
     },
     DiagnosticDescriptor {
         code: "E_WHEN_002",
@@ -201,7 +243,7 @@ const DIAGNOSTICS: &[DiagnosticDescriptor] = &[
     DiagnosticDescriptor {
         code: "JV3199",
         title: "Advanced pattern matching not yet supported / 高度なパターンマッチングは未対応",
-        help: "ガードや範囲など一部の高度な分解機能は段階的に解禁されます。対応済みの形へ書き換えるか、次期アップデートをお待ちください。/ Some advanced destructuring features (nested guards, range checks) are rolling out gradually. Rewrite the pattern using supported constructs or wait for the next update. (--explain JV3199)",
+        help: "深度2以上の分解パターンや複合ガードは段階的に提供されます。サポート済みの構文へ書き換えるか今後のアップデートをお待ちください。/ Deep destructuring (depth ≥ 2) and complex guards are still rolling out. Rewrite the pattern using supported constructs or wait for a forthcoming update. (--explain JV3199)",
         severity: DiagnosticSeverity::Error,
     },
 ];
@@ -239,11 +281,96 @@ fn detect_in_message(message: &str, span: Option<Span>) -> Option<EnhancedDiagno
         .chain(crate::compat::diagnostics::ENTRIES.iter())
         .find(|descriptor| message.contains(descriptor.code))?;
 
-    Some(EnhancedDiagnostic::new(
-        descriptor,
-        message.to_string(),
-        span,
-    ))
+    let (clean_message, suggestions, learning_hint) = extract_tooling_metadata(message);
+
+    let mut diagnostic = EnhancedDiagnostic::new(descriptor, clean_message, span);
+    if !suggestions.is_empty() {
+        diagnostic = diagnostic.with_suggestions(suggestions);
+    }
+    if let Some(hint) = learning_hint {
+        diagnostic = diagnostic.with_learning_hint(hint);
+    }
+
+    Some(diagnostic)
+}
+
+fn extract_tooling_metadata(message: &str) -> (String, Vec<String>, Option<String>) {
+    let mut suggestions = Vec::new();
+    let mut learning = Vec::new();
+    let mut cleaned_lines = Vec::new();
+
+    for line in message.lines() {
+        if let Some(index) = line.find("Quick Fix:") {
+            let (prefix, suffix) = line.split_at(index);
+            let quick_fix = suffix.trim_start_matches("Quick Fix:").trim();
+            if !quick_fix.is_empty() {
+                suggestions.push(format!("Quick Fix: {}", quick_fix));
+            }
+            let trimmed_prefix = prefix.trim_end();
+            if !trimmed_prefix.is_empty() {
+                cleaned_lines.push(trimmed_prefix.to_string());
+            }
+            continue;
+        }
+
+        if let Some(index) = line.find("--explain ") {
+            let explain = line[index..].trim();
+            if !explain.is_empty() {
+                learning.push(explain.to_string());
+            }
+            let trimmed_prefix = line[..index].trim_end();
+            if !trimmed_prefix.is_empty() {
+                cleaned_lines.push(trimmed_prefix.to_string());
+            }
+            continue;
+        }
+
+        cleaned_lines.push(line.to_string());
+    }
+
+    let cleaned_message = cleaned_lines
+        .into_iter()
+        .map(|line| line.trim_end().to_string())
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    let learning_hint = if learning.is_empty() {
+        None
+    } else {
+        Some(learning.join("\n"))
+    };
+
+    (cleaned_message, suggestions, learning_hint)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::extract_tooling_metadata;
+
+    #[test]
+    fn extract_metadata_captures_quick_fix_and_learning_hint() {
+        let message = "JV3103: sample message\nQuick Fix: when.convert.if -> template\n--explain JV3103: Additional guidance";
+        let (clean, suggestions, hint) = extract_tooling_metadata(message);
+        assert_eq!(clean, "JV3103: sample message");
+        assert_eq!(
+            suggestions,
+            vec!["Quick Fix: when.convert.if -> template".to_string()]
+        );
+        assert_eq!(
+            hint.as_deref(),
+            Some("--explain JV3103: Additional guidance")
+        );
+    }
+
+    #[test]
+    fn extract_metadata_preserves_non_metadata_lines() {
+        let message = "JV3100: line a\nSecondary line\nQuick Fix: when.add -> foo";
+        let (clean, suggestions, hint) = extract_tooling_metadata(message);
+        assert_eq!(clean, "JV3100: line a\nSecondary line");
+        assert_eq!(suggestions, vec!["Quick Fix: when.add -> foo".to_string()]);
+        assert!(hint.is_none());
+    }
 }
 
 pub fn from_check_error(error: &CheckError) -> Option<EnhancedDiagnostic> {

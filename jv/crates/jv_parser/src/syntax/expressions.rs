@@ -195,7 +195,7 @@ fn forbidden_if_expression_parser(
     token_if()
         .map(|token| span_from_token(&token))
         .try_map(|_span, error_span| {
-            let message = "JV3103: `if` 式は jv では禁止されています。`when` 式へ書き換えてください。Quick Fix: when.convert.if\nJV3103: `if` expressions are forbidden in jv. Rewrite this branch using `when`. Quick Fix: when.convert.if";
+            let message = "JV3103: if式はサポートされていません。when式を使用してください。\nJV3103: if expressions are not supported; use when instead.\nQuick Fix: when.convert.if -> when { 条件 -> 真分岐; else -> 偽分岐 } (例: if (x > 0) a else b => when { x > 0 -> a; else -> b })\nQuick Fix: when.convert.if -> when { condition -> thenBranch; else -> elseBranch } (Example: if (x > 0) a else b => when { x > 0 -> a; else -> b })";
             Err(Simple::custom(error_span, message.to_string()))
         })
 }

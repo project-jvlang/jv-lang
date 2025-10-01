@@ -331,6 +331,6 @@ fn conflicts_for_snapshot(
 
 fn conflict_message(variable: &str) -> String {
     format!(
-        "JV3108: `{variable}` は non-null と推論されていますが、when 分岐で null と比較されています。分岐を削除するか型を `String?` など nullable に変更してください。\nJV3108: `{variable}` is marked as non-null yet the when expression compares it against null. Remove the branch or update the type to be nullable."
+        "JV3108: `{variable}` は non-null と推論されていますが、when 分岐で null と比較されています。分岐を削除するか型を nullable に変更してください。\nJV3108: `{variable}` is inferred as non-null but the when expression compares it against null. Remove the branch or update the type to be nullable.\nQuick Fix: when.remove.null-branch -> `{variable}` の null 分岐を削除\nQuick Fix: when.remove.null-branch -> remove the null arm for `{variable}` or declare the type as nullable"
     )
 }
