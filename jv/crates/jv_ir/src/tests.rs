@@ -17,6 +17,7 @@ mod tests {
         TransformProfiler, VirtualThreadOp,
     };
     use jv_ast::*;
+    use jv_parser::Parser;
     use sha2::{Digest, Sha256};
     use std::fs;
     use std::time::Duration;
@@ -24,6 +25,34 @@ mod tests {
 
     fn dummy_span() -> Span {
         Span::dummy()
+    }
+
+    fn parse_when_expression(source: &str) -> Expression {
+        let program = Parser::parse(source).expect("snippet should parse");
+        for statement in program.statements {
+            match statement {
+                Statement::ValDeclaration { initializer, .. } => {
+                    if let Expression::When { .. } = initializer {
+                        return initializer;
+                    }
+                }
+                Statement::Expression { expr, .. } => {
+                    if let Expression::When { .. } = expr {
+                        return expr;
+                    }
+                }
+                Statement::VarDeclaration {
+                    initializer: Some(initializer),
+                    ..
+                } => {
+                    if let Expression::When { .. } = initializer {
+                        return initializer;
+                    }
+                }
+                _ => {}
+            }
+        }
+        panic!("expected when expression in snippet");
     }
 
     #[test]
@@ -780,6 +809,67 @@ mod tests {
         let strategies = context.when_strategies();
         assert_eq!(strategies.len(), 1);
         assert!(strategies[0].description.contains("strategy=Hybrid"));
+    }
+
+    #[test]
+    fn hybrid_strategy_records_full_metadata() {
+        let expr = parse_when_expression(
+            "val value = 4\n             val label = when (value) {\n             in 0..10 -> \"small\"\n             else -> \"other\"\n        }\n",
+        );
+
+        let Expression::When {
+            expr: subject,
+            arms,
+            else_arm,
+            implicit_end,
+            span,
+        } = expr
+        else {
+            panic!("expected when expression");
+        };
+
+        let recorded_span = span.clone();
+        let mut context = TransformContext::new();
+        context.add_variable("value".to_string(), JavaType::int());
+
+        let ir = desugar_when_expression(
+            subject,
+            arms,
+            else_arm,
+            implicit_end,
+            span.clone(),
+            &mut context,
+        )
+        .expect("hybrid lowering should succeed");
+
+        let IrExpression::Switch {
+            cases,
+            strategy_description,
+            ..
+        } = ir
+        else {
+            panic!("expected switch expression for hybrid lowering");
+        };
+
+        let metadata = strategy_description.expect("strategy description should be present");
+        let guard_count = cases.iter().filter(|case| case.guard.is_some()).count();
+        let has_default = cases.iter().any(|case| {
+            case.labels
+                .iter()
+                .any(|label| matches!(label, IrCaseLabel::Default))
+        });
+        let expected = format!(
+            "strategy=Hybrid arms={} guards={} default={} exhaustive=unknown",
+            cases.len(),
+            guard_count,
+            has_default
+        );
+        assert_eq!(metadata, expected);
+
+        let strategies = context.take_when_strategies();
+        assert_eq!(strategies.len(), 1);
+        assert_eq!(strategies[0].description, expected);
+        assert_eq!(strategies[0].span, recorded_span);
     }
 
     #[test]
@@ -2867,5 +2957,295 @@ mod tests {
             },
             other => panic!("expected foreach, got {:?}", other),
         }
+    }
+
+    #[test]
+    fn when_expression_with_subject_desugars_to_switch() {
+        let expr = parse_when_expression(
+            "val value = \"input\"\n             val label = when (value) {\n             is String -> \"string\"\n             else -> \"fallback\"\n        }\n",
+        );
+
+        let Expression::When {
+            expr: subject,
+            arms,
+            else_arm,
+            implicit_end,
+            span,
+        } = expr
+        else {
+            panic!("expected when expression");
+        };
+
+        let mut context = TransformContext::new();
+        context.add_variable("value".to_string(), JavaType::object());
+        let ir = desugar_when_expression(
+            subject,
+            arms,
+            else_arm,
+            implicit_end,
+            span.clone(),
+            &mut context,
+        )
+        .expect("lowering should succeed");
+
+        match ir {
+            IrExpression::Switch {
+                strategy_description,
+                ..
+            } => {
+                assert!(
+                    strategy_description
+                        .as_deref()
+                        .unwrap_or_default()
+                        .starts_with("strategy=Switch"),
+                    "strategy metadata should describe switch lowering",
+                );
+            }
+            other => panic!("expected switch expression, got {other:?}"),
+        }
+
+        let strategies = context.take_when_strategies();
+        assert_eq!(strategies.len(), 1);
+        assert!(
+            strategies[0]
+                .description
+                .starts_with("strategy=Switch arms=2"),
+            "context should record switch lowering strategy",
+        );
+    }
+
+    #[test]
+    fn subjectless_when_desugars_to_conditional_chain() {
+        let expr = parse_when_expression(
+            "val status = when {\n             isLarge() -> \"Large\"\n             else -> \"Small\"\n        }\n",
+        );
+
+        let Expression::When {
+            expr: subject,
+            arms,
+            else_arm,
+            implicit_end,
+            span,
+        } = expr
+        else {
+            panic!("expected when expression");
+        };
+
+        assert!(subject.is_none(), "subjectless when should have no subject");
+
+        let mut context = TransformContext::new();
+        let ir = desugar_when_expression(
+            subject,
+            arms,
+            else_arm,
+            implicit_end,
+            span.clone(),
+            &mut context,
+        )
+        .expect("lowering should succeed");
+
+        matches!(ir, IrExpression::Conditional { .. })
+            .then_some(())
+            .expect("subjectless when should become conditional chain");
+
+        let strategies = context.take_when_strategies();
+        assert_eq!(strategies.len(), 1);
+        assert!(
+            strategies[0].description.starts_with("strategy=IfChain"),
+            "context should record subjectless lowering metadata",
+        );
+    }
+
+    #[test]
+    fn subjectless_when_records_if_chain_metadata() {
+        let expr = parse_when_expression(
+            "val status = when {\n             checkPrimary() -> \"primary\"\n             else -> \"fallback\"\n        }\n",
+        );
+
+        let Expression::When {
+            expr: subject,
+            arms,
+            else_arm,
+            implicit_end,
+            span,
+        } = expr
+        else {
+            panic!("expected when expression");
+        };
+
+        assert!(
+            subject.is_none(),
+            "subjectless when should not have a discriminant"
+        );
+        let arm_count = arms.len();
+        let recorded_span = span.clone();
+
+        let mut context = TransformContext::new();
+        let ir = desugar_when_expression(
+            subject,
+            arms,
+            else_arm,
+            implicit_end,
+            span.clone(),
+            &mut context,
+        )
+        .expect("subjectless lowering should succeed");
+
+        matches!(ir, IrExpression::Conditional { .. })
+            .then_some(())
+            .expect("subjectless when should lower to conditional chain");
+
+        let strategies = context.take_when_strategies();
+        assert_eq!(strategies.len(), 1);
+        let expected = format!("strategy=IfChain arms={} exhaustive=unknown", arm_count);
+        assert_eq!(strategies[0].description, expected);
+        assert_eq!(strategies[0].span, recorded_span);
+    }
+
+    #[test]
+    fn nested_guard_in_destructuring_emits_jv3199() {
+        let span = dummy_span();
+        let when_expr = Expression::When {
+            expr: Some(Box::new(Expression::Identifier(
+                "value".to_string(),
+                span.clone(),
+            ))),
+            arms: vec![WhenArm {
+                pattern: Pattern::Constructor {
+                    name: "Container".to_string(),
+                    patterns: vec![Pattern::Guard {
+                        pattern: Box::new(Pattern::Constructor {
+                            name: "Point".to_string(),
+                            patterns: vec![
+                                Pattern::Identifier("x".to_string(), span.clone()),
+                                Pattern::Identifier("y".to_string(), span.clone()),
+                            ],
+                            span: span.clone(),
+                        }),
+                        condition: Expression::Literal(Literal::Boolean(true), span.clone()),
+                        span: span.clone(),
+                    }],
+                    span: span.clone(),
+                },
+                guard: None,
+                body: Expression::Literal(Literal::Number("1".to_string()), span.clone()),
+                span: span.clone(),
+            }],
+            else_arm: Some(Box::new(Expression::Literal(
+                Literal::Number("0".to_string()),
+                span.clone(),
+            ))),
+            implicit_end: None,
+            span: span.clone(),
+        };
+
+        let Expression::When {
+            expr: subject,
+            arms,
+            else_arm,
+            implicit_end,
+            span,
+        } = when_expr
+        else {
+            unreachable!("constructed expression should be a when expression");
+        };
+
+        let mut context = TransformContext::new();
+        context.add_variable("value".to_string(), JavaType::object());
+        let result = desugar_when_expression(
+            subject,
+            arms,
+            else_arm,
+            implicit_end,
+            span.clone(),
+            &mut context,
+        );
+
+        let Err(TransformError::UnsupportedConstruct { construct, .. }) = result else {
+            panic!("expected nested guard to raise unsupported construct error");
+        };
+        assert!(
+            construct.contains("JV3199"),
+            "JV3199 diagnostic should be embedded in unsupported construct message"
+        );
+        assert!(
+            construct.contains("--explain JV3199"),
+            "JV3199 explanation metadata should be present"
+        );
+    }
+
+    #[test]
+    fn nested_range_in_destructuring_emits_jv3199() {
+        let span = dummy_span();
+        let when_expr = Expression::When {
+            expr: Some(Box::new(Expression::Identifier(
+                "value".to_string(),
+                span.clone(),
+            ))),
+            arms: vec![WhenArm {
+                pattern: Pattern::Constructor {
+                    name: "Container".to_string(),
+                    patterns: vec![
+                        Pattern::Range {
+                            start: Box::new(Expression::Literal(
+                                Literal::Number("0".to_string()),
+                                span.clone(),
+                            )),
+                            end: Box::new(Expression::Literal(
+                                Literal::Number("10".to_string()),
+                                span.clone(),
+                            )),
+                            inclusive_end: false,
+                            span: span.clone(),
+                        },
+                        Pattern::Identifier("rest".to_string(), span.clone()),
+                    ],
+                    span: span.clone(),
+                },
+                guard: None,
+                body: Expression::Literal(Literal::Number("1".to_string()), span.clone()),
+                span: span.clone(),
+            }],
+            else_arm: Some(Box::new(Expression::Literal(
+                Literal::Number("0".to_string()),
+                span.clone(),
+            ))),
+            implicit_end: None,
+            span: span.clone(),
+        };
+
+        let Expression::When {
+            expr: subject,
+            arms,
+            else_arm,
+            implicit_end,
+            span,
+        } = when_expr
+        else {
+            unreachable!("constructed expression should be a when expression");
+        };
+
+        let mut context = TransformContext::new();
+        context.add_variable("value".to_string(), JavaType::object());
+        let result = desugar_when_expression(
+            subject,
+            arms,
+            else_arm,
+            implicit_end,
+            span.clone(),
+            &mut context,
+        );
+
+        let Err(TransformError::UnsupportedConstruct { construct, .. }) = result else {
+            panic!("expected nested range to raise unsupported construct error");
+        };
+        assert!(
+            construct.contains("JV3199"),
+            "JV3199 diagnostic should be embedded in unsupported construct message"
+        );
+        assert!(
+            construct.contains("--explain JV3199"),
+            "JV3199 explanation metadata should be present"
+        );
     }
 }
