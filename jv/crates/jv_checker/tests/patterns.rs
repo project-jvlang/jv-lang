@@ -143,6 +143,33 @@ fn cache_records_hits_after_repeated_analysis() {
 }
 
 #[test]
+fn multi_target_cache_metrics_are_isolated() {
+    let expr = parse_when_expression("val label = when (flag) { true -> \"yes\" }\n");
+    let mut service = PatternMatchService::new();
+
+    service.take_cache_metrics();
+    service.analyze(&expr, PatternTarget::Java25);
+    let metrics_java25_first = service.take_cache_metrics();
+    assert_eq!(metrics_java25_first.hits, 0);
+    assert_eq!(metrics_java25_first.misses, 1);
+
+    service.analyze(&expr, PatternTarget::Java25);
+    let metrics_java25_second = service.take_cache_metrics();
+    assert_eq!(metrics_java25_second.hits, 1);
+    assert_eq!(metrics_java25_second.misses, 0);
+
+    service.analyze(&expr, PatternTarget::Java21);
+    let metrics_java21_first = service.take_cache_metrics();
+    assert_eq!(metrics_java21_first.hits, 0);
+    assert_eq!(metrics_java21_first.misses, 1);
+
+    service.analyze(&expr, PatternTarget::Java21);
+    let metrics_java21_second = service.take_cache_metrics();
+    assert_eq!(metrics_java21_second.hits, 1);
+    assert_eq!(metrics_java21_second.misses, 0);
+}
+
+#[test]
 fn null_arm_records_narrowing_for_else_branch() {
     let expr =
         parse_when_expression("val label = when (value) { null -> \"missing\" else -> value }\n");
@@ -243,6 +270,7 @@ fn invalidate_dirty_nodes_forces_cache_miss() {
     service.take_cache_metrics();
 
     service.analyze(&expr, PatternTarget::Java25);
+    service.analyze(&expr, PatternTarget::Java21);
     let recorded_keys: Vec<_> = service.recorded_facts().keys().cloned().collect();
     let node_id = recorded_keys[0].0;
 
@@ -260,6 +288,14 @@ fn invalidate_dirty_nodes_forces_cache_miss() {
     assert_eq!(
         metrics_after.misses, 1,
         "analysis should recompute after invalidation"
+    );
+
+    service.analyze(&expr, PatternTarget::Java21);
+    let metrics_after_java21 = service.take_cache_metrics();
+    assert_eq!(metrics_after_java21.hits, 0);
+    assert_eq!(
+        metrics_after_java21.misses, 1,
+        "invalidating node should drop cached facts for all targets"
     );
 }
 
@@ -298,4 +334,36 @@ fn literal_arm_does_not_introduce_narrowing_snapshot() {
     let mut service = PatternMatchService::new();
     let facts = service.analyze(&expr, PatternTarget::Java25);
     assert!(facts.arm_narrowing(0).is_none());
+}
+
+#[test]
+fn when_without_span_is_not_cached() {
+    let span = Span::dummy();
+    let when_expression = Expression::When {
+        expr: Some(Box::new(Expression::Identifier(
+            "value".into(),
+            span.clone(),
+        ))),
+        arms: vec![WhenArm {
+            pattern: Pattern::Wildcard(span.clone()),
+            guard: None,
+            body: Expression::Literal(Literal::Number("1".into()), span.clone()),
+            span: span.clone(),
+        }],
+        else_arm: None,
+        implicit_end: None,
+        span: span.clone(),
+    };
+
+    let mut service = PatternMatchService::new();
+    service.take_cache_metrics();
+    service.analyze(&when_expression, PatternTarget::Java25);
+
+    let metrics = service.take_cache_metrics();
+    assert_eq!(metrics.hits, 0);
+    assert_eq!(metrics.misses, 1);
+    assert!(
+        service.recorded_facts().is_empty(),
+        "when expressions without a stable span (e.g. JV3199 fallback paths) must not be cached"
+    );
 }
