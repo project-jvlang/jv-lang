@@ -1,0 +1,16 @@
+package patterns;
+
+public class Example3 {
+    public static String describe(int x) {
+        if (x > 100) {
+            return "High";
+        }
+        else if (x > 50) {
+            return "Medium";
+        }
+        else {
+            return "Low";
+        }
+    }
+    
+}

@@ -1,0 +1,13 @@
+package patterns;
+
+public class Example4 {
+    public static void route(Object status) {
+        if (status instanceof String) {
+            System.out.println("OK");
+        }
+        else if (status instanceof Integer) {
+            System.out.println("Failed");
+        }
+    }
+    
+}

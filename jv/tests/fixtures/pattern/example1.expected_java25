@@ -1,0 +1,14 @@
+package patterns;
+
+public class Example1 {
+    public static int evaluate(Object x) {
+        return // strategy=Switch arms=3 guards=0 default=true exhaustive=false
+        switch (x) {
+            case String value -> value.length()
+            case Integer value -> value * 2
+            default -> 0
+        }
+        ;
+    }
+    
+}

@@ -1,0 +1,12 @@
+fun categorize(score: Int): String {
+    return when (score) {
+        in 0..60 -> "Fail"
+        in 60..80 -> "Pass"
+        in 80..=100 -> "Excellent"
+        else -> "Invalid"
+    }
+}
+
+fun main() {
+    println(categorize(72))
+}

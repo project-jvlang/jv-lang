@@ -1,0 +1,13 @@
+fun evaluate(x: Any): Int {
+    return when (x) {
+        is String -> x.length()
+        is Int -> x * 2
+        else -> 0
+    }
+}
+
+fun main() {
+    val input: Any = "demo"
+    val result = evaluate(input)
+    println(result)
+}

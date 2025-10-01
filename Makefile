@@ -167,6 +167,7 @@ test-all-binaries: check ## Test all binaries
 
 # CI/CD commands
 ci: check test lint ## Run CI checks (check + test + lint)
+	cd jv && RUSTFLAGS="-C debuginfo=0 -C strip=debuginfo" cargo test -p jv_cli --test fixture_runner -- --test-mode fixture --fixture-dir tests/fixtures/pattern
 
 # Memory-optimized builds (for low-memory environments)
 build-lowmem: ## Build with reduced parallelism for low-memory systems

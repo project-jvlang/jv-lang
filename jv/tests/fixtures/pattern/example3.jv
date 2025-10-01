@@ -1,0 +1,11 @@
+fun describe(x: Int): String {
+    return when {
+        x > 100 -> "High"
+        x > 50 -> "Medium"
+        else -> "Low"
+    }
+}
+
+fun main() {
+    println(describe(42))
+}

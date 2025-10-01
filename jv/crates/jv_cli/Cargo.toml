@@ -18,6 +18,11 @@ path = "src/bin/jvx.rs"
 name = "performance_regression"
 path = "../../tests/performance_regression.rs"
 
+[[test]]
+name = "fixture_runner"
+path = "../../tests/fixture_runner.rs"
+harness = false
+
 [dependencies]
 clap.workspace = true
 anyhow.workspace = true
@@ -40,3 +45,4 @@ zip = { version = "0.6", default-features = false, features = ["deflate"] }
 [dev-dependencies]
 tempfile = "3.10"
 sha2 = "0.10"
+jv_ast.workspace = true

@@ -1,0 +1,10 @@
+fun route(status: Any) {
+    when (status) {
+        is String -> println("OK")
+        is Int -> println("Failed")
+    }
+}
+
+fun main() {
+    route(42)
+}

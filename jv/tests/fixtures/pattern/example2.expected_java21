@@ -1,0 +1,28 @@
+package patterns;
+
+public class Example2 {
+    public static String categorize(int score) {
+        return // strategy=Switch arms=4 guards=3 default=true exhaustive=false
+        new Object() {
+            String matchExpr() {
+                final var __subject = score;
+                final String __matchResult;
+                if ((__subject instanceof int it0) && (score >= 0 && score < 60)) {
+                    __matchResult = "Fail";
+                }
+                else if ((__subject instanceof int it0) && (score >= 60 && score < 80)) {
+                    __matchResult = "Pass";
+                }
+                else if ((__subject instanceof int it0) && (score >= 80 && score <= 100)) {
+                    __matchResult = "Excellent";
+                }
+                else {
+                    __matchResult = "Invalid";
+                }
+                return __matchResult;
+            }
+        }.matchExpr()
+        ;
+    }
+    
+}
