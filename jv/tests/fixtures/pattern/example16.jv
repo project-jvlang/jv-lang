@@ -1,0 +1,12 @@
+fun segment(score: Int): String {
+    return when (score) {
+        in -20..5 -> "segment-a"
+        in 5..=15 -> "segment-b"
+        in 15..30 -> "segment-c"
+        else -> "segment-z"
+    }
+}
+
+fun main() {
+    println(segment(12))
+}

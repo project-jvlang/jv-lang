@@ -1,0 +1,39 @@
+package patterns;
+
+public class Example14 {
+    public static String classify(int score) {
+        return // strategy=Switch arms=4 guards=3 default=true exhaustive=false
+        new Object() {
+            String matchExpr() {
+                final var __subject = score;
+                final String __matchResult;
+                boolean __matched = false;
+                if (!__matched) {
+                    if ((__subject instanceof int it0) && (score >= -100 && score < -10)) {
+                        __matchResult = "very-low";
+                        __matched = true;
+                    }
+                }
+                if (!__matched) {
+                    if ((__subject instanceof int it0) && (score >= -10 && score < 10)) {
+                        __matchResult = "near-zero";
+                        __matched = true;
+                    }
+                }
+                if (!__matched) {
+                    if ((__subject instanceof int it0) && (score >= 10 && score <= 40)) {
+                        __matchResult = "positive";
+                        __matched = true;
+                    }
+                }
+                if (!__matched) {
+                    __matchResult = "wild";
+                    __matched = true;
+                }
+                return __matchResult;
+            }
+        }.matchExpr()
+        ;
+    }
+    
+}

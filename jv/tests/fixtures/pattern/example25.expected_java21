@@ -1,0 +1,35 @@
+package patterns;
+
+public record Pair3(int first, int second);
+
+public record Holder(Pair3 pair, int extra);
+
+public class Example25 {
+    public static int delta(Holder holder) {
+        return // strategy=Switch arms=2 guards=0 default=true exhaustive=true
+        new Object() {
+            int matchExpr() {
+                final var __subject = holder;
+                final int __matchResult;
+                boolean __matched = false;
+                if (!__matched) {
+                    do {
+                        if (!(__subject instanceof Holder(Pair3(var first, var second), var extra) h)) {
+                            break;
+                        }
+                        __matched = true;
+                        __matchResult = first - second + extra;
+                        break;
+                    } while (false);
+                }
+                if (!__matched) {
+                    __matchResult = holder.extra();
+                    __matched = true;
+                }
+                return __matchResult;
+            }
+        }.matchExpr()
+        ;
+    }
+    
+}

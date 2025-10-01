@@ -27,10 +27,7 @@ fn snapshot_program(name: &str, program: IrProgram) {
 
 fn snapshot_java21_fallback(name: &str, summary: &str, program: IrProgram) {
     let java21 = render_program(&program, JavaTarget::Java21);
-    let content = format!(
-        "{summary}\n{}\n",
-        java21.trim_end()
-    );
+    let content = format!("{summary}\n{}\n", java21.trim_end());
     assert_snapshot!(name, content);
 }
 

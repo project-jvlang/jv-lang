@@ -1,0 +1,12 @@
+fun decideScore(score: Int): String {
+    return when {
+        score >= 100 -> "bonus"
+        score >= 60 -> "pass"
+        score >= 40 -> "remedial"
+        else -> "fail"
+    }
+}
+
+fun main() {
+    println(decideScore(38))
+}

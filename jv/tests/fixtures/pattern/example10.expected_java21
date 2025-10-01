@@ -1,0 +1,59 @@
+package patterns;
+
+public record Box(int content, String label);
+
+public class Example10 {
+    public static int compute(Object value) {
+        return // strategy=Switch arms=4 guards=2 default=true exhaustive=false
+        new Object() {
+            int matchExpr() {
+                final var __subject = value;
+                final int __matchResult;
+                boolean __matched = false;
+                if (!__matched) {
+                    do {
+                        if (!(__subject instanceof String __tmp0)) {
+                            break;
+                        }
+                        if (!(__tmp0.contains("!"))) {
+                            break;
+                        }
+                        __matched = true;
+                        __matchResult = __tmp0.length() + 10;
+                        break;
+                    } while (false);
+                }
+                if (!__matched) {
+                    do {
+                        if (!(__subject instanceof Integer __tmp1)) {
+                            break;
+                        }
+                        if (!(__tmp1 > 100)) {
+                            break;
+                        }
+                        __matched = true;
+                        __matchResult = __tmp1 - 100;
+                        break;
+                    } while (false);
+                }
+                if (!__matched) {
+                    do {
+                        if (!(__subject instanceof Box(var content, var label) box)) {
+                            break;
+                        }
+                        __matched = true;
+                        __matchResult = content * 2;
+                        break;
+                    } while (false);
+                }
+                if (!__matched) {
+                    __matchResult = 0;
+                    __matched = true;
+                }
+                return __matchResult;
+            }
+        }.matchExpr()
+        ;
+    }
+    
+}

@@ -1,0 +1,18 @@
+package patterns;
+
+public class Example17 {
+    public static String grade(int score) {
+        return // strategy=Switch arms=4 guards=3 default=true exhaustive=false
+        switch (score) {
+            // range: 90..=100
+            case int it0 when (score >= 90 && score <= 100) -> "A"
+            // range: 70..90
+            case int it0 when (score >= 70 && score < 90) -> "B"
+            // range: 50..70
+            case int it0 when (score >= 50 && score < 70) -> "C"
+            default -> "F"
+        }
+        ;
+    }
+    
+}

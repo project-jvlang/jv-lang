@@ -1,0 +1,17 @@
+package patterns;
+
+public record Triple(int a, int b);
+
+public record Wrapper2(Triple triple, int constant);
+
+public class Example27 {
+    public static int compute(Wrapper2 wrapper) {
+        return // strategy=Switch arms=2 guards=0 default=true exhaustive=true
+        switch (wrapper) {
+            case Wrapper2(Triple(var a, var b), var constant) -> a * b + constant
+            default -> constant
+        }
+        ;
+    }
+    
+}

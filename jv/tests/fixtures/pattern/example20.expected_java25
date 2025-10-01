@@ -1,0 +1,19 @@
+package patterns;
+
+public class Example20 {
+    public static String decide(boolean a, boolean b) {
+        if (a && b) {
+            return "both";
+        }
+        else if (a) {
+            return "first";
+        }
+        else if (b) {
+            return "second";
+        }
+        else {
+            return "none";
+        }
+    }
+    
+}

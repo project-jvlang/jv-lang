@@ -1,0 +1,15 @@
+data class Container(val content: Int, val label: String)
+
+fun measure(value: Any): Int {
+    return when (value) {
+        is String && value.isEmpty() -> 5
+        is Int && value == 100 -> 1000
+        is Container -> value.amount + value.note.length
+        else -> -5
+    }
+}
+
+fun main() {
+    val payload: Any = Container(12, "boom!")
+    println(measure(payload))
+}

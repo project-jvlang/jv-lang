@@ -1,0 +1,19 @@
+package patterns;
+
+public class Example19 {
+    public static String status(int size) {
+        if (size == 0) {
+            return "empty";
+        }
+        else if (size < 5) {
+            return "small";
+        }
+        else if (size < 10) {
+            return "medium";
+        }
+        else {
+            return "large";
+        }
+    }
+    
+}

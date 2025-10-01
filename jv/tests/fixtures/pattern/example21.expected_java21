@@ -1,0 +1,19 @@
+package patterns;
+
+public class Example21 {
+    public static String decideScore(int score) {
+        if (score >= 100) {
+            return "bonus";
+        }
+        else if (score >= 60) {
+            return "pass";
+        }
+        else if (score >= 40) {
+            return "remedial";
+        }
+        else {
+            return "fail";
+        }
+    }
+    
+}

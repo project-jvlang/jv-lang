@@ -1,0 +1,19 @@
+package patterns;
+
+public class Example18 {
+    public static String describeTemp(int temp) {
+        if (temp < 0) {
+            return "freezing";
+        }
+        else if (temp < 20) {
+            return "cool";
+        }
+        else if (temp < 35) {
+            return "warm";
+        }
+        else {
+            return "hot";
+        }
+    }
+    
+}

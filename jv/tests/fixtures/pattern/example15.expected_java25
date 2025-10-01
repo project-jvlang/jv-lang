@@ -1,0 +1,18 @@
+package patterns;
+
+public class Example15 {
+    public static String stage(int score) {
+        return // strategy=Switch arms=4 guards=3 default=true exhaustive=false
+        switch (score) {
+            // range: 0..25
+            case int it0 when (score >= 0 && score < 25) -> "alpha"
+            // range: 25..50
+            case int it0 when (score >= 25 && score < 50) -> "beta"
+            // range: 50..=75
+            case int it0 when (score >= 50 && score <= 75) -> "gamma"
+            default -> "omega"
+        }
+        ;
+    }
+    
+}

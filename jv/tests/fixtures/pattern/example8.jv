@@ -1,0 +1,15 @@
+data class RangeWrapper(val min: Int, val max: Int)
+
+fun score(value: Any): Int {
+    return when (value) {
+        is String && value.endsWith("Z") -> value.length * 5
+        is Int && value < 0 -> -value
+        is RangeWrapper -> value.max - value.min
+        else -> 42
+    }
+}
+
+fun main() {
+    val payload: Any = RangeWrapper(2, 9)
+    println(score(payload))
+}

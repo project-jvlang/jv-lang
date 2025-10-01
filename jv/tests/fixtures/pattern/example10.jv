@@ -1,0 +1,15 @@
+data class Box(val content: Int, val label: String)
+
+fun compute(value: Any): Int {
+    return when (value) {
+        is String && value.contains("!") -> value.length + 10
+        is Int && value > 100 -> value - 100
+        is Box -> value.content * 2
+        else -> 0
+    }
+}
+
+fun main() {
+    val payload: Any = Box(12, "boom!")
+    println(compute(payload))
+}

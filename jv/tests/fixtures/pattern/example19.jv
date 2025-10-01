@@ -1,0 +1,12 @@
+fun status(size: Int): String {
+    return when {
+        size == 0 -> "empty"
+        size < 5 -> "small"
+        size < 10 -> "medium"
+        else -> "large"
+    }
+}
+
+fun main() {
+    println(status(3))
+}

@@ -1,0 +1,17 @@
+package patterns;
+
+public record RangeWrapper(int min, int max);
+
+public class Example8 {
+    public static int score(Object value) {
+        return // strategy=Switch arms=4 guards=2 default=true exhaustive=false
+        switch (value) {
+            case String text when (text.endsWith("Z")) -> text.length() * 5
+            case Integer number when (number < 0) -> -number
+            case RangeWrapper(var min, var max) -> max - min
+            default -> 42
+        }
+        ;
+    }
+    
+}

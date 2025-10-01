@@ -1,0 +1,17 @@
+package patterns;
+
+public record Vector(int x, int y);
+
+public record Point(Vector vector, int weight);
+
+public class Example23 {
+    public static int magnitude(Point value) {
+        return // strategy=Switch arms=2 guards=0 default=true exhaustive=true
+        switch (value) {
+            case Point(Vector(var x, var y), var weight) -> x * x + y * y + weight
+            default -> weight
+        }
+        ;
+    }
+    
+}

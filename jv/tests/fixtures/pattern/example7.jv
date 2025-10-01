@@ -1,0 +1,13 @@
+fun classify(value: Any): String {
+    return when (value) {
+        is String && value.length > 5 -> "long"
+        is String -> "short"
+        is Double && value > 0.0 -> "positive-double"
+        is Boolean -> if (value) "true" else "false"
+        else -> "other"
+    }
+}
+
+fun main() {
+    println(classify("kotlin"))
+}

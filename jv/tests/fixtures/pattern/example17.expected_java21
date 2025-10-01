@@ -1,0 +1,39 @@
+package patterns;
+
+public class Example17 {
+    public static String grade(int score) {
+        return // strategy=Switch arms=4 guards=3 default=true exhaustive=false
+        new Object() {
+            String matchExpr() {
+                final var __subject = score;
+                final String __matchResult;
+                boolean __matched = false;
+                if (!__matched) {
+                    if ((__subject instanceof int it0) && (score >= 90 && score <= 100)) {
+                        __matchResult = "A";
+                        __matched = true;
+                    }
+                }
+                if (!__matched) {
+                    if ((__subject instanceof int it0) && (score >= 70 && score < 90)) {
+                        __matchResult = "B";
+                        __matched = true;
+                    }
+                }
+                if (!__matched) {
+                    if ((__subject instanceof int it0) && (score >= 50 && score < 70)) {
+                        __matchResult = "C";
+                        __matched = true;
+                    }
+                }
+                if (!__matched) {
+                    __matchResult = "F";
+                    __matched = true;
+                }
+                return __matchResult;
+            }
+        }.matchExpr()
+        ;
+    }
+    
+}

@@ -1,0 +1,17 @@
+package patterns;
+
+public record Container(int content, String label);
+
+public class Example11 {
+    public static int measure(Object value) {
+        return // strategy=Switch arms=4 guards=2 default=true exhaustive=false
+        switch (value) {
+            case String text when (text.isEmpty()) -> 5
+            case Integer number when (number == 100) -> 1000
+            case Container(var amount, var note) -> amount + note.length()
+            default -> -5
+        }
+        ;
+    }
+    
+}

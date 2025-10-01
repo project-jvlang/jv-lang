@@ -1,0 +1,18 @@
+package patterns;
+
+public class Example13 {
+    public static String label(int score) {
+        return // strategy=Switch arms=4 guards=3 default=true exhaustive=false
+        switch (score) {
+            // range: 10..30
+            case int it0 when (score >= 10 && score < 30) -> "low"
+            // range: 30..=60
+            case int it0 when (score >= 30 && score <= 60) -> "mid"
+            // range: 60..90
+            case int it0 when (score >= 60 && score < 90) -> "upper"
+            default -> "extreme"
+        }
+        ;
+    }
+    
+}

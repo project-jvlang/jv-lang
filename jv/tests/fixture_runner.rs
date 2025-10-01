@@ -342,11 +342,7 @@ fn example1_program() -> IrProgram {
         },
     );
 
-    let default_case = switch_case(
-        vec![IrCaseLabel::Default],
-        None,
-        number_literal("0"),
-    );
+    let default_case = switch_case(vec![IrCaseLabel::Default], None, number_literal("0"));
 
     let switch_expr = IrExpression::Switch {
         discriminant,

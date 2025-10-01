@@ -1,0 +1,12 @@
+fun message(time: Int): String {
+    return when {
+        time < 6 -> "night"
+        time < 12 -> "morning"
+        time < 18 -> "afternoon"
+        else -> "evening"
+    }
+}
+
+fun main() {
+    println(message(19))
+}

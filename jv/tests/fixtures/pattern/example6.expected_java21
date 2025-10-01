@@ -1,0 +1,59 @@
+package patterns;
+
+public record Wrapper(String label, int value);
+
+public class Example6 {
+    public static int evaluate(Object value) {
+        return // strategy=Switch arms=4 guards=2 default=true exhaustive=false
+        new Object() {
+            int matchExpr() {
+                final var __subject = value;
+                final int __matchResult;
+                boolean __matched = false;
+                if (!__matched) {
+                    do {
+                        if (!(__subject instanceof String __tmp0)) {
+                            break;
+                        }
+                        if (!(__tmp0.startsWith("A"))) {
+                            break;
+                        }
+                        __matched = true;
+                        __matchResult = __tmp0.length() * 3;
+                        break;
+                    } while (false);
+                }
+                if (!__matched) {
+                    do {
+                        if (!(__subject instanceof Integer __tmp1)) {
+                            break;
+                        }
+                        if (!((__tmp1 % 2) == 0)) {
+                            break;
+                        }
+                        __matched = true;
+                        __matchResult = __tmp1 / 2;
+                        break;
+                    } while (false);
+                }
+                if (!__matched) {
+                    do {
+                        if (!(__subject instanceof Wrapper(var label, var inner) wrapper)) {
+                            break;
+                        }
+                        __matched = true;
+                        __matchResult = inner + label.length();
+                        break;
+                    } while (false);
+                }
+                if (!__matched) {
+                    __matchResult = -1;
+                    __matched = true;
+                }
+                return __matchResult;
+            }
+        }.matchExpr()
+        ;
+    }
+    
+}

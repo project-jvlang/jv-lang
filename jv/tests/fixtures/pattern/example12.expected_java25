@@ -1,0 +1,17 @@
+package patterns;
+
+public record Payload(int left, int right);
+
+public class Example12 {
+    public static int aggregate(Object value) {
+        return // strategy=Switch arms=4 guards=2 default=true exhaustive=false
+        switch (value) {
+            case String text when (text.contains(" ")) -> text.length() * 2
+            case Integer number when (number % 3 == 0) -> number / 3
+            case Payload(var left, var right) -> left + right
+            default -> 1
+        }
+        ;
+    }
+    
+}

@@ -1,0 +1,17 @@
+package patterns;
+
+public record Range(int start, int end);
+
+public record Span(Range range, int bias);
+
+public class Example26 {
+    public static int spread(Span span) {
+        return // strategy=Switch arms=2 guards=0 default=true exhaustive=true
+        switch (span) {
+            case Span(Range(var start, var end), var bias) -> end - start + bias
+            default -> bias
+        }
+        ;
+    }
+    
+}

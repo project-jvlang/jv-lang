@@ -1,0 +1,18 @@
+package patterns;
+
+public class Example9 {
+    public static String bucket(int score) {
+        return // strategy=Switch arms=4 guards=3 default=true exhaustive=false
+        switch (score) {
+            // range: -50..0
+            case int it0 when (score >= -50 && score < 0) -> "negative"
+            // range: 0..=50
+            case int it0 when (score >= 0 && score <= 50) -> "mid"
+            // range: 50..100
+            case int it0 when (score >= 50 && score < 100) -> "high"
+            default -> "out"
+        }
+        ;
+    }
+    
+}

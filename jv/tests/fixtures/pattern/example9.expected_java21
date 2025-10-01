@@ -1,0 +1,39 @@
+package patterns;
+
+public class Example9 {
+    public static String bucket(int score) {
+        return // strategy=Switch arms=4 guards=3 default=true exhaustive=false
+        new Object() {
+            String matchExpr() {
+                final var __subject = score;
+                final String __matchResult;
+                boolean __matched = false;
+                if (!__matched) {
+                    if ((__subject instanceof int it0) && (score >= -50 && score < 0)) {
+                        __matchResult = "negative";
+                        __matched = true;
+                    }
+                }
+                if (!__matched) {
+                    if ((__subject instanceof int it0) && (score >= 0 && score <= 50)) {
+                        __matchResult = "mid";
+                        __matched = true;
+                    }
+                }
+                if (!__matched) {
+                    if ((__subject instanceof int it0) && (score >= 50 && score < 100)) {
+                        __matchResult = "high";
+                        __matched = true;
+                    }
+                }
+                if (!__matched) {
+                    __matchResult = "out";
+                    __matched = true;
+                }
+                return __matchResult;
+            }
+        }.matchExpr()
+        ;
+    }
+    
+}

@@ -1,0 +1,16 @@
+package patterns;
+
+public class Example7 {
+    public static String classify(Object value) {
+        return // strategy=Switch arms=5 guards=2 default=true exhaustive=false
+        switch (value) {
+            case String text when (text.length() > 5) -> "long"
+            case String text -> "short"
+            case Double number when (number > 0.0D) -> "positive-double"
+            case Boolean flag -> flag ? "true" : "false"
+            default -> "other"
+        }
+        ;
+    }
+    
+}

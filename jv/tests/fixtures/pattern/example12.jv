@@ -1,0 +1,15 @@
+data class Payload(val left: Int, val right: Int)
+
+fun aggregate(value: Any): Int {
+    return when (value) {
+        is String && value.contains(" ") -> value.length * 2
+        is Int && value % 3 == 0 -> value / 3
+        is Payload -> value.left + value.right
+        else -> 1
+    }
+}
+
+fun main() {
+    val payload: Any = Payload(4, 9)
+    println(aggregate(payload))
+}

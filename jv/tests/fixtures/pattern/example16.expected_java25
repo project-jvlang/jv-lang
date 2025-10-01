@@ -1,0 +1,18 @@
+package patterns;
+
+public class Example16 {
+    public static String segment(int score) {
+        return // strategy=Switch arms=4 guards=3 default=true exhaustive=false
+        switch (score) {
+            // range: -20..5
+            case int it0 when (score >= -20 && score < 5) -> "segment-a"
+            // range: 5..=15
+            case int it0 when (score >= 5 && score <= 15) -> "segment-b"
+            // range: 15..30
+            case int it0 when (score >= 15 && score < 30) -> "segment-c"
+            default -> "segment-z"
+        }
+        ;
+    }
+    
+}

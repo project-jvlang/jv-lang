@@ -1,0 +1,12 @@
+fun describeTemp(temp: Int): String {
+    return when {
+        temp < 0 -> "freezing"
+        temp < 20 -> "cool"
+        temp < 35 -> "warm"
+        else -> "hot"
+    }
+}
+
+fun main() {
+    println(describeTemp(25))
+}

@@ -1,0 +1,17 @@
+package patterns;
+
+public record Node(int left, int right);
+
+public record Tree(Node node, int bonus);
+
+public class Example24 {
+    public static int sum(Tree tree) {
+        return // strategy=Switch arms=2 guards=0 default=true exhaustive=true
+        switch (tree) {
+            case Tree(Node(var left, var right), var bonus) -> left + right + bonus
+            default -> bonus
+        }
+        ;
+    }
+    
+}

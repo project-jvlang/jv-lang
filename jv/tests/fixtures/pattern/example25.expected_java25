@@ -1,0 +1,17 @@
+package patterns;
+
+public record Pair3(int first, int second);
+
+public record Holder(Pair3 pair, int extra);
+
+public class Example25 {
+    public static int delta(Holder holder) {
+        return // strategy=Switch arms=2 guards=0 default=true exhaustive=true
+        switch (holder) {
+            case Holder(Pair3(var first, var second), var extra) -> first - second + extra
+            default -> extra
+        }
+        ;
+    }
+    
+}

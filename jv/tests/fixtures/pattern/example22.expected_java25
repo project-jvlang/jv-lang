@@ -1,0 +1,19 @@
+package patterns;
+
+public class Example22 {
+    public static String message(int time) {
+        if (time < 6) {
+            return "night";
+        }
+        else if (time < 12) {
+            return "morning";
+        }
+        else if (time < 18) {
+            return "afternoon";
+        }
+        else {
+            return "evening";
+        }
+    }
+    
+}

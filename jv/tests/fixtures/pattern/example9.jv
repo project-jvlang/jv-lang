@@ -1,0 +1,12 @@
+fun bucket(score: Int): String {
+    return when (score) {
+        in -50..0 -> "negative"
+        in 0..=50 -> "mid"
+        in 50..100 -> "high"
+        else -> "out"
+    }
+}
+
+fun main() {
+    println(bucket(10))
+}

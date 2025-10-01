@@ -1,0 +1,17 @@
+package patterns;
+
+public record Matrix(int row, int column);
+
+public record Cell(Matrix matrix, int offset);
+
+public class Example28 {
+    public static int index(Cell cell) {
+        return // strategy=Switch arms=2 guards=0 default=true exhaustive=true
+        switch (cell) {
+            case Cell(Matrix(var row, var column), var offset) -> row * 100 + column + offset
+            default -> offset
+        }
+        ;
+    }
+    
+}

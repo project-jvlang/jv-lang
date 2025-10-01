@@ -1,0 +1,17 @@
+package patterns;
+
+public record Bounds(int min, int max);
+
+public record Window(Bounds bounds, int padding);
+
+public class Example29 {
+    public static int size(Window window) {
+        return // strategy=Switch arms=2 guards=0 default=true exhaustive=true
+        switch (window) {
+            case Window(Bounds(var min, var max), var padding) -> (max - min) + padding * 2
+            default -> padding
+        }
+        ;
+    }
+    
+}

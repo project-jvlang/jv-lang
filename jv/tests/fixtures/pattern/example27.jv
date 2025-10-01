@@ -1,0 +1,14 @@
+data class Triple(val a: Int, val b: Int)
+data class Wrapper2(val triple: Triple, val constant: Int)
+
+fun compute(wrapper: Wrapper2): Int {
+    return when (wrapper) {
+        Wrapper2(Triple(a, b), constant) -> a * b + constant
+        else -> constant
+    }
+}
+
+fun main() {
+    val input = Wrapper2(Triple(5, 6), 2)
+    println(compute(input))
+}

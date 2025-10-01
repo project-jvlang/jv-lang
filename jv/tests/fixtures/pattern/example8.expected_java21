@@ -1,0 +1,59 @@
+package patterns;
+
+public record RangeWrapper(int min, int max);
+
+public class Example8 {
+    public static int score(Object value) {
+        return // strategy=Switch arms=4 guards=2 default=true exhaustive=false
+        new Object() {
+            int matchExpr() {
+                final var __subject = value;
+                final int __matchResult;
+                boolean __matched = false;
+                if (!__matched) {
+                    do {
+                        if (!(__subject instanceof String __tmp0)) {
+                            break;
+                        }
+                        if (!(__tmp0.endsWith("Z"))) {
+                            break;
+                        }
+                        __matched = true;
+                        __matchResult = __tmp0.length() * 5;
+                        break;
+                    } while (false);
+                }
+                if (!__matched) {
+                    do {
+                        if (!(__subject instanceof Integer __tmp1)) {
+                            break;
+                        }
+                        if (!(__tmp1 < 0)) {
+                            break;
+                        }
+                        __matched = true;
+                        __matchResult = -__tmp1;
+                        break;
+                    } while (false);
+                }
+                if (!__matched) {
+                    do {
+                        if (!(__subject instanceof RangeWrapper(var min, var max) wrapper)) {
+                            break;
+                        }
+                        __matched = true;
+                        __matchResult = max - min;
+                        break;
+                    } while (false);
+                }
+                if (!__matched) {
+                    __matchResult = 42;
+                    __matched = true;
+                }
+                return __matchResult;
+            }
+        }.matchExpr()
+        ;
+    }
+    
+}

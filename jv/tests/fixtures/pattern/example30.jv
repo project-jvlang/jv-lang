@@ -1,0 +1,14 @@
+data class Envelope(val header: Int, val body: Int)
+data class Message(val envelope: Envelope, val tag: Int)
+
+fun checksum(message: Message): Int {
+    return when (message) {
+        Message(Envelope(header, body), tag) -> header + body + tag * 10
+        else -> tag
+    }
+}
+
+fun main() {
+    val input = Message(Envelope(4, 9), 3)
+    println(checksum(input))
+}

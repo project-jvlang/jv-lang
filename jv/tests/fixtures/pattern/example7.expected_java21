@@ -1,0 +1,67 @@
+package patterns;
+
+public class Example7 {
+    public static String classify(Object value) {
+        return // strategy=Switch arms=5 guards=2 default=true exhaustive=false
+        new Object() {
+            String matchExpr() {
+                final var __subject = value;
+                final String __matchResult;
+                boolean __matched = false;
+                if (!__matched) {
+                    do {
+                        if (!(__subject instanceof String __tmp0)) {
+                            break;
+                        }
+                        if (!(__tmp0.length() > 5)) {
+                            break;
+                        }
+                        __matched = true;
+                        __matchResult = "long";
+                        break;
+                    } while (false);
+                }
+                if (!__matched) {
+                    do {
+                        if (!(__subject instanceof String __tmp1)) {
+                            break;
+                        }
+                        __matched = true;
+                        __matchResult = "short";
+                        break;
+                    } while (false);
+                }
+                if (!__matched) {
+                    do {
+                        if (!(__subject instanceof Double __tmp2)) {
+                            break;
+                        }
+                        if (!(__tmp2 > 0.0D)) {
+                            break;
+                        }
+                        __matched = true;
+                        __matchResult = "positive-double";
+                        break;
+                    } while (false);
+                }
+                if (!__matched) {
+                    do {
+                        if (!(__subject instanceof Boolean __tmp3)) {
+                            break;
+                        }
+                        __matched = true;
+                        __matchResult = __tmp3 ? "true" : "false";
+                        break;
+                    } while (false);
+                }
+                if (!__matched) {
+                    __matchResult = "other";
+                    __matched = true;
+                }
+                return __matchResult;
+            }
+        }.matchExpr()
+        ;
+    }
+    
+}

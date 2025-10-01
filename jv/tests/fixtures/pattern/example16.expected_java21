@@ -1,0 +1,39 @@
+package patterns;
+
+public class Example16 {
+    public static String segment(int score) {
+        return // strategy=Switch arms=4 guards=3 default=true exhaustive=false
+        new Object() {
+            String matchExpr() {
+                final var __subject = score;
+                final String __matchResult;
+                boolean __matched = false;
+                if (!__matched) {
+                    if ((__subject instanceof int it0) && (score >= -20 && score < 5)) {
+                        __matchResult = "segment-a";
+                        __matched = true;
+                    }
+                }
+                if (!__matched) {
+                    if ((__subject instanceof int it0) && (score >= 5 && score <= 15)) {
+                        __matchResult = "segment-b";
+                        __matched = true;
+                    }
+                }
+                if (!__matched) {
+                    if ((__subject instanceof int it0) && (score >= 15 && score < 30)) {
+                        __matchResult = "segment-c";
+                        __matched = true;
+                    }
+                }
+                if (!__matched) {
+                    __matchResult = "segment-z";
+                    __matched = true;
+                }
+                return __matchResult;
+            }
+        }.matchExpr()
+        ;
+    }
+    
+}

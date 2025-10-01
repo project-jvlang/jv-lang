@@ -1,0 +1,17 @@
+package patterns;
+
+public record Wrapper(String label, int value);
+
+public class Example6 {
+    public static int evaluate(Object value) {
+        return // strategy=Switch arms=4 guards=2 default=true exhaustive=false
+        switch (value) {
+            case String text when (text.startsWith("A")) -> text.length() * 3
+            case Integer number when (number % 2 == 0) -> number / 2
+            case Wrapper(var label, var inner) -> inner + label.length()
+            default -> -1
+        }
+        ;
+    }
+    
+}

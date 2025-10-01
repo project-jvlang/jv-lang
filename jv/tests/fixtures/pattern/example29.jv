@@ -1,0 +1,14 @@
+data class Bounds(val min: Int, val max: Int)
+data class Window(val bounds: Bounds, val padding: Int)
+
+fun size(window: Window): Int {
+    return when (window) {
+        Window(Bounds(min, max), padding) -> (max - min) + padding * 2
+        else -> padding
+    }
+}
+
+fun main() {
+    val input = Window(Bounds(1, 5), 2)
+    println(size(input))
+}

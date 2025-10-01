@@ -1,0 +1,12 @@
+fun stage(score: Int): String {
+    return when (score) {
+        in 0..25 -> "alpha"
+        in 25..50 -> "beta"
+        in 50..=75 -> "gamma"
+        else -> "omega"
+    }
+}
+
+fun main() {
+    println(stage(70))
+}

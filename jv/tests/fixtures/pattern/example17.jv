@@ -1,0 +1,12 @@
+fun grade(score: Int): String {
+    return when (score) {
+        in 90..=100 -> "A"
+        in 70..90 -> "B"
+        in 50..70 -> "C"
+        else -> "F"
+    }
+}
+
+fun main() {
+    println(grade(82))
+}

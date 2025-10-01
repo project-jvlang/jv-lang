@@ -1,0 +1,14 @@
+data class Matrix(val row: Int, val column: Int)
+data class Cell(val matrix: Matrix, val offset: Int)
+
+fun index(cell: Cell): Int {
+    return when (cell) {
+        Cell(Matrix(row, column), offset) -> row * 100 + column + offset
+        else -> offset
+    }
+}
+
+fun main() {
+    val input = Cell(Matrix(2, 8), 1)
+    println(index(input))
+}

@@ -1,0 +1,17 @@
+package patterns;
+
+public record Box(int content, String label);
+
+public class Example10 {
+    public static int compute(Object value) {
+        return // strategy=Switch arms=4 guards=2 default=true exhaustive=false
+        switch (value) {
+            case String text when (text.contains("!")) -> text.length() + 10
+            case Integer number when (number > 100) -> number - 100
+            case Box(var content, var label) -> content * 2
+            default -> 0
+        }
+        ;
+    }
+    
+}

@@ -1,0 +1,17 @@
+package patterns;
+
+public record Envelope(int header, int body);
+
+public record Message(Envelope envelope, int tag);
+
+public class Example30 {
+    public static int checksum(Message message) {
+        return // strategy=Switch arms=2 guards=0 default=true exhaustive=true
+        switch (message) {
+            case Message(Envelope(var header, var body), var tag) -> header + body + tag * 10
+            default -> tag
+        }
+        ;
+    }
+    
+}

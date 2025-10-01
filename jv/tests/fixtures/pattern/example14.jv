@@ -1,0 +1,12 @@
+fun classify(score: Int): String {
+    return when (score) {
+        in -100..-10 -> "very-low"
+        in -10..10 -> "near-zero"
+        in 10..=40 -> "positive"
+        else -> "wild"
+    }
+}
+
+fun main() {
+    println(classify(-5))
+}

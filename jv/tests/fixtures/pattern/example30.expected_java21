@@ -1,0 +1,35 @@
+package patterns;
+
+public record Envelope(int header, int body);
+
+public record Message(Envelope envelope, int tag);
+
+public class Example30 {
+    public static int checksum(Message message) {
+        return // strategy=Switch arms=2 guards=0 default=true exhaustive=true
+        new Object() {
+            int matchExpr() {
+                final var __subject = message;
+                final int __matchResult;
+                boolean __matched = false;
+                if (!__matched) {
+                    do {
+                        if (!(__subject instanceof Message(Envelope(var header, var body), var tag) m)) {
+                            break;
+                        }
+                        __matched = true;
+                        __matchResult = header + body + tag * 10;
+                        break;
+                    } while (false);
+                }
+                if (!__matched) {
+                    __matchResult = message.tag();
+                    __matched = true;
+                }
+                return __matchResult;
+            }
+        }.matchExpr()
+        ;
+    }
+    
+}

@@ -1,0 +1,15 @@
+data class Wrapper(val label: String, val value: Int)
+
+fun evaluate(value: Any): Int {
+    return when (value) {
+        is String && value.startsWith("A") -> value.length * 3
+        is Int && value % 2 == 0 -> value / 2
+        is Wrapper -> value.value + value.label.length
+        else -> -1
+    }
+}
+
+fun main() {
+    val payload: Any = Wrapper("Alpha", 10)
+    println(evaluate(payload))
+}

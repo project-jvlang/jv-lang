@@ -1,0 +1,12 @@
+fun decide(a: Boolean, b: Boolean): String {
+    return when {
+        a && b -> "both"
+        a -> "first"
+        b -> "second"
+        else -> "none"
+    }
+}
+
+fun main() {
+    println(decide(true, false))
+}

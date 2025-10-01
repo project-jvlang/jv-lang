@@ -1,0 +1,14 @@
+data class Vector(val x: Int, val y: Int)
+data class Point(val vector: Vector, val weight: Int)
+
+fun magnitude(value: Point): Int {
+    return when (value) {
+        Point(Vector(x, y), weight) -> x * x + y * y + weight
+        else -> weight
+    }
+}
+
+fun main() {
+    val input = Point(Vector(3, 4), 2)
+    println(magnitude(input))
+}
