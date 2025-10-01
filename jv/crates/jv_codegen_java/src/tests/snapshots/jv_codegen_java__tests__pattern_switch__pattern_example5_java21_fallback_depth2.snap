@@ -1,0 +1,41 @@
+---
+source: crates/jv_codegen_java/src/tests/pattern_switch.rs
+assertion_line: 34
+expression: content
+---
+// Java 21 fallback handles nested destructuring via instanceof loop and do-while guard
+package patterns;
+
+public record Inner(int x, int y);
+
+public record Outer(Inner inner, int count);
+
+public class Example5 {
+    public static int total(Outer value) {
+        return // strategy=Switch arms=2 guards=0 default=true exhaustive=true
+        new Object() {
+            int matchExpr() {
+                final var __subject = value;
+                final int __matchResult;
+                boolean __matched = false;
+                if (!__matched) {
+                    do {
+                        if (!(__subject instanceof Outer(Inner(var x, var y), var count) outer)) {
+                            break;
+                        }
+                        __matched = true;
+                        __matchResult = x + y + count;
+                        break;
+                    } while (false);
+                }
+                if (!__matched) {
+                    __matchResult = 0;
+                    __matched = true;
+                }
+                return __matchResult;
+            }
+        }.matchExpr()
+        ;
+    }
+    
+}

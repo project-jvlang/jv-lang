@@ -25,6 +25,15 @@ fn snapshot_program(name: &str, program: IrProgram) {
     assert_snapshot!(name, combined);
 }
 
+fn snapshot_java21_fallback(name: &str, summary: &str, program: IrProgram) {
+    let java21 = render_program(&program, JavaTarget::Java21);
+    let content = format!(
+        "{summary}\n{}\n",
+        java21.trim_end()
+    );
+    assert_snapshot!(name, content);
+}
+
 fn example1_program() -> IrProgram {
     let object_type = reference_type("Object");
     let string = string_type();
@@ -446,6 +455,33 @@ fn pattern_example2_range_patterns() {
 fn pattern_example5_destructuring_patterns() {
     snapshot_program(
         "pattern_example5_destructuring_patterns",
+        example5_program(),
+    );
+}
+
+#[test]
+fn pattern_example1_java21_fallback_instanceof() {
+    snapshot_java21_fallback(
+        "pattern_example1_java21_fallback_instanceof",
+        "// Java 21 fallback expands type patterns into instanceof chains guarded by __matched",
+        example1_program(),
+    );
+}
+
+#[test]
+fn pattern_example2_java21_fallback_ranges() {
+    snapshot_java21_fallback(
+        "pattern_example2_java21_fallback_ranges",
+        "// Java 21 fallback lowers range patterns into sequential guard checks with __matched",
+        example2_program(),
+    );
+}
+
+#[test]
+fn pattern_example5_java21_fallback_depth2() {
+    snapshot_java21_fallback(
+        "pattern_example5_java21_fallback_depth2",
+        "// Java 21 fallback handles nested destructuring via instanceof loop and do-while guard",
         example5_program(),
     );
 }

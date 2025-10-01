@@ -1,0 +1,39 @@
+---
+source: crates/jv_codegen_java/src/tests/pattern_switch.rs
+assertion_line: 34
+expression: content
+---
+// Java 21 fallback expands type patterns into instanceof chains guarded by __matched
+package patterns;
+
+public class Example1 {
+    public static int evaluate(Object x) {
+        return // strategy=Switch arms=3 guards=0 default=true exhaustive=false
+        new Object() {
+            int matchExpr() {
+                final var __subject = x;
+                final int __matchResult;
+                boolean __matched = false;
+                if (!__matched) {
+                    if (__subject instanceof String value) {
+                        __matchResult = value.length();
+                        __matched = true;
+                    }
+                }
+                if (!__matched) {
+                    if (__subject instanceof Integer value) {
+                        __matchResult = value * 2;
+                        __matched = true;
+                    }
+                }
+                if (!__matched) {
+                    __matchResult = 0;
+                    __matched = true;
+                }
+                return __matchResult;
+            }
+        }.matchExpr()
+        ;
+    }
+    
+}

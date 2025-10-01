@@ -1,0 +1,45 @@
+---
+source: crates/jv_codegen_java/src/tests/pattern_switch.rs
+assertion_line: 34
+expression: content
+---
+// Java 21 fallback lowers range patterns into sequential guard checks with __matched
+package patterns;
+
+public class Example2 {
+    public static String categorize(int score) {
+        return // strategy=Switch arms=4 guards=3 default=true exhaustive=false
+        new Object() {
+            String matchExpr() {
+                final var __subject = score;
+                final String __matchResult;
+                boolean __matched = false;
+                if (!__matched) {
+                    if ((__subject instanceof int it0) && (score >= 0 && score < 60)) {
+                        __matchResult = "Fail";
+                        __matched = true;
+                    }
+                }
+                if (!__matched) {
+                    if ((__subject instanceof int it0) && (score >= 60 && score < 80)) {
+                        __matchResult = "Pass";
+                        __matched = true;
+                    }
+                }
+                if (!__matched) {
+                    if ((__subject instanceof int it0) && (score >= 80 && score <= 100)) {
+                        __matchResult = "Excellent";
+                        __matched = true;
+                    }
+                }
+                if (!__matched) {
+                    __matchResult = "Invalid";
+                    __matched = true;
+                }
+                return __matchResult;
+            }
+        }.matchExpr()
+        ;
+    }
+    
+}
