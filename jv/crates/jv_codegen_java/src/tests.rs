@@ -1692,10 +1692,135 @@ fn switch_expression_implicit_unit_renders_for_java21_target() {
         .generate_expression(&expression)
         .expect("java21 switch generation should succeed");
 
-    let expected = "switch (x) {\n    case 1 -> \"one\"\n    default -> { }\n}\n";
+    let expected = "new Object() {\n    String matchExpr() {\n        final var __subject = x;\n        final String __matchResult;\n        if (java.util.Objects.equals(__subject, 1)) {\n            __matchResult = \"one\";\n        }\n        else {\n            throw new IllegalStateException(\"non-exhaustive when expression\");\n        }\n        return __matchResult;\n    }\n}.matchExpr()\n";
     assert_eq!(
         rendered, expected,
-        "java21 fallback should match java25 rendering"
+        "java21 fallback should render lambda IIFE"
+    );
+}
+
+#[test]
+fn switch_expression_java21_type_pattern_fallback() {
+    let object_type = JavaType::Reference {
+        name: "Object".to_string(),
+        generic_args: vec![],
+    };
+
+    let expression = IrExpression::Switch {
+        discriminant: Box::new(ir_identifier("subject", &object_type)),
+        cases: vec![
+            switch_case(
+                vec![IrCaseLabel::TypePattern {
+                    type_name: "String".to_string(),
+                    variable: "value".to_string(),
+                }],
+                None,
+                string_literal("string"),
+            ),
+            switch_case(vec![IrCaseLabel::Default], None, string_literal("other")),
+        ],
+        java_type: JavaType::string(),
+        implicit_end: None,
+        strategy_description: Some(
+            "strategy=Switch arms=2 guards=0 default=true exhaustive=true".to_string(),
+        ),
+        span: dummy_span(),
+    };
+
+    let mut generator =
+        JavaCodeGenerator::with_config(JavaCodeGenConfig::for_target(JavaTarget::Java21));
+    let rendered = generator
+        .generate_expression(&expression)
+        .expect("java21 type pattern fallback should render");
+
+    let expected = "// strategy=Switch arms=2 guards=0 default=true exhaustive=true\nnew Object() {\n    String matchExpr() {\n        final var __subject = subject;\n        final String __matchResult;\n        if (__subject instanceof String value) {\n            __matchResult = \"string\";\n        }\n        else {\n            __matchResult = \"other\";\n        }\n        return __matchResult;\n    }\n}.matchExpr()\n";
+    assert_eq!(
+        rendered, expected,
+        "java21 fallback should use instanceof pattern"
+    );
+}
+
+#[test]
+fn switch_expression_java21_range_pattern_fallback() {
+    let int_type = JavaType::Primitive("int".to_string());
+    let bool_type = JavaType::Primitive("boolean".to_string());
+
+    let lower_check = IrExpression::Binary {
+        left: Box::new(IrExpression::Identifier {
+            name: "it0".to_string(),
+            java_type: int_type.clone(),
+            span: dummy_span(),
+        }),
+        op: BinaryOp::GreaterEqual,
+        right: Box::new(IrExpression::Literal(
+            Literal::Number("0".to_string()),
+            dummy_span(),
+        )),
+        java_type: bool_type.clone(),
+        span: dummy_span(),
+    };
+
+    let upper_check = IrExpression::Binary {
+        left: Box::new(IrExpression::Identifier {
+            name: "it0".to_string(),
+            java_type: int_type.clone(),
+            span: dummy_span(),
+        }),
+        op: BinaryOp::LessEqual,
+        right: Box::new(IrExpression::Literal(
+            Literal::Number("10".to_string()),
+            dummy_span(),
+        )),
+        java_type: bool_type.clone(),
+        span: dummy_span(),
+    };
+
+    let guard = IrExpression::Binary {
+        left: Box::new(lower_check),
+        op: BinaryOp::And,
+        right: Box::new(upper_check),
+        java_type: bool_type,
+        span: dummy_span(),
+    };
+
+    let expression = IrExpression::Switch {
+        discriminant: Box::new(ir_identifier("score", &int_type)),
+        cases: vec![
+            switch_case(
+                vec![IrCaseLabel::Range {
+                    type_name: "int".to_string(),
+                    variable: "it0".to_string(),
+                    lower: Box::new(IrExpression::Literal(
+                        Literal::Number("0".to_string()),
+                        dummy_span(),
+                    )),
+                    upper: Box::new(IrExpression::Literal(
+                        Literal::Number("10".to_string()),
+                        dummy_span(),
+                    )),
+                    inclusive_end: true,
+                }],
+                Some(guard),
+                string_literal("small"),
+            ),
+            switch_case(vec![IrCaseLabel::Default], None, string_literal("other")),
+        ],
+        java_type: JavaType::string(),
+        implicit_end: None,
+        strategy_description: None,
+        span: dummy_span(),
+    };
+
+    let mut generator =
+        JavaCodeGenerator::with_config(JavaCodeGenConfig::for_target(JavaTarget::Java21));
+    let rendered = generator
+        .generate_expression(&expression)
+        .expect("java21 range pattern fallback should render");
+
+    let expected = "new Object() {\n    String matchExpr() {\n        final var __subject = score;\n        final String __matchResult;\n        if ((__subject instanceof int it0) && (it0 >= 0 && it0 <= 10)) {\n            __matchResult = \"small\";\n        }\n        else {\n            __matchResult = \"other\";\n        }\n        return __matchResult;\n    }\n}.matchExpr()\n";
+    assert_eq!(
+        rendered, expected,
+        "java21 fallback should expand range patterns"
     );
 }
 

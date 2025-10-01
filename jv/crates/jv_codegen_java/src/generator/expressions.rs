@@ -1,4 +1,5 @@
 use super::*;
+use jv_ast::Span;
 
 impl JavaCodeGenerator {
     pub fn generate_expression(&mut self, expr: &IrExpression) -> Result<String, CodeGenError> {
@@ -195,52 +196,79 @@ impl JavaCodeGenerator {
         if let IrExpression::Switch {
             discriminant,
             cases,
+            java_type,
             implicit_end,
             strategy_description,
-            ..
+            span,
         } = switch
         {
-            let mut builder = self.builder();
-            if let Some(description) = strategy_description {
-                builder.push_line(&format!("// {}", description));
+            if self.targeting.supports_pattern_switch() {
+                self.render_switch_expression_java25(
+                    discriminant,
+                    cases,
+                    implicit_end.as_ref(),
+                    strategy_description.as_ref(),
+                )
+            } else {
+                self.render_switch_expression_java21(
+                    discriminant,
+                    cases,
+                    java_type,
+                    implicit_end.as_ref(),
+                    strategy_description.as_ref(),
+                    span,
+                )
             }
-            builder.push_line(&format!(
-                "switch ({}) {{",
-                self.generate_expression(discriminant)?
-            ));
-            builder.indent();
-            for case in cases {
-                if let Some(comment) = self.render_case_leading_comment(case)? {
-                    builder.push_line(&comment);
-                }
-                let guard = match &case.guard {
-                    Some(guard_expr) => {
-                        format!(" when ({})", self.generate_expression(guard_expr)?)
-                    }
-                    None => String::new(),
-                };
-                let body_expr = self.generate_expression(&case.body)?;
-                if Self::is_default_only_case(case) {
-                    builder.push_line(&format!("default{} -> {}", guard, body_expr));
-                } else {
-                    let labels = self.render_case_labels(&case.labels)?;
-                    builder.push_line(&format!("case {}{} -> {}", labels, guard, body_expr));
-                }
-            }
-            if let Some(implicit) = implicit_end.as_ref() {
-                if let Some(rendered) = self.render_implicit_when_end_case(implicit, cases)? {
-                    builder.push_line(&rendered);
-                }
-            }
-            builder.dedent();
-            builder.push_line("}");
-            Ok(builder.build())
         } else {
             Err(CodeGenError::UnsupportedConstruct {
                 construct: "Expected switch expression".to_string(),
                 span: None,
             })
         }
+    }
+
+    fn render_switch_expression_java25(
+        &mut self,
+        discriminant: &IrExpression,
+        cases: &[IrSwitchCase],
+        implicit_end: Option<&IrImplicitWhenEnd>,
+        strategy_description: Option<&String>,
+    ) -> Result<String, CodeGenError> {
+        let mut builder = self.builder();
+        if let Some(description) = strategy_description {
+            builder.push_line(&format!("// {}", description));
+        }
+        builder.push_line(&format!(
+            "switch ({}) {{",
+            self.generate_expression(discriminant)?
+        ));
+        builder.indent();
+        for case in cases {
+            if let Some(comment) = self.render_case_leading_comment(case)? {
+                builder.push_line(&comment);
+            }
+            let guard = match &case.guard {
+                Some(guard_expr) => {
+                    format!(" when ({})", self.generate_expression(guard_expr)?)
+                }
+                None => String::new(),
+            };
+            let body_expr = self.generate_expression(&case.body)?;
+            if Self::is_default_only_case(case) {
+                builder.push_line(&format!("default{} -> {}", guard, body_expr));
+            } else {
+                let labels = self.render_case_labels(&case.labels)?;
+                builder.push_line(&format!("case {}{} -> {}", labels, guard, body_expr));
+            }
+        }
+        if let Some(implicit) = implicit_end {
+            if let Some(rendered) = self.render_implicit_when_end_case(implicit, cases)? {
+                builder.push_line(&rendered);
+            }
+        }
+        builder.dedent();
+        builder.push_line("}");
+        Ok(builder.build())
     }
 
     fn render_case_leading_comment(
@@ -266,6 +294,261 @@ impl JavaCodeGenerator {
         }
 
         Ok(None)
+    }
+
+    fn render_switch_expression_java21(
+        &mut self,
+        discriminant: &IrExpression,
+        cases: &[IrSwitchCase],
+        java_type: &JavaType,
+        _implicit_end: Option<&IrImplicitWhenEnd>,
+        strategy_description: Option<&String>,
+        span: &Span,
+    ) -> Result<String, CodeGenError> {
+        if cases.is_empty() {
+            return Err(CodeGenError::UnsupportedConstruct {
+                construct: "when expression must contain at least one arm".to_string(),
+                span: Some(span.clone()),
+            });
+        }
+
+        let mut non_default_cases = Vec::new();
+        let mut default_case: Option<&IrSwitchCase> = None;
+
+        for case in cases {
+            if Self::is_default_only_case(case) {
+                if default_case.is_some() {
+                    return Err(CodeGenError::UnsupportedConstruct {
+                        construct:
+                            "Multiple default branches are not supported in Java 21 fallback"
+                                .to_string(),
+                        span: Some(case.span.clone()),
+                    });
+                }
+                default_case = Some(case);
+            } else {
+                non_default_cases.push(case);
+            }
+        }
+
+        let result_is_void = matches!(java_type, JavaType::Void);
+        let subject_binding = "__subject";
+        let result_binding = "__matchResult";
+
+        let subject_expr = self.generate_expression(discriminant)?;
+        let result_type = if result_is_void {
+            String::new()
+        } else {
+            self.generate_type(java_type)?
+        };
+
+        let mut builder = self.builder();
+        if let Some(description) = strategy_description {
+            builder.push_line(&format!("// {}", description));
+        }
+        builder.push_line("new Object() {");
+        builder.indent();
+        builder.push_line(&format!(
+            "{} matchExpr() {{",
+            if result_is_void {
+                "void".to_string()
+            } else {
+                result_type.clone()
+            }
+        ));
+        builder.indent();
+
+        builder.push_line(&format!(
+            "final var {} = {};",
+            subject_binding, subject_expr
+        ));
+        if !result_is_void {
+            builder.push_line(&format!("final {} {};", result_type, result_binding));
+        }
+
+        let mut emitted_branch = false;
+        for case in non_default_cases {
+            if let Some(condition) =
+                self.render_switch_case_condition_java21(case, subject_binding)?
+            {
+                let header = if !emitted_branch {
+                    format!("if ({}) {{", condition)
+                } else {
+                    format!("else if ({}) {{", condition)
+                };
+                builder.push_line(&header);
+                builder.indent();
+                self.write_switch_case_body_java21(
+                    &mut builder,
+                    case,
+                    result_is_void,
+                    result_binding,
+                )?;
+                builder.dedent();
+                builder.push_line("}");
+                emitted_branch = true;
+            } else {
+                return Err(CodeGenError::UnsupportedConstruct {
+                    construct: "Encountered pattern branch without condition in Java 21 fallback"
+                        .to_string(),
+                    span: Some(case.span.clone()),
+                });
+            }
+        }
+
+        if let Some(case) = default_case {
+            let header = if emitted_branch { "else {" } else { "{" };
+            builder.push_line(header);
+            builder.indent();
+            self.write_switch_case_body_java21(&mut builder, case, result_is_void, result_binding)?;
+            builder.dedent();
+            builder.push_line("}");
+        } else if !result_is_void {
+            builder.push_line(if emitted_branch { "else {" } else { "{" });
+            builder.indent();
+            self.add_import("java.lang.IllegalStateException");
+            builder
+                .push_line("throw new IllegalStateException(\"non-exhaustive when expression\");");
+            builder.dedent();
+            builder.push_line("}");
+        }
+
+        if result_is_void {
+            builder.push_line("return;");
+        } else {
+            builder.push_line(&format!("return {};", result_binding));
+        }
+
+        builder.dedent();
+        builder.push_line("}");
+        builder.dedent();
+        builder.push_line("}.matchExpr()");
+
+        Ok(builder.build())
+    }
+
+    fn render_switch_case_condition_java21(
+        &mut self,
+        case: &IrSwitchCase,
+        subject_binding: &str,
+    ) -> Result<Option<String>, CodeGenError> {
+        let mut literal_conditions = Vec::new();
+        let mut type_pattern_condition: Option<String> = None;
+
+        for label in &case.labels {
+            match label {
+                IrCaseLabel::Default => {}
+                IrCaseLabel::Literal(literal) => {
+                    literal_conditions
+                        .push(self.literal_condition_java21(subject_binding, literal)?);
+                }
+                IrCaseLabel::TypePattern {
+                    type_name,
+                    variable,
+                } => {
+                    if !literal_conditions.is_empty() || type_pattern_condition.is_some() {
+                        return Err(CodeGenError::UnsupportedConstruct {
+                            construct: "Java 21 fallback does not support combining multiple type patterns or mixing literals with type patterns in a single when arm".to_string(),
+                            span: Some(case.span.clone()),
+                        });
+                    }
+                    type_pattern_condition = Some(format!(
+                        "{} instanceof {} {}",
+                        subject_binding, type_name, variable
+                    ));
+                }
+                IrCaseLabel::Range {
+                    type_name,
+                    variable,
+                    ..
+                } => {
+                    if !literal_conditions.is_empty() || type_pattern_condition.is_some() {
+                        return Err(CodeGenError::UnsupportedConstruct {
+                            construct: "Java 21 fallback does not support mixing range patterns with other labels in a single arm".to_string(),
+                            span: Some(case.span.clone()),
+                        });
+                    }
+                    type_pattern_condition = Some(format!(
+                        "{} instanceof {} {}",
+                        subject_binding, type_name, variable
+                    ));
+                }
+            }
+        }
+
+        let mut condition = if let Some(pattern_condition) = type_pattern_condition {
+            pattern_condition
+        } else if literal_conditions.is_empty() {
+            return Ok(None);
+        } else if literal_conditions.len() == 1 {
+            literal_conditions.remove(0)
+        } else {
+            format!("({})", literal_conditions.join(" || "))
+        };
+
+        if let Some(guard) = case.guard.as_ref() {
+            let guard_expr = self.generate_expression(guard)?;
+            let guard_trim = guard_expr.trim();
+            if !guard_trim.is_empty() && guard_trim != "true" {
+                if condition.is_empty() {
+                    condition = format!("({})", guard_trim);
+                } else {
+                    condition = format!("({}) && ({})", condition, guard_trim);
+                }
+            }
+        }
+
+        Ok(Some(condition))
+    }
+
+    fn literal_condition_java21(
+        &mut self,
+        subject_binding: &str,
+        literal: &Literal,
+    ) -> Result<String, CodeGenError> {
+        let literal_value = Self::literal_to_string(literal);
+        self.add_import("java.util.Objects");
+        Ok(format!(
+            "java.util.Objects.equals({}, {})",
+            subject_binding, literal_value
+        ))
+    }
+
+    fn write_switch_case_body_java21(
+        &mut self,
+        builder: &mut JavaSourceBuilder,
+        case: &IrSwitchCase,
+        result_is_void: bool,
+        result_binding: &str,
+    ) -> Result<(), CodeGenError> {
+        let mut body_expr = self.generate_expression(&case.body)?;
+        let body_is_block = body_expr.trim_start().starts_with('{');
+        let body_has_semicolon = body_expr.trim_end().ends_with(';');
+
+        if result_is_void {
+            if body_is_block {
+                Self::push_lines(builder, &body_expr);
+            } else {
+                if !body_has_semicolon {
+                    body_expr.push(';');
+                }
+                builder.push_line(&body_expr);
+            }
+        } else {
+            if body_is_block {
+                return Err(CodeGenError::UnsupportedConstruct {
+                    construct: "Java 21 fallback does not yet support block expressions as when arm results".to_string(),
+                    span: Some(case.span.clone()),
+                });
+            }
+            let mut assignment = format!("{} = {}", result_binding, body_expr);
+            if !assignment.trim_end().ends_with(';') {
+                assignment.push(';');
+            }
+            builder.push_line(&assignment);
+        }
+
+        Ok(())
     }
 
     pub fn generate_null_safe_operation(
