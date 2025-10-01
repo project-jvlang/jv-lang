@@ -1,0 +1,7 @@
+fun inspect(number: Int): String {
+    val threshold = 32
+    return when (number) {
+        in threshold -> "too-low"
+        else -> "ok"
+    }
+}

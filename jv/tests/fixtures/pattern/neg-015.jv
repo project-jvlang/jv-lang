@@ -1,0 +1,4 @@
+fun main() {
+    val value = if (true) 1 else 0
+    println(value)
+}

@@ -1,0 +1,5 @@
+fun evaluateSwitch(flag: Boolean): String {
+    return when (flag) {
+        true -> "true"
+    }
+}

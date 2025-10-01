@@ -1,0 +1,5 @@
+fun requireElse(flag: Boolean): String {
+    return when (flag) {
+        true -> "ok"
+    }
+}

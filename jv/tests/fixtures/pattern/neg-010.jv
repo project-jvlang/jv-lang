@@ -1,0 +1,7 @@
+fun assessMeter(reading: Int): String {
+    val threshold = 10
+    return when (reading) {
+        in threshold -> "threshold"
+        else -> "clear"
+    }
+}

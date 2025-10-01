@@ -1,0 +1,5 @@
+[Warning] JV3104: Unused pattern binding / 未使用のパターン束縛です (L4C9-L4C21)
+  戦略: Deferred
+  ファイル: neg-007.jv
+  詳細: JV3104: `in` パターンには範囲式が必要です / `in` patterns require a range expression (invalid range pattern: Identifier("threshold", Span { start_line: 4, start_column: 12, end_line: 4, end_column: 21 }))
+  対処: 未使用の変数は削除するか `_` へ置き換えてください。/ Remove the binding or rename it to `_`. (--explain JV3104)

@@ -1,0 +1,7 @@
+fun analyzeInput(input: Int): String {
+    val threshold = 75
+    return when (input) {
+        in threshold -> "blocked"
+        else -> "ok"
+    }
+}

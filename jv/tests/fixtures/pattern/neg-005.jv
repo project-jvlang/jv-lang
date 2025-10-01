@@ -1,0 +1,4 @@
+fun computeLabel(status: Boolean): String {
+    val result = if (status) "enabled" else "disabled"
+    return result
+}

@@ -1,0 +1,5 @@
+fun evaluateBoolean(flag: Boolean): Int {
+    return when (flag) {
+        true -> 10
+    }
+}

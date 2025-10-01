@@ -1,0 +1,5 @@
+fun determine(flag: Boolean): Int {
+    return when (flag) {
+        true -> 5
+    }
+}

@@ -1,0 +1,5 @@
+fun classify(flag: Boolean): Int {
+    return when (flag) {
+        true -> 1
+    }
+}

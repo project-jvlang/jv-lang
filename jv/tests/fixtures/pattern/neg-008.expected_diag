@@ -1,0 +1,8 @@
+[Error] JV3100: `when` expression is not exhaustive / `when` 式が未網羅です (L2C12-L4C6)
+  戦略: Deferred
+  ファイル: neg-008.jv
+  詳細: JV3100: when 式が boolean の `false` ケースを網羅していません。欠落した分岐を追加してください。
+JV3100: `when` expression is missing the `false` branch; add an arm covering it.
+  対処: 欠落している sealed / enum / boolean ケースを網羅する分岐を追加してください。/ Add branches covering the missing sealed, enum, or boolean cases. (--explain JV3100)
+  提案: Quick Fix: when.add.branch -> `false` ケースの分岐テンプレートを挿入
+  提案: Quick Fix: when.add.branch -> insert branch template for `false`

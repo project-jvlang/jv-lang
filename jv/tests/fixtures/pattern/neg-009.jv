@@ -1,0 +1,4 @@
+fun renderStatus(flag: Boolean): String {
+    val text = if (!flag) "inactive" else "active"
+    return text
+}

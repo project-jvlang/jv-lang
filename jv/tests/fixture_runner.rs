@@ -5,11 +5,18 @@ use std::process::Command;
 
 use anyhow::{Context, Result};
 use jv_ast::{BinaryOp, CallArgumentStyle, Literal, Span};
+use jv_checker::{
+    diagnostics::{from_check_error, from_parse_error, from_transform_error, DiagnosticStrategy},
+    CheckError, TypeChecker,
+};
+use jv_cli::format_tooling_diagnostic;
 use jv_codegen_java::{JavaCodeGenConfig, JavaCodeGenerator};
 use jv_ir::{
-    IrCaseLabel, IrDeconstructionComponent, IrDeconstructionPattern, IrExpression, IrModifiers,
-    IrParameter, IrProgram, IrRecordComponent, IrStatement, IrSwitchCase, IrVisibility, JavaType,
+    transform_program, IrCaseLabel, IrDeconstructionComponent, IrDeconstructionPattern,
+    IrExpression, IrModifiers, IrParameter, IrProgram, IrRecordComponent, IrStatement,
+    IrSwitchCase, IrVisibility, JavaType,
 };
+use jv_parser::Parser as JvParser;
 use jv_pm::JavaTarget;
 use tempfile::tempdir;
 
@@ -102,30 +109,144 @@ fn run_fixture_suite(dir: &Path) -> Result<()> {
     }
 }
 
+fn collect_fixture_diagnostic(
+    source_path: &Path,
+    display_path: &Path,
+    analyze_codegen: bool,
+) -> Result<String> {
+    let source = fs::read_to_string(source_path)
+        .with_context(|| format!("read fixture source {}", source_path.display()))?;
+
+    let program = match JvParser::parse(&source) {
+        Ok(program) => program,
+        Err(error) => {
+            if let Some(diagnostic) = from_parse_error(&error) {
+                let diagnostic = diagnostic.with_strategy(DiagnosticStrategy::Deferred);
+                return Ok(format_tooling_diagnostic(display_path, &diagnostic));
+            }
+            anyhow::bail!("parser error without diagnostic code: {error:?}");
+        }
+    };
+
+    let ir_program = match transform_program(program.clone()) {
+        Ok(ir) => ir,
+        Err(error) => {
+            if let Some(diagnostic) = from_transform_error(&error) {
+                let diagnostic = diagnostic.with_strategy(DiagnosticStrategy::Deferred);
+                return Ok(format_tooling_diagnostic(display_path, &diagnostic));
+            }
+            anyhow::bail!("IR transform error without diagnostic code: {error:?}");
+        }
+    };
+
+    let mut checker = TypeChecker::new();
+    match checker.check_program(&program) {
+        Ok(()) => {}
+        Err(errors) => {
+            let diagnostics = errors
+                .iter()
+                .filter_map(from_check_error)
+                .collect::<Vec<_>>();
+
+            if let Some(primary) = diagnostics
+                .iter()
+                .find(|diagnostic| diagnostic.code.starts_with("JV"))
+                .cloned()
+                .or_else(|| diagnostics.first().cloned())
+            {
+                let diagnostic = primary.with_strategy(DiagnosticStrategy::Deferred);
+                return Ok(format_tooling_diagnostic(display_path, &diagnostic));
+            }
+
+            let details = errors
+                .iter()
+                .map(|error| error.to_string())
+                .collect::<Vec<_>>()
+                .join("\n");
+            anyhow::bail!("type checking failed without diagnostic code: {details}");
+        }
+    }
+
+    let null_safety_errors = checker.check_null_safety(&program, None);
+    let mut null_safety_diagnostics = Vec::new();
+    for error in &null_safety_errors {
+        if let Some(diagnostic) = from_check_error(error) {
+            null_safety_diagnostics.push(diagnostic);
+        }
+    }
+    if let Some(primary) = null_safety_diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code.starts_with("JV"))
+        .cloned()
+        .or_else(|| null_safety_diagnostics.first().cloned())
+    {
+        let diagnostic = primary.with_strategy(DiagnosticStrategy::Deferred);
+        return Ok(format_tooling_diagnostic(display_path, &diagnostic));
+    }
+
+    if analyze_codegen {
+        for target in [JavaTarget::Java25, JavaTarget::Java21] {
+            let mut generator =
+                JavaCodeGenerator::with_config(JavaCodeGenConfig::for_target(target));
+            if let Err(error) = generator.generate_compilation_unit(&ir_program) {
+                let message = error.to_string();
+                let pseudo = CheckError::TypeError(message);
+                if let Some(diagnostic) = from_check_error(&pseudo) {
+                    let diagnostic = diagnostic.with_strategy(DiagnosticStrategy::Deferred);
+                    return Ok(format_tooling_diagnostic(display_path, &diagnostic));
+                }
+                anyhow::bail!("codegen error without diagnostic code: {error:?}");
+            }
+        }
+    }
+
+    Ok(String::new())
+}
+
 fn run_fixture_case(path: &Path, javac_version: Option<u32>) -> Result<()> {
     let stem = path
         .file_stem()
         .and_then(|s| s.to_str())
         .context("fixture file stem must be valid UTF-8")?;
 
-    let expected_java25 = read_expected(path, stem, "expected_java25")?;
-    let expected_java21 = read_expected(path, stem, "expected_java21")?;
     let expected_diag = read_expected(path, stem, "expected_diag")?;
+    let is_negative = !expected_diag.trim().is_empty();
 
-    if let Some(actual) = generate_fixture_source(stem, JavaTarget::Java25) {
-        compare_output(&actual, &expected_java25, stem, "Java25")?;
+    let expected_pair = if is_negative {
+        None
+    } else {
+        Some((
+            read_expected(path, stem, "expected_java25")?,
+            read_expected(path, stem, "expected_java21")?,
+        ))
+    };
+
+    if let Some((ref expected_java25, ref expected_java21)) = expected_pair {
+        if let Some(actual) = generate_fixture_source(stem, JavaTarget::Java25) {
+            compare_output(&actual, expected_java25, stem, "Java25")?;
+        }
+
+        if let Some(actual) = generate_fixture_source(stem, JavaTarget::Java21) {
+            compare_output(&actual, expected_java21, stem, "Java21")?;
+        }
     }
 
-    if let Some(actual) = generate_fixture_source(stem, JavaTarget::Java21) {
-        compare_output(&actual, &expected_java21, stem, "Java21")?;
-    }
-
-    let actual_diag = "".to_string();
+    let display_path = path
+        .file_name()
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(stem));
+    let actual_diag = if is_negative {
+        collect_fixture_diagnostic(path, &display_path, true)?
+    } else {
+        String::new()
+    };
     compare_output(&actual_diag, &expected_diag, stem, "diagnostics")?;
 
-    if let Some(version) = javac_version {
-        compile_with_javac(&expected_java25, 25, version, stem, "Java25")?;
-        compile_with_javac(&expected_java21, 21, version, stem, "Java21")?;
+    if let Some((ref expected_java25, ref expected_java21)) = expected_pair {
+        if let Some(version) = javac_version {
+            compile_with_javac(expected_java25, 25, version, stem, "Java25")?;
+            compile_with_javac(expected_java21, 21, version, stem, "Java21")?;
+        }
     }
 
     Ok(())

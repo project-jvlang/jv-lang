@@ -1,0 +1,4 @@
+fun toggle(flag: Boolean): Int {
+    val measure = if (flag) 99 else 0
+    return measure
+}

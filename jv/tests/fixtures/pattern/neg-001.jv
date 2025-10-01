@@ -1,0 +1,7 @@
+fun evaluate(score: Int): String {
+    val threshold = 50
+    return when (score) {
+        in threshold -> "invalid"
+        else -> "ok"
+    }
+}

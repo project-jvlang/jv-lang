@@ -1,6 +1,6 @@
-[Error] JV3103: `if` expressions are not supported / `if` 式はサポートされていません (L6C23-L6C25)
+[Error] JV3103: `if` expressions are not supported / `if` 式はサポートされていません (L2C18-L2C20)
   戦略: Deferred
-  ファイル: example7.jv
+  ファイル: neg-005.jv
   詳細: JV3103: if式はサポートされていません。when式を使用してください。
 JV3103: if expressions are not supported; use when instead.
   対処: 条件分岐は `when` 式を使用してください。Quick Fix: when.convert.if. / Use a `when` expression for branching. Quick Fix: when.convert.if. (--explain JV3103)

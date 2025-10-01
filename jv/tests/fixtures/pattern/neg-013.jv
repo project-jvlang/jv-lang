@@ -1,0 +1,7 @@
+fun guardLimit(value: Int): String {
+    val threshold = 5
+    return when (value) {
+        in threshold -> "blocked"
+        else -> "ok"
+    }
+}
