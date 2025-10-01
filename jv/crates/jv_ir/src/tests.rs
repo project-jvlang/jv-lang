@@ -2184,16 +2184,45 @@ mod tests {
             dummy_span(),
         )));
 
-        let err =
+        let result =
             desugar_when_expression(subject, arms, else_arm, None, dummy_span(), &mut context)
-                .expect_err("complex patterns should currently be unsupported");
+                .expect("complex patterns should now be supported");
 
-        match err {
-            TransformError::UnsupportedConstruct { construct, .. } => {
-                assert!(construct.contains("JV3199"));
+        let IrExpression::Switch { cases, .. } = result else {
+            panic!("expected switch lowering for complex pattern");
+        };
+
+        assert_eq!(cases.len(), 3, "expected two explicit arms plus default");
+
+        match &cases[0].labels[0] {
+            IrCaseLabel::Range {
+                type_name,
+                inclusive_end,
+                ..
+            } => {
+                assert_eq!(type_name, "int");
+                assert!(!inclusive_end, "range should remain exclusive");
             }
-            other => panic!("Expected unsupported construct error, got {:?}", other),
+            other => panic!("expected range label, got {other:?}"),
         }
+
+        match &cases[1].labels[0] {
+            IrCaseLabel::TypePattern {
+                type_name,
+                deconstruction: Some(pattern),
+                ..
+            } => {
+                assert_eq!(type_name, "String");
+                assert_eq!(pattern.components.len(), 1);
+            }
+            other => panic!("expected type pattern label with deconstruction, got {other:?}"),
+        }
+        assert!(
+            cases[1].guard.is_some(),
+            "guard expression should be preserved"
+        );
+
+        assert!(matches!(cases[2].labels[0], IrCaseLabel::Default));
     }
 
     #[test]

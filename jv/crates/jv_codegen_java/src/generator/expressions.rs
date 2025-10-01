@@ -383,27 +383,19 @@ impl JavaCodeGenerator {
             builder.push_line(&format!("final {} {};", result_type, result_binding));
         }
 
-        let mut emitted_branch = false;
+        builder.push_line("boolean __matched = false;");
         for case in non_default_cases {
-            if let Some(condition) =
-                self.render_switch_case_condition_java21(case, subject_binding)?
-            {
-                let header = if !emitted_branch {
-                    format!("if ({}) {{", condition)
-                } else {
-                    format!("else if ({}) {{", condition)
-                };
-                builder.push_line(&header);
+            if let Some(block) = self.render_case_condition_block_java21(
+                case,
+                subject_binding,
+                result_is_void,
+                result_binding,
+            )? {
+                builder.push_line("if (!__matched) {");
                 builder.indent();
-                self.write_switch_case_body_java21(
-                    &mut builder,
-                    case,
-                    result_is_void,
-                    result_binding,
-                )?;
+                Self::push_lines(&mut builder, &block);
                 builder.dedent();
                 builder.push_line("}");
-                emitted_branch = true;
             } else {
                 return Err(self.java21_incompatibility_error(
                     &case.span,
@@ -414,14 +406,14 @@ impl JavaCodeGenerator {
         }
 
         if let Some(case) = default_case {
-            let header = if emitted_branch { "else {" } else { "{" };
-            builder.push_line(header);
+            builder.push_line("if (!__matched) {");
             builder.indent();
             self.write_switch_case_body_java21(&mut builder, case, result_is_void, result_binding)?;
+            builder.push_line("__matched = true;");
             builder.dedent();
             builder.push_line("}");
         } else if !result_is_void {
-            builder.push_line(if emitted_branch { "else {" } else { "{" });
+            builder.push_line("if (!__matched) {");
             builder.indent();
             self.add_import("java.lang.IllegalStateException");
             builder
@@ -462,6 +454,7 @@ impl JavaCodeGenerator {
                 IrCaseLabel::TypePattern {
                     type_name,
                     variable,
+                    deconstruction: None,
                 } => {
                     if !literal_conditions.is_empty() || type_pattern_condition.is_some() {
                         return Err(self.java21_incompatibility_error(
@@ -474,6 +467,13 @@ impl JavaCodeGenerator {
                         "{} instanceof {} {}",
                         subject_binding, type_name, variable
                     ));
+                }
+                IrCaseLabel::TypePattern {
+                    deconstruction: Some(_),
+                    ..
+                } => {
+                    // Nested destructuring is handled by the higher level block builder.
+                    return Ok(None);
                 }
                 IrCaseLabel::Range {
                     type_name,
@@ -518,6 +518,109 @@ impl JavaCodeGenerator {
         }
 
         Ok(Some(condition))
+    }
+
+    fn render_case_condition_block_java21(
+        &mut self,
+        case: &IrSwitchCase,
+        subject_binding: &str,
+        result_is_void: bool,
+        result_binding: &str,
+    ) -> Result<Option<String>, CodeGenError> {
+        if Self::case_has_deconstruction(case) {
+            return self
+                .render_deconstruction_case_block_java21(
+                    case,
+                    subject_binding,
+                    result_is_void,
+                    result_binding,
+                )
+                .map(Some);
+        }
+
+        if let Some(condition) = self.render_switch_case_condition_java21(case, subject_binding)? {
+            let mut builder = self.builder();
+            builder.push_line(&format!("if ({}) {{", condition));
+            builder.indent();
+            self.write_switch_case_body_java21(&mut builder, case, result_is_void, result_binding)?;
+            builder.push_line("__matched = true;");
+            builder.dedent();
+            builder.push_line("}");
+            Ok(Some(builder.build()))
+        } else {
+            Ok(None)
+        }
+    }
+
+    fn case_has_deconstruction(case: &IrSwitchCase) -> bool {
+        case.labels.iter().any(|label| {
+            matches!(
+                label,
+                IrCaseLabel::TypePattern {
+                    deconstruction: Some(_),
+                    ..
+                }
+            )
+        })
+    }
+
+    fn render_deconstruction_case_block_java21(
+        &mut self,
+        case: &IrSwitchCase,
+        subject_binding: &str,
+        result_is_void: bool,
+        result_binding: &str,
+    ) -> Result<String, CodeGenError> {
+        let (type_name, variable, pattern) = case
+            .labels
+            .iter()
+            .find_map(|label| match label {
+                IrCaseLabel::TypePattern {
+                    type_name,
+                    variable,
+                    deconstruction: Some(pattern),
+                } => Some((type_name.clone(), variable.clone(), pattern.clone())),
+                _ => None,
+            })
+            .ok_or_else(|| {
+                self.java21_incompatibility_error(
+                    &case.span,
+                    "分解パターンを含む case ラベルが見つかりません",
+                    "no destructuring pattern label available for this branch",
+                )
+            })?;
+
+        let mut builder = self.builder();
+        let pattern_label = self.render_type_deconstruction_label(&type_name, &pattern)?;
+
+        builder.push_line("do {");
+        builder.indent();
+        builder.push_line(&format!(
+            "if (!({} instanceof {} {})) {{",
+            subject_binding, pattern_label, variable
+        ));
+        builder.indent();
+        builder.push_line("break;");
+        builder.dedent();
+        builder.push_line("}");
+
+        if let Some(guard) = case.guard.as_ref() {
+            let guard_expr = self.generate_expression(guard)?;
+            builder.push_line(&format!("if (!({})) {{", guard_expr));
+            builder.indent();
+            builder.push_line("break;");
+            builder.dedent();
+            builder.push_line("}");
+        }
+
+        builder.push_line("__matched = true;");
+        self.write_switch_case_body_java21(&mut builder, case, result_is_void, result_binding)?;
+        builder.push_line("break;");
+
+        builder.dedent();
+        builder.push_line("} while (false);");
+
+        Ok(builder.build())
     }
 
     fn literal_condition_java21(
@@ -768,12 +871,20 @@ impl JavaCodeGenerator {
         labels: &[IrCaseLabel],
     ) -> Result<String, CodeGenError> {
         let mut rendered = Vec::new();
-        for label in labels {
+        for label in labels.iter().cloned() {
             match label {
-                IrCaseLabel::Literal(literal) => rendered.push(Self::literal_to_string(literal)),
+                IrCaseLabel::Literal(literal) => rendered.push(Self::literal_to_string(&literal)),
+                IrCaseLabel::TypePattern {
+                    type_name,
+                    variable: _,
+                    deconstruction: Some(pattern),
+                } => {
+                    rendered.push(self.render_type_deconstruction_label(&type_name, &pattern)?);
+                }
                 IrCaseLabel::TypePattern {
                     type_name,
                     variable,
+                    deconstruction: None,
                 } => rendered.push(format!("{} {}", type_name, variable)),
                 IrCaseLabel::Range {
                     type_name,
@@ -784,6 +895,45 @@ impl JavaCodeGenerator {
             }
         }
         Ok(rendered.join(", "))
+    }
+
+    fn render_type_deconstruction_label(
+        &mut self,
+        type_name: &str,
+        pattern: &IrDeconstructionPattern,
+    ) -> Result<String, CodeGenError> {
+        let rendered = self.render_deconstruction_pattern(pattern)?;
+        Ok(format!("{}{}", type_name, rendered))
+    }
+
+    fn render_deconstruction_pattern(
+        &mut self,
+        pattern: &IrDeconstructionPattern,
+    ) -> Result<String, CodeGenError> {
+        let mut parts = Vec::new();
+        for component in &pattern.components {
+            parts.push(self.render_deconstruction_component(component)?);
+        }
+        Ok(format!("({})", parts.join(", ")))
+    }
+
+    fn render_deconstruction_component(
+        &mut self,
+        component: &IrDeconstructionComponent,
+    ) -> Result<String, CodeGenError> {
+        match component {
+            IrDeconstructionComponent::Wildcard => Ok("_".to_string()),
+            IrDeconstructionComponent::Binding { name } => Ok(format!("var {}", name)),
+            IrDeconstructionComponent::Literal(literal) => Ok(Self::literal_to_string(literal)),
+            IrDeconstructionComponent::Type { type_name, pattern } => {
+                if let Some(nested) = pattern {
+                    let nested_rendered = self.render_deconstruction_pattern(nested)?;
+                    Ok(format!("{}{}", type_name, nested_rendered))
+                } else {
+                    Ok(type_name.clone())
+                }
+            }
+        }
     }
 
     fn render_implicit_when_end_case(

@@ -28,14 +28,22 @@ public class Example1 {
             int matchExpr() {
                 final var __subject = x;
                 final int __matchResult;
-                if (__subject instanceof String value) {
-                    __matchResult = value.length();
+                boolean __matched = false;
+                if (!__matched) {
+                    if (__subject instanceof String value) {
+                        __matchResult = value.length();
+                        __matched = true;
+                    }
                 }
-                else if (__subject instanceof Integer value) {
-                    __matchResult = value * 2;
+                if (!__matched) {
+                    if (__subject instanceof Integer value) {
+                        __matchResult = value * 2;
+                        __matched = true;
+                    }
                 }
-                else {
+                if (!__matched) {
                     __matchResult = 0;
+                    __matched = true;
                 }
                 return __matchResult;
             }

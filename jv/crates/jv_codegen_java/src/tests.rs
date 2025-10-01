@@ -2,10 +2,10 @@ use super::*;
 use insta::assert_snapshot;
 use jv_ast::{BinaryOp, CallArgumentStyle, Literal, SequenceDelimiter, Span};
 use jv_ir::{
-    DataFormat, IrCaseLabel, IrExpression, IrImplicitWhenEnd, IrModifiers, IrParameter, IrProgram,
-    IrRecordComponent, IrSampleDeclaration, IrStatement, IrSwitchCase, IrVisibility, JavaType,
-    MethodOverload, PrimitiveType, SampleMode, SampleRecordDescriptor, SampleRecordField,
-    SampleSourceKind, Schema,
+    DataFormat, IrCaseLabel, IrDeconstructionComponent, IrDeconstructionPattern, IrExpression,
+    IrImplicitWhenEnd, IrModifiers, IrParameter, IrProgram, IrRecordComponent, IrSampleDeclaration,
+    IrStatement, IrSwitchCase, IrVisibility, JavaType, MethodOverload, PrimitiveType, SampleMode,
+    SampleRecordDescriptor, SampleRecordField, SampleSourceKind, Schema,
 };
 use serde_json::to_string_pretty;
 use std::collections::{BTreeMap, BTreeSet};
@@ -1692,7 +1692,7 @@ fn switch_expression_implicit_unit_renders_for_java21_target() {
         .generate_expression(&expression)
         .expect("java21 switch generation should succeed");
 
-    let expected = "new Object() {\n    String matchExpr() {\n        final var __subject = x;\n        final String __matchResult;\n        if (java.util.Objects.equals(__subject, 1)) {\n            __matchResult = \"one\";\n        }\n        else {\n            throw new IllegalStateException(\"non-exhaustive when expression\");\n        }\n        return __matchResult;\n    }\n}.matchExpr()\n";
+    let expected = "new Object() {\n    String matchExpr() {\n        final var __subject = x;\n        final String __matchResult;\n        boolean __matched = false;\n        if (!__matched) {\n            if (java.util.Objects.equals(__subject, 1)) {\n                __matchResult = \"one\";\n                __matched = true;\n            }\n        }\n        if (!__matched) {\n            throw new IllegalStateException(\"non-exhaustive when expression\");\n        }\n        return __matchResult;\n    }\n}.matchExpr()\n";
     assert_eq!(
         rendered, expected,
         "java21 fallback should render lambda IIFE"
@@ -1713,6 +1713,7 @@ fn switch_expression_java21_type_pattern_fallback() {
                 vec![IrCaseLabel::TypePattern {
                     type_name: "String".to_string(),
                     variable: "value".to_string(),
+                    deconstruction: None,
                 }],
                 None,
                 string_literal("string"),
@@ -1733,7 +1734,7 @@ fn switch_expression_java21_type_pattern_fallback() {
         .generate_expression(&expression)
         .expect("java21 type pattern fallback should render");
 
-    let expected = "// strategy=Switch arms=2 guards=0 default=true exhaustive=true\nnew Object() {\n    String matchExpr() {\n        final var __subject = subject;\n        final String __matchResult;\n        if (__subject instanceof String value) {\n            __matchResult = \"string\";\n        }\n        else {\n            __matchResult = \"other\";\n        }\n        return __matchResult;\n    }\n}.matchExpr()\n";
+    let expected = "// strategy=Switch arms=2 guards=0 default=true exhaustive=true\nnew Object() {\n    String matchExpr() {\n        final var __subject = subject;\n        final String __matchResult;\n        boolean __matched = false;\n        if (!__matched) {\n            if (__subject instanceof String value) {\n                __matchResult = \"string\";\n                __matched = true;\n            }\n        }\n        if (!__matched) {\n            __matchResult = \"other\";\n            __matched = true;\n        }\n        return __matchResult;\n    }\n}.matchExpr()\n";
     assert_eq!(
         rendered, expected,
         "java21 fallback should use instanceof pattern"
@@ -1817,11 +1818,102 @@ fn switch_expression_java21_range_pattern_fallback() {
         .generate_expression(&expression)
         .expect("java21 range pattern fallback should render");
 
-    let expected = "new Object() {\n    String matchExpr() {\n        final var __subject = score;\n        final String __matchResult;\n        if ((__subject instanceof int it0) && (it0 >= 0 && it0 <= 10)) {\n            __matchResult = \"small\";\n        }\n        else {\n            __matchResult = \"other\";\n        }\n        return __matchResult;\n    }\n}.matchExpr()\n";
+    let expected = "new Object() {\n    String matchExpr() {\n        final var __subject = score;\n        final String __matchResult;\n        boolean __matched = false;\n        if (!__matched) {\n            if ((__subject instanceof int it0) && (it0 >= 0 && it0 <= 10)) {\n                __matchResult = \"small\";\n                __matched = true;\n            }\n        }\n        if (!__matched) {\n            __matchResult = \"other\";\n            __matched = true;\n        }\n        return __matchResult;\n    }\n}.matchExpr()\n";
     assert_eq!(
         rendered, expected,
         "java21 fallback should expand range patterns"
     );
+}
+
+#[test]
+fn switch_expression_nested_destructuring_java25_and_java21() {
+    let outer_type = JavaType::Reference {
+        name: "Outer".to_string(),
+        generic_args: vec![],
+    };
+    let int_type = JavaType::int();
+
+    let nested_pattern = IrDeconstructionPattern {
+        components: vec![
+            IrDeconstructionComponent::Type {
+                type_name: "Inner".to_string(),
+                pattern: Some(Box::new(IrDeconstructionPattern {
+                    components: vec![
+                        IrDeconstructionComponent::Binding {
+                            name: "x".to_string(),
+                        },
+                        IrDeconstructionComponent::Binding {
+                            name: "y".to_string(),
+                        },
+                    ],
+                })),
+            },
+            IrDeconstructionComponent::Binding {
+                name: "count".to_string(),
+            },
+        ],
+    };
+
+    let sum_xy = IrExpression::Binary {
+        left: Box::new(ir_identifier("x", &int_type)),
+        op: BinaryOp::Add,
+        right: Box::new(ir_identifier("y", &int_type)),
+        java_type: int_type.clone(),
+        span: dummy_span(),
+    };
+
+    let body_expr = IrExpression::Binary {
+        left: Box::new(sum_xy),
+        op: BinaryOp::Add,
+        right: Box::new(ir_identifier("count", &int_type)),
+        java_type: int_type.clone(),
+        span: dummy_span(),
+    };
+
+    let expression = IrExpression::Switch {
+        discriminant: Box::new(ir_identifier("value", &outer_type)),
+        cases: vec![
+            switch_case(
+                vec![IrCaseLabel::TypePattern {
+                    type_name: "Outer".to_string(),
+                    variable: "outer".to_string(),
+                    deconstruction: Some(nested_pattern.clone()),
+                }],
+                None,
+                body_expr.clone(),
+            ),
+            switch_case(
+                vec![IrCaseLabel::Default],
+                None,
+                IrExpression::Literal(Literal::Number("0".to_string()), dummy_span()),
+            ),
+        ],
+        java_type: int_type.clone(),
+        implicit_end: None,
+        strategy_description: Some(
+            "strategy=Switch arms=2 guards=0 default=true exhaustive=true".to_string(),
+        ),
+        span: dummy_span(),
+    };
+
+    let mut java25 =
+        JavaCodeGenerator::with_config(JavaCodeGenConfig::for_target(JavaTarget::Java25));
+    let rendered_java25 = java25
+        .generate_expression(&expression)
+        .expect("java25 nested pattern generation");
+
+    let expected_java25 = "// strategy=Switch arms=2 guards=0 default=true exhaustive=true\nswitch (value) {\n    case Outer(Inner(var x, var y), var count) -> x + y + count\n    default -> 0\n}\n";
+    assert_eq!(rendered_java25, expected_java25);
+
+    let mut java21 =
+        JavaCodeGenerator::with_config(JavaCodeGenConfig::for_target(JavaTarget::Java21));
+    let rendered_java21 = java21
+        .generate_expression(&expression)
+        .expect("java21 nested pattern fallback generation");
+
+    let expected_java21 = "// strategy=Switch arms=2 guards=0 default=true exhaustive=true\nnew Object() {\n    int matchExpr() {\n        final var __subject = value;\n        final int __matchResult;\n        boolean __matched = false;\n        if (!__matched) {\n            do {\n                if (!(__subject instanceof Outer(Inner(var x, var y), var count) outer)) {\n                    break;\n                }\n                __matched = true;\n                __matchResult = x + y + count;\n                break;\n            } while (false);\n        }\n        if (!__matched) {\n            __matchResult = 0;\n            __matched = true;\n        }\n        return __matchResult;\n    }\n}.matchExpr()\n";
+
+    assert_eq!(rendered_java21, expected_java21);
 }
 
 #[test]
@@ -1836,6 +1928,7 @@ fn switch_expression_java21_mixed_labels_emits_jv3105() {
                 IrCaseLabel::TypePattern {
                     type_name: "String".to_string(),
                     variable: "value".to_string(),
+                    deconstruction: None,
                 },
             ],
             None,

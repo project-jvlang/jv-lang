@@ -1,0 +1,12 @@
+data class Inner(val x: Int, val y: Int)
+data class Outer(val inner: Inner, val count: Int)
+
+fun total(value: Outer): Int = when (value) {
+    Outer(Inner(x, y), count) -> x + y + count
+    else -> 0
+}
+
+fun main() {
+    val input = Outer(Inner(1, 2), 3)
+    println(total(input))
+}

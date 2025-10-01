@@ -219,11 +219,19 @@ impl Java25FeatureGenerator {
                     IrCaseLabel::TypePattern {
                         type_name,
                         variable,
+                        deconstruction,
                     } => {
-                        result.push_str(&format!(
-                            "    case {} {} -> /* body */;\n",
-                            type_name, variable
-                        ));
+                        if deconstruction.is_some() {
+                            result.push_str(&format!(
+                                "    case {}({{...}}) -> /* body */;\n",
+                                type_name
+                            ));
+                        } else {
+                            result.push_str(&format!(
+                                "    case {} {} -> /* body */;\n",
+                                type_name, variable
+                            ));
+                        }
                     }
                     IrCaseLabel::Range {
                         lower,
@@ -256,7 +264,14 @@ impl Java25FeatureGenerator {
                 IrCaseLabel::TypePattern {
                     type_name,
                     variable,
-                } => Ok(format!("{} {}", type_name, variable)),
+                    deconstruction,
+                } => {
+                    if deconstruction.is_some() {
+                        Ok(format!("{}({{...}})", type_name))
+                    } else {
+                        Ok(format!("{} {}", type_name, variable))
+                    }
+                }
                 IrCaseLabel::Literal(l) => Ok(format!("{:?}", l)),
                 IrCaseLabel::Range {
                     lower,

@@ -454,7 +454,12 @@ pub enum IrCaseLabel {
     /// Literal case: case 42:
     Literal(Literal),
     /// Type pattern: case String s:
-    TypePattern { type_name: String, variable: String },
+    TypePattern {
+        type_name: String,
+        variable: String,
+        #[serde(default)]
+        deconstruction: Option<IrDeconstructionPattern>,
+    },
     /// Range pattern using guard semantics with explicit bounds
     Range {
         type_name: String,
@@ -465,6 +470,27 @@ pub enum IrCaseLabel {
     },
     /// Default case
     Default,
+}
+
+/// Nested deconstruction pattern attached to a type pattern label.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct IrDeconstructionPattern {
+    pub components: Vec<IrDeconstructionComponent>,
+}
+
+/// Component-level pattern used for nested destructuring.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum IrDeconstructionComponent {
+    Wildcard,
+    Binding {
+        name: String,
+    },
+    Literal(Literal),
+    Type {
+        type_name: String,
+        #[serde(default)]
+        pattern: Option<Box<IrDeconstructionPattern>>,
+    },
 }
 
 /// CompletableFuture operations

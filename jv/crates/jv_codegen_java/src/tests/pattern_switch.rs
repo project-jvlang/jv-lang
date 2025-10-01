@@ -33,6 +33,7 @@ fn example1_program() -> IrProgram {
         vec![IrCaseLabel::TypePattern {
             type_name: "String".to_string(),
             variable: "value".to_string(),
+            deconstruction: None,
         }],
         None,
         IrExpression::MethodCall {
@@ -49,6 +50,7 @@ fn example1_program() -> IrProgram {
         vec![IrCaseLabel::TypePattern {
             type_name: "Integer".to_string(),
             variable: "value".to_string(),
+            deconstruction: None,
         }],
         None,
         IrExpression::Binary {

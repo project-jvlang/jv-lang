@@ -1,0 +1,24 @@
+package patterns;
+
+public record Inner(int x, int y) {
+}
+
+public record Outer(Inner inner, int count) {
+}
+
+public class Example5 {
+    public static int total(Outer value) {
+        return // strategy=Switch arms=2 guards=0 default=true exhaustive=true
+        switch (value) {
+            case Outer(Inner(var x, var y), var count) -> x + y + count
+            default -> 0
+        }
+        ;
+    }
+    
+    public static void main() {
+        var input = new Outer(new Inner(1, 2), 3);
+        System.out.println(total(input));
+    }
+    
+}

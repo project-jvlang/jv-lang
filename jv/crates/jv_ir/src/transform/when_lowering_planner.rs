@@ -2,7 +2,10 @@ use super::transform_expression;
 use super::utils::extract_java_type;
 use crate::context::TransformContext;
 use crate::error::TransformError;
-use crate::types::{IrCaseLabel, IrExpression, IrImplicitWhenEnd, IrSwitchCase, JavaType};
+use crate::types::{
+    IrCaseLabel, IrDeconstructionComponent, IrDeconstructionPattern, IrExpression,
+    IrImplicitWhenEnd, IrSwitchCase, JavaType,
+};
 use jv_ast::{BinaryOp, Expression, ImplicitWhenEnd, Literal, Pattern, Span, WhenArm};
 
 #[derive(Debug, Default, Clone)]
@@ -312,24 +315,18 @@ fn lower_pattern_case(
         Pattern::Constructor {
             name,
             patterns,
-            span,
+            span: _span,
         } => {
-            if !patterns.is_empty() {
-                return Err(TransformError::UnsupportedConstruct {
-                    construct: unsupported_pattern_message(
-                        "Nested destructuring patterns are not yet supported",
-                        "分解パターンのネストは現在サポートされていません",
-                    ),
-                    span,
-                });
-            }
             let binding = CaseBinding::new(context.fresh_identifier("it"), subject_type.clone());
+            let (deconstruction, nested_guard) =
+                lower_constructor_deconstruction(patterns, context)?;
             Ok(PatternLowering {
                 labels: vec![IrCaseLabel::TypePattern {
                     type_name: name,
                     variable: binding.name.clone(),
+                    deconstruction,
                 }],
-                guard: None,
+                guard: nested_guard,
                 is_default: false,
             })
         }
@@ -488,6 +485,67 @@ fn convert_implicit_end(end: ImplicitWhenEnd) -> IrImplicitWhenEnd {
     }
 }
 
+fn lower_constructor_deconstruction(
+    patterns: Vec<Pattern>,
+    context: &mut TransformContext,
+) -> Result<(Option<IrDeconstructionPattern>, Option<IrExpression>), TransformError> {
+    if patterns.is_empty() {
+        return Ok((None, None));
+    }
+
+    let mut components = Vec::new();
+    for nested in patterns {
+        components.push(lower_deconstruction_component(nested, context)?);
+    }
+
+    Ok((Some(IrDeconstructionPattern { components }), None))
+}
+
+fn lower_deconstruction_component(
+    pattern: Pattern,
+    context: &mut TransformContext,
+) -> Result<IrDeconstructionComponent, TransformError> {
+    match pattern {
+        Pattern::Wildcard(_) => Ok(IrDeconstructionComponent::Wildcard),
+        Pattern::Identifier(name, _) => Ok(IrDeconstructionComponent::Binding { name }),
+        Pattern::Literal(literal, _) => Ok(IrDeconstructionComponent::Literal(literal)),
+        Pattern::Constructor {
+            name,
+            patterns,
+            span,
+        } => {
+            let (nested, nested_guard) = lower_constructor_deconstruction(patterns, context)?;
+            if nested_guard.is_some() {
+                return Err(TransformError::UnsupportedConstruct {
+                    construct: unsupported_nested_feature_message(
+                        "Nested guards inside destructuring patterns are not supported yet",
+                        "分解パターン内の guard はまだサポートされていません",
+                    ),
+                    span,
+                });
+            }
+            Ok(IrDeconstructionComponent::Type {
+                type_name: name,
+                pattern: nested.map(Box::new),
+            })
+        }
+        Pattern::Guard { span, .. } => Err(TransformError::UnsupportedConstruct {
+            construct: unsupported_nested_feature_message(
+                "Guard patterns inside destructuring require Phase 4 diagnostics",
+                "分解パターン内の guard は現行フェーズでは未対応です",
+            ),
+            span,
+        }),
+        Pattern::Range { span, .. } => Err(TransformError::UnsupportedConstruct {
+            construct: unsupported_nested_feature_message(
+                "Range patterns inside destructuring are not supported",
+                "分解パターン内の範囲指定はサポートされていません",
+            ),
+            span,
+        }),
+    }
+}
+
 fn describe_exhaustiveness(summary: &PatternAnalysisSummary) -> String {
     match summary.is_exhaustive {
         Some(true) => "true".to_string(),
@@ -510,6 +568,12 @@ fn type_name_for_case(java_type: &JavaType) -> String {
 
 fn unsupported_pattern_message(reason_en: &str, reason_ja: &str) -> String {
     format!(
-        "JV3199: {reason_ja}。Phase 4 で対応予定です。\nJV3199: {reason_en}. This construct will be supported in Phase 4.\n--explain JV3199: Pattern matching currently supports depth-1 shapes only. Simplify the pattern or upgrade once extended pattern support lands."
+        "JV3199: {reason_ja}。今後のアップデートで順次対応予定です。\nJV3199: {reason_en}. This construct will be supported in a forthcoming update.\n--explain JV3199: Advanced pattern matching features such as deep guards or range checks inside destructuring are partially limited in this release. Rewrite the pattern using supported constructs or target a newer compiler build."
+    )
+}
+
+fn unsupported_nested_feature_message(reason_en: &str, reason_ja: &str) -> String {
+    format!(
+        "JV3199: {reason_ja}。後続タスクで対応予定です。\nJV3199: {reason_en}. This construct will be available in a subsequent update.\n--explain JV3199: Advanced nested pattern features (guards, ranges) are limited in the current release."
     )
 }
