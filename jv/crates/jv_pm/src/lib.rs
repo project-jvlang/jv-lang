@@ -163,6 +163,7 @@ pub struct PackageInfo {
     pub name: String,
     pub version: String,
     pub description: Option<String>,
+    #[serde(default)]
     pub dependencies: HashMap<String, String>,
 }
 
