@@ -4,8 +4,8 @@ use crate::types::{
     IrExpression, IrModifiers, IrParameter, IrProgram, IrStatement, IrVisibility, JavaType,
 };
 use jv_ast::{
-    Argument, Expression, Literal, Modifiers, Program, Span, Statement, StringPart, TypeAnnotation,
-    Visibility,
+    Argument, CallArgumentMetadata, Expression, Literal, Modifiers, Program, Span, Statement,
+    StringPart, TypeAnnotation, Visibility,
 };
 
 use super::{
@@ -426,7 +426,7 @@ impl<'a> ReconstructionContext<'a> {
                 Expression::Call {
                     function: Box::new(function),
                     args,
-                    argument_style: *argument_style,
+                    argument_metadata: CallArgumentMetadata::with_style(*argument_style),
                     span: span.clone(),
                 }
             }

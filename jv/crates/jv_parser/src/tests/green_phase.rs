@@ -706,11 +706,11 @@ fn test_whitespace_call_arguments() {
         Statement::ValDeclaration { initializer, .. } => match initializer {
             Expression::Call {
                 args,
-                argument_style,
+                argument_metadata,
                 ..
             } => {
                 assert_eq!(args.len(), 3);
-                assert_eq!(*argument_style, CallArgumentStyle::Whitespace);
+                assert_eq!(argument_metadata.style, CallArgumentStyle::Whitespace);
             }
             other => panic!("expected call expression, found {:?}", other),
         },
@@ -727,10 +727,10 @@ fn test_whitespace_call_preserves_trailing_lambda() {
         Statement::ValDeclaration { initializer, .. } => match initializer {
             Expression::Call {
                 args,
-                argument_style,
+                argument_metadata,
                 ..
             } => {
-                assert_eq!(*argument_style, CallArgumentStyle::Whitespace);
+                assert_eq!(argument_metadata.style, CallArgumentStyle::Whitespace);
                 assert_eq!(args.len(), 3);
                 match &args[2] {
                     Argument::Positional(Expression::Lambda { .. }) => {}

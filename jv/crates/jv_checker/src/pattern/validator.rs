@@ -150,6 +150,7 @@ impl<'a> WhenUsageValidator<'a> {
                     }
                 }
             }
+            Expression::MultilineString { .. } | Expression::JsonLiteral { .. } => {}
             Expression::Array { elements, .. } => {
                 for element in elements {
                     self.visit_expression(element, true);

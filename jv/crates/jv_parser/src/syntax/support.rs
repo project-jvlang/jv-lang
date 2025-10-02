@@ -280,6 +280,8 @@ pub(crate) fn expression_span(expr: &Expression) -> Span {
         Expression::MemberAccess { span, .. } => span.clone(),
         Expression::NullSafeMemberAccess { span, .. } => span.clone(),
         Expression::StringInterpolation { span, .. } => span.clone(),
+        Expression::MultilineString(literal) => literal.span.clone(),
+        Expression::JsonLiteral(literal) => literal.span.clone(),
         Expression::When { span, .. } => span.clone(),
         Expression::If { span, .. } => span.clone(),
         Expression::IndexAccess { span, .. } => span.clone(),

@@ -346,6 +346,8 @@ impl<'env> ConstraintGenerator<'env> {
                 }
                 TypeKind::Primitive("String")
             }
+            Expression::MultilineString(_) => TypeKind::Primitive("String"),
+            Expression::JsonLiteral(_) => TypeKind::Unknown,
             Expression::This(_) | Expression::Super(_) => TypeKind::Unknown,
         }
     }

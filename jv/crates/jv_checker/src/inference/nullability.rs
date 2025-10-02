@@ -379,6 +379,8 @@ impl NullabilityAnalyzer {
                 }
                 state
             }
+            Expression::MultilineString(_) => Nullability::NonNull,
+            Expression::JsonLiteral(_) => Nullability::NonNull,
             Expression::This(_) | Expression::Super(_) => Nullability::NonNull,
         }
     }

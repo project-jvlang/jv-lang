@@ -6,13 +6,17 @@
 
 // Module declarations
 pub mod expression;
+pub mod json;
 pub mod statement;
+pub mod strings;
 pub mod types;
 pub mod utils;
 
 // Re-export all public types for convenient access
 pub use expression::*;
+pub use json::*;
 pub use statement::*;
+pub use strings::*;
 pub use types::*;
 pub use utils::*;
 

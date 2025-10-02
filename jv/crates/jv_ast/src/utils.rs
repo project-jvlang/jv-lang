@@ -17,6 +17,8 @@ impl Expression {
             Expression::IndexAccess { span, .. } => span,
             Expression::NullSafeIndexAccess { span, .. } => span,
             Expression::StringInterpolation { span, .. } => span,
+            Expression::MultilineString(literal) => &literal.span,
+            Expression::JsonLiteral(literal) => &literal.span,
             Expression::When { span, .. } => span,
             Expression::If { span, .. } => span,
             Expression::Block { span, .. } => span,

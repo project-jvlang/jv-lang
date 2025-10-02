@@ -73,3 +73,98 @@ fn modifiers_default_annotations_field_is_empty_when_missing() {
     assert_eq!(modifiers.visibility, Visibility::Internal);
     assert!(modifiers.is_final);
 }
+
+#[test]
+fn call_argument_metadata_deserializes_from_legacy_style() {
+    let metadata: CallArgumentMetadata =
+        serde_json::from_str("\"Whitespace\"").expect("deserialize legacy style");
+
+    assert_eq!(metadata.style, CallArgumentStyle::Whitespace);
+    assert!(metadata.homogeneous_kind.is_none());
+    assert!(metadata.separator_diagnostics.is_empty());
+}
+
+#[test]
+fn call_argument_metadata_roundtrips_with_extended_fields() {
+    let span = Span::new(1, 0, 1, 10);
+    let metadata = CallArgumentMetadata {
+        style: CallArgumentStyle::Whitespace,
+        homogeneous_kind: Some(ArgumentElementKind::Number),
+        separator_diagnostics: vec![CallArgumentIssue {
+            message: "mixed separators".to_string(),
+            span: Some(span.clone()),
+        }],
+    };
+
+    let serialized = serde_json::to_string(&metadata).expect("serialize metadata");
+    let decoded: CallArgumentMetadata =
+        serde_json::from_str(&serialized).expect("deserialize metadata");
+
+    assert_eq!(decoded, metadata);
+}
+
+#[test]
+fn json_literal_roundtrips_through_serde() {
+    let span = Span::new(2, 1, 6, 2);
+    let entry_span = Span::new(3, 3, 3, 20);
+    let comment_span = Span::new(2, 3, 2, 18);
+
+    let literal = JsonLiteral {
+        value: JsonValue::Object {
+            entries: vec![JsonEntry {
+                key: "timeout".to_string(),
+                comments: vec![JsonComment {
+                    kind: JsonCommentKind::Line,
+                    text: " in milliseconds".to_string(),
+                    span: comment_span.clone(),
+                }],
+                value: JsonValue::Number {
+                    literal: "5_000".to_string(),
+                    grouping: NumberGrouping::Underscore,
+                    span: entry_span.clone(),
+                },
+                span: entry_span.clone(),
+            }],
+            span: span.clone(),
+        },
+        leading_comments: vec![JsonComment {
+            kind: JsonCommentKind::Block,
+            text: " Service configuration ".to_string(),
+            span: Span::new(1, 1, 1, 26),
+        }],
+        trailing_comments: vec![],
+        span: span.clone(),
+        inferred_schema: Some(SchemaId("config.TimeoutSchema".to_string())),
+    };
+
+    let serialized = serde_json::to_string(&literal).expect("serialize json literal");
+    let decoded: JsonLiteral = serde_json::from_str(&serialized).expect("deserialize literal");
+
+    assert_eq!(decoded, literal);
+}
+
+#[test]
+fn multiline_string_literal_roundtrips_through_serde() {
+    let span = Span::new(10, 1, 14, 4);
+    let literal = MultilineStringLiteral {
+        kind: MultilineKind::TripleQuote,
+        normalized: "Hello, ${name}!".to_string(),
+        raw: "\"\"\"\nHello, ${name}!\n\"\"\"".to_string(),
+        parts: vec![
+            StringPart::Text("Hello, ".to_string()),
+            StringPart::Expression(Expression::Identifier(
+                "name".to_string(),
+                Span::new(11, 10, 11, 14),
+            )),
+            StringPart::Text("!".to_string()),
+        ],
+        indent: Some(IndentMetadata::new(4, true)),
+        span: span.clone(),
+    };
+
+    let serialized = serde_json::to_string(&literal).expect("serialize multiline literal");
+    let decoded: MultilineStringLiteral =
+        serde_json::from_str(&serialized).expect("deserialize multiline literal");
+
+    assert_eq!(decoded, literal);
+}

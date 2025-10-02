@@ -1,5 +1,8 @@
 // jv_ast/expression - Expression types and related constructs
+use crate::json::JsonLiteral;
+use crate::strings::MultilineStringLiteral;
 use crate::types::*;
+use serde::de::Deserializer;
 use serde::{Deserialize, Serialize};
 
 /// AST Expression node representing all types of expressions in jv
@@ -30,7 +33,8 @@ pub enum Expression {
     Call {
         function: Box<Expression>,
         args: Vec<Argument>,
-        argument_style: CallArgumentStyle,
+        #[serde(default, alias = "argument_style")]
+        argument_metadata: CallArgumentMetadata,
         span: Span,
     },
 
@@ -67,6 +71,12 @@ pub enum Expression {
         parts: Vec<StringPart>,
         span: Span,
     },
+
+    // Multiline string literals
+    MultilineString(MultilineStringLiteral),
+
+    // JSON literals
+    JsonLiteral(JsonLiteral),
 
     // When expressions
     When {
@@ -148,6 +158,89 @@ pub enum CallArgumentStyle {
 impl Default for CallArgumentStyle {
     fn default() -> Self {
         CallArgumentStyle::Comma
+    }
+}
+
+/// Additional metadata captured for function call arguments.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct CallArgumentMetadata {
+    pub style: CallArgumentStyle,
+    #[serde(default)]
+    pub homogeneous_kind: Option<ArgumentElementKind>,
+    #[serde(default)]
+    pub separator_diagnostics: Vec<CallArgumentIssue>,
+}
+
+impl Default for CallArgumentMetadata {
+    fn default() -> Self {
+        Self {
+            style: CallArgumentStyle::Comma,
+            homogeneous_kind: None,
+            separator_diagnostics: Vec::new(),
+        }
+    }
+}
+
+impl CallArgumentMetadata {
+    pub fn with_style(style: CallArgumentStyle) -> Self {
+        Self {
+            style,
+            ..Self::default()
+        }
+    }
+}
+
+/// Element classification used when arguments were grouped without commas.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ArgumentElementKind {
+    Number,
+    String,
+    Boolean,
+    Identifier,
+    Json,
+    Lambda,
+    Other,
+}
+
+/// Diagnostics emitted while normalizing argument separators.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CallArgumentIssue {
+    pub message: String,
+    #[serde(default)]
+    pub span: Option<Span>,
+}
+
+impl<'de> Deserialize<'de> for CallArgumentMetadata {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum MetadataFormat {
+            Full {
+                #[serde(default)]
+                style: Option<CallArgumentStyle>,
+                #[serde(default)]
+                homogeneous_kind: Option<ArgumentElementKind>,
+                #[serde(default)]
+                separator_diagnostics: Vec<CallArgumentIssue>,
+            },
+            Legacy(CallArgumentStyle),
+        }
+
+        match MetadataFormat::deserialize(deserializer)? {
+            MetadataFormat::Full {
+                style,
+                homogeneous_kind,
+                separator_diagnostics,
+            } => Ok(CallArgumentMetadata {
+                style: style.unwrap_or_default(),
+                homogeneous_kind,
+                separator_diagnostics,
+            }),
+            MetadataFormat::Legacy(style) => Ok(CallArgumentMetadata::with_style(style)),
+        }
     }
 }
 

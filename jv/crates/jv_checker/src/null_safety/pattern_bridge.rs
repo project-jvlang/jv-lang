@@ -285,7 +285,10 @@ impl PatternFactsBridge {
                 }
                 outcome
             }
-            Expression::This(_) | Expression::Super(_) => BridgeOutcome::default(),
+            Expression::MultilineString { .. }
+            | Expression::JsonLiteral { .. }
+            | Expression::This(_)
+            | Expression::Super(_) => BridgeOutcome::default(),
         }
     }
 }

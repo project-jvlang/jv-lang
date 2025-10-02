@@ -912,6 +912,8 @@ fn classify_expression(
         Expression::Lambda { .. }
         | Expression::Array { .. }
         | Expression::StringInterpolation { .. }
+        | Expression::MultilineString { .. }
+        | Expression::JsonLiteral { .. }
         | Expression::This(_)
         | Expression::Super(_) => ExpressionInfo::new(NullabilityKind::NonNull),
         Expression::Try {

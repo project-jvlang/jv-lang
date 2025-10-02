@@ -65,7 +65,7 @@ fn test_expression_call() {
     let expr = Expression::Call {
         function: Box::new(function),
         args: vec![arg],
-        argument_style: CallArgumentStyle::Comma,
+        argument_metadata: CallArgumentMetadata::with_style(CallArgumentStyle::Comma),
         span: dummy_span(),
     };
     match expr {
@@ -296,7 +296,7 @@ fn test_expression_try() {
             dummy_span(),
         )),
         args: vec![],
-        argument_style: CallArgumentStyle::Comma,
+        argument_metadata: CallArgumentMetadata::with_style(CallArgumentStyle::Comma),
         span: dummy_span(),
     };
     let catch_clause = TryCatchClause {

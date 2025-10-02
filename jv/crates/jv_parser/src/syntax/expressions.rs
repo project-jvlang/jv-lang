@@ -1,8 +1,8 @@
 use chumsky::prelude::*;
 use chumsky::Parser as ChumskyParser;
 use jv_ast::{
-    Argument, BinaryOp, CallArgumentStyle, Expression, Literal, Parameter, Pattern,
-    SequenceDelimiter, Span, StringPart, UnaryOp, WhenArm,
+    Argument, BinaryOp, CallArgumentMetadata, CallArgumentStyle, Expression, Literal, Parameter,
+    Pattern, SequenceDelimiter, Span, StringPart, UnaryOp, WhenArm,
 };
 use jv_lexer::{Token, TokenType};
 
@@ -394,7 +394,7 @@ fn identifier_expression_parser(
 enum PostfixOp {
     Call {
         args: Vec<Argument>,
-        style: CallArgumentStyle,
+        metadata: CallArgumentMetadata,
         span: Span,
     },
     Member {
@@ -447,7 +447,12 @@ fn call_suffix(
         .then(token_right_paren().map(|token| span_from_token(&token)))
         .map(|((left_span, (args, style)), right_span)| {
             let span = merge_spans(&left_span, &right_span);
-            PostfixOp::Call { args, style, span }
+            let metadata = CallArgumentMetadata::with_style(style);
+            PostfixOp::Call {
+                args,
+                metadata,
+                span,
+            }
         })
 }
 
@@ -591,14 +596,14 @@ fn apply_postfix(base: Expression, op: PostfixOp) -> Expression {
     match op {
         PostfixOp::Call {
             args,
-            style,
+            metadata,
             span: suffix_span,
         } => {
             let span = merge_spans(&expression_span(&base), &suffix_span);
             Expression::Call {
                 function: Box::new(base),
                 args,
-                argument_style: style,
+                argument_metadata: metadata,
                 span,
             }
         }
@@ -653,7 +658,7 @@ fn apply_postfix(base: Expression, op: PostfixOp) -> Expression {
             Expression::Call {
                 function,
                 mut args,
-                argument_style,
+                argument_metadata,
                 span,
             } => {
                 let new_span = merge_spans(&span, &lambda_span);
@@ -661,7 +666,7 @@ fn apply_postfix(base: Expression, op: PostfixOp) -> Expression {
                 Expression::Call {
                     function,
                     args,
-                    argument_style,
+                    argument_metadata,
                     span: new_span,
                 }
             }
@@ -670,7 +675,7 @@ fn apply_postfix(base: Expression, op: PostfixOp) -> Expression {
                 Expression::Call {
                     function: Box::new(other),
                     args: vec![Argument::Positional(lambda)],
-                    argument_style: CallArgumentStyle::Comma,
+                    argument_metadata: CallArgumentMetadata::with_style(CallArgumentStyle::Comma),
                     span,
                 }
             }
