@@ -218,6 +218,75 @@ configure_shell() {
     echo -e "  ${YELLOW}jv --version${NC}"
 }
 
+# Check Java environment
+check_java_environment() {
+    local has_javac=false
+    local has_maven=false
+    local javac_version=""
+    local maven_version=""
+
+    # Check for javac
+    if command -v javac &> /dev/null; then
+        javac_version=$(javac -version 2>&1 | head -n1)
+        # Extract version number (e.g., "21" from "javac 21.0.1")
+        local version_num=$(echo "$javac_version" | grep -oE '[0-9]+' | head -n1)
+        if [[ -n "$version_num" ]] && [[ "$version_num" -ge 21 ]]; then
+            has_javac=true
+        fi
+    fi
+
+    # Check for Maven
+    if command -v mvn &> /dev/null; then
+        maven_version=$(mvn -version 2>&1 | head -n1)
+        has_maven=true
+    fi
+
+    echo ""
+    echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${YELLOW}  Java Environment Check${NC}"
+    echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo ""
+
+    if [[ "$has_javac" == true ]]; then
+        echo -e "${GREEN}✓ Java Compiler: ${javac_version}${NC}"
+    else
+        echo -e "${RED}✗ Java Compiler: Not found or version < 21${NC}"
+    fi
+
+    if [[ "$has_maven" == true ]]; then
+        echo -e "${GREEN}✓ Maven: ${maven_version}${NC}"
+    else
+        echo -e "${RED}✗ Maven: Not found${NC}"
+    fi
+
+    echo ""
+
+    # If Java tools are missing, guide to jv init
+    if [[ "$has_javac" == false ]] || [[ "$has_maven" == false ]]; then
+        echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+        echo -e "${YELLOW}  Setup Required${NC}"
+        echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+        echo ""
+        echo -e "jv requires Java 21+ and Maven to compile jv code to Java."
+        echo ""
+        echo -e "${GREEN}Automatic setup (recommended):${NC}"
+        echo -e "  ${YELLOW}jv init${NC}"
+        echo ""
+        echo -e "This will:"
+        echo -e "  • Detect or install JDK 21+"
+        echo -e "  • Configure Maven"
+        echo -e "  • Set up your development environment"
+        echo ""
+        echo -e "${GREEN}Manual setup:${NC}"
+        echo -e "  • Install JDK 21+: ${YELLOW}https://adoptium.net/${NC}"
+        echo -e "  • Install Maven: ${YELLOW}https://maven.apache.org/download.cgi${NC}"
+        echo ""
+        return 1
+    fi
+
+    return 0
+}
+
 # Verify installation
 verify_installation() {
     if [[ -x "${INSTALL_DIR}/${BIN_NAME}" ]] || command -v jv &> /dev/null; then
@@ -226,9 +295,16 @@ verify_installation() {
         echo -e "${GREEN}  jv successfully installed! 🎉${NC}"
         echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
         echo ""
-        echo -e "Get started with:"
-        echo -e "  ${YELLOW}jv init my-project${NC}"
-        echo ""
+
+        # Check Java environment
+        if check_java_environment; then
+            echo -e "${GREEN}✓ Java environment ready${NC}"
+            echo ""
+            echo -e "Get started with:"
+            echo -e "  ${YELLOW}jv init my-project${NC}"
+            echo ""
+        fi
+
         echo -e "Learn more:"
         echo -e "  ${YELLOW}jv --help${NC}"
         echo -e "  ${YELLOW}https://github.com/${GITHUB_REPO}${NC}"
