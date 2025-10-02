@@ -30,7 +30,9 @@ impl OutputManager {
         ensure_within_workspace(plan.root.root_dir(), &target_dir)?;
 
         let mut clean_applied = false;
-        if plan.options.clean && target_dir.exists() {
+        let existed_before = target_dir.exists();
+
+        if plan.options.clean && existed_before {
             fs::remove_dir_all(&target_dir)
                 .map_err(|error| io_diagnostic(&target_dir, "をクリーン", error))?;
             clean_applied = true;
@@ -40,12 +42,13 @@ impl OutputManager {
             .map_err(|error| io_diagnostic(&target_dir, "を作成", error))?;
 
         let updated_plan = plan.with_output_dir(target_dir.clone());
+        let cleanup_on_drop = plan.options.clean || !existed_before;
 
         Ok(PreparedOutput {
             plan: updated_plan,
             base_dir,
             target_dir,
-            cleanup_on_drop: true,
+            cleanup_on_drop,
             clean_applied,
         })
     }

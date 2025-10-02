@@ -306,7 +306,7 @@ entrypoint = "src/main.jv"
 include = ["src/**/*.jv"]
 
 [project.output]
-directory = "out/java"
+directory = "target"
 clean = false
 "#,
     )
@@ -341,7 +341,7 @@ clean = false
 
     let overrides = pipeline::CliOverrides {
         entrypoint: Some(entrypoint.clone()),
-        output: Some(root_path.join("out/java")),
+        output: Some(root_path.join("target")),
         java_only: true,
         check: false,
         format: false,

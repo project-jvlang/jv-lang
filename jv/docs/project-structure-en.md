@@ -359,7 +359,7 @@ Control build output with `jv.toml`:
 [build]
 # Output directories
 target_dir = "out"
-java_dir = "out/java"
+java_dir = "target"
 classes_dir = "out/classes"
 resources_dir = "out/resources"
 

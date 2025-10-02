@@ -1,6 +1,7 @@
 // jv CLI entry point
 use anyhow::{Context, Result};
 use clap::Parser;
+use std::collections::HashMap;
 use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
@@ -15,13 +16,16 @@ use jv_parser::Parser as JvParser;
 
 use jv_cli::commands;
 use jv_cli::pipeline::project::{
-    layout::ProjectLayout, locator::ProjectLocator, manifest::ManifestLoader,
+    layout::ProjectLayout,
+    locator::{ProjectLocator, ProjectRoot},
+    manifest::{ManifestLoader, OutputConfig, ProjectSettings, SourceConfig},
 };
 use jv_cli::pipeline::{
     compile, produce_binary, run_program, BuildOptionsFactory, CliOverrides, OutputManager,
 };
 use jv_cli::tour::TourOrchestrator;
 use jv_cli::{get_version, init_project as cli_init_project, tooling_failure, Cli, Commands};
+use jv_pm::{Manifest, PackageInfo, ProjectSection};
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
@@ -220,18 +224,28 @@ fn main() -> Result<()> {
                 }
             };
 
-            let project_root = ProjectLocator::new()
-                .locate(&start_path)
-                .map_err(|diagnostic| tooling_failure(&start_path, diagnostic))?;
-            let manifest_path = project_root.manifest_path().to_path_buf();
+            let locator = ProjectLocator::new();
+            let (project_root, settings, error_path) = match locator.locate(&start_path) {
+                Ok(root) => {
+                    let manifest_path = root.manifest_path().to_path_buf();
+                    let settings = ManifestLoader::load(&manifest_path)
+                        .map_err(|diagnostic| tooling_failure(&manifest_path, diagnostic))?;
+                    (root, settings, manifest_path)
+                }
+                Err(diagnostic) => {
+                    if let Some((root, settings)) = build_ephemeral_run_settings(&start_path) {
+                        (root, settings, start_path.clone())
+                    } else {
+                        return Err(tooling_failure(&start_path, diagnostic));
+                    }
+                }
+            };
 
-            let settings = ManifestLoader::load(&manifest_path)
-                .map_err(|diagnostic| tooling_failure(&manifest_path, diagnostic))?;
             let layout = ProjectLayout::from_settings(&project_root, &settings)
-                .map_err(|diagnostic| tooling_failure(&manifest_path, diagnostic))?;
+                .map_err(|diagnostic| tooling_failure(&error_path, diagnostic))?;
 
             let overrides = CliOverrides {
-                entrypoint: Some(PathBuf::from(&input)),
+                entrypoint: Some(start_path.clone()),
                 output: None,
                 java_only: false,
                 check: false,
@@ -247,7 +261,7 @@ fn main() -> Result<()> {
             };
 
             let plan = BuildOptionsFactory::compose(project_root, settings, layout, overrides)
-                .map_err(|diagnostic| tooling_failure(&manifest_path, diagnostic))?;
+                .map_err(|diagnostic| tooling_failure(&error_path, diagnostic))?;
 
             run_program(&plan, &args)
                 .with_context(|| format!("Failed to run {}", plan.entrypoint().display()))?;
@@ -321,6 +335,83 @@ fn repl() -> Result<()> {
     }
 
     Ok(())
+}
+
+fn build_ephemeral_run_settings(start_path: &Path) -> Option<(ProjectRoot, ProjectSettings)> {
+    let entrypoint_abs = fs::canonicalize(start_path).ok()?;
+    if !entrypoint_abs.is_file() {
+        return None;
+    }
+
+    let root_dir = entrypoint_abs.parent()?.to_path_buf();
+
+    let relative = entrypoint_abs.strip_prefix(&root_dir).ok()?.to_path_buf();
+    let rel_string = relative.to_string_lossy().to_string();
+
+    let mut project_section = ProjectSection::default();
+    project_section.sources.include = vec!["**/*.jv".to_string()];
+    project_section.sources.exclude.clear();
+    project_section.entrypoint = Some(rel_string.clone());
+
+    let manifest = Manifest {
+        package: PackageInfo {
+            name: root_dir
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("script")
+                .to_string(),
+            version: "0.0.0".to_string(),
+            description: None,
+            dependencies: HashMap::new(),
+        },
+        project: project_section,
+        build: None,
+    };
+
+    let settings = ProjectSettings {
+        manifest,
+        sources: SourceConfig {
+            include: vec!["**/*.jv".to_string()],
+            exclude: Vec::new(),
+        },
+        output: OutputConfig {
+            directory: PathBuf::from("target"),
+            clean: false,
+        },
+        entrypoint: Some(relative),
+    };
+
+    let project_root = ProjectRoot::new(root_dir.clone(), root_dir.join("jv.toml"));
+    Some((project_root, settings))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::{Path, PathBuf};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn build_ephemeral_settings_detects_script_root() {
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis();
+        let base = std::env::temp_dir().join(format!("jv-ephemeral-run-{timestamp}"));
+        fs::create_dir_all(&base).expect("create temp script dir");
+        let script_path = base.join("script.jv");
+        fs::write(&script_path, "fun main() {}\n").expect("write script");
+
+        let (project_root, settings) =
+            build_ephemeral_run_settings(&script_path).expect("ephemeral project to be created");
+
+        let canonical_base = fs::canonicalize(&base).expect("canonicalise base dir");
+        assert_eq!(project_root.root_dir(), canonical_base);
+        assert_eq!(settings.entrypoint.as_deref(), Some(Path::new("script.jv")));
+        assert_eq!(settings.output.directory, PathBuf::from("target"));
+
+        fs::remove_dir_all(&base).expect("cleanup temp dir");
+    }
 }
 
 fn format_jv_files(files: Vec<String>) -> Result<()> {

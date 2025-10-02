@@ -5,7 +5,7 @@ The `cli-project-structure` initiative introduces a manifest-driven project disc
 `cli-project-structure` イニシアティブは、`jv` CLI にマニフェスト主導のプロジェクト解決フローを導入します。`jv.toml` がルート検出・ソース列挙・出力管理を統制し、どのサブディレクトリからでも追加フラグなしでコマンドを実行できます。
 
 ## Output Management / 出力管理
-- **Target-specific directories / ターゲット別ディレクトリ**: Build artifacts are written under `<project>/<output>/<javaXX>`. For example, `out/java/java25` for Java 25 and `out/java/java21` for Java 21 builds.
+- **Target-specific directories / ターゲット別ディレクトリ**: Build artifacts are written under `<project>/<output>/javaXX`. The default output base is `target`, yielding paths such as `target/java25` or `target/java21`.
 - **Clean builds / クリーンビルド**: Use `--clean` to remove the target directory before compiling. Manifest defaults via `project.output.clean = true` are also honoured.
 - **Automatic cleanup / 自動クリーンアップ**: If the build pipeline fails, partially generated outputs are removed to keep the workspace tidy.
 

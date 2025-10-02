@@ -126,7 +126,9 @@ impl JavaCodeGenerator {
 
             let code = match &declaration {
                 IrStatement::ClassDeclaration { .. } => self.generate_class(&declaration)?,
-                IrStatement::InterfaceDeclaration { .. } => self.generate_interface(&declaration)?,
+                IrStatement::InterfaceDeclaration { .. } => {
+                    self.generate_interface(&declaration)?
+                }
                 IrStatement::RecordDeclaration { .. } => self.generate_record(&declaration)?,
                 IrStatement::MethodDeclaration { .. }
                 | IrStatement::VariableDeclaration { .. }

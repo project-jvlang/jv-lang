@@ -23,7 +23,7 @@ entrypoint = "src/main.jv"
 include = ["src/**/*.jv"]
 
 [project.output]
-directory = "out/java"
+directory = "target"
 clean = false
 "#,
     )
@@ -59,7 +59,7 @@ fn output_manager_creates_target_directory() {
 
     assert!(target_dir.ends_with("java25"));
     assert!(target_dir.exists());
-    assert!(prepared.base_dir().ends_with("out/java"));
+    assert!(prepared.base_dir().ends_with("target"));
 
     prepared.mark_success();
 }
@@ -68,7 +68,7 @@ fn output_manager_creates_target_directory() {
 fn output_manager_cleans_when_requested() {
     let temp_dir = TempDirGuard::new("output-clean");
     compose_plan(&temp_dir, false);
-    let target_dir_hint = temp_dir.path().join("out/java/java25");
+    let target_dir_hint = temp_dir.path().join("target/java25");
     fs::create_dir_all(&target_dir_hint).expect("create existing target");
     fs::write(target_dir_hint.join("stale.txt"), "old").expect("write stale file");
 

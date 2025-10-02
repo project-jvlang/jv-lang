@@ -71,7 +71,7 @@ include = ["src/**/*.jv"]
         overrides.entrypoint = Some(entrypoint_path);
     }
     if overrides.output.is_none() {
-        overrides.output = Some(project_dir.join("out/java"));
+        overrides.output = Some(project_dir.join("target"));
     }
 
     BuildOptionsFactory::compose(project_root, settings, layout, overrides)
@@ -146,7 +146,7 @@ include = ["src/**/*.jv"]
 
     assert!(status.success(), "CLI build failed with status: {}", status);
 
-    let java_files: Vec<_> = fs::read_dir(project_dir.join("out/java"))
+    let java_files: Vec<_> = fs::read_dir(project_dir.join("target/java25"))
         .expect("Failed to read output directory")
         .filter_map(|entry| entry.ok())
         .map(|entry| entry.path())

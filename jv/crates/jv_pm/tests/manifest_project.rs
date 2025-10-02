@@ -32,7 +32,7 @@ version = "0.1.0"
         vec!["src/**/*.jv".to_string()]
     );
     assert!(manifest.project.sources.exclude.is_empty());
-    assert_eq!(manifest.project.output.directory, "out/java");
+    assert_eq!(manifest.project.output.directory, "target");
     assert!(!manifest.project.output.clean);
     assert!(manifest.project.entrypoint.is_none());
 
