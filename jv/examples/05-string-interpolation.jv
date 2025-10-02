@@ -1,0 +1,13 @@
+fun main() {
+    val name = "JV-lang"
+    val version = "0.1.0"
+    val year = 2025
+    
+    println("Welcome to ${name} v${version}")
+    println("Released in ${year}")
+    
+    // Expression interpolation
+    val x = 10
+    val y = 20
+    println("${x} + ${y} = ${x + y}")
+}
