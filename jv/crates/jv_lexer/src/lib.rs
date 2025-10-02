@@ -138,9 +138,71 @@ impl Default for JsonConfidence {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum StringDelimiterKind {
+    DoubleQuote,
+    TripleQuote,
+    BacktickBlock,
+}
+
+impl StringDelimiterKind {
+    fn opening_sequence(self) -> &'static str {
+        match self {
+            StringDelimiterKind::DoubleQuote => "\"",
+            StringDelimiterKind::TripleQuote => "\"\"\"",
+            StringDelimiterKind::BacktickBlock => "```",
+        }
+    }
+
+    fn closing_sequence(self) -> &'static str {
+        self.opening_sequence()
+    }
+
+    fn allows_interpolation(self) -> bool {
+        true
+    }
+
+    fn normalize_indentation(self) -> bool {
+        matches!(self, StringDelimiterKind::TripleQuote)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct StringLiteralMetadata {
+    pub delimiter: StringDelimiterKind,
+    pub allows_interpolation: bool,
+    pub normalize_indentation: bool,
+}
+
+impl StringLiteralMetadata {
+    fn from_kind(kind: StringDelimiterKind) -> Self {
+        Self {
+            delimiter: kind,
+            allows_interpolation: kind.allows_interpolation(),
+            normalize_indentation: kind.normalize_indentation(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum NumberGroupingKind {
+    None,
+    Comma,
+    Underscore,
+    Mixed,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct NumberLiteralMetadata {
+    pub grouping: NumberGroupingKind,
+    pub original_lexeme: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum TokenMetadata {
     PotentialJsonStart { confidence: JsonConfidence },
+    StringLiteral(StringLiteralMetadata),
+    NumberLiteral(NumberLiteralMetadata),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -607,10 +669,28 @@ impl Lexer {
                 // String literals
                 '"' => {
                     let leading_trivia = trivia.take();
+                    let delimiter = if self.starts_with_sequence(&chars, "\"\"\"") {
+                        StringDelimiterKind::TripleQuote
+                    } else {
+                        StringDelimiterKind::DoubleQuote
+                    };
                     tokens.extend(self.tokenize_string(
                         start_line,
                         start_column,
                         leading_trivia,
+                        delimiter,
+                    )?);
+                }
+                '`' => {
+                    if !self.starts_with_sequence(&chars, "```") {
+                        return Err(LexError::UnexpectedChar('`', start_line, start_column));
+                    }
+                    let leading_trivia = trivia.take();
+                    tokens.extend(self.tokenize_string(
+                        start_line,
+                        start_column,
+                        leading_trivia,
+                        StringDelimiterKind::BacktickBlock,
                     )?);
                 }
 
@@ -686,13 +766,19 @@ impl Lexer {
 
                 // Numbers
                 c if c.is_ascii_digit() => {
-                    let number = self.read_number()?;
-                    tokens.push(self.make_token(
+                    let leading_trivia = trivia.take();
+                    let (number, metadata) = self.read_number()?;
+                    let mut metadata_vec = Vec::new();
+                    if let Some(meta) = metadata {
+                        metadata_vec.push(TokenMetadata::NumberLiteral(meta));
+                    }
+                    tokens.push(self.make_token_with_metadata(
                         TokenType::Number(number.clone()),
                         &number,
                         start_line,
                         start_column,
-                        trivia.take(),
+                        leading_trivia,
+                        metadata_vec,
                     ));
                 }
 
@@ -813,17 +899,16 @@ impl Lexer {
         chars[start..self.current].iter().collect()
     }
 
-    fn read_number(&mut self) -> Result<String, LexError> {
+    fn read_number(&mut self) -> Result<(String, Option<NumberLiteralMetadata>), LexError> {
         let start = self.current;
         let chars: Vec<char> = self.input.chars().collect();
         let len = chars.len();
 
-        // Handle prefixed numeric literals (hex, binary)
         if self.current < len && chars[self.current] == '0' && self.current + 1 < len {
             match chars[self.current + 1] {
                 'x' | 'X' => {
-                    self.advance(); // consume '0'
-                    self.advance(); // consume 'x'
+                    self.advance();
+                    self.advance();
                     let digits_start = self.current;
                     while self.current < len && chars[self.current].is_ascii_hexdigit() {
                         self.advance();
@@ -832,11 +917,12 @@ impl Lexer {
                         let offending = chars.get(self.current).copied().unwrap_or('x');
                         return Err(LexError::UnexpectedChar(offending, self.line, self.column));
                     }
-                    return Ok(chars[start..self.current].iter().collect());
+                    let value = chars[start..self.current].iter().collect();
+                    return Ok((value, None));
                 }
                 'b' | 'B' => {
-                    self.advance(); // consume '0'
-                    self.advance(); // consume 'b'
+                    self.advance();
+                    self.advance();
                     let digits_start = self.current;
                     while self.current < len && matches!(chars[self.current], '0' | '1') {
                         self.advance();
@@ -845,40 +931,83 @@ impl Lexer {
                         let offending = chars.get(self.current).copied().unwrap_or('b');
                         return Err(LexError::UnexpectedChar(offending, self.line, self.column));
                     }
-                    return Ok(chars[start..self.current].iter().collect());
+                    let value = chars[start..self.current].iter().collect();
+                    return Ok((value, None));
                 }
                 _ => {}
             }
         }
 
+        let mut normalized = String::new();
         let mut seen_dot = false;
-        while self.current < len && chars[self.current].is_ascii_digit() {
-            self.advance();
-        }
+        let mut saw_comma = false;
+        let mut saw_underscore = false;
 
-        // Handle decimal point
-        if self.current < len
-            && chars[self.current] == '.'
-            && self.current + 1 < len
-            && chars[self.current + 1].is_ascii_digit()
-        {
-            seen_dot = true;
-            self.advance(); // consume '.'
-            while self.current < len && chars[self.current].is_ascii_digit() {
-                self.advance();
+        while self.current < len {
+            match chars[self.current] {
+                '0'..='9' => {
+                    normalized.push(chars[self.current]);
+                    self.advance();
+                }
+                ',' => {
+                    let mut lookahead = self.current + 1;
+                    let mut digits_after = 0;
+                    while lookahead < len && chars[lookahead].is_ascii_digit() {
+                        digits_after += 1;
+                        lookahead += 1;
+                    }
+                    if digits_after >= 3 {
+                        saw_comma = true;
+                        self.advance();
+                    } else {
+                        break;
+                    }
+                }
+                '_' => {
+                    if self.current + 1 >= len || !chars[self.current + 1].is_ascii_digit() {
+                        return Err(LexError::UnexpectedChar('_', self.line, self.column));
+                    }
+                    saw_underscore = true;
+                    self.advance();
+                }
+                '.' => {
+                    if seen_dot {
+                        return Err(LexError::UnexpectedChar('.', self.line, self.column));
+                    }
+                    if self.current + 1 >= len || !chars[self.current + 1].is_ascii_digit() {
+                        break;
+                    }
+                    seen_dot = true;
+                    normalized.push('.');
+                    self.advance();
+                }
+                _ => break,
             }
         }
 
-        if seen_dot
-            && self.current < len
-            && chars[self.current] == '.'
-            && self.current + 1 < len
-            && chars[self.current + 1].is_ascii_digit()
-        {
-            return Err(LexError::UnexpectedChar('.', self.line, self.column));
+        if normalized.is_empty() {
+            let offending = chars.get(self.current).copied().unwrap_or('\0');
+            return Err(LexError::UnexpectedChar(offending, self.line, self.column));
         }
 
-        Ok(chars[start..self.current].iter().collect())
+        let raw: String = chars[start..self.current].iter().collect();
+        let metadata = match (saw_comma, saw_underscore) {
+            (false, false) => None,
+            (true, false) => Some(NumberLiteralMetadata {
+                grouping: NumberGroupingKind::Comma,
+                original_lexeme: raw.clone(),
+            }),
+            (false, true) => Some(NumberLiteralMetadata {
+                grouping: NumberGroupingKind::Underscore,
+                original_lexeme: raw.clone(),
+            }),
+            (true, true) => Some(NumberLiteralMetadata {
+                grouping: NumberGroupingKind::Mixed,
+                original_lexeme: raw.clone(),
+            }),
+        };
+
+        Ok((normalized, metadata))
     }
 
     fn read_line_comment(&mut self) -> String {
@@ -925,21 +1054,29 @@ impl Lexer {
         start_line: usize,
         start_column: usize,
         initial_trivia: TokenTrivia,
+        delimiter_kind: StringDelimiterKind,
     ) -> Result<Vec<Token>, LexError> {
         let chars: Vec<char> = self.input.chars().collect();
+        let metadata = StringLiteralMetadata::from_kind(delimiter_kind);
+        let allows_interpolation = metadata.allows_interpolation;
+        let closing_chars: Vec<char> = metadata.delimiter.closing_sequence().chars().collect();
+        let opening_len = metadata.delimiter.opening_sequence().chars().count();
+
+        for _ in 0..opening_len {
+            self.advance();
+        }
+
         let mut tokens = Vec::new();
         let mut current_string = String::new();
-        let mut _string_start_pos = self.current;
         let mut leading_trivia = Some(initial_trivia);
+        let interpolation_prefix: [char; 2] = ['$', '{'];
 
-        self.advance(); // consume opening '"'
+        while self.current < chars.len() {
+            if self.starts_with_chars(&chars, &closing_chars) {
+                break;
+            }
 
-        while self.current < chars.len() && chars[self.current] != '"' {
-            if chars[self.current] == '$'
-                && self.current + 1 < chars.len()
-                && chars[self.current + 1] == '{'
-            {
-                // Emit a segment marker for the content collected so far (even if empty).
+            if allows_interpolation && self.starts_with_chars(&chars, &interpolation_prefix) {
                 if tokens.is_empty() {
                     tokens.push(self.make_token(
                         TokenType::StringStart,
@@ -959,11 +1096,9 @@ impl Lexer {
                 }
                 current_string.clear();
 
-                // Skip ${
                 self.advance(); // $
                 self.advance(); // {
 
-                // Tokenize the interpolation expression
                 let mut brace_count = 1;
                 let expr_start = self.current;
 
@@ -982,20 +1117,18 @@ impl Lexer {
                     return Err(LexError::UnterminatedString(start_line, start_column));
                 }
 
-                // Parse the expression inside ${}
                 let expr: String = chars[expr_start..self.current].iter().collect();
                 let mut expr_lexer = Lexer::new(expr.trim().to_string());
                 let expr_tokens = expr_lexer.tokenize()?;
 
-                // Add expression tokens (excluding EOF)
-                for token in expr_tokens {
-                    if !matches!(token.token_type, TokenType::Eof) {
-                        tokens.push(token);
-                    }
+                for token in expr_tokens
+                    .into_iter()
+                    .filter(|t| !matches!(t.token_type, TokenType::Eof))
+                {
+                    tokens.push(token);
                 }
 
                 self.advance(); // consume closing '}'
-                _string_start_pos = self.current;
             } else {
                 current_string.push(chars[self.current]);
                 if chars[self.current] == '\n' {
@@ -1008,13 +1141,11 @@ impl Lexer {
             }
         }
 
-        if self.current >= chars.len() {
+        if self.current >= chars.len() || !self.starts_with_chars(&chars, &closing_chars) {
             return Err(LexError::UnterminatedString(start_line, start_column));
         }
 
-        // Handle final string part
         if tokens.is_empty() {
-            // Simple string without interpolation
             let string_content = current_string.clone();
             tokens.push(self.make_token(
                 TokenType::String(current_string),
@@ -1024,7 +1155,6 @@ impl Lexer {
                 leading_trivia.take().unwrap_or_default(),
             ));
         } else {
-            // String with interpolation - add final part
             tokens.push(self.make_token(
                 TokenType::StringEnd,
                 &current_string,
@@ -1034,9 +1164,36 @@ impl Lexer {
             ));
         }
 
-        self.advance(); // consume closing '"'
+        for _ in 0..closing_chars.len() {
+            self.advance();
+        }
+
+        if let Some(first_token) = tokens.first_mut() {
+            first_token
+                .metadata
+                .push(TokenMetadata::StringLiteral(metadata));
+        }
 
         Ok(tokens)
+    }
+
+    fn starts_with_chars(&self, chars: &[char], sequence: &[char]) -> bool {
+        if self.current + sequence.len() > chars.len() {
+            return false;
+        }
+
+        for (idx, expected) in sequence.iter().enumerate() {
+            if chars[self.current + idx] != *expected {
+                return false;
+            }
+        }
+
+        true
+    }
+
+    fn starts_with_sequence(&self, chars: &[char], sequence: &str) -> bool {
+        let seq_chars: Vec<char> = sequence.chars().collect();
+        self.starts_with_chars(chars, &seq_chars)
     }
 
     fn json_start_metadata_for_brace(&self, chars: &[char]) -> Vec<TokenMetadata> {

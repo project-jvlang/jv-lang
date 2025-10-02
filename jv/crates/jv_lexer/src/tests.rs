@@ -76,6 +76,80 @@ fn test_string_interpolation_red_phase() {
 }
 
 #[test]
+fn test_triple_quote_multiline_string_metadata() {
+    let source = "\"\"\"Hello, ${name}!\nWelcome.\n\"\"\"";
+    let mut lexer = Lexer::new(source.to_string());
+    let tokens = lexer.tokenize().unwrap();
+
+    let string_start = tokens
+        .iter()
+        .find(|token| matches!(token.token_type, TokenType::StringStart))
+        .expect("expected string start token");
+
+    let metadata = string_start
+        .metadata
+        .iter()
+        .find_map(|meta| match meta {
+            TokenMetadata::StringLiteral(info) => Some(info),
+            _ => None,
+        })
+        .expect("string metadata missing");
+
+    assert_eq!(metadata.delimiter, StringDelimiterKind::TripleQuote);
+    assert!(metadata.allows_interpolation);
+    assert!(metadata.normalize_indentation);
+}
+
+#[test]
+fn test_backtick_multiline_string_metadata() {
+    let source = "```\nvalue: ${value}\n```";
+    let mut lexer = Lexer::new(source.to_string());
+    let tokens = lexer.tokenize().unwrap();
+
+    let string_start = tokens
+        .iter()
+        .find(|token| matches!(token.token_type, TokenType::StringStart))
+        .expect("expected string start token");
+
+    let metadata = string_start
+        .metadata
+        .iter()
+        .find_map(|meta| match meta {
+            TokenMetadata::StringLiteral(info) => Some(info),
+            _ => None,
+        })
+        .expect("string metadata missing");
+
+    assert_eq!(metadata.delimiter, StringDelimiterKind::BacktickBlock);
+    assert!(metadata.allows_interpolation);
+    assert!(!metadata.normalize_indentation);
+}
+
+#[test]
+fn test_triple_quote_simple_string_metadata() {
+    let source = "\"\"\"plain text\"\"\"";
+    let mut lexer = Lexer::new(source.to_string());
+    let tokens = lexer.tokenize().unwrap();
+
+    let string_token = tokens
+        .iter()
+        .find(|token| matches!(token.token_type, TokenType::String(_)))
+        .expect("expected plain string token");
+
+    let metadata = string_token
+        .metadata
+        .iter()
+        .find_map(|meta| match meta {
+            TokenMetadata::StringLiteral(info) => Some(info),
+            _ => None,
+        })
+        .expect("string metadata missing");
+
+    assert_eq!(metadata.delimiter, StringDelimiterKind::TripleQuote);
+    assert!(metadata.normalize_indentation);
+}
+
+#[test]
 fn test_arithmetic_operators_red_phase() {
     // RED: This test should fail
     let mut lexer = Lexer::new("a + b - c * d / e % f".to_string());
@@ -201,6 +275,7 @@ fn test_potential_json_start_metadata_for_brace_and_bracket() {
         .and_then(|token| {
             token.metadata.iter().find_map(|metadata| match metadata {
                 TokenMetadata::PotentialJsonStart { confidence } => Some(*confidence),
+                _ => None,
             })
         });
 
@@ -212,6 +287,7 @@ fn test_potential_json_start_metadata_for_brace_and_bracket() {
         .and_then(|token| {
             token.metadata.iter().find_map(|metadata| match metadata {
                 TokenMetadata::PotentialJsonStart { confidence } => Some(*confidence),
+                _ => None,
             })
         });
 
@@ -479,6 +555,44 @@ fn test_numbers_and_types() {
     assert!(numbers.contains(&"3.14"));
     assert!(numbers.contains(&"0xFF") || numbers.contains(&"255"));
     assert!(numbers.contains(&"0b1010") || numbers.contains(&"10"));
+}
+
+#[test]
+fn test_number_grouping_metadata() {
+    let source = "val sum = SUM(1,234 5_678)";
+    let mut lexer = Lexer::new(source.to_string());
+    let tokens = lexer.tokenize().unwrap();
+
+    let comma_token = tokens
+        .iter()
+        .find(|token| matches!(&token.token_type, TokenType::Number(n) if n == "1234"))
+        .expect("expected normalized comma number");
+    let underscore_token = tokens
+        .iter()
+        .find(|token| matches!(&token.token_type, TokenType::Number(n) if n == "5678"))
+        .expect("expected normalized underscore number");
+
+    let comma_meta = comma_token
+        .metadata
+        .iter()
+        .find_map(|meta| match meta {
+            TokenMetadata::NumberLiteral(info) => Some(info),
+            _ => None,
+        })
+        .expect("comma grouping metadata missing");
+    assert_eq!(comma_meta.grouping, NumberGroupingKind::Comma);
+    assert_eq!(comma_meta.original_lexeme, "1,234");
+
+    let underscore_meta = underscore_token
+        .metadata
+        .iter()
+        .find_map(|meta| match meta {
+            TokenMetadata::NumberLiteral(info) => Some(info),
+            _ => None,
+        })
+        .expect("underscore grouping metadata missing");
+    assert_eq!(underscore_meta.grouping, NumberGroupingKind::Underscore);
+    assert_eq!(underscore_meta.original_lexeme, "5_678");
 }
 
 #[test]
