@@ -171,6 +171,74 @@ fn test_comments_red_phase() {
 }
 
 #[test]
+fn test_json_comment_trivia_attached_to_following_token() {
+    let source = "{ // user config\n  \"key\": 1 }";
+    let mut lexer = Lexer::new(source.to_string());
+    let tokens = lexer.tokenize().unwrap();
+
+    let string_token = tokens
+        .iter()
+        .find(|token| matches!(token.token_type, TokenType::String(_)))
+        .expect("string token should exist");
+
+    assert!(string_token.leading_trivia.comments);
+    assert_eq!(string_token.leading_trivia.json_comments.len(), 1);
+    let trivia = &string_token.leading_trivia.json_comments[0];
+    assert_eq!(trivia.kind, JsonCommentTriviaKind::Line);
+    assert_eq!(trivia.line, 1);
+    assert_eq!(trivia.text.trim(), "user config");
+}
+
+#[test]
+fn test_potential_json_start_metadata_for_brace_and_bracket() {
+    let source = "{\"key\": 1}\n[1, 2]";
+    let mut lexer = Lexer::new(source.to_string());
+    let tokens = lexer.tokenize().unwrap();
+
+    let brace_confidence = tokens
+        .iter()
+        .find(|token| matches!(token.token_type, TokenType::LeftBrace))
+        .and_then(|token| {
+            token.metadata.iter().find_map(|metadata| match metadata {
+                TokenMetadata::PotentialJsonStart { confidence } => Some(*confidence),
+            })
+        });
+
+    assert!(matches!(brace_confidence, Some(JsonConfidence::High)));
+
+    let bracket_confidence = tokens
+        .iter()
+        .find(|token| matches!(token.token_type, TokenType::LeftBracket))
+        .and_then(|token| {
+            token.metadata.iter().find_map(|metadata| match metadata {
+                TokenMetadata::PotentialJsonStart { confidence } => Some(*confidence),
+            })
+        });
+
+    assert!(matches!(
+        bracket_confidence,
+        Some(JsonConfidence::Medium | JsonConfidence::High)
+    ));
+}
+
+#[test]
+fn test_block_brace_has_no_json_metadata() {
+    let source = "{ val x = 1 }";
+    let mut lexer = Lexer::new(source.to_string());
+    let tokens = lexer.tokenize().unwrap();
+
+    let brace_metadata = tokens
+        .iter()
+        .find(|token| matches!(token.token_type, TokenType::LeftBrace))
+        .map(|token| token.metadata.iter().collect::<Vec<_>>())
+        .unwrap_or_default();
+
+    assert!(brace_metadata
+        .iter()
+        .all(|metadata| !matches!(metadata, TokenMetadata::PotentialJsonStart { .. })));
+}
+
+#[test]
 fn test_position_tracking_green_phase() {
     // GREEN: Test position tracking functionality
     let mut lexer = Lexer::new("val\nname\n  =\n    42".to_string());

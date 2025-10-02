@@ -95,17 +95,52 @@ pub enum TokenType {
     Invalid(String),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum JsonCommentTriviaKind {
+    Line,
+    Block,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct JsonCommentTrivia {
+    pub kind: JsonCommentTriviaKind,
+    pub text: String,
+    pub line: usize,
+    pub column: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 pub struct TokenTrivia {
     pub spaces: u16,
     pub newlines: u16,
     pub comments: bool,
+    #[serde(default)]
+    pub json_comments: Vec<JsonCommentTrivia>,
 }
 
 impl TokenTrivia {
     pub fn merge_line_breaks(&mut self, count: u16) {
         self.newlines = self.newlines.saturating_add(count);
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum JsonConfidence {
+    None,
+    Low,
+    Medium,
+    High,
+}
+
+impl Default for JsonConfidence {
+    fn default() -> Self {
+        JsonConfidence::None
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum TokenMetadata {
+    PotentialJsonStart { confidence: JsonConfidence },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -127,9 +162,11 @@ pub struct Token {
     pub column: usize,
     pub leading_trivia: TokenTrivia,
     pub diagnostic: Option<TokenDiagnostic>,
+    #[serde(default)]
+    pub metadata: Vec<TokenMetadata>,
 }
 
-#[derive(Debug, Default, Clone, Copy)]
+#[derive(Debug, Default, Clone)]
 struct TriviaTracker {
     trivia: TokenTrivia,
 }
@@ -144,14 +181,15 @@ impl TriviaTracker {
         self.trivia.spaces = 0;
     }
 
-    fn record_comment(&mut self) {
-        self.trivia.comments = true;
+    fn take(&mut self) -> TokenTrivia {
+        std::mem::take(&mut self.trivia)
     }
 
-    fn take(&mut self) -> TokenTrivia {
-        let trivia = self.trivia;
-        self.trivia = TokenTrivia::default();
-        trivia
+    fn record_comment(&mut self, comment: Option<JsonCommentTrivia>) {
+        self.trivia.comments = true;
+        if let Some(comment) = comment {
+            self.trivia.json_comments.push(comment);
+        }
     }
 }
 
@@ -233,12 +271,14 @@ impl Lexer {
                     self.advance();
                 }
                 '{' => {
-                    tokens.push(self.make_token(
+                    let metadata = self.json_start_metadata_for_brace(&chars);
+                    tokens.push(self.make_token_with_metadata(
                         TokenType::LeftBrace,
                         "{",
                         start_line,
                         start_column,
                         trivia.take(),
+                        metadata,
                     ));
                     self.advance();
                 }
@@ -253,12 +293,14 @@ impl Lexer {
                     self.advance();
                 }
                 '[' => {
-                    tokens.push(self.make_token(
+                    let metadata = self.json_start_metadata_for_bracket(&chars);
+                    tokens.push(self.make_token_with_metadata(
                         TokenType::LeftBracket,
                         "[",
                         start_line,
                         start_column,
                         trivia.take(),
+                        metadata,
                     ));
                     self.advance();
                 }
@@ -580,6 +622,16 @@ impl Lexer {
                             '/' => {
                                 // Line comment
                                 let comment = self.read_line_comment();
+                                let sanitized = Self::sanitize_comment_text(
+                                    JsonCommentTriviaKind::Line,
+                                    &comment,
+                                );
+                                let comment_info = JsonCommentTrivia {
+                                    kind: JsonCommentTriviaKind::Line,
+                                    text: sanitized,
+                                    line: start_line,
+                                    column: start_column,
+                                };
                                 tokens.push(self.make_token(
                                     TokenType::LineComment(comment.clone()),
                                     &comment,
@@ -587,11 +639,21 @@ impl Lexer {
                                     start_column,
                                     trivia.take(),
                                 ));
-                                trivia.record_comment();
+                                trivia.record_comment(Some(comment_info));
                             }
                             '*' => {
                                 // Block comment
                                 let comment = self.read_block_comment()?;
+                                let sanitized = Self::sanitize_comment_text(
+                                    JsonCommentTriviaKind::Block,
+                                    &comment,
+                                );
+                                let comment_info = JsonCommentTrivia {
+                                    kind: JsonCommentTriviaKind::Block,
+                                    text: sanitized,
+                                    line: start_line,
+                                    column: start_column,
+                                };
                                 tokens.push(self.make_token(
                                     TokenType::BlockComment(comment.clone()),
                                     &comment,
@@ -599,7 +661,7 @@ impl Lexer {
                                     start_column,
                                     trivia.take(),
                                 ));
-                                trivia.record_comment();
+                                trivia.record_comment(Some(comment_info));
                             }
                             _ => {
                                 tokens.push(self.make_token(
@@ -681,6 +743,7 @@ impl Lexer {
             column: self.column,
             leading_trivia: trivia.take(),
             diagnostic: None,
+            metadata: Vec::new(),
         });
 
         Ok(tokens)
@@ -701,6 +764,18 @@ impl Lexer {
         column: usize,
         leading_trivia: TokenTrivia,
     ) -> Token {
+        self.make_token_with_metadata(token_type, lexeme, line, column, leading_trivia, Vec::new())
+    }
+
+    fn make_token_with_metadata(
+        &self,
+        token_type: TokenType,
+        lexeme: &str,
+        line: usize,
+        column: usize,
+        leading_trivia: TokenTrivia,
+        metadata: Vec<TokenMetadata>,
+    ) -> Token {
         let diagnostic = Self::diagnostic_for(&token_type);
         Token {
             token_type,
@@ -709,6 +784,7 @@ impl Lexer {
             column,
             leading_trivia,
             diagnostic,
+            metadata,
         }
     }
 
@@ -961,6 +1037,178 @@ impl Lexer {
         self.advance(); // consume closing '"'
 
         Ok(tokens)
+    }
+
+    fn json_start_metadata_for_brace(&self, chars: &[char]) -> Vec<TokenMetadata> {
+        self.detect_json_confidence_for_brace(chars)
+            .map(|confidence| vec![TokenMetadata::PotentialJsonStart { confidence }])
+            .unwrap_or_default()
+    }
+
+    fn json_start_metadata_for_bracket(&self, chars: &[char]) -> Vec<TokenMetadata> {
+        self.detect_json_confidence_for_bracket(chars)
+            .map(|confidence| vec![TokenMetadata::PotentialJsonStart { confidence }])
+            .unwrap_or_default()
+    }
+
+    fn detect_json_confidence_for_brace(&self, chars: &[char]) -> Option<JsonConfidence> {
+        let len = chars.len();
+        if self.current >= len {
+            return None;
+        }
+
+        let mut idx = self.current + 1;
+        idx = self.skip_ws_and_comments(chars, idx);
+        if idx >= len {
+            return None;
+        }
+
+        match chars[idx] {
+            '}' => return Some(JsonConfidence::High),
+            '"' => return Some(JsonConfidence::High),
+            _ => {}
+        }
+
+        if self.find_colon_before_block_close(chars, idx) {
+            Some(JsonConfidence::High)
+        } else {
+            None
+        }
+    }
+
+    fn detect_json_confidence_for_bracket(&self, chars: &[char]) -> Option<JsonConfidence> {
+        let len = chars.len();
+        if self.current >= len {
+            return None;
+        }
+
+        let mut idx = self.current + 1;
+        idx = self.skip_ws_and_comments(chars, idx);
+        if idx >= len {
+            return None;
+        }
+
+        let confidence = match chars[idx] {
+            ']' => JsonConfidence::High,
+            '{' | '[' | '"' => JsonConfidence::High,
+            't' | 'T' | 'f' | 'F' | 'n' | 'N' => JsonConfidence::Medium,
+            '-' | '0'..='9' => JsonConfidence::Medium,
+            _ => JsonConfidence::None,
+        };
+
+        match confidence {
+            JsonConfidence::None => None,
+            value => Some(value),
+        }
+    }
+
+    fn skip_ws_and_comments(&self, chars: &[char], mut idx: usize) -> usize {
+        let len = chars.len();
+
+        loop {
+            while idx < len && chars[idx].is_whitespace() {
+                idx += 1;
+            }
+
+            if idx + 1 < len && chars[idx] == '/' {
+                match chars[idx + 1] {
+                    '/' => {
+                        idx += 2;
+                        while idx < len && chars[idx] != '\n' {
+                            idx += 1;
+                        }
+                        if idx < len && chars[idx] == '\n' {
+                            idx += 1;
+                        }
+                        continue;
+                    }
+                    '*' => {
+                        idx += 2;
+                        while idx + 1 < len && !(chars[idx] == '*' && chars[idx + 1] == '/') {
+                            idx += 1;
+                        }
+                        if idx + 1 < len {
+                            idx += 2;
+                        } else {
+                            idx = len;
+                        }
+                        continue;
+                    }
+                    _ => {}
+                }
+            }
+
+            break;
+        }
+
+        idx
+    }
+
+    fn find_colon_before_block_close(&self, chars: &[char], mut idx: usize) -> bool {
+        let len = chars.len();
+        let mut depth = 0usize;
+
+        while idx < len {
+            idx = self.skip_ws_and_comments(chars, idx);
+            if idx >= len {
+                break;
+            }
+
+            match chars[idx] {
+                '"' => {
+                    idx = self.skip_string_literal(chars, idx + 1);
+                }
+                '{' => {
+                    depth += 1;
+                    idx += 1;
+                }
+                '}' => {
+                    if depth == 0 {
+                        break;
+                    }
+                    depth = depth.saturating_sub(1);
+                    idx += 1;
+                }
+                ':' if depth == 0 => {
+                    return true;
+                }
+                _ => {
+                    idx += 1;
+                }
+            }
+        }
+
+        false
+    }
+
+    fn skip_string_literal(&self, chars: &[char], mut idx: usize) -> usize {
+        let len = chars.len();
+
+        while idx < len {
+            match chars[idx] {
+                '\\' => {
+                    idx = (idx + 2).min(len);
+                }
+                '"' => {
+                    idx += 1;
+                    break;
+                }
+                _ => idx += 1,
+            }
+        }
+
+        idx
+    }
+
+    fn sanitize_comment_text(kind: JsonCommentTriviaKind, text: &str) -> String {
+        match kind {
+            JsonCommentTriviaKind::Line => {
+                let trimmed = text.trim_start();
+                let without_slashes = trimmed.trim_start_matches('/');
+                without_slashes.trim_start().to_string()
+            }
+            JsonCommentTriviaKind::Block => text.trim().to_string(),
+        }
     }
 }
 

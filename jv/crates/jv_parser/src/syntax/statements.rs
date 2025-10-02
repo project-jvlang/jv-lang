@@ -505,6 +505,7 @@ mod tests {
             column,
             leading_trivia: TokenTrivia::default(),
             diagnostic: None,
+            metadata: Vec::new(),
         }
     }
 
