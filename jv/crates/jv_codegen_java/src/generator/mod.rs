@@ -92,8 +92,9 @@ impl JavaCodeGenerator {
         }
 
         if !script_statements.is_empty() || !script_methods.is_empty() {
+            let script_class = &self.config.script_main_class;
             let mut builder = self.builder();
-            builder.push_line("public final class GeneratedMain {");
+            builder.push_line(&format!("public final class {} {{", script_class));
             builder.indent();
 
             builder.push_line("public static void main(String[] args) throws Exception {");

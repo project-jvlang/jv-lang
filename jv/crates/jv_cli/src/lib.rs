@@ -288,6 +288,7 @@ pub mod pipeline {
         pub inference: Option<InferenceSnapshot>,
         pub perf_capture: Option<PerfCapture>,
         pub when_strategies: Vec<StrategySummary>,
+        pub script_main_class: String,
     }
 
     /// Aggregated summary of lowering strategies selected for `when` expressions.
@@ -295,6 +296,63 @@ pub mod pipeline {
     pub struct StrategySummary {
         pub description: String,
         pub count: usize,
+    }
+
+    /// Compute the Java class name used to wrap script statements for execution.
+    pub fn compute_script_main_class(package_name: &str, entrypoint: &Path) -> String {
+        let mut base = to_pascal_case(package_name.trim());
+
+        if base.is_empty() {
+            if let Some(stem) = entrypoint.file_stem().and_then(|s| s.to_str()) {
+                base = to_pascal_case(stem);
+            }
+        }
+
+        if base.is_empty() {
+            base = "Generated".to_string();
+        }
+
+        if let Some(first) = base.chars().next() {
+            if !first.is_ascii_alphabetic() && first != '_' {
+                base = format!("J{base}");
+            }
+        } else {
+            base = "Generated".to_string();
+        }
+
+        if !base.to_ascii_lowercase().ends_with("main") {
+            base.push_str("Main");
+        }
+
+        base
+    }
+
+    fn script_main_class(plan: &BuildPlan) -> String {
+        compute_script_main_class(&plan.settings.manifest.package.name, plan.entrypoint())
+    }
+
+    fn to_pascal_case(input: &str) -> String {
+        let mut result = String::new();
+        let mut capitalize_next = true;
+
+        for ch in input.chars() {
+            if ch.is_ascii_alphanumeric() {
+                if capitalize_next {
+                    for upper in ch.to_uppercase() {
+                        result.push(upper);
+                    }
+                    capitalize_next = false;
+                } else {
+                    for lower in ch.to_lowercase() {
+                        result.push(lower);
+                    }
+                }
+            } else {
+                capitalize_next = true;
+            }
+        }
+
+        result
     }
 
     /// Compile a `.jv` file end-to-end into Java (and optionally `.class`) outputs.
@@ -431,8 +489,12 @@ pub mod pipeline {
 
         let when_strategy_summary = summarize_when_strategies(&when_strategy_records);
 
-        let mut code_generator =
-            JavaCodeGenerator::with_config(JavaCodeGenConfig::for_target(build_config.target));
+        let script_main_class = script_main_class(plan);
+
+        let mut codegen_config = JavaCodeGenConfig::for_target(build_config.target);
+        codegen_config.script_main_class = script_main_class.clone();
+
+        let mut code_generator = JavaCodeGenerator::with_config(codegen_config);
         let java_unit = code_generator
             .generate_compilation_unit(&ir_program)
             .map_err(|e| anyhow!("Code generation error: {:?}", e))?;
@@ -447,9 +509,9 @@ pub mod pipeline {
         let mut java_files = Vec::new();
         for (index, type_decl) in java_unit.type_declarations.iter().enumerate() {
             let java_filename = if index == 0 {
-                "GeneratedMain.java".to_string()
+                format!("{}.java", script_main_class)
             } else {
-                format!("GeneratedMain{}.java", index)
+                format!("{}{}.java", script_main_class, index)
             };
             let java_path = options.output_dir.join(&java_filename);
 
@@ -494,6 +556,7 @@ pub mod pipeline {
             inference: inference_snapshot,
             perf_capture,
             when_strategies: when_strategy_summary,
+            script_main_class,
         };
 
         if !options.java_only {
@@ -651,7 +714,7 @@ pub mod pipeline {
             bail!("Java compilation step did not produce class files; cannot execute program");
         }
 
-        let generated_main = target_dir.join("GeneratedMain.class");
+        let generated_main = target_dir.join(format!("{}.class", compile_result.script_main_class));
         if !generated_main.exists() {
             bail!(
                 "No compiled .class file found at {}. Make sure javac is available for execution.",
@@ -663,7 +726,7 @@ pub mod pipeline {
         let mut cmd = Command::new("java");
         cmd.arg("-cp");
         cmd.arg(&classpath);
-        cmd.arg("GeneratedMain");
+        cmd.arg(&compile_result.script_main_class);
         for arg in args {
             cmd.arg(arg);
         }
@@ -681,7 +744,12 @@ pub mod pipeline {
     }
 
     /// Package generated outputs into a JAR or native binary.
-    pub fn produce_binary(output_dir: &Path, bin_name: &str, kind: &str) -> Result<PathBuf> {
+    pub fn produce_binary(
+        output_dir: &Path,
+        bin_name: &str,
+        kind: &str,
+        main_class: &str,
+    ) -> Result<PathBuf> {
         match kind {
             "jar" => {
                 let jar_path = output_dir.join(format!("{}.jar", bin_name));
@@ -693,7 +761,7 @@ pub mod pipeline {
                             .to_str()
                             .ok_or_else(|| anyhow!("Non-UTF8 path encountered for jar output"))?,
                         "--main-class",
-                        "GeneratedMain",
+                        main_class,
                         "-C",
                         output_dir
                             .to_str()
@@ -709,7 +777,7 @@ pub mod pipeline {
                 }
             }
             "native" => {
-                let jar_artifact = produce_binary(output_dir, bin_name, "jar")?;
+                let jar_artifact = produce_binary(output_dir, bin_name, "jar", main_class)?;
                 let native_out = output_dir.join(bin_name);
                 let status = Command::new("native-image")
                     .arg("-jar")

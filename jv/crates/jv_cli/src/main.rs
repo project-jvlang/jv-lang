@@ -184,7 +184,12 @@ fn main() -> Result<()> {
             }
 
             if let Some(kind) = binary {
-                let artifact_path = produce_binary(plan.output_dir(), &bin_name, &kind)?;
+                let artifact_path = produce_binary(
+                    plan.output_dir(),
+                    &bin_name,
+                    &kind,
+                    &artifacts.script_main_class,
+                )?;
                 println!("Produced {} artifact at {}", kind, artifact_path.display());
             }
 
