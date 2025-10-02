@@ -1,4 +1,5 @@
 use super::*;
+use jv_ir::{IrAnnotation, IrAnnotationArgument, IrAnnotationValue};
 
 impl JavaCodeGenerator {
     pub fn generate_class(&mut self, class: &IrStatement) -> Result<String, CodeGenError> {
@@ -439,9 +440,101 @@ impl JavaCodeGenerator {
         Ok(())
     }
 
-    fn render_annotations(&self, builder: &mut JavaSourceBuilder, modifiers: &IrModifiers) {
+    fn render_annotations(&mut self, builder: &mut JavaSourceBuilder, modifiers: &IrModifiers) {
         for annotation in &modifiers.annotations {
-            builder.push_line(&format!("@{}", annotation));
+            self.register_annotation_imports(annotation);
+            builder.push_line(&self.format_annotation(annotation));
+        }
+    }
+
+    fn format_annotation(&self, annotation: &IrAnnotation) -> String {
+        let mut rendered = String::new();
+        rendered.push('@');
+        let qualified = annotation.name.qualified_name();
+        let name_to_use = if annotation.name.segments.len() > 1 {
+            annotation.name.simple_name().to_string()
+        } else {
+            qualified.clone()
+        };
+        rendered.push_str(&name_to_use);
+        if !annotation.arguments.is_empty() {
+            rendered.push('(');
+            let args = annotation
+                .arguments
+                .iter()
+                .map(|arg| self.format_annotation_argument(arg))
+                .collect::<Vec<_>>()
+                .join(", ");
+            rendered.push_str(&args);
+            rendered.push(')');
+        }
+        rendered
+    }
+
+    fn format_annotation_argument(&self, argument: &IrAnnotationArgument) -> String {
+        match argument {
+            IrAnnotationArgument::Positional(value) => self.format_annotation_value(value),
+            IrAnnotationArgument::Named { name, value } => format!(
+                "{} = {}",
+                name,
+                self.format_annotation_value(value)
+            ),
+        }
+    }
+
+    fn format_annotation_value(&self, value: &IrAnnotationValue) -> String {
+        match value {
+            IrAnnotationValue::Literal(literal) => Self::literal_to_string(literal),
+            IrAnnotationValue::EnumConstant { type_name, constant } => {
+                if type_name.is_empty() {
+                    constant.clone()
+                } else {
+                    format!("{}.{constant}", type_name)
+                }
+            }
+            IrAnnotationValue::Array(values) => {
+                let joined = values
+                    .iter()
+                    .map(|value| self.format_annotation_value(value))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("{{{joined}}}")
+            }
+            IrAnnotationValue::ClassLiteral(type_name) => format!("{}.class", type_name),
+            IrAnnotationValue::Nested(annotation) => self.format_annotation(annotation),
+        }
+    }
+
+    fn register_annotation_imports(&mut self, annotation: &IrAnnotation) {
+        let (package, _) = annotation.name.split_package();
+        if package.is_some() {
+            let qualified_name = annotation.name.qualified_name();
+            self.add_import(&qualified_name);
+        }
+
+        for argument in &annotation.arguments {
+            match argument {
+                IrAnnotationArgument::Positional(value) => {
+                    self.register_annotation_value_imports(value)
+                }
+                IrAnnotationArgument::Named { value, .. } => {
+                    self.register_annotation_value_imports(value)
+                }
+            }
+        }
+    }
+
+    fn register_annotation_value_imports(&mut self, value: &IrAnnotationValue) {
+        match value {
+            IrAnnotationValue::Array(values) => {
+                for value in values {
+                    self.register_annotation_value_imports(value);
+                }
+            }
+            IrAnnotationValue::Nested(annotation) => {
+                self.register_annotation_imports(annotation);
+            }
+            _ => {}
         }
     }
 }

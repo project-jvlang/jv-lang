@@ -202,6 +202,45 @@ fn pipeline_compile_produces_artifacts() {
 }
 
 #[test]
+fn pipeline_preserves_annotations_in_java_output() {
+    let temp_dir = TempDirGuard::new("pipeline-annotations").expect("create temp dir");
+    let input = workspace_file("tests/fixtures/java_annotations/pass_through.jv");
+
+    let plan = compose_plan_from_fixture(
+        temp_dir.path(),
+        &input,
+        CliOverrides {
+            entrypoint: None,
+            output: None,
+            java_only: true,
+            check: false,
+            format: false,
+            target: None,
+            clean: false,
+            perf: false,
+            emit_types: false,
+            emit_telemetry: false,
+            parallel_inference: false,
+            inference_workers: None,
+            constraint_batch: None,
+        },
+    );
+
+    let artifacts = compile(&plan).expect("annotation compilation succeeds");
+    let service_java = artifacts
+        .java_files
+        .iter()
+        .find(|path| path.file_name().and_then(|name| name.to_str()) == Some("Service.java"))
+        .expect("Service.java generated");
+
+    let java_source = fs::read_to_string(service_java).expect("read generated Java");
+    assert!(java_source.contains("@Component"));
+    assert!(java_source.contains("@Autowired"));
+    assert!(java_source.contains("@RequestMapping(path = {\"/ping\"}, produces = {\"application/json\"})"));
+    assert!(java_source.contains("@Nullable"));
+}
+
+#[test]
 fn pipeline_emit_types_produces_type_facts_json() {
     let temp_dir = TempDirGuard::new("pipeline-emit-types").expect("create temp dir");
     let input = workspace_file("test_simple.jv");

@@ -1,0 +1,14 @@
+package fixtures
+
+@Component
+class Service {
+    @Autowired
+    val repository = Repository()
+
+    @RequestMapping(path = {"/ping"}, produces = {"application/json"})
+    fun ping(@Nullable id: String?): String {
+        return id ?: "pong"
+    }
+}
+
+class Repository

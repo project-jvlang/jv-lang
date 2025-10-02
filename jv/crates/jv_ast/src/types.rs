@@ -1,4 +1,5 @@
 // jv_ast/types - Basic types, operators, and position information
+use crate::annotation::Annotation;
 use serde::{Deserialize, Serialize};
 
 /// Position information for AST nodes
@@ -153,13 +154,4 @@ impl Default for Modifiers {
             annotations: Vec::new(),
         }
     }
-}
-
-/// Annotation attached to declarations (e.g., @Sample)
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct Annotation {
-    pub name: String,
-    #[serde(default)]
-    pub arguments: Vec<crate::expression::AnnotationArgument>,
-    pub span: Span,
 }

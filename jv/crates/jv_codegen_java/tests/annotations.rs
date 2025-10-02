@@ -1,0 +1,111 @@
+use jv_ast::{AnnotationName, Literal, Span};
+use jv_codegen_java::JavaCodeGenerator;
+use jv_ir::{
+    IrAnnotation, IrAnnotationArgument, IrAnnotationValue, IrModifiers, IrProgram, IrStatement,
+    IrVisibility,
+};
+
+fn dummy_span() -> Span {
+    Span::dummy()
+}
+
+fn audited_program() -> IrProgram {
+    let span = dummy_span();
+
+    let author_annotation = IrAnnotation {
+        name: AnnotationName::new(
+            vec![
+                "com".to_string(),
+                "example".to_string(),
+                "meta".to_string(),
+                "Author".to_string(),
+            ],
+            span.clone(),
+        ),
+        arguments: vec![IrAnnotationArgument::Named {
+            name: "name".to_string(),
+            value: IrAnnotationValue::Literal(Literal::String("team".to_string())),
+        }],
+        span: span.clone(),
+    };
+
+    let audited_annotation = IrAnnotation {
+        name: AnnotationName::new(
+            vec![
+                "com".to_string(),
+                "example".to_string(),
+                "security".to_string(),
+                "Audited".to_string(),
+            ],
+            span.clone(),
+        ),
+        arguments: vec![
+            IrAnnotationArgument::Positional(IrAnnotationValue::Nested(
+                author_annotation.clone(),
+            )),
+            IrAnnotationArgument::Named {
+                name: "level".to_string(),
+                value: IrAnnotationValue::EnumConstant {
+                    type_name: "AuditLevel".to_string(),
+                    constant: "HIGH".to_string(),
+                },
+            },
+            IrAnnotationArgument::Named {
+                name: "tags".to_string(),
+                value: IrAnnotationValue::Array(vec![
+                    IrAnnotationValue::Literal(Literal::String("service".to_string())),
+                    IrAnnotationValue::Literal(Literal::String("core".to_string())),
+                ]),
+            },
+        ],
+        span: span.clone(),
+    };
+
+    let modifiers = IrModifiers {
+        visibility: IrVisibility::Public,
+        annotations: vec![audited_annotation],
+        ..IrModifiers::default()
+    };
+
+    let class = IrStatement::ClassDeclaration {
+        name: "AuditedService".to_string(),
+        type_parameters: vec![],
+        superclass: None,
+        interfaces: vec![],
+        fields: Vec::new(),
+        methods: Vec::new(),
+        nested_classes: Vec::new(),
+        modifiers,
+        span,
+    };
+
+    IrProgram {
+        package: Some("com.example.app".to_string()),
+        imports: vec![],
+        type_declarations: vec![class],
+        span: dummy_span(),
+    }
+}
+
+#[test]
+fn annotations_render_with_arguments_and_generate_imports() {
+    let program = audited_program();
+    let mut generator = JavaCodeGenerator::new();
+    let unit = generator
+        .generate_compilation_unit(&program)
+        .expect("compilation unit");
+
+    assert!(unit
+        .imports
+        .contains(&"com.example.security.Audited".to_string()));
+    assert!(
+        unit.imports
+            .contains(&"com.example.meta.Author".to_string())
+    );
+
+    let class_source = &unit.type_declarations[0];
+    assert!(class_source.contains("@Audited"));
+    assert!(class_source.contains("@Author(name = \"team\")"));
+    assert!(class_source.contains("level = AuditLevel.HIGH"));
+    assert!(class_source.contains("tags = {\"service\", \"core\"}"));
+}

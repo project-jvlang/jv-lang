@@ -99,9 +99,9 @@ mod tests {
         context.sample_options_mut().base_dir = Some(temp_dir.path().to_path_buf());
 
         let annotation = Annotation {
-            name: "Sample".to_string(),
-            arguments: vec![AnnotationArgument::PositionalLiteral {
-                value: Literal::String("users.json".to_string()),
+            name: AnnotationName::new(vec!["Sample".to_string()], dummy_span()),
+            arguments: vec![AnnotationArgument::Positional {
+                value: AnnotationValue::Literal(Literal::String("users.json".to_string())),
                 span: dummy_span(),
             }],
             span: dummy_span(),
@@ -183,15 +183,15 @@ mod tests {
         }
 
         let annotation = Annotation {
-            name: "Sample".to_string(),
+            name: AnnotationName::new(vec!["Sample".to_string()], dummy_span()),
             arguments: vec![
-                AnnotationArgument::PositionalLiteral {
-                    value: Literal::String(file_name.to_string()),
+                AnnotationArgument::Positional {
+                    value: AnnotationValue::Literal(Literal::String(file_name.to_string())),
                     span: dummy_span(),
                 },
                 AnnotationArgument::Named {
                     name: "sha256".to_string(),
-                    value: Expression::Literal(Literal::String(expected_sha.clone()), dummy_span()),
+                    value: AnnotationValue::Literal(Literal::String(expected_sha.clone())),
                     span: dummy_span(),
                 },
             ],
@@ -361,25 +361,28 @@ mod tests {
         context.sample_options_mut().base_dir = Some(temp_dir.path().to_path_buf());
 
         let annotation = Annotation {
-            name: "Sample".to_string(),
+            name: AnnotationName::new(vec!["Sample".to_string()], dummy_span()),
             arguments: vec![
-                AnnotationArgument::PositionalLiteral {
-                    value: Literal::String(file_name.to_string()),
+                AnnotationArgument::Positional {
+                    value: AnnotationValue::Literal(Literal::String(file_name.to_string())),
                     span: dummy_span(),
                 },
                 AnnotationArgument::Named {
                     name: "mode".to_string(),
-                    value: Expression::Identifier("Load".to_string(), dummy_span()),
+                    value: AnnotationValue::EnumConstant {
+                        type_path: vec![],
+                        constant: "Load".to_string(),
+                    },
                     span: dummy_span(),
                 },
                 AnnotationArgument::Named {
                     name: "limitBytes".to_string(),
-                    value: Expression::Literal(Literal::Number("128".to_string()), dummy_span()),
+                    value: AnnotationValue::Literal(Literal::Number("128".to_string())),
                     span: dummy_span(),
                 },
                 AnnotationArgument::Named {
                     name: "format".to_string(),
-                    value: Expression::Literal(Literal::String("csv".to_string()), dummy_span()),
+                    value: AnnotationValue::Literal(Literal::String("csv".to_string())),
                     span: dummy_span(),
                 },
             ],
@@ -442,7 +445,7 @@ mod tests {
 
         let mut modifiers = Modifiers::default();
         modifiers.annotations.push(Annotation {
-            name: "Sample".to_string(),
+            name: AnnotationName::new(vec!["Sample".to_string()], dummy_span()),
             arguments: Vec::new(),
             span: dummy_span(),
         });

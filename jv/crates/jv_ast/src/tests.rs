@@ -4,18 +4,23 @@ use serde_json::json;
 fn build_sample_annotation() -> Annotation {
     let positional_span = Span::new(1, 1, 1, 12);
     let named_span = Span::new(1, 14, 1, 30);
-    let value_span = Span::new(1, 20, 1, 24);
+    let name_span = Span::new(1, 0, 1, 7);
 
     Annotation {
-        name: "Sample".to_string(),
+        name: AnnotationName::new(vec!["Sample".to_string()], name_span.clone()),
         arguments: vec![
-            AnnotationArgument::PositionalLiteral {
-                value: Literal::String("examples/users.json".to_string()),
+            AnnotationArgument::Positional {
+                value: AnnotationValue::Literal(Literal::String(
+                    "examples/users.json".to_string(),
+                )),
                 span: positional_span,
             },
             AnnotationArgument::Named {
                 name: "mode".to_string(),
-                value: Expression::Identifier("Load".to_string(), value_span),
+                value: AnnotationValue::EnumConstant {
+                    type_path: vec!["SampleMode".to_string()],
+                    constant: "Load".to_string(),
+                },
                 span: named_span,
             },
         ],
@@ -40,17 +45,18 @@ fn annotation_roundtrips_through_serde_with_modifiers() {
 #[test]
 fn annotation_argument_span_access_returns_original_span() {
     let positional_span = Span::new(2, 5, 2, 18);
-    let positional = AnnotationArgument::PositionalLiteral {
-        value: Literal::String("users.csv".to_string()),
+    let positional = AnnotationArgument::Positional {
+        value: AnnotationValue::Literal(Literal::String("users.csv".to_string())),
         span: positional_span.clone(),
     };
     assert_eq!(positional.span(), &positional_span);
 
     let named_span = Span::new(2, 20, 2, 34);
-    let value_span = Span::new(2, 27, 2, 31);
     let named = AnnotationArgument::Named {
         name: "format".to_string(),
-        value: Expression::Identifier("Csv".to_string(), value_span),
+        value: AnnotationValue::ClassLiteral {
+            type_path: vec!["java".to_string(), "lang".to_string(), "String".to_string()],
+        },
         span: named_span.clone(),
     };
     assert_eq!(named.span(), &named_span);
@@ -101,6 +107,50 @@ fn call_argument_metadata_roundtrips_with_extended_fields() {
         serde_json::from_str(&serialized).expect("deserialize metadata");
 
     assert_eq!(decoded, metadata);
+}
+
+#[test]
+fn reserved_annotation_lookup_and_conflict_detection() {
+    assert!(is_jv_reserved("Sample"));
+    assert!(!is_jv_reserved("Custom"));
+
+    let span_primary = Span::new(1, 0, 1, 6);
+    let span_duplicate = Span::new(2, 0, 2, 6);
+    let span_shadow = Span::new(3, 0, 3, 15);
+
+    let sample_primary = Annotation {
+        name: AnnotationName::new(vec!["Sample".to_string()], span_primary.clone()),
+        arguments: Vec::new(),
+        span: span_primary,
+    };
+    let sample_duplicate = Annotation {
+        name: AnnotationName::new(vec!["Sample".to_string()], span_duplicate.clone()),
+        arguments: Vec::new(),
+        span: span_duplicate,
+    };
+    let sample_shadow = Annotation {
+        name: AnnotationName::new(
+            vec![
+                "com".to_string(),
+                "example".to_string(),
+                "Sample".to_string(),
+            ],
+            span_shadow.clone(),
+        ),
+        arguments: Vec::new(),
+        span: span_shadow,
+    };
+
+    let binding = [sample_primary, sample_duplicate, sample_shadow];
+    let conflicts = detect_reserved_conflicts(&binding);
+
+    assert!(conflicts
+        .iter()
+        .any(|conflict| matches!(conflict.kind, ReservedConflictKind::DuplicateUsage)));
+    assert!(conflicts.iter().any(|conflict| matches!(
+        conflict.kind,
+        ReservedConflictKind::NameShadowing { reserved } if reserved == "Sample"
+    )));
 }
 
 #[test]

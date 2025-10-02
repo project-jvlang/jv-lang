@@ -5,6 +5,7 @@
 //! statements, types, and metadata needed for further processing by the compiler.
 
 // Module declarations
+pub mod annotation;
 pub mod comments;
 pub mod expression;
 pub mod json;
@@ -14,6 +15,7 @@ pub mod types;
 pub mod utils;
 
 // Re-export all public types for convenient access
+pub use annotation::*;
 pub use comments::*;
 pub use expression::*;
 pub use json::*;

@@ -1,10 +1,10 @@
 use chumsky::prelude::*;
 use chumsky::Parser as ChumskyParser;
 use jv_ast::{
-    Annotation, AnnotationArgument, BinaryOp, CommentKind, CommentStatement, CommentVisibility,
-    ConcurrencyConstruct, Expression, ExtensionFunction, ForInStatement, Literal, LoopBinding,
-    LoopStrategy, Modifiers, NumericRangeLoop, Parameter, ResourceManagement, Span, Statement,
-    TypeAnnotation, Visibility,
+    Annotation, AnnotationArgument, AnnotationName, AnnotationValue, BinaryOp, CommentKind,
+    CommentStatement, CommentVisibility, ConcurrencyConstruct, Expression, ExtensionFunction,
+    ForInStatement, Literal, LoopBinding, LoopStrategy, Modifiers, NumericRangeLoop, Parameter,
+    ResourceManagement, Span, Statement, TypeAnnotation, Visibility,
 };
 use jv_lexer::{Token, TokenType};
 
@@ -470,31 +470,105 @@ fn modifiers_parser() -> impl ChumskyParser<Token, Modifiers, Error = Simple<Tok
 }
 
 fn annotation_parser() -> impl ChumskyParser<Token, Annotation, Error = Simple<Token>> + Clone {
-    let expr = expressions::expression_parser();
+    recursive(|annotation_parser_ref| {
+        let annotation_value = recursive(|value_parser_ref| {
+            let literal = filter_map(|span, token: Token| {
+                let token_span = span_from_token(&token);
+                match token.token_type {
+                    TokenType::String(value) => Ok((
+                        AnnotationValue::Literal(Literal::String(value)),
+                        token_span,
+                    )),
+                    TokenType::Number(value) => Ok((
+                        AnnotationValue::Literal(Literal::Number(value)),
+                        token_span,
+                    )),
+                    TokenType::Boolean(value) => Ok((
+                        AnnotationValue::Literal(Literal::Boolean(value)),
+                        token_span,
+                    )),
+                    TokenType::Null => Ok((AnnotationValue::Literal(Literal::Null), token_span)),
+                    _ => Err(Simple::expected_input_found(span, Vec::new(), Some(token))),
+                }
+            });
 
-    token_at()
-        .map(|token| span_from_token(&token))
-        .then(identifier_with_span())
-        .then(annotation_argument_list(expr.clone()).or_not())
-        .map(|((at_span, (name, name_span)), maybe_args)| {
-            let (arguments, end_span) =
-                maybe_args.unwrap_or_else(|| (Vec::new(), name_span.clone()));
-            let span = merge_spans(&at_span, &end_span);
-            Annotation {
-                name,
-                arguments,
-                span,
-            }
-        })
+            let enum_or_class = qualified_name_with_span().then(
+                token_dot()
+                    .ignore_then(token_class().map(|token| span_from_token(&token)))
+                    .or_not(),
+            )
+            .map(|((segments, name_span), maybe_class_span)| {
+                if let Some(class_span) = maybe_class_span {
+                    let span = merge_spans(&name_span, &class_span);
+                    (
+                        AnnotationValue::ClassLiteral {
+                            type_path: segments,
+                        },
+                        span,
+                    )
+                } else {
+                    let mut type_path = segments.clone();
+                    let constant = type_path.pop().unwrap_or_default();
+                    (
+                        AnnotationValue::EnumConstant {
+                            type_path,
+                            constant,
+                        },
+                        name_span,
+                    )
+                }
+            });
+
+            let nested = annotation_parser_ref.clone().map(|annotation: Annotation| {
+                let span = annotation.span.clone();
+                (
+                    AnnotationValue::NestedAnnotation(Box::new(annotation)),
+                    span,
+                )
+            });
+
+            let array = token_left_brace()
+                .map(|token| span_from_token(&token))
+                .then(
+                    value_parser_ref
+                        .clone()
+                        .separated_by(token_any_comma())
+                        .allow_trailing(),
+                )
+                .then(token_right_brace().map(|token| span_from_token(&token)))
+                .map(|((left_span, values), right_span)| {
+                    let elements = values.into_iter().map(|(value, _)| value).collect();
+                    let span = merge_spans(&left_span, &right_span);
+                    (AnnotationValue::Array(elements), span)
+                });
+
+            choice((literal, array, nested, enum_or_class.clone()))
+        });
+
+        token_at()
+            .map(|token| span_from_token(&token))
+            .then(qualified_name_with_span())
+            .then(annotation_argument_list(annotation_value).or_not())
+            .map(|((at_span, (segments, name_span)), maybe_args)| {
+                let (arguments, end_span) =
+                    maybe_args.unwrap_or_else(|| (Vec::new(), name_span.clone()));
+                let span = merge_spans(&at_span, &end_span);
+                Annotation {
+                    name: AnnotationName::new(segments, name_span),
+                    arguments,
+                    span,
+                }
+            })
+    })
 }
 
 fn annotation_argument_list(
-    expr: impl ChumskyParser<Token, Expression, Error = Simple<Token>> + Clone,
+    value_parser: impl ChumskyParser<Token, (AnnotationValue, Span), Error = Simple<Token>> + Clone,
 ) -> impl ChumskyParser<Token, (Vec<AnnotationArgument>, Span), Error = Simple<Token>> + Clone {
     token_left_paren()
         .map(|token| span_from_token(&token))
         .then(
-            annotation_argument(expr)
+            annotation_argument(value_parser)
                 .separated_by(token_any_comma())
                 .allow_trailing(),
         )
@@ -503,16 +577,16 @@ fn annotation_argument_list(
 }
 
 fn annotation_argument(
-    expr: impl ChumskyParser<Token, Expression, Error = Simple<Token>> + Clone,
+    value_parser: impl ChumskyParser<Token, (AnnotationValue, Span), Error = Simple<Token>> + Clone,
 ) -> impl ChumskyParser<Token, AnnotationArgument, Error = Simple<Token>> + Clone {
-    let positional = annotation_literal()
-        .map(|(value, span)| AnnotationArgument::PositionalLiteral { value, span });
+    let positional = value_parser
+        .clone()
+        .map(|(value, span)| AnnotationArgument::Positional { value, span });
 
     let named = identifier_with_span()
         .then_ignore(token_assign())
-        .then(expr)
-        .map(|((name, name_span), value)| {
-            let value_span = expression_span(&value);
+        .then(value_parser)
+        .map(|((name, name_span), (value, value_span))| {
             let span = merge_spans(&name_span, &value_span);
             AnnotationArgument::Named { name, value, span }
         });
@@ -520,18 +594,24 @@ fn annotation_argument(
     choice((named, positional))
 }
 
-fn annotation_literal() -> impl ChumskyParser<Token, (Literal, Span), Error = Simple<Token>> + Clone
-{
-    filter_map(|span, token: Token| {
-        let token_span = span_from_token(&token);
-        match token.token_type {
-            TokenType::String(value) => Ok((Literal::String(value), token_span)),
-            TokenType::Number(value) => Ok((Literal::Number(value), token_span)),
-            TokenType::Boolean(value) => Ok((Literal::Boolean(value), token_span)),
-            TokenType::Null => Ok((Literal::Null, token_span)),
-            _ => Err(Simple::expected_input_found(span, Vec::new(), Some(token))),
-        }
-    })
+fn qualified_name_with_span(
+) -> impl ChumskyParser<Token, (Vec<String>, Span), Error = Simple<Token>> + Clone {
+    identifier_with_span()
+        .then(
+            token_dot()
+                .ignore_then(identifier_with_span())
+                .repeated(),
+        )
+        .map(|((first_name, first_span), rest)| {
+            let mut segments = Vec::with_capacity(rest.len() + 1);
+            segments.push(first_name);
+            let mut span = first_span;
+            for (segment, segment_span) in rest {
+                span = merge_spans(&span, &segment_span);
+                segments.push(segment);
+            }
+            (segments, span)
+        })
 }
 
 #[cfg(test)]
@@ -574,12 +654,14 @@ mod tests {
 
         let annotation = parser.parse(tokens).expect("parse annotation");
 
-        assert_eq!(annotation.name, "Sample");
+        assert_eq!(annotation.name.simple_name(), "Sample");
         assert_eq!(annotation.arguments.len(), 2);
 
         match &annotation.arguments[0] {
-            AnnotationArgument::PositionalLiteral { value, .. } => match value {
-                Literal::String(path) => assert_eq!(path, "examples/users.json"),
+            AnnotationArgument::Positional { value, .. } => match value {
+                AnnotationValue::Literal(Literal::String(path)) => {
+                    assert_eq!(path, "examples/users.json")
+                }
                 other => panic!("expected string literal, found {:?}", other),
             },
             other => panic!("expected positional literal, found {:?}", other),
@@ -589,7 +671,10 @@ mod tests {
             AnnotationArgument::Named { name, value, .. } => {
                 assert_eq!(name, "mode");
                 match value {
-                    Expression::Identifier(identifier, _) => assert_eq!(identifier, "Load"),
+                    AnnotationValue::EnumConstant { type_path, constant } => {
+                        assert!(type_path.is_empty());
+                        assert_eq!(constant, "Load");
+                    }
                     other => panic!("expected identifier expression, found {:?}", other),
                 }
             }
@@ -617,10 +702,154 @@ mod tests {
         let modifiers = parser.parse(tokens).expect("parse modifiers");
 
         assert_eq!(modifiers.annotations.len(), 1);
-        assert_eq!(modifiers.annotations[0].name, "Sample");
+        assert_eq!(modifiers.annotations[0].name.simple_name(), "Sample");
         assert_eq!(modifiers.visibility, Visibility::Public);
         assert!(modifiers.is_final);
         assert_eq!(modifiers.annotations[0].arguments.len(), 1);
+        match &modifiers.annotations[0].arguments[0] {
+            AnnotationArgument::Positional { value, .. } => match value {
+                AnnotationValue::Literal(Literal::String(path)) => {
+                    assert_eq!(path, "data.json");
+                }
+                other => panic!("expected string literal, found {:?}", other),
+            },
+            other => panic!("expected positional argument, found {:?}", other),
+        }
+    }
+
+    #[test]
+    fn annotation_parser_supports_enum_and_class_literals() {
+        let parser = annotation_parser();
+
+        let tokens = vec![
+            make_token(TokenType::At, "@", 1),
+            make_token(TokenType::Identifier("Meta".to_string()), "Meta", 2),
+            make_token(TokenType::LeftParen, "(", 6),
+            make_token(TokenType::Identifier("status".to_string()), "status", 7),
+            make_token(TokenType::Assign, "=", 13),
+            make_token(TokenType::Identifier("com".to_string()), "com", 15),
+            make_token(TokenType::Dot, ".", 18),
+            make_token(TokenType::Identifier("example".to_string()), "example", 19),
+            make_token(TokenType::Dot, ".", 26),
+            make_token(TokenType::Identifier("Status".to_string()), "Status", 27),
+            make_token(TokenType::Dot, ".", 33),
+            make_token(TokenType::Identifier("ACTIVE".to_string()), "ACTIVE", 34),
+            make_token(TokenType::Comma, ",", 40),
+            make_token(TokenType::Identifier("clazz".to_string()), "clazz", 42),
+            make_token(TokenType::Assign, "=", 47),
+            make_token(TokenType::Identifier("java".to_string()), "java", 49),
+            make_token(TokenType::Dot, ".", 53),
+            make_token(TokenType::Identifier("lang".to_string()), "lang", 54),
+            make_token(TokenType::Dot, ".", 58),
+            make_token(TokenType::Identifier("String".to_string()), "String", 59),
+            make_token(TokenType::Dot, ".", 65),
+            make_token(TokenType::Class, "class", 66),
+            make_token(TokenType::RightParen, ")", 71),
+        ];
+
+        let annotation = parser.parse(tokens).expect("parse annotation with enum/class");
+
+        assert_eq!(annotation.arguments.len(), 2);
+
+        match &annotation.arguments[0] {
+            AnnotationArgument::Named { name, value, .. } => {
+                assert_eq!(name, "status");
+                match value {
+                    AnnotationValue::EnumConstant { type_path, constant } => {
+                        assert_eq!(type_path, &vec![
+                            "com".to_string(),
+                            "example".to_string(),
+                            "Status".to_string(),
+                        ]);
+                        assert_eq!(constant, "ACTIVE");
+                    }
+                    other => panic!("expected enum constant, found {:?}", other),
+                }
+            }
+            other => panic!("unexpected argument {:?}", other),
+        }
+
+        match &annotation.arguments[1] {
+            AnnotationArgument::Named { name, value, .. } => {
+                assert_eq!(name, "clazz");
+                match value {
+                    AnnotationValue::ClassLiteral { type_path } => {
+                        assert_eq!(type_path, &vec![
+                            "java".to_string(),
+                            "lang".to_string(),
+                            "String".to_string(),
+                        ]);
+                    }
+                    other => panic!("expected class literal, found {:?}", other),
+                }
+            }
+            other => panic!("unexpected argument {:?}", other),
+        }
+    }
+
+    #[test]
+    fn annotation_parser_supports_array_and_nested_annotations() {
+        let parser = annotation_parser();
+
+        let tokens = vec![
+            make_token(TokenType::At, "@", 1),
+            make_token(TokenType::Identifier("Tag".to_string()), "Tag", 2),
+            make_token(TokenType::LeftParen, "(", 5),
+            make_token(TokenType::Identifier("values".to_string()), "values", 6),
+            make_token(TokenType::Assign, "=", 12),
+            make_token(TokenType::LeftBrace, "{", 14),
+            make_token(TokenType::String("alpha".to_string()), "\"alpha\"", 15),
+            make_token(TokenType::Comma, ",", 22),
+            make_token(TokenType::String("beta".to_string()), "\"beta\"", 24),
+            make_token(TokenType::RightBrace, "}", 30),
+            make_token(TokenType::Comma, ",", 31),
+            make_token(TokenType::Identifier("nested".to_string()), "nested", 33),
+            make_token(TokenType::Assign, "=", 39),
+            make_token(TokenType::At, "@", 41),
+            make_token(TokenType::Identifier("Qualifier".to_string()), "Qualifier", 42),
+            make_token(TokenType::LeftParen, "(", 51),
+            make_token(TokenType::Identifier("value".to_string()), "value", 52),
+            make_token(TokenType::Assign, "=", 57),
+            make_token(TokenType::String("id".to_string()), "\"id\"", 59),
+            make_token(TokenType::RightParen, ")", 63),
+            make_token(TokenType::RightParen, ")", 64),
+        ];
+
+        let annotation = parser.parse(tokens).expect("parse annotation with array/nested");
+
+        assert_eq!(annotation.arguments.len(), 2);
+
+        match &annotation.arguments[0] {
+            AnnotationArgument::Named { name, value, .. } => {
+                assert_eq!(name, "values");
+                match value {
+                    AnnotationValue::Array(elements) => {
+                        assert_eq!(elements.len(), 2);
+                        match &elements[0] {
+                            AnnotationValue::Literal(Literal::String(text)) => {
+                                assert_eq!(text, "alpha");
+                            }
+                            other => panic!("unexpected array element {:?}", other),
+                        }
+                    }
+                    other => panic!("expected array, found {:?}", other),
+                }
+            }
+            other => panic!("unexpected argument {:?}", other),
+        }
+
+        match &annotation.arguments[1] {
+            AnnotationArgument::Named { name, value, .. } => {
+                assert_eq!(name, "nested");
+                match value {
+                    AnnotationValue::NestedAnnotation(inner) => {
+                        assert_eq!(inner.name.simple_name(), "Qualifier");
+                    }
+                    other => panic!("expected nested annotation, found {:?}", other),
+                }
+            }
+            other => panic!("unexpected argument {:?}", other),
+        }
     }
 }
 

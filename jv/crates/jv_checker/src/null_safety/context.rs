@@ -3,6 +3,7 @@ use std::collections::{HashMap, HashSet};
 use crate::inference::{TypeEnvironment, TypeKind as CheckerTypeKind, TypeScheme};
 use crate::pattern::{PatternMatchFacts, PatternTarget};
 use crate::{InferenceSnapshot, TypeInferenceService};
+use super::annotations::{lookup_nullability_hint, JavaNullabilityHint};
 use jv_inference::service::{TypeFacts, TypeFactsSnapshot};
 use jv_inference::types::{
     NullabilityFlag, TypeKind as FactsTypeKind, TypeVariant as FactsTypeVariant,
@@ -343,7 +344,7 @@ fn hydrate_java_annotations(
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct JavaSymbolMetadata {
     annotations: Vec<String>,
-    nullability_hint: Option<JavaNullabilityHint>,
+    nullability_hint: Option<(JavaNullabilityHint, u8)>,
     unknown_annotations: Vec<String>,
     boundary: Option<super::boundary::BoundaryKind>,
 }
@@ -363,26 +364,22 @@ impl JavaSymbolMetadata {
         self.annotations.push(trimmed.to_string());
 
         let normalized = trimmed.to_ascii_lowercase();
+
+        if let Some((hint, precedence)) = lookup_nullability_hint(&normalized) {
+            match self.nullability_hint {
+                Some((_, existing)) if existing > precedence => {}
+                _ => self.nullability_hint = Some((hint, precedence)),
+            }
+            return;
+        }
+
         match normalized.as_str() {
-            "nullable"
-            | "javax.annotation.nullable"
-            | "jakarta.annotation.nullable"
-            | "org.jetbrains.annotations.nullable" => {
-                self.nullability_hint = Some(JavaNullabilityHint::Nullable);
-            }
-            "nonnull"
-            | "notnull"
-            | "jakarta.annotation.nonnull"
-            | "javax.annotation.nonnull"
-            | "edu.umd.cs.findbugs.annotations.nonnull"
-            | "org.jetbrains.annotations.notnull" => {
-                if !matches!(self.nullability_hint, Some(JavaNullabilityHint::Nullable)) {
-                    self.nullability_hint = Some(JavaNullabilityHint::NonNull);
-                }
-            }
             "nullmarked" | "org.jspecify.annotations.nullmarked" => {
-                if !matches!(self.nullability_hint, Some(JavaNullabilityHint::Nullable)) {
-                    self.nullability_hint = Some(JavaNullabilityHint::NullMarked);
+                if !matches!(
+                    self.nullability_hint,
+                    Some((JavaNullabilityHint::Nullable, _))
+                ) {
+                    self.nullability_hint = Some((JavaNullabilityHint::NullMarked, 50));
                 }
             }
             "jni" | "jnifunction" | "jdk.jni" => {
@@ -396,7 +393,7 @@ impl JavaSymbolMetadata {
     }
 
     fn nullability_kind(&self) -> Option<NullabilityKind> {
-        match self.nullability_hint {
+        match self.nullability_hint.map(|(hint, _)| hint) {
             Some(JavaNullabilityHint::Nullable) => Some(NullabilityKind::Nullable),
             Some(JavaNullabilityHint::NonNull | JavaNullabilityHint::NullMarked) => {
                 Some(NullabilityKind::NonNull)
@@ -406,7 +403,7 @@ impl JavaSymbolMetadata {
     }
 
     pub fn nullability_hint(&self) -> Option<JavaNullabilityHint> {
-        self.nullability_hint
+        self.nullability_hint.map(|(hint, _)| hint)
     }
 
     pub fn boundary(&self) -> Option<super::boundary::BoundaryKind> {
@@ -424,13 +421,6 @@ impl JavaSymbolMetadata {
     fn is_empty(&self) -> bool {
         self.annotations.is_empty() && self.unknown_annotations.is_empty()
     }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum JavaNullabilityHint {
-    Nullable,
-    NonNull,
-    NullMarked,
 }
 
 #[cfg(test)]
@@ -560,6 +550,58 @@ mod tests {
         assert_eq!(unknowns.len(), 1);
         assert_eq!(unknowns[0].0, "mystery");
         assert_eq!(unknowns[0].1, "MaybeNull");
+    }
+
+    #[test]
+    fn higher_precedence_nullability_wins() {
+        let env = TypeEnvironment::new();
+        let mut builder = TypeFactsBuilder::new();
+        builder.environment_entry(
+            "symbol",
+            FactsTypeKind::new(TypeVariant::Primitive("java.lang.Object")),
+        );
+        builder.add_java_annotation("symbol", "@org.springframework.lang.NonNull");
+        builder.add_java_annotation("symbol", "@org.jetbrains.annotations.Nullable");
+        let facts = builder.build();
+
+        let context = NullSafetyContext::from_parts(Some(&facts), Some(&env));
+        let metadata = context
+            .java_metadata()
+            .get("symbol")
+            .expect("metadata present");
+
+        assert_eq!(
+            metadata.nullability_hint(),
+            Some(JavaNullabilityHint::Nullable)
+        );
+        assert_eq!(
+            context.lattice().get("symbol"),
+            Some(NullabilityKind::Nullable)
+        );
+    }
+
+    #[test]
+    fn null_marked_does_not_override_explicit_nullable() {
+        let env = TypeEnvironment::new();
+        let mut builder = TypeFactsBuilder::new();
+        builder.environment_entry(
+            "symbol",
+            FactsTypeKind::new(TypeVariant::Primitive("java.lang.Object")),
+        );
+        builder.add_java_annotation("symbol", "@org.jspecify.annotations.NullMarked");
+        builder.add_java_annotation("symbol", "@jakarta.annotation.Nullable");
+        let facts = builder.build();
+
+        let context = NullSafetyContext::from_parts(Some(&facts), Some(&env));
+        let metadata = context
+            .java_metadata()
+            .get("symbol")
+            .expect("metadata present");
+
+        assert_eq!(
+            metadata.nullability_hint(),
+            Some(JavaNullabilityHint::Nullable)
+        );
     }
 
     #[test]

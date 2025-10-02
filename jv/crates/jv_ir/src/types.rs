@@ -777,6 +777,28 @@ pub struct IrCatchClause {
 }
 
 /// Java modifiers (public, private, static, etc.)
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct IrAnnotation {
+    pub name: AnnotationName,
+    pub arguments: Vec<IrAnnotationArgument>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum IrAnnotationArgument {
+    Positional(IrAnnotationValue),
+    Named { name: String, value: IrAnnotationValue },
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum IrAnnotationValue {
+    Literal(Literal),
+    EnumConstant { type_name: String, constant: String },
+    Array(Vec<IrAnnotationValue>),
+    ClassLiteral(String),
+    Nested(IrAnnotation),
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct IrModifiers {
     pub visibility: IrVisibility,
@@ -786,7 +808,7 @@ pub struct IrModifiers {
     pub is_synchronized: bool,
     pub is_native: bool,
     pub is_strictfp: bool,
-    pub annotations: Vec<String>, // Annotation names
+    pub annotations: Vec<IrAnnotation>,
     #[serde(default)]
     pub is_sealed: bool,
     #[serde(default)]

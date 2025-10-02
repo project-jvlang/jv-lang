@@ -336,5 +336,14 @@ pub(crate) fn keyword(
 
 pub(crate) fn type_annotation_simple(
 ) -> impl ChumskyParser<Token, TypeAnnotation, Error = Simple<Token>> + Clone {
-    identifier().map(TypeAnnotation::Simple)
+    identifier()
+        .then(token_question().or_not())
+        .map(|(name, nullable)| {
+            let base = TypeAnnotation::Simple(name);
+            if nullable.is_some() {
+                TypeAnnotation::Nullable(Box::new(base))
+            } else {
+                base
+            }
+        })
 }

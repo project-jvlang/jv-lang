@@ -21,7 +21,7 @@ pub fn desugar_val_declaration(
     let sample_annotations: Vec<_> = modifiers
         .annotations
         .iter()
-        .filter(|annotation| annotation.name == "Sample")
+        .filter(|annotation| annotation.name.simple_name() == "Sample")
         .cloned()
         .collect();
 

@@ -155,7 +155,7 @@ impl<'g, 'ctx, 'facts> FlowGraphBuilder<'g, 'ctx, 'facts> {
         if modifiers
             .annotations
             .iter()
-            .any(|annotation| annotation.name.eq_ignore_ascii_case("LateInit"))
+            .any(|annotation| annotation.name.simple_name().eq_ignore_ascii_case("LateInit"))
         {
             self.context
                 .late_init_mut()

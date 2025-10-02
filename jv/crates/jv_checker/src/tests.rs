@@ -1,8 +1,8 @@
 use super::*;
 use crate::pattern::{self, PatternTarget};
 use jv_ast::{
-    BinaryOp, Expression, Literal, Modifiers, Parameter, Pattern, Program, Span, Statement,
-    TypeAnnotation, WhenArm,
+    Annotation, AnnotationName, BinaryOp, Expression, Literal, Modifiers, Parameter, Pattern,
+    Program, Span, Statement, TypeAnnotation, WhenArm,
 };
 
 fn dummy_span() -> Span {
@@ -11,6 +11,14 @@ fn dummy_span() -> Span {
 
 fn default_modifiers() -> Modifiers {
     Modifiers::default()
+}
+
+fn annotation(name: &str) -> Annotation {
+    Annotation {
+        name: AnnotationName::new(vec![name.to_string()], dummy_span()),
+        arguments: Vec::new(),
+        span: dummy_span(),
+    }
 }
 
 #[test]
@@ -111,6 +119,148 @@ fn check_program_reports_type_error_on_mismatch() {
     assert!(
         matches!(errors.first(), Some(CheckError::TypeError(message)) if message.contains("type mismatch"))
     );
+}
+
+#[test]
+fn override_annotation_on_method_is_allowed() {
+    let span = dummy_span();
+    let mut method_modifiers = Modifiers::default();
+    method_modifiers.annotations.push(annotation("Override"));
+
+    let method = Statement::FunctionDeclaration {
+        name: "run".into(),
+        parameters: Vec::new(),
+        return_type: None,
+        body: Box::new(Expression::Literal(Literal::Number("1".into()), span.clone())),
+        modifiers: method_modifiers,
+        span: span.clone(),
+    };
+
+    let class = Statement::ClassDeclaration {
+        name: "Service".into(),
+        type_parameters: Vec::new(),
+        superclass: None,
+        interfaces: Vec::new(),
+        properties: Vec::new(),
+        methods: vec![Box::new(method)],
+        modifiers: Modifiers::default(),
+        span: span.clone(),
+    };
+
+    let program = Program {
+        package: None,
+        imports: Vec::new(),
+        statements: vec![class],
+        span: span.clone(),
+    };
+
+    let mut checker = TypeChecker::new();
+    let result = checker.check_program(&program);
+    assert!(result.is_ok(), "override on method should be accepted: {result:?}");
+}
+
+#[test]
+fn override_annotation_on_field_is_rejected() {
+    let span = dummy_span();
+    let mut field_modifiers = Modifiers::default();
+    field_modifiers.annotations.push(annotation("Override"));
+
+    let program = Program {
+        package: None,
+        imports: Vec::new(),
+        statements: vec![Statement::ValDeclaration {
+            name: "count".into(),
+            type_annotation: None,
+            initializer: Expression::Literal(Literal::Number("1".into()), span.clone()),
+            modifiers: field_modifiers,
+            span: span.clone(),
+        }],
+        span: span.clone(),
+    };
+
+    let mut checker = TypeChecker::new();
+    let result = checker.check_program(&program);
+    assert!(result.is_err(), "override on field should be rejected");
+
+    let errors = result.err().unwrap();
+    assert!(matches!(
+        errors.first(),
+        Some(CheckError::ValidationError { message, .. }) if message.contains("@Override") && message.contains("method")
+    ));
+}
+
+#[test]
+fn duplicate_reserved_annotation_is_reported() {
+    let span = dummy_span();
+    let mut modifiers = Modifiers::default();
+    modifiers.annotations.push(annotation("Sample"));
+    modifiers.annotations.push(annotation("Sample"));
+
+    let program = Program {
+        package: None,
+        imports: Vec::new(),
+        statements: vec![Statement::ValDeclaration {
+            name: "fixture".into(),
+            type_annotation: None,
+            initializer: Expression::Literal(Literal::String("data".into()), span.clone()),
+            modifiers,
+            span: span.clone(),
+        }],
+        span: span.clone(),
+    };
+
+    let mut checker = TypeChecker::new();
+    let result = checker.check_program(&program);
+    assert!(result.is_err(), "duplicate reserved annotation should fail");
+
+    let errors = result.err().unwrap();
+    assert!(matches!(
+        errors.first(),
+        Some(CheckError::ValidationError { message, .. }) if message.contains("@Sample") && message.contains("used once")
+    ));
+}
+
+#[test]
+fn reserved_annotation_shadowing_is_detected() {
+    let span = dummy_span();
+    let shadow = Annotation {
+        name: AnnotationName::new(
+            vec![
+                "com".to_string(),
+                "example".to_string(),
+                "Sample".to_string(),
+            ],
+            span.clone(),
+        ),
+        arguments: Vec::new(),
+        span: span.clone(),
+    };
+
+    let mut modifiers = Modifiers::default();
+    modifiers.annotations.push(shadow);
+
+    let program = Program {
+        package: None,
+        imports: Vec::new(),
+        statements: vec![Statement::ValDeclaration {
+            name: "fixture".into(),
+            type_annotation: None,
+            initializer: Expression::Literal(Literal::String("data".into()), span.clone()),
+            modifiers,
+            span: span.clone(),
+        }],
+        span: span.clone(),
+    };
+
+    let mut checker = TypeChecker::new();
+    let result = checker.check_program(&program);
+    assert!(result.is_err(), "shadowing reserved annotation should fail");
+
+    let errors = result.err().unwrap();
+    assert!(matches!(
+        errors.first(),
+        Some(CheckError::ValidationError { message, .. }) if message.contains("reserved jv annotation")
+    ));
 }
 
 #[test]
