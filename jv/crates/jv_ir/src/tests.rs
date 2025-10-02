@@ -2251,6 +2251,112 @@ mod tests {
         }
     }
 
+    #[test]
+    fn test_implicit_println_lowering_uses_java_lang_system_out() {
+        let mut context = test_context();
+        context.add_variable("greeting".to_string(), JavaType::string());
+
+        let expr = Expression::Call {
+            function: Box::new(Expression::Identifier("println".to_string(), dummy_span())),
+            args: vec![Argument::Positional(Expression::Identifier(
+                "greeting".to_string(),
+                dummy_span(),
+            ))],
+            argument_metadata: CallArgumentMetadata::default(),
+            span: dummy_span(),
+        };
+
+        let ir_expr =
+            transform_expression(expr, &mut context).expect("println lowering should succeed");
+
+        match ir_expr {
+            IrExpression::MethodCall {
+                receiver: Some(receiver),
+                method_name,
+                args,
+                ..
+            } => {
+                assert_eq!(method_name, "println");
+                assert_eq!(args.len(), 1);
+                match &args[0] {
+                    IrExpression::Identifier { name, .. } => assert_eq!(name, "greeting"),
+                    other => panic!("expected greeting identifier, got {:?}", other),
+                }
+
+                match *receiver {
+                    IrExpression::FieldAccess {
+                        receiver: inner_receiver,
+                        field_name,
+                        ..
+                    } => {
+                        assert_eq!(field_name, "out");
+                        match *inner_receiver {
+                            IrExpression::Identifier { name, .. } => {
+                                assert_eq!(name, "java.lang.System");
+                            }
+                            other => panic!("expected system identifier, got {:?}", other),
+                        }
+                    }
+                    other => panic!("expected field access receiver, got {:?}", other),
+                }
+            }
+            other => panic!("expected println method call, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_explicit_system_in_call_uses_fully_qualified_receiver() {
+        let mut context = test_context();
+
+        let expr = Expression::Call {
+            function: Box::new(Expression::MemberAccess {
+                object: Box::new(Expression::MemberAccess {
+                    object: Box::new(Expression::Identifier("system".to_string(), dummy_span())),
+                    property: "in".to_string(),
+                    span: dummy_span(),
+                }),
+                property: "read".to_string(),
+                span: dummy_span(),
+            }),
+            args: Vec::new(),
+            argument_metadata: CallArgumentMetadata::default(),
+            span: dummy_span(),
+        };
+
+        let ir_expr = transform_expression(expr, &mut context)
+            .expect("system.in.read lowering should succeed");
+
+        match ir_expr {
+            IrExpression::MethodCall {
+                receiver: Some(receiver),
+                method_name,
+                java_type,
+                ..
+            } => {
+                assert_eq!(method_name, "read");
+                assert_eq!(java_type, JavaType::Primitive("int".to_string()));
+
+                match *receiver {
+                    IrExpression::FieldAccess {
+                        receiver: inner_receiver,
+                        field_name,
+                        ..
+                    } => {
+                        assert_eq!(field_name, "in");
+                        match *inner_receiver {
+                            IrExpression::Identifier { name, .. } => {
+                                assert_eq!(name, "java.lang.System");
+                            }
+                            other => panic!("expected system identifier, got {:?}", other),
+                        }
+                    }
+                    other => panic!("expected field access receiver, got {:?}", other),
+                }
+            }
+            other => panic!("expected system.in.read method call, got {:?}", other),
+        }
+    }
+
     // Complex integration tests for combined desugaring
 
     #[test]

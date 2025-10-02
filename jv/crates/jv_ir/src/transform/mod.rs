@@ -3,8 +3,8 @@ use crate::error::TransformError;
 use crate::profiling::{PerfMetrics, TransformProfiler};
 use crate::types::{IrCommentKind, IrExpression, IrProgram, IrStatement, JavaType};
 use jv_ast::{
-    BinaryOp, CommentKind, ConcurrencyConstruct, Expression, Literal, Program, ResourceManagement,
-    Span, Statement,
+    Argument, BinaryOp, CallArgumentMetadata, CommentKind, ConcurrencyConstruct, Expression,
+    Literal, Program, ResourceManagement, Span, Statement,
 };
 
 mod concurrency;
@@ -302,6 +302,23 @@ pub fn transform_expression(
                 })
             }
         }
+        Expression::MemberAccess {
+            object,
+            property,
+            span,
+        } => {
+            if let Some((field_expr, _)) = lower_system_field(*object, property, span.clone()) {
+                Ok(field_expr)
+            } else {
+                Ok(IrExpression::Literal(Literal::Null, Span::default()))
+            }
+        }
+        Expression::Call {
+            function,
+            args,
+            argument_metadata,
+            span,
+        } => lower_call_expression(*function, args, argument_metadata, span, context),
         Expression::When {
             expr: subject,
             arms,
@@ -310,5 +327,220 @@ pub fn transform_expression(
             span,
         } => desugar_when_expression(subject, arms, else_arm, implicit_end, span, context),
         _ => Ok(IrExpression::Literal(Literal::Null, Span::default())),
+    }
+}
+
+const SYSTEM_OUT_METHODS: &[&str] = &[
+    "append", "format", "print", "printf", "println", "write", "flush", "close",
+];
+
+const SYSTEM_IN_METHODS: &[&str] = &[
+    "available",
+    "close",
+    "mark",
+    "marksupported",
+    "read",
+    "readallbytes",
+    "readnbytes",
+    "reset",
+    "skip",
+    "transferto",
+];
+
+fn lower_call_expression(
+    function: Expression,
+    args: Vec<Argument>,
+    argument_metadata: CallArgumentMetadata,
+    span: Span,
+    context: &mut TransformContext,
+) -> Result<IrExpression, TransformError> {
+    let argument_style = argument_metadata.style;
+    let ir_args = lower_call_arguments(args, context)?;
+
+    match function {
+        Expression::Identifier(name, fn_span) => {
+            if let Some(receiver_kind) = resolve_implicit_system_method(&name) {
+                let receiver_expr = create_system_field_access(receiver_kind, fn_span);
+                let return_type = system_method_return_type(receiver_kind, &name);
+                return Ok(IrExpression::MethodCall {
+                    receiver: Some(Box::new(receiver_expr)),
+                    method_name: name,
+                    args: ir_args,
+                    argument_style,
+                    java_type: return_type,
+                    span,
+                });
+            }
+        }
+        Expression::MemberAccess {
+            object,
+            property,
+            span: _fn_span,
+        } => {
+            let method_name = property.clone();
+            if let Some((receiver_expr, receiver_kind)) = lower_system_receiver_expression(*object)
+            {
+                let return_type = system_method_return_type(receiver_kind, &method_name);
+                return Ok(IrExpression::MethodCall {
+                    receiver: Some(Box::new(receiver_expr)),
+                    method_name,
+                    args: ir_args,
+                    argument_style,
+                    java_type: return_type,
+                    span,
+                });
+            }
+        }
+        _ => {}
+    }
+
+    Ok(IrExpression::Literal(Literal::Null, Span::default()))
+}
+
+fn lower_call_arguments(
+    args: Vec<Argument>,
+    context: &mut TransformContext,
+) -> Result<Vec<IrExpression>, TransformError> {
+    let mut lowered = Vec::with_capacity(args.len());
+    for arg in args {
+        let expr = match arg {
+            Argument::Positional(expr) => expr,
+            Argument::Named { value, .. } => value,
+        };
+        lowered.push(transform_expression(expr, context)?);
+    }
+    Ok(lowered)
+}
+
+fn lower_system_receiver_expression(expr: Expression) -> Option<(IrExpression, SystemReceiver)> {
+    match expr {
+        Expression::MemberAccess {
+            object,
+            property,
+            span,
+        } => lower_system_field(*object, property, span),
+        _ => None,
+    }
+}
+
+fn lower_system_field(
+    object: Expression,
+    property: String,
+    span: Span,
+) -> Option<(IrExpression, SystemReceiver)> {
+    match object {
+        Expression::Identifier(name, system_span) if name.eq_ignore_ascii_case("system") => {
+            let property_lower = property.to_ascii_lowercase();
+            let receiver_kind = match property_lower.as_str() {
+                "out" => SystemReceiver::Out,
+                "in" => SystemReceiver::In,
+                "err" => SystemReceiver::Err,
+                _ => return None,
+            };
+
+            let field_expr = IrExpression::FieldAccess {
+                receiver: Box::new(system_identifier(system_span)),
+                field_name: receiver_kind.field_name().to_string(),
+                java_type: receiver_kind.java_type(),
+                span,
+            };
+
+            Some((field_expr, receiver_kind))
+        }
+        _ => None,
+    }
+}
+
+fn resolve_implicit_system_method(name: &str) -> Option<SystemReceiver> {
+    let lower = name.to_ascii_lowercase();
+    if SYSTEM_OUT_METHODS.contains(&lower.as_str()) {
+        Some(SystemReceiver::Out)
+    } else if SYSTEM_IN_METHODS.contains(&lower.as_str()) {
+        Some(SystemReceiver::In)
+    } else {
+        None
+    }
+}
+
+fn system_method_return_type(receiver: SystemReceiver, method_name: &str) -> JavaType {
+    match receiver {
+        SystemReceiver::Out | SystemReceiver::Err => system_out_method_return_type(method_name),
+        SystemReceiver::In => system_in_method_return_type(method_name),
+    }
+}
+
+fn system_out_method_return_type(method_name: &str) -> JavaType {
+    let lower = method_name.to_ascii_lowercase();
+    match lower.as_str() {
+        "append" | "format" | "printf" => JavaType::Reference {
+            name: "java.io.PrintStream".to_string(),
+            generic_args: vec![],
+        },
+        _ => JavaType::void(),
+    }
+}
+
+fn system_in_method_return_type(method_name: &str) -> JavaType {
+    let lower = method_name.to_ascii_lowercase();
+    match lower.as_str() {
+        "read" | "available" => JavaType::Primitive("int".to_string()),
+        "skip" | "transferto" => JavaType::Primitive("long".to_string()),
+        "marksupported" => JavaType::Primitive("boolean".to_string()),
+        "readallbytes" | "readnbytes" => JavaType::Array {
+            element_type: Box::new(JavaType::Primitive("byte".to_string())),
+            dimensions: 1,
+        },
+        "close" | "mark" | "reset" => JavaType::void(),
+        _ => JavaType::object(),
+    }
+}
+
+fn system_identifier(span: Span) -> IrExpression {
+    IrExpression::Identifier {
+        name: "java.lang.System".to_string(),
+        java_type: JavaType::Reference {
+            name: "java.lang.System".to_string(),
+            generic_args: vec![],
+        },
+        span,
+    }
+}
+
+fn create_system_field_access(receiver: SystemReceiver, span: Span) -> IrExpression {
+    IrExpression::FieldAccess {
+        receiver: Box::new(system_identifier(span.clone())),
+        field_name: receiver.field_name().to_string(),
+        java_type: receiver.java_type(),
+        span,
+    }
+}
+
+#[derive(Clone, Copy)]
+enum SystemReceiver {
+    Out,
+    In,
+    Err,
+}
+
+impl SystemReceiver {
+    fn field_name(self) -> &'static str {
+        match self {
+            SystemReceiver::Out => "out",
+            SystemReceiver::In => "in",
+            SystemReceiver::Err => "err",
+        }
+    }
+
+    fn java_type(self) -> JavaType {
+        match self {
+            SystemReceiver::Out | SystemReceiver::Err => JavaType::Reference {
+                name: "java.io.PrintStream".to_string(),
+                generic_args: vec![],
+            },
+            SystemReceiver::In => JavaType::Reference {
+                name: "java.io.InputStream".to_string(),
+                generic_args: vec![],
+            },
+        }
     }
 }
