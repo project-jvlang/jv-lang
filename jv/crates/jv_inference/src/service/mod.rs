@@ -7,8 +7,13 @@
 use crate::cache::CacheMetrics;
 use crate::solver::TypeBinding;
 use crate::types::{TypeId, TypeKind};
+use hex::encode as hex_encode;
+use jv_ast::json::{JsonLiteral, JsonValue};
+use jv_ir::transform::infer_json_value_schema;
+use jv_ir::types::Schema;
 use serde_json::{json, Value};
-use std::collections::HashMap;
+use sha2::{Digest, Sha256};
+use std::collections::{HashMap, HashSet};
 use std::hash::Hash;
 use std::sync::Arc;
 
@@ -367,6 +372,243 @@ impl TypeFactsCache {
     }
 }
 
+/// In-memory cache mapping canonical JSON literals to inferred schemas.
+#[derive(Debug, Default, Clone)]
+pub struct SchemaCache {
+    entries: HashMap<String, Schema>,
+}
+
+impl SchemaCache {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
+    pub fn clear(&mut self) {
+        self.entries.clear();
+    }
+
+    pub fn infer_schema(&mut self, literal: &JsonLiteral) -> Schema {
+        let canonical_value = literal_to_value(literal);
+        let key = compute_schema_key(&canonical_value);
+
+        if let Some(schema) = self.entries.get(&key) {
+            return schema.clone();
+        }
+
+        let schema = infer_json_value_schema(&canonical_value);
+        self.entries.insert(key, schema.clone());
+        schema
+    }
+}
+
+/// Convenience wrapper for inferring schemas from `JsonLiteral` nodes while
+/// leveraging the provided cache.
+pub fn json_literal_to_schema(cache: &mut SchemaCache, literal: &JsonLiteral) -> Schema {
+    cache.infer_schema(literal)
+}
+
+/// Converts a `JsonLiteral` into a canonical JSON value suitable for embedding or hashing.
+pub fn json_literal_to_value(literal: &JsonLiteral) -> Value {
+    literal_to_value(literal)
+}
+
+/// Converts snake_case or kebab-case identifiers into camelCase.
+pub fn snake_to_camel(input: &str) -> String {
+    if !input
+        .chars()
+        .any(|c| c == '_' || c == '-' || c.is_whitespace())
+    {
+        let mut chars = input.chars();
+        if let Some(first) = chars.next() {
+            let mut result = String::new();
+            result.push(first.to_ascii_lowercase());
+            result.extend(chars);
+            return result;
+        } else {
+            return String::new();
+        }
+    }
+
+    let mut parts = input
+        .split(|c: char| c == '_' || c == '-' || c.is_whitespace())
+        .filter(|segment| !segment.is_empty());
+
+    let first = match parts.next() {
+        Some(segment) => segment.to_ascii_lowercase(),
+        None => String::new(),
+    };
+
+    let mut result = first;
+    for segment in parts {
+        let mut chars = segment.chars();
+        if let Some(first_char) = chars.next() {
+            result.push(first_char.to_ascii_uppercase());
+            for ch in chars {
+                result.push(ch.to_ascii_lowercase());
+            }
+        }
+    }
+
+    result
+}
+
+/// Ensures the provided identifier is a valid, non-reserved Java identifier.
+pub fn sanitize_java_identifier(name: &str) -> String {
+    let raw = if name.is_empty() {
+        "value".to_string()
+    } else {
+        name.to_string()
+    };
+
+    let mut chars = raw.chars();
+    let mut normalized = String::new();
+
+    if let Some(first) = chars.next() {
+        if first.is_ascii_alphabetic() || first == '_' {
+            normalized.push(first);
+        } else if first.is_ascii_digit() {
+            normalized.push('_');
+            normalized.push(first);
+        } else {
+            normalized.push('_');
+        }
+    } else {
+        normalized.push('_');
+    }
+
+    for ch in chars {
+        if ch.is_ascii_alphanumeric() || ch == '_' {
+            normalized.push(ch);
+        } else {
+            normalized.push('_');
+        }
+    }
+
+    let lowered = normalized.to_ascii_lowercase();
+    if JAVA_RESERVED_KEYWORDS.contains(&lowered.as_str()) {
+        normalized.push('_');
+    }
+
+    normalized
+}
+
+fn literal_to_value(literal: &JsonLiteral) -> Value {
+    json_value_to_value(&literal.value)
+}
+
+fn json_value_to_value(value: &JsonValue) -> Value {
+    match value {
+        JsonValue::Object { entries, .. } => {
+            let mut used = HashSet::new();
+            let mut map = serde_json::Map::new();
+            for entry in entries {
+                let key = canonical_field_name(&entry.key, &mut used);
+                map.insert(key, json_value_to_value(&entry.value));
+            }
+            Value::Object(map)
+        }
+        JsonValue::Array { elements, .. } => {
+            Value::Array(elements.iter().map(json_value_to_value).collect::<Vec<_>>())
+        }
+        JsonValue::String { value, .. } => Value::String(value.clone()),
+        JsonValue::Number { literal, .. } => parse_json_number(literal),
+        JsonValue::Boolean { value, .. } => Value::Bool(*value),
+        JsonValue::Null { .. } => Value::Null,
+    }
+}
+
+fn canonical_field_name(raw: &str, used: &mut HashSet<String>) -> String {
+    let mut candidate = sanitize_java_identifier(&snake_to_camel(raw));
+    if candidate.is_empty() {
+        candidate = "value".to_string();
+    }
+
+    while used.contains(&candidate) {
+        candidate.push('_');
+    }
+
+    used.insert(candidate.clone());
+    candidate
+}
+
+fn parse_json_number(literal: &str) -> Value {
+    match serde_json::from_str::<Value>(literal) {
+        Ok(Value::Number(number)) => Value::Number(number),
+        _ => Value::String(literal.to_string()),
+    }
+}
+
+fn compute_schema_key(value: &Value) -> String {
+    let bytes = serde_json::to_vec(value).expect("serialize canonical json literal");
+    let mut hasher = Sha256::new();
+    hasher.update(&bytes);
+    hex_encode(hasher.finalize())
+}
+
+const JAVA_RESERVED_KEYWORDS: &[&str] = &[
+    "abstract",
+    "assert",
+    "boolean",
+    "break",
+    "byte",
+    "case",
+    "catch",
+    "char",
+    "class",
+    "const",
+    "continue",
+    "default",
+    "do",
+    "double",
+    "else",
+    "enum",
+    "extends",
+    "final",
+    "finally",
+    "float",
+    "for",
+    "goto",
+    "if",
+    "implements",
+    "import",
+    "instanceof",
+    "int",
+    "interface",
+    "long",
+    "native",
+    "new",
+    "package",
+    "private",
+    "protected",
+    "public",
+    "return",
+    "short",
+    "static",
+    "strictfp",
+    "super",
+    "switch",
+    "synchronized",
+    "this",
+    "throw",
+    "throws",
+    "transient",
+    "try",
+    "void",
+    "volatile",
+    "while",
+    "true",
+    "false",
+    "null",
+];
+
 fn format_type(ty: &TypeKind) -> String {
     format!("{:?}", ty)
 }
@@ -376,6 +618,9 @@ mod tests {
     use super::*;
     use crate::cache::CacheMetrics;
     use crate::types::TypeVariant;
+    use jv_ast::json::{JsonEntry, JsonLiteral, JsonValue, NumberGrouping};
+    use jv_ast::types::Span;
+    use std::collections::HashSet;
 
     fn sample_type(name: &'static str) -> TypeKind {
         TypeKind::new(TypeVariant::Primitive(name))
@@ -455,5 +700,88 @@ mod tests {
     fn snapshot_is_send_sync() {
         fn assert_send_sync<T: Send + Sync>() {}
         assert_send_sync::<TypeFactsSnapshot>();
+    }
+
+    fn sample_json_literal() -> JsonLiteral {
+        JsonLiteral {
+            value: JsonValue::Object {
+                entries: vec![
+                    JsonEntry {
+                        key: "created_at".to_string(),
+                        comments: Vec::new(),
+                        value: JsonValue::Number {
+                            literal: "1".to_string(),
+                            grouping: NumberGrouping::None,
+                            span: Span::dummy(),
+                        },
+                        span: Span::dummy(),
+                    },
+                    JsonEntry {
+                        key: "user-name".to_string(),
+                        comments: Vec::new(),
+                        value: JsonValue::String {
+                            value: "Alice".to_string(),
+                            span: Span::dummy(),
+                        },
+                        span: Span::dummy(),
+                    },
+                    JsonEntry {
+                        key: "userName".to_string(),
+                        comments: Vec::new(),
+                        value: JsonValue::Boolean {
+                            value: true,
+                            span: Span::dummy(),
+                        },
+                        span: Span::dummy(),
+                    },
+                ],
+                span: Span::dummy(),
+            },
+            leading_comments: Vec::new(),
+            trailing_comments: Vec::new(),
+            span: Span::dummy(),
+            inferred_schema: None,
+        }
+    }
+
+    #[test]
+    fn schema_cache_infers_and_caches() {
+        let literal = sample_json_literal();
+        let mut cache = SchemaCache::new();
+
+        let schema1 = json_literal_to_schema(&mut cache, &literal);
+        let schema2 = json_literal_to_schema(&mut cache, &literal);
+
+        assert_eq!(cache.len(), 1);
+        assert!(!cache.is_empty());
+
+        match schema1 {
+            Schema::Object {
+                ref fields,
+                ref required,
+            } => {
+                assert!(fields.contains_key("createdAt"));
+                assert!(fields.contains_key("userName"));
+                assert!(fields.contains_key("userName_"));
+                assert!(required.contains("createdAt"));
+            }
+            other => panic!("expected object schema, found {:?}", other),
+        }
+
+        assert_eq!(schema1, schema2);
+    }
+
+    #[test]
+    fn snake_case_conversion_and_sanitization() {
+        assert_eq!(snake_to_camel("created_at"), "createdAt");
+        assert_eq!(snake_to_camel("alreadyCamel"), "alreadyCamel");
+        assert_eq!(sanitize_java_identifier("class"), "class_");
+        assert_eq!(sanitize_java_identifier("9value"), "_9value");
+
+        let mut used = HashSet::new();
+        let first = canonical_field_name("user_name", &mut used);
+        let second = canonical_field_name("userName", &mut used);
+        assert_eq!(first, "userName");
+        assert_eq!(second, "userName_");
     }
 }

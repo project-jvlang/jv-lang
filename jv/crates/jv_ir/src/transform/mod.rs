@@ -40,7 +40,7 @@ pub use null_safety::{
     desugar_elvis_operator, desugar_null_safe_index_access, desugar_null_safe_member_access,
 };
 pub use resources::{desugar_defer_expression, desugar_use_expression};
-pub use sample::{fetch_sample_data, infer_schema};
+pub use sample::{fetch_sample_data, infer_json_value_schema, infer_schema};
 pub use strings::desugar_string_interpolation;
 pub use type_system::{convert_type_annotation, infer_java_type};
 pub use utils::{generate_extension_class_name, generate_utility_class_name};

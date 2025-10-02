@@ -1,7 +1,8 @@
 use super::support::{first_statement, parse_program, parse_program_result};
 use jv_ast::{
-    Argument, BinaryOp, CallArgumentStyle, ConcurrencyConstruct, Expression, Literal, LoopStrategy,
-    Pattern, ResourceManagement, SequenceDelimiter, Statement, StringPart, TypeAnnotation,
+    Argument, ArgumentElementKind, BinaryOp, CallArgumentStyle, ConcurrencyConstruct, Expression,
+    JsonValue, Literal, LoopStrategy, Pattern, ResourceManagement, SequenceDelimiter, Statement,
+    StringPart, TypeAnnotation,
 };
 
 use test_case::test_case;
@@ -138,6 +139,95 @@ fn test_data_class_declaration() {
             }
         }
         other => panic!("expected data class declaration, found {:?}", other),
+    }
+}
+
+#[test]
+fn test_whitespace_argument_metadata() {
+    let program = parse_program("val result = SUM(1 2 3)");
+    let statement = first_statement(&program);
+
+    match statement {
+        Statement::ValDeclaration { initializer, .. } => match initializer {
+            Expression::Call {
+                argument_metadata,
+                args,
+                ..
+            } => {
+                assert_eq!(argument_metadata.style, CallArgumentStyle::Whitespace);
+                assert_eq!(
+                    argument_metadata.homogeneous_kind,
+                    Some(ArgumentElementKind::Number)
+                );
+                assert!(
+                    argument_metadata.separator_diagnostics.is_empty(),
+                    "expected no diagnostics for homogeneous whitespace arguments"
+                );
+                assert_eq!(args.len(), 3);
+            }
+            other => panic!("expected call expression, found {:?}", other),
+        },
+        other => panic!("expected val declaration, found {:?}", other),
+    }
+}
+
+#[test]
+fn test_json_object_literal_expression() {
+    let program = parse_program("val config = { \"name\": \"Alice\", \"age\": 30 }");
+    let statement = first_statement(&program);
+
+    match statement {
+        Statement::ValDeclaration { initializer, .. } => match initializer {
+            Expression::JsonLiteral(literal) => match &literal.value {
+                JsonValue::Object { entries, .. } => {
+                    assert_eq!(entries.len(), 2);
+                    assert_eq!(entries[0].key, "name");
+                    match entries[0].value {
+                        JsonValue::String { ref value, .. } => assert_eq!(value, "Alice"),
+                        ref other => {
+                            panic!("expected string value for name entry, found {:?}", other)
+                        }
+                    }
+
+                    assert_eq!(entries[1].key, "age");
+                    match entries[1].value {
+                        JsonValue::Number { ref literal, .. } => assert_eq!(literal, "30"),
+                        ref other => {
+                            panic!("expected numeric value for age entry, found {:?}", other)
+                        }
+                    }
+                }
+                other => panic!("expected JSON object literal, found {:?}", other),
+            },
+            other => panic!("expected JSON literal expression, found {:?}", other),
+        },
+        other => panic!("expected val declaration, found {:?}", other),
+    }
+}
+
+#[test]
+fn test_json_array_literal_expression() {
+    let program = parse_program("val items = [\"a\", \"b\"]");
+    let statement = first_statement(&program);
+
+    match statement {
+        Statement::ValDeclaration { initializer, .. } => match initializer {
+            Expression::JsonLiteral(literal) => match &literal.value {
+                JsonValue::Array { elements, .. } => {
+                    assert_eq!(elements.len(), 2);
+                    match &elements[0] {
+                        JsonValue::String { value, .. } => assert_eq!(value, "a"),
+                        other => panic!(
+                            "expected first array element to be string, found {:?}",
+                            other
+                        ),
+                    }
+                }
+                other => panic!("expected JSON array literal, found {:?}", other),
+            },
+            other => panic!("expected JSON literal expression, found {:?}", other),
+        },
+        other => panic!("expected val declaration, found {:?}", other),
     }
 }
 
@@ -711,6 +801,55 @@ fn test_whitespace_call_arguments() {
             } => {
                 assert_eq!(args.len(), 3);
                 assert_eq!(argument_metadata.style, CallArgumentStyle::Whitespace);
+            }
+            other => panic!("expected call expression, found {:?}", other),
+        },
+        other => panic!("expected val declaration, found {:?}", other),
+    }
+}
+
+#[test]
+fn test_whitespace_call_arguments_metadata() {
+    let program = parse_program("val point = Point(1 2 3)");
+    let statement = first_statement(&program);
+
+    match statement {
+        Statement::ValDeclaration { initializer, .. } => match initializer {
+            Expression::Call {
+                argument_metadata,
+                args,
+                ..
+            } => {
+                assert_eq!(argument_metadata.style, CallArgumentStyle::Whitespace);
+                assert_eq!(
+                    argument_metadata.homogeneous_kind,
+                    Some(ArgumentElementKind::Number)
+                );
+                assert!(argument_metadata.separator_diagnostics.is_empty());
+                assert_eq!(args.len(), 3);
+            }
+            other => panic!("expected call expression, found {:?}", other),
+        },
+        other => panic!("expected val declaration, found {:?}", other),
+    }
+}
+
+#[test]
+fn test_whitespace_call_mixed_types_metadata_issue() {
+    let program = parse_program("val mixed = merge(1 \"two\" 3)");
+    let statement = first_statement(&program);
+
+    match statement {
+        Statement::ValDeclaration { initializer, .. } => match initializer {
+            Expression::Call {
+                argument_metadata, ..
+            } => {
+                assert_eq!(argument_metadata.style, CallArgumentStyle::Whitespace);
+                assert!(argument_metadata.homogeneous_kind.is_none());
+                assert_eq!(argument_metadata.separator_diagnostics.len(), 1);
+                assert!(argument_metadata.separator_diagnostics[0]
+                    .message
+                    .contains("JV1010"));
             }
             other => panic!("expected call expression, found {:?}", other),
         },

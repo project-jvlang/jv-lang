@@ -20,7 +20,10 @@ pub use cache::{
 };
 pub use config::ParallelInferenceConfig;
 pub use constraint::CompactConstraintGraph;
-pub use service::{FactSpan, TypeFacts};
+pub use service::{
+    json_literal_to_schema, sanitize_java_identifier, snake_to_camel, FactSpan, SchemaCache,
+    TypeFacts,
+};
 pub use types::{
     BoundConstraint, BoundPredicate, BoundsMatrix, FieldType, NullabilityFlag, TypeId, TypeKind,
     TypeVariant,

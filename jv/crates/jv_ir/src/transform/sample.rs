@@ -12,7 +12,8 @@ use crate::types::{
     Schema, SchemaError,
 };
 use jv_ast::{
-    Annotation, AnnotationArgument, Expression, Literal, Modifiers, Span, TypeAnnotation,
+    Annotation, AnnotationArgument, Expression, JsonLiteral, JsonValue, Literal, Modifiers, Span,
+    TypeAnnotation,
 };
 use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
@@ -43,7 +44,7 @@ fn infer_json_schema(data: &[u8]) -> Result<Schema, SchemaError> {
     Ok(infer_json_value_schema(&value))
 }
 
-fn infer_json_value_schema(value: &Value) -> Schema {
+pub fn infer_json_value_schema(value: &Value) -> Schema {
     match value {
         Value::Null => Schema::Primitive(PrimitiveType::Null),
         Value::Bool(_) => Schema::Primitive(PrimitiveType::Boolean),
@@ -51,6 +52,33 @@ fn infer_json_value_schema(value: &Value) -> Schema {
         Value::String(_) => Schema::Primitive(PrimitiveType::String),
         Value::Array(values) => infer_json_array_schema(values),
         Value::Object(map) => infer_json_object_schema(map),
+    }
+}
+
+fn literal_to_json_value(literal: &JsonLiteral) -> Value {
+    json_ast_value_to_value(&literal.value)
+}
+
+fn json_ast_value_to_value(value: &JsonValue) -> Value {
+    match value {
+        JsonValue::Object { entries, .. } => {
+            let mut map = Map::new();
+            for entry in entries {
+                map.insert(entry.key.clone(), json_ast_value_to_value(&entry.value));
+            }
+            Value::Object(map)
+        }
+        JsonValue::Array { elements, .. } => Value::Array(
+            elements
+                .iter()
+                .map(json_ast_value_to_value)
+                .collect::<Vec<_>>(),
+        ),
+        JsonValue::String { value, .. } => Value::String(value.clone()),
+        JsonValue::Number { literal, .. } => serde_json::from_str::<Value>(literal)
+            .unwrap_or_else(|_| Value::String(literal.clone())),
+        JsonValue::Boolean { value, .. } => Value::Bool(*value),
+        JsonValue::Null { .. } => Value::Null,
     }
 }
 
@@ -1047,6 +1075,56 @@ pub fn desugar_sample_annotation(
     };
 
     context.add_variable(variable_name, variable_java_type);
+
+    Ok(declaration)
+}
+
+pub fn inline_json_declaration(
+    name: String,
+    type_annotation: Option<TypeAnnotation>,
+    literal: JsonLiteral,
+    span: Span,
+    context: &mut TransformContext,
+) -> Result<IrSampleDeclaration, TransformError> {
+    if type_annotation.is_some() {
+        return Err(sample_annotation_error(
+            &span,
+            "JSONリテラルには型注釈を併用できません (@Sampleと同様に型は自動推論されます)",
+        ));
+    }
+
+    let value = literal_to_json_value(&literal);
+    let bytes =
+        serde_json::to_vec(&value).map_err(|error| TransformError::SampleProcessingError {
+            message: format!("inline JSON literal serialization failed: {}", error),
+            span: span.clone(),
+        })?;
+
+    let schema = infer_json_value_schema(&value);
+
+    let (java_type, records, root_record_name) = compute_type_layout(&schema, &name);
+
+    let declaration = IrSampleDeclaration {
+        variable_name: name.clone(),
+        java_type: java_type.clone(),
+        format: DataFormat::Json,
+        mode: SampleMode::Embed,
+        source: format!(
+            "inline:{}:{}-{}:{}",
+            span.start_line, span.start_column, span.end_line, span.end_column
+        ),
+        source_kind: SampleSourceKind::Inline,
+        sha256: compute_sha256(&bytes),
+        cache_path: None,
+        limit_bytes: None,
+        embedded_data: Some(bytes),
+        schema,
+        records,
+        root_record_name,
+        span,
+    };
+
+    context.add_variable(name, java_type);
 
     Ok(declaration)
 }

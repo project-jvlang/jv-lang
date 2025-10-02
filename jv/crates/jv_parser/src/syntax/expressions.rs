@@ -1,11 +1,13 @@
 use chumsky::prelude::*;
 use chumsky::Parser as ChumskyParser;
 use jv_ast::{
-    Argument, BinaryOp, CallArgumentMetadata, CallArgumentStyle, Expression, Literal, Parameter,
+    Argument, ArgumentElementKind, BinaryOp, CallArgumentIssue, CallArgumentMetadata,
+    CallArgumentStyle, Expression, Literal, MultilineKind, MultilineStringLiteral, Parameter,
     Pattern, SequenceDelimiter, Span, StringPart, UnaryOp, WhenArm,
 };
-use jv_lexer::{Token, TokenType};
+use jv_lexer::{StringDelimiterKind, StringLiteralMetadata, Token, TokenMetadata, TokenType};
 
+use super::json::json_expression_parser;
 use super::patterns::{self, pattern_span};
 use super::support::{
     expression_span, identifier, identifier_with_span, keyword, merge_spans, span_from_token,
@@ -22,6 +24,7 @@ pub(crate) fn expression_parser(
 ) -> impl ChumskyParser<Token, Expression, Error = Simple<Token>> + Clone {
     recursive(|expr| {
         let primary = choice((
+            json_expression_parser(),
             when_expression_parser(expr.clone()),
             forbidden_if_expression_parser(),
             lambda_literal_parser(expr.clone()),
@@ -315,37 +318,41 @@ fn string_interpolation_parser(
     expr: impl ChumskyParser<Token, Expression, Error = Simple<Token>> + Clone,
 ) -> impl ChumskyParser<Token, Expression, Error = Simple<Token>> + Clone {
     token_string_start()
-        .map(|token| (token.lexeme.clone(), span_from_token(&token)))
+        .map(|token| (token.clone(), span_from_token(&token)))
         .then(expr.clone())
         .then(
             token_string_mid()
-                .map(|token| (token.lexeme.clone(), span_from_token(&token)))
+                .map(|token| (token.clone(), span_from_token(&token)))
                 .then(expr.clone())
                 .repeated(),
         )
-        .then(token_string_end().map(|token| (token.lexeme.clone(), span_from_token(&token))))
+        .then(token_string_end().map(|token| (token.clone(), span_from_token(&token))))
         .map(|(((start_segment, first_expr), segments), end_segment)| {
-            let (start_text, mut start_span) = start_segment;
-            let (end_text, mut end_span) = end_segment;
+            let (start_token, mut start_span) = start_segment;
+            let (end_token, mut end_span) = end_segment;
 
             let mut parts = Vec::new();
+            let mut raw_components = Vec::new();
 
-            if !start_text.is_empty() {
-                parts.push(StringPart::Text(start_text));
+            if !start_token.lexeme.is_empty() {
+                parts.push(StringPart::Text(start_token.lexeme.clone()));
             }
+            raw_components.push(start_token.lexeme.clone());
 
             parts.push(StringPart::Expression(first_expr));
 
-            for ((text, _text_span), expr_part) in segments {
-                if !text.is_empty() {
-                    parts.push(StringPart::Text(text));
+            for ((text_token, _text_span), expr_part) in segments {
+                if !text_token.lexeme.is_empty() {
+                    parts.push(StringPart::Text(text_token.lexeme.clone()));
                 }
+                raw_components.push(text_token.lexeme.clone());
                 parts.push(StringPart::Expression(expr_part));
             }
 
-            if !end_text.is_empty() {
-                parts.push(StringPart::Text(end_text));
+            if !end_token.lexeme.is_empty() {
+                parts.push(StringPart::Text(end_token.lexeme.clone()));
             }
+            raw_components.push(end_token.lexeme.clone());
 
             if start_span.end_column == start_span.start_column {
                 start_span.end_column += 1;
@@ -356,23 +363,26 @@ fn string_interpolation_parser(
 
             let span = merge_spans(&start_span, &end_span);
 
+            if let Some(metadata) = string_literal_metadata(&start_token) {
+                if let Some(kind) = multiline_kind_from_metadata(metadata) {
+                    let raw = raw_components.concat();
+                    let literal = build_multiline_literal(kind, raw, parts, span);
+                    return Expression::MultilineString(literal);
+                }
+            }
+
             Expression::StringInterpolation { parts, span }
         })
 }
 
 fn literal_parser() -> impl ChumskyParser<Token, Expression, Error = Simple<Token>> + Clone {
-    filter_map(|span, token: Token| {
-        let token_span = span_from_token(&token);
-        match token.token_type {
-            TokenType::String(value) => Ok(Expression::Literal(Literal::String(value), token_span)),
-            TokenType::Number(value) => Ok(Expression::Literal(Literal::Number(value), token_span)),
-            TokenType::Boolean(value) => {
-                Ok(Expression::Literal(Literal::Boolean(value), token_span))
-            }
-            TokenType::Null => Ok(Expression::Literal(Literal::Null, token_span)),
-            _ => Err(Simple::expected_input_found(span, Vec::new(), Some(token))),
+    filter_map(|span, token: Token| match &token.token_type {
+        TokenType::String(_) | TokenType::Number(_) | TokenType::Boolean(_) | TokenType::Null => {
+            Ok(token)
         }
+        _ => Err(Simple::expected_input_found(span, Vec::new(), Some(token))),
     })
+    .map(build_literal_expression)
 }
 
 fn this_expression_parser() -> impl ChumskyParser<Token, Expression, Error = Simple<Token>> + Clone
@@ -445,9 +455,8 @@ fn call_suffix(
         .map(|token| span_from_token(&token))
         .then(argument_list(expr.clone()))
         .then(token_right_paren().map(|token| span_from_token(&token)))
-        .map(|((left_span, (args, style)), right_span)| {
+        .map(|((left_span, (args, metadata)), right_span)| {
             let span = merge_spans(&left_span, &right_span);
-            let metadata = CallArgumentMetadata::with_style(style);
             PostfixOp::Call {
                 args,
                 metadata,
@@ -458,7 +467,8 @@ fn call_suffix(
 
 fn argument_list(
     expr: impl ChumskyParser<Token, Expression, Error = Simple<Token>> + Clone,
-) -> impl ChumskyParser<Token, (Vec<Argument>, CallArgumentStyle), Error = Simple<Token>> + Clone {
+) -> impl ChumskyParser<Token, (Vec<Argument>, CallArgumentMetadata), Error = Simple<Token>> + Clone
+{
     // Layout-aware parsing: allow either comma separators or lexer-emitted layout commas.
     let separator = choice((
         token_comma().to(CallArgumentStyle::Comma),
@@ -513,10 +523,89 @@ fn argument_list(
                 CallArgumentStyle::Comma
             };
 
-            Ok((args, style))
+            let metadata = build_call_argument_metadata(&args, style);
+
+            Ok((args, metadata))
         })
         .or_not()
-        .map(|result| result.unwrap_or_else(|| (Vec::new(), CallArgumentStyle::Comma)))
+        .map(|result| result.unwrap_or_else(|| (Vec::new(), CallArgumentMetadata::default())))
+}
+
+fn build_call_argument_metadata(
+    args: &[Argument],
+    style: CallArgumentStyle,
+) -> CallArgumentMetadata {
+    let mut metadata = CallArgumentMetadata::with_style(style);
+
+    if matches!(style, CallArgumentStyle::Whitespace) {
+        let mut base_kind: Option<ArgumentElementKind> = None;
+        let mut mismatch = false;
+
+        for argument in args {
+            let kind = match argument {
+                Argument::Positional(expr) => argument_element_kind(expr),
+                Argument::Named { .. } => ArgumentElementKind::Other,
+            };
+
+            if kind == ArgumentElementKind::Other {
+                continue;
+            }
+
+            match base_kind {
+                None => base_kind = Some(kind),
+                Some(existing) if existing == kind => {}
+                Some(_) => {
+                    mismatch = true;
+                    break;
+                }
+            }
+        }
+
+        if mismatch {
+            metadata.separator_diagnostics.push(CallArgumentIssue {
+                message: "JV1010: whitespace-delimited arguments must use explicit commas when mixing element kinds".to_string(),
+                span: combined_argument_span(args),
+            });
+        } else if let Some(kind) = base_kind {
+            metadata.homogeneous_kind = Some(kind);
+        }
+    }
+
+    metadata
+}
+
+fn argument_element_kind(expr: &Expression) -> ArgumentElementKind {
+    match expr {
+        Expression::Literal(literal, _) => match literal {
+            Literal::Number(_) => ArgumentElementKind::Number,
+            Literal::String(_) => ArgumentElementKind::String,
+            Literal::Boolean(_) => ArgumentElementKind::Boolean,
+            _ => ArgumentElementKind::Other,
+        },
+        Expression::MultilineString(_) | Expression::StringInterpolation { .. } => {
+            ArgumentElementKind::String
+        }
+        Expression::JsonLiteral(_) => ArgumentElementKind::Json,
+        Expression::Lambda { .. } => ArgumentElementKind::Lambda,
+        _ => ArgumentElementKind::Other,
+    }
+}
+
+fn argument_span(argument: &Argument) -> Option<Span> {
+    match argument {
+        Argument::Positional(expr) => Some(expression_span(expr)),
+        Argument::Named { span, .. } => Some(span.clone()),
+    }
+}
+
+fn combined_argument_span(args: &[Argument]) -> Option<Span> {
+    let mut iter = args.iter().filter_map(argument_span);
+    let first = iter.next()?;
+    let mut last = first.clone();
+    for span in iter {
+        last = span;
+    }
+    Some(merge_spans(&first, &last))
 }
 
 fn argument(
@@ -532,6 +621,59 @@ fn argument(
         });
 
     named.or(expr.map(Argument::Positional))
+}
+
+fn build_literal_expression(token: Token) -> Expression {
+    let span = span_from_token(&token);
+    match &token.token_type {
+        TokenType::String(value) => build_string_literal(&token, value.clone(), span),
+        TokenType::Number(value) => Expression::Literal(Literal::Number(value.clone()), span),
+        TokenType::Boolean(value) => Expression::Literal(Literal::Boolean(*value), span),
+        TokenType::Null => Expression::Literal(Literal::Null, span),
+        _ => unreachable!("literal_parser filtered non-literal tokens"),
+    }
+}
+
+fn build_string_literal(token: &Token, value: String, span: Span) -> Expression {
+    if let Some(metadata) = string_literal_metadata(token) {
+        if let Some(kind) = multiline_kind_from_metadata(metadata) {
+            let literal = build_multiline_literal(kind, token.lexeme.clone(), Vec::new(), span);
+            return Expression::MultilineString(literal);
+        }
+    }
+
+    Expression::Literal(Literal::String(value), span)
+}
+
+fn build_multiline_literal(
+    kind: MultilineKind,
+    raw: String,
+    parts: Vec<StringPart>,
+    span: Span,
+) -> MultilineStringLiteral {
+    MultilineStringLiteral {
+        kind,
+        normalized: raw.clone(),
+        raw,
+        parts,
+        indent: None,
+        span,
+    }
+}
+
+fn string_literal_metadata(token: &Token) -> Option<&StringLiteralMetadata> {
+    token.metadata.iter().find_map(|metadata| match metadata {
+        TokenMetadata::StringLiteral(data) => Some(data),
+        _ => None,
+    })
+}
+
+fn multiline_kind_from_metadata(metadata: &StringLiteralMetadata) -> Option<MultilineKind> {
+    match metadata.delimiter {
+        StringDelimiterKind::TripleQuote => Some(MultilineKind::TripleQuote),
+        StringDelimiterKind::BacktickBlock => Some(MultilineKind::Backtick),
+        _ => None,
+    }
 }
 
 fn member_suffix() -> impl ChumskyParser<Token, PostfixOp, Error = Simple<Token>> + Clone {

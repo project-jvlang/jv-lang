@@ -9,8 +9,11 @@ description = "Hindley-Milner type inference engine for the jv language"
 
 [dependencies]
 jv_ast = { workspace = true }
+jv_ir = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 rustc-hash = "1.1"
 smallvec = "1.13"
 bitvec = "1.0"
+sha2 = "0.10"
+hex = "0.4"
