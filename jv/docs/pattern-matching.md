@@ -201,6 +201,58 @@ final String outcome = (() -> {
 - Java 21 では `instanceof` + 分解バインディングを組み合わせた if チェーンを生成します。
 - 深度 3 以上のパターンや guard の一部は Java 21 でサポートされないため、`JV3105` 診断を通じてガイドします。
 
+## 代表的なケースと Quick Fix フロー
+
+### Example 1 — 型スイッチとフォールバック
+
+```jv
+val length = when (value) {
+    is String -> value.length
+    is Int -> value * 2
+    else -> 0
+}
+```
+
+- **Java 25:** `switch` + レコードパターン。`strategy=Switch arms=3 guards=0 default=true` がコメント出力されます。
+- **Java 21:** `(() -> { ... })()` ブロック内で `instanceof` チェーンを生成し、分岐ごとに `return` します。
+- **Quick Fix:** 未網羅時は `MissingCase` 提案が日英ラベル付きで提示されます。
+
+### Example 2 — 範囲とハイブリッド戦略
+
+```jv
+val label = when (score) {
+    in 0..<60 -> "Fail"
+    in 60..<80 -> "Pass"
+    in 80..100 -> "Excellent"
+    else -> "Invalid"
+}
+```
+
+- Java 25 は `case int i when ...` を生成。
+- Java 21 は範囲比較を AND 連結した if チェーンへ展開し、テレメトリに `strategy=Hybrid arms=4 guards=3` が記録されます。
+- NEG フィクスチャ `NEG-005` は範囲重複時の `JV3101` を検証します。
+
+### Example 3 — 深度 2 の分解
+
+```jv
+val summary = when (event) {
+    is Audit(val actor, val payload: Audit.Payload(val id, val amount)) && amount > 10_000 -> "flag"
+    is Audit -> "ok"
+    else -> "skip"
+}
+```
+
+- 深度 2 までサポート（最大深度 10）。深度 11 以上で `JV3199` が発火し `--explain JV3199` が誘導されます。
+- Java 21 ではネストした `instanceof` と一時変数を組み合わせて展開されます。
+- NEG フィクスチャ `NEG-013`〜`NEG-015` が閾値超過時の診断文言を固定化します。
+
+### Quick Fix ステップ
+
+1. `jv check` または LSP で診断発生（例: `JV3103 if expressions are not supported; use when instead`）。
+2. Quick Fix 一覧に日英メッセージとテンプレートコードが表示される。
+3. 適用すると `if` ブロックが `when` へ置換され、必要な `else` 分岐が自動補完される。
+4. 適用後に `jv check --telemetry` を実行すると `when_strategies` と `pattern_cache_hits` の値が更新され、変換結果の挙動を追跡できる。
+
 ## ツール連携とテレメトリ
 
 - `jv check` / `jv lsp` は `pattern_cache_hits`, `pattern_cache_misses`, `pattern_bridge_ms`, `when_strategy` を計測し、`--telemetry` で表示します。

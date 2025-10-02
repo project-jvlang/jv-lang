@@ -22,7 +22,7 @@ jvは、モダンで簡潔な構文を純粋なJava 25ソースコードにト�
 ### 言語機能
 - 型推論付き`val/var`宣言
 - null安全演算子: `?`, `?.`, `?:`
-- `when`式 → Javaのswitch/パターンマッチング
+- `when`式 → Javaのswitch/パターンマッチング（深度10までの分解・範囲ガード対応）
 - `data class` → record（不変）またはclass（可変）
 - 拡張関数 → 静的ユーティリティメソッド
 - 文字列補間: `"Hello, ${name}"`
@@ -40,6 +40,7 @@ jvは、モダンで簡潔な構文を純粋なJava 25ソースコードにト�
 - Language Server Protocol経由の**IDE統合**
 - javac統合付き**ビルドシステム**
 - **コードフォーマッター**と静的解析
+- **テレメトリ/診断可視化**: `jv check --telemetry` で `pattern_cache_hits`, `pattern_bridge_ms`, `when_strategy` を集計表示
 
 ## クイックスタート
 
@@ -141,6 +142,10 @@ cargo test
 
 # ビルドせずにチェック
 cargo check
+
+# Makefileショートカット
+make check          # lint + fmt + unit tests + docs validation
+make test-lowmem    # メモリ制限下でのフィクスチャ検証（CI同等）
 ```
 
 ### AST→IR性能ハーネス

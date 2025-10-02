@@ -264,9 +264,10 @@ pub mod pipeline {
     use jv_checker::{InferenceSnapshot, InferenceTelemetry, TypeChecker};
     use jv_codegen_java::{JavaCodeGenConfig, JavaCodeGenerator};
     use jv_fmt::JavaFormatter;
+    use jv_ir::context::WhenStrategyRecord;
     use jv_ir::TransformContext;
     use jv_ir::{
-        transform_program, transform_program_with_context_profiled, TransformPools,
+        transform_program_with_context, transform_program_with_context_profiled, TransformPools,
         TransformProfiler,
     };
     use jv_parser::Parser as JvParser;
@@ -287,6 +288,14 @@ pub mod pipeline {
         pub compatibility_diagnostics: Vec<EnhancedDiagnostic>,
         pub inference: Option<InferenceSnapshot>,
         pub perf_capture: Option<PerfCapture>,
+        pub when_strategies: Vec<StrategySummary>,
+    }
+
+    /// Aggregated summary of lowering strategies selected for `when` expressions.
+    #[derive(Debug, Default, Clone, PartialEq, Eq)]
+    pub struct StrategySummary {
+        pub description: String,
+        pub count: usize,
     }
 
     /// Compile a `.jv` file end-to-end into Java (and optionally `.class`) outputs.
@@ -300,6 +309,7 @@ pub mod pipeline {
 
         let mut warnings = Vec::new();
         let mut inference_snapshot: Option<InferenceSnapshot> = None;
+        let mut telemetry_snapshot: Option<InferenceTelemetry> = None;
         let mut build_config = plan.build_config.clone();
         build_config.output_dir = options.output_dir.to_string_lossy().into_owned();
 
@@ -353,19 +363,26 @@ pub mod pipeline {
                     .into_iter()
                     .map(|warning| warning.to_string()),
             );
-            let telemetry_snapshot = type_checker.telemetry().clone();
-            if options.emit_telemetry {
-                print_inference_telemetry(entrypoint, &telemetry_snapshot);
-            }
+            telemetry_snapshot = Some(type_checker.telemetry().clone());
             inference_snapshot = type_checker.take_inference_snapshot();
         }
 
         let mut perf_capture: Option<PerfCapture> = None;
+        let when_strategy_records: Vec<WhenStrategyRecord>;
+        let mut program_holder = Some(program);
         let ir_program = if options.perf {
             let pools = TransformPools::with_chunk_capacity(256 * 1024);
             let mut context = TransformContext::with_pools(pools);
             let mut profiler = TransformProfiler::new();
-            match transform_program_with_context_profiled(program, &mut context, &mut profiler) {
+            let lowering_result = transform_program_with_context_profiled(
+                program_holder
+                    .take()
+                    .expect("program should be available for perf lowering"),
+                &mut context,
+                &mut profiler,
+            );
+
+            match lowering_result {
                 Ok((ir, metrics)) => {
                     let capture = persist_single_run_report(
                         plan.root.root_dir(),
@@ -374,6 +391,7 @@ pub mod pipeline {
                         &metrics,
                     )?;
                     perf_capture = Some(capture);
+                    when_strategy_records = context.take_when_strategies();
                     ir
                 }
                 Err(error) => {
@@ -387,8 +405,19 @@ pub mod pipeline {
                 }
             }
         } else {
-            match transform_program(program) {
-                Ok(ir) => ir,
+            let mut context = TransformContext::new();
+            let lowering_result = transform_program_with_context(
+                program_holder
+                    .take()
+                    .expect("program should be available for lowering"),
+                &mut context,
+            );
+
+            match lowering_result {
+                Ok(ir) => {
+                    when_strategy_records = context.take_when_strategies();
+                    ir
+                }
                 Err(error) => {
                     if let Some(diagnostic) = from_transform_error(&error) {
                         return Err(tooling_failure(
@@ -400,6 +429,8 @@ pub mod pipeline {
                 }
             }
         };
+
+        let when_strategy_summary = summarize_when_strategies(&when_strategy_records);
 
         let mut code_generator =
             JavaCodeGenerator::with_config(JavaCodeGenConfig::for_target(build_config.target));
@@ -446,6 +477,14 @@ pub mod pipeline {
             java_files.push(java_path);
         }
 
+        if options.emit_telemetry {
+            if let Some(telemetry) = telemetry_snapshot.as_ref() {
+                print_inference_telemetry(entrypoint, telemetry, &when_strategy_summary);
+            } else if !when_strategy_summary.is_empty() {
+                print_strategy_telemetry(entrypoint, &when_strategy_summary);
+            }
+        }
+
         let mut artifacts = BuildArtifacts {
             java_files,
             class_files: Vec::new(),
@@ -455,6 +494,7 @@ pub mod pipeline {
             compatibility_diagnostics,
             inference: inference_snapshot,
             perf_capture,
+            when_strategies: when_strategy_summary,
         };
 
         if !options.java_only {
@@ -507,7 +547,11 @@ pub mod pipeline {
         Ok(artifacts)
     }
 
-    fn print_inference_telemetry(entrypoint: &Path, telemetry: &InferenceTelemetry) {
+    fn print_inference_telemetry(
+        entrypoint: &Path,
+        telemetry: &InferenceTelemetry,
+        strategies: &[StrategySummary],
+    ) {
         println!(
             "Telemetry ({}):\n  constraints_emitted: {}\n  bindings_resolved: {}\n  inference_duration_ms: {:.3}\n  preserved_constraints: {}\n  cache_hit_rate: {}\n  invalidation_cascade_depth: {}\n  pattern_cache_hits: {}\n  pattern_cache_misses: {}\n  pattern_bridge_ms: {:.3}",
             entrypoint.display(),
@@ -524,6 +568,63 @@ pub mod pipeline {
             telemetry.pattern_cache_misses,
             telemetry.pattern_bridge_ms
         );
+
+        if strategies.is_empty() {
+            println!(
+                "  when_strategies: (none recorded)\n  pattern_diagnostic_hint: JV3199 surfaces when destructuring depth exceeds supported limits or when guards require Phase 5 features. Use --explain JV3199 for guidance."
+            );
+        } else {
+            println!("  when_strategies:");
+            for summary in strategies {
+                println!(
+                    "    - {} ({} occurrence{})",
+                    summary.description,
+                    summary.count,
+                    if summary.count == 1 { "" } else { "s" }
+                );
+            }
+            println!(
+                "  pattern_diagnostic_hint: Deep destructuring (depth ≥ 11) and complex guards yield JV3199. Run --explain JV3199 to review mitigation paths."
+            );
+        }
+    }
+
+    fn print_strategy_telemetry(entrypoint: &Path, strategies: &[StrategySummary]) {
+        println!("Telemetry ({})", entrypoint.display());
+        println!("  pattern_cache_hits: n/a");
+        println!("  pattern_cache_misses: n/a");
+        println!("  pattern_bridge_ms: n/a");
+        if strategies.is_empty() {
+            println!("  when_strategies: (none recorded)");
+        } else {
+            println!("  when_strategies:");
+            for summary in strategies {
+                println!(
+                    "    - {} ({} occurrence{})",
+                    summary.description,
+                    summary.count,
+                    if summary.count == 1 { "" } else { "s" }
+                );
+            }
+        }
+        println!(
+            "  pattern_diagnostic_hint: Deep destructuring beyond depth 10 or hybrid guards will surface JV3199. Use --explain JV3199 for remediation."
+        );
+    }
+
+    fn summarize_when_strategies(records: &[WhenStrategyRecord]) -> Vec<StrategySummary> {
+        use std::collections::BTreeMap;
+
+        let mut counts: BTreeMap<String, usize> = BTreeMap::new();
+        for record in records {
+            let key = record.description.trim().to_string();
+            *counts.entry(key).or_insert(0) += 1;
+        }
+
+        counts
+            .into_iter()
+            .map(|(description, count)| StrategySummary { description, count })
+            .collect()
     }
 
     /// Compile and execute a `.jv` program using the Java runtime.

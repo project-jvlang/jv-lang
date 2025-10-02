@@ -44,8 +44,7 @@ fn english_when_examples_are_kept_in_sync() {
 fn load_doc(relative: &str) -> String {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let path = manifest_dir.join(relative);
-    fs::read_to_string(&path)
-        .unwrap_or_else(|error| panic!("failed to read {:?}: {}", path, error))
+    fs::read_to_string(&path).unwrap_or_else(|error| panic!("failed to read {:?}: {}", path, error))
 }
 
 fn extract_jv_blocks(content: &str, heading: &str) -> Vec<String> {

@@ -201,6 +201,58 @@ final String outcome = (() -> {
 - Java 21 relies on `instanceof` chains with pattern bindings.
 - Deeply nested patterns (depth ≥ 3) or certain guards cannot be expressed; `JV3105` guides remediation.
 
+## Showcase Scenarios and Quick Fix Flow
+
+### Example 1 — Typed Switch with Fallback
+
+```jv
+val length = when (value) {
+    is String -> value.length
+    is Int -> value * 2
+    else -> 0
+}
+```
+
+- **Java 25:** Emits a pattern `switch` and annotates it with `strategy=Switch arms=3 guards=0 default=true`.
+- **Java 21:** Generates an immediately invoked lambda containing an `instanceof` chain with `return` statements.
+- **Quick Fix:** Missing branches surface `MissingCase` suggestions with bilingual labels.
+
+### Example 2 — Range Patterns and Hybrid Strategy
+
+```jv
+val label = when (score) {
+    in 0..<60 -> "Fail"
+    in 60..<80 -> "Pass"
+    in 80..100 -> "Excellent"
+    else -> "Invalid"
+}
+```
+
+- Java 25 uses guarded `case` labels.
+- Java 21 rewrites ranges into AND-composed comparisons; telemetry records `strategy=Hybrid arms=4 guards=3`.
+- Negative fixture `NEG-005` locks in the `JV3101` overlap diagnostic.
+
+### Example 3 — Depth-2 Destructuring
+
+```jv
+val summary = when (event) {
+    is Audit(val actor, val payload: Audit.Payload(val id, val amount)) && amount > 10_000 -> "flag"
+    is Audit -> "ok"
+    else -> "skip"
+}
+```
+
+- Supported up to depth 10. Depth ≥ 11 triggers `JV3199` with `--explain JV3199` guidance.
+- Java 21 expands into nested `instanceof` checks with temporary bindings.
+- Negative fixtures `NEG-013`–`NEG-015` pin the diagnostic text and remediation hints.
+
+### Quick Fix Steps
+
+1. Run `jv check` or use the LSP; diagnostics such as `JV3103 if expressions are not supported; use when instead` appear.
+2. Review the bilingual Quick Fix entry containing the replacement template.
+3. Apply the fix to rewrite the `if` into a `when` expression with the required `else` branch.
+4. Re-run `jv check --telemetry` to observe updated `when_strategies` and `pattern_cache_hits` metrics and confirm behaviour.
+
 ## Tooling Integration and Telemetry
 
 - `jv check` / `jv lsp` surface `pattern_cache_hits`, `pattern_cache_misses`, `pattern_bridge_ms`, and `when_strategy` via the `--telemetry` flag.
