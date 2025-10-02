@@ -1,0 +1,202 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag (e.g., v0.1.0)'
+        required: true
+        type: string
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: Build ${{ matrix.platform }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Linux x86_64
+          - os: ubuntu-latest
+            platform: x86_64-unknown-linux-gnu
+            target: x86_64-unknown-linux-gnu
+            use_cross: false
+            archive_ext: tar.gz
+
+          # Linux ARM64 (cross-compile)
+          - os: ubuntu-latest
+            platform: aarch64-unknown-linux-gnu
+            target: aarch64-unknown-linux-gnu
+            use_cross: true
+            archive_ext: tar.gz
+
+          # macOS Intel
+          - os: macos-13
+            platform: x86_64-apple-darwin
+            target: x86_64-apple-darwin
+            use_cross: false
+            archive_ext: tar.gz
+
+          # macOS Apple Silicon
+          - os: macos-14
+            platform: aarch64-apple-darwin
+            target: aarch64-apple-darwin
+            use_cross: false
+            archive_ext: tar.gz
+
+          # Windows x86_64
+          - os: windows-latest
+            platform: x86_64-pc-windows-msvc
+            target: x86_64-pc-windows-msvc
+            use_cross: false
+            archive_ext: zip
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install cross-compilation tools
+        if: matrix.use_cross
+        run: |
+          cargo install cross --git https://github.com/cross-rs/cross
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/registry
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Cache cargo index
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/git
+          key: ${{ runner.os }}-cargo-index-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Cache cargo build
+        uses: actions/cache@v4
+        with:
+          path: jv/target
+          key: ${{ runner.os }}-${{ matrix.target }}-cargo-build-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build binaries
+        working-directory: jv
+        run: |
+          if [ "${{ matrix.use_cross }}" = "true" ]; then
+            cross build --release --target ${{ matrix.target }} --bin jv
+            cross build --release --target ${{ matrix.target }} --bin jvx
+            cross build --release --target ${{ matrix.target }} --bin jv-lsp
+          else
+            cargo build --release --target ${{ matrix.target }} --bin jv
+            cargo build --release --target ${{ matrix.target }} --bin jvx
+            cargo build --release --target ${{ matrix.target }} --bin jv-lsp
+          fi
+        shell: bash
+
+      - name: Prepare binaries (Unix)
+        if: matrix.archive_ext == 'tar.gz'
+        working-directory: jv
+        run: |
+          mkdir -p release
+          cp target/${{ matrix.target }}/release/jv release/
+          cp target/${{ matrix.target }}/release/jvx release/
+          cp target/${{ matrix.target }}/release/jv-lsp release/
+          chmod +x release/jv release/jvx release/jv-lsp
+        shell: bash
+
+      - name: Prepare binaries (Windows)
+        if: matrix.archive_ext == 'zip'
+        working-directory: jv
+        run: |
+          mkdir -p release
+          cp target/${{ matrix.target }}/release/jv.exe release/
+          cp target/${{ matrix.target }}/release/jvx.exe release/
+          cp target/${{ matrix.target }}/release/jv-lsp.exe release/
+        shell: bash
+
+      - name: Create archive (tar.gz)
+        if: matrix.archive_ext == 'tar.gz'
+        working-directory: jv/release
+        run: |
+          tar czf ../../jv-${{ matrix.platform }}.tar.gz jv jvx jv-lsp
+        shell: bash
+
+      - name: Create archive (zip)
+        if: matrix.archive_ext == 'zip'
+        working-directory: jv/release
+        run: |
+          7z a ../../jv-${{ matrix.platform }}.zip jv.exe jvx.exe jv-lsp.exe
+        shell: bash
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: jv-${{ matrix.platform }}
+          path: jv-${{ matrix.platform }}.${{ matrix.archive_ext }}
+          retention-days: 7
+
+  upload-release:
+    name: Upload release assets
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Display structure of downloaded files
+        run: ls -R artifacts
+
+      - name: Get release tag
+        id: get_tag
+        run: |
+          echo "tag=${{ inputs.tag }}" >> $GITHUB_OUTPUT
+
+      - name: Upload release assets
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ steps.get_tag.outputs.tag }}
+          files: |
+            artifacts/jv-x86_64-unknown-linux-gnu/jv-x86_64-unknown-linux-gnu.tar.gz
+            artifacts/jv-aarch64-unknown-linux-gnu/jv-aarch64-unknown-linux-gnu.tar.gz
+            artifacts/jv-x86_64-apple-darwin/jv-x86_64-apple-darwin.tar.gz
+            artifacts/jv-aarch64-apple-darwin/jv-aarch64-apple-darwin.tar.gz
+            artifacts/jv-x86_64-pc-windows-msvc/jv-x86_64-pc-windows-msvc.zip
+            install.sh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Generate checksums
+        run: |
+          cd artifacts
+          for dir in jv-*/; do
+            cd "$dir"
+            for file in *; do
+              sha256sum "$file" >> ../../checksums.txt
+            done
+            cd ..
+          done
+          cd ..
+          sha256sum install.sh >> checksums.txt
+
+      - name: Upload checksums
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ steps.get_tag.outputs.tag }}
+          files: checksums.txt
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
