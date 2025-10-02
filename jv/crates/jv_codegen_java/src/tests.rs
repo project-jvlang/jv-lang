@@ -700,6 +700,70 @@ fn compilation_unit_collects_type_declarations() {
 }
 
 #[test]
+fn script_statements_are_wrapped_in_generated_main() {
+    let greeting_decl = IrStatement::VariableDeclaration {
+        name: "greeting".to_string(),
+        java_type: JavaType::string(),
+        initializer: Some(IrExpression::Literal(
+            Literal::String("Hello, jv!".to_string()),
+            dummy_span(),
+        )),
+        is_final: true,
+        modifiers: IrModifiers::default(),
+        span: dummy_span(),
+    };
+
+    let println_call = IrExpression::MethodCall {
+        receiver: Some(Box::new(IrExpression::FieldAccess {
+            receiver: Box::new(IrExpression::Identifier {
+                name: "System".to_string(),
+                java_type: JavaType::Reference {
+                    name: "System".to_string(),
+                    generic_args: vec![],
+                },
+                span: dummy_span(),
+            }),
+            field_name: "out".to_string(),
+            java_type: JavaType::Reference {
+                name: "PrintStream".to_string(),
+                generic_args: vec![],
+            },
+            span: dummy_span(),
+        })),
+        method_name: "println".to_string(),
+        args: vec![IrExpression::Identifier {
+            name: "greeting".to_string(),
+            java_type: JavaType::string(),
+            span: dummy_span(),
+        }],
+        argument_style: CallArgumentStyle::Comma,
+        java_type: JavaType::void(),
+        span: dummy_span(),
+    };
+
+    let program = IrProgram {
+        package: None,
+        imports: vec![],
+        type_declarations: vec![
+            greeting_decl,
+            IrStatement::Expression {
+                expr: println_call,
+                span: dummy_span(),
+            },
+        ],
+        span: dummy_span(),
+    };
+
+    let unit = generate_java_code(&program).expect("script lowering");
+    let source = unit.to_source(&JavaCodeGenConfig::default());
+
+    assert!(source.contains("public final class GeneratedMain"));
+    assert!(source.contains("public static void main(String[] args) throws Exception"));
+    assert!(source.contains("final String greeting = \"Hello, jv!\";"));
+    assert!(source.contains("System.out.println(greeting);"));
+}
+
+#[test]
 fn method_overload_generation_wraps_body() {
     let mut generator = JavaCodeGenerator::new();
     let overload = MethodOverload {
