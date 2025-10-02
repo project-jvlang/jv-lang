@@ -1,12 +1,15 @@
 use super::*;
 use insta::assert_snapshot;
 use jv_ast::{BinaryOp, CallArgumentStyle, Literal, SequenceDelimiter, Span};
+use jv_ir::transform::transform_program_with_context;
+use jv_ir::TransformContext;
 use jv_ir::{
     DataFormat, IrCaseLabel, IrDeconstructionComponent, IrDeconstructionPattern, IrExpression,
     IrImplicitWhenEnd, IrModifiers, IrParameter, IrProgram, IrRecordComponent, IrSampleDeclaration,
     IrStatement, IrSwitchCase, IrVisibility, JavaType, MethodOverload, PrimitiveType, SampleMode,
     SampleRecordDescriptor, SampleRecordField, SampleSourceKind, Schema,
 };
+use jv_parser::Parser;
 use serde_json::to_string_pretty;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
@@ -1128,6 +1131,32 @@ fn sample_declaration_generates_records_from_descriptors() {
     assert!(
         source.contains("public record UserSample(int id, String name, String email)"),
         "generated source should contain inferred record: {source}"
+    );
+}
+
+#[test]
+fn inline_json_sample_generates_payload_records() {
+    let source = r#"
+        val payload = {
+            "user": { "name": "Alice", "age": 30 },
+            "tags": ["admin", "core"]
+        }
+    "#;
+
+    let program = Parser::parse(source).expect("inline JSON snippet parses");
+    let mut context = TransformContext::new();
+    let ir = transform_program_with_context(program, &mut context).expect("lowering succeeds");
+
+    let unit = generate_java_code(&ir).expect("generate Java for inline JSON payload");
+    let source = unit.to_source(&JavaCodeGenConfig::default());
+
+    assert!(
+        source.contains("record PayloadSample("),
+        "root record should be generated for inline JSON payload: {source}"
+    );
+    assert!(
+        source.contains("record PayloadUserSample("),
+        "nested user record should be generated for inline JSON payload: {source}"
     );
 }
 

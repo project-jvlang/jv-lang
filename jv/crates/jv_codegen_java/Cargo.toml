@@ -17,6 +17,7 @@ jv_pm.workspace = true
 insta = { version = "1.39", features = ["redactions"] }
 serde_json.workspace = true
 criterion = "0.5"
+jv_parser.workspace = true
 
 [[bench]]
 name = "target_matrix"

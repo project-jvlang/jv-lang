@@ -1,4 +1,4 @@
-use super::sample::desugar_sample_annotation;
+use super::sample::{desugar_sample_annotation, inline_json_declaration};
 use super::transform_expression;
 use super::type_system::{convert_type_annotation, infer_java_type};
 use super::utils::{convert_modifiers, extract_java_type};
@@ -40,6 +40,18 @@ pub fn desugar_val_declaration(
             &modifiers,
             sample_annotations[0].clone(),
             span,
+            context,
+        )?;
+
+        return Ok(IrStatement::SampleDeclaration(declaration));
+    }
+
+    if let Expression::JsonLiteral(literal) = initializer.clone() {
+        let declaration = inline_json_declaration(
+            name.clone(),
+            type_annotation.clone(),
+            literal,
+            span.clone(),
             context,
         )?;
 

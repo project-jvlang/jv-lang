@@ -26,6 +26,7 @@ jvは、モダンで簡潔な構文を純粋なJava 25ソースコードにト�
 - `data class` → record（不変）またはclass（可変）
 - 拡張関数 → 静的ユーティリティメソッド
 - 文字列補間: `"Hello, ${name}"`
+- JSONリテラル + JSONC コメント → 自動POJO生成と型安全アクセス
 - 仮想スレッド: `spawn {}`
 - 非同期/await: `async {}.await()` → CompletableFuture
 - リソース管理: `use {}` → try-with-resources

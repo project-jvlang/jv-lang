@@ -15,6 +15,7 @@ Complete reference for the jv (Java Syntactic Sugar) syntax and features.
 9. [Resource Management](#resource-management)
 10. [Extension Functions](#extension-functions)
 11. [Java Interop](#java-interop)
+12. [JSON Literals & POJO Generation](#json-literals--pojo-generation)
 
 ## Variables and Types
 
@@ -628,6 +629,10 @@ fun useJavaLibrary() {
 ```
 
 The generated Java code directly uses these Java APIs without any wrapper layers.
+
+## JSON Literals & POJO Generation
+
+Inline literals such as `val payload = { ... }` are desugared into Java 25 `record`s, giving you type-safe access like `payload.user.name`. For end-to-end details—including JSONC comment preservation and schema inference—see the [JSON Literals & POJO Generation guide](json-en.md).
 
 ## Best Practices
 

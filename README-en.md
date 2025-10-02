@@ -26,6 +26,7 @@ The `ir-java-codegen` milestone is feature-complete and tagged for the 0.1.0 rel
 - `data class` → records (immutable) or classes (mutable)
 - Extension functions → static utility methods
 - String interpolation: `"Hello, ${name}"`
+- JSON literals & JSONC comments → automatic POJO generation
 - Virtual threads: `spawn {}`
 - Async/await: `async {}.await()` → CompletableFuture
 - Resource management: `use {}` → try-with-resources

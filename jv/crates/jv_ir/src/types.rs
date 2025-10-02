@@ -249,6 +249,7 @@ pub enum SampleSourceKind {
     S3,
     GitSsh,
     CachedFile,
+    Inline,
 }
 
 /// Request parameters controlling sample data fetching.

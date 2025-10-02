@@ -282,6 +282,47 @@ mod tests {
     }
 
     #[test]
+    fn inline_json_literal_desugars_to_sample_declaration() {
+        let source = r#"
+            val payload = {
+              "user": { "name": "Alice" },
+              "count": 2
+            }
+        "#;
+
+        let program = Parser::parse(source).expect("parse inline json payload");
+        let mut context = TransformContext::new();
+        let ir_program =
+            transform_program_with_context(program, &mut context).expect("lower inline json");
+
+        assert_eq!(ir_program.type_declarations.len(), 1);
+        match &ir_program.type_declarations[0] {
+            IrStatement::SampleDeclaration(declaration) => {
+                assert_eq!(declaration.variable_name, "payload");
+                assert_eq!(declaration.format, DataFormat::Json);
+                assert_eq!(declaration.mode, SampleMode::Embed);
+                assert_eq!(declaration.source_kind, SampleSourceKind::Inline);
+                assert!(declaration
+                    .embedded_data
+                    .as_ref()
+                    .is_some_and(|data| !data.is_empty()));
+                assert!(!declaration.records.is_empty());
+
+                let registered = context
+                    .lookup_variable("payload")
+                    .expect("payload type registered");
+                match registered {
+                    JavaType::Reference { name, .. } => {
+                        assert!(name.contains("Payload"));
+                    }
+                    other => panic!("expected reference type for payload, got {:?}", other),
+                }
+            }
+            other => panic!("expected sample declaration, got {:?}", other),
+        }
+    }
+
+    #[test]
     fn transform_pools_capture_reuse_between_runs() {
         let pools = TransformPools::with_chunk_capacity(8 * 1024);
         let mut context = TransformContext::with_pools(pools);
