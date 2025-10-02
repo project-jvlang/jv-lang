@@ -2292,7 +2292,7 @@ mod tests {
                         assert_eq!(field_name, "out");
                         match *inner_receiver {
                             IrExpression::Identifier { name, .. } => {
-                                assert_eq!(name, "java.lang.System");
+                                assert_eq!(name, "System");
                             }
                             other => panic!("expected system identifier, got {:?}", other),
                         }
@@ -2345,7 +2345,7 @@ mod tests {
                         assert_eq!(field_name, "in");
                         match *inner_receiver {
                             IrExpression::Identifier { name, .. } => {
-                                assert_eq!(name, "java.lang.System");
+                                assert_eq!(name, "System");
                             }
                             other => panic!("expected system identifier, got {:?}", other),
                         }

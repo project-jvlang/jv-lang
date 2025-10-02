@@ -497,7 +497,7 @@ fn system_in_method_return_type(method_name: &str) -> JavaType {
 
 fn system_identifier(span: Span) -> IrExpression {
     IrExpression::Identifier {
-        name: "java.lang.System".to_string(),
+        name: "System".to_string(),
         java_type: JavaType::Reference {
             name: "java.lang.System".to_string(),
             generic_args: vec![],
