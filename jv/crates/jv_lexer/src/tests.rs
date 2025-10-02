@@ -304,6 +304,37 @@ val value = 1";
 }
 
 #[test]
+fn test_multiline_jv_only_block_comment() {
+    let source = "//* comment start
+line in comment
+*//
+val value = 1";
+    let mut lexer = Lexer::new(source.to_string());
+    let tokens = lexer.tokenize().expect("tokenize jv-only block comment");
+
+    let comment_token = tokens
+        .iter()
+        .find(|token| matches!(token.token_type, TokenType::LineComment(_)))
+        .expect("expected comment token");
+
+    if let TokenType::LineComment(text) = &comment_token.token_type {
+        assert!(text.starts_with("/*"));
+        assert!(text.ends_with("*//"));
+        assert!(text.contains("line in comment"));
+    } else {
+        panic!("expected line comment token");
+    }
+
+    let val_token = tokens
+        .iter()
+        .find(|token| matches!(token.token_type, TokenType::Val))
+        .expect("expected val token after comment");
+
+    assert!(val_token.leading_trivia.passthrough_comments.is_empty());
+    assert!(val_token.leading_trivia.jv_comments.is_empty());
+}
+
+#[test]
 fn test_javadoc_comment_trivia_pass_through() {
     let source = "/**\n * Sample doc.\n */\nval answer = 42";
     let mut lexer = Lexer::new(source.to_string());

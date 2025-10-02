@@ -738,44 +738,74 @@ impl Lexer {
                     if self.current < chars.len() {
                         match chars[self.current] {
                             '/' => {
-                                // Line comment
-                                let is_jv_only =
-                                    matches!(chars.get(self.current + 1), Some('/') | Some('*'));
-                                let comment = self.read_line_comment();
-                                let sanitized = Self::sanitize_comment_text(
-                                    JsonCommentTriviaKind::Line,
-                                    &comment,
-                                );
-                                let comment_info = JsonCommentTrivia {
-                                    kind: JsonCommentTriviaKind::Line,
-                                    text: sanitized,
-                                    line: start_line,
-                                    column: start_column,
-                                };
-                                let full_text = format!("/{}", comment);
-                                let comment_trivia = SourceCommentTrivia {
-                                    kind: SourceCommentKind::Line,
-                                    text: full_text,
-                                    line: start_line,
-                                    column: start_column,
-                                };
-                                let (passthrough, jv_only_comment) = if is_jv_only {
-                                    (None, Some(comment_trivia.clone()))
+                                let mut has_jv_block_terminator = false;
+                                if self.current + 1 < chars.len() && chars[self.current + 1] == '*'
+                                {
+                                    let mut idx = self.current + 1;
+                                    while idx + 2 < chars.len() {
+                                        if chars[idx] == '*'
+                                            && chars[idx + 1] == '/'
+                                            && chars[idx + 2] == '/'
+                                        {
+                                            has_jv_block_terminator = true;
+                                            break;
+                                        }
+                                        idx += 1;
+                                    }
+                                }
+
+                                if has_jv_block_terminator {
+                                    let comment_body = self.read_jv_only_block_comment()?;
+                                    let comment_text = format!("/*{}*//", comment_body);
+                                    tokens.push(self.make_token(
+                                        TokenType::LineComment(comment_text.clone()),
+                                        &comment_text,
+                                        start_line,
+                                        start_column,
+                                        trivia.take(),
+                                    ));
                                 } else {
-                                    (Some(comment_trivia.clone()), None)
-                                };
-                                tokens.push(self.make_token(
-                                    TokenType::LineComment(comment.clone()),
-                                    &comment,
-                                    start_line,
-                                    start_column,
-                                    trivia.take(),
-                                ));
-                                trivia.record_comment(
-                                    Some(comment_info),
-                                    passthrough,
-                                    jv_only_comment,
-                                );
+                                    // Line comment
+                                    let is_jv_only = matches!(
+                                        chars.get(self.current + 1),
+                                        Some('/') | Some('*')
+                                    );
+                                    let comment = self.read_line_comment();
+                                    let sanitized = Self::sanitize_comment_text(
+                                        JsonCommentTriviaKind::Line,
+                                        &comment,
+                                    );
+                                    let comment_info = JsonCommentTrivia {
+                                        kind: JsonCommentTriviaKind::Line,
+                                        text: sanitized,
+                                        line: start_line,
+                                        column: start_column,
+                                    };
+                                    let full_text = format!("/{}", comment);
+                                    let comment_trivia = SourceCommentTrivia {
+                                        kind: SourceCommentKind::Line,
+                                        text: full_text,
+                                        line: start_line,
+                                        column: start_column,
+                                    };
+                                    let (passthrough, jv_only_comment) = if is_jv_only {
+                                        (None, Some(comment_trivia.clone()))
+                                    } else {
+                                        (Some(comment_trivia.clone()), None)
+                                    };
+                                    tokens.push(self.make_token(
+                                        TokenType::LineComment(comment.clone()),
+                                        &comment,
+                                        start_line,
+                                        start_column,
+                                        trivia.take(),
+                                    ));
+                                    trivia.record_comment(
+                                        Some(comment_info),
+                                        passthrough,
+                                        jv_only_comment,
+                                    );
+                                }
                             }
                             '*' => {
                                 let is_javadoc = self.current + 1 < chars.len()
@@ -1117,6 +1147,39 @@ impl Lexer {
                 self.advance(); // consume '/'
                 return Ok(chars[start..self.current - 2].iter().collect());
             }
+            if chars[self.current] == '\n' {
+                self.advance();
+                self.line += 1;
+                self.column = 1;
+            } else {
+                self.advance();
+            }
+        }
+
+        Err(LexError::UnterminatedString(start_line, start_column))
+    }
+
+    fn read_jv_only_block_comment(&mut self) -> Result<String, LexError> {
+        let start_line = self.line;
+        let start_column = self.column;
+        let chars: Vec<char> = self.input.chars().collect();
+
+        self.advance(); // consume second '/'
+        self.advance(); // consume '*'
+        let start = self.current;
+
+        while self.current + 2 < chars.len() {
+            if chars[self.current] == '*'
+                && chars[self.current + 1] == '/'
+                && chars[self.current + 2] == '/'
+            {
+                let comment: String = chars[start..self.current].iter().collect();
+                self.advance(); // consume '*'
+                self.advance(); // consume '/'
+                self.advance(); // consume '/'
+                return Ok(comment);
+            }
+
             if chars[self.current] == '\n' {
                 self.advance();
                 self.line += 1;

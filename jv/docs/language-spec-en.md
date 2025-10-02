@@ -54,7 +54,11 @@ jv source files are encoded in UTF-8. The lexical structure is case sensitive.
  */
 ```
 
-**Note**: JavaDoc comments (`/** ... */`) are passed through verbatim to the generated Java source code. This ensures that JavaDoc written in jv code is preserved in the generated Java files and remains available for JavaDoc tooling.
+**Note**: Each comment form serves a distinct purpose.
+
+- `//` and `/* */` are **passthrough comments**. They retain their position through parsing, IR, and code generation, and appear unmodified in the emitted Java source.
+- `///` and `//*` are treated as **jv-only comments**. They survive lexing and parsing but are filtered out before code generation, making them suitable for compiler-only notes or TODOs.
+- JavaDoc comments (`/** ... */`) are always copied to the generated Java source so that API documentation remains available to JavaDoc tooling.
 
 ### Identifiers
 

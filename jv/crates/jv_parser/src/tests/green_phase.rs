@@ -840,6 +840,36 @@ val answer = 42",
 }
 
 #[test]
+fn test_top_level_jv_only_multiline_comment_statement() {
+    let program = parse_program(
+        "//* comment start
+still comment
+*//
+val answer = 42",
+    );
+
+    assert_eq!(program.statements.len(), 2);
+    match &program.statements[0] {
+        Statement::Comment(comment) => {
+            assert_eq!(comment.visibility, CommentVisibility::JvOnly);
+            assert_eq!(comment.kind, CommentKind::Line);
+            assert!(comment.text.starts_with("//*"));
+            assert!(comment.text.contains("still comment"));
+            assert!(comment.text.trim_end().ends_with("*//"));
+        }
+        other => panic!("expected comment statement, found {:?}", other),
+    }
+
+    match &program.statements[1] {
+        Statement::ValDeclaration { .. } => {}
+        other => panic!(
+            "expected val declaration following comment, found {:?}",
+            other
+        ),
+    }
+}
+
+#[test]
 fn test_whitespace_call_arguments() {
     let program = parse_program("val result = plot(1 2 3)");
     let statement = first_statement(&program);
