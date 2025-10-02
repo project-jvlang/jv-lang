@@ -475,14 +475,12 @@ fn annotation_parser() -> impl ChumskyParser<Token, Annotation, Error = Simple<T
             let literal = filter_map(|span, token: Token| {
                 let token_span = span_from_token(&token);
                 match token.token_type {
-                    TokenType::String(value) => Ok((
-                        AnnotationValue::Literal(Literal::String(value)),
-                        token_span,
-                    )),
-                    TokenType::Number(value) => Ok((
-                        AnnotationValue::Literal(Literal::Number(value)),
-                        token_span,
-                    )),
+                    TokenType::String(value) => {
+                        Ok((AnnotationValue::Literal(Literal::String(value)), token_span))
+                    }
+                    TokenType::Number(value) => {
+                        Ok((AnnotationValue::Literal(Literal::Number(value)), token_span))
+                    }
                     TokenType::Boolean(value) => Ok((
                         AnnotationValue::Literal(Literal::Boolean(value)),
                         token_span,
@@ -492,32 +490,33 @@ fn annotation_parser() -> impl ChumskyParser<Token, Annotation, Error = Simple<T
                 }
             });
 
-            let enum_or_class = qualified_name_with_span().then(
-                token_dot()
-                    .ignore_then(token_class().map(|token| span_from_token(&token)))
-                    .or_not(),
-            )
-            .map(|((segments, name_span), maybe_class_span)| {
-                if let Some(class_span) = maybe_class_span {
-                    let span = merge_spans(&name_span, &class_span);
-                    (
-                        AnnotationValue::ClassLiteral {
-                            type_path: segments,
-                        },
-                        span,
-                    )
-                } else {
-                    let mut type_path = segments.clone();
-                    let constant = type_path.pop().unwrap_or_default();
-                    (
-                        AnnotationValue::EnumConstant {
-                            type_path,
-                            constant,
-                        },
-                        name_span,
-                    )
-                }
-            });
+            let enum_or_class = qualified_name_with_span()
+                .then(
+                    token_dot()
+                        .ignore_then(token_class().map(|token| span_from_token(&token)))
+                        .or_not(),
+                )
+                .map(|((segments, name_span), maybe_class_span)| {
+                    if let Some(class_span) = maybe_class_span {
+                        let span = merge_spans(&name_span, &class_span);
+                        (
+                            AnnotationValue::ClassLiteral {
+                                type_path: segments,
+                            },
+                            span,
+                        )
+                    } else {
+                        let mut type_path = segments.clone();
+                        let constant = type_path.pop().unwrap_or_default();
+                        (
+                            AnnotationValue::EnumConstant {
+                                type_path,
+                                constant,
+                            },
+                            name_span,
+                        )
+                    }
+                });
 
             let nested = annotation_parser_ref.clone().map(|annotation: Annotation| {
                 let span = annotation.span.clone();
@@ -597,11 +596,7 @@ fn annotation_argument(
 fn qualified_name_with_span(
 ) -> impl ChumskyParser<Token, (Vec<String>, Span), Error = Simple<Token>> + Clone {
     identifier_with_span()
-        .then(
-            token_dot()
-                .ignore_then(identifier_with_span())
-                .repeated(),
-        )
+        .then(token_dot().ignore_then(identifier_with_span()).repeated())
         .map(|((first_name, first_span), rest)| {
             let mut segments = Vec::with_capacity(rest.len() + 1);
             segments.push(first_name);
@@ -671,7 +666,10 @@ mod tests {
             AnnotationArgument::Named { name, value, .. } => {
                 assert_eq!(name, "mode");
                 match value {
-                    AnnotationValue::EnumConstant { type_path, constant } => {
+                    AnnotationValue::EnumConstant {
+                        type_path,
+                        constant,
+                    } => {
                         assert!(type_path.is_empty());
                         assert_eq!(constant, "Load");
                     }
@@ -747,7 +745,9 @@ mod tests {
             make_token(TokenType::RightParen, ")", 71),
         ];
 
-        let annotation = parser.parse(tokens).expect("parse annotation with enum/class");
+        let annotation = parser
+            .parse(tokens)
+            .expect("parse annotation with enum/class");
 
         assert_eq!(annotation.arguments.len(), 2);
 
@@ -755,12 +755,18 @@ mod tests {
             AnnotationArgument::Named { name, value, .. } => {
                 assert_eq!(name, "status");
                 match value {
-                    AnnotationValue::EnumConstant { type_path, constant } => {
-                        assert_eq!(type_path, &vec![
-                            "com".to_string(),
-                            "example".to_string(),
-                            "Status".to_string(),
-                        ]);
+                    AnnotationValue::EnumConstant {
+                        type_path,
+                        constant,
+                    } => {
+                        assert_eq!(
+                            type_path,
+                            &vec![
+                                "com".to_string(),
+                                "example".to_string(),
+                                "Status".to_string(),
+                            ]
+                        );
                         assert_eq!(constant, "ACTIVE");
                     }
                     other => panic!("expected enum constant, found {:?}", other),
@@ -774,11 +780,10 @@ mod tests {
                 assert_eq!(name, "clazz");
                 match value {
                     AnnotationValue::ClassLiteral { type_path } => {
-                        assert_eq!(type_path, &vec![
-                            "java".to_string(),
-                            "lang".to_string(),
-                            "String".to_string(),
-                        ]);
+                        assert_eq!(
+                            type_path,
+                            &vec!["java".to_string(), "lang".to_string(), "String".to_string(),]
+                        );
                     }
                     other => panic!("expected class literal, found {:?}", other),
                 }
@@ -806,7 +811,11 @@ mod tests {
             make_token(TokenType::Identifier("nested".to_string()), "nested", 33),
             make_token(TokenType::Assign, "=", 39),
             make_token(TokenType::At, "@", 41),
-            make_token(TokenType::Identifier("Qualifier".to_string()), "Qualifier", 42),
+            make_token(
+                TokenType::Identifier("Qualifier".to_string()),
+                "Qualifier",
+                42,
+            ),
             make_token(TokenType::LeftParen, "(", 51),
             make_token(TokenType::Identifier("value".to_string()), "value", 52),
             make_token(TokenType::Assign, "=", 57),
@@ -815,7 +824,9 @@ mod tests {
             make_token(TokenType::RightParen, ")", 64),
         ];
 
-        let annotation = parser.parse(tokens).expect("parse annotation with array/nested");
+        let annotation = parser
+            .parse(tokens)
+            .expect("parse annotation with array/nested");
 
         assert_eq!(annotation.arguments.len(), 2);
 

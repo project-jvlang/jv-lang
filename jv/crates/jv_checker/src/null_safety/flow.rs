@@ -152,11 +152,12 @@ impl<'g, 'ctx, 'facts> FlowGraphBuilder<'g, 'ctx, 'facts> {
     }
 
     fn register_late_init_annotation(&mut self, name: &str, modifiers: &Modifiers) {
-        if modifiers
-            .annotations
-            .iter()
-            .any(|annotation| annotation.name.simple_name().eq_ignore_ascii_case("LateInit"))
-        {
+        if modifiers.annotations.iter().any(|annotation| {
+            annotation
+                .name
+                .simple_name()
+                .eq_ignore_ascii_case("LateInit")
+        }) {
             self.context
                 .late_init_mut()
                 .allow_late_init(name.to_string());

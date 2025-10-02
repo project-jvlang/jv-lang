@@ -474,18 +474,19 @@ impl JavaCodeGenerator {
     fn format_annotation_argument(&self, argument: &IrAnnotationArgument) -> String {
         match argument {
             IrAnnotationArgument::Positional(value) => self.format_annotation_value(value),
-            IrAnnotationArgument::Named { name, value } => format!(
-                "{} = {}",
-                name,
-                self.format_annotation_value(value)
-            ),
+            IrAnnotationArgument::Named { name, value } => {
+                format!("{} = {}", name, self.format_annotation_value(value))
+            }
         }
     }
 
     fn format_annotation_value(&self, value: &IrAnnotationValue) -> String {
         match value {
             IrAnnotationValue::Literal(literal) => Self::literal_to_string(literal),
-            IrAnnotationValue::EnumConstant { type_name, constant } => {
+            IrAnnotationValue::EnumConstant {
+                type_name,
+                constant,
+            } => {
                 if type_name.is_empty() {
                     constant.clone()
                 } else {

@@ -1,9 +1,9 @@
 use std::collections::{HashMap, HashSet};
 
+use super::annotations::{lookup_nullability_hint, JavaNullabilityHint};
 use crate::inference::{TypeEnvironment, TypeKind as CheckerTypeKind, TypeScheme};
 use crate::pattern::{PatternMatchFacts, PatternTarget};
 use crate::{InferenceSnapshot, TypeInferenceService};
-use super::annotations::{lookup_nullability_hint, JavaNullabilityHint};
 use jv_inference::service::{TypeFacts, TypeFactsSnapshot};
 use jv_inference::types::{
     NullabilityFlag, TypeKind as FactsTypeKind, TypeVariant as FactsTypeVariant,

@@ -38,7 +38,9 @@ impl AnnotationTargetRule {
         for site in sites {
             allowed.insert(*site);
         }
-        Self { allowed_sites: allowed }
+        Self {
+            allowed_sites: allowed,
+        }
     }
 
     fn allows(&self, site: AnnotationSite) -> bool {
@@ -89,12 +91,18 @@ fn rules() -> &'static HashMap<&'static str, AnnotationTargetRule> {
         );
         insert_rule(
             &mut map,
-            &["org.springframework.beans.factory.annotation.Autowired", "Autowired"],
+            &[
+                "org.springframework.beans.factory.annotation.Autowired",
+                "Autowired",
+            ],
             &[Field, Method, Parameter],
         );
         insert_rule(
             &mut map,
-            &["org.springframework.beans.factory.annotation.Qualifier", "Qualifier"],
+            &[
+                "org.springframework.beans.factory.annotation.Qualifier",
+                "Qualifier",
+            ],
             &[Field, Method, Parameter],
         );
 
@@ -128,20 +136,12 @@ fn rules() -> &'static HashMap<&'static str, AnnotationTargetRule> {
         );
         insert_rule(
             &mut map,
-            &[
-                "jakarta.persistence.Id",
-                "javax.persistence.Id",
-                "Id",
-            ],
+            &["jakarta.persistence.Id", "javax.persistence.Id", "Id"],
             &[Field],
         );
 
         // JUnit 5
-        insert_rule(
-            &mut map,
-            &["org.junit.jupiter.api.Test", "Test"],
-            &[Method],
-        );
+        insert_rule(&mut map, &["org.junit.jupiter.api.Test", "Test"], &[Method]);
         insert_rule(
             &mut map,
             &["org.junit.jupiter.api.BeforeEach", "BeforeEach"],
@@ -154,7 +154,10 @@ fn rules() -> &'static HashMap<&'static str, AnnotationTargetRule> {
         );
         insert_rule(
             &mut map,
-            &["org.junit.jupiter.params.ParameterizedTest", "ParameterizedTest"],
+            &[
+                "org.junit.jupiter.params.ParameterizedTest",
+                "ParameterizedTest",
+            ],
             &[Method],
         );
 
@@ -248,7 +251,8 @@ fn validate_statement(statement: &Statement, errors: &mut Vec<CheckError>) {
         Statement::FunctionDeclaration { modifiers, .. } => {
             check_annotations(&modifiers.annotations, AnnotationSite::Method, errors);
         }
-        Statement::ValDeclaration { modifiers, .. } | Statement::VarDeclaration { modifiers, .. } => {
+        Statement::ValDeclaration { modifiers, .. }
+        | Statement::VarDeclaration { modifiers, .. } => {
             check_annotations(&modifiers.annotations, AnnotationSite::Field, errors);
         }
         Statement::Comment(_)
@@ -266,7 +270,11 @@ fn validate_statement(statement: &Statement, errors: &mut Vec<CheckError>) {
 }
 
 fn validate_property(property: &Property, errors: &mut Vec<CheckError>) {
-    check_annotations(&property.modifiers.annotations, AnnotationSite::Field, errors);
+    check_annotations(
+        &property.modifiers.annotations,
+        AnnotationSite::Field,
+        errors,
+    );
 }
 
 fn check_annotations(

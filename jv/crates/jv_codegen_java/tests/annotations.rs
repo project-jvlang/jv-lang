@@ -40,9 +40,7 @@ fn audited_program() -> IrProgram {
             span.clone(),
         ),
         arguments: vec![
-            IrAnnotationArgument::Positional(IrAnnotationValue::Nested(
-                author_annotation.clone(),
-            )),
+            IrAnnotationArgument::Positional(IrAnnotationValue::Nested(author_annotation.clone())),
             IrAnnotationArgument::Named {
                 name: "level".to_string(),
                 value: IrAnnotationValue::EnumConstant {
@@ -98,10 +96,9 @@ fn annotations_render_with_arguments_and_generate_imports() {
     assert!(unit
         .imports
         .contains(&"com.example.security.Audited".to_string()));
-    assert!(
-        unit.imports
-            .contains(&"com.example.meta.Author".to_string())
-    );
+    assert!(unit
+        .imports
+        .contains(&"com.example.meta.Author".to_string()));
 
     let class_source = &unit.type_declarations[0];
     assert!(class_source.contains("@Audited"));

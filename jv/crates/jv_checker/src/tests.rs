@@ -131,7 +131,10 @@ fn override_annotation_on_method_is_allowed() {
         name: "run".into(),
         parameters: Vec::new(),
         return_type: None,
-        body: Box::new(Expression::Literal(Literal::Number("1".into()), span.clone())),
+        body: Box::new(Expression::Literal(
+            Literal::Number("1".into()),
+            span.clone(),
+        )),
         modifiers: method_modifiers,
         span: span.clone(),
     };
@@ -156,7 +159,10 @@ fn override_annotation_on_method_is_allowed() {
 
     let mut checker = TypeChecker::new();
     let result = checker.check_program(&program);
-    assert!(result.is_ok(), "override on method should be accepted: {result:?}");
+    assert!(
+        result.is_ok(),
+        "override on method should be accepted: {result:?}"
+    );
 }
 
 #[test]

@@ -10,7 +10,11 @@ pub enum JavaNullabilityHint {
 
 const ENTRIES: &[(&[&str], JavaNullabilityHint, u8)] = &[
     // JetBrains annotations (highest precedence)
-    (&["org.jetbrains.annotations.notnull", "notnull"], JavaNullabilityHint::NonNull, 100),
+    (
+        &["org.jetbrains.annotations.notnull", "notnull"],
+        JavaNullabilityHint::NonNull,
+        100,
+    ),
     (
         &["org.jetbrains.annotations.nullable", "nullable"],
         JavaNullabilityHint::Nullable,
@@ -81,7 +85,5 @@ pub fn lookup_nullability_hint(annotation: &str) -> Option<(JavaNullabilityHint,
         .trim()
         .trim_start_matches('@')
         .to_ascii_lowercase();
-    precedence_map()
-        .get(normalized.as_str())
-        .copied()
+    precedence_map().get(normalized.as_str()).copied()
 }

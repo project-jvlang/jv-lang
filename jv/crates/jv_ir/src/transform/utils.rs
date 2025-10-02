@@ -1,6 +1,6 @@
 use crate::types::{
-    IrAnnotation, IrAnnotationArgument, IrAnnotationValue, IrExpression, IrModifiers,
-    IrVisibility, JavaType,
+    IrAnnotation, IrAnnotationArgument, IrAnnotationValue, IrExpression, IrModifiers, IrVisibility,
+    JavaType,
 };
 use jv_ast::{
     Annotation, AnnotationArgument, AnnotationName, AnnotationValue, Literal, Modifiers, Span,
@@ -19,8 +19,8 @@ pub(crate) fn convert_modifiers(modifiers: &Modifiers) -> IrModifiers {
     };
 
     ir_modifiers.is_static = modifiers.is_static;
-   ir_modifiers.is_final = modifiers.is_final;
-   ir_modifiers.is_abstract = modifiers.is_abstract;
+    ir_modifiers.is_final = modifiers.is_final;
+    ir_modifiers.is_abstract = modifiers.is_abstract;
 
     for annotation in &modifiers.annotations {
         ir_modifiers
@@ -28,8 +28,7 @@ pub(crate) fn convert_modifiers(modifiers: &Modifiers) -> IrModifiers {
             .push(convert_annotation(annotation));
     }
 
-    if modifiers
-        .is_override
+    if modifiers.is_override
         && !ir_modifiers
             .annotations
             .iter()
@@ -72,7 +71,10 @@ fn convert_annotation_argument(argument: &AnnotationArgument) -> IrAnnotationArg
 fn convert_annotation_value(value: &AnnotationValue) -> IrAnnotationValue {
     match value {
         AnnotationValue::Literal(literal) => IrAnnotationValue::Literal(literal.clone()),
-        AnnotationValue::EnumConstant { type_path, constant } => {
+        AnnotationValue::EnumConstant {
+            type_path,
+            constant,
+        } => {
             let type_name = if type_path.is_empty() {
                 String::new()
             } else {
@@ -83,12 +85,9 @@ fn convert_annotation_value(value: &AnnotationValue) -> IrAnnotationValue {
                 constant: constant.clone(),
             }
         }
-        AnnotationValue::Array(values) => IrAnnotationValue::Array(
-            values
-                .iter()
-                .map(convert_annotation_value)
-                .collect(),
-        ),
+        AnnotationValue::Array(values) => {
+            IrAnnotationValue::Array(values.iter().map(convert_annotation_value).collect())
+        }
         AnnotationValue::ClassLiteral { type_path } => {
             IrAnnotationValue::ClassLiteral(type_path.join("."))
         }

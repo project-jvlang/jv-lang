@@ -10,9 +10,7 @@ fn build_sample_annotation() -> Annotation {
         name: AnnotationName::new(vec!["Sample".to_string()], name_span.clone()),
         arguments: vec![
             AnnotationArgument::Positional {
-                value: AnnotationValue::Literal(Literal::String(
-                    "examples/users.json".to_string(),
-                )),
+                value: AnnotationValue::Literal(Literal::String("examples/users.json".to_string())),
                 span: positional_span,
             },
             AnnotationArgument::Named {

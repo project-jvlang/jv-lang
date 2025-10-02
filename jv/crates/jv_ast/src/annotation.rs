@@ -30,10 +30,7 @@ impl AnnotationName {
     }
 
     pub fn simple_name(&self) -> &str {
-        self.segments
-            .last()
-            .map(String::as_str)
-            .unwrap_or("")
+        self.segments.last().map(String::as_str).unwrap_or("")
     }
 
     pub fn qualified_name(&self) -> String {
@@ -203,9 +200,7 @@ pub fn detect_reserved_conflicts<'a>(
                                 }
                             })
                             .collect();
-                        if !other_reserved.is_empty()
-                            && simple.as_str() <= *other
-                        {
+                        if !other_reserved.is_empty() && simple.as_str() <= *other {
                             conflicts.push(ReservedAnnotationConflict {
                                 primary: *reserved_uses.first().unwrap(),
                                 secondary: Some(other_reserved[0]),

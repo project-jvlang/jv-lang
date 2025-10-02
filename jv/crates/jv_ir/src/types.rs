@@ -787,7 +787,10 @@ pub struct IrAnnotation {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum IrAnnotationArgument {
     Positional(IrAnnotationValue),
-    Named { name: String, value: IrAnnotationValue },
+    Named {
+        name: String,
+        value: IrAnnotationValue,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
