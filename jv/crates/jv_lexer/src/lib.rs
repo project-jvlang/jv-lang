@@ -85,6 +85,7 @@ pub enum TokenType {
     // Comments
     LineComment(String),
     BlockComment(String),
+    JavaDocComment(String),
 
     // Whitespace (usually ignored but useful for formatting)
     Whitespace(String),
@@ -116,6 +117,8 @@ pub struct TokenTrivia {
     pub comments: bool,
     #[serde(default)]
     pub json_comments: Vec<JsonCommentTrivia>,
+    #[serde(default)]
+    pub doc_comment: Option<String>,
 }
 
 impl TokenTrivia {
@@ -249,9 +252,15 @@ impl TriviaTracker {
 
     fn record_comment(&mut self, comment: Option<JsonCommentTrivia>) {
         self.trivia.comments = true;
+        self.trivia.doc_comment = None;
         if let Some(comment) = comment {
             self.trivia.json_comments.push(comment);
         }
+    }
+
+    fn record_doc_comment(&mut self, comment: String) {
+        self.trivia.comments = true;
+        self.trivia.doc_comment = Some(comment);
     }
 }
 
@@ -722,26 +731,39 @@ impl Lexer {
                                 trivia.record_comment(Some(comment_info));
                             }
                             '*' => {
-                                // Block comment
+                                let is_javadoc = self.current + 1 < chars.len()
+                                    && chars[self.current + 1] == '*';
                                 let comment = self.read_block_comment()?;
-                                let sanitized = Self::sanitize_comment_text(
-                                    JsonCommentTriviaKind::Block,
-                                    &comment,
-                                );
-                                let comment_info = JsonCommentTrivia {
-                                    kind: JsonCommentTriviaKind::Block,
-                                    text: sanitized,
-                                    line: start_line,
-                                    column: start_column,
-                                };
-                                tokens.push(self.make_token(
-                                    TokenType::BlockComment(comment.clone()),
-                                    &comment,
-                                    start_line,
-                                    start_column,
-                                    trivia.take(),
-                                ));
-                                trivia.record_comment(Some(comment_info));
+
+                                if is_javadoc {
+                                    tokens.push(self.make_token(
+                                        TokenType::JavaDocComment(comment.clone()),
+                                        &comment,
+                                        start_line,
+                                        start_column,
+                                        trivia.take(),
+                                    ));
+                                    trivia.record_doc_comment(comment);
+                                } else {
+                                    let sanitized = Self::sanitize_comment_text(
+                                        JsonCommentTriviaKind::Block,
+                                        &comment,
+                                    );
+                                    let comment_info = JsonCommentTrivia {
+                                        kind: JsonCommentTriviaKind::Block,
+                                        text: sanitized,
+                                        line: start_line,
+                                        column: start_column,
+                                    };
+                                    tokens.push(self.make_token(
+                                        TokenType::BlockComment(comment.clone()),
+                                        &comment,
+                                        start_line,
+                                        start_column,
+                                        trivia.take(),
+                                    ));
+                                    trivia.record_comment(Some(comment_info));
+                                }
                             }
                             _ => {
                                 tokens.push(self.make_token(

@@ -54,6 +54,8 @@ jv source files are encoded in UTF-8. The lexical structure is case sensitive.
  */
 ```
 
+**Note**: JavaDoc comments (`/** ... */`) are passed through verbatim to the generated Java source code. This ensures that JavaDoc written in jv code is preserved in the generated Java files and remains available for JavaDoc tooling.
+
 ### Identifiers
 
 ```bnf

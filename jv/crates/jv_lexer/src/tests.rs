@@ -245,6 +245,38 @@ fn test_comments_red_phase() {
 }
 
 #[test]
+fn test_javadoc_comment_trivia_pass_through() {
+    let source = "/**\n * Sample doc.\n */\nval answer = 42";
+    let mut lexer = Lexer::new(source.to_string());
+    let tokens = lexer.tokenize().expect("tokenize source with javadoc");
+
+    let javadoc_token = tokens
+        .iter()
+        .find(|token| matches!(token.token_type, TokenType::JavaDocComment(_)))
+        .expect("expected javadoc comment token");
+
+    if let TokenType::JavaDocComment(content) = &javadoc_token.token_type {
+        assert!(content.starts_with("**"));
+        assert!(content.contains("Sample doc."));
+    }
+
+    let val_token = tokens
+        .iter()
+        .find(|token| matches!(token.token_type, TokenType::Val))
+        .expect("expected val token following javadoc");
+
+    let doc_comment = val_token
+        .leading_trivia
+        .doc_comment
+        .as_ref()
+        .expect("javadoc should attach to following token");
+    assert!(doc_comment.starts_with("**"));
+    assert!(doc_comment.contains("Sample doc."));
+    assert!(val_token.leading_trivia.comments);
+    assert!(val_token.leading_trivia.json_comments.is_empty());
+}
+
+#[test]
 fn test_json_comment_trivia_attached_to_following_token() {
     let source = "{ // user config\n  \"key\": 1 }";
     let mut lexer = Lexer::new(source.to_string());

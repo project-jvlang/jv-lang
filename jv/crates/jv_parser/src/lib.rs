@@ -209,7 +209,7 @@ fn preprocess_tokens(tokens: Vec<Token>) -> Vec<Token> {
     for token in tokens {
         if matches!(
             token.token_type,
-            TokenType::LineComment(_) | TokenType::BlockComment(_)
+            TokenType::LineComment(_) | TokenType::BlockComment(_) | TokenType::JavaDocComment(_)
         ) {
             if let Some(ctx) = stack.last_mut() {
                 ctx.pending_layout = true;
