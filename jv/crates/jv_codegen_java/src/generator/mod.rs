@@ -70,17 +70,64 @@ impl JavaCodeGenerator {
             }
         }
 
+        let mut script_statements = Vec::new();
+        let mut script_methods = Vec::new();
+        let mut remaining_declarations = Vec::new();
+
         for declaration in &program.type_declarations {
-            if let IrStatement::SampleDeclaration(sample) = declaration {
+            match declaration {
+                IrStatement::ClassDeclaration { .. }
+                | IrStatement::InterfaceDeclaration { .. }
+                | IrStatement::RecordDeclaration { .. }
+                | IrStatement::SampleDeclaration(_) => {
+                    remaining_declarations.push(declaration.clone());
+                }
+                IrStatement::MethodDeclaration { .. } => {
+                    script_methods.push(declaration.clone());
+                }
+                _ => {
+                    script_statements.push(declaration.clone());
+                }
+            }
+        }
+
+        if !script_statements.is_empty() || !script_methods.is_empty() {
+            let mut builder = self.builder();
+            builder.push_line("public final class GeneratedMain {");
+            builder.indent();
+
+            builder.push_line("public static void main(String[] args) throws Exception {");
+            builder.indent();
+            for statement in &script_statements {
+                let code = self.generate_statement(statement)?;
+                Self::push_lines(&mut builder, &code);
+            }
+            builder.dedent();
+            builder.push_line("}");
+
+            for method in &script_methods {
+                builder.push_line("");
+                let method_code = self.generate_method(method)?;
+                Self::push_lines(&mut builder, &method_code);
+            }
+
+            builder.dedent();
+            builder.push_line("}");
+
+            unit.type_declarations.push(builder.build());
+        }
+
+        for declaration in remaining_declarations {
+            if let IrStatement::SampleDeclaration(sample) = &declaration {
                 let artifacts = self.generate_sample_declaration_artifacts(sample)?;
                 unit.type_declarations.extend(artifacts);
                 continue;
             }
 
-            let code = match declaration {
-                IrStatement::ClassDeclaration { .. } => self.generate_class(declaration)?,
-                IrStatement::InterfaceDeclaration { .. } => self.generate_interface(declaration)?,
-                IrStatement::RecordDeclaration { .. } => self.generate_record(declaration)?,
+            let code = match &declaration {
+                IrStatement::ClassDeclaration { .. } => self.generate_class(&declaration)?,
+                IrStatement::InterfaceDeclaration { .. } => self.generate_interface(&declaration)?,
+                IrStatement::RecordDeclaration { .. } => self.generate_record(&declaration)?,
                 IrStatement::MethodDeclaration { .. }
                 | IrStatement::VariableDeclaration { .. }
                 | IrStatement::Block { .. }
@@ -99,7 +146,7 @@ impl JavaCodeGenerator {
                 | IrStatement::FieldDeclaration { .. }
                 | IrStatement::Package { .. }
                 | IrStatement::Import { .. }
-                | IrStatement::Comment { .. } => self.generate_statement(declaration)?,
+                | IrStatement::Comment { .. } => self.generate_statement(&declaration)?,
                 IrStatement::SampleDeclaration { .. } => unreachable!(),
             };
             unit.type_declarations.push(code);
