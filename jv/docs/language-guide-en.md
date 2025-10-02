@@ -271,6 +271,8 @@ fun describe(x: Any): String = when (x) {
 }
 ```
 
+For deep dives into pattern forms, exhaustiveness analysis, and code generation strategies, see the dedicated [Pattern Matching Guide](pattern-matching-en.md).
+
 **Generated Java** (using Java 25 pattern matching):
 ```java
 public static String describe(Object x) {

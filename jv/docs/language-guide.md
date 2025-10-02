@@ -273,6 +273,8 @@ fun describe(x: Any): String = when (x) {
 }
 ```
 
+より高度なパターン構成・網羅性検査・コード生成戦略については、専用ガイド「[パターンマッチングガイド](pattern-matching.md)」を参照してください。
+
 **生成されるJava**（Java 25パターンマッチング使用）:
 ```java
 public static String describe(Object x) {

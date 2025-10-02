@@ -15,6 +15,7 @@ members = [
     "crates/jv_build",
     "crates/jv_lsp",
     "crates/jv_cli",
+    "crates/jv_docs",
 ]
 
 [workspace.package]

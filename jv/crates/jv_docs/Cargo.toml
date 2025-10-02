@@ -1,0 +1,9 @@
+[package]
+name = "jv_docs"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+
+[dev-dependencies]
+jv_parser = { path = "../jv_parser" }
