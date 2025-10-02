@@ -1,7 +1,7 @@
 # jv Language Project Makefile
 # Rust workspace build automation for jv transpiler and toolchain
 
-.PHONY: help build check test clean fmt lint install dev release docs setup
+.PHONY: help build check test clean fmt lint install dev release docs setup bench-pattern
 .DEFAULT_GOAL := help
 
 # Build configuration
@@ -26,6 +26,9 @@ check: ## Check all crates without building
 
 test: check ## Run library tests for all crates
 	cargo test $(TEST_FLAGS)
+
+bench-pattern: ## Run pattern matching benchmarks (criterion) and append results to log
+	./scripts/run_pattern_bench.sh
 
 test-parser: check ## Run tests for jv_parser specifically
 	cargo test --lib -p jv_parser $(CARGO_FLAGS)

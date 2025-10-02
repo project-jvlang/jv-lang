@@ -1,0 +1,218 @@
+[
+  {
+    "name": "java21_sealed_depth10",
+    "median_seconds": 3.9467e-05,
+    "median_text": "39.467 us",
+    "min_text": "38.854 us",
+    "max_text": "40.113 us",
+    "single_run_seconds": 8.9e-05,
+    "single_run_text": "89.000 us",
+    "budget_seconds": 0.1,
+    "budget_text": "100.000 ms",
+    "status": "PASS",
+    "change_low": "-3.7648%",
+    "change_mid": "-1.2743%",
+    "change_high": "+1.3202%",
+    "change_pvalue": "0.34 > 0.05",
+    "notes": [
+      "No change in performance detected.",
+      "Found 6 outliers among 100 measurements (6.00%)",
+      "6 (6.00%) high mild"
+    ]
+  },
+  {
+    "name": "java21_when_arms_100",
+    "median_seconds": 0.00011823999999999999,
+    "median_text": "118.24 us",
+    "min_text": "116.72 us",
+    "max_text": "119.95 us",
+    "single_run_seconds": 0.000152,
+    "single_run_text": "152.000 us",
+    "budget_seconds": 0.01,
+    "budget_text": "10.000 ms",
+    "status": "PASS",
+    "change_low": "-1.6033%",
+    "change_mid": "+0.9274%",
+    "change_high": "+3.5101%",
+    "change_pvalue": "0.49 > 0.05",
+    "notes": [
+      "No change in performance detected.",
+      "Found 5 outliers among 100 measurements (5.00%)",
+      "4 (4.00%) high mild",
+      "1 (1.00%) high severe"
+    ]
+  },
+  {
+    "name": "java21_when_arms_1000",
+    "median_seconds": 0.0011688,
+    "median_text": "1.1688 ms",
+    "min_text": "1.1563 ms",
+    "max_text": "1.1822 ms",
+    "single_run_seconds": 0.001252,
+    "single_run_text": "1.252 ms",
+    "budget_seconds": 0.05,
+    "budget_text": "50.000 ms",
+    "status": "PASS",
+    "change_low": "-6.6388%",
+    "change_mid": "-3.5600%",
+    "change_high": "-0.7285%",
+    "change_pvalue": "0.02 < 0.05",
+    "notes": [
+      "Change within noise threshold.",
+      "Found 3 outliers among 100 measurements (3.00%)",
+      "2 (2.00%) high mild",
+      "1 (1.00%) high severe"
+    ]
+  },
+  {
+    "name": "java21_when_arms_500",
+    "median_seconds": 0.00058924,
+    "median_text": "589.24 us",
+    "min_text": "580.84 us",
+    "max_text": "598.44 us",
+    "single_run_seconds": 0.00062,
+    "single_run_text": "620.000 us",
+    "budget_seconds": 0.025,
+    "budget_text": "25.000 ms",
+    "status": "PASS",
+    "change_low": "-4.6885%",
+    "change_mid": "-2.0174%",
+    "change_high": "+0.6382%",
+    "change_pvalue": "0.15 > 0.05",
+    "notes": [
+      "No change in performance detected.",
+      "Found 4 outliers among 100 measurements (4.00%)",
+      "3 (3.00%) high mild",
+      "1 (1.00%) high severe"
+    ]
+  },
+  {
+    "name": "java21_when_arms_5000",
+    "median_seconds": 0.007665600000000001,
+    "median_text": "7.6656 ms",
+    "min_text": "7.5817 ms",
+    "max_text": "7.7563 ms",
+    "single_run_seconds": 0.007977,
+    "single_run_text": "7.977 ms",
+    "budget_seconds": 0.25,
+    "budget_text": "250.000 ms",
+    "status": "PASS",
+    "change_low": "+0.6898%",
+    "change_mid": "+3.1399%",
+    "change_high": "+5.5565%",
+    "change_pvalue": "0.01 < 0.05",
+    "notes": [
+      "Change within noise threshold.",
+      "Found 6 outliers among 100 measurements (6.00%)",
+      "5 (5.00%) high mild",
+      "1 (1.00%) high severe"
+    ]
+  },
+  {
+    "name": "java25_sealed_depth10",
+    "median_seconds": 2.6622e-05,
+    "median_text": "26.622 us",
+    "min_text": "26.182 us",
+    "max_text": "27.078 us",
+    "single_run_seconds": 5.7e-05,
+    "single_run_text": "57.000 us",
+    "budget_seconds": 0.1,
+    "budget_text": "100.000 ms",
+    "status": "PASS",
+    "change_low": "-7.1296%",
+    "change_mid": "-4.6020%",
+    "change_high": "-2.0410%",
+    "change_pvalue": "0.00 < 0.05",
+    "notes": [
+      "Performance has improved.",
+      "Found 6 outliers among 100 measurements (6.00%)",
+      "5 (5.00%) high mild",
+      "1 (1.00%) high severe"
+    ]
+  },
+  {
+    "name": "java25_when_arms_100",
+    "median_seconds": 3.9118999999999996e-05,
+    "median_text": "39.119 us",
+    "min_text": "38.539 us",
+    "max_text": "39.751 us",
+    "single_run_seconds": 7.8e-05,
+    "single_run_text": "78.000 us",
+    "budget_seconds": 0.01,
+    "budget_text": "10.000 ms",
+    "status": "PASS",
+    "change_low": "-0.8741%",
+    "change_mid": "+1.4049%",
+    "change_high": "+3.6509%",
+    "change_pvalue": "0.22 > 0.05",
+    "notes": [
+      "No change in performance detected.",
+      "Found 6 outliers among 100 measurements (6.00%)",
+      "6 (6.00%) high mild"
+    ]
+  },
+  {
+    "name": "java25_when_arms_1000",
+    "median_seconds": 0.00037879,
+    "median_text": "378.79 us",
+    "min_text": "374.84 us",
+    "max_text": "383.07 us",
+    "single_run_seconds": 0.000368,
+    "single_run_text": "368.000 us",
+    "budget_seconds": 0.05,
+    "budget_text": "50.000 ms",
+    "status": "PASS",
+    "change_low": "-4.9564%",
+    "change_mid": "-2.3289%",
+    "change_high": "+0.1834%",
+    "change_pvalue": "0.08 > 0.05",
+    "notes": [
+      "No change in performance detected.",
+      "Found 4 outliers among 100 measurements (4.00%)",
+      "4 (4.00%) high mild"
+    ]
+  },
+  {
+    "name": "java25_when_arms_500",
+    "median_seconds": 0.00019515,
+    "median_text": "195.15 us",
+    "min_text": "191.94 us",
+    "max_text": "198.59 us",
+    "single_run_seconds": 0.000202,
+    "single_run_text": "202.000 us",
+    "budget_seconds": 0.025,
+    "budget_text": "25.000 ms",
+    "status": "PASS",
+    "change_low": "-0.5167%",
+    "change_mid": "+1.3997%",
+    "change_high": "+3.4662%",
+    "change_pvalue": "0.16 > 0.05",
+    "notes": [
+      "No change in performance detected.",
+      "Found 5 outliers among 100 measurements (5.00%)",
+      "4 (4.00%) high mild",
+      "1 (1.00%) high severe"
+    ]
+  },
+  {
+    "name": "java25_when_arms_5000",
+    "median_seconds": 0.001977,
+    "median_text": "1.9770 ms",
+    "min_text": "1.9557 ms",
+    "max_text": "1.9995 ms",
+    "single_run_seconds": 0.001991,
+    "single_run_text": "1.991 ms",
+    "budget_seconds": 0.25,
+    "budget_text": "250.000 ms",
+    "status": "PASS",
+    "change_low": "-4.8193%",
+    "change_mid": "-2.3709%",
+    "change_high": "+0.0135%",
+    "change_pvalue": "0.06 > 0.05",
+    "notes": [
+      "No change in performance detected.",
+      "Found 4 outliers among 100 measurements (4.00%)",
+      "4 (4.00%) high mild"
+    ]
+  }
+]
