@@ -4,10 +4,10 @@ use jv_ast::{BinaryOp, CallArgumentStyle, Literal, SequenceDelimiter, Span};
 use jv_ir::transform::transform_program_with_context;
 use jv_ir::TransformContext;
 use jv_ir::{
-    DataFormat, IrCaseLabel, IrDeconstructionComponent, IrDeconstructionPattern, IrExpression,
-    IrImplicitWhenEnd, IrModifiers, IrParameter, IrProgram, IrRecordComponent, IrSampleDeclaration,
-    IrStatement, IrSwitchCase, IrVisibility, JavaType, MethodOverload, PrimitiveType, SampleMode,
-    SampleRecordDescriptor, SampleRecordField, SampleSourceKind, Schema,
+    DataFormat, IrCaseLabel, IrCommentKind, IrDeconstructionComponent, IrDeconstructionPattern,
+    IrExpression, IrImplicitWhenEnd, IrModifiers, IrParameter, IrProgram, IrRecordComponent,
+    IrSampleDeclaration, IrStatement, IrSwitchCase, IrVisibility, JavaType, MethodOverload,
+    PrimitiveType, SampleMode, SampleRecordDescriptor, SampleRecordField, SampleSourceKind, Schema,
 };
 use jv_parser::Parser;
 use serde_json::to_string_pretty;
@@ -1992,3 +1992,28 @@ fn switch_expression_java21_mixed_labels_emits_jv3105() {
 
 mod pattern_switch;
 mod target_matrix;
+
+#[test]
+fn passthrough_comments_emit_in_java() {
+    let mut generator = JavaCodeGenerator::new();
+
+    let line_comment = IrStatement::Comment {
+        kind: IrCommentKind::Line,
+        text: "// keep outer".to_string(),
+        span: dummy_span(),
+    };
+    let block_comment = IrStatement::Comment {
+        kind: IrCommentKind::Block,
+        text: "/* block keep */".to_string(),
+        span: dummy_span(),
+    };
+
+    assert_eq!(
+        "// keep outer",
+        generator.generate_statement(&line_comment).unwrap()
+    );
+    assert_eq!(
+        "/* block keep */",
+        generator.generate_statement(&block_comment).unwrap()
+    );
+}

@@ -1,10 +1,10 @@
 use crate::context::TransformContext;
 use crate::error::TransformError;
 use crate::profiling::{PerfMetrics, TransformProfiler};
-use crate::types::{IrExpression, IrProgram, IrStatement, JavaType};
+use crate::types::{IrCommentKind, IrExpression, IrProgram, IrStatement, JavaType};
 use jv_ast::{
-    BinaryOp, ConcurrencyConstruct, Expression, Literal, Program, ResourceManagement, Span,
-    Statement,
+    BinaryOp, CommentKind, ConcurrencyConstruct, Expression, Literal, Program, ResourceManagement,
+    Span, Statement,
 };
 
 mod concurrency;
@@ -92,6 +92,20 @@ pub fn transform_statement(
     context: &mut TransformContext,
 ) -> Result<Vec<IrStatement>, TransformError> {
     match stmt {
+        Statement::Comment(comment) => {
+            if comment.is_passthrough() {
+                Ok(vec![IrStatement::Comment {
+                    kind: match comment.kind {
+                        CommentKind::Line => IrCommentKind::Line,
+                        CommentKind::Block => IrCommentKind::Block,
+                    },
+                    text: comment.text.clone(),
+                    span: comment.span.clone(),
+                }])
+            } else {
+                Ok(Vec::new())
+            }
+        }
         Statement::ValDeclaration {
             name,
             type_annotation,

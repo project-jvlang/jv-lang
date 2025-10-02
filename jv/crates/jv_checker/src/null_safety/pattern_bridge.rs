@@ -122,7 +122,8 @@ impl PatternFactsBridge {
             | Statement::Break(_)
             | Statement::Continue(_)
             | Statement::Import { .. }
-            | Statement::Package { .. } => BridgeOutcome::default(),
+            | Statement::Package { .. }
+            | Statement::Comment(_) => BridgeOutcome::default(),
         }
     }
 

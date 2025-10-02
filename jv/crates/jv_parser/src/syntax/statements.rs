@@ -1,9 +1,10 @@
 use chumsky::prelude::*;
 use chumsky::Parser as ChumskyParser;
 use jv_ast::{
-    Annotation, AnnotationArgument, BinaryOp, ConcurrencyConstruct, Expression, ExtensionFunction,
-    ForInStatement, Literal, LoopBinding, LoopStrategy, Modifiers, NumericRangeLoop, Parameter,
-    ResourceManagement, Span, Statement, TypeAnnotation, Visibility,
+    Annotation, AnnotationArgument, BinaryOp, CommentKind, CommentStatement, CommentVisibility,
+    ConcurrencyConstruct, Expression, ExtensionFunction, ForInStatement, Literal, LoopBinding,
+    LoopStrategy, Modifiers, NumericRangeLoop, Parameter, ResourceManagement, Span, Statement,
+    TypeAnnotation, Visibility,
 };
 use jv_lexer::{Token, TokenType};
 
@@ -23,6 +24,7 @@ pub(crate) fn statement_parser(
     recursive(|statement| {
         let expr = expressions::expression_parser();
 
+        let comment_stmt = comment_statement_parser();
         let val_decl = val_declaration_parser(expr.clone());
         let var_decl = var_declaration_parser(expr.clone());
         let assignment = assignment_statement_parser(expr.clone());
@@ -37,6 +39,7 @@ pub(crate) fn statement_parser(
         let expression_stmt = expression_statement_parser(expr);
 
         choice((
+            comment_stmt,
             val_decl,
             var_decl,
             assignment,
@@ -52,6 +55,46 @@ pub(crate) fn statement_parser(
         ))
         .boxed()
     })
+}
+
+fn comment_statement_parser() -> impl ChumskyParser<Token, Statement, Error = Simple<Token>> + Clone
+{
+    filter_map(|span, token: Token| {
+        let token_span = span_from_token(&token);
+        match token.token_type.clone() {
+            TokenType::LineComment(text) => {
+                let visibility = if is_jv_only_line_comment(&text) {
+                    CommentVisibility::JvOnly
+                } else {
+                    CommentVisibility::Passthrough
+                };
+                let rendered = format!("/{}", text);
+                Ok(Statement::Comment(CommentStatement {
+                    kind: CommentKind::Line,
+                    visibility,
+                    text: rendered,
+                    span: token_span,
+                }))
+            }
+            TokenType::BlockComment(text) => Ok(Statement::Comment(CommentStatement {
+                kind: CommentKind::Block,
+                visibility: CommentVisibility::Passthrough,
+                text: format!("/*{}*/", text),
+                span: token_span,
+            })),
+            _ => Err(Simple::expected_input_found(span, Vec::new(), Some(token))),
+        }
+    })
+}
+
+fn is_jv_only_line_comment(raw: &str) -> bool {
+    let mut chars = raw.chars();
+    let first = chars.next();
+    let second = chars.next();
+    matches!(
+        (first, second),
+        (Some('/'), Some('/')) | (Some('/'), Some('*'))
+    )
 }
 
 fn val_declaration_parser(

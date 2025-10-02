@@ -49,6 +49,7 @@ impl Statement {
             Statement::Continue(span) => span,
             Statement::Import { span, .. } => span,
             Statement::Package { span, .. } => span,
+            Statement::Comment(comment) => &comment.span,
             Statement::Concurrency(construct) => match construct {
                 ConcurrencyConstruct::Spawn { span, .. } => span,
                 ConcurrencyConstruct::Async { span, .. } => span,

@@ -25,8 +25,7 @@ fn bench_basic_syntax_sugar(c: &mut Criterion) {
         b.iter(|| {
             let program = Parser::parse(SOURCE).expect("source parses");
             let mut context = TransformContext::new();
-            transform_program_with_context(program, &mut context)
-                .expect("lowering succeeds");
+            transform_program_with_context(program, &mut context).expect("lowering succeeds");
         });
     });
 }

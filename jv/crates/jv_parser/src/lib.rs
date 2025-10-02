@@ -211,12 +211,22 @@ fn preprocess_tokens(tokens: Vec<Token>) -> Vec<Token> {
         let json_confidence = json_contexts.get(index).copied().flatten();
         update_token_json_metadata(&mut token, json_confidence);
 
+        if matches!(token.token_type, TokenType::JavaDocComment(_)) {
+            if let Some(ctx) = stack.last_mut() {
+                ctx.pending_layout = true;
+            }
+            continue;
+        }
+
         if matches!(
             token.token_type,
-            TokenType::LineComment(_) | TokenType::BlockComment(_) | TokenType::JavaDocComment(_)
+            TokenType::LineComment(_) | TokenType::BlockComment(_)
         ) {
             if let Some(ctx) = stack.last_mut() {
                 ctx.pending_layout = true;
+            }
+            if stack.is_empty() {
+                result.push(token);
             }
             continue;
         }

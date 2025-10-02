@@ -1,11 +1,12 @@
 use std::borrow::Cow;
 
 use crate::types::{
-    IrExpression, IrModifiers, IrParameter, IrProgram, IrStatement, IrVisibility, JavaType,
+    IrCommentKind, IrExpression, IrModifiers, IrParameter, IrProgram, IrStatement, IrVisibility,
+    JavaType,
 };
 use jv_ast::{
-    Argument, CallArgumentMetadata, Expression, Literal, Modifiers, Program, Span, Statement,
-    StringPart, TypeAnnotation, Visibility,
+    Argument, CallArgumentMetadata, CommentKind, CommentStatement, CommentVisibility, Expression,
+    Literal, Modifiers, Program, Span, Statement, StringPart, TypeAnnotation, Visibility,
 };
 
 use super::{
@@ -177,6 +178,19 @@ impl<'a> ReconstructionContext<'a> {
     fn convert_statement(&mut self, stmt: &IrStatement) -> Result<Statement, ReconstructionError> {
         self.visit_node();
         match stmt {
+            IrStatement::Comment { kind, text, span } => {
+                self.record_success();
+                let comment_kind = match kind {
+                    IrCommentKind::Line => CommentKind::Line,
+                    IrCommentKind::Block => CommentKind::Block,
+                };
+                Ok(Statement::Comment(CommentStatement {
+                    kind: comment_kind,
+                    visibility: CommentVisibility::Passthrough,
+                    text: text.clone(),
+                    span: span.clone(),
+                }))
+            }
             IrStatement::VariableDeclaration {
                 name,
                 java_type,
@@ -703,7 +717,8 @@ fn extract_span(stmt: &IrStatement) -> Option<Span> {
         | IrStatement::Continue { span, .. }
         | IrStatement::Block { span, .. }
         | IrStatement::Import { span, .. }
-        | IrStatement::Package { span, .. } => Some(span.clone()),
+        | IrStatement::Package { span, .. }
+        | IrStatement::Comment { span, .. } => Some(span.clone()),
         IrStatement::SampleDeclaration(decl) => Some(decl.span.clone()),
     }
 }

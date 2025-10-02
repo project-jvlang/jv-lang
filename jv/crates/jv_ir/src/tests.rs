@@ -3439,4 +3439,47 @@ mod tests {
             "depth-11 error should include explain metadata"
         );
     }
+
+    #[test]
+    fn transform_filters_jv_only_comments() {
+        let span = dummy_span();
+        let program = Program {
+            package: None,
+            imports: vec![],
+            statements: vec![
+                Statement::Comment(CommentStatement {
+                    kind: CommentKind::Line,
+                    visibility: CommentVisibility::Passthrough,
+                    text: "// keep".to_string(),
+                    span: span.clone(),
+                }),
+                Statement::Comment(CommentStatement {
+                    kind: CommentKind::Line,
+                    visibility: CommentVisibility::JvOnly,
+                    text: "/// drop".to_string(),
+                    span: span.clone(),
+                }),
+                Statement::Expression {
+                    expr: Expression::Literal(Literal::Number("1".to_string()), span.clone()),
+                    span: span.clone(),
+                },
+            ],
+            span: span.clone(),
+        };
+
+        let mut context = TransformContext::new();
+        let ir = transform_program_with_context(program, &mut context)
+            .expect("transform program with comments");
+
+        let rendered_comments: Vec<_> = ir
+            .type_declarations
+            .iter()
+            .filter_map(|stmt| match stmt {
+                IrStatement::Comment { text, .. } => Some(text.clone()),
+                _ => None,
+            })
+            .collect();
+
+        assert_eq!(rendered_comments, vec!["// keep".to_string()]);
+    }
 }

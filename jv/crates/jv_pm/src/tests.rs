@@ -150,6 +150,27 @@ java_version = "25"
 }
 
 #[test]
+fn manifest_allows_missing_dependencies_section() {
+    let path = manifest_path("nodeps");
+    fs::write(
+        &path,
+        r#"[package]
+name = "sample"
+version = "0.1.0"
+
+[build]
+java_version = "25"
+"#,
+    )
+    .unwrap();
+
+    let manifest = Manifest::load_from_path(&path).expect("load manifest without dependencies");
+    assert!(manifest.package.dependencies.is_empty());
+
+    let _ = fs::remove_file(path);
+}
+
+#[test]
 fn manifest_rejects_invalid_java_target() {
     let path = manifest_path("invalid");
     fs::write(

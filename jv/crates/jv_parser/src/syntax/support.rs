@@ -312,6 +312,7 @@ pub(crate) fn statement_span(stmt: &Statement) -> Span {
         Statement::Break(span) => span.clone(),
         Statement::Continue(span) => span.clone(),
         Statement::Package { span, .. } => span.clone(),
+        Statement::Comment(comment) => comment.span.clone(),
         Statement::Concurrency(cc) => match cc {
             ConcurrencyConstruct::Spawn { span, .. } => span.clone(),
             ConcurrencyConstruct::Async { span, .. } => span.clone(),
