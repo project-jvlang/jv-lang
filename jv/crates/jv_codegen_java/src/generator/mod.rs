@@ -98,7 +98,8 @@ impl JavaCodeGenerator {
                 | IrStatement::Continue { .. }
                 | IrStatement::FieldDeclaration { .. }
                 | IrStatement::Package { .. }
-                | IrStatement::Import { .. } => self.generate_statement(declaration)?,
+                | IrStatement::Import { .. }
+                | IrStatement::Comment { .. } => self.generate_statement(declaration)?,
                 IrStatement::SampleDeclaration { .. } => unreachable!(),
             };
             unit.type_declarations.push(code);

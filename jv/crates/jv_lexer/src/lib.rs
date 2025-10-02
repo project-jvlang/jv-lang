@@ -110,6 +110,20 @@ pub struct JsonCommentTrivia {
     pub column: usize,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum SourceCommentKind {
+    Line,
+    Block,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct SourceCommentTrivia {
+    pub kind: SourceCommentKind,
+    pub text: String,
+    pub line: usize,
+    pub column: usize,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 pub struct TokenTrivia {
     pub spaces: u16,
@@ -119,6 +133,10 @@ pub struct TokenTrivia {
     pub json_comments: Vec<JsonCommentTrivia>,
     #[serde(default)]
     pub doc_comment: Option<String>,
+    #[serde(default)]
+    pub passthrough_comments: Vec<SourceCommentTrivia>,
+    #[serde(default)]
+    pub jv_comments: Vec<SourceCommentTrivia>,
 }
 
 impl TokenTrivia {
@@ -250,11 +268,22 @@ impl TriviaTracker {
         std::mem::take(&mut self.trivia)
     }
 
-    fn record_comment(&mut self, comment: Option<JsonCommentTrivia>) {
+    fn record_comment(
+        &mut self,
+        comment: Option<JsonCommentTrivia>,
+        passthrough: Option<SourceCommentTrivia>,
+        jv_only: Option<SourceCommentTrivia>,
+    ) {
         self.trivia.comments = true;
         self.trivia.doc_comment = None;
         if let Some(comment) = comment {
             self.trivia.json_comments.push(comment);
+        }
+        if let Some(comment) = passthrough {
+            self.trivia.passthrough_comments.push(comment);
+        }
+        if let Some(comment) = jv_only {
+            self.trivia.jv_comments.push(comment);
         }
     }
 
@@ -710,6 +739,8 @@ impl Lexer {
                         match chars[self.current] {
                             '/' => {
                                 // Line comment
+                                let is_jv_only =
+                                    matches!(chars.get(self.current + 1), Some('/') | Some('*'));
                                 let comment = self.read_line_comment();
                                 let sanitized = Self::sanitize_comment_text(
                                     JsonCommentTriviaKind::Line,
@@ -721,6 +752,18 @@ impl Lexer {
                                     line: start_line,
                                     column: start_column,
                                 };
+                                let full_text = format!("/{}", comment);
+                                let comment_trivia = SourceCommentTrivia {
+                                    kind: SourceCommentKind::Line,
+                                    text: full_text,
+                                    line: start_line,
+                                    column: start_column,
+                                };
+                                let (passthrough, jv_only_comment) = if is_jv_only {
+                                    (None, Some(comment_trivia.clone()))
+                                } else {
+                                    (Some(comment_trivia.clone()), None)
+                                };
                                 tokens.push(self.make_token(
                                     TokenType::LineComment(comment.clone()),
                                     &comment,
@@ -728,7 +771,11 @@ impl Lexer {
                                     start_column,
                                     trivia.take(),
                                 ));
-                                trivia.record_comment(Some(comment_info));
+                                trivia.record_comment(
+                                    Some(comment_info),
+                                    passthrough,
+                                    jv_only_comment,
+                                );
                             }
                             '*' => {
                                 let is_javadoc = self.current + 1 < chars.len()
@@ -755,6 +802,13 @@ impl Lexer {
                                         line: start_line,
                                         column: start_column,
                                     };
+                                    let full_text = format!("/*{}*/", comment);
+                                    let comment_trivia = SourceCommentTrivia {
+                                        kind: SourceCommentKind::Block,
+                                        text: full_text,
+                                        line: start_line,
+                                        column: start_column,
+                                    };
                                     tokens.push(self.make_token(
                                         TokenType::BlockComment(comment.clone()),
                                         &comment,
@@ -762,7 +816,11 @@ impl Lexer {
                                         start_column,
                                         trivia.take(),
                                     ));
-                                    trivia.record_comment(Some(comment_info));
+                                    trivia.record_comment(
+                                        Some(comment_info),
+                                        Some(comment_trivia),
+                                        None,
+                                    );
                                 }
                             }
                             _ => {

@@ -1,4 +1,5 @@
 // jv_ast/statement - Statement types and program structure
+use crate::comments::*;
 use crate::expression::*;
 use crate::types::*;
 use serde::{Deserialize, Serialize};
@@ -85,6 +86,9 @@ pub struct ForInStatement {
 /// Statements in jv language
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Statement {
+    // Comments
+    Comment(CommentStatement),
+
     // Variable declarations
     ValDeclaration {
         name: String,

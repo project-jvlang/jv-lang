@@ -234,7 +234,8 @@ impl NullabilityAnalyzer {
             | Statement::Package { .. }
             | Statement::ExtensionFunction(_)
             | Statement::Break(_)
-            | Statement::Continue(_) => None,
+            | Statement::Continue(_)
+            | Statement::Comment(_) => None,
         }
     }
 

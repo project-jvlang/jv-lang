@@ -527,9 +527,22 @@ pub struct IrResource {
     pub span: Span,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum IrCommentKind {
+    Line,
+    Block,
+}
+
 /// Desugared statements
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum IrStatement {
+    // Comments propagated from AST
+    Comment {
+        kind: IrCommentKind,
+        text: String,
+        span: Span,
+    },
+
     // Variable declarations with explicit types
     VariableDeclaration {
         name: String,

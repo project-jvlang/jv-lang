@@ -1,8 +1,8 @@
 use super::support::{first_statement, parse_program, parse_program_result};
 use jv_ast::{
-    Argument, ArgumentElementKind, BinaryOp, CallArgumentStyle, ConcurrencyConstruct, Expression,
-    JsonValue, Literal, LoopStrategy, Pattern, ResourceManagement, SequenceDelimiter, Statement,
-    StringPart, TypeAnnotation,
+    Argument, ArgumentElementKind, BinaryOp, CallArgumentStyle, CommentKind, CommentVisibility,
+    ConcurrencyConstruct, Expression, JsonValue, Literal, LoopStrategy, Pattern,
+    ResourceManagement, SequenceDelimiter, Statement, StringPart, TypeAnnotation,
 };
 
 use test_case::test_case;
@@ -784,6 +784,58 @@ fn test_whitespace_array_literal_with_comment() {
             other => panic!("expected array expression, found {:?}", other),
         },
         other => panic!("expected val declaration, found {:?}", other),
+    }
+}
+
+#[test]
+fn test_top_level_passthrough_comment_statement() {
+    let program = parse_program(
+        "// keep
+val answer = 42",
+    );
+
+    assert_eq!(program.statements.len(), 2);
+    match &program.statements[0] {
+        Statement::Comment(comment) => {
+            assert_eq!(comment.visibility, CommentVisibility::Passthrough);
+            assert_eq!(comment.kind, CommentKind::Line);
+            assert_eq!(comment.text, "// keep");
+        }
+        other => panic!("expected comment statement, found {:?}", other),
+    }
+
+    match &program.statements[1] {
+        Statement::ValDeclaration { .. } => {}
+        other => panic!(
+            "expected val declaration following comment, found {:?}",
+            other
+        ),
+    }
+}
+
+#[test]
+fn test_top_level_jv_only_comment_statement() {
+    let program = parse_program(
+        "/// drop
+val answer = 42",
+    );
+
+    assert_eq!(program.statements.len(), 2);
+    match &program.statements[0] {
+        Statement::Comment(comment) => {
+            assert_eq!(comment.visibility, CommentVisibility::JvOnly);
+            assert_eq!(comment.kind, CommentKind::Line);
+            assert_eq!(comment.text, "/// drop");
+        }
+        other => panic!("expected comment statement, found {:?}", other),
+    }
+
+    match &program.statements[1] {
+        Statement::ValDeclaration { .. } => {}
+        other => panic!(
+            "expected val declaration following comment, found {:?}",
+            other
+        ),
     }
 }
 

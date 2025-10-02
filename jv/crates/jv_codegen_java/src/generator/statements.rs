@@ -3,6 +3,7 @@ use super::*;
 impl JavaCodeGenerator {
     pub fn generate_statement(&mut self, stmt: &IrStatement) -> Result<String, CodeGenError> {
         Ok(match stmt {
+            IrStatement::Comment { text, .. } => text.clone(),
             IrStatement::VariableDeclaration {
                 name,
                 java_type,

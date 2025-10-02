@@ -243,6 +243,65 @@ fn test_comments_red_phase() {
     assert!(has_line_comment);
     assert!(has_block_comment);
 }
+#[test]
+fn test_comment_trivia_passthrough_and_jv_only() {
+    let source = "// keep
+val keep = 1
+/// drop
+val drop = 2
+//* star
+val star = 3
+";
+    let mut lexer = Lexer::new(source.to_string());
+    let tokens = lexer.tokenize().expect("tokenize comment sample");
+
+    let mut val_tokens = tokens
+        .iter()
+        .filter(|token| matches!(token.token_type, TokenType::Val));
+
+    let keep_val = val_tokens.next().expect("expected first val token");
+    assert!(keep_val.leading_trivia.comments);
+    assert_eq!(keep_val.leading_trivia.passthrough_comments.len(), 1);
+    assert_eq!(
+        keep_val.leading_trivia.passthrough_comments[0].text,
+        "// keep"
+    );
+    assert!(keep_val.leading_trivia.jv_comments.is_empty());
+
+    let drop_val = val_tokens.next().expect("expected second val token");
+    assert!(drop_val.leading_trivia.comments);
+    assert!(drop_val.leading_trivia.passthrough_comments.is_empty());
+    assert_eq!(drop_val.leading_trivia.jv_comments.len(), 1);
+    assert_eq!(drop_val.leading_trivia.jv_comments[0].text, "/// drop");
+
+    let star_val = val_tokens.next().expect("expected third val token");
+    assert!(star_val.leading_trivia.comments);
+    assert!(star_val.leading_trivia.passthrough_comments.is_empty());
+    assert_eq!(star_val.leading_trivia.jv_comments.len(), 1);
+    assert_eq!(star_val.leading_trivia.jv_comments[0].text, "//* star");
+}
+
+#[test]
+fn test_block_comment_trivia_passthrough() {
+    let source = "/* keep */
+val value = 1";
+    let mut lexer = Lexer::new(source.to_string());
+    let tokens = lexer.tokenize().expect("tokenize block comment sample");
+
+    let val_token = tokens
+        .iter()
+        .find(|token| matches!(token.token_type, TokenType::Val))
+        .expect("expected val token");
+
+    assert!(val_token.leading_trivia.comments);
+    assert_eq!(val_token.leading_trivia.passthrough_comments.len(), 1);
+    let trivia = &val_token.leading_trivia.passthrough_comments[0];
+    assert!(trivia.text.starts_with("/*"));
+    assert!(trivia.text.ends_with("*/"));
+    assert!(trivia.text.contains("keep"));
+    assert_eq!(trivia.kind, SourceCommentKind::Block);
+    assert!(val_token.leading_trivia.jv_comments.is_empty());
+}
 
 #[test]
 fn test_javadoc_comment_trivia_pass_through() {
