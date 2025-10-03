@@ -37,6 +37,7 @@ jv_checker.workspace = true
 jv_mapper.workspace = true
 jv_pm.workspace = true
 jv_support.workspace = true
+jv_ast.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 chrono.workspace = true
@@ -45,4 +46,3 @@ zip = { version = "0.6", default-features = false, features = ["deflate"] }
 [dev-dependencies]
 tempfile = "3.10"
 sha2 = "0.10"
-jv_ast.workspace = true
