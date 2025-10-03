@@ -325,29 +325,16 @@ pub fn desugar_top_level_function(
             modifiers,
             span,
         } => {
-            // Convert function parameters to IR parameters
-            let ir_parameters: Result<Vec<IrParameter>, TransformError> = parameters
-                .iter()
-                .map(|p| {
-                    Ok(IrParameter {
-                        name: p.name.clone(),
-                        java_type: match &p.type_annotation {
-                            Some(type_ann) => convert_type_annotation(type_ann.clone())?,
-                            None => JavaType::object(),
-                        },
-                        modifiers: IrModifiers::default(),
-                        span: p.span.clone(),
-                    })
-                })
-                .collect();
-
-            let mut ir_parameters = ir_parameters?;
-
             // Convert return type
             let java_return_type = match return_type {
                 Some(type_ann) => convert_type_annotation(type_ann)?,
                 None => JavaType::void(),
             };
+
+            // Register the function's return type so subsequent calls can resolve it.
+            context
+                .type_info
+                .insert(name.clone(), java_return_type.clone());
 
             // Convert modifiers to IR modifiers
             let mut ir_modifiers = IrModifiers {
@@ -365,6 +352,10 @@ pub fn desugar_top_level_function(
 
             let mut throws = Vec::new();
 
+            context.enter_scope();
+
+            let mut ir_parameters = Vec::new();
+
             if name == "main" && parameters.is_empty() {
                 ir_modifiers.visibility = IrVisibility::Public;
 
@@ -376,18 +367,38 @@ pub fn desugar_top_level_function(
                     dimensions: 1,
                 };
 
-                ir_parameters = vec![IrParameter {
+                context.add_variable("args".to_string(), args_type.clone());
+
+                ir_parameters.push(IrParameter {
                     name: "args".to_string(),
                     java_type: args_type,
                     modifiers: IrModifiers::default(),
                     span: span.clone(),
-                }];
+                });
 
                 throws.push("java.lang.Exception".to_string());
+            } else {
+                for param in parameters.into_iter() {
+                    let java_type = match param.type_annotation {
+                        Some(type_ann) => convert_type_annotation(type_ann)?,
+                        None => JavaType::object(),
+                    };
+
+                    context.add_variable(param.name.clone(), java_type.clone());
+
+                    ir_parameters.push(IrParameter {
+                        name: param.name,
+                        java_type,
+                        modifiers: IrModifiers::default(),
+                        span: param.span,
+                    });
+                }
             }
 
             // Convert function body to IR expression
-            let ir_body = convert_expression_to_ir(*body, context)?;
+            let body_ir_result = convert_expression_to_ir(*body, context);
+            context.exit_scope();
+            let ir_body = body_ir_result?;
 
             // Create method declaration
             Ok(IrStatement::MethodDeclaration {

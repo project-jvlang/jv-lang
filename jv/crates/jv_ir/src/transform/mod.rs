@@ -135,6 +135,12 @@ pub fn transform_statement(
             span,
             context,
         )?]),
+        Statement::Return { value, span } => {
+            let ir_value = value
+                .map(|expr| transform_expression(expr, context))
+                .transpose()?;
+            Ok(vec![IrStatement::Return { value: ir_value, span }])
+        }
         Statement::FunctionDeclaration {
             name,
             parameters,
@@ -498,30 +504,63 @@ fn lower_call_expression(
                     span,
                 });
             }
+
+            let java_type = context
+                .lookup_variable(&name)
+                .cloned()
+                .unwrap_or_else(JavaType::object);
+
+            Ok(IrExpression::MethodCall {
+                receiver: None,
+                method_name: name,
+                args: ir_args,
+                argument_style,
+                java_type,
+                span,
+            })
         }
         Expression::MemberAccess {
             object,
             property,
             span: _fn_span,
         } => {
-            let method_name = property.clone();
-            if let Some((receiver_expr, receiver_kind)) = lower_system_receiver_expression(*object)
+            if let Some((receiver_expr, receiver_kind)) =
+                lower_system_receiver_expression((*object).clone())
             {
-                let return_type = system_method_return_type(receiver_kind, &method_name);
+                let return_type = system_method_return_type(receiver_kind, &property);
                 return Ok(IrExpression::MethodCall {
                     receiver: Some(Box::new(receiver_expr)),
-                    method_name,
+                    method_name: property,
                     args: ir_args,
                     argument_style,
                     java_type: return_type,
                     span,
                 });
             }
-        }
-        _ => {}
-    }
 
-    Ok(IrExpression::Literal(Literal::Null, Span::default()))
+            let receiver_expr = transform_expression(*object, context)?;
+
+            Ok(IrExpression::MethodCall {
+                receiver: Some(Box::new(receiver_expr)),
+                method_name: property,
+                args: ir_args,
+                argument_style,
+                java_type: JavaType::object(),
+                span,
+            })
+        }
+        other => {
+            let function_expr = transform_expression(other, context)?;
+            Ok(IrExpression::MethodCall {
+                receiver: Some(Box::new(function_expr)),
+                method_name: "call".to_string(),
+                args: ir_args,
+                argument_style,
+                java_type: JavaType::object(),
+                span,
+            })
+        }
+    }
 }
 
 fn lower_call_arguments(
