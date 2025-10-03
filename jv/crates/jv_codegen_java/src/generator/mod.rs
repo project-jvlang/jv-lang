@@ -103,6 +103,9 @@ impl JavaCodeGenerator {
                 let code = self.generate_statement(statement)?;
                 Self::push_lines(&mut builder, &code);
             }
+            if let Some(entry_call) = Self::script_entry_invocation(&script_methods) {
+                builder.push_line(&entry_call);
+            }
             builder.dedent();
             builder.push_line("}");
 
@@ -176,5 +179,38 @@ impl JavaCodeGenerator {
 
     fn reset(&mut self) {
         self.imports.clear();
+    }
+
+    fn script_entry_invocation(methods: &[IrStatement]) -> Option<String> {
+        for method in methods {
+            if let IrStatement::MethodDeclaration {
+                name, parameters, ..
+            } = method
+            {
+                if name != "main" {
+                    continue;
+                }
+
+                return match parameters.len() {
+                    0 => Some("main();".to_string()),
+                    1 if Self::is_string_array(&parameters[0].java_type) => {
+                        Some("main(args);".to_string())
+                    }
+                    _ => None,
+                };
+            }
+        }
+
+        None
+    }
+
+    fn is_string_array(java_type: &JavaType) -> bool {
+        match java_type {
+            JavaType::Array { element_type, .. } => match element_type.as_ref() {
+                JavaType::Reference { name, .. } => name == "String",
+                _ => false,
+            },
+            _ => false,
+        }
     }
 }

@@ -301,11 +301,13 @@ pub mod pipeline {
     /// Compute the Java class name used to wrap script statements for execution.
     pub fn compute_script_main_class(package_name: &str, entrypoint: &Path) -> String {
         let mut base = to_pascal_case(package_name.trim());
+        let mut derived_from_package = !base.is_empty();
 
         if base.is_empty() {
             if let Some(stem) = entrypoint.file_stem().and_then(|s| s.to_str()) {
                 base = to_pascal_case(stem);
             }
+            derived_from_package = false;
         }
 
         if base.is_empty() {
@@ -320,7 +322,7 @@ pub mod pipeline {
             base = "Generated".to_string();
         }
 
-        if !base.to_ascii_lowercase().ends_with("main") {
+        if derived_from_package && !base.to_ascii_lowercase().ends_with("main") {
             base.push_str("Main");
         }
 
@@ -334,8 +336,20 @@ pub mod pipeline {
     fn to_pascal_case(input: &str) -> String {
         let mut result = String::new();
         let mut capitalize_next = true;
+        let mut digit_buffer = String::new();
 
         for ch in input.chars() {
+            if ch.is_ascii_digit() {
+                digit_buffer.push(ch);
+                capitalize_next = true;
+                continue;
+            }
+
+            if !digit_buffer.is_empty() {
+                append_digit_words(&mut result, &digit_buffer);
+                digit_buffer.clear();
+            }
+
             if ch.is_ascii_alphanumeric() {
                 if capitalize_next {
                     for upper in ch.to_uppercase() {
@@ -352,7 +366,33 @@ pub mod pipeline {
             }
         }
 
+        if !digit_buffer.is_empty() {
+            append_digit_words(&mut result, &digit_buffer);
+        }
+
         result
+    }
+
+    fn append_digit_words(target: &mut String, digits: &str) {
+        for digit in digits.chars() {
+            target.push_str(digit_to_word(digit));
+        }
+    }
+
+    fn digit_to_word(digit: char) -> &'static str {
+        match digit {
+            '0' => "Zero",
+            '1' => "One",
+            '2' => "Two",
+            '3' => "Three",
+            '4' => "Four",
+            '5' => "Five",
+            '6' => "Six",
+            '7' => "Seven",
+            '8' => "Eight",
+            '9' => "Nine",
+            _ => "",
+        }
     }
 
     /// Compile a `.jv` file end-to-end into Java (and optionally `.class`) outputs.
@@ -710,7 +750,18 @@ pub mod pipeline {
             Err(err) => return Err(err),
         };
 
+        if !compile_result.warnings.is_empty() {
+            for warning in &compile_result.warnings {
+                eprintln!("warning: {}", warning);
+            }
+        }
+
         if compile_result.class_files.is_empty() {
+            if compile_result.javac_version.is_none() {
+                bail!(
+                    "Java コンパイラ (javac) が見つかりません。JDK をインストールして PATH に追加してください。"
+                );
+            }
             bail!("Java compilation step did not produce class files; cannot execute program");
         }
 

@@ -79,15 +79,25 @@ fn main() -> Result<()> {
                 })
                 .unwrap_or_else(|| cwd.clone());
 
-            let project_root = ProjectLocator::new()
-                .locate(&start_path)
-                .map_err(|diagnostic| tooling_failure(&start_path, diagnostic))?;
-            let manifest_path = project_root.manifest_path().to_path_buf();
+            let locator = ProjectLocator::new();
+            let (project_root, settings, diagnostic_path) = match locator.locate(&start_path) {
+                Ok(root) => {
+                    let manifest_path = root.manifest_path().to_path_buf();
+                    let settings = ManifestLoader::load(&manifest_path)
+                        .map_err(|diagnostic| tooling_failure(&manifest_path, diagnostic))?;
+                    (root, settings, manifest_path)
+                }
+                Err(diagnostic) => {
+                    if let Some((root, settings)) = build_ephemeral_run_settings(&start_path) {
+                        (root, settings, start_path.clone())
+                    } else {
+                        return Err(tooling_failure(&start_path, diagnostic));
+                    }
+                }
+            };
 
-            let settings = ManifestLoader::load(&manifest_path)
-                .map_err(|diagnostic| tooling_failure(&manifest_path, diagnostic))?;
             let layout = ProjectLayout::from_settings(&project_root, &settings)
-                .map_err(|diagnostic| tooling_failure(&manifest_path, diagnostic))?;
+                .map_err(|diagnostic| tooling_failure(&diagnostic_path, diagnostic))?;
 
             let mut check = check;
             if emit_types {
@@ -111,9 +121,9 @@ fn main() -> Result<()> {
             };
 
             let plan = BuildOptionsFactory::compose(project_root, settings, layout, overrides)
-                .map_err(|diagnostic| tooling_failure(&manifest_path, diagnostic))?;
+                .map_err(|diagnostic| tooling_failure(&diagnostic_path, diagnostic))?;
 
-            let manifest_path_for_output = manifest_path.clone();
+            let manifest_path_for_output = diagnostic_path.clone();
             let mut prepared_output = OutputManager::prepare(plan)
                 .map_err(|diagnostic| tooling_failure(&manifest_path_for_output, diagnostic))?;
             let plan = prepared_output.plan();
@@ -360,11 +370,8 @@ fn build_ephemeral_run_settings(start_path: &Path) -> Option<(ProjectRoot, Proje
 
     let manifest = Manifest {
         package: PackageInfo {
-            name: root_dir
-                .file_name()
-                .and_then(|name| name.to_str())
-                .unwrap_or("script")
-                .to_string(),
+            // Empty package name signals the script runner to derive the class from the entrypoint.
+            name: String::new(),
             version: "0.0.0".to_string(),
             description: None,
             dependencies: HashMap::new(),
@@ -413,6 +420,10 @@ mod tests {
         let canonical_base = fs::canonicalize(&base).expect("canonicalise base dir");
         assert_eq!(project_root.root_dir(), canonical_base);
         assert_eq!(settings.entrypoint.as_deref(), Some(Path::new("script.jv")));
+        assert!(
+            settings.manifest.package.name.is_empty(),
+            "ephemeral manifest package name should be empty"
+        );
         assert_eq!(settings.output.directory, PathBuf::from("target"));
 
         fs::remove_dir_all(&base).expect("cleanup temp dir");

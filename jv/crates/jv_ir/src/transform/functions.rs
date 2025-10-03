@@ -1,3 +1,4 @@
+use super::transform_expression;
 use crate::context::TransformContext;
 use crate::error::TransformError;
 use crate::types::{IrExpression, IrStatement, JavaType, MethodOverload};
@@ -73,7 +74,7 @@ pub fn desugar_default_parameters(
     let ir_params = ir_params?;
 
     // Convert body to IR expression
-    let ir_body = convert_expression_to_ir(*body, context)?;
+    let ir_body = transform_expression(*body, context)?;
 
     // Create base overload with required parameters only
     overloads.push(MethodOverload {
@@ -172,31 +173,12 @@ fn convert_type_annotation(type_ann: TypeAnnotation) -> Result<JavaType, Transfo
 }
 
 // Helper function to convert Expression to IrExpression (simplified)
-fn convert_expression_to_ir(
-    expr: Expression,
-    _context: &mut TransformContext,
-) -> Result<IrExpression, TransformError> {
-    match expr {
-        Expression::Literal(lit, span) => Ok(IrExpression::Literal(lit, span)),
-        Expression::Identifier(name, span) => Ok(IrExpression::Identifier {
-            name,
-            java_type: JavaType::object(), // Type inference would determine this
-            span,
-        }),
-        // For now, return a placeholder for complex expressions
-        _ => Ok(IrExpression::Literal(
-            jv_ast::Literal::String("/* TODO: complex expression */".to_string()),
-            Span::dummy(),
-        )),
-    }
-}
-
 // Helper function to create delegating method calls
 fn create_delegating_call(
     function_name: &str,
     current_params: &[Parameter],
     default_value: &Option<Expression>,
-    _context: &mut TransformContext,
+    context: &mut TransformContext,
 ) -> Result<IrExpression, TransformError> {
     // Create method call arguments from current parameters
     let mut args = Vec::new();
@@ -211,7 +193,7 @@ fn create_delegating_call(
 
     // Add default value if provided
     if let Some(default_expr) = default_value {
-        args.push(convert_expression_to_ir(default_expr.clone(), _context)?);
+        args.push(convert_expression_to_ir(default_expr.clone(), context)?);
     }
 
     Ok(IrExpression::MethodCall {
@@ -222,6 +204,24 @@ fn create_delegating_call(
         java_type: JavaType::object(), // Return type would be inferred
         span: Span::dummy(),
     })
+}
+
+fn convert_expression_to_ir(
+    expr: Expression,
+    context: &mut TransformContext,
+) -> Result<IrExpression, TransformError> {
+    match transform_expression(expr.clone(), context) {
+        Ok(ir) => Ok(ir),
+        Err(err) => match expr {
+            Expression::Literal(lit, span) => Ok(IrExpression::Literal(lit, span)),
+            Expression::Identifier(name, span) => Ok(IrExpression::Identifier {
+                name,
+                java_type: JavaType::object(),
+                span,
+            }),
+            _ => Err(err),
+        },
+    }
 }
 
 pub fn desugar_named_arguments(
@@ -364,7 +364,7 @@ pub fn desugar_top_level_function(
             };
 
             // Convert function body to IR expression
-            let ir_body = convert_expression_to_ir(*body, context)?;
+            let ir_body = transform_expression(*body, context)?;
 
             // Create method declaration
             Ok(IrStatement::MethodDeclaration {

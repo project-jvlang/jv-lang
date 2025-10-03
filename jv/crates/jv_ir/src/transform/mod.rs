@@ -134,6 +134,24 @@ pub fn transform_statement(
             span,
             context,
         )?]),
+        Statement::FunctionDeclaration {
+            name,
+            parameters,
+            return_type,
+            body,
+            modifiers,
+            span,
+        } => Ok(vec![desugar_top_level_function(
+            Statement::FunctionDeclaration {
+                name,
+                parameters,
+                return_type,
+                body,
+                modifiers,
+                span,
+            },
+            context,
+        )?]),
         Statement::Expression { expr, span } => {
             let ir_expr = transform_expression(expr, context)?;
             Ok(vec![IrStatement::Expression {
