@@ -5,9 +5,7 @@ impl JavaCodeGenerator {
         Ok(match stmt {
             IrStatement::Comment { text, .. } => text.clone(),
             IrStatement::Commented {
-                statement,
-                comment,
-                ..
+                statement, comment, ..
             } => {
                 let rendered = self.generate_statement(statement)?;
                 Self::append_inline_comment(rendered, comment)

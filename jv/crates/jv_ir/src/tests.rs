@@ -1783,7 +1783,9 @@ mod tests {
 
         assert_eq!(lowered.len(), 1);
         match &lowered[0] {
-            IrStatement::Return { value: Some(expr), .. } => match expr {
+            IrStatement::Return {
+                value: Some(expr), ..
+            } => match expr {
                 IrExpression::Literal(Literal::String(text), _) => {
                     assert_eq!(text, "result")
                 }
@@ -1801,10 +1803,7 @@ mod tests {
             .insert("greet".to_string(), JavaType::string());
 
         let call = Expression::Call {
-            function: Box::new(Expression::Identifier(
-                "greet".to_string(),
-                dummy_span(),
-            )),
+            function: Box::new(Expression::Identifier("greet".to_string(), dummy_span())),
             args: vec![Argument::Positional(Expression::Literal(
                 Literal::String("World".to_string()),
                 dummy_span(),

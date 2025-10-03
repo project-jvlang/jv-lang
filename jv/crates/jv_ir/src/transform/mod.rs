@@ -1,8 +1,8 @@
+use self::utils::extract_java_type;
 use crate::context::TransformContext;
 use crate::error::TransformError;
 use crate::profiling::{PerfMetrics, TransformProfiler};
 use crate::types::{IrCommentKind, IrExpression, IrProgram, IrStatement, JavaType};
-use self::utils::extract_java_type;
 use jv_ast::{
     Argument, BinaryOp, CallArgumentMetadata, CommentKind, ConcurrencyConstruct, Expression,
     Literal, Program, ResourceManagement, Span, Statement,
@@ -139,7 +139,10 @@ pub fn transform_statement(
             let ir_value = value
                 .map(|expr| transform_expression(expr, context))
                 .transpose()?;
-            Ok(vec![IrStatement::Return { value: ir_value, span }])
+            Ok(vec![IrStatement::Return {
+                value: ir_value,
+                span,
+            }])
         }
         Statement::FunctionDeclaration {
             name,
@@ -166,7 +169,11 @@ pub fn transform_statement(
                 span,
             }])
         }
-        Statement::Assignment { target, value, span } => {
+        Statement::Assignment {
+            target,
+            value,
+            span,
+        } => {
             let ir_target = transform_expression(target, context)?;
             let java_type = extract_java_type(&ir_target).ok_or_else(|| {
                 TransformError::TypeInferenceError {
@@ -292,11 +299,7 @@ fn attach_trailing_comments(statements: Vec<IrStatement>) -> Vec<IrStatement> {
                     }
                 }
 
-                result.push(IrStatement::Comment {
-                    kind,
-                    text,
-                    span,
-                });
+                result.push(IrStatement::Comment { kind, text, span });
             }
             other => result.push(other),
         }
