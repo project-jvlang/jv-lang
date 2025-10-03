@@ -25,6 +25,6 @@ pub use service::{
     TypeFacts,
 };
 pub use types::{
-    BoundConstraint, BoundPredicate, BoundsMatrix, FieldType, NullabilityFlag, TypeId, TypeKind,
-    TypeVariant,
+    BoundConstraint, BoundPredicate, BoundsMatrix, FieldType, NullabilityFlag, SymbolId, TypeId,
+    TypeKind, TypeVariant,
 };

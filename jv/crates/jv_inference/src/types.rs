@@ -6,6 +6,7 @@
 //! sites relying on the old enum-style API can migrate incrementally.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::fmt;
 
 /// Identifier assigned to type variables during inference.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -20,6 +21,64 @@ impl TypeId {
     /// Returns the raw numeric identifier.
     pub fn to_raw(self) -> u32 {
         self.0
+    }
+}
+
+/// Identifier assigned to resolved symbols (functions, constructors, etc.).
+///
+/// A dedicated type is used instead of reusing [`TypeId`] so that symbol
+/// tracking can evolve independently from type variable allocation. The newtype
+/// ensures we do not accidentally mix the two identifier spaces.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct SymbolId(String);
+
+impl SymbolId {
+    /// Creates a symbol identifier from a fully-qualified name.
+    pub fn new(name: impl Into<String>) -> Self {
+        Self(name.into())
+    }
+
+    /// Creates a symbol identifier from path segments such as module and name.
+    pub fn from_path<I, S>(segments: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        let mut iter = segments.into_iter().map(Into::into);
+        let mut buffer = String::new();
+        if let Some(first) = iter.next() {
+            buffer.push_str(&first);
+        }
+        for segment in iter {
+            if !buffer.is_empty() {
+                buffer.push_str("::");
+            }
+            buffer.push_str(&segment);
+        }
+        Self(buffer)
+    }
+
+    /// Returns the underlying symbol representation as `&str`.
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Display for SymbolId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl From<&str> for SymbolId {
+    fn from(value: &str) -> Self {
+        SymbolId::new(value)
+    }
+}
+
+impl From<String> for SymbolId {
+    fn from(value: String) -> Self {
+        SymbolId::new(value)
     }
 }
 

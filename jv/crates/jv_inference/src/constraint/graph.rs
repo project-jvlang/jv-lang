@@ -200,6 +200,36 @@ impl ConstraintGraph {
         TypeNodeId::new(self.type_nodes.len() - 1)
     }
 
+    /// Returns the node identifier for an existing type, if any.
+    pub fn find_type_node(&self, type_id: TypeId) -> Option<TypeNodeId> {
+        self.type_nodes
+            .iter()
+            .position(|node| node.type_id == type_id)
+            .map(TypeNodeId::new)
+    }
+
+    /// Ensures a type node exists and optionally enriches it with a more
+    /// specific [`TypeKind`].
+    pub fn ensure_type_node(&mut self, type_id: TypeId, hint: Option<TypeKind>) -> TypeNodeId {
+        if let Some(index) = self
+            .type_nodes
+            .iter()
+            .position(|node| node.type_id == type_id)
+        {
+            if let Some(hint) = hint {
+                let entry = &mut self.type_nodes[index];
+                let needs_update = entry.ty.contains_unknown() && !hint.contains_unknown();
+                if needs_update {
+                    entry.ty = hint;
+                }
+            }
+            return TypeNodeId::new(index);
+        }
+
+        let ty = hint.unwrap_or_default();
+        self.add_type_node(TypeNode::new(type_id, ty))
+    }
+
     /// Adds a new constraint node to the graph.
     pub fn add_constraint_node(&mut self, node: ConstraintNode) -> ConstraintNodeId {
         self.constraint_nodes.push(node);
