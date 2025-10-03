@@ -164,14 +164,6 @@ impl ManifestLoader {
             ));
         }
 
-        if starts_with_separator(trimmed) {
-            return Err(Self::invalid_field(
-                manifest_path,
-                "project.output.directory",
-                "絶対パスは指定できません",
-            ));
-        }
-
         if contains_parent_reference(trimmed) {
             return Err(Self::invalid_field(
                 manifest_path,

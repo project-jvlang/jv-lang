@@ -1,6 +1,7 @@
 use std::collections::{hash_map::Entry, HashMap};
 
-use super::context::{JavaNullabilityHint, NullSafetyContext};
+use super::annotations::JavaNullabilityHint;
+use super::context::NullSafetyContext;
 use super::flow::FlowAnalysisOutcome;
 use super::graph::FlowStateSnapshot;
 use super::operators::{JavaLoweringHint, JavaLoweringStrategy, OperatorOperand};

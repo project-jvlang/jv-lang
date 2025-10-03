@@ -12,6 +12,8 @@ pub struct JavaCodeGenConfig {
     pub include_source_comments: bool,
     /// Target Java release that guides feature selection and fallbacks.
     pub target: JavaTarget,
+    /// Class name used when wrapping script statements into an executable entrypoint.
+    pub script_main_class: String,
 }
 
 impl Default for JavaCodeGenConfig {
@@ -21,6 +23,7 @@ impl Default for JavaCodeGenConfig {
             extra_null_checks: true,
             include_source_comments: false,
             target: JavaTarget::default(),
+            script_main_class: "GeneratedMain".to_string(),
         }
     }
 }

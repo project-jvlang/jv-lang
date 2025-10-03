@@ -226,6 +226,13 @@ impl TypeChecker {
                     .snapshot
                     .as_ref()
                     .map(|snapshot| snapshot.type_facts().clone());
+
+                let placement_errors = compat::annotation_targets::validate_program(program);
+                if !placement_errors.is_empty() {
+                    self.snapshot = None;
+                    self.merged_facts = None;
+                    return Err(placement_errors);
+                }
                 Ok(())
             }
             Err(error) => {

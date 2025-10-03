@@ -1,3 +1,4 @@
+mod annotations;
 mod boundary;
 mod context;
 mod diagnostics;
@@ -20,6 +21,7 @@ use pattern_bridge::PatternFactsBridge;
 
 use std::time::Instant;
 
+pub use annotations::JavaNullabilityHint;
 pub use context::{NullSafetyContext, NullabilityKind, NullabilityLattice};
 
 /// Aggregated outcome of the null safety pipeline.

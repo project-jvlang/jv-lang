@@ -3,6 +3,8 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use jv_cli::pipeline::compute_script_main_class;
+
 const SAMPLE_MAIN: &str = r#"
 fun message(): String {
     "cli integration"
@@ -94,6 +96,9 @@ fn cli_supports_multi_target_and_clean_workflows() {
     write_manifest(project_dir);
     create_sources(project_dir);
 
+    let entrypoint_path = project_dir.join("src/app/main.jv");
+    let script_main_class = compute_script_main_class("cli-project-structure", &entrypoint_path);
+
     // Build from a nested directory to exercise ProjectLocator traversal.
     let nested_dir = project_dir.join("src/app");
     let output_21 = run_cli(
@@ -112,7 +117,7 @@ fn cli_supports_multi_target_and_clean_workflows() {
     assert!(stdout_21.contains("Java21"));
     assert!(stdout_21.contains("出力ディレクトリ"));
 
-    let generated_21 = project_dir.join("dist/java21/GeneratedMain.java");
+    let generated_21 = project_dir.join(format!("dist/java21/{}.java", script_main_class));
     assert!(generated_21.exists(), "java21 output missing");
     let report_21 = project_dir.join("dist/java21/compatibility.json");
     assert!(report_21.exists(), "java21 compatibility report missing");
@@ -132,7 +137,7 @@ fn cli_supports_multi_target_and_clean_workflows() {
     );
     let stdout_25 = String::from_utf8_lossy(&output_25.stdout);
     assert!(stdout_25.contains("Java25"));
-    let generated_25 = project_dir.join("dist/java25/GeneratedMain.java");
+    let generated_25 = project_dir.join(format!("dist/java25/{}.java", script_main_class));
     assert!(generated_25.exists(), "java25 output missing");
 
     // Introduce a stale artifact and ensure --clean removes it.
@@ -160,7 +165,9 @@ fn cli_supports_multi_target_and_clean_workflows() {
         "stale marker should be removed by --clean"
     );
     assert!(
-        project_dir.join("dist/java25/GeneratedMain.java").exists(),
+        project_dir
+            .join(format!("dist/java25/{}.java", script_main_class))
+            .exists(),
         "java25 output should be regenerated after --clean"
     );
 }

@@ -2,6 +2,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
+use jv_cli::pipeline::compute_script_main_class;
 use jv_ir::transform::{fetch_sample_data, SampleFetchError, SampleFetchRequest, SampleSourceKind};
 use sha2::{Digest, Sha256};
 use tempfile::tempdir;
@@ -72,11 +73,11 @@ fn build_sample_program(cli_path: &Path, main_path: &Path, output_dir: &Path) ->
     java_sources_in(output_dir)
 }
 
-fn run_generated_main(output_dir: &Path) -> std::process::Output {
+fn run_generated_main(output_dir: &Path, main_class: &str) -> std::process::Output {
     Command::new("java")
         .arg("-cp")
         .arg(output_dir)
-        .arg("GeneratedMain")
+        .arg(main_class)
         .output()
         .expect("execute generated Java")
 }
@@ -194,6 +195,7 @@ fn end_to_end_sample_annotation_embed_workflow() {
     let workspace = tempdir().expect("create temp workspace");
     let main_path = workspace.path().join("sample_main.jv");
     let output_dir = workspace.path().join("out");
+    let main_class = compute_script_main_class("", &main_path);
 
     let sample_path = fixture_path("sample_users.json");
     let sample_literal = escape_path_for_annotation(&sample_path);
@@ -223,12 +225,13 @@ fn end_to_end_sample_annotation_embed_workflow() {
     );
 
     assert!(
-        output_dir.join("GeneratedMain.class").exists(),
-        "javac should emit GeneratedMain.class in {}",
+        output_dir.join(format!("{}.class", main_class)).exists(),
+        "{}.class should exist in {}",
+        main_class,
         output_dir.display()
     );
 
-    let run_output = run_generated_main(&output_dir);
+    let run_output = run_generated_main(&output_dir, &main_class);
     assert!(
         run_output.status.success(),
         "java execution failed: {}",
@@ -263,6 +266,7 @@ fn end_to_end_sample_annotation_load_refreshes_runtime_data() {
     let workspace = tempdir().expect("create temp workspace");
     let main_path = workspace.path().join("sample_load.jv");
     let output_dir = workspace.path().join("out");
+    let main_class = compute_script_main_class("", &main_path);
 
     let fixture_json = fixture_path("sample_users.json");
     let runtime_sample = workspace.path().join("runtime_users.json");
@@ -304,15 +308,16 @@ fn end_to_end_sample_annotation_load_refreshes_runtime_data() {
     );
 
     assert!(
-        output_dir.join("GeneratedMain.class").exists(),
-        "javac should emit GeneratedMain.class in {}",
+        output_dir.join(format!("{}.class", main_class)).exists(),
+        "{}.class should exist in {}",
+        main_class,
         output_dir.display()
     );
 
     let runtime_dataset = r#"[{"name":"Charlie","age":41,"email":"charlie@example.com"}]"#;
     fs::write(&runtime_sample, runtime_dataset).expect("update runtime dataset before execution");
 
-    let run_output = run_generated_main(&output_dir);
+    let run_output = run_generated_main(&output_dir, &main_class);
     assert!(
         run_output.status.success(),
         "java execution failed: {}",
@@ -352,6 +357,7 @@ fn end_to_end_sample_annotation_csv_embed_workflow() {
     let workspace = tempdir().expect("create temp workspace");
     let main_path = workspace.path().join("sample_metrics.jv");
     let output_dir = workspace.path().join("out");
+    let main_class = compute_script_main_class("", &main_path);
 
     let sample_path = fixture_path("sample_metrics.csv");
     let sample_literal = escape_path_for_annotation(&sample_path);
@@ -380,12 +386,13 @@ fn end_to_end_sample_annotation_csv_embed_workflow() {
     );
 
     assert!(
-        output_dir.join("GeneratedMain.class").exists(),
-        "javac should emit GeneratedMain.class in {}",
+        output_dir.join(format!("{}.class", main_class)).exists(),
+        "{}.class should exist in {}",
+        main_class,
         output_dir.display()
     );
 
-    let run_output = run_generated_main(&output_dir);
+    let run_output = run_generated_main(&output_dir, &main_class);
     assert!(
         run_output.status.success(),
         "java execution failed: {}",

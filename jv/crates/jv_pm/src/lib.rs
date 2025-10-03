@@ -250,7 +250,7 @@ impl Default for OutputSection {
 }
 
 fn default_output_directory() -> String {
-    "out/java".to_string()
+    "target".to_string()
 }
 
 pub struct PackageManager {

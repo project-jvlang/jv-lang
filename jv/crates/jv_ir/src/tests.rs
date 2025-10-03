@@ -99,9 +99,9 @@ mod tests {
         context.sample_options_mut().base_dir = Some(temp_dir.path().to_path_buf());
 
         let annotation = Annotation {
-            name: "Sample".to_string(),
-            arguments: vec![AnnotationArgument::PositionalLiteral {
-                value: Literal::String("users.json".to_string()),
+            name: AnnotationName::new(vec!["Sample".to_string()], dummy_span()),
+            arguments: vec![AnnotationArgument::Positional {
+                value: AnnotationValue::Literal(Literal::String("users.json".to_string())),
                 span: dummy_span(),
             }],
             span: dummy_span(),
@@ -183,15 +183,15 @@ mod tests {
         }
 
         let annotation = Annotation {
-            name: "Sample".to_string(),
+            name: AnnotationName::new(vec!["Sample".to_string()], dummy_span()),
             arguments: vec![
-                AnnotationArgument::PositionalLiteral {
-                    value: Literal::String(file_name.to_string()),
+                AnnotationArgument::Positional {
+                    value: AnnotationValue::Literal(Literal::String(file_name.to_string())),
                     span: dummy_span(),
                 },
                 AnnotationArgument::Named {
                     name: "sha256".to_string(),
-                    value: Expression::Literal(Literal::String(expected_sha.clone()), dummy_span()),
+                    value: AnnotationValue::Literal(Literal::String(expected_sha.clone())),
                     span: dummy_span(),
                 },
             ],
@@ -361,25 +361,28 @@ mod tests {
         context.sample_options_mut().base_dir = Some(temp_dir.path().to_path_buf());
 
         let annotation = Annotation {
-            name: "Sample".to_string(),
+            name: AnnotationName::new(vec!["Sample".to_string()], dummy_span()),
             arguments: vec![
-                AnnotationArgument::PositionalLiteral {
-                    value: Literal::String(file_name.to_string()),
+                AnnotationArgument::Positional {
+                    value: AnnotationValue::Literal(Literal::String(file_name.to_string())),
                     span: dummy_span(),
                 },
                 AnnotationArgument::Named {
                     name: "mode".to_string(),
-                    value: Expression::Identifier("Load".to_string(), dummy_span()),
+                    value: AnnotationValue::EnumConstant {
+                        type_path: vec![],
+                        constant: "Load".to_string(),
+                    },
                     span: dummy_span(),
                 },
                 AnnotationArgument::Named {
                     name: "limitBytes".to_string(),
-                    value: Expression::Literal(Literal::Number("128".to_string()), dummy_span()),
+                    value: AnnotationValue::Literal(Literal::Number("128".to_string())),
                     span: dummy_span(),
                 },
                 AnnotationArgument::Named {
                     name: "format".to_string(),
-                    value: Expression::Literal(Literal::String("csv".to_string()), dummy_span()),
+                    value: AnnotationValue::Literal(Literal::String("csv".to_string())),
                     span: dummy_span(),
                 },
             ],
@@ -442,7 +445,7 @@ mod tests {
 
         let mut modifiers = Modifiers::default();
         modifiers.annotations.push(Annotation {
-            name: "Sample".to_string(),
+            name: AnnotationName::new(vec!["Sample".to_string()], dummy_span()),
             arguments: Vec::new(),
             span: dummy_span(),
         });
@@ -2245,6 +2248,112 @@ mod tests {
         match ir_expr {
             IrExpression::Binary { .. } => {}
             other => panic!("Expected binary IR expression, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_implicit_println_lowering_uses_java_lang_system_out() {
+        let mut context = test_context();
+        context.add_variable("greeting".to_string(), JavaType::string());
+
+        let expr = Expression::Call {
+            function: Box::new(Expression::Identifier("println".to_string(), dummy_span())),
+            args: vec![Argument::Positional(Expression::Identifier(
+                "greeting".to_string(),
+                dummy_span(),
+            ))],
+            argument_metadata: CallArgumentMetadata::default(),
+            span: dummy_span(),
+        };
+
+        let ir_expr =
+            transform_expression(expr, &mut context).expect("println lowering should succeed");
+
+        match ir_expr {
+            IrExpression::MethodCall {
+                receiver: Some(receiver),
+                method_name,
+                args,
+                ..
+            } => {
+                assert_eq!(method_name, "println");
+                assert_eq!(args.len(), 1);
+                match &args[0] {
+                    IrExpression::Identifier { name, .. } => assert_eq!(name, "greeting"),
+                    other => panic!("expected greeting identifier, got {:?}", other),
+                }
+
+                match *receiver {
+                    IrExpression::FieldAccess {
+                        receiver: inner_receiver,
+                        field_name,
+                        ..
+                    } => {
+                        assert_eq!(field_name, "out");
+                        match *inner_receiver {
+                            IrExpression::Identifier { name, .. } => {
+                                assert_eq!(name, "System");
+                            }
+                            other => panic!("expected system identifier, got {:?}", other),
+                        }
+                    }
+                    other => panic!("expected field access receiver, got {:?}", other),
+                }
+            }
+            other => panic!("expected println method call, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_explicit_system_in_call_uses_fully_qualified_receiver() {
+        let mut context = test_context();
+
+        let expr = Expression::Call {
+            function: Box::new(Expression::MemberAccess {
+                object: Box::new(Expression::MemberAccess {
+                    object: Box::new(Expression::Identifier("system".to_string(), dummy_span())),
+                    property: "in".to_string(),
+                    span: dummy_span(),
+                }),
+                property: "read".to_string(),
+                span: dummy_span(),
+            }),
+            args: Vec::new(),
+            argument_metadata: CallArgumentMetadata::default(),
+            span: dummy_span(),
+        };
+
+        let ir_expr = transform_expression(expr, &mut context)
+            .expect("system.in.read lowering should succeed");
+
+        match ir_expr {
+            IrExpression::MethodCall {
+                receiver: Some(receiver),
+                method_name,
+                java_type,
+                ..
+            } => {
+                assert_eq!(method_name, "read");
+                assert_eq!(java_type, JavaType::Primitive("int".to_string()));
+
+                match *receiver {
+                    IrExpression::FieldAccess {
+                        receiver: inner_receiver,
+                        field_name,
+                        ..
+                    } => {
+                        assert_eq!(field_name, "in");
+                        match *inner_receiver {
+                            IrExpression::Identifier { name, .. } => {
+                                assert_eq!(name, "System");
+                            }
+                            other => panic!("expected system identifier, got {:?}", other),
+                        }
+                    }
+                    other => panic!("expected field access receiver, got {:?}", other),
+                }
+            }
+            other => panic!("expected system.in.read method call, got {:?}", other),
         }
     }
 

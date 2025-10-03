@@ -361,7 +361,7 @@ out/
 [build]
 # 出力ディレクトリ
 target_dir = "out"
-java_dir = "out/java"
+java_dir = "target"
 classes_dir = "out/classes"
 resources_dir = "out/resources"
 

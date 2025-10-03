@@ -12,8 +12,8 @@ use crate::types::{
     Schema, SchemaError,
 };
 use jv_ast::{
-    Annotation, AnnotationArgument, Expression, JsonLiteral, JsonValue, Literal, Modifiers, Span,
-    TypeAnnotation,
+    Annotation, AnnotationArgument, AnnotationValue, Expression, JsonLiteral, JsonValue, Literal,
+    Modifiers, Span, TypeAnnotation,
 };
 use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
@@ -484,23 +484,20 @@ fn parse_sample_annotation(
 
     for argument in &annotation.arguments {
         match argument {
-            AnnotationArgument::PositionalLiteral { value, span } => {
+            AnnotationArgument::Positional { value, span } => {
                 if source.is_some() {
                     return Err(sample_annotation_error(
                         span,
                         "@Sample にはソース引数を一度だけ指定できます",
                     ));
                 }
-                match value {
-                    Literal::String(path) => {
-                        source = Some(path.clone());
-                    }
-                    _ => {
-                        return Err(sample_annotation_error(
-                            span,
-                            "@Sample の最初の位置引数は文字列リテラルである必要があります",
-                        ));
-                    }
+                if let Some(path) = annotation_value_to_string(value) {
+                    source = Some(path);
+                } else {
+                    return Err(sample_annotation_error(
+                        span,
+                        "@Sample の最初の位置引数は文字列リテラルである必要があります",
+                    ));
                 }
             }
             AnnotationArgument::Named { name, value, span } => match name.as_str() {
@@ -508,7 +505,7 @@ fn parse_sample_annotation(
                     if source.is_some() {
                         return Err(sample_annotation_error(span, "source 引数が重複しています"));
                     }
-                    if let Some(path) = extract_string_literal(value) {
+                    if let Some(path) = annotation_value_to_string(value) {
                         source = Some(path);
                     } else {
                         return Err(sample_annotation_error(
@@ -521,7 +518,7 @@ fn parse_sample_annotation(
                     if mode.is_some() {
                         return Err(sample_annotation_error(span, "mode 引数が重複しています"));
                     }
-                    if let Some(parsed) = parse_mode_expression(value) {
+                    if let Some(parsed) = parse_mode_value(value) {
                         mode = Some(parsed);
                     } else {
                         return Err(sample_annotation_error(
@@ -534,13 +531,7 @@ fn parse_sample_annotation(
                     if format.is_some() {
                         return Err(sample_annotation_error(span, "format 引数が重複しています"));
                     }
-                    let maybe_string = extract_string_literal(value).or_else(|| {
-                        if let Expression::Identifier(identifier, _) = value {
-                            Some(identifier.clone())
-                        } else {
-                            None
-                        }
-                    });
+                    let maybe_string = annotation_value_to_identifier(value);
                     if let Some(fmt) = maybe_string.as_deref().and_then(parse_format_literal) {
                         format = Some(fmt);
                     } else {
@@ -554,7 +545,7 @@ fn parse_sample_annotation(
                     if sha256.is_some() {
                         return Err(sample_annotation_error(span, "sha256 引数が重複しています"));
                     }
-                    if let Some(hash) = extract_string_literal(value) {
+                    if let Some(hash) = annotation_value_to_string(value) {
                         sha256 = Some(hash);
                     } else {
                         return Err(sample_annotation_error(
@@ -570,7 +561,7 @@ fn parse_sample_annotation(
                             "limitBytes 引数が重複しています",
                         ));
                     }
-                    if let Some(parsed) = extract_u64_literal(value) {
+                    if let Some(parsed) = annotation_value_to_u64(value) {
                         limit_bytes = Some(parsed);
                     } else {
                         return Err(sample_annotation_error(
@@ -605,10 +596,10 @@ fn parse_sample_annotation(
     })
 }
 
-fn parse_mode_expression(expr: &Expression) -> Option<SampleMode> {
-    match expr {
-        Expression::Identifier(name, _) => parse_mode_literal(name),
-        Expression::Literal(Literal::String(value), _) => parse_mode_literal(value),
+fn parse_mode_value(value: &AnnotationValue) -> Option<SampleMode> {
+    match value {
+        AnnotationValue::EnumConstant { constant, .. } => parse_mode_literal(constant),
+        AnnotationValue::Literal(Literal::String(value)) => parse_mode_literal(value),
         _ => None,
     }
 }
@@ -630,17 +621,25 @@ fn parse_format_literal(value: &str) -> Option<DataFormat> {
     }
 }
 
-fn extract_string_literal(expr: &Expression) -> Option<String> {
-    match expr {
-        Expression::Literal(Literal::String(value), _) => Some(value.clone()),
+fn annotation_value_to_identifier(value: &AnnotationValue) -> Option<String> {
+    match value {
+        AnnotationValue::EnumConstant { constant, .. } => Some(constant.clone()),
+        AnnotationValue::Literal(Literal::String(value)) => Some(value.clone()),
         _ => None,
     }
 }
 
-fn extract_u64_literal(expr: &Expression) -> Option<u64> {
-    match expr {
-        Expression::Literal(Literal::Number(value), _) => {
-            let digits: String = value.chars().filter(|c| *c != '_').collect();
+fn annotation_value_to_string(value: &AnnotationValue) -> Option<String> {
+    match value {
+        AnnotationValue::Literal(Literal::String(value)) => Some(value.clone()),
+        _ => None,
+    }
+}
+
+fn annotation_value_to_u64(value: &AnnotationValue) -> Option<u64> {
+    match value {
+        AnnotationValue::Literal(Literal::Number(number)) => {
+            let digits: String = number.chars().filter(|c| *c != '_').collect();
             digits.parse::<u64>().ok()
         }
         _ => None,

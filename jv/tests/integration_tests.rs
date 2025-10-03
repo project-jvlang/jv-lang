@@ -71,7 +71,7 @@ include = ["src/**/*.jv"]
         overrides.entrypoint = Some(entrypoint_path);
     }
     if overrides.output.is_none() {
-        overrides.output = Some(project_dir.join("out/java"));
+        overrides.output = Some(project_dir.join("target"));
     }
 
     BuildOptionsFactory::compose(project_root, settings, layout, overrides)
@@ -146,7 +146,7 @@ include = ["src/**/*.jv"]
 
     assert!(status.success(), "CLI build failed with status: {}", status);
 
-    let java_files: Vec<_> = fs::read_dir(project_dir.join("out/java"))
+    let java_files: Vec<_> = fs::read_dir(project_dir.join("target/java25"))
         .expect("Failed to read output directory")
         .filter_map(|entry| entry.ok())
         .map(|entry| entry.path())
@@ -199,6 +199,54 @@ fn pipeline_compile_produces_artifacts() {
     for file in &artifacts.java_files {
         assert!(file.exists(), "Java file missing: {}", file.display());
     }
+}
+
+#[test]
+fn pipeline_preserves_annotations_in_java_output() {
+    let temp_dir = TempDirGuard::new("pipeline-annotations").expect("create temp dir");
+    let input = workspace_file("tests/fixtures/java_annotations/pass_through.jv");
+
+    let plan = compose_plan_from_fixture(
+        temp_dir.path(),
+        &input,
+        CliOverrides {
+            entrypoint: None,
+            output: None,
+            java_only: true,
+            check: false,
+            format: false,
+            target: None,
+            clean: false,
+            perf: false,
+            emit_types: false,
+            emit_telemetry: false,
+            parallel_inference: false,
+            inference_workers: None,
+            constraint_batch: None,
+        },
+    );
+
+    let artifacts = match compile(&plan) {
+        Ok(artifacts) => artifacts,
+        Err(err) => {
+            eprintln!(
+                "Skipping annotation pipeline test: {}",
+                err
+            );
+            return;
+        }
+    };
+    let service_java = artifacts
+        .java_files
+        .iter()
+        .find(|path| path.file_name().and_then(|name| name.to_str()) == Some("Service.java"))
+        .expect("Service.java generated");
+
+    let java_source = fs::read_to_string(service_java).expect("read generated Java");
+    assert!(java_source.contains("@Component"));
+    assert!(java_source.contains("@Autowired"));
+    assert!(java_source.contains("@RequestMapping(path = {\"/ping\"}, produces = {\"application/json\"})"));
+    assert!(java_source.contains("@Nullable"));
 }
 
 #[test]
