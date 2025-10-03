@@ -48,7 +48,7 @@ fn current_dir_lock() -> &'static Mutex<()> {
 
 #[test]
 fn script_main_class_from_numeric_file_stem() {
-    let path = Path::new("examples/02-variables.jv");
+    let path = Path::new("tests/fixtures/02-variables.jv");
     let class = compute_script_main_class("", path);
     assert_eq!(class, "ZeroTwoVariables");
 }
