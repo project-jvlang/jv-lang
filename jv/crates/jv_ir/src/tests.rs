@@ -1766,6 +1766,79 @@ mod tests {
         }
     }
 
+    #[test]
+    fn test_transform_statement_preserves_return() {
+        let mut context = test_context();
+
+        let stmt = Statement::Return {
+            value: Some(Expression::Literal(
+                Literal::String("result".to_string()),
+                dummy_span(),
+            )),
+            span: dummy_span(),
+        };
+
+        let lowered = transform_statement(stmt, &mut context)
+            .expect("return statement should lower successfully");
+
+        assert_eq!(lowered.len(), 1);
+        match &lowered[0] {
+            IrStatement::Return { value: Some(expr), .. } => match expr {
+                IrExpression::Literal(Literal::String(text), _) => {
+                    assert_eq!(text, "result")
+                }
+                other => panic!("unexpected return expression: {:?}", other),
+            },
+            other => panic!("expected return statement, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_lower_call_expression_from_identifier() {
+        let mut context = test_context();
+        context
+            .type_info
+            .insert("greet".to_string(), JavaType::string());
+
+        let call = Expression::Call {
+            function: Box::new(Expression::Identifier(
+                "greet".to_string(),
+                dummy_span(),
+            )),
+            args: vec![Argument::Positional(Expression::Literal(
+                Literal::String("World".to_string()),
+                dummy_span(),
+            ))],
+            argument_metadata: CallArgumentMetadata::default(),
+            span: dummy_span(),
+        };
+
+        let ir = transform_expression(call, &mut context)
+            .expect("call expression should lower successfully");
+
+        match ir {
+            IrExpression::MethodCall {
+                receiver,
+                method_name,
+                args,
+                java_type,
+                ..
+            } => {
+                assert!(receiver.is_none());
+                assert_eq!(method_name, "greet");
+                assert_eq!(java_type, JavaType::string());
+                assert_eq!(args.len(), 1);
+                match &args[0] {
+                    IrExpression::Literal(Literal::String(value), _) => {
+                        assert_eq!(value, "World")
+                    }
+                    other => panic!("unexpected argument expression: {:?}", other),
+                }
+            }
+            other => panic!("expected method call, got {:?}", other),
+        }
+    }
+
     // Test for data class desugaring
     #[test]
     fn test_desugar_immutable_data_class_creates_record() {

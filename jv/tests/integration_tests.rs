@@ -173,7 +173,7 @@ fn cli_build_numeric_script_generates_worded_class() {
     let temp_dir = TempDirGuard::new("cli-numeric").expect("create temp dir");
     let source_path = temp_dir.path().join("02-variables.jv");
     fs::copy(
-        workspace_file("examples/02-variables.jv"),
+        workspace_file("tests/fixtures/02-variables.jv"),
         &source_path,
     )
     .expect("copy numeric-labeled script");

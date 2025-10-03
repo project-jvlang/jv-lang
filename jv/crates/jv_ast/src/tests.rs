@@ -86,6 +86,7 @@ fn call_argument_metadata_deserializes_from_legacy_style() {
     assert_eq!(metadata.style, CallArgumentStyle::Whitespace);
     assert!(metadata.homogeneous_kind.is_none());
     assert!(metadata.separator_diagnostics.is_empty());
+    assert!(!metadata.used_commas);
 }
 
 #[test]
@@ -98,6 +99,7 @@ fn call_argument_metadata_roundtrips_with_extended_fields() {
             message: "mixed separators".to_string(),
             span: Some(span.clone()),
         }],
+        used_commas: true,
     };
 
     let serialized = serde_json::to_string(&metadata).expect("serialize metadata");
