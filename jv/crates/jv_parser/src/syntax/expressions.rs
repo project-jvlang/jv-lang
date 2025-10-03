@@ -523,7 +523,7 @@ fn argument_list(
                 CallArgumentStyle::Comma
             };
 
-            let metadata = build_call_argument_metadata(&args, style);
+            let metadata = build_call_argument_metadata(&args, style, saw_comma);
 
             Ok((args, metadata))
         })
@@ -534,8 +534,10 @@ fn argument_list(
 fn build_call_argument_metadata(
     args: &[Argument],
     style: CallArgumentStyle,
+    used_commas: bool,
 ) -> CallArgumentMetadata {
     let mut metadata = CallArgumentMetadata::with_style(style);
+    metadata.used_commas = used_commas;
 
     if matches!(style, CallArgumentStyle::Whitespace) {
         let mut base_kind: Option<ArgumentElementKind> = None;

@@ -10,6 +10,8 @@ use jv_checker::diagnostics::{
 };
 use jv_pm::JavaTarget;
 
+mod sequence_warnings;
+
 pub mod commands;
 #[derive(Parser, Debug, Clone)]
 #[command(name = "jv")]
@@ -436,6 +438,8 @@ pub mod pipeline {
             }
         };
         let parse_duration = parse_start.elapsed();
+
+        warnings.extend(sequence_warnings::collect_sequence_warnings(&program));
 
         if options.check {
             let mut type_checker = TypeChecker::with_parallel_config(options.parallel_config);

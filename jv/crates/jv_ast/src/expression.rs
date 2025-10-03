@@ -169,6 +169,8 @@ pub struct CallArgumentMetadata {
     pub homogeneous_kind: Option<ArgumentElementKind>,
     #[serde(default)]
     pub separator_diagnostics: Vec<CallArgumentIssue>,
+    #[serde(default)]
+    pub used_commas: bool,
 }
 
 impl Default for CallArgumentMetadata {
@@ -177,6 +179,7 @@ impl Default for CallArgumentMetadata {
             style: CallArgumentStyle::Comma,
             homogeneous_kind: None,
             separator_diagnostics: Vec::new(),
+            used_commas: false,
         }
     }
 }
@@ -225,6 +228,8 @@ impl<'de> Deserialize<'de> for CallArgumentMetadata {
                 homogeneous_kind: Option<ArgumentElementKind>,
                 #[serde(default)]
                 separator_diagnostics: Vec<CallArgumentIssue>,
+                #[serde(default)]
+                used_commas: Option<bool>,
             },
             Legacy(CallArgumentStyle),
         }
@@ -234,10 +239,12 @@ impl<'de> Deserialize<'de> for CallArgumentMetadata {
                 style,
                 homogeneous_kind,
                 separator_diagnostics,
+                used_commas,
             } => Ok(CallArgumentMetadata {
                 style: style.unwrap_or_default(),
                 homogeneous_kind,
                 separator_diagnostics,
+                used_commas: used_commas.unwrap_or(false),
             }),
             MetadataFormat::Legacy(style) => Ok(CallArgumentMetadata::with_style(style)),
         }
