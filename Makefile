@@ -2,6 +2,7 @@
 # Rust workspace build automation for jv transpiler and toolchain
 
 .PHONY: help build check test clean fmt lint install dev release docs setup bench-pattern
+.PHONY: test-lowmem-crate
 .DEFAULT_GOAL := help
 
 # Build configuration
@@ -183,6 +184,14 @@ test-lowmem: ## Test with reduced parallelism for low-memory systems
 	CARGO_INCREMENTAL=0 cargo test $(CARGO_FLAGS) --lib -p jv_cli -j 1
 	CARGO_INCREMENTAL=0 cargo check $(CARGO_FLAGS) --lib -p jv_lsp -j 1
 	CARGO_INCREMENTAL=0 cargo test $(CARGO_FLAGS) --lib -p jv_lsp -j 1
+
+test-lowmem-crate: ## Test a specific crate with low-memory settings (use CRATE=name)
+	@if [ -z "$(CRATE)" ]; then \
+		echo "Usage: make test-lowmem-crate CRATE=<crate_name>"; \
+		exit 1; \
+	fi
+	CARGO_INCREMENTAL=0 cargo check $(CARGO_FLAGS) --lib -p $(CRATE) -j 1
+	CARGO_INCREMENTAL=0 cargo test $(CARGO_FLAGS) --lib -p $(CRATE) -j 1
 
 # Ultra low-memory builds (for constrained CI environments)
 build-minimal: ## Build with single thread for minimal memory usage
