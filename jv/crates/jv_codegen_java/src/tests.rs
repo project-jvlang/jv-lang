@@ -2081,3 +2081,32 @@ fn passthrough_comments_emit_in_java() {
         generator.generate_statement(&block_comment).unwrap()
     );
 }
+
+#[test]
+fn trailing_comments_remain_inline() {
+    let base = IrStatement::VariableDeclaration {
+        name: "age".to_string(),
+        java_type: JavaType::Primitive("int".to_string()),
+        initializer: Some(IrExpression::Literal(
+            Literal::Number("25".to_string()),
+            dummy_span(),
+        )),
+        is_final: false,
+        modifiers: IrModifiers::default(),
+        span: dummy_span(),
+    };
+
+    let commented = IrStatement::Commented {
+        statement: Box::new(base),
+        comment: "// mutable".to_string(),
+        kind: IrCommentKind::Line,
+        comment_span: dummy_span(),
+    };
+
+    let mut generator = JavaCodeGenerator::new();
+    let rendered = generator
+        .generate_statement(&commented)
+        .expect("commented statement generation");
+
+    assert_eq!(rendered, "int age = 25; // mutable");
+}

@@ -55,7 +55,7 @@ impl JavaCodeGenerator {
                 is_static,
                 is_wildcard,
                 ..
-            } = import
+            } = Self::base_statement(import)
             {
                 let mut stmt = String::from("import ");
                 if *is_static {
@@ -75,7 +75,7 @@ impl JavaCodeGenerator {
         let mut remaining_declarations = Vec::new();
 
         for declaration in &program.type_declarations {
-            match declaration {
+            match Self::base_statement(declaration) {
                 IrStatement::ClassDeclaration { .. }
                 | IrStatement::InterfaceDeclaration { .. }
                 | IrStatement::RecordDeclaration { .. }
@@ -91,23 +91,33 @@ impl JavaCodeGenerator {
             }
         }
 
+        let has_entry_method = script_methods.iter().any(Self::is_entry_point_method);
+        let needs_wrapper = !script_statements.is_empty() || !has_entry_method;
+
         if !script_statements.is_empty() || !script_methods.is_empty() {
             let script_class = &self.config.script_main_class;
             let mut builder = self.builder();
             builder.push_line(&format!("public final class {} {{", script_class));
             builder.indent();
 
-            builder.push_line("public static void main(String[] args) throws Exception {");
-            builder.indent();
-            for statement in &script_statements {
-                let code = self.generate_statement(statement)?;
-                Self::push_lines(&mut builder, &code);
+            if needs_wrapper {
+                builder.push_line("public static void main(String[] args) throws Exception {");
+                builder.indent();
+                for statement in &script_statements {
+                    let code = self.generate_statement(statement)?;
+                    Self::push_lines(&mut builder, &code);
+                }
+                if let Some(entry_call) = Self::script_entry_invocation(&script_methods) {
+                    builder.push_line(&entry_call);
+                }
+                builder.dedent();
+                builder.push_line("}");
+            } else {
+                for statement in &script_statements {
+                    let code = self.generate_statement(statement)?;
+                    Self::push_lines(&mut builder, &code);
+                }
             }
-            if let Some(entry_call) = Self::script_entry_invocation(&script_methods) {
-                builder.push_line(&entry_call);
-            }
-            builder.dedent();
-            builder.push_line("}");
 
             for method in &script_methods {
                 builder.push_line("");
@@ -122,13 +132,13 @@ impl JavaCodeGenerator {
         }
 
         for declaration in remaining_declarations {
-            if let IrStatement::SampleDeclaration(sample) = &declaration {
+            if let IrStatement::SampleDeclaration(sample) = Self::base_statement(&declaration) {
                 let artifacts = self.generate_sample_declaration_artifacts(sample)?;
                 unit.type_declarations.extend(artifacts);
                 continue;
             }
 
-            let code = match &declaration {
+            let code = match Self::base_statement(&declaration) {
                 IrStatement::ClassDeclaration { .. } => self.generate_class(&declaration)?,
                 IrStatement::InterfaceDeclaration { .. } => {
                     self.generate_interface(&declaration)?
@@ -153,6 +163,9 @@ impl JavaCodeGenerator {
                 | IrStatement::Package { .. }
                 | IrStatement::Import { .. }
                 | IrStatement::Comment { .. } => self.generate_statement(&declaration)?,
+                IrStatement::Commented { .. } => {
+                    unreachable!("base_statement must unwrap commented statements")
+                }
                 IrStatement::SampleDeclaration { .. } => unreachable!(),
             };
             unit.type_declarations.push(code);
@@ -181,14 +194,25 @@ impl JavaCodeGenerator {
         self.imports.clear();
     }
 
+    fn base_statement<'a>(statement: &'a IrStatement) -> &'a IrStatement {
+        match statement {
+            IrStatement::Commented { statement, .. } => Self::base_statement(statement),
+            other => other,
+        }
+    }
+
     fn script_entry_invocation(methods: &[IrStatement]) -> Option<String> {
         for method in methods {
             if let IrStatement::MethodDeclaration {
                 name, parameters, ..
-            } = method
+            } = Self::base_statement(method)
             {
                 if name != "main" {
                     continue;
+                }
+
+                if parameters.len() == 1 && Self::is_string_array(&parameters[0].java_type) {
+                    return None;
                 }
 
                 return match parameters.len() {
@@ -202,6 +226,20 @@ impl JavaCodeGenerator {
         }
 
         None
+    }
+
+    fn is_entry_point_method(method: &IrStatement) -> bool {
+        match Self::base_statement(method) {
+            IrStatement::MethodDeclaration {
+                name,
+                parameters,
+                modifiers,
+                ..
+            } if name == "main" && modifiers.visibility == IrVisibility::Public => {
+                parameters.len() == 1 && Self::is_string_array(&parameters[0].java_type)
+            }
+            _ => false,
+        }
     }
 
     fn is_string_array(java_type: &JavaType) -> bool {

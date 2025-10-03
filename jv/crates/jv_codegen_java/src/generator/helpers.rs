@@ -145,6 +145,33 @@ impl JavaCodeGenerator {
         }
     }
 
+    pub(super) fn append_inline_comment(mut code: String, comment: &str) -> String {
+        if code.is_empty() {
+            return comment.to_string();
+        }
+
+        let mut lines: Vec<String> = code.lines().map(|line| line.to_string()).collect();
+
+        if let Some(last_line) = lines.last_mut() {
+            if !last_line.trim_end().is_empty() {
+                last_line.push(' ');
+            }
+            last_line.push_str(comment);
+        } else {
+            lines.push(comment.to_string());
+        }
+
+        code.clear();
+        for (index, line) in lines.iter().enumerate() {
+            if index > 0 {
+                code.push('\n');
+            }
+            code.push_str(line);
+        }
+
+        code
+    }
+
     pub(super) fn is_default_only_case(case: &IrSwitchCase) -> bool {
         case.labels.len() == 1 && matches!(case.labels[0], IrCaseLabel::Default)
     }

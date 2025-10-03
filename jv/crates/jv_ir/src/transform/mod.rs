@@ -2,6 +2,7 @@ use crate::context::TransformContext;
 use crate::error::TransformError;
 use crate::profiling::{PerfMetrics, TransformProfiler};
 use crate::types::{IrCommentKind, IrExpression, IrProgram, IrStatement, JavaType};
+use self::utils::extract_java_type;
 use jv_ast::{
     Argument, BinaryOp, CallArgumentMetadata, CommentKind, ConcurrencyConstruct, Expression,
     Literal, Program, ResourceManagement, Span, Statement,
@@ -159,6 +160,27 @@ pub fn transform_statement(
                 span,
             }])
         }
+        Statement::Assignment { target, value, span } => {
+            let ir_target = transform_expression(target, context)?;
+            let java_type = extract_java_type(&ir_target).ok_or_else(|| {
+                TransformError::TypeInferenceError {
+                    message: "Cannot determine assignment target type".to_string(),
+                    span: span.clone(),
+                }
+            })?;
+
+            let ir_value = transform_expression(value, context)?;
+
+            Ok(vec![IrStatement::Expression {
+                expr: IrExpression::Assignment {
+                    target: Box::new(ir_target),
+                    value: Box::new(ir_value),
+                    java_type,
+                    span: span.clone(),
+                },
+                span,
+            }])
+        }
         Statement::Concurrency(construct) => match construct {
             ConcurrencyConstruct::Spawn { body, span } => {
                 let expression_span = span.clone();
@@ -234,12 +256,98 @@ fn lower_program(
     drop(pool_guard);
     context.finish_lowering_session();
 
+    let type_declarations = attach_trailing_comments(ir_statements);
+
     Ok(IrProgram {
         package,
         imports: Vec::new(),
-        type_declarations: ir_statements,
+        type_declarations,
         span,
     })
+}
+
+fn attach_trailing_comments(statements: Vec<IrStatement>) -> Vec<IrStatement> {
+    let mut result = Vec::with_capacity(statements.len());
+
+    for statement in statements {
+        match statement {
+            IrStatement::Comment { kind, text, span } => {
+                if let Some(last) = result.pop() {
+                    if should_attach_trailing_comment(&last, &span) {
+                        result.push(IrStatement::Commented {
+                            statement: Box::new(last),
+                            comment: text,
+                            kind,
+                            comment_span: span,
+                        });
+                        continue;
+                    } else {
+                        result.push(last);
+                    }
+                }
+
+                result.push(IrStatement::Comment {
+                    kind,
+                    text,
+                    span,
+                });
+            }
+            other => result.push(other),
+        }
+    }
+
+    result
+}
+
+fn should_attach_trailing_comment(statement: &IrStatement, comment_span: &Span) -> bool {
+    let base = unwrap_commented(statement);
+    if matches!(base, IrStatement::Comment { .. }) {
+        return false;
+    }
+
+    if let Some(span) = ir_statement_span(base) {
+        if span.end_line == comment_span.start_line {
+            return comment_span.start_column >= span.end_column;
+        }
+    }
+
+    false
+}
+
+fn unwrap_commented<'a>(statement: &'a IrStatement) -> &'a IrStatement {
+    match statement {
+        IrStatement::Commented { statement, .. } => unwrap_commented(statement),
+        other => other,
+    }
+}
+
+fn ir_statement_span(statement: &IrStatement) -> Option<Span> {
+    match statement {
+        IrStatement::VariableDeclaration { span, .. }
+        | IrStatement::MethodDeclaration { span, .. }
+        | IrStatement::ClassDeclaration { span, .. }
+        | IrStatement::InterfaceDeclaration { span, .. }
+        | IrStatement::RecordDeclaration { span, .. }
+        | IrStatement::FieldDeclaration { span, .. }
+        | IrStatement::Expression { span, .. }
+        | IrStatement::Return { span, .. }
+        | IrStatement::If { span, .. }
+        | IrStatement::While { span, .. }
+        | IrStatement::ForEach { span, .. }
+        | IrStatement::For { span, .. }
+        | IrStatement::Switch { span, .. }
+        | IrStatement::Try { span, .. }
+        | IrStatement::TryWithResources { span, .. }
+        | IrStatement::Throw { span, .. }
+        | IrStatement::Break { span, .. }
+        | IrStatement::Continue { span, .. }
+        | IrStatement::Block { span, .. }
+        | IrStatement::Import { span, .. }
+        | IrStatement::Package { span, .. }
+        | IrStatement::Comment { span, .. } => Some(span.clone()),
+        IrStatement::SampleDeclaration(decl) => Some(decl.span.clone()),
+        IrStatement::Commented { statement, .. } => ir_statement_span(statement),
+    }
 }
 
 pub fn transform_expression(
@@ -283,8 +391,9 @@ pub fn transform_expression(
                 ir_statements.append(&mut transformed);
             }
             context.exit_scope();
+            let statements = attach_trailing_comments(ir_statements);
             Ok(IrExpression::Block {
-                statements: ir_statements,
+                statements,
                 java_type: JavaType::void(),
                 span,
             })

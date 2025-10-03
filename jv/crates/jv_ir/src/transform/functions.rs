@@ -341,7 +341,7 @@ pub fn desugar_top_level_function(
                 })
                 .collect();
 
-            let ir_parameters = ir_parameters?;
+            let mut ir_parameters = ir_parameters?;
 
             // Convert return type
             let java_return_type = match return_type {
@@ -350,7 +350,7 @@ pub fn desugar_top_level_function(
             };
 
             // Convert modifiers to IR modifiers
-            let ir_modifiers = IrModifiers {
+            let mut ir_modifiers = IrModifiers {
                 visibility: match modifiers.visibility {
                     jv_ast::Visibility::Public => IrVisibility::Public,
                     jv_ast::Visibility::Private => IrVisibility::Private,
@@ -363,8 +363,31 @@ pub fn desugar_top_level_function(
                 ..Default::default()
             };
 
+            let mut throws = Vec::new();
+
+            if name == "main" && parameters.is_empty() {
+                ir_modifiers.visibility = IrVisibility::Public;
+
+                let args_type = JavaType::Array {
+                    element_type: Box::new(JavaType::Reference {
+                        name: "String".to_string(),
+                        generic_args: vec![],
+                    }),
+                    dimensions: 1,
+                };
+
+                ir_parameters = vec![IrParameter {
+                    name: "args".to_string(),
+                    java_type: args_type,
+                    modifiers: IrModifiers::default(),
+                    span: span.clone(),
+                }];
+
+                throws.push("java.lang.Exception".to_string());
+            }
+
             // Convert function body to IR expression
-            let ir_body = transform_expression(*body, context)?;
+            let ir_body = convert_expression_to_ir(*body, context)?;
 
             // Create method declaration
             Ok(IrStatement::MethodDeclaration {
@@ -373,7 +396,7 @@ pub fn desugar_top_level_function(
                 return_type: java_return_type,
                 body: Some(ir_body),
                 modifiers: ir_modifiers,
-                throws: vec![], // No throws clause for now
+                throws,
                 span,
             })
         }

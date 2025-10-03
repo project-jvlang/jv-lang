@@ -13,7 +13,7 @@ impl JavaCodeGenerator {
             nested_classes,
             modifiers,
             ..
-        } = class
+        } = JavaCodeGenerator::base_statement(class)
         {
             let mut builder = self.builder();
             self.render_annotations(&mut builder, modifiers);
@@ -97,7 +97,7 @@ impl JavaCodeGenerator {
             methods,
             modifiers,
             ..
-        } = record
+        } = JavaCodeGenerator::base_statement(record)
         {
             let mut builder = self.builder();
             self.render_annotations(&mut builder, modifiers);
@@ -157,7 +157,7 @@ impl JavaCodeGenerator {
             nested_types,
             modifiers,
             ..
-        } = interface
+        } = JavaCodeGenerator::base_statement(interface)
         {
             let mut builder = self.builder();
             self.render_annotations(&mut builder, modifiers);
@@ -214,7 +214,7 @@ impl JavaCodeGenerator {
             }
 
             for nested in nested_types {
-                let nested_code = match nested {
+                let nested_code = match JavaCodeGenerator::base_statement(nested) {
                     IrStatement::ClassDeclaration { .. } => self.generate_class(nested)?,
                     IrStatement::InterfaceDeclaration { .. } => self.generate_interface(nested)?,
                     IrStatement::RecordDeclaration { .. } => self.generate_record(nested)?,
@@ -245,7 +245,7 @@ impl JavaCodeGenerator {
             modifiers,
             throws,
             ..
-        } = method
+        } = JavaCodeGenerator::base_statement(method)
         {
             let mut builder = self.builder();
             self.render_annotations(&mut builder, modifiers);
