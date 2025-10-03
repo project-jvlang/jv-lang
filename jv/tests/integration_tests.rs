@@ -164,6 +164,50 @@ include = ["src/**/*.jv"]
 }
 
 #[test]
+fn cli_build_numeric_script_generates_worded_class() {
+    let Some(cli_path) = std::env::var_os("CARGO_BIN_EXE_jv").map(PathBuf::from) else {
+        eprintln!("Skipping numeric script test: CARGO_BIN_EXE_jv not set");
+        return;
+    };
+
+    let temp_dir = TempDirGuard::new("cli-numeric").expect("create temp dir");
+    let source_path = temp_dir.path().join("02-variables.jv");
+    fs::copy(
+        workspace_file("examples/02-variables.jv"),
+        &source_path,
+    )
+    .expect("copy numeric-labeled script");
+
+    let output_dir = temp_dir.path().join("out");
+    let status = Command::new(&cli_path)
+        .current_dir(temp_dir.path())
+        .arg("build")
+        .arg(&source_path)
+        .arg("--java-only")
+        .arg("-o")
+        .arg(&output_dir)
+        .status()
+        .expect("invoke jv build for numeric script");
+
+    assert!(status.success(), "jv build failed: {:?}", status);
+
+    let java_dir = output_dir.join("java25");
+    let expected_java = java_dir.join("ZeroTwoVariables.java");
+    assert!(
+        expected_java.exists(),
+        "expected {} to exist",
+        expected_java.display()
+    );
+
+    let java_source = fs::read_to_string(&expected_java).expect("read generated script java");
+    assert!(
+        java_source.contains("class ZeroTwoVariables"),
+        "generated Java should declare ZeroTwoVariables: {}",
+        java_source
+    );
+}
+
+#[test]
 fn pipeline_compile_produces_artifacts() {
     let temp_dir = TempDirGuard::new("pipeline").expect("Failed to create temp dir");
     let input = workspace_file("test_simple.jv");

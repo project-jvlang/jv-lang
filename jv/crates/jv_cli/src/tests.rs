@@ -1,4 +1,5 @@
 use super::*;
+use crate::pipeline::compute_script_main_class;
 
 mod compat;
 mod project_layout;
@@ -43,6 +44,27 @@ impl Drop for TempDirGuard {
 fn current_dir_lock() -> &'static Mutex<()> {
     static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
     LOCK.get_or_init(|| Mutex::new(()))
+}
+
+#[test]
+fn script_main_class_from_numeric_file_stem() {
+    let path = Path::new("examples/02-variables.jv");
+    let class = compute_script_main_class("", path);
+    assert_eq!(class, "ZeroTwoVariables");
+}
+
+#[test]
+fn script_main_class_from_package_name_retains_main_suffix() {
+    let path = Path::new("src/main.jv");
+    let class = compute_script_main_class("analytics-dashboard", path);
+    assert_eq!(class, "AnalyticsDashboardMain");
+}
+
+#[test]
+fn script_main_class_converts_embedded_digits() {
+    let path = Path::new("reports/monthly-2025.jv");
+    let class = compute_script_main_class("", path);
+    assert_eq!(class, "MonthlyTwoZeroTwoFive");
 }
 
 #[test]

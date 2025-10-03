@@ -113,17 +113,37 @@ impl BuildSystem {
 
     /// Check if javac is available and get version
     pub fn check_javac_availability(&self) -> Result<String, BuildError> {
-        let output = Command::new("javac")
-            .arg("-version")
-            .output()
-            .map_err(|_| BuildError::JdkNotFound("javac command not found".to_string()))?;
+        let try_version = |flag: &str| -> Result<Option<String>, BuildError> {
+            let output = Command::new("javac")
+                .arg(flag)
+                .output()
+                .map_err(|_| BuildError::JdkNotFound("javac command not found".to_string()))?;
 
-        if output.status.success() {
-            let version = String::from_utf8_lossy(&output.stderr);
-            Ok(version.trim().to_string())
-        } else {
-            Err(BuildError::JdkNotFound("javac not available".to_string()))
+            if output.status.success() {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                let version = if !stderr.trim().is_empty() {
+                    stderr.trim().to_string()
+                } else {
+                    stdout.trim().to_string()
+                };
+                Ok(Some(version))
+            } else {
+                Ok(None)
+            }
+        };
+
+        if let Some(version) = try_version("--version")? {
+            return Ok(version);
         }
+
+        if let Some(version) = try_version("-version")? {
+            return Ok(version);
+        }
+
+        Err(BuildError::JdkNotFound(
+            "javac not available (version check failed)".to_string(),
+        ))
     }
 
     /// Create output directory if it doesn't exist

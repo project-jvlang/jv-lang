@@ -1,3 +1,4 @@
+use super::transform_expression;
 use crate::context::TransformContext;
 use crate::error::TransformError;
 use crate::types::{IrExpression, IrStatement, JavaType, MethodOverload};
@@ -73,7 +74,7 @@ pub fn desugar_default_parameters(
     let ir_params = ir_params?;
 
     // Convert body to IR expression
-    let ir_body = convert_expression_to_ir(*body, context)?;
+    let ir_body = transform_expression(*body, context)?;
 
     // Create base overload with required parameters only
     overloads.push(MethodOverload {
@@ -172,31 +173,12 @@ fn convert_type_annotation(type_ann: TypeAnnotation) -> Result<JavaType, Transfo
 }
 
 // Helper function to convert Expression to IrExpression (simplified)
-fn convert_expression_to_ir(
-    expr: Expression,
-    _context: &mut TransformContext,
-) -> Result<IrExpression, TransformError> {
-    match expr {
-        Expression::Literal(lit, span) => Ok(IrExpression::Literal(lit, span)),
-        Expression::Identifier(name, span) => Ok(IrExpression::Identifier {
-            name,
-            java_type: JavaType::object(), // Type inference would determine this
-            span,
-        }),
-        // For now, return a placeholder for complex expressions
-        _ => Ok(IrExpression::Literal(
-            jv_ast::Literal::String("/* TODO: complex expression */".to_string()),
-            Span::dummy(),
-        )),
-    }
-}
-
 // Helper function to create delegating method calls
 fn create_delegating_call(
     function_name: &str,
     current_params: &[Parameter],
     default_value: &Option<Expression>,
-    _context: &mut TransformContext,
+    context: &mut TransformContext,
 ) -> Result<IrExpression, TransformError> {
     // Create method call arguments from current parameters
     let mut args = Vec::new();
@@ -211,7 +193,7 @@ fn create_delegating_call(
 
     // Add default value if provided
     if let Some(default_expr) = default_value {
-        args.push(convert_expression_to_ir(default_expr.clone(), _context)?);
+        args.push(convert_expression_to_ir(default_expr.clone(), context)?);
     }
 
     Ok(IrExpression::MethodCall {
@@ -222,6 +204,24 @@ fn create_delegating_call(
         java_type: JavaType::object(), // Return type would be inferred
         span: Span::dummy(),
     })
+}
+
+fn convert_expression_to_ir(
+    expr: Expression,
+    context: &mut TransformContext,
+) -> Result<IrExpression, TransformError> {
+    match transform_expression(expr.clone(), context) {
+        Ok(ir) => Ok(ir),
+        Err(err) => match expr {
+            Expression::Literal(lit, span) => Ok(IrExpression::Literal(lit, span)),
+            Expression::Identifier(name, span) => Ok(IrExpression::Identifier {
+                name,
+                java_type: JavaType::object(),
+                span,
+            }),
+            _ => Err(err),
+        },
+    }
 }
 
 pub fn desugar_named_arguments(
@@ -341,7 +341,7 @@ pub fn desugar_top_level_function(
                 })
                 .collect();
 
-            let ir_parameters = ir_parameters?;
+            let mut ir_parameters = ir_parameters?;
 
             // Convert return type
             let java_return_type = match return_type {
@@ -350,7 +350,7 @@ pub fn desugar_top_level_function(
             };
 
             // Convert modifiers to IR modifiers
-            let ir_modifiers = IrModifiers {
+            let mut ir_modifiers = IrModifiers {
                 visibility: match modifiers.visibility {
                     jv_ast::Visibility::Public => IrVisibility::Public,
                     jv_ast::Visibility::Private => IrVisibility::Private,
@@ -363,6 +363,29 @@ pub fn desugar_top_level_function(
                 ..Default::default()
             };
 
+            let mut throws = Vec::new();
+
+            if name == "main" && parameters.is_empty() {
+                ir_modifiers.visibility = IrVisibility::Public;
+
+                let args_type = JavaType::Array {
+                    element_type: Box::new(JavaType::Reference {
+                        name: "String".to_string(),
+                        generic_args: vec![],
+                    }),
+                    dimensions: 1,
+                };
+
+                ir_parameters = vec![IrParameter {
+                    name: "args".to_string(),
+                    java_type: args_type,
+                    modifiers: IrModifiers::default(),
+                    span: span.clone(),
+                }];
+
+                throws.push("java.lang.Exception".to_string());
+            }
+
             // Convert function body to IR expression
             let ir_body = convert_expression_to_ir(*body, context)?;
 
@@ -373,7 +396,7 @@ pub fn desugar_top_level_function(
                 return_type: java_return_type,
                 body: Some(ir_body),
                 modifiers: ir_modifiers,
-                throws: vec![], // No throws clause for now
+                throws,
                 span,
             })
         }

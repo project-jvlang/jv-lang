@@ -543,6 +543,14 @@ pub enum IrStatement {
         span: Span,
     },
 
+    // Statement decorated with a trailing inline comment
+    Commented {
+        statement: Box<IrStatement>,
+        comment: String,
+        kind: IrCommentKind,
+        comment_span: Span,
+    },
+
     // Variable declarations with explicit types
     VariableDeclaration {
         name: String,

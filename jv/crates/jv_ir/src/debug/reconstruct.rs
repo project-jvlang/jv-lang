@@ -178,6 +178,7 @@ impl<'a> ReconstructionContext<'a> {
     fn convert_statement(&mut self, stmt: &IrStatement) -> Result<Statement, ReconstructionError> {
         self.visit_node();
         match stmt {
+            IrStatement::Commented { statement, .. } => self.convert_statement(statement),
             IrStatement::Comment { kind, text, span } => {
                 self.record_success();
                 let comment_kind = match kind {
@@ -719,6 +720,7 @@ fn extract_span(stmt: &IrStatement) -> Option<Span> {
         | IrStatement::Import { span, .. }
         | IrStatement::Package { span, .. }
         | IrStatement::Comment { span, .. } => Some(span.clone()),
+        IrStatement::Commented { statement, .. } => extract_span(statement),
         IrStatement::SampleDeclaration(decl) => Some(decl.span.clone()),
     }
 }

@@ -4,6 +4,14 @@ impl JavaCodeGenerator {
     pub fn generate_statement(&mut self, stmt: &IrStatement) -> Result<String, CodeGenError> {
         Ok(match stmt {
             IrStatement::Comment { text, .. } => text.clone(),
+            IrStatement::Commented {
+                statement,
+                comment,
+                ..
+            } => {
+                let rendered = self.generate_statement(statement)?;
+                Self::append_inline_comment(rendered, comment)
+            }
             IrStatement::VariableDeclaration {
                 name,
                 java_type,
