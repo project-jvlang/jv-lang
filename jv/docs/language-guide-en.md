@@ -22,18 +22,19 @@ Complete reference for the jv (Java Syntactic Sugar) syntax and features.
 ### Variable Declarations
 
 ```jv
-// Immutable variable (final in Java)
-val name = "Alice"
-val age = 30
+// Implicitly immutable (final in Java): omit the keyword
+name = "Alice"
+age: Int = 30
 
-// Mutable variable
+// Use var only when mutation is required
 var count = 0
 var isActive = true
 
-// Explicit types (usually inferred)
-val pi: Double = 3.14159
-var items: List<String> = mutableListOf()
+// You can still spell `val` explicitly when desired
+val legacy = "still supported"
 ```
+
+Declarations of the form `identifier = expression` are implicitly immutable (compiled to Java `final`). Add a type annotation with `identifier: Type = expression` when needed. Use `var` only when reassignment is intended; existing `val` keywords continue to compile without warnings for migration periods.
 
 **Generated Java:**
 ```java
@@ -42,6 +43,7 @@ final int age = 30;
 
 int count = 0;
 boolean isActive = true;
+final String legacy = "still supported";
 ```
 
 ### Type Inference
@@ -49,10 +51,12 @@ boolean isActive = true;
 jv automatically infers types in most cases:
 
 ```jv
-val numbers = listOf(1, 2, 3)        // List<Int>
-val map = mapOf("key" to "value")    // Map<String, String>
-val lambda = { x: Int -> x * 2 }     // Function1<Int, Int>
+numbers = listOf(1, 2, 3)         // List<Int>
+mapping = mapOf("key" to "value") // Map<String, String>
+lambda = { x: Int -> x * 2 }      // Function1<Int, Int>
 ```
+
+Type inference applies to implicit immutables as well. Add `var` only when the variable must change.
 
 ## Functions
 
@@ -156,15 +160,23 @@ class Person(val name: String, var age: Int) {
 
 ```jv
 // Immutable data class -> Java record
-data class Point(val x: Double, val y: Double)
+data Point(x: Double, y: Double)
+
+// Traditional data class syntax remains valid
+data class Person(val name: String, val age: Int)
+
+// Type inference and default values are supported
+data Metrics(total, average = 0.0)
 
 // Mutable data class -> Java class with getters/setters
-data class mutable Counter(var value: Int) {
+data Counter(var value: Int) {
     fun increment() {
         value++
     }
 }
 ```
+
+`data Name(field ...)` produces the same AST as `data class` and infers field types when omitted. Records are generated when all fields are immutable; the presence of `var` switches the output to a Java class.
 
 **Generated Java** (immutable):
 ```java
@@ -441,36 +453,39 @@ for (_ in sequenceOf(Unit).repeat()) {
 ### Creating Collections
 
 ```jv
-val list = listOf(1, 2, 3, 4, 5)
-val mutableList = mutableListOf("a", "b", "c")
+numbers = [1 2 3 4 5]              // Whitespace-delimited literal
+list = listOf(1, 2, 3, 4, 5)
+mutableList = mutableListOf("a", "b", "c")
 
-val set = setOf(1, 2, 3, 2)  // {1, 2, 3}
-val map = mapOf("key1" to "value1", "key2" to "value2")
+set = setOf(1, 2, 3, 2)            // {1, 2, 3}
+mapping = mapOf("key1" to "value1", "key2" to "value2")
 ```
+
+See [Whitespace Arrays and Arguments](whitespace-arrays.md) for layout rules. Mixing commas with whitespace groups triggers diagnostics `JV2101`/`JV2102`.
 
 ### Collection Operations
 
 ```jv
-val numbers = listOf(1, 2, 3, 4, 5)
+numbers = listOf(1, 2, 3, 4, 5)
 
-val doubled = numbers.map { it * 2 }
-val evens = numbers.filter { it % 2 == 0 }
-val sum = numbers.reduce { acc, n -> acc + n }
+doubled = numbers.map { it * 2 }
+evens = numbers.filter { it % 2 == 0 }
+sum = numbers.reduce { acc, n -> acc + n }
 
-val firstPositive = numbers.firstOrNull { it > 0 }
-val hasNegative = numbers.any { it < 0 }
-val allPositive = numbers.all { it > 0 }
+firstPositive = numbers.firstOrNull { it > 0 }
+hasNegative = numbers.any { it < 0 }
+allPositive = numbers.all { it > 0 }
 ```
 
 ## String Interpolation
 
 ```jv
-val name = "Alice"
-val age = 30
+name = "Alice"
+age = 30
 
-val message = "Hello, my name is $name and I'm $age years old"
-val calculation = "The result is ${2 + 2}"
-val nested = "User: ${user.name.uppercase()}"
+message = "Hello, my name is $name and I'm $age years old"
+calculation = "The result is ${2 + 2}"
+nested = "User: ${user.name.uppercase()}"
 ```
 
 **Generated Java:**
@@ -487,7 +502,7 @@ String calculation = "The result is " + (2 + 2);
 fun processData() {
     spawn {
         // This runs in a virtual thread
-        val result = heavyComputation()
+        result = heavyComputation()
         println("Result: $result")
     }
 }

@@ -24,18 +24,19 @@ jv（Javaシンタックスシュガー）の構文と機能の完全なリフ�
 ### 変数宣言
 
 ```jv
-// 不変変数（Javaのfinal）
-val name = "Alice"
-val age = 30
+// 暗黙不変（Javaのfinal）: キーワード省略で自動的に final
+name = "Alice"
+age: Int = 30
 
-// 可変変数
+// 可変にしたい場合のみ var を明示
 var count = 0
 var isActive = true
 
-// 明示的型（通常は推論される）
-val pi: Double = 3.14159
-var items: List<String> = mutableListOf()
+// `val`キーワードを明示的に書くこともできます
+val legacy = "still supported"
 ```
+
+`identifier = 式`形式の宣言は暗黙に不変変数（Javaの`final`）として扱われます。必要に応じて`identifier: 型 = 式`で型を明示できます。`var`は再代入が必要な場合のみ使用し、既存コードとの互換性のため`val`キーワードもそのまま受け入れられます。
 
 **生成されるJava:**
 ```java
@@ -44,6 +45,7 @@ final int age = 30;
 
 int count = 0;
 boolean isActive = true;
+final String legacy = "still supported";
 ```
 
 ### 型推論
@@ -51,10 +53,12 @@ boolean isActive = true;
 jvはほとんどの場合、型を自動的に推論します：
 
 ```jv
-val numbers = listOf(1, 2, 3)        // List<Int>
-val map = mapOf("key" to "value")    // Map<String, String>
-val lambda = { x: Int -> x * 2 }     // Function1<Int, Int>
+numbers = listOf(1, 2, 3)         // List<Int>
+mapping = mapOf("key" to "value") // Map<String, String>
+lambda = { x: Int -> x * 2 }      // Function1<Int, Int>
 ```
+
+暗黙不変の変数でも型推論は働きます。意図的に再代入する場合のみ`var`を付けてください。
 
 ## 関数
 
@@ -158,15 +162,23 @@ class Person(val name: String, var age: Int) {
 
 ```jv
 // 不変データクラス -> Javaレコード
-data class Point(val x: Double, val y: Double)
+data Point(x: Double, y: Double)
+
+// 既存の data class 構文もサポートされます
+data class Person(val name: String, val age: Int)
+
+// デフォルト値や型推論も利用可能
+data Metrics(total, average = 0.0)
 
 // 可変データクラス -> ゲッター/セッターを持つJavaクラス
-data class mutable Counter(var value: Int) {
+data Counter(var value: Int) {
     fun increment() {
         value++
     }
 }
 ```
+
+`data Name(field ...)`形式は`data class`と同じASTを生成し、型注釈がないフィールドも推論されます。フィールドが`var`の場合はJavaクラス、すべて不変の場合はJava recordとして出力されます。
 
 **生成されるJava**（不変）:
 ```java
@@ -388,36 +400,39 @@ for (_ in sequenceOf(Unit).repeat()) {
 ### コレクションの作成
 
 ```jv
-val list = listOf(1, 2, 3, 4, 5)
-val mutableList = mutableListOf("a", "b", "c")
+numbers = [1 2 3 4 5]              // 空白区切りリテラル
+list = listOf(1, 2, 3, 4, 5)
+mutableList = mutableListOf("a", "b", "c")
 
-val set = setOf(1, 2, 3, 2)  // {1, 2, 3}
-val map = mapOf("key1" to "value1", "key2" to "value2")
+set = setOf(1, 2, 3, 2)            // {1, 2, 3}
+mapping = mapOf("key1" to "value1", "key2" to "value2")
 ```
+
+空白区切り配列と引数の詳細は[Whitespace Arrays and Arguments](whitespace-arrays.md)を参照してください。桁区切りカンマと混在させると`JV2101`/`JV2102`診断が発生します。
 
 ### コレクション操作
 
 ```jv
-val numbers = listOf(1, 2, 3, 4, 5)
+numbers = listOf(1, 2, 3, 4, 5)
 
-val doubled = numbers.map { it * 2 }
-val evens = numbers.filter { it % 2 == 0 }
-val sum = numbers.reduce { acc, n -> acc + n }
+doubled = numbers.map { it * 2 }
+evens = numbers.filter { it % 2 == 0 }
+sum = numbers.reduce { acc, n -> acc + n }
 
-val firstPositive = numbers.firstOrNull { it > 0 }
-val hasNegative = numbers.any { it < 0 }
-val allPositive = numbers.all { it > 0 }
+firstPositive = numbers.firstOrNull { it > 0 }
+hasNegative = numbers.any { it < 0 }
+allPositive = numbers.all { it > 0 }
 ```
 
 ## 文字列補間
 
 ```jv
-val name = "Alice"
-val age = 30
+name = "Alice"
+age = 30
 
-val message = "Hello, my name is $name and I'm $age years old"
-val calculation = "The result is ${2 + 2}"
-val nested = "User: ${user.name.uppercase()}"
+message = "Hello, my name is $name and I'm $age years old"
+calculation = "The result is ${2 + 2}"
+nested = "User: ${user.name.uppercase()}"
 ```
 
 **生成されるJava:**
@@ -434,7 +449,7 @@ String calculation = "The result is " + (2 + 2);
 fun processData() {
     spawn {
         // これは仮想スレッドで実行されます
-        val result = heavyComputation()
+        result = heavyComputation()
         println("Result: $result")
     }
 }

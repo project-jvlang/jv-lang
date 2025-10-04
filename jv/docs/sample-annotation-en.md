@@ -3,7 +3,7 @@
 **English** | [日本語](sample-annotation.md)
 
 ## Purpose
-Automatically infer static types from sample data based on declarations like `@Sample("users.json") val users`, providing end-to-end processing from sample data to Java 25 source generation. Users can obtain safely typed code and initial data by simply placing small samples.
+Automatically infer static types from sample data based on declarations like `@Sample("users.json") users`, providing end-to-end processing from sample data to Java 25 source generation. Users can obtain safely typed code and initial data by simply placing small samples.
 
 ## Overview
 - Supported schemas: File paths (relative/absolute), `file://`, `https://`, `s3://`
@@ -17,10 +17,12 @@ Automatically infer static types from sample data based on declarations like `@S
 
 Examples:
 ```
-@Sample("users.json") val users             // => mode=Embed (default)
-@Sample("https://example.com/users.json", mode=Load) val users
-@Sample(source="s3://bucket/key.json", mode=Embed, sha256="<hex>") val users
+@Sample("users.json") users             // => mode=Embed (default)
+@Sample("https://example.com/users.json", mode=Load) users
+@Sample(source="s3://bucket/key.json", mode=Embed, sha256="<hex>") users
 ```
+
+Declarations inherit the implicit immutable default, so the generated Java stores these samples as `final` fields. Add `var` only when the binding must be mutable.
 
 ## Type Inference
 - JSON objects → Generate `record` (immutable) or regular class (mutable) (jv uses data class → Java record as basis)
@@ -87,13 +89,13 @@ cache = true
 ## Examples
 ```
 // Embed local JSON with default (Embed)
-@Sample("data/users.json") val users
+@Sample("data/users.json") users
 
 // Load from HTTP at runtime
-@Sample("https://example.com/users.json", mode=Load) val users
+@Sample("https://example.com/users.json", mode=Load) users
 
 // Retrieve s3 at compile time with hash verification and embed
-@Sample(source="s3://my-bucket/users.json", mode=Embed, sha256="ab12…") val users
+@Sample(source="s3://my-bucket/users.json", mode=Embed, sha256="ab12…") users
 ```
 
 ---
