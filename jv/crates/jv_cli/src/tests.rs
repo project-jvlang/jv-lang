@@ -1,4 +1,5 @@
 use super::*;
+use crate::commands::explain;
 use crate::pipeline::compute_script_main_class;
 
 mod compat;
@@ -151,6 +152,26 @@ fn test_fmt_command_parsing() {
         }
         _ => panic!("Expected Fmt command"),
     }
+}
+
+#[test]
+fn test_explain_command_parsing() {
+    let explain_args = vec!["jv", "explain", "JV2001"];
+    let cli = Cli::try_parse_from(explain_args).unwrap();
+
+    match cli.command {
+        Some(Commands::Explain { code }) => {
+            assert_eq!(code, "JV2001");
+        }
+        _ => panic!("Expected Explain command"),
+    }
+}
+
+#[test]
+fn test_explain_render_known_code() {
+    let rendered = explain::render_explanation("JV2002").expect("explanation should exist");
+    assert!(rendered.contains("JV2002"));
+    assert!(rendered.to_lowercase().contains("remediation"));
 }
 
 #[test]

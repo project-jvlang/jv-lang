@@ -5,6 +5,10 @@
 //! focus on recording constructor-related metadata so that future passes can emit
 //! JV2001–JV2004 style reports with rich context.
 
+pub mod generic;
+
+pub use generic::{translate_solver_diagnostic, GenericDiagnostic, GenericDiagnostics};
+
 use crate::types::SymbolId;
 use jv_ast::Span;
 

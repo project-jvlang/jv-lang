@@ -95,6 +95,11 @@ pub enum Commands {
         /// Input .jv file
         input: String,
     },
+    /// Provide an in-depth explanation for a diagnostic code
+    Explain {
+        /// Diagnostic code (e.g., JV2001)
+        code: String,
+    },
     /// Show version information  
     Version,
     /// Start interactive REPL
@@ -659,7 +664,7 @@ pub mod pipeline {
         strategies: &[StrategySummary],
     ) {
         println!(
-            "Telemetry ({}):\n  constraints_emitted: {}\n  bindings_resolved: {}\n  inference_duration_ms: {:.3}\n  preserved_constraints: {}\n  cache_hit_rate: {}\n  invalidation_cascade_depth: {}\n  pattern_cache_hits: {}\n  pattern_cache_misses: {}\n  pattern_bridge_ms: {:.3}",
+            "Telemetry ({}):\n  constraints_emitted: {}\n  bindings_resolved: {}\n  inference_duration_ms: {:.3}\n  preserved_constraints: {}\n  cache_hit_rate: {}\n  invalidation_cascade_depth: {}\n  pattern_cache_hits: {}\n  pattern_cache_misses: {}\n  pattern_bridge_ms: {:.3}\n  generic_constraints_emitted: {}\n  bound_checks: {}\n  variance_conflicts: {}\n  sealed_hierarchy_checks: {}\n  generic_solver_ms: {:.3}\n  variance_analysis_ms: {:.3}",
             entrypoint.display(),
             telemetry.constraints_emitted,
             telemetry.bindings_resolved,
@@ -672,7 +677,13 @@ pub mod pipeline {
             telemetry.invalidation_cascade_depth,
             telemetry.pattern_cache_hits,
             telemetry.pattern_cache_misses,
-            telemetry.pattern_bridge_ms
+            telemetry.pattern_bridge_ms,
+            telemetry.generic_constraints_emitted,
+            telemetry.bound_checks,
+            telemetry.variance_conflicts,
+            telemetry.sealed_hierarchy_checks,
+            telemetry.generic_solver_ms,
+            telemetry.variance_analysis_ms
         );
 
         if strategies.is_empty() {

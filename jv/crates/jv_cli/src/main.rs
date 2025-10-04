@@ -6,10 +6,7 @@ use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
-use jv_checker::diagnostics::{
-    from_check_error, from_parse_error, from_transform_error, DiagnosticStrategy,
-};
-use jv_checker::TypeChecker;
+use jv_checker::diagnostics::{from_parse_error, from_transform_error, DiagnosticStrategy};
 use jv_fmt::JavaFormatter;
 use jv_ir::transform_program;
 use jv_parser::Parser as JvParser;
@@ -285,12 +282,15 @@ fn main() -> Result<()> {
             format_jv_files(files)?;
         }
         Some(Commands::Check { input }) => {
-            check_jv_file(&input)?;
+            commands::check::run(&input)?;
         }
         Some(Commands::Tour) => {
             TourOrchestrator::default()
                 .run()
                 .context("Failed to launch jv language tour")?;
+        }
+        Some(Commands::Explain { code }) => {
+            commands::explain::run(&code).context("Failed to render explanation")?;
         }
         Some(Commands::Version) => {
             println!("{}", get_version());
@@ -480,70 +480,5 @@ fn format_jv_files(files: Vec<String>) -> Result<()> {
         println!("Formatted: {}", file);
     }
 
-    Ok(())
-}
-
-fn check_jv_file(input: &str) -> Result<()> {
-    println!("Checking: {}", input);
-
-    if !Path::new(input).exists() {
-        anyhow::bail!("Input file '{}' not found", input);
-    }
-
-    let source =
-        fs::read_to_string(input).with_context(|| format!("Failed to read file: {}", input))?;
-
-    let program = match JvParser::parse(&source) {
-        Ok(program) => program,
-        Err(error) => {
-            if let Some(diagnostic) = from_parse_error(&error) {
-                return Err(jv_cli::tooling_failure(
-                    Path::new(input),
-                    diagnostic.with_strategy(DiagnosticStrategy::Deferred),
-                ));
-            }
-            return Err(anyhow::anyhow!("Parser error: {:?}", error));
-        }
-    };
-
-    if let Err(error) = transform_program(program.clone()) {
-        if let Some(diagnostic) = from_transform_error(&error) {
-            return Err(jv_cli::tooling_failure(
-                Path::new(input),
-                diagnostic.with_strategy(DiagnosticStrategy::Deferred),
-            ));
-        }
-        return Err(anyhow::anyhow!("IR transformation error: {:?}", error));
-    }
-
-    let mut type_checker = TypeChecker::new();
-    match type_checker.check_program(&program) {
-        Ok(_) => {
-            println!("✓ No errors found");
-        }
-        Err(errors) => {
-            if let Some(diagnostic) = errors.iter().find_map(from_check_error) {
-                return Err(jv_cli::tooling_failure(
-                    Path::new(input),
-                    diagnostic.with_strategy(DiagnosticStrategy::Deferred),
-                ));
-            }
-            println!("Found {} error(s):", errors.len());
-            for error in &errors {
-                println!("  Error: {}", error);
-            }
-            return Err(anyhow::anyhow!("Type checking failed"));
-        }
-    }
-
-    let warnings = type_checker.check_null_safety(&program, None);
-    if !warnings.is_empty() {
-        println!("Null safety warnings:");
-        for warning in &warnings {
-            println!("  Warning: {}", warning);
-        }
-    }
-
-    println!("Check completed successfully!");
     Ok(())
 }
