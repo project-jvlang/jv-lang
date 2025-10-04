@@ -32,12 +32,7 @@ fn run_null_safety_case(source: &str) -> NullSafetyCaseResult {
         .check_program(&program)
         .expect("program should type-check");
 
-    let diagnostics = if let Some(normalized) = checker.normalized_program() {
-        let cloned = normalized.clone();
-        checker.check_null_safety(&cloned, None)
-    } else {
-        checker.check_null_safety(&program, None)
-    };
+    let diagnostics = checker.check_null_safety(&program, None);
     let messages = collect_null_safety_messages(&diagnostics);
     let telemetry_ms = checker.telemetry().pattern_bridge_ms;
 
@@ -55,12 +50,7 @@ fn null_safety_errors_are_tagged_with_jv3002() {
     checker
         .check_program(&program)
         .expect("program should type-check before null safety");
-    let diagnostics = if let Some(normalized) = checker.normalized_program() {
-        let cloned = normalized.clone();
-        checker.check_null_safety(&cloned, None)
-    } else {
-        checker.check_null_safety(&program, None)
-    };
+    let diagnostics = checker.check_null_safety(&program, None);
     let messages = collect_null_safety_messages(&diagnostics);
 
     assert!(
@@ -84,12 +74,7 @@ fn null_safety_retains_type_facts_snapshot() {
         .to_json();
 
     let snapshot = checker.inference_snapshot().cloned();
-    let diagnostics = if let Some(normalized) = checker.normalized_program() {
-        let cloned = normalized.clone();
-        checker.check_null_safety(&cloned, snapshot.as_ref())
-    } else {
-        checker.check_null_safety(&program, snapshot.as_ref())
-    };
+    let diagnostics = checker.check_null_safety(&program, snapshot.as_ref());
     assert!(
         diagnostics.is_empty(),
         "no diagnostics expected for safe program"
@@ -127,12 +112,7 @@ fn when_null_branch_conflict_emits_jv3108() {
         .check_program(&program)
         .expect("program should type-check");
 
-    let diagnostics = if let Some(normalized) = checker.normalized_program() {
-        let cloned = normalized.clone();
-        checker.check_null_safety(&cloned, None)
-    } else {
-        checker.check_null_safety(&program, None)
-    };
+    let diagnostics = checker.check_null_safety(&program, None);
     let messages = collect_null_safety_messages(&diagnostics);
 
     assert!(
@@ -425,5 +405,37 @@ fn pattern_bridge_merges_flow_states(source: &str, expected_code: Option<&str>) 
     assert!(
         result.telemetry_ms >= 0.0,
         "pattern bridge telemetry should record elapsed time"
+    );
+}
+
+#[test]
+fn implicit_declarations_mix_with_explicit_val() {
+    let program = parse_program(
+        r#"
+fun provide(): String? = null
+
+maybe: String? = provide()
+val fallback = "fallback"
+label: String = when (maybe) {
+    is String -> maybe
+    else -> fallback
+}
+
+label
+"#,
+    );
+
+    let mut checker = TypeChecker::new();
+    checker
+        .check_program(&program)
+        .expect("program should type-check with mixed explicit/implicit declarations");
+
+    let diagnostics = checker.check_null_safety(&program, None);
+    assert!(
+        diagnostics
+            .iter()
+            .any(|error| matches!(error, CheckError::NullSafetyError(message) if message.contains("非 null として宣言されています"))),
+        "expected null safety diagnostic for implicit binding, got: {:?}",
+        diagnostics
     );
 }
