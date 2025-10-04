@@ -573,7 +573,7 @@ fn test_binary_expression_precedence() {
 
 #[test]
 fn test_function_call_expression() {
-    let program = parse_program("val result = calculate(x, y, 42)");
+    let program = parse_program("val result = calculate(x y 42)");
     let statement = first_statement(&program);
 
     match statement {
@@ -766,22 +766,21 @@ fn test_use_defer_constructs() {
 }
 
 #[test]
-fn test_array_literal() {
-    let program = parse_program("val numbers = [1, 2, 3]");
-    let statement = first_statement(&program);
+fn test_array_literal_with_comma_is_rejected() {
+    let result = parse_program_result("val numbers = [1, 2, 3]");
 
-    match statement {
-        Statement::ValDeclaration { initializer, .. } => match initializer {
-            Expression::Array { elements, .. } => {
-                assert_eq!(elements.len(), 3);
-                match &elements[0] {
-                    Expression::Literal(Literal::Number(value), _) => assert_eq!(value, "1"),
-                    other => panic!("expected numeric literal, found {:?}", other),
-                }
-            }
-            other => panic!("expected array expression, found {:?}", other),
-        },
-        other => panic!("expected val declaration, found {:?}", other),
+    match result {
+        Err(crate::ParseError::Syntax { message, .. }) => {
+            assert!(
+                message.contains("JV2101"),
+                "expected JV2101 diagnostic for comma-separated array, got {}",
+                message
+            );
+        }
+        other => panic!(
+            "expected syntax error for comma-separated array literal, got {:?}",
+            other
+        ),
     }
 }
 
@@ -904,6 +903,25 @@ val answer = 42",
         Statement::ValDeclaration { .. } => {}
         other => panic!(
             "expected val declaration following comment, found {:?}",
+            other
+        ),
+    }
+}
+
+#[test]
+fn test_call_arguments_with_comma_are_rejected() {
+    let result = parse_program_result("val result = plot(1, 2)");
+
+    match result {
+        Err(crate::ParseError::Syntax { message, .. }) => {
+            assert!(
+                message.contains("JV2102"),
+                "expected JV2102 diagnostic for comma-separated call arguments, got {}",
+                message
+            );
+        }
+        other => panic!(
+            "expected syntax error for comma-separated call arguments, got {:?}",
             other
         ),
     }
@@ -1200,7 +1218,7 @@ fn test_multiple_statements() {
         fun main() {
             println("Hello, ${name}!")
             increment()
-            val point = Point(1.0, 2.0)
+            val point = Point(1.0 2.0)
         }
     "#,
     );

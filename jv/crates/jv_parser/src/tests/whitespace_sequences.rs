@@ -3,7 +3,7 @@ use jv_ast::{CallArgumentStyle, Expression, SequenceDelimiter, Statement};
 
 #[test]
 fn whitespace_array_does_not_leak_into_comma_array() {
-    let program = parse_program("val layout_first = [1 2 3]\nval comma_second = [4, 5, 6]");
+    let program = parse_program("val layout_first = [1 2 3]\nval single_second = [4]");
 
     let first = program
         .statements
@@ -37,7 +37,7 @@ fn whitespace_array_does_not_leak_into_comma_array() {
 
 #[test]
 fn whitespace_call_does_not_force_following_calls_to_layout_style() {
-    let program = parse_program("val layout_call = plot(1 2 3)\nval comma_call = plot(4, 5, 6)");
+    let program = parse_program("val layout_call = plot(1 2 3)\nval regular_call = plot(value)");
 
     let first = program
         .statements

@@ -21,7 +21,10 @@ use chumsky::error::{Simple, SimpleReason};
 use chumsky::prelude::*;
 use chumsky::Parser as ChumskyParser;
 use jv_ast::*;
-use jv_lexer::{JsonConfidence, LexError, Token, TokenMetadata, TokenTrivia, TokenType};
+use jv_lexer::{
+    ExplicitSeparatorLocation, JsonConfidence, LayoutCommaMetadata, LayoutSequenceKind, LexError,
+    Token, TokenMetadata, TokenTrivia, TokenType,
+};
 use thiserror::Error;
 
 mod syntax;
@@ -157,6 +160,7 @@ struct SequenceContext {
     kind: SequenceContextKind,
     prev_was_separator: bool,
     pending_layout: bool,
+    last_explicit_separator: Option<ExplicitSeparatorLocation>,
 }
 
 impl SequenceContext {
@@ -165,6 +169,7 @@ impl SequenceContext {
             kind,
             prev_was_separator: true,
             pending_layout: false,
+            last_explicit_separator: None,
         }
     }
 }
@@ -263,7 +268,19 @@ fn preprocess_tokens(tokens: Vec<Token>) -> Vec<Token> {
                 let layout_needed = !ctx.prev_was_separator
                     && (ctx.pending_layout || has_layout_trivia(&token.leading_trivia));
                 if layout_needed {
-                    result.push(make_layout_comma_token(&token));
+                    let mut synthetic = make_layout_comma_token(&token);
+                    let sequence = match ctx.kind {
+                        SequenceContextKind::Array => LayoutSequenceKind::Array,
+                        SequenceContextKind::Call => LayoutSequenceKind::Call,
+                    };
+                    let metadata = LayoutCommaMetadata {
+                        sequence,
+                        explicit_separator: ctx.last_explicit_separator.take(),
+                    };
+                    synthetic
+                        .metadata
+                        .push(TokenMetadata::LayoutComma(metadata));
+                    result.push(synthetic);
                     ctx.prev_was_separator = true;
                 }
                 ctx.pending_layout = false;
@@ -276,6 +293,7 @@ fn preprocess_tokens(tokens: Vec<Token>) -> Vec<Token> {
             TokenType::LeftBracket => {
                 if let Some(ctx) = stack.last_mut() {
                     ctx.prev_was_separator = false;
+                    ctx.last_explicit_separator = None;
                 }
                 stack.push(SequenceContext::new(SequenceContextKind::Array));
                 next_call_state = false;
@@ -290,12 +308,14 @@ fn preprocess_tokens(tokens: Vec<Token>) -> Vec<Token> {
                 }
                 if let Some(ctx) = stack.last_mut() {
                     ctx.prev_was_separator = false;
+                    ctx.last_explicit_separator = None;
                 }
                 result.push(token);
             }
             TokenType::LeftParen => {
                 if let Some(ctx) = stack.last_mut() {
                     ctx.prev_was_separator = false;
+                    ctx.last_explicit_separator = None;
                 }
 
                 if is_call_left_paren {
@@ -314,6 +334,7 @@ fn preprocess_tokens(tokens: Vec<Token>) -> Vec<Token> {
                 }
                 if let Some(ctx) = stack.last_mut() {
                     ctx.prev_was_separator = false;
+                    ctx.last_explicit_separator = None;
                 }
                 result.push(token);
             }
@@ -321,6 +342,10 @@ fn preprocess_tokens(tokens: Vec<Token>) -> Vec<Token> {
                 if let Some(ctx) = stack.last_mut() {
                     ctx.prev_was_separator = true;
                     ctx.pending_layout = false;
+                    ctx.last_explicit_separator = Some(ExplicitSeparatorLocation {
+                        line: token.line,
+                        column: token.column,
+                    });
                 }
                 next_call_state = false;
                 result.push(token);
@@ -328,6 +353,7 @@ fn preprocess_tokens(tokens: Vec<Token>) -> Vec<Token> {
             _ => {
                 if let Some(ctx) = stack.last_mut() {
                     ctx.prev_was_separator = false;
+                    ctx.last_explicit_separator = None;
                 }
                 result.push(token);
             }

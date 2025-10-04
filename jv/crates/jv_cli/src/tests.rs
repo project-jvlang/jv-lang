@@ -340,8 +340,8 @@ include = ["src/**/*.jv"]
     assert!(result.is_err());
 
     let message = result.unwrap_err().to_string();
-    assert!(message.contains("JV1007"));
-    assert!(message.contains("配列"));
+    assert!(message.contains("JV2101"));
+    assert!(message.contains("カンマ") || message.contains("comma"));
 }
 
 #[test]

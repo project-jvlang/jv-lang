@@ -142,7 +142,7 @@ fn test_diagnostics_for_mixed_delimiters() {
 
     let diagnostics = server.get_diagnostics(&uri);
     assert_eq!(diagnostics.len(), 1);
-    assert!(diagnostics[0].message.contains("JV1007"));
+    assert!(diagnostics[0].message.contains("JV2101"));
 }
 
 #[test]

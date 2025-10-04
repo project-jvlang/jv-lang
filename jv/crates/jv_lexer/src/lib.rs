@@ -225,6 +225,26 @@ pub enum TokenMetadata {
     PotentialJsonStart { confidence: JsonConfidence },
     StringLiteral(StringLiteralMetadata),
     NumberLiteral(NumberLiteralMetadata),
+    LayoutComma(LayoutCommaMetadata),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum LayoutSequenceKind {
+    Array,
+    Call,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct ExplicitSeparatorLocation {
+    pub line: usize,
+    pub column: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct LayoutCommaMetadata {
+    pub sequence: LayoutSequenceKind,
+    #[serde(default)]
+    pub explicit_separator: Option<ExplicitSeparatorLocation>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]

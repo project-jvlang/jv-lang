@@ -31,19 +31,19 @@ fn parse_error_reports_span_for_unexpected_eof() {
 }
 
 #[test]
-fn mixed_array_delimiters_emit_jv1007() {
+fn comma_separated_array_emits_jv2101() {
     let result = Parser::parse("val numbers = [1, 2 3]");
 
     match result {
         Err(ParseError::Syntax { message, .. }) => {
             assert!(
-                message.contains("JV1007"),
-                "expected JV1007 diagnostic in message, got {}",
+                message.contains("JV2101"),
+                "expected JV2101 diagnostic in message, got {}",
                 message
             );
         }
         other => panic!(
-            "expected syntax error for mixed delimiters, got {:?}",
+            "expected syntax error for comma-separated array literal, got {:?}",
             other
         ),
     }
@@ -73,14 +73,14 @@ fn whitespace_arguments_with_named_emit_jv1009() {
 }
 
 #[test]
-fn whitespace_arguments_with_comma_emit_jv1009() {
+fn whitespace_arguments_with_comma_emit_jv2102() {
     let result = Parser::parse("val result = plot(1, 2 3)");
 
     match result {
         Err(ParseError::Syntax { message, .. }) => {
             assert!(
-                message.contains("JV1009"),
-                "expected JV1009 diagnostic in message, got {}",
+                message.contains("JV2102"),
+                "expected JV2102 diagnostic in message, got {}",
                 message
             );
         }
