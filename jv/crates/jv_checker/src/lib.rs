@@ -140,6 +140,12 @@ pub struct InferenceTelemetry {
     pub pattern_cache_hits: u64,
     pub pattern_cache_misses: u64,
     pub pattern_bridge_ms: f64,
+    pub generic_constraints_emitted: usize,
+    pub bound_checks: usize,
+    pub variance_conflicts: usize,
+    pub sealed_hierarchy_checks: usize,
+    pub generic_solver_ms: f64,
+    pub variance_analysis_ms: f64,
 }
 
 impl Default for InferenceTelemetry {
@@ -154,6 +160,12 @@ impl Default for InferenceTelemetry {
             pattern_cache_hits: 0,
             pattern_cache_misses: 0,
             pattern_bridge_ms: 0.0,
+            generic_constraints_emitted: 0,
+            bound_checks: 0,
+            variance_conflicts: 0,
+            sealed_hierarchy_checks: 0,
+            generic_solver_ms: 0.0,
+            variance_analysis_ms: 0.0,
         }
     }
 }

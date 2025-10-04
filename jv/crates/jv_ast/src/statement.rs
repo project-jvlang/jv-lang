@@ -109,6 +109,8 @@ pub enum Statement {
     // Function declarations
     FunctionDeclaration {
         name: String,
+        type_parameters: Vec<String>,
+        where_clause: Option<WhereClause>,
         parameters: Vec<Parameter>,
         return_type: Option<TypeAnnotation>,
         body: Box<Expression>,

@@ -1,5 +1,5 @@
 use crate::error::CodeGenError;
-use jv_ir::{IrCaseLabel, IrSwitchCase, IrTypeParameter, JavaType};
+use jv_ir::{IrCaseLabel, IrSwitchCase, IrTypeParameter, JavaType, JavaWildcardKind};
 use std::collections::{HashMap, HashSet};
 
 /// Maps IR and type-system constructs into Java-specific representations.
@@ -107,6 +107,25 @@ impl JavaTypeMapper {
             }
             JavaType::Void => Ok("void".to_string()),
             JavaType::Functional { interface_name, .. } => Ok(interface_name.clone()),
+            JavaType::Wildcard { kind, bound } => match kind {
+                JavaWildcardKind::Unbounded => Ok("?".to_string()),
+                JavaWildcardKind::Extends => {
+                    let ty = bound
+                        .as_ref()
+                        .map(|inner| Self::format_java_type(inner))
+                        .transpose()?
+                        .unwrap_or_else(|| "Object".to_string());
+                    Ok(format!("? extends {}", ty))
+                }
+                JavaWildcardKind::Super => {
+                    let ty = bound
+                        .as_ref()
+                        .map(|inner| Self::format_java_type(inner))
+                        .transpose()?
+                        .unwrap_or_else(|| "Object".to_string());
+                    Ok(format!("? super {}", ty))
+                }
+            },
         }
     }
 
@@ -161,7 +180,7 @@ impl NullSafetyGenerator {
                 // Primitive types can't be null, no check needed
                 expr.to_string()
             }
-            JavaType::Reference { .. } | JavaType::Array { .. } => {
+            JavaType::Reference { .. } | JavaType::Array { .. } | JavaType::Wildcard { .. } => {
                 // Generate null check for reference types
                 format!("({} != null ? {} : null)", expr, expr)
             }

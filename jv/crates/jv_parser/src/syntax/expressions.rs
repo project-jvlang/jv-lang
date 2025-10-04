@@ -17,7 +17,7 @@ use super::support::{
     token_less_equal, token_minus, token_modulo, token_multiply, token_not, token_not_equal,
     token_null_safe, token_or, token_plus, token_question, token_range_exclusive,
     token_range_inclusive, token_right_brace, token_right_bracket, token_right_paren,
-    token_string_end, token_string_mid, token_string_start, token_when, type_annotation_simple,
+    token_string_end, token_string_mid, token_string_start, token_when, type_annotation,
 };
 
 pub(crate) fn expression_parser(
@@ -227,7 +227,7 @@ fn lambda_literal_parser(
 fn lambda_parameter_clause(
 ) -> impl ChumskyParser<Token, Vec<Parameter>, Error = Simple<Token>> + Clone {
     let parameter = identifier()
-        .then(token_colon().ignore_then(type_annotation_simple()).or_not())
+        .then(token_colon().ignore_then(type_annotation()).or_not())
         .map(|(name, type_annotation)| Parameter {
             name,
             type_annotation,

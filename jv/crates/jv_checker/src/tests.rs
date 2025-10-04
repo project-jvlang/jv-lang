@@ -51,6 +51,8 @@ fn check_program_populates_inference_snapshot() {
             },
             Statement::FunctionDeclaration {
                 name: "add".into(),
+                type_parameters: Vec::new(),
+                where_clause: None,
                 parameters: vec![
                     Parameter {
                         name: "lhs".into(),
@@ -129,6 +131,8 @@ fn override_annotation_on_method_is_allowed() {
 
     let method = Statement::FunctionDeclaration {
         name: "run".into(),
+        type_parameters: Vec::new(),
+        where_clause: None,
         parameters: Vec::new(),
         return_type: None,
         body: Box::new(Expression::Literal(

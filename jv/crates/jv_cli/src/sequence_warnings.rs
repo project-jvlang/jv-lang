@@ -37,16 +37,18 @@ impl SequenceWarningCollector {
                 }
             }
             Statement::FunctionDeclaration {
-                parameters,
-                body,
-                ..
+                parameters, body, ..
             } => {
                 for parameter in parameters {
                     self.visit_parameter(parameter);
                 }
                 self.visit_expression(body);
             }
-            Statement::ClassDeclaration { properties, methods, .. } => {
+            Statement::ClassDeclaration {
+                properties,
+                methods,
+                ..
+            } => {
                 for property in properties {
                     if let Some(initializer) = &property.initializer {
                         self.visit_expression(initializer);
@@ -67,7 +69,11 @@ impl SequenceWarningCollector {
                     self.visit_parameter(parameter);
                 }
             }
-            Statement::InterfaceDeclaration { methods, properties, .. } => {
+            Statement::InterfaceDeclaration {
+                methods,
+                properties,
+                ..
+            } => {
                 for property in properties {
                     if let Some(initializer) = &property.initializer {
                         self.visit_expression(initializer);
@@ -232,9 +238,7 @@ impl SequenceWarningCollector {
                 }
             }
             Expression::Lambda {
-                parameters,
-                body,
-                ..
+                parameters, body, ..
             } => {
                 for parameter in parameters {
                     self.visit_parameter(parameter);
@@ -270,9 +274,7 @@ impl SequenceWarningCollector {
 
     fn visit_pattern(&mut self, pattern: &Pattern) {
         match pattern {
-            Pattern::Literal(_, _)
-            | Pattern::Identifier(_, _)
-            | Pattern::Wildcard(_) => {}
+            Pattern::Literal(_, _) | Pattern::Identifier(_, _) | Pattern::Wildcard(_) => {}
             Pattern::Constructor { patterns, .. } => {
                 for inner in patterns {
                     self.visit_pattern(inner);
@@ -282,7 +284,9 @@ impl SequenceWarningCollector {
                 self.visit_expression(start);
                 self.visit_expression(end);
             }
-            Pattern::Guard { pattern, condition, .. } => {
+            Pattern::Guard {
+                pattern, condition, ..
+            } => {
                 self.visit_pattern(pattern);
                 self.visit_expression(condition);
             }
@@ -319,7 +323,7 @@ impl SequenceWarningCollector {
         }
     }
 
-fn emit_warning(&mut self, span: &Span, kind: SequenceKind) {
+    fn emit_warning(&mut self, span: &Span, kind: SequenceKind) {
         let context = match kind {
             SequenceKind::Array => "array literal",
             SequenceKind::Call => "argument list",

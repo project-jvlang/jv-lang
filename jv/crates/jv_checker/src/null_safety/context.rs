@@ -226,7 +226,7 @@ impl<'facts> NullSafetyContext<'facts> {
             }
 
             for (name, scheme) in facts.all_schemes() {
-                let state = NullabilityKind::from_facts_type(&scheme.body);
+                let state = NullabilityKind::from_facts_type(scheme.body());
                 lattice.insert(name.to_string(), state);
             }
         }

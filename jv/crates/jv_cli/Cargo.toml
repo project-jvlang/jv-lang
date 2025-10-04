@@ -34,6 +34,7 @@ jv_codegen_java.workspace = true
 jv_build.workspace = true
 jv_fmt.workspace = true
 jv_checker.workspace = true
+jv_inference.workspace = true
 jv_mapper.workspace = true
 jv_pm.workspace = true
 jv_support.workspace = true

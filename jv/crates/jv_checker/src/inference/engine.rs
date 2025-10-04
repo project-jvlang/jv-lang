@@ -221,6 +221,8 @@ mod tests {
     ) -> Statement {
         Statement::FunctionDeclaration {
             name: name.into(),
+            type_parameters: Vec::new(),
+            where_clause: None,
             parameters,
             return_type: return_annotation,
             body: Box::new(body),

@@ -1,6 +1,7 @@
 use crate::builder::{JavaCompilationUnit, JavaSourceBuilder};
 use crate::config::JavaCodeGenConfig;
 use crate::error::CodeGenError;
+use crate::target_version::TargetedJavaEmitter;
 use jv_ast::{BinaryOp, CallArgumentStyle, Literal, SequenceDelimiter, UnaryOp};
 use jv_ir::{
     CompletableFutureOp, IrCaseLabel, IrCatchClause, IrDeconstructionComponent,
@@ -16,9 +17,6 @@ mod expressions;
 mod helpers;
 mod sample;
 mod statements;
-mod targeting;
-
-use targeting::TargetedJavaEmitter;
 
 pub struct JavaCodeGenerator {
     imports: HashMap<String, String>,

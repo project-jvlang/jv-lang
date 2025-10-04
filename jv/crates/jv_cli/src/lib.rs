@@ -95,6 +95,11 @@ pub enum Commands {
         /// Input .jv file
         input: String,
     },
+    /// Provide an in-depth explanation for a diagnostic code
+    Explain {
+        /// Diagnostic code (e.g., JV2001)
+        code: String,
+    },
     /// Show version information  
     Version,
     /// Start interactive REPL
@@ -233,6 +238,10 @@ pub mod pipeline {
         include!("pipeline/perf.rs");
     }
 
+    pub mod generics {
+        include!("pipeline/generics.rs");
+    }
+
     pub mod project {
         pub mod locator {
             include!("pipeline/project/locator.rs");
@@ -261,6 +270,7 @@ pub mod pipeline {
 
     use super::*;
     use anyhow::{anyhow, bail, Context};
+    use generics::apply_type_facts;
     use jv_build::BuildSystem;
     use jv_checker::compat::diagnostics as compat_diagnostics;
     use jv_checker::{InferenceSnapshot, InferenceTelemetry, TypeChecker};
@@ -407,8 +417,6 @@ pub mod pipeline {
         }
 
         let mut warnings = Vec::new();
-        let mut inference_snapshot: Option<InferenceSnapshot> = None;
-        let mut telemetry_snapshot: Option<InferenceTelemetry> = None;
         let mut build_config = plan.build_config.clone();
         build_config.output_dir = options.output_dir.to_string_lossy().into_owned();
 
@@ -441,37 +449,63 @@ pub mod pipeline {
 
         warnings.extend(sequence_warnings::collect_sequence_warnings(&program));
 
-        if options.check {
-            let mut type_checker = TypeChecker::with_parallel_config(options.parallel_config);
-            if let Err(errors) = type_checker.check_program(&program) {
-                if let Some(diagnostic) = errors.iter().find_map(from_check_error) {
-                    return Err(tooling_failure(
-                        entrypoint,
-                        diagnostic.with_strategy(DiagnosticStrategy::Deferred),
-                    ));
+        let mut type_checker = TypeChecker::with_parallel_config(options.parallel_config);
+        let (inference_snapshot, telemetry_snapshot) = match type_checker.check_program(&program) {
+            Ok(()) => {
+                if options.check {
+                    warnings.extend(
+                        type_checker
+                            .check_null_safety(&program, None)
+                            .into_iter()
+                            .map(|warning| warning.to_string()),
+                    );
                 }
-                let details = errors
-                    .iter()
-                    .map(|err| err.to_string())
-                    .collect::<Vec<_>>()
-                    .join("\n  - ");
-                bail!("Type checking failed:\n  - {}", details);
+                let telemetry = type_checker.telemetry().clone();
+                let snapshot = type_checker.take_inference_snapshot();
+                (snapshot, Some(telemetry))
             }
-
-            warnings.extend(
-                type_checker
-                    .check_null_safety(&program, None)
-                    .into_iter()
-                    .map(|warning| warning.to_string()),
-            );
-            telemetry_snapshot = Some(type_checker.telemetry().clone());
-            inference_snapshot = type_checker.take_inference_snapshot();
-        }
+            Err(errors) => {
+                if let Some(diagnostic) = errors.iter().find_map(from_check_error) {
+                    if options.check {
+                        return Err(tooling_failure(
+                            entrypoint,
+                            diagnostic.with_strategy(DiagnosticStrategy::Deferred),
+                        ));
+                    }
+                }
+                if options.check {
+                    let details = errors
+                        .iter()
+                        .map(|err| err.to_string())
+                        .collect::<Vec<_>>()
+                        .join(
+                            "
+- ",
+                        );
+                    bail!(
+                        "Type checking failed:
+- {}",
+                        details
+                    );
+                } else {
+                    let details = errors
+                        .iter()
+                        .map(|err| err.to_string())
+                        .collect::<Vec<_>>()
+                        .join("; ");
+                    warnings.push(format!(
+                        "Type checking skipped due to unresolved inference: {}",
+                        details
+                    ));
+                    (None, None)
+                }
+            }
+        };
 
         let mut perf_capture: Option<PerfCapture> = None;
         let when_strategy_records: Vec<WhenStrategyRecord>;
         let mut program_holder = Some(program);
-        let ir_program = if options.perf {
+        let mut ir_program = if options.perf {
             let pools = TransformPools::with_chunk_capacity(256 * 1024);
             let mut context = TransformContext::with_pools(pools);
             let mut profiler = TransformProfiler::new();
@@ -530,6 +564,10 @@ pub mod pipeline {
                 }
             }
         };
+
+        if let Some(snapshot) = inference_snapshot.as_ref() {
+            apply_type_facts(&mut ir_program, snapshot.type_facts());
+        }
 
         let when_strategy_summary = summarize_when_strategies(&when_strategy_records);
 
@@ -659,7 +697,7 @@ pub mod pipeline {
         strategies: &[StrategySummary],
     ) {
         println!(
-            "Telemetry ({}):\n  constraints_emitted: {}\n  bindings_resolved: {}\n  inference_duration_ms: {:.3}\n  preserved_constraints: {}\n  cache_hit_rate: {}\n  invalidation_cascade_depth: {}\n  pattern_cache_hits: {}\n  pattern_cache_misses: {}\n  pattern_bridge_ms: {:.3}",
+            "Telemetry ({}):\n  constraints_emitted: {}\n  bindings_resolved: {}\n  inference_duration_ms: {:.3}\n  preserved_constraints: {}\n  cache_hit_rate: {}\n  invalidation_cascade_depth: {}\n  pattern_cache_hits: {}\n  pattern_cache_misses: {}\n  pattern_bridge_ms: {:.3}\n  generic_constraints_emitted: {}\n  bound_checks: {}\n  variance_conflicts: {}\n  sealed_hierarchy_checks: {}\n  generic_solver_ms: {:.3}\n  variance_analysis_ms: {:.3}",
             entrypoint.display(),
             telemetry.constraints_emitted,
             telemetry.bindings_resolved,
@@ -672,7 +710,13 @@ pub mod pipeline {
             telemetry.invalidation_cascade_depth,
             telemetry.pattern_cache_hits,
             telemetry.pattern_cache_misses,
-            telemetry.pattern_bridge_ms
+            telemetry.pattern_bridge_ms,
+            telemetry.generic_constraints_emitted,
+            telemetry.bound_checks,
+            telemetry.variance_conflicts,
+            telemetry.sealed_hierarchy_checks,
+            telemetry.generic_solver_ms,
+            telemetry.variance_analysis_ms
         );
 
         if strategies.is_empty() {

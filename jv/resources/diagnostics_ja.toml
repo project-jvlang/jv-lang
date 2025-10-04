@@ -1,0 +1,23 @@
+[generic.conflicting_argument]
+message = "{symbol} の型パラメータ T{type_param} に複数の候補が推論されました: 既存 {previous} と新規 {candidate} が競合しています。型注釈を追加して曖昧さを解消してください。"
+note_existing = "既存の割り当ては {existing_span} に記録されています。"
+note_explain = "--explain JV2001 で詳細な制約内訳を表示できます。"
+
+[generic.bound_violation]
+message = "{symbol} の型パラメータ T{type_param} は {predicate} を満たす必要がありますが、推論された型では条件を満たせません。"
+note_hint = "必要なインターフェース/トレイトを実装するか、型引数を変更してください。"
+note_explain = "--explain JV2002 で不足している限定条件の確認方法を参照できます。"
+
+[generic.unresolved_parameter]
+message = "{symbol} の型パラメータ T{type_param} を解決できませんでした。{requirement}"
+note_hint = "型推論を補助するために明示的な型引数または境界を追加してください。"
+note_explain = "--explain JV2001 で詳細ガイドを確認できます。"
+
+[generic.capability_not_found]
+message = "{symbol} の型パラメータ T{type_param} に要求された能力 {capability} の実装が見つかりませんでした。"
+note_hint = "impl {capability}<{target}> { ... } を追加するか、依存パッケージを確認してください。"
+note_preferred = "指定された優先実装 {preferred_impl} も見つかりませんでした。"
+
+[generic.capability_ambiguous]
+message = "{symbol} の型パラメータ T{type_param} に対する能力 {capability} の実装候補が複数存在します: {candidates}。"
+note_hint = "preferredImpl または明示的な型注釈で使用する実装を指定してください。"

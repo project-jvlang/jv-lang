@@ -1254,6 +1254,8 @@ mod tests {
 
         let function_decl = Statement::FunctionDeclaration {
             name: "trimmed".to_string(),
+            type_parameters: Vec::new(),
+            where_clause: None,
             parameters: vec![],
             return_type: Some(TypeAnnotation::Simple("String".to_string())),
             body: Box::new(Expression::Call {
@@ -1728,6 +1730,8 @@ mod tests {
         // fun topLevelFunction(x: Int): String = x.toString()
         let function = Statement::FunctionDeclaration {
             name: "topLevelFunction".to_string(),
+            type_parameters: Vec::new(),
+            where_clause: None,
             parameters: vec![Parameter {
                 name: "x".to_string(),
                 type_annotation: Some(TypeAnnotation::Simple("Int".to_string())),
@@ -1783,7 +1787,9 @@ mod tests {
 
         assert_eq!(lowered.len(), 1);
         match &lowered[0] {
-            IrStatement::Return { value: Some(expr), .. } => match expr {
+            IrStatement::Return {
+                value: Some(expr), ..
+            } => match expr {
                 IrExpression::Literal(Literal::String(text), _) => {
                     assert_eq!(text, "result")
                 }
@@ -1801,10 +1807,7 @@ mod tests {
             .insert("greet".to_string(), JavaType::string());
 
         let call = Expression::Call {
-            function: Box::new(Expression::Identifier(
-                "greet".to_string(),
-                dummy_span(),
-            )),
+            function: Box::new(Expression::Identifier("greet".to_string(), dummy_span())),
             args: vec![Argument::Positional(Expression::Literal(
                 Literal::String("World".to_string()),
                 dummy_span(),
@@ -2612,6 +2615,8 @@ mod tests {
 
         let function_decl = Statement::FunctionDeclaration {
             name: "secondOrNull".to_string(),
+            type_parameters: Vec::new(),
+            where_clause: None,
             parameters: vec![],
             return_type: Some(TypeAnnotation::Nullable(Box::new(TypeAnnotation::Simple(
                 "T".to_string(),

@@ -1,4 +1,5 @@
 use super::*;
+use jv_ir::JavaWildcardKind;
 
 impl JavaCodeGenerator {
     pub fn generate_type(&self, java_type: &JavaType) -> Result<String, CodeGenError> {
@@ -23,8 +24,27 @@ impl JavaCodeGenerator {
                 let suffix = "[]".repeat(*dimensions);
                 format!("{}{}", base, suffix)
             }
-            JavaType::Void => "void".to_string(),
             JavaType::Functional { interface_name, .. } => interface_name.clone(),
+            JavaType::Wildcard { kind, bound } => match kind {
+                JavaWildcardKind::Unbounded => "?".to_string(),
+                JavaWildcardKind::Extends => {
+                    let ty = bound
+                        .as_ref()
+                        .map(|inner| self.generate_type(inner))
+                        .transpose()?
+                        .unwrap_or_else(|| "Object".to_string());
+                    format!("? extends {}", ty)
+                }
+                JavaWildcardKind::Super => {
+                    let ty = bound
+                        .as_ref()
+                        .map(|inner| self.generate_type(inner))
+                        .transpose()?
+                        .unwrap_or_else(|| "Object".to_string());
+                    format!("? super {}", ty)
+                }
+            },
+            JavaType::Void => "void".to_string(),
         })
     }
 

@@ -50,6 +50,8 @@ fn test_statement_function_declaration() {
     };
     let stmt = Statement::FunctionDeclaration {
         name: "add".to_string(),
+        type_parameters: Vec::new(),
+        where_clause: None,
         parameters: vec![param],
         return_type: Some(TypeAnnotation::Simple("Int".to_string())),
         body: Box::new(Expression::Identifier("x".to_string(), dummy_span())),
@@ -65,6 +67,39 @@ fn test_statement_function_declaration() {
         }
         _ => panic!("Expected function declaration"),
     }
+}
+
+#[test]
+fn test_where_clause_trait_bound_predicate() {
+    let predicate_span = Span::new(1, 20, 1, 40);
+    let clause_span = Span::new(1, 10, 1, 40);
+    let clause = WhereClause {
+        predicates: vec![WherePredicate::TraitBound {
+            type_param: "T".to_string(),
+            trait_name: QualifiedName::new(vec!["Comparable".to_string()], predicate_span.clone()),
+            type_args: vec![TypeAnnotation::Simple("T".to_string())],
+            span: predicate_span.clone(),
+        }],
+        span: clause_span.clone(),
+    };
+
+    assert_eq!(clause.predicates.len(), 1);
+    let predicate = clause.predicates.first().unwrap();
+    match predicate {
+        WherePredicate::TraitBound {
+            type_param,
+            trait_name,
+            type_args,
+            span,
+        } => {
+            assert_eq!(type_param, "T");
+            assert_eq!(trait_name.qualified(), "Comparable");
+            assert_eq!(type_args.len(), 1);
+            assert_eq!(span, &predicate_span);
+        }
+        _ => panic!("Expected trait bound predicate"),
+    }
+    assert_eq!(clause.span, clause_span);
 }
 
 #[test]
@@ -131,6 +166,8 @@ fn test_statement_data_class_declaration() {
 fn test_statement_interface_declaration() {
     let method = Box::new(Statement::FunctionDeclaration {
         name: "method".to_string(),
+        type_parameters: Vec::new(),
+        where_clause: None,
         parameters: vec![],
         return_type: None,
         body: Box::new(Expression::Literal(Literal::Null, dummy_span())),
@@ -329,6 +366,8 @@ fn test_program() {
     };
     let main_stmt = Statement::FunctionDeclaration {
         name: "main".to_string(),
+        type_parameters: Vec::new(),
+        where_clause: None,
         parameters: vec![],
         return_type: None,
         body: Box::new(Expression::Block {
@@ -376,6 +415,8 @@ fn test_property() {
 fn test_extension_function() {
     let function = Box::new(Statement::FunctionDeclaration {
         name: "toString".to_string(),
+        type_parameters: Vec::new(),
+        where_clause: None,
         parameters: vec![],
         return_type: Some(TypeAnnotation::Simple("String".to_string())),
         body: Box::new(Expression::Literal(

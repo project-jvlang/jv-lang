@@ -4,8 +4,7 @@ use jv_ast::{Expression, Parameter, Span};
 use jv_lexer::Token;
 
 use super::support::{
-    identifier, token_any_comma, token_assign, token_colon, token_val, token_var,
-    type_annotation_simple,
+    identifier, token_any_comma, token_assign, token_colon, token_val, token_var, type_annotation,
 };
 
 pub(crate) fn parameter_list(
@@ -24,7 +23,7 @@ pub(crate) fn parameter(
         .or(token_var())
         .repeated()
         .ignore_then(identifier())
-        .then(token_colon().ignore_then(type_annotation_simple()).or_not())
+        .then(token_colon().ignore_then(type_annotation()).or_not())
         .then(token_assign().ignore_then(expr).or_not())
         .map(|((name, type_annotation), default_value)| Parameter {
             name,

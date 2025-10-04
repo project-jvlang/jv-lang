@@ -5,11 +5,14 @@
 //! that enable high reuse between AST lowering runs.
 
 pub mod arena;
+pub mod i18n;
 pub mod perf;
+pub mod profiling;
 
 pub use arena::{
     ArenaAccessor, PoolMetrics, PoolSessionMetrics, TransformPools, TransformPoolsGuard,
 };
+pub use i18n::{catalog as load_catalog, LocaleCode, TemplateCatalog};
 pub use perf::report::{
     BudgetChecks as PerfBudgetChecks, PerfBudget, PerfReport, RunSample as PerfRunSample,
     Summary as PerfSummary,

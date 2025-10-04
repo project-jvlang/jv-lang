@@ -6,6 +6,7 @@
 //! from the source node. When the fingerprint remains unchanged we can re-use
 //! the cached signature and skip constraint regeneration.
 
+mod constraint_cache;
 mod dependency_tracker;
 
 use crate::constraint::AstId;
@@ -19,6 +20,7 @@ use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::time::Instant;
 
+pub use constraint_cache::ConstraintCache;
 pub use dependency_tracker::DependencyTracker;
 
 /// Tuple describing a single type substitution `(type_variable, resolved_type)`.

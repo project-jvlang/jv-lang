@@ -5,7 +5,12 @@
 //! bookkeeping. A lightweight compatibility layer is provided so that existing call
 //! sites relying on the old enum-style API can migrate incrementally.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::fmt;
+use std::sync::atomic::{AtomicU32, Ordering};
+
+/// Global counter used to mint fresh [`TypeId`] values.
+static NEXT_TYPE_ID: AtomicU32 = AtomicU32::new(1);
 
 /// Identifier assigned to type variables during inference.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -20,6 +25,75 @@ impl TypeId {
     /// Returns the raw numeric identifier.
     pub fn to_raw(self) -> u32 {
         self.0
+    }
+
+    /// Mints a fresh identifier using the global counter.
+    pub fn fresh() -> Self {
+        let raw = NEXT_TYPE_ID.fetch_add(1, Ordering::Relaxed);
+        TypeId::new(raw)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn reset_counter(value: u32) {
+        NEXT_TYPE_ID.store(value, Ordering::Relaxed);
+    }
+}
+
+/// Identifier assigned to resolved symbols (functions, constructors, etc.).
+///
+/// A dedicated type is used instead of reusing [`TypeId`] so that symbol
+/// tracking can evolve independently from type variable allocation. The newtype
+/// ensures we do not accidentally mix the two identifier spaces.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct SymbolId(String);
+
+impl SymbolId {
+    /// Creates a symbol identifier from a fully-qualified name.
+    pub fn new(name: impl Into<String>) -> Self {
+        Self(name.into())
+    }
+
+    /// Creates a symbol identifier from path segments such as module and name.
+    pub fn from_path<I, S>(segments: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        let mut iter = segments.into_iter().map(Into::into);
+        let mut buffer = String::new();
+        if let Some(first) = iter.next() {
+            buffer.push_str(&first);
+        }
+        for segment in iter {
+            if !buffer.is_empty() {
+                buffer.push_str("::");
+            }
+            buffer.push_str(&segment);
+        }
+        Self(buffer)
+    }
+
+    /// Returns the underlying symbol representation as `&str`.
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Display for SymbolId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl From<&str> for SymbolId {
+    fn from(value: &str) -> Self {
+        SymbolId::new(value)
+    }
+}
+
+impl From<String> for SymbolId {
+    fn from(value: String) -> Self {
+        SymbolId::new(value)
     }
 }
 
@@ -94,18 +168,322 @@ impl Default for TypeVariant {
 /// Constraint bound predicate.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BoundPredicate {
-    Trait(String),
+    Trait(TraitBound),
     Interface(String),
+    Capability(CapabilityBound),
+    FunctionSignature(FunctionSignatureBound),
     WhereClause(Vec<BoundPredicate>),
 }
 
 impl BoundPredicate {
-    fn key(&self) -> String {
+    pub fn key(&self) -> String {
         match self {
-            BoundPredicate::Trait(name) | BoundPredicate::Interface(name) => name.clone(),
+            BoundPredicate::Trait(bound) => bound.key(),
+            BoundPredicate::Interface(name) => name.clone(),
+            BoundPredicate::Capability(bound) => bound.key(),
+            BoundPredicate::FunctionSignature(signature) => signature.key(),
             BoundPredicate::WhereClause(predicates) => {
                 let inner: Vec<String> = predicates.iter().map(|p| p.key()).collect();
                 format!("where({})", inner.join("&"))
+            }
+        }
+    }
+
+    /// Human-readable description used by diagnostics and debugging helpers.
+    pub fn describe(&self) -> String {
+        match self {
+            BoundPredicate::Trait(bound) => bound.describe(),
+            BoundPredicate::Interface(name) => format!("interface {name}"),
+            BoundPredicate::Capability(bound) => bound.describe(),
+            BoundPredicate::FunctionSignature(signature) => signature.describe(),
+            BoundPredicate::WhereClause(predicates) => {
+                let inner: Vec<String> = predicates.iter().map(|p| p.describe()).collect();
+                inner.join(" & ")
+            }
+        }
+    }
+}
+
+/// Trait-style bound with optional type arguments.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TraitBound {
+    pub name: String,
+    pub arguments: Vec<BoundTypeReference>,
+}
+
+impl TraitBound {
+    pub fn new(name: impl Into<String>, arguments: Vec<BoundTypeReference>) -> Self {
+        Self {
+            name: name.into(),
+            arguments,
+        }
+    }
+
+    pub fn simple(name: impl Into<String>) -> Self {
+        Self::new(name, Vec::new())
+    }
+
+    fn key(&self) -> String {
+        if self.arguments.is_empty() {
+            self.name.clone()
+        } else {
+            let args = self
+                .arguments
+                .iter()
+                .map(|arg| arg.key())
+                .collect::<Vec<_>>()
+                .join(",");
+            format!("{}<{}>", self.name, args)
+        }
+    }
+
+    fn describe(&self) -> String {
+        if self.arguments.is_empty() {
+            self.name.clone()
+        } else {
+            let args = self
+                .arguments
+                .iter()
+                .map(|arg| arg.describe())
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("{}<{}>", self.name, args)
+        }
+    }
+}
+
+/// Capability-style bound analogous to type class constraints.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CapabilityBound {
+    pub name: String,
+    pub target: BoundTypeReference,
+    pub hints: CapabilityHints,
+}
+
+impl CapabilityBound {
+    pub fn new(
+        name: impl Into<String>,
+        target: BoundTypeReference,
+        hints: CapabilityHints,
+    ) -> Self {
+        Self {
+            name: name.into(),
+            target,
+            hints,
+        }
+    }
+
+    fn key(&self) -> String {
+        format!(
+            "capability:{}:{}:{}",
+            self.name,
+            self.target.key(),
+            self.hints.key()
+        )
+    }
+
+    fn describe(&self) -> String {
+        let mut base = format!("{} for {}", self.name, self.target.describe());
+        if let Some(preferred) = &self.hints.preferred_impl {
+            base.push_str(&format!(" (preferred impl: {preferred})"));
+        }
+        if self.hints.inline_only {
+            base.push_str(" [inline-only]");
+        }
+        base
+    }
+}
+
+/// Optional metadata provided when resolving capabilities.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct CapabilityHints {
+    pub preferred_impl: Option<String>,
+    pub inline_only: bool,
+}
+
+impl CapabilityHints {
+    fn key(&self) -> String {
+        let preferred = self
+            .preferred_impl
+            .as_ref()
+            .map(String::as_str)
+            .unwrap_or("_");
+        format!("pref={preferred}:inline={}", self.inline_only)
+    }
+}
+
+/// Dispatch style used when binding capability implementations.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DispatchKind {
+    /// Static dispatch through explicitly referenced implementation functions.
+    Static,
+    /// Inline expansion of the implementation (e.g. constexpr-style helpers).
+    Inline,
+    /// Dispatch via default methods provided by interfaces.
+    DefaultMethod,
+}
+
+impl DispatchKind {
+    /// Returns true when the dispatch kind satisfies inline-only requirements.
+    pub fn supports_inline(self) -> bool {
+        matches!(self, DispatchKind::Inline)
+    }
+}
+
+/// Result of resolving a capability requirement against the environment.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CapabilitySolution {
+    pub implementor: SymbolId,
+    pub binding_type: TypeKind,
+    pub dispatch_kind: DispatchKind,
+}
+
+impl CapabilitySolution {
+    pub fn new(implementor: SymbolId, binding_type: TypeKind, dispatch_kind: DispatchKind) -> Self {
+        Self {
+            implementor,
+            binding_type,
+            dispatch_kind,
+        }
+    }
+}
+
+/// Function signature-style bound used for advanced constraints.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FunctionSignatureBound {
+    pub parameters: Vec<BoundTypeReference>,
+    pub return_type: Option<BoundTypeReference>,
+}
+
+impl FunctionSignatureBound {
+    pub fn new(
+        parameters: Vec<BoundTypeReference>,
+        return_type: Option<BoundTypeReference>,
+    ) -> Self {
+        Self {
+            parameters,
+            return_type,
+        }
+    }
+
+    fn key(&self) -> String {
+        let params = self
+            .parameters
+            .iter()
+            .map(|p| p.key())
+            .collect::<Vec<_>>()
+            .join(",");
+        let ret = self
+            .return_type
+            .as_ref()
+            .map(|ty| ty.key())
+            .unwrap_or_else(|| "void".to_string());
+        format!("fn({params})->{ret}")
+    }
+
+    fn describe(&self) -> String {
+        let params = self
+            .parameters
+            .iter()
+            .map(|p| p.describe())
+            .collect::<Vec<_>>()
+            .join(", ");
+        let ret = self
+            .return_type
+            .as_ref()
+            .map(|ty| ty.describe())
+            .unwrap_or_else(|| "Unit".to_string());
+        format!("fn({params}) -> {ret}")
+    }
+}
+
+/// Type reference captured while translating predicates.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BoundTypeReference {
+    TypeParameter {
+        id: TypeId,
+        name: String,
+    },
+    Named(String),
+    Optional(Box<BoundTypeReference>),
+    Array(Box<BoundTypeReference>),
+    Generic {
+        name: String,
+        arguments: Vec<BoundTypeReference>,
+    },
+    Function {
+        parameters: Vec<BoundTypeReference>,
+        return_type: Option<Box<BoundTypeReference>>,
+    },
+}
+
+impl BoundTypeReference {
+    pub fn key(&self) -> String {
+        match self {
+            BoundTypeReference::TypeParameter { id, name } => {
+                format!("param:{name}:{}", id.to_raw())
+            }
+            BoundTypeReference::Named(name) => format!("named:{name}"),
+            BoundTypeReference::Optional(inner) => format!("optional<{}>", inner.key()),
+            BoundTypeReference::Array(inner) => format!("array<{}>", inner.key()),
+            BoundTypeReference::Generic { name, arguments } => {
+                let args = arguments
+                    .iter()
+                    .map(|arg| arg.key())
+                    .collect::<Vec<_>>()
+                    .join(",");
+                format!("generic:{name}<{}>", args)
+            }
+            BoundTypeReference::Function {
+                parameters,
+                return_type,
+            } => {
+                let params = parameters
+                    .iter()
+                    .map(|param| param.key())
+                    .collect::<Vec<_>>()
+                    .join(",");
+                let ret = return_type
+                    .as_ref()
+                    .map(|ty| ty.key())
+                    .unwrap_or_else(|| "void".to_string());
+                format!("fn<{params}->{ret}>")
+            }
+        }
+    }
+
+    pub fn describe(&self) -> String {
+        match self {
+            BoundTypeReference::TypeParameter { name, .. } => name.clone(),
+            BoundTypeReference::Named(name) => name.clone(),
+            BoundTypeReference::Optional(inner) => format!("{}?", inner.describe()),
+            BoundTypeReference::Array(inner) => format!("{}[]", inner.describe()),
+            BoundTypeReference::Generic { name, arguments } => {
+                if arguments.is_empty() {
+                    name.clone()
+                } else {
+                    let args = arguments
+                        .iter()
+                        .map(|arg| arg.describe())
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    format!("{}<{}>", name, args)
+                }
+            }
+            BoundTypeReference::Function {
+                parameters,
+                return_type,
+            } => {
+                let params = parameters
+                    .iter()
+                    .map(|param| param.describe())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let ret = return_type
+                    .as_ref()
+                    .map(|ty| ty.describe())
+                    .unwrap_or_else(|| "Unit".to_string());
+                format!("fn({params}) -> {ret}")
             }
         }
     }
@@ -217,6 +595,35 @@ impl GenericBounds {
     pub fn matrix(&self) -> &BoundsMatrix {
         &self.matrix
     }
+
+    /// Produces a new bounds set filtered to the specified type parameters.
+    pub fn filter_for(&self, params: &[TypeId]) -> Self {
+        if self.is_empty() || params.is_empty() {
+            return GenericBounds::default();
+        }
+
+        let wanted: HashSet<_> = params.iter().copied().collect();
+        let filtered = self
+            .constraints
+            .iter()
+            .filter(|constraint| wanted.contains(&constraint.type_param))
+            .cloned()
+            .collect::<Vec<_>>();
+
+        if filtered.is_empty() {
+            GenericBounds::default()
+        } else {
+            GenericBounds::new(filtered)
+        }
+    }
+
+    /// Returns `true` when one of the contained predicates matches `predicate`.
+    pub fn contains_predicate(&self, predicate: &BoundPredicate) -> bool {
+        let target = predicate.key();
+        self.constraints
+            .iter()
+            .any(|constraint| constraint.predicate.key() == target)
+    }
 }
 
 impl Default for GenericBounds {
@@ -250,6 +657,11 @@ impl TypeKind {
             variant,
             ..TypeKind::default()
         }
+    }
+
+    /// Convenience constructor for plain type variables.
+    pub fn variable(id: TypeId) -> Self {
+        TypeKind::new(TypeVariant::Variable(id))
     }
 
     /// Accessor for the inner variant.
@@ -500,12 +912,23 @@ mod tests {
     #[test]
     fn bounds_matrix_tracks_constraints() {
         let constraints = vec![
-            BoundConstraint::new(TypeId::new(0), BoundPredicate::Trait("Clone".to_string())),
-            BoundConstraint::new(TypeId::new(0), BoundPredicate::Trait("Debug".to_string())),
-            BoundConstraint::new(TypeId::new(1), BoundPredicate::Trait("Clone".to_string())),
+            BoundConstraint::new(
+                TypeId::new(0),
+                BoundPredicate::Trait(TraitBound::simple("Clone")),
+            ),
+            BoundConstraint::new(
+                TypeId::new(0),
+                BoundPredicate::Trait(TraitBound::simple("Debug")),
+            ),
             BoundConstraint::new(
                 TypeId::new(1),
-                BoundPredicate::WhereClause(vec![BoundPredicate::Trait("Send".to_string())]),
+                BoundPredicate::Trait(TraitBound::simple("Clone")),
+            ),
+            BoundConstraint::new(
+                TypeId::new(1),
+                BoundPredicate::WhereClause(vec![BoundPredicate::Trait(TraitBound::simple(
+                    "Send",
+                ))]),
             ),
         ];
         let bounds = GenericBounds::new(constraints);

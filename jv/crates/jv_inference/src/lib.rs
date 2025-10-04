@@ -14,9 +14,12 @@ pub mod service;
 pub mod solver;
 pub mod types;
 
+#[cfg(test)]
+mod tests;
+
 pub use cache::{
-    CacheMetrics, CachedDiagnostic, CachedSignature, DependencyTracker, FingerprintHash,
-    InferenceCache, SignatureUpdate,
+    CacheMetrics, CachedDiagnostic, CachedSignature, ConstraintCache, DependencyTracker,
+    FingerprintHash, InferenceCache, SignatureUpdate,
 };
 pub use config::ParallelInferenceConfig;
 pub use constraint::CompactConstraintGraph;
@@ -25,6 +28,7 @@ pub use service::{
     TypeFacts,
 };
 pub use types::{
-    BoundConstraint, BoundPredicate, BoundsMatrix, FieldType, NullabilityFlag, TypeId, TypeKind,
-    TypeVariant,
+    BoundConstraint, BoundPredicate, BoundTypeReference, BoundsMatrix, CapabilityBound,
+    CapabilityHints, CapabilitySolution, DispatchKind, FieldType, FunctionSignatureBound,
+    NullabilityFlag, SymbolId, TraitBound, TypeId, TypeKind, TypeVariant,
 };

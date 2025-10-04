@@ -324,6 +324,7 @@ pub fn desugar_top_level_function(
             body,
             modifiers,
             span,
+            ..
         } => {
             // Convert return type
             let java_return_type = match return_type {

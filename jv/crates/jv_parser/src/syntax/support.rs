@@ -17,6 +17,11 @@ pub(crate) fn token_fun() -> impl ChumskyParser<Token, Token, Error = Simple<Tok
     filter(|token: &Token| matches!(token.token_type, TokenType::Fun))
 }
 
+pub(crate) fn token_where_keyword(
+) -> impl ChumskyParser<Token, Token, Error = Simple<Token>> + Clone {
+    filter(|token: &Token| matches!(token.token_type, TokenType::Where))
+}
+
 pub(crate) fn token_for() -> impl ChumskyParser<Token, Token, Error = Simple<Token>> + Clone {
     filter(|token: &Token| matches!(token.token_type, TokenType::For))
 }
@@ -252,6 +257,22 @@ pub(crate) fn identifier_with_span(
     })
 }
 
+pub(crate) fn qualified_name_with_span(
+) -> impl ChumskyParser<Token, (Vec<String>, Span), Error = Simple<Token>> + Clone {
+    identifier_with_span()
+        .then(token_dot().ignore_then(identifier_with_span()).repeated())
+        .map(|((first_name, first_span), rest)| {
+            let mut segments = Vec::with_capacity(rest.len() + 1);
+            segments.push(first_name);
+            let mut span = first_span;
+            for (segment, segment_span) in rest {
+                span = merge_spans(&span, &segment_span);
+                segments.push(segment);
+            }
+            (segments, span)
+        })
+}
+
 pub(crate) fn span_from_token(token: &Token) -> Span {
     Span {
         start_line: token.line,
@@ -334,16 +355,38 @@ pub(crate) fn keyword(
     })
 }
 
-pub(crate) fn type_annotation_simple(
+pub(crate) fn type_annotation(
 ) -> impl ChumskyParser<Token, TypeAnnotation, Error = Simple<Token>> + Clone {
-    identifier()
-        .then(token_question().or_not())
-        .map(|(name, nullable)| {
-            let base = TypeAnnotation::Simple(name);
+    recursive(|annotation| {
+        let qualified = qualified_name_with_span();
+
+        let type_arguments = annotation
+            .clone()
+            .separated_by(token_any_comma())
+            .allow_trailing()
+            .delimited_by(token_less(), token_greater())
+            .or_not();
+
+        let base = qualified
+            .map(|(segments, span)| (segments.join("."), span))
+            .then(type_arguments)
+            .map(|((name, _span), args)| {
+                if let Some(arguments) = args {
+                    TypeAnnotation::Generic {
+                        name,
+                        type_args: arguments,
+                    }
+                } else {
+                    TypeAnnotation::Simple(name)
+                }
+            });
+
+        base.then(token_question().or_not()).map(|(ty, nullable)| {
             if nullable.is_some() {
-                TypeAnnotation::Nullable(Box::new(base))
+                TypeAnnotation::Nullable(Box::new(ty))
             } else {
-                base
+                ty
             }
         })
+    })
 }
