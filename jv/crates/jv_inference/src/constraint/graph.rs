@@ -5,7 +5,7 @@
 //! through [`SourceSpanTable`] for high quality diagnostics.
 
 use super::nullable::{predicate_requires_nullable, referenced_type_parameters};
-use super::{GenericConstraint, GenericConstraintKind};
+use super::{GenericConstraint, GenericConstraintKind, NullabilitySummary};
 use crate::types::{TypeId, TypeKind};
 use jv_ast::Span;
 use std::cell::RefCell;
@@ -38,6 +38,20 @@ impl WhereConstraintSummary {
 
     fn increment(&mut self) {
         self.recorded_constraints += 1;
+    }
+
+    pub fn into_nullability_summary(self) -> NullabilitySummary {
+        let mut summary = NullabilitySummary::default();
+        for parameter in self.nullable_parameters.into_keys() {
+            summary.mark_nullable(parameter);
+        }
+        summary
+    }
+
+    pub fn extend_nullability_summary(&self, summary: &mut NullabilitySummary) {
+        for parameter in self.nullable_parameters.keys() {
+            summary.mark_nullable(*parameter);
+        }
     }
 }
 
@@ -677,6 +691,13 @@ mod tests {
 
         let nullable: Vec<_> = summary.nullable_parameters().map(|(id, _)| id).collect();
         assert!(nullable.contains(&TypeId::new(10)));
+
+        let null_summary = summary.clone().into_nullability_summary();
+        assert!(null_summary.is_nullable(&TypeId::new(10)));
+
+        let mut extended = NullabilitySummary::default();
+        summary.extend_nullability_summary(&mut extended);
+        assert!(extended.is_nullable(&TypeId::new(10)));
 
         let t_node = graph
             .find_type_node(TypeId::new(10))

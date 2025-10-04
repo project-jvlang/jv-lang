@@ -410,12 +410,7 @@ impl ConstraintSolver {
 }
 
 fn value_restriction_components(graph: &ConstraintGraph) -> Vec<Vec<NodeId>> {
-    let cache = graph.strongly_connected_components();
-    cache
-        .components()
-        .filter(|component| component.len() > 1)
-        .map(|component| component.to_vec())
-        .collect()
+    graph.circular_components()
 }
 
 #[cfg(test)]

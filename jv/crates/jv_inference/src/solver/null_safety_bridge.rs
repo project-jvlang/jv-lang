@@ -1,3 +1,4 @@
+use crate::constraint::WhereConstraintSummary;
 use crate::types::{NullabilityFlag, TypeId};
 use jv_ast::Span;
 use std::collections::HashMap;
@@ -21,6 +22,13 @@ impl NullSafetyBridge {
     /// The first span wins so that diagnostics point to the earliest cause.
     pub fn register_nullable_bound(&mut self, parameter: TypeId, span: Span) {
         self.nullable_parameters.entry(parameter).or_insert(span);
+    }
+
+    /// Integrates nullable parameter information derived from where-clause constraints.
+    pub fn absorb_where_summary(&mut self, summary: &WhereConstraintSummary) {
+        for (parameter, span) in summary.nullable_parameters() {
+            self.register_nullable_bound(parameter, span.clone());
+        }
     }
 
     /// Returns the number of nullable parameters recorded.
@@ -77,5 +85,39 @@ mod tests {
         assert_eq!(collected.len(), 1);
         assert_eq!(collected[0].0, TypeId::new(7));
         assert_eq!(collected[0].1.start_line, 3);
+    }
+
+    #[test]
+    fn absorbs_where_summary_records_nullable_parameters() {
+        use crate::constraint::{ConstraintGraph, WhereConstraintResolver};
+        use crate::types::SymbolId;
+        use jv_ast::types::{QualifiedName, TypeAnnotation, WhereClause, WherePredicate};
+        use std::collections::HashMap;
+
+        let mut params = HashMap::new();
+        params.insert("T".to_string(), TypeId::new(5));
+
+        let clause = WhereClause {
+            predicates: vec![WherePredicate::TraitBound {
+                type_param: "T".into(),
+                trait_name: QualifiedName::new(vec!["Comparable".into()], Span::dummy()),
+                type_args: vec![TypeAnnotation::Nullable(Box::new(TypeAnnotation::Simple(
+                    "T".into(),
+                )))],
+                span: Span::dummy(),
+            }],
+            span: Span::dummy(),
+        };
+
+        let resolver = WhereConstraintResolver::new(SymbolId::from("pkg::Owner"), &params);
+        let constraints = resolver.from_clause(&clause);
+        let mut graph = ConstraintGraph::new();
+        let summary = graph.add_where_constraints(&constraints);
+
+        let mut bridge = NullSafetyBridge::new();
+        bridge.absorb_where_summary(&summary);
+        let collected: Vec<_> = bridge.nullable_parameters().collect();
+        assert_eq!(collected.len(), 1);
+        assert_eq!(collected[0].0, TypeId::new(5));
     }
 }

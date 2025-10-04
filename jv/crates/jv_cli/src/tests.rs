@@ -687,10 +687,7 @@ fn where_constraints_flow_into_ir_bounds() {
     let constraints = resolver.from_clause(&clause);
     let mut graph = ConstraintGraph::new();
     let summary = graph.add_where_constraints(&constraints);
-    let mut null_summary = NullabilitySummary::default();
-    for (parameter, _) in summary.nullable_parameters() {
-        null_summary.mark_nullable(parameter);
-    }
+    let null_summary = summary.into_nullability_summary();
     let solution = ConstraintSolution::from_generic_constraints(
         symbol.clone(),
         &constraints,

@@ -598,8 +598,10 @@ impl TypeFactsBuilder {
                 self.record_bounds(resolved.parameter, resolved.bounds.clone());
             }
         }
-        // Capability bindings and nullability integration will be handled by downstream
-        // stages once the corresponding consumers are ready to ingest them.
+        for parameter in solution.nullability.iter() {
+            self.record_nullability_override(parameter.to_raw(), NullabilityFlag::Nullable);
+        }
+        // Capability bindings will be integrated once downstream consumers are ready.
         self
     }
 
@@ -1029,7 +1031,7 @@ mod tests {
     }
 
     #[test]
-    fn apply_constraint_solution_records_bounds() {
+    fn apply_constraint_solution_records_bounds_and_nullability() {
         let mut builder = TypeFactsBuilder::new();
         let predicate = BoundPredicate::Trait(TraitBound::simple("Comparable"));
         let bounds = GenericBounds::new(vec![BoundConstraint::new(TypeId::new(13), predicate)]);
@@ -1037,11 +1039,16 @@ mod tests {
         solution
             .resolved_bounds
             .push(ResolvedBound::new(TypeId::new(13), bounds.clone()));
+        solution.nullability.mark_nullable(TypeId::new(13));
 
         builder.apply_constraint_solution(&solution);
 
         let snapshot = builder.build();
         assert_eq!(snapshot.recorded_bounds(TypeId::new(13)), Some(&bounds));
+        assert_eq!(
+            snapshot.nullability_override_for(TypeId::new(13).to_raw()),
+            Some(NullabilityFlag::Nullable)
+        );
     }
 
     #[test]
