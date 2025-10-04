@@ -2,7 +2,7 @@ use super::*;
 use crate::pattern::{self, PatternTarget};
 use jv_ast::{
     Annotation, AnnotationName, BinaryOp, Expression, Literal, Modifiers, Parameter, Pattern,
-    Program, Span, Statement, TypeAnnotation, WhenArm,
+    Program, Span, Statement, TypeAnnotation, ValBindingOrigin, WhenArm,
 };
 
 fn dummy_span() -> Span {
@@ -40,6 +40,7 @@ fn check_program_populates_inference_snapshot() {
                 type_annotation: None,
                 initializer: Expression::Literal(Literal::Number("1".into()), span.clone()),
                 modifiers: default_modifiers(),
+                origin: ValBindingOrigin::ExplicitKeyword,
                 span: span.clone(),
             },
             Statement::ValDeclaration {
@@ -47,6 +48,7 @@ fn check_program_populates_inference_snapshot() {
                 type_annotation: None,
                 initializer: Expression::Literal(Literal::Number("2".into()), span.clone()),
                 modifiers: default_modifiers(),
+                origin: ValBindingOrigin::ExplicitKeyword,
                 span: span.clone(),
             },
             Statement::FunctionDeclaration {
@@ -108,6 +110,7 @@ fn check_program_reports_type_error_on_mismatch() {
             type_annotation: None,
             initializer: mismatched_expr,
             modifiers: default_modifiers(),
+            origin: ValBindingOrigin::ExplicitKeyword,
             span: span.clone(),
         }],
         span: span.clone(),
@@ -183,6 +186,7 @@ fn override_annotation_on_field_is_rejected() {
             type_annotation: None,
             initializer: Expression::Literal(Literal::Number("1".into()), span.clone()),
             modifiers: field_modifiers,
+            origin: ValBindingOrigin::ExplicitKeyword,
             span: span.clone(),
         }],
         span: span.clone(),
@@ -284,6 +288,7 @@ fn null_safety_violation_is_reported() {
             type_annotation: Some(TypeAnnotation::Simple("String".into())),
             initializer: Expression::Literal(Literal::Null, span.clone()),
             modifiers: default_modifiers(),
+            origin: ValBindingOrigin::ExplicitKeyword,
             span: span.clone(),
         }],
         span: span.clone(),
@@ -324,6 +329,7 @@ fn when_without_else_in_value_position_emits_validation_error() {
             type_annotation: None,
             initializer: when_expr,
             modifiers: default_modifiers(),
+            origin: ValBindingOrigin::ExplicitKeyword,
             span: span.clone(),
         }],
         span: span.clone(),
@@ -368,6 +374,7 @@ fn when_with_else_in_value_position_passes_validation() {
             type_annotation: None,
             initializer: when_expr,
             modifiers: default_modifiers(),
+            origin: ValBindingOrigin::ExplicitKeyword,
             span: span.clone(),
         }],
         span: span.clone(),

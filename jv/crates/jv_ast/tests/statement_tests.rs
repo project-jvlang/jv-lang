@@ -14,6 +14,7 @@ fn test_statement_val_declaration() {
         type_annotation: Some(TypeAnnotation::Simple("Int".to_string())),
         initializer: Expression::Literal(Literal::Number("42".to_string()), dummy_span()),
         modifiers: Modifiers::default(),
+        origin: ValBindingOrigin::ExplicitKeyword,
         span: dummy_span(),
     };
     match stmt {

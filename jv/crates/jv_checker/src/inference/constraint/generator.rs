@@ -11,7 +11,7 @@ use crate::inference::iteration::{
 use crate::inference::types::TypeKind;
 use jv_ast::{
     Argument, BinaryOp, Expression, ForInStatement, Literal, Program, Statement, TypeAnnotation,
-    UnaryOp,
+    UnaryOp, ValBindingOrigin,
 };
 
 /// AST から制約を抽出するジェネレータ。
@@ -524,7 +524,7 @@ impl<'env> ConstraintGenerator<'env> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use jv_ast::{Modifiers, Span};
+    use jv_ast::{Modifiers, Span, ValBindingOrigin};
 
     fn dummy_span() -> Span {
         Span::dummy()
@@ -553,6 +553,7 @@ mod tests {
                 type_annotation: None,
                 initializer: Expression::Literal(Literal::Number("1".into()), span.clone()),
                 modifiers: default_modifiers(),
+                origin: ValBindingOrigin::ExplicitKeyword,
                 span: span.clone(),
             }],
             span,
@@ -583,6 +584,7 @@ mod tests {
                     type_annotation: None,
                     initializer: Expression::Literal(Literal::Number("1".into()), span.clone()),
                     modifiers: default_modifiers(),
+                    origin: ValBindingOrigin::ExplicitKeyword,
                     span: span.clone(),
                 },
                 Statement::ValDeclaration {
@@ -598,6 +600,7 @@ mod tests {
                         span: span.clone(),
                     },
                     modifiers: default_modifiers(),
+                    origin: ValBindingOrigin::ExplicitKeyword,
                     span: span.clone(),
                 },
             ],
@@ -641,6 +644,7 @@ mod tests {
                     type_annotation: None,
                     initializer: Expression::Literal(Literal::Number("1".into()), span.clone()),
                     modifiers: default_modifiers(),
+                    origin: ValBindingOrigin::ExplicitKeyword,
                     span: span.clone(),
                 },
                 Statement::Expression {
@@ -654,6 +658,7 @@ mod tests {
                                     inner_span.clone(),
                                 ),
                                 modifiers: default_modifiers(),
+                                origin: ValBindingOrigin::ExplicitKeyword,
                                 span: inner_span.clone(),
                             },
                             Statement::Expression {
@@ -670,6 +675,7 @@ mod tests {
                     type_annotation: None,
                     initializer: Expression::Literal(Literal::Null, span.clone()),
                     modifiers: default_modifiers(),
+                    origin: ValBindingOrigin::ExplicitKeyword,
                     span: span.clone(),
                 },
             ],

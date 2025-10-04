@@ -4,8 +4,8 @@ use jv_ast::{
     Annotation, AnnotationArgument, AnnotationName, AnnotationValue, BinaryOp, CommentKind,
     CommentStatement, CommentVisibility, ConcurrencyConstruct, Expression, ExtensionFunction,
     ForInStatement, Literal, LoopBinding, LoopStrategy, Modifiers, NumericRangeLoop, Parameter,
-    QualifiedName, ResourceManagement, Span, Statement, TypeAnnotation, Visibility, WhereClause,
-    WherePredicate,
+    QualifiedName, ResourceManagement, Span, Statement, TypeAnnotation, ValBindingOrigin,
+    Visibility, WhereClause, WherePredicate,
 };
 use jv_lexer::{Token, TokenType};
 
@@ -27,6 +27,7 @@ pub(crate) fn statement_parser(
 
         let comment_stmt = comment_statement_parser();
         let val_decl = val_declaration_parser(expr.clone());
+        let implicit_typed_val_decl = implicit_typed_val_declaration_parser(expr.clone());
         let var_decl = var_declaration_parser(expr.clone());
         let assignment = assignment_statement_parser(expr.clone());
         let function_decl = function_declaration_parser(statement.clone(), expr.clone());
@@ -42,6 +43,7 @@ pub(crate) fn statement_parser(
         choice((
             comment_stmt,
             val_decl,
+            implicit_typed_val_decl,
             var_decl,
             assignment,
             function_decl,
@@ -114,6 +116,28 @@ fn val_declaration_parser(
                 type_annotation,
                 initializer,
                 modifiers,
+                origin: ValBindingOrigin::ExplicitKeyword,
+                span,
+            }
+        })
+}
+
+fn implicit_typed_val_declaration_parser(
+    expr: impl ChumskyParser<Token, Expression, Error = Simple<Token>> + Clone,
+) -> impl ChumskyParser<Token, Statement, Error = Simple<Token>> + Clone {
+    modifiers_parser()
+        .then(identifier())
+        .then(token_colon().ignore_then(type_annotation()))
+        .then_ignore(token_assign())
+        .then(expr)
+        .map(|(((modifiers, name), type_annotation), initializer)| {
+            let span = expression_span(&initializer);
+            Statement::ValDeclaration {
+                name,
+                type_annotation: Some(type_annotation),
+                initializer,
+                modifiers,
+                origin: ValBindingOrigin::ImplicitTyped,
                 span,
             }
         })
@@ -244,8 +268,7 @@ fn data_class_declaration_parser(
 ) -> impl ChumskyParser<Token, Statement, Error = Simple<Token>> + Clone {
     modifiers_parser()
         .then_ignore(token_data())
-        .then_ignore(token_class())
-        .then(identifier())
+        .then(token_class().ignore_then(identifier()).or(identifier()))
         .then_ignore(token_left_paren())
         .then(parameter_list(expr))
         .then_ignore(token_right_paren())

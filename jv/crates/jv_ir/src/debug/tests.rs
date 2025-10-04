@@ -4,7 +4,8 @@ use super::*;
 use crate::transform::transform_program;
 use crate::types::{IrExpression, IrModifiers, IrProgram, IrStatement, IrVisibility, JavaType};
 use jv_ast::{
-    Expression, Literal, Modifiers, Program, Span, Statement, TypeAnnotation, Visibility,
+    Expression, Literal, Modifiers, Program, Span, Statement, TypeAnnotation, ValBindingOrigin,
+    Visibility,
 };
 
 fn span() -> Span {
@@ -25,6 +26,7 @@ fn sample_program() -> Program {
                 type_annotation: Some(TypeAnnotation::Simple("Int".to_string())),
                 initializer: Expression::Literal(Literal::Number("42".to_string()), span.clone()),
                 modifiers: modifiers.clone(),
+                origin: ValBindingOrigin::ExplicitKeyword,
                 span: span.clone(),
             },
             Statement::Expression {

@@ -8,13 +8,14 @@ use crate::types::{
     IrExpression, IrModifiers, IrParameter, IrRecordComponent, IrResource, IrStatement,
     IrSwitchCase, IrTypeParameter, JavaType,
 };
-use jv_ast::{Expression, Modifiers, Parameter, Span, Statement, TypeAnnotation};
+use jv_ast::{Expression, Modifiers, Parameter, Span, Statement, TypeAnnotation, ValBindingOrigin};
 
 pub fn desugar_val_declaration(
     name: String,
     type_annotation: Option<TypeAnnotation>,
     initializer: Expression,
     modifiers: Modifiers,
+    _origin: ValBindingOrigin,
     span: Span,
     context: &mut TransformContext,
 ) -> Result<IrStatement, TransformError> {

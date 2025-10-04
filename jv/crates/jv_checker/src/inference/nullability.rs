@@ -8,7 +8,7 @@ use crate::CheckError;
 use jv_ast::types::Span;
 use jv_ast::{
     expression::Argument, BinaryOp, Expression, Literal, Program, Statement, TypeAnnotation,
-    UnaryOp,
+    UnaryOp, ValBindingOrigin,
 };
 use std::collections::HashMap;
 
@@ -499,6 +499,7 @@ mod tests {
             type_annotation: annotation,
             initializer,
             modifiers: modifiers(),
+            origin: ValBindingOrigin::ExplicitKeyword,
             span: span(),
         }
     }

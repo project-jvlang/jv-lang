@@ -3,7 +3,7 @@ use std::collections::{HashMap, VecDeque};
 use jv_ast::{
     expression::Argument,
     types::{Literal, Modifiers, Span},
-    BinaryOp, Expression, Program, Statement, TryCatchClause, WhenArm,
+    BinaryOp, Expression, Program, Statement, TryCatchClause, ValBindingOrigin, WhenArm,
 };
 
 use super::{patterns, NullSafetyContext, NullabilityKind, NullabilityLattice};
@@ -998,6 +998,7 @@ mod tests {
                 type_annotation: None,
                 initializer: Expression::Literal(Literal::Null, Span::dummy()),
                 modifiers: Default::default(),
+                origin: ValBindingOrigin::ExplicitKeyword,
                 span: Span::dummy(),
             }],
             span: Span::dummy(),

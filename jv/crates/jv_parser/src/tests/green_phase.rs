@@ -2,7 +2,8 @@ use super::support::{first_statement, parse_program, parse_program_result};
 use jv_ast::{
     Argument, ArgumentElementKind, BinaryOp, CallArgumentStyle, CommentKind, CommentVisibility,
     ConcurrencyConstruct, Expression, JsonValue, Literal, LoopStrategy, Pattern,
-    ResourceManagement, SequenceDelimiter, Statement, StringPart, TypeAnnotation, WherePredicate,
+    ResourceManagement, SequenceDelimiter, Statement, StringPart, TypeAnnotation, ValBindingOrigin,
+    WherePredicate,
 };
 
 use test_case::test_case;
@@ -23,6 +24,34 @@ fn test_simple_val_declaration() {
             }
         }
         other => panic!("expected val declaration, found {:?}", other),
+    }
+}
+
+#[test]
+fn test_implicit_typed_val_declaration() {
+    let program = parse_program("name: String = \"hello\"");
+    let statement = first_statement(&program);
+
+    match statement {
+        Statement::ValDeclaration {
+            name,
+            type_annotation,
+            origin,
+            initializer,
+            ..
+        } => {
+            assert_eq!(name, "name");
+            assert!(matches!(
+                type_annotation,
+                Some(TypeAnnotation::Simple(ref type_name)) if type_name == "String"
+            ));
+            assert_eq!(*origin, ValBindingOrigin::ImplicitTyped);
+            match initializer {
+                Expression::Literal(Literal::String(value), _) => assert_eq!(value, "hello"),
+                other => panic!("expected string literal, found {:?}", other),
+            }
+        }
+        other => panic!("expected implicit val declaration, found {:?}", other),
     }
 }
 
@@ -179,6 +208,32 @@ fn test_data_class_declaration() {
             }
         }
         other => panic!("expected data class declaration, found {:?}", other),
+    }
+}
+
+#[test]
+fn test_data_shorthand_declaration() {
+    let program = parse_program("data User(name: String, age: Int)");
+    let statement = first_statement(&program);
+
+    match statement {
+        Statement::DataClassDeclaration {
+            name, parameters, ..
+        } => {
+            assert_eq!(name, "User");
+            assert_eq!(parameters.len(), 2);
+            assert_eq!(parameters[0].name, "name");
+            assert!(matches!(
+                parameters[0].type_annotation,
+                Some(TypeAnnotation::Simple(ref ty)) if ty == "String"
+            ));
+            assert_eq!(parameters[1].name, "age");
+            assert!(matches!(
+                parameters[1].type_annotation,
+                Some(TypeAnnotation::Simple(ref ty)) if ty == "Int"
+            ));
+        }
+        other => panic!("expected shorthand data declaration, found {:?}", other),
     }
 }
 

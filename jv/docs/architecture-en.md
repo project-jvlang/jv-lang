@@ -88,7 +88,7 @@ pub enum Token {
 **AST Node Types**:
 ```rust
 pub enum Statement {
-    ValDeclaration { name: String, type_annotation: Option<TypeAnnotation>, initializer: Expression, span: Span },
+    ValDeclaration { name: String, type_annotation: Option<TypeAnnotation>, initializer: Expression, origin: ValBindingOrigin, span: Span },
     VarDeclaration { name: String, type_annotation: Option<TypeAnnotation>, initializer: Option<Expression>, span: Span },
     FunctionDeclaration { name: String, parameters: Vec<Parameter>, return_type: Option<TypeAnnotation>, body: Box<Expression>, span: Span },
     ClassDeclaration { name: String, parameters: Vec<Parameter>, body: Vec<Statement>, span: Span },

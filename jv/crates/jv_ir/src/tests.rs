@@ -117,6 +117,7 @@ mod tests {
             None,
             initializer,
             modifiers,
+            ValBindingOrigin::ExplicitKeyword,
             dummy_span(),
             &mut context,
         )
@@ -206,6 +207,7 @@ mod tests {
             None,
             Expression::Literal(Literal::Null, dummy_span()),
             modifiers,
+            ValBindingOrigin::ExplicitKeyword,
             dummy_span(),
             &mut context,
         )
@@ -397,6 +399,7 @@ mod tests {
             None,
             Expression::Literal(Literal::Null, dummy_span()),
             modifiers,
+            ValBindingOrigin::ExplicitKeyword,
             dummy_span(),
             &mut context,
         )
@@ -455,6 +458,7 @@ mod tests {
             Some(TypeAnnotation::Simple("String".to_string())),
             Expression::Literal(Literal::Null, dummy_span()),
             modifiers,
+            ValBindingOrigin::ExplicitKeyword,
             dummy_span(),
             &mut context,
         )
@@ -2275,6 +2279,7 @@ mod tests {
                     dummy_span(),
                 ),
                 modifiers: Modifiers::default(),
+                origin: ValBindingOrigin::ExplicitKeyword,
                 span: dummy_span(),
             }],
             span: dummy_span(),
@@ -2293,6 +2298,7 @@ mod tests {
             type_annotation: Some(TypeAnnotation::Simple("Int".to_string())),
             initializer: Expression::Literal(Literal::Number("42".to_string()), dummy_span()),
             modifiers: Modifiers::default(),
+            origin: ValBindingOrigin::ExplicitKeyword,
             span: dummy_span(),
         };
 
