@@ -19,7 +19,8 @@ pub use variance::{Variance, VarianceAnalyzer, VariancePosition, VarianceTable};
 use crate::constraint::{ConstraintGraph, ConstraintKind, NodeId};
 use crate::types::{FieldType, TypeId, TypeKind, TypeVariant};
 use jv_ast::Span;
-use std::collections::{HashMap, VecDeque};
+use jv_support::profiling;
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt;
 
 /// Constraint item processed by the solver.
@@ -28,6 +29,35 @@ pub struct Constraint {
     pub kind: ConstraintKind,
     pub span: Option<Span>,
     pub note: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum ConstraintFingerprint {
+    Equality(TypeId, TypeId),
+    Assignment(TypeId, TypeId),
+}
+
+impl ConstraintFingerprint {
+    fn from_kind(kind: &ConstraintKind) -> Option<Self> {
+        match kind {
+            ConstraintKind::Equality { left, right } => {
+                let (a, b) = ordered_pair(*left, *right);
+                Some(ConstraintFingerprint::Equality(a, b))
+            }
+            ConstraintKind::Assignment { from, to } => {
+                Some(ConstraintFingerprint::Assignment(*from, *to))
+            }
+            ConstraintKind::BoundSatisfaction { .. } | ConstraintKind::Custom(_) => None,
+        }
+    }
+}
+
+fn ordered_pair(left: TypeId, right: TypeId) -> (TypeId, TypeId) {
+    if left.to_raw() <= right.to_raw() {
+        (left, right)
+    } else {
+        (right, left)
+    }
 }
 
 impl Constraint {
@@ -142,6 +172,7 @@ pub struct SolverTelemetry {
     pub nullability_merges: usize,
     pub optional_propagations: usize,
     pub preserved_constraints: usize,
+    pub pruned_constraints: usize,
     pub cache_hit_rate: Option<f64>,
     pub reinference_duration_ms: Option<f64>,
     pub invalidation_cascade_depth: usize,
@@ -150,6 +181,10 @@ pub struct SolverTelemetry {
 impl SolverTelemetry {
     pub fn record_preserved_constraints(&mut self, preserved: usize) {
         self.preserved_constraints = preserved;
+    }
+
+    pub fn record_pruned(&mut self) {
+        self.pruned_constraints = self.pruned_constraints.saturating_add(1);
     }
 
     pub fn set_cache_hit_rate(&mut self, rate: Option<f64>) {
@@ -195,6 +230,7 @@ impl SolveOutcome {
 pub struct ConstraintSolver {
     substitutions: HashMap<TypeId, TypeKind>,
     telemetry: SolverTelemetry,
+    seen_constraints: HashSet<ConstraintFingerprint>,
 }
 
 impl ConstraintSolver {
@@ -210,7 +246,15 @@ impl ConstraintSolver {
         mut constraints: ConstraintSet,
         graph: Option<&ConstraintGraph>,
     ) -> Result<SolveOutcome, SolveError> {
+        let _profiling_guard = profiling::start("jv_inference::constraint_solver.solve");
         while let Some(constraint) = constraints.pop() {
+            if let Some(fingerprint) = ConstraintFingerprint::from_kind(&constraint.kind) {
+                if !self.seen_constraints.insert(fingerprint) {
+                    self.telemetry.record_pruned();
+                    continue;
+                }
+            }
+
             self.telemetry.constraints_processed += 1;
             self.process_constraint(constraint)?;
         }
@@ -449,6 +493,19 @@ mod tests {
         );
         let err = solver.bind_variable(TypeId::new(0), ty, None).unwrap_err();
         assert!(matches!(err, SolveError::OccursCheck { .. }));
+    }
+
+    #[test]
+    fn duplicate_constraints_are_pruned() {
+        let mut set = ConstraintSet::new();
+        let constraint = Constraint::new(ConstraintKind::Equality {
+            left: TypeId::new(0),
+            right: TypeId::new(1),
+        });
+        set.push(constraint.clone());
+        set.push(constraint);
+        let outcome = ConstraintSolver::new().solve(set, None).expect("solve");
+        assert_eq!(outcome.telemetry.pruned_constraints, 1);
     }
 
     #[test]

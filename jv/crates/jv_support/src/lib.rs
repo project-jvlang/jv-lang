@@ -7,6 +7,7 @@
 pub mod arena;
 pub mod i18n;
 pub mod perf;
+pub mod profiling;
 
 pub use arena::{
     ArenaAccessor, PoolMetrics, PoolSessionMetrics, TransformPools, TransformPoolsGuard,

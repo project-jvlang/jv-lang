@@ -18,8 +18,8 @@ pub mod types;
 mod tests;
 
 pub use cache::{
-    CacheMetrics, CachedDiagnostic, CachedSignature, DependencyTracker, FingerprintHash,
-    InferenceCache, SignatureUpdate,
+    CacheMetrics, CachedDiagnostic, CachedSignature, ConstraintCache, DependencyTracker,
+    FingerprintHash, InferenceCache, SignatureUpdate,
 };
 pub use config::ParallelInferenceConfig;
 pub use constraint::CompactConstraintGraph;

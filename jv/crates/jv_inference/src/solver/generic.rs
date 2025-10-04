@@ -4,11 +4,11 @@ use crate::constraint::{
 };
 use crate::environment::CapabilityEnvironment;
 use crate::types::{
-    BoundPredicate, CapabilityBound, CapabilitySolution, SymbolId, TypeId, TypeKind,
+    BoundPredicate, CapabilityBound, CapabilitySolution, SymbolId, TypeId, TypeKind, TypeVariant,
 };
 use jv_ast::Span;
 use std::collections::hash_map::Entry;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 /// Result produced by [`GenericSolver::resolve`].
 #[derive(Debug, Default, Clone)]
@@ -154,45 +154,71 @@ impl GenericSolver {
             }
         }
 
+        let mut processed_requirements: HashSet<(String, TypeId, String)> = HashSet::new();
+
         for requirement in pending_bounds {
-            match assignments
-                .get(&requirement.symbol)
-                .and_then(|map| map.get(&requirement.parameter))
-            {
-                Some(candidate) => match &requirement.predicate {
-                    BoundPredicate::Capability(bound) => match resolver.resolve(bound, candidate) {
-                        Ok(solution) => {
-                            capability_solutions
-                                .entry(requirement.symbol.clone())
-                                .or_default()
-                                .push(solution);
+            let symbol = requirement.symbol.clone();
+            let parameter = requirement.parameter;
+            let span = requirement.span.clone();
+            let predicate = requirement.predicate.clone();
+            let predicate_key = predicate.key();
+            let key = (symbol.as_str().to_owned(), parameter, predicate_key.clone());
+            if !processed_requirements.insert(key) {
+                continue;
+            }
+
+            match assignments.get(&symbol).and_then(|map| map.get(&parameter)) {
+                Some(candidate) => {
+                    if matches!(candidate.variant(), TypeVariant::Unknown) {
+                        diagnostics.push(GenericSolverDiagnostic::UnresolvedParameter {
+                            symbol,
+                            parameter,
+                            predicate: Some(predicate),
+                            span,
+                        });
+                        continue;
+                    }
+
+                    match predicate {
+                        BoundPredicate::Capability(bound) => {
+                            let bound_clone = bound.clone();
+                            match resolver.resolve(&bound, candidate) {
+                                Ok(solution) => {
+                                    capability_solutions
+                                        .entry(symbol.clone())
+                                        .or_default()
+                                        .push(solution);
+                                }
+                                Err(error) => {
+                                    diagnostics.push(
+                                        GenericSolverDiagnostic::CapabilityResolutionFailed {
+                                            symbol: symbol.clone(),
+                                            parameter,
+                                            bound: bound_clone,
+                                            span: span.clone(),
+                                            error,
+                                        },
+                                    );
+                                }
+                            }
                         }
-                        Err(error) => {
-                            diagnostics.push(GenericSolverDiagnostic::CapabilityResolutionFailed {
-                                symbol: requirement.symbol.clone(),
-                                parameter: requirement.parameter,
-                                bound: bound.clone(),
-                                span: requirement.span.clone(),
-                                error,
-                            })
-                        }
-                    },
-                    other => {
-                        if !BoundSatisfactionChecker::evaluate(candidate, other) {
-                            diagnostics.push(GenericSolverDiagnostic::BoundViolation {
-                                symbol: requirement.symbol.clone(),
-                                parameter: requirement.parameter,
-                                predicate: other.clone(),
-                                span: requirement.span.clone(),
-                            });
+                        other => {
+                            if !BoundSatisfactionChecker::evaluate(candidate, &other) {
+                                diagnostics.push(GenericSolverDiagnostic::BoundViolation {
+                                    symbol: symbol.clone(),
+                                    parameter,
+                                    predicate: other.clone(),
+                                    span: span.clone(),
+                                });
+                            }
                         }
                     }
-                },
+                }
                 None => diagnostics.push(GenericSolverDiagnostic::UnresolvedParameter {
-                    symbol: requirement.symbol.clone(),
-                    parameter: requirement.parameter,
-                    predicate: Some(requirement.predicate.clone()),
-                    span: requirement.span.clone(),
+                    symbol,
+                    parameter,
+                    predicate: Some(predicate),
+                    span,
                 }),
             }
         }

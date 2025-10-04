@@ -2,6 +2,7 @@ use super::{GenericConstraint, GenericConstraintKind};
 use crate::types::{
     BoundConstraint, BoundPredicate, CapabilitySolution, GenericBounds, SymbolId, TypeId,
 };
+use crate::ConstraintCache;
 use std::collections::{HashMap, HashSet};
 
 /// Collection of resolved bounds for a specific type parameter.
@@ -76,6 +77,43 @@ impl ConstraintSolution {
         nullability: NullabilitySummary,
         capability_bindings: Vec<CapabilitySolution>,
     ) -> Self {
+        Self::build_solution(symbol, constraints, nullability, capability_bindings)
+    }
+
+    pub fn from_generic_constraints_cached(
+        symbol: SymbolId,
+        constraints: &[GenericConstraint],
+        nullability: NullabilitySummary,
+        capability_bindings: Vec<CapabilitySolution>,
+        mut cache: Option<&mut ConstraintCache>,
+    ) -> (Self, bool) {
+        if let Some(cache) = cache.as_mut() {
+            let fingerprint = ConstraintCache::fingerprint_for(constraints);
+            if let Some(existing) = cache.lookup(&symbol, fingerprint) {
+                return (existing, true);
+            }
+            let solution = Self::build_solution(
+                symbol.clone(),
+                constraints,
+                nullability,
+                capability_bindings,
+            );
+            cache.store(symbol, fingerprint, solution.clone());
+            (solution, false)
+        } else {
+            (
+                Self::build_solution(symbol, constraints, nullability, capability_bindings),
+                false,
+            )
+        }
+    }
+
+    fn build_solution(
+        symbol: SymbolId,
+        constraints: &[GenericConstraint],
+        nullability: NullabilitySummary,
+        capability_bindings: Vec<CapabilitySolution>,
+    ) -> Self {
         let mut grouped: HashMap<TypeId, HashMap<String, BoundPredicate>> = HashMap::new();
 
         for constraint in constraints {
@@ -123,6 +161,7 @@ mod tests {
         BoundTypeReference, CapabilityBound, CapabilityHints, DispatchKind, TraitBound, TypeKind,
         TypeVariant,
     };
+    use crate::ConstraintCache;
     use jv_ast::Span;
 
     fn constraint(predicate: BoundPredicate, parameter: TypeId) -> GenericConstraint {
@@ -187,6 +226,34 @@ mod tests {
 
         assert_eq!(solution.resolved_bounds.len(), 1);
         assert_eq!(solution.resolved_bounds[0].bounds.constraints().len(), 1);
+    }
+
+    #[test]
+    fn cached_solution_hits_on_second_lookup() {
+        let param = TypeId::new(7);
+        let constraints = vec![constraint(
+            BoundPredicate::Trait(TraitBound::simple("Display")),
+            param,
+        )];
+        let mut cache = ConstraintCache::new();
+        let (first, hit_first) = ConstraintSolution::from_generic_constraints_cached(
+            SymbolId::from("pkg::Owner"),
+            &constraints,
+            NullabilitySummary::default(),
+            Vec::new(),
+            Some(&mut cache),
+        );
+        assert!(!hit_first);
+
+        let (second, hit_second) = ConstraintSolution::from_generic_constraints_cached(
+            SymbolId::from("pkg::Owner"),
+            &constraints,
+            NullabilitySummary::default(),
+            Vec::new(),
+            Some(&mut cache),
+        );
+        assert!(hit_second);
+        assert_eq!(first, second);
     }
 
     #[test]
