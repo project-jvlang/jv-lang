@@ -312,6 +312,42 @@ impl CapabilityHints {
     }
 }
 
+/// Dispatch style used when binding capability implementations.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DispatchKind {
+    /// Static dispatch through explicitly referenced implementation functions.
+    Static,
+    /// Inline expansion of the implementation (e.g. constexpr-style helpers).
+    Inline,
+    /// Dispatch via default methods provided by interfaces.
+    DefaultMethod,
+}
+
+impl DispatchKind {
+    /// Returns true when the dispatch kind satisfies inline-only requirements.
+    pub fn supports_inline(self) -> bool {
+        matches!(self, DispatchKind::Inline)
+    }
+}
+
+/// Result of resolving a capability requirement against the environment.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CapabilitySolution {
+    pub implementor: SymbolId,
+    pub binding_type: TypeKind,
+    pub dispatch_kind: DispatchKind,
+}
+
+impl CapabilitySolution {
+    pub fn new(implementor: SymbolId, binding_type: TypeKind, dispatch_kind: DispatchKind) -> Self {
+        Self {
+            implementor,
+            binding_type,
+            dispatch_kind,
+        }
+    }
+}
+
 /// Function signature-style bound used for advanced constraints.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FunctionSignatureBound {

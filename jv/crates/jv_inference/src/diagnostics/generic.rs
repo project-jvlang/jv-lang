@@ -1,6 +1,7 @@
 use crate::cache::CachedDiagnostic;
+use crate::constraint::CapabilityResolutionError;
 use crate::solver::GenericSolverDiagnostic;
-use crate::types::{BoundPredicate, SymbolId, TypeId, TypeKind};
+use crate::types::{BoundPredicate, CapabilityBound, SymbolId, TypeId, TypeKind};
 use jv_ast::Span;
 
 /// Human-readable diagnostic entry describing issues discovered while resolving
@@ -114,6 +115,13 @@ pub fn translate_solver_diagnostic(diagnostic: &GenericSolverDiagnostic) -> Gene
             predicate,
             span,
         } => unresolved_parameter(symbol, parameter, predicate.as_ref(), span),
+        GenericSolverDiagnostic::CapabilityResolutionFailed {
+            symbol,
+            parameter,
+            bound,
+            span,
+            error,
+        } => capability_resolution_failed(symbol, parameter, bound, error, span),
     }
 }
 
@@ -177,6 +185,68 @@ fn unresolved_parameter(
         .with_span(span.clone())
         .with_note("型推論を補助するために明示的な型引数または境界を追加してください。")
         .with_note("--explain JV2001 で詳細ガイドを確認できます。")
+}
+
+fn capability_resolution_failed(
+    symbol: &SymbolId,
+    parameter: &TypeId,
+    bound: &CapabilityBound,
+    error: &CapabilityResolutionError,
+    span: &Span,
+) -> GenericDiagnostic {
+    let capability_label = format!("{}<{}>", bound.name, bound.target.describe());
+    match error {
+        CapabilityResolutionError::NotFound {
+            preferred_impl,
+            inline_only,
+            ..
+        } => {
+            let message = format!(
+                "{symbol} の型パラメータ T{} に要求された能力 {capability_label} の実装が見つかりません。",
+                parameter.to_raw()
+            );
+            let mut diagnostic = GenericDiagnostic::new("JV2003", message).with_span(span.clone());
+            if let Some(preferred) = preferred_impl {
+                diagnostic = diagnostic.with_note(format!(
+                    "preferred_impl として {preferred} が指定されています。"
+                ));
+            }
+            if *inline_only {
+                diagnostic = diagnostic
+                    .with_note("inline-only 指定のためインライン実装のみを探索しました。");
+            }
+            diagnostic.with_note(format!(
+                "型 {} 向けの impl {capability_label} {{ ... }} を追加するか、where句の制約を調整してください。",
+                bound.target.describe()
+            ))
+        }
+        CapabilityResolutionError::Ambiguous {
+            candidates,
+            preferred_impl,
+            ..
+        } => {
+            let message = format!(
+                "{symbol} の型パラメータ T{} に対する能力 {capability_label} の実装候補が複数存在し、決定できません。",
+                parameter.to_raw()
+            );
+            let mut diagnostic = GenericDiagnostic::new("JV2004", message).with_span(span.clone());
+            if !candidates.is_empty() {
+                let names = candidates
+                    .iter()
+                    .map(SymbolId::as_str)
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                diagnostic = diagnostic.with_note(format!("候補: {names}"));
+            }
+            if let Some(preferred) = preferred_impl {
+                diagnostic = diagnostic.with_note(format!(
+                    "preferred_impl='{preferred}' が指定されていますが曖昧さは解消されません。"
+                ));
+            }
+            diagnostic
+                .with_note("明示的に使用する実装を import するか、余分な impl を除外してください。")
+        }
+    }
 }
 
 fn describe_type(ty: &TypeKind) -> String {

@@ -4,6 +4,7 @@
 //! module exists as a placeholder that documents the intended separation of concerns.
 
 pub mod calls;
+pub mod capability;
 pub mod compact;
 pub mod constructors;
 pub mod generic;
@@ -32,5 +33,6 @@ pub use constructors::{
 
 pub use compact::CompactConstraintGraph;
 
+pub use capability::{CapabilityDictionaryResolver, CapabilityResolutionError};
 pub use incremental::{AstId, ConstraintDiff, IncrementalConstraintBuilder, IncrementalTelemetry};
 pub use where_clause::WhereConstraintResolver;

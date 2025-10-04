@@ -1,5 +1,11 @@
-use crate::constraint::{GenericConstraint, GenericConstraintKind};
-use crate::types::{BoundPredicate, SymbolId, TypeId, TypeKind};
+use crate::constraint::{
+    CapabilityDictionaryResolver, CapabilityResolutionError, GenericConstraint,
+    GenericConstraintKind,
+};
+use crate::environment::CapabilityEnvironment;
+use crate::types::{
+    BoundPredicate, CapabilityBound, CapabilitySolution, SymbolId, TypeId, TypeKind,
+};
 use jv_ast::Span;
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
@@ -8,6 +14,7 @@ use std::collections::HashMap;
 #[derive(Debug, Default, Clone)]
 pub struct TypeArgumentSolution {
     assignments: HashMap<SymbolId, HashMap<TypeId, TypeKind>>,
+    capabilities: HashMap<SymbolId, Vec<CapabilitySolution>>,
     diagnostics: Vec<GenericSolverDiagnostic>,
 }
 
@@ -22,6 +29,16 @@ impl TypeArgumentSolution {
 
     pub fn diagnostics(&self) -> &[GenericSolverDiagnostic] {
         &self.diagnostics
+    }
+
+    pub fn capability_solutions(&self, symbol: &SymbolId) -> Option<&[CapabilitySolution]> {
+        self.capabilities
+            .get(symbol)
+            .map(|solutions| solutions.as_slice())
+    }
+
+    pub fn all_capability_solutions(&self) -> &HashMap<SymbolId, Vec<CapabilitySolution>> {
+        &self.capabilities
     }
 }
 
@@ -48,6 +65,13 @@ pub enum GenericSolverDiagnostic {
         predicate: Option<BoundPredicate>,
         span: Span,
     },
+    CapabilityResolutionFailed {
+        symbol: SymbolId,
+        parameter: TypeId,
+        bound: CapabilityBound,
+        span: Span,
+        error: CapabilityResolutionError,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -64,10 +88,19 @@ pub struct GenericSolver;
 
 impl GenericSolver {
     pub fn resolve(constraints: &[GenericConstraint]) -> TypeArgumentSolution {
+        Self::resolve_with_environment(constraints, &CapabilityEnvironment::new())
+    }
+
+    pub fn resolve_with_environment(
+        constraints: &[GenericConstraint],
+        environment: &CapabilityEnvironment,
+    ) -> TypeArgumentSolution {
         let mut assignments: HashMap<SymbolId, HashMap<TypeId, TypeKind>> = HashMap::new();
         let mut sources: HashMap<SymbolId, HashMap<TypeId, Span>> = HashMap::new();
         let mut pending_bounds: Vec<BoundRequirementRecord> = Vec::new();
         let mut diagnostics: Vec<GenericSolverDiagnostic> = Vec::new();
+        let mut capability_solutions: HashMap<SymbolId, Vec<CapabilitySolution>> = HashMap::new();
+        let resolver = CapabilityDictionaryResolver::new(environment);
 
         for constraint in constraints {
             match &constraint.kind {
@@ -126,16 +159,35 @@ impl GenericSolver {
                 .get(&requirement.symbol)
                 .and_then(|map| map.get(&requirement.parameter))
             {
-                Some(candidate) => {
-                    if !BoundSatisfactionChecker::evaluate(candidate, &requirement.predicate) {
-                        diagnostics.push(GenericSolverDiagnostic::BoundViolation {
-                            symbol: requirement.symbol.clone(),
-                            parameter: requirement.parameter,
-                            predicate: requirement.predicate.clone(),
-                            span: requirement.span.clone(),
-                        });
+                Some(candidate) => match &requirement.predicate {
+                    BoundPredicate::Capability(bound) => match resolver.resolve(bound, candidate) {
+                        Ok(solution) => {
+                            capability_solutions
+                                .entry(requirement.symbol.clone())
+                                .or_default()
+                                .push(solution);
+                        }
+                        Err(error) => {
+                            diagnostics.push(GenericSolverDiagnostic::CapabilityResolutionFailed {
+                                symbol: requirement.symbol.clone(),
+                                parameter: requirement.parameter,
+                                bound: bound.clone(),
+                                span: requirement.span.clone(),
+                                error,
+                            })
+                        }
+                    },
+                    other => {
+                        if !BoundSatisfactionChecker::evaluate(candidate, other) {
+                            diagnostics.push(GenericSolverDiagnostic::BoundViolation {
+                                symbol: requirement.symbol.clone(),
+                                parameter: requirement.parameter,
+                                predicate: other.clone(),
+                                span: requirement.span.clone(),
+                            });
+                        }
                     }
-                }
+                },
                 None => diagnostics.push(GenericSolverDiagnostic::UnresolvedParameter {
                     symbol: requirement.symbol.clone(),
                     parameter: requirement.parameter,
@@ -147,6 +199,7 @@ impl GenericSolver {
 
         TypeArgumentSolution {
             assignments,
+            capabilities: capability_solutions,
             diagnostics,
         }
     }

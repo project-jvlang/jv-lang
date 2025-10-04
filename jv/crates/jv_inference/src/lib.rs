@@ -29,6 +29,6 @@ pub use service::{
 };
 pub use types::{
     BoundConstraint, BoundPredicate, BoundTypeReference, BoundsMatrix, CapabilityBound,
-    CapabilityHints, FieldType, FunctionSignatureBound, NullabilityFlag, SymbolId, TraitBound,
-    TypeId, TypeKind, TypeVariant,
+    CapabilityHints, CapabilitySolution, DispatchKind, FieldType, FunctionSignatureBound,
+    NullabilityFlag, SymbolId, TraitBound, TypeId, TypeKind, TypeVariant,
 };
