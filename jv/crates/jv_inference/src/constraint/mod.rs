@@ -9,6 +9,7 @@ pub mod constructors;
 pub mod generic;
 pub mod graph;
 pub mod incremental;
+pub mod where_clause;
 
 pub use crate::diagnostics::ConstructorOrigin;
 
@@ -32,3 +33,4 @@ pub use constructors::{
 pub use compact::CompactConstraintGraph;
 
 pub use incremental::{AstId, ConstraintDiff, IncrementalConstraintBuilder, IncrementalTelemetry};
+pub use where_clause::WhereConstraintResolver;

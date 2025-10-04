@@ -1,7 +1,8 @@
 use crate::constraint::{GenericConstraint, GenericConstraintKind};
 use crate::solver::{GenericSolver, GenericSolverDiagnostic};
 use crate::types::{
-    BoundConstraint, BoundPredicate, GenericBounds, SymbolId, TypeId, TypeKind, TypeVariant,
+    BoundConstraint, BoundPredicate, GenericBounds, SymbolId, TraitBound, TypeId, TypeKind,
+    TypeVariant,
 };
 use jv_ast::Span;
 
@@ -54,7 +55,7 @@ fn reports_bound_violation_when_predicate_missing() {
     constraints.push(constraint(GenericConstraintKind::BoundRequirement {
         owner: symbol.clone(),
         parameter: param,
-        predicate: BoundPredicate::Trait("Display".into()),
+        predicate: BoundPredicate::Trait(TraitBound::simple("Display")),
     }));
 
     let solution = GenericSolver::resolve(&constraints);
@@ -71,7 +72,7 @@ fn accepts_argument_when_bound_present() {
     let param = TypeId::new(3);
     let bounds = GenericBounds::new(vec![BoundConstraint::new(
         param,
-        BoundPredicate::Trait("Display".into()),
+        BoundPredicate::Trait(TraitBound::simple("Display")),
     )]);
     let argument = TypeKind::variable(param).with_bounds(bounds);
     let mut constraints = Vec::new();
@@ -84,7 +85,7 @@ fn accepts_argument_when_bound_present() {
     constraints.push(constraint(GenericConstraintKind::BoundRequirement {
         owner: symbol.clone(),
         parameter: param,
-        predicate: BoundPredicate::Trait("Display".into()),
+        predicate: BoundPredicate::Trait(TraitBound::simple("Display")),
     }));
 
     let solution = GenericSolver::resolve(&constraints);

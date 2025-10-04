@@ -184,13 +184,7 @@ fn describe_type(ty: &TypeKind) -> String {
 }
 
 fn describe_predicate(predicate: &BoundPredicate) -> String {
-    match predicate {
-        BoundPredicate::Trait(name) | BoundPredicate::Interface(name) => name.clone(),
-        BoundPredicate::WhereClause(predicates) => {
-            let inner: Vec<String> = predicates.iter().map(describe_predicate).collect();
-            format!("where {}", inner.join(" & "))
-        }
-    }
+    predicate.describe()
 }
 
 fn format_span(span: &Span) -> String {
@@ -203,7 +197,7 @@ fn format_span(span: &Span) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::TypeVariant;
+    use crate::types::{TraitBound, TypeVariant};
 
     fn dummy_span() -> Span {
         Span {
@@ -244,7 +238,7 @@ mod tests {
 
     #[test]
     fn translate_bound_violation_creates_jv2002() {
-        let predicate = BoundPredicate::Trait("Display".into());
+        let predicate = BoundPredicate::Trait(TraitBound::simple("Display"));
         let diagnostic = GenericSolverDiagnostic::BoundViolation {
             symbol: SymbolId::from("pkg::Bar"),
             parameter: TypeId::new(2),

@@ -136,12 +136,19 @@ fn convert_bounds(bounds: &GenericBounds) -> Vec<JavaType> {
 
 fn java_types_from_predicate(predicate: &BoundPredicate) -> Vec<JavaType> {
     match predicate {
-        BoundPredicate::Trait(name) | BoundPredicate::Interface(name) => {
-            vec![JavaType::Reference {
-                name: to_java_name(name),
-                generic_args: Vec::new(),
-            }]
-        }
+        BoundPredicate::Trait(bound) => vec![JavaType::Reference {
+            name: to_java_name(&bound.name),
+            generic_args: Vec::new(),
+        }],
+        BoundPredicate::Interface(name) => vec![JavaType::Reference {
+            name: to_java_name(name),
+            generic_args: Vec::new(),
+        }],
+        BoundPredicate::Capability(capability) => vec![JavaType::Reference {
+            name: to_java_name(&capability.name),
+            generic_args: Vec::new(),
+        }],
+        BoundPredicate::FunctionSignature(_) => Vec::new(),
         BoundPredicate::WhereClause(predicates) => predicates
             .iter()
             .flat_map(java_types_from_predicate)

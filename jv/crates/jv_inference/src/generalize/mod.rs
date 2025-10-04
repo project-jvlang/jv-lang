@@ -131,7 +131,7 @@ fn substitute_type(original: &TypeKind, subs: &HashMap<TypeId, TypeKind>) -> Typ
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::{BoundConstraint, BoundPredicate};
+    use crate::types::{BoundConstraint, BoundPredicate, TraitBound};
 
     #[test]
     fn generalize_collects_bounds_for_quantified_variables() {
@@ -139,8 +139,11 @@ mod tests {
         let u = TypeId::new(11);
         let ty = TypeKind::function(vec![TypeKind::variable(t)], TypeKind::variable(u));
         let bounds = GenericBounds::new(vec![
-            BoundConstraint::new(t, BoundPredicate::Trait("Display".into())),
-            BoundConstraint::new(TypeId::new(99), BoundPredicate::Trait("Clone".into())),
+            BoundConstraint::new(t, BoundPredicate::Trait(TraitBound::simple("Display"))),
+            BoundConstraint::new(
+                TypeId::new(99),
+                BoundPredicate::Trait(TraitBound::simple("Clone")),
+            ),
         ]);
 
         let scheme = generalize_with_bounds(ty.clone(), &bounds);
@@ -158,7 +161,7 @@ mod tests {
         let ty = TypeKind::variable(t);
         let bounds = GenericBounds::new(vec![BoundConstraint::new(
             t,
-            BoundPredicate::Trait("Debug".into()),
+            BoundPredicate::Trait(TraitBound::simple("Debug")),
         )]);
         let scheme = generalize_with_bounds(ty, &bounds);
 

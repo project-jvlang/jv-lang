@@ -904,7 +904,7 @@ mod tests {
     use super::*;
     use crate::cache::CacheMetrics;
     use crate::solver::Variance;
-    use crate::types::{BoundConstraint, BoundPredicate, NullabilityFlag, TypeVariant};
+    use crate::types::{BoundConstraint, BoundPredicate, NullabilityFlag, TraitBound, TypeVariant};
     use jv_ast::json::{JsonEntry, JsonLiteral, JsonValue, NumberGrouping};
     use jv_ast::types::Span;
     use std::collections::HashSet;
@@ -997,7 +997,7 @@ mod tests {
 
         let bounds = GenericBounds::new(vec![BoundConstraint::new(
             TypeId::new(7),
-            BoundPredicate::Trait("Debug".to_string()),
+            BoundPredicate::Trait(TraitBound::simple("Debug")),
         )]);
         builder.record_bounds(TypeId::new(7), bounds.clone());
         builder.record_variance(TypeId::new(7), Variance::Covariant);

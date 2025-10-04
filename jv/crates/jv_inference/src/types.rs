@@ -168,18 +168,286 @@ impl Default for TypeVariant {
 /// Constraint bound predicate.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BoundPredicate {
-    Trait(String),
+    Trait(TraitBound),
     Interface(String),
+    Capability(CapabilityBound),
+    FunctionSignature(FunctionSignatureBound),
     WhereClause(Vec<BoundPredicate>),
 }
 
 impl BoundPredicate {
     fn key(&self) -> String {
         match self {
-            BoundPredicate::Trait(name) | BoundPredicate::Interface(name) => name.clone(),
+            BoundPredicate::Trait(bound) => bound.key(),
+            BoundPredicate::Interface(name) => name.clone(),
+            BoundPredicate::Capability(bound) => bound.key(),
+            BoundPredicate::FunctionSignature(signature) => signature.key(),
             BoundPredicate::WhereClause(predicates) => {
                 let inner: Vec<String> = predicates.iter().map(|p| p.key()).collect();
                 format!("where({})", inner.join("&"))
+            }
+        }
+    }
+
+    /// Human-readable description used by diagnostics and debugging helpers.
+    pub fn describe(&self) -> String {
+        match self {
+            BoundPredicate::Trait(bound) => bound.describe(),
+            BoundPredicate::Interface(name) => format!("interface {name}"),
+            BoundPredicate::Capability(bound) => bound.describe(),
+            BoundPredicate::FunctionSignature(signature) => signature.describe(),
+            BoundPredicate::WhereClause(predicates) => {
+                let inner: Vec<String> = predicates.iter().map(|p| p.describe()).collect();
+                inner.join(" & ")
+            }
+        }
+    }
+}
+
+/// Trait-style bound with optional type arguments.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TraitBound {
+    pub name: String,
+    pub arguments: Vec<BoundTypeReference>,
+}
+
+impl TraitBound {
+    pub fn new(name: impl Into<String>, arguments: Vec<BoundTypeReference>) -> Self {
+        Self {
+            name: name.into(),
+            arguments,
+        }
+    }
+
+    pub fn simple(name: impl Into<String>) -> Self {
+        Self::new(name, Vec::new())
+    }
+
+    fn key(&self) -> String {
+        if self.arguments.is_empty() {
+            self.name.clone()
+        } else {
+            let args = self
+                .arguments
+                .iter()
+                .map(|arg| arg.key())
+                .collect::<Vec<_>>()
+                .join(",");
+            format!("{}<{}>", self.name, args)
+        }
+    }
+
+    fn describe(&self) -> String {
+        if self.arguments.is_empty() {
+            self.name.clone()
+        } else {
+            let args = self
+                .arguments
+                .iter()
+                .map(|arg| arg.describe())
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("{}<{}>", self.name, args)
+        }
+    }
+}
+
+/// Capability-style bound analogous to type class constraints.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CapabilityBound {
+    pub name: String,
+    pub target: BoundTypeReference,
+    pub hints: CapabilityHints,
+}
+
+impl CapabilityBound {
+    pub fn new(
+        name: impl Into<String>,
+        target: BoundTypeReference,
+        hints: CapabilityHints,
+    ) -> Self {
+        Self {
+            name: name.into(),
+            target,
+            hints,
+        }
+    }
+
+    fn key(&self) -> String {
+        format!(
+            "capability:{}:{}:{}",
+            self.name,
+            self.target.key(),
+            self.hints.key()
+        )
+    }
+
+    fn describe(&self) -> String {
+        let mut base = format!("{} for {}", self.name, self.target.describe());
+        if let Some(preferred) = &self.hints.preferred_impl {
+            base.push_str(&format!(" (preferred impl: {preferred})"));
+        }
+        if self.hints.inline_only {
+            base.push_str(" [inline-only]");
+        }
+        base
+    }
+}
+
+/// Optional metadata provided when resolving capabilities.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct CapabilityHints {
+    pub preferred_impl: Option<String>,
+    pub inline_only: bool,
+}
+
+impl CapabilityHints {
+    fn key(&self) -> String {
+        let preferred = self
+            .preferred_impl
+            .as_ref()
+            .map(String::as_str)
+            .unwrap_or("_");
+        format!("pref={preferred}:inline={}", self.inline_only)
+    }
+}
+
+/// Function signature-style bound used for advanced constraints.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FunctionSignatureBound {
+    pub parameters: Vec<BoundTypeReference>,
+    pub return_type: Option<BoundTypeReference>,
+}
+
+impl FunctionSignatureBound {
+    pub fn new(
+        parameters: Vec<BoundTypeReference>,
+        return_type: Option<BoundTypeReference>,
+    ) -> Self {
+        Self {
+            parameters,
+            return_type,
+        }
+    }
+
+    fn key(&self) -> String {
+        let params = self
+            .parameters
+            .iter()
+            .map(|p| p.key())
+            .collect::<Vec<_>>()
+            .join(",");
+        let ret = self
+            .return_type
+            .as_ref()
+            .map(|ty| ty.key())
+            .unwrap_or_else(|| "void".to_string());
+        format!("fn({params})->{ret}")
+    }
+
+    fn describe(&self) -> String {
+        let params = self
+            .parameters
+            .iter()
+            .map(|p| p.describe())
+            .collect::<Vec<_>>()
+            .join(", ");
+        let ret = self
+            .return_type
+            .as_ref()
+            .map(|ty| ty.describe())
+            .unwrap_or_else(|| "Unit".to_string());
+        format!("fn({params}) -> {ret}")
+    }
+}
+
+/// Type reference captured while translating predicates.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BoundTypeReference {
+    TypeParameter {
+        id: TypeId,
+        name: String,
+    },
+    Named(String),
+    Optional(Box<BoundTypeReference>),
+    Array(Box<BoundTypeReference>),
+    Generic {
+        name: String,
+        arguments: Vec<BoundTypeReference>,
+    },
+    Function {
+        parameters: Vec<BoundTypeReference>,
+        return_type: Option<Box<BoundTypeReference>>,
+    },
+}
+
+impl BoundTypeReference {
+    pub fn key(&self) -> String {
+        match self {
+            BoundTypeReference::TypeParameter { id, name } => {
+                format!("param:{name}:{}", id.to_raw())
+            }
+            BoundTypeReference::Named(name) => format!("named:{name}"),
+            BoundTypeReference::Optional(inner) => format!("optional<{}>", inner.key()),
+            BoundTypeReference::Array(inner) => format!("array<{}>", inner.key()),
+            BoundTypeReference::Generic { name, arguments } => {
+                let args = arguments
+                    .iter()
+                    .map(|arg| arg.key())
+                    .collect::<Vec<_>>()
+                    .join(",");
+                format!("generic:{name}<{}>", args)
+            }
+            BoundTypeReference::Function {
+                parameters,
+                return_type,
+            } => {
+                let params = parameters
+                    .iter()
+                    .map(|param| param.key())
+                    .collect::<Vec<_>>()
+                    .join(",");
+                let ret = return_type
+                    .as_ref()
+                    .map(|ty| ty.key())
+                    .unwrap_or_else(|| "void".to_string());
+                format!("fn<{params}->{ret}>")
+            }
+        }
+    }
+
+    pub fn describe(&self) -> String {
+        match self {
+            BoundTypeReference::TypeParameter { name, .. } => name.clone(),
+            BoundTypeReference::Named(name) => name.clone(),
+            BoundTypeReference::Optional(inner) => format!("{}?", inner.describe()),
+            BoundTypeReference::Array(inner) => format!("{}[]", inner.describe()),
+            BoundTypeReference::Generic { name, arguments } => {
+                if arguments.is_empty() {
+                    name.clone()
+                } else {
+                    let args = arguments
+                        .iter()
+                        .map(|arg| arg.describe())
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    format!("{}<{}>", name, args)
+                }
+            }
+            BoundTypeReference::Function {
+                parameters,
+                return_type,
+            } => {
+                let params = parameters
+                    .iter()
+                    .map(|param| param.describe())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let ret = return_type
+                    .as_ref()
+                    .map(|ty| ty.describe())
+                    .unwrap_or_else(|| "Unit".to_string());
+                format!("fn({params}) -> {ret}")
             }
         }
     }
@@ -608,12 +876,23 @@ mod tests {
     #[test]
     fn bounds_matrix_tracks_constraints() {
         let constraints = vec![
-            BoundConstraint::new(TypeId::new(0), BoundPredicate::Trait("Clone".to_string())),
-            BoundConstraint::new(TypeId::new(0), BoundPredicate::Trait("Debug".to_string())),
-            BoundConstraint::new(TypeId::new(1), BoundPredicate::Trait("Clone".to_string())),
+            BoundConstraint::new(
+                TypeId::new(0),
+                BoundPredicate::Trait(TraitBound::simple("Clone")),
+            ),
+            BoundConstraint::new(
+                TypeId::new(0),
+                BoundPredicate::Trait(TraitBound::simple("Debug")),
+            ),
             BoundConstraint::new(
                 TypeId::new(1),
-                BoundPredicate::WhereClause(vec![BoundPredicate::Trait("Send".to_string())]),
+                BoundPredicate::Trait(TraitBound::simple("Clone")),
+            ),
+            BoundConstraint::new(
+                TypeId::new(1),
+                BoundPredicate::WhereClause(vec![BoundPredicate::Trait(TraitBound::simple(
+                    "Send",
+                ))]),
             ),
         ];
         let bounds = GenericBounds::new(constraints);
