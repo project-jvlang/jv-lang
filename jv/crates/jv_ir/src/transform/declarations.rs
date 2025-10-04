@@ -138,6 +138,7 @@ pub fn desugar_extension_function(
             body,
             modifiers,
             span,
+            ..
         } => (name, parameters, return_type, body, modifiers, span),
         _ => {
             return Err(TransformError::ExtensionFunctionError {

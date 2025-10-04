@@ -340,6 +340,8 @@ impl<'a> ReconstructionContext<'a> {
 
                 Ok(Statement::FunctionDeclaration {
                     name: name.clone(),
+                    type_parameters: Vec::new(),
+                    where_clause: None,
                     parameters: params,
                     return_type,
                     body: Box::new(body_expr),

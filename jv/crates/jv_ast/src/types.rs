@@ -96,6 +96,92 @@ pub enum TypeAnnotation {
     Array(Box<TypeAnnotation>),
 }
 
+/// Qualified name used for traits, capabilities, and other declaration references.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct QualifiedName {
+    pub segments: Vec<String>,
+    pub span: Span,
+}
+
+impl QualifiedName {
+    pub fn new(segments: Vec<String>, span: Span) -> Self {
+        Self { segments, span }
+    }
+
+    pub fn simple_name(&self) -> Option<&str> {
+        self.segments.last().map(String::as_str)
+    }
+
+    pub fn qualified(&self) -> String {
+        self.segments.join(".")
+    }
+}
+
+/// Additional hints used when resolving capabilities.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct CapabilityHints {
+    #[serde(default)]
+    pub preferred_impl: Option<String>,
+    #[serde(default)]
+    pub inline_only: bool,
+}
+
+/// Capability requirement analogous to type class constraints.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CapabilityRequirement {
+    pub name: QualifiedName,
+    pub target: TypeAnnotation,
+    #[serde(default)]
+    pub hints: CapabilityHints,
+    pub span: Span,
+}
+
+/// Function signature-style predicate for advanced constraints.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FunctionConstraintSignature {
+    pub parameters: Vec<TypeAnnotation>,
+    pub return_type: Option<TypeAnnotation>,
+    pub span: Span,
+}
+
+/// where句で指定される制約の集合。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct WhereClause {
+    pub predicates: Vec<WherePredicate>,
+    pub span: Span,
+}
+
+/// where句内の個別制約。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum WherePredicate {
+    TraitBound {
+        type_param: String,
+        trait_name: QualifiedName,
+        type_args: Vec<TypeAnnotation>,
+        span: Span,
+    },
+    Capability {
+        type_param: String,
+        capability: CapabilityRequirement,
+        span: Span,
+    },
+    FunctionSignature {
+        type_param: String,
+        signature: FunctionConstraintSignature,
+        span: Span,
+    },
+}
+
+impl WherePredicate {
+    pub fn span(&self) -> &Span {
+        match self {
+            WherePredicate::TraitBound { span, .. }
+            | WherePredicate::Capability { span, .. }
+            | WherePredicate::FunctionSignature { span, .. } => span,
+        }
+    }
+}
+
 /// Pattern matching constructs
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Pattern {

@@ -2,7 +2,7 @@ use super::support::{first_statement, parse_program, parse_program_result};
 use jv_ast::{
     Argument, ArgumentElementKind, BinaryOp, CallArgumentStyle, CommentKind, CommentVisibility,
     ConcurrencyConstruct, Expression, JsonValue, Literal, LoopStrategy, Pattern,
-    ResourceManagement, SequenceDelimiter, Statement, StringPart, TypeAnnotation,
+    ResourceManagement, SequenceDelimiter, Statement, StringPart, TypeAnnotation, WherePredicate,
 };
 
 use test_case::test_case;
@@ -80,6 +80,46 @@ fn test_function_declaration_signature_and_body() {
                     assert!(matches!(statements[0], Statement::Return { .. }));
                 }
                 other => panic!("expected block body, found {:?}", other),
+            }
+        }
+        other => panic!("expected function declaration, found {:?}", other),
+    }
+}
+
+#[test]
+fn test_function_generic_where_clause() {
+    let program = parse_program("fun <T> max(a: T, b: T): T where T: Comparable<T>");
+    let statement = first_statement(&program);
+
+    match statement {
+        Statement::FunctionDeclaration {
+            type_parameters,
+            where_clause,
+            parameters,
+            ..
+        } => {
+            assert_eq!(type_parameters, &vec!["T".to_string()]);
+            assert_eq!(parameters.len(), 2);
+
+            let clause = where_clause.as_ref().expect("where clause present");
+            assert_eq!(clause.predicates.len(), 1);
+
+            match &clause.predicates[0] {
+                WherePredicate::TraitBound {
+                    type_param,
+                    trait_name,
+                    type_args,
+                    ..
+                } => {
+                    assert_eq!(type_param, "T");
+                    assert_eq!(trait_name.simple_name(), Some("Comparable"));
+                    assert_eq!(type_args.len(), 1);
+                    match &type_args[0] {
+                        TypeAnnotation::Simple(name) => assert_eq!(name, "T"),
+                        other => panic!("expected simple type argument, found {:?}", other),
+                    }
+                }
+                other => panic!("expected trait bound predicate, found {:?}", other),
             }
         }
         other => panic!("expected function declaration, found {:?}", other),

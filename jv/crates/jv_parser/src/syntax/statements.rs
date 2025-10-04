@@ -4,7 +4,8 @@ use jv_ast::{
     Annotation, AnnotationArgument, AnnotationName, AnnotationValue, BinaryOp, CommentKind,
     CommentStatement, CommentVisibility, ConcurrencyConstruct, Expression, ExtensionFunction,
     ForInStatement, Literal, LoopBinding, LoopStrategy, Modifiers, NumericRangeLoop, Parameter,
-    ResourceManagement, Span, Statement, TypeAnnotation, Visibility,
+    QualifiedName, ResourceManagement, Span, Statement, TypeAnnotation, Visibility, WhereClause,
+    WherePredicate,
 };
 use jv_lexer::{Token, TokenType};
 
@@ -12,11 +13,11 @@ use super::expressions;
 use super::parameters::parameter_list;
 use super::support::{
     expression_span, identifier, identifier_with_span, keyword as support_keyword, merge_spans,
-    span_from_token, statement_span, token_any_comma, token_assign, token_at, token_class,
-    token_colon, token_data, token_defer, token_do_keyword, token_dot, token_for, token_fun,
-    token_in_keyword, token_left_brace, token_left_paren, token_return, token_right_brace,
-    token_right_paren, token_spawn, token_use, token_val, token_var, token_while_keyword,
-    type_annotation_simple,
+    qualified_name_with_span, span_from_token, statement_span, token_any_comma, token_assign,
+    token_at, token_class, token_colon, token_data, token_defer, token_do_keyword, token_dot,
+    token_for, token_fun, token_greater, token_in_keyword, token_left_brace, token_left_paren,
+    token_less, token_question, token_return, token_right_brace, token_right_paren, token_spawn,
+    token_use, token_val, token_var, token_where_keyword, token_while_keyword, type_annotation,
 };
 
 pub(crate) fn statement_parser(
@@ -157,6 +158,39 @@ fn assignment_statement_parser(
         })
 }
 
+fn optional_type_arguments(
+) -> impl ChumskyParser<Token, Vec<TypeAnnotation>, Error = Simple<Token>> + Clone {
+    token_less()
+        .ignore_then(
+            type_annotation()
+                .separated_by(token_any_comma())
+                .allow_trailing(),
+        )
+        .then_ignore(token_greater())
+        .or_not()
+        .map(|args| args.unwrap_or_default())
+}
+
+fn receiver_type_parser() -> impl ChumskyParser<Token, TypeAnnotation, Error = Simple<Token>> + Clone
+{
+    identifier()
+        .then(optional_type_arguments())
+        .then(token_question().or_not())
+        .map(|((name, type_args), nullable)| {
+            let base = if type_args.is_empty() {
+                TypeAnnotation::Simple(name)
+            } else {
+                TypeAnnotation::Generic { name, type_args }
+            };
+
+            if nullable.is_some() {
+                TypeAnnotation::Nullable(Box::new(base))
+            } else {
+                base
+            }
+        })
+}
+
 fn function_declaration_parser(
     statement: impl ChumskyParser<Token, Statement, Error = Simple<Token>> + Clone,
     expr: impl ChumskyParser<Token, Expression, Error = Simple<Token>> + Clone,
@@ -176,6 +210,8 @@ fn function_declaration_parser(
                 let inner_body = body_expr.clone();
                 let inner = Statement::FunctionDeclaration {
                     name: signature.name,
+                    type_parameters: signature.type_parameters.clone(),
+                    where_clause: signature.where_clause.clone(),
                     parameters: signature.parameters,
                     return_type: signature.return_type,
                     body: Box::new(inner_body),
@@ -191,6 +227,8 @@ fn function_declaration_parser(
             } else {
                 Statement::FunctionDeclaration {
                     name: signature.name,
+                    type_parameters: signature.type_parameters,
+                    where_clause: signature.where_clause,
                     parameters: signature.parameters,
                     return_type: signature.return_type,
                     body: Box::new(body_expr),
@@ -422,30 +460,116 @@ fn legacy_loop_parser() -> impl ChumskyParser<Token, Statement, Error = Simple<T
 fn function_signature(
     expr: impl ChumskyParser<Token, Expression, Error = Simple<Token>> + Clone,
 ) -> impl ChumskyParser<Token, FunctionSignature, Error = Simple<Token>> + Clone {
-    let receiver_and_name = type_annotation_simple()
+    let receiver_and_name = receiver_type_parser()
         .then_ignore(token_dot())
         .then(identifier())
         .map(|(receiver, name)| (Some(receiver), name))
         .or(identifier().map(|name| (None, name)));
 
-    receiver_and_name
+    type_parameter_list()
+        .or_not()
+        .then(receiver_and_name)
         .then_ignore(token_left_paren())
         .then(parameter_list(expr.clone()))
         .then_ignore(token_right_paren())
         .then(type_annotation_clause())
+        .then(where_clause_parser())
         .map(
-            |(((receiver, name), parameters), return_type)| FunctionSignature {
-                receiver_type: receiver,
-                name,
-                parameters,
-                return_type,
+            |((((generics, (receiver, name)), parameters), return_type), where_clause)| {
+                FunctionSignature {
+                    receiver_type: receiver,
+                    name,
+                    type_parameters: generics.unwrap_or_default(),
+                    parameters,
+                    return_type,
+                    where_clause,
+                }
             },
         )
 }
 
+fn type_parameter_list() -> impl ChumskyParser<Token, Vec<String>, Error = Simple<Token>> + Clone {
+    token_less()
+        .ignore_then(
+            identifier()
+                .separated_by(token_any_comma())
+                .allow_trailing(),
+        )
+        .then_ignore(token_greater())
+}
+
+fn where_clause_parser(
+) -> impl ChumskyParser<Token, Option<WhereClause>, Error = Simple<Token>> + Clone {
+    token_where_keyword()
+        .map(|token| span_from_token(&token))
+        .then(
+            where_predicate_parser()
+                .separated_by(token_any_comma())
+                .at_least(1)
+                .allow_trailing(),
+        )
+        .map(|(where_span, predicates)| {
+            let clause_span = predicates
+                .last()
+                .map(|predicate| predicate.span().clone())
+                .map(|end_span| merge_spans(&where_span, &end_span))
+                .unwrap_or(where_span.clone());
+
+            WhereClause {
+                predicates,
+                span: clause_span,
+            }
+        })
+        .or_not()
+}
+
+fn where_predicate_parser(
+) -> impl ChumskyParser<Token, WherePredicate, Error = Simple<Token>> + Clone {
+    identifier_with_span()
+        .then_ignore(token_colon())
+        .then(trait_bound_predicate())
+        .map(
+            |((type_param, type_span), (trait_name, type_args, trait_span))| {
+                let span = merge_spans(&type_span, &trait_span);
+                WherePredicate::TraitBound {
+                    type_param,
+                    trait_name,
+                    type_args,
+                    span,
+                }
+            },
+        )
+}
+
+fn trait_bound_predicate(
+) -> impl ChumskyParser<Token, (QualifiedName, Vec<TypeAnnotation>, Span), Error = Simple<Token>> + Clone
+{
+    qualified_name_with_span()
+        .map(|(segments, span)| (QualifiedName::new(segments, span.clone()), span))
+        .then(
+            token_less()
+                .map(|token| span_from_token(&token))
+                .then(
+                    type_annotation()
+                        .separated_by(token_any_comma())
+                        .allow_trailing(),
+                )
+                .then(token_greater().map(|token| span_from_token(&token)))
+                .map(|((lt_span, args), gt_span)| (args, merge_spans(&lt_span, &gt_span)))
+                .or_not(),
+        )
+        .map(|((name, name_span), maybe_args)| {
+            if let Some((args, args_span)) = maybe_args {
+                (name, args, merge_spans(&name_span, &args_span))
+            } else {
+                (name, Vec::new(), name_span)
+            }
+        })
+}
+
 fn type_annotation_clause(
 ) -> impl ChumskyParser<Token, Option<TypeAnnotation>, Error = Simple<Token>> + Clone {
-    token_colon().ignore_then(type_annotation_simple()).or_not()
+    token_colon().ignore_then(type_annotation()).or_not()
 }
 
 fn modifiers_parser() -> impl ChumskyParser<Token, Modifiers, Error = Simple<Token>> + Clone {
@@ -591,22 +715,6 @@ fn annotation_argument(
         });
 
     choice((named, positional))
-}
-
-fn qualified_name_with_span(
-) -> impl ChumskyParser<Token, (Vec<String>, Span), Error = Simple<Token>> + Clone {
-    identifier_with_span()
-        .then(token_dot().ignore_then(identifier_with_span()).repeated())
-        .map(|((first_name, first_span), rest)| {
-            let mut segments = Vec::with_capacity(rest.len() + 1);
-            segments.push(first_name);
-            let mut span = first_span;
-            for (segment, segment_span) in rest {
-                span = merge_spans(&span, &segment_span);
-                segments.push(segment);
-            }
-            (segments, span)
-        })
 }
 
 #[cfg(test)]
@@ -898,8 +1006,10 @@ fn modifier_keyword() -> impl ChumskyParser<Token, ModifierToken, Error = Simple
 struct FunctionSignature {
     receiver_type: Option<TypeAnnotation>,
     name: String,
+    type_parameters: Vec<String>,
     parameters: Vec<Parameter>,
     return_type: Option<TypeAnnotation>,
+    where_clause: Option<WhereClause>,
 }
 
 #[derive(Debug, Clone)]

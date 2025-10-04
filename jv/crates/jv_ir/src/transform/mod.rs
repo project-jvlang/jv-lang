@@ -151,6 +151,8 @@ pub fn transform_statement(
             body,
             modifiers,
             span,
+            type_parameters,
+            where_clause,
         } => Ok(vec![desugar_top_level_function(
             Statement::FunctionDeclaration {
                 name,
@@ -159,6 +161,8 @@ pub fn transform_statement(
                 body,
                 modifiers,
                 span,
+                type_parameters,
+                where_clause,
             },
             context,
         )?]),
