@@ -7,7 +7,7 @@ use std::time::Duration;
 use thiserror::Error;
 
 /// Java-compatible type representation after desugaring
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum JavaType {
     /// Primitive types: int, boolean, char, etc.
     Primitive(String),
@@ -27,8 +27,21 @@ pub enum JavaType {
         param_types: Vec<JavaType>,
         return_type: Box<JavaType>,
     },
+    /// Wildcard generic (e.g., `? extends Number`).
+    Wildcard {
+        kind: JavaWildcardKind,
+        bound: Option<Box<JavaType>>,
+    },
     /// Void type
     Void,
+}
+
+/// Variance kind for Java wildcards.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum JavaWildcardKind {
+    Unbounded,
+    Extends,
+    Super,
 }
 
 /// Desugared expressions - all jv sugar removed
@@ -767,12 +780,38 @@ pub struct IrRecordComponent {
     pub span: Span,
 }
 
+/// Variance annotation recorded for IR type parameters.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum IrVariance {
+    #[default]
+    Invariant,
+    Covariant,
+    Contravariant,
+    Bivariant,
+}
+
 /// Type parameters for generics
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct IrTypeParameter {
     pub name: String,
     pub bounds: Vec<JavaType>,
+    #[serde(default)]
+    pub variance: IrVariance,
+    #[serde(default)]
+    pub permits: Vec<String>,
     pub span: Span,
+}
+
+impl IrTypeParameter {
+    pub fn new(name: impl Into<String>, span: Span) -> Self {
+        Self {
+            name: name.into(),
+            bounds: Vec::new(),
+            variance: IrVariance::default(),
+            permits: Vec::new(),
+            span,
+        }
+    }
 }
 
 /// Catch clause for exception handling
@@ -895,6 +934,27 @@ impl JavaType {
         JavaType::Reference {
             name: "Object".to_string(),
             generic_args: vec![],
+        }
+    }
+
+    pub fn wildcard_extends(bound: JavaType) -> Self {
+        JavaType::Wildcard {
+            kind: JavaWildcardKind::Extends,
+            bound: Some(Box::new(bound)),
+        }
+    }
+
+    pub fn wildcard_super(bound: JavaType) -> Self {
+        JavaType::Wildcard {
+            kind: JavaWildcardKind::Super,
+            bound: Some(Box::new(bound)),
+        }
+    }
+
+    pub fn wildcard_unbounded() -> Self {
+        JavaType::Wildcard {
+            kind: JavaWildcardKind::Unbounded,
+            bound: None,
         }
     }
 

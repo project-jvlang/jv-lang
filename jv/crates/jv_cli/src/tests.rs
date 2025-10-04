@@ -2,6 +2,15 @@ use super::*;
 use crate::commands::explain;
 use crate::pipeline::compute_script_main_class;
 
+use crate::pipeline::generics::apply_type_facts;
+use jv_inference::service::{TypeFactsBuilder, TypeScheme};
+use jv_inference::solver::Variance;
+use jv_inference::types::{
+    BoundConstraint, BoundPredicate, GenericBounds, TypeId, TypeKind, TypeVariant,
+};
+use jv_ir::{IrModifiers, IrProgram, IrStatement, IrTypeParameter, IrVariance, JavaType};
+use std::collections::HashMap;
+
 mod compat;
 mod project_layout;
 mod project_locator;
@@ -15,6 +24,10 @@ use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 use zip::write::FileOptions;
+
+fn dummy_span() -> jv_ast::Span {
+    jv_ast::Span::dummy()
+}
 
 struct TempDirGuard {
     path: PathBuf,
@@ -553,4 +566,79 @@ fn test_multiple_files_fmt() {
         }
         _ => panic!("Expected Fmt command"),
     }
+}
+
+#[test]
+fn apply_type_facts_enriches_class_metadata() {
+    let span = dummy_span();
+    let mut program = IrProgram {
+        package: Some("demo".to_string()),
+        imports: Vec::new(),
+        type_declarations: vec![IrStatement::ClassDeclaration {
+            name: "Box".to_string(),
+            type_parameters: vec![IrTypeParameter::new("T", span.clone())],
+            superclass: None,
+            interfaces: Vec::new(),
+            fields: Vec::new(),
+            methods: Vec::new(),
+            nested_classes: Vec::new(),
+            modifiers: IrModifiers::default(),
+            span: span.clone(),
+        }],
+        span,
+    };
+
+    let type_id = TypeId::new(7);
+    let bounds = GenericBounds::new(vec![BoundConstraint::new(
+        type_id,
+        BoundPredicate::Interface("java::lang::Comparable".into()),
+    )]);
+    let mut scheme_bounds = HashMap::new();
+    scheme_bounds.insert(type_id, bounds.clone());
+    let mut scheme = TypeScheme::with_bounds(
+        vec![type_id],
+        TypeKind::new(TypeVariant::Primitive("demo::Box")),
+        scheme_bounds,
+    );
+    scheme.set_variance(type_id, Variance::Covariant);
+
+    let mut builder = TypeFactsBuilder::new();
+    builder.add_scheme("demo::Box", scheme);
+    builder.record_bounds(type_id, bounds);
+    builder.record_variance(type_id, Variance::Covariant);
+    builder.record_sealed_permits(
+        type_id,
+        vec![TypeKind::new(TypeVariant::Primitive("demo::Foo"))],
+    );
+
+    let facts = builder.build();
+
+    apply_type_facts(&mut program, &facts);
+
+    let IrStatement::ClassDeclaration {
+        type_parameters,
+        modifiers,
+        ..
+    } = &program.type_declarations[0]
+    else {
+        panic!("expected class declaration");
+    };
+
+    assert_eq!(type_parameters.len(), 1);
+    let param = &type_parameters[0];
+    assert_eq!(param.variance, IrVariance::Covariant);
+    assert_eq!(param.permits, vec!["demo.Foo".to_string()]);
+
+    let bounds = &param.bounds;
+    assert_eq!(bounds.len(), 1);
+    match &bounds[0] {
+        JavaType::Reference { name, generic_args } => {
+            assert_eq!(name, "java.lang.Comparable");
+            assert!(generic_args.is_empty());
+        }
+        other => panic!("unexpected bound: {:?}", other),
+    }
+
+    assert!(modifiers.is_sealed);
+    assert_eq!(modifiers.permitted_types, vec!["demo.Foo".to_string()]);
 }

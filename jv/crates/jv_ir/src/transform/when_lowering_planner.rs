@@ -4,7 +4,7 @@ use crate::context::TransformContext;
 use crate::error::TransformError;
 use crate::types::{
     IrCaseLabel, IrDeconstructionComponent, IrDeconstructionPattern, IrExpression,
-    IrImplicitWhenEnd, IrSwitchCase, JavaType,
+    IrImplicitWhenEnd, IrSwitchCase, JavaType, JavaWildcardKind,
 };
 use jv_ast::{BinaryOp, Expression, ImplicitWhenEnd, Literal, Pattern, Span, WhenArm};
 
@@ -586,6 +586,13 @@ fn type_name_for_case(java_type: &JavaType) -> String {
             format!("{}[]", type_name_for_case(element_type.as_ref()))
         }
         JavaType::Functional { interface_name, .. } => interface_name.clone(),
+        JavaType::Wildcard { kind, bound } => match kind {
+            JavaWildcardKind::Unbounded => "Object".to_string(),
+            JavaWildcardKind::Extends | JavaWildcardKind::Super => bound
+                .as_ref()
+                .map(|inner| type_name_for_case(inner))
+                .unwrap_or_else(|| "Object".to_string()),
+        },
         JavaType::Void => "Object".to_string(),
     }
 }

@@ -2,6 +2,7 @@ pub mod builder;
 pub mod config;
 pub mod error;
 pub mod generator;
+pub mod target_version;
 pub mod types;
 
 pub use builder::{JavaCompilationUnit, JavaSourceBuilder};
@@ -9,6 +10,7 @@ pub use config::JavaCodeGenConfig;
 pub use error::CodeGenError;
 pub use generator::JavaCodeGenerator;
 pub use jv_pm::JavaTarget;
+pub use target_version::TargetedJavaEmitter;
 pub use types::{
     ImportManager, Java25FeatureGenerator, JavaTypeMapper, NullSafetyGenerator, StandardImport,
 };

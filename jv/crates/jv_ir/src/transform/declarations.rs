@@ -216,11 +216,7 @@ pub fn desugar_data_class(
     let ir_modifiers = convert_modifiers(&modifiers);
     let ir_type_parameters = type_parameters
         .into_iter()
-        .map(|tp| IrTypeParameter {
-            name: tp,
-            bounds: Vec::new(),
-            span: span.clone(),
-        })
+        .map(|tp| IrTypeParameter::new(tp, span.clone()))
         .collect::<Vec<_>>();
 
     if !is_mutable {

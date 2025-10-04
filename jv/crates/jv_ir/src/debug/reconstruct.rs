@@ -2,12 +2,31 @@ use std::borrow::Cow;
 
 use crate::types::{
     IrCommentKind, IrExpression, IrModifiers, IrParameter, IrProgram, IrStatement, IrVisibility,
-    JavaType,
+    JavaType, JavaWildcardKind,
 };
 use jv_ast::{
     Argument, CallArgumentMetadata, CommentKind, CommentStatement, CommentVisibility, Expression,
     Literal, Modifiers, Program, Span, Statement, StringPart, TypeAnnotation, Visibility,
 };
+
+fn render_type_annotation(annotation: TypeAnnotation) -> String {
+    match annotation {
+        TypeAnnotation::Simple(name) => name,
+        TypeAnnotation::Array(inner) => format!("{}[]", render_type_annotation(*inner)),
+        TypeAnnotation::Function {
+            params,
+            return_type,
+        } => {
+            let params = params
+                .into_iter()
+                .map(render_type_annotation)
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("({}) -> {}", params, render_type_annotation(*return_type))
+        }
+        other => format!("{:?}", other),
+    }
+}
 
 use super::{
     ReconstructionError, ReconstructionOptions, ReconstructionStats, ReconstructionWarning,
@@ -625,6 +644,28 @@ impl<'a> ReconstructionContext<'a> {
                     .collect(),
                 return_type: Box::new(self.convert_java_type(return_type)),
             },
+            JavaType::Wildcard { kind, bound } => {
+                let text = match kind {
+                    JavaWildcardKind::Unbounded => "?".to_string(),
+                    JavaWildcardKind::Extends => format!(
+                        "? extends {}",
+                        bound
+                            .as_ref()
+                            .map(|inner| self.convert_java_type(inner))
+                            .map(render_type_annotation)
+                            .unwrap_or_else(|| "Object".to_string())
+                    ),
+                    JavaWildcardKind::Super => format!(
+                        "? super {}",
+                        bound
+                            .as_ref()
+                            .map(|inner| self.convert_java_type(inner))
+                            .map(render_type_annotation)
+                            .unwrap_or_else(|| "Object".to_string())
+                    ),
+                };
+                TypeAnnotation::Simple(text)
+            }
             JavaType::Void => TypeAnnotation::Simple("Void".into()),
         }
     }

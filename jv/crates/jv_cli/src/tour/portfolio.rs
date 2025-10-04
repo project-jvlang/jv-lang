@@ -9,9 +9,7 @@ use zip::write::FileOptions;
 use zip::{CompressionMethod, ZipWriter};
 
 use super::cli::SectionId;
-use super::progress::{
-    AchievementId, AchievementRecord, Certificate, ProgressSummary, SectionDisplay,
-};
+use super::progress::{ProgressSummary, SectionDisplay};
 use super::projects::{self, JarArtifact, Project, ProjectType};
 use super::sections;
 
@@ -569,6 +567,7 @@ fn add_entries(
 
 #[cfg(test)]
 mod tests {
+    use super::super::progress::{AchievementId, AchievementRecord, Certificate, SectionStatus};
     use super::*;
     use anyhow::Result;
 
@@ -583,9 +582,9 @@ mod tests {
                     title: section.title().to_string(),
                     description: section.description().to_string(),
                     status: if completed {
-                        super::super::progress::SectionStatus::Completed
+                        SectionStatus::Completed
                     } else {
-                        super::super::progress::SectionStatus::InProgress
+                        SectionStatus::InProgress
                     },
                     icon: if completed { "✅" } else { "🔄" },
                     started_at: Some(now),

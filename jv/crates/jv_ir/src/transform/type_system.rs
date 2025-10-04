@@ -1,7 +1,7 @@
 use super::utils::{extract_java_type, ir_expression_span};
 use crate::context::TransformContext;
 use crate::error::TransformError;
-use crate::types::{IrExpression, JavaType};
+use crate::types::{IrExpression, JavaType, JavaWildcardKind};
 use jv_ast::{CallArgumentStyle, SequenceDelimiter, Span, TypeAnnotation};
 
 pub fn infer_java_type(
@@ -208,6 +208,23 @@ fn describe_java_type(java_type: &JavaType) -> String {
             descriptor
         }
         JavaType::Functional { interface_name, .. } => interface_name.clone(),
+        JavaType::Wildcard { kind, bound } => match kind {
+            JavaWildcardKind::Unbounded => "?".to_string(),
+            JavaWildcardKind::Extends => {
+                let ty = bound
+                    .as_ref()
+                    .map(|inner| describe_java_type(inner))
+                    .unwrap_or_else(|| "Object".to_string());
+                format!("? extends {}", ty)
+            }
+            JavaWildcardKind::Super => {
+                let ty = bound
+                    .as_ref()
+                    .map(|inner| describe_java_type(inner))
+                    .unwrap_or_else(|| "Object".to_string());
+                format!("? super {}", ty)
+            }
+        },
         JavaType::Void => "void".to_string(),
     }
 }
