@@ -5,8 +5,8 @@
 //! live outside this crate so that each consumer can decide how to persist and surface data.
 
 use crate::cache::CacheMetrics;
-use crate::solver::TypeBinding;
-use crate::types::{TypeId, TypeKind};
+use crate::solver::{TypeBinding, Variance};
+use crate::types::{GenericBounds, NullabilityFlag, SymbolId, TypeId, TypeKind};
 use hex::encode as hex_encode;
 use jv_ast::json::{JsonLiteral, JsonValue};
 use jv_ir::transform::infer_json_value_schema;
@@ -80,13 +80,98 @@ impl TypeEnvironmentSnapshot {
 /// Describes a type scheme that can be instantiated by downstream consumers.
 #[derive(Debug, Clone)]
 pub struct TypeScheme {
-    pub generics: Vec<TypeId>,
-    pub body: TypeKind,
+    generics: Vec<TypeId>,
+    body: TypeKind,
+    bounds: HashMap<TypeId, GenericBounds>,
+    variance: HashMap<TypeId, Variance>,
 }
 
 impl TypeScheme {
     pub fn new(generics: Vec<TypeId>, body: TypeKind) -> Self {
-        Self { generics, body }
+        Self::with_bounds(generics, body, HashMap::new())
+    }
+
+    pub fn monomorphic(body: TypeKind) -> Self {
+        Self::new(Vec::new(), body)
+    }
+
+    pub fn with_bounds(
+        generics: Vec<TypeId>,
+        body: TypeKind,
+        bounds: HashMap<TypeId, GenericBounds>,
+    ) -> Self {
+        let mut sorted = generics;
+        sorted.sort_by_key(|id| id.to_raw());
+        sorted.dedup_by_key(|id| id.to_raw());
+        Self {
+            generics: sorted,
+            body,
+            bounds,
+            variance: HashMap::new(),
+        }
+    }
+
+    pub fn generics(&self) -> &[TypeId] {
+        &self.generics
+    }
+
+    pub fn body(&self) -> &TypeKind {
+        &self.body
+    }
+
+    pub fn bounds(&self) -> &HashMap<TypeId, GenericBounds> {
+        &self.bounds
+    }
+
+    pub fn bounds_for(&self, id: TypeId) -> Option<&GenericBounds> {
+        self.bounds.get(&id)
+    }
+
+    pub fn variance(&self) -> &HashMap<TypeId, Variance> {
+        &self.variance
+    }
+
+    pub fn variance_for(&self, id: TypeId) -> Option<&Variance> {
+        self.variance.get(&id)
+    }
+
+    pub fn with_variance(mut self, variance: HashMap<TypeId, Variance>) -> Self {
+        self.variance = variance;
+        self
+    }
+
+    pub fn set_variance(&mut self, id: TypeId, variance: Variance) {
+        self.variance.insert(id, variance);
+    }
+
+    pub fn is_polymorphic(&self) -> bool {
+        !self.generics.is_empty()
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+struct GenericFacts {
+    arguments: HashMap<SymbolId, Vec<TypeKind>>,
+    bounds: HashMap<TypeId, GenericBounds>,
+    variance: HashMap<TypeId, Variance>,
+    sealed_permits: HashMap<TypeId, Vec<TypeKind>>,
+}
+
+impl GenericFacts {
+    fn record_arguments(&mut self, symbol: SymbolId, args: Vec<TypeKind>) {
+        self.arguments.insert(symbol, args);
+    }
+
+    fn record_bounds(&mut self, type_param: TypeId, bounds: GenericBounds) {
+        self.bounds.insert(type_param, bounds);
+    }
+
+    fn record_variance(&mut self, type_param: TypeId, variance: Variance) {
+        self.variance.insert(type_param, variance);
+    }
+
+    fn record_sealed_permits(&mut self, type_param: TypeId, permits: Vec<TypeKind>) {
+        self.sealed_permits.insert(type_param, permits);
     }
 }
 
@@ -101,6 +186,34 @@ pub struct TypeFactsSnapshot {
     root_type: Option<TypeKind>,
     cache_metrics: Option<CacheMetrics>,
     java_annotations: Arc<HashMap<String, Vec<String>>>,
+    generic_facts: Arc<GenericFacts>,
+    nullability_overrides: Arc<HashMap<TypeFactsNodeId, NullabilityFlag>>,
+}
+
+#[derive(Debug, Clone)]
+pub struct FunctionSignature {
+    pub name: String,
+    pub generics: Vec<TypeId>,
+    pub arguments: Vec<TypeKind>,
+    pub variance: HashMap<TypeId, Variance>,
+    pub body: TypeKind,
+}
+
+impl FunctionSignature {
+    fn new(
+        name: impl Into<String>,
+        scheme: &TypeScheme,
+        arguments: Vec<TypeKind>,
+        variance: HashMap<TypeId, Variance>,
+    ) -> Self {
+        Self {
+            name: name.into(),
+            generics: scheme.generics().to_vec(),
+            arguments,
+            variance,
+            body: scheme.body().clone(),
+        }
+    }
 }
 
 impl TypeFactsSnapshot {
@@ -112,6 +225,8 @@ impl TypeFactsSnapshot {
         root_type: Option<TypeKind>,
         cache_metrics: Option<CacheMetrics>,
         java_annotations: Arc<HashMap<String, Vec<String>>>,
+        generic_facts: Arc<GenericFacts>,
+        nullability_overrides: Arc<HashMap<TypeFactsNodeId, NullabilityFlag>>,
     ) -> Self {
         Self {
             environment,
@@ -121,7 +236,62 @@ impl TypeFactsSnapshot {
             root_type,
             cache_metrics,
             java_annotations,
+            generic_facts,
+            nullability_overrides,
         }
+    }
+
+    pub fn generic_arguments_for(&self, symbol: &SymbolId) -> Option<&[TypeKind]> {
+        self.generic_facts
+            .arguments
+            .get(symbol)
+            .map(|args| args.as_slice())
+    }
+
+    pub fn recorded_bounds(&self, type_param: TypeId) -> Option<&GenericBounds> {
+        self.generic_facts.bounds.get(&type_param)
+    }
+
+    pub fn recorded_variance(&self, type_param: TypeId) -> Option<Variance> {
+        self.generic_facts.variance.get(&type_param).copied()
+    }
+
+    pub fn sealed_permits_for(&self, type_param: TypeId) -> Option<&[TypeKind]> {
+        self.generic_facts
+            .sealed_permits
+            .get(&type_param)
+            .map(|permits| permits.as_slice())
+    }
+
+    pub fn nullability_override_for(&self, node: TypeFactsNodeId) -> Option<NullabilityFlag> {
+        self.nullability_overrides.get(&node).copied()
+    }
+
+    pub fn function_signature(&self, name: &str) -> Option<FunctionSignature> {
+        let scheme = self.scheme_for(name)?;
+        let symbol = SymbolId::from(name);
+        let arguments = self
+            .generic_facts
+            .arguments
+            .get(&symbol)
+            .cloned()
+            .unwrap_or_default();
+
+        let mut variance = scheme
+            .variance()
+            .iter()
+            .map(|(id, value)| (*id, *value))
+            .collect::<HashMap<_, _>>();
+        for (id, recorded) in &self.generic_facts.variance {
+            variance.insert(*id, *recorded);
+        }
+
+        Some(FunctionSignature::new(
+            name.to_string(),
+            scheme,
+            arguments,
+            variance,
+        ))
     }
 
     /// Produces a debug JSON representation of the snapshot. Complex values are
@@ -146,15 +316,29 @@ impl TypeFactsSnapshot {
             .schemes
             .iter()
             .map(|(name, scheme)| {
+                let bounds = scheme
+                    .bounds()
+                    .iter()
+                    .map(|(id, bound_set)| {
+                        let predicates = bound_set
+                            .constraints()
+                            .iter()
+                            .map(|constraint| format!("{:?}", constraint.predicate))
+                            .collect::<Vec<_>>();
+                        (id.to_raw().to_string(), predicates)
+                    })
+                    .collect::<HashMap<_, _>>();
+
                 (
                     name.clone(),
                     json!({
                         "generics": scheme
-                            .generics
+                            .generics()
                             .iter()
                             .map(|id| id.to_raw())
                             .collect::<Vec<_>>(),
-                        "body": format_type(&scheme.body),
+                        "body": format_type(scheme.body()),
+                        "bounds": bounds,
                     }),
                 )
             })
@@ -183,6 +367,57 @@ impl TypeFactsSnapshot {
             .map(|(symbol, annotations)| (symbol.clone(), annotations.clone()))
             .collect::<HashMap<_, _>>();
 
+        let generic_arguments = self
+            .generic_facts
+            .arguments
+            .iter()
+            .map(|(symbol, args)| {
+                (
+                    symbol.as_str().to_string(),
+                    args.iter().map(format_type).collect::<Vec<_>>(),
+                )
+            })
+            .collect::<HashMap<_, _>>();
+
+        let generic_bounds = self
+            .generic_facts
+            .bounds
+            .iter()
+            .map(|(id, bounds)| {
+                let predicates = bounds
+                    .constraints()
+                    .iter()
+                    .map(|constraint| format!("{:?}", constraint.predicate))
+                    .collect::<Vec<_>>();
+                (id.to_raw().to_string(), predicates)
+            })
+            .collect::<HashMap<_, _>>();
+
+        let variance_map = self
+            .generic_facts
+            .variance
+            .iter()
+            .map(|(id, variance)| (id.to_raw().to_string(), format!("{:?}", variance)))
+            .collect::<HashMap<_, _>>();
+
+        let sealed_permits = self
+            .generic_facts
+            .sealed_permits
+            .iter()
+            .map(|(id, permits)| {
+                (
+                    id.to_raw().to_string(),
+                    permits.iter().map(format_type).collect::<Vec<_>>(),
+                )
+            })
+            .collect::<HashMap<_, _>>();
+
+        let nullability_overrides = self
+            .nullability_overrides
+            .iter()
+            .map(|(node, flag)| (node.to_string(), format!("{:?}", flag)))
+            .collect::<HashMap<_, _>>();
+
         json!({
             "environment": environment,
             "bindings": bindings,
@@ -191,6 +426,13 @@ impl TypeFactsSnapshot {
             "root_type": self.root_type.as_ref().map(format_type),
             "cache_metrics": cache_metrics,
             "java_annotations": java_annotations,
+            "generic_facts": {
+                "arguments": generic_arguments,
+                "bounds": generic_bounds,
+                "variance": variance_map,
+                "sealed_permits": sealed_permits,
+            },
+            "nullability_overrides": nullability_overrides,
         })
     }
 
@@ -255,6 +497,8 @@ pub struct TypeFactsBuilder {
     root_type: Option<TypeKind>,
     cache_metrics: Option<CacheMetrics>,
     java_annotations: HashMap<String, Vec<String>>,
+    generic_facts: GenericFacts,
+    nullability_overrides: HashMap<TypeFactsNodeId, NullabilityFlag>,
 }
 
 impl TypeFactsBuilder {
@@ -273,6 +517,8 @@ impl TypeFactsBuilder {
             root_type: snapshot.root_type.clone(),
             cache_metrics: snapshot.cache_metrics,
             java_annotations: snapshot.java_annotations.as_ref().clone(),
+            generic_facts: snapshot.generic_facts.as_ref().clone(),
+            nullability_overrides: snapshot.nullability_overrides.as_ref().clone(),
         }
     }
 
@@ -331,6 +577,44 @@ impl TypeFactsBuilder {
         self
     }
 
+    pub fn record_generic_arguments(
+        &mut self,
+        symbol: impl Into<SymbolId>,
+        args: Vec<TypeKind>,
+    ) -> &mut Self {
+        self.generic_facts.record_arguments(symbol.into(), args);
+        self
+    }
+
+    pub fn record_bounds(&mut self, type_param: TypeId, bounds: GenericBounds) -> &mut Self {
+        self.generic_facts.record_bounds(type_param, bounds);
+        self
+    }
+
+    pub fn record_variance(&mut self, type_param: TypeId, variance: Variance) -> &mut Self {
+        self.generic_facts.record_variance(type_param, variance);
+        self
+    }
+
+    pub fn record_sealed_permits(
+        &mut self,
+        type_param: TypeId,
+        permits: Vec<TypeKind>,
+    ) -> &mut Self {
+        self.generic_facts
+            .record_sealed_permits(type_param, permits);
+        self
+    }
+
+    pub fn record_nullability_override(
+        &mut self,
+        node: TypeFactsNodeId,
+        nullability: NullabilityFlag,
+    ) -> &mut Self {
+        self.nullability_overrides.insert(node, nullability);
+        self
+    }
+
     pub fn build(self) -> TypeFactsSnapshot {
         TypeFactsSnapshot::new(
             Arc::new(TypeEnvironmentSnapshot::new(self.environment)),
@@ -340,6 +624,8 @@ impl TypeFactsBuilder {
             self.root_type,
             self.cache_metrics,
             Arc::new(self.java_annotations),
+            Arc::new(self.generic_facts),
+            Arc::new(self.nullability_overrides),
         )
     }
 }
@@ -617,7 +903,8 @@ fn format_type(ty: &TypeKind) -> String {
 mod tests {
     use super::*;
     use crate::cache::CacheMetrics;
-    use crate::types::TypeVariant;
+    use crate::solver::Variance;
+    use crate::types::{BoundConstraint, BoundPredicate, NullabilityFlag, TypeVariant};
     use jv_ast::json::{JsonEntry, JsonLiteral, JsonValue, NumberGrouping};
     use jv_ast::types::Span;
     use std::collections::HashSet;
@@ -700,6 +987,66 @@ mod tests {
     fn snapshot_is_send_sync() {
         fn assert_send_sync<T: Send + Sync>() {}
         assert_send_sync::<TypeFactsSnapshot>();
+    }
+
+    #[test]
+    fn generic_facts_roundtrip() {
+        let mut builder = TypeFactsBuilder::new();
+        let symbol = SymbolId::from("pkg::Foo");
+        builder.record_generic_arguments(symbol.clone(), vec![sample_type("String")]);
+
+        let bounds = GenericBounds::new(vec![BoundConstraint::new(
+            TypeId::new(7),
+            BoundPredicate::Trait("Debug".to_string()),
+        )]);
+        builder.record_bounds(TypeId::new(7), bounds.clone());
+        builder.record_variance(TypeId::new(7), Variance::Covariant);
+        builder.record_sealed_permits(TypeId::new(7), vec![sample_type("Bool")]);
+
+        let snapshot = builder.build();
+
+        let recorded_args = snapshot.generic_arguments_for(&symbol).unwrap();
+        assert_eq!(recorded_args.len(), 1);
+        assert_eq!(snapshot.recorded_bounds(TypeId::new(7)), Some(&bounds));
+        assert_eq!(
+            snapshot.recorded_variance(TypeId::new(7)),
+            Some(Variance::Covariant)
+        );
+        assert!(snapshot.sealed_permits_for(TypeId::new(7)).is_some());
+    }
+
+    #[test]
+    fn function_signature_combines_metadata() {
+        let mut builder = TypeFactsBuilder::new();
+        let mut scheme = TypeScheme::new(vec![TypeId::new(11)], sample_type("Int"));
+        scheme.set_variance(TypeId::new(11), Variance::Contravariant);
+        builder.add_scheme("pkg::fn", scheme);
+        builder.record_generic_arguments("pkg::fn", vec![sample_type("String")]);
+        builder.record_variance(TypeId::new(11), Variance::Covariant);
+
+        let snapshot = builder.build();
+        let signature = snapshot
+            .function_signature("pkg::fn")
+            .expect("function signature");
+
+        assert_eq!(signature.name, "pkg::fn");
+        assert_eq!(signature.generics, vec![TypeId::new(11)]);
+        assert_eq!(signature.arguments.len(), 1);
+        assert_eq!(
+            signature.variance.get(&TypeId::new(11)),
+            Some(&Variance::Covariant)
+        );
+    }
+
+    #[test]
+    fn nullability_overrides_are_preserved() {
+        let mut builder = TypeFactsBuilder::new();
+        builder.record_nullability_override(42, NullabilityFlag::Nullable);
+        let snapshot = builder.build();
+        assert_eq!(
+            snapshot.nullability_override_for(42),
+            Some(NullabilityFlag::Nullable)
+        );
     }
 
     fn sample_json_literal() -> JsonLiteral {

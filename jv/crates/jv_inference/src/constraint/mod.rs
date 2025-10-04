@@ -5,9 +5,12 @@
 
 pub mod calls;
 pub mod compact;
+pub mod constructors;
 pub mod generic;
 pub mod graph;
 pub mod incremental;
+
+pub use crate::diagnostics::ConstructorOrigin;
 
 pub use graph::{
     ConstraintGraph, ConstraintKind, ConstraintNode, ConstraintNodeId, Edge, EdgeKind, NodeId,
@@ -19,6 +22,11 @@ pub use generic::{GenericConstraint, GenericConstraintKind};
 pub use calls::{
     CallArgument, CallConstraintBuilder, CallConstraintInput, CallConstraintResult,
     CallResultBinding,
+};
+
+pub use constructors::{
+    CollectionShape, ConstructorArgument, ConstructorConstraintBuilder, ConstructorConstraintInput,
+    ConstructorConstraintResult, JsonDiagnosticMetadata,
 };
 
 pub use compact::CompactConstraintGraph;

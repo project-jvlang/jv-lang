@@ -322,6 +322,13 @@ mod tests {
                 assert_eq!(*parameter, TypeId::new(1));
                 assert_eq!(*argument_index, 0);
             }
+            GenericConstraintKind::ConstructorArgument { .. } => {
+                panic!("call builder must not emit constructor constraints")
+            }
+            GenericConstraintKind::BoundRequirement { .. }
+            | GenericConstraintKind::VarianceUsage { .. } => {
+                panic!("call builder must not emit bound or variance constraints")
+            }
         }
 
         let diff = incremental.diff();

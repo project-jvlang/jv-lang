@@ -5,8 +5,12 @@
 //! bookkeeping. A lightweight compatibility layer is provided so that existing call
 //! sites relying on the old enum-style API can migrate incrementally.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::fmt;
+use std::sync::atomic::{AtomicU32, Ordering};
+
+/// Global counter used to mint fresh [`TypeId`] values.
+static NEXT_TYPE_ID: AtomicU32 = AtomicU32::new(1);
 
 /// Identifier assigned to type variables during inference.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -21,6 +25,17 @@ impl TypeId {
     /// Returns the raw numeric identifier.
     pub fn to_raw(self) -> u32 {
         self.0
+    }
+
+    /// Mints a fresh identifier using the global counter.
+    pub fn fresh() -> Self {
+        let raw = NEXT_TYPE_ID.fetch_add(1, Ordering::Relaxed);
+        TypeId::new(raw)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn reset_counter(value: u32) {
+        NEXT_TYPE_ID.store(value, Ordering::Relaxed);
     }
 }
 
@@ -276,6 +291,35 @@ impl GenericBounds {
     pub fn matrix(&self) -> &BoundsMatrix {
         &self.matrix
     }
+
+    /// Produces a new bounds set filtered to the specified type parameters.
+    pub fn filter_for(&self, params: &[TypeId]) -> Self {
+        if self.is_empty() || params.is_empty() {
+            return GenericBounds::default();
+        }
+
+        let wanted: HashSet<_> = params.iter().copied().collect();
+        let filtered = self
+            .constraints
+            .iter()
+            .filter(|constraint| wanted.contains(&constraint.type_param))
+            .cloned()
+            .collect::<Vec<_>>();
+
+        if filtered.is_empty() {
+            GenericBounds::default()
+        } else {
+            GenericBounds::new(filtered)
+        }
+    }
+
+    /// Returns `true` when one of the contained predicates matches `predicate`.
+    pub fn contains_predicate(&self, predicate: &BoundPredicate) -> bool {
+        let target = predicate.key();
+        self.constraints
+            .iter()
+            .any(|constraint| constraint.predicate.key() == target)
+    }
 }
 
 impl Default for GenericBounds {
@@ -309,6 +353,11 @@ impl TypeKind {
             variant,
             ..TypeKind::default()
         }
+    }
+
+    /// Convenience constructor for plain type variables.
+    pub fn variable(id: TypeId) -> Self {
+        TypeKind::new(TypeVariant::Variable(id))
     }
 
     /// Accessor for the inner variant.

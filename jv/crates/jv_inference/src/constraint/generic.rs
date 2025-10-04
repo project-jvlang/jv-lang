@@ -1,4 +1,5 @@
-use crate::types::{SymbolId, TypeId, TypeKind};
+use crate::solver::variance::VariancePosition;
+use crate::types::{BoundPredicate, SymbolId, TypeId, TypeKind};
 use jv_ast::Span;
 
 /// Categories of generic constraints emitted by builders prior to solving.
@@ -10,6 +11,25 @@ pub enum GenericConstraintKind {
         parameter: TypeId,
         argument: TypeKind,
         argument_index: usize,
+    },
+    /// Associates constructor input with a target type parameter for initialization.
+    ConstructorArgument {
+        ctor: SymbolId,
+        parameter: TypeId,
+        argument: TypeKind,
+        argument_index: usize,
+        field: Option<String>,
+    },
+    /// Requires the resolved argument to satisfy a predicate (trait/interface/where clause).
+    BoundRequirement {
+        owner: SymbolId,
+        parameter: TypeId,
+        predicate: BoundPredicate,
+    },
+    /// Records how a type parameter appears in source code for variance analysis.
+    VarianceUsage {
+        parameter: TypeId,
+        position: VariancePosition,
     },
 }
 

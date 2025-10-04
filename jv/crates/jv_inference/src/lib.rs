@@ -14,6 +14,9 @@ pub mod service;
 pub mod solver;
 pub mod types;
 
+#[cfg(test)]
+mod tests;
+
 pub use cache::{
     CacheMetrics, CachedDiagnostic, CachedSignature, DependencyTracker, FingerprintHash,
     InferenceCache, SignatureUpdate,

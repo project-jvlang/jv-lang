@@ -6,6 +6,14 @@
 //! deterministic and focuses on providing a solid foundation for later
 //! extensions such as SAT-style bound reduction and incremental solving hooks.
 
+pub mod generic;
+pub mod variance;
+
+pub use generic::{
+    BoundSatisfactionChecker, GenericSolver, GenericSolverDiagnostic, TypeArgumentSolution,
+};
+pub use variance::{Variance, VarianceAnalyzer, VariancePosition, VarianceTable};
+
 use crate::constraint::{ConstraintGraph, ConstraintKind, NodeId};
 use crate::types::{FieldType, TypeId, TypeKind, TypeVariant};
 use jv_ast::Span;
