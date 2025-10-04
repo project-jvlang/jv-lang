@@ -66,6 +66,8 @@ fn test_diagnostic_creation() {
         },
         severity: Some(DiagnosticSeverity::Error),
         message: "Type error".to_string(),
+        code: None,
+        source: None,
         help: None,
         suggestions: Vec::new(),
         strategy: None,
@@ -76,6 +78,8 @@ fn test_diagnostic_creation() {
         diagnostic.severity,
         Some(DiagnosticSeverity::Error)
     ));
+    assert!(diagnostic.code.is_none());
+    assert!(diagnostic.source.is_none());
 }
 
 #[test]
@@ -143,10 +147,52 @@ fn test_diagnostics_for_mixed_delimiters() {
     let diagnostics = server.get_diagnostics(&uri);
     assert_eq!(diagnostics.len(), 1);
     assert!(diagnostics[0].message.contains("JV2101"));
+    assert_eq!(diagnostics[0].code.as_deref(), Some("JV2101"));
+    assert_eq!(diagnostics[0].source.as_deref(), Some("jv-lsp"));
 }
 
 #[test]
-fn test_completions_placeholder() {
+fn test_diagnostics_for_mixed_argument_commas() {
+    let mut server = JvLanguageServer::new();
+    let uri = "file:///call.jv".to_string();
+    let source = "fun plot(x: Int, y: Int): Int { x + y }\nval result = plot(1, 2)";
+    server.open_document(uri.clone(), source.to_string());
+
+    let diagnostics = server.get_diagnostics(&uri);
+    assert!(diagnostics
+        .iter()
+        .any(|diag| { diag.message.contains("JV2102") && diag.code.as_deref() == Some("JV2102") }));
+}
+
+#[test]
+fn test_diagnostics_for_immutable_reassignment() {
+    let mut server = JvLanguageServer::new();
+    let uri = "file:///reassign.jv".to_string();
+    server.open_document(
+        uri.clone(),
+        "greeting = \"hello\"\ngreeting = \"hi\"".to_string(),
+    );
+
+    let diagnostics = server.get_diagnostics(&uri);
+    assert!(diagnostics
+        .iter()
+        .any(|diag| { diag.message.contains("JV4201") && diag.code.as_deref() == Some("JV4201") }));
+}
+
+#[test]
+fn test_diagnostics_for_missing_initializer_self_reference() {
+    let mut server = JvLanguageServer::new();
+    let uri = "file:///self.jv".to_string();
+    server.open_document(uri.clone(), "value = value".to_string());
+
+    let diagnostics = server.get_diagnostics(&uri);
+    assert!(diagnostics
+        .iter()
+        .any(|diag| { diag.message.contains("JV4202") && diag.code.as_deref() == Some("JV4202") }));
+}
+
+#[test]
+fn test_completions_include_new_templates() {
     let server = JvLanguageServer::new();
     let position = Position {
         line: 0,
@@ -155,9 +201,9 @@ fn test_completions_placeholder() {
     let completions = server.get_completions("file:///test.jv", position);
 
     assert!(!completions.is_empty());
-    assert!(completions.contains(&"val".to_string()));
-    assert!(completions.contains(&"var".to_string()));
-    assert!(completions.contains(&"fun".to_string()));
+    assert!(completions.contains(&"name = value".to_string()));
+    assert!(completions.contains(&"var name = value".to_string()));
+    assert!(completions.contains(&"data Point(x y)".to_string()));
 }
 
 #[test]

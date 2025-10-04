@@ -11,6 +11,14 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use thiserror::Error;
 
+const COMPLETION_TEMPLATES: &[&str] = &[
+    "name = value",
+    "var name = value",
+    "data Point(x y)",
+    "data Record(name: Type)",
+    "fun name(params) { }",
+];
+
 #[derive(Error, Debug)]
 pub enum LspError {
     #[error("Protocol error: {0}")]
@@ -44,6 +52,10 @@ pub struct Diagnostic {
     pub range: Range,
     pub severity: Option<DiagnosticSeverity>,
     pub message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub code: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub help: Option<String>,
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
@@ -161,8 +173,10 @@ impl JvLanguageServer {
     }
 
     pub fn get_completions(&self, _uri: &str, _position: Position) -> Vec<String> {
-        // Placeholder implementation
-        vec!["val".to_string(), "var".to_string(), "fun".to_string()]
+        COMPLETION_TEMPLATES
+            .iter()
+            .map(|template| (*template).to_string())
+            .collect()
     }
 
     pub fn type_facts(&self, uri: &str) -> Option<&TypeFactsSnapshot> {
@@ -193,6 +207,8 @@ fn tooling_diagnostic_to_lsp(uri: &str, diagnostic: EnhancedDiagnostic) -> Diagn
             uri = uri,
             detail = diagnostic.message,
         ),
+        code: Some(diagnostic.code.to_string()),
+        source: Some("jv-lsp".to_string()),
         help: Some(diagnostic.help.to_string()),
         suggestions: diagnostic.suggestions.clone(),
         strategy: Some(format!("{:?}", diagnostic.strategy)),
@@ -205,6 +221,8 @@ fn fallback_diagnostic(uri: &str, label: &str) -> Diagnostic {
         range: default_range(),
         severity: Some(DiagnosticSeverity::Warning),
         message,
+        code: None,
+        source: Some("jv-lsp".to_string()),
         help: None,
         suggestions: Vec::new(),
         strategy: Some("Immediate".to_string()),
@@ -216,6 +234,8 @@ fn warning_diagnostic(uri: &str, warning: CheckError) -> Diagnostic {
         range: default_range(),
         severity: Some(DiagnosticSeverity::Warning),
         message: format!("Warning ({uri}): {warning}"),
+        code: None,
+        source: Some("jv-lsp".to_string()),
         help: None,
         suggestions: Vec::new(),
         strategy: Some("Deferred".to_string()),
@@ -233,6 +253,8 @@ fn type_error_to_diagnostic(uri: &str, error: CheckError) -> Diagnostic {
             range: default_range(),
             severity: Some(DiagnosticSeverity::Error),
             message: format!("Type error: {error}"),
+            code: None,
+            source: Some("jv-lsp".to_string()),
             help: None,
             suggestions: Vec::new(),
             strategy: Some("Immediate".to_string()),
