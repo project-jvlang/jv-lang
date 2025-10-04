@@ -1,0 +1,23 @@
+[generic.conflicting_argument]
+message = "Multiple candidates were inferred for type parameter T{type_param} of {symbol}: existing {previous} conflicts with new {candidate}. Add an explicit annotation to disambiguate."
+note_existing = "The previous assignment was recorded at {existing_span}."
+note_explain = "Run --explain JV2001 to inspect the constraint breakdown."
+
+[generic.bound_violation]
+message = "Type parameter T{type_param} of {symbol} must satisfy {predicate}, but the inferred type does not."
+note_hint = "Implement the required interface/trait or adjust the type argument."
+note_explain = "Run --explain JV2002 to learn how to resolve missing bounds."
+
+[generic.unresolved_parameter]
+message = "Unable to resolve type parameter T{type_param} of {symbol}. {requirement}"
+note_hint = "Add explicit type arguments or bounds to guide the inference engine."
+note_explain = "Run --explain JV2001 for a step-by-step guide."
+
+[generic.capability_not_found]
+message = "No implementation of capability {capability} was found for type parameter T{type_param} of {symbol}."
+note_hint = "Add impl {capability}<{target}> { ... } or verify that the dependency providing it is available."
+note_preferred = "Preferred implementation {preferred_impl} was not found either."
+
+[generic.capability_ambiguous]
+message = "Capability {capability} for type parameter T{type_param} of {symbol} is ambiguous: {candidates}."
+note_hint = "Set preferredImpl or add an explicit annotation to select the desired implementation."

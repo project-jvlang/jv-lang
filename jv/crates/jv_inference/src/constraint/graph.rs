@@ -4,10 +4,42 @@
 //! the original constraint semantics via [`EdgeKind`], and source spans are attached
 //! through [`SourceSpanTable`] for high quality diagnostics.
 
+use super::nullable::{predicate_requires_nullable, referenced_type_parameters};
+use super::{GenericConstraint, GenericConstraintKind};
 use crate::types::{TypeId, TypeKind};
 use jv_ast::Span;
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
+
+/// Summary describing how where-clause constraints affected the constraint graph.
+#[derive(Debug, Default, Clone)]
+pub struct WhereConstraintSummary {
+    recorded_constraints: usize,
+    nullable_parameters: HashMap<TypeId, Span>,
+}
+
+impl WhereConstraintSummary {
+    /// Returns the number of constraint records processed.
+    pub fn recorded_constraints(&self) -> usize {
+        self.recorded_constraints
+    }
+
+    /// Returns an iterator over nullable type parameters together with the span
+    /// that introduced the nullability.
+    pub fn nullable_parameters(&self) -> impl Iterator<Item = (TypeId, &Span)> {
+        self.nullable_parameters
+            .iter()
+            .map(|(id, span)| (*id, span))
+    }
+
+    fn register_nullable(&mut self, parameter: TypeId, span: Span) {
+        self.nullable_parameters.entry(parameter).or_insert(span);
+    }
+
+    fn increment(&mut self) {
+        self.recorded_constraints += 1;
+    }
+}
 
 /// Identifier assigned to type nodes within the constraint graph.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -81,7 +113,7 @@ impl ConstraintNode {
 }
 
 /// Edge categories tracked in the constraint graph.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum EdgeKind {
     Equality,
     Assignment,
@@ -168,13 +200,15 @@ impl SccCache {
 }
 
 /// Constraint graph storing nodes, edges, and SCC metadata.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct ConstraintGraph {
     type_nodes: Vec<TypeNode>,
     constraint_nodes: Vec<ConstraintNode>,
     edges: Vec<Edge>,
     metadata: SourceSpanTable,
     scc_cache: RefCell<Option<SccCache>>,
+    constraint_index: HashMap<(TypeId, String), ConstraintNodeId>,
+    edge_index: HashSet<(NodeId, NodeId, EdgeKind)>,
 }
 
 impl ConstraintGraph {
@@ -239,8 +273,90 @@ impl ConstraintGraph {
 
     /// Records an edge between two nodes.
     pub fn add_edge(&mut self, from: NodeId, to: NodeId, kind: EdgeKind) {
-        self.edges.push(Edge::new(from, to, kind));
-        self.invalidate_scc_cache();
+        if self.edge_index.insert((from, to, kind)) {
+            self.edges.push(Edge::new(from, to, kind));
+            self.invalidate_scc_cache();
+        }
+    }
+
+    /// Returns true when an edge with the given kind connects the specified nodes.
+    pub fn has_edge_with_kind(&self, from: NodeId, to: NodeId, kind: EdgeKind) -> bool {
+        self.edge_index.contains(&(from, to, kind))
+    }
+
+    /// Returns true when any edge connects the specified nodes irrespective of kind.
+    pub fn has_edge_between(&self, from: NodeId, to: NodeId) -> bool {
+        self.edge_index
+            .iter()
+            .any(|(edge_from, edge_to, _)| *edge_from == from && *edge_to == to)
+    }
+
+    /// Registers generic bound requirements into the graph and returns a summary that
+    /// can be used by higher layers (e.g. diagnostics, null safety bridge).
+    pub fn add_where_constraints(
+        &mut self,
+        constraints: &[GenericConstraint],
+    ) -> WhereConstraintSummary {
+        let mut summary = WhereConstraintSummary::default();
+
+        for constraint in constraints {
+            if let GenericConstraintKind::BoundRequirement {
+                parameter,
+                predicate,
+                ..
+            } = &constraint.kind
+            {
+                summary.increment();
+                let type_node = self.ensure_type_node(*parameter, None);
+                self.metadata
+                    .insert(NodeId::Type(type_node), constraint.span.clone());
+
+                let predicate_key = predicate.key();
+                let constraint_node_id = match self
+                    .constraint_index
+                    .get(&(*parameter, predicate_key.clone()))
+                {
+                    Some(&id) => id,
+                    None => {
+                        let node = ConstraintNode::new(ConstraintKind::BoundSatisfaction {
+                            subject: *parameter,
+                            bound: predicate.describe(),
+                        });
+                        let id = self.add_constraint_node(node);
+                        self.metadata
+                            .insert(NodeId::Constraint(id), constraint.span.clone());
+                        self.constraint_index
+                            .insert((*parameter, predicate_key), id);
+                        id
+                    }
+                };
+
+                self.add_edge(
+                    NodeId::Type(type_node),
+                    NodeId::Constraint(constraint_node_id),
+                    EdgeKind::BoundSatisfaction,
+                );
+
+                let mut referenced = Vec::new();
+                referenced_type_parameters(predicate, &mut referenced);
+                for referenced_id in referenced {
+                    let referenced_node = self.ensure_type_node(referenced_id, None);
+                    self.metadata
+                        .insert(NodeId::Type(referenced_node), constraint.span.clone());
+                    self.add_edge(
+                        NodeId::Constraint(constraint_node_id),
+                        NodeId::Type(referenced_node),
+                        EdgeKind::BoundSatisfaction,
+                    );
+                }
+
+                if predicate_requires_nullable(predicate, *parameter) {
+                    summary.register_nullable(*parameter, constraint.span.clone());
+                }
+            }
+        }
+
+        summary
     }
 
     /// Returns all edges originating from the provided node.
@@ -305,6 +421,48 @@ impl ConstraintGraph {
 
     fn invalidate_scc_cache(&mut self) {
         self.scc_cache.borrow_mut().take();
+    }
+
+    /// Returns strongly connected components that represent cycles in the graph.
+    pub fn circular_components(&self) -> Vec<Vec<NodeId>> {
+        let cache = self.strongly_connected_components();
+        let mut components = Vec::new();
+
+        for component in cache.components() {
+            if component.len() > 1 {
+                let mut nodes = component.to_vec();
+                nodes.sort_by_key(order_key);
+                components.push(nodes);
+            } else if let Some(&node) = component.first() {
+                if self.has_edge_between(node, node) {
+                    components.push(vec![node]);
+                }
+            }
+        }
+
+        components.sort_by(|left, right| order_key(&left[0]).cmp(&order_key(&right[0])));
+        components
+    }
+}
+
+impl Default for ConstraintGraph {
+    fn default() -> Self {
+        Self {
+            type_nodes: Vec::new(),
+            constraint_nodes: Vec::new(),
+            edges: Vec::new(),
+            metadata: SourceSpanTable::new(),
+            scc_cache: RefCell::new(None),
+            constraint_index: HashMap::new(),
+            edge_index: HashSet::new(),
+        }
+    }
+}
+
+fn order_key(node: &NodeId) -> (u8, usize) {
+    match node {
+        NodeId::Type(id) => (0, id.to_raw()),
+        NodeId::Constraint(id) => (1, id.to_raw()),
     }
 }
 
@@ -401,6 +559,10 @@ impl TarjanState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::constraint::WhereConstraintResolver;
+    use crate::types::SymbolId;
+    use jv_ast::types::{QualifiedName, TypeAnnotation, WhereClause, WherePredicate};
+    use std::collections::HashMap;
 
     fn dummy_span(line: usize) -> Span {
         Span::new(line, 0, line, 10)
@@ -475,5 +637,66 @@ mod tests {
             cache_cycle.component_for(NodeId::Type(t2)).unwrap().len(),
             2
         );
+    }
+
+    #[test]
+    fn where_constraints_register_edges_and_nullability() {
+        let mut params = HashMap::new();
+        params.insert("T".into(), TypeId::new(10));
+        params.insert("U".into(), TypeId::new(11));
+
+        let clause = WhereClause {
+            predicates: vec![
+                WherePredicate::TraitBound {
+                    type_param: "T".into(),
+                    trait_name: QualifiedName::new(vec!["Comparable".into()], Span::dummy()),
+                    type_args: vec![TypeAnnotation::Nullable(Box::new(TypeAnnotation::Simple(
+                        "T".into(),
+                    )))],
+                    span: Span::dummy(),
+                },
+                WherePredicate::TraitBound {
+                    type_param: "U".into(),
+                    trait_name: QualifiedName::new(vec!["Serializer".into()], Span::dummy()),
+                    type_args: vec![TypeAnnotation::Simple("T".into())],
+                    span: Span::dummy(),
+                },
+            ],
+            span: Span::dummy(),
+        };
+
+        let resolver = WhereConstraintResolver::new(SymbolId::from("pkg::Example"), &params);
+        let constraints = resolver.from_clause(&clause);
+
+        let mut graph = ConstraintGraph::new();
+        let summary = graph.add_where_constraints(&constraints);
+
+        assert_eq!(graph.constraint_node_count(), 2);
+        assert_eq!(graph.type_node_count(), 2);
+        assert_eq!(summary.recorded_constraints(), 2);
+
+        let nullable: Vec<_> = summary.nullable_parameters().map(|(id, _)| id).collect();
+        assert!(nullable.contains(&TypeId::new(10)));
+
+        let t_node = graph
+            .find_type_node(TypeId::new(10))
+            .expect("type node for T");
+        let edges_from_t: Vec<_> = graph.edges_from(NodeId::Type(t_node)).collect();
+        let constraint_node = edges_from_t
+            .iter()
+            .find_map(|edge| match edge.to {
+                NodeId::Constraint(id) if edge.kind == EdgeKind::BoundSatisfaction => Some(id),
+                _ => None,
+            })
+            .expect("bound satisfaction edge");
+
+        assert!(graph.has_edge_with_kind(
+            NodeId::Constraint(constraint_node),
+            NodeId::Type(t_node),
+            EdgeKind::BoundSatisfaction,
+        ));
+
+        let cycles = graph.circular_components();
+        assert!(cycles.iter().any(|component| component.len() >= 2));
     }
 }

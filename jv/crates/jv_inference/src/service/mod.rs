@@ -5,6 +5,7 @@
 //! live outside this crate so that each consumer can decide how to persist and surface data.
 
 use crate::cache::CacheMetrics;
+use crate::constraint::ConstraintSolution;
 use crate::solver::{TypeBinding, Variance};
 use crate::types::{GenericBounds, NullabilityFlag, SymbolId, TypeId, TypeKind};
 use hex::encode as hex_encode;
@@ -591,6 +592,17 @@ impl TypeFactsBuilder {
         self
     }
 
+    pub fn apply_constraint_solution(&mut self, solution: &ConstraintSolution) -> &mut Self {
+        for resolved in &solution.resolved_bounds {
+            if !resolved.is_empty() {
+                self.record_bounds(resolved.parameter, resolved.bounds.clone());
+            }
+        }
+        // Capability bindings and nullability integration will be handled by downstream
+        // stages once the corresponding consumers are ready to ingest them.
+        self
+    }
+
     pub fn record_variance(&mut self, type_param: TypeId, variance: Variance) -> &mut Self {
         self.generic_facts.record_variance(type_param, variance);
         self
@@ -903,6 +915,7 @@ fn format_type(ty: &TypeKind) -> String {
 mod tests {
     use super::*;
     use crate::cache::CacheMetrics;
+    use crate::constraint::{ConstraintSolution, ResolvedBound};
     use crate::solver::Variance;
     use crate::types::{BoundConstraint, BoundPredicate, NullabilityFlag, TraitBound, TypeVariant};
     use jv_ast::json::{JsonEntry, JsonLiteral, JsonValue, NumberGrouping};
@@ -1013,6 +1026,22 @@ mod tests {
             Some(Variance::Covariant)
         );
         assert!(snapshot.sealed_permits_for(TypeId::new(7)).is_some());
+    }
+
+    #[test]
+    fn apply_constraint_solution_records_bounds() {
+        let mut builder = TypeFactsBuilder::new();
+        let predicate = BoundPredicate::Trait(TraitBound::simple("Comparable"));
+        let bounds = GenericBounds::new(vec![BoundConstraint::new(TypeId::new(13), predicate)]);
+        let mut solution = ConstraintSolution::new(SymbolId::from("pkg::Owner"));
+        solution
+            .resolved_bounds
+            .push(ResolvedBound::new(TypeId::new(13), bounds.clone()));
+
+        builder.apply_constraint_solution(&solution);
+
+        let snapshot = builder.build();
+        assert_eq!(snapshot.recorded_bounds(TypeId::new(13)), Some(&bounds));
     }
 
     #[test]

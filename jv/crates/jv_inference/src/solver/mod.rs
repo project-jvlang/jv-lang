@@ -7,11 +7,13 @@
 //! extensions such as SAT-style bound reduction and incremental solving hooks.
 
 pub mod generic;
+pub mod null_safety_bridge;
 pub mod variance;
 
 pub use generic::{
     BoundSatisfactionChecker, GenericSolver, GenericSolverDiagnostic, TypeArgumentSolution,
 };
+pub use null_safety_bridge::NullSafetyBridge;
 pub use variance::{Variance, VarianceAnalyzer, VariancePosition, VarianceTable};
 
 use crate::constraint::{ConstraintGraph, ConstraintKind, NodeId};

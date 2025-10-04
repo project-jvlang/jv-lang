@@ -1,6 +1,6 @@
 use jv_ast::Span;
 use jv_codegen_java::{JavaCodeGenConfig, JavaCodeGenerator, JavaTarget};
-use jv_ir::{IrModifiers, IrProgram, IrStatement, JavaType};
+use jv_ir::{IrModifiers, IrProgram, IrStatement, IrTypeParameter, IrVariance, JavaType};
 
 fn dummy_span() -> Span {
     Span::dummy()
@@ -8,7 +8,7 @@ fn dummy_span() -> Span {
 
 #[test]
 fn wildcard_arguments_are_rendered() {
-    let mut generator = JavaCodeGenerator::new();
+    let generator = JavaCodeGenerator::new();
     let list_type = JavaType::Reference {
         name: "java.util.List".to_string(),
         generic_args: vec![JavaType::wildcard_extends(JavaType::Reference {
@@ -72,5 +72,50 @@ fn sealed_classes_emit_target_specific_metadata() {
         class_source25.contains("permits demo.Foo"),
         "expected permits clause for Java 25 output: {}",
         class_source25
+    );
+}
+
+#[test]
+fn class_signature_includes_generic_bounds() {
+    let span = dummy_span();
+    let class = IrStatement::ClassDeclaration {
+        name: "Demo".to_string(),
+        type_parameters: vec![IrTypeParameter {
+            name: "T".to_string(),
+            bounds: vec![JavaType::Reference {
+                name: "Comparable".to_string(),
+                generic_args: Vec::new(),
+            }],
+            variance: IrVariance::Invariant,
+            permits: Vec::new(),
+            span: span.clone(),
+        }],
+        superclass: None,
+        interfaces: Vec::new(),
+        fields: Vec::new(),
+        methods: Vec::new(),
+        nested_classes: Vec::new(),
+        modifiers: IrModifiers::default(),
+        span: span.clone(),
+    };
+
+    let program = IrProgram {
+        package: Some("demo".to_string()),
+        imports: Vec::new(),
+        type_declarations: vec![class],
+        span,
+    };
+
+    let mut generator =
+        JavaCodeGenerator::with_config(JavaCodeGenConfig::for_target(JavaTarget::Java25));
+    let unit = generator
+        .generate_compilation_unit(&program)
+        .expect("class generation");
+    let class_source = &unit.type_declarations[0];
+
+    assert!(
+        class_source.contains("class Demo<T extends Comparable>"),
+        "expected generic bounds in class signature: {}",
+        class_source
     );
 }

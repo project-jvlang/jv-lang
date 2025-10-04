@@ -10,14 +10,17 @@ pub mod constructors;
 pub mod generic;
 pub mod graph;
 pub mod incremental;
+pub mod nullable;
+pub mod solution;
 pub mod where_clause;
 
 pub use crate::diagnostics::ConstructorOrigin;
 
 pub use graph::{
     ConstraintGraph, ConstraintKind, ConstraintNode, ConstraintNodeId, Edge, EdgeKind, NodeId,
-    SourceSpanTable, TypeNode, TypeNodeId,
+    SourceSpanTable, TypeNode, TypeNodeId, WhereConstraintSummary,
 };
+pub use solution::{ConstraintSolution, NullabilitySummary, ResolvedBound};
 
 pub use generic::{GenericConstraint, GenericConstraintKind};
 

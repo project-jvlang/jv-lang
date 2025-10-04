@@ -176,7 +176,7 @@ pub enum BoundPredicate {
 }
 
 impl BoundPredicate {
-    fn key(&self) -> String {
+    pub fn key(&self) -> String {
         match self {
             BoundPredicate::Trait(bound) => bound.key(),
             BoundPredicate::Interface(name) => name.clone(),

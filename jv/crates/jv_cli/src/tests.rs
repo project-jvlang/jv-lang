@@ -3,10 +3,13 @@ use crate::commands::explain;
 use crate::pipeline::compute_script_main_class;
 
 use crate::pipeline::generics::apply_type_facts;
+use jv_inference::constraint::{
+    ConstraintGraph, ConstraintSolution, NullabilitySummary, WhereConstraintResolver,
+};
 use jv_inference::service::{TypeFactsBuilder, TypeScheme};
 use jv_inference::solver::Variance;
 use jv_inference::types::{
-    BoundConstraint, BoundPredicate, GenericBounds, TypeId, TypeKind, TypeVariant,
+    BoundConstraint, BoundPredicate, GenericBounds, SymbolId, TypeId, TypeKind, TypeVariant,
 };
 use jv_ir::{IrModifiers, IrProgram, IrStatement, IrTypeParameter, IrVariance, JavaType};
 use std::collections::HashMap;
@@ -641,4 +644,85 @@ fn apply_type_facts_enriches_class_metadata() {
 
     assert!(modifiers.is_sealed);
     assert_eq!(modifiers.permitted_types, vec!["demo.Foo".to_string()]);
+}
+
+#[test]
+fn where_constraints_flow_into_ir_bounds() {
+    use jv_ast::types::{QualifiedName, TypeAnnotation, WhereClause, WherePredicate};
+    use std::collections::HashMap;
+
+    let span = dummy_span();
+    let mut program = IrProgram {
+        package: Some("demo".to_string()),
+        imports: Vec::new(),
+        type_declarations: vec![IrStatement::ClassDeclaration {
+            name: "Box".to_string(),
+            type_parameters: vec![IrTypeParameter::new("T", span.clone())],
+            superclass: None,
+            interfaces: Vec::new(),
+            fields: Vec::new(),
+            methods: Vec::new(),
+            nested_classes: Vec::new(),
+            modifiers: IrModifiers::default(),
+            span: span.clone(),
+        }],
+        span: span.clone(),
+    };
+
+    let mut params = HashMap::new();
+    let type_id = TypeId::new(11);
+    params.insert("T".to_string(), type_id);
+    let clause = WhereClause {
+        predicates: vec![WherePredicate::TraitBound {
+            type_param: "T".into(),
+            trait_name: QualifiedName::new(vec!["Comparable".into()], span.clone()),
+            type_args: vec![TypeAnnotation::Simple("T".into())],
+            span: span.clone(),
+        }],
+        span: span.clone(),
+    };
+
+    let symbol = SymbolId::from("demo::Box");
+    let resolver = WhereConstraintResolver::new(symbol.clone(), &params);
+    let constraints = resolver.from_clause(&clause);
+    let mut graph = ConstraintGraph::new();
+    let summary = graph.add_where_constraints(&constraints);
+    let mut null_summary = NullabilitySummary::default();
+    for (parameter, _) in summary.nullable_parameters() {
+        null_summary.mark_nullable(parameter);
+    }
+    let solution = ConstraintSolution::from_generic_constraints(
+        symbol.clone(),
+        &constraints,
+        null_summary,
+        Vec::new(),
+    );
+
+    let mut scheme = TypeScheme::new(
+        vec![type_id],
+        TypeKind::new(TypeVariant::Primitive("demo::Box")),
+    );
+    scheme.set_variance(type_id, Variance::Invariant);
+
+    let mut builder = TypeFactsBuilder::new();
+    builder.add_scheme("demo::Box", scheme);
+    builder.apply_constraint_solution(&solution);
+
+    let facts = builder.build();
+    apply_type_facts(&mut program, &facts);
+
+    let IrStatement::ClassDeclaration {
+        type_parameters, ..
+    } = &program.type_declarations[0]
+    else {
+        panic!("expected class declaration");
+    };
+
+    assert_eq!(type_parameters.len(), 1);
+    let param = &type_parameters[0];
+    assert_eq!(param.bounds.len(), 1);
+    match &param.bounds[0] {
+        JavaType::Reference { name, .. } => assert_eq!(name, "Comparable"),
+        other => panic!("unexpected bound: {other:?}"),
+    }
 }
