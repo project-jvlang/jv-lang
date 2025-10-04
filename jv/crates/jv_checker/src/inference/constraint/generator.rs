@@ -11,7 +11,7 @@ use crate::inference::iteration::{
 use crate::inference::types::TypeKind;
 use jv_ast::{
     Argument, BinaryOp, Expression, ForInStatement, Literal, Program, Statement, TypeAnnotation,
-    UnaryOp, ValBindingOrigin,
+    UnaryOp,
 };
 
 /// AST から制約を抽出するジェネレータ。

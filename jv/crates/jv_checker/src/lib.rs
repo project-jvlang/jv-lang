@@ -1,4 +1,5 @@
 // jv_checker - Static analysis and validation
+pub mod binding;
 pub mod compat;
 pub mod diagnostics;
 pub mod inference;
@@ -11,6 +12,7 @@ pub use inference::{
 };
 pub use jv_inference::ParallelInferenceConfig;
 
+use binding::{resolve_bindings, BindingResolution, BindingUsageSummary};
 use jv_ast::{Program, Span};
 use null_safety::{JavaLoweringHint, NullSafetyCoordinator};
 use pattern::{PatternCacheMetrics, PatternMatchFacts, PatternMatchService, PatternTarget};
@@ -179,6 +181,8 @@ pub struct TypeChecker {
     null_safety_hints: Vec<JavaLoweringHint>,
     merged_facts: Option<TypeFactsSnapshot>,
     pattern_service: PatternMatchService,
+    normalized_program: Option<Program>,
+    binding_usage: BindingUsageSummary,
 }
 
 impl TypeChecker {
@@ -198,6 +202,8 @@ impl TypeChecker {
             null_safety_hints: Vec::new(),
             merged_facts: None,
             pattern_service: PatternMatchService::new(),
+            normalized_program: None,
+            binding_usage: BindingUsageSummary::default(),
         }
     }
 
@@ -219,12 +225,56 @@ impl TypeChecker {
     }
 
     /// 型推論と整合性検証を実行する。
+
+    pub fn normalized_program(&self) -> Option<&Program> {
+        self.normalized_program.as_ref()
+    }
+
+    pub fn take_normalized_program(&mut self) -> Option<Program> {
+        self.normalized_program.take()
+    }
+
+    pub fn binding_usage(&self) -> &BindingUsageSummary {
+        &self.binding_usage
+    }
+
     pub fn check_program(&mut self, program: &Program) -> Result<(), Vec<CheckError>> {
         self.engine.set_parallel_config(self.parallel_config);
         self.null_safety_hints.clear();
-        match self.engine.infer_program(program) {
+
+        let binding_resolution = resolve_bindings(program);
+        let BindingResolution {
+            program: normalized,
+            diagnostics,
+            usage,
+        } = binding_resolution;
+
+        self.binding_usage = usage;
+        self.normalized_program = Some(normalized);
+
+        if !diagnostics.is_empty() {
+            self.snapshot = None;
+            self.merged_facts = None;
+            return Err(diagnostics);
+        }
+
+        let inference_result = {
+            let normalized_program = self
+                .normalized_program
+                .as_ref()
+                .expect("normalized program should be available");
+            self.engine.infer_program(normalized_program)
+        };
+
+        match inference_result {
             Ok(()) => {
-                let validation_errors = self.pattern_service.validate_program(program);
+                let validation_errors = {
+                    let normalized_program = self
+                        .normalized_program
+                        .as_ref()
+                        .expect("normalized program should be available");
+                    self.pattern_service.validate_program(normalized_program)
+                };
                 let pattern_facts = self.pattern_service.take_recorded_facts();
                 let metrics = self.pattern_service.take_cache_metrics();
                 self.record_pattern_cache_metrics(metrics);
@@ -239,7 +289,13 @@ impl TypeChecker {
                     .as_ref()
                     .map(|snapshot| snapshot.type_facts().clone());
 
-                let placement_errors = compat::annotation_targets::validate_program(program);
+                let placement_errors = {
+                    let normalized_program = self
+                        .normalized_program
+                        .as_ref()
+                        .expect("normalized program should be available");
+                    compat::annotation_targets::validate_program(normalized_program)
+                };
                 if !placement_errors.is_empty() {
                     self.snapshot = None;
                     self.merged_facts = None;

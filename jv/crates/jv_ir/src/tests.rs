@@ -543,6 +543,7 @@ mod tests {
             None,
             initializer,
             Modifiers::default(),
+            ValBindingOrigin::ExplicitKeyword,
             dummy_span(),
             &mut context,
         )
@@ -568,6 +569,34 @@ mod tests {
         }
 
         assert_eq!(context.lookup_variable("x"), Some(&JavaType::int()));
+    }
+
+    #[test]
+    fn test_desugar_implicit_val_is_final() {
+        let mut context = test_context();
+        let initializer = Expression::Literal(Literal::Number("7".to_string()), dummy_span());
+
+        let result = desugar_val_declaration(
+            "implicit_total".to_string(),
+            None,
+            initializer,
+            Modifiers::default(),
+            ValBindingOrigin::Implicit,
+            dummy_span(),
+            &mut context,
+        )
+        .expect("implicit val should desugar successfully");
+
+        let IrStatement::VariableDeclaration {
+            is_final,
+            modifiers,
+            ..
+        } = result
+        else {
+            panic!("expected variable declaration");
+        };
+        assert!(is_final, "implicit val should produce final variables");
+        assert!(modifiers.is_final);
     }
 
     // Test for var declaration desugaring with inference

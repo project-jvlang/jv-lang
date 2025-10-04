@@ -3,7 +3,7 @@ use std::collections::{HashMap, VecDeque};
 use jv_ast::{
     expression::Argument,
     types::{Literal, Modifiers, Span},
-    BinaryOp, Expression, Program, Statement, TryCatchClause, ValBindingOrigin, WhenArm,
+    BinaryOp, Expression, Program, Statement, TryCatchClause, WhenArm,
 };
 
 use super::{patterns, NullSafetyContext, NullabilityKind, NullabilityLattice};
@@ -986,6 +986,7 @@ mod tests {
     use super::*;
     use crate::null_safety::graph::BranchAssumption;
     use crate::null_safety::JavaLoweringStrategy;
+    use jv_ast::ValBindingOrigin;
     use jv_ast::{types::Span, Expression, Pattern, Program, Statement, TryCatchClause, WhenArm};
 
     #[test]

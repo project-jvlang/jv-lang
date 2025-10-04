@@ -8,7 +8,7 @@ use crate::CheckError;
 use jv_ast::types::Span;
 use jv_ast::{
     expression::Argument, BinaryOp, Expression, Literal, Program, Statement, TypeAnnotation,
-    UnaryOp, ValBindingOrigin,
+    UnaryOp,
 };
 use std::collections::HashMap;
 
@@ -477,6 +477,7 @@ impl NullabilityAnalyzer {
 mod tests {
     use super::*;
     use jv_ast::types::{Modifiers, Visibility};
+    use jv_ast::ValBindingOrigin;
 
     fn span() -> Span {
         Span::new(1, 1, 1, 5)

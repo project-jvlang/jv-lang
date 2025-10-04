@@ -113,7 +113,12 @@ impl JvLanguageServer {
         let mut checker = TypeChecker::with_parallel_config(self.parallel_config);
         match checker.check_program(&program) {
             Ok(_) => {
-                let null_safety_warnings = checker.check_null_safety(&program, None);
+                let null_safety_warnings = if let Some(normalized) = checker.normalized_program() {
+                    let cloned = normalized.clone();
+                    checker.check_null_safety(&cloned, None)
+                } else {
+                    checker.check_null_safety(&program, None)
+                };
                 if let Some(snapshot) = checker.take_inference_snapshot() {
                     type_facts_snapshot = Some(snapshot.type_facts().clone());
                 } else {
@@ -134,7 +139,8 @@ impl JvLanguageServer {
             }
         }
 
-        match transform_program(program) {
+        let lowering_input = checker.take_normalized_program().unwrap_or(program);
+        match transform_program(lowering_input) {
             Ok(_) => {}
             Err(error) => {
                 diagnostics.push(match from_transform_error(&error) {

@@ -199,6 +199,18 @@ const DIAGNOSTICS: &[DiagnosticDescriptor] = &[
         severity: DiagnosticSeverity::Error,
     },
     DiagnosticDescriptor {
+        code: "JV4201",
+        title: "不変変数に再代入できません / Cannot reassign immutable binding",
+        help: "`var` で宣言されていない変数には再代入できません。再代入が必要な場合は `var` へ変更するか、新しい名前の変数を導入してください。/ Reassignment is not allowed for immutable bindings. Use `var` when mutation is required or introduce a new binding name.",
+        severity: DiagnosticSeverity::Error,
+    },
+    DiagnosticDescriptor {
+        code: "JV4202",
+        title: "暗黙宣言には初期化子が必要です / Implicit binding requires an initializer",
+        help: "`identifier = value` の形式で初期化子を指定してください。同じ名前を右辺で参照することはできません。/ Provide an initializer when introducing an implicit binding (use `identifier = value`). The right-hand side cannot reference the binding being declared.",
+        severity: DiagnosticSeverity::Error,
+    },
+    DiagnosticDescriptor {
         code: "JV1008",
         title: "空白区切りの要素が同種ではありません",
         help: "空白区切りを使う場合は同じ型の要素だけを並べます。型が混在する場合はカンマ区切りに切り替えてください。",

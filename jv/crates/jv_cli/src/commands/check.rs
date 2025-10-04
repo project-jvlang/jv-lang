@@ -35,16 +35,6 @@ pub fn run(input: &str) -> Result<()> {
         }
     };
 
-    if let Err(error) = transform_program(program.clone()) {
-        if let Some(diagnostic) = from_transform_error(&error) {
-            return Err(tooling_failure(
-                Path::new(input),
-                diagnostic.with_strategy(DiagnosticStrategy::Deferred),
-            ));
-        }
-        return Err(anyhow::anyhow!("IR transformation error: {:?}", error));
-    }
-
     let mut type_checker = TypeChecker::new();
     match type_checker.check_program(&program) {
         Ok(_) => {
@@ -65,12 +55,28 @@ pub fn run(input: &str) -> Result<()> {
         }
     }
 
-    let warnings = type_checker.check_null_safety(&program, None);
+    let warnings = if let Some(normalized) = type_checker.normalized_program() {
+        let cloned = normalized.clone();
+        type_checker.check_null_safety(&cloned, None)
+    } else {
+        type_checker.check_null_safety(&program, None)
+    };
     if !warnings.is_empty() {
         println!("Null safety warnings:");
         for warning in &warnings {
             println!("  Warning: {}", warning);
         }
+    }
+
+    let normalized_program = type_checker.take_normalized_program().unwrap_or(program);
+    if let Err(error) = transform_program(normalized_program) {
+        if let Some(diagnostic) = from_transform_error(&error) {
+            return Err(tooling_failure(
+                Path::new(input),
+                diagnostic.with_strategy(DiagnosticStrategy::Deferred),
+            ));
+        }
+        return Err(anyhow::anyhow!("IR transformation error: {:?}", error));
     }
 
     println!("Check completed successfully!");

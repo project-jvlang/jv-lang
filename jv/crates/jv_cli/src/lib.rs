@@ -453,12 +453,14 @@ pub mod pipeline {
         let (inference_snapshot, telemetry_snapshot) = match type_checker.check_program(&program) {
             Ok(()) => {
                 if options.check {
-                    warnings.extend(
-                        type_checker
-                            .check_null_safety(&program, None)
-                            .into_iter()
-                            .map(|warning| warning.to_string()),
-                    );
+                    let null_warnings = if let Some(normalized) = type_checker.normalized_program()
+                    {
+                        let cloned = normalized.clone();
+                        type_checker.check_null_safety(&cloned, None)
+                    } else {
+                        type_checker.check_null_safety(&program, None)
+                    };
+                    warnings.extend(null_warnings.into_iter().map(|warning| warning.to_string()));
                 }
                 let telemetry = type_checker.telemetry().clone();
                 let snapshot = type_checker.take_inference_snapshot();
@@ -504,7 +506,7 @@ pub mod pipeline {
 
         let mut perf_capture: Option<PerfCapture> = None;
         let when_strategy_records: Vec<WhenStrategyRecord>;
-        let mut program_holder = Some(program);
+        let mut program_holder = Some(type_checker.take_normalized_program().unwrap_or(program));
         let mut ir_program = if options.perf {
             let pools = TransformPools::with_chunk_capacity(256 * 1024);
             let mut context = TransformContext::with_pools(pools);

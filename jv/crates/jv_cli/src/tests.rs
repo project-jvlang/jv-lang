@@ -3,9 +3,7 @@ use crate::commands::explain;
 use crate::pipeline::compute_script_main_class;
 
 use crate::pipeline::generics::apply_type_facts;
-use jv_inference::constraint::{
-    ConstraintGraph, ConstraintSolution, NullabilitySummary, WhereConstraintResolver,
-};
+use jv_inference::constraint::{ConstraintGraph, ConstraintSolution, WhereConstraintResolver};
 use jv_inference::service::{TypeFactsBuilder, TypeScheme};
 use jv_inference::solver::Variance;
 use jv_inference::types::{

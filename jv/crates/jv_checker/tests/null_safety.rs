@@ -32,7 +32,12 @@ fn run_null_safety_case(source: &str) -> NullSafetyCaseResult {
         .check_program(&program)
         .expect("program should type-check");
 
-    let diagnostics = checker.check_null_safety(&program, None);
+    let diagnostics = if let Some(normalized) = checker.normalized_program() {
+        let cloned = normalized.clone();
+        checker.check_null_safety(&cloned, None)
+    } else {
+        checker.check_null_safety(&program, None)
+    };
     let messages = collect_null_safety_messages(&diagnostics);
     let telemetry_ms = checker.telemetry().pattern_bridge_ms;
 
@@ -50,7 +55,12 @@ fn null_safety_errors_are_tagged_with_jv3002() {
     checker
         .check_program(&program)
         .expect("program should type-check before null safety");
-    let diagnostics = checker.check_null_safety(&program, None);
+    let diagnostics = if let Some(normalized) = checker.normalized_program() {
+        let cloned = normalized.clone();
+        checker.check_null_safety(&cloned, None)
+    } else {
+        checker.check_null_safety(&program, None)
+    };
     let messages = collect_null_safety_messages(&diagnostics);
 
     assert!(
@@ -74,7 +84,12 @@ fn null_safety_retains_type_facts_snapshot() {
         .to_json();
 
     let snapshot = checker.inference_snapshot().cloned();
-    let diagnostics = checker.check_null_safety(&program, snapshot.as_ref());
+    let diagnostics = if let Some(normalized) = checker.normalized_program() {
+        let cloned = normalized.clone();
+        checker.check_null_safety(&cloned, snapshot.as_ref())
+    } else {
+        checker.check_null_safety(&program, snapshot.as_ref())
+    };
     assert!(
         diagnostics.is_empty(),
         "no diagnostics expected for safe program"
@@ -112,7 +127,12 @@ fn when_null_branch_conflict_emits_jv3108() {
         .check_program(&program)
         .expect("program should type-check");
 
-    let diagnostics = checker.check_null_safety(&program, None);
+    let diagnostics = if let Some(normalized) = checker.normalized_program() {
+        let cloned = normalized.clone();
+        checker.check_null_safety(&cloned, None)
+    } else {
+        checker.check_null_safety(&program, None)
+    };
     let messages = collect_null_safety_messages(&diagnostics);
 
     assert!(

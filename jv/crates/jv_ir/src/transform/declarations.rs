@@ -15,7 +15,7 @@ pub fn desugar_val_declaration(
     type_annotation: Option<TypeAnnotation>,
     initializer: Expression,
     modifiers: Modifiers,
-    _origin: ValBindingOrigin,
+    origin: ValBindingOrigin,
     span: Span,
     context: &mut TransformContext,
 ) -> Result<IrStatement, TransformError> {
@@ -63,7 +63,12 @@ pub fn desugar_val_declaration(
     let java_type = infer_java_type(type_annotation, Some(&ir_initializer), context)?;
 
     let mut ir_modifiers = convert_modifiers(&modifiers);
-    ir_modifiers.is_final = true;
+    let is_final = match origin {
+        ValBindingOrigin::ExplicitKeyword
+        | ValBindingOrigin::Implicit
+        | ValBindingOrigin::ImplicitTyped => true,
+    };
+    ir_modifiers.is_final = is_final;
 
     context.add_variable(name.clone(), java_type.clone());
 
@@ -71,7 +76,7 @@ pub fn desugar_val_declaration(
         name,
         java_type,
         initializer: Some(ir_initializer),
-        is_final: true,
+        is_final,
         modifiers: ir_modifiers,
         span,
     })
@@ -102,7 +107,7 @@ pub fn desugar_var_declaration(
     let java_type = infer_java_type(type_annotation.take(), ir_initializer.as_ref(), context)?;
 
     let mut ir_modifiers = convert_modifiers(&modifiers);
-    ir_modifiers.is_final = modifiers.is_final;
+    ir_modifiers.is_final = false;
 
     context.add_variable(name.clone(), java_type.clone());
 
