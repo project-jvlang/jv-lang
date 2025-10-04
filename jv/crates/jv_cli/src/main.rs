@@ -6,7 +6,7 @@ use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
-use jv_checker::diagnostics::{from_parse_error, from_transform_error, DiagnosticStrategy};
+use jv_checker::diagnostics::{from_parse_error, from_transform_error};
 use jv_fmt::JavaFormatter;
 use jv_ir::transform_program;
 use jv_parser::Parser as JvParser;
@@ -156,6 +156,15 @@ fn main() -> Result<()> {
             for warning in &artifacts.warnings {
                 println!("Warning: {}", warning);
             }
+
+            let usage = &artifacts.binding_usage;
+            println!(
+                "バインディング統計 / Binding usage: explicit val={} implicit val={} implicit typed={} var={}",
+                usage.explicit,
+                usage.implicit,
+                usage.implicit_typed,
+                usage.vars
+            );
 
             if let Some(perf) = &artifacts.perf_capture {
                 let summary = &perf.report.summary;

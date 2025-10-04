@@ -236,6 +236,8 @@ fn test_init_project_in_temp_dir() {
     let main_jv_content = fs::read_to_string(temp_path.join("src/main.jv")).unwrap();
     assert!(main_jv_content.contains("fun main()"));
     assert!(main_jv_content.contains("Hello, jv!"));
+    assert!(main_jv_content.contains("greeting = \"Hello, jv!\""));
+    assert!(main_jv_content.contains("[1 2 3]"));
 
     // Restore original directory
     std::env::set_current_dir(&original_dir).unwrap();
@@ -277,6 +279,79 @@ fn test_validate_file_exists() {
     fs::write(&temp_file, "val x = 42").unwrap();
     let result = validate_file_exists(temp_file.to_str().unwrap());
     assert!(result.is_ok());
+}
+
+#[test]
+fn compile_tracks_binding_usage() {
+    let temp_dir = TempDirGuard::new("binding-usage");
+    let root_path = temp_dir.path();
+    let manifest_path = root_path.join("jv.toml");
+
+    fs::write(
+        &manifest_path,
+        r#"[package]
+name = "binding-stats"
+version = "0.1.0"
+
+[package.dependencies]
+
+[project]
+entrypoint = "src/main.jv"
+
+[project.sources]
+include = ["src/**/*.jv"]
+"#,
+    )
+    .expect("write manifest");
+
+    let src_dir = root_path.join("src");
+    fs::create_dir_all(&src_dir).expect("create src directory");
+    let entrypoint = src_dir.join("main.jv");
+    fs::write(
+        &entrypoint,
+        r#"result = 1
+typed: Int = 2
+val explicit = result + typed
+var counter = 0
+counter = counter + explicit
+"#,
+    )
+    .expect("write source");
+
+    let project_root = pipeline::project::locator::ProjectRoot::new(
+        root_path.to_path_buf(),
+        manifest_path.clone(),
+    );
+    let settings =
+        pipeline::project::manifest::ManifestLoader::load(&manifest_path).expect("manifest loads");
+    let layout = pipeline::project::layout::ProjectLayout::from_settings(&project_root, &settings)
+        .expect("layout resolves");
+
+    let overrides = pipeline::CliOverrides {
+        entrypoint: Some(entrypoint.clone()),
+        output: Some(root_path.join("target")),
+        java_only: true,
+        check: false,
+        format: false,
+        target: None,
+        clean: false,
+        perf: false,
+        emit_types: false,
+        emit_telemetry: false,
+        parallel_inference: false,
+        inference_workers: None,
+        constraint_batch: None,
+    };
+
+    let plan = pipeline::BuildOptionsFactory::compose(project_root, settings, layout, overrides)
+        .expect("plan composition succeeds");
+
+    let artifacts = pipeline::compile(&plan).expect("program should compile");
+
+    assert_eq!(artifacts.binding_usage.implicit, 1);
+    assert_eq!(artifacts.binding_usage.implicit_typed, 1);
+    assert_eq!(artifacts.binding_usage.explicit, 1);
+    assert_eq!(artifacts.binding_usage.vars, 1);
 }
 
 #[test]

@@ -324,21 +324,21 @@ impl SequenceWarningCollector {
     }
 
     fn emit_warning(&mut self, span: &Span, kind: SequenceKind) {
-        let context = match kind {
-            SequenceKind::Array => "array literal",
-            SequenceKind::Call => "argument list",
-            SequenceKind::JsonArray => "JSON array literal",
+        let (code, context) = match kind {
+            SequenceKind::Array => ("JV2101", "array literal"),
+            SequenceKind::Call => ("JV2102", "argument list"),
+            SequenceKind::JsonArray => ("JV2101", "JSON array literal"),
         };
 
         if span.start_line > 0 {
             self.warnings.push(format!(
-                "JV1011: comma-separated {} at {}:{}; prefer whitespace-delimited layout.",
-                context, span.start_line, span.start_column
+                "{}: comma-separated {} at {}:{}; whitespace-only layout is required.",
+                code, context, span.start_line, span.start_column
             ));
         } else {
             self.warnings.push(format!(
-                "JV1011: comma-separated {} detected; prefer whitespace-delimited layout.",
-                context
+                "{}: comma-separated {} detected; whitespace-only layout is required.",
+                code, context
             ));
         }
     }

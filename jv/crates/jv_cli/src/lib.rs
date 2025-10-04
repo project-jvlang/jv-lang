@@ -194,8 +194,10 @@ java_version = "{}"
     fs::create_dir_all(&src_dir)?;
 
     let main_jv = r#"fun main() {
-    val greeting = "Hello, jv!"
+    greeting = "Hello, jv!"
+    numbers = [1 2 3]
     println(greeting)
+    println(numbers)
 }
 "#;
     fs::write(src_dir.join("main.jv"), main_jv)?;
@@ -272,6 +274,7 @@ pub mod pipeline {
     use anyhow::{anyhow, bail, Context};
     use generics::apply_type_facts;
     use jv_build::BuildSystem;
+    use jv_checker::binding::BindingUsageSummary;
     use jv_checker::compat::diagnostics as compat_diagnostics;
     use jv_checker::{InferenceSnapshot, InferenceTelemetry, TypeChecker};
     use jv_codegen_java::{JavaCodeGenConfig, JavaCodeGenerator};
@@ -283,6 +286,7 @@ pub mod pipeline {
         TransformProfiler,
     };
     use jv_parser::Parser as JvParser;
+    use serde_json::json;
     use std::ffi::OsStr;
     use std::path::{Path, PathBuf};
     use std::process::Command;
@@ -301,6 +305,7 @@ pub mod pipeline {
         pub perf_capture: Option<PerfCapture>,
         pub when_strategies: Vec<StrategySummary>,
         pub script_main_class: String,
+        pub binding_usage: BindingUsageSummary,
     }
 
     /// Aggregated summary of lowering strategies selected for `when` expressions.
@@ -504,6 +509,8 @@ pub mod pipeline {
             }
         };
 
+        let binding_usage = type_checker.binding_usage().clone();
+
         let mut perf_capture: Option<PerfCapture> = None;
         let when_strategy_records: Vec<WhenStrategyRecord>;
         let mut program_holder = Some(type_checker.take_normalized_program().unwrap_or(program));
@@ -624,9 +631,14 @@ pub mod pipeline {
 
         if options.emit_telemetry {
             if let Some(telemetry) = telemetry_snapshot.as_ref() {
-                print_inference_telemetry(entrypoint, telemetry, &when_strategy_summary);
-            } else if !when_strategy_summary.is_empty() {
-                print_strategy_telemetry(entrypoint, &when_strategy_summary);
+                print_inference_telemetry(
+                    entrypoint,
+                    telemetry,
+                    &when_strategy_summary,
+                    &binding_usage,
+                );
+            } else {
+                print_strategy_telemetry(entrypoint, &when_strategy_summary, &binding_usage);
             }
         }
 
@@ -641,6 +653,7 @@ pub mod pipeline {
             perf_capture,
             when_strategies: when_strategy_summary,
             script_main_class,
+            binding_usage,
         };
 
         if !options.java_only {
@@ -697,6 +710,7 @@ pub mod pipeline {
         entrypoint: &Path,
         telemetry: &InferenceTelemetry,
         strategies: &[StrategySummary],
+        binding_usage: &BindingUsageSummary,
     ) {
         println!(
             "Telemetry ({}):\n  constraints_emitted: {}\n  bindings_resolved: {}\n  inference_duration_ms: {:.3}\n  preserved_constraints: {}\n  cache_hit_rate: {}\n  invalidation_cascade_depth: {}\n  pattern_cache_hits: {}\n  pattern_cache_misses: {}\n  pattern_bridge_ms: {:.3}\n  generic_constraints_emitted: {}\n  bound_checks: {}\n  variance_conflicts: {}\n  sealed_hierarchy_checks: {}\n  generic_solver_ms: {:.3}\n  variance_analysis_ms: {:.3}",
@@ -721,6 +735,14 @@ pub mod pipeline {
             telemetry.variance_analysis_ms
         );
 
+        println!(
+            "  binding_usage: explicit_val={} implicit_val={} implicit_typed={} var={}",
+            binding_usage.explicit,
+            binding_usage.implicit,
+            binding_usage.implicit_typed,
+            binding_usage.vars
+        );
+
         if strategies.is_empty() {
             println!(
                 "  when_strategies: (none recorded)\n  pattern_diagnostic_hint: JV3199 surfaces when destructuring depth exceeds supported limits or when guards require Phase 5 features. Use --explain JV3199 for guidance."
@@ -739,9 +761,15 @@ pub mod pipeline {
                 "  pattern_diagnostic_hint: Deep destructuring (depth ≥ 11) and complex guards yield JV3199. Run --explain JV3199 to review mitigation paths."
             );
         }
+
+        emit_binding_usage_json(entrypoint, Some(telemetry), strategies, binding_usage);
     }
 
-    fn print_strategy_telemetry(entrypoint: &Path, strategies: &[StrategySummary]) {
+    fn print_strategy_telemetry(
+        entrypoint: &Path,
+        strategies: &[StrategySummary],
+        binding_usage: &BindingUsageSummary,
+    ) {
         println!("Telemetry ({})", entrypoint.display());
         println!("  pattern_cache_hits: n/a");
         println!("  pattern_cache_misses: n/a");
@@ -762,6 +790,15 @@ pub mod pipeline {
         println!(
             "  pattern_diagnostic_hint: Deep destructuring beyond depth 10 or hybrid guards will surface JV3199. Use --explain JV3199 for remediation."
         );
+        println!(
+            "  binding_usage: explicit_val={} implicit_val={} implicit_typed={} var={}",
+            binding_usage.explicit,
+            binding_usage.implicit,
+            binding_usage.implicit_typed,
+            binding_usage.vars
+        );
+
+        emit_binding_usage_json(entrypoint, None, strategies, binding_usage);
     }
 
     fn summarize_when_strategies(records: &[WhenStrategyRecord]) -> Vec<StrategySummary> {
@@ -777,6 +814,60 @@ pub mod pipeline {
             .into_iter()
             .map(|(description, count)| StrategySummary { description, count })
             .collect()
+    }
+
+    fn emit_binding_usage_json(
+        entrypoint: &Path,
+        telemetry: Option<&InferenceTelemetry>,
+        strategies: &[StrategySummary],
+        binding_usage: &BindingUsageSummary,
+    ) {
+        let strategies_json = strategies
+            .iter()
+            .map(|summary| {
+                json!({
+                    "description": summary.description,
+                    "count": summary.count,
+                })
+            })
+            .collect::<Vec<_>>();
+
+        let telemetry_json = telemetry.map(|telemetry| {
+            json!({
+                "constraints_emitted": telemetry.constraints_emitted,
+                "bindings_resolved": telemetry.bindings_resolved,
+                "inference_duration_ms": telemetry.inference_duration_ms,
+                "preserved_constraints": telemetry.preserved_constraints,
+                "cache_hit_rate": telemetry.cache_hit_rate,
+                "invalidation_cascade_depth": telemetry.invalidation_cascade_depth,
+                "pattern_cache_hits": telemetry.pattern_cache_hits,
+                "pattern_cache_misses": telemetry.pattern_cache_misses,
+                "pattern_bridge_ms": telemetry.pattern_bridge_ms,
+                "generic_constraints_emitted": telemetry.generic_constraints_emitted,
+                "bound_checks": telemetry.bound_checks,
+                "variance_conflicts": telemetry.variance_conflicts,
+                "sealed_hierarchy_checks": telemetry.sealed_hierarchy_checks,
+                "generic_solver_ms": telemetry.generic_solver_ms,
+                "variance_analysis_ms": telemetry.variance_analysis_ms,
+            })
+        });
+
+        let payload = json!({
+            "entrypoint": entrypoint.display().to_string(),
+            "binding_usage": {
+                "explicit_val": binding_usage.explicit,
+                "implicit_val": binding_usage.implicit,
+                "implicit_typed": binding_usage.implicit_typed,
+                "vars": binding_usage.vars,
+            },
+            "when_strategies": strategies_json,
+            "telemetry": telemetry_json,
+        });
+
+        match serde_json::to_string(&payload) {
+            Ok(json_line) => println!("{}", json_line),
+            Err(error) => eprintln!("Failed to serialize telemetry payload: {}", error),
+        }
     }
 
     /// Compile and execute a `.jv` program using the Java runtime.
