@@ -187,6 +187,26 @@ impl Normalizer {
         Self { _private: () }
     }
 
+    fn finalize_token<'source>(
+        &self,
+        token: RawToken<'source>,
+        mut metadata: PreMetadata,
+        normalized_text: String,
+    ) -> NormalizedToken<'source> {
+        if let Some(carry) = token.carry_over.clone() {
+            if !matches!(
+                token.kind,
+                RawTokenKind::CommentCandidate | RawTokenKind::Eof
+            ) {
+                metadata
+                    .provisional_metadata
+                    .push(TokenMetadata::CommentCarryOver(carry));
+            }
+        }
+
+        NormalizedToken::new(token, normalized_text, metadata)
+    }
+
     fn normalize_number<'source>(
         &mut self,
         token: RawToken<'source>,
@@ -236,7 +256,7 @@ impl Normalizer {
                 original_lexeme: lexeme.to_string(),
             }));
 
-        Ok(NormalizedToken::new(token, normalized, metadata))
+        Ok(self.finalize_token(token, metadata, normalized))
     }
 
     fn has_radix_prefix(lexeme: &str) -> bool {
@@ -282,7 +302,7 @@ impl Normalizer {
                 .push(TokenMetadata::StringInterpolation { segments });
         }
 
-        Ok(NormalizedToken::new(token, normalized, metadata))
+        Ok(self.finalize_token(token, metadata, normalized))
     }
 
     fn collect_interpolation_segments(
@@ -487,7 +507,7 @@ impl Normalizer {
         }
 
         let normalized_text = token.text.to_string();
-        Ok(NormalizedToken::new(token, normalized_text, metadata))
+        Ok(self.finalize_token(token, metadata, normalized_text))
     }
 
     fn normalize_trivia<'source>(
@@ -504,7 +524,7 @@ impl Normalizer {
         }
 
         let normalized_text = token.text.to_string();
-        Ok(NormalizedToken::new(token, normalized_text, metadata))
+        Ok(self.finalize_token(token, metadata, normalized_text))
     }
 
     fn normalize_comment<'source>(
@@ -512,11 +532,7 @@ impl Normalizer {
         token: RawToken<'source>,
     ) -> Result<NormalizedToken<'source>, LexError> {
         let normalized_text = token.text.to_string();
-        Ok(NormalizedToken::new(
-            token,
-            normalized_text,
-            PreMetadata::default(),
-        ))
+        Ok(self.finalize_token(token, PreMetadata::default(), normalized_text))
     }
 }
 
@@ -535,18 +551,12 @@ impl NormalizerStage for Normalizer {
                     self.normalize_comment(token)
                 }
             }
-            RawTokenKind::Eof => Ok(NormalizedToken::new(
-                token,
-                String::new(),
-                PreMetadata::default(),
-            )),
+            RawTokenKind::Eof => {
+                Ok(self.finalize_token(token, PreMetadata::default(), String::new()))
+            }
             RawTokenKind::Identifier => {
                 let normalized_text = token.text.to_string();
-                Ok(NormalizedToken::new(
-                    token,
-                    normalized_text,
-                    PreMetadata::default(),
-                ))
+                Ok(self.finalize_token(token, PreMetadata::default(), normalized_text))
             }
             RawTokenKind::Symbol => {
                 if token.text.starts_with('"') || token.text.starts_with("```") {
@@ -578,6 +588,10 @@ impl PreMetadata {
 mod tests {
     use super::*;
     use crate::pipeline::types::{RawToken, ScannerPosition, Span};
+    use crate::{
+        CommentCarryOverMetadata, JsonCommentTrivia, JsonCommentTriviaKind, SourceCommentKind,
+        SourceCommentTrivia,
+    };
 
     fn make_span(len: usize) -> Span {
         make_span_with_offset(0, len, 1, 1)
@@ -856,5 +870,72 @@ mod tests {
             })
             .expect("layout metadata");
         assert!(matches!(layout_meta.sequence, LayoutSequenceKind::Call));
+    }
+
+    #[test]
+    fn normalize_identifier_appends_comment_carry_metadata() {
+        let mut normalizer = Normalizer::new();
+        let mut ctx = LexerContext::new("val");
+
+        let mut raw = make_raw_token(RawTokenKind::Identifier, "val");
+        let mut carry = CommentCarryOverMetadata::default();
+        carry.passthrough.push(SourceCommentTrivia {
+            kind: SourceCommentKind::Line,
+            text: "// keep".to_string(),
+            line: 1,
+            column: 1,
+        });
+        carry.json.push(JsonCommentTrivia {
+            kind: JsonCommentTriviaKind::Line,
+            text: "keep".to_string(),
+            line: 1,
+            column: 1,
+        });
+        raw.carry_over = Some(carry.clone());
+
+        let normalized = normalizer
+            .normalize(raw, &mut ctx)
+            .expect("identifier normalization with carry");
+
+        let carry_meta = normalized
+            .metadata
+            .provisional_metadata
+            .iter()
+            .find_map(|meta| match meta {
+                TokenMetadata::CommentCarryOver(info) => Some(info.clone()),
+                _ => None,
+            })
+            .expect("comment carry metadata");
+
+        assert_eq!(carry_meta.passthrough, carry.passthrough);
+        assert_eq!(carry_meta.json, carry.json);
+        assert!(normalized.raw.carry_over.is_some());
+    }
+
+    #[test]
+    fn normalize_comment_keeps_carry_metadata_on_raw_without_injecting_pre_metadata() {
+        let mut normalizer = Normalizer::new();
+        let mut ctx = LexerContext::new("// keep");
+
+        let mut raw = make_raw_token(RawTokenKind::CommentCandidate, "// keep");
+        let mut carry = CommentCarryOverMetadata::default();
+        carry.passthrough.push(SourceCommentTrivia {
+            kind: SourceCommentKind::Line,
+            text: "// keep".to_string(),
+            line: 1,
+            column: 1,
+        });
+        raw.carry_over = Some(carry.clone());
+
+        let normalized = normalizer
+            .normalize(raw, &mut ctx)
+            .expect("comment normalization");
+
+        assert!(normalized
+            .metadata
+            .provisional_metadata
+            .iter()
+            .all(|meta| !matches!(meta, TokenMetadata::CommentCarryOver(_))));
+        assert_eq!(normalized.raw.carry_over, Some(carry));
     }
 }
