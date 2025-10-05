@@ -218,19 +218,163 @@ configure_shell() {
     echo -e "  ${YELLOW}jv --version${NC}"
 }
 
-# Check Java environment
+# Install GraalVM JDK 25
+install_graalvm() {
+    echo ""
+    echo -e "${GREEN}Installing GraalVM JDK 25...${NC}"
+
+    local platform
+    local arch
+    local os_name
+
+    # Detect platform
+    case "$(uname -s)" in
+        Linux*)     os_name="linux" ;;
+        Darwin*)    os_name="macos" ;;
+        *)
+            echo -e "${RED}Error: Unsupported OS for automatic JDK installation${NC}" >&2
+            return 1
+            ;;
+    esac
+
+    case "$(uname -m)" in
+        x86_64|amd64)   arch="x64" ;;
+        aarch64|arm64)  arch="aarch64" ;;
+        *)
+            echo -e "${RED}Error: Unsupported architecture for automatic JDK installation${NC}" >&2
+            return 1
+            ;;
+    esac
+
+    # GraalVM download URL
+    local graalvm_version="25.0.0"
+    local graalvm_build="11"
+    local graalvm_url="https://download.oracle.com/graalvm/${graalvm_version%%.*}/archive/graalvm-jdk-${graalvm_version}_${os_name}-${arch}_bin.tar.gz"
+
+    # Installation directory
+    local jdk_install_dir="${HOME}/.jv/jdk"
+    local graalvm_dir="${jdk_install_dir}/graalvm-jdk-${graalvm_version}"
+
+    # Check if already installed
+    if [[ -d "$graalvm_dir" ]]; then
+        echo -e "${GREEN}✓ GraalVM JDK 25 already installed at ${graalvm_dir}${NC}"
+
+        # Set JAVA_HOME
+        export JAVA_HOME="$graalvm_dir"
+        export PATH="$JAVA_HOME/bin:$PATH"
+
+        # Update shell config
+        update_java_home_in_shell "$graalvm_dir"
+        return 0
+    fi
+
+    # Create installation directory
+    mkdir -p "$jdk_install_dir"
+
+    # Download GraalVM
+    local temp_file="/tmp/graalvm-jdk-${graalvm_version}.tar.gz"
+    echo -e "${YELLOW}Downloading GraalVM JDK 25 from ${graalvm_url}...${NC}"
+
+    if command -v curl &> /dev/null; then
+        if ! curl -fSL "${graalvm_url}" -o "${temp_file}"; then
+            echo -e "${RED}Error: Failed to download GraalVM JDK${NC}" >&2
+            rm -f "${temp_file}"
+            return 1
+        fi
+    elif command -v wget &> /dev/null; then
+        if ! wget -q "${graalvm_url}" -O "${temp_file}"; then
+            echo -e "${RED}Error: Failed to download GraalVM JDK${NC}" >&2
+            rm -f "${temp_file}"
+            return 1
+        fi
+    else
+        echo -e "${RED}Error: curl or wget is required${NC}" >&2
+        return 1
+    fi
+
+    # Extract
+    echo -e "${YELLOW}Extracting GraalVM JDK...${NC}"
+    tar xzf "${temp_file}" -C "${jdk_install_dir}"
+    rm -f "${temp_file}"
+
+    # Rename directory to standard name
+    local extracted_dir=$(find "${jdk_install_dir}" -maxdepth 1 -type d -name "graalvm-jdk-${graalvm_version}*" | head -n1)
+    if [[ -n "$extracted_dir" ]] && [[ "$extracted_dir" != "$graalvm_dir" ]]; then
+        mv "$extracted_dir" "$graalvm_dir"
+    fi
+
+    # For macOS, handle Contents/Home structure
+    if [[ "$os_name" == "macos" ]] && [[ -d "${graalvm_dir}/Contents/Home" ]]; then
+        local temp_home="${jdk_install_dir}/graalvm-temp"
+        mv "${graalvm_dir}/Contents/Home" "$temp_home"
+        rm -rf "$graalvm_dir"
+        mv "$temp_home" "$graalvm_dir"
+    fi
+
+    echo -e "${GREEN}✓ GraalVM JDK 25 installed to ${graalvm_dir}${NC}"
+
+    # Set JAVA_HOME
+    export JAVA_HOME="$graalvm_dir"
+    export PATH="$JAVA_HOME/bin:$PATH"
+
+    # Update shell config
+    update_java_home_in_shell "$graalvm_dir"
+
+    return 0
+}
+
+# Update JAVA_HOME in shell configuration
+update_java_home_in_shell() {
+    local java_home_path="$1"
+    local shell_config=""
+    local shell_name=""
+
+    # Detect shell
+    if [[ -n "${BASH_VERSION:-}" ]]; then
+        shell_name="bash"
+        shell_config="${HOME}/.bashrc"
+    elif [[ -n "${ZSH_VERSION:-}" ]]; then
+        shell_name="zsh"
+        shell_config="${HOME}/.zshrc"
+    elif [[ -n "${FISH_VERSION:-}" ]]; then
+        shell_name="fish"
+        shell_config="${HOME}/.config/fish/config.fish"
+    else
+        shell_name="sh"
+        shell_config="${HOME}/.profile"
+    fi
+
+    # Add JAVA_HOME to shell config
+    if [[ -f "$shell_config" ]]; then
+        if ! grep -q "JAVA_HOME.*jv/jdk" "$shell_config" 2>/dev/null; then
+            echo "" >> "$shell_config"
+            echo "# GraalVM JDK (jv-lang)" >> "$shell_config"
+            if [[ "$shell_name" == "fish" ]]; then
+                echo "set -gx JAVA_HOME \"${java_home_path}\"" >> "$shell_config"
+                echo "set -gx PATH \$JAVA_HOME/bin \$PATH" >> "$shell_config"
+            else
+                echo "export JAVA_HOME=\"${java_home_path}\"" >> "$shell_config"
+                echo "export PATH=\"\$JAVA_HOME/bin:\$PATH\"" >> "$shell_config"
+            fi
+            echo -e "${GREEN}✓ Added JAVA_HOME to ${shell_config}${NC}"
+        fi
+    fi
+}
+
+# Check Java environment and install if needed
 check_java_environment() {
     local has_javac=false
     local has_maven=false
     local javac_version=""
+    local javac_version_num=0
     local maven_version=""
 
     # Check for javac
     if command -v javac &> /dev/null; then
         javac_version=$(javac -version 2>&1 | head -n1)
         # Extract version number (e.g., "21" from "javac 21.0.1")
-        local version_num=$(echo "$javac_version" | grep -oE '[0-9]+' | head -n1)
-        if [[ -n "$version_num" ]] && [[ "$version_num" -ge 21 ]]; then
+        javac_version_num=$(echo "$javac_version" | grep -oE '[0-9]+' | head -n1)
+        if [[ -n "$javac_version_num" ]] && [[ "$javac_version_num" -ge 21 ]]; then
             has_javac=true
         fi
     fi
@@ -249,8 +393,10 @@ check_java_environment() {
 
     if [[ "$has_javac" == true ]]; then
         echo -e "${GREEN}✓ Java Compiler: ${javac_version}${NC}"
+    elif [[ -n "$javac_version_num" ]] && [[ "$javac_version_num" -lt 21 ]]; then
+        echo -e "${RED}✗ Java Compiler: ${javac_version} (version < 21)${NC}"
     else
-        echo -e "${RED}✗ Java Compiler: Not found or version < 21${NC}"
+        echo -e "${RED}✗ Java Compiler: Not found${NC}"
     fi
 
     if [[ "$has_maven" == true ]]; then
@@ -261,25 +407,105 @@ check_java_environment() {
 
     echo ""
 
-    # If Java tools are missing, guide to jv init
+    # Handle JDK installation
+    if [[ "$has_javac" == false ]]; then
+        if [[ -n "$javac_version_num" ]] && [[ "$javac_version_num" -lt 21 ]]; then
+            # JDK exists but version is too old
+            echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+            echo -e "${YELLOW}  JDK Update Required${NC}"
+            echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+            echo ""
+            echo -e "Your current JDK version is ${javac_version_num}, but jv requires JDK 21 or higher."
+            echo ""
+            echo -e "${GREEN}Recommended: Install GraalVM JDK 25${NC}"
+            echo ""
+            read -p "Do you want to install GraalVM JDK 25 now? [Y/n] " -n 1 -r
+            echo
+            if [[ $REPLY =~ ^[Yy]$ ]] || [[ -z $REPLY ]]; then
+                if install_graalvm; then
+                    has_javac=true
+                    echo ""
+                    echo -e "${GREEN}✓ GraalVM JDK 25 installed successfully${NC}"
+                    echo ""
+                    echo -e "${YELLOW}Note: Please restart your terminal or run:${NC}"
+                    echo -e "  ${YELLOW}source ~/.bashrc${NC}  # or your shell's config file"
+                    echo ""
+                else
+                    echo ""
+                    echo -e "${YELLOW}Automatic installation failed. Please install manually:${NC}"
+                    echo -e "  • GraalVM JDK 25: ${YELLOW}https://www.graalvm.org/downloads/${NC}"
+                    echo -e "  • Or JDK 21+: ${YELLOW}https://adoptium.net/${NC}"
+                    echo ""
+                fi
+            else
+                echo ""
+                echo -e "${YELLOW}Manual installation:${NC}"
+                echo -e "  • GraalVM JDK 25: ${YELLOW}https://www.graalvm.org/downloads/${NC}"
+                echo -e "  • Or JDK 21+: ${YELLOW}https://adoptium.net/${NC}"
+                echo ""
+            fi
+        else
+            # JDK not found
+            echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+            echo -e "${YELLOW}  JDK Installation Required${NC}"
+            echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+            echo ""
+            echo -e "jv requires JDK 21 or higher to compile jv code to Java."
+            echo ""
+            echo -e "${GREEN}Recommended: Install GraalVM JDK 25${NC}"
+            echo ""
+            read -p "Do you want to install GraalVM JDK 25 now? [Y/n] " -n 1 -r
+            echo
+            if [[ $REPLY =~ ^[Yy]$ ]] || [[ -z $REPLY ]]; then
+                if install_graalvm; then
+                    has_javac=true
+                    echo ""
+                    echo -e "${GREEN}✓ GraalVM JDK 25 installed successfully${NC}"
+                    echo ""
+                    echo -e "${YELLOW}Note: Please restart your terminal or run:${NC}"
+                    echo -e "  ${YELLOW}source ~/.bashrc${NC}  # or your shell's config file"
+                    echo ""
+                else
+                    echo ""
+                    echo -e "${YELLOW}Automatic installation failed. Please install manually:${NC}"
+                    echo -e "  • GraalVM JDK 25: ${YELLOW}https://www.graalvm.org/downloads/${NC}"
+                    echo -e "  • Or JDK 21+: ${YELLOW}https://adoptium.net/${NC}"
+                    echo ""
+                fi
+            else
+                echo ""
+                echo -e "${YELLOW}Manual installation:${NC}"
+                echo -e "  • GraalVM JDK 25: ${YELLOW}https://www.graalvm.org/downloads/${NC}"
+                echo -e "  • Or JDK 21+: ${YELLOW}https://adoptium.net/${NC}"
+                echo ""
+            fi
+        fi
+    fi
+
+    # If Java tools are missing, guide to jv init or manual installation
     if [[ "$has_javac" == false ]] || [[ "$has_maven" == false ]]; then
         echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
         echo -e "${YELLOW}  Setup Required${NC}"
         echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
         echo ""
-        echo -e "jv requires Java 21+ and Maven to compile jv code to Java."
-        echo ""
+
+        if [[ "$has_javac" == false ]]; then
+            echo -e "jv requires Java 21+ to compile jv code to Java."
+            echo ""
+        fi
+
+        if [[ "$has_maven" == false ]]; then
+            echo -e "jv requires Maven for dependency management."
+            echo ""
+            echo -e "${GREEN}Install Maven:${NC}"
+            echo -e "  • ${YELLOW}https://maven.apache.org/download.cgi${NC}"
+            echo ""
+        fi
+
         echo -e "${GREEN}Automatic setup (recommended):${NC}"
         echo -e "  ${YELLOW}jv init${NC}"
         echo ""
-        echo -e "This will:"
-        echo -e "  • Detect or install JDK 21+"
-        echo -e "  • Configure Maven"
-        echo -e "  • Set up your development environment"
-        echo ""
-        echo -e "${GREEN}Manual setup:${NC}"
-        echo -e "  • Install JDK 21+: ${YELLOW}https://adoptium.net/${NC}"
-        echo -e "  • Install Maven: ${YELLOW}https://maven.apache.org/download.cgi${NC}"
+        echo -e "This will configure your development environment."
         echo ""
         return 1
     fi
