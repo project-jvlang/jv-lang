@@ -540,3 +540,51 @@ impl CharScannerStage for CharScanner {
         &ctx.source[self.cursor..end]
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::pipeline::pipeline::DEFAULT_LOOKAHEAD_LIMIT;
+
+    #[test]
+    fn scan_identifier_captures_trivia_and_span() {
+        let mut scanner = CharScanner::new();
+        let source = "  // keep\nval answer";
+        let mut ctx = LexerContext::new(source);
+
+        let token = scanner.scan_next_token(&mut ctx).expect("token");
+        assert_eq!(token.kind, RawTokenKind::Identifier);
+        assert_eq!(token.text, "val");
+
+        let trivia = token.trivia.expect("expected leading trivia");
+        assert!(trivia.comments, "comment trivia should be recorded");
+        assert!(trivia.newlines >= 1, "newline trivia should be tracked");
+
+        let expected_offset = source.find("val").expect("lexeme location");
+        assert_eq!(token.span.start.byte_offset, expected_offset);
+        assert_eq!(token.span.end.byte_offset, expected_offset + "val".len());
+    }
+
+    #[test]
+    fn peek_limit_and_checkpoint_restore_roundtrip() {
+        let mut scanner = CharScanner::new();
+        let source = "a".repeat(DEFAULT_LOOKAHEAD_LIMIT + 64);
+        let mut ctx = LexerContext::new(&source);
+
+        let preview = scanner.peek_chars(&mut ctx, DEFAULT_LOOKAHEAD_LIMIT * 2);
+        assert_eq!(preview.len(), DEFAULT_LOOKAHEAD_LIMIT);
+
+        let checkpoint = scanner.save_position();
+        let first = scanner.scan_next_token(&mut ctx).expect("first token");
+
+        scanner.restore_position(checkpoint);
+        ctx.update_position(checkpoint);
+        let second = scanner.scan_next_token(&mut ctx).expect("second token");
+
+        assert_eq!(first.kind, second.kind);
+        assert_eq!(first.text, second.text);
+        assert_eq!(first.span.byte_range, second.span.byte_range);
+
+        scanner.discard_checkpoint(checkpoint);
+    }
+}

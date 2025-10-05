@@ -152,6 +152,7 @@ impl ClassifierStage for Classifier {
 mod tests {
     use super::*;
     use crate::pipeline::types::{PreMetadata, RawToken, Span};
+    use crate::{JsonConfidence, StringDelimiterKind, StringLiteralMetadata, TokenMetadata};
 
     fn make_raw_token(kind: RawTokenKind, text: &str) -> RawToken<'static> {
         let leaked: &'static str = Box::leak(text.to_string().into_boxed_str());
@@ -211,5 +212,44 @@ mod tests {
 
         let classified = classifier.classify(token, &mut ctx).unwrap();
         assert!(matches!(classified.token_type, TokenType::Equal));
+    }
+
+    #[test]
+    fn classifier_preserves_pre_metadata_entries() {
+        let mut classifier = Classifier::new();
+        let raw = make_raw_token(RawTokenKind::Identifier, "jsonCandidate");
+        let mut pre = PreMetadata::default();
+        pre.provisional_metadata
+            .push(TokenMetadata::PotentialJsonStart {
+                confidence: JsonConfidence::High,
+            });
+        let token = NormalizedToken::new(raw, "jsonCandidate".to_string(), pre);
+        let mut ctx = build_context("jsonCandidate");
+
+        let classified = classifier.classify(token, &mut ctx).unwrap();
+        assert!(classified.metadata.iter().any(|meta| matches!(
+            meta,
+            TokenMetadata::PotentialJsonStart {
+                confidence: JsonConfidence::High
+            }
+        )));
+    }
+
+    #[test]
+    fn classifier_marks_string_literals_from_metadata() {
+        let mut classifier = Classifier::new();
+        let raw = make_raw_token(RawTokenKind::Symbol, "\"hello\"");
+        let mut pre = PreMetadata::default();
+        pre.provisional_metadata
+            .push(TokenMetadata::StringLiteral(StringLiteralMetadata {
+                delimiter: StringDelimiterKind::DoubleQuote,
+                allows_interpolation: true,
+                normalize_indentation: false,
+            }));
+        let token = NormalizedToken::new(raw, "hello".to_string(), pre);
+        let mut ctx = build_context("\"hello\"");
+
+        let classified = classifier.classify(token, &mut ctx).unwrap();
+        assert!(matches!(classified.token_type, TokenType::String(ref value) if value == "hello"));
     }
 }

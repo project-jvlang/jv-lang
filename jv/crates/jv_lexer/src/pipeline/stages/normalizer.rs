@@ -260,3 +260,74 @@ impl PreMetadata {
         pre
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::pipeline::types::{RawToken, ScannerPosition, Span};
+
+    fn make_span(len: usize) -> Span {
+        let start = ScannerPosition {
+            byte_offset: 0,
+            line: 1,
+            column: 1,
+        };
+        let end = ScannerPosition {
+            byte_offset: len,
+            line: 1,
+            column: len + 1,
+        };
+        Span::new(0..len, start, end)
+    }
+
+    fn make_raw_token(kind: RawTokenKind, text: &str) -> RawToken<'static> {
+        let leaked: &'static str = Box::leak(text.to_string().into_boxed_str());
+        RawToken {
+            kind,
+            text: leaked,
+            span: make_span(leaked.len()),
+            trivia: None,
+        }
+    }
+
+    #[test]
+    fn normalize_string_unescapes_and_normalizes() {
+        let mut normalizer = Normalizer::new();
+        let raw = make_raw_token(RawTokenKind::Symbol, "\"Cafe\\u{0301}\"");
+        let mut ctx = LexerContext::new("\"Cafe\\u{0301}\"");
+
+        let normalized = normalizer
+            .normalize(raw, &mut ctx)
+            .expect("string normalization");
+
+        assert_eq!(normalized.normalized_text, "Café");
+        assert!(normalized
+            .metadata
+            .provisional_metadata
+            .iter()
+            .any(|meta| matches!(meta, TokenMetadata::StringLiteral(_))));
+        assert!(normalized.metadata.provisional_diagnostics.is_empty());
+    }
+
+    #[test]
+    fn normalize_number_collapses_grouping_metadata() {
+        let mut normalizer = Normalizer::new();
+        let raw = make_raw_token(RawTokenKind::NumberCandidate, "1_234,567");
+        let mut ctx = LexerContext::new("1_234,567");
+
+        let normalized = normalizer
+            .normalize(raw, &mut ctx)
+            .expect("number normalization");
+
+        assert_eq!(normalized.normalized_text, "1234567");
+        assert!(normalized
+            .metadata
+            .provisional_metadata
+            .iter()
+            .any(|meta| matches!(
+                meta,
+                TokenMetadata::NumberLiteral(info)
+                if matches!(info.grouping, NumberGroupingKind::Mixed)
+            )));
+    }
+}
