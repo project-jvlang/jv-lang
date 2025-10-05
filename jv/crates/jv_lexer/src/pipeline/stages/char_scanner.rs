@@ -392,7 +392,11 @@ impl CharScanner {
                 }
                 '.' => {
                     if saw_dot || saw_exponent {
-                        break;
+                        return Err(LexError::UnexpectedChar(
+                            '.',
+                            self.position.line,
+                            self.position.column,
+                        ));
                     }
                     let after = self.peek_char_offset(source, 1);
                     if matches!(after, Some('.') | Some('=')) {
@@ -693,6 +697,10 @@ impl CharScanner {
         let start_line = self.position.line;
         let start_column = self.position.column;
         let remaining = self.remaining(source);
+
+        if remaining.starts_with('\'') {
+            return Err(LexError::UnexpectedChar('\'', start_line, start_column));
+        }
 
         let (opening, closing, is_raw) = if remaining.starts_with("```") {
             ("```", "```", true)
@@ -1006,7 +1014,8 @@ impl CharScannerStage for CharScanner {
             let rest = &remaining[2..];
             let line = start_position.line;
             let column = start_position.column;
-            let (slice, trivia_piece, carry_piece) = if Self::is_jv_block_comment(rest) {
+            let is_jv_block = Self::is_jv_block_comment(rest);
+            let (slice, trivia_piece, carry_piece) = if is_jv_block {
                 let slice = self.read_jv_only_block_comment(source)?;
                 let trivia_piece = self.build_jv_block_comment_trivia(slice, line, column);
                 let carry_piece = self.build_jv_block_comment_carry(slice, line, column);
@@ -1018,8 +1027,10 @@ impl CharScannerStage for CharScanner {
                 let carry_piece = self.build_line_comment_carry(slice, line, column, is_jv_only);
                 (slice, trivia_piece, carry_piece)
             };
-            self.push_comment_trivia(trivia_piece);
-            self.push_comment_carry(carry_piece.clone());
+            if !is_jv_block {
+                self.push_comment_trivia(trivia_piece);
+                self.push_comment_carry(carry_piece.clone());
+            }
             let span = self.current_span(start_offset, start_position);
             ctx.update_position(self.position);
             return Ok(RawToken {
@@ -1027,7 +1038,7 @@ impl CharScannerStage for CharScanner {
                 text: slice,
                 span,
                 trivia,
-                carry_over: Some(carry_piece),
+                carry_over: (!is_jv_block).then_some(carry_piece),
             });
         }
 

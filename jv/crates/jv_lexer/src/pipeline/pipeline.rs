@@ -77,7 +77,7 @@ pub trait EmitterStage {
         &mut self,
         token: ClassifiedToken<'source>,
         ctx: &mut LexerContext<'source>,
-    ) -> Result<Token, LexError>;
+    ) -> Result<Vec<Token>, LexError>;
 }
 
 pub trait TokenPlugin: Send + Sync {
@@ -197,10 +197,15 @@ impl<S, N, C, E> LexerPipeline<S, N, C, E> {
             let normalized = self.stages.normalizer.normalize(raw, ctx)?;
             let mut classified = self.stages.classifier.classify(normalized, ctx)?;
             self.plugins.apply(&mut classified, ctx)?;
-            let token = self.stages.emitter.emit(classified, ctx)?;
-            let reached_end = matches!(token.token_type, TokenType::Eof);
-            sink.push(token)?;
-            ctx.increment_emitted();
+            let emitted = self.stages.emitter.emit(classified, ctx)?;
+            let mut reached_end = false;
+            for token in emitted {
+                if matches!(token.token_type, TokenType::Eof) {
+                    reached_end = true;
+                }
+                sink.push(token)?;
+                ctx.increment_emitted();
+            }
             ctx.clear_lookahead_window();
             self.stages.scanner.commit_position();
             self.stages.scanner.discard_checkpoint(checkpoint);

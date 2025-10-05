@@ -531,7 +531,16 @@ impl Normalizer {
         &mut self,
         token: RawToken<'source>,
     ) -> Result<NormalizedToken<'source>, LexError> {
-        let normalized_text = token.text.to_string();
+        let raw_text = token.text;
+        let normalized_text = if raw_text.starts_with("/**") {
+            raw_text.trim_start_matches('/').to_string()
+        } else if raw_text.starts_with("//*") && raw_text.ends_with("*//") {
+            let mut converted = String::from("/*");
+            converted.push_str(&raw_text[3..]);
+            converted
+        } else {
+            raw_text.to_string()
+        };
         Ok(self.finalize_token(token, PreMetadata::default(), normalized_text))
     }
 }

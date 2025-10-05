@@ -6,7 +6,7 @@ use crate::{
 };
 
 /// ソース全体に対する位置情報を表す。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ScannerPosition {
     pub byte_offset: usize,
     pub line: usize,
@@ -21,6 +21,16 @@ impl ScannerPosition {
             self.column = delta_column;
         } else {
             self.column = self.column.saturating_add(delta_column);
+        }
+    }
+}
+
+impl Default for ScannerPosition {
+    fn default() -> Self {
+        Self {
+            byte_offset: 0,
+            line: 1,
+            column: 1,
         }
     }
 }
