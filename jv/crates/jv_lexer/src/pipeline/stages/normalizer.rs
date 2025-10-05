@@ -6,13 +6,174 @@ use crate::{
     pipeline::{
         context::LexerContext,
         pipeline::NormalizerStage,
-        types::{NormalizedToken, PreMetadata, RawToken, RawTokenKind},
+        types::{NormalizedToken, PreMetadata, RawToken, RawTokenKind, Span},
     },
-    LexError, NumberGroupingKind, NumberLiteralMetadata, StringDelimiterKind,
-    StringLiteralMetadata, TokenDiagnostic, TokenMetadata,
+    LayoutCommaMetadata, LayoutSequenceKind, LexError, NumberGroupingKind, NumberLiteralMetadata,
+    StringDelimiterKind, StringLiteralMetadata, TokenDiagnostic, TokenMetadata,
 };
 
 use super::json_utils::{detect_array_confidence, detect_object_confidence};
+
+fn normalize_decimal_number(
+    lexeme: &str,
+    line: usize,
+    column: usize,
+    saw_comma: &mut bool,
+    saw_underscore: &mut bool,
+) -> Result<String, LexError> {
+    let mut normalized = String::with_capacity(lexeme.len());
+    let mut chars = lexeme.chars().peekable();
+    let mut seen_digit = false;
+    let mut seen_dot = false;
+    let mut seen_exp = false;
+    let mut exponent_digits = 0usize;
+
+    while let Some(ch) = chars.next() {
+        match ch {
+            '_' => {
+                *saw_underscore = true;
+            }
+            ',' => {
+                *saw_comma = true;
+            }
+            '.' => {
+                if seen_dot || seen_exp {
+                    return Err(LexError::UnexpectedChar('.', line, column));
+                }
+                seen_dot = true;
+                normalized.push('.');
+            }
+            'e' | 'E' => {
+                if seen_exp {
+                    return Err(LexError::UnexpectedChar('e', line, column));
+                }
+                seen_exp = true;
+                exponent_digits = 0;
+                normalized.push('e');
+                if let Some(&next) = chars.peek() {
+                    if next == '+' || next == '-' {
+                        normalized.push(next);
+                        chars.next();
+                    }
+                }
+            }
+            _ => {
+                normalized.push(ch);
+                seen_digit = true;
+                if seen_exp {
+                    exponent_digits = exponent_digits.saturating_add(1);
+                }
+            }
+        }
+    }
+
+    if !seen_digit {
+        return Err(LexError::UnexpectedChar(
+            lexeme.chars().next().unwrap_or('\0'),
+            line,
+            column,
+        ));
+    }
+
+    if seen_exp && exponent_digits == 0 {
+        return Err(LexError::UnexpectedChar('e', line, column));
+    }
+
+    Ok(normalized)
+}
+
+fn detect_layout_metadata(source: &str, span: &Span) -> Option<LayoutCommaMetadata> {
+    let (_prev_idx, prev_char) = prev_non_whitespace(source, span.byte_range.start)?;
+    if matches!(prev_char, ',') {
+        return None;
+    }
+
+    let (_, next_char) = next_non_whitespace(source, span.byte_range.end)?;
+    if matches!(next_char, ',' | ']' | ')') {
+        return None;
+    }
+
+    let sequence_kind = enclosing_sequence_kind(source, span.byte_range.start)?;
+    match sequence_kind {
+        LayoutSequenceKind::Array | LayoutSequenceKind::Call => Some(LayoutCommaMetadata {
+            sequence: sequence_kind,
+            explicit_separator: None,
+        }),
+    }
+}
+
+fn prev_non_whitespace(source: &str, mut idx: usize) -> Option<(usize, char)> {
+    while idx > 0 {
+        let ch = source[..idx].chars().rev().next()?;
+        idx -= ch.len_utf8();
+        if !ch.is_whitespace() {
+            return Some((idx, ch));
+        }
+    }
+    None
+}
+
+fn next_non_whitespace(source: &str, mut idx: usize) -> Option<(usize, char)> {
+    let len = source.len();
+    while idx < len {
+        let ch = source[idx..].chars().next()?;
+        if !ch.is_whitespace() {
+            return Some((idx, ch));
+        }
+        idx += ch.len_utf8();
+    }
+    None
+}
+
+fn enclosing_sequence_kind(source: &str, pos: usize) -> Option<LayoutSequenceKind> {
+    let mut stack: Vec<char> = Vec::new();
+    let mut idx = 0;
+    while idx < pos {
+        let ch = source[idx..].chars().next().unwrap();
+        let ch_len = ch.len_utf8();
+        match ch {
+            '[' | '(' => stack.push(ch),
+            ']' => {
+                if matches!(stack.last(), Some('[')) {
+                    stack.pop();
+                }
+            }
+            ')' => {
+                if matches!(stack.last(), Some('(')) {
+                    stack.pop();
+                }
+            }
+            '"' => {
+                idx += ch_len;
+                while idx < pos {
+                    let next = source[idx..].chars().next().unwrap();
+                    let len = next.len_utf8();
+                    if next == '\\' {
+                        idx += len;
+                        if idx < pos {
+                            let escaped = source[idx..].chars().next().unwrap();
+                            idx += escaped.len_utf8();
+                        }
+                        continue;
+                    }
+                    idx += len;
+                    if next == '"' {
+                        break;
+                    }
+                }
+                continue;
+            }
+            _ => {}
+        }
+        idx += ch_len;
+    }
+
+    match stack.iter().rev().find(|&&c| c == '[' || c == '(') {
+        Some('[') => Some(LayoutSequenceKind::Array),
+        Some('(') => Some(LayoutSequenceKind::Call),
+        _ => None,
+    }
+}
 
 /// RawToken から文字列正規化・数値整形を行い、NormalizedToken を生成するステージ。
 #[derive(Debug, Default)]
@@ -31,58 +192,48 @@ impl Normalizer {
     ) -> Result<NormalizedToken<'source>, LexError> {
         let lexeme = token.text;
         let mut metadata = PreMetadata::default();
-
-        if Self::has_radix_prefix(lexeme) {
-            return Ok(NormalizedToken::new(token, lexeme.to_string(), metadata));
-        }
-
-        let mut normalized = String::with_capacity(lexeme.len());
         let mut saw_comma = false;
         let mut saw_underscore = false;
-        let mut prev_is_separator = false;
 
-        for ch in lexeme.chars() {
-            match ch {
-                ',' => {
-                    saw_comma = true;
-                    prev_is_separator = true;
-                }
-                '_' => {
-                    saw_underscore = true;
-                    prev_is_separator = true;
-                }
-                _ => {
-                    normalized.push(ch);
-                    prev_is_separator = false;
+        let normalized = if Self::has_radix_prefix(lexeme) {
+            let (prefix, rest) = lexeme.split_at(2);
+            let mut normalized = String::with_capacity(rest.len() + 2);
+            normalized.push_str(prefix);
+            for ch in rest.chars() {
+                match ch {
+                    '_' => {
+                        saw_underscore = true;
+                    }
+                    ',' => {
+                        saw_comma = true;
+                    }
+                    _ => normalized.push(ch),
                 }
             }
-        }
-
-        if prev_is_separator {
-            return Err(LexError::UnexpectedChar(
-                lexeme.chars().last().unwrap_or_default(),
+            normalized
+        } else {
+            normalize_decimal_number(
+                lexeme,
                 token.span.end.line,
                 token.span.end.column,
-            ));
-        }
+                &mut saw_comma,
+                &mut saw_underscore,
+            )?
+        };
 
-        if saw_comma || saw_underscore {
-            let grouping = match (saw_comma, saw_underscore) {
-                (true, true) => NumberGroupingKind::Mixed,
-                (true, false) => NumberGroupingKind::Comma,
-                (false, true) => NumberGroupingKind::Underscore,
-                (false, false) => NumberGroupingKind::None,
-            };
+        let grouping = match (saw_comma, saw_underscore) {
+            (true, true) => NumberGroupingKind::Mixed,
+            (true, false) => NumberGroupingKind::Comma,
+            (false, true) => NumberGroupingKind::Underscore,
+            (false, false) => NumberGroupingKind::None,
+        };
 
-            if grouping != NumberGroupingKind::None {
-                metadata
-                    .provisional_metadata
-                    .push(TokenMetadata::NumberLiteral(NumberLiteralMetadata {
-                        grouping,
-                        original_lexeme: lexeme.to_string(),
-                    }));
-            }
-        }
+        metadata
+            .provisional_metadata
+            .push(TokenMetadata::NumberLiteral(NumberLiteralMetadata {
+                grouping,
+                original_lexeme: lexeme.to_string(),
+            }));
 
         Ok(NormalizedToken::new(token, normalized, metadata))
     }
@@ -117,11 +268,9 @@ impl Normalizer {
         let normalized = unescaped.nfc().collect::<String>();
 
         let mut metadata = PreMetadata::default();
-        let string_metadata = StringLiteralMetadata {
-            delimiter: delimiter_kind,
-            allows_interpolation: true,
-            normalize_indentation: matches!(delimiter_kind, StringDelimiterKind::TripleQuote),
-        };
+        let mut string_metadata = StringLiteralMetadata::from_kind(delimiter_kind);
+        string_metadata.normalize_indentation =
+            matches!(delimiter_kind, StringDelimiterKind::TripleQuote);
         metadata
             .provisional_metadata
             .push(TokenMetadata::StringLiteral(string_metadata));
@@ -237,6 +386,23 @@ impl Normalizer {
     fn normalize_trivia<'source>(
         &mut self,
         token: RawToken<'source>,
+        ctx: &LexerContext<'source>,
+    ) -> Result<NormalizedToken<'source>, LexError> {
+        let mut metadata = PreMetadata::default();
+
+        if let Some(layout_meta) = detect_layout_metadata(ctx.source, &token.span) {
+            metadata
+                .provisional_metadata
+                .push(TokenMetadata::LayoutComma(layout_meta));
+        }
+
+        let normalized_text = token.text.to_string();
+        Ok(NormalizedToken::new(token, normalized_text, metadata))
+    }
+
+    fn normalize_comment<'source>(
+        &mut self,
+        token: RawToken<'source>,
     ) -> Result<NormalizedToken<'source>, LexError> {
         let normalized_text = token.text.to_string();
         Ok(NormalizedToken::new(
@@ -256,7 +422,11 @@ impl NormalizerStage for Normalizer {
         match token.kind {
             RawTokenKind::NumberCandidate => self.normalize_number(token),
             RawTokenKind::Whitespace | RawTokenKind::CommentCandidate => {
-                self.normalize_trivia(token)
+                if matches!(token.kind, RawTokenKind::Whitespace) {
+                    self.normalize_trivia(token, ctx)
+                } else {
+                    self.normalize_comment(token)
+                }
             }
             RawTokenKind::Eof => Ok(NormalizedToken::new(
                 token,
@@ -303,17 +473,21 @@ mod tests {
     use crate::pipeline::types::{RawToken, ScannerPosition, Span};
 
     fn make_span(len: usize) -> Span {
-        let start = ScannerPosition {
-            byte_offset: 0,
-            line: 1,
-            column: 1,
+        make_span_with_offset(0, len, 1, 1)
+    }
+
+    fn make_span_with_offset(start: usize, len: usize, line: usize, column: usize) -> Span {
+        let start_pos = ScannerPosition {
+            byte_offset: start,
+            line,
+            column,
         };
-        let end = ScannerPosition {
-            byte_offset: len,
-            line: 1,
-            column: len + 1,
+        let end_pos = ScannerPosition {
+            byte_offset: start + len,
+            line,
+            column: column + len,
         };
-        Span::new(0..len, start, end)
+        Span::new(start..start + len, start_pos, end_pos)
     }
 
     fn make_raw_token(kind: RawTokenKind, text: &str) -> RawToken<'static> {
@@ -343,6 +517,17 @@ mod tests {
             .iter()
             .any(|meta| matches!(meta, TokenMetadata::StringLiteral(_))));
         assert!(normalized.metadata.provisional_diagnostics.is_empty());
+
+        let string_meta = normalized
+            .metadata
+            .provisional_metadata
+            .iter()
+            .find_map(|meta| match meta {
+                TokenMetadata::StringLiteral(info) => Some(info),
+                _ => None,
+            })
+            .expect("string metadata");
+        assert!(string_meta.allows_interpolation);
     }
 
     #[test]
@@ -429,5 +614,107 @@ mod tests {
         assert_eq!(normalized.normalized_text, "  \n\t");
         assert!(normalized.metadata.provisional_metadata.is_empty());
         assert!(normalized.metadata.provisional_diagnostics.is_empty());
+    }
+
+    #[test]
+    fn normalize_decimal_with_exponent_and_grouping() {
+        let mut normalizer = Normalizer::new();
+        let raw = make_raw_token(RawTokenKind::NumberCandidate, "1,234.5e-6");
+        let mut ctx = LexerContext::new("1,234.5e-6");
+
+        let normalized = normalizer
+            .normalize(raw, &mut ctx)
+            .expect("decimal normalization");
+
+        assert_eq!(normalized.normalized_text, "1234.5e-6");
+        let metadata = normalized
+            .metadata
+            .provisional_metadata
+            .iter()
+            .find_map(|meta| match meta {
+                TokenMetadata::NumberLiteral(info) => Some(info),
+                _ => None,
+            })
+            .expect("number metadata");
+        assert_eq!(metadata.original_lexeme, "1,234.5e-6");
+        assert!(matches!(metadata.grouping, NumberGroupingKind::Comma));
+    }
+
+    #[test]
+    fn normalize_hex_number_strips_underscores() {
+        let mut normalizer = Normalizer::new();
+        let raw = make_raw_token(RawTokenKind::NumberCandidate, "0xAB_CD");
+        let mut ctx = LexerContext::new("0xAB_CD");
+
+        let normalized = normalizer
+            .normalize(raw, &mut ctx)
+            .expect("hex normalization");
+
+        assert_eq!(normalized.normalized_text, "0xABCD");
+        let metadata = normalized
+            .metadata
+            .provisional_metadata
+            .iter()
+            .find_map(|meta| match meta {
+                TokenMetadata::NumberLiteral(info) => Some(info),
+                _ => None,
+            })
+            .expect("number metadata");
+        assert_eq!(metadata.original_lexeme, "0xAB_CD");
+        assert!(matches!(metadata.grouping, NumberGroupingKind::Underscore));
+    }
+
+    #[test]
+    fn normalize_whitespace_between_array_elements_sets_layout_metadata() {
+        let mut normalizer = Normalizer::new();
+        let raw = RawToken {
+            kind: RawTokenKind::Whitespace,
+            text: " ",
+            span: make_span_with_offset(2, 1, 1, 3),
+            trivia: None,
+        };
+        let mut ctx = LexerContext::new("[1 2]");
+
+        let normalized = normalizer
+            .normalize(raw, &mut ctx)
+            .expect("layout whitespace normalization");
+
+        let layout_meta = normalized
+            .metadata
+            .provisional_metadata
+            .iter()
+            .find_map(|meta| match meta {
+                TokenMetadata::LayoutComma(info) => Some(info),
+                _ => None,
+            })
+            .expect("layout metadata");
+        assert!(matches!(layout_meta.sequence, LayoutSequenceKind::Array));
+    }
+
+    #[test]
+    fn normalize_whitespace_between_call_arguments_sets_layout_metadata() {
+        let mut normalizer = Normalizer::new();
+        let raw = RawToken {
+            kind: RawTokenKind::Whitespace,
+            text: " ",
+            span: make_span_with_offset(5, 1, 1, 6),
+            trivia: None,
+        };
+        let mut ctx = LexerContext::new("plot(1 2)");
+
+        let normalized = normalizer
+            .normalize(raw, &mut ctx)
+            .expect("call whitespace normalization");
+
+        let layout_meta = normalized
+            .metadata
+            .provisional_metadata
+            .iter()
+            .find_map(|meta| match meta {
+                TokenMetadata::LayoutComma(info) => Some(info),
+                _ => None,
+            })
+            .expect("layout metadata");
+        assert!(matches!(layout_meta.sequence, LayoutSequenceKind::Call));
     }
 }
