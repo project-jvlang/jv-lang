@@ -1,5 +1,6 @@
 use super::*;
 
+use crate::pipeline::pipeline::CharScannerStage;
 use test_case::test_case;
 
 #[test]
@@ -923,4 +924,60 @@ fn trivia_records_absence_of_whitespace_for_comma_arguments() {
     assert_eq!(numbers.len(), 3);
     assert_eq!(numbers[1].leading_trivia.spaces, 0);
     assert_eq!(numbers[2].leading_trivia.spaces, 0);
+}
+
+#[test]
+fn char_scanner_handles_large_input_without_overflow() {
+    let mut scanner = pipeline::CharScanner::new();
+    let source = "a".repeat(10 * 1024 * 1024 + 128);
+    let mut context = pipeline::LexerContext::new(&source);
+
+    let checkpoint = scanner.save_position();
+    let token = scanner
+        .scan_next_token(&mut context)
+        .expect("large scan succeeds");
+
+    assert_eq!(token.kind, pipeline::RawTokenKind::Identifier);
+    assert_eq!(token.text.len(), source.len());
+
+    scanner.commit_position();
+    scanner.discard_checkpoint(checkpoint);
+}
+
+#[test]
+fn char_scanner_captures_trivia_for_identifiers() {
+    let mut scanner = pipeline::CharScanner::new();
+    let source = " \tfoo";
+    let mut context = pipeline::LexerContext::new(source);
+
+    let token = scanner
+        .scan_next_token(&mut context)
+        .expect("scan succeeds");
+
+    assert_eq!(token.text, "foo");
+    assert_eq!(token.kind, pipeline::RawTokenKind::Identifier);
+
+    let trivia = token.trivia.expect("trivia expected");
+    assert!(trivia.spaces >= 1);
+    assert_eq!(trivia.newlines, 0);
+}
+
+#[test]
+fn char_scanner_supports_checkpoint_restore_cycle() {
+    let mut scanner = pipeline::CharScanner::new();
+    let source = "foo bar";
+    let mut context = pipeline::LexerContext::new(source);
+
+    let checkpoint = scanner.save_position();
+
+    let first = scanner.scan_next_token(&mut context).expect("first token");
+    assert_eq!(first.text, "foo");
+
+    scanner.restore_position(checkpoint);
+    let second = scanner
+        .scan_next_token(&mut context)
+        .expect("token after restore");
+    assert_eq!(second.text, "foo");
+
+    scanner.discard_checkpoint(checkpoint);
 }

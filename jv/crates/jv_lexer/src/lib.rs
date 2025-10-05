@@ -322,6 +322,8 @@ pub enum LexError {
     UnexpectedChar(char, usize, usize),
     #[error("Unterminated string at line {0}, column {1}")]
     UnterminatedString(usize, usize),
+    #[error("Lookahead buffer overflow (requested {requested} bytes)")]
+    LookaheadOverflow { requested: usize },
 }
 
 pub struct Lexer {
@@ -339,6 +341,13 @@ impl Lexer {
             line: 1,
             column: 1,
         }
+    }
+
+    /// パイプライン移行用のCharScannerとコンテキストを用意するヘルパー。
+    pub fn create_pipeline_scanner(&self) -> (pipeline::CharScanner, pipeline::LexerContext<'_>) {
+        let scanner = pipeline::CharScanner::new();
+        let context = pipeline::LexerContext::new(&self.input);
+        (scanner, context)
     }
 
     pub fn tokenize(&mut self) -> Result<Vec<Token>, LexError> {
