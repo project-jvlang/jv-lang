@@ -10,5 +10,6 @@ pub use pipeline::{
 };
 pub use stages::{CharScanner, Normalizer};
 pub use types::{
-    ClassifiedToken, NormalizedToken, PreMetadata, RawToken, RawTokenKind, ScannerPosition, Span,
+    ClassifiedToken, EmissionPlan, NormalizedToken, PreMetadata, RawToken, RawTokenKind,
+    ScannerPosition, Span,
 };

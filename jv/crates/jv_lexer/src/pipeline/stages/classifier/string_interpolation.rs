@@ -1,7 +1,7 @@
 use crate::{
     pipeline::{
         context::LexerContext,
-        types::{NormalizedToken, RawTokenKind},
+        types::{EmissionPlan, NormalizedToken, RawTokenKind},
     },
     LexError, TokenMetadata, TokenType,
 };
@@ -40,15 +40,19 @@ impl ClassificationModule for StringInterpolationModule {
             return Ok(());
         }
 
-        let has_interpolation = state
-            .metadata()
-            .iter()
-            .any(|meta| matches!(meta, TokenMetadata::StringInterpolation { .. }));
+        let interpolation_segments = state.metadata().iter().find_map(|meta| {
+            if let TokenMetadata::StringInterpolation { segments } = meta {
+                Some(segments.clone())
+            } else {
+                None
+            }
+        });
 
-        if has_interpolation {
+        if let Some(segments) = interpolation_segments {
             state.set_token_type(TokenType::StringInterpolation(
                 token.normalized_text.clone(),
             ));
+            state.set_emission_plan(EmissionPlan::StringInterpolation { segments });
         } else {
             state.set_token_type(TokenType::String(token.normalized_text.clone()));
         }

@@ -2,7 +2,7 @@ use crate::{
     pipeline::{
         context::LexerContext,
         pipeline::ClassifierStage,
-        types::{ClassifiedToken, NormalizedToken, RawTokenKind},
+        types::{ClassifiedToken, EmissionPlan, NormalizedToken, RawTokenKind},
     },
     LexError, TokenDiagnostic, TokenMetadata, TokenType,
 };
@@ -29,6 +29,7 @@ pub struct ClassificationState<'source> {
     metadata: Vec<TokenMetadata>,
     diagnostics: Vec<TokenDiagnostic>,
     token: &'source NormalizedToken<'source>,
+    emission_plan: EmissionPlan,
 }
 
 impl<'source> ClassificationState<'source> {
@@ -38,6 +39,7 @@ impl<'source> ClassificationState<'source> {
             metadata: token.metadata.provisional_metadata.clone(),
             diagnostics: token.metadata.provisional_diagnostics.clone(),
             token,
+            emission_plan: EmissionPlan::Direct,
         }
     }
 
@@ -78,8 +80,24 @@ impl<'source> ClassificationState<'source> {
         &mut self.diagnostics
     }
 
-    fn into_parts(self) -> (Option<TokenType>, Vec<TokenMetadata>, Vec<TokenDiagnostic>) {
-        (self.token_type, self.metadata, self.diagnostics)
+    pub fn set_emission_plan(&mut self, emission_plan: EmissionPlan) {
+        self.emission_plan = emission_plan;
+    }
+
+    fn into_parts(
+        self,
+    ) -> (
+        Option<TokenType>,
+        Vec<TokenMetadata>,
+        Vec<TokenDiagnostic>,
+        EmissionPlan,
+    ) {
+        (
+            self.token_type,
+            self.metadata,
+            self.diagnostics,
+            self.emission_plan,
+        )
     }
 }
 
@@ -131,7 +149,7 @@ impl ClassifierStage for Classifier {
             module.apply(&token, ctx, &mut state)?;
         }
 
-        let (token_type, mut metadata, diagnostics) = state.into_parts();
+        let (token_type, mut metadata, diagnostics, emission_plan) = state.into_parts();
         let resolved_type = match token_type {
             Some(ty) => ty,
             None => match token.raw.kind {
@@ -146,15 +164,20 @@ impl ClassifierStage for Classifier {
             },
         };
 
-        if matches!(resolved_type, TokenType::Eof) {
-            metadata.clear();
-        }
+        let emission_plan = match resolved_type {
+            TokenType::Eof => {
+                metadata.clear();
+                EmissionPlan::Direct
+            }
+            _ => emission_plan,
+        };
 
-        Ok(ClassifiedToken::new(
+        Ok(ClassifiedToken::with_plan(
             token,
             resolved_type,
             diagnostics,
             metadata,
+            emission_plan,
         ))
     }
 }
@@ -162,7 +185,7 @@ impl ClassifierStage for Classifier {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::pipeline::types::{PreMetadata, RawToken, Span};
+    use crate::pipeline::types::{EmissionPlan, PreMetadata, RawToken, Span};
     use crate::{
         JsonConfidence, LayoutCommaMetadata, LayoutSequenceKind, StringDelimiterKind,
         StringInterpolationSegment, StringLiteralMetadata, TokenMetadata,
@@ -266,6 +289,7 @@ mod tests {
 
         let classified = classifier.classify(token, &mut ctx).unwrap();
         assert!(matches!(classified.token_type, TokenType::String(ref value) if value == "hello"));
+        assert!(matches!(classified.emission_plan, EmissionPlan::Direct));
     }
 
     #[test]
@@ -299,6 +323,21 @@ mod tests {
             .metadata
             .iter()
             .any(|meta| matches!(meta, TokenMetadata::StringInterpolation { .. })));
+        match &classified.emission_plan {
+            EmissionPlan::StringInterpolation { segments } => {
+                assert_eq!(segments.len(), 3);
+                assert!(
+                    matches!(segments[0], StringInterpolationSegment::Literal(ref s) if s == "Hello ")
+                );
+                assert!(
+                    matches!(segments[1], StringInterpolationSegment::Expression(ref s) if s == "name")
+                );
+                assert!(
+                    matches!(segments[2], StringInterpolationSegment::Literal(ref s) if s == "!")
+                );
+            }
+            other => panic!("unexpected emission plan: {:?}", other),
+        }
     }
 
     #[test]

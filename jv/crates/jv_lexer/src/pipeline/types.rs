@@ -1,6 +1,9 @@
 use std::ops::Range;
 
-use crate::{CommentCarryOverMetadata, TokenDiagnostic, TokenMetadata, TokenTrivia, TokenType};
+use crate::{
+    CommentCarryOverMetadata, StringInterpolationSegment, TokenDiagnostic, TokenMetadata,
+    TokenTrivia, TokenType,
+};
 
 /// ソース全体に対する位置情報を表す。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -103,6 +106,7 @@ pub struct ClassifiedToken<'source> {
     pub token_type: TokenType,
     pub diagnostics: Vec<TokenDiagnostic>,
     pub metadata: Vec<TokenMetadata>,
+    pub emission_plan: EmissionPlan,
 }
 
 impl<'source> ClassifiedToken<'source> {
@@ -112,11 +116,39 @@ impl<'source> ClassifiedToken<'source> {
         diagnostics: Vec<TokenDiagnostic>,
         metadata: Vec<TokenMetadata>,
     ) -> Self {
+        Self::with_plan(
+            normalized,
+            token_type,
+            diagnostics,
+            metadata,
+            EmissionPlan::Direct,
+        )
+    }
+
+    pub fn with_plan(
+        normalized: NormalizedToken<'source>,
+        token_type: TokenType,
+        diagnostics: Vec<TokenDiagnostic>,
+        metadata: Vec<TokenMetadata>,
+        emission_plan: EmissionPlan,
+    ) -> Self {
         Self {
             normalized,
             token_type,
             diagnostics,
             metadata,
+            emission_plan,
         }
     }
+}
+
+/// Emitter が出力トークンを組み立てる際の計画。
+#[derive(Debug, Clone)]
+pub enum EmissionPlan {
+    /// 追加処理なしで単一トークンとして出力する。
+    Direct,
+    /// 文字列補間を段階的に出力する。
+    StringInterpolation {
+        segments: Vec<StringInterpolationSegment>,
+    },
 }
