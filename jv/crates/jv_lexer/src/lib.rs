@@ -1,6 +1,8 @@
 // P0-001: lexer tokens定義・パース - TDD Red Phase
 // Reference: 作業指示-20250830.md:19-20
 
+pub mod pipeline;
+
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
