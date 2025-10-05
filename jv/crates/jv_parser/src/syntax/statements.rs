@@ -1,4 +1,6 @@
+use chumsky::debug::Silent;
 use chumsky::prelude::*;
+use chumsky::primitive::custom;
 use chumsky::Parser as ChumskyParser;
 use jv_ast::{
     Annotation, AnnotationArgument, AnnotationName, AnnotationValue, BinaryOp, CommentKind,
@@ -20,15 +22,32 @@ use super::support::{
     token_use, token_val, token_var, token_where_keyword, token_while_keyword, type_annotation,
 };
 
+fn attempt_statement_parser<P>(
+    parser: P,
+) -> impl ChumskyParser<Token, Statement, Error = Simple<Token>> + Clone
+where
+    P: ChumskyParser<Token, Statement, Error = Simple<Token>> + Clone,
+{
+    custom(
+        move |stream: &mut chumsky::StreamOf<Token, Simple<Token>>| {
+            stream.try_parse(|stream| {
+                let mut silent = Silent;
+                parser.clone().parse_inner_silent(&mut silent, stream)
+            })
+        },
+    )
+}
+
 pub(crate) fn statement_parser(
 ) -> impl ChumskyParser<Token, Statement, Error = Simple<Token>> + Clone {
     recursive(|statement| {
         let expr = expressions::expression_parser();
 
         let comment_stmt = comment_statement_parser();
-        let val_decl = val_declaration_parser(expr.clone());
-        let implicit_typed_val_decl = implicit_typed_val_declaration_parser(expr.clone());
-        let var_decl = var_declaration_parser(expr.clone());
+        let val_decl = attempt_statement_parser(val_declaration_parser(expr.clone()));
+        let implicit_typed_val_decl =
+            attempt_statement_parser(implicit_typed_val_declaration_parser(expr.clone()));
+        let var_decl = attempt_statement_parser(var_declaration_parser(expr.clone()));
         let assignment = assignment_statement_parser(expr.clone());
         let function_decl = function_declaration_parser(statement.clone(), expr.clone());
         let data_class_decl = data_class_declaration_parser(expr.clone());

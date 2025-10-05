@@ -41,6 +41,8 @@ pub fn analyze(expression: &Expression) -> NarrowingFacts {
                 snapshot.push_on_mismatch(NarrowedBinding::new(name, NarrowedNullability::NonNull));
                 fallback_snapshot
                     .push_on_match(NarrowedBinding::new(name, NarrowedNullability::NonNull));
+            } else if pattern_implies_non_null(&arm.pattern) {
+                snapshot.push_on_match(NarrowedBinding::new(name, NarrowedNullability::NonNull));
             }
         }
 
@@ -68,6 +70,14 @@ fn matches_null_pattern(pattern: &Pattern) -> bool {
     match pattern {
         Pattern::Literal(Literal::Null, _) => true,
         Pattern::Guard { pattern, .. } => matches_null_pattern(pattern),
+        _ => false,
+    }
+}
+
+fn pattern_implies_non_null(pattern: &Pattern) -> bool {
+    match pattern {
+        Pattern::Constructor { .. } => true,
+        Pattern::Guard { pattern, .. } => pattern_implies_non_null(pattern),
         _ => false,
     }
 }
