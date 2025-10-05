@@ -12,6 +12,8 @@ use crate::{
     StringLiteralMetadata, TokenDiagnostic, TokenMetadata,
 };
 
+use super::json_utils::{detect_array_confidence, detect_object_confidence};
+
 /// RawToken から文字列正規化・数値整形を行い、NormalizedToken を生成するステージ。
 #[derive(Debug, Default)]
 pub struct Normalizer {
@@ -199,23 +201,62 @@ impl Normalizer {
 
         Ok(output)
     }
+
+    fn normalize_symbol<'source>(
+        &mut self,
+        token: RawToken<'source>,
+        ctx: &LexerContext<'source>,
+    ) -> Result<NormalizedToken<'source>, LexError> {
+        let mut metadata = PreMetadata::default();
+        match token.text {
+            "{" => {
+                if let Some(confidence) =
+                    detect_object_confidence(ctx.source, token.span.byte_range.end)
+                {
+                    metadata
+                        .provisional_metadata
+                        .push(TokenMetadata::PotentialJsonStart { confidence });
+                }
+            }
+            "[" => {
+                if let Some(confidence) =
+                    detect_array_confidence(ctx.source, token.span.byte_range.end)
+                {
+                    metadata
+                        .provisional_metadata
+                        .push(TokenMetadata::PotentialJsonStart { confidence });
+                }
+            }
+            _ => {}
+        }
+
+        let normalized_text = token.text.to_string();
+        Ok(NormalizedToken::new(token, normalized_text, metadata))
+    }
+
+    fn normalize_trivia<'source>(
+        &mut self,
+        token: RawToken<'source>,
+    ) -> Result<NormalizedToken<'source>, LexError> {
+        let normalized_text = token.text.to_string();
+        Ok(NormalizedToken::new(
+            token,
+            normalized_text,
+            PreMetadata::default(),
+        ))
+    }
 }
 
 impl NormalizerStage for Normalizer {
     fn normalize<'source>(
         &mut self,
         token: RawToken<'source>,
-        _ctx: &mut LexerContext<'source>,
+        ctx: &mut LexerContext<'source>,
     ) -> Result<NormalizedToken<'source>, LexError> {
         match token.kind {
             RawTokenKind::NumberCandidate => self.normalize_number(token),
             RawTokenKind::Whitespace | RawTokenKind::CommentCandidate => {
-                let normalized_text = token.text.to_string();
-                Ok(NormalizedToken::new(
-                    token,
-                    normalized_text,
-                    PreMetadata::default(),
-                ))
+                self.normalize_trivia(token)
             }
             RawTokenKind::Eof => Ok(NormalizedToken::new(
                 token,
@@ -234,12 +275,7 @@ impl NormalizerStage for Normalizer {
                 if token.text.starts_with('"') || token.text.starts_with("```") {
                     self.normalize_string(token)
                 } else {
-                    let normalized_text = token.text.to_string();
-                    Ok(NormalizedToken::new(
-                        token,
-                        normalized_text,
-                        PreMetadata::default(),
-                    ))
+                    self.normalize_symbol(token, ctx)
                 }
             }
         }
@@ -329,5 +365,69 @@ mod tests {
                 TokenMetadata::NumberLiteral(info)
                 if matches!(info.grouping, NumberGroupingKind::Mixed)
             )));
+    }
+
+    #[test]
+    fn normalize_left_brace_attaches_json_metadata() {
+        let mut normalizer = Normalizer::new();
+        let raw = make_raw_token(RawTokenKind::Symbol, "{");
+        let mut ctx = LexerContext::new("{\"key\": 1}");
+
+        let normalized = normalizer
+            .normalize(raw, &mut ctx)
+            .expect("brace normalization");
+
+        let confidence = normalized
+            .metadata
+            .provisional_metadata
+            .iter()
+            .find_map(|meta| match meta {
+                TokenMetadata::PotentialJsonStart { confidence } => Some(*confidence),
+                _ => None,
+            })
+            .expect("json metadata");
+
+        assert!(matches!(confidence, crate::JsonConfidence::High));
+    }
+
+    #[test]
+    fn normalize_left_bracket_attaches_json_metadata() {
+        let mut normalizer = Normalizer::new();
+        let raw = make_raw_token(RawTokenKind::Symbol, "[");
+        let mut ctx = LexerContext::new("[1, 2, 3]");
+
+        let normalized = normalizer
+            .normalize(raw, &mut ctx)
+            .expect("bracket normalization");
+
+        let confidence = normalized
+            .metadata
+            .provisional_metadata
+            .iter()
+            .find_map(|meta| match meta {
+                TokenMetadata::PotentialJsonStart { confidence } => Some(*confidence),
+                _ => None,
+            })
+            .expect("json metadata");
+
+        assert!(matches!(
+            confidence,
+            crate::JsonConfidence::Medium | crate::JsonConfidence::High
+        ));
+    }
+
+    #[test]
+    fn normalize_whitespace_tokens_preserve_text_without_diagnostics() {
+        let mut normalizer = Normalizer::new();
+        let raw = make_raw_token(RawTokenKind::Whitespace, "  \n\t");
+        let mut ctx = LexerContext::new("  \n\tval");
+
+        let normalized = normalizer
+            .normalize(raw, &mut ctx)
+            .expect("whitespace normalization");
+
+        assert_eq!(normalized.normalized_text, "  \n\t");
+        assert!(normalized.metadata.provisional_metadata.is_empty());
+        assert!(normalized.metadata.provisional_diagnostics.is_empty());
     }
 }
