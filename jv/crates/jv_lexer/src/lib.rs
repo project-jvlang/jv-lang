@@ -171,18 +171,6 @@ pub enum StringDelimiterKind {
 }
 
 impl StringDelimiterKind {
-    fn opening_sequence(self) -> &'static str {
-        match self {
-            StringDelimiterKind::DoubleQuote => "\"",
-            StringDelimiterKind::TripleQuote => "\"\"\"",
-            StringDelimiterKind::BacktickBlock => "```",
-        }
-    }
-
-    fn closing_sequence(self) -> &'static str {
-        self.opening_sequence()
-    }
-
     fn allows_interpolation(self) -> bool {
         true
     }
