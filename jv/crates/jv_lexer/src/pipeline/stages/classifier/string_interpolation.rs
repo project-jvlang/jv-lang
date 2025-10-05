@@ -31,11 +31,28 @@ impl ClassificationModule for StringInterpolationModule {
             return Ok(());
         }
 
-        if !state.metadata_contains(|meta| matches!(meta, TokenMetadata::StringLiteral(_))) {
+        let has_literal_meta = state
+            .metadata()
+            .iter()
+            .any(|meta| matches!(meta, TokenMetadata::StringLiteral(_)));
+
+        if !has_literal_meta {
             return Ok(());
         }
 
-        state.set_token_type(TokenType::String(token.normalized_text.clone()));
+        let has_interpolation = state
+            .metadata()
+            .iter()
+            .any(|meta| matches!(meta, TokenMetadata::StringInterpolation { .. }));
+
+        if has_interpolation {
+            state.set_token_type(TokenType::StringInterpolation(
+                token.normalized_text.clone(),
+            ));
+        } else {
+            state.set_token_type(TokenType::String(token.normalized_text.clone()));
+        }
+
         Ok(())
     }
 }

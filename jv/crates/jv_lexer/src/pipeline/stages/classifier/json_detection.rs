@@ -4,7 +4,6 @@ use crate::{
 };
 
 use super::{ClassificationModule, ClassificationState};
-use crate::pipeline::stages::json_utils::{detect_array_confidence, detect_object_confidence};
 
 pub struct JsonDetectionModule;
 
@@ -17,35 +16,20 @@ impl JsonDetectionModule {
 impl ClassificationModule for JsonDetectionModule {
     fn apply<'source>(
         &mut self,
-        token: &NormalizedToken<'source>,
-        ctx: &LexerContext<'source>,
+        _token: &NormalizedToken<'source>,
+        _ctx: &LexerContext<'source>,
         state: &mut ClassificationState<'source>,
     ) -> Result<(), LexError> {
-        let offset = token.raw.span.byte_range.end;
-        let source = ctx.source;
-
-        if state.metadata_contains(|meta| matches!(meta, TokenMetadata::PotentialJsonStart { .. }))
+        if state
+            .metadata()
+            .iter()
+            .any(|meta| matches!(meta, TokenMetadata::PotentialJsonStart { .. }))
         {
             return Ok(());
         }
 
-        match token.raw.text {
-            "{" => {
-                if let Some(confidence) = detect_object_confidence(source, offset) {
-                    state
-                        .metadata_mut()
-                        .push(TokenMetadata::PotentialJsonStart { confidence });
-                }
-            }
-            "[" => {
-                if let Some(confidence) = detect_array_confidence(source, offset) {
-                    state
-                        .metadata_mut()
-                        .push(TokenMetadata::PotentialJsonStart { confidence });
-                }
-            }
-            _ => {}
-        }
+        // Normalizer is responsible for attaching PotentialJsonStart metadata to brace tokens.
+        // If it is absent we skip recomputation here to avoid duplicating the detection logic.
         Ok(())
     }
 }

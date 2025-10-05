@@ -165,7 +165,7 @@ mod tests {
     use crate::pipeline::types::{PreMetadata, RawToken, Span};
     use crate::{
         JsonConfidence, LayoutCommaMetadata, LayoutSequenceKind, StringDelimiterKind,
-        StringLiteralMetadata, TokenMetadata,
+        StringInterpolationSegment, StringLiteralMetadata, TokenMetadata,
     };
 
     fn make_raw_token(kind: RawTokenKind, text: &str) -> RawToken<'static> {
@@ -265,6 +265,39 @@ mod tests {
 
         let classified = classifier.classify(token, &mut ctx).unwrap();
         assert!(matches!(classified.token_type, TokenType::String(ref value) if value == "hello"));
+    }
+
+    #[test]
+    fn classifier_marks_string_interpolation_from_metadata() {
+        let mut classifier = Classifier::new();
+        let raw = make_raw_token(RawTokenKind::Symbol, "\"Hello ${name}!\"");
+        let mut pre = PreMetadata::default();
+        pre.provisional_metadata
+            .push(TokenMetadata::StringLiteral(StringLiteralMetadata {
+                delimiter: StringDelimiterKind::DoubleQuote,
+                allows_interpolation: true,
+                normalize_indentation: false,
+            }));
+        pre.provisional_metadata
+            .push(TokenMetadata::StringInterpolation {
+                segments: vec![
+                    StringInterpolationSegment::Literal("Hello ".to_string()),
+                    StringInterpolationSegment::Expression("name".to_string()),
+                    StringInterpolationSegment::Literal("!".to_string()),
+                ],
+            });
+        let token = NormalizedToken::new(raw, "Hello ${name}!".to_string(), pre);
+        let mut ctx = build_context("\"Hello ${name}!\"");
+
+        let classified = classifier.classify(token, &mut ctx).unwrap();
+        assert!(matches!(
+            classified.token_type,
+            TokenType::StringInterpolation(ref value) if value == "Hello ${name}!"
+        ));
+        assert!(classified
+            .metadata
+            .iter()
+            .any(|meta| matches!(meta, TokenMetadata::StringInterpolation { .. })));
     }
 
     #[test]

@@ -9,7 +9,8 @@ use crate::{
         types::{NormalizedToken, PreMetadata, RawToken, RawTokenKind, Span},
     },
     LayoutCommaMetadata, LayoutSequenceKind, LexError, NumberGroupingKind, NumberLiteralMetadata,
-    StringDelimiterKind, StringLiteralMetadata, TokenDiagnostic, TokenMetadata,
+    StringDelimiterKind, StringInterpolationSegment, StringLiteralMetadata, TokenDiagnostic,
+    TokenMetadata,
 };
 
 use super::json_utils::{detect_array_confidence, detect_object_confidence};
@@ -275,7 +276,113 @@ impl Normalizer {
             .provisional_metadata
             .push(TokenMetadata::StringLiteral(string_metadata));
 
+        if let Some(segments) = self.collect_interpolation_segments(inner, &token.span)? {
+            metadata
+                .provisional_metadata
+                .push(TokenMetadata::StringInterpolation { segments });
+        }
+
         Ok(NormalizedToken::new(token, normalized, metadata))
+    }
+
+    fn collect_interpolation_segments(
+        &self,
+        inner: &str,
+        span: &Span,
+    ) -> Result<Option<Vec<StringInterpolationSegment>>, LexError> {
+        if !inner.contains("${") {
+            return Ok(None);
+        }
+
+        let mut segments = Vec::new();
+        let mut index = 0usize;
+        let bytes = inner.as_bytes();
+        let mut literal_start = 0usize;
+        let mut has_interpolation = false;
+
+        while index < inner.len() {
+            if bytes[index] == b'\\' {
+                // Skip escaped sequence. We defer actual unescape to dedicated helper.
+                index += 1;
+                if index < inner.len() {
+                    index += inner[index..]
+                        .chars()
+                        .next()
+                        .map(|c| c.len_utf8())
+                        .unwrap_or(1);
+                }
+                continue;
+            }
+
+            if bytes[index] == b'$' && index + 1 < inner.len() && bytes[index + 1] == b'{' {
+                let literal_slice = &inner[literal_start..index];
+                if let Some(literal) =
+                    self.unescape_literal_segment(literal_slice, span.start.clone())?
+                {
+                    segments.push(StringInterpolationSegment::Literal(literal));
+                }
+
+                index += 2; // consume "${"
+                let expr_start = index;
+                let mut depth = 1usize;
+                let mut expr_end = expr_start;
+                while index < inner.len() {
+                    let ch = inner[index..].chars().next().unwrap();
+                    index += ch.len_utf8();
+                    match ch {
+                        '{' => depth += 1,
+                        '}' => {
+                            depth -= 1;
+                            if depth == 0 {
+                                expr_end = index - ch.len_utf8();
+                                break;
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+
+                if depth != 0 {
+                    return Err(LexError::UnterminatedString(
+                        span.start.line,
+                        span.start.column,
+                    ));
+                }
+
+                let expr_raw = inner[expr_start..expr_end].trim().to_string();
+                segments.push(StringInterpolationSegment::Expression(expr_raw));
+                has_interpolation = true;
+
+                literal_start = index;
+                continue;
+            }
+
+            index += inner[index..]
+                .chars()
+                .next()
+                .map(|c| c.len_utf8())
+                .unwrap_or(1);
+        }
+
+        let trailing_slice = &inner[literal_start..];
+        if let Some(literal) = self.unescape_literal_segment(trailing_slice, span.start.clone())? {
+            segments.push(StringInterpolationSegment::Literal(literal));
+        }
+
+        if has_interpolation {
+            Ok(Some(segments))
+        } else {
+            Ok(None)
+        }
+    }
+
+    fn unescape_literal_segment(
+        &self,
+        segment: &str,
+        start: crate::pipeline::types::ScannerPosition,
+    ) -> Result<Option<String>, LexError> {
+        let unescaped = self.unescape(segment, start)?;
+        Ok(Some(unescaped))
     }
 
     fn detect_delimiter(&self, lexeme: &str) -> (StringDelimiterKind, usize) {
@@ -528,6 +635,36 @@ mod tests {
             })
             .expect("string metadata");
         assert!(string_meta.allows_interpolation);
+    }
+
+    #[test]
+    fn normalize_string_records_interpolation_segments() {
+        let mut normalizer = Normalizer::new();
+        let raw = make_raw_token(RawTokenKind::Symbol, "\"Hello ${name}!\"");
+        let mut ctx = LexerContext::new("\"Hello ${name}!\"");
+
+        let normalized = normalizer
+            .normalize(raw, &mut ctx)
+            .expect("string normalization");
+
+        let segments = normalized
+            .metadata
+            .provisional_metadata
+            .iter()
+            .find_map(|meta| match meta {
+                TokenMetadata::StringInterpolation { segments } => Some(segments.clone()),
+                _ => None,
+            })
+            .expect("expected interpolation metadata");
+
+        assert_eq!(
+            segments,
+            vec![
+                StringInterpolationSegment::Literal("Hello ".to_string()),
+                StringInterpolationSegment::Expression("name".to_string()),
+                StringInterpolationSegment::Literal("!".to_string()),
+            ]
+        );
     }
 
     #[test]

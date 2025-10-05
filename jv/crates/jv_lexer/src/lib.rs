@@ -225,16 +225,27 @@ pub struct NumberLiteralMetadata {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum TokenMetadata {
-    PotentialJsonStart { confidence: JsonConfidence },
+    PotentialJsonStart {
+        confidence: JsonConfidence,
+    },
     StringLiteral(StringLiteralMetadata),
     NumberLiteral(NumberLiteralMetadata),
     LayoutComma(LayoutCommaMetadata),
+    StringInterpolation {
+        segments: Vec<StringInterpolationSegment>,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum LayoutSequenceKind {
     Array,
     Call,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum StringInterpolationSegment {
+    Literal(String),
+    Expression(String),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
