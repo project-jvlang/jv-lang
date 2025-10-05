@@ -59,8 +59,19 @@ impl<'source> ClassificationState<'source> {
         self.token_type = Some(token_type);
     }
 
-    pub fn metadata(&mut self) -> &mut Vec<TokenMetadata> {
+    pub fn metadata(&self) -> &[TokenMetadata] {
+        &self.metadata
+    }
+
+    pub fn metadata_mut(&mut self) -> &mut Vec<TokenMetadata> {
         &mut self.metadata
+    }
+
+    pub fn metadata_contains<F>(&self, predicate: F) -> bool
+    where
+        F: Fn(&TokenMetadata) -> bool,
+    {
+        self.metadata.iter().any(predicate)
     }
 
     pub fn diagnostics(&mut self) -> &mut Vec<TokenDiagnostic> {
@@ -152,7 +163,10 @@ impl ClassifierStage for Classifier {
 mod tests {
     use super::*;
     use crate::pipeline::types::{PreMetadata, RawToken, Span};
-    use crate::{JsonConfidence, StringDelimiterKind, StringLiteralMetadata, TokenMetadata};
+    use crate::{
+        JsonConfidence, LayoutCommaMetadata, LayoutSequenceKind, StringDelimiterKind,
+        StringLiteralMetadata, TokenMetadata,
+    };
 
     fn make_raw_token(kind: RawTokenKind, text: &str) -> RawToken<'static> {
         let leaked: &'static str = Box::leak(text.to_string().into_boxed_str());
@@ -251,5 +265,82 @@ mod tests {
 
         let classified = classifier.classify(token, &mut ctx).unwrap();
         assert!(matches!(classified.token_type, TokenType::String(ref value) if value == "hello"));
+    }
+
+    #[test]
+    fn classifier_emits_layout_comma_when_metadata_present() {
+        let mut classifier = Classifier::new();
+        let raw = make_raw_token(
+            RawTokenKind::Whitespace,
+            "
+",
+        );
+        let mut pre = PreMetadata::default();
+        pre.provisional_metadata
+            .push(TokenMetadata::LayoutComma(LayoutCommaMetadata {
+                sequence: LayoutSequenceKind::Array,
+                explicit_separator: None,
+            }));
+        let token = NormalizedToken::new(
+            raw,
+            "
+"
+            .to_string(),
+            pre,
+        );
+        let mut ctx = build_context(
+            "
+",
+        );
+
+        let classified = classifier.classify(token, &mut ctx).unwrap();
+        assert!(matches!(classified.token_type, TokenType::LayoutComma));
+        assert!(classified
+            .metadata
+            .iter()
+            .any(|meta| matches!(meta, TokenMetadata::LayoutComma(_))));
+    }
+
+    #[test]
+    fn classifier_classifies_line_comment_candidate() {
+        let mut classifier = Classifier::new();
+        let raw = make_raw_token(RawTokenKind::CommentCandidate, "// trailing comment");
+        let token =
+            NormalizedToken::new(raw, " trailing comment".to_string(), PreMetadata::default());
+        let mut ctx = build_context("// trailing comment");
+
+        let classified = classifier.classify(token, &mut ctx).unwrap();
+        assert!(matches!(
+            classified.token_type,
+            TokenType::LineComment(ref value) if value == " trailing comment"
+        ));
+    }
+
+    #[test]
+    fn classifier_classifies_block_comment_candidate() {
+        let mut classifier = Classifier::new();
+        let raw = make_raw_token(RawTokenKind::CommentCandidate, "/* block */");
+        let token = NormalizedToken::new(raw, " block ".to_string(), PreMetadata::default());
+        let mut ctx = build_context("/* block */");
+
+        let classified = classifier.classify(token, &mut ctx).unwrap();
+        assert!(matches!(
+            classified.token_type,
+            TokenType::BlockComment(ref value) if value == " block "
+        ));
+    }
+
+    #[test]
+    fn classifier_classifies_javadoc_comment_candidate() {
+        let mut classifier = Classifier::new();
+        let raw = make_raw_token(RawTokenKind::CommentCandidate, "/** docs */");
+        let token = NormalizedToken::new(raw, " docs ".to_string(), PreMetadata::default());
+        let mut ctx = build_context("/** docs */");
+
+        let classified = classifier.classify(token, &mut ctx).unwrap();
+        assert!(matches!(
+            classified.token_type,
+            TokenType::JavaDocComment(ref value) if value == " docs "
+        ));
     }
 }

@@ -23,10 +23,8 @@ impl ClassificationModule for JsonDetectionModule {
     ) -> Result<(), LexError> {
         let offset = token.raw.span.byte_range.end;
         let source = ctx.source;
-        let metadata = state.metadata();
-        if metadata
-            .iter()
-            .any(|meta| matches!(meta, TokenMetadata::PotentialJsonStart { .. }))
+
+        if state.metadata_contains(|meta| matches!(meta, TokenMetadata::PotentialJsonStart { .. }))
         {
             return Ok(());
         }
@@ -34,12 +32,16 @@ impl ClassificationModule for JsonDetectionModule {
         match token.raw.text {
             "{" => {
                 if let Some(confidence) = detect_object_confidence(source, offset) {
-                    metadata.push(TokenMetadata::PotentialJsonStart { confidence });
+                    state
+                        .metadata_mut()
+                        .push(TokenMetadata::PotentialJsonStart { confidence });
                 }
             }
             "[" => {
                 if let Some(confidence) = detect_array_confidence(source, offset) {
-                    metadata.push(TokenMetadata::PotentialJsonStart { confidence });
+                    state
+                        .metadata_mut()
+                        .push(TokenMetadata::PotentialJsonStart { confidence });
                 }
             }
             _ => {}

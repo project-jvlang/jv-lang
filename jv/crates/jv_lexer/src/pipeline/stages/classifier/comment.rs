@@ -1,6 +1,9 @@
 use crate::{
-    pipeline::{context::LexerContext, types::NormalizedToken},
-    LexError,
+    pipeline::{
+        context::LexerContext,
+        types::{NormalizedToken, RawTokenKind},
+    },
+    LexError, TokenType,
 };
 
 use super::{ClassificationModule, ClassificationState};
@@ -13,14 +16,48 @@ impl CommentModule {
     }
 }
 
+enum CommentKind {
+    Line,
+    Block,
+    JavaDoc,
+}
+
+fn classify_comment(raw_text: &str) -> CommentKind {
+    let trimmed = raw_text.trim_start();
+    if trimmed.starts_with("/**") {
+        CommentKind::JavaDoc
+    } else if trimmed.starts_with("/*") {
+        CommentKind::Block
+    } else {
+        CommentKind::Line
+    }
+}
+
 impl ClassificationModule for CommentModule {
     fn apply<'source>(
         &mut self,
-        _token: &NormalizedToken<'source>,
+        token: &NormalizedToken<'source>,
         _ctx: &LexerContext<'source>,
-        _state: &mut ClassificationState<'source>,
+        state: &mut ClassificationState<'source>,
     ) -> Result<(), LexError> {
-        // コメントは CharScanner でトリビアとして処理されるため、現段階では分類を行わない。
+        if state.token_type().is_some() {
+            return Ok(());
+        }
+
+        if !matches!(token.raw.kind, RawTokenKind::CommentCandidate) {
+            return Ok(());
+        }
+
+        let comment_text = token.normalized_text.clone();
+        let raw_text = token.raw.text;
+
+        let token_type = match classify_comment(raw_text) {
+            CommentKind::Line => TokenType::LineComment(comment_text),
+            CommentKind::Block => TokenType::BlockComment(comment_text),
+            CommentKind::JavaDoc => TokenType::JavaDocComment(comment_text),
+        };
+
+        state.overwrite_token_type(token_type);
         Ok(())
     }
 }

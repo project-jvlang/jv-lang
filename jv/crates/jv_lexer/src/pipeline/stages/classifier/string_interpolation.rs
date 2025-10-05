@@ -31,13 +31,7 @@ impl ClassificationModule for StringInterpolationModule {
             return Ok(());
         }
 
-        let has_string_metadata = token
-            .metadata
-            .provisional_metadata
-            .iter()
-            .any(|meta| matches!(meta, TokenMetadata::StringLiteral(_)));
-
-        if !has_string_metadata {
+        if !state.metadata_contains(|meta| matches!(meta, TokenMetadata::StringLiteral(_))) {
             return Ok(());
         }
 
