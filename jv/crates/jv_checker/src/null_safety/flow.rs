@@ -751,6 +751,14 @@ fn detect_null_comparison(condition: &Expression) -> ConditionAssumptions {
                     }
                 }
             }
+            BinaryOp::Is => {
+                if let Some(identifier) = extract_identifier(left) {
+                    assumptions.true_assumption = Some(BranchAssumption::Equals {
+                        variable: identifier,
+                        state: NullabilityKind::NonNull,
+                    });
+                }
+            }
             _ => {}
         }
     }

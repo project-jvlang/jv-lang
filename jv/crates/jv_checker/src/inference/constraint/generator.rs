@@ -426,6 +426,7 @@ impl<'env> ConstraintGenerator<'env> {
                 );
                 TypeKind::Primitive("Boolean")
             }
+            Is => TypeKind::Primitive("Boolean"),
             RangeExclusive | RangeInclusive => {
                 self.push_constraint(
                     ConstraintKind::Equal(left_ty.clone(), right_ty.clone()),

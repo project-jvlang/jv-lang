@@ -31,6 +31,10 @@ pub(crate) fn token_in_keyword() -> impl ChumskyParser<Token, Token, Error = Sim
     filter(|token: &Token| matches!(token.token_type, TokenType::In))
 }
 
+pub(crate) fn token_is() -> impl ChumskyParser<Token, Token, Error = Simple<Token>> + Clone {
+    keyword("is")
+}
+
 pub(crate) fn token_while_keyword(
 ) -> impl ChumskyParser<Token, Token, Error = Simple<Token>> + Clone {
     filter(|token: &Token| matches!(token.token_type, TokenType::While))

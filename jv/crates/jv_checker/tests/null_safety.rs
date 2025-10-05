@@ -131,8 +131,8 @@ fn when_null_branch_conflict_emits_jv3108() {
 fun provide(): String? = null
 fun consume(value: String): Int = 1
 
-val maybe = provide()
-val result = when (maybe) {
+maybe = provide()
+result = when (maybe) {
     is String -> consume(maybe)
     else -> 0
 }
@@ -172,8 +172,8 @@ val result = when (maybe) {
     r#"
 fun provide(): String? = null
 
-val maybe = provide()
-val label: String = when (maybe) {
+maybe = provide()
+label = when (maybe) {
     is String -> maybe
     else -> "fallback"
 }
@@ -414,9 +414,9 @@ fn implicit_declarations_mix_with_explicit_val() {
         r#"
 fun provide(): String? = null
 
-maybe: String? = provide()
+maybe = provide()
 val fallback = "fallback"
-label: String = when (maybe) {
+label = when (maybe) {
     is String -> maybe
     else -> fallback
 }

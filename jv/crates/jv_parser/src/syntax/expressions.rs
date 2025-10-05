@@ -13,9 +13,9 @@ use super::support::{
     expression_span, identifier, identifier_with_span, keyword, merge_spans, span_from_token,
     token_and, token_any_comma, token_arrow, token_assign, token_colon, token_comma, token_divide,
     token_dot, token_else, token_elvis, token_equal, token_greater, token_greater_equal, token_if,
-    token_layout_comma, token_left_brace, token_left_bracket, token_left_paren, token_less,
-    token_less_equal, token_minus, token_modulo, token_multiply, token_not, token_not_equal,
-    token_null_safe, token_or, token_plus, token_question, token_range_exclusive,
+    token_is, token_layout_comma, token_left_brace, token_left_bracket, token_left_paren,
+    token_less, token_less_equal, token_minus, token_modulo, token_multiply, token_not,
+    token_not_equal, token_null_safe, token_or, token_plus, token_question, token_range_exclusive,
     token_range_inclusive, token_right_brace, token_right_bracket, token_right_paren,
     token_string_end, token_string_mid, token_string_start, token_when, type_annotation,
 };
@@ -924,6 +924,7 @@ fn comparison_expression_parser(
                 token_less_equal().to(BinaryOp::LessEqual),
                 token_greater().to(BinaryOp::Greater),
                 token_greater_equal().to(BinaryOp::GreaterEqual),
+                token_is().to(BinaryOp::Is),
             ))
             .then(operand)
             .repeated(),
