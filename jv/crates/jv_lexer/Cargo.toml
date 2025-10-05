@@ -10,6 +10,7 @@ repository.workspace = true
 thiserror.workspace = true
 serde.workspace = true
 unicode-normalization = "0.1"
+unicode-ident = "1.0"
 
 [dev-dependencies]
 test-case.workspace = true
