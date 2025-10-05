@@ -8,7 +8,7 @@ pub use pipeline::{
     CharScannerStage, ClassifierStage, EmitterStage, LexerPipeline, NormalizerStage,
     PipelineStages, TokenPlugin, TokenPluginManager, TokenSink, DEFAULT_LOOKAHEAD_LIMIT,
 };
-pub use stages::CharScanner;
+pub use stages::{CharScanner, Normalizer};
 pub use types::{
     ClassifiedToken, NormalizedToken, PreMetadata, RawToken, RawTokenKind, ScannerPosition, Span,
 };

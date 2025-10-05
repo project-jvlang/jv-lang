@@ -1,6 +1,6 @@
 use super::*;
 
-use crate::pipeline::pipeline::CharScannerStage;
+use crate::pipeline::pipeline::{CharScannerStage, NormalizerStage};
 use test_case::test_case;
 
 #[test]
@@ -980,4 +980,96 @@ fn char_scanner_supports_checkpoint_restore_cycle() {
     assert_eq!(second.text, "foo");
 
     scanner.discard_checkpoint(checkpoint);
+}
+
+#[test]
+fn normalizer_records_number_grouping_metadata() {
+    let mut scanner = pipeline::CharScanner::new();
+    let mut normalizer = pipeline::Normalizer::new();
+    let source = "1_234,567";
+    let mut context = pipeline::LexerContext::new(source);
+
+    let raw = scanner
+        .scan_next_token(&mut context)
+        .expect("raw token is produced");
+    assert_eq!(raw.kind, pipeline::RawTokenKind::NumberCandidate);
+
+    let normalized = normalizer
+        .normalize(raw, &mut context)
+        .expect("normalization succeeds");
+
+    assert_eq!(normalized.normalized_text, "1234567");
+
+    let grouping = normalized
+        .metadata
+        .provisional_metadata
+        .iter()
+        .find_map(|meta| match meta {
+            TokenMetadata::NumberLiteral(info) => Some(info.grouping),
+            _ => None,
+        })
+        .expect("number metadata present");
+
+    assert_eq!(grouping, NumberGroupingKind::Mixed);
+}
+
+#[test]
+fn normalizer_handles_unicode_escape_sequences() {
+    let mut scanner = pipeline::CharScanner::new();
+    let mut normalizer = pipeline::Normalizer::new();
+    let source = "\"smile \\u{1F600}\"";
+    let mut context = pipeline::LexerContext::new(source);
+
+    let raw = scanner
+        .scan_next_token(&mut context)
+        .expect("raw token is produced");
+
+    let normalized = normalizer
+        .normalize(raw, &mut context)
+        .expect("normalization succeeds");
+
+    assert_eq!(normalized.normalized_text, "smile 😀");
+
+    let delimiter = normalized
+        .metadata
+        .provisional_metadata
+        .iter()
+        .find_map(|meta| match meta {
+            TokenMetadata::StringLiteral(info) => Some(info.delimiter),
+            _ => None,
+        })
+        .expect("string metadata present");
+
+    assert_eq!(delimiter, StringDelimiterKind::DoubleQuote);
+}
+
+#[test]
+fn normalizer_preserves_multiline_strings() {
+    let mut scanner = pipeline::CharScanner::new();
+    let mut normalizer = pipeline::Normalizer::new();
+    let source = "\"first line\nsecond line\"";
+    let mut context = pipeline::LexerContext::new(source);
+
+    let raw = scanner
+        .scan_next_token(&mut context)
+        .expect("raw token is produced");
+
+    let normalized = normalizer
+        .normalize(raw, &mut context)
+        .expect("normalization succeeds");
+
+    assert_eq!(normalized.normalized_text, "first line\nsecond line");
+
+    let string_metadata = normalized
+        .metadata
+        .provisional_metadata
+        .iter()
+        .find_map(|meta| match meta {
+            TokenMetadata::StringLiteral(info) => Some(info.clone()),
+            _ => None,
+        })
+        .expect("string metadata present");
+
+    assert_eq!(string_metadata.delimiter, StringDelimiterKind::DoubleQuote);
+    assert!(!string_metadata.normalize_indentation);
 }
