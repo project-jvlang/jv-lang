@@ -604,6 +604,7 @@ mod tests {
             text: leaked,
             span: make_span(leaked.len()),
             trivia: None,
+            carry_over: None,
         }
     }
 
@@ -809,6 +810,7 @@ mod tests {
             text: " ",
             span: make_span_with_offset(2, 1, 1, 3),
             trivia: None,
+            carry_over: None,
         };
         let mut ctx = LexerContext::new("[1 2]");
 
@@ -836,6 +838,7 @@ mod tests {
             text: " ",
             span: make_span_with_offset(5, 1, 1, 6),
             trivia: None,
+            carry_over: None,
         };
         let mut ctx = LexerContext::new("plot(1 2)");
 

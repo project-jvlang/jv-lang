@@ -1,6 +1,6 @@
 use std::ops::Range;
 
-use crate::{TokenDiagnostic, TokenMetadata, TokenTrivia, TokenType};
+use crate::{CommentCarryOverMetadata, TokenDiagnostic, TokenMetadata, TokenTrivia, TokenType};
 
 /// ソース全体に対する位置情報を表す。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -62,6 +62,7 @@ pub struct RawToken<'source> {
     pub text: &'source str,
     pub span: Span,
     pub trivia: Option<TokenTrivia>,
+    pub carry_over: Option<CommentCarryOverMetadata>,
 }
 
 impl<'source> RawToken<'source> {

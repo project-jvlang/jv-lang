@@ -223,6 +223,18 @@ pub struct NumberLiteralMetadata {
     pub original_lexeme: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+pub struct CommentCarryOverMetadata {
+    #[serde(default)]
+    pub passthrough: Vec<SourceCommentTrivia>,
+    #[serde(default)]
+    pub jv_only: Vec<SourceCommentTrivia>,
+    #[serde(default)]
+    pub json: Vec<JsonCommentTrivia>,
+    #[serde(default)]
+    pub doc_comment: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum TokenMetadata {
     PotentialJsonStart {
@@ -234,6 +246,7 @@ pub enum TokenMetadata {
     StringInterpolation {
         segments: Vec<StringInterpolationSegment>,
     },
+    CommentCarryOver(CommentCarryOverMetadata),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]

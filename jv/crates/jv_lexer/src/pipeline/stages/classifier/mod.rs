@@ -175,6 +175,7 @@ mod tests {
             text: leaked,
             span: Span::empty(Default::default()),
             trivia: None,
+            carry_over: None,
         }
     }
 

@@ -7,7 +7,8 @@ use crate::{
         pipeline::DEFAULT_LOOKAHEAD_LIMIT,
         types::{RawToken, RawTokenKind, ScannerPosition, Span},
     },
-    LexError, TokenTrivia,
+    CommentCarryOverMetadata, JsonCommentTrivia, JsonCommentTriviaKind, LexError,
+    SourceCommentKind, SourceCommentTrivia, TokenTrivia,
 };
 use unicode_ident::{is_xid_continue, is_xid_start};
 
@@ -114,6 +115,8 @@ pub struct CharScanner {
     checkpoints: Vec<Checkpoint>,
     ring_buffer: RingBuffer,
     trivia_tracker: TriviaTracker,
+    pending_comment_trivia: Option<TokenTrivia>,
+    pending_comment_carry: Option<CommentCarryOverMetadata>,
     lookahead_limit: usize,
     last_source_ptr: Option<usize>,
 }
@@ -137,6 +140,8 @@ impl CharScanner {
             checkpoints: Vec::new(),
             ring_buffer: RingBuffer::new(capacity),
             trivia_tracker: TriviaTracker::default(),
+            pending_comment_trivia: None,
+            pending_comment_carry: None,
             lookahead_limit: capacity,
             last_source_ptr: None,
         }
@@ -153,6 +158,8 @@ impl CharScanner {
         self.checkpoints.clear();
         self.ring_buffer.reset();
         self.trivia_tracker.reset();
+        self.pending_comment_trivia = None;
+        self.pending_comment_carry = None;
     }
 
     fn synchronize_context<'source>(&mut self, ctx: &mut LexerContext<'source>) {
@@ -554,6 +561,130 @@ impl CharScanner {
         Ok(self.take_slice(source, start, self.cursor))
     }
 
+    fn is_jv_block_comment(rest: &str) -> bool {
+        rest.contains("*//")
+    }
+
+    fn build_line_comment_carry(
+        &self,
+        text: &str,
+        line: usize,
+        column: usize,
+        is_jv_only: bool,
+    ) -> CommentCarryOverMetadata {
+        let mut carry = CommentCarryOverMetadata::default();
+        if is_jv_only {
+            carry.jv_only.push(SourceCommentTrivia {
+                kind: SourceCommentKind::Line,
+                text: text.to_string(),
+                line,
+                column,
+            });
+        } else {
+            let sanitized = Self::sanitize_line_comment(text);
+            if !sanitized.is_empty() {
+                carry.json.push(JsonCommentTrivia {
+                    kind: JsonCommentTriviaKind::Line,
+                    text: sanitized,
+                    line,
+                    column,
+                });
+            }
+            carry.passthrough.push(SourceCommentTrivia {
+                kind: SourceCommentKind::Line,
+                text: text.to_string(),
+                line,
+                column,
+            });
+        }
+        carry
+    }
+
+    fn build_hash_comment_carry(
+        &self,
+        text: &str,
+        line: usize,
+        column: usize,
+    ) -> CommentCarryOverMetadata {
+        let mut carry = CommentCarryOverMetadata::default();
+        let sanitized = text.trim_start_matches('#').trim().to_string();
+        if !sanitized.is_empty() {
+            carry.json.push(JsonCommentTrivia {
+                kind: JsonCommentTriviaKind::Line,
+                text: sanitized,
+                line,
+                column,
+            });
+        }
+        carry
+    }
+
+    fn build_block_comment_carry(
+        &self,
+        text: &str,
+        line: usize,
+        column: usize,
+        is_javadoc: bool,
+    ) -> CommentCarryOverMetadata {
+        let mut carry = CommentCarryOverMetadata::default();
+        if is_javadoc {
+            let doc = text.trim_start_matches('/').to_string();
+            carry.doc_comment = Some(doc);
+        } else {
+            let sanitized = Self::sanitize_block_comment(text);
+            if !sanitized.is_empty() {
+                carry.json.push(JsonCommentTrivia {
+                    kind: JsonCommentTriviaKind::Block,
+                    text: sanitized,
+                    line,
+                    column,
+                });
+            }
+            carry.passthrough.push(SourceCommentTrivia {
+                kind: SourceCommentKind::Block,
+                text: text.to_string(),
+                line,
+                column,
+            });
+        }
+        carry
+    }
+
+    fn build_jv_block_comment_carry(
+        &self,
+        text: &str,
+        line: usize,
+        column: usize,
+    ) -> CommentCarryOverMetadata {
+        let mut carry = CommentCarryOverMetadata::default();
+        carry.jv_only.push(SourceCommentTrivia {
+            kind: SourceCommentKind::Block,
+            text: text.to_string(),
+            line,
+            column,
+        });
+        carry
+    }
+
+    fn sanitize_line_comment(text: &str) -> String {
+        let trimmed = text.trim_start();
+        if let Some(rest) = trimmed.strip_prefix("//") {
+            rest.trim().to_string()
+        } else if let Some(rest) = trimmed.strip_prefix('#') {
+            rest.trim().to_string()
+        } else {
+            trimmed.trim().to_string()
+        }
+    }
+
+    fn sanitize_block_comment(text: &str) -> String {
+        text.trim()
+            .trim_start_matches("/*")
+            .trim_end_matches("*/")
+            .trim()
+            .to_string()
+    }
+
     fn read_string_literal<'source>(
         &mut self,
         source: &'source str,
@@ -603,6 +734,140 @@ impl CharScanner {
         }
 
         Ok(self.take_slice(source, start, self.cursor))
+    }
+
+    fn push_comment_trivia(&mut self, trivia: TokenTrivia) {
+        if let Some(existing) = &mut self.pending_comment_trivia {
+            Self::merge_trivia(existing, trivia);
+        } else {
+            self.pending_comment_trivia = Some(trivia);
+        }
+    }
+
+    fn push_comment_carry(&mut self, carry: CommentCarryOverMetadata) {
+        if let Some(existing) = &mut self.pending_comment_carry {
+            Self::merge_carry(existing, carry);
+        } else {
+            self.pending_comment_carry = Some(carry);
+        }
+    }
+
+    fn merge_carry(target: &mut CommentCarryOverMetadata, mut incoming: CommentCarryOverMetadata) {
+        target.passthrough.append(&mut incoming.passthrough);
+        target.jv_only.append(&mut incoming.jv_only);
+        target.json.append(&mut incoming.json);
+        if incoming.doc_comment.is_some() {
+            target.doc_comment = incoming.doc_comment;
+        }
+    }
+
+    fn merge_trivia(target: &mut TokenTrivia, mut incoming: TokenTrivia) {
+        target.spaces = target.spaces.saturating_add(incoming.spaces);
+        target.newlines = target.newlines.saturating_add(incoming.newlines);
+        target.comments |= incoming.comments;
+        target.json_comments.append(&mut incoming.json_comments);
+        if incoming.doc_comment.is_some() {
+            target.doc_comment = incoming.doc_comment;
+        }
+        target
+            .passthrough_comments
+            .append(&mut incoming.passthrough_comments);
+        target.jv_comments.append(&mut incoming.jv_comments);
+    }
+
+    fn build_line_comment_trivia(
+        &self,
+        text: &str,
+        line: usize,
+        column: usize,
+        is_jv_only: bool,
+    ) -> TokenTrivia {
+        let mut trivia = TokenTrivia::default();
+        trivia.comments = true;
+        if is_jv_only {
+            trivia.jv_comments.push(SourceCommentTrivia {
+                kind: SourceCommentKind::Line,
+                text: text.to_string(),
+                line,
+                column,
+            });
+        } else {
+            let sanitized = Self::sanitize_line_comment(text);
+            if !sanitized.is_empty() {
+                trivia.json_comments.push(JsonCommentTrivia {
+                    kind: JsonCommentTriviaKind::Line,
+                    text: sanitized,
+                    line,
+                    column,
+                });
+            }
+            trivia.passthrough_comments.push(SourceCommentTrivia {
+                kind: SourceCommentKind::Line,
+                text: text.to_string(),
+                line,
+                column,
+            });
+        }
+        trivia
+    }
+
+    fn build_hash_comment_trivia(&self, text: &str, line: usize, column: usize) -> TokenTrivia {
+        let mut trivia = TokenTrivia::default();
+        trivia.comments = true;
+        let sanitized = text.trim_start_matches('#').trim().to_string();
+        if !sanitized.is_empty() {
+            trivia.json_comments.push(JsonCommentTrivia {
+                kind: JsonCommentTriviaKind::Line,
+                text: sanitized,
+                line,
+                column,
+            });
+        }
+        trivia
+    }
+
+    fn build_block_comment_trivia(
+        &self,
+        text: &str,
+        line: usize,
+        column: usize,
+        is_javadoc: bool,
+    ) -> TokenTrivia {
+        let mut trivia = TokenTrivia::default();
+        trivia.comments = true;
+        if is_javadoc {
+            let doc = text.trim_start_matches('/').to_string();
+            trivia.doc_comment = Some(doc);
+        } else {
+            let sanitized = Self::sanitize_block_comment(text);
+            if !sanitized.is_empty() {
+                trivia.json_comments.push(JsonCommentTrivia {
+                    kind: JsonCommentTriviaKind::Block,
+                    text: sanitized,
+                    line,
+                    column,
+                });
+            }
+            trivia.passthrough_comments.push(SourceCommentTrivia {
+                kind: SourceCommentKind::Block,
+                text: text.to_string(),
+                line,
+                column,
+            });
+        }
+        trivia
+    }
+
+    fn build_jv_block_comment_trivia(&self, text: &str, line: usize, column: usize) -> TokenTrivia {
+        let mut trivia = TokenTrivia::default();
+        trivia.comments = true;
+        trivia.jv_comments.push(SourceCommentTrivia {
+            kind: SourceCommentKind::Block,
+            text: text.to_string(),
+            line,
+            column,
+        });
+        trivia
     }
 
     fn read_symbol<'source>(&mut self, source: &'source str) -> Result<&'source str, LexError> {
@@ -716,11 +981,20 @@ impl CharScannerStage for CharScanner {
         if self.cursor >= source.len() {
             let span = Span::empty(self.position);
             ctx.update_position(self.position);
+            let mut final_trivia = trivia;
+            if let Some(mut comment_trivia) = self.pending_comment_trivia.take() {
+                if let Some(existing) = final_trivia.take() {
+                    Self::merge_trivia(&mut comment_trivia, existing);
+                }
+                final_trivia = Some(comment_trivia);
+            }
+            let carry_over = self.pending_comment_carry.take();
             return Ok(RawToken {
                 kind: RawTokenKind::Eof,
                 text: "",
                 span,
-                trivia,
+                trivia: final_trivia,
+                carry_over,
             });
         }
 
@@ -730,11 +1004,22 @@ impl CharScannerStage for CharScanner {
 
         if remaining.starts_with("//") {
             let rest = &remaining[2..];
-            let slice = if rest.starts_with('*') || rest.starts_with("/*") {
-                self.read_jv_only_block_comment(source)?
+            let line = start_position.line;
+            let column = start_position.column;
+            let (slice, trivia_piece, carry_piece) = if Self::is_jv_block_comment(rest) {
+                let slice = self.read_jv_only_block_comment(source)?;
+                let trivia_piece = self.build_jv_block_comment_trivia(slice, line, column);
+                let carry_piece = self.build_jv_block_comment_carry(slice, line, column);
+                (slice, trivia_piece, carry_piece)
             } else {
-                self.read_line_comment(source)?
+                let slice = self.read_line_comment(source)?;
+                let is_jv_only = slice.starts_with("///") || slice.starts_with("//*");
+                let trivia_piece = self.build_line_comment_trivia(slice, line, column, is_jv_only);
+                let carry_piece = self.build_line_comment_carry(slice, line, column, is_jv_only);
+                (slice, trivia_piece, carry_piece)
             };
+            self.push_comment_trivia(trivia_piece);
+            self.push_comment_carry(carry_piece.clone());
             let span = self.current_span(start_offset, start_position);
             ctx.update_position(self.position);
             return Ok(RawToken {
@@ -742,11 +1027,19 @@ impl CharScannerStage for CharScanner {
                 text: slice,
                 span,
                 trivia,
+                carry_over: Some(carry_piece),
             });
         }
 
         if remaining.starts_with("/*") {
+            let line = start_position.line;
+            let column = start_position.column;
             let slice = self.read_block_comment(source)?;
+            let is_javadoc = slice.starts_with("/**");
+            let trivia_piece = self.build_block_comment_trivia(slice, line, column, is_javadoc);
+            let carry_piece = self.build_block_comment_carry(slice, line, column, is_javadoc);
+            self.push_comment_trivia(trivia_piece);
+            self.push_comment_carry(carry_piece.clone());
             let span = self.current_span(start_offset, start_position);
             ctx.update_position(self.position);
             return Ok(RawToken {
@@ -754,11 +1047,18 @@ impl CharScannerStage for CharScanner {
                 text: slice,
                 span,
                 trivia,
+                carry_over: Some(carry_piece),
             });
         }
 
         if remaining.starts_with('#') {
             let slice = self.read_hash_comment(source)?;
+            let trivia_piece =
+                self.build_hash_comment_trivia(slice, start_position.line, start_position.column);
+            let carry_piece =
+                self.build_hash_comment_carry(slice, start_position.line, start_position.column);
+            self.push_comment_trivia(trivia_piece);
+            self.push_comment_carry(carry_piece.clone());
             let span = self.current_span(start_offset, start_position);
             ctx.update_position(self.position);
             return Ok(RawToken {
@@ -766,6 +1066,7 @@ impl CharScannerStage for CharScanner {
                 text: slice,
                 span,
                 trivia,
+                carry_over: Some(carry_piece),
             });
         }
 
@@ -785,11 +1086,22 @@ impl CharScannerStage for CharScanner {
         let span = self.current_span(start_offset, start_position);
         ctx.update_position(self.position);
 
+        let mut final_trivia = trivia;
+        if let Some(mut comment_trivia) = self.pending_comment_trivia.take() {
+            if let Some(existing) = final_trivia.take() {
+                Self::merge_trivia(&mut comment_trivia, existing);
+            }
+            final_trivia = Some(comment_trivia);
+        }
+
+        let carry_over = self.pending_comment_carry.take();
+
         Ok(RawToken {
             kind,
             text: slice,
             span,
-            trivia,
+            trivia: final_trivia,
+            carry_over,
         })
     }
 
@@ -852,10 +1164,12 @@ mod tests {
 
         let trivia = token.trivia.expect("expected leading trivia");
         assert!(
-            !trivia.comments,
-            "comments should no longer be absorbed into trivia"
+            trivia.comments,
+            "leading trivia should now include comments"
         );
         assert!(trivia.newlines >= 1, "newline trivia should be tracked");
+        assert_eq!(trivia.passthrough_comments.len(), 1);
+        assert_eq!(trivia.passthrough_comments[0].text, "// keep");
 
         let expected_offset = source.find("val").expect("lexeme location");
         assert_eq!(token.span.start.byte_offset, expected_offset);
@@ -934,6 +1248,28 @@ mod tests {
         assert_eq!(identifier.kind, RawTokenKind::Identifier);
         assert_eq!(identifier.text, "val");
         assert!(identifier.trivia.is_some());
+    }
+
+    #[test]
+    fn comment_carry_over_attaches_to_next_token() {
+        let mut scanner = CharScanner::new();
+        let source = "// note\nval";
+        let mut ctx = LexerContext::new(source);
+
+        let comment = scanner.scan_next_token(&mut ctx).expect("comment token");
+        assert_eq!(comment.kind, RawTokenKind::CommentCandidate);
+        assert!(comment.carry_over.is_some());
+
+        let identifier = scanner.scan_next_token(&mut ctx).expect("identifier token");
+        assert_eq!(identifier.kind, RawTokenKind::Identifier);
+        let trivia = identifier.trivia.expect("identifier trivia");
+        assert!(trivia.comments);
+        assert!(trivia.newlines >= 1);
+        let carry = identifier.carry_over.expect("carry metadata");
+        assert_eq!(carry.passthrough.len(), 1);
+        assert_eq!(carry.passthrough[0].text, "// note");
+        assert_eq!(carry.json.len(), 1);
+        assert_eq!(carry.json[0].text, "note");
     }
 
     #[test]
