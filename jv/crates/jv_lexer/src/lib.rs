@@ -2,6 +2,7 @@
 // Reference: 作業指示-20250830.md:19-20
 
 pub mod pipeline;
+pub mod plugins;
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;

@@ -104,6 +104,10 @@ impl TokenPluginManager {
         Self { plugins }
     }
 
+    pub fn with_default_plugins() -> Self {
+        Self::with_plugins(crate::plugins::load_static_plugins())
+    }
+
     pub fn is_empty(&self) -> bool {
         self.plugins.is_empty()
     }
