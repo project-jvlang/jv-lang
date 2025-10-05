@@ -1,6 +1,7 @@
 pub mod context;
 pub mod pipeline;
 pub mod stages;
+pub mod trace;
 pub mod types;
 
 pub use context::LexerContext;

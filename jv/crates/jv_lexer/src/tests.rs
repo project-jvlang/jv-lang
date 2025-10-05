@@ -1,6 +1,6 @@
 use super::*;
 
-use crate::pipeline::pipeline::{CharScannerStage, NormalizerStage};
+use crate::pipeline::pipeline::{CharScannerStage, ClassifierStage, EmitterStage, NormalizerStage};
 use test_case::test_case;
 
 #[test]
@@ -1072,4 +1072,166 @@ fn normalizer_preserves_multiline_strings() {
 
     assert_eq!(string_metadata.delimiter, StringDelimiterKind::DoubleQuote);
     assert!(!string_metadata.normalize_indentation);
+}
+
+fn span_with_len(len: usize) -> pipeline::Span {
+    let start = pipeline::ScannerPosition::default();
+    let mut end = start;
+    end.advance(len, 0, len);
+    pipeline::Span::new(0..len, start, end)
+}
+
+#[test]
+fn classifier_resolves_keywords_and_identifiers() {
+    let mut classifier = pipeline::Classifier::new();
+    let mut ctx_keyword = pipeline::LexerContext::new("val");
+    let raw_keyword = pipeline::RawToken {
+        kind: pipeline::RawTokenKind::Identifier,
+        text: "val",
+        span: span_with_len(3),
+        trivia: None,
+        carry_over: None,
+    };
+    let normalized_keyword = pipeline::NormalizedToken::new(
+        raw_keyword,
+        "val".to_string(),
+        pipeline::PreMetadata::default(),
+    );
+    let keyword = classifier
+        .classify(normalized_keyword, &mut ctx_keyword)
+        .expect("classify keyword");
+    assert_eq!(keyword.token_type, TokenType::Val);
+
+    let mut classifier = pipeline::Classifier::new();
+    let mut ctx_identifier = pipeline::LexerContext::new("value");
+    let raw_identifier = pipeline::RawToken {
+        kind: pipeline::RawTokenKind::Identifier,
+        text: "value",
+        span: span_with_len(5),
+        trivia: None,
+        carry_over: None,
+    };
+    let normalized_identifier = pipeline::NormalizedToken::new(
+        raw_identifier,
+        "value".to_string(),
+        pipeline::PreMetadata::default(),
+    );
+    let identifier = classifier
+        .classify(normalized_identifier, &mut ctx_identifier)
+        .expect("classify identifier");
+    match identifier.token_type {
+        TokenType::Identifier(ref name) => assert_eq!(name, "value"),
+        other => panic!("expected identifier, got {:?}", other),
+    }
+}
+
+#[test]
+fn classifier_marks_string_interpolation_plan() {
+    let mut classifier = pipeline::Classifier::new();
+    let source = "\"Hello, ${name}!\"";
+    let mut ctx = pipeline::LexerContext::new(source);
+    let mut metadata = pipeline::PreMetadata::default();
+    metadata
+        .provisional_metadata
+        .push(TokenMetadata::StringLiteral(StringLiteralMetadata {
+            delimiter: StringDelimiterKind::DoubleQuote,
+            allows_interpolation: true,
+            normalize_indentation: false,
+        }));
+    metadata
+        .provisional_metadata
+        .push(TokenMetadata::StringInterpolation {
+            segments: vec![
+                StringInterpolationSegment::Literal("Hello, ".to_string()),
+                StringInterpolationSegment::Expression("name".to_string()),
+                StringInterpolationSegment::Literal("!".to_string()),
+            ],
+        });
+    let raw = pipeline::RawToken {
+        kind: pipeline::RawTokenKind::Symbol,
+        text: source,
+        span: span_with_len(source.len()),
+        trivia: Some(TokenTrivia::default()),
+        carry_over: None,
+    };
+    let normalized = pipeline::NormalizedToken::new(raw, source.to_string(), metadata);
+    let classified = classifier
+        .classify(normalized, &mut ctx)
+        .expect("classify interpolation");
+    assert!(matches!(
+        classified.emission_plan,
+        pipeline::EmissionPlan::StringInterpolation { .. }
+    ));
+    match classified.token_type {
+        TokenType::StringInterpolation(ref text) => {
+            assert!(text.contains("${name}"));
+        }
+        other => panic!("expected string interpolation token, got {:?}", other),
+    }
+}
+
+#[test]
+fn emitter_merges_comment_carry_into_trivia() {
+    let mut emitter = pipeline::Emitter::new();
+    let carry = CommentCarryOverMetadata {
+        passthrough: vec![SourceCommentTrivia {
+            kind: SourceCommentKind::Line,
+            text: "// keep".to_string(),
+            line: 1,
+            column: 1,
+        }],
+        jv_only: Vec::new(),
+        json: Vec::new(),
+        doc_comment: Some("Doc".to_string()),
+    };
+    let metadata = vec![TokenMetadata::CommentCarryOver(carry)];
+    let raw = pipeline::RawToken {
+        kind: pipeline::RawTokenKind::Identifier,
+        text: "value",
+        span: span_with_len(5),
+        trivia: Some(TokenTrivia::default()),
+        carry_over: None,
+    };
+    let normalized =
+        pipeline::NormalizedToken::new(raw, "value".to_string(), pipeline::PreMetadata::default());
+    let classified = pipeline::ClassifiedToken::with_plan(
+        normalized,
+        TokenType::Identifier("value".to_string()),
+        Vec::new(),
+        metadata,
+        pipeline::EmissionPlan::Direct,
+    );
+    let mut ctx = pipeline::LexerContext::new("value");
+    let emitted = emitter
+        .emit(classified, &mut ctx)
+        .expect("emit identifier token");
+    assert_eq!(emitted.len(), 1);
+    let token = &emitted[0];
+    assert!(token.leading_trivia.comments);
+    assert_eq!(token.leading_trivia.passthrough_comments.len(), 1);
+    assert_eq!(token.leading_trivia.passthrough_comments[0].text, "// keep");
+    assert_eq!(token.leading_trivia.doc_comment.as_deref(), Some("Doc"));
+    assert!(token.metadata.is_empty());
+}
+
+#[test]
+fn pipeline_token_sequence_matches_expected_assignment() {
+    let source = "val greeting = \"Hello, ${name}!\"";
+    let mut lexer = Lexer::new(source.to_string());
+    let tokens = lexer
+        .tokenize()
+        .expect("tokenize greeting assignment through pipeline");
+    let token_types: Vec<TokenType> = tokens.into_iter().map(|token| token.token_type).collect();
+    assert_eq!(
+        token_types,
+        vec![
+            TokenType::Val,
+            TokenType::Identifier("greeting".to_string()),
+            TokenType::Assign,
+            TokenType::StringStart,
+            TokenType::Identifier("name".to_string()),
+            TokenType::StringEnd,
+            TokenType::Eof,
+        ]
+    );
 }

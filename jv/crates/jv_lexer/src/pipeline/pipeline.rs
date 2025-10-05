@@ -1,6 +1,7 @@
 use crate::{LexError, Token, TokenType};
 
 use super::context::LexerContext;
+use super::trace;
 use super::types::{ClassifiedToken, NormalizedToken, RawToken, ScannerPosition};
 
 pub const DEFAULT_LOOKAHEAD_LIMIT: usize = 1024;
@@ -179,25 +180,38 @@ impl<S, N, C, E> LexerPipeline<S, N, C, E> {
         E: EmitterStage,
     {
         loop {
+            trace::stage_event("pipeline", "loop_start", ctx);
             let checkpoint = self.stages.scanner.save_position();
+            trace::stage_event("char_scanner", "scan_next_token", ctx);
             let raw = self.stages.scanner.scan_next_token(ctx)?;
+            trace::raw_token(&raw);
             let is_raw_eof = raw.is_eof();
 
             if !is_raw_eof && self.stages.scanner.needs_lookahead(&raw) {
+                trace::stage_event("char_scanner", "lookahead", ctx);
                 let preview = self.stages.scanner.peek_chars(ctx, self.lookahead_limit);
                 ctx.set_lookahead_window(preview);
 
                 if self.stages.scanner.should_reinterpret(&raw, preview) {
+                    trace::stage_event("char_scanner", "reinterpret", ctx);
                     self.stages.scanner.restore_position(checkpoint);
                     self.stages.scanner.discard_checkpoint(checkpoint);
                     continue;
                 }
             }
 
+            trace::stage_event("normalizer", "normalize", ctx);
             let normalized = self.stages.normalizer.normalize(raw, ctx)?;
+            trace::normalized_token(&normalized);
+
+            trace::stage_event("classifier", "classify", ctx);
             let mut classified = self.stages.classifier.classify(normalized, ctx)?;
             self.plugins.apply(&mut classified, ctx)?;
+            trace::classified_token(&classified);
+
+            trace::stage_event("emitter", "emit", ctx);
             let emitted = self.stages.emitter.emit(classified, ctx)?;
+            trace::emitted_tokens(&emitted);
             let mut reached_end = false;
             for token in emitted {
                 if matches!(token.token_type, TokenType::Eof) {
@@ -209,6 +223,7 @@ impl<S, N, C, E> LexerPipeline<S, N, C, E> {
             ctx.clear_lookahead_window();
             self.stages.scanner.commit_position();
             self.stages.scanner.discard_checkpoint(checkpoint);
+            trace::stage_event("pipeline", "loop_end", ctx);
 
             if is_raw_eof || reached_end {
                 break;
