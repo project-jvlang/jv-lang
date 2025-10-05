@@ -7,8 +7,7 @@ use crate::{
         pipeline::DEFAULT_LOOKAHEAD_LIMIT,
         types::{RawToken, RawTokenKind, ScannerPosition, Span},
     },
-    JsonCommentTrivia, JsonCommentTriviaKind, LexError, SourceCommentKind, SourceCommentTrivia,
-    TokenTrivia,
+    LexError, TokenTrivia,
 };
 use unicode_ident::{is_xid_continue, is_xid_start};
 
@@ -95,47 +94,6 @@ impl TriviaTracker {
         self.trivia.spaces = 0;
     }
 
-    fn record_comment_variants(
-        &mut self,
-        json: Option<JsonCommentTrivia>,
-        passthrough: Option<SourceCommentTrivia>,
-        jv_only: Option<SourceCommentTrivia>,
-    ) {
-        self.trivia.comments = true;
-
-        if let Some(comment) = json {
-            self.trivia.json_comments.push(comment);
-        }
-
-        if let Some(comment) = passthrough {
-            self.trivia.passthrough_comments.push(comment);
-        }
-
-        if let Some(comment) = jv_only {
-            self.trivia.jv_comments.push(comment);
-        }
-    }
-
-    fn record_json_comment(&mut self, text: String, line: usize, column: usize, is_block: bool) {
-        self.trivia.comments = true;
-        self.trivia.json_comments.push(JsonCommentTrivia {
-            kind: if is_block {
-                JsonCommentTriviaKind::Block
-            } else {
-                JsonCommentTriviaKind::Line
-            },
-            text,
-            line,
-            column,
-        });
-    }
-
-    #[allow(dead_code)]
-    fn record_doc_comment(&mut self, text: String) {
-        self.trivia.comments = true;
-        self.trivia.doc_comment = Some(text);
-    }
-
     fn take(&mut self) -> Option<TokenTrivia> {
         if self.trivia == TokenTrivia::default() {
             None
@@ -219,17 +177,6 @@ impl CharScanner {
 
     fn peek_char_offset<'source>(&self, source: &'source str, offset: usize) -> Option<char> {
         self.remaining(source).chars().nth(offset)
-    }
-
-    fn sanitize_comment_text(kind: JsonCommentTriviaKind, text: &str) -> String {
-        match kind {
-            JsonCommentTriviaKind::Line => {
-                let trimmed = text.trim_start();
-                let without_slashes = trimmed.trim_start_matches('/');
-                without_slashes.trim_start().to_string()
-            }
-            JsonCommentTriviaKind::Block => text.trim().to_string(),
-        }
     }
 
     fn remaining<'source>(&self, source: &'source str) -> &'source str {
@@ -385,6 +332,8 @@ impl CharScanner {
 
         let mut saw_digit = false;
         let mut saw_dot = false;
+        let mut saw_exponent = false;
+        let mut exponent_digits = 0;
         let mut trailing_separator: Option<char> = None;
 
         while let Some(ch) = self.peek_char_from(source) {
@@ -393,8 +342,14 @@ impl CharScanner {
                     self.advance_char(ch, source)?;
                     saw_digit = true;
                     trailing_separator = None;
+                    if saw_exponent {
+                        exponent_digits += 1;
+                    }
                 }
                 ',' => {
+                    if saw_exponent {
+                        break;
+                    }
                     let mut digits_after = 0;
                     let remaining_bytes = self.remaining(source);
                     if remaining_bytes.len() > 1 {
@@ -429,18 +384,43 @@ impl CharScanner {
                     ));
                 }
                 '.' => {
-                    if saw_dot {
+                    if saw_dot || saw_exponent {
                         break;
                     }
-
                     let after = self.peek_char_offset(source, 1);
                     if matches!(after, Some('.') | Some('=')) {
                         break;
                     }
-
                     if after.map(|c| c.is_ascii_digit()).unwrap_or(false) {
                         self.advance_char(ch, source)?;
                         saw_dot = true;
+                        trailing_separator = None;
+                    } else {
+                        break;
+                    }
+                }
+                'e' | 'E' => {
+                    if saw_exponent {
+                        break;
+                    }
+                    let mut lookahead = 1;
+                    if let Some(sign) = self.peek_char_offset(source, 1) {
+                        if matches!(sign, '+' | '-') {
+                            lookahead += 1;
+                        }
+                    }
+                    if self
+                        .peek_char_offset(source, lookahead)
+                        .map(|c| c.is_ascii_digit())
+                        .unwrap_or(false)
+                    {
+                        self.advance_char(ch, source)?;
+                        if lookahead > 1 {
+                            let sign = self.peek_char_from(source).unwrap();
+                            self.advance_char(sign, source)?;
+                        }
+                        saw_exponent = true;
+                        exponent_digits = 0;
                         trailing_separator = None;
                     } else {
                         break;
@@ -466,11 +446,23 @@ impl CharScanner {
             ));
         }
 
+        if saw_exponent && exponent_digits == 0 {
+            return Err(LexError::UnexpectedChar(
+                'e',
+                self.position.line,
+                self.position.column,
+            ));
+        }
+
         Ok(self.take_slice(source, start, self.cursor))
     }
 
-    fn read_line_comment<'source>(&mut self, source: &'source str) -> Result<String, LexError> {
+    fn read_line_comment<'source>(
+        &mut self,
+        source: &'source str,
+    ) -> Result<&'source str, LexError> {
         let start = self.cursor;
+        self.advance_char('/', source)?;
         self.advance_char('/', source)?;
 
         while let Some(ch) = self.peek_char_from(source) {
@@ -480,86 +472,86 @@ impl CharScanner {
             self.advance_char(ch, source)?;
         }
 
-        Ok(self.take_slice(source, start, self.cursor).to_string())
+        Ok(self.take_slice(source, start, self.cursor))
     }
 
-    fn read_block_comment<'source>(&mut self, source: &'source str) -> Result<String, LexError> {
+    fn read_block_comment<'source>(
+        &mut self,
+        source: &'source str,
+    ) -> Result<&'source str, LexError> {
+        let start = self.cursor;
         let start_line = self.position.line;
         let start_column = self.position.column;
-        let mut text = String::new();
+
+        self.advance_char('/', source)?;
+        self.advance_char('*', source)?;
 
         loop {
             let Some(ch) = self.peek_char_from(source) else {
                 return Err(LexError::UnterminatedString(start_line, start_column));
             };
 
-            if ch == '*' && self.peek_char_offset(source, 1) == Some('/') {
-                self.advance_char('*', source)?;
-                self.advance_char('/', source)?;
-                return Ok(text);
-            }
-
             self.advance_char(ch, source)?;
-            text.push(ch);
+            if ch == '*' && self.peek_char_from(source) == Some('/') {
+                self.advance_char('/', source)?;
+                break;
+            }
         }
+
+        Ok(self.take_slice(source, start, self.cursor))
     }
 
     fn read_jv_only_block_comment<'source>(
         &mut self,
         source: &'source str,
-    ) -> Result<String, LexError> {
+    ) -> Result<&'source str, LexError> {
+        let start = self.cursor;
         let start_line = self.position.line;
         let start_column = self.position.column;
 
-        self.advance_char('/', source)?; // consume second '/'
+        self.advance_char('/', source)?;
+        self.advance_char('/', source)?;
         if self.peek_char_from(source) == Some('/') {
             self.advance_char('/', source)?;
         }
 
         if self.peek_char_from(source) != Some('*') {
-            return Ok(String::new());
+            return Ok(self.take_slice(source, start, self.cursor));
         }
         self.advance_char('*', source)?;
-
-        let mut text = String::new();
 
         loop {
             let Some(ch) = self.peek_char_from(source) else {
                 return Err(LexError::UnterminatedString(start_line, start_column));
             };
 
-            if ch == '*'
-                && self.peek_char_offset(source, 1) == Some('/')
-                && self.peek_char_offset(source, 2) == Some('/')
-            {
-                self.advance_char('*', source)?;
-                self.advance_char('/', source)?;
-                self.advance_char('/', source)?;
-                return Ok(text);
-            }
-
             self.advance_char(ch, source)?;
-            text.push(ch);
+            if ch == '*'
+                && self.peek_char_from(source) == Some('/')
+                && self.peek_char_offset(source, 1) == Some('/')
+            {
+                self.advance_char('/', source)?;
+                self.advance_char('/', source)?;
+                break;
+            }
         }
+
+        Ok(self.take_slice(source, start, self.cursor))
     }
 
-    fn read_hash_comment<'source>(&mut self, source: &'source str) -> Result<String, LexError> {
-        let mut text = String::new();
+    fn read_hash_comment<'source>(
+        &mut self,
+        source: &'source str,
+    ) -> Result<&'source str, LexError> {
+        let start = self.cursor;
+        self.advance_char('#', source)?;
         while let Some(ch) = self.peek_char_from(source) {
             if ch == '\n' {
                 break;
             }
             self.advance_char(ch, source)?;
-            text.push(ch);
         }
-        Ok(text)
-    }
-
-    fn has_jv_block_comment(&self, source: &str) -> bool {
-        self.remaining(source)
-            .strip_prefix("//")
-            .map(|rest| rest.contains("*//"))
-            .unwrap_or(false)
+        Ok(self.take_slice(source, start, self.cursor))
     }
 
     fn read_string_literal<'source>(
@@ -656,128 +648,6 @@ impl CharScanner {
                     self.advance_char(ch, source)?;
                     self.trivia_tracker.record_newline();
                 }
-                '/' => {
-                    let ahead = self.peek_n_from(source, 3);
-                    if ahead.starts_with("//") {
-                        saw_trivia = true;
-                        let line = self.position.line;
-                        let column = self.position.column;
-                        let has_jv_block = self.has_jv_block_comment(source);
-                        self.advance_char('/', source)?;
-
-                        if has_jv_block {
-                            let comment_body = self.read_jv_only_block_comment(source)?;
-                            let source_trivia = SourceCommentTrivia {
-                                kind: SourceCommentKind::Block,
-                                text: format!("/*{}*//", comment_body),
-                                line,
-                                column,
-                            };
-                            self.trivia_tracker.record_comment_variants(
-                                None,
-                                None,
-                                Some(source_trivia),
-                            );
-                            continue;
-                        }
-
-                        let comment = self.read_line_comment(source)?;
-                        let sanitized =
-                            Self::sanitize_comment_text(JsonCommentTriviaKind::Line, &comment);
-                        let json_meta = JsonCommentTrivia {
-                            kind: JsonCommentTriviaKind::Line,
-                            text: sanitized,
-                            line,
-                            column,
-                        };
-                        let full_text = format!("/{}", comment);
-                        let source_trivia = SourceCommentTrivia {
-                            kind: SourceCommentKind::Line,
-                            text: full_text,
-                            line,
-                            column,
-                        };
-                        let first_body_char = comment.chars().nth(1);
-                        let is_jv_only = matches!(first_body_char, Some('/') | Some('*'));
-                        let passthrough = if is_jv_only {
-                            None
-                        } else {
-                            Some(source_trivia.clone())
-                        };
-                        let jv_only = if is_jv_only {
-                            Some(source_trivia.clone())
-                        } else {
-                            None
-                        };
-                        self.trivia_tracker.record_comment_variants(
-                            Some(json_meta),
-                            passthrough,
-                            jv_only,
-                        );
-
-                        if matches!(first_body_char, Some('/')) {
-                            let doc = comment.trim_start_matches('/').trim().to_string();
-                            if !doc.is_empty() {
-                                self.trivia_tracker.record_doc_comment(doc);
-                            }
-                        }
-                    } else if ahead.starts_with("/*") {
-                        saw_trivia = true;
-                        let line = self.position.line;
-                        let column = self.position.column;
-                        let is_javadoc = self.peek_n_from(source, 3).starts_with("/**");
-                        self.advance_char('/', source)?;
-                        self.advance_char('*', source)?;
-                        if is_javadoc {
-                            self.advance_char('*', source)?;
-                        }
-
-                        let comment_body = self.read_block_comment(source)?;
-                        let full_text = if is_javadoc {
-                            format!("/**{}*/", comment_body)
-                        } else {
-                            format!("/*{}*/", comment_body)
-                        };
-                        let json_meta = JsonCommentTrivia {
-                            kind: JsonCommentTriviaKind::Block,
-                            text: Self::sanitize_comment_text(
-                                JsonCommentTriviaKind::Block,
-                                &comment_body,
-                            ),
-                            line,
-                            column,
-                        };
-                        let source_trivia = SourceCommentTrivia {
-                            kind: SourceCommentKind::Block,
-                            text: full_text,
-                            line,
-                            column,
-                        };
-                        self.trivia_tracker.record_comment_variants(
-                            Some(json_meta),
-                            Some(source_trivia),
-                            None,
-                        );
-
-                        if is_javadoc {
-                            let doc = comment_body.trim().to_string();
-                            if !doc.is_empty() {
-                                self.trivia_tracker.record_doc_comment(doc);
-                            }
-                        }
-                    } else {
-                        break;
-                    }
-                }
-                '#' => {
-                    saw_trivia = true;
-                    let line = self.position.line;
-                    let column = self.position.column;
-                    self.advance_char('#', source)?;
-                    let text = self.read_hash_comment(source)?;
-                    self.trivia_tracker
-                        .record_json_comment(text, line, column, false);
-                }
                 _ => break,
             }
         }
@@ -856,6 +726,49 @@ impl CharScannerStage for CharScanner {
 
         let start_offset = self.cursor;
         let start_position = self.position;
+        let remaining = self.remaining(source);
+
+        if remaining.starts_with("//") {
+            let rest = &remaining[2..];
+            let slice = if rest.starts_with('*') || rest.starts_with("/*") {
+                self.read_jv_only_block_comment(source)?
+            } else {
+                self.read_line_comment(source)?
+            };
+            let span = self.current_span(start_offset, start_position);
+            ctx.update_position(self.position);
+            return Ok(RawToken {
+                kind: RawTokenKind::CommentCandidate,
+                text: slice,
+                span,
+                trivia,
+            });
+        }
+
+        if remaining.starts_with("/*") {
+            let slice = self.read_block_comment(source)?;
+            let span = self.current_span(start_offset, start_position);
+            ctx.update_position(self.position);
+            return Ok(RawToken {
+                kind: RawTokenKind::CommentCandidate,
+                text: slice,
+                span,
+                trivia,
+            });
+        }
+
+        if remaining.starts_with('#') {
+            let slice = self.read_hash_comment(source)?;
+            let span = self.current_span(start_offset, start_position);
+            ctx.update_position(self.position);
+            return Ok(RawToken {
+                kind: RawTokenKind::CommentCandidate,
+                text: slice,
+                span,
+                trivia,
+            });
+        }
+
         let current_char = self.peek_char_from(source).unwrap_or('\0');
 
         let slice = if Self::is_identifier_start(current_char) {
@@ -929,12 +842,19 @@ mod tests {
         let source = "  // keep\nval answer";
         let mut ctx = LexerContext::new(source);
 
-        let token = scanner.scan_next_token(&mut ctx).expect("token");
+        let comment = scanner.scan_next_token(&mut ctx).expect("comment token");
+        assert_eq!(comment.kind, RawTokenKind::CommentCandidate);
+        assert!(comment.text.starts_with("//"));
+
+        let token = scanner.scan_next_token(&mut ctx).expect("identifier");
         assert_eq!(token.kind, RawTokenKind::Identifier);
         assert_eq!(token.text, "val");
 
         let trivia = token.trivia.expect("expected leading trivia");
-        assert!(trivia.comments, "comment trivia should be recorded");
+        assert!(
+            !trivia.comments,
+            "comments should no longer be absorbed into trivia"
+        );
         assert!(trivia.newlines >= 1, "newline trivia should be tracked");
 
         let expected_offset = source.find("val").expect("lexeme location");
@@ -982,7 +902,7 @@ mod tests {
     #[test]
     fn scan_radix_and_grouped_numbers() {
         let mut scanner = CharScanner::new();
-        let source = "0x1F 1_234,567";
+        let source = "0x1F 1_234,567 1.2e+3";
         let mut ctx = LexerContext::new(source);
 
         let hex = scanner.scan_next_token(&mut ctx).expect("hex token");
@@ -990,26 +910,30 @@ mod tests {
 
         let decimal = scanner.scan_next_token(&mut ctx).expect("decimal token");
         assert_eq!(decimal.text, "1_234,567");
+
+        let exponent = scanner.scan_next_token(&mut ctx).expect("exponent token");
+        assert_eq!(exponent.text, "1.2e+3");
+        assert_eq!(exponent.kind, RawTokenKind::NumberCandidate);
     }
 
     #[test]
-    fn trivia_records_hash_and_jv_only_comments() {
+    fn scan_comment_candidates() {
         let mut scanner = CharScanner::new();
         let source = "# json\n///*doc*//\nval";
         let mut ctx = LexerContext::new(source);
 
-        let token = scanner.scan_next_token(&mut ctx).expect("identifier");
-        let trivia = token.trivia.expect("expected trivia");
+        let hash_comment = scanner.scan_next_token(&mut ctx).expect("hash comment");
+        assert_eq!(hash_comment.kind, RawTokenKind::CommentCandidate);
+        assert_eq!(hash_comment.text, "# json");
 
-        assert_eq!(token.text, "val");
-        assert_eq!(token.kind, RawTokenKind::Identifier);
-        assert!(!trivia.json_comments.is_empty(), "json comment captured");
-        assert!(!trivia.jv_comments.is_empty(), "jv-only comment captured");
-        assert!(trivia.doc_comment.is_none());
-        assert!(trivia
-            .jv_comments
-            .iter()
-            .any(|comment| comment.text.contains("doc")));
+        let jv_comment = scanner.scan_next_token(&mut ctx).expect("jv block comment");
+        assert_eq!(jv_comment.kind, RawTokenKind::CommentCandidate);
+        assert!(jv_comment.text.contains("doc"));
+
+        let identifier = scanner.scan_next_token(&mut ctx).expect("identifier");
+        assert_eq!(identifier.kind, RawTokenKind::Identifier);
+        assert_eq!(identifier.text, "val");
+        assert!(identifier.trivia.is_some());
     }
 
     #[test]
@@ -1020,8 +944,10 @@ mod tests {
 
         let triple = scanner.scan_next_token(&mut ctx).expect("triple");
         assert_eq!(triple.text, "\"\"\"hello\"\"\"");
+        assert_eq!(triple.kind, RawTokenKind::Symbol);
 
         let raw = scanner.scan_next_token(&mut ctx).expect("raw");
         assert_eq!(raw.text, "```raw```");
+        assert_eq!(raw.kind, RawTokenKind::Symbol);
     }
 }
