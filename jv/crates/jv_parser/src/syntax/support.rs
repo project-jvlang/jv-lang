@@ -32,7 +32,10 @@ pub(crate) fn token_in_keyword() -> impl ChumskyParser<Token, Token, Error = Sim
 }
 
 pub(crate) fn token_is() -> impl ChumskyParser<Token, Token, Error = Simple<Token>> + Clone {
-    keyword("is")
+    filter(|token: &Token| {
+        matches!(&token.token_type, TokenType::Identifier(name) if name == "is")
+            && token.leading_trivia.newlines == 0
+    })
 }
 
 pub(crate) fn token_while_keyword(

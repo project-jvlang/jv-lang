@@ -341,6 +341,21 @@ fn multiple_when_arms_preserve_order() {
 }
 
 #[test]
+fn multiple_is_type_when_arms_parse() {
+    let result = parse_program_result(
+        r#"val value = when (x) {
+    is String -> 1
+    is Int -> 2
+    else -> 3
+}"#,
+    );
+    assert!(
+        result.is_ok(),
+        "when expression with consecutive is-pattern arms should parse"
+    );
+}
+
+#[test]
 fn forbidden_if_expression_reports_jv3103() {
     let result = parse_program_result("val value = if (true) 1 else 0\n");
     assert!(result.is_err(), "if expression should be rejected");
