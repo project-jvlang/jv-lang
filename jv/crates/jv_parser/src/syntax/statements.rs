@@ -1,6 +1,4 @@
-use chumsky::debug::Silent;
 use chumsky::prelude::*;
-use chumsky::primitive::custom;
 use chumsky::Parser as ChumskyParser;
 use jv_ast::{
     Annotation, AnnotationArgument, AnnotationName, AnnotationValue, BinaryOp, CommentKind,
@@ -28,14 +26,7 @@ fn attempt_statement_parser<P>(
 where
     P: ChumskyParser<Token, Statement, Error = Simple<Token>> + Clone,
 {
-    custom(
-        move |stream: &mut chumsky::StreamOf<Token, Simple<Token>>| {
-            stream.try_parse(|stream| {
-                let mut silent = Silent;
-                parser.clone().parse_inner_silent(&mut silent, stream)
-            })
-        },
-    )
+    parser
 }
 
 pub(crate) fn statement_parser(
@@ -90,7 +81,13 @@ fn comment_statement_parser() -> impl ChumskyParser<Token, Statement, Error = Si
                 } else {
                     CommentVisibility::Passthrough
                 };
-                let rendered = format!("/{}", text);
+                let rendered = if text.starts_with("/*") {
+                    format!("//{}", &text[1..])
+                } else if text.starts_with('/') {
+                    text
+                } else {
+                    format!("/{}", text)
+                };
                 Ok(Statement::Comment(CommentStatement {
                     kind: CommentKind::Line,
                     visibility,
@@ -110,13 +107,8 @@ fn comment_statement_parser() -> impl ChumskyParser<Token, Statement, Error = Si
 }
 
 fn is_jv_only_line_comment(raw: &str) -> bool {
-    let mut chars = raw.chars();
-    let first = chars.next();
-    let second = chars.next();
-    matches!(
-        (first, second),
-        (Some('/'), Some('/')) | (Some('/'), Some('*'))
-    )
+    let trimmed = raw.trim_start();
+    trimmed.starts_with("///") || trimmed.starts_with("//*") || raw.contains("*//")
 }
 
 fn val_declaration_parser(

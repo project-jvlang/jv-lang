@@ -169,7 +169,10 @@ fn when_arm_with_subject_parser(
 fn when_arm_subjectless_parser(
     expr: impl ChumskyParser<Token, Expression, Error = Simple<Token>> + Clone + 'static,
 ) -> impl ChumskyParser<Token, WhenArm, Error = Simple<Token>> + Clone {
-    expr.clone()
+    token_layout_comma()
+        .repeated()
+        .ignore_then(expr.clone())
+        .then_ignore(token_layout_comma().repeated())
         .then_ignore(token_arrow())
         .then(expr)
         .map(|(condition, body)| {

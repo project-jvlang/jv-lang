@@ -1,3 +1,6 @@
-greeting = "Hello, jv!"
-
-println(greeting)
+fun main() {
+    greeting = "Hello, jv!"
+    numbers = [1 2 3]
+    println(greeting)
+    println(numbers)
+}
