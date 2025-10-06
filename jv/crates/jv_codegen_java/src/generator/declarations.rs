@@ -538,4 +538,55 @@ impl JavaCodeGenerator {
             _ => {}
         }
     }
+
+    // === Declaration Helpers (moved from helpers.rs) ===
+
+    /// Generate Java modifiers string from IR modifiers.
+    ///
+    /// Handles visibility (public/protected/private), abstract, sealed, static,
+    /// final, synchronized, native, strictfp.
+    pub fn generate_modifiers(&self, modifiers: &IrModifiers) -> String {
+        let mut parts = Vec::new();
+        match modifiers.visibility {
+            IrVisibility::Public => parts.push("public"),
+            IrVisibility::Protected => parts.push("protected"),
+            IrVisibility::Private => parts.push("private"),
+            IrVisibility::Package => {}
+        }
+        if modifiers.is_abstract {
+            parts.push("abstract");
+        }
+        if modifiers.is_sealed {
+            if self.targeting.supports_sealed_types() {
+                parts.push("sealed");
+            } else if !modifiers.is_final {
+                parts.push("final");
+            }
+        }
+        if modifiers.is_static {
+            parts.push("static");
+        }
+        if modifiers.is_final {
+            parts.push("final");
+        }
+        if modifiers.is_synchronized {
+            parts.push("synchronized");
+        }
+        if modifiers.is_native {
+            parts.push("native");
+        }
+        if modifiers.is_strictfp {
+            parts.push("strictfp");
+        }
+        parts.join(" ")
+    }
+
+    /// Generate Java parameter modifiers (currently only 'final').
+    pub fn generate_parameter_modifiers(&self, modifiers: &IrModifiers) -> String {
+        if modifiers.is_final {
+            "final".to_string()
+        } else {
+            String::new()
+        }
+    }
 }

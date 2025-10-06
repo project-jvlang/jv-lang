@@ -975,4 +975,67 @@ impl JavaCodeGenerator {
         result.push(')');
         Ok(result)
     }
+
+    // === Expression Helpers (moved from helpers.rs) ===
+
+    /// Generate Java binary operator from IR BinaryOp.
+    pub fn generate_binary_op(&self, op: &BinaryOp) -> Result<String, CodeGenError> {
+        Ok(match op {
+            BinaryOp::Add => "+".to_string(),
+            BinaryOp::Subtract => "-".to_string(),
+            BinaryOp::Multiply => "*".to_string(),
+            BinaryOp::Divide => "/".to_string(),
+            BinaryOp::Modulo => "%".to_string(),
+            BinaryOp::Equal => "==".to_string(),
+            BinaryOp::NotEqual => "!=".to_string(),
+            BinaryOp::Less => "<".to_string(),
+            BinaryOp::LessEqual => "<=".to_string(),
+            BinaryOp::Greater => ">".to_string(),
+            BinaryOp::GreaterEqual => ">=".to_string(),
+            BinaryOp::Is => "instanceof".to_string(),
+            BinaryOp::And => "&&".to_string(),
+            BinaryOp::Or => "||".to_string(),
+            BinaryOp::BitAnd => "&".to_string(),
+            BinaryOp::BitOr => "|".to_string(),
+            BinaryOp::BitXor => "^".to_string(),
+            BinaryOp::PlusAssign => "+=".to_string(),
+            BinaryOp::MinusAssign => "-=".to_string(),
+            BinaryOp::MultiplyAssign => "*=".to_string(),
+            BinaryOp::DivideAssign => "/=".to_string(),
+            BinaryOp::RangeExclusive | BinaryOp::RangeInclusive => {
+                return Err(CodeGenError::UnsupportedConstruct {
+                    construct: "Range operators must be lowered before Java emission".to_string(),
+                    span: None,
+                })
+            }
+            BinaryOp::Elvis => {
+                return Err(CodeGenError::UnsupportedConstruct {
+                    construct: "Elvis operator requires specialised lowering".to_string(),
+                    span: None,
+                })
+            }
+        })
+    }
+
+    /// Convert literal to Java string representation.
+    pub(super) fn literal_to_string(literal: &Literal) -> String {
+        match literal {
+            Literal::String(value) => format!("\"{}\"", Self::escape_string(value)),
+            Literal::Number(value) => value.clone(),
+            Literal::Boolean(value) => value.to_string(),
+            Literal::Null => "null".to_string(),
+            Literal::Character(value) => {
+                let escaped = match value {
+                    '\\' => "\\".to_string(),
+                    '\n' => "\\n".to_string(),
+                    '\r' => "\\r".to_string(),
+                    '\t' => "\\t".to_string(),
+                    '"' => "\"".to_string(),
+                    '\'' => "\\'".to_string(),
+                    ch => ch.to_string(),
+                };
+                format!("'{}'", escaped)
+            }
+        }
+    }
 }

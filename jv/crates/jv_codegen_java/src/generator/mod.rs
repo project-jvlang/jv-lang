@@ -14,9 +14,10 @@ use std::collections::HashMap;
 
 mod declarations;
 mod expressions;
-mod helpers;
+mod formatting;
 mod sample;
 mod statements;
+mod types;
 
 pub struct JavaCodeGenerator {
     imports: HashMap<String, String>,

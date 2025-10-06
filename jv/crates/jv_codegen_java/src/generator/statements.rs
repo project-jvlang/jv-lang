@@ -521,4 +521,11 @@ impl JavaCodeGenerator {
             String::new()
         }
     }
+
+    // === Statement Helpers (moved from helpers.rs) ===
+
+    /// Check if switch case contains only a default label.
+    pub(super) fn is_default_only_case(case: &IrSwitchCase) -> bool {
+        case.labels.len() == 1 && matches!(case.labels[0], IrCaseLabel::Default)
+    }
 }
