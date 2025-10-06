@@ -882,6 +882,37 @@ fn test_whitespace_array_literal_with_comment() {
 }
 
 #[test]
+fn test_whitespace_array_preserves_thousand_separator_numbers() {
+    let program = parse_program("val coordinates = [1,234 5]");
+    let statement = first_statement(&program);
+
+    match statement {
+        Statement::ValDeclaration { initializer, .. } => match initializer {
+            Expression::Array {
+                elements,
+                delimiter,
+                ..
+            } => {
+                assert_eq!(elements.len(), 2, "expected two array elements");
+                assert_eq!(*delimiter, SequenceDelimiter::Whitespace);
+                match &elements[0] {
+                    Expression::Literal(Literal::Number(value), _) => {
+                        assert_eq!(value, "1234", "array elements should retain canonical numeric literal")
+                    }
+                    other => panic!("expected first array element to be number literal, found {:?}", other),
+                }
+                match &elements[1] {
+                    Expression::Literal(Literal::Number(value), _) => assert_eq!(value, "5"),
+                    other => panic!("expected second array element to be number literal, found {:?}", other),
+                }
+            }
+            other => panic!("expected array expression, found {:?}", other),
+        },
+        other => panic!("expected val declaration, found {:?}", other),
+    }
+}
+
+#[test]
 fn test_top_level_passthrough_comment_statement() {
     let program = parse_program(
         "// keep
@@ -1045,6 +1076,43 @@ fn test_whitespace_call_mixed_types_metadata_issue() {
                 assert!(argument_metadata.separator_diagnostics[0]
                     .message
                     .contains("JV1010"));
+            }
+            other => panic!("expected call expression, found {:?}", other),
+        },
+        other => panic!("expected val declaration, found {:?}", other),
+    }
+}
+
+#[test]
+fn test_whitespace_call_allows_thousand_separator_numbers() {
+    let program = parse_program("val chart = plot(1,234 5)");
+    let statement = first_statement(&program);
+
+    match statement {
+        Statement::ValDeclaration { initializer, .. } => match initializer {
+            Expression::Call {
+                args,
+                argument_metadata,
+                ..
+            } => {
+                assert_eq!(args.len(), 2, "expected two positional arguments");
+                assert_eq!(argument_metadata.style, CallArgumentStyle::Whitespace);
+                assert!(
+                    argument_metadata.separator_diagnostics.is_empty(),
+                    "thousand separators should not trigger comma diagnostics"
+                );
+                match &args[0] {
+                    Argument::Positional(Expression::Literal(Literal::Number(value), _)) => {
+                        assert_eq!(value, "1234", "numeric literal should retain canonical form")
+                    }
+                    other => panic!("expected numeric literal with grouping, found {:?}", other),
+                }
+                match &args[1] {
+                    Argument::Positional(Expression::Literal(Literal::Number(value), _)) => {
+                        assert_eq!(value, "5")
+                    }
+                    other => panic!("expected numeric literal without grouping, found {:?}", other),
+                }
             }
             other => panic!("expected call expression, found {:?}", other),
         },

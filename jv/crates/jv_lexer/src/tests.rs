@@ -151,6 +151,64 @@ fn test_triple_quote_simple_string_metadata() {
 }
 
 #[test]
+fn layout_comma_metadata_survives_multiline_array() {
+    let source = "[1\n  2]";
+    let mut lexer = Lexer::new(source.to_string());
+    let tokens = lexer.tokenize().unwrap();
+
+    assert!(
+        !tokens
+            .iter()
+            .any(|token| matches!(token.token_type, TokenType::Comma)),
+        "lexer should not synthesize explicit commas for whitespace-delimited arrays",
+    );
+
+    let second_element = tokens
+        .iter()
+        .find(|token| matches!(token.token_type, TokenType::Number(ref value) if value == "2"))
+        .expect("expected to find second numeric literal");
+
+    assert_eq!(second_element.leading_trivia.newlines, 1);
+    assert!(
+        second_element.leading_trivia.spaces >= 2,
+        "indentation should be preserved so parser can infer layout commas",
+    );
+}
+
+#[test]
+fn layout_comma_metadata_survives_commented_call_arguments() {
+    let source = "plot(1 /*hint*/\n2)";
+    let mut lexer = Lexer::new(source.to_string());
+    let tokens = lexer.tokenize().unwrap();
+
+    assert!(
+        !tokens
+            .iter()
+            .any(|token| matches!(token.token_type, TokenType::Comma)),
+        "lexer should keep call arguments whitespace-delimited without inserting commas",
+    );
+
+    let last_argument = tokens
+        .iter()
+        .find(|token| matches!(token.token_type, TokenType::Number(ref value) if value == "2"))
+        .expect("expected to find second positional argument");
+
+    assert_eq!(last_argument.leading_trivia.newlines, 1);
+    assert!(
+        last_argument.leading_trivia.comments,
+        "leading trivia should remember inline block comment crossing the newline",
+    );
+    assert!(
+        last_argument
+            .leading_trivia
+            .passthrough_comments
+            .iter()
+            .any(|comment| comment.text == "/*hint*/"),
+        "passthrough comment should be preserved for downstream layout analysis",
+    );
+}
+
+#[test]
 fn test_arithmetic_operators_red_phase() {
     // RED: This test should fail
     let mut lexer = Lexer::new("a + b - c * d / e % f".to_string());

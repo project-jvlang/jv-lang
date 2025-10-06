@@ -356,6 +356,63 @@ fn multiple_is_type_when_arms_parse() {
 }
 
 #[test]
+fn when_arm_accepts_is_pattern_after_newline() {
+    let Expression::When { arms, else_arm, .. } = extract_when_expression(
+        "val routed = when (subject) {\n    is Type -> subject.accept()\n    else -> subject.reject()\n}\n",
+    ) else {
+        panic!("expected when expression");
+    };
+
+    assert_eq!(arms.len(), 1, "expected a single pattern arm before the else branch");
+    match &arms[0].pattern {
+        Pattern::Constructor { name, patterns, .. } => {
+            assert_eq!(name, "Type");
+            assert!(patterns.is_empty(), "is-pattern should not produce nested args");
+        }
+        other => panic!("expected constructor pattern from is arm, got {other:?}"),
+    }
+
+    assert!(
+        arms[0].guard.is_none(),
+        "is-pattern arm should not include an implicit guard"
+    );
+
+    assert!(else_arm.is_some(), "else arm should be captured separately");
+}
+
+#[test]
+fn binary_is_requires_same_line_expression() {
+    // Steering 2025-10: 改行を挟んだ `is` はパターンでも二項演算子でもなく、独立した式として扱う。
+    let program = parse_program("val outcome = subject\nis Type\n");
+
+    assert_eq!(program.statements.len(), 3, "expected val + two expression statements");
+
+    matches!(&program.statements[0], Statement::ValDeclaration { .. })
+        .then_some(())
+        .expect("first statement should remain the original val declaration");
+
+    match &program.statements[1] {
+        Statement::Expression { expr, .. } => {
+            assert!(
+                matches!(expr, Expression::Identifier(name, _) if name == "is"),
+                "newline should keep `is` as a standalone identifier expression",
+            );
+        }
+        other => panic!("expected second statement to be bare identifier expression, got {other:?}"),
+    }
+
+    match &program.statements[2] {
+        Statement::Expression { expr, .. } => {
+            assert!(
+                matches!(expr, Expression::Identifier(name, _) if name == "Type"),
+                "third statement should be the trailing identifier expression",
+            );
+        }
+        other => panic!("expected trailing identifier expression, got {other:?}"),
+    }
+}
+
+#[test]
 fn forbidden_if_expression_reports_jv3103() {
     let result = parse_program_result("val value = if (true) 1 else 0\n");
     assert!(result.is_err(), "if expression should be rejected");
