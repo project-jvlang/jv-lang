@@ -3,7 +3,7 @@
 **日本語** | [English](sample-annotation-en.md)
 
 ## 目的
-`@Sample("users.json") val users` のような宣言から、サンプルデータを元に静的型を自動推論し、Java 25 ソース生成まで一気通貫で行う。利用者は小さなサンプルを置くだけで、安全に型付きのコードと初期データを得られる。
+`@Sample("users.json") users` のような宣言から、サンプルデータを元に静的型を自動推論し、Java 25 ソース生成まで一気通貫で行う。利用者は小さなサンプルを置くだけで、安全に型付きのコードと初期データを得られる。
 
 ## 概要
 - 対応スキーマ: ファイルパス（相対/絶対）、`file://`、`https://`、`s3://`
@@ -17,10 +17,12 @@
 
 例:
 ```
-@Sample("users.json") val users             // => mode=Embed（デフォルト）
-@Sample("https://example.com/users.json", mode=Load) val users
-@Sample(source="s3://bucket/key.json", mode=Embed, sha256="<hex>") val users
+@Sample("users.json") users             // => mode=Embed（デフォルト）
+@Sample("https://example.com/users.json", mode=Load) users
+@Sample(source="s3://bucket/key.json", mode=Embed, sha256="<hex>") users
 ```
+
+暗黙不変宣言に対応しており、キーワードなしの変数名でもJava側では`final`フィールドとして生成されます。再代入が必要な場合のみ`var`を併用してください。
 
 ## 型推論
 - JSON オブジェクト → `record`（不変）または通常クラス（可変）を生成（jv では data class → Java record を基本とする）。
@@ -87,13 +89,13 @@ cache = true
 ## 例
 ```
 // ローカル JSON をデフォルト（Embed）で埋め込み
-@Sample("data/users.json") val users
+@Sample("data/users.json") users
 
 // 実行時に HTTP からロード
-@Sample("https://example.com/users.json", mode=Load) val users
+@Sample("https://example.com/users.json", mode=Load) users
 
 // s3 をコンパイル時に取得・ハッシュ検証し埋め込み
-@Sample(source="s3://my-bucket/users.json", mode=Embed, sha256="ab12…") val users
+@Sample(source="s3://my-bucket/users.json", mode=Embed, sha256="ab12…") users
 ```
 
 ---

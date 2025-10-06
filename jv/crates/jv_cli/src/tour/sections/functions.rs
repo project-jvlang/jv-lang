@@ -79,7 +79,7 @@ const LESSONS: [LessonExample; 3] = [
 
 fun showcase() {
     greet("Kira")
-    greet("Alex", "Welcome", "!!")
+    greet("Alex" "Welcome" "!!")
 }"#,
         java_output: r#"public final class FunctionDefaults {
     public static void greet(String name, String prefix, String punctuation) {

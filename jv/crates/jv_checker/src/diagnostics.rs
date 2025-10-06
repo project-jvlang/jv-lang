@@ -187,9 +187,27 @@ const DIAGNOSTICS: &[DiagnosticDescriptor] = &[
         severity: DiagnosticSeverity::Error,
     },
     DiagnosticDescriptor {
-        code: "JV1007",
-        title: "配列リテラルの区切り記号が混在しています",
-        help: "配列全体をカンマ区切りにするか、空白区切りに統一してください。コメントを挟む場合はカンマ区切りに戻すと安全です。",
+        code: "JV2101",
+        title: "配列リテラルでカンマ区切りは使用できません / Array literals cannot use comma separators",
+        help: "要素は空白または改行で区切ってください。examples: docs/whitespace-arrays.md。/ Separate elements with whitespace or newlines. See docs/whitespace-arrays.md for examples. (--explain JV2101)",
+        severity: DiagnosticSeverity::Error,
+    },
+    DiagnosticDescriptor {
+        code: "JV2102",
+        title: "関数呼び出しでカンマ区切りは使用できません / Function calls cannot use comma separators",
+        help: "位置引数は空白区切りで並べ、必要ならカンマ区切りに戻してください。/ Use whitespace between positional arguments or revert to comma-separated form. See docs/whitespace-arrays.md#function-calls. (--explain JV2102)",
+        severity: DiagnosticSeverity::Error,
+    },
+    DiagnosticDescriptor {
+        code: "JV4201",
+        title: "不変変数に再代入できません / Cannot reassign immutable binding",
+        help: "`var` で宣言されていない変数には再代入できません。再代入が必要な場合は `var` へ変更するか、新しい名前の変数を導入してください。/ Reassignment is not allowed for immutable bindings. Use `var` when mutation is required or introduce a new binding name.",
+        severity: DiagnosticSeverity::Error,
+    },
+    DiagnosticDescriptor {
+        code: "JV4202",
+        title: "暗黙宣言には初期化子が必要です / Implicit binding requires an initializer",
+        help: "`identifier = value` の形式で初期化子を指定してください。同じ名前を右辺で参照することはできません。/ Provide an initializer when introducing an implicit binding (use `identifier = value`). The right-hand side cannot reference the binding being declared.",
         severity: DiagnosticSeverity::Error,
     },
     DiagnosticDescriptor {
@@ -200,8 +218,8 @@ const DIAGNOSTICS: &[DiagnosticDescriptor] = &[
     },
     DiagnosticDescriptor {
         code: "JV1009",
-        title: "空白区切りの引数に不正な形式があります",
-        help: "空白区切りの呼び出しでは位置引数のみを並べ、名前付き引数やカンマとの混在を避けてください。",
+        title: "空白区切りの引数に不正な形式があります / Invalid whitespace-delimited call arguments",
+        help: "空白区切りの呼び出しでは名前付き引数を使用せず、必要ならカンマ区切りへ戻してください。/ Avoid named arguments in whitespace-delimited calls or revert to comma-separated syntax. (--explain JV1009)",
         severity: DiagnosticSeverity::Error,
     },
     DiagnosticDescriptor {

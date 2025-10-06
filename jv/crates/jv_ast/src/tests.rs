@@ -218,3 +218,36 @@ fn multiline_string_literal_roundtrips_through_serde() {
 
     assert_eq!(decoded, literal);
 }
+
+#[test]
+fn val_declaration_origin_roundtrips_through_serde() {
+    let stmt = Statement::ValDeclaration {
+        name: "temperature".to_string(),
+        type_annotation: Some(TypeAnnotation::Simple("Double".to_string())),
+        initializer: Expression::Literal(Literal::Number("36.5".to_string()), Span::dummy()),
+        modifiers: Modifiers::default(),
+        origin: ValBindingOrigin::ImplicitTyped,
+        span: Span::dummy(),
+    };
+
+    let serialized = serde_json::to_string(&stmt).expect("serialize val declaration");
+    let decoded: Statement =
+        serde_json::from_str(&serialized).expect("deserialize val declaration");
+
+    match decoded {
+        Statement::ValDeclaration {
+            name,
+            type_annotation,
+            origin,
+            ..
+        } => {
+            assert_eq!(name, "temperature");
+            assert!(matches!(
+                type_annotation,
+                Some(TypeAnnotation::Simple(ref type_name)) if type_name == "Double"
+            ));
+            assert_eq!(origin, ValBindingOrigin::ImplicitTyped);
+        }
+        other => panic!("expected val declaration, got {:?}", other),
+    }
+}

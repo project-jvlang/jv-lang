@@ -426,6 +426,7 @@ impl<'env> ConstraintGenerator<'env> {
                 );
                 TypeKind::Primitive("Boolean")
             }
+            Is => TypeKind::Primitive("Boolean"),
             RangeExclusive | RangeInclusive => {
                 self.push_constraint(
                     ConstraintKind::Equal(left_ty.clone(), right_ty.clone()),
@@ -524,7 +525,7 @@ impl<'env> ConstraintGenerator<'env> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use jv_ast::{Modifiers, Span};
+    use jv_ast::{Modifiers, Span, ValBindingOrigin};
 
     fn dummy_span() -> Span {
         Span::dummy()
@@ -553,6 +554,7 @@ mod tests {
                 type_annotation: None,
                 initializer: Expression::Literal(Literal::Number("1".into()), span.clone()),
                 modifiers: default_modifiers(),
+                origin: ValBindingOrigin::ExplicitKeyword,
                 span: span.clone(),
             }],
             span,
@@ -583,6 +585,7 @@ mod tests {
                     type_annotation: None,
                     initializer: Expression::Literal(Literal::Number("1".into()), span.clone()),
                     modifiers: default_modifiers(),
+                    origin: ValBindingOrigin::ExplicitKeyword,
                     span: span.clone(),
                 },
                 Statement::ValDeclaration {
@@ -598,6 +601,7 @@ mod tests {
                         span: span.clone(),
                     },
                     modifiers: default_modifiers(),
+                    origin: ValBindingOrigin::ExplicitKeyword,
                     span: span.clone(),
                 },
             ],
@@ -641,6 +645,7 @@ mod tests {
                     type_annotation: None,
                     initializer: Expression::Literal(Literal::Number("1".into()), span.clone()),
                     modifiers: default_modifiers(),
+                    origin: ValBindingOrigin::ExplicitKeyword,
                     span: span.clone(),
                 },
                 Statement::Expression {
@@ -654,6 +659,7 @@ mod tests {
                                     inner_span.clone(),
                                 ),
                                 modifiers: default_modifiers(),
+                                origin: ValBindingOrigin::ExplicitKeyword,
                                 span: inner_span.clone(),
                             },
                             Statement::Expression {
@@ -670,6 +676,7 @@ mod tests {
                     type_annotation: None,
                     initializer: Expression::Literal(Literal::Null, span.clone()),
                     modifiers: default_modifiers(),
+                    origin: ValBindingOrigin::ExplicitKeyword,
                     span: span.clone(),
                 },
             ],

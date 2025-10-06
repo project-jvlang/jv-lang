@@ -159,8 +159,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn diagnostic_note_returns_help_for_jv1007() {
-        let help = diagnostic_note("JV1007").expect("expected help text for JV1007");
+    fn diagnostic_note_returns_help_for_jv2101() {
+        let help = diagnostic_note("JV2101").expect("expected help text for JV2101");
         assert!(help.contains("配列"));
     }
 

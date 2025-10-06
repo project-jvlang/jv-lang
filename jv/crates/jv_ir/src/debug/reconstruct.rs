@@ -6,7 +6,8 @@ use crate::types::{
 };
 use jv_ast::{
     Argument, CallArgumentMetadata, CommentKind, CommentStatement, CommentVisibility, Expression,
-    Literal, Modifiers, Program, Span, Statement, StringPart, TypeAnnotation, Visibility,
+    Literal, Modifiers, Program, Span, Statement, StringPart, TypeAnnotation, ValBindingOrigin,
+    Visibility,
 };
 
 fn render_type_annotation(annotation: TypeAnnotation) -> String {
@@ -251,6 +252,7 @@ impl<'a> ReconstructionContext<'a> {
                         type_annotation,
                         initializer,
                         modifiers,
+                        origin: ValBindingOrigin::ExplicitKeyword,
                         span: span.clone(),
                     })
                 } else {

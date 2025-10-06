@@ -52,6 +52,8 @@ pub enum BinaryOp {
     LessEqual,
     Greater,
     GreaterEqual,
+    /// Type test (instanceof) operator
+    Is,
     // Logical
     And,
     Or,

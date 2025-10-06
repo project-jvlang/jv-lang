@@ -179,7 +179,11 @@ impl Backend {
                     jv_lsp::DiagnosticSeverity::Hint => DiagnosticSeverity::HINT,
                 }),
                 message: diag.message,
-                source: Some("jv-lsp".to_string()),
+                source: diag.source.clone(),
+                code: diag
+                    .code
+                    .clone()
+                    .map(tower_lsp::lsp_types::NumberOrString::String),
                 ..Default::default()
             })
             .collect();
@@ -193,7 +197,7 @@ impl Backend {
             .await;
     }
 
-    async fn get_diagnostics_for_document(&self, uri: &str) -> Vec<Diagnostic> {
+    async fn get_diagnostics_for_document(&self, _uri: &str) -> Vec<Diagnostic> {
         // Placeholder - in a real implementation you'd retrieve stored document content
         Vec::new()
     }

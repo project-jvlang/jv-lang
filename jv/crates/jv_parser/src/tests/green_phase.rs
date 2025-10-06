@@ -2,7 +2,8 @@ use super::support::{first_statement, parse_program, parse_program_result};
 use jv_ast::{
     Argument, ArgumentElementKind, BinaryOp, CallArgumentStyle, CommentKind, CommentVisibility,
     ConcurrencyConstruct, Expression, JsonValue, Literal, LoopStrategy, Pattern,
-    ResourceManagement, SequenceDelimiter, Statement, StringPart, TypeAnnotation, WherePredicate,
+    ResourceManagement, SequenceDelimiter, Statement, StringPart, TypeAnnotation, ValBindingOrigin,
+    WherePredicate,
 };
 
 use test_case::test_case;
@@ -23,6 +24,34 @@ fn test_simple_val_declaration() {
             }
         }
         other => panic!("expected val declaration, found {:?}", other),
+    }
+}
+
+#[test]
+fn test_implicit_typed_val_declaration() {
+    let program = parse_program("name: String = \"hello\"");
+    let statement = first_statement(&program);
+
+    match statement {
+        Statement::ValDeclaration {
+            name,
+            type_annotation,
+            origin,
+            initializer,
+            ..
+        } => {
+            assert_eq!(name, "name");
+            assert!(matches!(
+                type_annotation,
+                Some(TypeAnnotation::Simple(ref type_name)) if type_name == "String"
+            ));
+            assert_eq!(*origin, ValBindingOrigin::ImplicitTyped);
+            match initializer {
+                Expression::Literal(Literal::String(value), _) => assert_eq!(value, "hello"),
+                other => panic!("expected string literal, found {:?}", other),
+            }
+        }
+        other => panic!("expected implicit val declaration, found {:?}", other),
     }
 }
 
@@ -179,6 +208,32 @@ fn test_data_class_declaration() {
             }
         }
         other => panic!("expected data class declaration, found {:?}", other),
+    }
+}
+
+#[test]
+fn test_data_shorthand_declaration() {
+    let program = parse_program("data User(name: String, age: Int)");
+    let statement = first_statement(&program);
+
+    match statement {
+        Statement::DataClassDeclaration {
+            name, parameters, ..
+        } => {
+            assert_eq!(name, "User");
+            assert_eq!(parameters.len(), 2);
+            assert_eq!(parameters[0].name, "name");
+            assert!(matches!(
+                parameters[0].type_annotation,
+                Some(TypeAnnotation::Simple(ref ty)) if ty == "String"
+            ));
+            assert_eq!(parameters[1].name, "age");
+            assert!(matches!(
+                parameters[1].type_annotation,
+                Some(TypeAnnotation::Simple(ref ty)) if ty == "Int"
+            ));
+        }
+        other => panic!("expected shorthand data declaration, found {:?}", other),
     }
 }
 
@@ -573,7 +628,7 @@ fn test_binary_expression_precedence() {
 
 #[test]
 fn test_function_call_expression() {
-    let program = parse_program("val result = calculate(x, y, 42)");
+    let program = parse_program("val result = calculate(x y 42)");
     let statement = first_statement(&program);
 
     match statement {
@@ -766,22 +821,21 @@ fn test_use_defer_constructs() {
 }
 
 #[test]
-fn test_array_literal() {
-    let program = parse_program("val numbers = [1, 2, 3]");
-    let statement = first_statement(&program);
+fn test_array_literal_with_comma_is_rejected() {
+    let result = parse_program_result("val numbers = [1, 2, 3]");
 
-    match statement {
-        Statement::ValDeclaration { initializer, .. } => match initializer {
-            Expression::Array { elements, .. } => {
-                assert_eq!(elements.len(), 3);
-                match &elements[0] {
-                    Expression::Literal(Literal::Number(value), _) => assert_eq!(value, "1"),
-                    other => panic!("expected numeric literal, found {:?}", other),
-                }
-            }
-            other => panic!("expected array expression, found {:?}", other),
-        },
-        other => panic!("expected val declaration, found {:?}", other),
+    match result {
+        Err(crate::ParseError::Syntax { message, .. }) => {
+            assert!(
+                message.contains("JV2101"),
+                "expected JV2101 diagnostic for comma-separated array, got {}",
+                message
+            );
+        }
+        other => panic!(
+            "expected syntax error for comma-separated array literal, got {:?}",
+            other
+        ),
     }
 }
 
@@ -820,6 +874,37 @@ fn test_whitespace_array_literal_with_comment() {
             } => {
                 assert_eq!(elements.len(), 2);
                 assert_eq!(*delimiter, SequenceDelimiter::Whitespace);
+            }
+            other => panic!("expected array expression, found {:?}", other),
+        },
+        other => panic!("expected val declaration, found {:?}", other),
+    }
+}
+
+#[test]
+fn test_whitespace_array_preserves_thousand_separator_numbers() {
+    let program = parse_program("val coordinates = [1,234 5]");
+    let statement = first_statement(&program);
+
+    match statement {
+        Statement::ValDeclaration { initializer, .. } => match initializer {
+            Expression::Array {
+                elements,
+                delimiter,
+                ..
+            } => {
+                assert_eq!(elements.len(), 2, "expected two array elements");
+                assert_eq!(*delimiter, SequenceDelimiter::Whitespace);
+                match &elements[0] {
+                    Expression::Literal(Literal::Number(value), _) => {
+                        assert_eq!(value, "1234", "array elements should retain canonical numeric literal")
+                    }
+                    other => panic!("expected first array element to be number literal, found {:?}", other),
+                }
+                match &elements[1] {
+                    Expression::Literal(Literal::Number(value), _) => assert_eq!(value, "5"),
+                    other => panic!("expected second array element to be number literal, found {:?}", other),
+                }
             }
             other => panic!("expected array expression, found {:?}", other),
         },
@@ -910,6 +995,25 @@ val answer = 42",
 }
 
 #[test]
+fn test_call_arguments_with_comma_are_rejected() {
+    let result = parse_program_result("val result = plot(1, 2)");
+
+    match result {
+        Err(crate::ParseError::Syntax { message, .. }) => {
+            assert!(
+                message.contains("JV2102"),
+                "expected JV2102 diagnostic for comma-separated call arguments, got {}",
+                message
+            );
+        }
+        other => panic!(
+            "expected syntax error for comma-separated call arguments, got {:?}",
+            other
+        ),
+    }
+}
+
+#[test]
 fn test_whitespace_call_arguments() {
     let program = parse_program("val result = plot(1 2 3)");
     let statement = first_statement(&program);
@@ -972,6 +1076,43 @@ fn test_whitespace_call_mixed_types_metadata_issue() {
                 assert!(argument_metadata.separator_diagnostics[0]
                     .message
                     .contains("JV1010"));
+            }
+            other => panic!("expected call expression, found {:?}", other),
+        },
+        other => panic!("expected val declaration, found {:?}", other),
+    }
+}
+
+#[test]
+fn test_whitespace_call_allows_thousand_separator_numbers() {
+    let program = parse_program("val chart = plot(1,234 5)");
+    let statement = first_statement(&program);
+
+    match statement {
+        Statement::ValDeclaration { initializer, .. } => match initializer {
+            Expression::Call {
+                args,
+                argument_metadata,
+                ..
+            } => {
+                assert_eq!(args.len(), 2, "expected two positional arguments");
+                assert_eq!(argument_metadata.style, CallArgumentStyle::Whitespace);
+                assert!(
+                    argument_metadata.separator_diagnostics.is_empty(),
+                    "thousand separators should not trigger comma diagnostics"
+                );
+                match &args[0] {
+                    Argument::Positional(Expression::Literal(Literal::Number(value), _)) => {
+                        assert_eq!(value, "1234", "numeric literal should retain canonical form")
+                    }
+                    other => panic!("expected numeric literal with grouping, found {:?}", other),
+                }
+                match &args[1] {
+                    Argument::Positional(Expression::Literal(Literal::Number(value), _)) => {
+                        assert_eq!(value, "5")
+                    }
+                    other => panic!("expected numeric literal without grouping, found {:?}", other),
+                }
             }
             other => panic!("expected call expression, found {:?}", other),
         },
@@ -1200,7 +1341,7 @@ fn test_multiple_statements() {
         fun main() {
             println("Hello, ${name}!")
             increment()
-            val point = Point(1.0, 2.0)
+            val point = Point(1.0 2.0)
         }
     "#,
     );

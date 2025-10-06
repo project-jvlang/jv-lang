@@ -34,7 +34,7 @@ fn cli_binary() -> Option<PathBuf> {
 }
 
 #[test]
-fn cli_check_reports_jv1007_for_mixed_whitespace_arrays() {
+fn cli_check_reports_jv2101_for_comma_arrays() {
     let Some(cli_path) = cli_binary() else {
         eprintln!("Skipping CLI diagnostic snapshot: binary not available");
         return;
@@ -66,10 +66,10 @@ fun main() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     let combined = format!("{}\n{}", stdout, stderr);
 
-    assert!(combined.contains("JV1007"), "diagnostic should mention JV1007");
+    assert!(combined.contains("JV2101"), "diagnostic should mention JV2101");
     assert!(
-        combined.contains("mixed delimiters") || combined.contains("whitespace"),
-        "diagnostic should describe delimiter issue"
+        combined.contains("カンマ") || combined.contains("comma"),
+        "diagnostic should mention comma guidance"
     );
 }
 

@@ -55,18 +55,20 @@ my-jv-project/
 Edit `src/main.jv`:
 
 ```jv
-val greeting = "Hello, jv!"
+greeting = "Hello, jv!"
 
 fun main() {
     println(greeting)
     
-    val numbers = listOf(1, 2, 3, 4, 5)
-    val doubled = numbers.map { it * 2 }
+    numbers = [1 2 3 4 5]
+    doubled = numbers.map { it * 2 }
     
     println("Original: $numbers")
     println("Doubled: $doubled")
 }
 ```
+
+Declarations without a keyword are implicitly immutable (`final` in Java). Use `var` only for variables that need reassignment.
 
 ### 3. Build and Run
 

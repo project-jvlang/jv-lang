@@ -4,6 +4,23 @@ use crate::expression::*;
 use crate::types::*;
 use serde::{Deserialize, Serialize};
 
+/// Origin of a `val` binding indicating how the declaration was introduced.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ValBindingOrigin {
+    /// Declaration explicitly used the `val` keyword.
+    ExplicitKeyword,
+    /// Declaration was inferred without a type annotation.
+    Implicit,
+    /// Declaration was inferred while providing an explicit type annotation.
+    ImplicitTyped,
+}
+
+impl Default for ValBindingOrigin {
+    fn default() -> Self {
+        ValBindingOrigin::ExplicitKeyword
+    }
+}
+
 /// Class/interface property
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Property {
@@ -95,6 +112,8 @@ pub enum Statement {
         type_annotation: Option<TypeAnnotation>,
         initializer: Expression,
         modifiers: Modifiers,
+        #[serde(default)]
+        origin: ValBindingOrigin,
         span: Span,
     },
 

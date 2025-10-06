@@ -2,7 +2,7 @@ use super::*;
 use crate::pattern::{self, PatternTarget};
 use jv_ast::{
     Annotation, AnnotationName, BinaryOp, Expression, Literal, Modifiers, Parameter, Pattern,
-    Program, Span, Statement, TypeAnnotation, WhenArm,
+    Program, Span, Statement, TypeAnnotation, ValBindingOrigin, WhenArm,
 };
 
 fn dummy_span() -> Span {
@@ -40,6 +40,7 @@ fn check_program_populates_inference_snapshot() {
                 type_annotation: None,
                 initializer: Expression::Literal(Literal::Number("1".into()), span.clone()),
                 modifiers: default_modifiers(),
+                origin: ValBindingOrigin::ExplicitKeyword,
                 span: span.clone(),
             },
             Statement::ValDeclaration {
@@ -47,6 +48,7 @@ fn check_program_populates_inference_snapshot() {
                 type_annotation: None,
                 initializer: Expression::Literal(Literal::Number("2".into()), span.clone()),
                 modifiers: default_modifiers(),
+                origin: ValBindingOrigin::ExplicitKeyword,
                 span: span.clone(),
             },
             Statement::FunctionDeclaration {
@@ -108,6 +110,7 @@ fn check_program_reports_type_error_on_mismatch() {
             type_annotation: None,
             initializer: mismatched_expr,
             modifiers: default_modifiers(),
+            origin: ValBindingOrigin::ExplicitKeyword,
             span: span.clone(),
         }],
         span: span.clone(),
@@ -183,6 +186,7 @@ fn override_annotation_on_field_is_rejected() {
             type_annotation: None,
             initializer: Expression::Literal(Literal::Number("1".into()), span.clone()),
             modifiers: field_modifiers,
+            origin: ValBindingOrigin::ExplicitKeyword,
             span: span.clone(),
         }],
         span: span.clone(),
@@ -214,6 +218,7 @@ fn duplicate_reserved_annotation_is_reported() {
             type_annotation: None,
             initializer: Expression::Literal(Literal::String("data".into()), span.clone()),
             modifiers,
+            origin: ValBindingOrigin::ExplicitKeyword,
             span: span.clone(),
         }],
         span: span.clone(),
@@ -257,6 +262,7 @@ fn reserved_annotation_shadowing_is_detected() {
             type_annotation: None,
             initializer: Expression::Literal(Literal::String("data".into()), span.clone()),
             modifiers,
+            origin: ValBindingOrigin::ExplicitKeyword,
             span: span.clone(),
         }],
         span: span.clone(),
@@ -284,6 +290,7 @@ fn null_safety_violation_is_reported() {
             type_annotation: Some(TypeAnnotation::Simple("String".into())),
             initializer: Expression::Literal(Literal::Null, span.clone()),
             modifiers: default_modifiers(),
+            origin: ValBindingOrigin::ExplicitKeyword,
             span: span.clone(),
         }],
         span: span.clone(),
@@ -324,6 +331,7 @@ fn when_without_else_in_value_position_emits_validation_error() {
             type_annotation: None,
             initializer: when_expr,
             modifiers: default_modifiers(),
+            origin: ValBindingOrigin::ExplicitKeyword,
             span: span.clone(),
         }],
         span: span.clone(),
@@ -368,6 +376,7 @@ fn when_with_else_in_value_position_passes_validation() {
             type_annotation: None,
             initializer: when_expr,
             modifiers: default_modifiers(),
+            origin: ValBindingOrigin::ExplicitKeyword,
             span: span.clone(),
         }],
         span: span.clone(),
@@ -417,5 +426,107 @@ fn when_without_else_in_statement_position_is_allowed() {
     assert!(
         result.is_ok(),
         "statement-position when without else should be permitted"
+    );
+}
+
+#[test]
+fn implicit_assignment_becomes_val_declaration() {
+    let span = dummy_span();
+    let program = Program {
+        package: None,
+        imports: Vec::new(),
+        statements: vec![Statement::Assignment {
+            target: Expression::Identifier("total".into(), span.clone()),
+            value: Expression::Literal(Literal::Number("42".into()), span.clone()),
+            span: span.clone(),
+        }],
+        span: span.clone(),
+    };
+
+    let mut checker = TypeChecker::new();
+    let result = checker.check_program(&program);
+    assert!(
+        result.is_ok(),
+        "binding resolver should accept implicit assignment: {result:?}"
+    );
+
+    let normalized = checker
+        .normalized_program()
+        .expect("normalized program should be available");
+    match normalized.statements.first() {
+        Some(Statement::ValDeclaration { name, origin, .. }) => {
+            assert_eq!(name, "total");
+            assert_eq!(*origin, ValBindingOrigin::Implicit);
+        }
+        other => panic!("expected ValDeclaration, got {:?}", other),
+    }
+
+    let usage = checker.binding_usage();
+    assert_eq!(usage.implicit, 1);
+    assert_eq!(usage.explicit + usage.implicit_typed + usage.vars, 0);
+}
+
+#[test]
+fn reassigning_immutable_binding_emits_jv4201() {
+    let span = dummy_span();
+    let program = Program {
+        package: None,
+        imports: Vec::new(),
+        statements: vec![
+            Statement::Assignment {
+                target: Expression::Identifier("value".into(), span.clone()),
+                value: Expression::Literal(Literal::Number("1".into()), span.clone()),
+                span: span.clone(),
+            },
+            Statement::Assignment {
+                target: Expression::Identifier("value".into(), span.clone()),
+                value: Expression::Literal(Literal::Number("2".into()), span.clone()),
+                span: span.clone(),
+            },
+        ],
+        span: span.clone(),
+    };
+
+    let mut checker = TypeChecker::new();
+    let result = checker.check_program(&program);
+    assert!(result.is_err(), "reassignment should produce JV4201 error");
+    let errors = result.err().unwrap();
+    assert!(errors.iter().any(|error| matches!(
+        error,
+        CheckError::ValidationError { message, .. } if message.contains("JV4201")
+    )));
+}
+
+#[test]
+fn mutable_var_allows_reassignment() {
+    let span = dummy_span();
+    let program = Program {
+        package: None,
+        imports: Vec::new(),
+        statements: vec![
+            Statement::VarDeclaration {
+                name: "count".into(),
+                type_annotation: None,
+                initializer: Some(Expression::Literal(
+                    Literal::Number("0".into()),
+                    span.clone(),
+                )),
+                modifiers: default_modifiers(),
+                span: span.clone(),
+            },
+            Statement::Assignment {
+                target: Expression::Identifier("count".into(), span.clone()),
+                value: Expression::Literal(Literal::Number("1".into()), span.clone()),
+                span: span.clone(),
+            },
+        ],
+        span: span.clone(),
+    };
+
+    let mut checker = TypeChecker::new();
+    let result = checker.check_program(&program);
+    assert!(
+        result.is_ok(),
+        "var reassignment should be permitted: {result:?}"
     );
 }

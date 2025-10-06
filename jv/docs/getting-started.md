@@ -57,18 +57,20 @@ my-jv-project/
 `src/main.jv`を編集：
 
 ```jv
-val greeting = "Hello, jv!"
+greeting = "Hello, jv!"
 
 fun main() {
     println(greeting)
 
-    val numbers = listOf(1, 2, 3, 4, 5)
-    val doubled = numbers.map { it * 2 }
+    numbers = [1 2 3 4 5]
+    doubled = numbers.map { it * 2 }
 
     println("Original: $numbers")
     println("Doubled: $doubled")
 }
 ```
+
+宣言にキーワードを付けない場合でも暗黙に不変変数（Javaの`final`）として扱われるため、`var`が必要なケース以外はこの書き方で十分です。
 
 ### 3. ビルドと実行
 

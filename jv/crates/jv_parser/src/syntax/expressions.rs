@@ -13,9 +13,9 @@ use super::support::{
     expression_span, identifier, identifier_with_span, keyword, merge_spans, span_from_token,
     token_and, token_any_comma, token_arrow, token_assign, token_colon, token_comma, token_divide,
     token_dot, token_else, token_elvis, token_equal, token_greater, token_greater_equal, token_if,
-    token_layout_comma, token_left_brace, token_left_bracket, token_left_paren, token_less,
-    token_less_equal, token_minus, token_modulo, token_multiply, token_not, token_not_equal,
-    token_null_safe, token_or, token_plus, token_question, token_range_exclusive,
+    token_is, token_layout_comma, token_left_brace, token_left_bracket, token_left_paren,
+    token_less, token_less_equal, token_minus, token_modulo, token_multiply, token_not,
+    token_not_equal, token_null_safe, token_or, token_plus, token_question, token_range_exclusive,
     token_range_inclusive, token_right_brace, token_right_bracket, token_right_paren,
     token_string_end, token_string_mid, token_string_start, token_when, type_annotation,
 };
@@ -169,7 +169,10 @@ fn when_arm_with_subject_parser(
 fn when_arm_subjectless_parser(
     expr: impl ChumskyParser<Token, Expression, Error = Simple<Token>> + Clone + 'static,
 ) -> impl ChumskyParser<Token, WhenArm, Error = Simple<Token>> + Clone {
-    expr.clone()
+    token_layout_comma()
+        .repeated()
+        .ignore_then(expr.clone())
+        .then_ignore(token_layout_comma().repeated())
         .then_ignore(token_arrow())
         .then(expr)
         .map(|(condition, body)| {
@@ -265,6 +268,11 @@ fn array_literal_parser(
         })
 }
 
+fn array_comma_error_message() -> String {
+    "JV2101: 配列リテラルでカンマ区切りはサポートされません。空白または改行のみで要素を分けてください。\nJV2101: Array literals do not support comma separators. Use whitespace or newlines between elements.\nQuick Fix: arrays.whitespace.remove-commas -> [a b c]（例: [1, 2, 3] => [1 2 3])\nQuick Fix: arrays.whitespace.remove-commas -> [a b c] (Example: [1, 2, 3] => [1 2 3])\nDoc: docs/whitespace-arrays.md"
+        .to_string()
+}
+
 fn array_elements<P>(
     expr: P,
 ) -> impl ChumskyParser<Token, (Vec<Expression>, SequenceDelimiter), Error = Simple<Token>> + Clone
@@ -298,14 +306,15 @@ where
                 saw_comma = true;
             }
 
-            let delimiter = match (saw_comma, saw_layout) {
-                (true, true) => {
-                    let message = "JV1007: mixed comma and whitespace delimiters in array literal"
-                        .to_string();
-                    return Err(Simple::custom(span, message));
-                }
-                (false, true) => SequenceDelimiter::Whitespace,
-                _ => SequenceDelimiter::Comma,
+            if saw_comma {
+                let message = array_comma_error_message();
+                return Err(Simple::custom(span, message));
+            }
+
+            let delimiter = if saw_layout {
+                SequenceDelimiter::Whitespace
+            } else {
+                SequenceDelimiter::Comma
             };
 
             Ok((elements, delimiter))
@@ -465,6 +474,16 @@ fn call_suffix(
         })
 }
 
+fn call_argument_comma_error_message() -> String {
+    "JV2102: 関数呼び出しでカンマ区切りはサポートされません。位置引数は空白または改行で区切ってください。\nJV2102: Function calls do not support comma separators. Separate positional arguments with whitespace or newlines.\nQuick Fix: calls.whitespace.remove-commas -> func a b c（例: plot(1, 2, 3) => plot(1 2 3))\nQuick Fix: calls.whitespace.remove-commas -> func a b c (Example: plot(1, 2, 3) => plot(1 2 3))\nDoc: docs/whitespace-arrays.md#function-calls"
+        .to_string()
+}
+
+fn call_argument_named_argument_error() -> String {
+    "JV1009: 空白区切りの引数リストでは名前付き引数を使用できません。カンマ区切りに戻すか、すべて位置引数にしてください。\nJV1009: Whitespace-delimited argument lists cannot include named arguments. Switch to comma-separated form or stick to positional arguments only.\nDoc: docs/whitespace-arrays.md#function-calls"
+        .to_string()
+}
+
 fn argument_list(
     expr: impl ChumskyParser<Token, Expression, Error = Simple<Token>> + Clone,
 ) -> impl ChumskyParser<Token, (Vec<Argument>, CallArgumentMetadata), Error = Simple<Token>> + Clone
@@ -503,16 +522,14 @@ fn argument_list(
                 saw_comma = true;
             }
 
-            if saw_layout {
-                if saw_comma {
-                    let message = "JV1009: mixed comma and whitespace delimiters in call arguments"
-                        .to_string();
-                    return Err(Simple::custom(span, message));
-                }
+            if saw_comma {
+                let message = call_argument_comma_error_message();
+                return Err(Simple::custom(span, message));
+            }
 
+            if saw_layout {
                 if saw_named {
-                    let message = "JV1009: whitespace-delimited argument lists cannot include named arguments"
-                        .to_string();
+                    let message = call_argument_named_argument_error();
                     return Err(Simple::custom(span, message));
                 }
             }
@@ -565,7 +582,7 @@ fn build_call_argument_metadata(
 
         if mismatch {
             metadata.separator_diagnostics.push(CallArgumentIssue {
-                message: "JV1010: whitespace-delimited arguments must use explicit commas when mixing element kinds".to_string(),
+                message: "JV1010: 空白区切りの引数では同じ種類の要素のみを並べられます。異なる型が混在する場合はカンマ区切りに戻してください。\nJV1010: Whitespace-delimited argument lists must remain homogeneous. Switch back to comma-separated arguments when mixing element kinds.\nDoc: docs/whitespace-arrays.md#function-calls".to_string(),
                 span: combined_argument_span(args),
             });
         } else if let Some(kind) = base_kind {
@@ -910,6 +927,7 @@ fn comparison_expression_parser(
                 token_less_equal().to(BinaryOp::LessEqual),
                 token_greater().to(BinaryOp::Greater),
                 token_greater_equal().to(BinaryOp::GreaterEqual),
+                token_is().to(BinaryOp::Is),
             ))
             .then(operand)
             .repeated(),

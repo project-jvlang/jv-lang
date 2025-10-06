@@ -112,12 +112,14 @@ pub fn transform_statement(
             type_annotation,
             initializer,
             modifiers,
+            origin,
             span,
         } => Ok(vec![desugar_val_declaration(
             name,
             type_annotation,
             initializer,
             modifiers,
+            origin,
             span,
             context,
         )?]),
@@ -432,7 +434,18 @@ pub fn transform_expression(
             } else {
                 let left_ir = transform_expression(*left, context)?;
                 let right_ir = transform_expression(*right, context)?;
-                let java_type = JavaType::Primitive("int".to_string());
+                let java_type = match op {
+                    BinaryOp::Equal
+                    | BinaryOp::NotEqual
+                    | BinaryOp::Less
+                    | BinaryOp::LessEqual
+                    | BinaryOp::Greater
+                    | BinaryOp::GreaterEqual
+                    | BinaryOp::And
+                    | BinaryOp::Or
+                    | BinaryOp::Is => JavaType::boolean(),
+                    _ => JavaType::int(),
+                };
                 Ok(IrExpression::Binary {
                     left: Box::new(left_ir),
                     op,

@@ -128,17 +128,6 @@ fn collect_fixture_diagnostic(
         }
     };
 
-    let ir_program = match transform_program(program.clone()) {
-        Ok(ir) => ir,
-        Err(error) => {
-            if let Some(diagnostic) = from_transform_error(&error) {
-                let diagnostic = diagnostic.with_strategy(DiagnosticStrategy::Deferred);
-                return Ok(format_tooling_diagnostic(display_path, &diagnostic));
-            }
-            anyhow::bail!("IR transform error without diagnostic code: {error:?}");
-        }
-    };
-
     let mut checker = TypeChecker::new();
     match checker.check_program(&program) {
         Ok(()) => {}
@@ -167,7 +156,12 @@ fn collect_fixture_diagnostic(
         }
     }
 
-    let null_safety_errors = checker.check_null_safety(&program, None);
+    let null_safety_errors = if let Some(normalized) = checker.normalized_program() {
+        let cloned = normalized.clone();
+        checker.check_null_safety(&cloned, None)
+    } else {
+        checker.check_null_safety(&program, None)
+    };
     let mut null_safety_diagnostics = Vec::new();
     for error in &null_safety_errors {
         if let Some(diagnostic) = from_check_error(error) {
@@ -183,6 +177,18 @@ fn collect_fixture_diagnostic(
         let diagnostic = primary.with_strategy(DiagnosticStrategy::Deferred);
         return Ok(format_tooling_diagnostic(display_path, &diagnostic));
     }
+
+    let lowering_input = checker.take_normalized_program().unwrap_or(program.clone());
+    let ir_program = match transform_program(lowering_input) {
+        Ok(ir) => ir,
+        Err(error) => {
+            if let Some(diagnostic) = from_transform_error(&error) {
+                let diagnostic = diagnostic.with_strategy(DiagnosticStrategy::Deferred);
+                return Ok(format_tooling_diagnostic(display_path, &diagnostic));
+            }
+            anyhow::bail!("IR transform error without diagnostic code: {error:?}");
+        }
+    };
 
     if analyze_codegen {
         for target in [JavaTarget::Java25, JavaTarget::Java21] {

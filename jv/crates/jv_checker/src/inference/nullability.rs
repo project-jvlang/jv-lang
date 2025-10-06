@@ -419,8 +419,8 @@ impl NullabilityAnalyzer {
     ) -> Nullability {
         if matches!(expected, Nullability::NonNull) && matches!(value, Nullability::Optional) {
             let message = format!(
-                "{}:{} `{}` は非 null として宣言されていますが Optional の値が代入されました。`?.` や `!!` で明示的に処理してください。",
-                span.start_line, span.start_column, subject
+                "JV3002: 行 {} 列 {} の変数 `{}` は non-null と宣言されていますが Optional な値が代入されています。`?.` や `!!` で明示的に処理してください。\nJV3002: Variable `{}` at line {} column {} is declared non-null but receives an optional value. Handle the optional explicitly using `?.` or `!!`.",
+                span.start_line, span.start_column, subject, subject, span.start_line, span.start_column
             );
             self.errors.push(CheckError::NullSafetyError(message));
             Nullability::NonNull
@@ -477,6 +477,7 @@ impl NullabilityAnalyzer {
 mod tests {
     use super::*;
     use jv_ast::types::{Modifiers, Visibility};
+    use jv_ast::ValBindingOrigin;
 
     fn span() -> Span {
         Span::new(1, 1, 1, 5)
@@ -499,6 +500,7 @@ mod tests {
             type_annotation: annotation,
             initializer,
             modifiers: modifiers(),
+            origin: ValBindingOrigin::ExplicitKeyword,
             span: span(),
         }
     }

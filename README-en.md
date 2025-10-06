@@ -20,10 +20,11 @@ The `ir-java-codegen` milestone is feature-complete and tagged for the 0.1.0 rel
 ## Features
 
 ### Language Features
-- `val/var` declarations with type inference
+- Implicitly immutable declarations (`identifier = expression`) with opt-in `var` for mutation
 - Null safety operators: `?`, `?.`, `?:`
 - `when` expressions → Java switch/pattern matching
 - `data class` → records (immutable) or classes (mutable)
+- `data Name(field ...)` shorthand with type inference
 - Extension functions → static utility methods
 - String interpolation: `"Hello, ${name}"`
 - JSON literals & JSONC comments → automatic POJO generation
@@ -68,16 +69,18 @@ cd hello-world
 ```
 
 Write some jv code (`src/main.jv`):
-```kotlin
+```jv
 fun main() {
-    val name = "World"
+    name = "World"
     println("Hello, ${name}!")
 
-    val numbers = listOf(1, 2, 3, 4, 5)
-    val doubled = numbers.map { it * 2 }
+    numbers = [1 2 3 4 5]
+    doubled = numbers.map { it * 2 }
     println("Doubled: ${doubled}")
 }
 ```
+
+Declarations without a keyword compile to `final` variables automatically. Reach for `var` only when the binding must change.
 
 Build and run:
 ```bash

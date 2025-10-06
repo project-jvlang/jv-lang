@@ -61,6 +61,7 @@ impl JavaCodeGenerator {
             BinaryOp::LessEqual => "<=".to_string(),
             BinaryOp::Greater => ">".to_string(),
             BinaryOp::GreaterEqual => ">=".to_string(),
+            BinaryOp::Is => "instanceof".to_string(),
             BinaryOp::And => "&&".to_string(),
             BinaryOp::Or => "||".to_string(),
             BinaryOp::BitAnd => "&".to_string(),

@@ -751,6 +751,14 @@ fn detect_null_comparison(condition: &Expression) -> ConditionAssumptions {
                     }
                 }
             }
+            BinaryOp::Is => {
+                if let Some(identifier) = extract_identifier(left) {
+                    assumptions.true_assumption = Some(BranchAssumption::Equals {
+                        variable: identifier,
+                        state: NullabilityKind::NonNull,
+                    });
+                }
+            }
             _ => {}
         }
     }
@@ -986,6 +994,7 @@ mod tests {
     use super::*;
     use crate::null_safety::graph::BranchAssumption;
     use crate::null_safety::JavaLoweringStrategy;
+    use jv_ast::ValBindingOrigin;
     use jv_ast::{types::Span, Expression, Pattern, Program, Statement, TryCatchClause, WhenArm};
 
     #[test]
@@ -998,6 +1007,7 @@ mod tests {
                 type_annotation: None,
                 initializer: Expression::Literal(Literal::Null, Span::dummy()),
                 modifiers: Default::default(),
+                origin: ValBindingOrigin::ExplicitKeyword,
                 span: Span::dummy(),
             }],
             span: Span::dummy(),

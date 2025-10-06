@@ -18,20 +18,23 @@ pub(crate) fn when_pattern_parser(
             Pattern::Wildcard(span)
         });
 
-        let literal = filter_map(|span, token: Token| {
+        let literal = filter(|token: &Token| {
+            matches!(
+                token.token_type,
+                TokenType::String(_)
+                    | TokenType::Number(_)
+                    | TokenType::Boolean(_)
+                    | TokenType::Null
+            )
+        })
+        .map(|token: Token| {
             let token_span = span_from_token(&token);
             match token.token_type {
-                TokenType::String(value) => {
-                    Ok(Pattern::Literal(Literal::String(value), token_span))
-                }
-                TokenType::Number(value) => {
-                    Ok(Pattern::Literal(Literal::Number(value), token_span))
-                }
-                TokenType::Boolean(value) => {
-                    Ok(Pattern::Literal(Literal::Boolean(value), token_span))
-                }
-                TokenType::Null => Ok(Pattern::Literal(Literal::Null, token_span)),
-                _ => Err(Simple::expected_input_found(span, Vec::new(), Some(token))),
+                TokenType::String(value) => Pattern::Literal(Literal::String(value), token_span),
+                TokenType::Number(value) => Pattern::Literal(Literal::Number(value), token_span),
+                TokenType::Boolean(value) => Pattern::Literal(Literal::Boolean(value), token_span),
+                TokenType::Null => Pattern::Literal(Literal::Null, token_span),
+                _ => unreachable!("filter ensures only literal tokens reach this branch"),
             }
         });
 
@@ -112,8 +115,8 @@ pub(crate) fn when_pattern_parser(
 
         let base = choice((
             wildcard,
-            literal,
             is_pattern,
+            literal,
             identifier_or_constructor,
             range_pattern,
         ))

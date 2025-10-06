@@ -33,6 +33,16 @@ pub fn analyze_pattern(subject: Option<&Expression>, pattern: &Pattern) -> Patte
                 }),
             })
             .unwrap_or_default(),
+        Pattern::Constructor { .. } => subject
+            .and_then(extract_identifier)
+            .map(|identifier| PatternMatchAssumptions {
+                on_match: Some(BranchAssumption::Equals {
+                    variable: identifier.to_string(),
+                    state: NullabilityKind::NonNull,
+                }),
+                on_mismatch: None,
+            })
+            .unwrap_or_default(),
         Pattern::Guard { pattern, .. } => analyze_pattern(subject, pattern),
         _ => PatternMatchAssumptions::none(),
     }

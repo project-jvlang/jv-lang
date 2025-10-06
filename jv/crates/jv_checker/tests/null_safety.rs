@@ -131,8 +131,8 @@ fn when_null_branch_conflict_emits_jv3108() {
 fun provide(): String? = null
 fun consume(value: String): Int = 1
 
-val maybe = provide()
-val result = when (maybe) {
+maybe = provide()
+result = when (maybe) {
     is String -> consume(maybe)
     else -> 0
 }
@@ -172,8 +172,8 @@ val result = when (maybe) {
     r#"
 fun provide(): String? = null
 
-val maybe = provide()
-val label: String = when (maybe) {
+maybe = provide()
+label = when (maybe) {
     is String -> maybe
     else -> "fallback"
 }
@@ -405,5 +405,37 @@ fn pattern_bridge_merges_flow_states(source: &str, expected_code: Option<&str>) 
     assert!(
         result.telemetry_ms >= 0.0,
         "pattern bridge telemetry should record elapsed time"
+    );
+}
+
+#[test]
+fn implicit_declarations_mix_with_explicit_val() {
+    let program = parse_program(
+        r#"
+fun provide(): String? = null
+
+maybe = provide()
+val fallback = "fallback"
+label = when (maybe) {
+    is String -> maybe
+    else -> fallback
+}
+
+label
+"#,
+    );
+
+    let mut checker = TypeChecker::new();
+    checker
+        .check_program(&program)
+        .expect("program should type-check with mixed explicit/implicit declarations");
+
+    let diagnostics = checker.check_null_safety(&program, None);
+    assert!(
+        diagnostics
+            .iter()
+            .any(|error| matches!(error, CheckError::NullSafetyError(message) if message.contains("非 null として宣言されています"))),
+        "expected null safety diagnostic for implicit binding, got: {:?}",
+        diagnostics
     );
 }
