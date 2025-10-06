@@ -5,9 +5,13 @@
 //! bookkeeping. A lightweight compatibility layer is provided so that existing call
 //! sites relying on the old enum-style API can migrate incrementally.
 
+use crate::solver::Variance;
+use jv_ast::Span;
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::fmt;
 use std::sync::atomic::{AtomicU32, Ordering};
+
+pub use jv_ast::types::{RawTypeContinuation, RawTypeDirective};
 
 /// Global counter used to mint fresh [`TypeId`] values.
 static NEXT_TYPE_ID: AtomicU32 = AtomicU32::new(1);
@@ -485,6 +489,139 @@ impl BoundTypeReference {
                     .unwrap_or_else(|| "Unit".to_string());
                 format!("fn({params}) -> {ret}")
             }
+        }
+    }
+}
+
+/// Generic parameter declaration annotated with bounds, variance, and defaults.
+#[derive(Debug, Clone, PartialEq)]
+pub struct GenericParameterInfo {
+    pub name: String,
+    pub bounds: Vec<BoundTypeReference>,
+    pub variance: Option<Variance>,
+    pub default: Option<BoundTypeReference>,
+    pub span: Span,
+}
+
+impl GenericParameterInfo {
+    pub fn new(
+        name: impl Into<String>,
+        bounds: Vec<BoundTypeReference>,
+        variance: Option<Variance>,
+        default: Option<BoundTypeReference>,
+        span: Span,
+    ) -> Self {
+        Self {
+            name: name.into(),
+            bounds,
+            variance,
+            default,
+            span,
+        }
+    }
+
+    pub fn has_bounds(&self) -> bool {
+        !self.bounds.is_empty()
+    }
+
+    pub fn variance(&self) -> Option<Variance> {
+        self.variance
+    }
+
+    pub fn default(&self) -> Option<&BoundTypeReference> {
+        self.default.as_ref()
+    }
+}
+
+/// where句内の個別制約をIR向けに正規化した構造。
+#[derive(Debug, Clone, PartialEq)]
+pub struct GenericWherePredicate {
+    pub type_param: String,
+    pub predicate: BoundPredicate,
+    pub span: Span,
+}
+
+impl GenericWherePredicate {
+    pub fn new(type_param: impl Into<String>, predicate: BoundPredicate, span: Span) -> Self {
+        Self {
+            type_param: type_param.into(),
+            predicate,
+            span,
+        }
+    }
+}
+
+/// Optional where句メタデータ。
+#[derive(Debug, Clone, PartialEq)]
+pub struct GenericWhereClause {
+    pub predicates: Vec<GenericWherePredicate>,
+    pub span: Span,
+}
+
+impl GenericWhereClause {
+    pub fn new(predicates: Vec<GenericWherePredicate>, span: Span) -> Self {
+        Self { predicates, span }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.predicates.is_empty()
+    }
+}
+
+/// Full generic signature metadata threaded through the inference pipeline.
+#[derive(Debug, Clone, PartialEq)]
+pub struct GenericSignature {
+    pub parameters: Vec<GenericParameterInfo>,
+    pub where_clause: Option<GenericWhereClause>,
+    pub raw_directives: Vec<RawTypeDirective>,
+    pub span: Span,
+}
+
+impl GenericSignature {
+    pub fn new(
+        parameters: Vec<GenericParameterInfo>,
+        where_clause: Option<GenericWhereClause>,
+        raw_directives: Vec<RawTypeDirective>,
+        span: Span,
+    ) -> Self {
+        Self {
+            parameters,
+            where_clause,
+            raw_directives,
+            span,
+        }
+    }
+
+    pub fn parameters(&self) -> &[GenericParameterInfo] {
+        &self.parameters
+    }
+
+    pub fn where_clause(&self) -> Option<&GenericWhereClause> {
+        self.where_clause.as_ref()
+    }
+
+    pub fn has_raw_directives(&self) -> bool {
+        !self.raw_directives.is_empty()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.parameters.is_empty()
+            && self
+                .where_clause
+                .as_ref()
+                .map(GenericWhereClause::is_empty)
+                .unwrap_or(true)
+            && self.raw_directives.is_empty()
+    }
+}
+
+impl Default for GenericSignature {
+    fn default() -> Self {
+        Self {
+            parameters: Vec::new(),
+            where_clause: None,
+            raw_directives: Vec::new(),
+            span: Span::default(),
         }
     }
 }
