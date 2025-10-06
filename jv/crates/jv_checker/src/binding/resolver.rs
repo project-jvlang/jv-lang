@@ -122,6 +122,7 @@ impl BindingResolver {
             Statement::FunctionDeclaration {
                 name,
                 type_parameters,
+                generic_signature,
                 where_clause,
                 mut parameters,
                 return_type,
@@ -150,6 +151,7 @@ impl BindingResolver {
                 Statement::FunctionDeclaration {
                     name,
                     type_parameters,
+                    generic_signature,
                     where_clause,
                     parameters,
                     return_type,
@@ -161,6 +163,7 @@ impl BindingResolver {
             Statement::ClassDeclaration {
                 name,
                 type_parameters,
+                generic_signature,
                 superclass,
                 interfaces,
                 mut properties,
@@ -180,6 +183,7 @@ impl BindingResolver {
                 Statement::ClassDeclaration {
                     name,
                     type_parameters,
+                    generic_signature,
                     superclass,
                     interfaces,
                     properties,
@@ -192,6 +196,7 @@ impl BindingResolver {
                 name,
                 mut parameters,
                 type_parameters,
+                generic_signature,
                 is_mutable,
                 modifiers,
                 span,
@@ -205,6 +210,7 @@ impl BindingResolver {
                     name,
                     parameters,
                     type_parameters,
+                    generic_signature,
                     is_mutable,
                     modifiers,
                     span,
@@ -213,6 +219,7 @@ impl BindingResolver {
             Statement::InterfaceDeclaration {
                 name,
                 type_parameters,
+                generic_signature,
                 superinterfaces,
                 mut methods,
                 mut properties,
@@ -231,6 +238,7 @@ impl BindingResolver {
                 Statement::InterfaceDeclaration {
                     name,
                     type_parameters,
+                    generic_signature,
                     superinterfaces,
                     methods,
                     properties,

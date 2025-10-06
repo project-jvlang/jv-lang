@@ -222,6 +222,7 @@ mod tests {
         Statement::FunctionDeclaration {
             name: name.into(),
             type_parameters: Vec::new(),
+            generic_signature: None,
             where_clause: None,
             parameters,
             return_type: return_annotation,

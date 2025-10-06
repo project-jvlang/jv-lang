@@ -52,6 +52,7 @@ fn test_statement_function_declaration() {
     let stmt = Statement::FunctionDeclaration {
         name: "add".to_string(),
         type_parameters: Vec::new(),
+        generic_signature: None,
         where_clause: None,
         parameters: vec![param],
         return_type: Some(TypeAnnotation::Simple("Int".to_string())),
@@ -118,6 +119,7 @@ fn test_statement_class_declaration() {
     let stmt = Statement::ClassDeclaration {
         name: "MyClass".to_string(),
         type_parameters: vec![],
+        generic_signature: None,
         superclass: None,
         interfaces: vec![],
         properties: vec![property],
@@ -148,6 +150,7 @@ fn test_statement_data_class_declaration() {
         name: "Point".to_string(),
         parameters: vec![param],
         type_parameters: vec![],
+        generic_signature: None,
         is_mutable: false,
         modifiers: Modifiers::default(),
         span: dummy_span(),
@@ -168,6 +171,7 @@ fn test_statement_interface_declaration() {
     let method = Box::new(Statement::FunctionDeclaration {
         name: "method".to_string(),
         type_parameters: Vec::new(),
+        generic_signature: None,
         where_clause: None,
         parameters: vec![],
         return_type: None,
@@ -178,6 +182,7 @@ fn test_statement_interface_declaration() {
     let stmt = Statement::InterfaceDeclaration {
         name: "MyInterface".to_string(),
         type_parameters: vec![],
+        generic_signature: None,
         superinterfaces: vec![],
         methods: vec![method],
         properties: vec![],
@@ -368,6 +373,7 @@ fn test_program() {
     let main_stmt = Statement::FunctionDeclaration {
         name: "main".to_string(),
         type_parameters: Vec::new(),
+        generic_signature: None,
         where_clause: None,
         parameters: vec![],
         return_type: None,
@@ -417,6 +423,7 @@ fn test_extension_function() {
     let function = Box::new(Statement::FunctionDeclaration {
         name: "toString".to_string(),
         type_parameters: Vec::new(),
+        generic_signature: None,
         where_clause: None,
         parameters: vec![],
         return_type: Some(TypeAnnotation::Simple("String".to_string())),

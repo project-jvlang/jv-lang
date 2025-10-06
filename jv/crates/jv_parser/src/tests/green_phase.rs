@@ -3,7 +3,7 @@ use jv_ast::{
     Argument, ArgumentElementKind, BinaryOp, CallArgumentStyle, CommentKind, CommentVisibility,
     ConcurrencyConstruct, Expression, JsonValue, Literal, LoopStrategy, Pattern,
     ResourceManagement, SequenceDelimiter, Statement, StringPart, TypeAnnotation, ValBindingOrigin,
-    WherePredicate,
+    VarianceMarker, WherePredicate,
 };
 
 use test_case::test_case;
@@ -125,6 +125,7 @@ fn test_function_generic_where_clause() {
             type_parameters,
             where_clause,
             parameters,
+            generic_signature,
             ..
         } => {
             assert_eq!(type_parameters, &vec!["T".to_string()]);
@@ -132,6 +133,11 @@ fn test_function_generic_where_clause() {
 
             let clause = where_clause.as_ref().expect("where clause present");
             assert_eq!(clause.predicates.len(), 1);
+
+            let signature = generic_signature
+                .as_ref()
+                .expect("generic signature should be present");
+            assert_eq!(signature.parameters.len(), 1);
 
             match &clause.predicates[0] {
                 WherePredicate::TraitBound {
@@ -149,6 +155,45 @@ fn test_function_generic_where_clause() {
                     }
                 }
                 other => panic!("expected trait bound predicate, found {:?}", other),
+            }
+        }
+        other => panic!("expected function declaration, found {:?}", other),
+    }
+}
+
+#[test]
+fn test_function_generic_variance_default_metadata() {
+    let source = "fun <out T: Comparable<T> = String> max(value: T): T = value";
+    let program = parse_program(source);
+    let statement = first_statement(&program);
+
+    match statement {
+        Statement::FunctionDeclaration {
+            type_parameters,
+            generic_signature,
+            ..
+        } => {
+            assert_eq!(type_parameters, &vec!["T".to_string()]);
+
+            let signature = generic_signature
+                .as_ref()
+                .expect("generic signature should be captured");
+            assert_eq!(signature.parameters.len(), 1);
+
+            let param = &signature.parameters[0];
+            assert!(matches!(param.variance, Some(VarianceMarker::Covariant)));
+            assert_eq!(param.bounds.len(), 1);
+            match &param.bounds[0] {
+                TypeAnnotation::Generic { name, type_args } => {
+                    assert_eq!(name, "Comparable");
+                    assert_eq!(type_args.len(), 1);
+                }
+                other => panic!("expected generic bound, found {:?}", other),
+            }
+
+            match param.default.as_ref() {
+                Some(TypeAnnotation::Simple(name)) => assert_eq!(name, "String"),
+                other => panic!("expected default type String, found {:?}", other),
             }
         }
         other => panic!("expected function declaration, found {:?}", other),
@@ -897,13 +942,22 @@ fn test_whitespace_array_preserves_thousand_separator_numbers() {
                 assert_eq!(*delimiter, SequenceDelimiter::Whitespace);
                 match &elements[0] {
                     Expression::Literal(Literal::Number(value), _) => {
-                        assert_eq!(value, "1234", "array elements should retain canonical numeric literal")
+                        assert_eq!(
+                            value, "1234",
+                            "array elements should retain canonical numeric literal"
+                        )
                     }
-                    other => panic!("expected first array element to be number literal, found {:?}", other),
+                    other => panic!(
+                        "expected first array element to be number literal, found {:?}",
+                        other
+                    ),
                 }
                 match &elements[1] {
                     Expression::Literal(Literal::Number(value), _) => assert_eq!(value, "5"),
-                    other => panic!("expected second array element to be number literal, found {:?}", other),
+                    other => panic!(
+                        "expected second array element to be number literal, found {:?}",
+                        other
+                    ),
                 }
             }
             other => panic!("expected array expression, found {:?}", other),
@@ -1103,7 +1157,10 @@ fn test_whitespace_call_allows_thousand_separator_numbers() {
                 );
                 match &args[0] {
                     Argument::Positional(Expression::Literal(Literal::Number(value), _)) => {
-                        assert_eq!(value, "1234", "numeric literal should retain canonical form")
+                        assert_eq!(
+                            value, "1234",
+                            "numeric literal should retain canonical form"
+                        )
                     }
                     other => panic!("expected numeric literal with grouping, found {:?}", other),
                 }
@@ -1111,7 +1168,10 @@ fn test_whitespace_call_allows_thousand_separator_numbers() {
                     Argument::Positional(Expression::Literal(Literal::Number(value), _)) => {
                         assert_eq!(value, "5")
                     }
-                    other => panic!("expected numeric literal without grouping, found {:?}", other),
+                    other => panic!(
+                        "expected numeric literal without grouping, found {:?}",
+                        other
+                    ),
                 }
             }
             other => panic!("expected call expression, found {:?}", other),

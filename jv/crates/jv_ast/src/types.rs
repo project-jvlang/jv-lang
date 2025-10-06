@@ -98,6 +98,15 @@ pub enum TypeAnnotation {
     Array(Box<TypeAnnotation>),
 }
 
+/// Variance marker used by generic parameters (`out T` / `in T`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum VarianceMarker {
+    /// Covariant (`out T`).
+    Covariant,
+    /// Contravariant (`in T`).
+    Contravariant,
+}
+
 /// Qualified name used for traits, capabilities, and other declaration references.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct QualifiedName {
@@ -150,6 +159,49 @@ pub struct FunctionConstraintSignature {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct WhereClause {
     pub predicates: Vec<WherePredicate>,
+    pub span: Span,
+}
+
+/// Directive that indicates how a detected raw type should be handled.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum RawTypeContinuation {
+    /// Default policy (warn + defensive code).
+    DefaultPolicy,
+    /// Allow raw usage but surface comment-only mitigation.
+    AllowWithComment,
+}
+
+/// Raw type continuation directive extracted from source comments.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RawTypeDirective {
+    pub owner: QualifiedName,
+    pub span: Span,
+    pub mode: RawTypeContinuation,
+}
+
+/// Generic type parameter declaration with metadata.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct GenericParameter {
+    pub name: String,
+    #[serde(default)]
+    pub bounds: Vec<TypeAnnotation>,
+    #[serde(default)]
+    pub variance: Option<VarianceMarker>,
+    #[serde(default)]
+    pub default: Option<TypeAnnotation>,
+    pub span: Span,
+}
+
+/// Generic signature combining parameters, optional where clause, and raw directives.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct GenericSignature {
+    #[serde(default)]
+    pub parameters: Vec<GenericParameter>,
+    #[serde(default)]
+    pub where_clause: Option<WhereClause>,
+    #[serde(default)]
+    pub raw_directives: Vec<RawTypeDirective>,
+    #[serde(default)]
     pub span: Span,
 }
 

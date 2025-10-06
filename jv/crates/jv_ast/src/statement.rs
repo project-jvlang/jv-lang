@@ -129,6 +129,8 @@ pub enum Statement {
     FunctionDeclaration {
         name: String,
         type_parameters: Vec<String>,
+        #[serde(default)]
+        generic_signature: Option<GenericSignature>,
         where_clause: Option<WhereClause>,
         parameters: Vec<Parameter>,
         return_type: Option<TypeAnnotation>,
@@ -141,6 +143,8 @@ pub enum Statement {
     ClassDeclaration {
         name: String,
         type_parameters: Vec<String>,
+        #[serde(default)]
+        generic_signature: Option<GenericSignature>,
         superclass: Option<TypeAnnotation>,
         interfaces: Vec<TypeAnnotation>,
         properties: Vec<Property>,
@@ -154,6 +158,8 @@ pub enum Statement {
         name: String,
         parameters: Vec<Parameter>,
         type_parameters: Vec<String>,
+        #[serde(default)]
+        generic_signature: Option<GenericSignature>,
         is_mutable: bool,
         modifiers: Modifiers,
         span: Span,
@@ -163,6 +169,8 @@ pub enum Statement {
     InterfaceDeclaration {
         name: String,
         type_parameters: Vec<String>,
+        #[serde(default)]
+        generic_signature: Option<GenericSignature>,
         superinterfaces: Vec<TypeAnnotation>,
         methods: Vec<Box<Statement>>, // Abstract function declarations
         properties: Vec<Property>,

@@ -343,6 +343,7 @@ impl<'a> ReconstructionContext<'a> {
                 Ok(Statement::FunctionDeclaration {
                     name: name.clone(),
                     type_parameters: Vec::new(),
+                    generic_signature: None,
                     where_clause: None,
                     parameters: params,
                     return_type,

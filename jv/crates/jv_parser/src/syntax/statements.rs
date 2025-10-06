@@ -3,11 +3,12 @@ use chumsky::Parser as ChumskyParser;
 use jv_ast::{
     Annotation, AnnotationArgument, AnnotationName, AnnotationValue, BinaryOp, CommentKind,
     CommentStatement, CommentVisibility, ConcurrencyConstruct, Expression, ExtensionFunction,
-    ForInStatement, Literal, LoopBinding, LoopStrategy, Modifiers, NumericRangeLoop, Parameter,
-    QualifiedName, ResourceManagement, Span, Statement, TypeAnnotation, ValBindingOrigin,
+    ForInStatement, GenericParameter, GenericSignature, Literal, LoopBinding, LoopStrategy,
+    Modifiers, NumericRangeLoop, Parameter, QualifiedName, RawTypeContinuation, RawTypeDirective,
+    ResourceManagement, Span, Statement, TypeAnnotation, ValBindingOrigin, VarianceMarker,
     Visibility, WhereClause, WherePredicate,
 };
-use jv_lexer::{Token, TokenType};
+use jv_lexer::{SourceCommentTrivia, Token, TokenTrivia, TokenType};
 
 use super::expressions;
 use super::parameters::parameter_list;
@@ -246,6 +247,7 @@ fn function_declaration_parser(
                 let inner = Statement::FunctionDeclaration {
                     name: signature.name,
                     type_parameters: signature.type_parameters.clone(),
+                    generic_signature: signature.generic_signature.clone(),
                     where_clause: signature.where_clause.clone(),
                     parameters: signature.parameters,
                     return_type: signature.return_type,
@@ -263,6 +265,7 @@ fn function_declaration_parser(
                 Statement::FunctionDeclaration {
                     name: signature.name,
                     type_parameters: signature.type_parameters,
+                    generic_signature: signature.generic_signature,
                     where_clause: signature.where_clause,
                     parameters: signature.parameters,
                     return_type: signature.return_type,
@@ -290,6 +293,7 @@ fn data_class_declaration_parser(
                 is_mutable: false,
                 modifiers,
                 type_parameters: Vec::new(),
+                generic_signature: None,
                 span: Span::dummy(),
             },
         )
@@ -510,10 +514,29 @@ fn function_signature(
         .then(where_clause_parser())
         .map(
             |((((generics, (receiver, name)), parameters), return_type), where_clause)| {
+                let (type_parameters, generic_signature) = match generics {
+                    Some(generics) => {
+                        let names: Vec<String> = generics
+                            .params
+                            .iter()
+                            .map(|param| param.name.clone())
+                            .collect();
+                        let signature = GenericSignature {
+                            parameters: generics.params,
+                            where_clause: where_clause.clone(),
+                            raw_directives: generics.raw_directives,
+                            span: generics.span,
+                        };
+                        (names, Some(signature))
+                    }
+                    None => (Vec::new(), None),
+                };
+
                 FunctionSignature {
                     receiver_type: receiver,
                     name,
-                    type_parameters: generics.unwrap_or_default(),
+                    type_parameters,
+                    generic_signature,
                     parameters,
                     return_type,
                     where_clause,
@@ -522,14 +545,140 @@ fn function_signature(
         )
 }
 
-fn type_parameter_list() -> impl ChumskyParser<Token, Vec<String>, Error = Simple<Token>> + Clone {
+fn type_parameter_list() -> impl ChumskyParser<Token, ParsedGenerics, Error = Simple<Token>> + Clone
+{
     token_less()
-        .ignore_then(
-            identifier()
+        .map(|token| {
+            let span = span_from_token(&token);
+            (span, collect_raw_directives_from_token(&token))
+        })
+        .then(
+            generic_parameter()
                 .separated_by(token_any_comma())
                 .allow_trailing(),
         )
-        .then_ignore(token_greater())
+        .then(token_greater().map(|token| {
+            let span = span_from_token(&token);
+            (span, collect_raw_directives_from_token(&token))
+        }))
+        .map(
+            |(((left_span, mut directives), params), (right_span, mut closing_directives))| {
+                directives.append(&mut closing_directives);
+                ParsedGenerics {
+                    params,
+                    raw_directives: directives,
+                    span: merge_spans(&left_span, &right_span),
+                }
+            },
+        )
+}
+
+fn generic_parameter() -> impl ChumskyParser<Token, GenericParameter, Error = Simple<Token>> + Clone
+{
+    variance_marker()
+        .then(identifier_with_span())
+        .then(
+            token_colon()
+                .ignore_then(type_annotation())
+                .map(|annotation| vec![annotation])
+                .or_not()
+                .map(|maybe| maybe.unwrap_or_default()),
+        )
+        .then(token_assign().ignore_then(type_annotation()).or_not())
+        .map(
+            |(((variance, (name, name_span)), bounds), default)| GenericParameter {
+                name,
+                bounds,
+                variance,
+                default,
+                span: name_span,
+            },
+        )
+}
+
+fn variance_marker(
+) -> impl ChumskyParser<Token, Option<VarianceMarker>, Error = Simple<Token>> + Clone {
+    filter_map(|span, token: Token| match token.token_type {
+        TokenType::Identifier(ref name) if name == "out" => Ok(VarianceMarker::Covariant),
+        TokenType::Identifier(ref name) if name == "in" => Ok(VarianceMarker::Contravariant),
+        _ => Err(Simple::expected_input_found(span, Vec::new(), Some(token))),
+    })
+    .or_not()
+}
+
+fn collect_raw_directives_from_token(token: &Token) -> Vec<RawTypeDirective> {
+    collect_raw_directives_from_trivia(&token.leading_trivia)
+}
+
+fn collect_raw_directives_from_trivia(trivia: &TokenTrivia) -> Vec<RawTypeDirective> {
+    let mut directives = Vec::new();
+
+    for comment in trivia
+        .passthrough_comments
+        .iter()
+        .chain(trivia.jv_comments.iter())
+    {
+        if let Some(directive) = raw_directive_from_comment(comment) {
+            directives.push(directive);
+        }
+    }
+
+    directives
+        .into_iter()
+        .filter(|directive| !directive.owner.segments.is_empty())
+        .collect()
+}
+
+fn raw_directive_from_comment(comment: &SourceCommentTrivia) -> Option<RawTypeDirective> {
+    let content = normalize_comment_text(&comment.text);
+    let trimmed = content.trim();
+
+    let (mode, payload) = if let Some(rest) = trimmed.strip_prefix("jv:raw-allow") {
+        (RawTypeContinuation::AllowWithComment, rest.trim())
+    } else if let Some(rest) = trimmed.strip_prefix("jv:raw-default") {
+        (RawTypeContinuation::DefaultPolicy, rest.trim())
+    } else {
+        return None;
+    };
+
+    if payload.is_empty() {
+        return None;
+    }
+
+    let segments: Vec<String> = payload
+        .split('.')
+        .map(|segment| segment.trim())
+        .filter(|segment| !segment.is_empty())
+        .map(|segment| segment.to_string())
+        .collect();
+
+    if segments.is_empty() {
+        return None;
+    }
+
+    let span = Span::new(
+        comment.line,
+        comment.column,
+        comment.line,
+        comment.column + comment.text.len(),
+    );
+
+    Some(RawTypeDirective {
+        owner: QualifiedName::new(segments, span.clone()),
+        span,
+        mode,
+    })
+}
+
+fn normalize_comment_text(raw: &str) -> String {
+    let trimmed = raw.trim();
+    if let Some(stripped) = trimmed.strip_prefix("//") {
+        stripped.trim_start_matches('*').trim().to_string()
+    } else if let Some(stripped) = trimmed.strip_prefix("/*") {
+        stripped.trim_end_matches("*/").trim().to_string()
+    } else {
+        trimmed.to_string()
+    }
 }
 
 fn where_clause_parser(
@@ -755,7 +904,7 @@ fn annotation_argument(
 mod tests {
     use super::*;
     use chumsky::Parser as ChumskyParser;
-    use jv_lexer::TokenTrivia;
+    use jv_lexer::{SourceCommentKind, SourceCommentTrivia, TokenTrivia};
 
     fn make_token(token_type: TokenType, lexeme: &str, column: usize) -> Token {
         Token {
@@ -1004,6 +1153,37 @@ mod tests {
             other => panic!("unexpected argument {:?}", other),
         }
     }
+
+    #[test]
+    fn type_parameter_list_extracts_raw_directive() {
+        let mut less = make_token(TokenType::Less, "<", 1);
+        less.leading_trivia
+            .passthrough_comments
+            .push(SourceCommentTrivia {
+                kind: SourceCommentKind::Line,
+                text: "// jv:raw-allow java.util.List".to_string(),
+                line: 1,
+                column: 1,
+            });
+
+        let identifier = make_token(TokenType::Identifier("T".to_string()), "T", 2);
+        let greater = make_token(TokenType::Greater, ">", 3);
+
+        let parser = type_parameter_list();
+        let parsed = parser
+            .parse(vec![less, identifier, greater])
+            .expect("generic parameters should parse");
+
+        assert_eq!(parsed.params.len(), 1);
+        assert_eq!(parsed.params[0].name, "T");
+        assert_eq!(parsed.raw_directives.len(), 1);
+        let directive = &parsed.raw_directives[0];
+        assert_eq!(directive.owner.qualified(), "java.util.List");
+        assert!(matches!(
+            directive.mode,
+            RawTypeContinuation::AllowWithComment
+        ));
+    }
 }
 
 fn modifier_keyword() -> impl ChumskyParser<Token, ModifierToken, Error = Simple<Token>> + Clone {
@@ -1036,11 +1216,19 @@ fn modifier_keyword() -> impl ChumskyParser<Token, ModifierToken, Error = Simple
     ))
 }
 
+#[derive(Debug, Clone, Default)]
+struct ParsedGenerics {
+    params: Vec<GenericParameter>,
+    raw_directives: Vec<RawTypeDirective>,
+    span: Span,
+}
+
 #[derive(Debug, Clone)]
 struct FunctionSignature {
     receiver_type: Option<TypeAnnotation>,
     name: String,
     type_parameters: Vec<String>,
+    generic_signature: Option<GenericSignature>,
     parameters: Vec<Parameter>,
     return_type: Option<TypeAnnotation>,
     where_clause: Option<WhereClause>,

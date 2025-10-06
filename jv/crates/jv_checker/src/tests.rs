@@ -54,6 +54,7 @@ fn check_program_populates_inference_snapshot() {
             Statement::FunctionDeclaration {
                 name: "add".into(),
                 type_parameters: Vec::new(),
+                generic_signature: None,
                 where_clause: None,
                 parameters: vec![
                     Parameter {
@@ -135,6 +136,7 @@ fn override_annotation_on_method_is_allowed() {
     let method = Statement::FunctionDeclaration {
         name: "run".into(),
         type_parameters: Vec::new(),
+        generic_signature: None,
         where_clause: None,
         parameters: Vec::new(),
         return_type: None,
@@ -149,6 +151,7 @@ fn override_annotation_on_method_is_allowed() {
     let class = Statement::ClassDeclaration {
         name: "Service".into(),
         type_parameters: Vec::new(),
+        generic_signature: None,
         superclass: None,
         interfaces: Vec::new(),
         properties: Vec::new(),

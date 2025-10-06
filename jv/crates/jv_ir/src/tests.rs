@@ -1288,6 +1288,7 @@ mod tests {
         let function_decl = Statement::FunctionDeclaration {
             name: "trimmed".to_string(),
             type_parameters: Vec::new(),
+            generic_signature: None,
             where_clause: None,
             parameters: vec![],
             return_type: Some(TypeAnnotation::Simple("String".to_string())),
@@ -1764,6 +1765,7 @@ mod tests {
         let function = Statement::FunctionDeclaration {
             name: "topLevelFunction".to_string(),
             type_parameters: Vec::new(),
+            generic_signature: None,
             where_clause: None,
             parameters: vec![Parameter {
                 name: "x".to_string(),
@@ -2651,6 +2653,7 @@ mod tests {
         let function_decl = Statement::FunctionDeclaration {
             name: "secondOrNull".to_string(),
             type_parameters: Vec::new(),
+            generic_signature: None,
             where_clause: None,
             parameters: vec![],
             return_type: Some(TypeAnnotation::Nullable(Box::new(TypeAnnotation::Simple(
