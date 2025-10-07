@@ -37,3 +37,38 @@ fun main(): Unit {
         stdout
     );
 }
+
+#[test]
+fn check_command_reports_raw_allow_info() {
+    let Some(cli_path) = std::env::var_os("CARGO_BIN_EXE_jv").map(Into::into) else {
+        eprintln!("Skipping raw allow diagnostic test: CLI binary unavailable");
+        return;
+    };
+
+    let dir = tempdir().expect("create temp dir");
+    let source_path = dir.path().join("raw_allow.jv");
+    let source = r#"
+fun main(): Unit {
+    val xs = [] // jv:raw-allow demo.Value
+}
+"#;
+    fs::write(&source_path, source.trim_start()).expect("write source file");
+
+    let output = Command::new(cli_path)
+        .arg("check")
+        .arg(&source_path)
+        .output()
+        .expect("invoke jv check");
+
+    assert!(
+        output.status.success(),
+        "jv check should succeed even with raw-allow comments"
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("JV3203"),
+        "expected JV3203 diagnostic in output, got:\n{}",
+        stdout
+    );
+}

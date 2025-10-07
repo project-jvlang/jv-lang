@@ -346,6 +346,67 @@ fn raw_default_comment_on_field_adds_import_and_guard() {
 }
 
 #[test]
+fn raw_allow_comment_on_field_keeps_imports_clean() {
+    let span = dummy_span();
+    let field = IrStatement::FieldDeclaration {
+        name: "items".to_string(),
+        java_type: JavaType::Reference {
+            name: "java.util.List".to_string(),
+            generic_args: Vec::new(),
+        },
+        initializer: None,
+        modifiers: IrModifiers::default(),
+        span: span.clone(),
+    };
+
+    let commented_field = IrStatement::Commented {
+        statement: Box::new(field),
+        comment: "// jv:raw-allow demo.Widget".to_string(),
+        kind: IrCommentKind::Line,
+        comment_span: span.clone(),
+    };
+
+    let class = IrStatement::ClassDeclaration {
+        name: "Demo".to_string(),
+        type_parameters: Vec::new(),
+        superclass: None,
+        interfaces: Vec::new(),
+        fields: vec![commented_field],
+        methods: Vec::new(),
+        nested_classes: Vec::new(),
+        modifiers: IrModifiers::default(),
+        span: span.clone(),
+    };
+
+    let program = IrProgram {
+        package: Some("demo".to_string()),
+        imports: Vec::new(),
+        type_declarations: vec![class],
+        span,
+    };
+
+    let mut generator = JavaCodeGenerator::new();
+    let unit = generator
+        .generate_compilation_unit(&program)
+        .expect("compilation unit");
+
+    assert!(
+        unit.imports
+            .iter()
+            .all(|import| !import.contains("java.util.Objects")),
+        "unexpected Objects import for raw-allow comment: {:?}",
+        unit.imports
+    );
+
+    let declaration = &unit.type_declarations[0];
+    assert!(
+        declaration.contains("java.util.List items; // jv:raw-allow demo.Widget"),
+        "expected field to remain unchanged aside from comment: {}",
+        declaration
+    );
+}
+
+#[test]
 fn raw_allow_comment_keeps_statement_unchanged() {
     let span = dummy_span();
     let base = IrStatement::Return {

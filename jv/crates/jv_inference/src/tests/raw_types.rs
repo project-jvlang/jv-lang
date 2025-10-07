@@ -80,3 +80,20 @@ fn record_events_noops_when_empty() {
     assert!(telemetry.raw_type_events().is_empty());
     assert!(!telemetry.raw_type_severity_todo());
 }
+
+#[test]
+fn record_directives_sets_policy_and_returns_events() {
+    let directives = vec![directive(
+        "demo.Service",
+        RawTypeContinuation::AllowWithComment,
+    )];
+    let mut telemetry = SolverTelemetry::default();
+
+    let events = RawTypeAnalyzer::record_directives(&directives, &mut telemetry);
+
+    assert_eq!(events.len(), 1);
+    assert_eq!(telemetry.raw_type_events().len(), 1);
+    assert!(telemetry.raw_type_severity_todo());
+    assert_eq!(events[0].symbol, "demo.Service");
+    assert_eq!(events[0].mitigation, RawTypeMitigation::CommentOnly);
+}

@@ -205,6 +205,19 @@ fn test_diagnostics_for_raw_type_comment() {
 }
 
 #[test]
+fn test_diagnostics_for_raw_allow_comment() {
+    let mut server = JvLanguageServer::new();
+    let uri = "file:///raw_allow.jv".to_string();
+    let source = "val answer = 0 // jv:raw-allow demo.Value\n";
+    server.open_document(uri.clone(), source.to_string());
+
+    let diagnostics = server.get_diagnostics(&uri);
+    assert!(diagnostics
+        .iter()
+        .any(|diag| diag.code.as_deref() == Some("JV3203")));
+}
+
+#[test]
 fn test_completions_include_new_templates() {
     let server = JvLanguageServer::new();
     let position = Position {
