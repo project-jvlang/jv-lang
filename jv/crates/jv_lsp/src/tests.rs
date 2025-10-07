@@ -132,7 +132,7 @@ fn test_multiple_documents() {
 fn test_diagnostics_for_clean_source() {
     let mut server = JvLanguageServer::new();
     let uri = "file:///test.jv".to_string();
-    server.open_document(uri.clone(), "val numbers = [1, 2, 3]".to_string());
+    server.open_document(uri.clone(), "val numbers = [1 2 3]".to_string());
 
     let diagnostics = server.get_diagnostics(&uri);
     assert!(diagnostics.is_empty());
@@ -189,6 +189,19 @@ fn test_diagnostics_for_missing_initializer_self_reference() {
     assert!(diagnostics
         .iter()
         .any(|diag| { diag.message.contains("JV4202") && diag.code.as_deref() == Some("JV4202") }));
+}
+
+#[test]
+fn test_diagnostics_for_raw_type_comment() {
+    let mut server = JvLanguageServer::new();
+    let uri = "file:///raw.jv".to_string();
+    let source = "val answer = 0 // jv:raw-default demo.Value\n";
+    server.open_document(uri.clone(), source.to_string());
+
+    let diagnostics = server.get_diagnostics(&uri);
+    assert!(diagnostics
+        .iter()
+        .any(|diag| diag.code.as_deref() == Some("JV3202")));
 }
 
 #[test]

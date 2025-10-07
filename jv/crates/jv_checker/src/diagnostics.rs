@@ -1,6 +1,9 @@
 use crate::CheckError;
-use jv_ast::Span;
-use jv_ir::error::TransformError;
+use jv_ast::{types::RawTypeContinuation, Span};
+use jv_ir::{
+    error::TransformError,
+    types::{IrProgram, IrStatement},
+};
 use jv_parser::ParseError;
 
 /// Severity level used when surfacing diagnostics to users.
@@ -259,6 +262,24 @@ const DIAGNOSTICS: &[DiagnosticDescriptor] = &[
         severity: DiagnosticSeverity::Information,
     },
     DiagnosticDescriptor {
+        code: "JV3201",
+        title: "型トークンを生成できません / Unable to synthesise type token",
+        help: "対象のジェネリクス型に対する実行時トークンを生成できません。型注釈を追加するか API を調整してください。/ The generic type requires an explicit runtime token. Provide an explicit annotation or refactor the API to supply a token. (--explain JV3201)",
+        severity: DiagnosticSeverity::Error,
+    },
+    DiagnosticDescriptor {
+        code: "JV3202",
+        title: "Raw型の使用を検出しました / Raw type usage detected",
+        help: "`// jv:raw-allow <QualifiedName>` で意図を明示するか、欠落している型引数を補ってください。/ Either acknowledge the intent with `// jv:raw-allow <QualifiedName>` or supply the missing generic arguments to restore type safety.",
+        severity: DiagnosticSeverity::Warning,
+    },
+    DiagnosticDescriptor {
+        code: "JV3203",
+        title: "Raw型継続コメント / Raw type continuation comment",
+        help: "このコメントは防御策を最小限に抑えます。継続が妥当か再確認してください。/ This directive minimises defensive handling; review to ensure the raw continuation is acceptable.",
+        severity: DiagnosticSeverity::Information,
+    },
+    DiagnosticDescriptor {
         code: "JV3199",
         title: "Advanced pattern matching not yet supported / 高度なパターンマッチングは未対応",
         help: "深度11以上の分解パターンや複合ガードは段階的に提供されます。サポート済みの構文へ書き換えるか今後のアップデートをお待ちください。/ Deep destructuring (depth ≥ 11) and complex guards are still rolling out. Rewrite the pattern using supported constructs or wait for a forthcoming update. (--explain JV3199)",
@@ -378,9 +399,210 @@ fn extract_tooling_metadata(message: &str) -> (String, Vec<String>, Option<Strin
     (cleaned_message, suggestions, learning_hint)
 }
 
+pub fn collect_raw_type_diagnostics(program: &IrProgram) -> Vec<EnhancedDiagnostic> {
+    let mut diagnostics = Vec::new();
+
+    for import in &program.imports {
+        collect_statement_raw_diagnostics(import, &mut diagnostics);
+    }
+
+    for declaration in &program.type_declarations {
+        collect_statement_raw_diagnostics(declaration, &mut diagnostics);
+    }
+
+    diagnostics
+}
+
+fn collect_statement_raw_diagnostics(
+    statement: &IrStatement,
+    diagnostics: &mut Vec<EnhancedDiagnostic>,
+) {
+    match statement {
+        IrStatement::Commented {
+            statement: inner,
+            comment,
+            comment_span,
+            ..
+        } => {
+            if let Some((mode, owner)) = parse_raw_type_comment(comment) {
+                if let Some(diagnostic) =
+                    build_raw_type_diagnostic(mode, owner, comment_span.clone())
+                {
+                    diagnostics.push(diagnostic);
+                }
+            }
+            collect_statement_raw_diagnostics(inner, diagnostics);
+        }
+        IrStatement::ClassDeclaration {
+            fields,
+            methods,
+            nested_classes,
+            ..
+        } => {
+            for field in fields {
+                collect_statement_raw_diagnostics(field, diagnostics);
+            }
+            for method in methods {
+                collect_statement_raw_diagnostics(method, diagnostics);
+            }
+            for class in nested_classes {
+                collect_statement_raw_diagnostics(class, diagnostics);
+            }
+        }
+        IrStatement::InterfaceDeclaration {
+            methods,
+            default_methods,
+            fields,
+            nested_types,
+            ..
+        } => {
+            for method in methods {
+                collect_statement_raw_diagnostics(method, diagnostics);
+            }
+            for method in default_methods {
+                collect_statement_raw_diagnostics(method, diagnostics);
+            }
+            for field in fields {
+                collect_statement_raw_diagnostics(field, diagnostics);
+            }
+            for ty in nested_types {
+                collect_statement_raw_diagnostics(ty, diagnostics);
+            }
+        }
+        IrStatement::RecordDeclaration { methods, .. } => {
+            for method in methods {
+                collect_statement_raw_diagnostics(method, diagnostics);
+            }
+        }
+        IrStatement::Block { statements, .. } => {
+            for stmt in statements {
+                collect_statement_raw_diagnostics(stmt, diagnostics);
+            }
+        }
+        IrStatement::If {
+            then_stmt,
+            else_stmt,
+            ..
+        } => {
+            collect_statement_raw_diagnostics(then_stmt, diagnostics);
+            if let Some(else_stmt) = else_stmt {
+                collect_statement_raw_diagnostics(else_stmt, diagnostics);
+            }
+        }
+        IrStatement::While { body, .. } | IrStatement::ForEach { body, .. } => {
+            collect_statement_raw_diagnostics(body, diagnostics);
+        }
+        IrStatement::For { init, body, .. } => {
+            if let Some(initializer) = init.as_deref() {
+                collect_statement_raw_diagnostics(initializer, diagnostics);
+            }
+            collect_statement_raw_diagnostics(body, diagnostics);
+        }
+        IrStatement::Try {
+            body,
+            catch_clauses,
+            finally_block,
+            ..
+        }
+        | IrStatement::TryWithResources {
+            body,
+            catch_clauses,
+            finally_block,
+            ..
+        } => {
+            collect_statement_raw_diagnostics(body, diagnostics);
+            for clause in catch_clauses {
+                collect_statement_raw_diagnostics(&clause.body, diagnostics);
+            }
+            if let Some(finally_stmt) = finally_block {
+                collect_statement_raw_diagnostics(finally_stmt, diagnostics);
+            }
+        }
+        IrStatement::Comment { .. }
+        | IrStatement::VariableDeclaration { .. }
+        | IrStatement::SampleDeclaration(_)
+        | IrStatement::MethodDeclaration { .. }
+        | IrStatement::FieldDeclaration { .. }
+        | IrStatement::Expression { .. }
+        | IrStatement::Return { .. }
+        | IrStatement::Switch { .. }
+        | IrStatement::Throw { .. }
+        | IrStatement::Break { .. }
+        | IrStatement::Continue { .. }
+        | IrStatement::Import { .. }
+        | IrStatement::Package { .. } => {}
+    }
+}
+
+fn parse_raw_type_comment(comment: &str) -> Option<(RawTypeContinuation, String)> {
+    let trimmed = comment.trim();
+    let content = if let Some(rest) = trimmed.strip_prefix("//") {
+        rest.trim_start_matches('*').trim()
+    } else if let Some(rest) = trimmed.strip_prefix("/*") {
+        rest.trim_end_matches("*/").trim()
+    } else {
+        trimmed
+    };
+
+    let (mode, payload) = if let Some(rest) = content.strip_prefix("jv:raw-allow") {
+        (RawTypeContinuation::AllowWithComment, rest.trim())
+    } else if let Some(rest) = content.strip_prefix("jv:raw-default") {
+        (RawTypeContinuation::DefaultPolicy, rest.trim())
+    } else {
+        return None;
+    };
+
+    let owner_token = payload.split_whitespace().next().unwrap_or("");
+    let normalized_owner = owner_token
+        .split('.')
+        .map(|segment| segment.trim())
+        .filter(|segment| !segment.is_empty())
+        .collect::<Vec<_>>()
+        .join(".");
+
+    if normalized_owner.is_empty() {
+        return None;
+    }
+
+    Some((mode, normalized_owner))
+}
+
+fn build_raw_type_diagnostic(
+    mode: RawTypeContinuation,
+    owner: String,
+    span: Span,
+) -> Option<EnhancedDiagnostic> {
+    let code = match mode {
+        RawTypeContinuation::DefaultPolicy => "JV3202",
+        RawTypeContinuation::AllowWithComment => "JV3203",
+    };
+
+    let descriptor = lookup(code)?;
+    let message = match mode {
+        RawTypeContinuation::DefaultPolicy => format!(
+            "Raw型 `{owner}` を検出し、防御コードを挿入しました。ジェネリクス型を明示して警告を解消してください。/ Raw type `{owner}` detected; defensive guards were emitted. Provide explicit generics to address the warning."
+        ),
+        RawTypeContinuation::AllowWithComment => format!(
+            "Raw型 `{owner}` はコメントによって継続されています。影響範囲を再確認してください。/ Raw type `{owner}` is continued via comment; verify that the trade-offs are acceptable."
+        ),
+    };
+
+    let mut diagnostic = EnhancedDiagnostic::new(descriptor, message, Some(span));
+
+    if matches!(mode, RawTypeContinuation::AllowWithComment) {
+        diagnostic.severity = DiagnosticSeverity::Information;
+    }
+
+    Some(diagnostic)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::extract_tooling_metadata;
+    use super::{collect_raw_type_diagnostics, extract_tooling_metadata, DiagnosticSeverity};
+    use jv_ast::{Literal, Span};
+    use jv_ir::types::{
+        IrCommentKind, IrExpression, IrModifiers, IrProgram, IrStatement, JavaType,
+    };
 
     #[test]
     fn extract_metadata_captures_quick_fix_and_learning_hint() {
@@ -404,6 +626,57 @@ mod tests {
         assert_eq!(clean, "JV3100: line a\nSecondary line");
         assert_eq!(suggestions, vec!["Quick Fix: when.add -> foo".to_string()]);
         assert!(hint.is_none());
+    }
+
+    fn program_with_comment(comment: &str) -> IrProgram {
+        let span = Span::new(1, 0, 1, comment.len().max(1));
+        let statement = IrStatement::Commented {
+            statement: Box::new(IrStatement::VariableDeclaration {
+                name: "value".to_string(),
+                java_type: JavaType::Primitive("int".to_string()),
+                initializer: Some(IrExpression::Literal(
+                    Literal::Number("1".to_string()),
+                    span.clone(),
+                )),
+                is_final: false,
+                modifiers: IrModifiers::default(),
+                span: span.clone(),
+            }),
+            comment: comment.to_string(),
+            kind: IrCommentKind::Line,
+            comment_span: span.clone(),
+        };
+
+        IrProgram {
+            package: None,
+            imports: Vec::new(),
+            type_declarations: vec![statement],
+            span,
+        }
+    }
+
+    #[test]
+    fn collect_raw_type_diagnostics_detects_default_policy() {
+        let program = program_with_comment("// jv:raw-default demo.Value");
+        let diagnostics = collect_raw_type_diagnostics(&program);
+        assert_eq!(diagnostics.len(), 1);
+        let diagnostic = &diagnostics[0];
+        assert_eq!(diagnostic.code, "JV3202");
+        assert_eq!(diagnostic.severity, DiagnosticSeverity::Warning);
+        assert!(
+            diagnostic.message.contains("demo.Value"),
+            "diagnostic message should mention owner"
+        );
+    }
+
+    #[test]
+    fn collect_raw_type_diagnostics_detects_allow_comment() {
+        let program = program_with_comment("// jv:raw-allow demo.Value");
+        let diagnostics = collect_raw_type_diagnostics(&program);
+        assert_eq!(diagnostics.len(), 1);
+        let diagnostic = &diagnostics[0];
+        assert_eq!(diagnostic.code, "JV3203");
+        assert_eq!(diagnostic.severity, DiagnosticSeverity::Information);
     }
 }
 
