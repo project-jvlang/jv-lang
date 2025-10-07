@@ -25,7 +25,10 @@ fn analyze_signature_records_events_and_policy() {
     let signature = GenericSignature::new(
         Vec::new(),
         None,
-        vec![directive("java.util.List", RawTypeContinuation::DefaultPolicy)],
+        vec![directive(
+            "java.util.List",
+            RawTypeContinuation::DefaultPolicy,
+        )],
         span(),
     );
 

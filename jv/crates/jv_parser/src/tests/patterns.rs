@@ -363,11 +363,18 @@ fn when_arm_accepts_is_pattern_after_newline() {
         panic!("expected when expression");
     };
 
-    assert_eq!(arms.len(), 1, "expected a single pattern arm before the else branch");
+    assert_eq!(
+        arms.len(),
+        1,
+        "expected a single pattern arm before the else branch"
+    );
     match &arms[0].pattern {
         Pattern::Constructor { name, patterns, .. } => {
             assert_eq!(name, "Type");
-            assert!(patterns.is_empty(), "is-pattern should not produce nested args");
+            assert!(
+                patterns.is_empty(),
+                "is-pattern should not produce nested args"
+            );
         }
         other => panic!("expected constructor pattern from is arm, got {other:?}"),
     }
@@ -385,7 +392,11 @@ fn binary_is_requires_same_line_expression() {
     // Steering 2025-10: 改行を挟んだ `is` はパターンでも二項演算子でもなく、独立した式として扱う。
     let program = parse_program("val outcome = subject\nis Type\n");
 
-    assert_eq!(program.statements.len(), 3, "expected val + two expression statements");
+    assert_eq!(
+        program.statements.len(),
+        3,
+        "expected val + two expression statements"
+    );
 
     matches!(&program.statements[0], Statement::ValDeclaration { .. })
         .then_some(())
@@ -398,7 +409,9 @@ fn binary_is_requires_same_line_expression() {
                 "newline should keep `is` as a standalone identifier expression",
             );
         }
-        other => panic!("expected second statement to be bare identifier expression, got {other:?}"),
+        other => {
+            panic!("expected second statement to be bare identifier expression, got {other:?}")
+        }
     }
 
     match &program.statements[2] {

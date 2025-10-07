@@ -75,7 +75,9 @@ pub struct RawTypePolicyPlan {
 impl RawTypePolicyPlan {
     /// Phase 2 では常に TODO として記録する。
     pub fn phase2_placeholder() -> Self {
-        Self { severity_todo: true }
+        Self {
+            severity_todo: true,
+        }
     }
 }
 

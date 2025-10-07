@@ -19,6 +19,8 @@ mod sample;
 mod statements;
 mod types;
 
+pub use types::ErasurePlan;
+
 pub struct JavaCodeGenerator {
     imports: HashMap<String, String>,
     config: JavaCodeGenConfig,
