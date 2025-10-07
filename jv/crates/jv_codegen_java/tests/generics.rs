@@ -3,7 +3,10 @@ use jv_ast::{
     Span,
 };
 use jv_codegen_java::{JavaCodeGenConfig, JavaCodeGenerator, JavaTarget};
-use jv_ir::{IrModifiers, IrProgram, IrStatement, IrTypeParameter, IrVariance, JavaType};
+use jv_ir::{
+    IrCommentKind, IrExpression, IrModifiers, IrProgram, IrStatement, IrTypeParameter, IrVariance,
+    JavaType,
+};
 
 fn dummy_span() -> Span {
     Span::dummy()
@@ -246,4 +249,161 @@ fn raw_type_comment_generation_matches_directive() {
 
     let comment = generator.generate_raw_type_comment(&directive);
     assert_eq!(comment, "// jv:raw-allow java.util.List");
+}
+
+#[test]
+fn raw_default_comment_on_variable_inserts_guard() {
+    let span = dummy_span();
+    let base = IrStatement::VariableDeclaration {
+        name: "list".to_string(),
+        java_type: JavaType::Reference {
+            name: "java.util.List".to_string(),
+            generic_args: Vec::new(),
+        },
+        initializer: Some(IrExpression::Literal(Literal::Null, span.clone())),
+        is_final: false,
+        modifiers: IrModifiers::default(),
+        span: span.clone(),
+    };
+
+    let commented = IrStatement::Commented {
+        statement: Box::new(base),
+        comment: "// jv:raw-default java.util.List".to_string(),
+        kind: IrCommentKind::Line,
+        comment_span: span.clone(),
+    };
+
+    let mut generator = JavaCodeGenerator::new();
+    let rendered = generator
+        .generate_statement(&commented)
+        .expect("guarded statement");
+
+    assert_eq!(
+        rendered,
+        "java.util.List list = Objects.requireNonNull(null, \"JV: raw type guard for java.util.List\"); // jv:raw-default java.util.List"
+    );
+}
+
+#[test]
+fn raw_default_comment_on_field_adds_import_and_guard() {
+    let span = dummy_span();
+    let field = IrStatement::FieldDeclaration {
+        name: "items".to_string(),
+        java_type: JavaType::Reference {
+            name: "java.util.List".to_string(),
+            generic_args: Vec::new(),
+        },
+        initializer: Some(IrExpression::Literal(Literal::Null, span.clone())),
+        modifiers: IrModifiers::default(),
+        span: span.clone(),
+    };
+
+    let commented_field = IrStatement::Commented {
+        statement: Box::new(field),
+        comment: "// jv:raw-default java.util.List".to_string(),
+        kind: IrCommentKind::Line,
+        comment_span: span.clone(),
+    };
+
+    let class = IrStatement::ClassDeclaration {
+        name: "Demo".to_string(),
+        type_parameters: Vec::new(),
+        superclass: None,
+        interfaces: Vec::new(),
+        fields: vec![commented_field],
+        methods: Vec::new(),
+        nested_classes: Vec::new(),
+        modifiers: IrModifiers::default(),
+        span: span.clone(),
+    };
+
+    let program = IrProgram {
+        package: Some("demo".to_string()),
+        imports: Vec::new(),
+        type_declarations: vec![class],
+        span,
+    };
+
+    let mut generator = JavaCodeGenerator::new();
+    let unit = generator
+        .generate_compilation_unit(&program)
+        .expect("compilation unit");
+
+    assert!(
+        unit.imports
+            .contains(&"import java.util.Objects;".to_string()),
+        "expected Objects import but found {:?}",
+        unit.imports
+    );
+
+    let declaration = &unit.type_declarations[0];
+    assert!(
+        declaration
+            .contains("Objects.requireNonNull(null, \"JV: raw type guard for java.util.List\")"),
+        "expected guard in field declaration: {}",
+        declaration
+    );
+}
+
+#[test]
+fn raw_allow_comment_keeps_statement_unchanged() {
+    let span = dummy_span();
+    let base = IrStatement::Return {
+        value: Some(IrExpression::Identifier {
+            name: "value".to_string(),
+            java_type: JavaType::Reference {
+                name: "Object".to_string(),
+                generic_args: Vec::new(),
+            },
+            span: span.clone(),
+        }),
+        span: span.clone(),
+    };
+
+    let commented = IrStatement::Commented {
+        statement: Box::new(base),
+        comment: "// jv:raw-allow demo.Value".to_string(),
+        kind: IrCommentKind::Line,
+        comment_span: span.clone(),
+    };
+
+    let mut generator = JavaCodeGenerator::new();
+    let rendered = generator
+        .generate_statement(&commented)
+        .expect("commented statement");
+
+    assert_eq!(rendered, "return value; // jv:raw-allow demo.Value");
+}
+
+#[test]
+fn raw_default_comment_on_return_inserts_guard() {
+    let span = dummy_span();
+    let base = IrStatement::Return {
+        value: Some(IrExpression::Identifier {
+            name: "result".to_string(),
+            java_type: JavaType::Reference {
+                name: "Object".to_string(),
+                generic_args: Vec::new(),
+            },
+            span: span.clone(),
+        }),
+        span: span.clone(),
+    };
+
+    let commented = IrStatement::Commented {
+        statement: Box::new(base),
+        comment: "// jv:raw-default demo.Result".to_string(),
+        kind: IrCommentKind::Line,
+        comment_span: span.clone(),
+    };
+
+    let mut generator = JavaCodeGenerator::new();
+    let rendered = generator
+        .generate_statement(&commented)
+        .expect("guarded return");
+
+    assert_eq!(
+        rendered,
+        "return Objects.requireNonNull(result, \"JV: raw type guard for demo.Result\"); // jv:raw-default demo.Result"
+    );
 }

@@ -62,4 +62,36 @@ impl JavaCodeGenerator {
 
         format!("// {} {}", prefix, directive.owner.qualified())
     }
+
+    pub(super) fn parse_raw_type_comment(comment: &str) -> Option<(RawTypeContinuation, String)> {
+        let trimmed = comment.trim();
+        let content = if let Some(rest) = trimmed.strip_prefix("//") {
+            rest.trim_start_matches('*').trim()
+        } else if let Some(rest) = trimmed.strip_prefix("/*") {
+            rest.trim_end_matches("*/").trim()
+        } else {
+            trimmed
+        };
+
+        let (mode, payload) = if let Some(rest) = content.strip_prefix("jv:raw-allow") {
+            (RawTypeContinuation::AllowWithComment, rest.trim())
+        } else if let Some(rest) = content.strip_prefix("jv:raw-default") {
+            (RawTypeContinuation::DefaultPolicy, rest.trim())
+        } else {
+            return None;
+        };
+
+        let normalized_owner = payload
+            .split('.')
+            .map(|segment| segment.trim())
+            .filter(|segment| !segment.is_empty())
+            .collect::<Vec<_>>()
+            .join(".");
+
+        if normalized_owner.is_empty() {
+            return None;
+        }
+
+        Some((mode, normalized_owner))
+    }
 }
