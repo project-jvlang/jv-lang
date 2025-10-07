@@ -30,56 +30,65 @@ impl JavaCodeGenerator {
             let generics = self.render_type_parameters(type_parameters)?;
             header.push_str(&generics);
 
-            if let Some(super_ty) = superclass {
-                header.push_str(" extends ");
-                header.push_str(&self.generate_type(super_ty)?);
-            }
-            let implements = self.render_interface_clause("implements", interfaces)?;
-            header.push_str(&implements);
+            let scope_len = self.variance_scope_len();
+            self.push_variance_scope(type_parameters);
 
-            let mut fallback_comment = None;
-            if modifiers.is_sealed {
-                if let Some(clause) = self.targeting.permits_clause(&modifiers.permitted_types) {
-                    header.push_str(&clause);
-                } else {
-                    fallback_comment = self
-                        .targeting
-                        .sealed_fallback_comment(&modifiers.permitted_types);
+            let result = (|| -> Result<String, CodeGenError> {
+                if let Some(super_ty) = superclass {
+                    header.push_str(" extends ");
+                    header.push_str(&self.generate_type(super_ty)?);
                 }
-            }
+                let implements = self.render_interface_clause("implements", interfaces)?;
+                header.push_str(&implements);
 
-            builder.push_line(&format!("{} {{", header.trim()));
-            builder.indent();
+                let mut fallback_comment = None;
+                if modifiers.is_sealed {
+                    if let Some(clause) = self.targeting.permits_clause(&modifiers.permitted_types)
+                    {
+                        header.push_str(&clause);
+                    } else {
+                        fallback_comment = self
+                            .targeting
+                            .sealed_fallback_comment(&modifiers.permitted_types);
+                    }
+                }
 
-            if let Some(comment) = fallback_comment {
-                builder.push_line(&comment);
-            }
+                builder.push_line(&format!("{} {{", header.trim()));
+                builder.indent();
 
-            for field in fields {
-                let field_code = self.generate_statement(field)?;
-                Self::push_lines(&mut builder, &field_code);
-            }
+                if let Some(comment) = fallback_comment {
+                    builder.push_line(&comment);
+                }
 
-            if !fields.is_empty() && (!methods.is_empty() || !nested_classes.is_empty()) {
-                builder.push_line("");
-            }
+                for field in fields {
+                    let field_code = self.generate_statement(field)?;
+                    Self::push_lines(&mut builder, &field_code);
+                }
 
-            for method in methods {
-                let method_code = self.generate_method(method)?;
-                Self::push_lines(&mut builder, &method_code);
-                builder.push_line("");
-            }
+                if !fields.is_empty() && (!methods.is_empty() || !nested_classes.is_empty()) {
+                    builder.push_line("");
+                }
 
-            for nested in nested_classes {
-                let nested_code = self.generate_class(nested)?;
-                Self::push_lines(&mut builder, &nested_code);
-                builder.push_line("");
-            }
+                for method in methods {
+                    let method_code = self.generate_method(method)?;
+                    Self::push_lines(&mut builder, &method_code);
+                    builder.push_line("");
+                }
 
-            builder.dedent();
-            builder.push_line("}");
+                for nested in nested_classes {
+                    let nested_code = self.generate_class(nested)?;
+                    Self::push_lines(&mut builder, &nested_code);
+                    builder.push_line("");
+                }
 
-            Ok(builder.build())
+                builder.dedent();
+                builder.push_line("}");
+
+                Ok(builder.build())
+            })();
+
+            self.truncate_variance_scopes(scope_len);
+            result
         } else {
             Err(CodeGenError::UnsupportedConstruct {
                 construct: "Expected class declaration".to_string(),
@@ -114,30 +123,38 @@ impl JavaCodeGenerator {
             let generics = self.render_type_parameters(type_parameters)?;
             header.push_str(&generics);
 
-            header.push('(');
-            header.push_str(&self.render_record_components(components)?);
-            header.push(')');
+            let scope_len = self.variance_scope_len();
+            self.push_variance_scope(type_parameters);
 
-            let implements = self.render_interface_clause("implements", interfaces)?;
-            header.push_str(&implements);
+            let result = (|| -> Result<String, CodeGenError> {
+                header.push('(');
+                header.push_str(&self.render_record_components(components)?);
+                header.push(')');
 
-            if methods.is_empty() {
-                header.push(';');
-                builder.push_line(&header);
-                return Ok(builder.build());
-            }
+                let implements = self.render_interface_clause("implements", interfaces)?;
+                header.push_str(&implements);
 
-            builder.push_line(&format!("{} {{", header));
-            builder.indent();
-            for method in methods {
-                let method_code = self.generate_method(method)?;
-                Self::push_lines(&mut builder, &method_code);
-                builder.push_line("");
-            }
-            builder.dedent();
-            builder.push_line("}");
+                if methods.is_empty() {
+                    header.push(';');
+                    builder.push_line(&header);
+                    return Ok(builder.build());
+                }
 
-            Ok(builder.build())
+                builder.push_line(&format!("{} {{", header));
+                builder.indent();
+                for method in methods {
+                    let method_code = self.generate_method(method)?;
+                    Self::push_lines(&mut builder, &method_code);
+                    builder.push_line("");
+                }
+                builder.dedent();
+                builder.push_line("}");
+
+                Ok(builder.build())
+            })();
+
+            self.truncate_variance_scopes(scope_len);
+            result
         } else {
             Err(CodeGenError::UnsupportedConstruct {
                 construct: "Expected record declaration".to_string(),
@@ -174,60 +191,71 @@ impl JavaCodeGenerator {
             let generics = self.render_type_parameters(type_parameters)?;
             header.push_str(&generics);
 
-            let extends = self.render_interface_clause("extends", superinterfaces)?;
-            header.push_str(&extends);
+            let scope_len = self.variance_scope_len();
+            self.push_variance_scope(type_parameters);
 
-            let mut fallback_comment = None;
-            if modifiers.is_sealed {
-                if let Some(clause) = self.targeting.permits_clause(&modifiers.permitted_types) {
-                    header.push_str(&clause);
-                } else {
-                    fallback_comment = self
-                        .targeting
-                        .sealed_fallback_comment(&modifiers.permitted_types);
+            let result = (|| -> Result<String, CodeGenError> {
+                let extends = self.render_interface_clause("extends", superinterfaces)?;
+                header.push_str(&extends);
+
+                let mut fallback_comment = None;
+                if modifiers.is_sealed {
+                    if let Some(clause) = self.targeting.permits_clause(&modifiers.permitted_types)
+                    {
+                        header.push_str(&clause);
+                    } else {
+                        fallback_comment = self
+                            .targeting
+                            .sealed_fallback_comment(&modifiers.permitted_types);
+                    }
                 }
-            }
 
-            builder.push_line(&format!("{} {{", header.trim()));
-            builder.indent();
+                builder.push_line(&format!("{} {{", header.trim()));
+                builder.indent();
 
-            if let Some(comment) = fallback_comment {
-                builder.push_line(&comment);
-            }
+                if let Some(comment) = fallback_comment {
+                    builder.push_line(&comment);
+                }
 
-            for field in fields {
-                let field_code = self.generate_statement(field)?;
-                Self::push_lines(&mut builder, &field_code);
-            }
-            if !fields.is_empty() && (!methods.is_empty() || !default_methods.is_empty()) {
-                builder.push_line("");
-            }
+                for field in fields {
+                    let field_code = self.generate_statement(field)?;
+                    Self::push_lines(&mut builder, &field_code);
+                }
+                if !fields.is_empty() && (!methods.is_empty() || !default_methods.is_empty()) {
+                    builder.push_line("");
+                }
 
-            for method in methods {
-                let method_code = self.generate_method(method)?;
-                Self::push_lines(&mut builder, &method_code);
-            }
+                for method in methods {
+                    let method_code = self.generate_method(method)?;
+                    Self::push_lines(&mut builder, &method_code);
+                }
 
-            for method in default_methods {
-                let method_code = self.generate_method(method)?;
-                Self::push_lines(&mut builder, &method_code);
-            }
+                for method in default_methods {
+                    let method_code = self.generate_method(method)?;
+                    Self::push_lines(&mut builder, &method_code);
+                }
 
-            for nested in nested_types {
-                let nested_code = match JavaCodeGenerator::base_statement(nested) {
-                    IrStatement::ClassDeclaration { .. } => self.generate_class(nested)?,
-                    IrStatement::InterfaceDeclaration { .. } => self.generate_interface(nested)?,
-                    IrStatement::RecordDeclaration { .. } => self.generate_record(nested)?,
-                    _ => self.generate_statement(nested)?,
-                };
-                Self::push_lines(&mut builder, &nested_code);
-                builder.push_line("");
-            }
+                for nested in nested_types {
+                    let nested_code = match JavaCodeGenerator::base_statement(nested) {
+                        IrStatement::ClassDeclaration { .. } => self.generate_class(nested)?,
+                        IrStatement::InterfaceDeclaration { .. } => {
+                            self.generate_interface(nested)?
+                        }
+                        IrStatement::RecordDeclaration { .. } => self.generate_record(nested)?,
+                        _ => self.generate_statement(nested)?,
+                    };
+                    Self::push_lines(&mut builder, &nested_code);
+                    builder.push_line("");
+                }
 
-            builder.dedent();
-            builder.push_line("}");
+                builder.dedent();
+                builder.push_line("}");
 
-            Ok(builder.build())
+                Ok(builder.build())
+            })();
+
+            self.truncate_variance_scopes(scope_len);
+            result
         } else {
             Err(CodeGenError::UnsupportedConstruct {
                 construct: "Expected interface declaration".to_string(),

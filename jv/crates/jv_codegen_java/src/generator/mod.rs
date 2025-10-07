@@ -7,8 +7,8 @@ use jv_ir::{
     CompletableFutureOp, IrCaseLabel, IrCatchClause, IrDeconstructionComponent,
     IrDeconstructionPattern, IrExpression, IrForEachKind, IrForLoopMetadata, IrImplicitWhenEnd,
     IrModifiers, IrNumericRangeLoop, IrParameter, IrProgram, IrRecordComponent, IrResource,
-    IrSampleDeclaration, IrStatement, IrSwitchCase, IrTypeParameter, IrVisibility, JavaType,
-    MethodOverload, UtilityClass, VirtualThreadOp,
+    IrSampleDeclaration, IrStatement, IrSwitchCase, IrTypeParameter, IrVariance, IrVisibility,
+    JavaType, MethodOverload, UtilityClass, VirtualThreadOp,
 };
 use std::collections::HashMap;
 
@@ -25,6 +25,7 @@ pub struct JavaCodeGenerator {
     imports: HashMap<String, String>,
     config: JavaCodeGenConfig,
     targeting: TargetedJavaEmitter,
+    variance_stack: Vec<HashMap<String, IrVariance>>,
 }
 
 impl JavaCodeGenerator {
@@ -38,6 +39,7 @@ impl JavaCodeGenerator {
             imports: HashMap::new(),
             config,
             targeting: TargetedJavaEmitter::new(target),
+            variance_stack: Vec::new(),
         }
     }
 
@@ -193,6 +195,36 @@ impl JavaCodeGenerator {
 
     fn reset(&mut self) {
         self.imports.clear();
+        self.variance_stack.clear();
+    }
+
+    pub(super) fn push_variance_scope(&mut self, params: &[IrTypeParameter]) {
+        if params.is_empty() {
+            return;
+        }
+
+        let mut scope = HashMap::with_capacity(params.len());
+        for param in params {
+            scope.insert(param.name.clone(), param.variance);
+        }
+        self.variance_stack.push(scope);
+    }
+
+    pub(super) fn truncate_variance_scopes(&mut self, len: usize) {
+        self.variance_stack.truncate(len);
+    }
+
+    pub(super) fn variance_scope_len(&self) -> usize {
+        self.variance_stack.len()
+    }
+
+    pub(super) fn lookup_variance(&self, name: &str) -> Option<IrVariance> {
+        for scope in self.variance_stack.iter().rev() {
+            if let Some(variance) = scope.get(name) {
+                return Some(*variance);
+            }
+        }
+        None
     }
 
     fn base_statement<'a>(statement: &'a IrStatement) -> &'a IrStatement {

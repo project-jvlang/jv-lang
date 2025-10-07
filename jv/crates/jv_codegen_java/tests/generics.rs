@@ -1,4 +1,7 @@
-use jv_ast::Span;
+use jv_ast::{
+    types::{QualifiedName, RawTypeContinuation, RawTypeDirective},
+    Span,
+};
 use jv_codegen_java::{JavaCodeGenConfig, JavaCodeGenerator, JavaTarget};
 use jv_ir::{IrModifiers, IrProgram, IrStatement, IrTypeParameter, IrVariance, JavaType};
 
@@ -118,4 +121,129 @@ fn class_signature_includes_generic_bounds() {
         "expected generic bounds in class signature: {}",
         class_source
     );
+}
+
+#[test]
+fn covariant_type_arguments_render_wildcards() {
+    let span = dummy_span();
+    let class = IrStatement::ClassDeclaration {
+        name: "Box".to_string(),
+        type_parameters: vec![IrTypeParameter {
+            name: "T".to_string(),
+            bounds: Vec::new(),
+            variance: IrVariance::Covariant,
+            permits: Vec::new(),
+            span: span.clone(),
+        }],
+        superclass: None,
+        interfaces: Vec::new(),
+        fields: vec![IrStatement::FieldDeclaration {
+            name: "items".to_string(),
+            java_type: JavaType::Reference {
+                name: "java.util.List".to_string(),
+                generic_args: vec![JavaType::Reference {
+                    name: "T".to_string(),
+                    generic_args: Vec::new(),
+                }],
+            },
+            initializer: None,
+            modifiers: IrModifiers::default(),
+            span: span.clone(),
+        }],
+        methods: Vec::new(),
+        nested_classes: Vec::new(),
+        modifiers: IrModifiers::default(),
+        span: span.clone(),
+    };
+
+    let program = IrProgram {
+        package: Some("demo".to_string()),
+        imports: Vec::new(),
+        type_declarations: vec![class],
+        span,
+    };
+
+    let mut generator =
+        JavaCodeGenerator::with_config(JavaCodeGenConfig::for_target(JavaTarget::Java25));
+    let unit = generator
+        .generate_compilation_unit(&program)
+        .expect("class generation");
+    let class_source = &unit.type_declarations[0];
+
+    assert!(
+        class_source.contains("java.util.List<? extends T> items;"),
+        "expected covariant wildcard: {}",
+        class_source
+    );
+}
+
+#[test]
+fn contravariant_type_arguments_render_wildcards() {
+    let span = dummy_span();
+    let class = IrStatement::ClassDeclaration {
+        name: "Sink".to_string(),
+        type_parameters: vec![IrTypeParameter {
+            name: "U".to_string(),
+            bounds: Vec::new(),
+            variance: IrVariance::Contravariant,
+            permits: Vec::new(),
+            span: span.clone(),
+        }],
+        superclass: None,
+        interfaces: Vec::new(),
+        fields: vec![IrStatement::FieldDeclaration {
+            name: "consumer".to_string(),
+            java_type: JavaType::Reference {
+                name: "java.util.function.Consumer".to_string(),
+                generic_args: vec![JavaType::Reference {
+                    name: "U".to_string(),
+                    generic_args: Vec::new(),
+                }],
+            },
+            initializer: None,
+            modifiers: IrModifiers::default(),
+            span: span.clone(),
+        }],
+        methods: Vec::new(),
+        nested_classes: Vec::new(),
+        modifiers: IrModifiers::default(),
+        span: span.clone(),
+    };
+
+    let program = IrProgram {
+        package: Some("demo".to_string()),
+        imports: Vec::new(),
+        type_declarations: vec![class],
+        span,
+    };
+
+    let mut generator =
+        JavaCodeGenerator::with_config(JavaCodeGenConfig::for_target(JavaTarget::Java25));
+    let unit = generator
+        .generate_compilation_unit(&program)
+        .expect("class generation");
+    let class_source = &unit.type_declarations[0];
+
+    assert!(
+        class_source.contains("java.util.function.Consumer<? super U> consumer;"),
+        "expected contravariant wildcard: {}",
+        class_source
+    );
+}
+
+#[test]
+fn raw_type_comment_generation_matches_directive() {
+    let generator = JavaCodeGenerator::new();
+    let span = dummy_span();
+    let directive = RawTypeDirective {
+        owner: QualifiedName::new(
+            vec!["java".into(), "util".into(), "List".into()],
+            span.clone(),
+        ),
+        span,
+        mode: RawTypeContinuation::AllowWithComment,
+    };
+
+    let comment = generator.generate_raw_type_comment(&directive);
+    assert_eq!(comment, "// jv:raw-allow java.util.List");
 }

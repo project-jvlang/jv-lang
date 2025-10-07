@@ -1,6 +1,6 @@
 use super::*;
-use jv_ast::Span;
-use jv_ir::JavaWildcardKind;
+use jv_ast::{types::RawTypeDirective, Span};
+use jv_ir::{IrVariance, JavaWildcardKind};
 
 const TYPE_TOKEN_ERROR_CODE: &str = "JV3201";
 
@@ -126,15 +126,36 @@ impl JavaCodeGenerator {
     /// - Wildcard types (? extends, ? super)
     /// - Void type
     pub fn generate_type(&self, java_type: &JavaType) -> Result<String, CodeGenError> {
+        self.generate_type_internal(java_type, false)
+    }
+
+    // Future extensions for java-generics-interop spec:
+    // - emit_defensive_code (Task 5: defensive casts and null checks)
+    fn generate_type_internal(
+        &self,
+        java_type: &JavaType,
+        in_argument_position: bool,
+    ) -> Result<String, CodeGenError> {
         Ok(match java_type {
             JavaType::Primitive(name) => name.clone(),
             JavaType::Reference { name, generic_args } => {
-                if generic_args.is_empty() {
+                if in_argument_position && generic_args.is_empty() {
+                    if let Some(variance) = self.lookup_variance(name) {
+                        match variance {
+                            IrVariance::Covariant => format!("? extends {}", name),
+                            IrVariance::Contravariant => format!("? super {}", name),
+                            IrVariance::Bivariant => "?".to_string(),
+                            IrVariance::Invariant => name.clone(),
+                        }
+                    } else {
+                        name.clone()
+                    }
+                } else if generic_args.is_empty() {
                     name.clone()
                 } else {
                     let mut rendered = Vec::new();
                     for arg in generic_args {
-                        rendered.push(self.generate_type(arg)?);
+                        rendered.push(self.generate_type_internal(arg, true)?);
                     }
                     format!("{}<{}>", name, rendered.join(", "))
                 }
@@ -143,7 +164,7 @@ impl JavaCodeGenerator {
                 element_type,
                 dimensions,
             } => {
-                let base = self.generate_type(element_type)?;
+                let base = self.generate_type_internal(element_type, false)?;
                 let suffix = "[]".repeat(*dimensions);
                 format!("{}{}", base, suffix)
             }
@@ -153,7 +174,7 @@ impl JavaCodeGenerator {
                 JavaWildcardKind::Extends => {
                     let ty = bound
                         .as_ref()
-                        .map(|inner| self.generate_type(inner))
+                        .map(|inner| self.generate_type_internal(inner, false))
                         .transpose()?
                         .unwrap_or_else(|| "Object".to_string());
                     format!("? extends {}", ty)
@@ -161,7 +182,7 @@ impl JavaCodeGenerator {
                 JavaWildcardKind::Super => {
                     let ty = bound
                         .as_ref()
-                        .map(|inner| self.generate_type(inner))
+                        .map(|inner| self.generate_type_internal(inner, false))
                         .transpose()?
                         .unwrap_or_else(|| "Object".to_string());
                     format!("? super {}", ty)
@@ -171,9 +192,8 @@ impl JavaCodeGenerator {
         })
     }
 
-    // Future extensions for java-generics-interop spec:
-    // - generate_type_with_variance (Task 5: variance metadata handling)
-    // - generate_raw_type_comment (Task 5: raw type continuation comments)
-    // - emit_defensive_code (Task 5: defensive casts and null checks)
-    // - emit_type_token (Task 4: type erasure helper)
+    /// Render the raw type continuation comment corresponding to a directive.
+    pub fn generate_raw_type_comment(&self, directive: &RawTypeDirective) -> String {
+        Self::render_raw_type_comment(directive)
+    }
 }

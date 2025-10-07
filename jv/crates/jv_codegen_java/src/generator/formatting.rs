@@ -1,4 +1,5 @@
 use super::*;
+use jv_ast::types::{RawTypeContinuation, RawTypeDirective};
 
 impl JavaCodeGenerator {
     /// Escape special characters in Java string literals.
@@ -51,5 +52,14 @@ impl JavaCodeGenerator {
         }
 
         code
+    }
+
+    pub(super) fn render_raw_type_comment(directive: &RawTypeDirective) -> String {
+        let prefix = match directive.mode {
+            RawTypeContinuation::AllowWithComment => "jv:raw-allow",
+            RawTypeContinuation::DefaultPolicy => "jv:raw-default",
+        };
+
+        format!("// {} {}", prefix, directive.owner.qualified())
     }
 }
