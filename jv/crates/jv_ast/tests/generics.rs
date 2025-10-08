@@ -61,7 +61,12 @@ fn signature_collects_raw_directives_and_where_clause() {
 
     let owner = &signature.raw_directives[0].owner;
     assert_eq!(owner.qualified(), "demo.Widget");
-    assert!(signature.where_clause.as_ref().unwrap().predicates.is_empty());
+    assert!(signature
+        .where_clause
+        .as_ref()
+        .unwrap()
+        .predicates
+        .is_empty());
 }
 
 #[test]
