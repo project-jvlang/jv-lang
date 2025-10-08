@@ -63,6 +63,7 @@ pub enum RawTokenKind {
     Identifier,
     NumberCandidate,
     Symbol,
+    RegexCandidate,
     Whitespace,
     CommentCandidate,
     Eof,

@@ -214,11 +214,15 @@ impl<S, N, C, E> LexerPipeline<S, N, C, E> {
             trace::emitted_tokens(&emitted);
             let mut reached_end = false;
             for token in emitted {
-                if matches!(token.token_type, TokenType::Eof) {
+                let token_type_clone = token.token_type.clone();
+                if matches!(token_type_clone, TokenType::Eof) {
                     reached_end = true;
                 }
                 sink.push(token)?;
                 ctx.increment_emitted();
+                if !matches!(token_type_clone, TokenType::Whitespace(_)) {
+                    ctx.set_last_token_type(Some(token_type_clone));
+                }
             }
             ctx.clear_lookahead_window();
             self.stages.scanner.commit_position();

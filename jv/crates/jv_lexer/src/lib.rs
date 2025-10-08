@@ -16,6 +16,7 @@ pub enum TokenType {
     Number(String),              // Store as string to avoid f64 Eq issues, parse later
     Identifier(String),
     Boolean(bool),
+    RegexLiteral(String),
 
     // Keywords
     Val,
@@ -234,6 +235,10 @@ pub enum TokenMetadata {
     StringInterpolation {
         segments: Vec<StringInterpolationSegment>,
     },
+    RegexLiteral {
+        raw: String,
+        pattern: String,
+    },
     CommentCarryOver(CommentCarryOverMetadata),
 }
 
@@ -291,6 +296,14 @@ pub enum LexError {
     UnexpectedChar(char, usize, usize),
     #[error("Unterminated string at line {0}, column {1}")]
     UnterminatedString(usize, usize),
+    #[error("Unterminated regex literal at line {line}, column {column}")]
+    UnterminatedRegex { line: usize, column: usize },
+    #[error("Invalid character {character:?} in regex literal at line {line}, column {column}")]
+    InvalidRegexCharacter {
+        character: char,
+        line: usize,
+        column: usize,
+    },
     #[error("Lookahead buffer overflow (requested {requested} bytes)")]
     LookaheadOverflow { requested: usize },
 }
