@@ -167,6 +167,10 @@ fn literal_to_java_type(literal: &Literal) -> JavaType {
         Literal::Boolean(_) => JavaType::boolean(),
         Literal::Character(_) => JavaType::Primitive("char".to_string()),
         Literal::Null => JavaType::object(),
+        Literal::Regex(_) => JavaType::Reference {
+            name: "java.util.regex.Pattern".to_string(),
+            generic_args: Vec::new(),
+        },
     }
 }
 

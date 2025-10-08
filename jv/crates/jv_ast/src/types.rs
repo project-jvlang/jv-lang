@@ -26,6 +26,16 @@ impl Span {
     }
 }
 
+/// Regex literal metadata capturing both the normalized pattern and raw source text.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RegexLiteral {
+    /// Pattern string with escapes normalized by the lexer.
+    pub pattern: String,
+    /// Raw literal text including delimiters as it appeared in source.
+    pub raw: String,
+    pub span: Span,
+}
+
 /// Literal values
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Literal {
@@ -34,6 +44,7 @@ pub enum Literal {
     Boolean(bool),
     Null,
     Character(char),
+    Regex(RegexLiteral),
 }
 
 /// Binary operators

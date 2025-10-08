@@ -1,9 +1,10 @@
 use chumsky::prelude::*;
 use chumsky::Parser as ChumskyParser;
 use jv_ast::{
-    ConcurrencyConstruct, Expression, ResourceManagement, Span, Statement, TypeAnnotation,
+    ConcurrencyConstruct, Expression, RegexLiteral, ResourceManagement, Span, Statement,
+    TypeAnnotation,
 };
-use jv_lexer::{Token, TokenType};
+use jv_lexer::{Token, TokenMetadata, TokenType};
 
 pub(crate) fn token_val() -> impl ChumskyParser<Token, Token, Error = Simple<Token>> + Clone {
     filter(|token: &Token| matches!(token.token_type, TokenType::Val))
@@ -289,6 +290,31 @@ pub(crate) fn span_from_token(token: &Token) -> Span {
     }
 }
 
+pub(crate) fn regex_literal_from_token(token: &Token, span: Span) -> RegexLiteral {
+    let normalized = match &token.token_type {
+        TokenType::RegexLiteral(value) => value.clone(),
+        _ => token.lexeme.clone(),
+    };
+
+    let (raw, pattern) = token
+        .metadata
+        .iter()
+        .find_map(|metadata| match metadata {
+            TokenMetadata::RegexLiteral { raw, pattern } => Some((raw.clone(), pattern.clone())),
+            _ => None,
+        })
+        .unwrap_or_else(|| (format!("/{normalized}/"), normalized.clone()));
+
+    let mut computed_span = span;
+    computed_span.end_column = computed_span.start_column + raw.chars().count();
+
+    RegexLiteral {
+        pattern,
+        raw,
+        span: computed_span,
+    }
+}
+
 pub(crate) fn merge_spans(start: &Span, end: &Span) -> Span {
     Span {
         start_line: start.start_line,
@@ -301,6 +327,7 @@ pub(crate) fn merge_spans(start: &Span, end: &Span) -> Span {
 pub(crate) fn expression_span(expr: &Expression) -> Span {
     match expr {
         Expression::Literal(_, span) => span.clone(),
+        Expression::RegexLiteral(literal) => literal.span.clone(),
         Expression::Identifier(_, span) => span.clone(),
         Expression::Binary { span, .. } => span.clone(),
         Expression::Unary { span, .. } => span.clone(),

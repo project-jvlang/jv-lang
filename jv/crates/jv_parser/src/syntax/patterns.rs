@@ -4,8 +4,9 @@ use jv_ast::{BinaryOp, Expression, Literal, Pattern, Span};
 use jv_lexer::{Token, TokenType};
 
 use super::support::{
-    expression_span, identifier_with_span, keyword, merge_spans, span_from_token, token_and,
-    token_any_comma, token_in_keyword, token_left_paren, token_right_paren,
+    expression_span, identifier_with_span, keyword, merge_spans, regex_literal_from_token,
+    span_from_token, token_and, token_any_comma, token_in_keyword, token_left_paren,
+    token_right_paren,
 };
 
 /// Parser for patterns used in `when` expressions.
@@ -25,6 +26,7 @@ pub(crate) fn when_pattern_parser(
                     | TokenType::Number(_)
                     | TokenType::Boolean(_)
                     | TokenType::Null
+                    | TokenType::RegexLiteral(_)
             )
         })
         .map(|token: Token| {
@@ -34,6 +36,10 @@ pub(crate) fn when_pattern_parser(
                 TokenType::Number(value) => Pattern::Literal(Literal::Number(value), token_span),
                 TokenType::Boolean(value) => Pattern::Literal(Literal::Boolean(value), token_span),
                 TokenType::Null => Pattern::Literal(Literal::Null, token_span),
+                TokenType::RegexLiteral(_) => {
+                    let literal = regex_literal_from_token(&token, token_span);
+                    Pattern::Literal(Literal::Regex(literal.clone()), literal.span.clone())
+                }
                 _ => unreachable!("filter ensures only literal tokens reach this branch"),
             }
         });

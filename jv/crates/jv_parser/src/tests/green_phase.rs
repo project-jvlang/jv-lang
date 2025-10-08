@@ -1,7 +1,7 @@
 use super::support::{first_statement, parse_program, parse_program_result};
 use jv_ast::{
     Argument, ArgumentElementKind, BinaryOp, CallArgumentStyle, CommentKind, CommentVisibility,
-    ConcurrencyConstruct, Expression, JsonValue, Literal, LoopStrategy, Pattern,
+    ConcurrencyConstruct, Expression, JsonValue, Literal, LoopStrategy, Pattern, RegexLiteral,
     ResourceManagement, SequenceDelimiter, Statement, StringPart, TypeAnnotation, ValBindingOrigin,
     VarianceMarker, WherePredicate,
 };
@@ -71,6 +71,25 @@ fn test_var_declaration() {
             }
         }
         other => panic!("expected var declaration, found {:?}", other),
+    }
+}
+
+#[test]
+fn regex_literal_expression_captures_raw_and_pattern() {
+    let program = parse_program("val pattern = /a\\/b/");
+    let statement = first_statement(&program);
+
+    match statement {
+        Statement::ValDeclaration { initializer, .. } => match initializer {
+            Expression::RegexLiteral(RegexLiteral { pattern, raw, span }) => {
+                assert_eq!(pattern, "a/b");
+                assert_eq!(raw, "/a\\/b/");
+                assert_eq!(span.start_line, 1);
+                assert!(span.end_column > span.start_column);
+            }
+            other => panic!("expected regex literal initializer, found {:?}", other),
+        },
+        other => panic!("expected val declaration, found {:?}", other),
     }
 }
 

@@ -1,5 +1,5 @@
 use super::support::{first_statement, parse_program, parse_program_result};
-use jv_ast::{Expression, Literal, Pattern, Statement};
+use jv_ast::{Expression, Literal, Pattern, RegexLiteral, Statement};
 
 fn extract_when_expression(source: &str) -> Expression {
     let program = parse_program(source);
@@ -89,6 +89,26 @@ fn parses_null_literal_pattern() {
     matches!(pattern, Pattern::Literal(Literal::Null, _))
         .then_some(())
         .expect("expected null literal pattern");
+}
+
+#[test]
+fn parses_regex_literal_pattern() {
+    let pattern = first_arm_pattern("val result = when (value) { /foo/ -> 1 else -> 0 }\n");
+    match pattern {
+        Pattern::Literal(
+            Literal::Regex(RegexLiteral {
+                pattern,
+                raw,
+                span: literal_span,
+            }),
+            span,
+        ) => {
+            assert_eq!(pattern, "foo");
+            assert_eq!(raw, "/foo/");
+            assert_eq!(literal_span, span);
+        }
+        other => panic!("expected regex literal pattern, got {other:?}"),
+    }
 }
 
 #[test]
