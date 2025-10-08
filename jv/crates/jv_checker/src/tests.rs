@@ -1,6 +1,8 @@
 use super::*;
 use crate::pattern::{self, PatternTarget};
+use crate::regex::RegexValidator;
 use crate::TypeKind;
+use fastrand::Rng;
 use jv_ast::{
     Annotation, AnnotationName, BinaryOp, Expression, Literal, Modifiers, Parameter, Pattern,
     Program, RegexLiteral, Span, Statement, TypeAnnotation, ValBindingOrigin, WhenArm,
@@ -643,4 +645,122 @@ fn regex_validator_reports_unbalanced_groups() {
         error,
         CheckError::ValidationError { message, .. } if message.contains("JV5101")
     )));
+}
+
+fn build_regex_program(pattern: &str) -> Program {
+    let span = dummy_span();
+    let literal = RegexLiteral {
+        pattern: pattern.to_string(),
+        raw: format!("/{pattern}/"),
+        span: span.clone(),
+    };
+    Program {
+        package: None,
+        imports: Vec::new(),
+        statements: vec![Statement::ValDeclaration {
+            name: "pattern".into(),
+            type_annotation: None,
+            initializer: Expression::RegexLiteral(literal),
+            modifiers: default_modifiers(),
+            origin: ValBindingOrigin::ExplicitKeyword,
+            span,
+        }],
+        span: dummy_span(),
+    }
+}
+
+fn run_regex_validator(pattern: &str) -> Vec<CheckError> {
+    let program = build_regex_program(pattern);
+    let mut validator = RegexValidator::new();
+    validator.validate_program(&program)
+}
+
+fn sample_valid_pattern(rng: &mut Rng) -> String {
+    sample_valid_pattern_with_depth(rng, 0)
+}
+
+fn sample_valid_pattern_with_depth(rng: &mut Rng, depth: u8) -> String {
+    let segments = rng.usize(1..=6);
+    let mut pattern = String::new();
+    for _ in 0..segments {
+        let choice_limit = if depth < 2 { 5 } else { 4 };
+        let segment = match rng.usize(0..choice_limit) {
+            0 => sample_literal_atom(rng),
+            1 => sample_escape_atom(rng).to_string(),
+            2 => sample_quantified(sample_literal_atom(rng), rng),
+            3 => sample_quantified(sample_escape_atom(rng).to_string(), rng),
+            _ => format!("({})", sample_valid_pattern_with_depth(rng, depth + 1)),
+        };
+        pattern.push_str(&segment);
+    }
+    pattern
+}
+
+fn sample_literal_atom(rng: &mut Rng) -> String {
+    const LITERALS: &[char] = &[
+        'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r',
+        's', 't', 'u', 'v', 'w', 'x', 'y', 'z', 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J',
+        'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z', '0', '1',
+        '2', '3', '4', '5', '6', '7', '8', '9', '_', '.', '-', '^',
+    ];
+    let len = rng.usize(1..=3);
+    (0..len)
+        .map(|_| {
+            let idx = rng.usize(0..LITERALS.len());
+            LITERALS[idx]
+        })
+        .collect()
+}
+
+fn sample_escape_atom(rng: &mut Rng) -> &'static str {
+    const ESCAPES: &[&str] = &[
+        "\\d", "\\D", "\\s", "\\S", "\\w", "\\W", "\\t", "\\n", "\\r", "\\b", "\\B", "\\+", "\\.",
+        "\\?", "\\*", "\\Q", "\\E", "\\/", "\\\\",
+    ];
+    let idx = rng.usize(0..ESCAPES.len());
+    ESCAPES[idx]
+}
+
+fn sample_quantified(atom: String, rng: &mut Rng) -> String {
+    const QUANTIFIERS: &[&str] = &["+", "*", "?"];
+    let idx = rng.usize(0..QUANTIFIERS.len());
+    format!("{atom}{}", QUANTIFIERS[idx])
+}
+
+fn random_invalid_escape_char(rng: &mut Rng) -> char {
+    const INVALID_ESCAPES: &[char] = &['q', 'h', '!', 'y'];
+    let idx = rng.usize(0..INVALID_ESCAPES.len());
+    INVALID_ESCAPES[idx]
+}
+
+#[test]
+fn regex_validator_fuzzes_valid_patterns_without_errors() {
+    let mut rng = Rng::with_seed(0xC0FFEE);
+    for iteration in 0..256 {
+        let pattern = sample_valid_pattern(&mut rng);
+        let errors = run_regex_validator(&pattern);
+        assert!(
+            errors.is_empty(),
+            "iteration {iteration}: unexpected errors for pattern {pattern:?}: {errors:?}"
+        );
+    }
+}
+
+#[test]
+fn regex_validator_fuzzes_invalid_escape_detection() {
+    let mut rng = Rng::with_seed(0xFEEDBEEF);
+    for iteration in 0..256 {
+        let mut pattern = sample_valid_pattern(&mut rng);
+        let invalid = random_invalid_escape_char(&mut rng);
+        pattern.push('\\');
+        pattern.push(invalid);
+        let errors = run_regex_validator(&pattern);
+        assert!(
+            errors.iter().any(|error| matches!(
+                error,
+                CheckError::ValidationError { message, .. } if message.contains("JV5102")
+            )),
+            "iteration {iteration}: expected JV5102 for pattern {pattern:?}, got {errors:?}"
+        );
+    }
 }
