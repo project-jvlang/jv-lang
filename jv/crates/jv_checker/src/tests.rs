@@ -1,8 +1,9 @@
 use super::*;
 use crate::pattern::{self, PatternTarget};
+use crate::TypeKind;
 use jv_ast::{
     Annotation, AnnotationName, BinaryOp, Expression, Literal, Modifiers, Parameter, Pattern,
-    Program, Span, Statement, TypeAnnotation, ValBindingOrigin, WhenArm,
+    Program, RegexLiteral, Span, Statement, TypeAnnotation, ValBindingOrigin, WhenArm,
 };
 
 fn dummy_span() -> Span {
@@ -532,4 +533,114 @@ fn mutable_var_allows_reassignment() {
         result.is_ok(),
         "var reassignment should be permitted: {result:?}"
     );
+}
+
+#[test]
+fn regex_literal_infers_pattern_type() {
+    let span = dummy_span();
+    let literal = RegexLiteral {
+        pattern: "\\d+".into(),
+        raw: "/\\d+/".into(),
+        span: span.clone(),
+    };
+    let program = Program {
+        package: None,
+        imports: Vec::new(),
+        statements: vec![Statement::ValDeclaration {
+            name: "pattern".into(),
+            type_annotation: None,
+            initializer: Expression::RegexLiteral(literal),
+            modifiers: default_modifiers(),
+            origin: ValBindingOrigin::ExplicitKeyword,
+            span: span.clone(),
+        }],
+        span: span.clone(),
+    };
+
+    let mut checker = TypeChecker::new();
+    let result = checker.check_program(&program);
+    assert!(
+        result.is_ok(),
+        "regex literal should be accepted: {result:?}"
+    );
+
+    let snapshot = checker
+        .inference_snapshot()
+        .expect("snapshot should be produced");
+    let scheme = snapshot
+        .binding_scheme("pattern")
+        .expect("binding scheme for pattern");
+    assert_eq!(
+        scheme.ty,
+        TypeKind::Primitive("java.util.regex.Pattern"),
+        "regex literal should infer Pattern type"
+    );
+    let analyses = snapshot.regex_analyses();
+    assert_eq!(analyses.len(), 1);
+    assert!(analyses[0].diagnostics.is_empty());
+    assert_eq!(analyses[0].pattern, "\\d+");
+}
+
+#[test]
+fn regex_validator_reports_unsupported_escape() {
+    let span = dummy_span();
+    let literal = RegexLiteral {
+        pattern: "abc\\q".into(),
+        raw: "/abc\\q/".into(),
+        span: span.clone(),
+    };
+    let program = Program {
+        package: None,
+        imports: Vec::new(),
+        statements: vec![Statement::ValDeclaration {
+            name: "pattern".into(),
+            type_annotation: None,
+            initializer: Expression::RegexLiteral(literal),
+            modifiers: default_modifiers(),
+            origin: ValBindingOrigin::ExplicitKeyword,
+            span: span.clone(),
+        }],
+        span: span.clone(),
+    };
+
+    let mut checker = TypeChecker::new();
+    let result = checker.check_program(&program);
+    assert!(result.is_err(), "invalid escape should be rejected");
+    let errors = result.err().unwrap();
+    assert!(errors.iter().any(|error| matches!(
+        error,
+        CheckError::ValidationError { message, .. } if message.contains("JV5102")
+    )));
+}
+
+#[test]
+fn regex_validator_reports_unbalanced_groups() {
+    let span = dummy_span();
+    let literal = RegexLiteral {
+        pattern: "(abc".into(),
+        raw: "/(abc/".into(),
+        span: span.clone(),
+    };
+    let program = Program {
+        package: None,
+        imports: Vec::new(),
+        statements: vec![Statement::ValDeclaration {
+            name: "pattern".into(),
+            type_annotation: None,
+            initializer: Expression::RegexLiteral(literal),
+            modifiers: default_modifiers(),
+            origin: ValBindingOrigin::ExplicitKeyword,
+            span: span.clone(),
+        }],
+        span: span.clone(),
+    };
+
+    let mut checker = TypeChecker::new();
+    let result = checker.check_program(&program);
+    assert!(result.is_err(), "unbalanced groups should be rejected");
+    let errors = result.err().unwrap();
+    assert!(errors.iter().any(|error| matches!(
+        error,
+        CheckError::ValidationError { message, .. } if message.contains("JV5101")
+    )));
 }

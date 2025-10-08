@@ -153,6 +153,7 @@ impl PatternFactsBridge {
         context: &mut NullSafetyContext,
     ) -> BridgeOutcome {
         match expression {
+            Expression::RegexLiteral(_) => BridgeOutcome::default(),
             Expression::Literal(_, _) | Expression::Identifier(_, _) => BridgeOutcome::default(),
             Expression::Unary { operand, .. } => self.visit_expression(operand, service, context),
             Expression::Binary { left, right, .. } => {

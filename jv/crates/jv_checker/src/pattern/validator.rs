@@ -115,7 +115,8 @@ impl<'a> WhenUsageValidator<'a> {
 
     fn visit_expression(&mut self, expression: &Expression, expects_value: bool) {
         match expression {
-            Expression::Literal(..)
+            Expression::RegexLiteral(..)
+            | Expression::Literal(..)
             | Expression::Identifier(..)
             | Expression::This(..)
             | Expression::Super(..) => {}

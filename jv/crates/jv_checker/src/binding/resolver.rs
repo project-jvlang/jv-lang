@@ -355,6 +355,7 @@ impl BindingResolver {
 
     fn resolve_expression(&mut self, expression: Expression) -> Expression {
         match expression {
+            Expression::RegexLiteral(literal) => Expression::RegexLiteral(literal),
             Expression::Binary {
                 left,
                 op,
@@ -680,6 +681,7 @@ fn expression_span(expr: &Expression) -> Span {
         | Expression::Try { span, .. }
         | Expression::This(span)
         | Expression::Super(span) => span.clone(),
+        Expression::RegexLiteral(literal) => literal.span.clone(),
         Expression::MultilineString(literal) => literal.span.clone(),
         Expression::JsonLiteral(literal) => literal.span.clone(),
     }

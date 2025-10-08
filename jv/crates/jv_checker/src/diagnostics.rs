@@ -95,6 +95,13 @@ impl EnhancedDiagnostic {
     }
 }
 
+pub fn descriptor(code: &str) -> Option<&'static DiagnosticDescriptor> {
+    DIAGNOSTICS
+        .iter()
+        .chain(crate::compat::diagnostics::ENTRIES.iter())
+        .find(|descriptor| descriptor.code == code)
+}
+
 /// Backwards compatible alias – legacy call sites still refer to ToolingDiagnostic.
 pub type ToolingDiagnostic = EnhancedDiagnostic;
 
@@ -277,6 +284,30 @@ const DIAGNOSTICS: &[DiagnosticDescriptor] = &[
         code: "JV3203",
         title: "Raw型継続コメント / Raw type continuation comment",
         help: "このコメントは防御策を最小限に抑えます。継続が妥当か再確認してください。/ This directive minimises defensive handling; review to ensure the raw continuation is acceptable.",
+        severity: DiagnosticSeverity::Information,
+    },
+    DiagnosticDescriptor {
+        code: "JV5101",
+        title: "正規表現リテラルの構造が不正です / Regex literal structure is invalid",
+        help: "終端スラッシュと括弧の対応を確認し、リテラル全体が閉じていることを確認してください。/ Ensure the literal closes with `/` and that all grouping brackets are balanced.",
+        severity: DiagnosticSeverity::Error,
+    },
+    DiagnosticDescriptor {
+        code: "JV5102",
+        title: "サポートされない正規表現エスケープ / Unsupported regex escape sequence",
+        help: "Java互換のエスケープシーケンス (例: \\n, \\t, \\\\) へ置き換えてください。/ Replace the sequence with a Java-compatible escape such as \\n, \\t, or \\\\.",
+        severity: DiagnosticSeverity::Error,
+    },
+    DiagnosticDescriptor {
+        code: "JV5103",
+        title: "Java互換性が不確かな正規表現です / Regex may not behave identically on Java",
+        help: "パターンを Java の `Pattern.compile` で検証し、互換性の高い構文へ書き換えてください。/ Validate the pattern with Java `Pattern.compile` or rewrite it using portable constructs.",
+        severity: DiagnosticSeverity::Warning,
+    },
+    DiagnosticDescriptor {
+        code: "JV5104",
+        title: "正規表現検証が遅延しています / Regex validation is slow",
+        help: "パターンを簡素化するか、部分的に分割して検証コストを抑えてください。/ Simplify the pattern or split it into smaller parts to reduce validation time.",
         severity: DiagnosticSeverity::Information,
     },
     DiagnosticDescriptor {
