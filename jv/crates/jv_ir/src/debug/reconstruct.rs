@@ -608,6 +608,13 @@ impl<'a> ReconstructionContext<'a> {
                 self.record_success();
                 Expression::Super(span.clone())
             }
+            IrExpression::SequencePipeline { span, .. } => {
+                return self.placeholder_expression(
+                    &span,
+                    WarningKind::UnsupportedNode,
+                    "Sequence pipeline expression reconstruction is not implemented",
+                );
+            }
             other => {
                 let span = extract_expr_span(other);
                 return self.placeholder_expression(
@@ -805,6 +812,7 @@ fn extract_expr_span(expr: &IrExpression) -> Span {
         | IrExpression::CompletableFuture { span, .. }
         | IrExpression::VirtualThread { span, .. }
         | IrExpression::TryWithResources { span, .. }
-        | IrExpression::RegexPattern { span, .. } => span.clone(),
+        | IrExpression::RegexPattern { span, .. }
+        | IrExpression::SequencePipeline { span, .. } => span.clone(),
     }
 }
