@@ -1296,6 +1296,30 @@ fn pipeline_token_sequence_matches_expected_assignment() {
 }
 
 #[test]
+fn no_layout_comma_inside_string_interpolation_expressions() {
+    let source = r#"
+        fun main() {
+            val x = 10
+            val y = 20
+            println("${x} + ${y} = ${x + y}")
+        }
+    "#;
+    let mut lexer = Lexer::new(source.to_string());
+    let tokens = lexer
+        .tokenize()
+        .expect("tokenize function with interpolation");
+
+    let layout_commas = tokens
+        .iter()
+        .filter(|token| matches!(token.token_type, TokenType::LayoutComma))
+        .count();
+    assert_eq!(
+        layout_commas, 0,
+        "layout commas should not appear inside interpolation expressions"
+    );
+}
+
+#[test]
 fn regex_literal_basic_tokenization() {
     let mut lexer = Lexer::new("val pattern = /abc/".to_string());
     let tokens = lexer.tokenize().unwrap();
