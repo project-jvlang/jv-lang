@@ -1,4 +1,4 @@
-use jv_ast::{Argument, BinaryOp, Expression, Literal, Parameter, SequenceDelimiter, Span};
+use jv_ast::{Argument, BinaryOp, Expression, Literal, Parameter, SequenceDelimiter, Span, StringPart};
 use jv_ir::{
     transform_expression, IrExpression, JavaType, SequenceSource, SequenceStage,
     SequenceTerminalEvaluation, SequenceTerminalKind, TransformContext,
@@ -116,6 +116,37 @@ fn map_pipeline(source: Expression) -> Expression {
         argument_metadata: jv_ast::CallArgumentMetadata::default(),
         span: dummy_span(),
     }
+}
+
+fn map_expression() -> Expression {
+    call_method(
+        identifier("numbers"),
+        "map",
+        vec![Argument::Positional(lambda(
+            &["value"],
+            multiply(identifier("value"), number_literal("2")),
+        ))],
+    )
+}
+
+fn map_filter_expression() -> Expression {
+    let mapped = map_expression();
+    call_method(
+        mapped,
+        "filter",
+        vec![Argument::Positional(lambda(
+            &["candidate"],
+            equal(
+                modulo(identifier("candidate"), number_literal("2")),
+                number_literal("0"),
+            ),
+        ))],
+    )
+}
+
+fn map_filter_to_list_expression() -> Expression {
+    let filtered = map_filter_expression();
+    call_method(filtered, "toList", vec![])
 }
 
 fn complex_sequence_expression() -> Expression {
@@ -302,6 +333,38 @@ fn count_terminal_uses_aggregate_policy() {
 }
 
 #[test]
+fn map_filter_pipeline_is_eager_to_list() {
+    let mut context = TransformContext::new();
+    register_numbers(&mut context);
+    let ir = transform_expression(map_filter_to_list_expression(), &mut context)
+        .expect("map/filter pipeline lowers");
+
+    let pipeline = match ir {
+        IrExpression::SequencePipeline { pipeline, .. } => pipeline,
+        other => panic!("expected sequence pipeline, got {:?}", other),
+    };
+
+    assert_eq!(pipeline.stages.len(), 2, "expected map and filter stages");
+    assert!(matches!(pipeline.stages[0], SequenceStage::Map { .. }));
+    assert!(matches!(pipeline.stages[1], SequenceStage::Filter { .. }));
+    assert!(
+        !pipeline.lazy,
+        "toList terminal should force eager evaluation"
+    );
+
+    let terminal = pipeline
+        .terminal
+        .as_ref()
+        .expect("pipeline should include toList terminal");
+    assert!(matches!(terminal.kind, SequenceTerminalKind::ToList));
+    assert_eq!(
+        terminal.evaluation,
+        SequenceTerminalEvaluation::Collector,
+        "toList terminal should use collector evaluation"
+    );
+}
+
+#[test]
 fn pipeline_detects_complex_stage_chain() {
     let mut context = TransformContext::new();
     register_numbers(&mut context);
@@ -468,4 +531,58 @@ fn whitespace_list_literal_becomes_list_sequence_source() {
         "list literal elements should lower to literal IR nodes",
     );
     assert_eq!(pipeline.stages.len(), 2, "map + filter stages expected");
+}
+
+#[test]
+fn string_interpolation_materializes_lazy_sequence() {
+    let mut context = TransformContext::new();
+    register_numbers(&mut context);
+
+    let interpolation = Expression::StringInterpolation {
+        parts: vec![
+            StringPart::Text("inline=".to_string()),
+            StringPart::Expression(map_expression()),
+        ],
+        span: dummy_span(),
+    };
+
+    let ir = transform_expression(interpolation, &mut context)
+        .expect("string interpolation lowers to IR");
+
+    let IrExpression::StringFormat { args, .. } = ir else {
+        panic!("expected string format IR expression");
+    };
+
+    assert_eq!(args.len(), 1, "expected single interpolation argument");
+    let arg = &args[0];
+
+    let IrExpression::SequencePipeline {
+        pipeline,
+        java_type,
+        ..
+    } = arg
+    else {
+        panic!("expected sequence pipeline argument");
+    };
+
+    assert_eq!(
+        *java_type,
+        JavaType::list(),
+        "string interpolation should materialize sequences as java.util.List",
+    );
+    assert!(
+        !pipeline.lazy,
+        "materialized pipeline should evaluate eagerly for interpolation",
+    );
+
+    let terminal = pipeline
+        .terminal
+        .as_ref()
+        .expect("string interpolation should inject toList terminal");
+    assert!(matches!(terminal.kind, SequenceTerminalKind::ToList));
+    assert_eq!(
+        terminal.evaluation,
+        SequenceTerminalEvaluation::Collector,
+        "materialized terminal should use collector evaluation",
+    );
 }

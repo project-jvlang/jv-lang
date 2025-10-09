@@ -878,7 +878,7 @@ fn sequence_pipeline_fixture_runs_consistently_across_targets() {
     }
 
     let fixture = workspace_file("tests/lang/collections/sequence_chain.jv");
-    let expected_output = "[5, 8]\n3\ntrue\n15\n3";
+    let expected_output = "[2, 4, 6, 8, 10]\n[5, 8]\n3\ntrue\n15\n3";
 
     for target in [JavaTarget::Java25, JavaTarget::Java21] {
         let temp_dir =
@@ -991,6 +991,71 @@ fn java_target_switch_emits_expected_sequence_collection_factories() {
                 java_source
             );
         }
+    }
+}
+
+#[test]
+fn java21_compat_fixture_runs_across_targets() {
+    if !has_javac() || !has_java_runtime() {
+        eprintln!("Skipping java21 compat runtime test: java runtime or javac missing");
+        return;
+    }
+
+    let fixture = workspace_file("tests/lang/collections/java21_compat.jv");
+    let expected_output = "[2, 3, 4, 5]\ntrue\n2";
+
+    for target in [JavaTarget::Java25, JavaTarget::Java21] {
+        let temp_dir =
+            TempDirGuard::new("java21-compat-run").expect("create temp directory for fixture");
+        let plan = compose_plan_from_fixture(
+            temp_dir.path(),
+            &fixture,
+            CliOverrides {
+                java_only: true,
+                target: Some(target),
+                ..CliOverrides::default()
+            },
+        );
+
+        let artifacts = compile(&plan).expect("java21 compat fixture compiles");
+        let java_dir = plan
+            .options
+            .output_dir
+            .join(format!("java{}", target.as_str()));
+        let classes_dir = java_dir.join("classes");
+        fs::create_dir_all(&classes_dir).expect("create classes directory for javac");
+
+        let mut javac = Command::new("javac");
+        javac.arg("-d").arg(&classes_dir);
+        for file in &artifacts.java_files {
+            javac.arg(file);
+        }
+        let status = javac
+            .status()
+            .expect("invoke javac for java21 compat fixture");
+        assert!(status.success(), "javac failed for target {}", target.as_str());
+
+        let output = Command::new("java")
+            .arg("-cp")
+            .arg(&classes_dir)
+            .arg(&artifacts.script_main_class)
+            .output()
+            .expect("execute compiled java21 compat script");
+
+        assert!(
+            output.status.success(),
+            "java execution failed for target {}: {}",
+            target.as_str(),
+            String::from_utf8_lossy(&output.stderr)
+        );
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert_eq!(
+            stdout.trim(),
+            expected_output,
+            "unexpected output for target {}",
+            target.as_str()
+        );
     }
 }
 
