@@ -1,0 +1,12 @@
+fun main(): Unit {
+    val numbers = [1 2 3 4]
+
+    val transformed = numbers
+        .map { value -> value + 1 }
+        .filter { candidate -> candidate % 2 == 0 }
+        .toList()
+
+    println(transformed)
+    println(transformed.size)
+    println(transformed.contains(4))
+}

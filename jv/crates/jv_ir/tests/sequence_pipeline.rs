@@ -422,3 +422,50 @@ fn sum_terminal_uses_aggregator_evaluation() {
         "sum should not require non-empty source"
     );
 }
+
+#[test]
+fn whitespace_list_literal_becomes_list_sequence_source() {
+    let mut context = TransformContext::new();
+
+    let literal = array_literal(vec![
+        number_literal("1"),
+        number_literal("2"),
+        number_literal("3"),
+    ]);
+    let map_expr = map_pipeline(literal);
+    let filter_lambda = lambda(
+        &["candidate"],
+        Expression::Literal(Literal::Boolean(true), dummy_span()),
+    );
+    let filter_call = call_method(
+        map_expr,
+        "filter",
+        vec![Argument::Positional(filter_lambda)],
+    );
+
+    let ir = transform_expression(filter_call, &mut context)
+        .expect("list literal pipeline lowers to sequence");
+
+    let pipeline = match ir {
+        IrExpression::SequencePipeline { pipeline, .. } => pipeline,
+        other => panic!("expected sequence pipeline, got {:?}", other),
+    };
+
+    let list_elements = match pipeline.source {
+        SequenceSource::ListLiteral { elements, .. } => elements,
+        other => panic!("expected list literal source, got {:?}", other),
+    };
+
+    assert_eq!(
+        list_elements.len(),
+        3,
+        "list literal should retain elements"
+    );
+    assert!(
+        list_elements
+            .iter()
+            .all(|element| matches!(element, IrExpression::Literal(_, _))),
+        "list literal elements should lower to literal IR nodes",
+    );
+    assert_eq!(pipeline.stages.len(), 2, "map + filter stages expected");
+}

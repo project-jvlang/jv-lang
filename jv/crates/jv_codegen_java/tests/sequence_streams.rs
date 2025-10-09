@@ -131,6 +131,16 @@ fn java_stream_source(name: &str, auto_close: bool) -> SequenceSource {
     }
 }
 
+fn list_literal_source(values: &[&str]) -> SequenceSource {
+    let elements = values.iter().map(|value| number_literal(value)).collect();
+
+    SequenceSource::ListLiteral {
+        elements,
+        element_hint: None,
+        span: dummy_span(),
+    }
+}
+
 fn build_pipeline(
     source: SequenceSource,
     stages: Vec<SequenceStage>,
@@ -176,6 +186,34 @@ fn java25_sequence_to_list_uses_stream_to_list() {
         .expect("sequence pipeline should render for Java 25");
 
     assert_eq!(rendered, "(numbers).stream().map(x -> x).toList()");
+}
+
+#[test]
+fn java25_sequence_list_literal_source_streams_from_list_of() {
+    let terminal = SequenceTerminal {
+        kind: SequenceTerminalKind::ToList,
+        evaluation: SequenceTerminalEvaluation::Collector,
+        requires_non_empty_source: false,
+        span: dummy_span(),
+    };
+
+    let expr = build_pipeline(
+        list_literal_source(&["1", "2", "3"]),
+        vec![map_stage()],
+        terminal,
+        JavaType::Reference {
+            name: "java.util.List".to_string(),
+            generic_args: vec![],
+        },
+    );
+
+    let mut generator =
+        JavaCodeGenerator::with_config(JavaCodeGenConfig::for_target(JavaTarget::Java25));
+    let rendered = generator
+        .generate_expression(&expr)
+        .expect("list literal sequence should render for Java 25");
+
+    assert_eq!(rendered, "(List.of(1, 2, 3)).stream().map(x -> x).toList()",);
 }
 
 #[test]
@@ -245,6 +283,37 @@ fn java21_sequence_to_list_falls_back_to_collectors() {
     assert_eq!(
         rendered,
         "(numbers).stream().map(x -> x).collect(Collectors.toList())"
+    );
+}
+
+#[test]
+fn java21_sequence_list_literal_source_uses_arrays_stream_fallback() {
+    let terminal = SequenceTerminal {
+        kind: SequenceTerminalKind::ToList,
+        evaluation: SequenceTerminalEvaluation::Collector,
+        requires_non_empty_source: false,
+        span: dummy_span(),
+    };
+
+    let expr = build_pipeline(
+        list_literal_source(&["1", "2", "3"]),
+        vec![map_stage()],
+        terminal,
+        JavaType::Reference {
+            name: "java.util.List".to_string(),
+            generic_args: vec![],
+        },
+    );
+
+    let mut generator =
+        JavaCodeGenerator::with_config(JavaCodeGenConfig::for_target(JavaTarget::Java21));
+    let rendered = generator
+        .generate_expression(&expr)
+        .expect("list literal sequence should render for Java 21");
+
+    assert_eq!(
+        rendered,
+        "(Arrays.asList(1, 2, 3).stream().toList()).stream().map(x -> x).collect(Collectors.toList())",
     );
 }
 
