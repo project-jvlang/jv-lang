@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use jv_build::JavaTarget;
 use jv_checker::{TypeInferenceService, TypeKind};
 use jv_cli::pipeline::{compile, BuildOptionsFactory, CliOverrides};
 use jv_cli::pipeline::project::{layout::ProjectLayout, locator::ProjectRoot, manifest::ManifestLoader};
@@ -867,4 +868,128 @@ fn cli_all_subcommands_smoke_test() {
     assert!(repl_stdout.contains("jv REPL"));
     assert!(repl_stdout.contains("Commands:"));
     assert!(repl_stdout.contains("Bye"));
+}
+
+#[test]
+fn sequence_pipeline_fixture_runs_consistently_across_targets() {
+    if !has_javac() || !has_java_runtime() {
+        eprintln!("Skipping sequence pipeline fixture run: java runtime or javac missing");
+        return;
+    }
+
+    let fixture = workspace_file("tests/lang/collections/sequence_chain.jv");
+    let expected_output = "[5, 8]\n3\ntrue\n15\n3";
+
+    for target in [JavaTarget::Java25, JavaTarget::Java21] {
+        let temp_dir =
+            TempDirGuard::new("sequence-pipeline").expect("create temp directory for fixture");
+        let plan = compose_plan_from_fixture(
+            temp_dir.path(),
+            &fixture,
+            CliOverrides {
+                java_only: true,
+                target: Some(target),
+                ..CliOverrides::default()
+            },
+        );
+
+        let artifacts = compile(&plan).expect("sequence pipeline fixture compiles");
+        let java_dir = plan
+            .options
+            .output_dir
+            .join(format!("java{}", target.as_str()));
+        let classes_dir = java_dir.join("classes");
+        fs::create_dir_all(&classes_dir).expect("create classes directory for javac");
+
+        let mut javac = Command::new("javac");
+        javac.arg("-d").arg(&classes_dir);
+        for file in &artifacts.java_files {
+            javac.arg(file);
+        }
+        let status = javac
+            .status()
+            .expect("invoke javac for sequence pipeline fixture");
+        assert!(
+            status.success(),
+            "javac failed for target {}",
+            target.as_str()
+        );
+
+        let output = Command::new("java")
+            .arg("-cp")
+            .arg(&classes_dir)
+            .arg(&artifacts.script_main_class)
+            .output()
+            .expect("execute compiled sequence pipeline script");
+
+        assert!(
+            output.status.success(),
+            "java execution failed for target {}: {}",
+            target.as_str(),
+            String::from_utf8_lossy(&output.stderr)
+        );
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert_eq!(
+            stdout.trim(),
+            expected_output,
+            "unexpected output for target {}",
+            target.as_str()
+        );
+    }
+}
+
+#[test]
+fn java_target_switch_emits_expected_sequence_collection_factories() {
+    let fixture = workspace_file("tests/lang/collections/java21_compat.jv");
+
+    for (target, expected_snippets) in [
+        (JavaTarget::Java25, vec![".toList()", ".toSet()"]),
+        (
+            JavaTarget::Java21,
+            vec!["Collectors.toList()", "Collectors.toSet()"],
+        ),
+    ] {
+        let temp_dir =
+            TempDirGuard::new("sequence-collection-factories").expect("create temp directory");
+        let plan = compose_plan_from_fixture(
+            temp_dir.path(),
+            &fixture,
+            CliOverrides {
+                java_only: true,
+                target: Some(target),
+                ..CliOverrides::default()
+            },
+        );
+
+        let artifacts = compile(&plan).expect("collection factory fixture compiles");
+        let mut java_source = String::new();
+        for file in &artifacts.java_files {
+            let content = fs::read_to_string(file).expect("read generated java source");
+            java_source.push_str(&content);
+        }
+
+        for snippet in expected_snippets {
+            assert!(
+                java_source.contains(snippet),
+                "expected '{}' for target {} in generated Java:\n{}",
+                snippet,
+                target.as_str(),
+                java_source
+            );
+        }
+
+        if target == JavaTarget::Java25 {
+            assert!(
+                !java_source.contains("Collectors.toList()"),
+                "Java 25 output should avoid Collectors fallback:\n{}",
+                java_source
+            );
+            assert!(
+                !java_source.contains("Collectors.toSet()"),
+                "Java 25 output should avoid Collectors fallback:\n{}",
+                java_source
+            );
+        }
+    }
 }

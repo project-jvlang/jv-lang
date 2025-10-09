@@ -1,7 +1,7 @@
-use jv_ast::{Argument, BinaryOp, Expression, Literal, Parameter, Span};
+use jv_ast::{Argument, BinaryOp, Expression, Literal, Parameter, SequenceDelimiter, Span};
 use jv_ir::{
-    transform_expression, IrExpression, JavaType, SequenceSource, SequenceTerminalEvaluation,
-    SequenceTerminalKind, TransformContext,
+    transform_expression, IrExpression, JavaType, SequenceSource, SequenceStage,
+    SequenceTerminalEvaluation, SequenceTerminalKind, TransformContext,
 };
 
 fn dummy_span() -> Span {
@@ -48,6 +48,58 @@ fn add(lhs: Expression, rhs: Expression) -> Expression {
     }
 }
 
+fn multiply(lhs: Expression, rhs: Expression) -> Expression {
+    Expression::Binary {
+        left: Box::new(lhs),
+        op: BinaryOp::Multiply,
+        right: Box::new(rhs),
+        span: dummy_span(),
+    }
+}
+
+fn modulo(lhs: Expression, rhs: Expression) -> Expression {
+    Expression::Binary {
+        left: Box::new(lhs),
+        op: BinaryOp::Modulo,
+        right: Box::new(rhs),
+        span: dummy_span(),
+    }
+}
+
+fn equal(lhs: Expression, rhs: Expression) -> Expression {
+    Expression::Binary {
+        left: Box::new(lhs),
+        op: BinaryOp::Equal,
+        right: Box::new(rhs),
+        span: dummy_span(),
+    }
+}
+
+fn number_literal(value: &str) -> Expression {
+    Expression::Literal(Literal::Number(value.to_string()), dummy_span())
+}
+
+fn array_literal(elements: Vec<Expression>) -> Expression {
+    Expression::Array {
+        elements,
+        delimiter: SequenceDelimiter::Whitespace,
+        span: dummy_span(),
+    }
+}
+
+fn call_method(receiver: Expression, method: &str, args: Vec<Argument>) -> Expression {
+    Expression::Call {
+        function: Box::new(Expression::MemberAccess {
+            object: Box::new(receiver),
+            property: method.to_string(),
+            span: dummy_span(),
+        }),
+        args,
+        argument_metadata: jv_ast::CallArgumentMetadata::default(),
+        span: dummy_span(),
+    }
+}
+
 fn map_pipeline(source: Expression) -> Expression {
     let lambda_body = add(
         identifier("x"),
@@ -64,6 +116,59 @@ fn map_pipeline(source: Expression) -> Expression {
         argument_metadata: jv_ast::CallArgumentMetadata::default(),
         span: dummy_span(),
     }
+}
+
+fn complex_sequence_expression() -> Expression {
+    let mapped = call_method(
+        identifier("numbers"),
+        "map",
+        vec![Argument::Positional(lambda(
+            &["value"],
+            multiply(identifier("value"), number_literal("2")),
+        ))],
+    );
+    let filtered = call_method(
+        mapped,
+        "filter",
+        vec![Argument::Positional(lambda(
+            &["candidate"],
+            equal(
+                modulo(identifier("candidate"), number_literal("4")),
+                number_literal("0"),
+            ),
+        ))],
+    );
+    let flattened = call_method(
+        filtered,
+        "flatMap",
+        vec![Argument::Positional(lambda(
+            &["value"],
+            array_literal(vec![
+                identifier("value"),
+                add(identifier("value"), number_literal("1")),
+            ]),
+        ))],
+    );
+    let taken = call_method(
+        flattened,
+        "take",
+        vec![Argument::Positional(number_literal("3"))],
+    );
+    let dropped = call_method(
+        taken,
+        "drop",
+        vec![Argument::Positional(number_literal("1"))],
+    );
+    let sorted = call_method(dropped, "sorted", vec![]);
+    let sorted_by = call_method(
+        sorted,
+        "sortedBy",
+        vec![Argument::Positional(lambda(
+            &["value"],
+            identifier("value"),
+        ))],
+    );
+    call_method(sorted_by, "toList", vec![])
 }
 
 fn reduce_expression() -> Expression {
@@ -193,5 +298,127 @@ fn count_terminal_uses_aggregate_policy() {
     assert!(
         !terminal.requires_non_empty_source,
         "count should not require non-empty source"
+    );
+}
+
+#[test]
+fn pipeline_detects_complex_stage_chain() {
+    let mut context = TransformContext::new();
+    register_numbers(&mut context);
+    let ir =
+        transform_expression(complex_sequence_expression(), &mut context).expect("pipeline lowers");
+
+    let pipeline = match ir {
+        IrExpression::SequencePipeline { pipeline, .. } => pipeline,
+        other => panic!("expected sequence pipeline, got {:?}", other),
+    };
+
+    assert_eq!(
+        pipeline.stages.len(),
+        7,
+        "expected seven intermediate stages"
+    );
+    assert!(
+        matches!(pipeline.stages[0], SequenceStage::Map { .. }),
+        "first stage should be map"
+    );
+    assert!(
+        matches!(pipeline.stages[1], SequenceStage::Filter { .. }),
+        "second stage should be filter"
+    );
+    match &pipeline.stages[2] {
+        SequenceStage::FlatMap { flatten_depth, .. } => {
+            assert_eq!(
+                *flatten_depth, 1,
+                "flatMap should default to single-level flattening"
+            );
+        }
+        other => panic!("expected flatMap stage, found {:?}", other),
+    }
+    assert!(
+        matches!(pipeline.stages[3], SequenceStage::Take { .. }),
+        "fourth stage should be take"
+    );
+    assert!(
+        matches!(pipeline.stages[4], SequenceStage::Drop { .. }),
+        "fifth stage should be drop"
+    );
+    match &pipeline.stages[5] {
+        SequenceStage::Sorted { comparator, .. } => {
+            assert!(comparator.is_none(), "sorted stage should omit comparator");
+        }
+        other => panic!(
+            "expected sorted stage without comparator, found {:?}",
+            other
+        ),
+    }
+    match &pipeline.stages[6] {
+        SequenceStage::Sorted { comparator, .. } => {
+            assert!(
+                comparator.is_some(),
+                "sortedBy stage should retain comparator lambda"
+            );
+        }
+        other => panic!("expected sortedBy stage with comparator, found {:?}", other),
+    }
+
+    assert!(
+        !pipeline.lazy,
+        "presence of terminal should mark pipeline as eager"
+    );
+
+    let terminal = pipeline
+        .terminal
+        .as_ref()
+        .expect("complex pipeline should end with toList");
+    assert!(
+        matches!(terminal.kind, SequenceTerminalKind::ToList),
+        "terminal must be toList"
+    );
+    assert_eq!(
+        terminal.evaluation,
+        SequenceTerminalEvaluation::Collector,
+        "toList evaluation should be collector"
+    );
+}
+
+#[test]
+fn sum_terminal_uses_aggregator_evaluation() {
+    let mut context = TransformContext::new();
+    register_numbers(&mut context);
+
+    let mapped = call_method(
+        identifier("numbers"),
+        "map",
+        vec![Argument::Positional(lambda(
+            &["value"],
+            identifier("value"),
+        ))],
+    );
+    let sum_expr = call_method(mapped, "sum", vec![]);
+    let ir =
+        transform_expression(sum_expr, &mut context).expect("sequence sum pipeline transforms");
+
+    let pipeline = match ir {
+        IrExpression::SequencePipeline { pipeline, .. } => pipeline,
+        other => panic!("expected sequence pipeline, got {:?}", other),
+    };
+
+    let terminal = pipeline
+        .terminal
+        .as_ref()
+        .expect("sum pipeline should have terminal");
+    assert!(
+        matches!(terminal.kind, SequenceTerminalKind::Sum),
+        "terminal should be sum"
+    );
+    assert_eq!(
+        terminal.evaluation,
+        SequenceTerminalEvaluation::Aggregator,
+        "sum should use aggregator evaluation"
+    );
+    assert!(
+        !terminal.requires_non_empty_source,
+        "sum should not require non-empty source"
     );
 }
