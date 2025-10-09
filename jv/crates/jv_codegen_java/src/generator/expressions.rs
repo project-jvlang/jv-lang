@@ -1,5 +1,8 @@
 use super::*;
 use jv_ast::Span;
+use jv_ir::{
+    SequencePipeline, SequenceSource, SequenceStage, SequenceTerminal, SequenceTerminalKind,
+};
 
 impl JavaCodeGenerator {
     pub fn generate_expression(&mut self, expr: &IrExpression) -> Result<String, CodeGenError> {
@@ -156,6 +159,11 @@ impl JavaCodeGenerator {
                 let body_str = self.generate_expression(body)?;
                 Ok(format!("({}) -> {}", params, body_str))
             }
+            IrExpression::SequencePipeline {
+                pipeline,
+                java_type,
+                span,
+            } => self.generate_sequence_pipeline_expression(pipeline, java_type, span),
             IrExpression::Switch { .. } => self.generate_switch_expression(expr),
             IrExpression::Cast {
                 expr, target_type, ..
@@ -798,6 +806,196 @@ impl JavaCodeGenerator {
         builder.dedent();
         builder.push_line("}");
         Ok(builder.build())
+    }
+
+    fn generate_sequence_pipeline_expression(
+        &mut self,
+        pipeline: &SequencePipeline,
+        result_type: &JavaType,
+        span: &Span,
+    ) -> Result<String, CodeGenError> {
+        if pipeline.terminal.is_none() {
+            return Err(CodeGenError::UnsupportedConstruct {
+                construct: "lazy sequence pipeline without terminal".to_string(),
+                span: Some(span.clone()),
+            });
+        }
+
+        let (source_expr, needs_resource_guard) = self.render_sequence_source(&pipeline.source)?;
+
+        if needs_resource_guard {
+            let chained = self.render_sequence_chain("__jvStream", pipeline)?;
+            let return_type = self.generate_type(result_type)?;
+            let is_void = matches!(result_type, JavaType::Void);
+
+            let mut builder = self.builder();
+            builder.push_line("new Object() {");
+            builder.indent();
+            builder.push_line(&format!("{} run() {{", return_type));
+            builder.indent();
+            builder.push_line(&format!("try (var __jvStream = {}) {{", source_expr));
+            builder.indent();
+            if is_void {
+                builder.push_line(&format!("{};", chained));
+            } else {
+                builder.push_line(&format!("return {};", chained));
+            }
+            builder.dedent();
+            builder.push_line("}");
+            builder.dedent();
+            builder.push_line("}");
+            builder.dedent();
+            builder.push_line("}.run()");
+            Ok(builder.build())
+        } else {
+            self.render_sequence_chain(&source_expr, pipeline)
+        }
+    }
+
+    fn render_sequence_source(
+        &mut self,
+        source: &SequenceSource,
+    ) -> Result<(String, bool), CodeGenError> {
+        match source {
+            SequenceSource::Collection { expr, .. } => {
+                let rendered = self.generate_expression(expr)?;
+                Ok((format!("({}).stream()", rendered), false))
+            }
+            SequenceSource::Array { expr, .. } => {
+                let rendered = self.generate_expression(expr)?;
+                self.add_import("java.util.Arrays");
+                Ok((format!("Arrays.stream({})", rendered), false))
+            }
+            SequenceSource::JavaStream {
+                expr, auto_close, ..
+            } => {
+                let rendered = self.generate_expression(expr)?;
+                Ok((rendered, *auto_close))
+            }
+        }
+    }
+
+    fn render_sequence_chain(
+        &mut self,
+        start_expr: &str,
+        pipeline: &SequencePipeline,
+    ) -> Result<String, CodeGenError> {
+        let mut chain = start_expr.to_string();
+        for stage in &pipeline.stages {
+            chain.push_str(&self.render_sequence_stage(stage)?);
+        }
+
+        if let Some(terminal) = &pipeline.terminal {
+            self.render_sequence_terminal(chain, terminal)
+        } else {
+            Ok(chain)
+        }
+    }
+
+    fn render_sequence_stage(&mut self, stage: &SequenceStage) -> Result<String, CodeGenError> {
+        match stage {
+            SequenceStage::Map { lambda, .. } => {
+                let rendered = self.generate_expression(lambda)?;
+                Ok(format!(".map({})", rendered))
+            }
+            SequenceStage::Filter { predicate, .. } => {
+                let rendered = self.generate_expression(predicate)?;
+                Ok(format!(".filter({})", rendered))
+            }
+            SequenceStage::FlatMap { lambda, .. } => {
+                let rendered = self.generate_expression(lambda)?;
+                Ok(format!(".flatMap({})", rendered))
+            }
+            SequenceStage::Take { count, .. } => {
+                let rendered = self.generate_expression(count)?;
+                Ok(format!(".limit({})", rendered))
+            }
+            SequenceStage::Drop { count, .. } => {
+                let rendered = self.generate_expression(count)?;
+                Ok(format!(".skip({})", rendered))
+            }
+            SequenceStage::Sorted { comparator, .. } => match comparator {
+                Some(comp) => {
+                    let rendered = self.generate_expression(comp)?;
+                    Ok(format!(".sorted({})", rendered))
+                }
+                None => Ok(".sorted()".to_string()),
+            },
+        }
+    }
+
+    fn render_sequence_terminal(
+        &mut self,
+        chain: String,
+        terminal: &SequenceTerminal,
+    ) -> Result<String, CodeGenError> {
+        match &terminal.kind {
+            SequenceTerminalKind::ToList => {
+                if self.targeting.supports_collection_factories() {
+                    Ok(format!("{}{}", chain, ".toList()"))
+                } else {
+                    self.add_import("java.util.stream.Collectors");
+                    Ok(format!("{}.collect(Collectors.toList())", chain))
+                }
+            }
+            SequenceTerminalKind::ToSet => {
+                if self.targeting.supports_collection_factories() {
+                    Ok(format!("{}{}", chain, ".toSet()"))
+                } else {
+                    self.add_import("java.util.stream.Collectors");
+                    Ok(format!("{}.collect(Collectors.toSet())", chain))
+                }
+            }
+            SequenceTerminalKind::Fold {
+                initial,
+                accumulator,
+            } => {
+                let initial_expr = self.generate_expression(initial)?;
+                let accumulator_expr = self.generate_expression(accumulator)?;
+                Ok(format!(
+                    "{}.reduce({}, {})",
+                    chain, initial_expr, accumulator_expr
+                ))
+            }
+            SequenceTerminalKind::Reduce { accumulator } => {
+                let accumulator_expr = self.generate_expression(accumulator)?;
+                let mut rendered = format!("{}.reduce({})", chain, accumulator_expr);
+                if terminal.requires_non_empty_source {
+                    self.add_import("java.lang.IllegalArgumentException");
+                    rendered.push_str(
+                        ".orElseThrow(() -> new IllegalArgumentException(\"Sequence reduce() on empty source\"))",
+                    );
+                }
+                Ok(rendered)
+            }
+            SequenceTerminalKind::GroupBy { key_selector } => {
+                let selector_expr = self.generate_expression(key_selector)?;
+                self.add_import("java.util.stream.Collectors");
+                Ok(format!(
+                    "{}.collect(Collectors.groupingBy({}))",
+                    chain, selector_expr
+                ))
+            }
+            SequenceTerminalKind::Associate { pair_selector } => {
+                let selector_expr = self.generate_expression(pair_selector)?;
+                self.add_import("java.util.stream.Collectors");
+                self.add_import("java.util.Map");
+                let mapped = format!("{}.map({})", chain, selector_expr);
+                Ok(format!(
+                    "{}.collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue))",
+                    mapped
+                ))
+            }
+            SequenceTerminalKind::Count => Ok(format!("{}.count()", chain)),
+            SequenceTerminalKind::Sum => Ok(format!(
+                "{}.mapToLong(value -> ((Number) value).longValue()).sum()",
+                chain
+            )),
+            SequenceTerminalKind::ForEach { action } => {
+                let action_expr = self.generate_expression(action)?;
+                Ok(format!("{}.forEach({})", chain, action_expr))
+            }
+        }
     }
 
     fn render_arguments(&mut self, args: &[IrExpression]) -> Result<String, CodeGenError> {
