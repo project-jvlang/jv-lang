@@ -1,0 +1,259 @@
+package jv.collections
+
+import java.lang.IllegalArgumentException
+import java.util.Iterator
+import java.util.List
+import java.util.stream.Collectors
+import java.util.stream.Stream
+import java.util.stream.StreamSupport
+
+/**
+ * KotlinのSequence APIに対応する遅延評価チェーンラッパー。
+ *
+ * - Kotlinパリティ: Kotlin `Sequence` と同様に map / filter / flatMap / take / drop / toList を提供
+ * - 明示引数必須: transform / predicate ラムダはパラメータを必ず宣言する
+ * - Zero runtime overhead: Java Stream API へ直接デシュガリングし中間コレクションを生成しない
+ *
+ * Requirement 1 / Requirement 2
+ */
+class Sequence<T>(private val delegate: Stream<T>) : Iterable<T>, AutoCloseable {
+    companion object {
+        fun <T> fromIterable(source: Iterable<T>): Sequence<T> {
+            return Sequence(StreamSupport.stream(source.spliterator(), false))
+        }
+
+        fun <T> fromStream(stream: Stream<T>): Sequence<T> {
+            return Sequence(stream)
+        }
+    }
+
+    override fun iterator(): Iterator<T> {
+        return delegate.iterator()
+    }
+
+    override fun close() {
+        delegate.close()
+    }
+
+    fun toStream(): Stream<T> {
+        return delegate
+    }
+}
+
+/**
+ * Kotlin `Sequence.map` と同等の変換操作。
+ *
+ * Requirement 1: コレクションチェーンを遅延評価に変換し、Java Stream `.map` を生成する。
+ *
+ * @param transform 明示引数の変換ラムダ
+ */
+fun <T, R> Sequence<T>.map(transform: (T) -> R): Sequence<R> {
+    val mapped = this.toStream().map { value -> transform(value) }
+    return Sequence.fromStream(mapped)
+}
+
+/**
+ * Kotlin `Sequence.filter` と同等のフィルタ操作。
+ *
+ * Requirement 1: predicate に一致する要素だけを遅延評価チェーンへ残す。
+ *
+ * @param predicate 明示引数の述語ラムダ
+ */
+fun <T> Sequence<T>.filter(predicate: (T) -> Boolean): Sequence<T> {
+    val filtered = this.toStream().filter { value -> predicate(value) }
+    return Sequence.fromStream(filtered)
+}
+
+/**
+ * Kotlin `Sequence.take` と同等の範囲制御操作。
+ *
+ * Requirement 1: チェーン中に含まれた場合でも遅延評価のまま上位 `Stream.limit` へ変換する。
+ *
+ * @param count 取得する最大要素数（0以上）
+ */
+fun <T> Sequence<T>.take(count: Int): Sequence<T> {
+    val limited = this.toStream().limit(count.toLong())
+    return Sequence.fromStream(limited)
+}
+
+/**
+ * Kotlin `Sequence.drop` と同等のスキップ操作。
+ *
+ * Requirement 1: Java `Stream.skip` を利用して遅延チェーン内で前方要素を除外する。
+ *
+ * @param count スキップする要素数（0以上）
+ */
+fun <T> Sequence<T>.drop(count: Int): Sequence<T> {
+    val skipped = this.toStream().skip(count.toLong())
+    return Sequence.fromStream(skipped)
+}
+
+/**
+ * Kotlin `Sequence.flatMap` と同等のフラット化操作。
+ *
+ * Requirement 1: 変換結果のイテラブルを遅延的にフラット化し、中間コレクションを生成しない。
+ *
+ * @param transform 要素を遅延シーケンスへ変換するラムダ
+ */
+fun <T, R> Sequence<T>.flatMap(transform: (T) -> Iterable<R>): Sequence<R> {
+    val flattened = this.toStream().flatMap { value ->
+        val nextIterable = transform(value)
+        when (nextIterable) {
+            is Sequence<*> -> (nextIterable as Sequence<R>).toStream()
+            else -> StreamSupport.stream(nextIterable.spliterator(), false)
+        }
+    }
+    return Sequence.fromStream(flattened)
+}
+
+/**
+ * Kotlin `Sequence.toList` と同等の終端操作。
+ *
+ * Requirement 2: Java 25 Stream `.toList()` 互換の List へ評価する。
+ * Java 21 ターゲットでは Collectors.toList() へのフォールバックをコンパイラが担う。
+ */
+fun <T> Sequence<T>.toList(): List<T> {
+    // Collectors.toList() を利用して両LTSターゲットに対応する。
+    return this.toStream().collect(Collectors.toList())
+}
+
+/**
+ * Kotlin `Sequence.fold` と同等の集約操作。
+ *
+ * Requirement 2: 初期値と要素を順序通りに1度ずつ評価し、副作用なく結果を返す。
+ *
+ * @param initial 集約の初期値
+ * @param operation 明示引数の畳み込みラムダ
+ */
+fun <T, R> Sequence<T>.fold(initial: R, operation: (R, T) -> R): R {
+    var accumulator = initial
+    val iterator = this.toStream().iterator()
+    while (iterator.hasNext()) {
+        val value = iterator.next()
+        accumulator = operation(accumulator, value)
+    }
+    return accumulator
+}
+
+/**
+ * Kotlin `Sequence.reduce` と同等の集約操作。
+ *
+ * Requirement 2: 先頭要素を初期値として扱い、空シーケンスではKotlin互換の例外を送出する。
+ *
+ * @param operation 明示引数の畳み込みラムダ
+ * @throws IllegalArgumentException 空シーケンスに対して呼び出された場合
+ */
+fun <T> Sequence<T>.reduce(operation: (T, T) -> T): T {
+    val iterator = this.toStream().iterator()
+    if (!iterator.hasNext()) {
+        throw IllegalArgumentException("Sequence reduce() on empty source")
+    }
+
+    var accumulator = iterator.next()
+    while (iterator.hasNext()) {
+        val value = iterator.next()
+        accumulator = operation(accumulator, value)
+    }
+    return accumulator
+}
+
+/**
+ * Kotlin `Sequence.count` に対応する要素数集計。
+ *
+ * Requirement 2: 遅延チェーンを評価し、総要素数を返す。
+ */
+fun <T> Sequence<T>.count(): Long {
+    val stream = this.toStream()
+    return stream.count()
+}
+
+/**
+ * Kotlin `Sequence.sum` 相当の数値集計。
+ *
+ * Requirement 2: 数値要素を`long`へ正規化しながら遅延チェーンを評価する。
+ */
+fun <T> Sequence<T>.sum(): Long {
+    var total: Long = 0
+    val iterator = this.toStream().iterator()
+    while (iterator.hasNext()) {
+        val value = iterator.next() as Number
+        total += value.longValue()
+    }
+    return total
+}
+
+/**
+ * Collection から Kotlin `Sequence.map` 相当の遅延チェーンを開始する拡張。
+ *
+ * Requirement 1: `asSequence()` を不要にし、コレクションから直接 `map` を開始できる。
+ */
+fun <T, R> Iterable<T>.map(transform: (T) -> R): Sequence<R> {
+    val sequence = Sequence.fromIterable(this)
+    return sequence.map(transform)
+}
+
+/**
+ * Collection から Kotlin `Sequence.filter` 相当の遅延チェーンを開始する拡張。
+ *
+ * Requirement 1: predicate を保持したまま遅延チェーンを形成する。
+ */
+fun <T> Iterable<T>.filter(predicate: (T) -> Boolean): Sequence<T> {
+    val sequence = Sequence.fromIterable(this)
+    return sequence.filter(predicate)
+}
+
+/**
+ * Collection から Kotlin `Sequence.take` 相当の遅延チェーンを開始する拡張。
+ */
+fun <T> Iterable<T>.take(count: Int): Sequence<T> {
+    val sequence = Sequence.fromIterable(this)
+    return sequence.take(count)
+}
+
+/**
+ * Collection から Kotlin `Sequence.drop` 相当の遅延チェーンを開始する拡張。
+ */
+fun <T> Iterable<T>.drop(count: Int): Sequence<T> {
+    val sequence = Sequence.fromIterable(this)
+    return sequence.drop(count)
+}
+
+/**
+ * Collection から Kotlin `Sequence.flatMap` 相当の遅延チェーンを開始する拡張。
+ */
+fun <T, R> Iterable<T>.flatMap(transform: (T) -> Iterable<R>): Sequence<R> {
+    val sequence = Sequence.fromIterable(this)
+    return sequence.flatMap(transform)
+}
+
+/**
+ * Kotlin `Iterable.fold` と同等の集約操作。
+ */
+fun <T, R> Iterable<T>.fold(initial: R, operation: (R, T) -> R): R {
+    val sequence = Sequence.fromIterable(this)
+    return sequence.fold(initial, operation)
+}
+
+/**
+ * Kotlin `Iterable.reduce` と同等の集約操作。
+ */
+fun <T> Iterable<T>.reduce(operation: (T, T) -> T): T {
+    val sequence = Sequence.fromIterable(this)
+    return sequence.reduce(operation)
+}
+
+/**
+ * Kotlin `Iterable.count` と同等の要素数集計。
+ */
+fun <T> Iterable<T>.count(): Long {
+    val sequence = Sequence.fromIterable(this)
+    return sequence.count()
+}
+
+/**
+ * Kotlin `Iterable.sum` と同等の数値集計。
+ */
+fun <T> Iterable<T>.sum(): Long {
+    val sequence = Sequence.fromIterable(this)
+    return sequence.sum()
+}

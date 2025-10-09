@@ -1,0 +1,132 @@
+package jv.stdlib.collections.tests
+
+import jv.collections.Sequence
+
+fun validatePhase1MapFilterToList() {
+    numbers = [1 2 3 4 5]
+    result = numbers
+        .map { value -> value * 2 }
+        .filter { candidate -> candidate >= 6 }
+        .toList()
+
+    expected = [6 8 10]
+    if (result != expected) {
+        throw IllegalStateException("map/filter/toList expected ${expected} but was ${result}")
+    }
+}
+
+fun validatePhase1SequenceFromIterableToList() {
+    numbers = [10 20 30]
+    sequence = Sequence.fromIterable(numbers)
+    result = sequence
+        .map { value -> value / 10 }
+        .toList()
+
+    expected = [1 2 3]
+    if (result != expected) {
+        throw IllegalStateException("Sequence.fromIterable toList expected ${expected} but was ${result}")
+    }
+}
+
+fun validatePhase1FilterOnlyChain() {
+    numbers = [5 6 7 8 9]
+    result = numbers
+        .filter { value -> value % 2 == 0 }
+        .toList()
+
+    expected = [6 8]
+    if (result != expected) {
+        throw IllegalStateException("filter/toList expected ${expected} but was ${result}")
+    }
+}
+
+fun validatePhase2TakeDropChain() {
+    numbers = [1 2 3 4 5 6]
+    result = numbers
+        .map { value -> value * 10 }
+        .drop(2)
+        .take(3)
+        .toList()
+
+    expected = [30 40 50]
+    if (result != expected) {
+        throw IllegalStateException("drop/take chain expected ${expected} but was ${result}")
+    }
+}
+
+fun validatePhase2FlatMapFromIterable() {
+    groups = [
+        [1 2]
+        [3 4]
+        [5]
+    ]
+
+    result = groups
+        .flatMap { group -> group }
+        .toList()
+
+    expected = [1 2 3 4 5]
+    if (result != expected) {
+        throw IllegalStateException("flatMap from iterable expected ${expected} but was ${result}")
+    }
+}
+
+fun validatePhase2FlatMapFromSequence() {
+    base = Sequence.fromIterable([1 2 3])
+    result = base
+        .flatMap { value -> [value value * 10] }
+        .take(4)
+        .toList()
+
+    expected = [1 10 2 20]
+    if (result != expected) {
+        throw IllegalStateException("flatMap sequence expected ${expected} but was ${result}")
+    }
+}
+
+fun validatePhase3FoldAggregates() {
+    numbers = [1 2 3 4]
+    total = numbers
+        .map { value -> value * 2 }
+        .fold(10) { acc value -> acc + value }
+
+    if (total != 30) {
+        throw IllegalStateException("fold expected 30 but was ${total}")
+    }
+}
+
+fun validatePhase3ReduceAggregates() {
+    numbers = Sequence.fromIterable([5 6 7])
+    reduceResult = numbers.reduce { left right -> left + right }
+
+    if (reduceResult != 18) {
+        throw IllegalStateException("reduce expected 18 but was ${reduceResult}")
+    }
+}
+
+fun validatePhase3ReduceEmptyThrows() {
+    emptySequence = Sequence.fromIterable([])
+
+    try {
+        emptySequence.reduce { left right -> left + right }
+        throw IllegalStateException("reduce on empty sequence should throw IllegalArgumentException")
+    } catch (error: IllegalArgumentException) {
+        // expected
+    }
+}
+
+fun validatePhase3CountAndSum() {
+    numbers = [2 4 6 8]
+    countResult = numbers.count()
+    if (countResult != 4L) {
+        throw IllegalStateException("count expected 4 but was ${countResult}")
+    }
+
+    sumResult = numbers
+        .map { value -> value + 1 }
+        .sum()
+
+    if (sumResult != 30L) {
+        throw IllegalStateException("sum expected 30 but was ${sumResult}")
+    }
+}
