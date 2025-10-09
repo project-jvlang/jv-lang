@@ -1,0 +1,14 @@
+fun main(): Unit {
+    val numbers = [1 2 3 4]
+
+    val incremented = numbers
+        .map { value -> value + 1 }
+        .toList()
+    println(incremented)
+
+    val parity = numbers
+        .map { value -> value % 2 }
+        .toSet()
+    println(parity.contains(0))
+    println(parity.size)
+}

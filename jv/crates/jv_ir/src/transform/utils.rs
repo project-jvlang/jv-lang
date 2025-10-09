@@ -112,6 +112,7 @@ pub(crate) fn extract_java_type(expr: &IrExpression) -> Option<JavaType> {
         | IrExpression::Block { java_type, .. }
         | IrExpression::ObjectCreation { java_type, .. }
         | IrExpression::Lambda { java_type, .. }
+        | IrExpression::SequencePipeline { java_type, .. }
         | IrExpression::Switch { java_type, .. }
         | IrExpression::NullSafeOperation { java_type, .. }
         | IrExpression::CompletableFuture { java_type, .. }
@@ -149,6 +150,7 @@ pub(crate) fn ir_expression_span(expr: &IrExpression) -> Span {
         | IrExpression::ArrayCreation { span, .. }
         | IrExpression::ObjectCreation { span, .. }
         | IrExpression::Lambda { span, .. }
+        | IrExpression::SequencePipeline { span, .. }
         | IrExpression::Switch { span, .. }
         | IrExpression::Cast { span, .. }
         | IrExpression::InstanceOf { span, .. }

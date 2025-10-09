@@ -1395,12 +1395,11 @@ fn string_literal_with_regex_delimiters_remains_string() {
 #[test]
 fn random_string_literals_never_lex_as_regex_literals() {
     const ALPHABET: &[char] = &[
-        '/', '\\', ' ', '-', '_', '.', ':', ';', ',', '+', '*', '?', '=', '#',
-        '0', '1', '2', '3', '4', '5', '6', '7', '8', '9',
-        'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r',
-        's', 't', 'u', 'v', 'w', 'x', 'y', 'z',
-        'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R',
-        'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z',
+        '/', '\\', ' ', '-', '_', '.', ':', ';', ',', '+', '*', '?', '=', '#', '0', '1', '2', '3',
+        '4', '5', '6', '7', '8', '9', 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l',
+        'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z', 'A', 'B', 'C', 'D',
+        'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V',
+        'W', 'X', 'Y', 'Z',
     ];
 
     let mut rng = Rng::with_seed(0xDEAD_5A5Eu64);
@@ -1412,15 +1411,13 @@ fn random_string_literals_never_lex_as_regex_literals() {
             literal.push(ALPHABET[idx]);
         }
 
-        let escaped = literal
-            .replace('\\', "\\\\")
-            .replace('"', "\\\"");
+        let escaped = literal.replace('\\', "\\\\").replace('"', "\\\"");
         let source = format!("val sample = \"{escaped}\"");
 
         let mut lexer = Lexer::new(source.clone());
-        let tokens = lexer
-            .tokenize()
-            .unwrap_or_else(|error| panic!("iteration {iteration}: failed to tokenize {source:?}: {error:?}"));
+        let tokens = lexer.tokenize().unwrap_or_else(|error| {
+            panic!("iteration {iteration}: failed to tokenize {source:?}: {error:?}")
+        });
 
         let string_token = tokens.iter().find_map(|token| match &token.token_type {
             TokenType::String(value) => Some(value.clone()),

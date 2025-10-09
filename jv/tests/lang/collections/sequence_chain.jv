@@ -1,0 +1,29 @@
+fun main(): Unit {
+    val numbers = [1 2 3 4 5]
+
+    val pipeline = numbers
+        .map { value -> value * 2 }
+        .filter { candidate -> candidate % 4 == 0 }
+        .flatMap { value -> [value value + 1] }
+        .take(3)
+        .drop(1)
+        .sorted()
+        .toList()
+    println(pipeline)
+
+    val unique = numbers
+        .map { value -> value % 3 }
+        .toSet()
+    println(unique.size)
+    println(unique.contains(1))
+
+    val total = numbers
+        .map { value -> value }
+        .sum()
+    println(total)
+
+    val greaterThanTwo = numbers
+        .filter { value -> value > 2 }
+        .count()
+    println(greaterThanTwo)
+}

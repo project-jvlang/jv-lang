@@ -59,7 +59,7 @@ fun demonstrateJavaInterop() {
     // Java 8+ ストリーム
     val total = map.values()
         .stream()
-        .mapToInt { it }
+        .mapToInt { value -> value }
         .sum()
 
     println("Total fruits: $total")
@@ -450,8 +450,8 @@ public class UserService {
 fun processItems(items: List<String>): List<String> {
     return items
         .stream()
-        .filter { it.isNotEmpty() }
-        .map { it.uppercase() }
+        .filter { value -> value.isNotEmpty() }
+        .map { value -> value.uppercase() }
         .collect(Collectors.toList())
 }
 ```
@@ -461,7 +461,7 @@ fun processItems(items: List<String>): List<String> {
 ```jv
 // Javaライブラリを使用する際のnull安全性
 fun safeGetProperty(props: Properties, key: String): String? {
-    return props.getProperty(key)?.takeIf { it.isNotEmpty() }
+    return props.getProperty(key)?.takeIf { value -> value.isNotEmpty() }
 }
 ```
 
@@ -470,8 +470,13 @@ fun safeGetProperty(props: Properties, key: String): String? {
 ```jv
 // プリミティブ型を適切に使用
 fun calculateSum(numbers: IntArray): Long {
-    return numbers.asSequence().map { it.toLong() }.sum()
+    return numbers.map { value -> value.toLong() }.sum()
 }
+
+`Iterable`/配列から暗黙の`Sequence`チェーンが構築されるため、Kotlin同様に`asSequence()`を挟む必要はありません。
+`map`/`filter`/`flatMap`/`groupBy`/`associate`/`fold`/`reduce`/`forEach`などの呼び出しは、そのままJava `Stream`
+APIへデシュガリングされます。終端操作の`toList()`/`toSet()`はJava 25ターゲットでは`.stream().toList()`/
+`.stream().toSet()`となり、Java 21ターゲットでは`Collectors.toList()`/`Collectors.toSet()`へフォールバックします。
 ```
 
 ### 4. 例外を適切に処理

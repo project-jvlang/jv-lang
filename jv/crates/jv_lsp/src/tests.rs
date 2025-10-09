@@ -386,3 +386,81 @@ fn regex_completions_include_templates_and_metadata() {
         .iter()
         .any(|item| item.contains("regex literal")));
 }
+
+#[test]
+fn test_sequence_completion_after_dot() {
+    let mut server = JvLanguageServer::new();
+    let uri = "file:///sequence.jv".to_string();
+    server.open_document(uri.clone(), "numbers.".to_string());
+
+    let completions = server.get_completions(
+        &uri,
+        Position {
+            line: 0,
+            character: 8,
+        },
+    );
+
+    assert!(
+        completions
+            .iter()
+            .any(|entry| entry.contains("map") && entry.contains("明示引数必須")),
+        "Sequence completions should include map with explicit parameter note"
+    );
+}
+
+#[test]
+fn test_sequence_hover_map_operation() {
+    let mut server = JvLanguageServer::new();
+    let uri = "file:///hover.jv".to_string();
+    let source = "numbers.map { value -> value * 2 }.toList()";
+    server.open_document(uri.clone(), source.to_string());
+
+    let hover = server.get_hover(
+        &uri,
+        Position {
+            line: 0,
+            character: 9,
+        },
+    );
+
+    let hover = hover.expect("hover should be available for map");
+    assert!(
+        hover.contents.contains("遅延評価Sequence"),
+        "Hover text should describe the sequence operation"
+    );
+    assert!(
+        hover.contents.contains("明示必須"),
+        "Hover text should emphasise explicit lambda parameters"
+    );
+}
+
+#[test]
+fn test_sequence_lambda_diagnostic_for_it_parameter() {
+    let mut server = JvLanguageServer::new();
+    let uri = "file:///diag.jv".to_string();
+    let source = r#"
+numbers = [1 2 3]
+result = numbers.map { it -> it * 2 }.toList()
+"#;
+    server.open_document(uri.clone(), source.to_string());
+
+    let diagnostics = server.get_diagnostics(&uri);
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diag| diag.code.as_deref() == Some("E1001")),
+        "Expected E1001 diagnostic when using implicit it parameter"
+    );
+    let diagnostic = diagnostics
+        .iter()
+        .find(|diag| diag.code.as_deref() == Some("E1001"))
+        .expect("diagnostic should exist");
+    assert!(
+        diagnostic
+            .suggestions
+            .iter()
+            .any(|suggestion| suggestion.contains("{ value ->")),
+        "Diagnostic should propose explicit parameter suggestion"
+    );
+}

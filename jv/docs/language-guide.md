@@ -415,9 +415,16 @@ mapping = mapOf("key1" to "value1", "key2" to "value2")
 ```jv
 numbers = listOf(1, 2, 3, 4, 5)
 
-doubled = numbers.map { it * 2 }
-evens = numbers.filter { it % 2 == 0 }
-sum = numbers.reduce { acc, n -> acc + n }
+doubled = numbers.map { value -> value * 2 }
+evens = numbers.filter { value -> value % 2 == 0 }
+sum = numbers.reduce { acc, value -> acc + value }
+
+Sequenceスタイルの拡張関数は`Iterable`から直接呼び出せます。`asSequence()`を挟む必要はなく、
+`map`/`filter`/`flatMap`/`sorted`/`groupBy`/`associate`/`fold`/`reduce`/`count`/`sum`/`forEach`といった
+演算が遅延評価チェーンとして自動的に構築されます。ラムダ式の引数は必ず明示し、Kotlinの暗黙
+パラメータ`it`は使用できません。副作用を伴う処理は`forEach { value -> ... }`で記述し、終端処理
+として`toList()`や`toSet()`を呼ぶとJava 25ターゲットでは`.stream().toList()`/`.stream().toSet()`が、
+Java 21ターゲットでは`Collectors.toList()`/`Collectors.toSet()`が生成されます。
 
 firstPositive = numbers.firstOrNull { it > 0 }
 hasNegative = numbers.any { it < 0 }
