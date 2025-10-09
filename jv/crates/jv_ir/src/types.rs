@@ -1,4 +1,5 @@
 // jv_ir - Intermediate representation for desugaring jv language constructs
+use crate::sequence_pipeline::SequencePipeline;
 use jv_ast::*;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
@@ -152,6 +153,13 @@ pub enum IrExpression {
         param_names: Vec<String>,
         param_types: Vec<JavaType>,
         body: Box<IrExpression>,
+        java_type: JavaType,
+        span: Span,
+    },
+
+    // Sequence pipeline expression constructed from Kotlin-style collection chains.
+    SequencePipeline {
+        pipeline: SequencePipeline,
         java_type: JavaType,
         span: Span,
     },

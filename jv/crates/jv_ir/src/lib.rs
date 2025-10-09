@@ -1,5 +1,6 @@
 pub mod context;
 pub mod error;
+pub mod sequence_pipeline;
 pub mod profiling;
 pub mod transform;
 pub mod types;
@@ -20,6 +21,7 @@ pub mod prelude {
     pub use crate::error::TransformError;
     pub use crate::transform::*;
     pub use crate::types::*;
+    pub use crate::sequence_pipeline::*;
     pub use crate::{
         PerfMetrics, StageTiming, TransformArenaAccessor, TransformPoolMetrics,
         TransformPoolSessionMetrics, TransformPools, TransformPoolsGuard, TransformProfiler,

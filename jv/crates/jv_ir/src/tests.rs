@@ -14,6 +14,7 @@ mod tests {
         DataFormat, IrCaseLabel, IrDeconstructionComponent, IrDeconstructionPattern, IrExpression,
         IrForEachKind, IrForLoopMetadata, IrImplicitWhenEnd, IrModifiers, IrNumericRangeLoop,
         IrStatement, IrVisibility, JavaType, SampleMode, SampleSourceKind, Schema,
+        SequencePipeline, SequenceSource, SequenceStage, SequenceTerminal, SequenceTerminalKind,
         TransformContext, TransformError, TransformPools, TransformProfiler, VirtualThreadOp,
     };
     use jv_ast::*;
@@ -3044,6 +3045,49 @@ mod tests {
         };
         assert!(matches!(method_call, IrExpression::MethodCall { .. }));
 
+        let lambda_ir = IrExpression::Lambda {
+            functional_interface: "java.util.function.Function".to_string(),
+            param_names: vec!["x".to_string()],
+            param_types: vec![JavaType::object()],
+            body: Box::new(IrExpression::Literal(
+                Literal::Number("0".to_string()),
+                dummy_span(),
+            )),
+            java_type: JavaType::object(),
+            span: dummy_span(),
+        };
+
+        let pipeline = SequencePipeline {
+            source: SequenceSource::Expression {
+                expr: Box::new(IrExpression::Identifier {
+                    name: "numbers".to_string(),
+                    java_type: JavaType::object(),
+                    span: dummy_span(),
+                }),
+                element_hint: None,
+            },
+            stages: vec![SequenceStage::Map {
+                lambda: Box::new(lambda_ir.clone()),
+                span: dummy_span(),
+            }],
+            terminal: Some(SequenceTerminal {
+                kind: SequenceTerminalKind::ToList,
+                span: dummy_span(),
+            }),
+            lazy: false,
+            span: dummy_span(),
+        };
+
+        let sequence_expr = IrExpression::SequencePipeline {
+            pipeline,
+            java_type: JavaType::Reference {
+                name: "java.util.List".to_string(),
+                generic_args: vec![],
+            },
+            span: dummy_span(),
+        };
+        assert!(matches!(sequence_expr, IrExpression::SequencePipeline { .. }));
+
         // Test IrStatement variants
         let var_decl = IrStatement::VariableDeclaration {
             name: "x".to_string(),
@@ -3104,6 +3148,81 @@ mod tests {
 
         let after_clear = cache.lookup_or_insert_call(&span, JavaType::string());
         assert!(after_clear.is_none());
+    }
+
+    #[test]
+    fn sequence_pipeline_detection_recognizes_map_to_list() {
+        let mut context = TransformContext::new();
+        context.add_variable(
+            "numbers".to_string(),
+            JavaType::Reference {
+                name: "java.util.List".to_string(),
+                generic_args: vec![],
+            },
+        );
+
+        let lambda_span = dummy_span();
+        let lambda_expr = Expression::Lambda {
+            parameters: vec![Parameter {
+                name: "x".to_string(),
+                type_annotation: None,
+                default_value: None,
+                span: lambda_span.clone(),
+            }],
+            body: Box::new(Expression::Identifier("x".to_string(), lambda_span.clone())),
+            span: lambda_span.clone(),
+        };
+
+        let map_call = Expression::Call {
+            function: Box::new(Expression::MemberAccess {
+                object: Box::new(Expression::Identifier(
+                    "numbers".to_string(),
+                    dummy_span(),
+                )),
+                property: "map".to_string(),
+                span: dummy_span(),
+            }),
+            args: vec![Argument::Positional(lambda_expr)],
+            argument_metadata: CallArgumentMetadata::default(),
+            span: dummy_span(),
+        };
+
+        let to_list_call = Expression::Call {
+            function: Box::new(Expression::MemberAccess {
+                object: Box::new(map_call),
+                property: "toList".to_string(),
+                span: dummy_span(),
+            }),
+            args: vec![],
+            argument_metadata: CallArgumentMetadata::default(),
+            span: dummy_span(),
+        };
+
+        let result = transform_expression(to_list_call, &mut context)
+            .expect("pipeline transformation should succeed");
+
+        match result {
+            IrExpression::SequencePipeline { pipeline, java_type, .. } => {
+                assert_eq!(pipeline.stages.len(), 1);
+                assert!(matches!(pipeline.stages[0], SequenceStage::Map { .. }));
+
+                let terminal = pipeline
+                    .terminal
+                    .as_ref()
+                    .expect("pipeline should have terminal");
+                assert!(matches!(terminal.kind, SequenceTerminalKind::ToList));
+                assert!(!pipeline.lazy);
+
+                assert_eq!(
+                    java_type,
+                    JavaType::Reference {
+                        name: "java.util.List".to_string(),
+                        generic_args: vec![],
+                    }
+                );
+            }
+            other => panic!("expected sequence pipeline, got {:?}", other),
+        }
     }
     #[test]
     fn numeric_range_lowering_produces_metadata_and_conditions() {

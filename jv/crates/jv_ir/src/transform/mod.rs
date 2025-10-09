@@ -1,6 +1,7 @@
 use self::utils::extract_java_type;
 use crate::context::TransformContext;
 use crate::error::TransformError;
+use crate::sequence_pipeline;
 use crate::profiling::{PerfMetrics, TransformProfiler};
 use crate::types::{IrCommentKind, IrExpression, IrProgram, IrStatement, JavaType};
 use jv_ast::{
@@ -487,7 +488,49 @@ pub fn transform_expression(
             args,
             argument_metadata,
             span,
-        } => lower_call_expression(*function, args, argument_metadata, span, context),
+        } => {
+            if let Some(sequence_expr) = sequence_pipeline::try_lower_sequence_call(
+                (*function).clone(),
+                args.clone(),
+                argument_metadata.clone(),
+                span.clone(),
+                context,
+            )? {
+                return Ok(sequence_expr);
+            }
+
+            lower_call_expression(*function, args, argument_metadata, span, context)
+        }
+        Expression::Lambda {
+            parameters,
+            body,
+            span,
+        } => {
+            context.enter_scope();
+            let mut param_names = Vec::with_capacity(parameters.len());
+            let mut param_types = Vec::with_capacity(parameters.len());
+
+            for param in &parameters {
+                let java_type = JavaType::object();
+                context.add_variable(param.name.clone(), java_type.clone());
+                param_names.push(param.name.clone());
+                param_types.push(java_type);
+            }
+
+            let result = transform_expression(*body, context);
+            context.exit_scope();
+
+            let body_ir = result?;
+
+            Ok(IrExpression::Lambda {
+                functional_interface: "java.util.function.Function".to_string(),
+                param_names,
+                param_types,
+                body: Box::new(body_ir),
+                java_type: JavaType::object(),
+                span,
+            })
+        }
         Expression::When {
             expr: subject,
             arms,
