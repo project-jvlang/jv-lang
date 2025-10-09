@@ -829,12 +829,14 @@ fn classify_expression(
     expr: &Expression,
 ) -> ExpressionInfo {
     match expr {
+        Expression::RegexLiteral(_) => ExpressionInfo::new(NullabilityKind::NonNull),
         Expression::Literal(literal, _) => match literal {
             Literal::Null => ExpressionInfo::new(NullabilityKind::Nullable),
             Literal::Boolean(_)
             | Literal::Character(_)
             | Literal::Number(_)
-            | Literal::String(_) => ExpressionInfo::new(NullabilityKind::NonNull),
+            | Literal::String(_)
+            | Literal::Regex(_) => ExpressionInfo::new(NullabilityKind::NonNull),
         },
         Expression::Identifier(name, _) => {
             ExpressionInfo::with_symbol(NullabilityKind::Unknown, Some(name.clone()))

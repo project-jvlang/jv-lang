@@ -8,12 +8,16 @@
 
 pub mod generic;
 pub mod null_safety_bridge;
+pub mod raw_types;
 pub mod variance;
 
 pub use generic::{
     BoundSatisfactionChecker, GenericSolver, GenericSolverDiagnostic, TypeArgumentSolution,
 };
 pub use null_safety_bridge::NullSafetyBridge;
+pub use raw_types::{
+    RawTypeAnalyzer, RawTypeEvent, RawTypeMitigation, RawTypePolicyPlan, RAW_TYPE_TELEMETRY_KEY,
+};
 pub use variance::{Variance, VarianceAnalyzer, VariancePosition, VarianceTable};
 
 use crate::constraint::{ConstraintGraph, ConstraintKind, NodeId};
@@ -176,6 +180,8 @@ pub struct SolverTelemetry {
     pub cache_hit_rate: Option<f64>,
     pub reinference_duration_ms: Option<f64>,
     pub invalidation_cascade_depth: usize,
+    pub raw_type_events: Vec<RawTypeEvent>,
+    pub raw_type_policy: Option<RawTypePolicyPlan>,
 }
 
 impl SolverTelemetry {
@@ -197,6 +203,29 @@ impl SolverTelemetry {
 
     pub fn set_invalidation_cascade_depth(&mut self, depth: usize) {
         self.invalidation_cascade_depth = depth;
+    }
+
+    pub fn record_raw_type_event(&mut self, event: RawTypeEvent) {
+        self.raw_type_events.push(event);
+    }
+
+    pub fn raw_type_events(&self) -> &[RawTypeEvent] {
+        &self.raw_type_events
+    }
+
+    pub fn set_raw_type_policy(&mut self, plan: RawTypePolicyPlan) {
+        self.raw_type_policy = Some(plan);
+    }
+
+    pub fn raw_type_policy(&self) -> Option<&RawTypePolicyPlan> {
+        self.raw_type_policy.as_ref()
+    }
+
+    pub fn raw_type_severity_todo(&self) -> bool {
+        self.raw_type_policy
+            .as_ref()
+            .map(|plan| plan.severity_todo)
+            .unwrap_or(false)
     }
 }
 

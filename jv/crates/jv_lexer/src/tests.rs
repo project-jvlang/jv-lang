@@ -1293,3 +1293,94 @@ fn pipeline_token_sequence_matches_expected_assignment() {
         ]
     );
 }
+
+#[test]
+fn regex_literal_basic_tokenization() {
+    let mut lexer = Lexer::new("val pattern = /abc/".to_string());
+    let tokens = lexer.tokenize().unwrap();
+
+    let regex_token = tokens
+        .iter()
+        .find(|token| matches!(token.token_type, TokenType::RegexLiteral(_)))
+        .expect("expected regex literal token");
+
+    assert_eq!(regex_token.lexeme, "abc");
+    assert_eq!(
+        regex_token.token_type,
+        TokenType::RegexLiteral("abc".to_string())
+    );
+
+    let metadata = regex_token
+        .metadata
+        .iter()
+        .find_map(|meta| match meta {
+            TokenMetadata::RegexLiteral { raw, pattern } => Some((raw, pattern)),
+            _ => None,
+        })
+        .expect("regex metadata should be present");
+
+    assert_eq!(metadata.0, "/abc/");
+    assert_eq!(metadata.1, "abc");
+}
+
+#[test]
+fn regex_literal_preserves_escaped_slash() {
+    let mut lexer = Lexer::new("val pattern = /a\\/b/".to_string());
+    let tokens = lexer.tokenize().unwrap();
+
+    let regex_token = tokens
+        .iter()
+        .find(|token| matches!(token.token_type, TokenType::RegexLiteral(_)))
+        .expect("expected regex literal token");
+
+    assert_eq!(
+        regex_token.token_type,
+        TokenType::RegexLiteral("a/b".to_string())
+    );
+}
+
+#[test]
+fn regex_literal_reports_unterminated_pattern() {
+    let mut lexer = Lexer::new("/abc".to_string());
+    let error = lexer
+        .tokenize()
+        .expect_err("expected unterminated regex error");
+
+    assert!(matches!(error, LexError::UnterminatedRegex { .. }));
+}
+
+#[test]
+fn regex_literal_rejects_tab_character() {
+    let mut lexer = Lexer::new("/a\tb/".to_string());
+    let error = lexer
+        .tokenize()
+        .expect_err("expected invalid regex character error");
+
+    assert!(matches!(
+        error,
+        LexError::InvalidRegexCharacter {
+            character: '\t',
+            ..
+        }
+    ));
+}
+
+#[test]
+fn arithmetic_division_remains_unchanged() {
+    let mut lexer = Lexer::new("result = 4 / 2".to_string());
+    let tokens = lexer.tokenize().unwrap();
+
+    assert!(
+        tokens
+            .iter()
+            .any(|token| matches!(token.token_type, TokenType::Divide)),
+        "division operator should be preserved"
+    );
+
+    assert!(
+        tokens
+            .iter()
+            .all(|token| !matches!(token.token_type, TokenType::RegexLiteral(_))),
+        "regex literal token should not appear in arithmetic expression"
+    );
+}

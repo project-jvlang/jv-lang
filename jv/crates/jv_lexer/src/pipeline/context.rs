@@ -1,4 +1,4 @@
-use crate::LexError;
+use crate::{LexError, TokenType};
 
 use super::types::ScannerPosition;
 
@@ -10,6 +10,7 @@ pub struct LexerContext<'source> {
     pub lookahead_window: Option<&'source str>,
     pub emitted_tokens: usize,
     pub errors: Vec<LexError>,
+    pub last_token_type: Option<TokenType>,
 }
 
 impl<'source> LexerContext<'source> {
@@ -20,6 +21,7 @@ impl<'source> LexerContext<'source> {
             lookahead_window: None,
             emitted_tokens: 0,
             errors: Vec::new(),
+            last_token_type: None,
         }
     }
 
@@ -41,5 +43,17 @@ impl<'source> LexerContext<'source> {
 
     pub fn record_error(&mut self, error: LexError) {
         self.errors.push(error);
+    }
+
+    pub fn last_token_type(&self) -> Option<&TokenType> {
+        self.last_token_type.as_ref()
+    }
+
+    pub fn set_last_token_type(&mut self, token_type: Option<TokenType>) {
+        self.last_token_type = token_type;
+    }
+
+    pub fn clear_last_token_type(&mut self) {
+        self.last_token_type = None;
     }
 }

@@ -1,10 +1,13 @@
+use super::raw_types::{RawTypeAnalyzer, RawTypeEvent};
+use super::SolverTelemetry;
 use crate::constraint::{
     CapabilityDictionaryResolver, CapabilityResolutionError, GenericConstraint,
     GenericConstraintKind,
 };
 use crate::environment::CapabilityEnvironment;
 use crate::types::{
-    BoundPredicate, CapabilityBound, CapabilitySolution, SymbolId, TypeId, TypeKind, TypeVariant,
+    BoundPredicate, CapabilityBound, CapabilitySolution, GenericSignature, SymbolId, TypeId,
+    TypeKind, TypeVariant,
 };
 use jv_ast::Span;
 use std::collections::hash_map::Entry;
@@ -16,6 +19,7 @@ pub struct TypeArgumentSolution {
     assignments: HashMap<SymbolId, HashMap<TypeId, TypeKind>>,
     capabilities: HashMap<SymbolId, Vec<CapabilitySolution>>,
     diagnostics: Vec<GenericSolverDiagnostic>,
+    raw_type_events: Vec<RawTypeEvent>,
 }
 
 impl TypeArgumentSolution {
@@ -39,6 +43,32 @@ impl TypeArgumentSolution {
 
     pub fn all_capability_solutions(&self) -> &HashMap<SymbolId, Vec<CapabilitySolution>> {
         &self.capabilities
+    }
+
+    pub fn raw_type_events(&self) -> &[RawTypeEvent] {
+        &self.raw_type_events
+    }
+
+    pub fn record_raw_type_event(&mut self, event: RawTypeEvent) {
+        self.raw_type_events.push(event);
+    }
+
+    pub fn extend_raw_type_events<I>(&mut self, events: I)
+    where
+        I: IntoIterator<Item = RawTypeEvent>,
+    {
+        self.raw_type_events.extend(events);
+    }
+
+    pub fn annotate_raw_types_from_signature(
+        &mut self,
+        signature: &GenericSignature,
+        telemetry: &mut SolverTelemetry,
+    ) {
+        let events = RawTypeAnalyzer::analyze_signature(signature, telemetry);
+        if !events.is_empty() {
+            self.raw_type_events.extend(events);
+        }
     }
 }
 
@@ -227,6 +257,7 @@ impl GenericSolver {
             assignments,
             capabilities: capability_solutions,
             diagnostics,
+            raw_type_events: Vec::new(),
         }
     }
 }

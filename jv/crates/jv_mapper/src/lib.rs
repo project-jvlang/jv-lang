@@ -1,4 +1,8 @@
 // jv_mapper - Source mapping (.jv ↔ .java)
+pub mod types;
+
+pub use types::lower_generic_signature;
+
 use jv_ast::Span;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;

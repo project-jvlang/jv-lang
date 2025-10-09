@@ -305,6 +305,61 @@ impl Normalizer {
         Ok(self.finalize_token(token, metadata, normalized))
     }
 
+    fn normalize_regex<'source>(
+        &mut self,
+        token: RawToken<'source>,
+    ) -> Result<NormalizedToken<'source>, LexError> {
+        let lexeme = token.text;
+        if lexeme.len() < 2 {
+            return Err(LexError::UnterminatedRegex {
+                line: token.span.start.line,
+                column: token.span.start.column,
+            });
+        }
+
+        let inner = &lexeme[1..lexeme.len() - 1];
+        let mut pattern = String::with_capacity(inner.len());
+        let mut chars = inner.chars();
+        let mut escaped = false;
+
+        while let Some(ch) = chars.next() {
+            if escaped {
+                if ch == '/' {
+                    pattern.push('/');
+                } else {
+                    pattern.push('\\');
+                    pattern.push(ch);
+                }
+                escaped = false;
+                continue;
+            }
+
+            if ch == '\\' {
+                escaped = true;
+                continue;
+            }
+
+            pattern.push(ch);
+        }
+
+        if escaped {
+            return Err(LexError::UnterminatedRegex {
+                line: token.span.start.line,
+                column: token.span.start.column,
+            });
+        }
+
+        let mut metadata = PreMetadata::default();
+        metadata
+            .provisional_metadata
+            .push(TokenMetadata::RegexLiteral {
+                raw: lexeme.to_string(),
+                pattern: pattern.clone(),
+            });
+
+        Ok(self.finalize_token(token, metadata, pattern))
+    }
+
     fn collect_interpolation_segments(
         &self,
         inner: &str,
@@ -560,6 +615,7 @@ impl NormalizerStage for Normalizer {
                     self.normalize_comment(token)
                 }
             }
+            RawTokenKind::RegexCandidate => self.normalize_regex(token),
             RawTokenKind::Eof => {
                 Ok(self.finalize_token(token, PreMetadata::default(), String::new()))
             }

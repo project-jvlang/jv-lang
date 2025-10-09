@@ -612,6 +612,22 @@ fn expression_generation_handles_binary_arithmetic() {
 }
 
 #[test]
+fn regex_pattern_expression_renders_pattern_compile() {
+    let mut generator = JavaCodeGenerator::new();
+    let expression = IrExpression::RegexPattern {
+        pattern: "^[a-z]+$".to_string(),
+        java_type: JavaType::pattern(),
+        span: dummy_span(),
+    };
+
+    let rendered = generator
+        .generate_expression(&expression)
+        .expect("regex expression should render");
+
+    assert_eq!(rendered, "Pattern.compile(\"^[a-z]+$\")");
+}
+
+#[test]
 fn whitespace_array_uses_list_of_for_java25_target() {
     let mut generator =
         JavaCodeGenerator::with_config(JavaCodeGenConfig::for_target(JavaTarget::Java25));
@@ -761,6 +777,110 @@ fn script_statements_are_wrapped_in_generated_main() {
     assert!(source.contains("public static void main(String[] args) throws Exception"));
     assert!(source.contains("final String greeting = \"Hello, jv!\";"));
     assert!(source.contains("System.out.println(greeting);"));
+}
+
+#[test]
+fn script_regex_val_is_hoisted_to_static_field() {
+    let regex_initializer = IrExpression::RegexPattern {
+        pattern: "^[a-z]+$".to_string(),
+        java_type: JavaType::pattern(),
+        span: dummy_span(),
+    };
+
+    let regex_decl = IrStatement::VariableDeclaration {
+        name: "usernamePattern".to_string(),
+        java_type: JavaType::pattern(),
+        initializer: Some(regex_initializer),
+        is_final: true,
+        modifiers: IrModifiers::default(),
+        span: dummy_span(),
+    };
+
+    let program = IrProgram {
+        package: None,
+        imports: vec![],
+        type_declarations: vec![regex_decl],
+        span: dummy_span(),
+    };
+
+    let unit = generate_java_code(&program).expect("script regex lowering");
+    let source = unit.to_source(&JavaCodeGenConfig::default());
+
+    assert!(
+        source.contains("static final java.util.regex.Pattern usernamePattern"),
+        "regex pattern should be hoisted to a static field: {source}"
+    );
+    assert!(
+        source.contains("Pattern.compile(\"^[a-z]+$\")"),
+        "field initializer should compile pattern"
+    );
+    let field_index = source
+        .find("static final java.util.regex.Pattern usernamePattern")
+        .expect("hoisted field present");
+    let main_index = source
+        .find("void main")
+        .expect("generated main should exist for scripts without entry method");
+    assert!(
+        field_index < main_index,
+        "hoisted field must appear before main method"
+    );
+    assert!(
+        source.contains("import java.util.regex.Pattern;"),
+        "Pattern import should be added"
+    );
+}
+
+#[test]
+fn class_regex_field_is_emitted_as_static_final() {
+    let field = IrStatement::FieldDeclaration {
+        name: "EMAIL_PATTERN".to_string(),
+        java_type: JavaType::pattern(),
+        initializer: Some(IrExpression::RegexPattern {
+            pattern: "^.+@.+$".to_string(),
+            java_type: JavaType::pattern(),
+            span: dummy_span(),
+        }),
+        modifiers: IrModifiers {
+            visibility: IrVisibility::Private,
+            is_final: true,
+            ..IrModifiers::default()
+        },
+        span: dummy_span(),
+    };
+
+    let class = IrStatement::ClassDeclaration {
+        name: "EmailValidator".to_string(),
+        type_parameters: vec![],
+        superclass: None,
+        interfaces: vec![],
+        fields: vec![field],
+        methods: vec![],
+        nested_classes: vec![],
+        modifiers: IrModifiers {
+            visibility: IrVisibility::Public,
+            ..IrModifiers::default()
+        },
+        span: dummy_span(),
+    };
+
+    let program = IrProgram {
+        package: Some("example.validation".to_string()),
+        imports: vec![],
+        type_declarations: vec![class],
+        span: dummy_span(),
+    };
+
+    let unit = generate_java_code(&program).expect("class regex lowering");
+    let source = unit.to_source(&JavaCodeGenConfig::default());
+
+    assert!(
+        source.contains("static final java.util.regex.Pattern EMAIL_PATTERN"),
+        "class field should become static final pattern"
+    );
+    assert!(
+        source.contains("Pattern.compile(\"^.+@.+$\")"),
+        "class field initializer should compile pattern"
+    );
 }
 
 #[test]

@@ -7,21 +7,25 @@ use jv_ir::{
     CompletableFutureOp, IrCaseLabel, IrCatchClause, IrDeconstructionComponent,
     IrDeconstructionPattern, IrExpression, IrForEachKind, IrForLoopMetadata, IrImplicitWhenEnd,
     IrModifiers, IrNumericRangeLoop, IrParameter, IrProgram, IrRecordComponent, IrResource,
-    IrSampleDeclaration, IrStatement, IrSwitchCase, IrTypeParameter, IrVisibility, JavaType,
-    MethodOverload, UtilityClass, VirtualThreadOp,
+    IrSampleDeclaration, IrStatement, IrSwitchCase, IrTypeParameter, IrVariance, IrVisibility,
+    JavaType, MethodOverload, UtilityClass, VirtualThreadOp,
 };
 use std::collections::HashMap;
 
 mod declarations;
 mod expressions;
-mod helpers;
+mod formatting;
 mod sample;
 mod statements;
+mod types;
+
+pub use types::ErasurePlan;
 
 pub struct JavaCodeGenerator {
     imports: HashMap<String, String>,
     config: JavaCodeGenConfig,
     targeting: TargetedJavaEmitter,
+    variance_stack: Vec<HashMap<String, IrVariance>>,
 }
 
 impl JavaCodeGenerator {
@@ -35,6 +39,7 @@ impl JavaCodeGenerator {
             imports: HashMap::new(),
             config,
             targeting: TargetedJavaEmitter::new(target),
+            variance_stack: Vec::new(),
         }
     }
 
@@ -89,14 +94,39 @@ impl JavaCodeGenerator {
             }
         }
 
+        let mut hoisted_regex_fields = Vec::new();
+        let mut retained_statements = Vec::new();
+        for statement in script_statements.drain(..) {
+            if let Some(field) = Self::hoist_regex_pattern_field(&statement) {
+                hoisted_regex_fields.push(field);
+            } else {
+                retained_statements.push(statement);
+            }
+        }
+        script_statements = retained_statements;
+
         let has_entry_method = script_methods.iter().any(Self::is_entry_point_method);
         let needs_wrapper = !script_statements.is_empty() || !has_entry_method;
 
-        if !script_statements.is_empty() || !script_methods.is_empty() {
+        if !script_statements.is_empty()
+            || !script_methods.is_empty()
+            || !hoisted_regex_fields.is_empty()
+        {
             let script_class = &self.config.script_main_class;
             let mut builder = self.builder();
             builder.push_line(&format!("public final class {} {{", script_class));
             builder.indent();
+
+            if !hoisted_regex_fields.is_empty() {
+                for field in &hoisted_regex_fields {
+                    let code = self.generate_statement(field)?;
+                    Self::push_lines(&mut builder, &code);
+                }
+
+                if needs_wrapper || !script_methods.is_empty() {
+                    builder.push_line("");
+                }
+            }
 
             if needs_wrapper {
                 builder.push_line("public static void main(String[] args) throws Exception {");
@@ -190,6 +220,36 @@ impl JavaCodeGenerator {
 
     fn reset(&mut self) {
         self.imports.clear();
+        self.variance_stack.clear();
+    }
+
+    pub(super) fn push_variance_scope(&mut self, params: &[IrTypeParameter]) {
+        if params.is_empty() {
+            return;
+        }
+
+        let mut scope = HashMap::with_capacity(params.len());
+        for param in params {
+            scope.insert(param.name.clone(), param.variance);
+        }
+        self.variance_stack.push(scope);
+    }
+
+    pub(super) fn truncate_variance_scopes(&mut self, len: usize) {
+        self.variance_stack.truncate(len);
+    }
+
+    pub(super) fn variance_scope_len(&self) -> usize {
+        self.variance_stack.len()
+    }
+
+    pub(super) fn lookup_variance(&self, name: &str) -> Option<IrVariance> {
+        for scope in self.variance_stack.iter().rev() {
+            if let Some(variance) = scope.get(name) {
+                return Some(*variance);
+            }
+        }
+        None
     }
 
     fn base_statement<'a>(statement: &'a IrStatement) -> &'a IrStatement {
@@ -247,6 +307,47 @@ impl JavaCodeGenerator {
                 _ => false,
             },
             _ => false,
+        }
+    }
+
+    fn hoist_regex_pattern_field(statement: &IrStatement) -> Option<IrStatement> {
+        match statement {
+            IrStatement::Commented {
+                statement,
+                comment,
+                kind,
+                comment_span,
+            } => Self::hoist_regex_pattern_field(statement).map(|inner| IrStatement::Commented {
+                statement: Box::new(inner),
+                comment: comment.clone(),
+                kind: kind.clone(),
+                comment_span: comment_span.clone(),
+            }),
+            IrStatement::VariableDeclaration {
+                name,
+                java_type,
+                initializer,
+                is_final,
+                modifiers,
+                span,
+            } if *is_final => {
+                if let Some(expr) = initializer {
+                    if matches!(expr, IrExpression::RegexPattern { .. }) {
+                        let mut field_modifiers = modifiers.clone();
+                        field_modifiers.is_static = true;
+                        field_modifiers.is_final = true;
+                        return Some(IrStatement::FieldDeclaration {
+                            name: name.clone(),
+                            java_type: java_type.clone(),
+                            initializer: Some(expr.clone()),
+                            modifiers: field_modifiers,
+                            span: span.clone(),
+                        });
+                    }
+                }
+                None
+            }
+            _ => None,
         }
     }
 }

@@ -8,7 +8,7 @@ use crate::{
         types::{RawToken, RawTokenKind, ScannerPosition, Span},
     },
     CommentCarryOverMetadata, JsonCommentTrivia, JsonCommentTriviaKind, LexError,
-    SourceCommentKind, SourceCommentTrivia, TokenTrivia,
+    SourceCommentKind, SourceCommentTrivia, TokenTrivia, TokenType,
 };
 use unicode_ident::{is_xid_continue, is_xid_start};
 
@@ -744,6 +744,82 @@ impl CharScanner {
         Ok(self.take_slice(source, start, self.cursor))
     }
 
+    fn regex_cannot_follow(token: &TokenType) -> bool {
+        matches!(
+            token,
+            TokenType::Identifier(_)
+                | TokenType::Number(_)
+                | TokenType::String(_)
+                | TokenType::StringInterpolation(_)
+                | TokenType::StringEnd
+                | TokenType::Boolean(_)
+                | TokenType::True
+                | TokenType::False
+                | TokenType::Null
+                | TokenType::RightParen
+                | TokenType::RightBracket
+                | TokenType::RightBrace
+                | TokenType::RegexLiteral(_)
+        )
+    }
+
+    fn can_start_regex(ctx: &LexerContext<'_>) -> bool {
+        match ctx.last_token_type() {
+            None => true,
+            Some(token) => !Self::regex_cannot_follow(token),
+        }
+    }
+
+    fn read_regex_literal<'source>(
+        &mut self,
+        source: &'source str,
+    ) -> Result<&'source str, LexError> {
+        let start = self.cursor;
+        let start_line = self.position.line;
+        let start_column = self.position.column;
+
+        self.advance_char('/', source)?;
+        let mut escaped = false;
+
+        while let Some(ch) = self.peek_char_from(source) {
+            if ch == '\n' || ch == '\r' {
+                return Err(LexError::UnterminatedRegex {
+                    line: start_line,
+                    column: start_column,
+                });
+            }
+
+            if ch == '\t' {
+                return Err(LexError::InvalidRegexCharacter {
+                    character: '\t',
+                    line: start_line,
+                    column: start_column,
+                });
+            }
+
+            self.advance_char(ch, source)?;
+
+            if escaped {
+                escaped = false;
+                continue;
+            }
+
+            if ch == '\\' {
+                escaped = true;
+                continue;
+            }
+
+            if ch == '/' {
+                return Ok(self.take_slice(source, start, self.cursor));
+            }
+        }
+
+        Err(LexError::UnterminatedRegex {
+            line: start_line,
+            column: start_column,
+        })
+    }
+
     fn push_comment_trivia(&mut self, trivia: TokenTrivia) {
         if let Some(existing) = &mut self.pending_comment_trivia {
             Self::merge_trivia(existing, trivia);
@@ -1083,17 +1159,21 @@ impl CharScannerStage for CharScanner {
 
         let current_char = self.peek_char_from(source).unwrap_or('\0');
 
+        let mut kind_override = None;
         let slice = if Self::is_identifier_start(current_char) {
             self.read_identifier(source)?
         } else if current_char.is_ascii_digit() {
             self.read_number(source)?
+        } else if current_char == '/' && Self::can_start_regex(ctx) {
+            kind_override = Some(RawTokenKind::RegexCandidate);
+            self.read_regex_literal(source)?
         } else if matches!(current_char, '"' | '\'' | '`') {
             self.read_string_literal(source)?
         } else {
             self.read_symbol(source)?
         };
 
-        let kind = Self::determine_kind(current_char, slice);
+        let kind = kind_override.unwrap_or_else(|| Self::determine_kind(current_char, slice));
         let span = self.current_span(start_offset, start_position);
         ctx.update_position(self.position);
 

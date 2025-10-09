@@ -10,14 +10,15 @@ use jv_lexer::{StringDelimiterKind, StringLiteralMetadata, Token, TokenMetadata,
 use super::json::json_expression_parser;
 use super::patterns::{self, pattern_span};
 use super::support::{
-    expression_span, identifier, identifier_with_span, keyword, merge_spans, span_from_token,
-    token_and, token_any_comma, token_arrow, token_assign, token_colon, token_comma, token_divide,
-    token_dot, token_else, token_elvis, token_equal, token_greater, token_greater_equal, token_if,
-    token_is, token_layout_comma, token_left_brace, token_left_bracket, token_left_paren,
-    token_less, token_less_equal, token_minus, token_modulo, token_multiply, token_not,
-    token_not_equal, token_null_safe, token_or, token_plus, token_question, token_range_exclusive,
-    token_range_inclusive, token_right_brace, token_right_bracket, token_right_paren,
-    token_string_end, token_string_mid, token_string_start, token_when, type_annotation,
+    expression_span, identifier, identifier_with_span, keyword, merge_spans,
+    regex_literal_from_token, span_from_token, token_and, token_any_comma, token_arrow,
+    token_assign, token_colon, token_comma, token_divide, token_dot, token_else, token_elvis,
+    token_equal, token_greater, token_greater_equal, token_if, token_is, token_layout_comma,
+    token_left_brace, token_left_bracket, token_left_paren, token_less, token_less_equal,
+    token_minus, token_modulo, token_multiply, token_not, token_not_equal, token_null_safe,
+    token_or, token_plus, token_question, token_range_exclusive, token_range_inclusive,
+    token_right_brace, token_right_bracket, token_right_paren, token_string_end, token_string_mid,
+    token_string_start, token_when, type_annotation,
 };
 
 pub(crate) fn expression_parser(
@@ -386,9 +387,11 @@ fn string_interpolation_parser(
 
 fn literal_parser() -> impl ChumskyParser<Token, Expression, Error = Simple<Token>> + Clone {
     filter_map(|span, token: Token| match &token.token_type {
-        TokenType::String(_) | TokenType::Number(_) | TokenType::Boolean(_) | TokenType::Null => {
-            Ok(token)
-        }
+        TokenType::String(_)
+        | TokenType::Number(_)
+        | TokenType::Boolean(_)
+        | TokenType::Null
+        | TokenType::RegexLiteral(_) => Ok(token),
         _ => Err(Simple::expected_input_found(span, Vec::new(), Some(token))),
     })
     .map(build_literal_expression)
@@ -649,6 +652,10 @@ fn build_literal_expression(token: Token) -> Expression {
         TokenType::Number(value) => Expression::Literal(Literal::Number(value.clone()), span),
         TokenType::Boolean(value) => Expression::Literal(Literal::Boolean(*value), span),
         TokenType::Null => Expression::Literal(Literal::Null, span),
+        TokenType::RegexLiteral(_) => {
+            let literal = regex_literal_from_token(&token, span);
+            Expression::RegexLiteral(literal)
+        }
         _ => unreachable!("literal_parser filtered non-literal tokens"),
     }
 }

@@ -224,6 +224,7 @@ impl<'env> ConstraintGenerator<'env> {
 
     fn infer_expression(&mut self, expr: &Expression) -> TypeKind {
         match expr {
+            Expression::RegexLiteral(_) => TypeKind::Primitive("java.util.regex.Pattern"),
             Expression::Literal(literal, _) => self.type_from_literal(literal),
             Expression::Identifier(name, _) => {
                 if let Some(scheme) = self.env.lookup(name).cloned() {
@@ -480,6 +481,7 @@ impl<'env> ConstraintGenerator<'env> {
             }
             Literal::Boolean(_) => TypeKind::Primitive("Boolean"),
             Literal::Character(_) => TypeKind::Primitive("String"),
+            Literal::Regex(_) => TypeKind::Primitive("java.util.regex.Pattern"),
             Literal::Null => TypeKind::Optional(Box::new(TypeKind::Unknown)),
         }
     }

@@ -13,6 +13,7 @@ mod keyword;
 mod layout_analysis;
 mod number_literal;
 mod operator;
+mod regex_literal;
 mod string_interpolation;
 
 use comment::CommentModule;
@@ -21,6 +22,7 @@ use keyword::KeywordModule;
 use layout_analysis::LayoutAnalysisModule;
 use number_literal::NumberLiteralModule;
 use operator::OperatorModule;
+use regex_literal::RegexLiteralModule;
 use string_interpolation::StringInterpolationModule;
 
 /// 分類処理中に蓄積する中間状態。
@@ -125,6 +127,7 @@ impl Classifier {
                 Box::new(LayoutAnalysisModule::new()),
                 Box::new(CommentModule::new()),
                 Box::new(NumberLiteralModule::new()),
+                Box::new(RegexLiteralModule::new()),
                 Box::new(OperatorModule::new()),
             ],
         }
@@ -156,6 +159,7 @@ impl ClassifierStage for Classifier {
                 RawTokenKind::Identifier => TokenType::Identifier(token.normalized_text.clone()),
                 RawTokenKind::NumberCandidate => TokenType::Number(token.normalized_text.clone()),
                 RawTokenKind::Symbol => TokenType::Invalid(token.normalized_text.clone()),
+                RawTokenKind::RegexCandidate => TokenType::Invalid(token.normalized_text.clone()),
                 RawTokenKind::Whitespace => TokenType::Whitespace(token.normalized_text.clone()),
                 RawTokenKind::CommentCandidate => {
                     TokenType::LineComment(token.normalized_text.clone())

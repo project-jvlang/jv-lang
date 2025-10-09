@@ -1,7 +1,7 @@
 // jv_lsp - Language Server Protocol implementation
 use jv_checker::diagnostics::{
-    from_check_error, from_parse_error, from_transform_error, DiagnosticStrategy,
-    EnhancedDiagnostic,
+    collect_raw_type_diagnostics, from_check_error, from_parse_error, from_transform_error,
+    DiagnosticStrategy, EnhancedDiagnostic,
 };
 use jv_checker::{CheckError, TypeChecker};
 use jv_inference::{service::TypeFactsSnapshot, ParallelInferenceConfig};
@@ -152,8 +152,8 @@ impl JvLanguageServer {
         }
 
         let lowering_input = checker.take_normalized_program().unwrap_or(program);
-        match transform_program(lowering_input) {
-            Ok(_) => {}
+        let ir_program = match transform_program(lowering_input) {
+            Ok(ir) => Some(ir),
             Err(error) => {
                 diagnostics.push(match from_transform_error(&error) {
                     Some(diagnostic) => tooling_diagnostic_to_lsp(
@@ -162,7 +162,18 @@ impl JvLanguageServer {
                     ),
                     None => fallback_diagnostic(uri, "IR transformation error"),
                 });
+                None
             }
+        };
+
+        if let Some(ir_program) = ir_program.as_ref() {
+            let raw_type_diagnostics = collect_raw_type_diagnostics(ir_program);
+            diagnostics.extend(raw_type_diagnostics.into_iter().map(|diagnostic| {
+                tooling_diagnostic_to_lsp(
+                    uri,
+                    diagnostic.with_strategy(DiagnosticStrategy::Interactive),
+                )
+            }));
         }
 
         if let Some(snapshot) = type_facts_snapshot {

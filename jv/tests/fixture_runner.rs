@@ -6,7 +6,10 @@ use std::process::Command;
 use anyhow::{Context, Result};
 use jv_ast::{BinaryOp, CallArgumentStyle, Literal, Span};
 use jv_checker::{
-    diagnostics::{from_check_error, from_parse_error, from_transform_error, DiagnosticStrategy},
+    diagnostics::{
+        collect_raw_type_diagnostics, from_check_error, from_parse_error, from_transform_error,
+        DiagnosticStrategy,
+    },
     CheckError, TypeChecker,
 };
 use jv_cli::format_tooling_diagnostic;
@@ -189,6 +192,19 @@ fn collect_fixture_diagnostic(
             anyhow::bail!("IR transform error without diagnostic code: {error:?}");
         }
     };
+
+    let raw_type_diagnostics = collect_raw_type_diagnostics(&ir_program);
+    if !raw_type_diagnostics.is_empty() {
+        let rendered = raw_type_diagnostics
+            .into_iter()
+            .map(|diagnostic| {
+                let diagnostic = diagnostic.with_strategy(DiagnosticStrategy::Deferred);
+                format_tooling_diagnostic(display_path, &diagnostic)
+            })
+            .collect::<Vec<_>>()
+            .join("\n\n");
+        return Ok(rendered);
+    }
 
     if analyze_codegen {
         for target in [JavaTarget::Java25, JavaTarget::Java21] {

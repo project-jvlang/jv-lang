@@ -11,6 +11,9 @@ pub enum Expression {
     // Literals
     Literal(Literal, Span),
 
+    /// Regex literal with raw + normalized pattern metadata.
+    RegexLiteral(RegexLiteral),
+
     // Identifiers
     Identifier(String, Span),
 

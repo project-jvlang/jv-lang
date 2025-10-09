@@ -3,13 +3,14 @@ use std::fs;
 use std::path::Path;
 
 use jv_checker::diagnostics::{
-    from_check_error, from_parse_error, from_transform_error, DiagnosticStrategy,
+    collect_raw_type_diagnostics, from_check_error, from_parse_error, from_transform_error,
+    DiagnosticStrategy,
 };
 use jv_checker::TypeChecker;
 use jv_ir::transform_program;
 use jv_parser::Parser as JvParser;
 
-use crate::tooling_failure;
+use crate::{format_tooling_diagnostic, tooling_failure};
 
 /// Execute the `jv check` workflow against a single input file.
 pub fn run(input: &str) -> Result<()> {
@@ -69,14 +70,29 @@ pub fn run(input: &str) -> Result<()> {
     }
 
     let normalized_program = type_checker.take_normalized_program().unwrap_or(program);
-    if let Err(error) = transform_program(normalized_program) {
-        if let Some(diagnostic) = from_transform_error(&error) {
-            return Err(tooling_failure(
-                Path::new(input),
-                diagnostic.with_strategy(DiagnosticStrategy::Deferred),
-            ));
+    let ir_program = match transform_program(normalized_program) {
+        Ok(ir) => ir,
+        Err(error) => {
+            if let Some(diagnostic) = from_transform_error(&error) {
+                return Err(tooling_failure(
+                    Path::new(input),
+                    diagnostic.with_strategy(DiagnosticStrategy::Deferred),
+                ));
+            }
+            return Err(anyhow::anyhow!("IR transformation error: {:?}", error));
         }
-        return Err(anyhow::anyhow!("IR transformation error: {:?}", error));
+    };
+
+    let raw_type_diagnostics = collect_raw_type_diagnostics(&ir_program);
+    if !raw_type_diagnostics.is_empty() {
+        println!("Raw type diagnostics:");
+        for diagnostic in raw_type_diagnostics {
+            let diagnostic = diagnostic.with_strategy(DiagnosticStrategy::Deferred);
+            println!(
+                "{}",
+                format_tooling_diagnostic(Path::new(input), &diagnostic)
+            );
+        }
     }
 
     println!("Check completed successfully!");

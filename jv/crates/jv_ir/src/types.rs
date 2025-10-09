@@ -49,6 +49,12 @@ pub enum JavaWildcardKind {
 pub enum IrExpression {
     // Basic expressions that map directly to Java
     Literal(Literal, Span),
+    /// Compiled regular expression pattern handle.
+    RegexPattern {
+        pattern: String,
+        java_type: JavaType,
+        span: Span,
+    },
     Identifier {
         name: String,
         java_type: JavaType,
@@ -926,6 +932,13 @@ impl JavaType {
     pub fn string() -> Self {
         JavaType::Reference {
             name: "String".to_string(),
+            generic_args: vec![],
+        }
+    }
+
+    pub fn pattern() -> Self {
+        JavaType::Reference {
+            name: "java.util.regex.Pattern".to_string(),
             generic_args: vec![],
         }
     }

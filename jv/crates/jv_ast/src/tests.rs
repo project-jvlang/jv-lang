@@ -220,6 +220,27 @@ fn multiline_string_literal_roundtrips_through_serde() {
 }
 
 #[test]
+fn regex_literal_roundtrips_through_serde() {
+    let span = Span::new(5, 10, 5, 16);
+    let literal = RegexLiteral {
+        pattern: "a/b".to_string(),
+        raw: "/a\\/b/".to_string(),
+        span: span.clone(),
+    };
+
+    let variant = Literal::Regex(literal.clone());
+    let serialized = serde_json::to_string(&variant).expect("serialize regex literal");
+    let decoded: Literal = serde_json::from_str(&serialized).expect("deserialize literal");
+    assert_eq!(decoded, variant);
+
+    let expr = Expression::RegexLiteral(literal.clone());
+    let expr_serialized = serde_json::to_string(&expr).expect("serialize regex expression");
+    let expr_decoded: Expression =
+        serde_json::from_str(&expr_serialized).expect("deserialize regex expression");
+    assert_eq!(expr_decoded, expr);
+}
+
+#[test]
 fn val_declaration_origin_roundtrips_through_serde() {
     let stmt = Statement::ValDeclaration {
         name: "temperature".to_string(),

@@ -5,17 +5,20 @@ pub mod diagnostics;
 pub mod inference;
 pub mod null_safety;
 pub mod pattern;
+pub mod regex;
 
 pub use inference::{
     InferenceEngine, InferenceError, InferenceResult, NullabilityAnalyzer, TypeBinding,
     TypeEnvironment, TypeId, TypeKind, TypeScheme,
 };
 pub use jv_inference::ParallelInferenceConfig;
+pub use regex::RegexAnalysis;
 
 use binding::{resolve_bindings, BindingResolution, BindingUsageSummary};
 use jv_ast::{Program, Span};
 use null_safety::{JavaLoweringHint, NullSafetyCoordinator};
 use pattern::{PatternCacheMetrics, PatternMatchFacts, PatternMatchService, PatternTarget};
+use regex::RegexValidator;
 use std::collections::HashMap;
 use thiserror::Error;
 
@@ -48,12 +51,14 @@ pub struct InferenceSnapshot {
     result_type: Option<TypeKind>,
     facts: TypeFactsSnapshot,
     pattern_facts: HashMap<(u64, PatternTarget), PatternMatchFacts>,
+    regex_analyses: Vec<RegexAnalysis>,
 }
 
 impl InferenceSnapshot {
     fn from_engine(
         engine: &InferenceEngine,
         pattern_facts: HashMap<(u64, PatternTarget), PatternMatchFacts>,
+        regex_analyses: Vec<RegexAnalysis>,
     ) -> Self {
         let environment = engine.environment().clone();
         let bindings = engine.bindings().to_vec();
@@ -74,6 +79,7 @@ impl InferenceSnapshot {
             result_type,
             facts,
             pattern_facts,
+            regex_analyses,
         }
     }
 
@@ -87,6 +93,14 @@ impl InferenceSnapshot {
 
     pub fn pattern_fact(&self, node_id: u64, target: PatternTarget) -> Option<&PatternMatchFacts> {
         self.pattern_facts.get(&(node_id, target))
+    }
+
+    pub fn regex_analyses(&self) -> &[RegexAnalysis] {
+        &self.regex_analyses
+    }
+
+    pub fn binding_scheme(&self, name: &str) -> Option<&TypeScheme> {
+        self.environment.lookup(name)
     }
 }
 
@@ -181,6 +195,7 @@ pub struct TypeChecker {
     null_safety_hints: Vec<JavaLoweringHint>,
     merged_facts: Option<TypeFactsSnapshot>,
     pattern_service: PatternMatchService,
+    regex_validator: RegexValidator,
     normalized_program: Option<Program>,
     binding_usage: BindingUsageSummary,
 }
@@ -202,6 +217,7 @@ impl TypeChecker {
             null_safety_hints: Vec::new(),
             merged_facts: None,
             pattern_service: PatternMatchService::new(),
+            regex_validator: RegexValidator::new(),
             normalized_program: None,
             binding_usage: BindingUsageSummary::default(),
         }
@@ -268,6 +284,21 @@ impl TypeChecker {
 
         match inference_result {
             Ok(()) => {
+                let (regex_errors, regex_analyses) = {
+                    let normalized_program = self
+                        .normalized_program
+                        .as_ref()
+                        .expect("normalized program should be available");
+                    let errors = self.regex_validator.validate_program(normalized_program);
+                    let analyses = self.regex_validator.take_analyses();
+                    (errors, analyses)
+                };
+                if !regex_errors.is_empty() {
+                    self.snapshot = None;
+                    self.merged_facts = None;
+                    return Err(regex_errors);
+                }
+
                 let validation_errors = {
                     let normalized_program = self
                         .normalized_program
@@ -283,7 +314,11 @@ impl TypeChecker {
                     self.merged_facts = None;
                     return Err(validation_errors);
                 }
-                self.snapshot = Some(InferenceSnapshot::from_engine(&self.engine, pattern_facts));
+                self.snapshot = Some(InferenceSnapshot::from_engine(
+                    &self.engine,
+                    pattern_facts,
+                    regex_analyses,
+                ));
                 self.merged_facts = self
                     .snapshot
                     .as_ref()
@@ -358,6 +393,13 @@ impl TypeChecker {
         self.merged_facts
             .as_ref()
             .or_else(|| self.snapshot.as_ref().map(|snapshot| snapshot.type_facts()))
+    }
+
+    /// Regex analysis results gathered during the last checker run.
+    pub fn regex_analyses(&self) -> Option<&[RegexAnalysis]> {
+        self.snapshot
+            .as_ref()
+            .map(|snapshot| snapshot.regex_analyses())
     }
 
     /// 推論スナップショットを引き渡し、内部状態からは破棄する。

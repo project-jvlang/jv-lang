@@ -1,4 +1,5 @@
 use super::*;
+use jv_ast::types::RawTypeContinuation;
 
 impl JavaCodeGenerator {
     pub fn generate_statement(&mut self, stmt: &IrStatement) -> Result<String, CodeGenError> {
@@ -7,8 +8,20 @@ impl JavaCodeGenerator {
             IrStatement::Commented {
                 statement, comment, ..
             } => {
-                let rendered = self.generate_statement(statement)?;
-                Self::append_inline_comment(rendered, comment)
+                if let Some((mode, owner)) = Self::parse_raw_type_comment(comment) {
+                    let rendered = match mode {
+                        RawTypeContinuation::AllowWithComment => {
+                            self.generate_statement(statement)?
+                        }
+                        RawTypeContinuation::DefaultPolicy => {
+                            self.generate_statement_with_null_guard(statement, &owner)?
+                        }
+                    };
+                    Self::append_inline_comment(rendered, comment)
+                } else {
+                    let rendered = self.generate_statement(statement)?;
+                    Self::append_inline_comment(rendered, comment)
+                }
             }
             IrStatement::VariableDeclaration {
                 name,
@@ -41,7 +54,21 @@ impl JavaCodeGenerator {
                 ..
             } => {
                 let mut parts = Vec::new();
-                let modifiers_str = self.generate_modifiers(modifiers);
+                let promote_static = initializer
+                    .as_ref()
+                    .map(|expr| matches!(expr, IrExpression::RegexPattern { .. }))
+                    .unwrap_or(false)
+                    && modifiers.is_final;
+                let promoted_modifiers = if promote_static {
+                    let mut clone = modifiers.clone();
+                    clone.is_static = true;
+                    clone.is_final = true;
+                    Some(clone)
+                } else {
+                    None
+                };
+                let modifiers_to_render = promoted_modifiers.as_ref().unwrap_or(modifiers);
+                let modifiers_str = self.generate_modifiers(modifiers_to_render);
                 if !modifiers_str.is_empty() {
                     parts.push(modifiers_str);
                 }
@@ -514,11 +541,106 @@ impl JavaCodeGenerator {
         Ok(header)
     }
 
+    fn generate_statement_with_null_guard(
+        &mut self,
+        statement: &IrStatement,
+        owner: &str,
+    ) -> Result<String, CodeGenError> {
+        match statement {
+            IrStatement::VariableDeclaration {
+                name,
+                java_type,
+                initializer,
+                is_final,
+                modifiers,
+                ..
+            } => {
+                let mut parts = Vec::new();
+                let modifier = self.generate_local_modifiers(*is_final, modifiers);
+                if !modifier.is_empty() {
+                    parts.push(modifier);
+                }
+                parts.push(self.generate_type(java_type)?);
+                parts.push(name.clone());
+                let mut line = parts.join(" ");
+                if let Some(expr) = initializer {
+                    let expr_code = self.generate_expression(expr)?;
+                    let guarded = self.wrap_with_null_guard(expr_code, owner);
+                    line.push_str(" = ");
+                    line.push_str(&guarded);
+                }
+                line.push(';');
+                Ok(line)
+            }
+            IrStatement::FieldDeclaration {
+                name,
+                java_type,
+                initializer,
+                modifiers,
+                ..
+            } => {
+                let mut parts = Vec::new();
+                let modifiers_str = self.generate_modifiers(modifiers);
+                if !modifiers_str.is_empty() {
+                    parts.push(modifiers_str);
+                }
+                parts.push(self.generate_type(java_type)?);
+                parts.push(name.clone());
+                let mut line = parts.join(" ");
+                if let Some(expr) = initializer {
+                    let expr_code = self.generate_expression(expr)?;
+                    let guarded = self.wrap_with_null_guard(expr_code, owner);
+                    line.push_str(" = ");
+                    line.push_str(&guarded);
+                }
+                line.push(';');
+                Ok(line)
+            }
+            IrStatement::Return {
+                value: Some(expr), ..
+            } => {
+                let expr_code = self.generate_expression(expr)?;
+                let guarded = self.wrap_with_null_guard(expr_code, owner);
+                Ok(format!("return {};", guarded))
+            }
+            IrStatement::Expression { expr, .. } => {
+                if let IrExpression::Assignment { target, value, .. } = expr {
+                    let lhs = self.generate_expression(target)?;
+                    let rhs = self.generate_expression(value)?;
+                    let guarded_rhs = self.wrap_with_null_guard(rhs, owner);
+                    Ok(format!("{} = {};", lhs, guarded_rhs))
+                } else {
+                    let mut rendered = self.generate_expression(expr)?;
+                    if !rendered.ends_with(';') {
+                        rendered.push(';');
+                    }
+                    Ok(rendered)
+                }
+            }
+            _ => self.generate_statement(statement),
+        }
+    }
+
+    fn wrap_with_null_guard(&mut self, expr: String, owner: &str) -> String {
+        self.add_import("java.util.Objects");
+        format!(
+            "Objects.requireNonNull({}, \"JV: raw type guard for {}\")",
+            expr, owner
+        )
+    }
+
     fn generate_local_modifiers(&self, is_final: bool, modifiers: &IrModifiers) -> String {
         if is_final || modifiers.is_final {
             "final".to_string()
         } else {
             String::new()
         }
+    }
+
+    // === Statement Helpers (moved from helpers.rs) ===
+
+    /// Check if switch case contains only a default label.
+    pub(super) fn is_default_only_case(case: &IrSwitchCase) -> bool {
+        case.labels.len() == 1 && matches!(case.labels[0], IrCaseLabel::Default)
     }
 }
