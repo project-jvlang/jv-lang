@@ -100,7 +100,8 @@ fn convert_annotation_value(value: &AnnotationValue) -> IrAnnotationValue {
 pub(crate) fn extract_java_type(expr: &IrExpression) -> Option<JavaType> {
     match expr {
         IrExpression::Literal(literal, _) => Some(literal_to_java_type(literal)),
-        IrExpression::Identifier { java_type, .. }
+        IrExpression::RegexPattern { java_type, .. }
+        | IrExpression::Identifier { java_type, .. }
         | IrExpression::MethodCall { java_type, .. }
         | IrExpression::FieldAccess { java_type, .. }
         | IrExpression::ArrayAccess { java_type, .. }
@@ -135,6 +136,7 @@ pub(crate) fn extract_java_type(expr: &IrExpression) -> Option<JavaType> {
 pub(crate) fn ir_expression_span(expr: &IrExpression) -> Span {
     match expr {
         IrExpression::Literal(_, span)
+        | IrExpression::RegexPattern { span, .. }
         | IrExpression::Identifier { span, .. }
         | IrExpression::MethodCall { span, .. }
         | IrExpression::FieldAccess { span, .. }

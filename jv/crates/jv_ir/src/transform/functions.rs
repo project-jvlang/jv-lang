@@ -3,7 +3,8 @@ use crate::context::TransformContext;
 use crate::error::TransformError;
 use crate::types::{IrExpression, IrStatement, JavaType, MethodOverload};
 use jv_ast::{
-    Argument, CallArgumentStyle, Expression, Modifiers, Parameter, Span, Statement, TypeAnnotation,
+    Argument, CallArgumentStyle, Expression, Literal, Modifiers, Parameter, Span, Statement,
+    TypeAnnotation,
 };
 
 pub fn desugar_default_parameters(
@@ -213,7 +214,21 @@ fn convert_expression_to_ir(
     match transform_expression(expr.clone(), context) {
         Ok(ir) => Ok(ir),
         Err(err) => match expr {
-            Expression::Literal(lit, span) => Ok(IrExpression::Literal(lit, span)),
+            Expression::Literal(lit, span) => {
+                if let Literal::Regex(regex) = &lit {
+                    return Ok(IrExpression::RegexPattern {
+                        pattern: regex.pattern.clone(),
+                        java_type: JavaType::pattern(),
+                        span: regex.span.clone(),
+                    });
+                }
+                Ok(IrExpression::Literal(lit, span))
+            }
+            Expression::RegexLiteral(literal) => Ok(IrExpression::RegexPattern {
+                pattern: literal.pattern.clone(),
+                java_type: JavaType::pattern(),
+                span: literal.span.clone(),
+            }),
             Expression::Identifier(name, span) => Ok(IrExpression::Identifier {
                 name,
                 java_type: JavaType::object(),

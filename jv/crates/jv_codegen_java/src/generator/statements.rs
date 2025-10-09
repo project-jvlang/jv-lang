@@ -54,7 +54,21 @@ impl JavaCodeGenerator {
                 ..
             } => {
                 let mut parts = Vec::new();
-                let modifiers_str = self.generate_modifiers(modifiers);
+                let promote_static = initializer
+                    .as_ref()
+                    .map(|expr| matches!(expr, IrExpression::RegexPattern { .. }))
+                    .unwrap_or(false)
+                    && modifiers.is_final;
+                let promoted_modifiers = if promote_static {
+                    let mut clone = modifiers.clone();
+                    clone.is_static = true;
+                    clone.is_final = true;
+                    Some(clone)
+                } else {
+                    None
+                };
+                let modifiers_to_render = promoted_modifiers.as_ref().unwrap_or(modifiers);
+                let modifiers_str = self.generate_modifiers(modifiers_to_render);
                 if !modifiers_str.is_empty() {
                     parts.push(modifiers_str);
                 }

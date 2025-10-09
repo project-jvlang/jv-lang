@@ -1,6 +1,6 @@
 use jv_ast::{
     types::{QualifiedName, RawTypeContinuation, RawTypeDirective},
-    Span,
+    Literal, Span,
 };
 use jv_codegen_java::{JavaCodeGenConfig, JavaCodeGenerator, JavaTarget};
 use jv_ir::{
@@ -330,8 +330,7 @@ fn raw_default_comment_on_field_adds_import_and_guard() {
         .expect("compilation unit");
 
     assert!(
-        unit.imports
-            .contains(&"import java.util.Objects;".to_string()),
+        unit.imports.contains(&"java.util.Objects".to_string()),
         "expected Objects import but found {:?}",
         unit.imports
     );

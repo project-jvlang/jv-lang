@@ -94,14 +94,39 @@ impl JavaCodeGenerator {
             }
         }
 
+        let mut hoisted_regex_fields = Vec::new();
+        let mut retained_statements = Vec::new();
+        for statement in script_statements.drain(..) {
+            if let Some(field) = Self::hoist_regex_pattern_field(&statement) {
+                hoisted_regex_fields.push(field);
+            } else {
+                retained_statements.push(statement);
+            }
+        }
+        script_statements = retained_statements;
+
         let has_entry_method = script_methods.iter().any(Self::is_entry_point_method);
         let needs_wrapper = !script_statements.is_empty() || !has_entry_method;
 
-        if !script_statements.is_empty() || !script_methods.is_empty() {
+        if !script_statements.is_empty()
+            || !script_methods.is_empty()
+            || !hoisted_regex_fields.is_empty()
+        {
             let script_class = &self.config.script_main_class;
             let mut builder = self.builder();
             builder.push_line(&format!("public final class {} {{", script_class));
             builder.indent();
+
+            if !hoisted_regex_fields.is_empty() {
+                for field in &hoisted_regex_fields {
+                    let code = self.generate_statement(field)?;
+                    Self::push_lines(&mut builder, &code);
+                }
+
+                if needs_wrapper || !script_methods.is_empty() {
+                    builder.push_line("");
+                }
+            }
 
             if needs_wrapper {
                 builder.push_line("public static void main(String[] args) throws Exception {");
@@ -282,6 +307,47 @@ impl JavaCodeGenerator {
                 _ => false,
             },
             _ => false,
+        }
+    }
+
+    fn hoist_regex_pattern_field(statement: &IrStatement) -> Option<IrStatement> {
+        match statement {
+            IrStatement::Commented {
+                statement,
+                comment,
+                kind,
+                comment_span,
+            } => Self::hoist_regex_pattern_field(statement).map(|inner| IrStatement::Commented {
+                statement: Box::new(inner),
+                comment: comment.clone(),
+                kind: kind.clone(),
+                comment_span: comment_span.clone(),
+            }),
+            IrStatement::VariableDeclaration {
+                name,
+                java_type,
+                initializer,
+                is_final,
+                modifiers,
+                span,
+            } if *is_final => {
+                if let Some(expr) = initializer {
+                    if matches!(expr, IrExpression::RegexPattern { .. }) {
+                        let mut field_modifiers = modifiers.clone();
+                        field_modifiers.is_static = true;
+                        field_modifiers.is_final = true;
+                        return Some(IrStatement::FieldDeclaration {
+                            name: name.clone(),
+                            java_type: java_type.clone(),
+                            initializer: Some(expr.clone()),
+                            modifiers: field_modifiers,
+                            span: span.clone(),
+                        });
+                    }
+                }
+                None
+            }
+            _ => None,
         }
     }
 }

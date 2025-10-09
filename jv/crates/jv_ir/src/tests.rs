@@ -71,6 +71,79 @@ mod tests {
         assert!(profiler.latest_metrics().is_some());
     }
 
+    #[test]
+    fn transform_expression_creates_regex_pattern_variant() {
+        let span = dummy_span();
+        let literal = RegexLiteral {
+            pattern: "\\d+".to_string(),
+            raw: "/\\d+/".to_string(),
+            span: span.clone(),
+        };
+        let mut context = TransformContext::new();
+        let ir_expr = transform_expression(Expression::RegexLiteral(literal.clone()), &mut context)
+            .expect("regex literal lowering");
+
+        match ir_expr {
+            IrExpression::RegexPattern {
+                pattern,
+                java_type,
+                span: ir_span,
+            } => {
+                assert_eq!(pattern, "\\d+");
+                assert_eq!(ir_span, span);
+                match java_type {
+                    JavaType::Reference { name, generic_args } => {
+                        assert_eq!(name, "java.util.regex.Pattern");
+                        assert!(
+                            generic_args.is_empty(),
+                            "pattern type should not carry generics"
+                        );
+                    }
+                    other => panic!("expected pattern reference type, got {:?}", other),
+                }
+            }
+            other => panic!("expected regex pattern ir expression, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn transform_literal_regex_variant_also_creates_regex_pattern() {
+        let span = dummy_span();
+        let literal = RegexLiteral {
+            pattern: "^[a-z]+$".to_string(),
+            raw: "/^[a-z]+$/".to_string(),
+            span: span.clone(),
+        };
+        let mut context = TransformContext::new();
+        let ir_expr = transform_expression(
+            Expression::Literal(Literal::Regex(literal.clone()), span.clone()),
+            &mut context,
+        )
+        .expect("regex literal lowering");
+
+        match ir_expr {
+            IrExpression::RegexPattern {
+                pattern,
+                java_type,
+                span: ir_span,
+            } => {
+                assert_eq!(pattern, "^[a-z]+$");
+                assert_eq!(ir_span, literal.span);
+                match java_type {
+                    JavaType::Reference { name, generic_args } => {
+                        assert_eq!(name, "java.util.regex.Pattern");
+                        assert!(
+                            generic_args.is_empty(),
+                            "pattern type should not include generic arguments"
+                        );
+                    }
+                    other => panic!("expected pattern reference type, got {:?}", other),
+                }
+            }
+            other => panic!("expected regex pattern ir expression, got {:?}", other),
+        }
+    }
+
     fn simple_program() -> Program {
         Program {
             package: Some("demo".to_string()),

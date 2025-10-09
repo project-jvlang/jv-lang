@@ -5,6 +5,13 @@ impl JavaCodeGenerator {
     pub fn generate_expression(&mut self, expr: &IrExpression) -> Result<String, CodeGenError> {
         match expr {
             IrExpression::Literal(literal, _) => Ok(Self::literal_to_string(literal)),
+            IrExpression::RegexPattern { pattern, .. } => {
+                self.add_import("java.util.regex.Pattern");
+                Ok(format!(
+                    "Pattern.compile(\"{}\")",
+                    Self::escape_string(pattern)
+                ))
+            }
             IrExpression::Identifier { name, .. } => Ok(name.clone()),
             IrExpression::MethodCall {
                 receiver,
@@ -1036,6 +1043,10 @@ impl JavaCodeGenerator {
                 };
                 format!("'{}'", escaped)
             }
+            Literal::Regex(regex) => format!(
+                "java.util.regex.Pattern.compile(\"{}\")",
+                Self::escape_string(&regex.pattern)
+            ),
         }
     }
 }

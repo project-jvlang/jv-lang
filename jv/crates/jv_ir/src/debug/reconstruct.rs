@@ -6,8 +6,8 @@ use crate::types::{
 };
 use jv_ast::{
     Argument, CallArgumentMetadata, CommentKind, CommentStatement, CommentVisibility, Expression,
-    Literal, Modifiers, Program, Span, Statement, StringPart, TypeAnnotation, ValBindingOrigin,
-    Visibility,
+    Literal, Modifiers, Program, RegexLiteral, Span, Statement, StringPart, TypeAnnotation,
+    ValBindingOrigin, Visibility,
 };
 
 fn render_type_annotation(annotation: TypeAnnotation) -> String {
@@ -395,6 +395,15 @@ impl<'a> ReconstructionContext<'a> {
             IrExpression::Literal(literal, span) => {
                 self.record_success();
                 Expression::Literal(literal.clone(), span.clone())
+            }
+            IrExpression::RegexPattern { pattern, span, .. } => {
+                self.record_success();
+                let escaped = pattern.replace('/', "\\/");
+                Expression::RegexLiteral(RegexLiteral {
+                    pattern: pattern.clone(),
+                    raw: format!("/{}/", escaped),
+                    span: span.clone(),
+                })
             }
             IrExpression::Identifier { name, span, .. } => {
                 self.record_success();

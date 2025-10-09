@@ -372,7 +372,21 @@ pub fn transform_expression(
     context: &mut TransformContext,
 ) -> Result<IrExpression, TransformError> {
     match expr {
-        Expression::Literal(lit, span) => Ok(IrExpression::Literal(lit, span)),
+        Expression::Literal(lit, span) => {
+            if let Literal::Regex(regex) = &lit {
+                return Ok(IrExpression::RegexPattern {
+                    pattern: regex.pattern.clone(),
+                    java_type: JavaType::pattern(),
+                    span: regex.span.clone(),
+                });
+            }
+            Ok(IrExpression::Literal(lit, span))
+        }
+        Expression::RegexLiteral(literal) => Ok(IrExpression::RegexPattern {
+            pattern: literal.pattern.clone(),
+            java_type: JavaType::pattern(),
+            span: literal.span.clone(),
+        }),
         Expression::Identifier(name, span) => {
             if let Some(java_type) = context.lookup_variable(&name).cloned() {
                 Ok(IrExpression::Identifier {
