@@ -1,6 +1,9 @@
 package jv.stdlib.collections.tests
 
+import java.util.Map
 import jv.collections.Sequence
+
+data Person(name: String age: Int)
 
 fun validatePhase1MapFilterToList() {
     numbers = [1 2 3 4 5]
@@ -128,5 +131,93 @@ fun validatePhase3CountAndSum() {
 
     if (sumResult != 30L) {
         throw IllegalStateException("sum expected 30 but was ${sumResult}")
+    }
+}
+
+fun validatePhase4SortedSequence() {
+    numbers = [5 2 4 1 3]
+    result = numbers
+        .sorted()
+        .toList()
+
+    expected = [1 2 3 4 5]
+    if (result != expected) {
+        throw IllegalStateException("sorted expected ${expected} but was ${result}")
+    }
+}
+
+fun validatePhase4SortedBySequence() {
+    people = [
+        Person("Carol" 40)
+        Person("Alice" 32)
+        Person("Bob" 28)
+    ]
+
+    result = people
+        .sortedBy { person -> person.age }
+        .toList()
+
+    expected = [
+        Person("Bob" 28)
+        Person("Alice" 32)
+        Person("Carol" 40)
+    ]
+
+    if (result != expected) {
+        throw IllegalStateException("sortedBy expected ${expected} but was ${result}")
+    }
+}
+
+fun validatePhase4GroupByOperation() {
+    words = ["alpha" "amber" "bravo" "blue"]
+    grouped = words.groupBy { word -> word.substring(0 1) }
+
+    if (grouped.size() != 2) {
+        throw IllegalStateException("groupBy expected 2 buckets but was ${grouped.size()}")
+    }
+
+    aBucket = grouped.get("a")
+    if (aBucket == null || aBucket != ["alpha" "amber"]) {
+        throw IllegalStateException("groupBy bucket 'a' expected [alpha amber] but was ${aBucket}")
+    }
+
+    bBucket = grouped.get("b")
+    if (bBucket == null || bBucket != ["bravo" "blue"]) {
+        throw IllegalStateException("groupBy bucket 'b' expected [bravo blue] but was ${bBucket}")
+    }
+}
+
+fun validatePhase4AssociateOperation() {
+    entries = [
+        Person("Alice" 32)
+        Person("Bob" 28)
+        Person("Bob" 35)
+    ]
+
+    associated = entries.associate { person -> Map.entry(person.name person.age) }
+
+    if (associated.size() != 2) {
+        throw IllegalStateException("associate expected size 2 but was ${associated.size()}")
+    }
+
+    if (associated.get("Alice") != 32) {
+        throw IllegalStateException("associate expected Alice -> 32 but was ${associated.get("Alice")}")
+    }
+
+    if (associated.get("Bob") != 35) {
+        throw IllegalStateException("associate expected Bob -> 35 but was ${associated.get("Bob")}")
+    }
+}
+
+fun validatePhase5ForEachSideEffects() {
+    numbers = [1 2 3 4]
+    var total = 0
+
+    numbers
+        .map { value -> value * 3 }
+        .forEach { value -> total = total + value }
+
+    if (total != 30) {
+        throw IllegalStateException("forEach expected total 30 but was ${total}")
     }
 }

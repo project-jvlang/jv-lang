@@ -26,6 +26,150 @@ const REGEX_COMPLETION_TEMPLATES: &[&str] =
 const MAX_REGEX_PREVIEW_LENGTH: usize = 48;
 const HOVER_TEXT_MAX_LENGTH: usize = 160;
 
+struct SequenceOperationDoc {
+    name: &'static str,
+    description: &'static str,
+    example: &'static str,
+    java_output: &'static str,
+    completion: &'static str,
+    requires_lambda: bool,
+}
+
+const SEQUENCE_OPERATIONS: &[SequenceOperationDoc] = &[
+    SequenceOperationDoc {
+        name: "map",
+        description: "遅延評価Sequenceへ変換し、各要素を変換します。",
+        example: "numbers.map { value -> value * 2 }.toList()",
+        java_output: ".stream().map(value -> value * 2)",
+        completion: "map { value -> value * 2 }",
+        requires_lambda: true,
+    },
+    SequenceOperationDoc {
+        name: "filter",
+        description: "述語に一致する要素だけを保持します。",
+        example: "numbers.filter { value -> value % 2 == 0 }.toList()",
+        java_output: ".stream().filter(value -> value % 2 == 0)",
+        completion: "filter { value -> value % 2 == 0 }",
+        requires_lambda: true,
+    },
+    SequenceOperationDoc {
+        name: "flatMap",
+        description: "各要素をイテラブルへ展開し、遅延的に平坦化します。",
+        example: "groups.flatMap { entry -> entry.values }.toList()",
+        java_output: ".stream().flatMap(entry -> entry.values.stream())",
+        completion: "flatMap { value -> value }",
+        requires_lambda: true,
+    },
+    SequenceOperationDoc {
+        name: "take",
+        description: "先頭から指定数の要素だけを取り出します。",
+        example: "numbers.take(3).toList()",
+        java_output: ".stream().limit(3)",
+        completion: "take(3)",
+        requires_lambda: false,
+    },
+    SequenceOperationDoc {
+        name: "drop",
+        description: "先頭から指定数の要素をスキップします。",
+        example: "numbers.drop(2).toList()",
+        java_output: ".stream().skip(2)",
+        completion: "drop(2)",
+        requires_lambda: false,
+    },
+    SequenceOperationDoc {
+        name: "sorted",
+        description: "自然順序でソートされた遅延シーケンスを返します。",
+        example: "numbers.sorted().toList()",
+        java_output: ".stream().sorted()",
+        completion: "sorted()",
+        requires_lambda: false,
+    },
+    SequenceOperationDoc {
+        name: "sortedBy",
+        description: "キー選択ラムダを用いてソート順を指定します。",
+        example: "people.sortedBy { person -> person.age }.toList()",
+        java_output: ".stream().sorted(Comparator.comparing(person -> person.age))",
+        completion: "sortedBy { value -> value.key }",
+        requires_lambda: true,
+    },
+    SequenceOperationDoc {
+        name: "groupBy",
+        description: "キーごとに要素を`LinkedHashMap`へ集約します。",
+        example: "words.groupBy { word -> word.substring(0 1) }",
+        java_output: ".stream().collect(Collectors.groupingBy(word -> word.substring(0, 1), LinkedHashMap::new, Collectors.toList()))",
+        completion: "groupBy { value -> value.key() }",
+        requires_lambda: true,
+    },
+    SequenceOperationDoc {
+        name: "associate",
+        description: "キーと値のペアからマップを生成します。",
+        example: "entries.associate { entry -> Map.entry(entry.id entry.value) }",
+        java_output: ".stream().collect(Collectors.toMap(entry -> entry.id, entry -> entry.value, (left, _right) -> left, LinkedHashMap::new))",
+        completion: "associate { value -> Map.entry(value.key value.value) }",
+        requires_lambda: true,
+    },
+    SequenceOperationDoc {
+        name: "fold",
+        description: "初期値とラムダで累積演算を行います。",
+        example: "numbers.fold(0) { acc value -> acc + value }",
+        java_output: ".stream().reduce(0, (acc, value) -> acc + value)",
+        completion: "fold(initial) { acc value -> acc }",
+        requires_lambda: true,
+    },
+    SequenceOperationDoc {
+        name: "reduce",
+        description: "先頭要素を初期値として累積演算を行います。",
+        example: "numbers.reduce { left right -> left + right }",
+        java_output: ".stream().reduce((left, right) -> left + right)",
+        completion: "reduce { left right -> left }",
+        requires_lambda: true,
+    },
+    SequenceOperationDoc {
+        name: "count",
+        description: "遅延チェーンを評価し要素数を返します。",
+        example: "numbers.count()",
+        java_output: ".stream().count()",
+        completion: "count()",
+        requires_lambda: false,
+    },
+    SequenceOperationDoc {
+        name: "sum",
+        description: "数値要素を合計し`long`として返します。",
+        example: "numbers.map { value -> value + 1 }.sum()",
+        java_output: ".stream().mapToLong(value -> value + 1).sum()",
+        completion: "sum()",
+        requires_lambda: false,
+    },
+    SequenceOperationDoc {
+        name: "toList",
+        description: "結果を`List`へ収集します。Java 25では`.toList()`、Java 21では`Collectors.toList()`が出力されます。",
+        example: "numbers.map { value -> value * 2 }.toList()",
+        java_output: ".stream().toList() // Java 21: .collect(Collectors.toList())",
+        completion: "toList()",
+        requires_lambda: false,
+    },
+    SequenceOperationDoc {
+        name: "forEach",
+        description: "各要素に副作用ラムダを適用します（引数は明示が必要です）。",
+        example: "numbers.forEach { value -> println(value) }",
+        java_output: ".stream().forEach(value -> System.out.println(value))",
+        completion: "forEach { value -> /* side effects */ }",
+        requires_lambda: true,
+    },
+];
+
+const SEQUENCE_LAMBDA_OPERATIONS: &[&str] = &[
+    "map",
+    "filter",
+    "flatMap",
+    "sortedBy",
+    "groupBy",
+    "associate",
+    "fold",
+    "reduce",
+    "forEach",
+];
+
 #[derive(Error, Debug)]
 pub enum LspError {
     #[error("Protocol error: {0}")]
@@ -234,14 +378,22 @@ impl JvLanguageServer {
                 .insert(uri.to_string(), regex_analyses.clone());
         }
 
+        diagnostics.extend(sequence_lambda_diagnostics(content));
+
         diagnostics
     }
 
-    pub fn get_completions(&self, uri: &str, _position: Position) -> Vec<String> {
+    pub fn get_completions(&self, uri: &str, position: Position) -> Vec<String> {
         let mut items: Vec<String> = COMPLETION_TEMPLATES
             .iter()
             .map(|template| (*template).to_string())
             .collect();
+
+        if let Some(content) = self.documents.get(uri) {
+            if should_offer_sequence_completions(content, &position) {
+                items.extend(SEQUENCE_OPERATIONS.iter().map(sequence_completion_item));
+            }
+        }
 
         if let Some(analyses) = self.regex_metadata.get(uri) {
             items.extend(
@@ -268,6 +420,10 @@ impl JvLanguageServer {
     }
 
     pub fn get_hover(&self, uri: &str, position: Position) -> Option<HoverResult> {
+        if let Some(hover) = self.sequence_hover(uri, &position) {
+            return Some(hover);
+        }
+
         let analyses = self.regex_metadata.get(uri)?;
         let analysis = analyses
             .iter()
@@ -281,6 +437,28 @@ impl JvLanguageServer {
         self.regex_metadata
             .get(uri)
             .map(|entries| entries.as_slice())
+    }
+
+    fn sequence_hover(&self, uri: &str, position: &Position) -> Option<HoverResult> {
+        let content = self.documents.get(uri)?;
+        let (start, end, word) = word_at_position(content, position)?;
+        let operation = SEQUENCE_OPERATIONS
+            .iter()
+            .find(|candidate| candidate.name == word)?;
+        let contents = build_sequence_hover(operation);
+        Some(HoverResult {
+            contents,
+            range: Range {
+                start: Position {
+                    line: position.line,
+                    character: start as u32,
+                },
+                end: Position {
+                    line: position.line,
+                    character: end as u32,
+                },
+            },
+        })
     }
 }
 
@@ -507,6 +685,200 @@ fn truncate_with_ellipsis(input: &str, max: usize) -> String {
 
 fn escape_inline_code(input: &str) -> String {
     input.replace('`', "\\`")
+}
+
+fn sequence_completion_item(operation: &SequenceOperationDoc) -> String {
+    let mut entry = format!("{} · {}", operation.name, operation.completion);
+    if operation.requires_lambda {
+        entry.push_str(" // 明示引数必須");
+    }
+    entry.push_str(&format!(" — {}", operation.description));
+    entry
+}
+
+fn should_offer_sequence_completions(content: &str, position: &Position) -> bool {
+    let line_index = position.line as usize;
+    let lines: Vec<&str> = content.split('\n').collect();
+    if line_index >= lines.len() {
+        return false;
+    }
+
+    let line = lines[line_index];
+    let mut char_index = position.character as usize;
+    if char_index > line.len() {
+        char_index = line.len();
+    }
+    if char_index == 0 {
+        return false;
+    }
+
+    let prefix = &line[..char_index];
+    let Some(dot_index) = prefix.rfind('.') else {
+        return false;
+    };
+
+    if dot_index + 1 != prefix.len() {
+        return false;
+    }
+
+    let identifier = prefix[..dot_index]
+        .chars()
+        .rev()
+        .take_while(|ch| ch.is_ascii_alphanumeric() || *ch == '_')
+        .collect::<Vec<_>>();
+
+    !identifier.is_empty()
+}
+
+fn word_at_position(content: &str, position: &Position) -> Option<(usize, usize, String)> {
+    let line_index = position.line as usize;
+    let lines: Vec<&str> = content.split('\n').collect();
+    if line_index >= lines.len() {
+        return None;
+    }
+
+    let line = lines[line_index];
+    let mut char_index = position.character as usize;
+    if char_index > line.len() {
+        char_index = line.len();
+    }
+
+    let bytes = line.as_bytes();
+    let mut start = char_index;
+    while start > 0 && is_word_byte(bytes[start - 1]) {
+        start -= 1;
+    }
+
+    let mut end = char_index;
+    while end < line.len() && is_word_byte(bytes[end]) {
+        end += 1;
+    }
+
+    if start == end {
+        return None;
+    }
+
+    Some((start, end, line[start..end].to_string()))
+}
+
+fn build_sequence_hover(operation: &SequenceOperationDoc) -> String {
+    let mut sections = Vec::new();
+    sections.push(operation.description.to_string());
+    sections.push(format!("**使用例:**\n```jv\n{}\n```", operation.example));
+    if operation.requires_lambda {
+        sections.push("**注意:** ラムダ引数は明示必須です。".to_string());
+    }
+    sections.push(format!("**Java出力:** `{}`", operation.java_output));
+    sections.join("\n\n")
+}
+
+fn sequence_lambda_diagnostics(content: &str) -> Vec<Diagnostic> {
+    sequence_lambda_issue_ranges(content)
+        .into_iter()
+        .map(|(start, end)| Diagnostic {
+            range: offset_range(content, start, end),
+            severity: Some(DiagnosticSeverity::Error),
+            message: "ラムダ式の引数を明示してください。jvでは暗黙の `it` パラメータはサポートしていません。\n\n例: `{ x -> x > 0 }`"
+                .to_string(),
+            code: Some("E1001".to_string()),
+            source: Some("jv-lsp".to_string()),
+            help: Some("Sequenceチェーンのラムダでは名前付きパラメータを宣言してください。".to_string()),
+            suggestions: vec![
+                "コードアクション: `{ it ->` を `{ value ->` に置き換えてください。".to_string()
+            ],
+            strategy: Some("Immediate".to_string()),
+        })
+        .collect()
+}
+
+fn sequence_lambda_issue_ranges(content: &str) -> Vec<(usize, usize)> {
+    let mut issues = Vec::new();
+    let mut search_index = 0usize;
+    while let Some(relative) = content[search_index..].find('{') {
+        let brace_index = search_index + relative;
+        if let Some(identifier) = preceding_identifier(content, brace_index) {
+            if SEQUENCE_LAMBDA_OPERATIONS.contains(&identifier.as_str()) {
+                if let Some((start, end)) = detect_implicit_it(content, brace_index) {
+                    issues.push((start, end));
+                }
+            }
+        }
+        search_index = brace_index + 1;
+    }
+    issues
+}
+
+fn preceding_identifier(content: &str, brace_index: usize) -> Option<String> {
+    if brace_index == 0 {
+        return None;
+    }
+    let bytes = content.as_bytes();
+    let mut index = brace_index;
+    while index > 0 && bytes[index - 1].is_ascii_whitespace() {
+        index -= 1;
+    }
+    let end = index;
+    while index > 0 && is_word_byte(bytes[index - 1]) {
+        index -= 1;
+    }
+    if index == end {
+        return None;
+    }
+    Some(content[index..end].to_string())
+}
+
+fn detect_implicit_it(content: &str, brace_index: usize) -> Option<(usize, usize)> {
+    let bytes = content.as_bytes();
+    let mut index = brace_index + 1;
+    while index < bytes.len() && bytes[index].is_ascii_whitespace() {
+        index += 1;
+    }
+    if index + 1 > bytes.len() {
+        return None;
+    }
+    if index >= bytes.len() || !is_word_byte(bytes[index]) {
+        return None;
+    }
+    let start = index;
+    while index < bytes.len() && is_word_byte(bytes[index]) {
+        index += 1;
+    }
+    if &content[start..index] != "it" {
+        return None;
+    }
+    Some((start, index))
+}
+
+fn offset_range(content: &str, start: usize, end: usize) -> Range {
+    Range {
+        start: offset_to_position(content, start),
+        end: offset_to_position(content, end),
+    }
+}
+
+fn offset_to_position(content: &str, offset: usize) -> Position {
+    let mut line = 0u32;
+    let mut character = 0u32;
+    let mut index = 0usize;
+
+    for ch in content.chars() {
+        if index >= offset {
+            break;
+        }
+        if ch == '\n' {
+            line += 1;
+            character = 0;
+        } else {
+            character += 1;
+        }
+        index += ch.len_utf8();
+    }
+
+    Position { line, character }
+}
+
+fn is_word_byte(byte: u8) -> bool {
+    byte.is_ascii_alphanumeric() || byte == b'_'
 }
 
 #[cfg(test)]

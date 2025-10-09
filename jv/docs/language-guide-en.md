@@ -468,9 +468,14 @@ See [Whitespace Arrays and Arguments](whitespace-arrays.md) for layout rules. Mi
 ```jv
 numbers = listOf(1, 2, 3, 4, 5)
 
-doubled = numbers.map { it * 2 }
-evens = numbers.filter { it % 2 == 0 }
-sum = numbers.reduce { acc, n -> acc + n }
+doubled = numbers.map { value -> value * 2 }
+evens = numbers.filter { value -> value % 2 == 0 }
+sum = numbers.reduce { acc, value -> acc + value }
+
+// Sequence-style extensions can be invoked directly on Iterable without calling asSequence().
+// Lambdas must declare explicit parameter names; implicit `it` is not supported.
+// Use forEach { value -> ... } for side effects. toList()/toSet() emit .stream().toList()/toSet()
+// for Java 25 and fall back to Collectors.toList()/Collectors.toSet() when targeting Java 21.
 
 firstPositive = numbers.firstOrNull { it > 0 }
 hasNegative = numbers.any { it < 0 }

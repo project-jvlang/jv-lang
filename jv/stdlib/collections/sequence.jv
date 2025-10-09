@@ -1,8 +1,12 @@
 package jv.collections
 
 import java.lang.IllegalArgumentException
+import java.util.ArrayList
+import java.util.Comparator
 import java.util.Iterator
+import java.util.LinkedHashMap
 import java.util.List
+import java.util.Map
 import java.util.stream.Collectors
 import java.util.stream.Stream
 import java.util.stream.StreamSupport
@@ -10,7 +14,7 @@ import java.util.stream.StreamSupport
 /**
  * KotlinのSequence APIに対応する遅延評価チェーンラッパー。
  *
- * - Kotlinパリティ: Kotlin `Sequence` と同様に map / filter / flatMap / take / drop / toList を提供
+ * - Kotlinパリティ: Kotlin `Sequence` と同様に map / filter / flatMap / take / drop / sorted / reduce / fold / groupBy / associate / count / sum / toList / forEach を提供
  * - 明示引数必須: transform / predicate ラムダはパラメータを必ず宣言する
  * - Zero runtime overhead: Java Stream API へ直接デシュガリングし中間コレクションを生成しない
  *
@@ -107,6 +111,27 @@ fun <T, R> Sequence<T>.flatMap(transform: (T) -> Iterable<R>): Sequence<R> {
 }
 
 /**
+ * Kotlin `Sequence.sorted` と同等のソート操作。
+ *
+ * Requirement 1: 遅延チェーンを維持しつつ自然順序で要素を並べ替える。
+ */
+fun <T : Comparable<T>> Sequence<T>.sorted(): Sequence<T> {
+    val sortedStream = this.toStream().sorted()
+    return Sequence.fromStream(sortedStream)
+}
+
+/**
+ * Kotlin `Sequence.sortedBy` と同等のキー指定ソート。
+ *
+ * Requirement 1: 指定キーを Comparator へ変換し、遅延チェーンのまま評価順序を保証する。
+ */
+fun <T, R : Comparable<R>> Sequence<T>.sortedBy(selector: (T) -> R): Sequence<T> {
+    val comparator = Comparator.comparing { value -> selector(value) }
+    val sortedStream = this.toStream().sorted(comparator)
+    return Sequence.fromStream(sortedStream)
+}
+
+/**
  * Kotlin `Sequence.toList` と同等の終端操作。
  *
  * Requirement 2: Java 25 Stream `.toList()` 互換の List へ評価する。
@@ -183,6 +208,59 @@ fun <T> Sequence<T>.sum(): Long {
 }
 
 /**
+ * Kotlin `Sequence.forEach` と同等の副作用操作。
+ *
+ * Requirement 2: 各要素を順序通りに訪問し、副作用ラムダへ明示引数で受け渡す。
+ *
+ * @param action 明示引数を取る副作用ラムダ
+ */
+fun <T> Sequence<T>.forEach(action: (T) -> Unit) {
+    val stream = this.toStream()
+    stream.forEach { value -> action(value) }
+}
+
+/**
+ * Kotlin `Sequence.groupBy` と同等のキー集約操作。
+ *
+ * Requirement 2: 入力順序を保持する `LinkedHashMap` へグルーピングし、各キーの要素を遅延評価後に `List` へ蓄積する。
+ */
+fun <T, K> Sequence<T>.groupBy(keySelector: (T) -> K): Map<K, List<T>> {
+    val iterator = this.toStream().iterator()
+    val result: LinkedHashMap<K, List<T>> = LinkedHashMap()
+    while (iterator.hasNext()) {
+        val element = iterator.next()
+        val key = keySelector(element)
+
+        var bucket = result.get(key)
+        if (bucket == null) {
+            bucket = ArrayList()
+            result.put(key, bucket)
+        }
+
+        bucket.add(element)
+    }
+    return result
+}
+
+/**
+ * Kotlin `Sequence.associate` と同等のキー／値マップ生成。
+ *
+ * Requirement 2: 各要素を `Map.Entry` へ変換し、最後に出現したキーを優先して `LinkedHashMap` として返す。
+ *
+ * @param transform `Map.entry(key value)` などでキー／値ペアを生成するラムダ
+ */
+fun <T, K, V> Sequence<T>.associate(transform: (T) -> Map.Entry<K, V>): Map<K, V> {
+    val iterator = this.toStream().iterator()
+    val result: LinkedHashMap<K, V> = LinkedHashMap()
+    while (iterator.hasNext()) {
+        val element = iterator.next()
+        val entry = transform(element)
+        result.put(entry.getKey(), entry.getValue())
+    }
+    return result
+}
+
+/**
  * Collection から Kotlin `Sequence.map` 相当の遅延チェーンを開始する拡張。
  *
  * Requirement 1: `asSequence()` を不要にし、コレクションから直接 `map` を開始できる。
@@ -227,6 +305,26 @@ fun <T, R> Iterable<T>.flatMap(transform: (T) -> Iterable<R>): Sequence<R> {
 }
 
 /**
+ * Kotlin `Iterable.sorted` に準拠した遅延ソート開始。
+ *
+ * Requirement 1: コレクションから遅延Sequenceへ昇格させ、自然順序ソートをチェーンに組み込む。
+ */
+fun <T : Comparable<T>> Iterable<T>.sorted(): Sequence<T> {
+    val sequence = Sequence.fromIterable(this)
+    return sequence.sorted()
+}
+
+/**
+ * Kotlin `Iterable.sortedBy` に準拠したキー指定ソートの遅延チェーン。
+ *
+ * Requirement 1: キー抽出を保持したまま遅延Sequenceへ委譲する。
+ */
+fun <T, R : Comparable<R>> Iterable<T>.sortedBy(selector: (T) -> R): Sequence<T> {
+    val sequence = Sequence.fromIterable(this)
+    return sequence.sortedBy(selector)
+}
+
+/**
  * Kotlin `Iterable.fold` と同等の集約操作。
  */
 fun <T, R> Iterable<T>.fold(initial: R, operation: (R, T) -> R): R {
@@ -256,4 +354,36 @@ fun <T> Iterable<T>.count(): Long {
 fun <T> Iterable<T>.sum(): Long {
     val sequence = Sequence.fromIterable(this)
     return sequence.sum()
+}
+
+/**
+ * Kotlin `Iterable.forEach` と同等の副作用操作。
+ *
+ * Requirement 2: コレクションから遅延Sequenceへ昇格し、各要素を副作用ラムダへ受け渡す。
+ *
+ * @param action 明示引数を取る副作用ラムダ
+ */
+fun <T> Iterable<T>.forEach(action: (T) -> Unit) {
+    val sequence = Sequence.fromIterable(this)
+    sequence.forEach(action)
+}
+
+/**
+ * Kotlin `Iterable.groupBy` と同等のマップ生成。
+ *
+ * Requirement 2: 入力順序を保持した `LinkedHashMap` を返すため、Sequence 実装へ委譲する。
+ */
+fun <T, K> Iterable<T>.groupBy(keySelector: (T) -> K): Map<K, List<T>> {
+    val sequence = Sequence.fromIterable(this)
+    return sequence.groupBy(keySelector)
+}
+
+/**
+ * Kotlin `Iterable.associate` と同等のキー／値マップ生成。
+ *
+ * Requirement 2: キー重複時は最後の値で上書きする挙動を維持する。
+ */
+fun <T, K, V> Iterable<T>.associate(transform: (T) -> Map.Entry<K, V>): Map<K, V> {
+    val sequence = Sequence.fromIterable(this)
+    return sequence.associate(transform)
 }

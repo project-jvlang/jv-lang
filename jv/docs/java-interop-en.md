@@ -57,7 +57,7 @@ fun demonstrateJavaInterop() {
     // Java 8+ streams
     val total = map.values()
         .stream()
-        .mapToInt { it }
+        .mapToInt { value -> value }
         .sum()
     
     println("Total fruits: $total")
@@ -459,7 +459,7 @@ fun workWithJavaCollections() {
     
     // Streams
     val filtered = list.stream()
-        .filter { it.startsWith("a") }
+        .filter { value -> value.startsWith("a") }
         .collect(Collectors.toList())
     
     // TreeSet (sorted)
@@ -482,7 +482,7 @@ fun convertCollections() {
     val jvListFromJava = javaArrayList.toList()
     
     // Working with both
-    val combined = jvList + javaList.map { it * 2 }
+    val combined = jvList + javaList.map { value -> value * 2 }
 }
 ```
 
@@ -629,13 +629,31 @@ class MathService {
 
 ## Best Practices
 
+### Sequence Pipelines
+
+```jv
+val numbers = listOf(1, 2, 3, 4, 5)
+
+val doubled = numbers.map { value -> value * 2 }
+val evens = numbers.filter { value -> value % 2 == 0 }
+val sum = numbers.reduce { acc, value -> acc + value }
+
+// Use forEach { value -> ... } when the pipeline performs side effects.
+// toList()/toSet() emit .stream().toList()/toSet() for Java 25 targets and
+// fall back to Collectors.toList()/Collectors.toSet() on Java 21.
+```
+
+Iterable and array sources automatically promote to lazy `Sequence` pipelines, so
+there is no need to introduce `asSequence()`. Sequence extension lambdas must
+declare explicit parameter names; the implicit `it` placeholder is not supported.
+
 ### Library Integration
 
 1. **Use Idiomatic jv**: Don't just translate Java code
    ```jv
    // Good: Use jv collections and null safety
    fun processUsers(users: List<User?>): List<String> {
-       return users.mapNotNull { it?.name }
+       return users.mapNotNull { user -> user?.name }
    }
    
    // Less ideal: Direct Java style  
@@ -689,12 +707,12 @@ class MathService {
    ```jv
    // Good: Transform in place
    fun processInPlace(list: MutableList<String>) {
-       list.replaceAll { it.uppercase() }
+       list.replaceAll { value -> value.uppercase() }
    }
    
    // Less efficient: Create new collection
    fun processNew(list: List<String>): List<String> {
-       return list.map { it.uppercase() }
+       return list.map { value -> value.uppercase() }
    }
    ```
 
@@ -712,7 +730,7 @@ class MathService {
 2. **Generic Constraints**: Use bounded generics for type safety
    ```jv
    fun <T : Number> average(numbers: List<T>): Double {
-       return numbers.map { it.toDouble() }.average()
+       return numbers.map { value -> value.toDouble() }.average()
    }
    ```
 
@@ -771,8 +789,8 @@ import java.util.stream.Collectors
 
 fun processData(data: List<String>): Map<Int, List<String>> {
     return data.stream()
-        .filter { it.isNotEmpty() }
-        .collect(Collectors.groupingBy { it.length })
+        .filter { value -> value.isNotEmpty() }
+        .collect(Collectors.groupingBy { value -> value.length })
 }
 ```
 

@@ -12,6 +12,8 @@ pub fn collect_sequence_warnings(program: &Program) -> Vec<String> {
 #[derive(Default)]
 struct SequenceWarningCollector {
     warnings: Vec<String>,
+    emitted_as_sequence_hint: bool,
+    emitted_java_fallback_hint: bool,
 }
 
 enum SequenceKind {
@@ -168,6 +170,19 @@ impl SequenceWarningCollector {
                 self.visit_expression(function);
                 for argument in args {
                     self.visit_argument(argument);
+                }
+                if let Expression::MemberAccess {
+                    property,
+                    span: member_span,
+                    ..
+                } = function.as_ref()
+                {
+                    let method = property.as_str();
+                    if method == "asSequence" {
+                        self.emit_as_sequence_hint(member_span);
+                    } else if method == "toList" || method == "toSet" {
+                        self.emit_java_fallback_hint(member_span, method);
+                    }
                 }
                 if argument_metadata.used_commas {
                     self.emit_warning(span, SequenceKind::Call);
@@ -342,5 +357,79 @@ impl SequenceWarningCollector {
                 code, context
             ));
         }
+    }
+
+    fn emit_as_sequence_hint(&mut self, span: &Span) {
+        if self.emitted_as_sequence_hint {
+            return;
+        }
+        self.emitted_as_sequence_hint = true;
+        if span.start_line > 0 {
+            self.warnings.push(format!(
+                "SEQ1001: `asSequence()` は不要です。Iterable から直接 map/filter を呼び出すと自動で遅延Sequenceが開始されます ({}:{})。",
+                span.start_line, span.start_column
+            ));
+        } else {
+            self.warnings.push(
+                "SEQ1001: `asSequence()` は不要です。Iterable から直接 map/filter を呼び出すと自動で遅延Sequenceが開始されます。"
+                    .to_string(),
+            );
+        }
+    }
+
+    fn emit_java_fallback_hint(&mut self, span: &Span, method: &str) {
+        if self.emitted_java_fallback_hint {
+            return;
+        }
+        self.emitted_java_fallback_hint = true;
+        let fallback = if method == "toSet" {
+            "Collectors.toSet()"
+        } else {
+            "Collectors.toList()"
+        };
+        if span.start_line > 0 {
+            self.warnings.push(format!(
+                "SEQ1002: `{method}()` は Java 25 で `.stream().{method}()`、Java 21 で `{fallback}` にデシュガリングされます ({}:{})。",
+                span.start_line, span.start_column
+            ));
+        } else {
+            self.warnings.push(format!(
+                "SEQ1002: `{method}()` は Java 25 で `.stream().{method}()`、Java 21 で `{fallback}` にデシュガリングされます。",
+            ));
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use jv_parser::Parser as JvParser;
+
+    fn parse(source: &str) -> Program {
+        JvParser::parse(source).expect("source should parse for sequence warnings")
+    }
+
+    #[test]
+    fn warns_on_as_sequence_call() {
+        let program = parse(
+            r#"
+numbers = [1 2 3]
+numbers.asSequence().map { value -> value }.toList()
+"#,
+        );
+        let warnings = collect_sequence_warnings(&program);
+        assert!(warnings.iter().any(|warning| warning.contains("SEQ1001")));
+    }
+
+    #[test]
+    fn warns_on_to_list_java_fallback() {
+        let program = parse(
+            r#"
+numbers = [1 2 3]
+numbers.map { value -> value * 2 }.toList()
+"#,
+        );
+        let warnings = collect_sequence_warnings(&program);
+        assert!(warnings.iter().any(|warning| warning.contains("SEQ1002")));
     }
 }
