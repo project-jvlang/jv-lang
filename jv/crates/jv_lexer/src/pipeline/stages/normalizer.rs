@@ -10,7 +10,7 @@ use crate::{
     },
     LayoutCommaMetadata, LayoutSequenceKind, LexError, NumberGroupingKind, NumberLiteralMetadata,
     StringDelimiterKind, StringInterpolationSegment, StringLiteralMetadata, TokenDiagnostic,
-    TokenMetadata,
+    TokenMetadata, TokenType,
 };
 
 use super::json_utils::{detect_array_confidence, detect_object_confidence};
@@ -83,35 +83,30 @@ fn normalize_decimal_number(
     Ok(normalized)
 }
 
-fn detect_layout_metadata(source: &str, span: &Span) -> Option<LayoutCommaMetadata> {
-    let (_prev_idx, prev_char) = prev_non_whitespace(source, span.byte_range.start)?;
-    if matches!(prev_char, ',') {
+fn detect_layout_metadata<'source>(
+    token: &RawToken<'source>,
+    ctx: &LexerContext<'source>,
+) -> Option<LayoutCommaMetadata> {
+    let sequence_kind = ctx.current_layout_sequence()?;
+    let previous_token = ctx.last_token_type()?;
+
+    if !can_end_layout_item(previous_token) {
         return None;
     }
 
-    let (_, next_char) = next_non_whitespace(source, span.byte_range.end)?;
-    if matches!(next_char, ',' | ']' | ')') {
+    let (next_idx, next_char) = next_non_whitespace(ctx.source, token.span.byte_range.end)?;
+    if is_forbidden_layout_successor(next_char) {
         return None;
     }
 
-    let sequence_kind = enclosing_sequence_kind(source, span.byte_range.start)?;
-    match sequence_kind {
-        LayoutSequenceKind::Array | LayoutSequenceKind::Call => Some(LayoutCommaMetadata {
-            sequence: sequence_kind,
-            explicit_separator: None,
-        }),
+    if !can_begin_layout_item(ctx.source, next_idx, next_char) {
+        return None;
     }
-}
 
-fn prev_non_whitespace(source: &str, mut idx: usize) -> Option<(usize, char)> {
-    while idx > 0 {
-        let ch = source[..idx].chars().rev().next()?;
-        idx -= ch.len_utf8();
-        if !ch.is_whitespace() {
-            return Some((idx, ch));
-        }
-    }
-    None
+    Some(LayoutCommaMetadata {
+        sequence: sequence_kind,
+        explicit_separator: None,
+    })
 }
 
 fn next_non_whitespace(source: &str, mut idx: usize) -> Option<(usize, char)> {
@@ -126,54 +121,50 @@ fn next_non_whitespace(source: &str, mut idx: usize) -> Option<(usize, char)> {
     None
 }
 
-fn enclosing_sequence_kind(source: &str, pos: usize) -> Option<LayoutSequenceKind> {
-    let mut stack: Vec<char> = Vec::new();
-    let mut idx = 0;
-    while idx < pos {
-        let ch = source[idx..].chars().next().unwrap();
-        let ch_len = ch.len_utf8();
-        match ch {
-            '[' | '(' => stack.push(ch),
-            ']' => {
-                if matches!(stack.last(), Some('[')) {
-                    stack.pop();
-                }
-            }
-            ')' => {
-                if matches!(stack.last(), Some('(')) {
-                    stack.pop();
-                }
-            }
-            '"' => {
-                idx += ch_len;
-                while idx < pos {
-                    let next = source[idx..].chars().next().unwrap();
-                    let len = next.len_utf8();
-                    if next == '\\' {
-                        idx += len;
-                        if idx < pos {
-                            let escaped = source[idx..].chars().next().unwrap();
-                            idx += escaped.len_utf8();
-                        }
-                        continue;
-                    }
-                    idx += len;
-                    if next == '"' {
-                        break;
-                    }
-                }
-                continue;
-            }
-            _ => {}
-        }
-        idx += ch_len;
-    }
+fn is_forbidden_layout_successor(ch: char) -> bool {
+    matches!(ch, ',' | ')' | ']' | '}')
+}
 
-    match stack.iter().rev().find(|&&c| c == '[' || c == '(') {
-        Some('[') => Some(LayoutSequenceKind::Array),
-        Some('(') => Some(LayoutSequenceKind::Call),
-        _ => None,
+fn can_begin_layout_item(source: &str, idx: usize, ch: char) -> bool {
+    match ch {
+        'a'..='z' | 'A'..='Z' | '_' => true,
+        '0'..='9' => true,
+        '"' | '\'' | '`' => true,
+        '(' | '[' | '{' => true,
+        '@' => true,
+        '-' | '+' => {
+            let mut cursor = idx + ch.len_utf8();
+            while let Some(next) = source[cursor..].chars().next() {
+                if next.is_whitespace() {
+                    cursor += next.len_utf8();
+                    continue;
+                }
+                return next.is_ascii_digit();
+            }
+            false
+        }
+        '$' => true,
+        _ => false,
     }
+}
+
+fn can_end_layout_item(token: &TokenType) -> bool {
+    matches!(
+        token,
+        TokenType::Identifier(_)
+            | TokenType::Number(_)
+            | TokenType::String(_)
+            | TokenType::StringInterpolation(_)
+            | TokenType::Boolean(_)
+            | TokenType::True
+            | TokenType::False
+            | TokenType::Null
+            | TokenType::RightParen
+            | TokenType::RightBracket
+            | TokenType::RightBrace
+            | TokenType::StringEnd
+            | TokenType::RegexLiteral(_)
+    )
 }
 
 /// RawToken から文字列正規化・数値整形を行い、NormalizedToken を生成するステージ。
@@ -536,7 +527,7 @@ impl Normalizer {
     fn normalize_symbol<'source>(
         &mut self,
         token: RawToken<'source>,
-        ctx: &LexerContext<'source>,
+        ctx: &mut LexerContext<'source>,
     ) -> Result<NormalizedToken<'source>, LexError> {
         let mut metadata = PreMetadata::default();
         match token.text {
@@ -561,6 +552,14 @@ impl Normalizer {
             _ => {}
         }
 
+        match token.text {
+            "(" => ctx.push_layout_sequence(LayoutSequenceKind::Call),
+            "[" => ctx.push_layout_sequence(LayoutSequenceKind::Array),
+            ")" => ctx.pop_layout_sequence(LayoutSequenceKind::Call),
+            "]" => ctx.pop_layout_sequence(LayoutSequenceKind::Array),
+            _ => {}
+        }
+
         let normalized_text = token.text.to_string();
         Ok(self.finalize_token(token, metadata, normalized_text))
     }
@@ -572,7 +571,7 @@ impl Normalizer {
     ) -> Result<NormalizedToken<'source>, LexError> {
         let mut metadata = PreMetadata::default();
 
-        if let Some(layout_meta) = detect_layout_metadata(ctx.source, &token.span) {
+        if let Some(layout_meta) = detect_layout_metadata(&token, ctx) {
             metadata
                 .provisional_metadata
                 .push(TokenMetadata::LayoutComma(layout_meta));
@@ -892,6 +891,8 @@ mod tests {
             carry_over: None,
         };
         let mut ctx = LexerContext::new("[1 2]");
+        ctx.push_layout_sequence(LayoutSequenceKind::Array);
+        ctx.set_last_token_type(Some(TokenType::Number("1".to_string())));
 
         let normalized = normalizer
             .normalize(raw, &mut ctx)
@@ -920,6 +921,8 @@ mod tests {
             carry_over: None,
         };
         let mut ctx = LexerContext::new("plot(1 2)");
+        ctx.push_layout_sequence(LayoutSequenceKind::Call);
+        ctx.set_last_token_type(Some(TokenType::Number("1".to_string())));
 
         let normalized = normalizer
             .normalize(raw, &mut ctx)

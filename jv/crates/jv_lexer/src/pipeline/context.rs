@@ -1,4 +1,4 @@
-use crate::{LexError, TokenType};
+use crate::{LayoutSequenceKind, LexError, TokenType};
 
 use super::types::ScannerPosition;
 
@@ -11,6 +11,7 @@ pub struct LexerContext<'source> {
     pub emitted_tokens: usize,
     pub errors: Vec<LexError>,
     pub last_token_type: Option<TokenType>,
+    layout_stack: Vec<LayoutSequenceKind>,
 }
 
 impl<'source> LexerContext<'source> {
@@ -22,6 +23,7 @@ impl<'source> LexerContext<'source> {
             emitted_tokens: 0,
             errors: Vec::new(),
             last_token_type: None,
+            layout_stack: Vec::new(),
         }
     }
 
@@ -55,5 +57,27 @@ impl<'source> LexerContext<'source> {
 
     pub fn clear_last_token_type(&mut self) {
         self.last_token_type = None;
+    }
+
+    pub fn push_layout_sequence(&mut self, kind: LayoutSequenceKind) {
+        self.layout_stack.push(kind);
+    }
+
+    pub fn pop_layout_sequence(&mut self, kind: LayoutSequenceKind) {
+        match self.layout_stack.last().copied() {
+            Some(last) if last == kind => {
+                self.layout_stack.pop();
+            }
+            Some(_) => {
+                if let Some(pos) = self.layout_stack.iter().rposition(|&entry| entry == kind) {
+                    self.layout_stack.truncate(pos);
+                }
+            }
+            None => {}
+        }
+    }
+
+    pub fn current_layout_sequence(&self) -> Option<LayoutSequenceKind> {
+        self.layout_stack.last().copied()
     }
 }
