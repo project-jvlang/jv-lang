@@ -456,10 +456,7 @@ fn build_terminal(
 
 fn determine_java_type(terminal: Option<&SequenceTerminal>) -> JavaType {
     match terminal.map(|t| &t.kind) {
-        Some(SequenceTerminalKind::ToList) => JavaType::Reference {
-            name: "java.util.List".to_string(),
-            generic_args: vec![],
-        },
+        Some(SequenceTerminalKind::ToList) => JavaType::list(),
         Some(SequenceTerminalKind::ToSet) => JavaType::Reference {
             name: "java.util.Set".to_string(),
             generic_args: vec![],
@@ -476,10 +473,7 @@ fn determine_java_type(terminal: Option<&SequenceTerminal>) -> JavaType {
             JavaType::Primitive("long".to_string())
         }
         Some(SequenceTerminalKind::ForEach { .. }) => JavaType::void(),
-        None => JavaType::Reference {
-            name: "jv.collections.Sequence".to_string(),
-            generic_args: vec![],
-        },
+        None => JavaType::sequence(),
     }
 }
 

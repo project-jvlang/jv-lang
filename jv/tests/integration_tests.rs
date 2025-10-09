@@ -993,3 +993,72 @@ fn java_target_switch_emits_expected_sequence_collection_factories() {
         }
     }
 }
+
+#[test]
+fn sequence_interpolation_materializes_sequences_before_string_format() {
+    if !has_javac() || !has_java_runtime() {
+        eprintln!("Skipping sequence interpolation fixture run: java runtime or javac missing");
+        return;
+    }
+
+    let fixture = workspace_file("tests/lang/strings/sequence_interpolation.jv");
+    let expected_output = "inline=[2, 4, 6, 8]\nstored=[2, 4]";
+
+    for target in [JavaTarget::Java25, JavaTarget::Java21] {
+        let temp_dir =
+            TempDirGuard::new("sequence-interpolation").expect("create temp directory for fixture");
+        let plan = compose_plan_from_fixture(
+            temp_dir.path(),
+            &fixture,
+            CliOverrides {
+                java_only: true,
+                target: Some(target),
+                ..CliOverrides::default()
+            },
+        );
+
+        let artifacts = compile(&plan).expect("sequence interpolation fixture compiles");
+        let java_dir = plan
+            .options
+            .output_dir
+            .join(format!("java{}", target.as_str()));
+        let classes_dir = java_dir.join("classes");
+        fs::create_dir_all(&classes_dir).expect("create classes directory for javac");
+
+        let mut javac = Command::new("javac");
+        javac.arg("-d").arg(&classes_dir);
+        for file in &artifacts.java_files {
+            javac.arg(file);
+        }
+        let status = javac
+            .status()
+            .expect("invoke javac for sequence interpolation fixture");
+        assert!(
+            status.success(),
+            "javac failed for target {}",
+            target.as_str()
+        );
+
+        let output = Command::new("java")
+            .arg("-cp")
+            .arg(&classes_dir)
+            .arg(&artifacts.script_main_class)
+            .output()
+            .expect("execute compiled sequence interpolation script");
+
+        assert!(
+            output.status.success(),
+            "java execution failed for target {}: {}",
+            target.as_str(),
+            String::from_utf8_lossy(&output.stderr)
+        );
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert_eq!(
+            stdout.trim(),
+            expected_output,
+            "unexpected output for target {}",
+            target.as_str()
+        );
+    }
+}

@@ -958,6 +958,20 @@ impl JavaType {
         }
     }
 
+    pub fn list() -> Self {
+        JavaType::Reference {
+            name: "java.util.List".to_string(),
+            generic_args: vec![],
+        }
+    }
+
+    pub fn sequence() -> Self {
+        JavaType::Reference {
+            name: "jv.collections.Sequence".to_string(),
+            generic_args: vec![],
+        }
+    }
+
     pub fn wildcard_extends(bound: JavaType) -> Self {
         JavaType::Wildcard {
             kind: JavaWildcardKind::Extends,
