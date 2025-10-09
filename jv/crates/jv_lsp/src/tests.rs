@@ -320,3 +320,69 @@ fn surfaces_null_safety_warning() {
         Some(DiagnosticSeverity::Warning)
     ) && diag.message.contains("Null safety")));
 }
+
+#[test]
+fn surfaces_regex_diagnostics_from_validator() {
+    let mut server = JvLanguageServer::new();
+    let uri = "file:///regex-invalid.jv".to_string();
+    server.open_document(uri.clone(), "val pattern = /\\y/".to_string());
+
+    let diagnostics = server.get_diagnostics(&uri);
+    assert!(diagnostics
+        .iter()
+        .any(|diag| diag.code.as_deref() == Some("JV5102")));
+
+    let metadata = server
+        .regex_metadata(&uri)
+        .expect("regex metadata should be recorded");
+    assert_eq!(metadata.len(), 1);
+}
+
+#[test]
+fn hover_exposes_regex_analysis_summary() {
+    let mut server = JvLanguageServer::new();
+    let uri = "file:///regex-hover.jv".to_string();
+    server.open_document(uri.clone(), "val pattern = /[a-z]+/".to_string());
+
+    let _ = server.get_diagnostics(&uri);
+    let metadata = server
+        .regex_metadata(&uri)
+        .expect("regex metadata should be available");
+    let analysis = &metadata[0];
+
+    let hover_position = Position {
+        line: analysis.span.start_line.saturating_sub(1) as u32,
+        character: analysis.span.start_column.saturating_sub(1) as u32,
+    };
+
+    let hover = server
+        .get_hover(&uri, hover_position.clone())
+        .expect("hover information should be returned");
+
+    assert!(hover.contents.contains("Regex pattern"));
+    assert!(hover.contents.contains("[a-z]+"));
+    assert_eq!(hover.range.start.line, hover_position.line);
+}
+
+#[test]
+fn regex_completions_include_templates_and_metadata() {
+    let mut server = JvLanguageServer::new();
+    let uri = "file:///regex-completion.jv".to_string();
+    server.open_document(uri.clone(), "val pattern = /^[0-9]+$/".to_string());
+
+    let _ = server.get_diagnostics(&uri);
+    let completions = server.get_completions(
+        &uri,
+        Position {
+            line: 0,
+            character: 0,
+        },
+    );
+
+    assert!(completions
+        .iter()
+        .any(|item| item.contains("regex template")));
+    assert!(completions
+        .iter()
+        .any(|item| item.contains("regex literal")));
+}
