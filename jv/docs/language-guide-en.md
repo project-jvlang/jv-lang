@@ -494,6 +494,43 @@ String message = String.format("Hello, my name is %s and I'm %d years old", name
 String calculation = "The result is " + (2 + 2);
 ```
 
+## Regex Literals
+
+Use the slash-delimited literal syntax `/<pattern>/` to create a `java.util.regex.Pattern`
+without calling `Pattern.compile` manually. Top-level `val` declarations are hoisted to static
+fields so the pattern is compiled only once per class.
+
+```jv
+val pattern = /\d+/
+
+fun isNumber(input: String): Boolean {
+    return pattern.matcher(input).matches()
+}
+```
+
+**Generated Java:**
+```java
+import java.util.regex.Pattern;
+
+private static final Pattern PATTERN = Pattern.compile("\\d+");
+
+public static boolean isNumber(String input) {
+    return PATTERN.matcher(input).matches();
+}
+```
+
+### Syntax Rules and Diagnostics
+- Escape the closing delimiter with `\/`. A trailing standalone backslash is rejected and produces
+  diagnostic `JV5102`.
+- Control characters such as newlines or tabs are disallowed inside the literal. For these cases use
+  a regular string literal and call `Pattern.compile` explicitly.
+- The built-in `RegexValidator` performs static analysis; unmatched brackets or unsupported escapes
+  surface as `JV5101`/`JV5103` diagnostics.
+- Ordinary string literals like `"/not/regex/"` continue to tokenize as `TokenType::String` and are
+  never reinterpreted as regex literals.
+- No additional runtime dependencies are introduced. The compiler only targets
+  `java.util.regex.Pattern`.
+
 ## Concurrency
 
 ### Virtual Threads (spawn)

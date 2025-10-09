@@ -804,6 +804,7 @@ fn extract_expr_span(expr: &IrExpression) -> Span {
         | IrExpression::StringFormat { span, .. }
         | IrExpression::CompletableFuture { span, .. }
         | IrExpression::VirtualThread { span, .. }
-        | IrExpression::TryWithResources { span, .. } => span.clone(),
+        | IrExpression::TryWithResources { span, .. }
+        | IrExpression::RegexPattern { span, .. } => span.clone(),
     }
 }

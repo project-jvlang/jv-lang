@@ -1,6 +1,7 @@
 use super::*;
 
 use crate::pipeline::pipeline::{CharScannerStage, ClassifierStage, EmitterStage, NormalizerStage};
+use fastrand::Rng;
 use test_case::test_case;
 
 #[test]
@@ -1363,6 +1364,82 @@ fn regex_literal_rejects_tab_character() {
             ..
         }
     ));
+}
+
+#[test]
+fn string_literal_with_regex_delimiters_remains_string() {
+    let mut lexer = Lexer::new("val message = \"/not/a/regex/\"".to_string());
+    let tokens = lexer
+        .tokenize()
+        .expect("string literal containing slashes should tokenize");
+
+    let string_token = tokens.iter().find_map(|token| match &token.token_type {
+        TokenType::String(value) => Some(value.clone()),
+        _ => None,
+    });
+
+    assert_eq!(
+        string_token.as_deref(),
+        Some("/not/a/regex/"),
+        "string literal contents should be preserved"
+    );
+
+    assert!(
+        tokens
+            .iter()
+            .all(|token| !matches!(token.token_type, TokenType::RegexLiteral(_))),
+        "string literal should not emit RegexLiteral tokens"
+    );
+}
+
+#[test]
+fn random_string_literals_never_lex_as_regex_literals() {
+    const ALPHABET: &[char] = &[
+        '/', '\\', ' ', '-', '_', '.', ':', ';', ',', '+', '*', '?', '=', '#',
+        '0', '1', '2', '3', '4', '5', '6', '7', '8', '9',
+        'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r',
+        's', 't', 'u', 'v', 'w', 'x', 'y', 'z',
+        'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R',
+        'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z',
+    ];
+
+    let mut rng = Rng::with_seed(0xDEAD_5A5Eu64);
+    for iteration in 0..256 {
+        let length = rng.usize(0..24);
+        let mut literal = String::with_capacity(length);
+        for _ in 0..length {
+            let idx = rng.usize(0..ALPHABET.len());
+            literal.push(ALPHABET[idx]);
+        }
+
+        let escaped = literal
+            .replace('\\', "\\\\")
+            .replace('"', "\\\"");
+        let source = format!("val sample = \"{escaped}\"");
+
+        let mut lexer = Lexer::new(source.clone());
+        let tokens = lexer
+            .tokenize()
+            .unwrap_or_else(|error| panic!("iteration {iteration}: failed to tokenize {source:?}: {error:?}"));
+
+        let string_token = tokens.iter().find_map(|token| match &token.token_type {
+            TokenType::String(value) => Some(value.clone()),
+            _ => None,
+        });
+
+        assert_eq!(
+            string_token.as_deref(),
+            Some(literal.as_str()),
+            "iteration {iteration}: string literal contents should match input"
+        );
+
+        assert!(
+            tokens
+                .iter()
+                .all(|token| !matches!(token.token_type, TokenType::RegexLiteral(_))),
+            "iteration {iteration}: no RegexLiteral tokens should be produced"
+        );
+    }
 }
 
 #[test]
