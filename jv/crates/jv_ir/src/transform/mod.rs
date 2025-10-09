@@ -1,8 +1,8 @@
 use self::utils::extract_java_type;
 use crate::context::TransformContext;
 use crate::error::TransformError;
-use crate::sequence_pipeline;
 use crate::profiling::{PerfMetrics, TransformProfiler};
+use crate::sequence_pipeline;
 use crate::types::{IrCommentKind, IrExpression, IrProgram, IrStatement, JavaType};
 use jv_ast::{
     Argument, BinaryOp, CallArgumentMetadata, CommentKind, ConcurrencyConstruct, Expression,

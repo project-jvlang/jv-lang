@@ -16,19 +16,47 @@ pub struct SequencePipeline {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum SequenceSource {
-    Expression {
+    Collection {
         expr: Box<IrExpression>,
         element_hint: Option<JavaType>,
+    },
+    Array {
+        expr: Box<IrExpression>,
+        element_hint: Option<JavaType>,
+        dimensions: usize,
+    },
+    JavaStream {
+        expr: Box<IrExpression>,
+        element_hint: Option<JavaType>,
+        auto_close: bool,
     },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum SequenceStage {
-    Map { lambda: Box<IrExpression>, span: Span },
-    Filter { predicate: Box<IrExpression>, span: Span },
-    FlatMap { lambda: Box<IrExpression>, span: Span },
-    Take { count: Box<IrExpression>, span: Span },
-    Drop { count: Box<IrExpression>, span: Span },
+    Map {
+        lambda: Box<IrExpression>,
+        result_hint: Option<JavaType>,
+        span: Span,
+    },
+    Filter {
+        predicate: Box<IrExpression>,
+        span: Span,
+    },
+    FlatMap {
+        lambda: Box<IrExpression>,
+        element_hint: Option<JavaType>,
+        flatten_depth: usize,
+        span: Span,
+    },
+    Take {
+        count: Box<IrExpression>,
+        span: Span,
+    },
+    Drop {
+        count: Box<IrExpression>,
+        span: Span,
+    },
     Sorted {
         comparator: Option<Box<IrExpression>>,
         span: Span,
@@ -38,16 +66,58 @@ pub enum SequenceStage {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SequenceTerminal {
     pub kind: SequenceTerminalKind,
+    pub evaluation: SequenceTerminalEvaluation,
+    /// Whether the terminal requires a non-empty source for safe evaluation.
+    pub requires_non_empty_source: bool,
     pub span: Span,
+}
+
+impl SequenceTerminal {
+    fn new(
+        kind: SequenceTerminalKind,
+        evaluation: SequenceTerminalEvaluation,
+        requires_non_empty_source: bool,
+        span: Span,
+    ) -> Self {
+        Self {
+            kind,
+            evaluation,
+            requires_non_empty_source,
+            span,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub enum SequenceTerminalEvaluation {
+    Collector,
+    Reducer,
+    Aggregator,
+    Consumer,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum SequenceTerminalKind {
     ToList,
     ToSet,
+    Fold {
+        initial: Box<IrExpression>,
+        accumulator: Box<IrExpression>,
+    },
+    Reduce {
+        accumulator: Box<IrExpression>,
+    },
+    GroupBy {
+        key_selector: Box<IrExpression>,
+    },
+    Associate {
+        pair_selector: Box<IrExpression>,
+    },
     Count,
     Sum,
-    ForEach { action: Box<IrExpression> },
+    ForEach {
+        action: Box<IrExpression>,
+    },
 }
 
 pub fn try_lower_sequence_call(
@@ -100,7 +170,7 @@ pub fn try_lower_sequence_call(
 
     let source_ir = transform_expression(source_expr, context)?;
     let mut pipeline = SequencePipeline {
-        source: SequenceSource::Expression {
+        source: SequenceSource::Collection {
             expr: Box::new(source_ir),
             element_hint: None,
         },
@@ -176,6 +246,10 @@ enum StageKind {
 enum TerminalKind {
     ToList,
     ToSet,
+    Fold,
+    Reduce,
+    GroupBy,
+    Associate,
     Count,
     Sum,
     ForEach,
@@ -192,6 +266,10 @@ fn classify_method(name: &str) -> MethodKind {
         "sortedBy" => MethodKind::Stage(StageKind::SortedBy),
         "toList" => MethodKind::Terminal(TerminalKind::ToList),
         "toSet" => MethodKind::Terminal(TerminalKind::ToSet),
+        "fold" => MethodKind::Terminal(TerminalKind::Fold),
+        "reduce" => MethodKind::Terminal(TerminalKind::Reduce),
+        "groupBy" => MethodKind::Terminal(TerminalKind::GroupBy),
+        "associate" => MethodKind::Terminal(TerminalKind::Associate),
         "count" => MethodKind::Terminal(TerminalKind::Count),
         "sum" => MethodKind::Terminal(TerminalKind::Sum),
         "forEach" => MethodKind::Terminal(TerminalKind::ForEach),
@@ -210,6 +288,7 @@ fn build_stage(
             let lambda_ir = transform_expression(lambda, context)?;
             Ok(SequenceStage::Map {
                 lambda: Box::new(lambda_ir),
+                result_hint: None,
                 span: segment.span.clone(),
             })
         }
@@ -226,6 +305,8 @@ fn build_stage(
             let lambda_ir = transform_expression(lambda, context)?;
             Ok(SequenceStage::FlatMap {
                 lambda: Box::new(lambda_ir),
+                element_hint: None,
+                flatten_depth: 1,
                 span: segment.span.clone(),
             })
         }
@@ -277,31 +358,91 @@ fn build_terminal(
     context: &mut TransformContext,
 ) -> Result<SequenceTerminal, TransformError> {
     match kind {
-        TerminalKind::ToList if segment.args.is_empty() => Ok(SequenceTerminal {
-            kind: SequenceTerminalKind::ToList,
-            span: segment.span.clone(),
-        }),
-        TerminalKind::ToSet if segment.args.is_empty() => Ok(SequenceTerminal {
-            kind: SequenceTerminalKind::ToSet,
-            span: segment.span.clone(),
-        }),
-        TerminalKind::Count if segment.args.is_empty() => Ok(SequenceTerminal {
-            kind: SequenceTerminalKind::Count,
-            span: segment.span.clone(),
-        }),
-        TerminalKind::Sum if segment.args.is_empty() => Ok(SequenceTerminal {
-            kind: SequenceTerminalKind::Sum,
-            span: segment.span.clone(),
-        }),
+        TerminalKind::ToList if segment.args.is_empty() => Ok(SequenceTerminal::new(
+            SequenceTerminalKind::ToList,
+            SequenceTerminalEvaluation::Collector,
+            false,
+            segment.span.clone(),
+        )),
+        TerminalKind::ToSet if segment.args.is_empty() => Ok(SequenceTerminal::new(
+            SequenceTerminalKind::ToSet,
+            SequenceTerminalEvaluation::Collector,
+            false,
+            segment.span.clone(),
+        )),
+        TerminalKind::Fold => {
+            let (initial, lambda) = expect_two_positional(&segment.args)?;
+            let initial_ir = transform_expression(initial, context)?;
+            let accumulator_ir = transform_expression(lambda, context)?;
+            Ok(SequenceTerminal::new(
+                SequenceTerminalKind::Fold {
+                    initial: Box::new(initial_ir),
+                    accumulator: Box::new(accumulator_ir),
+                },
+                SequenceTerminalEvaluation::Reducer,
+                false,
+                segment.span.clone(),
+            ))
+        }
+        TerminalKind::Reduce => {
+            let accumulator = expect_single_positional(&segment.args)?;
+            let accumulator_ir = transform_expression(accumulator, context)?;
+            Ok(SequenceTerminal::new(
+                SequenceTerminalKind::Reduce {
+                    accumulator: Box::new(accumulator_ir),
+                },
+                SequenceTerminalEvaluation::Reducer,
+                true,
+                segment.span.clone(),
+            ))
+        }
+        TerminalKind::GroupBy => {
+            let selector = expect_single_positional(&segment.args)?;
+            let selector_ir = transform_expression(selector, context)?;
+            Ok(SequenceTerminal::new(
+                SequenceTerminalKind::GroupBy {
+                    key_selector: Box::new(selector_ir),
+                },
+                SequenceTerminalEvaluation::Collector,
+                false,
+                segment.span.clone(),
+            ))
+        }
+        TerminalKind::Associate => {
+            let selector = expect_single_positional(&segment.args)?;
+            let selector_ir = transform_expression(selector, context)?;
+            Ok(SequenceTerminal::new(
+                SequenceTerminalKind::Associate {
+                    pair_selector: Box::new(selector_ir),
+                },
+                SequenceTerminalEvaluation::Collector,
+                false,
+                segment.span.clone(),
+            ))
+        }
+        TerminalKind::Count if segment.args.is_empty() => Ok(SequenceTerminal::new(
+            SequenceTerminalKind::Count,
+            SequenceTerminalEvaluation::Aggregator,
+            false,
+            segment.span.clone(),
+        )),
+        TerminalKind::Sum if segment.args.is_empty() => Ok(SequenceTerminal::new(
+            SequenceTerminalKind::Sum,
+            SequenceTerminalEvaluation::Aggregator,
+            false,
+            segment.span.clone(),
+        )),
         TerminalKind::ForEach => {
             let action = expect_single_positional(&segment.args)?;
             let action_ir = transform_expression(action, context)?;
-            Ok(SequenceTerminal {
-                kind: SequenceTerminalKind::ForEach {
+            Ok(SequenceTerminal::new(
+                SequenceTerminalKind::ForEach {
                     action: Box::new(action_ir),
                 },
-                span: segment.span.clone(),
-            })
+                SequenceTerminalEvaluation::Consumer,
+                false,
+                segment.span.clone(),
+            ))
         }
         _ => Err(TransformError::TypeInferenceError {
             message: format!(
@@ -323,6 +464,14 @@ fn determine_java_type(terminal: Option<&SequenceTerminal>) -> JavaType {
             name: "java.util.Set".to_string(),
             generic_args: vec![],
         },
+        Some(SequenceTerminalKind::Fold { .. }) | Some(SequenceTerminalKind::Reduce { .. }) => {
+            JavaType::object()
+        }
+        Some(SequenceTerminalKind::GroupBy { .. })
+        | Some(SequenceTerminalKind::Associate { .. }) => JavaType::Reference {
+            name: "java.util.Map".to_string(),
+            generic_args: vec![],
+        },
         Some(SequenceTerminalKind::Count) | Some(SequenceTerminalKind::Sum) => {
             JavaType::Primitive("long".to_string())
         }
@@ -338,10 +487,7 @@ fn expect_single_positional(args: &[Argument]) -> Result<Expression, TransformEr
     if args.len() != 1 {
         return Err(TransformError::TypeInferenceError {
             message: "Sequence stage expects exactly one argument".to_string(),
-            span: args
-                .first()
-                .map(argument_span)
-                .unwrap_or_else(Span::dummy),
+            span: args.first().map(argument_span).unwrap_or_else(Span::dummy),
         });
     }
 
@@ -350,6 +496,25 @@ fn expect_single_positional(args: &[Argument]) -> Result<Expression, TransformEr
         Argument::Named { span, .. } => Err(TransformError::TypeInferenceError {
             message: "Named arguments are not supported in sequence pipelines".to_string(),
             span: span.clone(),
+        }),
+    }
+}
+
+fn expect_two_positional(args: &[Argument]) -> Result<(Expression, Expression), TransformError> {
+    if args.len() != 2 {
+        return Err(TransformError::TypeInferenceError {
+            message: "Sequence terminal expects exactly two positional arguments".to_string(),
+            span: args.first().map(argument_span).unwrap_or_else(Span::dummy),
+        });
+    }
+
+    match (&args[0], &args[1]) {
+        (Argument::Positional(first), Argument::Positional(second)) => {
+            Ok((first.clone(), second.clone()))
+        }
+        _ => Err(TransformError::TypeInferenceError {
+            message: "Named arguments are not supported in sequence pipelines".to_string(),
+            span: argument_span(&args[0]),
         }),
     }
 }

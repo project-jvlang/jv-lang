@@ -14,8 +14,9 @@ mod tests {
         DataFormat, IrCaseLabel, IrDeconstructionComponent, IrDeconstructionPattern, IrExpression,
         IrForEachKind, IrForLoopMetadata, IrImplicitWhenEnd, IrModifiers, IrNumericRangeLoop,
         IrStatement, IrVisibility, JavaType, SampleMode, SampleSourceKind, Schema,
-        SequencePipeline, SequenceSource, SequenceStage, SequenceTerminal, SequenceTerminalKind,
-        TransformContext, TransformError, TransformPools, TransformProfiler, VirtualThreadOp,
+        SequencePipeline, SequenceSource, SequenceStage, SequenceTerminal,
+        SequenceTerminalEvaluation, SequenceTerminalKind, TransformContext, TransformError,
+        TransformPools, TransformProfiler, VirtualThreadOp,
     };
     use jv_ast::*;
     use jv_parser::Parser;
@@ -3058,7 +3059,7 @@ mod tests {
         };
 
         let pipeline = SequencePipeline {
-            source: SequenceSource::Expression {
+            source: SequenceSource::Collection {
                 expr: Box::new(IrExpression::Identifier {
                     name: "numbers".to_string(),
                     java_type: JavaType::object(),
@@ -3068,10 +3069,13 @@ mod tests {
             },
             stages: vec![SequenceStage::Map {
                 lambda: Box::new(lambda_ir.clone()),
+                result_hint: None,
                 span: dummy_span(),
             }],
             terminal: Some(SequenceTerminal {
                 kind: SequenceTerminalKind::ToList,
+                evaluation: SequenceTerminalEvaluation::Collector,
+                requires_non_empty_source: false,
                 span: dummy_span(),
             }),
             lazy: false,
@@ -3086,7 +3090,10 @@ mod tests {
             },
             span: dummy_span(),
         };
-        assert!(matches!(sequence_expr, IrExpression::SequencePipeline { .. }));
+        assert!(matches!(
+            sequence_expr,
+            IrExpression::SequencePipeline { .. }
+        ));
 
         // Test IrStatement variants
         let var_decl = IrStatement::VariableDeclaration {
@@ -3175,10 +3182,7 @@ mod tests {
 
         let map_call = Expression::Call {
             function: Box::new(Expression::MemberAccess {
-                object: Box::new(Expression::Identifier(
-                    "numbers".to_string(),
-                    dummy_span(),
-                )),
+                object: Box::new(Expression::Identifier("numbers".to_string(), dummy_span())),
                 property: "map".to_string(),
                 span: dummy_span(),
             }),
@@ -3202,7 +3206,11 @@ mod tests {
             .expect("pipeline transformation should succeed");
 
         match result {
-            IrExpression::SequencePipeline { pipeline, java_type, .. } => {
+            IrExpression::SequencePipeline {
+                pipeline,
+                java_type,
+                ..
+            } => {
                 assert_eq!(pipeline.stages.len(), 1);
                 assert!(matches!(pipeline.stages[0], SequenceStage::Map { .. }));
 
