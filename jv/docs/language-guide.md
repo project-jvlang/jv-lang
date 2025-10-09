@@ -441,6 +441,42 @@ String message = String.format("Hello, my name is %s and I'm %d years old", name
 String calculation = "The result is " + (2 + 2);
 ```
 
+## 正規表現リテラル
+
+正規表現はスラッシュ区切りのリテラル `/<pattern>/` として記述でき、コンパイル後は
+`java.util.regex.Pattern` に変換されます。トップレベル `val` は静的フィールドへ
+ホイストされ、実行時の再コンパイルを避けます。
+
+```jv
+val pattern = /\d+/
+
+fun isNumber(input: String): Boolean {
+    return pattern.matcher(input).matches()
+}
+```
+
+**生成されるJava:**
+```java
+import java.util.regex.Pattern;
+
+private static final Pattern PATTERN = Pattern.compile("\\d+");
+
+public static boolean isNumber(String input) {
+    return PATTERN.matcher(input).matches();
+}
+```
+
+### 構文と制約
+- パターン内のスラッシュは `\/` でエスケープします。末尾のバックスラッシュは無効で
+  `JV5102` が報告されます。
+- 改行やタブなど制御文字は許可されません。必要な場合は通常の文字列リテラルで記述
+  し、`Pattern.compile` を手動で呼び出してください。
+- リテラルは `RegexValidator` によって静的解析され、括弧の未閉鎖や対応しない閉じ括弧
+  などは `JV5101`/`JV5103` シリーズの診断として表示されます。
+- 文字列リテラル（`"/not/regex/"`）は従来どおり `TokenType::String` として扱われ、
+  正規表現リテラルと混同されません。
+- 追加のランタイム依存関係は不要で、`java.util.regex.Pattern` のみを使用します。
+
 ## 並行性
 
 ### 仮想スレッド（spawn）

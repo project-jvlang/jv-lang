@@ -254,6 +254,36 @@ String nonNull = "value";       // String（non-null、実行時チェック）
 | `Map<K, V>` | `Map<K, V>` |
 | `Array<T>` | `T[]` |
 
+## 正規表現リテラル
+
+`/.../` リテラルは追加のライブラリを必要とせず、Java の `java.util.regex.Pattern` へ
+直接変換されます。
+
+```jv
+val postalCode = /\d{3}-\d{4}/
+
+fun normalize(input: String): Boolean {
+    return postalCode.matcher(input).matches()
+}
+```
+
+**生成されるJava:**
+```java
+import java.util.regex.Pattern;
+
+private static final Pattern POSTAL_CODE = Pattern.compile("\\d{3}-\\d{4}");
+
+public static boolean normalize(String input) {
+    return POSTAL_CODE.matcher(input).matches();
+}
+```
+
+- スラッシュは `\/` でエスケープします。末尾に単独のバックスラッシュがあると
+  `JV5102` 診断が発生します。
+- 括弧の未閉鎖や互換性のないエスケープは `RegexValidator` が静的に検出し、エラーを
+  提示します。
+- 引用符付きの文字列リテラル（`"/path/"` など）は従来どおり文字列として扱われます。
+
 ## null安全性統合
 
 ### 安全呼び出し演算子

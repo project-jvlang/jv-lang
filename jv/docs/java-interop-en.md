@@ -247,6 +247,27 @@ public class ListExtensions {
 }
 ```
 
+### Regex Literals
+
+Regex literals provide a direct bridge to `java.util.regex.Pattern` while keeping the generated
+code explicit and dependency-free:
+
+```jv
+val pattern = /\d{3}-\d{4}/
+```
+
+**Generated Java:**
+```java
+import java.util.regex.Pattern;
+
+private static final Pattern PATTERN = Pattern.compile("\\d{3}-\\d{4}");
+```
+
+- Static hoisting ensures the pattern is compiled once per class.
+- Unsupported escapes or unbalanced groups surface as checker diagnostics (`JV5101`–`JV5104`) so
+  invalid patterns never reach the Java backend.
+- String literals with slashes remain untouched; only the `/.../` form without quotes is recognized.
+
 ### Top-level Functions
 
 Top-level functions are placed in utility classes:

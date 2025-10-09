@@ -150,6 +150,7 @@ impl SequenceWarningCollector {
     fn visit_expression(&mut self, expression: &Expression) {
         match expression {
             Expression::Literal(_, _)
+            | Expression::RegexLiteral(_)
             | Expression::Identifier(_, _)
             | Expression::This(_)
             | Expression::Super(_) => {}

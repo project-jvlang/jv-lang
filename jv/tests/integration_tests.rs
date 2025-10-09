@@ -208,6 +208,110 @@ fn cli_build_numeric_script_generates_worded_class() {
 }
 
 #[test]
+fn cli_build_emits_pattern_compile_for_regex_literal() {
+    let Some(cli_path) = std::env::var_os("CARGO_BIN_EXE_jv").map(PathBuf::from) else {
+        eprintln!("Skipping regex CLI build test: CARGO_BIN_EXE_jv not set");
+        return;
+    };
+
+    let temp_dir = TempDirGuard::new("cli-regex-build").expect("create temp dir");
+    let project_dir = temp_dir.path().join("regex-project");
+    fs::create_dir_all(project_dir.join("src")).expect("create regex project src");
+
+    fs::write(
+        project_dir.join("jv.toml"),
+        r#"[package]
+name = "regex"
+version = "0.1.0"
+
+[package.dependencies]
+
+[project]
+entrypoint = "src/main.jv"
+
+[project.sources]
+include = ["src/**/*.jv"]
+"#,
+    )
+    .expect("write regex manifest");
+
+    fs::write(
+        project_dir.join("src/main.jv"),
+        r#"val pattern = /\d+/
+
+fun sample(input: String): Boolean {
+    return pattern.matcher(input).matches()
+}
+"#,
+    )
+    .expect("write regex source");
+
+    let status = Command::new(&cli_path)
+        .current_dir(&project_dir)
+        .arg("build")
+        .arg("--java-only")
+        .status()
+        .expect("execute jv build for regex literal");
+
+    assert!(status.success(), "regex CLI build failed: {status:?}");
+
+    let java_files: Vec<_> = fs::read_dir(project_dir.join("target/java25"))
+        .expect("read regex java output")
+        .filter_map(|entry| entry.ok())
+        .map(|entry| entry.path())
+        .filter(|path| path.extension().and_then(|ext| ext.to_str()) == Some("java"))
+        .collect();
+
+    assert!(
+        !java_files.is_empty(),
+        "regex build should emit at least one Java file"
+    );
+
+    let java_source = fs::read_to_string(&java_files[0]).expect("read regex java source");
+    assert!(
+        java_source.contains("import java.util.regex.Pattern;"),
+        "generated Java should import Pattern: {java_source}"
+    );
+    assert!(
+        java_source.contains("Pattern.compile(\"\\d+\")"),
+        "generated Java should compile the regex literal: {java_source}"
+    );
+}
+
+#[test]
+fn cli_check_reports_regex_diagnostics() {
+    let Some(cli_path) = std::env::var_os("CARGO_BIN_EXE_jv").map(PathBuf::from) else {
+        eprintln!("Skipping regex diagnostic test: CARGO_BIN_EXE_jv not set");
+        return;
+    };
+
+    let temp_dir = TempDirGuard::new("cli-regex-diagnostic").expect("create temp dir");
+    let source_path = temp_dir.path().join("invalid_regex.jv");
+    fs::write(&source_path, "val broken = /abc\\q/\n").expect("write invalid regex source");
+
+    let output = Command::new(&cli_path)
+        .arg("check")
+        .arg(&source_path)
+        .output()
+        .expect("execute jv check for invalid regex");
+
+    assert!(
+        !output.status.success(),
+        "invalid regex should cause CLI check to fail"
+    );
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("JV5102"),
+        "regex diagnostic output should contain JV5102, got: {stderr}"
+    );
+    assert!(
+        stderr.contains("Regex literal"),
+        "regex diagnostic text should mention regex literal, got: {stderr}"
+    );
+}
+
+#[test]
 fn pipeline_compile_produces_artifacts() {
     let temp_dir = TempDirGuard::new("pipeline").expect("Failed to create temp dir");
     let input = workspace_file("test_simple.jv");
