@@ -1261,6 +1261,43 @@ fn test_lambda_expression() {
 }
 
 #[test]
+fn test_lambda_expression_with_whitespace_parameters() {
+    let program = parse_program("val sum = numbers.reduce { acc x -> acc + x }");
+    let statement = first_statement(&program);
+
+    match statement {
+        Statement::ValDeclaration { initializer, .. } => match initializer {
+            Expression::Call { function, args, .. } => {
+                match function.as_ref() {
+                    Expression::MemberAccess {
+                        object, property, ..
+                    } => {
+                        match object.as_ref() {
+                            Expression::Identifier(name, _) => assert_eq!(name, "numbers"),
+                            other => panic!("expected identifier receiver, found {:?}", other),
+                        }
+                        assert_eq!(property, "reduce");
+                    }
+                    other => panic!("expected member access, found {:?}", other),
+                }
+
+                assert_eq!(args.len(), 1);
+                match &args[0] {
+                    Argument::Positional(Expression::Lambda { parameters, .. }) => {
+                        assert_eq!(parameters.len(), 2);
+                        assert_eq!(parameters[0].name, "acc");
+                        assert_eq!(parameters[1].name, "x");
+                    }
+                    other => panic!("expected lambda argument, found {:?}", other),
+                }
+            }
+            other => panic!("expected call expression, found {:?}", other),
+        },
+        other => panic!("expected val declaration, found {:?}", other),
+    }
+}
+
+#[test]
 fn test_parse_error_missing_semicolon() {
     let source = "val x = 42\nval y = 43"; // line-separated statements are valid
     assert!(parse_program_result(source).is_ok());
