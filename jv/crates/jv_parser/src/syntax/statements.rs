@@ -527,6 +527,7 @@ fn function_signature(
                             .collect();
                         let signature = GenericSignature {
                             parameters: generics.params,
+                            const_parameters: Vec::new(),
                             where_clause: where_clause.clone(),
                             raw_directives: generics.raw_directives,
                             span: generics.span,
@@ -595,6 +596,7 @@ fn extract_type_parameters_and_signature(
 
             let signature = GenericSignature {
                 parameters: params,
+                const_parameters: Vec::new(),
                 where_clause: None,
                 raw_directives,
                 span,
@@ -624,6 +626,7 @@ fn generic_parameter() -> impl ChumskyParser<Token, GenericParameter, Error = Si
                 bounds,
                 variance,
                 default,
+                kind: None,
                 span: name_span,
             },
         )
