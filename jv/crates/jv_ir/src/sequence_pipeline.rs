@@ -2,7 +2,7 @@ use crate::context::TransformContext;
 use crate::error::TransformError;
 use crate::transform::transform_expression;
 use crate::types::{IrExpression, JavaType};
-use jv_ast::{Argument, CallArgumentMetadata, Expression, Span};
+use jv_ast::{Argument, CallArgumentMetadata, Expression, SequenceDelimiter, Span};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -24,6 +24,11 @@ pub enum SequenceSource {
         expr: Box<IrExpression>,
         element_hint: Option<JavaType>,
         dimensions: usize,
+    },
+    ListLiteral {
+        elements: Vec<IrExpression>,
+        element_hint: Option<JavaType>,
+        span: Span,
     },
     JavaStream {
         expr: Box<IrExpression>,
@@ -168,12 +173,9 @@ pub fn try_lower_sequence_call(
 
     segments.reverse();
 
-    let source_ir = transform_expression(source_expr, context)?;
+    let source = lower_sequence_source(source_expr, context)?;
     let mut pipeline = SequencePipeline {
-        source: SequenceSource::Collection {
-            expr: Box::new(source_ir),
-            element_hint: None,
-        },
+        source,
         stages: Vec::new(),
         terminal: None,
         lazy: true,
@@ -216,6 +218,37 @@ pub fn try_lower_sequence_call(
         java_type,
         span,
     }))
+}
+
+fn lower_sequence_source(
+    expr: Expression,
+    context: &mut TransformContext,
+) -> Result<SequenceSource, TransformError> {
+    match expr {
+        Expression::Array {
+            elements,
+            delimiter: SequenceDelimiter::Whitespace,
+            span,
+        } => {
+            let mut lowered = Vec::with_capacity(elements.len());
+            for element in elements {
+                lowered.push(transform_expression(element, context)?);
+            }
+
+            Ok(SequenceSource::ListLiteral {
+                elements: lowered,
+                element_hint: None,
+                span,
+            })
+        }
+        other => {
+            let source_ir = transform_expression(other, context)?;
+            Ok(SequenceSource::Collection {
+                expr: Box::new(source_ir),
+                element_hint: None,
+            })
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -456,10 +489,7 @@ fn build_terminal(
 
 fn determine_java_type(terminal: Option<&SequenceTerminal>) -> JavaType {
     match terminal.map(|t| &t.kind) {
-        Some(SequenceTerminalKind::ToList) => JavaType::Reference {
-            name: "java.util.List".to_string(),
-            generic_args: vec![],
-        },
+        Some(SequenceTerminalKind::ToList) => JavaType::list(),
         Some(SequenceTerminalKind::ToSet) => JavaType::Reference {
             name: "java.util.Set".to_string(),
             generic_args: vec![],
@@ -476,10 +506,7 @@ fn determine_java_type(terminal: Option<&SequenceTerminal>) -> JavaType {
             JavaType::Primitive("long".to_string())
         }
         Some(SequenceTerminalKind::ForEach { .. }) => JavaType::void(),
-        None => JavaType::Reference {
-            name: "jv.collections.Sequence".to_string(),
-            generic_args: vec![],
-        },
+        None => JavaType::sequence(),
     }
 }
 

@@ -1,6 +1,12 @@
 fun main(): Unit {
     val numbers = [1 2 3 4 5]
 
+    val doubledEvens = numbers
+        .map { value -> value * 2 }
+        .filter { candidate -> candidate % 2 == 0 }
+        .toList()
+    println(doubledEvens)
+
     val pipeline = numbers
         .map { value -> value * 2 }
         .filter { candidate -> candidate % 4 == 0 }

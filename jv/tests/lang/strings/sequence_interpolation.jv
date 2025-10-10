@@ -1,0 +1,20 @@
+import jv.collections.Sequence
+
+fun inlineSequenceMessage(numbers: Sequence<Int>): String {
+    return "inline=${numbers.map { value -> value * 2 }}"
+}
+
+fun main(): Unit {
+    val numbers = [1 2 3 4]
+
+    val inline = inlineSequenceMessage(numbers)
+
+    val storedSequence = numbers
+        .map { candidate -> candidate + 1 }
+        .filter { candidate -> candidate % 2 == 0 }
+
+    val stored = "stored=${storedSequence}"
+
+    println(inline)
+    println(stored)
+}

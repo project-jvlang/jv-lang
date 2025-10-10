@@ -116,6 +116,59 @@ fn sorted_by_stage() -> SequenceStage {
     }
 }
 
+fn map_double_stage() -> SequenceStage {
+    let lambda = IrExpression::Lambda {
+        functional_interface: "java.util.function.Function".to_string(),
+        param_names: vec!["value".to_string()],
+        param_types: vec![JavaType::object()],
+        body: Box::new(IrExpression::Binary {
+            left: Box::new(identifier("value")),
+            op: BinaryOp::Multiply,
+            right: Box::new(number_literal("2")),
+            java_type: JavaType::object(),
+            span: dummy_span(),
+        }),
+        java_type: JavaType::object(),
+        span: dummy_span(),
+    };
+
+    SequenceStage::Map {
+        lambda: Box::new(lambda),
+        result_hint: None,
+        span: dummy_span(),
+    }
+}
+
+fn filter_even_stage() -> SequenceStage {
+    let modulo_expr = IrExpression::Binary {
+        left: Box::new(identifier("candidate")),
+        op: BinaryOp::Modulo,
+        right: Box::new(number_literal("2")),
+        java_type: JavaType::object(),
+        span: dummy_span(),
+    };
+    let comparison = IrExpression::Binary {
+        left: Box::new(modulo_expr),
+        op: BinaryOp::Equal,
+        right: Box::new(number_literal("0")),
+        java_type: JavaType::Primitive("boolean".to_string()),
+        span: dummy_span(),
+    };
+    let predicate = IrExpression::Lambda {
+        functional_interface: "java.util.function.Predicate".to_string(),
+        param_names: vec!["candidate".to_string()],
+        param_types: vec![JavaType::object()],
+        body: Box::new(comparison),
+        java_type: JavaType::Primitive("boolean".to_string()),
+        span: dummy_span(),
+    };
+
+    SequenceStage::Filter {
+        predicate: Box::new(predicate),
+        span: dummy_span(),
+    }
+}
+
 fn collection_source(name: &str) -> SequenceSource {
     SequenceSource::Collection {
         expr: Box::new(identifier(name)),
@@ -128,6 +181,16 @@ fn java_stream_source(name: &str, auto_close: bool) -> SequenceSource {
         expr: Box::new(identifier(name)),
         element_hint: None,
         auto_close,
+    }
+}
+
+fn list_literal_source(values: &[&str]) -> SequenceSource {
+    let elements = values.iter().map(|value| number_literal(value)).collect();
+
+    SequenceSource::ListLiteral {
+        elements,
+        element_hint: None,
+        span: dummy_span(),
     }
 }
 
@@ -176,6 +239,34 @@ fn java25_sequence_to_list_uses_stream_to_list() {
         .expect("sequence pipeline should render for Java 25");
 
     assert_eq!(rendered, "(numbers).stream().map(x -> x).toList()");
+}
+
+#[test]
+fn java25_sequence_list_literal_source_streams_from_list_of() {
+    let terminal = SequenceTerminal {
+        kind: SequenceTerminalKind::ToList,
+        evaluation: SequenceTerminalEvaluation::Collector,
+        requires_non_empty_source: false,
+        span: dummy_span(),
+    };
+
+    let expr = build_pipeline(
+        list_literal_source(&["1", "2", "3"]),
+        vec![map_stage()],
+        terminal,
+        JavaType::Reference {
+            name: "java.util.List".to_string(),
+            generic_args: vec![],
+        },
+    );
+
+    let mut generator =
+        JavaCodeGenerator::with_config(JavaCodeGenConfig::for_target(JavaTarget::Java25));
+    let rendered = generator
+        .generate_expression(&expr)
+        .expect("list literal sequence should render for Java 25");
+
+    assert_eq!(rendered, "(List.of(1, 2, 3)).stream().map(x -> x).toList()",);
 }
 
 #[test]
@@ -249,6 +340,37 @@ fn java21_sequence_to_list_falls_back_to_collectors() {
 }
 
 #[test]
+fn java21_sequence_list_literal_source_uses_arrays_stream_fallback() {
+    let terminal = SequenceTerminal {
+        kind: SequenceTerminalKind::ToList,
+        evaluation: SequenceTerminalEvaluation::Collector,
+        requires_non_empty_source: false,
+        span: dummy_span(),
+    };
+
+    let expr = build_pipeline(
+        list_literal_source(&["1", "2", "3"]),
+        vec![map_stage()],
+        terminal,
+        JavaType::Reference {
+            name: "java.util.List".to_string(),
+            generic_args: vec![],
+        },
+    );
+
+    let mut generator =
+        JavaCodeGenerator::with_config(JavaCodeGenConfig::for_target(JavaTarget::Java21));
+    let rendered = generator
+        .generate_expression(&expr)
+        .expect("list literal sequence should render for Java 21");
+
+    assert_eq!(
+        rendered,
+        "(Arrays.asList(1, 2, 3).stream().toList()).stream().map(x -> x).collect(Collectors.toList())",
+    );
+}
+
+#[test]
 fn java21_sequence_to_set_falls_back_to_collectors() {
     let terminal = SequenceTerminal {
         kind: SequenceTerminalKind::ToSet,
@@ -276,6 +398,54 @@ fn java21_sequence_to_set_falls_back_to_collectors() {
     assert_eq!(
         rendered,
         "(numbers).stream().map(x -> x).collect(Collectors.toSet())"
+    );
+}
+
+#[test]
+fn map_filter_pipeline_renders_expected_lambdas() {
+    let terminal = SequenceTerminal {
+        kind: SequenceTerminalKind::ToList,
+        evaluation: SequenceTerminalEvaluation::Collector,
+        requires_non_empty_source: false,
+        span: dummy_span(),
+    };
+
+    let stages = vec![map_double_stage(), filter_even_stage()];
+
+    let expr_java25 = build_pipeline(
+        collection_source("numbers"),
+        stages.clone(),
+        terminal.clone(),
+        JavaType::list(),
+    );
+
+    let mut generator25 =
+        JavaCodeGenerator::with_config(JavaCodeGenConfig::for_target(JavaTarget::Java25));
+    let rendered25 = generator25
+        .generate_expression(&expr_java25)
+        .expect("map/filter pipeline renders for Java 25");
+
+    assert_eq!(
+        rendered25,
+        "(numbers).stream().map(value -> (value * 2)).filter(candidate -> ((candidate % 2) == 0)).toList()"
+    );
+
+    let expr_java21 = build_pipeline(
+        collection_source("numbers"),
+        stages,
+        terminal,
+        JavaType::list(),
+    );
+
+    let mut generator21 =
+        JavaCodeGenerator::with_config(JavaCodeGenConfig::for_target(JavaTarget::Java21));
+    let rendered21 = generator21
+        .generate_expression(&expr_java21)
+        .expect("map/filter pipeline renders for Java 21");
+
+    assert_eq!(
+        rendered21,
+        "(numbers).stream().map(value -> (value * 2)).filter(candidate -> ((candidate % 2) == 0)).collect(Collectors.toList())"
     );
 }
 
@@ -331,6 +501,60 @@ fn autocloseable_stream_pipeline_wraps_with_try_resource() {
     assert!(rendered.starts_with("new Object()"));
     assert!(rendered.contains("try (var __jvStream = resourceStream)"));
     assert!(rendered.contains("return __jvStream.count();"));
+}
+
+#[test]
+fn string_format_arguments_materialize_sequences() {
+    let terminal = SequenceTerminal {
+        kind: SequenceTerminalKind::ToList,
+        evaluation: SequenceTerminalEvaluation::Collector,
+        requires_non_empty_source: false,
+        span: dummy_span(),
+    };
+
+    let format_expr_java25 = IrExpression::StringFormat {
+        format_string: "inline=%s".to_string(),
+        args: vec![build_pipeline(
+            collection_source("numbers"),
+            vec![map_double_stage()],
+            terminal.clone(),
+            JavaType::list(),
+        )],
+        span: dummy_span(),
+    };
+
+    let mut generator25 =
+        JavaCodeGenerator::with_config(JavaCodeGenConfig::for_target(JavaTarget::Java25));
+    let rendered25 = generator25
+        .generate_expression(&format_expr_java25)
+        .expect("string format pipeline renders for Java 25");
+
+    assert_eq!(
+        rendered25,
+        "String.format(\"inline=%s\", (numbers).stream().map(value -> (value * 2)).toList())"
+    );
+
+    let format_expr_java21 = IrExpression::StringFormat {
+        format_string: "inline=%s".to_string(),
+        args: vec![build_pipeline(
+            collection_source("numbers"),
+            vec![map_double_stage()],
+            terminal,
+            JavaType::list(),
+        )],
+        span: dummy_span(),
+    };
+
+    let mut generator21 =
+        JavaCodeGenerator::with_config(JavaCodeGenConfig::for_target(JavaTarget::Java21));
+    let rendered21 = generator21
+        .generate_expression(&format_expr_java21)
+        .expect("string format pipeline renders for Java 21");
+
+    assert_eq!(
+        rendered21,
+        "String.format(\"inline=%s\", (numbers).stream().map(value -> (value * 2)).collect(Collectors.toList()))"
+    );
 }
 
 #[test]

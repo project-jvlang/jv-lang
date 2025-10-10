@@ -866,6 +866,10 @@ impl JavaCodeGenerator {
                 self.add_import("java.util.Arrays");
                 Ok((format!("Arrays.stream({})", rendered), false))
             }
+            SequenceSource::ListLiteral { elements, .. } => {
+                let list_expr = self.render_whitespace_array(elements)?;
+                Ok((format!("({}).stream()", list_expr), false))
+            }
             SequenceSource::JavaStream {
                 expr, auto_close, ..
             } => {
