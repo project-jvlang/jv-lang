@@ -5,6 +5,7 @@
 
 use crate::inference::constraint::{Constraint, ConstraintKind, ConstraintSet};
 use crate::inference::environment::{TypeEnvironment, TypeScheme};
+use crate::inference::extensions::ExtensionRegistry;
 use crate::inference::iteration::{
     classify_loop, expression_can_yield_iterable, LoopClassification,
 };
@@ -16,9 +17,10 @@ use jv_ast::{
 
 /// AST から制約を抽出するジェネレータ。
 #[derive(Debug)]
-pub struct ConstraintGenerator<'env> {
+pub struct ConstraintGenerator<'env, 'ext> {
     env: &'env mut TypeEnvironment,
     constraints: ConstraintSet,
+    extensions: &'ext ExtensionRegistry,
 }
 
 const DIAG_RANGE_BOUNDS: &str = "E_LOOP_002: numeric range bounds must resolve to the same type";
@@ -27,12 +29,13 @@ const DIAG_RANGE_BINDING: &str =
 const DIAG_ITERABLE_PROTOCOL: &str =
     "E_LOOP_003: loop target expression does not expose iterable semantics";
 
-impl<'env> ConstraintGenerator<'env> {
+impl<'env, 'ext> ConstraintGenerator<'env, 'ext> {
     /// 環境への可変参照を受け取ってジェネレータを初期化する。
-    pub fn new(env: &'env mut TypeEnvironment) -> Self {
+    pub fn new(env: &'env mut TypeEnvironment, extensions: &'ext ExtensionRegistry) -> Self {
         Self {
             env,
             constraints: ConstraintSet::new(),
+            extensions,
         }
     }
 
@@ -280,9 +283,13 @@ impl<'env> ConstraintGenerator<'env> {
                     TypeKind::Unknown
                 }
             }
-            Expression::MemberAccess { object, .. }
-            | Expression::NullSafeMemberAccess { object, .. }
-            | Expression::IndexAccess { object, .. }
+            Expression::MemberAccess {
+                object, property, ..
+            } => self.infer_member_access(object, property),
+            Expression::NullSafeMemberAccess {
+                object, property, ..
+            } => self.infer_member_access(object, property),
+            Expression::IndexAccess { object, .. }
             | Expression::NullSafeIndexAccess { object, .. } => {
                 self.infer_expression(object);
                 TypeKind::Unknown
@@ -350,6 +357,32 @@ impl<'env> ConstraintGenerator<'env> {
             Expression::MultilineString(_) => TypeKind::Primitive("String"),
             Expression::JsonLiteral(_) => TypeKind::Unknown,
             Expression::This(_) | Expression::Super(_) => TypeKind::Unknown,
+        }
+    }
+
+    fn infer_member_access(&mut self, object: &Expression, property: &str) -> TypeKind {
+        let receiver_ty = self.infer_expression(object);
+        match self.resolve_extension_call(&receiver_ty, property) {
+            Some(resolved) => resolved,
+            None => TypeKind::Unknown,
+        }
+    }
+
+    fn resolve_extension_call(
+        &mut self,
+        receiver_ty: &TypeKind,
+        property: &str,
+    ) -> Option<TypeKind> {
+        let primitive = Self::primitive_name(receiver_ty)?;
+        let scheme = self.extensions.lookup(primitive, property)?;
+        Some(self.env.instantiate(scheme))
+    }
+
+    fn primitive_name(ty: &TypeKind) -> Option<&'static str> {
+        match ty {
+            TypeKind::Primitive(name) => Some(*name),
+            TypeKind::Optional(inner) => Self::primitive_name(inner),
+            _ => None,
         }
     }
 
@@ -563,7 +596,8 @@ mod tests {
         };
 
         let mut env = TypeEnvironment::new();
-        let constraints = ConstraintGenerator::new(&mut env).generate(&program);
+        let extensions = ExtensionRegistry::new();
+        let constraints = ConstraintGenerator::new(&mut env, &extensions).generate(&program);
         let collected = collect_constraints(constraints);
 
         assert!(collected.iter().any(|constraint| matches!(
@@ -611,7 +645,8 @@ mod tests {
         };
 
         let mut env = TypeEnvironment::new();
-        let constraints = ConstraintGenerator::new(&mut env).generate(&program);
+        let extensions = ExtensionRegistry::new();
+        let constraints = ConstraintGenerator::new(&mut env, &extensions).generate(&program);
         let collected = collect_constraints(constraints);
 
         assert!(collected.iter().any(|constraint| matches!(
@@ -686,7 +721,8 @@ mod tests {
         };
 
         let mut env = TypeEnvironment::new();
-        let constraints = ConstraintGenerator::new(&mut env).generate(&program);
+        let extensions = ExtensionRegistry::new();
+        let constraints = ConstraintGenerator::new(&mut env, &extensions).generate(&program);
         let collected = collect_constraints(constraints);
 
         assert!(collected.iter().any(|constraint| {

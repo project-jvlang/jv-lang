@@ -66,6 +66,7 @@ fn materialize_sequence_if_needed(expr: IrExpression) -> IrExpression {
                 span: span.clone(),
             });
             pipeline.lazy = false;
+            pipeline.recompute_shape();
             IrExpression::SequencePipeline {
                 pipeline,
                 java_type: JavaType::list(),
@@ -96,6 +97,6 @@ fn materialize_sequence_if_needed(expr: IrExpression) -> IrExpression {
 fn is_sequence_type(java_type: &JavaType) -> bool {
     matches!(
         java_type,
-        JavaType::Reference { name, .. } if name == "jv.collections.Sequence"
+        JavaType::Reference { name, .. } if name == "jv.collections.SequenceCore"
     )
 }

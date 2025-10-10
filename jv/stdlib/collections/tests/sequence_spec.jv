@@ -1,9 +1,32 @@
 package jv.stdlib.collections.tests
 
 import java.util.Map
-import jv.collections.Sequence
+import jv.collections.SequenceFactory
 
 data Person(name: String age: Int)
+
+fun validateSampleSingleStageOperations() {
+    numbers = [1 2 3 4 5]
+
+    doubled = numbers
+        .map { value -> value * 2 }
+        .toList()
+    if (doubled != [2 4 6 8 10]) {
+        throw IllegalStateException("map expected [2 4 6 8 10] but was ${doubled}")
+    }
+
+    evens = numbers
+        .filter { value -> value % 2 == 0 }
+        .toList()
+    if (evens != [2 4 6 8]) {
+        throw IllegalStateException("filter expected [2 4 6 8] but was ${evens}")
+    }
+
+    sum = numbers.reduce { left right -> left + right }
+    if (sum != 15) {
+        throw IllegalStateException("reduce expected 15 but was ${sum}")
+    }
+}
 
 fun validatePhase1MapFilterToList() {
     numbers = [1 2 3 4 5]
@@ -20,14 +43,14 @@ fun validatePhase1MapFilterToList() {
 
 fun validatePhase1SequenceFromIterableToList() {
     numbers = [10 20 30]
-    sequence = Sequence.fromIterable(numbers)
+    sequence = SequenceFactory.fromIterable(numbers)
     result = sequence
         .map { value -> value / 10 }
         .toList()
 
     expected = [1 2 3]
     if (result != expected) {
-        throw IllegalStateException("Sequence.fromIterable toList expected ${expected} but was ${result}")
+        throw IllegalStateException("SequenceFactory.fromIterable toList expected ${expected} but was ${result}")
     }
 }
 
@@ -75,7 +98,7 @@ fun validatePhase2FlatMapFromIterable() {
 }
 
 fun validatePhase2FlatMapFromSequence() {
-    base = Sequence.fromIterable([1 2 3])
+    base = SequenceFactory.fromIterable([1 2 3])
     result = base
         .flatMap { value -> [value value * 10] }
         .take(4)
@@ -99,7 +122,7 @@ fun validatePhase3FoldAggregates() {
 }
 
 fun validatePhase3ReduceAggregates() {
-    numbers = Sequence.fromIterable([5 6 7])
+    numbers = SequenceFactory.fromIterable([5 6 7])
     reduceResult = numbers.reduce { left right -> left + right }
 
     if (reduceResult != 18) {
@@ -108,7 +131,7 @@ fun validatePhase3ReduceAggregates() {
 }
 
 fun validatePhase3ReduceEmptyThrows() {
-    emptySequence = Sequence.fromIterable([])
+    emptySequence = SequenceFactory.fromIterable([])
 
     try {
         emptySequence.reduce { left right -> left + right }

@@ -1,5 +1,6 @@
 use super::*;
 use jv_ast::Span;
+use jv_ir::PipelineShape;
 use jv_ir::{
     SequencePipeline, SequenceSource, SequenceStage, SequenceTerminal, SequenceTerminalKind,
 };
@@ -817,11 +818,23 @@ impl JavaCodeGenerator {
         let (source_expr, needs_resource_guard) = self.render_sequence_source(&pipeline.source)?;
 
         if pipeline.terminal.is_none() {
-            let chained = self.render_sequence_chain(&source_expr, pipeline)?;
+            let chained = self.render_sequence_stage_chain(&source_expr, pipeline)?;
             return self.render_lazy_sequence_pipeline(
                 chained,
                 needs_resource_guard,
                 result_type,
+                span,
+            );
+        }
+
+        let needs_helper = self.sequence_pipeline_requires_helper(pipeline);
+
+        if needs_helper {
+            return self.render_sequence_pipeline_with_helper(
+                &source_expr,
+                pipeline,
+                result_type,
+                needs_resource_guard,
                 span,
             );
         }
@@ -855,6 +868,18 @@ impl JavaCodeGenerator {
         }
     }
 
+    fn sequence_pipeline_requires_helper(&self, pipeline: &SequencePipeline) -> bool {
+        match &pipeline.shape {
+            PipelineShape::MultiStage {
+                stages,
+                repeated_transforms,
+                ..
+            } => *stages >= 2 || *repeated_transforms,
+            PipelineShape::ExplicitSequenceSource => true,
+            _ => false,
+        }
+    }
+
     fn render_lazy_sequence_pipeline(
         &mut self,
         stream_expr: String,
@@ -863,18 +888,18 @@ impl JavaCodeGenerator {
         span: &Span,
     ) -> Result<String, CodeGenError> {
         match result_type {
-            JavaType::Reference { name, .. } if name == "jv.collections.Sequence" => {}
+            JavaType::Reference { name, .. } if name == "jv.collections.SequenceCore" => {}
             _ => {
                 return Err(CodeGenError::TypeGenerationError {
-                    message: "lazy sequence pipeline must resolve to jv.collections.Sequence"
+                    message: "lazy sequence pipeline must resolve to jv.collections.SequenceCore"
                         .to_string(),
                     span: Some(span.clone()),
                 })
             }
         }
 
-        self.add_import("jv.collections.Sequence");
-        Ok(format!("Sequence.fromStream({})", stream_expr))
+        self.add_import("jv.collections.SequenceFactory");
+        Ok(format!("SequenceFactory.fromStream({})", stream_expr))
     }
 
     fn render_sequence_source(
@@ -902,6 +927,18 @@ impl JavaCodeGenerator {
                 Ok((rendered, *auto_close))
             }
         }
+    }
+
+    fn render_sequence_stage_chain(
+        &mut self,
+        start_expr: &str,
+        pipeline: &SequencePipeline,
+    ) -> Result<String, CodeGenError> {
+        let mut chain = start_expr.to_string();
+        for stage in &pipeline.stages {
+            chain.push_str(&self.render_sequence_stage(stage)?);
+        }
+        Ok(chain)
     }
 
     fn render_sequence_chain(
@@ -951,6 +988,81 @@ impl JavaCodeGenerator {
                 None => Ok(".sorted()".to_string()),
             },
         }
+    }
+
+    fn render_sequence_pipeline_with_helper(
+        &mut self,
+        source_expr: &str,
+        pipeline: &SequencePipeline,
+        result_type: &JavaType,
+        needs_resource_guard: bool,
+        span: &Span,
+    ) -> Result<String, CodeGenError> {
+        let terminal =
+            pipeline
+                .terminal
+                .as_ref()
+                .ok_or_else(|| CodeGenError::TypeGenerationError {
+                    message: "helper-assisted sequence pipeline requires a terminal operation"
+                        .to_string(),
+                    span: Some(span.clone()),
+                })?;
+
+        self.ensure_sequence_helper();
+
+        let return_type = self.generate_type(result_type)?;
+        let is_void = matches!(result_type, JavaType::Void);
+        let helper_var = "__jvSequence";
+
+        let helper_stream = format!("{}.toStream()", helper_var);
+        let terminal_expr = self.render_sequence_terminal(helper_stream, terminal)?;
+
+        let mut builder = self.builder();
+        builder.push_line("new Object() {");
+        builder.indent();
+        builder.push_line(&format!("{} run() {{", return_type));
+        builder.indent();
+
+        if needs_resource_guard {
+            builder.push_line(&format!("try (var __jvStream = {}) {{", source_expr));
+            builder.indent();
+            let stage_chain = self.render_sequence_stage_chain("__jvStream", pipeline)?;
+            builder.push_line(&format!(
+                "try (var {} = new JvSequence<>({})) {{",
+                helper_var, stage_chain
+            ));
+            builder.indent();
+            if is_void {
+                builder.push_line(&format!("{};", terminal_expr));
+            } else {
+                builder.push_line(&format!("return {};", terminal_expr));
+            }
+            builder.dedent();
+            builder.push_line("}");
+            builder.dedent();
+            builder.push_line("}");
+        } else {
+            let stage_chain = self.render_sequence_stage_chain(source_expr, pipeline)?;
+            builder.push_line(&format!(
+                "try (var {} = new JvSequence<>({})) {{",
+                helper_var, stage_chain
+            ));
+            builder.indent();
+            if is_void {
+                builder.push_line(&format!("{};", terminal_expr));
+            } else {
+                builder.push_line(&format!("return {};", terminal_expr));
+            }
+            builder.dedent();
+            builder.push_line("}");
+        }
+
+        builder.dedent();
+        builder.push_line("}");
+        builder.dedent();
+        builder.push_line("}.run()");
+
+        Ok(builder.build())
     }
 
     fn render_sequence_terminal(

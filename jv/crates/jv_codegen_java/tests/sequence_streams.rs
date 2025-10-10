@@ -302,10 +302,16 @@ fn java25_sequence_renders_full_stage_chain() {
         .generate_expression(&expr)
         .expect("complex sequence chain renders for Java 25");
 
-    assert_eq!(
-        rendered,
-        "(numbers).stream().map(x -> x).filter(x -> true).flatMap(x -> x).limit(3).skip(1).sorted().sorted(VALUE_COMPARATOR).toList()"
+    let expected = concat!(
+        "new Object() {\n",
+        "    java.util.List run() {\n",
+        "        try (var __jvSequence = new JvSequence<>((numbers).stream().map(x -> x).filter(x -> true).flatMap(x -> x).limit(3).skip(1).sorted().sorted(VALUE_COMPARATOR))) {\n",
+        "            return __jvSequence.toStream().toList();\n",
+        "        }\n",
+        "    }\n",
+        "}.run()\n",
     );
+    assert_eq!(rendered, expected);
 }
 
 #[test]
@@ -332,7 +338,7 @@ fn lazy_sequence_pipeline_produces_sequence_wrapper() {
 
     assert_eq!(
         rendered,
-        "Sequence.fromStream((numbers).stream().map((x) -> x))"
+        "SequenceFactory.fromStream((numbers).stream().map((x) -> x))"
     );
 }
 
