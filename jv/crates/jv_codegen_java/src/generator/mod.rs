@@ -26,6 +26,7 @@ pub struct JavaCodeGenerator {
     config: JavaCodeGenConfig,
     targeting: TargetedJavaEmitter,
     variance_stack: Vec<HashMap<String, IrVariance>>,
+    sequence_helper: Option<String>,
 }
 
 impl JavaCodeGenerator {
@@ -40,6 +41,7 @@ impl JavaCodeGenerator {
             config,
             targeting: TargetedJavaEmitter::new(target),
             variance_stack: Vec::new(),
+            sequence_helper: None,
         }
     }
 
@@ -199,6 +201,10 @@ impl JavaCodeGenerator {
             unit.type_declarations.push(code);
         }
 
+        if let Some(helper) = self.sequence_helper.take() {
+            unit.type_declarations.push(helper);
+        }
+
         let mut inferred = self.imports.values().cloned().collect::<Vec<_>>();
         inferred.sort();
         inferred.dedup();
@@ -221,6 +227,7 @@ impl JavaCodeGenerator {
     fn reset(&mut self) {
         self.imports.clear();
         self.variance_stack.clear();
+        self.sequence_helper = None;
     }
 
     pub(super) fn push_variance_scope(&mut self, params: &[IrTypeParameter]) {
@@ -237,6 +244,30 @@ impl JavaCodeGenerator {
 
     pub(super) fn truncate_variance_scopes(&mut self, len: usize) {
         self.variance_stack.truncate(len);
+    }
+
+    pub(super) fn ensure_sequence_helper(&mut self) {
+        if self.sequence_helper.is_some() {
+            return;
+        }
+
+        self.add_import("java.util.Iterator");
+        self.add_import("java.util.stream.Stream");
+
+        let mut builder = self.builder();
+        builder.push_line("final class JvSequence<T> implements Iterable<T>, AutoCloseable {");
+        builder.indent();
+        builder.push_line("private final Stream<T> delegate;");
+        builder.push_line("");
+        builder.push_line("JvSequence(Stream<T> delegate) { this.delegate = delegate; }");
+        builder.push_line("");
+        builder.push_line("public Iterator<T> iterator() { return delegate.iterator(); }");
+        builder.push_line("public void close() { delegate.close(); }");
+        builder.push_line("public Stream<T> toStream() { return delegate; }");
+        builder.dedent();
+        builder.push_line("}");
+
+        self.sequence_helper = Some(builder.build());
     }
 
     pub(super) fn variance_scope_len(&self) -> usize {

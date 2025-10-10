@@ -967,7 +967,7 @@ impl JavaType {
 
     pub fn sequence() -> Self {
         JavaType::Reference {
-            name: "jv.collections.Sequence".to_string(),
+            name: "jv.collections.SequenceCore".to_string(),
             generic_args: vec![],
         }
     }

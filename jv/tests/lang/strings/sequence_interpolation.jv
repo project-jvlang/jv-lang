@@ -1,6 +1,6 @@
-import jv.collections.Sequence
+import jv.collections.SequenceCore
 
-fun inlineSequenceMessage(numbers: Sequence<Int>): String {
+fun inlineSequenceMessage(numbers: SequenceCore<Int>): String {
     return "inline=${numbers.map { value -> value * 2 }}"
 }
 
