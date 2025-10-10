@@ -308,13 +308,27 @@ pub enum LexError {
     LookaheadOverflow { requested: usize },
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LayoutMode {
+    Enabled,
+    Disabled,
+}
+
 pub struct Lexer {
     input: String,
+    layout_mode: LayoutMode,
 }
 
 impl Lexer {
     pub fn new(input: String) -> Self {
-        Self { input }
+        Self {
+            input,
+            layout_mode: LayoutMode::Enabled,
+        }
+    }
+
+    pub fn with_layout_mode(input: String, layout_mode: LayoutMode) -> Self {
+        Self { input, layout_mode }
     }
 
     pub fn tokenize(&mut self) -> Result<Vec<Token>, LexError> {
@@ -323,7 +337,7 @@ impl Lexer {
             PipelineStages, TokenPluginManager,
         };
 
-        let mut context = LexerContext::new(&self.input);
+        let mut context = LexerContext::with_layout_mode(&self.input, self.layout_mode);
         let stages = PipelineStages::new(
             CharScanner::new(),
             Normalizer::new(),

@@ -25,7 +25,7 @@ pub mod commands;
 - ラムダ式の引数は明示必須 ({ value -> ... } 形式)。暗黙の it パラメータは使用できません。
 - Sequence から Java Stream へブリッジした後は再利用できないため、必要に応じて toList()/toSet() で具現化してください。
 
-詳細は README と docs/stdlib/collections.md を参照してください。"#,
+詳細は README と docs/stdlib/collections.md を参照してください。"#
 )]
 pub struct Cli {
     #[command(subcommand)]

@@ -866,7 +866,8 @@ impl JavaCodeGenerator {
             JavaType::Reference { name, .. } if name == "jv.collections.Sequence" => {}
             _ => {
                 return Err(CodeGenError::TypeGenerationError {
-                    message: "lazy sequence pipeline must resolve to jv.collections.Sequence".to_string(),
+                    message: "lazy sequence pipeline must resolve to jv.collections.Sequence"
+                        .to_string(),
                     span: Some(span.clone()),
                 })
             }

@@ -1,8 +1,9 @@
-use crate::{LayoutSequenceKind, LexError, TokenType};
+use crate::{LayoutMode, LayoutSequenceKind, LexError, TokenType};
 
 use super::types::ScannerPosition;
 
 /// パイプライン全体で共有されるコンテキスト情報。
+
 #[derive(Debug)]
 pub struct LexerContext<'source> {
     pub source: &'source str,
@@ -12,10 +13,15 @@ pub struct LexerContext<'source> {
     pub errors: Vec<LexError>,
     pub last_token_type: Option<TokenType>,
     layout_stack: Vec<LayoutSequenceKind>,
+    layout_mode: LayoutMode,
 }
 
 impl<'source> LexerContext<'source> {
     pub fn new(source: &'source str) -> Self {
+        Self::with_layout_mode(source, LayoutMode::Enabled)
+    }
+
+    pub fn with_layout_mode(source: &'source str, layout_mode: LayoutMode) -> Self {
         Self {
             source,
             current_position: ScannerPosition::default(),
@@ -24,6 +30,7 @@ impl<'source> LexerContext<'source> {
             errors: Vec::new(),
             last_token_type: None,
             layout_stack: Vec::new(),
+            layout_mode,
         }
     }
 
@@ -60,10 +67,16 @@ impl<'source> LexerContext<'source> {
     }
 
     pub fn push_layout_sequence(&mut self, kind: LayoutSequenceKind) {
+        if self.is_layout_disabled() {
+            return;
+        }
         self.layout_stack.push(kind);
     }
 
     pub fn pop_layout_sequence(&mut self, kind: LayoutSequenceKind) {
+        if self.is_layout_disabled() {
+            return;
+        }
         match self.layout_stack.last().copied() {
             Some(last) if last == kind => {
                 self.layout_stack.pop();
@@ -78,6 +91,21 @@ impl<'source> LexerContext<'source> {
     }
 
     pub fn current_layout_sequence(&self) -> Option<LayoutSequenceKind> {
+        if self.is_layout_disabled() {
+            return None;
+        }
         self.layout_stack.last().copied()
+    }
+
+    pub fn layout_mode(&self) -> LayoutMode {
+        self.layout_mode
+    }
+
+    pub fn is_layout_enabled(&self) -> bool {
+        matches!(self.layout_mode, LayoutMode::Enabled)
+    }
+
+    pub fn is_layout_disabled(&self) -> bool {
+        !self.is_layout_enabled()
     }
 }
