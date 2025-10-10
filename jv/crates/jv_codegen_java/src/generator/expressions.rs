@@ -814,14 +814,17 @@ impl JavaCodeGenerator {
         result_type: &JavaType,
         span: &Span,
     ) -> Result<String, CodeGenError> {
-        if pipeline.terminal.is_none() {
-            return Err(CodeGenError::UnsupportedConstruct {
-                construct: "lazy sequence pipeline without terminal".to_string(),
-                span: Some(span.clone()),
-            });
-        }
-
         let (source_expr, needs_resource_guard) = self.render_sequence_source(&pipeline.source)?;
+
+        if pipeline.terminal.is_none() {
+            let chained = self.render_sequence_chain(&source_expr, pipeline)?;
+            return self.render_lazy_sequence_pipeline(
+                chained,
+                needs_resource_guard,
+                result_type,
+                span,
+            );
+        }
 
         if needs_resource_guard {
             let chained = self.render_sequence_chain("__jvStream", pipeline)?;
@@ -850,6 +853,27 @@ impl JavaCodeGenerator {
         } else {
             self.render_sequence_chain(&source_expr, pipeline)
         }
+    }
+
+    fn render_lazy_sequence_pipeline(
+        &mut self,
+        stream_expr: String,
+        _needs_resource_guard: bool,
+        result_type: &JavaType,
+        span: &Span,
+    ) -> Result<String, CodeGenError> {
+        match result_type {
+            JavaType::Reference { name, .. } if name == "jv.collections.Sequence" => {}
+            _ => {
+                return Err(CodeGenError::TypeGenerationError {
+                    message: "lazy sequence pipeline must resolve to jv.collections.Sequence".to_string(),
+                    span: Some(span.clone()),
+                })
+            }
+        }
+
+        self.add_import("jv.collections.Sequence");
+        Ok(format!("Sequence.fromStream({})", stream_expr))
     }
 
     fn render_sequence_source(

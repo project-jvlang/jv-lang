@@ -149,6 +149,40 @@ fn map_filter_to_list_expression() -> Expression {
     call_method(filtered, "toList", vec![])
 }
 
+#[test]
+fn map_pipeline_without_terminal_stays_lazy_sequence() {
+    let mut context = TransformContext::new();
+    register_numbers(&mut context);
+
+    let ir =
+        transform_expression(map_expression(), &mut context).expect("map pipeline lowers to IR");
+
+    let IrExpression::SequencePipeline {
+        pipeline,
+        java_type,
+        ..
+    } = ir
+    else {
+        panic!("expected sequence pipeline expression");
+    };
+
+    assert!(pipeline.lazy, "lazy pipelines should remain marked lazy");
+    assert!(
+        pipeline.terminal.is_none(),
+        "map without terminal should not synthesize a terminal"
+    );
+    assert_eq!(
+        pipeline.stages.len(),
+        1,
+        "single map call should produce one stage"
+    );
+    assert_eq!(
+        java_type,
+        JavaType::sequence(),
+        "lazy pipeline should infer Sequence return type"
+    );
+}
+
 fn complex_sequence_expression() -> Expression {
     let mapped = call_method(
         identifier("numbers"),
