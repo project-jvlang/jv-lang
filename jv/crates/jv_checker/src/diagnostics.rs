@@ -682,6 +682,7 @@ mod tests {
             package: None,
             imports: Vec::new(),
             type_declarations: vec![statement],
+            generic_metadata: Default::default(),
             span,
         }
     }

@@ -661,6 +661,7 @@ fn apply_type_facts_enriches_class_metadata() {
             modifiers: IrModifiers::default(),
             span: span.clone(),
         }],
+        generic_metadata: Default::default(),
         span,
     };
 
@@ -739,6 +740,7 @@ fn where_constraints_flow_into_ir_bounds() {
             modifiers: IrModifiers::default(),
             span: span.clone(),
         }],
+        generic_metadata: Default::default(),
         span: span.clone(),
     };
 

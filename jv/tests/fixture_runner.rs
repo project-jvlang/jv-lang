@@ -545,6 +545,7 @@ fn example1_program() -> IrProgram {
         package: Some("patterns".to_string()),
         imports: vec![],
         type_declarations: vec![class],
+        generic_metadata: Default::default(),
         span: dummy_span(),
     }
 }
@@ -620,6 +621,7 @@ fn example2_program() -> IrProgram {
         package: Some("patterns".to_string()),
         imports: vec![],
         type_declarations: vec![class],
+        generic_metadata: Default::default(),
         span: dummy_span(),
     }
 }
@@ -803,6 +805,7 @@ fn example5_program() -> IrProgram {
         package: Some("patterns".to_string()),
         imports: vec![],
         type_declarations: vec![inner_record, outer_record, example_class],
+        generic_metadata: Default::default(),
         span: dummy_span(),
     }
 }

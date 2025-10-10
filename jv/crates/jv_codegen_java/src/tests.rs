@@ -269,6 +269,7 @@ fn sample_embed_program() -> IrProgram {
         package: Some("sample.embed".to_string()),
         imports: vec![],
         type_declarations: vec![user_sample_record(), embed_data_class()],
+        generic_metadata: Default::default(),
         span: dummy_span(),
     }
 }
@@ -351,6 +352,7 @@ fn sample_load_program() -> IrProgram {
         package: Some("sample.load".to_string()),
         imports: vec![],
         type_declarations: vec![load_helper_class()],
+        generic_metadata: Default::default(),
         span: dummy_span(),
     }
 }
@@ -568,6 +570,7 @@ fn snapshot_program() -> IrProgram {
         package: Some("example.greeter".to_string()),
         imports: vec![],
         type_declarations: vec![class],
+        generic_metadata: Default::default(),
         span: dummy_span(),
     }
 }
@@ -704,6 +707,7 @@ fn compilation_unit_collects_type_declarations() {
         package: Some("com.example".to_string()),
         imports: vec![],
         type_declarations: vec![simple_class()],
+        generic_metadata: Default::default(),
         span: dummy_span(),
     };
 
@@ -800,6 +804,7 @@ fn script_regex_val_is_hoisted_to_static_field() {
         package: None,
         imports: vec![],
         type_declarations: vec![regex_decl],
+        generic_metadata: Default::default(),
         span: dummy_span(),
     };
 
@@ -867,6 +872,7 @@ fn class_regex_field_is_emitted_as_static_final() {
         package: Some("example.validation".to_string()),
         imports: vec![],
         type_declarations: vec![class],
+        generic_metadata: Default::default(),
         span: dummy_span(),
     };
 
@@ -1282,6 +1288,7 @@ fn sample_record_generation_emits_expected_record() {
         package: Some("sample.users".to_string()),
         imports: vec![],
         type_declarations: vec![user_sample_record()],
+        generic_metadata: Default::default(),
         span: dummy_span(),
     };
 
@@ -1301,6 +1308,7 @@ fn sample_declaration_generates_records_from_descriptors() {
         package: Some("sample.generated".to_string()),
         imports: vec![],
         type_declarations: vec![IrStatement::SampleDeclaration(declaration)],
+        generic_metadata: Default::default(),
         span: dummy_span(),
     };
 
@@ -1351,6 +1359,7 @@ fn embed_mode_sample_declaration_handles_csv() {
         package: Some("sample.embed".to_string()),
         imports: vec![],
         type_declarations: vec![IrStatement::SampleDeclaration(declaration)],
+        generic_metadata: Default::default(),
         span: dummy_span(),
     };
 
@@ -1379,6 +1388,7 @@ fn embed_mode_sample_declaration_handles_tsv() {
         package: Some("sample.embed".to_string()),
         imports: vec![],
         type_declarations: vec![IrStatement::SampleDeclaration(declaration)],
+        generic_metadata: Default::default(),
         span: dummy_span(),
     };
 
@@ -1407,6 +1417,7 @@ fn embed_mode_sample_declaration_produces_helper_class() {
         package: Some("sample.embed".to_string()),
         imports: vec![],
         type_declarations: vec![IrStatement::SampleDeclaration(declaration)],
+        generic_metadata: Default::default(),
         span: dummy_span(),
     };
 
@@ -1536,6 +1547,7 @@ fn load_mode_sample_declaration_generates_http_fetch_pipeline() {
         package: Some("sample.load.http".to_string()),
         imports: vec![],
         type_declarations: vec![IrStatement::SampleDeclaration(declaration)],
+        generic_metadata: Default::default(),
         span: dummy_span(),
     };
 
@@ -1612,6 +1624,7 @@ fn load_mode_sample_declaration_supports_s3_and_tabular_decoding() {
         package: Some("sample.load.s3".to_string()),
         imports: vec![],
         type_declarations: vec![IrStatement::SampleDeclaration(declaration)],
+        generic_metadata: Default::default(),
         span: dummy_span(),
     };
 

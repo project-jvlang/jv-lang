@@ -53,6 +53,7 @@ fn sealed_classes_emit_target_specific_metadata() {
         package: Some("demo".to_string()),
         imports: Vec::new(),
         type_declarations: vec![class],
+        generic_metadata: Default::default(),
         span,
     };
 
@@ -94,6 +95,7 @@ fn class_signature_includes_generic_bounds() {
             }],
             variance: IrVariance::Invariant,
             permits: Vec::new(),
+            kind: None,
             span: span.clone(),
         }],
         superclass: None,
@@ -109,6 +111,7 @@ fn class_signature_includes_generic_bounds() {
         package: Some("demo".to_string()),
         imports: Vec::new(),
         type_declarations: vec![class],
+        generic_metadata: Default::default(),
         span,
     };
 
@@ -136,6 +139,7 @@ fn covariant_type_arguments_render_wildcards() {
             bounds: Vec::new(),
             variance: IrVariance::Covariant,
             permits: Vec::new(),
+            kind: None,
             span: span.clone(),
         }],
         superclass: None,
@@ -163,6 +167,7 @@ fn covariant_type_arguments_render_wildcards() {
         package: Some("demo".to_string()),
         imports: Vec::new(),
         type_declarations: vec![class],
+        generic_metadata: Default::default(),
         span,
     };
 
@@ -190,6 +195,7 @@ fn contravariant_type_arguments_render_wildcards() {
             bounds: Vec::new(),
             variance: IrVariance::Contravariant,
             permits: Vec::new(),
+            kind: None,
             span: span.clone(),
         }],
         superclass: None,
@@ -217,6 +223,7 @@ fn contravariant_type_arguments_render_wildcards() {
         package: Some("demo".to_string()),
         imports: Vec::new(),
         type_declarations: vec![class],
+        generic_metadata: Default::default(),
         span,
     };
 
@@ -321,6 +328,7 @@ fn raw_default_comment_on_field_adds_import_and_guard() {
         package: Some("demo".to_string()),
         imports: Vec::new(),
         type_declarations: vec![class],
+        generic_metadata: Default::default(),
         span,
     };
 
@@ -381,6 +389,7 @@ fn raw_allow_comment_on_field_keeps_imports_clean() {
         package: Some("demo".to_string()),
         imports: Vec::new(),
         type_declarations: vec![class],
+        generic_metadata: Default::default(),
         span,
     };
 

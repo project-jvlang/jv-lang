@@ -56,6 +56,7 @@ fn sealed_program() -> IrProgram {
         package: Some("com.example".to_string()),
         imports: vec![],
         type_declarations: vec![result_class, success_class, failure_class],
+        generic_metadata: Default::default(),
         span: dummy_span(),
     }
 }

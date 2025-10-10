@@ -81,6 +81,7 @@ fn audited_program() -> IrProgram {
         package: Some("com.example.app".to_string()),
         imports: vec![],
         type_declarations: vec![class],
+        generic_metadata: Default::default(),
         span: dummy_span(),
     }
 }
