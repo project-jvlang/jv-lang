@@ -839,6 +839,36 @@ fn test_string_interpolation_multiple_expressions_no_text() {
 }
 
 #[test]
+fn test_string_interpolation_binary_expression_segment() {
+    let program = parse_program(r#"val message = "${x} + ${y} = ${x + y}""#);
+    let statement = first_statement(&program);
+
+    match statement {
+        Statement::ValDeclaration { initializer, .. } => match initializer {
+            Expression::StringInterpolation { parts, .. } => {
+                assert_eq!(parts.len(), 5);
+                match &parts[4] {
+                    StringPart::Expression(Expression::Binary { op, left, right, .. }) => {
+                        assert_eq!(*op, BinaryOp::Add);
+                        match left.as_ref() {
+                            Expression::Identifier(name, _) => assert_eq!(name, "x"),
+                            other => panic!("expected identifier 'x', found {:?}", other),
+                        }
+                        match right.as_ref() {
+                            Expression::Identifier(name, _) => assert_eq!(name, "y"),
+                            other => panic!("expected identifier 'y', found {:?}", other),
+                        }
+                    }
+                    other => panic!("expected binary expression segment, found {:?}", other),
+                }
+            }
+            other => panic!("expected string interpolation, found {:?}", other),
+        },
+        other => panic!("expected val declaration, found {:?}", other),
+    }
+}
+
+#[test]
 fn test_async_spawn_constructs() {
     let program = parse_program(
         r#"

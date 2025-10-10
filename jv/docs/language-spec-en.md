@@ -339,7 +339,7 @@ val writeOnlyList: MutableList<in Int> = mutableListOf()
 
 ```jv
 // Function types
-val operation: (Int, Int) -> Int = { a, b -> a + b }
+val operation: (Int, Int) -> Int = { a b -> a + b }
 val predicate: (String) -> Boolean = { it.isNotEmpty() }
 
 // Higher-order function
@@ -472,7 +472,7 @@ val numbers = listOf(1, 2, 3, 4, 5)
 
 val doubled = numbers.map { it * 2 }
 val evens = numbers.filter { it % 2 == 0 }
-val sum = numbers.reduce { acc, n -> acc + n }
+val sum = numbers.reduce { acc n -> acc + n }
 val first = numbers.firstOrNull { it > 3 }
 ```
 

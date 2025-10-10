@@ -141,7 +141,12 @@ impl Emitter {
                         tokens.extend(
                             nested_tokens
                                 .into_iter()
-                                .filter(|token| !matches!(token.token_type, TokenType::Eof)),
+                                .filter(|token| {
+                                    !matches!(
+                                        token.token_type,
+                                        TokenType::Eof | TokenType::LayoutComma
+                                    )
+                                }),
                         );
                     }
                 }
