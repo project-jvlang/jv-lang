@@ -21,3 +21,8 @@ note_preferred = "指定された優先実装 {preferred_impl} も見つかり�
 [generic.capability_ambiguous]
 message = "{symbol} の型パラメータ T{type_param} に対する能力 {capability} の実装候補が複数存在します: {candidates}。"
 note_hint = "preferredImpl または明示的な型注釈で使用する実装を指定してください。"
+
+[generic.kind_mismatch]
+message = "{symbol} の型パラメータ {type_param} は kind {expected} を要求しますが、提供された引数は {actual} でした。"
+note_span = "型引数は {span} で指定されています。"
+note_hint = "kind 注釈または部分適用のスロット数を確認してください。"

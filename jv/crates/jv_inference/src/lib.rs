@@ -10,6 +10,7 @@ pub mod constraint;
 pub mod diagnostics;
 pub mod environment;
 pub mod generalize;
+pub mod kind;
 pub mod service;
 pub mod solver;
 pub mod types;
