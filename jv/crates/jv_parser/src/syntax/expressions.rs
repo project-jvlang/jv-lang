@@ -239,17 +239,18 @@ fn lambda_parameter_clause(
             span: Span::default(),
         });
 
-    choice((
-        token_left_paren()
-            .ignore_then(
-                parameter
-                    .clone()
-                    .separated_by(token_any_comma())
-                    .allow_trailing(),
-            )
-            .then_ignore(token_right_paren()),
-        parameter.map(|param| vec![param]),
-    ))
+    let parenthesized = token_left_paren()
+        .ignore_then(
+            parameter
+                .clone()
+                .separated_by(token_any_comma())
+                .allow_trailing(),
+        )
+        .then_ignore(token_right_paren());
+
+    let bare = parameter.repeated().at_least(1);
+
+    choice((parenthesized, bare))
 }
 
 fn array_literal_parser(
