@@ -303,6 +303,93 @@ fn test_data_shorthand_declaration() {
 }
 
 #[test]
+fn test_generic_data_declaration_signature() {
+    let program = parse_program("data Box<T>(value: T)");
+    let statement = first_statement(&program);
+
+    match statement {
+        Statement::DataClassDeclaration {
+            name,
+            type_parameters,
+            generic_signature,
+            parameters,
+            ..
+        } => {
+            assert_eq!(name, "Box");
+            assert_eq!(type_parameters, &vec!["T".to_string()]);
+            assert_eq!(parameters.len(), 1);
+
+            let signature = generic_signature
+                .as_ref()
+                .expect("generic signature should be present for data Box<T>");
+            assert_eq!(signature.parameters.len(), 1);
+            assert!(signature.parameters[0].bounds.is_empty());
+        }
+        other => panic!("expected generic data declaration, found {:?}", other),
+    }
+}
+
+#[test]
+fn test_generic_data_multiple_type_parameters() {
+    let program = parse_program("data Pair<K, V>(first: K, second: V)");
+    let statement = first_statement(&program);
+
+    match statement {
+        Statement::DataClassDeclaration {
+            name,
+            type_parameters,
+            generic_signature,
+            parameters,
+            ..
+        } => {
+            assert_eq!(name, "Pair");
+            assert_eq!(type_parameters, &vec!["K".to_string(), "V".to_string()]);
+            assert_eq!(parameters.len(), 2);
+
+            let signature = generic_signature
+                .as_ref()
+                .expect("generic signature should be present for data Pair<K, V>");
+            assert_eq!(signature.parameters.len(), 2);
+        }
+        other => panic!("expected generic data declaration, found {:?}", other),
+    }
+}
+
+#[test]
+fn test_generic_data_declaration_with_bound() {
+    let program = parse_program("data Bounded<T: Comparable>(value: T)");
+    let statement = first_statement(&program);
+
+    match statement {
+        Statement::DataClassDeclaration {
+            name,
+            type_parameters,
+            generic_signature,
+            ..
+        } => {
+            assert_eq!(name, "Bounded");
+            assert_eq!(type_parameters, &vec!["T".to_string()]);
+
+            let signature = generic_signature
+                .as_ref()
+                .expect("generic signature should be present for data Bounded<T: Comparable>");
+            assert_eq!(signature.parameters.len(), 1);
+            let param = &signature.parameters[0];
+            assert_eq!(param.name, "T");
+            assert_eq!(param.bounds.len(), 1);
+            match &param.bounds[0] {
+                TypeAnnotation::Simple(name) => assert_eq!(name, "Comparable"),
+                other => panic!("expected simple bound, found {:?}", other),
+            }
+        }
+        other => panic!(
+            "expected generic data declaration with bound, found {:?}",
+            other
+        ),
+    }
+}
+
+#[test]
 fn test_whitespace_argument_metadata() {
     let program = parse_program("val result = SUM(1 2 3)");
     let statement = first_statement(&program);

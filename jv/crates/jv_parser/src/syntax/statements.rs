@@ -283,20 +283,24 @@ fn data_class_declaration_parser(
     modifiers_parser()
         .then_ignore(token_data())
         .then(token_class().ignore_then(identifier()).or(identifier()))
+        .then(type_parameter_list().or_not())
         .then_ignore(token_left_paren())
         .then(parameter_list(expr))
         .then_ignore(token_right_paren())
-        .map(
-            |((modifiers, name), parameters)| Statement::DataClassDeclaration {
+        .map(|(((modifiers, name), generics), parameters)| {
+            let (type_parameters, generic_signature) =
+                extract_type_parameters_and_signature(generics);
+
+            Statement::DataClassDeclaration {
                 name,
                 parameters,
                 is_mutable: false,
                 modifiers,
-                type_parameters: Vec::new(),
-                generic_signature: None,
+                type_parameters,
+                generic_signature,
                 span: Span::dummy(),
-            },
-        )
+            }
+        })
 }
 
 fn use_statement_parser(
@@ -571,6 +575,35 @@ fn type_parameter_list() -> impl ChumskyParser<Token, ParsedGenerics, Error = Si
                 }
             },
         )
+}
+
+fn extract_type_parameters_and_signature(
+    generics: Option<ParsedGenerics>,
+) -> (Vec<String>, Option<GenericSignature>) {
+    match generics {
+        Some(parsed) => {
+            let ParsedGenerics {
+                params,
+                raw_directives,
+                span,
+            } = parsed;
+
+            let type_parameters = params
+                .iter()
+                .map(|param| param.name.clone())
+                .collect::<Vec<_>>();
+
+            let signature = GenericSignature {
+                parameters: params,
+                where_clause: None,
+                raw_directives,
+                span,
+            };
+
+            (type_parameters, Some(signature))
+        }
+        None => (Vec::new(), None),
+    }
 }
 
 fn generic_parameter() -> impl ChumskyParser<Token, GenericParameter, Error = Simple<Token>> + Clone
