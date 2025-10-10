@@ -4,6 +4,30 @@ use crate::transform::transform_expression;
 use crate::types::{IrExpression, JavaType};
 use jv_ast::{Argument, CallArgumentMetadata, Expression, SequenceDelimiter, Span};
 use serde::{Deserialize, Serialize};
+use std::mem;
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum PipelineShape {
+    SingleStageMap,
+    SingleStageFilter,
+    SingleStageReduce,
+    MultiStage {
+        stages: usize,
+        repeated_transforms: bool,
+        has_terminal: bool,
+    },
+    ExplicitSequenceSource,
+}
+
+impl Default for PipelineShape {
+    fn default() -> Self {
+        Self::MultiStage {
+            stages: 0,
+            repeated_transforms: false,
+            has_terminal: false,
+        }
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SequencePipeline {
@@ -12,6 +36,13 @@ pub struct SequencePipeline {
     pub terminal: Option<SequenceTerminal>,
     pub lazy: bool,
     pub span: Span,
+    pub shape: PipelineShape,
+}
+
+impl SequencePipeline {
+    pub fn recompute_shape(&mut self) {
+        self.shape = PipelineShape::classify(&self.source, &self.stages, self.terminal.as_ref());
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -125,6 +156,47 @@ pub enum SequenceTerminalKind {
     },
 }
 
+impl PipelineShape {
+    fn classify(
+        source: &SequenceSource,
+        stages: &[SequenceStage],
+        terminal: Option<&SequenceTerminal>,
+    ) -> Self {
+        if matches!(source, SequenceSource::JavaStream { .. }) {
+            return PipelineShape::ExplicitSequenceSource;
+        }
+
+        let has_terminal = terminal.is_some();
+        let stage_count = stages.len();
+
+        if stage_count == 0 {
+            if terminal.is_some_and(|t| matches!(t.kind, SequenceTerminalKind::Reduce { .. })) {
+                return PipelineShape::SingleStageReduce;
+            }
+
+            return PipelineShape::MultiStage {
+                stages: 0,
+                repeated_transforms: false,
+                has_terminal,
+            };
+        }
+
+        if stage_count == 1 {
+            match stages.first().unwrap() {
+                SequenceStage::Map { .. } => return PipelineShape::SingleStageMap,
+                SequenceStage::Filter { .. } => return PipelineShape::SingleStageFilter,
+                _ => {}
+            }
+        }
+
+        PipelineShape::MultiStage {
+            stages: stage_count,
+            repeated_transforms: has_repeated_transform(stages),
+            has_terminal,
+        }
+    }
+}
+
 pub fn try_lower_sequence_call(
     function: Expression,
     args: Vec<Argument>,
@@ -180,6 +252,7 @@ pub fn try_lower_sequence_call(
         terminal: None,
         lazy: true,
         span: span.clone(),
+        shape: PipelineShape::default(),
     };
 
     for segment in segments {
@@ -210,6 +283,8 @@ pub fn try_lower_sequence_call(
     if pipeline.stages.is_empty() {
         return Ok(None);
     }
+
+    pipeline.recompute_shape();
 
     let java_type = determine_java_type(pipeline.terminal.as_ref());
 
@@ -577,4 +652,18 @@ fn expression_span(expr: &Expression) -> Span {
         Expression::JsonLiteral(literal) => literal.span.clone(),
         Expression::MultilineString(literal) => literal.span.clone(),
     }
+}
+
+fn has_repeated_transform(stages: &[SequenceStage]) -> bool {
+    let mut fingerprints = Vec::new();
+
+    for stage in stages {
+        let discriminant = mem::discriminant(stage);
+        if fingerprints.iter().any(|seen| *seen == discriminant) {
+            return true;
+        }
+        fingerprints.push(discriminant);
+    }
+
+    false
 }

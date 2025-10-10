@@ -13,7 +13,7 @@ mod tests {
         transform_program_with_context_profiled, transform_statement, CompletableFutureOp,
         DataFormat, IrCaseLabel, IrDeconstructionComponent, IrDeconstructionPattern, IrExpression,
         IrForEachKind, IrForLoopMetadata, IrImplicitWhenEnd, IrModifiers, IrNumericRangeLoop,
-        IrStatement, IrVisibility, JavaType, SampleMode, SampleSourceKind, Schema,
+        IrStatement, IrVisibility, JavaType, PipelineShape, SampleMode, SampleSourceKind, Schema,
         SequencePipeline, SequenceSource, SequenceStage, SequenceTerminal,
         SequenceTerminalEvaluation, SequenceTerminalKind, TransformContext, TransformError,
         TransformPools, TransformProfiler, VirtualThreadOp,
@@ -3058,7 +3058,7 @@ mod tests {
             span: dummy_span(),
         };
 
-        let pipeline = SequencePipeline {
+        let mut pipeline = SequencePipeline {
             source: SequenceSource::Collection {
                 expr: Box::new(IrExpression::Identifier {
                     name: "numbers".to_string(),
@@ -3080,7 +3080,9 @@ mod tests {
             }),
             lazy: false,
             span: dummy_span(),
+            shape: PipelineShape::default(),
         };
+        pipeline.recompute_shape();
 
         let sequence_expr = IrExpression::SequencePipeline {
             pipeline,
@@ -3231,6 +3233,128 @@ mod tests {
             }
             other => panic!("expected sequence pipeline, got {:?}", other),
         }
+    }
+
+    #[test]
+    fn sequence_pipeline_shape_flags() {
+        let make_map_stage = || SequenceStage::Map {
+            lambda: Box::new(IrExpression::Identifier {
+                name: "mapper".to_string(),
+                java_type: JavaType::object(),
+                span: dummy_span(),
+            }),
+            result_hint: None,
+            span: dummy_span(),
+        };
+
+        let make_filter_stage = || SequenceStage::Filter {
+            predicate: Box::new(IrExpression::Identifier {
+                name: "predicate".to_string(),
+                java_type: JavaType::object(),
+                span: dummy_span(),
+            }),
+            span: dummy_span(),
+        };
+
+        let terminal_to_list = SequenceTerminal {
+            kind: SequenceTerminalKind::ToList,
+            evaluation: SequenceTerminalEvaluation::Collector,
+            requires_non_empty_source: false,
+            span: dummy_span(),
+        };
+
+        let mut single_stage = SequencePipeline {
+            source: SequenceSource::Collection {
+                expr: Box::new(IrExpression::Identifier {
+                    name: "numbers".to_string(),
+                    java_type: JavaType::object(),
+                    span: dummy_span(),
+                }),
+                element_hint: None,
+            },
+            stages: vec![make_map_stage()],
+            terminal: Some(terminal_to_list.clone()),
+            lazy: false,
+            span: dummy_span(),
+            shape: PipelineShape::default(),
+        };
+        single_stage.recompute_shape();
+        assert!(matches!(single_stage.shape, PipelineShape::SingleStageMap));
+
+        let mut multi_stage = SequencePipeline {
+            source: SequenceSource::Collection {
+                expr: Box::new(IrExpression::Identifier {
+                    name: "numbers".to_string(),
+                    java_type: JavaType::object(),
+                    span: dummy_span(),
+                }),
+                element_hint: None,
+            },
+            stages: vec![make_map_stage(), make_filter_stage()],
+            terminal: Some(terminal_to_list.clone()),
+            lazy: false,
+            span: dummy_span(),
+            shape: PipelineShape::default(),
+        };
+        multi_stage.recompute_shape();
+        match multi_stage.shape {
+            PipelineShape::MultiStage {
+                stages,
+                repeated_transforms,
+                has_terminal,
+            } => {
+                assert_eq!(stages, 2);
+                assert!(!repeated_transforms);
+                assert!(has_terminal);
+            }
+            other => panic!("unexpected shape {:?}", other),
+        }
+
+        let mut repeated = SequencePipeline {
+            source: SequenceSource::Collection {
+                expr: Box::new(IrExpression::Identifier {
+                    name: "numbers".to_string(),
+                    java_type: JavaType::object(),
+                    span: dummy_span(),
+                }),
+                element_hint: None,
+            },
+            stages: vec![make_map_stage(), make_map_stage()],
+            terminal: None,
+            lazy: true,
+            span: dummy_span(),
+            shape: PipelineShape::default(),
+        };
+        repeated.recompute_shape();
+        match repeated.shape {
+            PipelineShape::MultiStage {
+                repeated_transforms,
+                ..
+            } => assert!(repeated_transforms),
+            other => panic!("unexpected shape {:?}", other),
+        }
+
+        let mut explicit_source = SequencePipeline {
+            source: SequenceSource::JavaStream {
+                expr: Box::new(IrExpression::Identifier {
+                    name: "stream".to_string(),
+                    java_type: JavaType::object(),
+                    span: dummy_span(),
+                }),
+                element_hint: None,
+                auto_close: true,
+            },
+            stages: vec![make_map_stage()],
+            terminal: Some(terminal_to_list),
+            lazy: false,
+            span: dummy_span(),
+            shape: PipelineShape::default(),
+        };
+        explicit_source.recompute_shape();
+        assert!(matches!(
+            explicit_source.shape,
+            PipelineShape::ExplicitSequenceSource
+        ));
     }
     #[test]
     fn numeric_range_lowering_produces_metadata_and_conditions() {

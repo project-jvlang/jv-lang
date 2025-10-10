@@ -66,6 +66,7 @@ fn materialize_sequence_if_needed(expr: IrExpression) -> IrExpression {
                 span: span.clone(),
             });
             pipeline.lazy = false;
+            pipeline.recompute_shape();
             IrExpression::SequencePipeline {
                 pipeline,
                 java_type: JavaType::list(),
