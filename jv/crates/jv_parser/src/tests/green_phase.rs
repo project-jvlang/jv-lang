@@ -5,6 +5,7 @@ use jv_ast::{
     ResourceManagement, SequenceDelimiter, Statement, StringPart, TypeAnnotation, ValBindingOrigin,
     VarianceMarker, WherePredicate,
 };
+use jv_lexer::{Lexer, TokenType};
 
 use test_case::test_case;
 
@@ -848,7 +849,9 @@ fn test_string_interpolation_binary_expression_segment() {
             Expression::StringInterpolation { parts, .. } => {
                 assert_eq!(parts.len(), 5);
                 match &parts[4] {
-                    StringPart::Expression(Expression::Binary { op, left, right, .. }) => {
+                    StringPart::Expression(Expression::Binary {
+                        op, left, right, ..
+                    }) => {
                         assert_eq!(*op, BinaryOp::Add);
                         match left.as_ref() {
                             Expression::Identifier(name, _) => assert_eq!(name, "x"),
@@ -865,6 +868,125 @@ fn test_string_interpolation_binary_expression_segment() {
             other => panic!("expected string interpolation, found {:?}", other),
         },
         other => panic!("expected val declaration, found {:?}", other),
+    }
+}
+
+#[test]
+fn test_string_interpolation_in_function_body() {
+    let source = r#"
+        fun main() {
+            val x = 10
+            val y = 20
+            println("${x} + ${y} = ${x + y}")
+        }
+    "#;
+    let mut lexer = Lexer::new(source.to_string());
+    let tokens = lexer
+        .tokenize()
+        .expect("lex function with interpolation should succeed");
+    assert!(
+        tokens
+            .iter()
+            .all(|token| !matches!(token.token_type, TokenType::LayoutComma)),
+        "layout commas should not appear in lexed tokens"
+    );
+    let program = parse_program(source);
+    let statement = first_statement(&program);
+
+    match statement {
+        Statement::FunctionDeclaration { name, body, .. } => {
+            assert_eq!(name, "main");
+            match body.as_ref() {
+                Expression::Block { statements, .. } => {
+                    assert_eq!(statements.len(), 3);
+                    match &statements[0] {
+                        Statement::ValDeclaration {
+                            name, initializer, ..
+                        } => {
+                            assert_eq!(name, "x");
+                            match initializer {
+                                Expression::Literal(Literal::Number(value), _) => {
+                                    assert_eq!(value, "10")
+                                }
+                                other => panic!("expected numeric literal, found {:?}", other),
+                            }
+                        }
+                        other => panic!("expected val declaration, found {:?}", other),
+                    }
+
+                    match &statements[1] {
+                        Statement::ValDeclaration {
+                            name, initializer, ..
+                        } => {
+                            assert_eq!(name, "y");
+                            match initializer {
+                                Expression::Literal(Literal::Number(value), _) => {
+                                    assert_eq!(value, "20")
+                                }
+                                other => panic!("expected numeric literal, found {:?}", other),
+                            }
+                        }
+                        other => panic!("expected val declaration, found {:?}", other),
+                    }
+
+                    match &statements[2] {
+                        Statement::Expression { expr, .. } => match expr {
+                            Expression::Call { args, .. } => {
+                                assert_eq!(args.len(), 1);
+                                match &args[0] {
+                                    Argument::Positional(Expression::StringInterpolation {
+                                        parts,
+                                        ..
+                                    }) => {
+                                        assert_eq!(parts.len(), 5);
+                                        match &parts[4] {
+                                            StringPart::Expression(Expression::Binary {
+                                                op,
+                                                left,
+                                                right,
+                                                ..
+                                            }) => {
+                                                assert_eq!(*op, BinaryOp::Add);
+                                                match left.as_ref() {
+                                                    Expression::Identifier(name, _) => {
+                                                        assert_eq!(name, "x")
+                                                    }
+                                                    other => panic!(
+                                                        "expected identifier 'x', found {:?}",
+                                                        other
+                                                    ),
+                                                }
+                                                match right.as_ref() {
+                                                    Expression::Identifier(name, _) => {
+                                                        assert_eq!(name, "y")
+                                                    }
+                                                    other => panic!(
+                                                        "expected identifier 'y', found {:?}",
+                                                        other
+                                                    ),
+                                                }
+                                            }
+                                            other => panic!(
+                                                "expected binary expression segment, found {:?}",
+                                                other
+                                            ),
+                                        }
+                                    }
+                                    other => panic!(
+                                        "expected string interpolation argument, found {:?}",
+                                        other
+                                    ),
+                                }
+                            }
+                            other => panic!("expected call expression, found {:?}", other),
+                        },
+                        other => panic!("expected expression statement, found {:?}", other),
+                    }
+                }
+                other => panic!("expected block body, found {:?}", other),
+            }
+        }
+        other => panic!("expected function declaration, found {:?}", other),
     }
 }
 

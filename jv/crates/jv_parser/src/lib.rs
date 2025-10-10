@@ -211,6 +211,8 @@ fn preprocess_tokens(tokens: Vec<Token>) -> Vec<Token> {
     let mut stack: Vec<SequenceContext> = Vec::new();
     let mut call_eligible = false;
     let mut suppress_definition_call = false;
+    let mut in_interpolation_expr = false;
+    let mut expect_interpolation_expr = false;
 
     for (index, mut token) in tokens.into_iter().enumerate() {
         let json_confidence = json_contexts.get(index).copied().flatten();
@@ -237,6 +239,16 @@ fn preprocess_tokens(tokens: Vec<Token>) -> Vec<Token> {
         }
 
         let token_type_ref = &token.token_type;
+        if expect_interpolation_expr {
+            in_interpolation_expr = true;
+            expect_interpolation_expr = false;
+        }
+        if matches!(
+            token.token_type,
+            TokenType::StringStart | TokenType::StringMid | TokenType::StringEnd
+        ) {
+            in_interpolation_expr = false;
+        }
         if matches!(
             token_type_ref,
             TokenType::Fun | TokenType::Class | TokenType::Data
@@ -255,37 +267,39 @@ fn preprocess_tokens(tokens: Vec<Token>) -> Vec<Token> {
         }
         let mut next_call_state = allows_call_suffix(token_type_ref);
 
-        if let Some(ctx) = stack.last_mut() {
-            let eligible = match ctx.kind {
-                SequenceContextKind::Array => {
-                    !matches!(token.token_type, TokenType::Comma | TokenType::RightBracket)
+        if !in_interpolation_expr {
+            if let Some(ctx) = stack.last_mut() {
+                let eligible = match ctx.kind {
+                    SequenceContextKind::Array => {
+                        !matches!(token.token_type, TokenType::Comma | TokenType::RightBracket)
+                    }
+                    SequenceContextKind::Call => {
+                        !matches!(token.token_type, TokenType::Comma | TokenType::RightParen)
+                    }
+                } && is_sequence_layout_candidate(token_type_ref);
+                if eligible {
+                    let layout_needed = !ctx.prev_was_separator
+                        && (ctx.pending_layout || has_layout_trivia(&token.leading_trivia));
+                    if layout_needed {
+                        let mut synthetic = make_layout_comma_token(&token);
+                        let sequence = match ctx.kind {
+                            SequenceContextKind::Array => LayoutSequenceKind::Array,
+                            SequenceContextKind::Call => LayoutSequenceKind::Call,
+                        };
+                        let metadata = LayoutCommaMetadata {
+                            sequence,
+                            explicit_separator: ctx.last_explicit_separator.take(),
+                        };
+                        synthetic
+                            .metadata
+                            .push(TokenMetadata::LayoutComma(metadata));
+                        result.push(synthetic);
+                        ctx.prev_was_separator = true;
+                    }
+                    ctx.pending_layout = false;
+                } else {
+                    ctx.pending_layout = false;
                 }
-                SequenceContextKind::Call => {
-                    !matches!(token.token_type, TokenType::Comma | TokenType::RightParen)
-                }
-            } && is_sequence_layout_candidate(token_type_ref);
-            if eligible {
-                let layout_needed = !ctx.prev_was_separator
-                    && (ctx.pending_layout || has_layout_trivia(&token.leading_trivia));
-                if layout_needed {
-                    let mut synthetic = make_layout_comma_token(&token);
-                    let sequence = match ctx.kind {
-                        SequenceContextKind::Array => LayoutSequenceKind::Array,
-                        SequenceContextKind::Call => LayoutSequenceKind::Call,
-                    };
-                    let metadata = LayoutCommaMetadata {
-                        sequence,
-                        explicit_separator: ctx.last_explicit_separator.take(),
-                    };
-                    synthetic
-                        .metadata
-                        .push(TokenMetadata::LayoutComma(metadata));
-                    result.push(synthetic);
-                    ctx.prev_was_separator = true;
-                }
-                ctx.pending_layout = false;
-            } else {
-                ctx.pending_layout = false;
             }
         }
 
@@ -310,6 +324,23 @@ fn preprocess_tokens(tokens: Vec<Token>) -> Vec<Token> {
                     ctx.prev_was_separator = false;
                     ctx.last_explicit_separator = None;
                 }
+                result.push(token);
+            }
+            TokenType::StringStart | TokenType::StringMid => {
+                if let Some(ctx) = stack.last_mut() {
+                    ctx.prev_was_separator = false;
+                    ctx.last_explicit_separator = None;
+                }
+                expect_interpolation_expr = true;
+                result.push(token);
+            }
+            TokenType::StringEnd => {
+                if let Some(ctx) = stack.last_mut() {
+                    ctx.prev_was_separator = false;
+                    ctx.last_explicit_separator = None;
+                }
+                in_interpolation_expr = false;
+                expect_interpolation_expr = false;
                 result.push(token);
             }
             TokenType::LeftParen => {

@@ -1,4 +1,6 @@
-use jv_ast::{Argument, BinaryOp, Expression, Literal, Parameter, SequenceDelimiter, Span, StringPart};
+use jv_ast::{
+    Argument, BinaryOp, Expression, Literal, Parameter, SequenceDelimiter, Span, StringPart,
+};
 use jv_ir::{
     transform_expression, IrExpression, JavaType, SequenceSource, SequenceStage,
     SequenceTerminalEvaluation, SequenceTerminalKind, TransformContext,

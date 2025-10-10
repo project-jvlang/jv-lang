@@ -8,7 +8,7 @@ use crate::{
     TokenType,
 };
 
-use crate::{Lexer, StringInterpolationSegment};
+use crate::{LayoutMode, Lexer, StringInterpolationSegment};
 
 #[derive(Default)]
 pub struct Emitter;
@@ -136,18 +136,12 @@ impl Emitter {
                     ));
 
                     if !expression.is_empty() {
-                        let mut nested_lexer = Lexer::new(expression);
+                        let mut nested_lexer =
+                            Lexer::with_layout_mode(expression, LayoutMode::Disabled);
                         let nested_tokens = nested_lexer.tokenize()?;
-                        tokens.extend(
-                            nested_tokens
-                                .into_iter()
-                                .filter(|token| {
-                                    !matches!(
-                                        token.token_type,
-                                        TokenType::Eof | TokenType::LayoutComma
-                                    )
-                                }),
-                        );
+                        tokens.extend(nested_tokens.into_iter().filter(|token| {
+                            !matches!(token.token_type, TokenType::Eof | TokenType::LayoutComma)
+                        }));
                     }
                 }
             }

@@ -87,6 +87,9 @@ fn detect_layout_metadata<'source>(
     token: &RawToken<'source>,
     ctx: &LexerContext<'source>,
 ) -> Option<LayoutCommaMetadata> {
+    if ctx.is_layout_disabled() {
+        return None;
+    }
     let sequence_kind = ctx.current_layout_sequence()?;
     let previous_token = ctx.last_token_type()?;
 
