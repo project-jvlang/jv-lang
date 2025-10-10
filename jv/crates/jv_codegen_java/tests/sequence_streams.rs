@@ -309,6 +309,34 @@ fn java25_sequence_renders_full_stage_chain() {
 }
 
 #[test]
+fn lazy_sequence_pipeline_produces_sequence_wrapper() {
+    let pipeline = SequencePipeline {
+        source: collection_source("numbers"),
+        stages: vec![map_stage()],
+        terminal: None,
+        lazy: true,
+        span: dummy_span(),
+    };
+
+    let expr = IrExpression::SequencePipeline {
+        pipeline,
+        java_type: JavaType::sequence(),
+        span: dummy_span(),
+    };
+
+    let mut generator =
+        JavaCodeGenerator::with_config(JavaCodeGenConfig::for_target(JavaTarget::Java25));
+    let rendered = generator
+        .generate_expression(&expr)
+        .expect("lazy pipeline should render");
+
+    assert_eq!(
+        rendered,
+        "Sequence.fromStream((numbers).stream().map((x) -> x))"
+    );
+}
+
+#[test]
 fn java21_sequence_to_list_falls_back_to_collectors() {
     let terminal = SequenceTerminal {
         kind: SequenceTerminalKind::ToList,
