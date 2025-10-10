@@ -243,9 +243,24 @@ fn lambda_parameter_clause(
         .ignore_then(
             parameter
                 .clone()
-                .separated_by(token_any_comma())
-                .allow_trailing(),
+                .then(
+                    token_any_comma()
+                        .ignored()
+                        .or_not()
+                        .then(parameter.clone())
+                        .map(|(_, param)| param)
+                        .repeated(),
+                )
+                .map(|(first, rest)| {
+                    let mut params = Vec::with_capacity(rest.len() + 1);
+                    params.push(first);
+                    params.extend(rest);
+                    params
+                })
+                .or_not()
+                .map(|params| params.unwrap_or_default()),
         )
+        .then_ignore(token_any_comma().or_not())
         .then_ignore(token_right_paren());
 
     let bare = parameter.repeated().at_least(1);
