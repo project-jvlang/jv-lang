@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.1.1] - 2025-10-09
+
+### Added
+- Kotlinスタイルの遅延SequenceコレクションAPIを有効化し、Java 25/21 両ターゲットでの`Stream`ブリッジをサポート。
+
+### Documentation
+- `docs/stdlib/collections.md` を追加し、暗黙Sequenceチェーン、フォールバック方針、ラムダ記法ルールを整理。
+- CLIヘルプにSequenceパイプラインの概要とStream再利用禁止ポリシーを追記。
+- v0.1 Alphaリリースノートを更新し、KotlinスタイルコレクションAPI導入を告知。
+
 ## [0.1.0] - 2025-09-19
 
 ### Added

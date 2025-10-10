@@ -15,7 +15,18 @@ mod sequence_warnings;
 pub mod commands;
 #[derive(Parser, Debug, Clone)]
 #[command(name = "jv")]
-#[command(about = "A Java Sugar Language compiler")]
+#[command(
+    about = "A Java Sugar Language compiler",
+    long_about = r#"KotlinスタイルのコレクションAPIと遅延Sequenceパイプラインを備えたJavaシンタックスシュガーコンパイラです。
+
+主なハイライト:
+- Iterable/配列に対する map/filter/flatMap 呼び出しで暗黙Sequenceチェーンが開始され、終端操作 (toList/toSet/count/sum 等) まで遅延評価を維持します。
+- Java 25 を優先ターゲットとしつつ、Collectors ベースの Java 21 フォールバックも自動生成します。AutoCloseable ソースは try-with-resources で保護されます。
+- ラムダ式の引数は明示必須 ({ value -> ... } 形式)。暗黙の it パラメータは使用できません。
+- Sequence から Java Stream へブリッジした後は再利用できないため、必要に応じて toList()/toSet() で具現化してください。
+
+詳細は README と docs/stdlib/collections.md を参照してください。"#,
+)]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Option<Commands>,
