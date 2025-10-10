@@ -6,8 +6,10 @@
 pub mod constraint;
 pub mod engine;
 pub mod environment;
+pub mod extensions;
 pub mod iteration;
 pub mod nullability;
+pub mod prelude;
 pub mod types;
 pub mod unify;
 pub mod utils;

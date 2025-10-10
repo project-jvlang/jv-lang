@@ -174,3 +174,42 @@ fn type_facts_update_after_rechecking_program() {
         "expected incremented binding to be inferred as Int"
     );
 }
+
+#[test]
+fn sequence_extension_chain_maintains_inference() {
+    let program = parse_program(
+        r#"
+        import jv.collections.SequenceFactory
+
+        val numbers = SequenceFactory.fromIterable([1 2 3 4 5])
+        val doubled = numbers.map { value -> value * 2 }
+        val filtered = doubled.filter { value -> value > 4 }
+        val total = filtered.reduce { (acc value) -> acc + value }
+    "#,
+    );
+
+    let mut checker = TypeChecker::new();
+    checker
+        .check_program(&program)
+        .expect("sequence pipeline should type-check");
+
+    let snapshot = checker
+        .inference_snapshot()
+        .expect("inference snapshot should be available");
+
+    let filtered_scheme = snapshot
+        .binding_scheme("filtered")
+        .expect("filtered binding registered");
+    assert_eq!(
+        filtered_scheme.ty,
+        TypeKind::Primitive("jv.collections.SequenceCore")
+    );
+
+    let total_scheme = snapshot
+        .binding_scheme("total")
+        .expect("total binding registered");
+    assert!(
+        !matches!(total_scheme.ty, TypeKind::Unknown),
+        "reduce result should not remain Unknown"
+    );
+}

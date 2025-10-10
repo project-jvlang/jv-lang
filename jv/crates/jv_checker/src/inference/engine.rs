@@ -6,6 +6,7 @@
 
 use crate::inference::constraint::ConstraintGenerator;
 use crate::inference::environment::{TypeEnvironment, TypeScheme};
+use crate::inference::prelude;
 use crate::inference::types::{TypeBinding, TypeId, TypeKind};
 use crate::inference::unify::{ConstraintSolver, SolveError};
 use crate::InferenceTelemetry;
@@ -82,7 +83,8 @@ impl InferenceEngine {
     /// AST 全体に対する推論を実行し、各種結果を内部状態へ保持する。
     pub fn infer_program(&mut self, program: &Program) -> InferenceResult<()> {
         let mut environment = TypeEnvironment::new();
-        let generator = ConstraintGenerator::new(&mut environment);
+        let extensions = prelude::install_prelude(&mut environment);
+        let generator = ConstraintGenerator::new(&mut environment, &extensions);
         let constraints = generator.generate(program);
         let constraint_count = constraints.len();
         let inference_start = Instant::now();
