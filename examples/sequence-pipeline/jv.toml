@@ -1,0 +1,17 @@
+[package]
+name = "sequence-pipeline"
+version = "0.1.0"
+
+[build]
+java_version = "25"
+
+[project]
+entrypoint = "src/main.jv"
+
+[project.sources]
+include = ["src/**/*.jv"]
+exclude = []
+
+[project.output]
+directory = "target"
+clean = false

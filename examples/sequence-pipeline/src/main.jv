@@ -1,0 +1,26 @@
+fun main() {
+    // Map
+    doubled = [1 2 3 4 5]
+        .map { i -> i * 2 }
+        .toList()
+    println("Doubled: ${doubled}")
+
+    // Filter
+    evens = [1 2 3 4 5]
+        .filter { i -> i % 2 == 0 }
+        .toList()
+    println("Evens: ${evens}")
+
+    // Reduce
+    sum = [1 2 3 4 5]
+        .map { value -> value }
+        .reduce {(acc x) -> acc + x }
+    println("Sum: ${sum}")
+
+    // Combined pipeline (map → filter → reduce)
+    combined = [1 2 3 4 5]
+        .map { value -> value * 3 }
+        .filter { value -> value > 6 }
+        .reduce {(acc value) -> acc + value }
+    println("Combined: ${combined}")
+}

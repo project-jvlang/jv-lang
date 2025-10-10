@@ -10,6 +10,7 @@ use jv_checker::diagnostics::{
 };
 use jv_pm::JavaTarget;
 
+mod embedded_stdlib;
 mod sequence_warnings;
 
 pub mod commands;
@@ -639,6 +640,14 @@ pub mod pipeline {
 
             java_files.push(java_path);
         }
+
+        let stdlib_helpers = embedded_stdlib::compile_stdlib_modules(
+            &options.output_dir,
+            plan.build_config.target,
+            options.format,
+            options.parallel_config,
+        )?;
+        java_files.extend(stdlib_helpers);
 
         if options.emit_telemetry {
             if let Some(telemetry) = telemetry_snapshot.as_ref() {
