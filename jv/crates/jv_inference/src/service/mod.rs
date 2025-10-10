@@ -10,11 +10,13 @@ use crate::solver::{TypeBinding, Variance};
 use crate::types::{GenericBounds, NullabilityFlag, SymbolId, TypeId, TypeKind};
 use hex::encode as hex_encode;
 use jv_ast::json::{JsonLiteral, JsonValue};
+use jv_ast::types::Kind;
 use jv_ir::transform::infer_json_value_schema;
 use jv_ir::types::Schema;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
+use std::fmt;
 use std::hash::Hash;
 use std::sync::Arc;
 
@@ -25,6 +27,102 @@ pub type FactSpan = jv_ast::Span;
 /// crates can map this identifier to their concrete AST representations (e.g.
 /// `AstId`).
 pub type TypeFactsNodeId = u32;
+
+/// Evaluated value produced by type-level computation or const bindings.
+#[derive(Debug, Clone, PartialEq)]
+pub enum TypeLevelValue {
+    Int(i64),
+    Bool(bool),
+    String(String),
+}
+
+impl TypeLevelValue {
+    /// Returns the inner integer when the value represents an `Int`.
+    pub fn as_int(&self) -> Option<i64> {
+        if let Self::Int(value) = self {
+            Some(*value)
+        } else {
+            None
+        }
+    }
+
+    /// Returns the inner boolean when the value represents a `Bool`.
+    pub fn as_bool(&self) -> Option<bool> {
+        if let Self::Bool(value) = self {
+            Some(*value)
+        } else {
+            None
+        }
+    }
+
+    /// Returns the inner string when the value represents a `String`.
+    pub fn as_str(&self) -> Option<&str> {
+        if let Self::String(value) = self {
+            Some(value.as_str())
+        } else {
+            None
+        }
+    }
+
+    fn to_json_value(&self) -> Value {
+        match self {
+            Self::Int(value) => json!(value),
+            Self::Bool(value) => json!(value),
+            Self::String(value) => json!(value),
+        }
+    }
+}
+
+impl fmt::Display for TypeLevelValue {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Int(value) => write!(f, "{value}"),
+            Self::Bool(value) => write!(f, "{value}"),
+            Self::String(value) => write!(f, "\"{value}\""),
+        }
+    }
+}
+
+/// Telemetry counters emitted by the TypeFacts service for `--telemetry`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TypeFactsTelemetry {
+    /// Number of kind checks performed during the inference pass.
+    pub kind_checks_count: u64,
+    /// Hit rate for the kind assignment cache when reusing results.
+    pub kind_cache_hit_rate: Option<f64>,
+    /// Number of const evaluations executed for dependent generics.
+    pub const_evaluations: u64,
+    /// Size of the type-level evaluation cache after inference completes.
+    pub type_level_cache_size: usize,
+}
+
+impl TypeFactsTelemetry {
+    /// Creates a telemetry snapshot with the provided counters.
+    pub fn new(
+        kind_checks_count: u64,
+        kind_cache_hit_rate: Option<f64>,
+        const_evaluations: u64,
+        type_level_cache_size: usize,
+    ) -> Self {
+        Self {
+            kind_checks_count,
+            kind_cache_hit_rate,
+            const_evaluations,
+            type_level_cache_size,
+        }
+    }
+}
+
+impl Default for TypeFactsTelemetry {
+    fn default() -> Self {
+        Self {
+            kind_checks_count: 0,
+            kind_cache_hit_rate: None,
+            const_evaluations: 0,
+            type_level_cache_size: 0,
+        }
+    }
+}
 
 /// Describes the read-only facts that the inference engine exposes once analysis completes.
 ///
@@ -156,6 +254,9 @@ struct GenericFacts {
     bounds: HashMap<TypeId, GenericBounds>,
     variance: HashMap<TypeId, Variance>,
     sealed_permits: HashMap<TypeId, Vec<TypeKind>>,
+    kinds: HashMap<TypeId, Kind>,
+    const_bindings: HashMap<SymbolId, HashMap<String, TypeLevelValue>>,
+    type_level_results: HashMap<SymbolId, HashMap<String, TypeLevelValue>>,
 }
 
 impl GenericFacts {
@@ -174,6 +275,58 @@ impl GenericFacts {
     fn record_sealed_permits(&mut self, type_param: TypeId, permits: Vec<TypeKind>) {
         self.sealed_permits.insert(type_param, permits);
     }
+
+    fn record_kind(&mut self, type_param: TypeId, kind: Kind) {
+        self.kinds.insert(type_param, kind);
+    }
+
+    fn kind_for(&self, type_param: &TypeId) -> Option<&Kind> {
+        self.kinds.get(type_param)
+    }
+
+    fn kinds(&self) -> &HashMap<TypeId, Kind> {
+        &self.kinds
+    }
+
+    fn record_const_binding(&mut self, owner: SymbolId, parameter: String, value: TypeLevelValue) {
+        self.const_bindings
+            .entry(owner)
+            .or_default()
+            .insert(parameter, value);
+    }
+
+    fn const_bindings_for(&self, owner: &SymbolId) -> Option<&HashMap<String, TypeLevelValue>> {
+        self.const_bindings.get(owner)
+    }
+
+    fn const_binding(&self, owner: &SymbolId, parameter: &str) -> Option<&TypeLevelValue> {
+        self.const_bindings_for(owner)
+            .and_then(|bindings| bindings.get(parameter))
+    }
+
+    fn const_bindings(&self) -> &HashMap<SymbolId, HashMap<String, TypeLevelValue>> {
+        &self.const_bindings
+    }
+
+    fn record_type_level_result(&mut self, owner: SymbolId, slot: String, value: TypeLevelValue) {
+        self.type_level_results
+            .entry(owner)
+            .or_default()
+            .insert(slot, value);
+    }
+
+    fn type_level_results_for(&self, owner: &SymbolId) -> Option<&HashMap<String, TypeLevelValue>> {
+        self.type_level_results.get(owner)
+    }
+
+    fn type_level_result(&self, owner: &SymbolId, slot: &str) -> Option<&TypeLevelValue> {
+        self.type_level_results_for(owner)
+            .and_then(|results| results.get(slot))
+    }
+
+    fn type_level_results(&self) -> &HashMap<SymbolId, HashMap<String, TypeLevelValue>> {
+        &self.type_level_results
+    }
 }
 
 /// Concrete implementation of [`TypeFacts`] that stores all inference outputs in
@@ -189,6 +342,7 @@ pub struct TypeFactsSnapshot {
     java_annotations: Arc<HashMap<String, Vec<String>>>,
     generic_facts: Arc<GenericFacts>,
     nullability_overrides: Arc<HashMap<TypeFactsNodeId, NullabilityFlag>>,
+    telemetry: TypeFactsTelemetry,
 }
 
 #[derive(Debug, Clone)]
@@ -228,6 +382,7 @@ impl TypeFactsSnapshot {
         java_annotations: Arc<HashMap<String, Vec<String>>>,
         generic_facts: Arc<GenericFacts>,
         nullability_overrides: Arc<HashMap<TypeFactsNodeId, NullabilityFlag>>,
+        telemetry: TypeFactsTelemetry,
     ) -> Self {
         Self {
             environment,
@@ -239,6 +394,7 @@ impl TypeFactsSnapshot {
             java_annotations,
             generic_facts,
             nullability_overrides,
+            telemetry,
         }
     }
 
@@ -262,6 +418,41 @@ impl TypeFactsSnapshot {
             .sealed_permits
             .get(&type_param)
             .map(|permits| permits.as_slice())
+    }
+
+    pub fn kind_for(&self, type_param: TypeId) -> Option<&Kind> {
+        self.generic_facts.kind_for(&type_param)
+    }
+
+    pub fn kind_assignments(&self) -> &HashMap<TypeId, Kind> {
+        self.generic_facts.kinds()
+    }
+
+    pub fn const_bindings_for(&self, owner: &SymbolId) -> Option<&HashMap<String, TypeLevelValue>> {
+        self.generic_facts.const_bindings_for(owner)
+    }
+
+    pub fn const_binding(&self, owner: &SymbolId, parameter: &str) -> Option<&TypeLevelValue> {
+        self.generic_facts.const_binding(owner, parameter)
+    }
+
+    pub fn const_bindings(&self) -> &HashMap<SymbolId, HashMap<String, TypeLevelValue>> {
+        self.generic_facts.const_bindings()
+    }
+
+    pub fn type_level_results_for(
+        &self,
+        owner: &SymbolId,
+    ) -> Option<&HashMap<String, TypeLevelValue>> {
+        self.generic_facts.type_level_results_for(owner)
+    }
+
+    pub fn type_level_result(&self, owner: &SymbolId, slot: &str) -> Option<&TypeLevelValue> {
+        self.generic_facts.type_level_result(owner, slot)
+    }
+
+    pub fn type_level_results(&self) -> &HashMap<SymbolId, HashMap<String, TypeLevelValue>> {
+        self.generic_facts.type_level_results()
     }
 
     pub fn nullability_override_for(&self, node: TypeFactsNodeId) -> Option<NullabilityFlag> {
@@ -413,6 +604,39 @@ impl TypeFactsSnapshot {
             })
             .collect::<HashMap<_, _>>();
 
+        let kind_assignments = self
+            .generic_facts
+            .kinds()
+            .iter()
+            .map(|(id, kind)| (id.to_raw().to_string(), format!("{kind:?}")))
+            .collect::<HashMap<_, _>>();
+
+        let const_bindings = self
+            .generic_facts
+            .const_bindings()
+            .iter()
+            .map(|(owner, bindings)| {
+                let entries = bindings
+                    .iter()
+                    .map(|(name, value)| (name.clone(), value.to_json_value()))
+                    .collect::<HashMap<_, _>>();
+                (owner.as_str().to_string(), json!(entries))
+            })
+            .collect::<HashMap<_, _>>();
+
+        let type_level_results = self
+            .generic_facts
+            .type_level_results()
+            .iter()
+            .map(|(owner, results)| {
+                let entries = results
+                    .iter()
+                    .map(|(slot, value)| (slot.clone(), value.to_json_value()))
+                    .collect::<HashMap<_, _>>();
+                (owner.as_str().to_string(), json!(entries))
+            })
+            .collect::<HashMap<_, _>>();
+
         let nullability_overrides = self
             .nullability_overrides
             .iter()
@@ -432,8 +656,17 @@ impl TypeFactsSnapshot {
                 "bounds": generic_bounds,
                 "variance": variance_map,
                 "sealed_permits": sealed_permits,
+                "kinds": kind_assignments,
+                "const_bindings": const_bindings,
+                "type_level_results": type_level_results,
             },
             "nullability_overrides": nullability_overrides,
+            "telemetry": {
+                "kind_checks_count": self.telemetry.kind_checks_count,
+                "kind_cache_hit_rate": self.telemetry.kind_cache_hit_rate,
+                "const_evaluations": self.telemetry.const_evaluations,
+                "type_level_cache_size": self.telemetry.type_level_cache_size,
+            },
         })
     }
 
@@ -450,6 +683,11 @@ impl TypeFactsSnapshot {
     /// Returns raw Java annotation metadata captured for external symbols.
     pub fn java_annotations(&self) -> &HashMap<String, Vec<String>> {
         self.java_annotations.as_ref()
+    }
+
+    /// Returns telemetry counters captured during the inference pass.
+    pub fn telemetry(&self) -> &TypeFactsTelemetry {
+        &self.telemetry
     }
 }
 
@@ -500,6 +738,7 @@ pub struct TypeFactsBuilder {
     java_annotations: HashMap<String, Vec<String>>,
     generic_facts: GenericFacts,
     nullability_overrides: HashMap<TypeFactsNodeId, NullabilityFlag>,
+    telemetry: TypeFactsTelemetry,
 }
 
 impl TypeFactsBuilder {
@@ -520,6 +759,7 @@ impl TypeFactsBuilder {
             java_annotations: snapshot.java_annotations.as_ref().clone(),
             generic_facts: snapshot.generic_facts.as_ref().clone(),
             nullability_overrides: snapshot.nullability_overrides.as_ref().clone(),
+            telemetry: *snapshot.telemetry(),
         }
     }
 
@@ -629,6 +869,46 @@ impl TypeFactsBuilder {
         self
     }
 
+    pub fn record_kind_assignment(&mut self, type_param: TypeId, kind: Kind) -> &mut Self {
+        self.generic_facts.record_kind(type_param, kind);
+        self
+    }
+
+    pub fn record_const_binding(
+        &mut self,
+        owner: impl Into<SymbolId>,
+        parameter: impl Into<String>,
+        value: TypeLevelValue,
+    ) -> &mut Self {
+        self.generic_facts
+            .record_const_binding(owner.into(), parameter.into(), value);
+        self
+    }
+
+    pub fn record_type_level_evaluation(
+        &mut self,
+        owner: impl Into<SymbolId>,
+        slot: impl Into<String>,
+        value: TypeLevelValue,
+    ) -> &mut Self {
+        self.generic_facts
+            .record_type_level_result(owner.into(), slot.into(), value);
+        self
+    }
+
+    pub fn set_telemetry(&mut self, telemetry: TypeFactsTelemetry) -> &mut Self {
+        self.telemetry = telemetry;
+        self
+    }
+
+    pub fn telemetry(&self) -> &TypeFactsTelemetry {
+        &self.telemetry
+    }
+
+    pub fn telemetry_mut(&mut self) -> &mut TypeFactsTelemetry {
+        &mut self.telemetry
+    }
+
     pub fn build(self) -> TypeFactsSnapshot {
         TypeFactsSnapshot::new(
             Arc::new(TypeEnvironmentSnapshot::new(self.environment)),
@@ -640,6 +920,7 @@ impl TypeFactsBuilder {
             Arc::new(self.java_annotations),
             Arc::new(self.generic_facts),
             Arc::new(self.nullability_overrides),
+            self.telemetry,
         )
     }
 }
@@ -921,6 +1202,7 @@ mod tests {
     use crate::solver::Variance;
     use crate::types::{BoundConstraint, BoundPredicate, NullabilityFlag, TraitBound, TypeVariant};
     use jv_ast::json::{JsonEntry, JsonLiteral, JsonValue, NumberGrouping};
+    use jv_ast::types::Kind;
     use jv_ast::types::Span;
     use std::collections::HashSet;
 
@@ -958,11 +1240,13 @@ mod tests {
         let mut builder = TypeFactsBuilder::new();
         builder.environment_entry("x", sample_type("Int"));
         builder.set_cache_metrics(CacheMetrics::default());
+        builder.telemetry_mut().kind_checks_count = 1;
         let snapshot = builder.build();
 
         let json = snapshot.to_pretty_json().expect("json");
         assert!(json.contains("\"environment\""));
         assert!(json.contains("\"cache_metrics\""));
+        assert!(json.contains("\"kind_checks_count\""));
     }
 
     #[test]
@@ -1028,6 +1312,48 @@ mod tests {
             Some(Variance::Covariant)
         );
         assert!(snapshot.sealed_permits_for(TypeId::new(7)).is_some());
+    }
+
+    #[test]
+    fn records_kind_const_and_type_level_results() {
+        let mut builder = TypeFactsBuilder::new();
+        let type_param = TypeId::new(21);
+        builder.record_kind_assignment(type_param, Kind::Star);
+
+        let owner = SymbolId::from("pkg::Vector");
+        builder.record_const_binding(owner.clone(), "N", TypeLevelValue::Int(32));
+        builder.record_type_level_evaluation(
+            owner.clone(),
+            "dimension",
+            TypeLevelValue::String("3D".to_string()),
+        );
+
+        let snapshot = builder.build();
+        assert_eq!(snapshot.kind_for(type_param), Some(&Kind::Star));
+        let bindings = snapshot
+            .const_bindings_for(&owner)
+            .expect("const bindings should be present");
+        assert_eq!(bindings.get("N"), Some(&TypeLevelValue::Int(32)));
+        assert_eq!(
+            snapshot.type_level_result(&owner, "dimension"),
+            Some(&TypeLevelValue::String("3D".to_string()))
+        );
+    }
+
+    #[test]
+    fn telemetry_defaults_and_survives_roundtrip() {
+        let mut builder = TypeFactsBuilder::new();
+        builder.telemetry_mut().kind_checks_count = 5;
+        builder.telemetry_mut().kind_cache_hit_rate = Some(0.75);
+        builder.telemetry_mut().const_evaluations = 2;
+        builder.telemetry_mut().type_level_cache_size = 4;
+
+        let snapshot = builder.build();
+        let telemetry = snapshot.telemetry();
+        assert_eq!(telemetry.kind_checks_count, 5);
+        assert_eq!(telemetry.kind_cache_hit_rate, Some(0.75));
+        assert_eq!(telemetry.const_evaluations, 2);
+        assert_eq!(telemetry.type_level_cache_size, 4);
     }
 
     #[test]
