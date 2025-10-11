@@ -71,16 +71,18 @@ jv_cli = { path = "crates/jv_cli" }
 jv_support = { path = "crates/jv_support" }
 
 [profile.dev]
-# Reduce debug info to save disk space
-debug = 1
-# Use fewer optimization passes to reduce build time and disk usage
+# Minimal debug info to reduce memory usage
+debug = 0
+# No optimization to reduce memory usage
 opt-level = 0
-# Reduce parallel codegen units to save disk space (at cost of build time)
-codegen-units = 16
-# Enable LTO for smaller binaries
-lto = "thin"
-# Enable incremental compilation for faster rebuilds
-incremental = true
+# Reduce codegen units to save memory
+codegen-units = 1
+# Disable LTO in dev to save memory
+lto = false
+# Disable incremental compilation to save memory
+incremental = false
+# Strip debug info to reduce memory usage
+strip = "debuginfo"
 
 [profile.release]
 # Full debug info for production builds
@@ -96,10 +98,12 @@ strip = true
 # Enable panic=abort for smaller binary size
 panic = "abort"
 
-# Optimize dependencies even in dev builds
+# Don't optimize dependencies in dev builds to save memory
 [profile.dev.package."*"]
-opt-level = 1
+opt-level = 0
+debug = 0
 
-# Optimize build dependencies
+# Don't optimize build dependencies to save memory
 [profile.dev.build-override]
-opt-level = 1
+opt-level = 0
+debug = 0
