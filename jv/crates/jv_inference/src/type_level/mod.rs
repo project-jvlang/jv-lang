@@ -9,6 +9,9 @@
 mod evaluator;
 mod termination;
 
+#[cfg(test)]
+mod tests;
+
 pub use evaluator::{
     EvaluationContext, EvaluationDependencies, TypeLevelBinding, TypeLevelDiagnostic,
     TypeLevelEvaluationOutcome, TypeLevelEvaluator,

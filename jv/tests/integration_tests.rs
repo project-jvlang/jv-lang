@@ -871,6 +871,38 @@ fn cli_all_subcommands_smoke_test() {
 }
 
 #[test]
+fn advanced_generics_fixtures_compile() {
+    if !has_java_runtime() || !has_javac() {
+        eprintln!(
+            "Skipping advanced generics fixtures: java runtime or javac not available"
+        );
+        return;
+    }
+
+    let fixtures = [
+        "generic_data_basic",
+        "higher_kinded_functor",
+        "dependent_vector",
+        "reflection_api",
+    ];
+
+    for name in &fixtures {
+        let fixture_path = workspace_file(&format!(
+            "crates/jv_cli/tests/fixtures/advanced_generics/{}.jv",
+            name
+        ));
+        let temp_dir = TempDirGuard::new(&format!("advanced-generics-{name}")).expect("temp dir");
+        let plan = compose_plan_from_fixture(
+            temp_dir.path(),
+            &fixture_path,
+            CliOverrides::default(),
+        );
+
+        assert!(plan.entrypoint().exists(), "entrypoint should exist for {name}");
+    }
+}
+
+#[test]
 fn sequence_pipeline_fixture_runs_consistently_across_targets() {
     if !has_javac() || !has_java_runtime() {
         eprintln!("Skipping sequence pipeline fixture run: java runtime or javac missing");

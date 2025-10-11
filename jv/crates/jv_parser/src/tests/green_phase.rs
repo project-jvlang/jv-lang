@@ -303,7 +303,7 @@ fn test_data_shorthand_declaration() {
 }
 
 #[test]
-fn test_generic_data_declaration_signature() {
+fn test_data_generic_single() {
     let program = parse_program("data Box<T>(value: T)");
     let statement = first_statement(&program);
 
@@ -330,7 +330,7 @@ fn test_generic_data_declaration_signature() {
 }
 
 #[test]
-fn test_generic_data_multiple_type_parameters() {
+fn test_data_generic_multiple() {
     let program = parse_program("data Pair<K, V>(first: K, second: V)");
     let statement = first_statement(&program);
 
@@ -356,7 +356,7 @@ fn test_generic_data_multiple_type_parameters() {
 }
 
 #[test]
-fn test_generic_data_declaration_with_bound() {
+fn test_data_generic_with_bounds() {
     let program = parse_program("data Bounded<T: Comparable>(value: T)");
     let statement = first_statement(&program);
 
@@ -386,6 +386,39 @@ fn test_generic_data_declaration_with_bound() {
             "expected generic data declaration with bound, found {:?}",
             other
         ),
+    }
+}
+
+#[test]
+fn test_data_generic_with_const_produces_error() {
+    let result = parse_program_result("data Vector<T, const N: Int>(value: T)");
+    assert!(result.is_err(), "const generics should currently report a parse error");
+}
+
+#[test]
+fn test_record_generic() {
+    let program = parse_program("data class Entry<K, V>(val key: K, val value: V)");
+    let statement = first_statement(&program);
+
+    match statement {
+        Statement::DataClassDeclaration {
+            name,
+            type_parameters,
+            generic_signature,
+            parameters,
+            ..
+        } => {
+            assert_eq!(name, "Entry");
+            assert_eq!(type_parameters, &vec!["K".to_string(), "V".to_string()]);
+            assert_eq!(parameters.len(), 2);
+
+            let signature = generic_signature
+                .as_ref()
+                .expect("generic signature should be present for record Entry<K, V>");
+            assert_eq!(signature.parameters.len(), 2);
+            assert!(signature.const_parameters().is_empty());
+        }
+        other => panic!("expected generic data class declaration, found {:?}", other),
     }
 }
 

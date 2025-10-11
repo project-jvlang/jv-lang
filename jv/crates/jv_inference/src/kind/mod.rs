@@ -7,6 +7,9 @@
 
 pub mod solver;
 
+#[cfg(test)]
+mod tests;
+
 pub use solver::{
     KindArgument, KindConstraint, KindEnvironment, KindSolution, KindSolver, KindSolverDiagnostic,
     KindSolverTelemetry,
