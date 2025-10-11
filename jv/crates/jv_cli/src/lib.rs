@@ -733,7 +733,7 @@ pub mod pipeline {
         binding_usage: &BindingUsageSummary,
     ) {
         println!(
-            "Telemetry ({}):\n  constraints_emitted: {}\n  bindings_resolved: {}\n  inference_duration_ms: {:.3}\n  preserved_constraints: {}\n  cache_hit_rate: {}\n  invalidation_cascade_depth: {}\n  pattern_cache_hits: {}\n  pattern_cache_misses: {}\n  pattern_bridge_ms: {:.3}\n  generic_constraints_emitted: {}\n  bound_checks: {}\n  variance_conflicts: {}\n  sealed_hierarchy_checks: {}\n  generic_solver_ms: {:.3}\n  variance_analysis_ms: {:.3}",
+            "Telemetry ({}):\n  constraints_emitted: {}\n  bindings_resolved: {}\n  inference_duration_ms: {:.3}\n  preserved_constraints: {}\n  cache_hit_rate: {}\n  invalidation_cascade_depth: {}\n  pattern_cache_hits: {}\n  pattern_cache_misses: {}\n  pattern_bridge_ms: {:.3}\n  generic_constraints_emitted: {}\n  bound_checks: {}\n  variance_conflicts: {}\n  sealed_hierarchy_checks: {}\n  generic_solver_ms: {:.3}\n  variance_analysis_ms: {:.3}\n  kind_checks_count: {}\n  kind_cache_hit_rate: {}\n  const_evaluations: {}\n  type_level_cache_size: {}",
             entrypoint.display(),
             telemetry.constraints_emitted,
             telemetry.bindings_resolved,
@@ -752,7 +752,14 @@ pub mod pipeline {
             telemetry.variance_conflicts,
             telemetry.sealed_hierarchy_checks,
             telemetry.generic_solver_ms,
-            telemetry.variance_analysis_ms
+            telemetry.variance_analysis_ms,
+            telemetry.kind_checks_count,
+            telemetry
+                .kind_cache_hit_rate
+                .map(|rate| format!("{:.2}%", rate * 100.0))
+                .unwrap_or_else(|| "n/a".to_string()),
+            telemetry.const_evaluations,
+            telemetry.type_level_cache_size
         );
 
         println!(

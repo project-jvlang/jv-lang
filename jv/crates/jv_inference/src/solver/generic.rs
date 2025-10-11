@@ -9,6 +9,7 @@ use crate::types::{
     BoundPredicate, CapabilityBound, CapabilitySolution, GenericSignature, SymbolId, TypeId,
     TypeKind, TypeVariant,
 };
+use jv_ast::types::Kind;
 use jv_ast::Span;
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
@@ -101,6 +102,14 @@ pub enum GenericSolverDiagnostic {
         bound: CapabilityBound,
         span: Span,
         error: CapabilityResolutionError,
+    },
+    KindMismatch {
+        symbol: SymbolId,
+        parameter: TypeId,
+        parameter_name: Option<String>,
+        expected: Kind,
+        actual: Kind,
+        span: Span,
     },
 }
 

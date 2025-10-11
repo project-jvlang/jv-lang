@@ -1,0 +1,8 @@
+data Reflective<T>(payload: T)
+
+fun <T> describe(value: T): String = "value: ${value}"
+
+fun main(): Unit {
+    val record = Reflective("metadata")
+    println(describe(record))
+}

@@ -804,6 +804,60 @@ pub enum IrVariance {
     Bivariant,
 }
 
+/// Value captured from type-level computation or const bindings.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum IrTypeLevelValue {
+    Int(i64),
+    Bool(bool),
+    String(String),
+}
+
+impl IrTypeLevelValue {
+    /// Returns the contained integer when the value represents an `Int`.
+    pub fn as_int(&self) -> Option<i64> {
+        if let Self::Int(value) = self {
+            Some(*value)
+        } else {
+            None
+        }
+    }
+
+    /// Returns the contained boolean when the value represents a `Bool`.
+    pub fn as_bool(&self) -> Option<bool> {
+        if let Self::Bool(value) = self {
+            Some(*value)
+        } else {
+            None
+        }
+    }
+
+    /// Returns the contained string slice when the value represents a `String`.
+    pub fn as_str(&self) -> Option<&str> {
+        if let Self::String(value) = self {
+            Some(value.as_str())
+        } else {
+            None
+        }
+    }
+}
+
+/// Aggregated generic metadata recorded per declaration.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct IrGenericMetadata {
+    /// Kind assignments for declared type parameters.
+    #[serde(default)]
+    pub type_parameter_kinds: BTreeMap<String, Kind>,
+    /// Resolved const parameter bindings produced by inference.
+    #[serde(default)]
+    pub const_parameter_values: BTreeMap<String, IrTypeLevelValue>,
+    /// Cached results for type-level expressions.
+    #[serde(default)]
+    pub type_level_bindings: BTreeMap<String, IrTypeLevelValue>,
+}
+
+/// Mapping from declaration identifiers to generic metadata.
+pub type GenericMetadataMap = BTreeMap<String, IrGenericMetadata>;
+
 /// Type parameters for generics
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct IrTypeParameter {
@@ -813,6 +867,8 @@ pub struct IrTypeParameter {
     pub variance: IrVariance,
     #[serde(default)]
     pub permits: Vec<String>,
+    #[serde(default)]
+    pub kind: Option<Kind>,
     pub span: Span,
 }
 
@@ -823,6 +879,7 @@ impl IrTypeParameter {
             bounds: Vec::new(),
             variance: IrVariance::default(),
             permits: Vec::new(),
+            kind: None,
             span,
         }
     }
@@ -895,6 +952,8 @@ pub struct IrProgram {
     pub package: Option<String>,
     pub imports: Vec<IrStatement>,
     pub type_declarations: Vec<IrStatement>, // Classes, interfaces, records
+    #[serde(default)]
+    pub generic_metadata: GenericMetadataMap,
     pub span: Span,
 }
 

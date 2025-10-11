@@ -69,6 +69,7 @@ fn reconstructs_basic_program_with_variable_and_expression() {
                 span: span(),
             },
         ],
+        generic_metadata: Default::default(),
         span: span(),
     };
 
@@ -165,6 +166,7 @@ fn emits_warning_for_missing_final_initializer() {
             modifiers: IrModifiers::default(),
             span: span(),
         }],
+        generic_metadata: Default::default(),
         span: span(),
     };
 
@@ -208,6 +210,7 @@ fn errors_when_placeholders_disallowed() {
             modifiers: IrModifiers::default(),
             span: span(),
         }],
+        generic_metadata: Default::default(),
         span: span(),
     };
 

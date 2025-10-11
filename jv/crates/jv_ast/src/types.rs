@@ -200,7 +200,115 @@ pub struct GenericParameter {
     pub variance: Option<VarianceMarker>,
     #[serde(default)]
     pub default: Option<TypeAnnotation>,
+    /// Optional kind metadata describing higher-kinded parameters.
+    #[serde(default)]
+    pub kind: Option<Kind>,
     pub span: Span,
+}
+
+impl GenericParameter {
+    /// Returns the declared kind if one was provided.
+    pub fn kind(&self) -> Option<&Kind> {
+        self.kind.as_ref()
+    }
+
+    /// Indicates whether the parameter has explicit kind metadata.
+    pub fn has_kind(&self) -> bool {
+        self.kind.is_some()
+    }
+}
+
+/// Const parameter declaration used for lightweight dependent typing.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ConstParameter {
+    pub name: String,
+    pub type_annotation: TypeAnnotation,
+    #[serde(default)]
+    pub default: Option<TypeLevelExpr>,
+    pub span: Span,
+}
+
+impl ConstParameter {
+    /// Returns whether the const parameter provides a default value.
+    pub fn has_default(&self) -> bool {
+        self.default.is_some()
+    }
+}
+
+/// Identifier used within type-level expressions.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TypeLevelIdentifier {
+    pub name: String,
+    pub span: Span,
+}
+
+/// Binary operators available inside type-level expressions.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum TypeLevelOp {
+    Add,
+    Subtract,
+    Multiply,
+    Divide,
+    Modulo,
+    Equal,
+    NotEqual,
+    Less,
+    LessEqual,
+    Greater,
+    GreaterEqual,
+    And,
+    Or,
+}
+
+/// Expressions evaluated at the type level (for const parameter defaults, etc.).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum TypeLevelExpr {
+    LiteralInt(i64),
+    LiteralBool(bool),
+    LiteralString(String),
+    Identifier(TypeLevelIdentifier),
+    Apply {
+        callee: Box<TypeLevelExpr>,
+        arguments: Vec<TypeLevelExpr>,
+        span: Span,
+    },
+    BinaryOp {
+        op: TypeLevelOp,
+        lhs: Box<TypeLevelExpr>,
+        rhs: Box<TypeLevelExpr>,
+        span: Span,
+    },
+}
+
+/// Constraint describing additional requirements on a kind.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct KindConstraint {
+    pub trait_name: QualifiedName,
+    #[serde(default)]
+    pub type_args: Vec<TypeAnnotation>,
+    pub span: Span,
+}
+
+/// Higher-kinded type metadata tracked for generic parameters.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum Kind {
+    /// Simple value-level type (`*`).
+    Star,
+    /// Arrow kind representing single-argument higher-kinded types.
+    Arrow {
+        parameter: Box<Kind>,
+        result: Box<Kind>,
+    },
+    /// N-ary higher-kinded type with explicit parameter list.
+    Higher {
+        parameters: Vec<Kind>,
+        result: Box<Kind>,
+    },
+    /// Kind annotated with trait-style constraints.
+    Constraint {
+        base: Box<Kind>,
+        constraints: Vec<KindConstraint>,
+    },
 }
 
 /// Generic signature combining parameters, optional where clause, and raw directives.
@@ -208,12 +316,32 @@ pub struct GenericParameter {
 pub struct GenericSignature {
     #[serde(default)]
     pub parameters: Vec<GenericParameter>,
+    /// Const parameters declared alongside the generic type parameters.
+    #[serde(default)]
+    pub const_parameters: Vec<ConstParameter>,
     #[serde(default)]
     pub where_clause: Option<WhereClause>,
     #[serde(default)]
     pub raw_directives: Vec<RawTypeDirective>,
     #[serde(default)]
     pub span: Span,
+}
+
+impl GenericSignature {
+    /// Returns the type parameters tracked by the signature.
+    pub fn type_parameters(&self) -> &[GenericParameter] {
+        &self.parameters
+    }
+
+    /// Returns the const parameters associated with the signature.
+    pub fn const_parameters(&self) -> &[ConstParameter] {
+        &self.const_parameters
+    }
+
+    /// Indicates whether any const parameters were declared.
+    pub fn has_const_parameters(&self) -> bool {
+        !self.const_parameters.is_empty()
+    }
 }
 
 /// where句内の個別制約。

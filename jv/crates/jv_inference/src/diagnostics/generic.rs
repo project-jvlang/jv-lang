@@ -1,7 +1,9 @@
 use crate::cache::CachedDiagnostic;
 use crate::constraint::CapabilityResolutionError;
+use crate::kind::solver::describe_kind;
 use crate::solver::GenericSolverDiagnostic;
 use crate::types::{BoundPredicate, CapabilityBound, SymbolId, TypeId, TypeKind};
+use jv_ast::types::Kind;
 use jv_ast::Span;
 use jv_support::{load_catalog, LocaleCode};
 use std::collections::HashMap;
@@ -144,7 +146,65 @@ pub fn translate_solver_diagnostic(
             span,
             error,
         } => capability_resolution_failed(locale, symbol, parameter, bound, error, span),
+        GenericSolverDiagnostic::KindMismatch {
+            symbol,
+            parameter,
+            parameter_name,
+            expected,
+            actual,
+            span,
+        } => kind_mismatch(
+            locale,
+            symbol,
+            parameter,
+            parameter_name.as_deref(),
+            expected,
+            actual,
+            span,
+        ),
     }
+}
+
+fn kind_mismatch(
+    locale: LocaleCode,
+    symbol: &SymbolId,
+    parameter: &TypeId,
+    parameter_name: Option<&str>,
+    expected: &Kind,
+    actual: &Kind,
+    span: &Span,
+) -> GenericDiagnostic {
+    let mut args = HashMap::new();
+    let param_label = parameter_display(parameter, parameter_name);
+    args.insert("symbol", symbol.as_str().to_string());
+    args.insert("type_param", param_label.clone());
+    args.insert("expected", describe_kind(expected));
+    args.insert("actual", describe_kind(actual));
+    args.insert("span", format_span(span));
+
+    let catalog = load_catalog(locale);
+    let fallback_message = format!(
+        "{symbol} の型パラメータ {param_label} は kind {expected} を要求しますが、提供された引数は {actual} でした。",
+        symbol = symbol.as_str(),
+        param_label = param_label,
+        expected = describe_kind(expected),
+        actual = describe_kind(actual)
+    );
+
+    let message = catalog
+        .render("generic.kind_mismatch.message", &args)
+        .unwrap_or(fallback_message);
+    let note_span = catalog
+        .render("generic.kind_mismatch.note_span", &args)
+        .unwrap_or_else(|| format!("型引数は {} で指定されています。", format_span(span)));
+    let note_hint = catalog
+        .render("generic.kind_mismatch.note_hint", &args)
+        .unwrap_or_else(|| "kind 注釈または部分適用を調整してください。".to_string());
+
+    GenericDiagnostic::new("JV2008", message)
+        .with_span(span.clone())
+        .with_note(note_span)
+        .with_note(note_hint)
 }
 
 fn conflicting_argument(
@@ -378,6 +438,11 @@ fn describe_type(ty: &TypeKind) -> String {
     format!("{:?}", ty)
 }
 
+fn parameter_display(parameter: &TypeId, name: Option<&str>) -> String {
+    name.map(|value| value.to_string())
+        .unwrap_or_else(|| format!("T{}", parameter.to_raw()))
+}
+
 fn describe_predicate(predicate: &BoundPredicate) -> String {
     predicate.describe()
 }
@@ -393,6 +458,7 @@ fn format_span(span: &Span) -> String {
 mod tests {
     use super::*;
     use crate::types::{TraitBound, TypeVariant};
+    use jv_ast::types::Kind;
 
     fn dummy_span() -> Span {
         Span {
@@ -489,5 +555,29 @@ mod tests {
         assert_eq!(cached.message, "message");
         assert!(cached.span.is_some());
         assert_eq!(cached.notes.len(), 2);
+    }
+
+    fn arrow_kind(parameter: Kind, result: Kind) -> Kind {
+        Kind::Arrow {
+            parameter: Box::new(parameter),
+            result: Box::new(result),
+        }
+    }
+
+    #[test]
+    fn translate_kind_mismatch_includes_kind_diff() {
+        let diagnostic = GenericSolverDiagnostic::KindMismatch {
+            symbol: SymbolId::from("pkg::Functor"),
+            parameter: TypeId::new(7),
+            parameter_name: Some("F".to_string()),
+            expected: arrow_kind(Kind::Star, Kind::Star),
+            actual: Kind::Star,
+            span: dummy_span(),
+        };
+
+        let translated = translate_solver_diagnostic(LocaleCode::Ja, &diagnostic);
+        assert_eq!(translated.code, "JV2008");
+        assert!(translated.message.contains("kind * -> *"));
+        assert!(translated.notes.iter().any(|note| note.contains("L1C1")));
     }
 }

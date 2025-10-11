@@ -2,6 +2,8 @@
 # Ultra-aggressive optimization disabling
 
 [build]
+# Limit parallel jobs to 1 to reduce memory usage
+jobs = 1
 rustflags = [
     "-C", "opt-level=0",
     "-C", "debuginfo=0",

@@ -1,5 +1,8 @@
 use super::*;
-use jv_ir::{IrAnnotation, IrAnnotationArgument, IrAnnotationValue};
+use jv_ast::types::Kind;
+use jv_ir::{
+    IrAnnotation, IrAnnotationArgument, IrAnnotationValue, IrGenericMetadata, IrTypeLevelValue,
+};
 
 impl JavaCodeGenerator {
     pub fn generate_class(&mut self, class: &IrStatement) -> Result<String, CodeGenError> {
@@ -15,25 +18,33 @@ impl JavaCodeGenerator {
             ..
         } = JavaCodeGenerator::base_statement(class)
         {
-            let mut builder = self.builder();
-            self.render_annotations(&mut builder, modifiers);
-
-            let mut header = String::new();
-            let modifiers_str = self.generate_modifiers(modifiers);
-            if !modifiers_str.is_empty() {
-                header.push_str(&modifiers_str);
-                header.push(' ');
-            }
-            header.push_str("class ");
-            header.push_str(name);
-
-            let generics = self.render_type_parameters(type_parameters)?;
-            header.push_str(&generics);
+            self.metadata_path.push(name.clone());
+            let metadata_entry = self.current_generic_metadata().cloned();
 
             let scope_len = self.variance_scope_len();
             self.push_variance_scope(type_parameters);
 
             let result = (|| -> Result<String, CodeGenError> {
+                let mut builder = self.builder();
+                self.render_annotations(&mut builder, modifiers);
+                self.emit_generic_metadata_comment(
+                    &mut builder,
+                    type_parameters,
+                    metadata_entry.as_ref(),
+                );
+
+                let mut header = String::new();
+                let modifiers_str = self.generate_modifiers(modifiers);
+                if !modifiers_str.is_empty() {
+                    header.push_str(&modifiers_str);
+                    header.push(' ');
+                }
+                header.push_str("class ");
+                header.push_str(name);
+
+                let generics = self.render_type_parameters(type_parameters)?;
+                header.push_str(&generics);
+
                 if let Some(super_ty) = superclass {
                     header.push_str(" extends ");
                     header.push_str(&self.generate_type(super_ty)?);
@@ -88,6 +99,7 @@ impl JavaCodeGenerator {
             })();
 
             self.truncate_variance_scopes(scope_len);
+            self.metadata_path.pop();
             result
         } else {
             Err(CodeGenError::UnsupportedConstruct {
@@ -108,25 +120,33 @@ impl JavaCodeGenerator {
             ..
         } = JavaCodeGenerator::base_statement(record)
         {
-            let mut builder = self.builder();
-            self.render_annotations(&mut builder, modifiers);
-
-            let mut header = String::new();
-            let modifiers_str = self.generate_modifiers(modifiers);
-            if !modifiers_str.is_empty() {
-                header.push_str(&modifiers_str);
-                header.push(' ');
-            }
-            header.push_str("record ");
-            header.push_str(name);
-
-            let generics = self.render_type_parameters(type_parameters)?;
-            header.push_str(&generics);
+            self.metadata_path.push(name.clone());
+            let metadata_entry = self.current_generic_metadata().cloned();
 
             let scope_len = self.variance_scope_len();
             self.push_variance_scope(type_parameters);
 
             let result = (|| -> Result<String, CodeGenError> {
+                let mut builder = self.builder();
+                self.render_annotations(&mut builder, modifiers);
+                self.emit_generic_metadata_comment(
+                    &mut builder,
+                    type_parameters,
+                    metadata_entry.as_ref(),
+                );
+
+                let mut header = String::new();
+                let modifiers_str = self.generate_modifiers(modifiers);
+                if !modifiers_str.is_empty() {
+                    header.push_str(&modifiers_str);
+                    header.push(' ');
+                }
+                header.push_str("record ");
+                header.push_str(name);
+
+                let generics = self.render_type_parameters(type_parameters)?;
+                header.push_str(&generics);
+
                 header.push('(');
                 header.push_str(&self.render_record_components(components)?);
                 header.push(')');
@@ -154,6 +174,7 @@ impl JavaCodeGenerator {
             })();
 
             self.truncate_variance_scopes(scope_len);
+            self.metadata_path.pop();
             result
         } else {
             Err(CodeGenError::UnsupportedConstruct {
@@ -176,25 +197,33 @@ impl JavaCodeGenerator {
             ..
         } = JavaCodeGenerator::base_statement(interface)
         {
-            let mut builder = self.builder();
-            self.render_annotations(&mut builder, modifiers);
-
-            let mut header = String::new();
-            let modifiers_str = self.generate_modifiers(modifiers);
-            if !modifiers_str.is_empty() {
-                header.push_str(&modifiers_str);
-                header.push(' ');
-            }
-            header.push_str("interface ");
-            header.push_str(name);
-
-            let generics = self.render_type_parameters(type_parameters)?;
-            header.push_str(&generics);
+            self.metadata_path.push(name.clone());
+            let metadata_entry = self.current_generic_metadata().cloned();
 
             let scope_len = self.variance_scope_len();
             self.push_variance_scope(type_parameters);
 
             let result = (|| -> Result<String, CodeGenError> {
+                let mut builder = self.builder();
+                self.render_annotations(&mut builder, modifiers);
+                self.emit_generic_metadata_comment(
+                    &mut builder,
+                    type_parameters,
+                    metadata_entry.as_ref(),
+                );
+
+                let mut header = String::new();
+                let modifiers_str = self.generate_modifiers(modifiers);
+                if !modifiers_str.is_empty() {
+                    header.push_str(&modifiers_str);
+                    header.push(' ');
+                }
+                header.push_str("interface ");
+                header.push_str(name);
+
+                let generics = self.render_type_parameters(type_parameters)?;
+                header.push_str(&generics);
+
                 let extends = self.render_interface_clause("extends", superinterfaces)?;
                 header.push_str(&extends);
 
@@ -255,6 +284,7 @@ impl JavaCodeGenerator {
             })();
 
             self.truncate_variance_scopes(scope_len);
+            self.metadata_path.pop();
             result
         } else {
             Err(CodeGenError::UnsupportedConstruct {
@@ -386,6 +416,15 @@ impl JavaCodeGenerator {
         let mut parts = Vec::new();
         for param in type_parameters {
             let mut fragment = param.name.clone();
+            let kind_hint = param.kind.clone().or_else(|| {
+                self.current_generic_metadata()
+                    .and_then(|entry| entry.type_parameter_kinds.get(&param.name).cloned())
+            });
+            if let Some(kind) = kind_hint {
+                fragment.push_str(" /* kind: ");
+                fragment.push_str(&self.render_kind(&kind));
+                fragment.push_str(" */");
+            }
             if !param.bounds.is_empty() {
                 let mut bounds_rendered = Vec::new();
                 for bound in &param.bounds {
@@ -397,6 +436,96 @@ impl JavaCodeGenerator {
             parts.push(fragment);
         }
         Ok(format!("<{}>", parts.join(", ")))
+    }
+
+    fn emit_generic_metadata_comment(
+        &self,
+        builder: &mut JavaSourceBuilder,
+        type_parameters: &[IrTypeParameter],
+        metadata: Option<&IrGenericMetadata>,
+    ) {
+        let mut lines: Vec<String> = Vec::new();
+
+        for param in type_parameters {
+            let kind_hint = param.kind.clone().or_else(|| {
+                metadata.and_then(|entry| entry.type_parameter_kinds.get(&param.name).cloned())
+            });
+            if let Some(kind) = kind_hint {
+                lines.push(format!(
+                    "type parameter {} kind = {}",
+                    param.name,
+                    self.render_kind(&kind)
+                ));
+            }
+        }
+
+        if let Some(entry) = metadata {
+            for (name, value) in &entry.const_parameter_values {
+                lines.push(format!(
+                    "const {} = {}",
+                    name,
+                    self.render_type_level_value(value)
+                ));
+            }
+            for (slot, value) in &entry.type_level_bindings {
+                lines.push(format!(
+                    "type-level {} = {}",
+                    slot,
+                    self.render_type_level_value(value)
+                ));
+            }
+        }
+
+        if lines.is_empty() {
+            return;
+        }
+
+        builder.push_line("/**");
+        builder.push_line(" * JV Generic Metadata");
+        for line in lines {
+            builder.push_line(&format!(" * - {}", line));
+        }
+        builder.push_line(" */");
+    }
+
+    fn render_kind(&self, kind: &Kind) -> String {
+        match kind {
+            Kind::Star => "*".to_string(),
+            Kind::Arrow { parameter, result } => format!(
+                "{} -> {}",
+                self.render_kind(parameter),
+                self.render_kind(result)
+            ),
+            Kind::Higher { parameters, result } => {
+                let rendered_params: Vec<String> =
+                    parameters.iter().map(|k| self.render_kind(k)).collect();
+                format!(
+                    "({}) -> {}",
+                    rendered_params.join(", "),
+                    self.render_kind(result)
+                )
+            }
+            Kind::Constraint { base, constraints } => {
+                let mut rendered = self.render_kind(base);
+                if !constraints.is_empty() {
+                    let constraint_names: Vec<String> = constraints
+                        .iter()
+                        .map(|constraint| constraint.trait_name.qualified())
+                        .collect();
+                    rendered.push_str(" with ");
+                    rendered.push_str(&constraint_names.join(", "));
+                }
+                rendered
+            }
+        }
+    }
+
+    fn render_type_level_value(&self, value: &IrTypeLevelValue) -> String {
+        match value {
+            IrTypeLevelValue::Int(v) => v.to_string(),
+            IrTypeLevelValue::Bool(v) => v.to_string(),
+            IrTypeLevelValue::String(v) => format!("\"{}\"", v),
+        }
     }
 
     fn render_interface_clause(

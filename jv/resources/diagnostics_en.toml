@@ -21,3 +21,8 @@ note_preferred = "Preferred implementation {preferred_impl} was not found either
 [generic.capability_ambiguous]
 message = "Capability {capability} for type parameter T{type_param} of {symbol} is ambiguous: {candidates}."
 note_hint = "Set preferredImpl or add an explicit annotation to select the desired implementation."
+
+[generic.kind_mismatch]
+message = "Type parameter {type_param} of {symbol} expects kind {expected}, but the argument has kind {actual}."
+note_span = "The type argument originates at {span}."
+note_hint = "Adjust the kind annotation or supply the missing type constructors."

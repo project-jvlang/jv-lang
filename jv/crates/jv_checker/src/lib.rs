@@ -162,6 +162,10 @@ pub struct InferenceTelemetry {
     pub sealed_hierarchy_checks: usize,
     pub generic_solver_ms: f64,
     pub variance_analysis_ms: f64,
+    pub kind_checks_count: u64,
+    pub kind_cache_hit_rate: Option<f64>,
+    pub const_evaluations: u64,
+    pub type_level_cache_size: usize,
 }
 
 impl Default for InferenceTelemetry {
@@ -182,6 +186,10 @@ impl Default for InferenceTelemetry {
             sealed_hierarchy_checks: 0,
             generic_solver_ms: 0.0,
             variance_analysis_ms: 0.0,
+            kind_checks_count: 0,
+            kind_cache_hit_rate: None,
+            const_evaluations: 0,
+            type_level_cache_size: 0,
         }
     }
 }
@@ -312,6 +320,7 @@ impl TypeChecker {
                 if !validation_errors.is_empty() {
                     self.snapshot = None;
                     self.merged_facts = None;
+                    self.update_type_facts_telemetry();
                     return Err(validation_errors);
                 }
                 self.snapshot = Some(InferenceSnapshot::from_engine(
@@ -323,6 +332,7 @@ impl TypeChecker {
                     .snapshot
                     .as_ref()
                     .map(|snapshot| snapshot.type_facts().clone());
+                self.update_type_facts_telemetry();
 
                 let placement_errors = {
                     let normalized_program = self
@@ -334,6 +344,7 @@ impl TypeChecker {
                 if !placement_errors.is_empty() {
                     self.snapshot = None;
                     self.merged_facts = None;
+                    self.update_type_facts_telemetry();
                     return Err(placement_errors);
                 }
                 Ok(())
@@ -341,6 +352,7 @@ impl TypeChecker {
             Err(error) => {
                 self.snapshot = None;
                 self.merged_facts = None;
+                self.update_type_facts_telemetry();
                 Err(vec![CheckError::TypeError(error.to_string())])
             }
         }
@@ -363,6 +375,7 @@ impl TypeChecker {
         if let Some(facts) = report.take_type_facts() {
             self.merged_facts = Some(facts);
         }
+        self.update_type_facts_telemetry();
         if let Some(duration) = report.pattern_bridge_duration_ms() {
             self.engine.telemetry_mut().pattern_bridge_ms = duration;
         } else {
@@ -419,6 +432,32 @@ impl TypeChecker {
         let telemetry = self.engine.telemetry_mut();
         telemetry.pattern_cache_hits = metrics.hits;
         telemetry.pattern_cache_misses = metrics.misses;
+    }
+
+    fn update_type_facts_telemetry(&mut self) {
+        let facts_snapshot = {
+            if let Some(facts) = self.merged_facts.as_ref() {
+                Some(facts.clone())
+            } else {
+                self.snapshot
+                    .as_ref()
+                    .map(|snapshot| snapshot.type_facts().clone())
+            }
+        };
+
+        let telemetry = self.engine.telemetry_mut();
+        if let Some(facts) = facts_snapshot {
+            let counters = facts.telemetry();
+            telemetry.kind_checks_count = counters.kind_checks_count;
+            telemetry.kind_cache_hit_rate = counters.kind_cache_hit_rate;
+            telemetry.const_evaluations = counters.const_evaluations;
+            telemetry.type_level_cache_size = counters.type_level_cache_size;
+        } else {
+            telemetry.kind_checks_count = 0;
+            telemetry.kind_cache_hit_rate = None;
+            telemetry.const_evaluations = 0;
+            telemetry.type_level_cache_size = 0;
+        }
     }
 }
 

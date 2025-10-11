@@ -161,6 +161,7 @@ fn build_switch_program(
         package: Some("benchmarks.patterns".to_string()),
         imports: vec![],
         type_declarations: extra_declarations,
+        generic_metadata: Default::default(),
         span: dummy_span(),
     }
 }

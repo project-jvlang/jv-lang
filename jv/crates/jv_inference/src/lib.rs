@@ -10,8 +10,10 @@ pub mod constraint;
 pub mod diagnostics;
 pub mod environment;
 pub mod generalize;
+pub mod kind;
 pub mod service;
 pub mod solver;
+pub mod type_level;
 pub mod types;
 
 #[cfg(test)]
@@ -25,7 +27,11 @@ pub use config::ParallelInferenceConfig;
 pub use constraint::CompactConstraintGraph;
 pub use service::{
     json_literal_to_schema, sanitize_java_identifier, snake_to_camel, FactSpan, SchemaCache,
-    TypeFacts,
+    TypeFacts, TypeFactsTelemetry, TypeLevelValue,
+};
+pub use type_level::{
+    EvaluationContext, EvaluationDependencies, TerminationConfig, TerminationError,
+    TypeLevelBinding, TypeLevelDiagnostic, TypeLevelEvaluationOutcome, TypeLevelEvaluator,
 };
 pub use types::{
     BoundConstraint, BoundPredicate, BoundTypeReference, BoundsMatrix, CapabilityBound,

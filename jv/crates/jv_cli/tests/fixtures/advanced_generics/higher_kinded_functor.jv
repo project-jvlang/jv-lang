@@ -1,0 +1,10 @@
+fun <T, R> fmap(value: T, transform: (T) -> R): R = transform(value)
+
+fun <T> identity(value: T): T = value
+
+fun main(): Unit {
+    val doubled = fmap(10) { candidate -> candidate * 2 }
+    val same = identity("generic")
+    println(doubled)
+    println(same)
+}

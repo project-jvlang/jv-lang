@@ -1,0 +1,8 @@
+data Vector<T>(size: Int seed: T)
+
+fun <T> vectorOf(size: Int value: T): Vector<T> = Vector(size value)
+
+fun main(): Unit {
+    val integers = vectorOf(3 0)
+    println(integers)
+}

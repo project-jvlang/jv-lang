@@ -284,6 +284,7 @@ fn lower_program(
         package,
         imports: Vec::new(),
         type_declarations,
+        generic_metadata: Default::default(),
         span,
     })
 }
