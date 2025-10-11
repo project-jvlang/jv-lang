@@ -265,7 +265,7 @@ pub fn try_lower_sequence_call(
                 pipeline.stages.push(stage);
             }
             MethodKind::Terminal(kind) => {
-                if pipeline.stages.is_empty() || pipeline.terminal.is_some() {
+                if pipeline.terminal.is_some() {
                     return Ok(None);
                 }
                 let terminal = match build_terminal(kind, &segment, context) {
@@ -280,7 +280,7 @@ pub fn try_lower_sequence_call(
         }
     }
 
-    if pipeline.stages.is_empty() {
+    if pipeline.stages.is_empty() && pipeline.terminal.is_none() {
         return Ok(None);
     }
 

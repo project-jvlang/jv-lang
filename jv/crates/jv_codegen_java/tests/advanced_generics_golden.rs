@@ -29,9 +29,10 @@ fn build_program() -> IrProgram {
     metadata_entry
         .const_parameter_values
         .insert("SIZE".to_string(), IrTypeLevelValue::Int(32));
-    metadata_entry
-        .type_level_bindings
-        .insert("dimension".to_string(), IrTypeLevelValue::String("3D".to_string()));
+    metadata_entry.type_level_bindings.insert(
+        "dimension".to_string(),
+        IrTypeLevelValue::String("3D".to_string()),
+    );
 
     let mut metadata = BTreeMap::new();
     metadata.insert("fixtures::Reflective".to_string(), metadata_entry);

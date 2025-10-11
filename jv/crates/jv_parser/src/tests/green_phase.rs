@@ -392,7 +392,10 @@ fn test_data_generic_with_bounds() {
 #[test]
 fn test_data_generic_with_const_produces_error() {
     let result = parse_program_result("data Vector<T, const N: Int>(value: T)");
-    assert!(result.is_err(), "const generics should currently report a parse error");
+    assert!(
+        result.is_err(),
+        "const generics should currently report a parse error"
+    );
 }
 
 #[test]

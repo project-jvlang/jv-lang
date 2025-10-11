@@ -6,7 +6,7 @@ use crate::sequence_pipeline;
 use crate::types::{IrCommentKind, IrExpression, IrProgram, IrStatement, JavaType};
 use jv_ast::{
     Argument, BinaryOp, CallArgumentMetadata, CommentKind, ConcurrencyConstruct, Expression,
-    Literal, Program, ResourceManagement, Span, Statement,
+    Literal, Program, ResourceManagement, SequenceDelimiter, Span, Statement,
 };
 
 mod concurrency;
@@ -428,6 +428,44 @@ pub fn transform_expression(
             Ok(IrExpression::Block {
                 statements,
                 java_type: JavaType::void(),
+                span,
+            })
+        }
+        Expression::Array {
+            elements,
+            delimiter,
+            span,
+        } => {
+            let mut lowered_elements = Vec::with_capacity(elements.len());
+            let mut element_type: Option<JavaType> = None;
+
+            for element in elements {
+                let lowered = transform_expression(element, context)?;
+
+                if let Some(new_type) = extract_java_type(&lowered) {
+                    let updated = match element_type.take() {
+                        Some(current) if current == new_type => current,
+                        Some(_) => JavaType::object(),
+                        None => new_type,
+                    };
+                    element_type = Some(updated);
+                }
+
+                lowered_elements.push(lowered);
+            }
+
+            let element_type = element_type.unwrap_or_else(JavaType::object);
+            let dimensions = if delimiter == SequenceDelimiter::Whitespace {
+                Vec::new()
+            } else {
+                vec![None]
+            };
+
+            Ok(IrExpression::ArrayCreation {
+                element_type,
+                dimensions,
+                initializer: Some(lowered_elements),
+                delimiter,
                 span,
             })
         }

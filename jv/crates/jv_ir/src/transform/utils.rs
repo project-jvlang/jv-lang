@@ -3,8 +3,8 @@ use crate::types::{
     JavaType,
 };
 use jv_ast::{
-    Annotation, AnnotationArgument, AnnotationName, AnnotationValue, Literal, Modifiers, Span,
-    TypeAnnotation, Visibility,
+    Annotation, AnnotationArgument, AnnotationName, AnnotationValue, Literal, Modifiers,
+    SequenceDelimiter, Span, TypeAnnotation, Visibility,
 };
 use std::path::Path;
 
@@ -125,11 +125,23 @@ pub(crate) fn extract_java_type(expr: &IrExpression) -> Option<JavaType> {
         IrExpression::ArrayCreation {
             element_type,
             dimensions,
+            delimiter,
             ..
-        } => Some(JavaType::Array {
-            element_type: Box::new(element_type.clone()),
-            dimensions: dimensions.len(),
-        }),
+        } => {
+            if *delimiter == SequenceDelimiter::Whitespace {
+                Some(list_type_for(element_type))
+            } else {
+                let dimension_count = if dimensions.is_empty() {
+                    1
+                } else {
+                    dimensions.len()
+                };
+                Some(JavaType::Array {
+                    element_type: Box::new(element_type.clone()),
+                    dimensions: dimension_count,
+                })
+            }
+        }
         IrExpression::StringFormat { .. } => Some(JavaType::string()),
     }
 }
@@ -175,6 +187,37 @@ fn literal_to_java_type(literal: &Literal) -> JavaType {
             name: "java.util.regex.Pattern".to_string(),
             generic_args: Vec::new(),
         },
+    }
+}
+
+fn list_type_for(element_type: &JavaType) -> JavaType {
+    JavaType::Reference {
+        name: "java.util.List".to_string(),
+        generic_args: vec![boxed_java_type(element_type)],
+    }
+}
+
+fn boxed_java_type(java_type: &JavaType) -> JavaType {
+    match java_type {
+        JavaType::Primitive(name) => {
+            let boxed_name = match name.as_str() {
+                "int" => "Integer",
+                "boolean" => "Boolean",
+                "char" => "Character",
+                "double" => "Double",
+                "float" => "Float",
+                "long" => "Long",
+                "byte" => "Byte",
+                "short" => "Short",
+                _ => "Object",
+            };
+            JavaType::Reference {
+                name: boxed_name.to_string(),
+                generic_args: Vec::new(),
+            }
+        }
+        JavaType::Void => JavaType::object(),
+        _ => java_type.clone(),
     }
 }
 
