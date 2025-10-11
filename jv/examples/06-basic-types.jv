@@ -1,0 +1,24 @@
+fun main() {
+    // Integer types
+    val count = 42
+    val large = 1000000
+    println("Count: ${count}")
+    println("Large: ${large}")
+
+    // String types
+    val greeting = "Hello"
+    val name = "JV"
+    println("${greeting}, ${name}!")
+
+    // Boolean types
+    val isTrue = true
+    val isFalse = false
+    println("True: ${isTrue}")
+    println("False: ${isFalse}")
+
+    // Double types
+    val pi: Double = 3.14159
+    val half: Double = 0.5
+    println("Pi: ${pi}")
+    println("Half: ${half}")
+}

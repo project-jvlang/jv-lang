@@ -1,0 +1,33 @@
+fun main() {
+    // Basic arithmetic
+    val a = 10
+    val b = 3
+
+    val sum = a + b
+    val diff = a - b
+    val prod = a * b
+    val quot = a / b
+
+    println("${a} + ${b} = ${sum}")
+    println("${a} - ${b} = ${diff}")
+    println("${a} * ${b} = ${prod}")
+    println("${a} / ${b} = ${quot}")
+
+    // Modulo
+    val remainder = a % b
+    println("${a} % ${b} = ${remainder}")
+
+    // Floating point arithmetic
+    val x: Double = 10.5
+    val y: Double = 3.2
+
+    val fsum: Double = x + y
+    val fdiff: Double = x - y
+    val fprod: Double = x * y
+    val fquot: Double = x / y
+
+    println("${x} + ${y} = ${fsum}")
+    println("${x} - ${y} = ${fdiff}")
+    println("${x} * ${y} = ${fprod}")
+    println("${x} / ${y} = ${fquot}")
+}
