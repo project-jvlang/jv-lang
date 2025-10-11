@@ -190,6 +190,58 @@ fn generic_metadata_comment_emitted() {
 }
 
 #[test]
+fn metadata_kind_comment_uses_fallback_entry() {
+    let span = dummy_span();
+    let type_param = IrTypeParameter::new("F", span.clone());
+
+    let class = IrStatement::ClassDeclaration {
+        name: "Functor".to_string(),
+        type_parameters: vec![type_param],
+        superclass: None,
+        interfaces: Vec::new(),
+        fields: Vec::new(),
+        methods: Vec::new(),
+        nested_classes: Vec::new(),
+        modifiers: IrModifiers::default(),
+        span: span.clone(),
+    };
+
+    let mut metadata_entry = IrGenericMetadata::default();
+    metadata_entry.type_parameter_kinds.insert(
+        "F".to_string(),
+        Kind::Arrow {
+            parameter: Box::new(Kind::Star),
+            result: Box::new(Kind::Star),
+        },
+    );
+    let mut metadata_map = BTreeMap::new();
+    metadata_map.insert("demo::Functor".to_string(), metadata_entry);
+
+    let program = IrProgram {
+        package: Some("demo".to_string()),
+        imports: Vec::new(),
+        type_declarations: vec![class],
+        generic_metadata: metadata_map,
+        span,
+    };
+
+    let mut generator =
+        JavaCodeGenerator::with_config(JavaCodeGenConfig::for_target(JavaTarget::Java25));
+    let unit = generator
+        .generate_compilation_unit(&program)
+        .expect("class generation");
+    let class_source = &unit.type_declarations[0];
+
+    assert!(
+        class_source.contains("class Functor<F /* kind: * -> * */>"),
+        "expected kind annotation derived from metadata: {}",
+        class_source
+    );
+    assert!(class_source.contains("JV Generic Metadata"));
+    assert!(class_source.contains("type parameter F kind = * -> *"));
+}
+
+#[test]
 fn covariant_type_arguments_render_wildcards() {
     let span = dummy_span();
     let class = IrStatement::ClassDeclaration {

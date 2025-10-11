@@ -1,8 +1,8 @@
-use jv_ast::{AnnotationName, Literal, Span};
+use jv_ast::{types::Kind, AnnotationName, Literal, Span};
 use jv_codegen_java::JavaCodeGenerator;
 use jv_ir::{
-    IrAnnotation, IrAnnotationArgument, IrAnnotationValue, IrModifiers, IrProgram, IrStatement,
-    IrVisibility,
+    IrAnnotation, IrAnnotationArgument, IrAnnotationValue, IrGenericMetadata, IrModifiers,
+    IrProgram, IrStatement, IrTypeParameter, IrVariance, IrVisibility,
 };
 
 fn dummy_span() -> Span {
@@ -106,4 +106,56 @@ fn annotations_render_with_arguments_and_generate_imports() {
     assert!(class_source.contains("@Author(name = \"team\")"));
     assert!(class_source.contains("level = AuditLevel.HIGH"));
     assert!(class_source.contains("tags = {\"service\", \"core\"}"));
+}
+
+#[test]
+fn annotations_render_before_generic_metadata_comment() {
+    let mut program = audited_program();
+
+    let param_span = Span::dummy();
+    let type_param = IrTypeParameter {
+        name: "T".to_string(),
+        bounds: Vec::new(),
+        variance: IrVariance::Invariant,
+        permits: Vec::new(),
+        kind: None,
+        span: param_span,
+    };
+
+    let declaration = program
+        .type_declarations
+        .get_mut(0)
+        .expect("expected audited service declaration");
+    let IrStatement::ClassDeclaration { type_parameters, .. } = declaration else {
+        panic!("expected class declaration for audited service");
+    };
+    type_parameters.push(type_param);
+
+    let mut metadata_entry = IrGenericMetadata::default();
+    metadata_entry
+        .type_parameter_kinds
+        .insert("T".to_string(), Kind::Star);
+    program
+        .generic_metadata
+        .insert("com::example::app::AuditedService".to_string(), metadata_entry);
+
+    let mut generator = JavaCodeGenerator::new();
+    let unit = generator
+        .generate_compilation_unit(&program)
+        .expect("compilation unit");
+    let class_source = &unit.type_declarations[0];
+
+    let annotation_index = class_source
+        .find("@Audited")
+        .expect("annotation should be present");
+    let metadata_index = class_source
+        .find("JV Generic Metadata")
+        .expect("metadata comment should be present");
+    assert!(
+        annotation_index < metadata_index,
+        "annotations should precede metadata comment: {}",
+        class_source
+    );
+    assert!(class_source.contains("class AuditedService<T /* kind: * */>"));
+    assert!(class_source.contains("type parameter T kind = *"));
 }

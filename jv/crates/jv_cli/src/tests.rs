@@ -822,6 +822,60 @@ fn apply_type_facts_records_nested_metadata() {
 }
 
 #[test]
+fn apply_type_facts_records_metadata_without_generics() {
+    let span = dummy_span();
+    let class = IrStatement::ClassDeclaration {
+        name: "Config".to_string(),
+        type_parameters: Vec::new(),
+        superclass: None,
+        interfaces: Vec::new(),
+        fields: Vec::new(),
+        methods: Vec::new(),
+        nested_classes: Vec::new(),
+        modifiers: IrModifiers::default(),
+        span: span.clone(),
+    };
+
+    let mut program = IrProgram {
+        package: Some("demo".to_string()),
+        imports: Vec::new(),
+        type_declarations: vec![class],
+        generic_metadata: Default::default(),
+        span,
+    };
+
+    let mut builder = TypeFactsBuilder::new();
+    let scheme = TypeScheme::new(
+        Vec::new(),
+        TypeKind::new(TypeVariant::Primitive("demo::Config")),
+    );
+    builder.add_scheme("demo::Config", scheme);
+    builder.record_const_binding("demo::Config", "MAX_SIZE", TypeLevelValue::Int(128));
+    builder.record_type_level_evaluation(
+        "demo::Config",
+        "descriptor",
+        TypeLevelValue::String("Constants".to_string()),
+    );
+
+    let facts = builder.build();
+    apply_type_facts(&mut program, &facts);
+
+    let entry = program
+        .generic_metadata
+        .get("demo::Config")
+        .expect("metadata entry for Config");
+    assert!(entry.type_parameter_kinds.is_empty());
+    assert!(matches!(
+        entry.const_parameter_values.get("MAX_SIZE"),
+        Some(IrTypeLevelValue::Int(128))
+    ));
+    match entry.type_level_bindings.get("descriptor") {
+        Some(IrTypeLevelValue::String(value)) => assert_eq!(value, "Constants"),
+        other => panic!("unexpected descriptor metadata: {other:?}"),
+    }
+}
+
+#[test]
 fn where_constraints_flow_into_ir_bounds() {
     use jv_ast::types::{QualifiedName, TypeAnnotation, WhereClause, WherePredicate};
     use std::collections::HashMap;
