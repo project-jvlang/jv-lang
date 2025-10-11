@@ -1,19 +1,34 @@
 use std::collections::HashSet;
 
-use jv_inference::service::{TypeFacts, TypeFactsSnapshot};
+use jv_inference::service::{TypeFacts, TypeFactsSnapshot, TypeLevelValue};
 use jv_inference::solver::Variance;
-use jv_inference::types::{BoundPredicate, GenericBounds, TypeId, TypeKind, TypeVariant};
-use jv_ir::{IrModifiers, IrProgram, IrStatement, IrTypeParameter, IrVariance, JavaType};
+use jv_inference::types::{BoundPredicate, GenericBounds, SymbolId, TypeId, TypeKind, TypeVariant};
+use jv_ir::{
+    GenericMetadataMap, IrGenericMetadata, IrModifiers, IrProgram, IrStatement, IrTypeLevelValue,
+    IrTypeParameter, IrVariance, JavaType,
+};
 
 /// Enriches the generated IR program with generic metadata sourced from type inference facts.
 pub fn apply_type_facts(program: &mut IrProgram, facts: &TypeFactsSnapshot) {
     let package = program.package.as_deref();
+    let mut metadata = std::mem::take(&mut program.generic_metadata);
+    metadata.clear();
+    let mut path = Vec::new();
+
     for declaration in &mut program.type_declarations {
-        apply_to_statement(declaration, facts, package);
+        apply_to_statement(declaration, facts, package, &mut metadata, &mut path);
     }
+
+    program.generic_metadata = metadata;
 }
 
-fn apply_to_statement(statement: &mut IrStatement, facts: &TypeFactsSnapshot, package: Option<&str>) {
+fn apply_to_statement(
+    statement: &mut IrStatement,
+    facts: &TypeFactsSnapshot,
+    package: Option<&str>,
+    metadata: &mut GenericMetadataMap,
+    path: &mut Vec<String>,
+) {
     match statement {
         IrStatement::ClassDeclaration {
             name,
@@ -29,10 +44,19 @@ fn apply_to_statement(statement: &mut IrStatement, facts: &TypeFactsSnapshot, pa
             nested_types: nested_classes,
             ..
         } => {
-            enrich_type_parameters(package, name, type_parameters, modifiers, facts);
+            path.push(name.clone());
+            enrich_type_parameters(
+                package,
+                path.as_slice(),
+                type_parameters,
+                modifiers,
+                facts,
+                metadata,
+            );
             for nested in nested_classes {
-                apply_to_statement(nested, facts, package);
+                apply_to_statement(nested, facts, package, metadata, path);
             }
+            path.pop();
         }
         IrStatement::RecordDeclaration {
             name,
@@ -40,7 +64,16 @@ fn apply_to_statement(statement: &mut IrStatement, facts: &TypeFactsSnapshot, pa
             modifiers,
             ..
         } => {
-            enrich_type_parameters(package, name, type_parameters, modifiers, facts);
+            path.push(name.clone());
+            enrich_type_parameters(
+                package,
+                path.as_slice(),
+                type_parameters,
+                modifiers,
+                facts,
+                metadata,
+            );
+            path.pop();
         }
         _ => {}
     }
@@ -48,45 +81,53 @@ fn apply_to_statement(statement: &mut IrStatement, facts: &TypeFactsSnapshot, pa
 
 fn enrich_type_parameters(
     package: Option<&str>,
-    name: &str,
+    path: &[String],
     type_parameters: &mut [IrTypeParameter],
     modifiers: &mut IrModifiers,
     facts: &TypeFactsSnapshot,
+    metadata: &mut GenericMetadataMap,
 ) {
-    let Some((scheme, generics)) = find_scheme(facts, package, name) else {
+    let Some((scheme, generics, symbol_name)) = find_scheme(facts, package, path) else {
         return;
     };
 
-    if type_parameters.is_empty() || generics.is_empty() {
-        return;
-    }
-
     let mut collected_permits: HashSet<String> = modifiers.permitted_types.iter().cloned().collect();
 
-    for (param, type_id) in type_parameters.iter_mut().zip(generics.iter()) {
-        if let Some(bounds) = scheme
-            .bounds_for(*type_id)
-            .or_else(|| facts.recorded_bounds(*type_id))
-        {
-            param.bounds = convert_bounds(bounds);
-        }
+    let mut metadata_entry = IrGenericMetadata::default();
 
-        if let Some(variance) = scheme
-            .variance_for(*type_id)
-            .copied()
-            .or_else(|| facts.recorded_variance(*type_id))
-        {
-            param.variance = map_variance(variance);
-        }
+    if !type_parameters.is_empty() && !generics.is_empty() {
+        for (param, type_id) in type_parameters.iter_mut().zip(generics.iter()) {
+            if let Some(bounds) = scheme
+                .bounds_for(*type_id)
+                .or_else(|| facts.recorded_bounds(*type_id))
+            {
+                param.bounds = convert_bounds(bounds);
+            }
 
-        if let Some(permits) = facts.sealed_permits_for(*type_id) {
-            let rendered = permits
-                .iter()
-                .filter_map(type_kind_to_type_name)
-                .collect::<Vec<_>>();
-            if !rendered.is_empty() {
-                param.permits = rendered.clone();
-                collected_permits.extend(rendered);
+            if let Some(variance) = scheme
+                .variance_for(*type_id)
+                .copied()
+                .or_else(|| facts.recorded_variance(*type_id))
+            {
+                param.variance = map_variance(variance);
+            }
+
+            if let Some(kind) = facts.kind_for(*type_id) {
+                param.kind = Some(kind.clone());
+                metadata_entry
+                    .type_parameter_kinds
+                    .insert(param.name.clone(), kind.clone());
+            }
+
+            if let Some(permits) = facts.sealed_permits_for(*type_id) {
+                let rendered = permits
+                    .iter()
+                    .filter_map(type_kind_to_type_name)
+                    .collect::<Vec<_>>();
+                if !rendered.is_empty() {
+                    param.permits = rendered.clone();
+                    collected_permits.extend(rendered);
+                }
             }
         }
     }
@@ -96,34 +137,106 @@ fn enrich_type_parameters(
         modifiers.permitted_types = collected_permits.into_iter().collect();
         modifiers.permitted_types.sort();
     }
+
+    let symbol = SymbolId::from(symbol_name.as_str());
+
+    if let Some(bindings) = facts.const_bindings_for(&symbol) {
+        for (name, value) in bindings {
+            metadata_entry.const_parameter_values.insert(
+                name.clone(),
+                convert_type_level_value(value),
+            );
+        }
+    }
+
+    if let Some(results) = facts.type_level_results_for(&symbol) {
+        for (slot, value) in results {
+            metadata_entry.type_level_bindings.insert(
+                slot.clone(),
+                convert_type_level_value(value),
+            );
+        }
+    }
+
+    if !metadata_entry.type_parameter_kinds.is_empty()
+        || !metadata_entry.const_parameter_values.is_empty()
+        || !metadata_entry.type_level_bindings.is_empty()
+    {
+        let key = metadata_key(package, path);
+        metadata.insert(key, metadata_entry);
+    }
 }
 
 fn find_scheme<'a>(
     facts: &'a TypeFactsSnapshot,
     package: Option<&str>,
-    name: &str,
-) -> Option<(&'a jv_inference::service::TypeScheme, Vec<TypeId>)> {
-    for candidate in symbol_candidates(package, name) {
+    path: &[String],
+) -> Option<(&'a jv_inference::service::TypeScheme, Vec<TypeId>, String)> {
+    for candidate in symbol_candidates(package, path) {
         if let Some(scheme) = facts.scheme_for(&candidate) {
             let generics = scheme.generics().to_vec();
-            return Some((scheme, generics));
+            return Some((scheme, generics, candidate));
         }
     }
     None
 }
 
-fn symbol_candidates(package: Option<&str>, name: &str) -> Vec<String> {
+fn symbol_candidates(package: Option<&str>, path: &[String]) -> Vec<String> {
     let mut candidates = Vec::new();
-    let bare = name.to_string();
-    candidates.push(bare.clone());
+    if path.is_empty() {
+        return candidates;
+    }
+
+    let name = path.last().cloned().unwrap_or_default();
+    push_candidate(&mut candidates, name.clone());
+
+    let colon_join = path.join("::");
+    push_candidate(&mut candidates, colon_join.clone());
+
+    if path.len() > 1 {
+        push_candidate(&mut candidates, path.join("."));
+        push_candidate(&mut candidates, path.join("$"));
+    }
+
     if let Some(pkg) = package {
         if !pkg.is_empty() {
-            let pkg_path = pkg.replace('.', "::");
-            candidates.push(format!("{}::{}", pkg_path, name));
-            candidates.push(format!("{}.{}", pkg, name));
+            let pkg_colon = pkg.replace('.', "::");
+            let pkg_dot = pkg;
+            push_candidate(&mut candidates, format!("{}::{}", pkg_colon, colon_join));
+            let dot_join = path.join(".");
+            push_candidate(&mut candidates, format!("{}.{}", pkg_dot, dot_join));
+            let dollar_join = path.join("$");
+            let pkg_dollar = pkg.replace('.', "$");
+            push_candidate(&mut candidates, format!("{}${}", pkg_dollar, dollar_join));
         }
     }
+
     candidates
+}
+
+fn push_candidate(candidates: &mut Vec<String>, candidate: String) {
+    if !candidate.is_empty() && !candidates.iter().any(|existing| existing == &candidate) {
+        candidates.push(candidate);
+    }
+}
+
+fn metadata_key(package: Option<&str>, path: &[String]) -> String {
+    let mut segments: Vec<String> = Vec::new();
+    if let Some(pkg) = package {
+        if !pkg.is_empty() {
+            segments.extend(pkg.split('.').map(|segment| segment.to_string()));
+        }
+    }
+    segments.extend(path.iter().cloned());
+    segments.join("::")
+}
+
+fn convert_type_level_value(value: &TypeLevelValue) -> IrTypeLevelValue {
+    match value {
+        TypeLevelValue::Int(v) => IrTypeLevelValue::Int(*v),
+        TypeLevelValue::Bool(v) => IrTypeLevelValue::Bool(*v),
+        TypeLevelValue::String(v) => IrTypeLevelValue::String(v.clone()),
+    }
 }
 
 fn convert_bounds(bounds: &GenericBounds) -> Vec<JavaType> {

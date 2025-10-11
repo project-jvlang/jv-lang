@@ -3,13 +3,16 @@ use crate::commands::explain;
 use crate::pipeline::compute_script_main_class;
 
 use crate::pipeline::generics::apply_type_facts;
+use jv_ast::types::Kind;
 use jv_inference::constraint::{ConstraintGraph, ConstraintSolution, WhereConstraintResolver};
-use jv_inference::service::{TypeFactsBuilder, TypeScheme};
+use jv_inference::service::{TypeFactsBuilder, TypeLevelValue, TypeScheme};
 use jv_inference::solver::Variance;
 use jv_inference::types::{
     BoundConstraint, BoundPredicate, GenericBounds, SymbolId, TypeId, TypeKind, TypeVariant,
 };
-use jv_ir::{IrModifiers, IrProgram, IrStatement, IrTypeParameter, IrVariance, JavaType};
+use jv_ir::{
+    IrModifiers, IrProgram, IrStatement, IrTypeLevelValue, IrTypeParameter, IrVariance, JavaType,
+};
 use std::collections::HashMap;
 
 mod compat;
@@ -687,6 +690,13 @@ fn apply_type_facts_enriches_class_metadata() {
         type_id,
         vec![TypeKind::new(TypeVariant::Primitive("demo::Foo"))],
     );
+    builder.record_kind_assignment(type_id, Kind::Star);
+    builder.record_const_binding("demo::Box", "SIZE", TypeLevelValue::Int(32));
+    builder.record_type_level_evaluation(
+        "demo::Box",
+        "dimension",
+        TypeLevelValue::String("3D".to_string()),
+    );
 
     let facts = builder.build();
 
@@ -705,6 +715,7 @@ fn apply_type_facts_enriches_class_metadata() {
     let param = &type_parameters[0];
     assert_eq!(param.variance, IrVariance::Covariant);
     assert_eq!(param.permits, vec!["demo.Foo".to_string()]);
+    assert_eq!(param.kind, Some(Kind::Star));
 
     let bounds = &param.bounds;
     assert_eq!(bounds.len(), 1);
@@ -718,6 +729,101 @@ fn apply_type_facts_enriches_class_metadata() {
 
     assert!(modifiers.is_sealed);
     assert_eq!(modifiers.permitted_types, vec!["demo.Foo".to_string()]);
+
+    let metadata_entry = program
+        .generic_metadata
+        .get("demo::Box")
+        .expect("generic metadata should be recorded");
+    assert_eq!(
+        metadata_entry
+            .type_parameter_kinds
+            .get("T"),
+        Some(&Kind::Star)
+    );
+    assert!(matches!(
+        metadata_entry.const_parameter_values.get("SIZE"),
+        Some(IrTypeLevelValue::Int(32))
+    ));
+    match metadata_entry.type_level_bindings.get("dimension") {
+        Some(IrTypeLevelValue::String(value)) => assert_eq!(value, "3D"),
+        other => panic!("unexpected type-level binding: {other:?}"),
+    }
+}
+
+#[test]
+fn apply_type_facts_records_nested_metadata() {
+    let span = dummy_span();
+    let inner_span = span.clone();
+    let inner_class = IrStatement::ClassDeclaration {
+        name: "Inner".to_string(),
+        type_parameters: vec![IrTypeParameter::new("V", inner_span.clone())],
+        superclass: None,
+        interfaces: Vec::new(),
+        fields: Vec::new(),
+        methods: Vec::new(),
+        nested_classes: Vec::new(),
+        modifiers: IrModifiers::default(),
+        span: inner_span,
+    };
+
+    let mut program = IrProgram {
+        package: Some("demo".to_string()),
+        imports: Vec::new(),
+        type_declarations: vec![IrStatement::ClassDeclaration {
+            name: "Outer".to_string(),
+            type_parameters: Vec::new(),
+            superclass: None,
+            interfaces: Vec::new(),
+            fields: Vec::new(),
+            methods: Vec::new(),
+            nested_classes: vec![inner_class],
+            modifiers: IrModifiers::default(),
+            span: span.clone(),
+        }],
+        generic_metadata: Default::default(),
+        span,
+    };
+
+    let inner_id = TypeId::new(99);
+    let mut inner_scheme = TypeScheme::new(
+        vec![inner_id],
+        TypeKind::new(TypeVariant::Primitive("demo::Outer::Inner")),
+    );
+    inner_scheme.set_variance(inner_id, Variance::Invariant);
+
+    let mut builder = TypeFactsBuilder::new();
+    builder.add_scheme("demo::Outer::Inner", inner_scheme);
+    builder.record_kind_assignment(inner_id, Kind::Star);
+    builder.record_const_binding(
+        "demo::Outer::Inner",
+        "CAPACITY",
+        TypeLevelValue::Bool(true),
+    );
+
+    let facts = builder.build();
+    apply_type_facts(&mut program, &facts);
+
+    let IrStatement::ClassDeclaration { nested_classes, .. } = &program.type_declarations[0] else {
+        panic!("expected outer class");
+    };
+    let IrStatement::ClassDeclaration { type_parameters, .. } = &nested_classes[0] else {
+        panic!("expected inner class");
+    };
+    assert_eq!(
+        type_parameters
+            .get(0)
+            .and_then(|param| param.kind.clone()),
+        Some(Kind::Star)
+    );
+
+    let entry = program
+        .generic_metadata
+        .get("demo::Outer::Inner")
+        .expect("nested metadata should be recorded");
+    assert!(matches!(
+        entry.const_parameter_values.get("CAPACITY"),
+        Some(IrTypeLevelValue::Bool(true))
+    ));
 }
 
 #[test]
