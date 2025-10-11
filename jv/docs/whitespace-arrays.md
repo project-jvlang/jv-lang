@@ -1,38 +1,40 @@
-# Whitespace Arrays and Arguments
+# 空白区切り配列と引数
 
-The contextual parsing feature lets you express homogeneous sequences without commas. This page explains how whitespace-delimited arrays and call arguments behave across the toolchain.
+**日本語** | [English](whitespace-arrays-en.md)
 
-## Syntax overview
+文脈考慮パース機能により、同種のシーケンスをカンマなしで表現できます。このページでは、空白区切りの配列と関数呼び出し引数がツールチェーン全体でどのように動作するかを説明します。
 
-- **Array literals**: `val numbers = [1 2 3]`
-- **Call arguments**: `plot(temperature readings average)` groups the positional arguments by layout.
-- **Trailing lambdas**: `plot(1 2) { sample -> sample * sample }` keeps the lambda as a distinct argument.
+## 構文概要
 
-Use layout-aware sequences only when every element shares the same type. Mixing named arguments or commas will emit diagnostics.
+- **配列リテラル**: `val numbers = [1 2 3]`
+- **関数呼び出し引数**: `plot(temperature readings average)` はレイアウトによって位置引数をグループ化します
+- **末尾ラムダ**: `plot(1 2) { sample -> sample * sample }` はラムダを個別の引数として保持します
 
-## Diagnostics
+レイアウト対応シーケンスは、すべての要素が同じ型を共有する場合にのみ使用してください。名前付き引数やカンマを混在させると診断が発生します。
 
-| Code   | Description                                                                    | Fix                                                                                         |
-| ------ | ------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------- |
-| JV2101 | Array literal uses comma separators (comma and whitespace cannot mix)          | Remove commas and rely on whitespace, or revert the entire literal to comma-separated form. |
-| JV2102 | Function call arguments use comma separators                                    | Remove commas and keep positional arguments whitespace-delimited, or switch back to commas. |
-| JV1009 | Named arguments appear in a whitespace-delimited call argument group            | Use positional arguments only or revert the call to comma-separated syntax.                 |
-| JV1010 | Mixed element kinds detected in a whitespace-delimited call argument sequence   | Keep the group homogeneous or switch back to comma-separated arguments.                     |
+## 診断
 
-The `jv check` command fails when either diagnostic appears, returning a non-zero exit code so CI can detect the regression.
+| コード | 説明                                                           | 修正方法                                                                           |
+| ------ | -------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| JV2101 | 配列リテラルがカンマ区切りを使用（カンマと空白は混在不可）     | カンマを削除して空白に依存するか、リテラル全体をカンマ区切り形式に戻してください   |
+| JV2102 | 関数呼び出し引数がカンマ区切りを使用                           | カンマを削除して位置引数を空白区切りにするか、カンマ区切りに戻してください         |
+| JV1009 | 空白区切り関数呼び出し引数グループに名前付き引数が含まれている | 位置引数のみを使用するか、カンマ区切り構文に戻してください                         |
+| JV1010 | 空白区切り関数呼び出し引数シーケンスに混合要素が検出された     | グループを同種に保つか、カンマ区切り引数に戻してください                           |
 
-## Tooling integration
+`jv check` コマンドは、いずれかの診断が表示されると失敗し、ゼロ以外の終了コードを返すため、CIが回帰を検出できます。
 
-- **CLI**: `jv build path/to/file.jv --java-only` emits Java sources that render whitespace arrays as `List.of(...)` when modern features are enabled, or `Arrays.asList(...).stream().toList()` otherwise.
-- **Checker**: Layout-aware sequences flow through the checker’s `SequenceStyleCache`, so repeated invocations remain fast while keeping cache entries isolated per compilation.
-- **Benchmarks**: Run `cargo bench -p jv_parser sequence_layout_bench` to observe parser + transform performance for whitespace-heavy programs.
+## ツール統合
 
-## Function calls
+- **CLI**: `jv build path/to/file.jv --java-only` は、モダン機能が有効な場合は `List.of(...)` として、そうでない場合は `Arrays.asList(...).stream().toList()` として空白区切り配列をレンダリングしたJavaソースを出力します
+- **チェッカー**: レイアウト対応シーケンスは、チェッカーの `SequenceStyleCache` を通じてフローするため、キャッシュエントリをコンパイルごとに分離したまま、繰り返し呼び出しを高速に保ちます
+- **ベンチマーク**: `cargo bench -p jv_parser sequence_layout_bench` を実行して、空白の多いプログラムのパーサー＋変換パフォーマンスを観察します
 
-Whitespace-delimited calls work best for homogeneous positional arguments. When you need named parameters or heterogeneous values, revert to comma-separated syntax for clarity.
+## 関数呼び出し
 
-## Tips
+空白区切り呼び出しは、同種の位置引数に最適です。名前付きパラメータや異種値が必要な場合は、明確性のためにカンマ区切り構文に戻してください。
 
-- Prefer whitespace sequences for short, homogeneous literals; long lists remain easier to read with commas.
-- Keep unit and integration tests in sync by covering both whitespace and comma scenarios.
-- Regenerate CLI snapshots when diagnostic messages change to avoid stale expectations.
+## ヒント
+
+- 短い同種リテラルには空白区切りシーケンスを優先してください。長いリストはカンマを使用した方が読みやすいままです
+- 空白区切りシナリオとカンマ区切りシナリオの両方をカバーすることで、単体テストと統合テストの同期を保ってください
+- 診断メッセージが変更されたときにCLIスナップショットを再生成して、古い期待値を回避してください

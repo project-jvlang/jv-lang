@@ -1,5 +1,7 @@
 # ir-java-codegen Release Notes (0.1.0)
 
+[日本語](release-notes-ir-java-codegen.md) | **English**
+
 ## Summary
 
 The ir-java-codegen milestone completes the desugaring pipeline from the jv AST to Java 25 source code. Transform context management, diagnostic error reporting, Java emission, source mapping, and CLI orchestration are now production-ready.
