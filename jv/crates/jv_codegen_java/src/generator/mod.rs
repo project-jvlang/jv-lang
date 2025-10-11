@@ -5,12 +5,12 @@ use crate::target_version::TargetedJavaEmitter;
 use jv_ast::{BinaryOp, CallArgumentStyle, Literal, SequenceDelimiter, UnaryOp};
 use jv_ir::{
     CompletableFutureOp, IrCaseLabel, IrCatchClause, IrDeconstructionComponent,
-    IrDeconstructionPattern, IrExpression, IrForEachKind, IrForLoopMetadata, IrImplicitWhenEnd,
-    IrModifiers, IrNumericRangeLoop, IrParameter, IrProgram, IrRecordComponent, IrResource,
-    IrSampleDeclaration, IrStatement, IrSwitchCase, IrTypeParameter, IrVariance, IrVisibility,
-    JavaType, MethodOverload, UtilityClass, VirtualThreadOp,
+    IrDeconstructionPattern, IrExpression, IrForEachKind, IrForLoopMetadata, IrGenericMetadata,
+    IrImplicitWhenEnd, IrModifiers, IrNumericRangeLoop, IrParameter, IrProgram, IrRecordComponent,
+    IrResource, IrSampleDeclaration, IrStatement, IrSwitchCase, IrTypeParameter, IrVariance,
+    IrVisibility, JavaType, MethodOverload, UtilityClass, VirtualThreadOp,
 };
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 mod declarations;
 mod expressions;
@@ -27,6 +27,9 @@ pub struct JavaCodeGenerator {
     targeting: TargetedJavaEmitter,
     variance_stack: Vec<HashMap<String, IrVariance>>,
     sequence_helper: Option<String>,
+    generic_metadata: BTreeMap<String, IrGenericMetadata>,
+    metadata_path: Vec<String>,
+    package: Option<String>,
 }
 
 impl JavaCodeGenerator {
@@ -42,6 +45,9 @@ impl JavaCodeGenerator {
             targeting: TargetedJavaEmitter::new(target),
             variance_stack: Vec::new(),
             sequence_helper: None,
+            generic_metadata: BTreeMap::new(),
+            metadata_path: Vec::new(),
+            package: None,
         }
     }
 
@@ -50,6 +56,9 @@ impl JavaCodeGenerator {
         program: &IrProgram,
     ) -> Result<JavaCompilationUnit, CodeGenError> {
         self.reset();
+        self.package = program.package.clone();
+        self.generic_metadata = program.generic_metadata.clone();
+        self.metadata_path.clear();
 
         let mut unit = JavaCompilationUnit::new();
         unit.package_declaration = program.package.clone();
@@ -228,6 +237,27 @@ impl JavaCodeGenerator {
         self.imports.clear();
         self.variance_stack.clear();
         self.sequence_helper = None;
+        self.metadata_path.clear();
+    }
+
+    fn metadata_lookup_key(&self) -> Option<String> {
+        if self.metadata_path.is_empty() {
+            return None;
+        }
+
+        let mut segments: Vec<String> = Vec::new();
+        if let Some(pkg) = &self.package {
+            if !pkg.is_empty() {
+                segments.extend(pkg.split('.').map(|segment| segment.to_string()));
+            }
+        }
+        segments.extend(self.metadata_path.iter().cloned());
+        Some(segments.join("::"))
+    }
+
+    fn current_generic_metadata(&self) -> Option<&IrGenericMetadata> {
+        self.metadata_lookup_key()
+            .and_then(|key| self.generic_metadata.get(&key))
     }
 
     pub(super) fn push_variance_scope(&mut self, params: &[IrTypeParameter]) {

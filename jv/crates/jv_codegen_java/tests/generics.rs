@@ -1,12 +1,13 @@
 use jv_ast::{
-    types::{QualifiedName, RawTypeContinuation, RawTypeDirective},
+    types::{Kind, QualifiedName, RawTypeContinuation, RawTypeDirective},
     Literal, Span,
 };
 use jv_codegen_java::{JavaCodeGenConfig, JavaCodeGenerator, JavaTarget};
 use jv_ir::{
-    IrCommentKind, IrExpression, IrModifiers, IrProgram, IrStatement, IrTypeParameter, IrVariance,
-    JavaType,
+    IrCommentKind, IrExpression, IrGenericMetadata, IrModifiers, IrProgram, IrStatement,
+    IrTypeLevelValue, IrTypeParameter, IrVariance, JavaType,
 };
+use std::collections::BTreeMap;
 
 fn dummy_span() -> Span {
     Span::dummy()
@@ -127,6 +128,65 @@ fn class_signature_includes_generic_bounds() {
         "expected generic bounds in class signature: {}",
         class_source
     );
+}
+
+#[test]
+fn generic_metadata_comment_emitted() {
+    let span = dummy_span();
+    let mut type_param = IrTypeParameter::new("T", span.clone());
+    type_param.kind = Some(Kind::Star);
+    type_param.bounds.push(JavaType::Reference {
+        name: "Comparable".to_string(),
+        generic_args: Vec::new(),
+    });
+
+    let class = IrStatement::ClassDeclaration {
+        name: "Box".to_string(),
+        type_parameters: vec![type_param],
+        superclass: None,
+        interfaces: Vec::new(),
+        fields: Vec::new(),
+        methods: Vec::new(),
+        nested_classes: Vec::new(),
+        modifiers: IrModifiers::default(),
+        span: span.clone(),
+    };
+
+    let mut metadata_entry = IrGenericMetadata::default();
+    metadata_entry
+        .type_parameter_kinds
+        .insert("T".to_string(), Kind::Star);
+    metadata_entry
+        .const_parameter_values
+        .insert("SIZE".to_string(), IrTypeLevelValue::Int(32));
+    metadata_entry.type_level_bindings.insert(
+        "dimension".to_string(),
+        IrTypeLevelValue::String("3D".to_string()),
+    );
+
+    let mut metadata_map = BTreeMap::new();
+    metadata_map.insert("demo::Box".to_string(), metadata_entry);
+
+    let program = IrProgram {
+        package: Some("demo".to_string()),
+        imports: Vec::new(),
+        type_declarations: vec![class],
+        generic_metadata: metadata_map,
+        span,
+    };
+
+    let mut generator =
+        JavaCodeGenerator::with_config(JavaCodeGenConfig::for_target(JavaTarget::Java25));
+    let unit = generator
+        .generate_compilation_unit(&program)
+        .expect("class generation");
+    let class_source = &unit.type_declarations[0];
+
+    assert!(class_source.contains("class Box<T /* kind: * */>"));
+    assert!(class_source.contains("JV Generic Metadata"));
+    assert!(class_source.contains("type parameter T kind = *"));
+    assert!(class_source.contains("const SIZE = 32"));
+    assert!(class_source.contains("type-level dimension = \"3D\""));
 }
 
 #[test]

@@ -1,7 +1,9 @@
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 
 use anyhow::{anyhow, Result};
+use jv_ast::types::Kind;
 use jv_build::JavaTarget;
 use jv_checker::diagnostics::{
     from_check_error, from_parse_error, from_transform_error, DiagnosticStrategy,
@@ -9,9 +11,12 @@ use jv_checker::diagnostics::{
 use jv_checker::{ParallelInferenceConfig, TypeChecker};
 use jv_codegen_java::{JavaCodeGenConfig, JavaCodeGenerator};
 use jv_fmt::JavaFormatter;
-use jv_ir::transform_program_with_context;
-use jv_ir::TransformContext;
+use jv_ir::{
+    transform_program_with_context, IrGenericMetadata, IrProgram, IrStatement, IrTypeLevelValue,
+    IrTypeParameter, IrVariance, JavaType, JavaWildcardKind, TransformContext,
+};
 use jv_parser::Parser as JvParser;
+use serde::Serialize;
 
 use crate::pipeline::generics::apply_type_facts;
 use crate::tooling_failure;
@@ -22,6 +27,30 @@ struct StdlibModule {
     path: PathBuf,
     source: String,
     script_main_class: String,
+}
+
+#[derive(Debug, Serialize)]
+struct GenericManifest {
+    module: String,
+    package: Option<String>,
+    declarations: Vec<GenericManifestEntry>,
+}
+
+#[derive(Debug, Serialize)]
+struct GenericManifestEntry {
+    qualified_name: String,
+    type_parameters: Vec<ManifestTypeParameter>,
+    const_parameters: BTreeMap<String, IrTypeLevelValue>,
+    type_level_bindings: BTreeMap<String, IrTypeLevelValue>,
+}
+
+#[derive(Debug, Serialize)]
+struct ManifestTypeParameter {
+    name: String,
+    variance: IrVariance,
+    bounds: Vec<String>,
+    permits: Vec<String>,
+    kind: Option<Kind>,
 }
 
 pub fn compile_stdlib_modules(
@@ -266,7 +295,204 @@ fn compile_module(
         emitted_paths.push(java_path);
     }
 
+    let manifest = GenericManifest {
+        module: module.script_main_class.clone(),
+        package: ir_program.package.clone(),
+        declarations: collect_generic_manifest(&ir_program),
+    };
+
+    if !manifest.declarations.is_empty() {
+        let manifest_json = serde_json::to_string_pretty(&manifest).map_err(|error| {
+            ModuleError::Fatal(anyhow!(
+                "Failed to serialize generic manifest for {}: {}",
+                module.path.display(),
+                error
+            ))
+        })?;
+        let manifest_path = output_dir.join(format!("{}-generics.json", module.script_main_class));
+        fs::write(&manifest_path, manifest_json).map_err(|error| {
+            ModuleError::Fatal(anyhow!(
+                "Failed to write {}: {}",
+                manifest_path.display(),
+                error
+            ))
+        })?;
+        emitted_paths.push(manifest_path);
+    }
+
     Ok(emitted_paths)
+}
+
+fn collect_generic_manifest(program: &IrProgram) -> Vec<GenericManifestEntry> {
+    let mut entries = Vec::new();
+    let package = program.package.as_deref();
+    let mut path = Vec::new();
+    for declaration in &program.type_declarations {
+        collect_manifest_from_statement(
+            declaration,
+            package,
+            &program.generic_metadata,
+            &mut path,
+            &mut entries,
+        );
+    }
+    entries
+}
+
+fn collect_manifest_from_statement(
+    statement: &IrStatement,
+    package: Option<&str>,
+    metadata_map: &BTreeMap<String, IrGenericMetadata>,
+    path: &mut Vec<String>,
+    entries: &mut Vec<GenericManifestEntry>,
+) {
+    match statement {
+        IrStatement::ClassDeclaration {
+            name,
+            type_parameters,
+            nested_classes,
+            ..
+        }
+        | IrStatement::InterfaceDeclaration {
+            name,
+            type_parameters,
+            nested_types: nested_classes,
+            ..
+        } => {
+            path.push(name.clone());
+            let key = manifest_key(package, path);
+            let metadata_entry = metadata_map.get(&key);
+            if should_emit_manifest_entry(type_parameters, metadata_entry) {
+                entries.push(GenericManifestEntry {
+                    qualified_name: key.clone(),
+                    type_parameters: type_parameters
+                        .iter()
+                        .map(|param| manifest_type_parameter(param, metadata_entry))
+                        .collect(),
+                    const_parameters: metadata_entry
+                        .map(|entry| entry.const_parameter_values.clone())
+                        .unwrap_or_default(),
+                    type_level_bindings: metadata_entry
+                        .map(|entry| entry.type_level_bindings.clone())
+                        .unwrap_or_default(),
+                });
+            }
+            for nested in nested_classes {
+                collect_manifest_from_statement(nested, package, metadata_map, path, entries);
+            }
+            path.pop();
+        }
+        IrStatement::RecordDeclaration {
+            name,
+            type_parameters,
+            ..
+        } => {
+            path.push(name.clone());
+            let key = manifest_key(package, path);
+            let metadata_entry = metadata_map.get(&key);
+            if should_emit_manifest_entry(type_parameters, metadata_entry) {
+                entries.push(GenericManifestEntry {
+                    qualified_name: key,
+                    type_parameters: type_parameters
+                        .iter()
+                        .map(|param| manifest_type_parameter(param, metadata_entry))
+                        .collect(),
+                    const_parameters: metadata_entry
+                        .map(|entry| entry.const_parameter_values.clone())
+                        .unwrap_or_default(),
+                    type_level_bindings: metadata_entry
+                        .map(|entry| entry.type_level_bindings.clone())
+                        .unwrap_or_default(),
+                });
+            }
+            path.pop();
+        }
+        _ => {}
+    }
+}
+
+fn should_emit_manifest_entry(
+    type_parameters: &[IrTypeParameter],
+    metadata_entry: Option<&IrGenericMetadata>,
+) -> bool {
+    if !type_parameters.is_empty() {
+        return true;
+    }
+    metadata_entry.map(manifest_has_metadata).unwrap_or(false)
+}
+
+fn manifest_has_metadata(entry: &IrGenericMetadata) -> bool {
+    !(entry.type_parameter_kinds.is_empty()
+        && entry.const_parameter_values.is_empty()
+        && entry.type_level_bindings.is_empty())
+}
+
+fn manifest_type_parameter(
+    param: &IrTypeParameter,
+    metadata_entry: Option<&IrGenericMetadata>,
+) -> ManifestTypeParameter {
+    let kind = param.kind.clone().or_else(|| {
+        metadata_entry.and_then(|entry| entry.type_parameter_kinds.get(&param.name).cloned())
+    });
+    ManifestTypeParameter {
+        name: param.name.clone(),
+        variance: param.variance,
+        bounds: param.bounds.iter().map(render_java_type).collect(),
+        permits: param.permits.clone(),
+        kind,
+    }
+}
+
+fn manifest_key(package: Option<&str>, path: &[String]) -> String {
+    let mut segments: Vec<String> = Vec::new();
+    if let Some(pkg) = package {
+        if !pkg.is_empty() {
+            segments.extend(pkg.split('.').map(|segment| segment.to_string()));
+        }
+    }
+    segments.extend(path.iter().cloned());
+    segments.join("::")
+}
+
+fn render_java_type(java_type: &JavaType) -> String {
+    match java_type {
+        JavaType::Primitive(name) => name.clone(),
+        JavaType::Reference { name, generic_args } => {
+            if generic_args.is_empty() {
+                name.clone()
+            } else {
+                let rendered: Vec<String> = generic_args.iter().map(render_java_type).collect();
+                format!("{}<{}>", name, rendered.join(", "))
+            }
+        }
+        JavaType::Array {
+            element_type,
+            dimensions,
+        } => {
+            let base = render_java_type(element_type);
+            let suffix = "[]".repeat(*dimensions);
+            format!("{}{}", base, suffix)
+        }
+        JavaType::Functional { interface_name, .. } => interface_name.clone(),
+        JavaType::Wildcard { kind, bound } => match kind {
+            JavaWildcardKind::Unbounded => "?".to_string(),
+            JavaWildcardKind::Extends => {
+                let ty = bound
+                    .as_ref()
+                    .map(|inner| render_java_type(inner))
+                    .unwrap_or_else(|| "Object".to_string());
+                format!("? extends {}", ty)
+            }
+            JavaWildcardKind::Super => {
+                let ty = bound
+                    .as_ref()
+                    .map(|inner| render_java_type(inner))
+                    .unwrap_or_else(|| "Object".to_string());
+                format!("? super {}", ty)
+            }
+        },
+        JavaType::Void => "void".to_string(),
+    }
 }
 
 fn derive_type_name(type_decl: &str) -> Option<String> {
@@ -497,4 +723,75 @@ fn write_prebuilt_sequence(output_dir: &Path) -> Result<Vec<PathBuf>> {
     fs::write(&core_path, SEQUENCE_CORE_JAVA)?;
 
     Ok(vec![factory_path, core_path])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use jv_ast::Span;
+    use jv_ir::{IrModifiers, IrStatement};
+
+    #[test]
+    fn collect_manifest_includes_generic_metadata() {
+        let span = Span::dummy();
+        let mut type_param = IrTypeParameter::new("T", span.clone());
+        type_param.kind = Some(Kind::Star);
+        type_param.bounds.push(JavaType::Reference {
+            name: "java.lang.Comparable".to_string(),
+            generic_args: Vec::new(),
+        });
+
+        let class_decl = IrStatement::ClassDeclaration {
+            name: "Vector".to_string(),
+            type_parameters: vec![type_param],
+            superclass: None,
+            interfaces: Vec::new(),
+            fields: Vec::new(),
+            methods: Vec::new(),
+            nested_classes: Vec::new(),
+            modifiers: IrModifiers::default(),
+            span: span.clone(),
+        };
+
+        let mut program = IrProgram {
+            package: Some("demo".to_string()),
+            imports: Vec::new(),
+            type_declarations: vec![class_decl],
+            generic_metadata: BTreeMap::new(),
+            span,
+        };
+
+        let mut metadata_entry = IrGenericMetadata::default();
+        metadata_entry
+            .type_parameter_kinds
+            .insert("T".to_string(), Kind::Star);
+        metadata_entry
+            .const_parameter_values
+            .insert("SIZE".to_string(), IrTypeLevelValue::Int(3));
+        metadata_entry.type_level_bindings.insert(
+            "dimension".to_string(),
+            IrTypeLevelValue::String("3D".to_string()),
+        );
+
+        program
+            .generic_metadata
+            .insert("demo::Vector".to_string(), metadata_entry);
+
+        let entries = collect_generic_manifest(&program);
+        assert_eq!(entries.len(), 1);
+        let entry = &entries[0];
+        assert_eq!(entry.qualified_name, "demo::Vector");
+        assert_eq!(entry.type_parameters.len(), 1);
+        let param_entry = &entry.type_parameters[0];
+        assert_eq!(param_entry.name, "T");
+        assert_eq!(param_entry.kind, Some(Kind::Star));
+        assert!(matches!(
+            entry.const_parameters.get("SIZE"),
+            Some(IrTypeLevelValue::Int(3))
+        ));
+        assert!(matches!(
+            entry.type_level_bindings.get("dimension"),
+            Some(IrTypeLevelValue::String(value)) if value == "3D"
+        ));
+    }
 }

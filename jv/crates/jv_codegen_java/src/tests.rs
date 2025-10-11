@@ -771,6 +771,7 @@ fn script_statements_are_wrapped_in_generated_main() {
                 span: dummy_span(),
             },
         ],
+        generic_metadata: Default::default(),
         span: dummy_span(),
     };
 
@@ -1242,6 +1243,7 @@ fn snapshot_ir_program() {
       }
     }
   ],
+  "generic_metadata": {},
   "span": {
     "start_line": 0,
     "start_column": 0,

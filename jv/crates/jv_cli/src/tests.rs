@@ -735,9 +735,7 @@ fn apply_type_facts_enriches_class_metadata() {
         .get("demo::Box")
         .expect("generic metadata should be recorded");
     assert_eq!(
-        metadata_entry
-            .type_parameter_kinds
-            .get("T"),
+        metadata_entry.type_parameter_kinds.get("T"),
         Some(&Kind::Star)
     );
     assert!(matches!(
@@ -794,11 +792,7 @@ fn apply_type_facts_records_nested_metadata() {
     let mut builder = TypeFactsBuilder::new();
     builder.add_scheme("demo::Outer::Inner", inner_scheme);
     builder.record_kind_assignment(inner_id, Kind::Star);
-    builder.record_const_binding(
-        "demo::Outer::Inner",
-        "CAPACITY",
-        TypeLevelValue::Bool(true),
-    );
+    builder.record_const_binding("demo::Outer::Inner", "CAPACITY", TypeLevelValue::Bool(true));
 
     let facts = builder.build();
     apply_type_facts(&mut program, &facts);
@@ -806,13 +800,14 @@ fn apply_type_facts_records_nested_metadata() {
     let IrStatement::ClassDeclaration { nested_classes, .. } = &program.type_declarations[0] else {
         panic!("expected outer class");
     };
-    let IrStatement::ClassDeclaration { type_parameters, .. } = &nested_classes[0] else {
+    let IrStatement::ClassDeclaration {
+        type_parameters, ..
+    } = &nested_classes[0]
+    else {
         panic!("expected inner class");
     };
     assert_eq!(
-        type_parameters
-            .get(0)
-            .and_then(|param| param.kind.clone()),
+        type_parameters.get(0).and_then(|param| param.kind.clone()),
         Some(Kind::Star)
     );
 
