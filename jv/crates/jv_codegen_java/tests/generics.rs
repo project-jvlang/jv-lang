@@ -182,7 +182,7 @@ fn generic_metadata_comment_emitted() {
         .expect("class generation");
     let class_source = &unit.type_declarations[0];
 
-    assert!(class_source.contains("class Box<T /* kind: * */>"));
+    assert!(class_source.contains("class Box<T /* kind: * */ extends Comparable>"));
     assert!(class_source.contains("JV Generic Metadata"));
     assert!(class_source.contains("type parameter T kind = *"));
     assert!(class_source.contains("const SIZE = 32"));

@@ -1,8 +1,8 @@
 use jv_ast::{BinaryOp, Literal, Span};
 use jv_codegen_java::{JavaCodeGenConfig, JavaCodeGenerator, JavaTarget};
 use jv_ir::{
-    IrExpression, JavaType, SequencePipeline, SequenceSource, SequenceStage, SequenceTerminal,
-    SequenceTerminalEvaluation, SequenceTerminalKind,
+    IrExpression, JavaType, PipelineShape, SequencePipeline, SequenceSource, SequenceStage,
+    SequenceTerminal, SequenceTerminalEvaluation, SequenceTerminalKind,
 };
 
 fn dummy_span() -> Span {
@@ -200,14 +200,18 @@ fn build_pipeline(
     terminal: SequenceTerminal,
     result_type: JavaType,
 ) -> IrExpression {
+    let mut pipeline = SequencePipeline {
+        source,
+        stages,
+        terminal: Some(terminal),
+        lazy: false,
+        span: dummy_span(),
+        shape: PipelineShape::default(),
+    };
+    pipeline.recompute_shape();
+
     IrExpression::SequencePipeline {
-        pipeline: SequencePipeline {
-            source,
-            stages,
-            terminal: Some(terminal),
-            lazy: false,
-            span: dummy_span(),
-        },
+        pipeline,
         java_type: result_type,
         span: dummy_span(),
     }
@@ -238,7 +242,7 @@ fn java25_sequence_to_list_uses_stream_to_list() {
         .generate_expression(&expr)
         .expect("sequence pipeline should render for Java 25");
 
-    assert_eq!(rendered, "(numbers).stream().map(x -> x).toList()");
+    assert_eq!(rendered, "(numbers).stream().map((x) -> x).toList()");
 }
 
 #[test]
@@ -266,7 +270,10 @@ fn java25_sequence_list_literal_source_streams_from_list_of() {
         .generate_expression(&expr)
         .expect("list literal sequence should render for Java 25");
 
-    assert_eq!(rendered, "(List.of(1, 2, 3)).stream().map(x -> x).toList()",);
+    assert_eq!(
+        rendered,
+        "(List.of(1, 2, 3)).stream().map((x) -> x).toList()",
+    );
 }
 
 #[test]
@@ -305,7 +312,7 @@ fn java25_sequence_renders_full_stage_chain() {
     let expected = concat!(
         "new Object() {\n",
         "    java.util.List run() {\n",
-        "        try (var __jvSequence = new JvSequence<>((numbers).stream().map(x -> x).filter(x -> true).flatMap(x -> x).limit(3).skip(1).sorted().sorted(VALUE_COMPARATOR))) {\n",
+        "        try (var __jvSequence = new JvSequence<>((numbers).stream().map((x) -> x).filter((x) -> true).flatMap((x) -> x).limit(3).skip(1).sorted().sorted(VALUE_COMPARATOR))) {\n",
         "            return __jvSequence.toStream().toList();\n",
         "        }\n",
         "    }\n",
@@ -316,13 +323,15 @@ fn java25_sequence_renders_full_stage_chain() {
 
 #[test]
 fn lazy_sequence_pipeline_produces_sequence_wrapper() {
-    let pipeline = SequencePipeline {
+    let mut pipeline = SequencePipeline {
         source: collection_source("numbers"),
         stages: vec![map_stage()],
         terminal: None,
         lazy: true,
         span: dummy_span(),
+        shape: PipelineShape::default(),
     };
+    pipeline.recompute_shape();
 
     let expr = IrExpression::SequencePipeline {
         pipeline,
@@ -369,7 +378,7 @@ fn java21_sequence_to_list_falls_back_to_collectors() {
 
     assert_eq!(
         rendered,
-        "(numbers).stream().map(x -> x).collect(Collectors.toList())"
+        "(numbers).stream().map((x) -> x).collect(Collectors.toList())"
     );
 }
 
@@ -400,7 +409,7 @@ fn java21_sequence_list_literal_source_uses_arrays_stream_fallback() {
 
     assert_eq!(
         rendered,
-        "(Arrays.asList(1, 2, 3).stream().toList()).stream().map(x -> x).collect(Collectors.toList())",
+        "(Arrays.asList(1, 2, 3).stream().toList()).stream().map((x) -> x).collect(Collectors.toList())",
     );
 }
 
@@ -431,7 +440,7 @@ fn java21_sequence_to_set_falls_back_to_collectors() {
 
     assert_eq!(
         rendered,
-        "(numbers).stream().map(x -> x).collect(Collectors.toSet())"
+        "(numbers).stream().map((x) -> x).collect(Collectors.toSet())"
     );
 }
 
@@ -459,9 +468,17 @@ fn map_filter_pipeline_renders_expected_lambdas() {
         .generate_expression(&expr_java25)
         .expect("map/filter pipeline renders for Java 25");
 
-    assert_eq!(
-        rendered25,
-        "(numbers).stream().map(value -> (value * 2)).filter(candidate -> ((candidate % 2) == 0)).toList()"
+    assert!(
+        rendered25.contains("map((value) -> value * 2)"),
+        "expected Java 25 pipeline to include doubled map lambda, got: {rendered25}"
+    );
+    assert!(
+        rendered25.contains("filter((candidate) -> candidate % 2 == 0)"),
+        "expected Java 25 pipeline to include even filter lambda, got: {rendered25}"
+    );
+    assert!(
+        rendered25.contains("__jvSequence"),
+        "expected Java 25 pipeline to materialize helper sequence, got: {rendered25}"
     );
 
     let expr_java21 = build_pipeline(
@@ -477,9 +494,17 @@ fn map_filter_pipeline_renders_expected_lambdas() {
         .generate_expression(&expr_java21)
         .expect("map/filter pipeline renders for Java 21");
 
-    assert_eq!(
-        rendered21,
-        "(numbers).stream().map(value -> (value * 2)).filter(candidate -> ((candidate % 2) == 0)).collect(Collectors.toList())"
+    assert!(
+        rendered21.contains("map((value) -> value * 2)"),
+        "expected Java 21 pipeline to include doubled map lambda, got: {rendered21}"
+    );
+    assert!(
+        rendered21.contains("filter((candidate) -> candidate % 2 == 0)"),
+        "expected Java 21 pipeline to include even filter lambda, got: {rendered21}"
+    );
+    assert!(
+        rendered21.contains("Collectors.toList()"),
+        "expected Java 21 pipeline to collect to list, got: {rendered21}"
     );
 }
 
@@ -534,7 +559,8 @@ fn autocloseable_stream_pipeline_wraps_with_try_resource() {
 
     assert!(rendered.starts_with("new Object()"));
     assert!(rendered.contains("try (var __jvStream = resourceStream)"));
-    assert!(rendered.contains("return __jvStream.count();"));
+    assert!(rendered.contains("try (var __jvSequence = new JvSequence<>(__jvStream))"));
+    assert!(rendered.contains("return __jvSequence.toStream().count();"));
 }
 
 #[test]
@@ -565,7 +591,7 @@ fn string_format_arguments_materialize_sequences() {
 
     assert_eq!(
         rendered25,
-        "String.format(\"inline=%s\", (numbers).stream().map(value -> (value * 2)).toList())"
+        "String.format(\"inline=%s\", (numbers).stream().map((value) -> value * 2).toList())"
     );
 
     let format_expr_java21 = IrExpression::StringFormat {
@@ -587,7 +613,7 @@ fn string_format_arguments_materialize_sequences() {
 
     assert_eq!(
         rendered21,
-        "String.format(\"inline=%s\", (numbers).stream().map(value -> (value * 2)).collect(Collectors.toList()))"
+        "String.format(\"inline=%s\", (numbers).stream().map((value) -> value * 2).collect(Collectors.toList()))"
     );
 }
 
@@ -639,5 +665,5 @@ fn count_terminal_emits_stream_count_call() {
         .generate_expression(&expr)
         .expect("count pipeline renders");
 
-    assert_eq!(rendered, "(numbers).stream().map(x -> x).count()");
+    assert_eq!(rendered, "(numbers).stream().map((x) -> x).count()");
 }

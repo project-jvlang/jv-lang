@@ -2241,7 +2241,7 @@ mod tests {
 
         let whitespace_array = IrExpression::ArrayCreation {
             element_type: JavaType::int(),
-            dimensions: vec![None],
+            dimensions: Vec::new(),
             initializer: Some(vec![
                 IrExpression::Literal(Literal::Number("1".to_string()), dummy_span()),
                 IrExpression::Literal(Literal::Number("2".to_string()), dummy_span()),
@@ -2255,9 +2255,12 @@ mod tests {
 
         assert_eq!(
             inferred,
-            JavaType::Array {
-                element_type: Box::new(JavaType::int()),
-                dimensions: 1,
+            JavaType::Reference {
+                name: "java.util.List".to_string(),
+                generic_args: vec![JavaType::Reference {
+                    name: "Integer".to_string(),
+                    generic_args: vec![],
+                }],
             }
         );
     }
@@ -2268,7 +2271,7 @@ mod tests {
 
         let whitespace_array = IrExpression::ArrayCreation {
             element_type: JavaType::object(),
-            dimensions: vec![None],
+            dimensions: Vec::new(),
             initializer: Some(vec![
                 IrExpression::Literal(Literal::Number("1".to_string()), dummy_span()),
                 IrExpression::Literal(Literal::String("oops".to_string()), dummy_span()),
@@ -2291,6 +2294,86 @@ mod tests {
                 "expected whitespace sequence mismatch error, got {:?}",
                 other
             ),
+        }
+    }
+
+    #[test]
+    fn transform_whitespace_array_literal_lowers_to_list_creation() {
+        let mut context = test_context();
+
+        let expr = Expression::Array {
+            elements: vec![
+                Expression::Literal(Literal::Number("1".to_string()), dummy_span()),
+                Expression::Literal(Literal::Number("2".to_string()), dummy_span()),
+            ],
+            delimiter: SequenceDelimiter::Whitespace,
+            span: dummy_span(),
+        };
+
+        let ir = transform_expression(expr, &mut context)
+            .expect("whitespace array lowering should succeed");
+
+        match ir {
+            IrExpression::ArrayCreation {
+                element_type,
+                dimensions,
+                initializer,
+                delimiter,
+                ..
+            } => {
+                assert_eq!(element_type, JavaType::int());
+                assert!(
+                    dimensions.is_empty(),
+                    "whitespace arrays should not emit dimensions"
+                );
+                assert_eq!(delimiter, SequenceDelimiter::Whitespace);
+                let init = initializer.expect("initializer expected for array literal");
+                assert_eq!(init.len(), 2);
+                for (index, element) in init.into_iter().enumerate() {
+                    match element {
+                        IrExpression::Literal(Literal::Number(value), _) => {
+                            assert_eq!(value, (index + 1).to_string());
+                        }
+                        other => panic!("expected numeric literal, got {:?}", other),
+                    }
+                }
+            }
+            other => panic!("expected array creation, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn transform_comma_array_literal_preserves_dimension_metadata() {
+        let mut context = test_context();
+
+        let expr = Expression::Array {
+            elements: vec![
+                Expression::Literal(Literal::Number("1".to_string()), dummy_span()),
+                Expression::Literal(Literal::Number("2".to_string()), dummy_span()),
+            ],
+            delimiter: SequenceDelimiter::Comma,
+            span: dummy_span(),
+        };
+
+        let ir =
+            transform_expression(expr, &mut context).expect("comma array lowering should succeed");
+
+        match ir {
+            IrExpression::ArrayCreation {
+                element_type,
+                dimensions,
+                initializer,
+                delimiter,
+                ..
+            } => {
+                assert_eq!(element_type, JavaType::int());
+                assert_eq!(dimensions.len(), 1);
+                assert!(dimensions.iter().all(|dim| dim.is_none()));
+                assert_eq!(delimiter, SequenceDelimiter::Comma);
+                let init = initializer.expect("initializer expected for array literal");
+                assert_eq!(init.len(), 2);
+            }
+            other => panic!("expected array creation, got {:?}", other),
         }
     }
 

@@ -126,7 +126,10 @@ fn annotations_render_before_generic_metadata_comment() {
         .type_declarations
         .get_mut(0)
         .expect("expected audited service declaration");
-    let IrStatement::ClassDeclaration { type_parameters, .. } = declaration else {
+    let IrStatement::ClassDeclaration {
+        type_parameters, ..
+    } = declaration
+    else {
         panic!("expected class declaration for audited service");
     };
     type_parameters.push(type_param);
@@ -135,9 +138,10 @@ fn annotations_render_before_generic_metadata_comment() {
     metadata_entry
         .type_parameter_kinds
         .insert("T".to_string(), Kind::Star);
-    program
-        .generic_metadata
-        .insert("com::example::app::AuditedService".to_string(), metadata_entry);
+    program.generic_metadata.insert(
+        "com::example::app::AuditedService".to_string(),
+        metadata_entry,
+    );
 
     let mut generator = JavaCodeGenerator::new();
     let unit = generator

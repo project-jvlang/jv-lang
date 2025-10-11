@@ -61,7 +61,10 @@ fn evaluator_hits_cache_on_repeated_evaluation() {
     assert!(second.cache_hit);
 
     let (evaluations, cache_hits) = evaluator.metrics();
-    assert_eq!(evaluations, 1, "cache reuse should not increment evaluation count twice");
+    assert_eq!(
+        evaluations, 1,
+        "cache reuse should not increment evaluation count twice"
+    );
     assert_eq!(cache_hits, 1);
     assert_eq!(evaluator.cache_size(), 1);
 }
