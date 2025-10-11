@@ -26,7 +26,11 @@ fn diagnostics_for_generic_source_are_empty() {
         .collect();
     let elapsed = start.elapsed();
 
-    assert_eq!(diagnostics.len(), 1, "expected a single diagnostic highlighting generic ambiguity");
+    assert_eq!(
+        diagnostics.len(),
+        1,
+        "expected a single diagnostic highlighting generic ambiguity"
+    );
     assert!(
         messages[0].contains("ambiguous function signature"),
         "diagnostic should mention ambiguous signature: {:?}",

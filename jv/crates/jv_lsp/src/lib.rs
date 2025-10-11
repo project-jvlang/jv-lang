@@ -1,11 +1,20 @@
 // jv_lsp - Language Server Protocol implementation
+use jv_ast::types::TypeLevelExpr;
+use jv_ast::{
+    ConstParameter, GenericParameter, GenericSignature, Program, Statement, TypeAnnotation,
+};
 use jv_checker::diagnostics::{
     collect_raw_type_diagnostics, from_check_error, from_parse_error, from_transform_error,
     DiagnosticStrategy, EnhancedDiagnostic,
 };
 use jv_checker::regex::RegexValidator;
 use jv_checker::{CheckError, RegexAnalysis, TypeChecker};
-use jv_inference::{service::TypeFactsSnapshot, ParallelInferenceConfig};
+use jv_inference::{
+    service::{TypeFactsSnapshot, TypeLevelValue},
+    solver::Variance,
+    types::{SymbolId, TypeId},
+    ParallelInferenceConfig, TypeFacts,
+};
 use jv_ir::transform_program;
 use jv_parser::Parser as JvParser;
 use serde::{Deserialize, Serialize};
@@ -158,6 +167,240 @@ const SEQUENCE_OPERATIONS: &[SequenceOperationDoc] = &[
     },
 ];
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum GenericSymbolKind {
+    Function,
+    Class,
+    DataClass,
+    Interface,
+}
+
+impl GenericSymbolKind {
+    fn label(self) -> &'static str {
+        match self {
+            GenericSymbolKind::Function => "関数",
+            GenericSymbolKind::Class => "クラス",
+            GenericSymbolKind::DataClass => "dataクラス",
+            GenericSymbolKind::Interface => "インターフェース",
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct GenericSymbolInfo {
+    name: String,
+    path: Vec<String>,
+    span: jv_ast::Span,
+    signature: Option<GenericSignature>,
+    fallback_type_parameters: Vec<String>,
+    kind: GenericSymbolKind,
+}
+
+impl GenericSymbolInfo {
+    fn contains(&self, position: &Position) -> bool {
+        position_overlaps_span(position, &self.span)
+    }
+
+    fn declared_type_parameter_names(&self) -> Vec<String> {
+        if let Some(signature) = &self.signature {
+            signature
+                .type_parameters()
+                .iter()
+                .map(|param| param.name.clone())
+                .collect()
+        } else {
+            self.fallback_type_parameters.clone()
+        }
+    }
+
+    fn type_parameters(&self) -> Option<Vec<GenericParameter>> {
+        self.signature
+            .as_ref()
+            .map(|sig| sig.type_parameters().to_vec())
+    }
+
+    fn const_parameters(&self) -> Vec<ConstParameter> {
+        self.signature
+            .as_ref()
+            .map(|sig| sig.const_parameters().to_vec())
+            .unwrap_or_default()
+    }
+
+    fn symbol_candidates(&self, package: Option<&str>) -> Vec<String> {
+        symbol_candidates(package, &self.path)
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+struct GenericDocumentIndex {
+    package: Option<String>,
+    symbols: Vec<GenericSymbolInfo>,
+}
+
+impl GenericDocumentIndex {
+    fn from_program(program: &Program) -> Self {
+        let mut symbols = Vec::new();
+        let mut path = Vec::new();
+        for statement in &program.statements {
+            collect_generic_symbols(statement, &mut path, &mut symbols);
+        }
+        Self {
+            package: program.package.clone(),
+            symbols,
+        }
+    }
+
+    fn package(&self) -> Option<&str> {
+        self.package.as_deref()
+    }
+
+    fn symbols(&self) -> &[GenericSymbolInfo] {
+        &self.symbols
+    }
+
+    fn symbol_for<'a>(&'a self, word: &str, position: &Position) -> Option<&'a GenericSymbolInfo> {
+        self.symbols
+            .iter()
+            .find(|info| info.name == word && info.contains(position))
+    }
+}
+
+fn collect_generic_symbols(
+    statement: &Statement,
+    path: &mut Vec<String>,
+    output: &mut Vec<GenericSymbolInfo>,
+) {
+    match statement {
+        Statement::FunctionDeclaration {
+            name,
+            generic_signature,
+            type_parameters,
+            span,
+            ..
+        } => {
+            let mut symbol_path = path.clone();
+            symbol_path.push(name.clone());
+            output.push(GenericSymbolInfo {
+                name: name.clone(),
+                path: symbol_path,
+                span: span.clone(),
+                signature: generic_signature.clone(),
+                fallback_type_parameters: type_parameters.clone(),
+                kind: GenericSymbolKind::Function,
+            });
+        }
+        Statement::ClassDeclaration {
+            name,
+            type_parameters,
+            generic_signature,
+            methods,
+            span,
+            ..
+        } => {
+            path.push(name.clone());
+            output.push(GenericSymbolInfo {
+                name: name.clone(),
+                path: path.clone(),
+                span: span.clone(),
+                signature: generic_signature.clone(),
+                fallback_type_parameters: type_parameters.clone(),
+                kind: GenericSymbolKind::Class,
+            });
+            for method in methods {
+                collect_generic_symbols(method, path, output);
+            }
+            path.pop();
+        }
+        Statement::DataClassDeclaration {
+            name,
+            type_parameters,
+            generic_signature,
+            span,
+            ..
+        } => {
+            let mut symbol_path = path.clone();
+            symbol_path.push(name.clone());
+            output.push(GenericSymbolInfo {
+                name: name.clone(),
+                path: symbol_path,
+                span: span.clone(),
+                signature: generic_signature.clone(),
+                fallback_type_parameters: type_parameters.clone(),
+                kind: GenericSymbolKind::DataClass,
+            });
+        }
+        Statement::InterfaceDeclaration {
+            name,
+            type_parameters,
+            generic_signature,
+            methods,
+            span,
+            ..
+        } => {
+            path.push(name.clone());
+            output.push(GenericSymbolInfo {
+                name: name.clone(),
+                path: path.clone(),
+                span: span.clone(),
+                signature: generic_signature.clone(),
+                fallback_type_parameters: type_parameters.clone(),
+                kind: GenericSymbolKind::Interface,
+            });
+            for method in methods {
+                collect_generic_symbols(method, path, output);
+            }
+            path.pop();
+        }
+        Statement::ExtensionFunction(extension) => {
+            path.push("<extension>".to_string());
+            collect_generic_symbols(&extension.function, path, output);
+            path.pop();
+        }
+        _ => {}
+    }
+}
+
+fn symbol_candidates(package: Option<&str>, path: &[String]) -> Vec<String> {
+    let mut candidates = Vec::new();
+    if path.is_empty() {
+        return candidates;
+    }
+
+    let name = path.last().cloned().unwrap_or_default();
+    push_candidate(&mut candidates, name.clone());
+
+    let colon_join = path.join("::");
+    push_candidate(&mut candidates, colon_join.clone());
+
+    if path.len() > 1 {
+        push_candidate(&mut candidates, path.join("."));
+        push_candidate(&mut candidates, path.join("$"));
+    }
+
+    if let Some(pkg) = package {
+        if !pkg.is_empty() {
+            if !colon_join.is_empty() {
+                push_candidate(&mut candidates, format!("{pkg}::{colon_join}"));
+            }
+            let dot = path.join(".");
+            if !dot.is_empty() {
+                push_candidate(&mut candidates, format!("{pkg}::{dot}"));
+            }
+        }
+    }
+
+    candidates
+}
+
+fn push_candidate(candidates: &mut Vec<String>, value: String) {
+    if value.is_empty() {
+        return;
+    }
+    if !candidates.contains(&value) {
+        candidates.push(value);
+    }
+}
+
 const SEQUENCE_LAMBDA_OPERATIONS: &[&str] = &[
     "map",
     "filter",
@@ -233,6 +476,8 @@ pub struct JvLanguageServer {
     documents: HashMap<String, String>,
     type_facts: HashMap<String, TypeFactsSnapshot>,
     regex_metadata: HashMap<String, Vec<RegexAnalysis>>,
+    programs: HashMap<String, Program>,
+    generics: HashMap<String, GenericDocumentIndex>,
     parallel_config: ParallelInferenceConfig,
 }
 
@@ -246,6 +491,8 @@ impl JvLanguageServer {
             documents: HashMap::new(),
             type_facts: HashMap::new(),
             regex_metadata: HashMap::new(),
+            programs: HashMap::new(),
+            generics: HashMap::new(),
             parallel_config: config,
         }
     }
@@ -258,6 +505,8 @@ impl JvLanguageServer {
         self.documents.insert(uri.clone(), content);
         self.type_facts.remove(&uri);
         self.regex_metadata.remove(&uri);
+        self.programs.remove(&uri);
+        self.generics.remove(&uri);
     }
 
     pub fn get_diagnostics(&mut self, uri: &str) -> Vec<Diagnostic> {
@@ -270,6 +519,8 @@ impl JvLanguageServer {
             Err(error) => {
                 self.type_facts.remove(uri);
                 self.regex_metadata.remove(uri);
+                self.programs.remove(uri);
+                self.generics.remove(uri);
                 return match from_parse_error(&error) {
                     Some(diagnostic) => vec![tooling_diagnostic_to_lsp(
                         uri,
@@ -283,6 +534,12 @@ impl JvLanguageServer {
         let mut diagnostics = Vec::new();
         let mut type_facts_snapshot: Option<TypeFactsSnapshot> = None;
         let mut regex_analyses: Vec<RegexAnalysis> = Vec::new();
+
+        self.programs.insert(uri.to_string(), program.clone());
+        self.generics.insert(
+            uri.to_string(),
+            GenericDocumentIndex::from_program(&program),
+        );
 
         let mut checker = TypeChecker::with_parallel_config(self.parallel_config);
         let check_result = checker.check_program(&program);
@@ -371,6 +628,11 @@ impl JvLanguageServer {
             self.type_facts.insert(uri.to_string(), snapshot);
         }
 
+        if let Some(index) = self.generics.get(uri) {
+            let facts_ref = self.type_facts.get(uri);
+            enrich_generic_diagnostics(&mut diagnostics, facts_ref, index);
+        }
+
         if regex_analyses.is_empty() {
             self.regex_metadata.remove(uri);
         } else {
@@ -410,6 +672,11 @@ impl JvLanguageServer {
             }
         }
 
+        if let Some(index) = self.generics.get(uri) {
+            let facts = self.type_facts(uri);
+            items.extend(build_generic_completions(index, facts));
+        }
+
         let mut seen = HashSet::new();
         items.retain(|entry| seen.insert(entry.clone()));
         items
@@ -421,6 +688,10 @@ impl JvLanguageServer {
 
     pub fn get_hover(&self, uri: &str, position: Position) -> Option<HoverResult> {
         if let Some(hover) = self.sequence_hover(uri, &position) {
+            return Some(hover);
+        }
+
+        if let Some(hover) = self.generic_hover(uri, &position) {
             return Some(hover);
         }
 
@@ -460,12 +731,392 @@ impl JvLanguageServer {
             },
         })
     }
+
+    fn generic_hover(&self, uri: &str, position: &Position) -> Option<HoverResult> {
+        let content = self.documents.get(uri)?;
+        let (start, end, word) = word_at_position(content, position)?;
+        let index = self.generics.get(uri)?;
+        let symbol = index.symbol_for(&word, position)?;
+        let facts = self.type_facts(uri);
+        let contents = build_generic_hover(symbol, facts, index.package());
+        if contents.is_empty() {
+            return None;
+        }
+        Some(HoverResult {
+            contents,
+            range: Range {
+                start: Position {
+                    line: position.line,
+                    character: start as u32,
+                },
+                end: Position {
+                    line: position.line,
+                    character: end as u32,
+                },
+            },
+        })
+    }
 }
 
 impl Default for JvLanguageServer {
     fn default() -> Self {
         Self::new()
     }
+}
+
+#[derive(Default)]
+struct SymbolSummary {
+    symbol_key: Option<String>,
+    type_params: Vec<TypeParamSummary>,
+    const_params: Vec<ConstParamSummary>,
+    type_level_results: Vec<(String, String)>,
+}
+
+#[derive(Default)]
+struct TypeParamSummary {
+    name: String,
+    attributes: Vec<String>,
+}
+
+#[derive(Default)]
+struct ConstParamSummary {
+    name: String,
+    ty: String,
+    attributes: Vec<String>,
+}
+
+#[derive(Clone)]
+struct ResolvedSymbolData {
+    key: String,
+    type_ids: Vec<TypeId>,
+    variance: HashMap<TypeId, Variance>,
+    bounds: HashMap<TypeId, String>,
+}
+
+fn build_generic_hover(
+    info: &GenericSymbolInfo,
+    facts: Option<&TypeFactsSnapshot>,
+    package: Option<&str>,
+) -> String {
+    let summary = summarize_symbol(info, facts, package);
+    if summary.type_params.is_empty()
+        && summary.const_params.is_empty()
+        && summary.type_level_results.is_empty()
+    {
+        return String::new();
+    }
+
+    let mut lines = Vec::new();
+    lines.push(format!(
+        "{} `{}` のジェネリクス情報",
+        info.kind.label(),
+        info.name
+    ));
+    if let Some(pkg) = package {
+        if !pkg.is_empty() {
+            lines.push(format!("パッケージ: {}", pkg));
+        }
+    }
+
+    if !summary.type_params.is_empty() {
+        lines.push("型パラメータ:".to_string());
+        for param in summary.type_params {
+            if param.attributes.is_empty() {
+                lines.push(format!("• `{}`", param.name));
+            } else {
+                lines.push(format!(
+                    "• `{}` ({})",
+                    param.name,
+                    param.attributes.join(", ")
+                ));
+            }
+        }
+    }
+
+    if !summary.const_params.is_empty() {
+        lines.push("const パラメータ:".to_string());
+        for param in summary.const_params {
+            if param.attributes.is_empty() {
+                lines.push(format!("• `{}`: {}", param.name, param.ty));
+            } else {
+                lines.push(format!(
+                    "• `{}`: {} ({})",
+                    param.name,
+                    param.ty,
+                    param.attributes.join(", ")
+                ));
+            }
+        }
+    }
+
+    if !summary.type_level_results.is_empty() {
+        lines.push("型レベル計算結果:".to_string());
+        for (slot, value) in summary.type_level_results {
+            lines.push(format!("• `{}` = {}", slot, value));
+        }
+    }
+
+    if let Some(facts) = facts {
+        let telemetry = facts.telemetry();
+        lines.push(format!(
+            "Telemetry: kind検証={} / const評価={} / キャッシュ={} entries",
+            telemetry.kind_checks_count,
+            telemetry.const_evaluations,
+            telemetry.type_level_cache_size
+        ));
+    }
+
+    lines.join("\n")
+}
+
+fn build_generic_completions(
+    index: &GenericDocumentIndex,
+    facts: Option<&TypeFactsSnapshot>,
+) -> Vec<String> {
+    let mut entries = Vec::new();
+    for info in index.symbols() {
+        let summary = summarize_symbol(info, facts, index.package());
+        if summary.type_params.is_empty() && summary.const_params.is_empty() {
+            continue;
+        }
+        for param in &summary.type_params {
+            let mut entry = format!("{} · 型パラメータ `{}`", info.name, param.name);
+            if !param.attributes.is_empty() {
+                entry.push_str(&format!(" ({})", param.attributes.join(", ")));
+            }
+            entries.push(entry);
+        }
+        for param in &summary.const_params {
+            let mut entry = format!("{} · const `{}`", info.name, param.name);
+            if !param.attributes.is_empty() {
+                entry.push_str(&format!(" ({})", param.attributes.join(", ")));
+            }
+            entries.push(entry);
+        }
+        for (slot, value) in &summary.type_level_results {
+            entries.push(format!("{} · type-level `{}` = {}", info.name, slot, value));
+        }
+    }
+    entries
+}
+
+fn enrich_generic_diagnostics(
+    diagnostics: &mut [Diagnostic],
+    facts: Option<&TypeFactsSnapshot>,
+    index: &GenericDocumentIndex,
+) {
+    let _ = (facts, index);
+    for diagnostic in diagnostics {
+        let Some(code) = diagnostic.code.as_deref() else {
+            continue;
+        };
+        if !matches!(code, "JV2008" | "JV3101" | "JV3102" | "JV3202") {
+            continue;
+        }
+        if !diagnostic.suggestions.is_empty() {
+            continue;
+        }
+
+        let suggestion = match code {
+            "JV2008" => "型引数のkind注釈か部分適用を調整し、推論されたkindと一致させてください。ホバーで期待kindを確認できます。",
+            "JV3101" => "型レベル式の入力とconstパラメータを見直し、評価が収束するように境界やデフォルト値を修正してください。",
+            "JV3102" => "型レベル式の上下限・比較対象を揃え、同じ型に統一してください。",
+            "JV3202" => "raw型を避けるようにconstパラメータや境界を補い、安全な型情報を提供してください。",
+            _ => continue,
+        };
+
+        diagnostic.suggestions.push(suggestion.to_string());
+    }
+}
+
+fn summarize_symbol(
+    info: &GenericSymbolInfo,
+    facts: Option<&TypeFactsSnapshot>,
+    package: Option<&str>,
+) -> SymbolSummary {
+    let mut summary = SymbolSummary::default();
+    let candidates = info.symbol_candidates(package);
+    let resolved = facts.and_then(|snapshot| resolve_type_metadata(snapshot, &candidates));
+
+    if let Some(data) = resolved.clone() {
+        summary.symbol_key = Some(data.key.clone());
+    }
+
+    let type_params = info.type_parameters();
+    if let Some(params) = type_params.as_ref() {
+        let type_ids = resolved
+            .as_ref()
+            .map(|data| data.type_ids.clone())
+            .unwrap_or_default();
+        let mut variance_map = resolved
+            .as_ref()
+            .map(|data| data.variance.clone())
+            .unwrap_or_default();
+        let bounds_map = resolved
+            .as_ref()
+            .map(|data| data.bounds.clone())
+            .unwrap_or_default();
+
+        if let Some(facts) = facts {
+            for id in &type_ids {
+                if let Some(recorded) = facts.recorded_variance(*id) {
+                    variance_map.entry(*id).or_insert(recorded);
+                }
+            }
+        }
+
+        for (idx, param) in params.iter().enumerate() {
+            let mut attributes = Vec::new();
+            if let Some(kind) = &param.kind {
+                attributes.push(format!("宣言kind: {:?}", kind));
+            }
+            if let Some(bounds) = format_annotation_list(&param.bounds) {
+                attributes.push(format!("宣言境界: {}", bounds));
+            }
+            if let Some(type_id) = type_ids.get(idx) {
+                if let Some(facts) = facts {
+                    if let Some(kind) = facts.kind_for(*type_id) {
+                        attributes.push(format!("推論kind: {:?}", kind));
+                    }
+                }
+                if let Some(variance) = variance_map.get(type_id) {
+                    attributes.push(format!("変位: {:?}", variance));
+                }
+                if let Some(bound) = bounds_map.get(type_id) {
+                    attributes.push(format!("推論境界: {}", bound));
+                }
+            }
+            summary.type_params.push(TypeParamSummary {
+                name: param.name.clone(),
+                attributes,
+            });
+        }
+    } else {
+        for name in info.declared_type_parameter_names() {
+            summary.type_params.push(TypeParamSummary {
+                name,
+                attributes: Vec::new(),
+            });
+        }
+    }
+
+    for param in info.const_parameters() {
+        let mut attributes = Vec::new();
+        if let Some(default) = param.default.as_ref() {
+            attributes.push(format!("デフォルト: {}", format_type_level_expr(default)));
+        }
+        if let (Some(facts), Some(key)) = (facts, summary.symbol_key.as_ref()) {
+            let symbol = SymbolId::from(key.as_str());
+            if let Some(value) = facts.const_binding(&symbol, &param.name) {
+                attributes.push(format!("推論値: {}", format_type_level_value(value)));
+            }
+        }
+        summary.const_params.push(ConstParamSummary {
+            name: param.name.clone(),
+            ty: format_type_annotation(&param.type_annotation),
+            attributes,
+        });
+    }
+
+    if let (Some(facts), Some(key)) = (facts, summary.symbol_key.as_ref()) {
+        let symbol = SymbolId::from(key.as_str());
+        if let Some(results) = facts.type_level_results_for(&symbol) {
+            summary.type_level_results.extend(
+                results
+                    .iter()
+                    .map(|(slot, value)| (slot.clone(), format_type_level_value(value))),
+            );
+        }
+    }
+
+    summary
+}
+
+fn resolve_type_metadata(
+    facts: &TypeFactsSnapshot,
+    candidates: &[String],
+) -> Option<ResolvedSymbolData> {
+    for candidate in candidates {
+        if let Some(signature) = facts.function_signature(candidate) {
+            let mut bounds = HashMap::new();
+            for type_id in &signature.generics {
+                if let Some(recorded) = facts.recorded_bounds(*type_id) {
+                    bounds.insert(*type_id, format!("{:?}", recorded));
+                }
+            }
+            return Some(ResolvedSymbolData {
+                key: candidate.clone(),
+                type_ids: signature.generics.clone(),
+                variance: signature.variance.clone(),
+                bounds,
+            });
+        }
+
+        if let Some(scheme) = facts.scheme_for(candidate) {
+            let mut variance = scheme
+                .variance()
+                .iter()
+                .map(|(id, variance)| (*id, *variance))
+                .collect::<HashMap<_, _>>();
+            let mut bounds = HashMap::new();
+            for type_id in scheme.generics() {
+                if let Some(bound) = scheme.bounds_for(*type_id) {
+                    bounds.insert(*type_id, format!("{:?}", bound));
+                }
+                if let Some(recorded) = facts.recorded_bounds(*type_id) {
+                    bounds
+                        .entry(*type_id)
+                        .or_insert_with(|| format!("{:?}", recorded));
+                }
+                if let Some(recorded) = facts.recorded_variance(*type_id) {
+                    variance.entry(*type_id).or_insert(recorded);
+                }
+            }
+            return Some(ResolvedSymbolData {
+                key: candidate.clone(),
+                type_ids: scheme.generics().to_vec(),
+                variance,
+                bounds,
+            });
+        }
+    }
+
+    if let Some(first) = candidates.first() {
+        return Some(ResolvedSymbolData {
+            key: first.clone(),
+            type_ids: Vec::new(),
+            variance: HashMap::new(),
+            bounds: HashMap::new(),
+        });
+    }
+
+    None
+}
+
+fn format_annotation_list(annotations: &[TypeAnnotation]) -> Option<String> {
+    if annotations.is_empty() {
+        None
+    } else {
+        Some(
+            annotations
+                .iter()
+                .map(format_type_annotation)
+                .collect::<Vec<_>>()
+                .join(" + "),
+        )
+    }
+}
+
+fn format_type_annotation(annotation: &TypeAnnotation) -> String {
+    format!("{:?}", annotation)
+}
+
+fn format_type_level_expr(expr: &TypeLevelExpr) -> String {
+    format!("{:?}", expr)
+}
+
+fn format_type_level_value(value: &TypeLevelValue) -> String {
+    value.to_string()
 }
 
 fn tooling_diagnostic_to_lsp(uri: &str, diagnostic: EnhancedDiagnostic) -> Diagnostic {
