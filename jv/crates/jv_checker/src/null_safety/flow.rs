@@ -172,9 +172,7 @@ impl<'g, 'ctx, 'facts> FlowGraphBuilder<'g, 'ctx, 'facts> {
                 span,
                 ..
             } => {
-                self.context
-                    .late_init_mut()
-                    .allow_late_init(name.clone());
+                self.context.late_init_mut().allow_late_init(name.clone());
                 self.emit_assignment(current, name, initializer, span)
             }
             Statement::VarDeclaration {

@@ -14,7 +14,7 @@ pub use inference::{
 pub use jv_inference::ParallelInferenceConfig;
 pub use regex::RegexAnalysis;
 
-use binding::{resolve_bindings, BindingResolution, BindingUsageSummary};
+use binding::{resolve_bindings, BindingResolution, BindingUsageSummary, LateInitSeed};
 use jv_ast::{Program, Span};
 use null_safety::{JavaLoweringHint, NullSafetyCoordinator};
 use pattern::{PatternCacheMetrics, PatternMatchFacts, PatternMatchService, PatternTarget};
@@ -207,6 +207,7 @@ pub struct TypeChecker {
     regex_validator: RegexValidator,
     normalized_program: Option<Program>,
     binding_usage: BindingUsageSummary,
+    late_init_seeds: HashMap<String, LateInitSeed>,
 }
 
 impl TypeChecker {
@@ -229,6 +230,7 @@ impl TypeChecker {
             regex_validator: RegexValidator::new(),
             normalized_program: None,
             binding_usage: BindingUsageSummary::default(),
+            late_init_seeds: HashMap::new(),
         }
     }
 
@@ -263,6 +265,10 @@ impl TypeChecker {
         &self.binding_usage
     }
 
+    pub fn late_init_seeds(&self) -> &HashMap<String, LateInitSeed> {
+        &self.late_init_seeds
+    }
+
     pub fn check_program(&mut self, program: &Program) -> Result<(), Vec<CheckError>> {
         self.engine.set_parallel_config(self.parallel_config);
         self.null_safety_hints.clear();
@@ -272,10 +278,12 @@ impl TypeChecker {
             program: normalized,
             diagnostics,
             usage,
+            late_init_seeds,
         } = binding_resolution;
 
         self.binding_usage = usage;
         self.normalized_program = Some(normalized);
+        self.late_init_seeds = late_init_seeds;
 
         if !diagnostics.is_empty() {
             self.snapshot = None;

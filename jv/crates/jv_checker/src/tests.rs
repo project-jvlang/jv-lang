@@ -203,6 +203,75 @@ fn check_program_populates_inference_snapshot() {
 }
 
 #[test]
+fn binding_resolver_collects_late_init_metadata() {
+    let span = dummy_span();
+
+    let explicit_val = Statement::ValDeclaration {
+        name: "explicitVal".into(),
+        type_annotation: None,
+        initializer: Expression::Literal(Literal::Number("1".into()), span.clone()),
+        modifiers: default_modifiers(),
+        origin: ValBindingOrigin::ExplicitKeyword,
+        span: span.clone(),
+    };
+
+    let implicit_val = Statement::ValDeclaration {
+        name: "implicitVal".into(),
+        type_annotation: None,
+        initializer: Expression::Literal(Literal::Number("2".into()), span.clone()),
+        modifiers: default_modifiers(),
+        origin: ValBindingOrigin::Implicit,
+        span: span.clone(),
+    };
+
+    let mut late_init_modifiers = default_modifiers();
+    late_init_modifiers.annotations.push(annotation("LateInit"));
+
+    let late_var = Statement::VarDeclaration {
+        name: "lateVar".into(),
+        type_annotation: None,
+        initializer: None,
+        modifiers: late_init_modifiers,
+        span: span.clone(),
+    };
+
+    let program = Program {
+        package: None,
+        imports: Vec::new(),
+        statements: vec![explicit_val, implicit_val, late_var],
+        span,
+    };
+
+    let mut checker = TypeChecker::new();
+    checker
+        .check_program(&program)
+        .expect("binding resolution should succeed");
+
+    let seeds = checker.late_init_seeds();
+
+    let explicit = seeds
+        .get("explicitVal")
+        .expect("explicit val seed should be recorded");
+    assert_eq!(explicit.origin, ValBindingOrigin::ExplicitKeyword);
+    assert!(explicit.has_initializer);
+    assert!(!explicit.explicit_late_init);
+
+    let implicit = seeds
+        .get("implicitVal")
+        .expect("implicit val seed should be recorded");
+    assert_eq!(implicit.origin, ValBindingOrigin::Implicit);
+    assert!(implicit.has_initializer);
+    assert!(!implicit.explicit_late_init);
+
+    let late_var = seeds
+        .get("lateVar")
+        .expect("late var seed should be recorded");
+    assert_eq!(late_var.origin, ValBindingOrigin::ExplicitKeyword);
+    assert!(!late_var.has_initializer);
+    assert!(late_var.explicit_late_init);
+}
+
+#[test]
 fn check_program_reports_type_error_on_mismatch() {
     let span = dummy_span();
     let mismatched_expr = Expression::Binary {

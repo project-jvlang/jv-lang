@@ -15,11 +15,20 @@ pub struct BindingUsageSummary {
     pub vars: usize,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LateInitSeed {
+    pub name: String,
+    pub origin: ValBindingOrigin,
+    pub has_initializer: bool,
+    pub explicit_late_init: bool,
+}
+
 #[derive(Debug)]
 pub struct BindingResolution {
     pub program: Program,
     pub diagnostics: Vec<CheckError>,
     pub usage: BindingUsageSummary,
+    pub late_init_seeds: HashMap<String, LateInitSeed>,
 }
 
 pub fn resolve_bindings(program: &Program) -> BindingResolution {
@@ -30,6 +39,7 @@ struct BindingResolver {
     scopes: Vec<HashMap<String, BindingKind>>,
     diagnostics: Vec<CheckError>,
     usage: BindingUsageSummary,
+    late_init_seeds: HashMap<String, LateInitSeed>,
 }
 
 #[derive(Clone)]
@@ -49,6 +59,7 @@ impl BindingResolver {
             scopes: vec![HashMap::new()],
             diagnostics: Vec::new(),
             usage: BindingUsageSummary::default(),
+            late_init_seeds: HashMap::new(),
         }
     }
 
@@ -62,7 +73,24 @@ impl BindingResolver {
             program: normalized,
             diagnostics: self.diagnostics,
             usage: self.usage,
+            late_init_seeds: self.late_init_seeds,
         }
+    }
+
+    fn record_late_init_seed(
+        &mut self,
+        name: String,
+        origin: ValBindingOrigin,
+        has_initializer: bool,
+        modifiers: &Modifiers,
+    ) {
+        let seed = LateInitSeed {
+            name: name.clone(),
+            origin,
+            has_initializer,
+            explicit_late_init: has_late_init_annotation(modifiers),
+        };
+        self.late_init_seeds.insert(name, seed);
     }
 
     fn resolve_statements(&mut self, statements: Vec<Statement>) -> Vec<Statement> {
@@ -84,6 +112,7 @@ impl BindingResolver {
             } => {
                 let initializer = self.resolve_expression(initializer);
                 self.declare_immutable(name.clone(), origin, span.clone(), true);
+                self.record_late_init_seed(name.clone(), origin, true, &modifiers);
                 Statement::ValDeclaration {
                     name,
                     type_annotation,
@@ -100,8 +129,20 @@ impl BindingResolver {
                 modifiers,
                 span,
             } => {
-                let initializer = initializer.map(|expr| self.resolve_expression(expr));
+                let (has_initializer, initializer) = match initializer {
+                    Some(expr) => {
+                        let resolved = self.resolve_expression(expr);
+                        (true, Some(resolved))
+                    }
+                    None => (false, None),
+                };
                 self.declare_mutable(name.clone(), span.clone(), true);
+                self.record_late_init_seed(
+                    name.clone(),
+                    ValBindingOrigin::ExplicitKeyword,
+                    has_initializer,
+                    &modifiers,
+                );
                 Statement::VarDeclaration {
                     name,
                     type_annotation,
@@ -659,6 +700,15 @@ impl BindingResolver {
     fn is_self_reference(&self, name: &str, expr: &Expression) -> bool {
         matches!(expr, Expression::Identifier(ref other, _) if other == name)
     }
+}
+
+fn has_late_init_annotation(modifiers: &Modifiers) -> bool {
+    modifiers.annotations.iter().any(|annotation| {
+        annotation
+            .name
+            .simple_name()
+            .eq_ignore_ascii_case("LateInit")
+    })
 }
 
 fn expression_span(expr: &Expression) -> Span {
