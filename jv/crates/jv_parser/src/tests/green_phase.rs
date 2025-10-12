@@ -1,4 +1,5 @@
 use super::support::{first_statement, parse_program, parse_program_result};
+use crate::syntax::support::statement_span;
 use jv_ast::{
     Argument, ArgumentElementKind, BinaryOp, CallArgumentStyle, CommentKind, CommentVisibility,
     ConcurrencyConstruct, Expression, JsonValue, Literal, LoopStrategy, Pattern, RegexLiteral,
@@ -1194,6 +1195,103 @@ fn test_whitespace_array_literal() {
                 assert_eq!(*delimiter, SequenceDelimiter::Whitespace);
             }
             other => panic!("expected array expression, found {:?}", other),
+        },
+        other => panic!("expected val declaration, found {:?}", other),
+    }
+}
+
+#[test]
+fn block_expression_initializer_span_includes_braces() {
+    let source = "val value = { val x = 1\n    x\n}\n";
+    let program = parse_program(source);
+    let statement = first_statement(&program);
+
+    match statement {
+        Statement::ValDeclaration { initializer, .. } => match initializer {
+            Expression::Block { statements, span } => {
+                assert_eq!(statements.len(), 2);
+
+                let first_span = statement_span(&statements[0]);
+                let last_span = statement_span(statements.last().unwrap());
+
+                let starts_before_first = span.start_line < first_span.start_line
+                    || (span.start_line == first_span.start_line
+                        && span.start_column < first_span.start_column);
+                assert!(
+                    starts_before_first,
+                    "block span should begin before the first inner statement",
+                );
+
+                let ends_after_last = span.end_line > last_span.end_line
+                    || (span.end_line == last_span.end_line
+                        && span.end_column >= last_span.end_column);
+                assert!(
+                    ends_after_last,
+                    "block span should extend through the closing brace",
+                );
+            }
+            other => panic!("expected block expression initializer, found {:?}", other),
+        },
+        other => panic!("expected val declaration, found {:?}", other),
+    }
+}
+
+#[test]
+fn block_expression_inline_when_arm_parses() {
+    let source = r#"
+val result = when (value) {
+    is String -> { val label = value
+        label
+    }
+    else -> "fallback"
+}
+"#;
+    let program = parse_program(source);
+    let statement = first_statement(&program);
+
+    match statement {
+        Statement::ValDeclaration { initializer, .. } => match initializer {
+            Expression::When { arms, else_arm, .. } => {
+                assert_eq!(arms.len(), 1);
+                assert!(
+                    else_arm.is_some(),
+                    "else arm should be captured separately"
+                );
+                match &arms[0].body {
+                    Expression::Block { statements, .. } => {
+                        assert!(
+                            !statements.is_empty(),
+                            "block arm should contain inner statements"
+                        );
+                    }
+                    other => panic!("expected block expression body, got {:?}", other),
+                }
+            }
+            other => panic!("expected when expression initializer, found {:?}", other),
+        },
+        other => panic!("expected val declaration, found {:?}", other),
+    }
+}
+
+#[test]
+fn block_expression_supports_trailing_member_access() {
+    let source = "val length = { val text = \"abc\"\n    text\n}.length\n";
+    let program = parse_program(source);
+    let statement = first_statement(&program);
+
+    match statement {
+        Statement::ValDeclaration { initializer, .. } => match initializer {
+            Expression::MemberAccess { object, property, .. } => {
+                assert_eq!(property, "length");
+                match object.as_ref() {
+                    Expression::Block { statements, .. } => {
+                        assert_eq!(statements.len(), 2);
+                        assert!(matches!(statements.last().unwrap(), Statement::Expression { .. }));
+                    }
+                    other => panic!("expected block expression receiver, found {:?}", other),
+                }
+            }
+            other => panic!("expected member access initializer, found {:?}", other),
         },
         other => panic!("expected val declaration, found {:?}", other),
     }

@@ -113,19 +113,19 @@ pub(crate) fn block_expression_parser(
     statement: impl ChumskyParser<Token, Statement, Error = Simple<Token>> + Clone,
 ) -> impl ChumskyParser<Token, Expression, Error = Simple<Token>> + Clone {
     token_left_brace()
-        .ignore_then(statement.repeated())
-        .then_ignore(token_right_brace())
-        .map(|statements| {
-            let span = if statements.is_empty() {
-                Span::dummy()
-            } else {
-                let start = statement_span(&statements[0]);
-                let end = statement_span(statements.last().unwrap());
-                merge_spans(&start, &end)
-            };
-
+        .map(|token| span_from_token(&token))
+        .then(statement.repeated())
+        .then(token_right_brace().map(|token| span_from_token(&token)))
+        .map(|((left_span, statements), right_span)| {
+            let span = merge_spans(&left_span, &right_span);
             Expression::Block { statements, span }
         })
+}
+
+pub(crate) fn expression_level_block_parser(
+    statement: impl ChumskyParser<Token, Statement, Error = Simple<Token>> + Clone + 'static,
+) -> impl ChumskyParser<Token, Expression, Error = Simple<Token>> + Clone {
+    block_expression_parser(statement).boxed()
 }
 
 pub(crate) fn token_comma() -> impl ChumskyParser<Token, Token, Error = Simple<Token>> + Clone {
