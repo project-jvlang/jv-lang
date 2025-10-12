@@ -29,6 +29,16 @@ fn annotation(name: &str) -> Annotation {
     }
 }
 
+fn collect_null_safety_messages(errors: &[CheckError]) -> Vec<String> {
+    errors
+        .iter()
+        .filter_map(|error| match error {
+            CheckError::NullSafetyError(message) => Some(message.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
 #[test]
 fn convert_type_kind_exports_non_null_primitives() {
     let facts = convert_type_kind(&TypeKind::Primitive("String"));
@@ -200,6 +210,19 @@ fn check_program_populates_inference_snapshot() {
         .expect("inference snapshot should be populated");
     assert!(snapshot.function_scheme("add").is_some());
     assert!(!snapshot.bindings().is_empty());
+
+    let manifest = snapshot.late_init_manifest();
+    let lhs_seed = manifest
+        .get("lhs")
+        .expect("lhs seed should be captured in snapshot");
+    assert_eq!(lhs_seed.origin, ValBindingOrigin::ExplicitKeyword);
+    assert!(lhs_seed.has_initializer);
+
+    let rhs_seed = manifest
+        .get("rhs")
+        .expect("rhs seed should be captured in snapshot");
+    assert_eq!(rhs_seed.origin, ValBindingOrigin::ExplicitKeyword);
+    assert!(rhs_seed.has_initializer);
 }
 
 #[test]
@@ -485,6 +508,100 @@ fn null_safety_violation_is_reported() {
     assert!(diagnostics.iter().any(
         |error| matches!(error, CheckError::NullSafetyError(message) if message.contains("null"))
     ));
+}
+
+#[test]
+fn null_safety_reports_jv3108_without_jv3003_regression() {
+    let span = dummy_span();
+
+    let implicit_val = Statement::ValDeclaration {
+        name: "implicitVal".into(),
+        type_annotation: None,
+        initializer: Expression::Literal(Literal::Number("1".into()), span.clone()),
+        modifiers: default_modifiers(),
+        origin: ValBindingOrigin::Implicit,
+        span: span.clone(),
+    };
+
+    let token_binding = Statement::ValDeclaration {
+        name: "token".into(),
+        type_annotation: Some(TypeAnnotation::Simple("String".into())),
+        initializer: Expression::Literal(Literal::String("hello".into()), span.clone()),
+        modifiers: default_modifiers(),
+        origin: ValBindingOrigin::ExplicitKeyword,
+        span: span.clone(),
+    };
+
+    let when_expr = Expression::When {
+        expr: Some(Box::new(Expression::Identifier("token".into(), span.clone()))),
+        arms: vec![WhenArm {
+            pattern: Pattern::Literal(Literal::Null, span.clone()),
+            guard: None,
+            body: Expression::Literal(Literal::String("none".into()), span.clone()),
+            span: span.clone(),
+        }],
+        else_arm: Some(Box::new(Expression::Identifier("token".into(), span.clone()))),
+        implicit_end: None,
+        span: span.clone(),
+    };
+
+    let null_branch_label = Statement::ValDeclaration {
+        name: "label".into(),
+        type_annotation: None,
+        initializer: when_expr,
+        modifiers: default_modifiers(),
+        origin: ValBindingOrigin::ExplicitKeyword,
+        span: span.clone(),
+    };
+
+    let program = Program {
+        package: None,
+        imports: Vec::new(),
+        statements: vec![implicit_val, token_binding, null_branch_label],
+        span: span.clone(),
+    };
+
+    let mut checker = TypeChecker::new();
+    checker
+        .check_program(&program)
+        .expect("program should type-check");
+
+    let snapshot = checker.inference_snapshot().cloned();
+    let diagnostics = checker.check_null_safety(&program, snapshot.as_ref());
+    let messages = collect_null_safety_messages(&diagnostics);
+
+    assert_eq!(
+        messages.len(),
+        1,
+        "expected a single null safety diagnostic, got: {messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|message| message.contains("JV3108")),
+        "expected JV3108 conflict, got: {messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .all(|message| !message.contains("JV3003")),
+        "unexpected JV3003 regression detected: {messages:?}"
+    );
+
+    let snapshot = snapshot.expect("snapshot should be available for null safety");
+    let manifest = snapshot.late_init_manifest();
+
+    let implicit_seed = manifest
+        .get("implicitVal")
+        .expect("implicit val should be recorded in manifest");
+    assert_eq!(implicit_seed.origin, ValBindingOrigin::Implicit);
+    assert!(implicit_seed.has_initializer);
+
+    let token_seed = manifest
+        .get("token")
+        .expect("token binding should be recorded in manifest");
+    assert_eq!(token_seed.origin, ValBindingOrigin::ExplicitKeyword);
+    assert!(token_seed.has_initializer);
 }
 
 fn sample_when_arm(span: &Span) -> WhenArm {
