@@ -228,6 +228,35 @@ fn guard_pattern_span_covers_condition() {
 }
 
 #[test]
+fn when_arm_accepts_block_expression_body() {
+    let expr = extract_when_expression(
+        r#"
+val result = when (value) {
+    is String -> {
+        val label = value
+        label
+    }
+    else -> "fallback"
+}
+"#,
+    );
+
+    let Expression::When { arms, .. } = expr else {
+        panic!("expected when expression");
+    };
+
+    match &arms[0].body {
+        Expression::Block { statements, .. } => {
+            assert!(
+                !statements.is_empty(),
+                "block body should contain statements"
+            );
+        }
+        other => panic!("expected block expression body, got {other:?}"),
+    }
+}
+
+#[test]
 fn subjectless_when_expression_preserves_none_subject() {
     let expr = extract_when_expression("val flag = when { condition() -> true else -> false }\n");
     let Expression::When {

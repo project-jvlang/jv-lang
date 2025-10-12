@@ -25,7 +25,8 @@ use thiserror::Error;
 use jv_inference::service::{TypeFactsBuilder, TypeFactsSnapshot, TypeScheme as FactsTypeScheme};
 use jv_inference::solver::TypeBinding as FactsTypeBinding;
 use jv_inference::types::{
-    TypeId as FactsTypeId, TypeKind as FactsTypeKind, TypeVariant as FactsTypeVariant,
+    NullabilityFlag, TypeId as FactsTypeId, TypeKind as FactsTypeKind,
+    TypeVariant as FactsTypeVariant,
 };
 
 #[derive(Error, Debug)]
@@ -509,7 +510,8 @@ fn convert_scheme(scheme: &TypeScheme) -> FactsTypeScheme {
 
 fn convert_type_kind(ty: &TypeKind) -> FactsTypeKind {
     match ty {
-        TypeKind::Primitive(name) => FactsTypeKind::new(FactsTypeVariant::Primitive(name)),
+        TypeKind::Primitive(name) => FactsTypeKind::new(FactsTypeVariant::Primitive(name))
+            .with_nullability(NullabilityFlag::NonNull),
         TypeKind::Optional(inner) => FactsTypeKind::optional(convert_type_kind(inner)),
         TypeKind::Variable(id) => {
             FactsTypeKind::new(FactsTypeVariant::Variable(FactsTypeId::new(id.to_raw())))
@@ -518,6 +520,7 @@ fn convert_type_kind(ty: &TypeKind) -> FactsTypeKind {
             let converted_params = params.iter().map(convert_type_kind).collect::<Vec<_>>();
             let converted_ret = convert_type_kind(ret);
             FactsTypeKind::function(converted_params, converted_ret)
+                .with_nullability(NullabilityFlag::NonNull)
         }
         TypeKind::Unknown => FactsTypeKind::default(),
     }

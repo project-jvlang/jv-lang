@@ -21,10 +21,16 @@ use super::support::{
     token_string_start, token_when, type_annotation,
 };
 
-pub(crate) fn expression_parser(
-) -> impl ChumskyParser<Token, Expression, Error = Simple<Token>> + Clone {
-    recursive(|expr| {
+pub(crate) fn expression_parser<B>(
+    block: B,
+) -> impl ChumskyParser<Token, Expression, Error = Simple<Token>> + Clone
+where
+    B: ChumskyParser<Token, Expression, Error = Simple<Token>> + Clone + 'static,
+{
+    recursive(move |expr| {
+        let block_expr = block.clone();
         let primary = choice((
+            block_expr,
             json_expression_parser(),
             when_expression_parser(expr.clone()),
             forbidden_if_expression_parser(),

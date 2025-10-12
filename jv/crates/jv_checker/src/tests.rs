@@ -7,6 +7,7 @@ use jv_ast::{
     Annotation, AnnotationName, BinaryOp, Expression, Literal, Modifiers, Parameter, Pattern,
     Program, RegexLiteral, Span, Statement, TypeAnnotation, ValBindingOrigin, WhenArm,
 };
+use jv_inference::types::{NullabilityFlag, TypeVariant as FactsTypeVariant};
 
 fn dummy_span() -> Span {
     Span::new(1, 0, 1, 5)
@@ -21,6 +22,40 @@ fn annotation(name: &str) -> Annotation {
         name: AnnotationName::new(vec![name.to_string()], dummy_span()),
         arguments: Vec::new(),
         span: dummy_span(),
+    }
+}
+
+#[test]
+fn convert_type_kind_exports_non_null_primitives() {
+    let facts = convert_type_kind(&TypeKind::Primitive("String"));
+    assert_eq!(facts.nullability(), NullabilityFlag::NonNull);
+    assert!(matches!(
+        facts.variant(),
+        FactsTypeVariant::Primitive(name) if *name == "String"
+    ));
+}
+
+#[test]
+fn convert_type_kind_exports_non_null_functions() {
+    let function = TypeKind::Function(
+        vec![TypeKind::Primitive("String")],
+        Box::new(TypeKind::Primitive("Int")),
+    );
+    let facts = convert_type_kind(&function);
+    assert_eq!(facts.nullability(), NullabilityFlag::NonNull);
+
+    if let FactsTypeVariant::Function(params, ret) = facts.variant() {
+        assert_eq!(params.len(), 1);
+        assert!(matches!(
+            params[0].variant(),
+            FactsTypeVariant::Primitive(name) if *name == "String"
+        ));
+        assert!(matches!(
+            ret.variant(),
+            FactsTypeVariant::Primitive(name) if *name == "Int"
+        ));
+    } else {
+        panic!("expected function variant");
     }
 }
 

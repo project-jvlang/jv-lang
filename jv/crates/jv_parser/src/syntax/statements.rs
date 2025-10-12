@@ -13,12 +13,13 @@ use jv_lexer::{SourceCommentTrivia, Token, TokenTrivia, TokenType};
 use super::expressions;
 use super::parameters::parameter_list;
 use super::support::{
-    expression_span, identifier, identifier_with_span, keyword as support_keyword, merge_spans,
-    qualified_name_with_span, span_from_token, statement_span, token_any_comma, token_assign,
-    token_at, token_class, token_colon, token_data, token_defer, token_do_keyword, token_dot,
-    token_for, token_fun, token_greater, token_in_keyword, token_left_brace, token_left_paren,
-    token_less, token_question, token_return, token_right_brace, token_right_paren, token_spawn,
-    token_use, token_val, token_var, token_where_keyword, token_while_keyword, type_annotation,
+    block_expression_parser, expression_span, identifier, identifier_with_span,
+    keyword as support_keyword, merge_spans, qualified_name_with_span, span_from_token,
+    token_any_comma, token_assign, token_at, token_class, token_colon, token_data, token_defer,
+    token_do_keyword, token_dot, token_for, token_fun, token_greater, token_in_keyword,
+    token_left_brace, token_left_paren, token_less, token_question, token_return,
+    token_right_brace, token_right_paren, token_spawn, token_use, token_val, token_var,
+    token_where_keyword, token_while_keyword, type_annotation,
 };
 
 fn attempt_statement_parser<P>(
@@ -33,7 +34,7 @@ where
 pub(crate) fn statement_parser(
 ) -> impl ChumskyParser<Token, Statement, Error = Simple<Token>> + Clone {
     recursive(|statement| {
-        let expr = expressions::expression_parser();
+        let expr = expressions::expression_parser(block_expression_parser(statement.clone()));
 
         let comment_stmt = comment_statement_parser();
         let val_decl = attempt_statement_parser(val_declaration_parser(expr.clone()));
@@ -427,25 +428,6 @@ fn infer_loop_strategy(iterable: &Expression) -> LoopStrategy {
         }),
         _ => LoopStrategy::Iterable,
     }
-}
-
-fn block_expression_parser(
-    statement: impl ChumskyParser<Token, Statement, Error = Simple<Token>> + Clone,
-) -> impl ChumskyParser<Token, Expression, Error = Simple<Token>> + Clone {
-    token_left_brace()
-        .ignore_then(statement.repeated())
-        .then_ignore(token_right_brace())
-        .map(|statements| {
-            let span = if statements.is_empty() {
-                Span::dummy()
-            } else {
-                let start = statement_span(&statements[0]);
-                let end = statement_span(statements.last().unwrap());
-                merge_spans(&start, &end)
-            };
-
-            Expression::Block { statements, span }
-        })
 }
 
 fn function_body(

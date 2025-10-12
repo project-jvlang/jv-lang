@@ -115,9 +115,16 @@ fn when_null_branch_conflict_emits_jv3108() {
     let diagnostics = checker.check_null_safety(&program, None);
     let messages = collect_null_safety_messages(&diagnostics);
 
+    assert_eq!(
+        messages.len(),
+        1,
+        "expected single JV3108 conflict diagnostic, got: {messages:?}"
+    );
+
+    let expected = "JV3108: `token` は non-null と推論されていますが、when 分岐で null と比較されています。分岐を削除するか型を nullable に変更してください。\nJV3108: `token` is inferred as non-null but the when expression compares it against null. Remove the branch or update the type to be nullable.\nQuick Fix: when.remove.null-branch -> `token` の null 分岐を削除\nQuick Fix: when.remove.null-branch -> remove the null arm for `token` or declare the type as nullable";
     assert!(
-        messages.iter().any(|message| message.contains("JV3108")),
-        "expected JV3108 conflict diagnostic, got: {messages:?}"
+        messages.contains(&expected.to_string()),
+        "expected JV3108 conflict for `token`, got: {messages:?}"
     );
 
     assert!(
@@ -434,7 +441,7 @@ label
     assert!(
         diagnostics
             .iter()
-            .any(|error| matches!(error, CheckError::NullSafetyError(message) if message.contains("非 null として宣言されています"))),
+            .any(|error| matches!(error, CheckError::NullSafetyError(message) if message.contains("non-null と宣言されています"))),
         "expected null safety diagnostic for implicit binding, got: {:?}",
         diagnostics
     );

@@ -109,6 +109,25 @@ pub(crate) fn token_right_brace() -> impl ChumskyParser<Token, Token, Error = Si
     filter(|token: &Token| matches!(token.token_type, TokenType::RightBrace))
 }
 
+pub(crate) fn block_expression_parser(
+    statement: impl ChumskyParser<Token, Statement, Error = Simple<Token>> + Clone,
+) -> impl ChumskyParser<Token, Expression, Error = Simple<Token>> + Clone {
+    token_left_brace()
+        .ignore_then(statement.repeated())
+        .then_ignore(token_right_brace())
+        .map(|statements| {
+            let span = if statements.is_empty() {
+                Span::dummy()
+            } else {
+                let start = statement_span(&statements[0]);
+                let end = statement_span(statements.last().unwrap());
+                merge_spans(&start, &end)
+            };
+
+            Expression::Block { statements, span }
+        })
+}
+
 pub(crate) fn token_comma() -> impl ChumskyParser<Token, Token, Error = Simple<Token>> + Clone {
     filter(|token: &Token| matches!(token.token_type, TokenType::Comma))
 }
