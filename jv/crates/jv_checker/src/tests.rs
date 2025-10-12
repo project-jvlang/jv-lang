@@ -247,23 +247,23 @@ fn binding_resolver_collects_late_init_metadata() {
         .check_program(&program)
         .expect("binding resolution should succeed");
 
-    let seeds = checker.late_init_seeds();
+    let manifest = checker.late_init_manifest();
 
-    let explicit = seeds
+    let explicit = manifest
         .get("explicitVal")
         .expect("explicit val seed should be recorded");
     assert_eq!(explicit.origin, ValBindingOrigin::ExplicitKeyword);
     assert!(explicit.has_initializer);
     assert!(!explicit.explicit_late_init);
 
-    let implicit = seeds
+    let implicit = manifest
         .get("implicitVal")
         .expect("implicit val seed should be recorded");
     assert_eq!(implicit.origin, ValBindingOrigin::Implicit);
     assert!(implicit.has_initializer);
     assert!(!implicit.explicit_late_init);
 
-    let late_var = seeds
+    let late_var = manifest
         .get("lateVar")
         .expect("late var seed should be recorded");
     assert_eq!(late_var.origin, ValBindingOrigin::ExplicitKeyword);

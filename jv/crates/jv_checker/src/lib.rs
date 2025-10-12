@@ -14,7 +14,7 @@ pub use inference::{
 pub use jv_inference::ParallelInferenceConfig;
 pub use regex::RegexAnalysis;
 
-use binding::{resolve_bindings, BindingResolution, BindingUsageSummary, LateInitSeed};
+use binding::{resolve_bindings, BindingResolution, BindingUsageSummary, LateInitManifest};
 use jv_ast::{Program, Span};
 use null_safety::{JavaLoweringHint, NullSafetyCoordinator};
 use pattern::{PatternCacheMetrics, PatternMatchFacts, PatternMatchService, PatternTarget};
@@ -53,6 +53,7 @@ pub struct InferenceSnapshot {
     facts: TypeFactsSnapshot,
     pattern_facts: HashMap<(u64, PatternTarget), PatternMatchFacts>,
     regex_analyses: Vec<RegexAnalysis>,
+    late_init_manifest: LateInitManifest,
 }
 
 impl InferenceSnapshot {
@@ -60,6 +61,7 @@ impl InferenceSnapshot {
         engine: &InferenceEngine,
         pattern_facts: HashMap<(u64, PatternTarget), PatternMatchFacts>,
         regex_analyses: Vec<RegexAnalysis>,
+        late_init_manifest: LateInitManifest,
     ) -> Self {
         let environment = engine.environment().clone();
         let bindings = engine.bindings().to_vec();
@@ -81,6 +83,7 @@ impl InferenceSnapshot {
             facts,
             pattern_facts,
             regex_analyses,
+            late_init_manifest,
         }
     }
 
@@ -103,6 +106,10 @@ impl InferenceSnapshot {
     pub fn binding_scheme(&self, name: &str) -> Option<&TypeScheme> {
         self.environment.lookup(name)
     }
+
+    pub fn late_init_manifest(&self) -> &LateInitManifest {
+        &self.late_init_manifest
+    }
 }
 
 /// 推論済み情報へアクセスするためのサービスレイヤ。
@@ -121,6 +128,9 @@ pub trait TypeInferenceService {
 
     /// 推論済みのトップレベル型を返す。
     fn result_type(&self) -> Option<&TypeKind>;
+
+    /// Late-init 用メタデータを返す。
+    fn late_init_manifest(&self) -> &LateInitManifest;
 }
 
 impl TypeInferenceService for InferenceSnapshot {
@@ -142,6 +152,10 @@ impl TypeInferenceService for InferenceSnapshot {
 
     fn result_type(&self) -> Option<&TypeKind> {
         self.result_type.as_ref()
+    }
+
+    fn late_init_manifest(&self) -> &LateInitManifest {
+        &self.late_init_manifest
     }
 }
 
@@ -207,7 +221,7 @@ pub struct TypeChecker {
     regex_validator: RegexValidator,
     normalized_program: Option<Program>,
     binding_usage: BindingUsageSummary,
-    late_init_seeds: HashMap<String, LateInitSeed>,
+    late_init_manifest: LateInitManifest,
 }
 
 impl TypeChecker {
@@ -230,7 +244,7 @@ impl TypeChecker {
             regex_validator: RegexValidator::new(),
             normalized_program: None,
             binding_usage: BindingUsageSummary::default(),
-            late_init_seeds: HashMap::new(),
+            late_init_manifest: LateInitManifest::default(),
         }
     }
 
@@ -265,8 +279,8 @@ impl TypeChecker {
         &self.binding_usage
     }
 
-    pub fn late_init_seeds(&self) -> &HashMap<String, LateInitSeed> {
-        &self.late_init_seeds
+    pub fn late_init_manifest(&self) -> &LateInitManifest {
+        &self.late_init_manifest
     }
 
     pub fn check_program(&mut self, program: &Program) -> Result<(), Vec<CheckError>> {
@@ -278,12 +292,12 @@ impl TypeChecker {
             program: normalized,
             diagnostics,
             usage,
-            late_init_seeds,
+            late_init_manifest,
         } = binding_resolution;
 
         self.binding_usage = usage;
         self.normalized_program = Some(normalized);
-        self.late_init_seeds = late_init_seeds;
+        self.late_init_manifest = late_init_manifest;
 
         if !diagnostics.is_empty() {
             self.snapshot = None;
@@ -336,6 +350,7 @@ impl TypeChecker {
                     &self.engine,
                     pattern_facts,
                     regex_analyses,
+                    self.late_init_manifest.clone(),
                 ));
                 self.merged_facts = self
                     .snapshot

@@ -2,4 +2,6 @@
 
 mod resolver;
 
-pub use resolver::{resolve_bindings, BindingResolution, BindingUsageSummary, LateInitSeed};
+pub use resolver::{
+    resolve_bindings, BindingResolution, BindingUsageSummary, LateInitManifest, LateInitSeed,
+};

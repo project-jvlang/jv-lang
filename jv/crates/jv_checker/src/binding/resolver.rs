@@ -23,12 +23,39 @@ pub struct LateInitSeed {
     pub explicit_late_init: bool,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct LateInitManifest {
+    pub items: HashMap<String, LateInitSeed>,
+}
+
+impl LateInitManifest {
+    pub fn new(items: HashMap<String, LateInitSeed>) -> Self {
+        Self { items }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.items.is_empty()
+    }
+
+    pub fn len(&self) -> usize {
+        self.items.len()
+    }
+
+    pub fn get(&self, name: &str) -> Option<&LateInitSeed> {
+        self.items.get(name)
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = (&String, &LateInitSeed)> {
+        self.items.iter()
+    }
+}
+
 #[derive(Debug)]
 pub struct BindingResolution {
     pub program: Program,
     pub diagnostics: Vec<CheckError>,
     pub usage: BindingUsageSummary,
-    pub late_init_seeds: HashMap<String, LateInitSeed>,
+    pub late_init_manifest: LateInitManifest,
 }
 
 pub fn resolve_bindings(program: &Program) -> BindingResolution {
@@ -73,7 +100,7 @@ impl BindingResolver {
             program: normalized,
             diagnostics: self.diagnostics,
             usage: self.usage,
-            late_init_seeds: self.late_init_seeds,
+            late_init_manifest: LateInitManifest::new(self.late_init_seeds),
         }
     }
 
