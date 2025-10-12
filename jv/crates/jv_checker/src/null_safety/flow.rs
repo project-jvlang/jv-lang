@@ -1084,6 +1084,107 @@ mod tests {
     }
 
     #[test]
+    fn flow_graph_normalizes_when_block_spans() {
+        let block_span = Span::new(3, 4, 3, 4);
+        let else_block_span = Span::new(4, 8, 4, 8);
+
+        let block_statements = vec![
+            Statement::ValDeclaration {
+                name: "trimmed".into(),
+                type_annotation: None,
+                initializer: Expression::Identifier(
+                    "token".into(),
+                    Span::new(3, 18, 3, 23),
+                ),
+                modifiers: Default::default(),
+                origin: ValBindingOrigin::ExplicitKeyword,
+                span: Span::new(3, 8, 3, 24),
+            },
+            Statement::Expression {
+                expr: Expression::Identifier("trimmed".into(), Span::new(3, 26, 3, 33)),
+                span: Span::new(3, 26, 3, 33),
+            },
+        ];
+
+        let when_arm = WhenArm {
+            pattern: Pattern::Identifier("value".into(), Span::new(3, 4, 3, 9)),
+            guard: None,
+            body: Expression::Block {
+                statements: block_statements,
+                span: block_span.clone(),
+            },
+            span: Span::new(3, 4, 3, 34),
+        };
+
+        let else_block = Expression::Block {
+            statements: vec![Statement::Expression {
+                expr: Expression::Literal(Literal::String("".into()), Span::new(4, 10, 4, 12)),
+                span: Span::new(4, 10, 4, 12),
+            }],
+            span: else_block_span.clone(),
+        };
+
+        let when_expression = Expression::When {
+            expr: Some(Box::new(Expression::Identifier(
+                "token".into(),
+                Span::new(2, 15, 2, 20),
+            ))),
+            arms: vec![when_arm],
+            else_arm: Some(Box::new(else_block)),
+            implicit_end: None,
+            span: Span::new(2, 5, 4, 15),
+        };
+
+        let program = Program {
+            package: None,
+            imports: vec![],
+            statements: vec![Statement::Expression {
+                expr: when_expression,
+                span: Span::new(2, 1, 4, 16),
+            }],
+            span: Span::new(1, 1, 4, 16),
+        };
+
+        let mut context = NullSafetyContext::hydrate(None);
+        let graph = build_graph(&program, &mut context);
+
+        let normalized_spans: Vec<Span> = graph
+            .nodes()
+            .iter()
+            .filter_map(|node| match node.kind() {
+                FlowNodeKind::Expression => node.span().cloned(),
+                _ => None,
+            })
+            .collect();
+
+        assert!(
+            !normalized_spans.is_empty(),
+            "expected expression nodes with spans, got {:?}",
+            graph
+                .nodes()
+                .iter()
+                .map(|node| (node.kind().clone(), node.span().cloned()))
+                .collect::<Vec<_>>()
+        );
+
+        assert!(
+            normalized_spans.iter().any(|span| {
+                span.start_line == 3 && span.start_column == 4 && span.end_column > span.start_column
+            }),
+            "expected normalized span for when arm block, got: {:?}",
+            normalized_spans
+        );
+
+        assert!(
+            normalized_spans.iter().any(|span| {
+                span.start_line == 4 && span.start_column == 8 && span.end_column > span.start_column
+            }),
+            "expected normalized span for else block, got: {:?}",
+            normalized_spans
+        );
+    }
+
+    #[test]
     fn try_with_catch_creates_exceptional_edges() {
         let span = Span::dummy();
         let try_body = Expression::Block {

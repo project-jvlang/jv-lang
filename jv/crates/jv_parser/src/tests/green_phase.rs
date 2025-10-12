@@ -1274,6 +1274,97 @@ val result = when (value) {
 }
 
 #[test]
+fn when_expression_with_block_arms_supports_member_access() {
+    let source = r#"
+val length = when (token) {
+    is String -> {
+        val trimmed = token.trim()
+        trimmed
+    }
+    else -> {
+        ""
+    }
+}.length
+"#;
+    let program = parse_program(source);
+    let statement = first_statement(&program);
+
+    match statement {
+        Statement::ValDeclaration { initializer, .. } => match initializer {
+            Expression::MemberAccess { object, property, .. } => {
+                assert_eq!(property, "length");
+                match object.as_ref() {
+                    Expression::When { arms, else_arm, .. } => {
+                        assert_eq!(arms.len(), 1, "expected single when arm");
+
+                        match &arms[0].body {
+                            Expression::Block { statements, span } => {
+                                assert_eq!(statements.len(), 2);
+                                assert!(
+                                    span.end_line > span.start_line,
+                                    "block body should span multiple lines"
+                                );
+                                match &statements[0] {
+                                    Statement::ValDeclaration { name, .. } => {
+                                        assert_eq!(name, "trimmed")
+                                    }
+                                    other => panic!(
+                                        "expected val declaration in when arm block, found {:?}",
+                                        other
+                                    ),
+                                }
+                            }
+                            other => panic!(
+                                "expected block expression in when arm, found {:?}",
+                                other
+                            ),
+                        }
+
+                        let else_expression = else_arm
+                            .as_ref()
+                            .expect("expected else arm expression");
+                        match else_expression.as_ref() {
+                            Expression::Block { statements, span } => {
+                                assert_eq!(statements.len(), 1);
+                                assert!(
+                                    span.end_line >= span.start_line,
+                                    "else block span should have a valid line range"
+                                );
+                                match &statements[0] {
+                                    Statement::Expression { expr, .. } => match expr {
+                                        Expression::Literal(Literal::String(value), _) => {
+                                            assert!(value.is_empty())
+                                        }
+                                        other => panic!(
+                                            "expected string literal in else block, found {:?}",
+                                            other
+                                        ),
+                                    },
+                                    other => panic!(
+                                        "expected expression statement in else block, found {:?}",
+                                        other
+                                    ),
+                                }
+                            }
+                            other => panic!(
+                                "expected block expression in else arm, found {:?}",
+                                other
+                            ),
+                        }
+                    }
+                    other => panic!(
+                        "expected when expression receiver for member access, found {:?}",
+                        other
+                    ),
+                }
+            }
+            other => panic!("expected member access initializer, found {:?}", other),
+        },
+        other => panic!("expected val declaration, found {:?}", other),
+    }
+}
+
+#[test]
 fn block_expression_supports_trailing_member_access() {
     let source = "val length = { val text = \"abc\"\n    text\n}.length\n";
     let program = parse_program(source);
