@@ -294,24 +294,22 @@ impl<'g, 'ctx, 'facts> FlowGraphBuilder<'g, 'ctx, 'facts> {
         else_branch: Option<&Expression>,
         span: Span,
     ) -> FlowNodeId {
-        let condition_node = self
-            .graph
-            .add_node(FlowNodeKind::Expression, Some(span.clone()));
+        let condition_node = self.add_graph_node(FlowNodeKind::Expression, Some(span.clone()));
         self.connect(current, condition_node, FlowEdgeKind::Normal);
 
         let assumptions = detect_null_comparison(condition);
 
-        let then_node = self.graph.add_node(FlowNodeKind::Merge, None);
+        let then_node = self.add_graph_node(FlowNodeKind::Merge, None);
         let true_edge = FlowEdgeKind::TrueBranch {
             assumption: assumptions.true_assumption,
         };
         self.connect(condition_node, then_node, true_edge);
         let then_end = self.handle_expression(then_node, then_branch, None);
 
-        let merge_node = self.graph.add_node(FlowNodeKind::Merge, Some(span.clone()));
+        let merge_node = self.add_graph_node(FlowNodeKind::Merge, Some(span.clone()));
 
         let else_target = if let Some(else_branch) = else_branch {
-            let else_node = self.graph.add_node(FlowNodeKind::Merge, None);
+            let else_node = self.add_graph_node(FlowNodeKind::Merge, None);
             let false_edge = FlowEdgeKind::FalseBranch {
                 assumption: assumptions.false_assumption,
             };
@@ -349,7 +347,7 @@ impl<'g, 'ctx, 'facts> FlowGraphBuilder<'g, 'ctx, 'facts> {
             current
         };
 
-        let merge_node = self.graph.add_node(FlowNodeKind::Merge, Some(span.clone()));
+        let merge_node = self.add_graph_node(FlowNodeKind::Merge, Some(span.clone()));
 
         if arms.is_empty() {
             if let Some(else_expr) = else_branch {
@@ -362,16 +360,12 @@ impl<'g, 'ctx, 'facts> FlowGraphBuilder<'g, 'ctx, 'facts> {
         }
 
         for (index, arm) in arms.iter().enumerate() {
-            let test_node = self
-                .graph
-                .add_node(FlowNodeKind::Expression, Some(arm.span.clone()));
+            let test_node = self.add_graph_node(FlowNodeKind::Expression, Some(arm.span.clone()));
             self.connect(cursor, test_node, FlowEdgeKind::Normal);
 
             let assumptions = patterns::analyze_pattern(subject, &arm.pattern);
 
-            let branch_entry = self
-                .graph
-                .add_node(FlowNodeKind::Merge, Some(arm.span.clone()));
+            let branch_entry = self.add_graph_node(FlowNodeKind::Merge, Some(arm.span.clone()));
             self.connect(
                 test_node,
                 branch_entry,
@@ -396,9 +390,9 @@ impl<'g, 'ctx, 'facts> FlowGraphBuilder<'g, 'ctx, 'facts> {
 
             let is_last_arm = index == arms.len() - 1;
             let fallback_target = if !is_last_arm {
-                Some(self.graph.add_node(FlowNodeKind::Merge, None))
+                Some(self.add_graph_node(FlowNodeKind::Merge, None))
             } else if else_branch.is_some() {
-                Some(self.graph.add_node(FlowNodeKind::Merge, Some(span.clone())))
+                Some(self.add_graph_node(FlowNodeKind::Merge, Some(span.clone())))
             } else {
                 None
             };
@@ -456,9 +450,7 @@ impl<'g, 'ctx, 'facts> FlowGraphBuilder<'g, 'ctx, 'facts> {
         span: Span,
     ) -> FlowNodeId {
         let base_count = self.graph.node_count();
-        let try_entry = self
-            .graph
-            .add_node(FlowNodeKind::Expression, Some(span.clone()));
+        let try_entry = self.add_graph_node(FlowNodeKind::Expression, Some(span.clone()));
         self.connect(current, try_entry, FlowEdgeKind::Normal);
 
         let body_end = self.handle_expression(try_entry, body, None);
@@ -478,9 +470,8 @@ impl<'g, 'ctx, 'facts> FlowGraphBuilder<'g, 'ctx, 'facts> {
 
         if !catch_clauses.is_empty() {
             for clause in catch_clauses {
-                let catch_entry = self
-                    .graph
-                    .add_node(FlowNodeKind::Expression, Some(clause.span.clone()));
+                let catch_entry =
+                    self.add_graph_node(FlowNodeKind::Expression, Some(clause.span.clone()));
 
                 for &source in &exceptional_sources {
                     self.connect(source, catch_entry, FlowEdgeKind::Exceptional);
@@ -501,9 +492,7 @@ impl<'g, 'ctx, 'facts> FlowGraphBuilder<'g, 'ctx, 'facts> {
         }
 
         if let Some(finally_expr) = finally_block {
-            let finally_entry = self
-                .graph
-                .add_node(FlowNodeKind::Expression, Some(span.clone()));
+            let finally_entry = self.add_graph_node(FlowNodeKind::Expression, Some(span.clone()));
 
             for target in &normal_targets {
                 self.connect(*target, finally_entry, FlowEdgeKind::Normal);
@@ -516,7 +505,8 @@ impl<'g, 'ctx, 'facts> FlowGraphBuilder<'g, 'ctx, 'facts> {
             }
 
             let finally_end = self.handle_expression(finally_entry, finally_expr, None);
-            let merge_after_finally = self.graph.add_node(FlowNodeKind::Merge, Some(span.clone()));
+            let merge_after_finally =
+                self.add_graph_node(FlowNodeKind::Merge, Some(span.clone()));
             self.connect(finally_end, merge_after_finally, FlowEdgeKind::Normal);
 
             if catch_clauses.is_empty() {
@@ -525,7 +515,7 @@ impl<'g, 'ctx, 'facts> FlowGraphBuilder<'g, 'ctx, 'facts> {
 
             merge_after_finally
         } else {
-            let merge_node = self.graph.add_node(FlowNodeKind::Merge, Some(span.clone()));
+            let merge_node = self.add_graph_node(FlowNodeKind::Merge, Some(span.clone()));
 
             for target in &normal_targets {
                 self.connect(*target, merge_node, FlowEdgeKind::Normal);
@@ -542,9 +532,7 @@ impl<'g, 'ctx, 'facts> FlowGraphBuilder<'g, 'ctx, 'facts> {
     }
 
     fn build_for_in(&mut self, current: FlowNodeId, for_in: &jv_ast::ForInStatement) -> FlowNodeId {
-        let loop_entry = self
-            .graph
-            .add_node(FlowNodeKind::Loop, Some(for_in.span.clone()));
+        let loop_entry = self.add_graph_node(FlowNodeKind::Loop, Some(for_in.span.clone()));
         self.connect(current, loop_entry, FlowEdgeKind::Normal);
 
         if let Some(annotation) = &for_in.binding.type_annotation {
@@ -560,9 +548,7 @@ impl<'g, 'ctx, 'facts> FlowGraphBuilder<'g, 'ctx, 'facts> {
                 });
         }
 
-        let body_start = self
-            .graph
-            .add_node(FlowNodeKind::Expression, Some(for_in.span.clone()));
+        let body_start = self.add_graph_node(FlowNodeKind::Expression, Some(for_in.span.clone()));
         self.connect(
             loop_entry,
             body_start,
@@ -571,9 +557,7 @@ impl<'g, 'ctx, 'facts> FlowGraphBuilder<'g, 'ctx, 'facts> {
         let body_end = self.handle_expression(body_start, &for_in.body, None);
         self.connect(body_end, loop_entry, FlowEdgeKind::LoopBack);
 
-        let loop_exit = self
-            .graph
-            .add_node(FlowNodeKind::Merge, Some(for_in.span.clone()));
+        let loop_exit = self.add_graph_node(FlowNodeKind::Merge, Some(for_in.span.clone()));
         self.connect(
             loop_entry,
             loop_exit,
@@ -608,7 +592,7 @@ impl<'g, 'ctx, 'facts> FlowGraphBuilder<'g, 'ctx, 'facts> {
         constraint: FlowConstraint,
         span: Option<Span>,
     ) -> FlowNodeId {
-        let node_id = self.graph.add_node(kind, span);
+        let node_id = self.add_graph_node(kind, span);
         self.connect(current, node_id, FlowEdgeKind::Normal);
         self.graph.node_mut(node_id).push_constraint(constraint);
         node_id
@@ -620,9 +604,42 @@ impl<'g, 'ctx, 'facts> FlowGraphBuilder<'g, 'ctx, 'facts> {
         kind: FlowNodeKind,
         span: Option<Span>,
     ) -> FlowNodeId {
-        let node_id = self.graph.add_node(kind, span);
+        let node_id = self.add_graph_node(kind, span);
         self.connect(current, node_id, FlowEdgeKind::Normal);
         node_id
+    }
+
+    fn add_graph_node(&mut self, kind: FlowNodeKind, span: Option<Span>) -> FlowNodeId {
+        let sanitized = Self::normalize_span(span);
+        self.graph.add_node(kind, sanitized)
+    }
+
+    fn normalize_span(span: Option<Span>) -> Option<Span> {
+        span.map(|mut span| {
+            if span.start_line == 0 {
+                span.start_line = 1;
+            }
+            if span.start_column == 0 {
+                span.start_column = 1;
+            }
+
+            if span.end_line == 0 {
+                span.end_line = span.start_line;
+            }
+            if span.end_line < span.start_line {
+                span.end_line = span.start_line;
+            }
+
+            if span.end_line == span.start_line {
+                if span.end_column <= span.start_column {
+                    span.end_column = span.start_column + 1;
+                }
+            } else if span.end_column == 0 {
+                span.end_column = span.start_column + 1;
+            }
+
+            span
+        })
     }
 }
 
@@ -1021,6 +1038,49 @@ mod tests {
         let mut context = NullSafetyContext::hydrate(None);
         let graph = build_graph(&program, &mut context);
         assert!(graph.adjacency(graph.entry()).len() > 0);
+    }
+
+    #[test]
+    fn flow_nodes_sanitize_zero_width_spans() {
+        let program = Program {
+            package: None,
+            imports: vec![],
+            statements: vec![Statement::Expression {
+                expr: Expression::Block {
+                    statements: vec![Statement::Return {
+                        value: Some(Expression::Literal(
+                            Literal::Number("0".into()),
+                            Span::dummy(),
+                        )),
+                        span: Span::dummy(),
+                    }],
+                    span: Span::dummy(),
+                },
+                span: Span::dummy(),
+            }],
+            span: Span::new(1, 1, 1, 2),
+        };
+
+        let mut context = NullSafetyContext::hydrate(None);
+        let graph = build_graph(&program, &mut context);
+
+        for node in graph.nodes() {
+            if let Some(span) = node.span() {
+                assert!(
+                    span.end_line >= span.start_line,
+                    "expected end_line >= start_line for span {:?}",
+                    span
+                );
+
+                if span.end_line == span.start_line {
+                    assert!(
+                        span.end_column > span.start_column,
+                        "expected span to cover at least one column, got {:?}",
+                        span
+                    );
+                }
+            }
+        }
     }
 
     #[test]
