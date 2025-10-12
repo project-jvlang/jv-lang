@@ -75,3 +75,60 @@ fun main(): Unit {
         stdout
     );
 }
+
+#[test]
+fn check_command_reports_null_safety_conflict_for_when_block() {
+    let Some(cli_path): Option<PathBuf> = std::env::var_os("CARGO_BIN_EXE_jv").map(Into::into)
+    else {
+        eprintln!("Skipping null safety diagnostic test: CLI binary unavailable");
+        return;
+    };
+
+    let dir = tempdir().expect("create temp dir");
+    let source_path = dir.path().join("when_block_null_conflict.jv");
+    let source = r#"
+fun main(): Unit {
+    val token: String = "value"
+
+    val label = when (token) {
+        null -> {
+            "missing"
+        }
+        else -> {
+            val trimmed = token.trim()
+            trimmed
+        }
+    }
+
+    val length = label.length
+    println(length)
+}
+"#;
+    fs::write(&source_path, source.trim_start()).expect("write source file");
+
+    let output = Command::new(cli_path)
+        .arg("check")
+        .arg(&source_path)
+        .output()
+        .expect("invoke jv check");
+
+    assert!(
+        !output.status.success(),
+        "jv check should fail when null safety detects unreachable null branch"
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let combined = format!("{}{}", stdout, stderr);
+
+    assert!(
+        combined.contains("JV3108"),
+        "expected JV3108 diagnostic in CLI output, got:\n{}",
+        combined
+    );
+    assert!(
+        combined.contains("token"),
+        "expected diagnostic to reference `token`, got:\n{}",
+        combined
+    );
+}
