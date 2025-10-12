@@ -389,7 +389,7 @@ mod tests {
         );
         let base_snapshot = base_builder.build();
 
-        let context = NullSafetyContext::from_parts(Some(&base_snapshot), Some(&env));
+        let context = NullSafetyContext::from_parts(Some(&base_snapshot), Some(&env), None);
 
         let mut outcome = FlowAnalysisOutcome::default();
         let mut state = FlowStateSnapshot::new();
@@ -416,7 +416,7 @@ mod tests {
     fn platform_states_emit_jv3005_information_warning() {
         let env = TypeEnvironment::new();
         let facts = TypeFactsBuilder::new().build();
-        let context = NullSafetyContext::from_parts(Some(&facts), Some(&env));
+        let context = NullSafetyContext::from_parts(Some(&facts), Some(&env), None);
 
         let mut outcome = FlowAnalysisOutcome::default();
         let mut state = FlowStateSnapshot::new();
@@ -443,7 +443,7 @@ mod tests {
         builder.add_java_annotation("mystery", "@MaybeNull");
         let facts = builder.build();
 
-        let context = NullSafetyContext::from_parts(Some(&facts), Some(&env));
+        let context = NullSafetyContext::from_parts(Some(&facts), Some(&env), None);
         let outcome = FlowAnalysisOutcome::default();
         let emitter = DiagnosticsEmitter::new(&context);
         let payload = emitter.emit(&outcome);
@@ -466,7 +466,7 @@ mod tests {
         builder.add_java_annotation("external", "@NotNull");
         let facts = builder.build();
 
-        let context = NullSafetyContext::from_parts(Some(&facts), Some(&env));
+        let context = NullSafetyContext::from_parts(Some(&facts), Some(&env), None);
 
         let mut outcome = FlowAnalysisOutcome::default();
         let mut state = FlowStateSnapshot::new();
@@ -495,7 +495,7 @@ mod tests {
                 .with_nullability(NullabilityFlag::NonNull),
         );
         let facts = facts_builder.build();
-        let context = NullSafetyContext::from_parts(Some(&facts), Some(&env));
+        let context = NullSafetyContext::from_parts(Some(&facts), Some(&env), None);
 
         let operand = OperatorOperand::new(NullabilityKind::NonNull, Some("user".into()));
         let hint = JavaLoweringHint::new(
@@ -532,7 +532,7 @@ mod tests {
                 .with_nullability(NullabilityFlag::NonNull),
         );
         let facts = facts_builder.build();
-        let context = NullSafetyContext::from_parts(Some(&facts), Some(&env));
+        let context = NullSafetyContext::from_parts(Some(&facts), Some(&env), None);
 
         let operand = OperatorOperand::new(NullabilityKind::NonNull, Some("value".into()));
         let hint = JavaLoweringHint::new(
@@ -568,7 +568,7 @@ mod tests {
                 .with_nullability(NullabilityFlag::NonNull),
         );
         let facts = builder.build();
-        let context = NullSafetyContext::from_parts(Some(&facts), Some(&env));
+        let context = NullSafetyContext::from_parts(Some(&facts), Some(&env), None);
 
         let mut outcome = FlowAnalysisOutcome::default();
         let mut exit_state = FlowStateSnapshot::new();
@@ -605,7 +605,7 @@ mod tests {
                 .with_nullability(NullabilityFlag::NonNull),
         );
         let facts = builder.build();
-        let context = NullSafetyContext::from_parts(Some(&facts), Some(&env));
+        let context = NullSafetyContext::from_parts(Some(&facts), Some(&env), None);
 
         let mut outcome = FlowAnalysisOutcome::default();
         let mut exit_state = FlowStateSnapshot::new();
@@ -630,7 +630,7 @@ mod tests {
                 .with_nullability(NullabilityFlag::NonNull),
         );
         let facts = builder.build();
-        let context = NullSafetyContext::from_parts(Some(&facts), Some(&env));
+        let context = NullSafetyContext::from_parts(Some(&facts), Some(&env), None);
 
         let mut outcome = FlowAnalysisOutcome::default();
         outcome.exit_state = Some(FlowStateSnapshot::new());
@@ -655,7 +655,7 @@ mod tests {
                 .with_nullability(NullabilityFlag::NonNull),
         );
         let facts = builder.build();
-        let context = NullSafetyContext::from_parts(Some(&facts), None);
+        let context = NullSafetyContext::from_parts(Some(&facts), None, None);
 
         let mut outcome = FlowAnalysisOutcome::default();
         outcome.exit_state = Some(FlowStateSnapshot::new());
@@ -681,7 +681,7 @@ mod tests {
                 .with_nullability(NullabilityFlag::NonNull),
         );
         let facts = builder.build();
-        let mut context = NullSafetyContext::from_parts(Some(&facts), Some(&env));
+        let mut context = NullSafetyContext::from_parts(Some(&facts), Some(&env), None);
         context.late_init_mut().allow_late_init("session");
 
         let mut outcome = FlowAnalysisOutcome::default();
