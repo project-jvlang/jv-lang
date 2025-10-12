@@ -239,6 +239,7 @@ fn produces_warning_for_unsupported_statement() {
             }),
             span: span(),
         }],
+        generic_metadata: Default::default(),
         span: span(),
     };
 

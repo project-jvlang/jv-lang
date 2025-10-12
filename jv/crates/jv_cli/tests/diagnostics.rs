@@ -1,11 +1,13 @@
 use std::fs;
+use std::path::PathBuf;
 use std::process::Command;
 
 use tempfile::tempdir;
 
 #[test]
 fn check_command_reports_raw_type_warning() {
-    let Some(cli_path) = std::env::var_os("CARGO_BIN_EXE_jv").map(Into::into) else {
+    let Some(cli_path): Option<PathBuf> = std::env::var_os("CARGO_BIN_EXE_jv").map(Into::into)
+    else {
         eprintln!("Skipping raw type diagnostic test: CLI binary unavailable");
         return;
     };
@@ -40,7 +42,8 @@ fun main(): Unit {
 
 #[test]
 fn check_command_reports_raw_allow_info() {
-    let Some(cli_path) = std::env::var_os("CARGO_BIN_EXE_jv").map(Into::into) else {
+    let Some(cli_path): Option<PathBuf> = std::env::var_os("CARGO_BIN_EXE_jv").map(Into::into)
+    else {
         eprintln!("Skipping raw allow diagnostic test: CLI binary unavailable");
         return;
     };

@@ -1,4 +1,6 @@
 use super::*;
+use crate::inference::environment::{TypeEnvironment, TypeScheme};
+use crate::inference::types::TypeBinding;
 use crate::pattern::{self, PatternTarget};
 use crate::regex::RegexValidator;
 use crate::TypeKind;
@@ -8,6 +10,8 @@ use jv_ast::{
     Program, RegexLiteral, Span, Statement, TypeAnnotation, ValBindingOrigin, WhenArm,
 };
 use jv_inference::types::{NullabilityFlag, TypeVariant as FactsTypeVariant};
+use jv_inference::TypeFacts;
+use std::collections::HashMap;
 
 fn dummy_span() -> Span {
     Span::new(1, 0, 1, 5)
@@ -57,6 +61,76 @@ fn convert_type_kind_exports_non_null_functions() {
     } else {
         panic!("expected function variant");
     }
+}
+
+#[test]
+fn convert_type_kind_preserves_optional_nullability() {
+    let optional = TypeKind::Optional(Box::new(TypeKind::Primitive("String")));
+    let facts = convert_type_kind(&optional);
+
+    assert_eq!(facts.nullability(), NullabilityFlag::Nullable);
+    if let FactsTypeVariant::Optional(inner) = facts.variant() {
+        assert_eq!(inner.nullability(), NullabilityFlag::NonNull);
+        assert!(matches!(
+            inner.variant(),
+            FactsTypeVariant::Primitive(name) if name == &"String"
+        ));
+    } else {
+        panic!("expected optional variant");
+    }
+}
+
+#[test]
+fn build_type_facts_propagates_environment_nullability() {
+    let mut environment = TypeEnvironment::new();
+    environment.define_monotype("user_id", TypeKind::Primitive("Int"));
+    environment.define_monotype(
+        "maybe_email",
+        TypeKind::Optional(Box::new(TypeKind::Primitive("String"))),
+    );
+
+    let bindings: Vec<TypeBinding> = Vec::new();
+    let function_schemes: HashMap<String, TypeScheme> = HashMap::new();
+
+    let facts = build_type_facts(&environment, &bindings, &function_schemes, None);
+    let env_facts = facts.environment().values();
+
+    assert_eq!(
+        env_facts
+            .get("user_id")
+            .expect("user_id fact")
+            .nullability(),
+        NullabilityFlag::NonNull
+    );
+    assert_eq!(
+        env_facts
+            .get("maybe_email")
+            .expect("maybe_email fact")
+            .nullability(),
+        NullabilityFlag::Nullable
+    );
+}
+
+#[test]
+fn build_type_facts_propagates_result_type_nullability() {
+    let environment = TypeEnvironment::new();
+    let bindings: Vec<TypeBinding> = Vec::new();
+    let function_schemes: HashMap<String, TypeScheme> = HashMap::new();
+    let result_type = TypeKind::Primitive("Boolean");
+
+    let facts = build_type_facts(
+        &environment,
+        &bindings,
+        &function_schemes,
+        Some(&result_type),
+    );
+
+    let root = facts.root_type().expect("root type");
+    assert_eq!(root.nullability(), NullabilityFlag::NonNull);
+    assert!(matches!(
+        root.variant(),
+        FactsTypeVariant::Primitive(name) if name == &"Boolean"
+    ));
 }
 
 #[test]
