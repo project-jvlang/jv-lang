@@ -132,6 +132,28 @@ fn reports_ambiguous_function_signature_error() {
 }
 
 #[test]
+fn reports_ambiguous_extension_method_error() {
+    let program = parse_program(
+        r#"
+        fun ambiguousExtension(input) {
+            val result = input.map { element -> element }
+            result
+        }
+    "#,
+    );
+
+    let mut checker = TypeChecker::new();
+    let errors = checker
+        .check_program(&program)
+        .expect_err("ambiguous extension resolution should fail");
+
+    assert!(errors.iter().any(|error| matches!(
+        error,
+        CheckError::TypeError(message) if message.contains("ambiguous extension method 'map'")
+    )));
+}
+
+#[test]
 fn type_facts_update_after_rechecking_program() {
     let program_v1 = parse_program("val counter = 1\n");
     let mut checker = TypeChecker::new();
@@ -211,5 +233,49 @@ fn sequence_extension_chain_maintains_inference() {
     assert!(
         !matches!(total_scheme.ty, TypeKind::Unknown),
         "reduce result should not remain Unknown"
+    );
+}
+
+#[test]
+fn lambda_extension_receiver_resolves_sequence_core() {
+    let program = parse_program(
+        r#"
+        import jv.collections.SequenceFactory
+
+        val source = SequenceFactory.fromIterable([1 2 3])
+        val toStream = { seq -> seq.toStream() }
+        val stream = toStream(source)
+    "#,
+    );
+
+    let mut checker = TypeChecker::new();
+    checker
+        .check_program(&program)
+        .expect("lambda extension call should infer receiver");
+
+    let snapshot = checker
+        .inference_snapshot()
+        .expect("snapshot should exist after successful inference");
+    let lambda_scheme = snapshot
+        .binding_scheme("toStream")
+        .expect("lambda binding should exist");
+    assert!(lambda_scheme.quantifiers.is_empty());
+    match &lambda_scheme.ty {
+        TypeKind::Function(params, ret) => {
+            assert_eq!(
+                params,
+                &vec![TypeKind::Primitive("jv.collections.SequenceCore")]
+            );
+            assert_eq!(**ret, TypeKind::Primitive("java.util.stream.Stream"));
+        }
+        other => panic!("expected function type, found {other:?}"),
+    }
+
+    let stream_scheme = snapshot
+        .binding_scheme("stream")
+        .expect("stream binding should be registered");
+    assert!(
+        !stream_scheme.ty.contains_unknown(),
+        "stream binding should not remain Unknown"
     );
 }

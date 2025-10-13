@@ -9,15 +9,16 @@ use crate::inference::extensions::ExtensionRegistry;
 use crate::inference::iteration::{
     classify_loop, expression_can_yield_iterable, LoopClassification,
 };
-use crate::inference::types::TypeKind;
+use crate::inference::types::{TypeId, TypeKind};
 use crate::pattern::{
     NarrowedBinding, NarrowedNullability, NarrowingSnapshot, PatternMatchService, PatternTarget,
 };
 use jv_ast::{
-    Argument, BinaryOp, Expression, ForInStatement, Literal, Program, Statement, TypeAnnotation,
-    UnaryOp,
+    Argument, BinaryOp, Expression, ForInStatement, Literal, Parameter, Program, Span, Statement,
+    TypeAnnotation, UnaryOp,
 };
 use jv_inference::types::NullabilityFlag;
+use std::collections::HashMap;
 
 /// AST から制約を抽出するジェネレータ。
 #[derive(Debug)]
@@ -26,6 +27,7 @@ pub struct ConstraintGenerator<'env, 'ext> {
     constraints: ConstraintSet,
     extensions: &'ext ExtensionRegistry,
     pattern_service: PatternMatchService,
+    type_var_usage: HashMap<TypeId, usize>,
 }
 
 const DIAG_RANGE_BOUNDS: &str = "E_LOOP_002: numeric range bounds must resolve to the same type";
@@ -33,6 +35,7 @@ const DIAG_RANGE_BINDING: &str =
     "E_LOOP_002: loop binding must align with the numeric range element type";
 const DIAG_ITERABLE_PROTOCOL: &str =
     "E_LOOP_003: loop target expression does not expose iterable semantics";
+const DIAG_AMBIGUOUS_EXTENSION: &str = "E_EXT_001: ambiguous extension method resolution";
 
 impl<'env, 'ext> ConstraintGenerator<'env, 'ext> {
     /// 環境への可変参照を受け取ってジェネレータを初期化する。
@@ -42,6 +45,7 @@ impl<'env, 'ext> ConstraintGenerator<'env, 'ext> {
             constraints: ConstraintSet::new(),
             extensions,
             pattern_service: PatternMatchService::new(),
+            type_var_usage: HashMap::new(),
         }
     }
 
@@ -290,11 +294,15 @@ impl<'env, 'ext> ConstraintGenerator<'env, 'ext> {
                 }
             }
             Expression::MemberAccess {
-                object, property, ..
-            } => self.infer_member_access(object, property),
+                object,
+                property,
+                span,
+            } => self.infer_member_access(object, property, span),
             Expression::NullSafeMemberAccess {
-                object, property, ..
-            } => self.infer_member_access(object, property),
+                object,
+                property,
+                span,
+            } => self.infer_member_access(object, property, span),
             Expression::IndexAccess { object, .. }
             | Expression::NullSafeIndexAccess { object, .. } => {
                 self.infer_expression(object);
@@ -306,7 +314,9 @@ impl<'env, 'ext> ConstraintGenerator<'env, 'ext> {
                 }
                 TypeKind::Unknown
             }
-            Expression::Lambda { body, .. } => self.infer_expression(body),
+            Expression::Lambda {
+                parameters, body, ..
+            } => self.infer_lambda(parameters, body),
             Expression::Try {
                 body,
                 catch_clauses,
@@ -428,9 +438,14 @@ impl<'env, 'ext> ConstraintGenerator<'env, 'ext> {
         }
     }
 
-    fn infer_member_access(&mut self, object: &Expression, property: &str) -> TypeKind {
+    fn infer_member_access(
+        &mut self,
+        object: &Expression,
+        property: &str,
+        span: &Span,
+    ) -> TypeKind {
         let receiver_ty = self.infer_expression(object);
-        match self.resolve_extension_call(&receiver_ty, property) {
+        match self.resolve_extension_call(&receiver_ty, property, span) {
             Some(resolved) => resolved,
             None => TypeKind::Unknown,
         }
@@ -440,16 +455,92 @@ impl<'env, 'ext> ConstraintGenerator<'env, 'ext> {
         &mut self,
         receiver_ty: &TypeKind,
         property: &str,
+        span: &Span,
     ) -> Option<TypeKind> {
-        let primitive = Self::primitive_name(receiver_ty)?;
-        let scheme = self.extensions.lookup(primitive, property)?;
-        Some(self.env.instantiate(scheme))
+        if let TypeKind::Optional(inner) = receiver_ty {
+            return self.resolve_extension_call(inner, property, span);
+        }
+
+        if let Some(primitive) = Self::primitive_name(receiver_ty) {
+            let scheme = self.extensions.lookup(primitive, property)?;
+            return Some(self.env.instantiate(scheme));
+        }
+
+        if let TypeKind::Variable(id) = receiver_ty {
+            let candidates = self.extensions.candidates_for_method(property);
+            if candidates.is_empty() {
+                return None;
+            }
+
+            if candidates.len() == 1 {
+                let (primitive, scheme) = candidates[0];
+                self.enqueue_receiver_constraint(*id, primitive, property);
+                return Some(self.env.instantiate(scheme));
+            }
+
+            let mut usage_count = *self.type_var_usage.get(id).unwrap_or(&0);
+            if usage_count == 0 {
+                if let Some(origin) = self.env.type_origin(*id) {
+                    usage_count = *self.type_var_usage.get(&origin).unwrap_or(&0);
+                }
+            }
+            if usage_count == 0 {
+                let candidate_names: Vec<&'static str> =
+                    candidates.iter().map(|(recv, _)| *recv).collect();
+                let message = format!(
+                    "ambiguous extension method '{}' at {}:{}; matching receivers: {}",
+                    property,
+                    span.start_line,
+                    span.start_column,
+                    candidate_names.join(", ")
+                );
+                let constraint =
+                    Constraint::new(ConstraintKind::Placeholder(DIAG_AMBIGUOUS_EXTENSION))
+                        .with_note(message);
+                self.constraints.push(constraint);
+                return None;
+            }
+
+            let (primitive, scheme) = candidates[0];
+            self.enqueue_receiver_constraint(*id, primitive, property);
+            return Some(self.env.instantiate(scheme));
+        }
+
+        None
+    }
+
+    fn infer_lambda(&mut self, parameters: &[Parameter], body: &Expression) -> TypeKind {
+        self.env.enter_scope();
+        let mut param_types = Vec::with_capacity(parameters.len());
+        for param in parameters {
+            let ty = param
+                .type_annotation
+                .as_ref()
+                .map(|ann| self.type_from_annotation(ann))
+                .unwrap_or_else(|| self.env.fresh_type_variable());
+
+            self.env
+                .define_scheme(param.name.clone(), TypeScheme::monotype(ty.clone()));
+
+            if let Some(default_expr) = &param.default_value {
+                let default_ty = self.infer_expression(default_expr);
+                self.push_constraint(
+                    ConstraintKind::Equal(ty.clone(), default_ty),
+                    Some("lambda default must match parameter type"),
+                );
+            }
+
+            param_types.push(ty);
+        }
+
+        let body_ty = self.infer_expression(body);
+        self.env.leave_scope();
+        TypeKind::function(param_types, body_ty)
     }
 
     fn primitive_name(ty: &TypeKind) -> Option<&'static str> {
         match ty {
             TypeKind::Primitive(name) => Some(*name),
-            TypeKind::Optional(inner) => Self::primitive_name(inner),
             _ => None,
         }
     }
@@ -616,12 +707,54 @@ impl<'env, 'ext> ConstraintGenerator<'env, 'ext> {
     }
 
     fn push_constraint(&mut self, kind: ConstraintKind, note: Option<&str>) {
+        self.record_type_vars_in_constraint(&kind);
         let constraint = if let Some(text) = note {
             Constraint::new(kind).with_note(text)
         } else {
             Constraint::new(kind)
         };
         self.constraints.push(constraint);
+    }
+
+    fn enqueue_receiver_constraint(&mut self, id: TypeId, primitive: &'static str, property: &str) {
+        let note = format!(
+            "extension receiver must be {} to call {}",
+            primitive, property
+        );
+        let kind = ConstraintKind::Equal(TypeKind::Variable(id), TypeKind::Primitive(primitive));
+        self.record_type_vars_in_constraint(&kind);
+        let constraint = Constraint::new(kind).with_note(note);
+        self.constraints.push(constraint);
+    }
+
+    fn record_type_vars_in_constraint(&mut self, kind: &ConstraintKind) {
+        match kind {
+            ConstraintKind::Equal(left, right) => {
+                self.record_type_vars(left);
+                self.record_type_vars(right);
+            }
+            ConstraintKind::Assign(id, ty) => {
+                *self.type_var_usage.entry(*id).or_default() += 1;
+                self.record_type_vars(ty);
+            }
+            ConstraintKind::Placeholder(_) => {}
+        }
+    }
+
+    fn record_type_vars(&mut self, ty: &TypeKind) {
+        match ty {
+            TypeKind::Variable(id) => {
+                *self.type_var_usage.entry(*id).or_default() += 1;
+            }
+            TypeKind::Optional(inner) => self.record_type_vars(inner),
+            TypeKind::Function(params, result) => {
+                for param in params {
+                    self.record_type_vars(param);
+                }
+                self.record_type_vars(result);
+            }
+            TypeKind::Primitive(_) | TypeKind::Unknown => {}
+        }
     }
 
     fn apply_branch_narrowing(&mut self, snapshot: &NarrowingSnapshot) {

@@ -45,6 +45,7 @@ impl TypeScheme {
 pub struct TypeEnvironment {
     scopes: Vec<HashMap<String, TypeScheme>>,
     generator: TypeIdGenerator,
+    instantiation_origins: HashMap<TypeId, TypeId>,
 }
 
 impl TypeEnvironment {
@@ -53,6 +54,7 @@ impl TypeEnvironment {
         Self {
             scopes: vec![HashMap::new()],
             generator: TypeIdGenerator::new(),
+            instantiation_origins: HashMap::new(),
         }
     }
 
@@ -135,7 +137,11 @@ impl TypeEnvironment {
         let substitutions: HashMap<TypeId, TypeKind> = scheme
             .quantifiers
             .iter()
-            .map(|id| (*id, TypeKind::Variable(self.fresh_type_id())))
+            .map(|id| {
+                let fresh = self.fresh_type_id();
+                self.instantiation_origins.insert(fresh, *id);
+                (*id, TypeKind::Variable(fresh))
+            })
             .collect();
 
         substitute_type(&scheme.ty, &substitutions)
@@ -166,6 +172,23 @@ impl TypeEnvironment {
             }
         }
         acc
+    }
+
+    /// Follows instantiation mappings to locate the origin quantifier for a type variable, if any.
+    pub fn type_origin(&self, id: TypeId) -> Option<TypeId> {
+        let mut current = id;
+        let mut visited = HashSet::new();
+        while let Some(origin) = self.instantiation_origins.get(&current) {
+            if !visited.insert(current) {
+                break;
+            }
+            current = *origin;
+        }
+        if current != id {
+            Some(current)
+        } else {
+            self.instantiation_origins.get(&id).copied()
+        }
     }
 }
 

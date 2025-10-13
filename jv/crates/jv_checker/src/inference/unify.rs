@@ -15,6 +15,7 @@ use std::fmt;
 pub enum SolveError {
     Placeholder {
         placeholder: &'static str,
+        note: Option<String>,
     },
     TypeMismatch {
         left: TypeKind,
@@ -31,11 +32,12 @@ pub enum SolveError {
 impl SolveError {
     fn note_suffix(&self) -> String {
         match self {
-            SolveError::TypeMismatch { note, .. } | SolveError::OccursCheck { note, .. } => note
+            SolveError::Placeholder { note, .. }
+            | SolveError::TypeMismatch { note, .. }
+            | SolveError::OccursCheck { note, .. } => note
                 .as_ref()
                 .map(|n| format!(" ({})", n))
                 .unwrap_or_default(),
-            _ => String::new(),
         }
     }
 }
@@ -43,8 +45,12 @@ impl SolveError {
 impl fmt::Display for SolveError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            SolveError::Placeholder { placeholder } => {
-                write!(f, "encountered placeholder constraint: {placeholder}")
+            SolveError::Placeholder { placeholder, .. } => {
+                write!(
+                    f,
+                    "encountered placeholder constraint: {placeholder}{}",
+                    self.note_suffix()
+                )
             }
             SolveError::TypeMismatch { left, right, .. } => {
                 write!(
@@ -148,6 +154,7 @@ impl ConstraintSolver {
             ConstraintKind::Placeholder(placeholder) => {
                 return Err(SolveError::Placeholder {
                     placeholder: *placeholder,
+                    note: constraint.note.clone(),
                 });
             }
         }
