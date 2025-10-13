@@ -396,7 +396,6 @@ impl BindingResolver {
                             }
                         } else {
                             let origin = ValBindingOrigin::Implicit;
-                            let statement_span = expression_span(&value);
                             self.declare_immutable(name.clone(), origin, target_span.clone(), true);
                             let modifiers = Modifiers::default();
                             self.record_late_init_seed(name.clone(), origin, true, &modifiers);
@@ -406,7 +405,7 @@ impl BindingResolver {
                                 initializer: value,
                                 modifiers,
                                 origin,
-                                span: statement_span,
+                                span,
                             }
                         }
                     }
@@ -739,32 +738,6 @@ fn has_late_init_annotation(modifiers: &Modifiers) -> bool {
             .simple_name()
             .eq_ignore_ascii_case("LateInit")
     })
-}
-
-fn expression_span(expr: &Expression) -> Span {
-    match expr {
-        Expression::Literal(_, span)
-        | Expression::Identifier(_, span)
-        | Expression::Binary { span, .. }
-        | Expression::Unary { span, .. }
-        | Expression::Call { span, .. }
-        | Expression::MemberAccess { span, .. }
-        | Expression::NullSafeMemberAccess { span, .. }
-        | Expression::IndexAccess { span, .. }
-        | Expression::NullSafeIndexAccess { span, .. }
-        | Expression::StringInterpolation { span, .. }
-        | Expression::When { span, .. }
-        | Expression::If { span, .. }
-        | Expression::Block { span, .. }
-        | Expression::Array { span, .. }
-        | Expression::Lambda { span, .. }
-        | Expression::Try { span, .. }
-        | Expression::This(span)
-        | Expression::Super(span) => span.clone(),
-        Expression::RegexLiteral(literal) => literal.span.clone(),
-        Expression::MultilineString(literal) => literal.span.clone(),
-        Expression::JsonLiteral(literal) => literal.span.clone(),
-    }
 }
 
 fn reassignment_message(name: &str) -> String {
