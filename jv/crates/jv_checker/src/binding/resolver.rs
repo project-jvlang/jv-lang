@@ -397,12 +397,7 @@ impl BindingResolver {
                         } else {
                             let origin = ValBindingOrigin::Implicit;
                             let statement_span = expression_span(&value);
-                            self.declare_immutable(
-                                name.clone(),
-                                origin,
-                                target_span.clone(),
-                                true,
-                            );
+                            self.declare_immutable(name.clone(), origin, target_span.clone(), true);
                             let modifiers = Modifiers::default();
                             self.record_late_init_seed(name.clone(), origin, true, &modifiers);
                             Statement::ValDeclaration {

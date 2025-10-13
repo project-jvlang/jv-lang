@@ -11,6 +11,7 @@ use jv_ast::{
 };
 use jv_inference::types::{NullabilityFlag, TypeVariant as FactsTypeVariant};
 use jv_inference::TypeFacts;
+use jv_parser::Parser;
 use std::collections::HashMap;
 
 fn dummy_span() -> Span {
@@ -775,6 +776,65 @@ fn implicit_assignment_becomes_val_declaration() {
     assert_eq!(seed.origin, ValBindingOrigin::Implicit);
     assert!(seed.has_initializer);
     assert!(!seed.explicit_late_init);
+}
+
+#[test]
+fn task15_debug_implicit_binding_manifest_and_missing_jv3002() {
+    let program = Parser::parse(
+        r#"
+fun provide(): String? = null
+
+maybe = provide()
+val fallback = "fallback"
+label = when (maybe) {
+    is String -> maybe
+    else -> fallback
+}
+
+label
+"#,
+    )
+    .expect("debug snippet should parse");
+
+    let mut checker = TypeChecker::new();
+    checker
+        .check_program(&program)
+        .expect("program should type-check for debug reproduction");
+
+    let normalized = checker
+        .normalized_program()
+        .expect("normalized program should exist");
+    let maybe_origin = normalized
+        .statements
+        .iter()
+        .find_map(|statement| match statement {
+            Statement::ValDeclaration { name, origin, .. } if name == "maybe" => Some(origin),
+            _ => None,
+        })
+        .expect("implicit assignment should normalize to val declaration");
+    assert_eq!(
+        *maybe_origin,
+        ValBindingOrigin::Implicit,
+        "implicit assignment must retain implicit origin"
+    );
+
+    let manifest = checker.late_init_manifest();
+    let maybe_seed = manifest
+        .get("maybe")
+        .expect("LateInit manifest should track implicit binding");
+    assert_eq!(maybe_seed.origin, ValBindingOrigin::Implicit);
+    assert!(maybe_seed.has_initializer);
+    assert!(
+        !maybe_seed.explicit_late_init,
+        "implicit binding should not be marked as explicit late init"
+    );
+
+    let diagnostics = checker.check_null_safety(&program, None);
+    let messages = collect_null_safety_messages(&diagnostics);
+    assert!(
+        !messages.iter().any(|message| message.contains("JV3002")),
+        "regression reproduction: expected JV3002 to be missing, diagnostics were {messages:?}"
+    );
 }
 
 #[test]
