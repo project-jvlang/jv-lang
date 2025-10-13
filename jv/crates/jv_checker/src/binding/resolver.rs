@@ -366,21 +366,27 @@ impl BindingResolver {
         match target {
             Expression::Identifier(name, target_span) => {
                 let value = self.resolve_expression(value);
-                if self.is_self_reference(&name, &value) {
-                    self.diagnostics.push(CheckError::ValidationError {
-                        message: missing_initializer_message(&name),
-                        span: Some(span.clone()),
-                    });
-                    Statement::Assignment {
+                match self.lookup(&name) {
+                    Some(BindingKind::Immutable { .. }) => {
+                        self.diagnostics.push(CheckError::ValidationError {
+                            message: reassignment_message(&name),
+                            span: Some(span.clone()),
+                        });
+                        Statement::Assignment {
+                            target: Expression::Identifier(name, target_span),
+                            value,
+                            span,
+                        }
+                    }
+                    Some(BindingKind::Mutable { .. }) => Statement::Assignment {
                         target: Expression::Identifier(name, target_span),
                         value,
                         span,
-                    }
-                } else if let Some(kind) = self.lookup(&name) {
-                    match kind {
-                        BindingKind::Immutable { .. } => {
+                    },
+                    None => {
+                        if self.is_self_reference(&name, &value) {
                             self.diagnostics.push(CheckError::ValidationError {
-                                message: reassignment_message(&name),
+                                message: missing_initializer_message(&name),
                                 span: Some(span.clone()),
                             });
                             Statement::Assignment {
@@ -388,26 +394,26 @@ impl BindingResolver {
                                 value,
                                 span,
                             }
+                        } else {
+                            let origin = ValBindingOrigin::Implicit;
+                            let statement_span = expression_span(&value);
+                            self.declare_immutable(
+                                name.clone(),
+                                origin,
+                                target_span.clone(),
+                                true,
+                            );
+                            let modifiers = Modifiers::default();
+                            self.record_late_init_seed(name.clone(), origin, true, &modifiers);
+                            Statement::ValDeclaration {
+                                name,
+                                type_annotation: None,
+                                initializer: value,
+                                modifiers,
+                                origin,
+                                span: statement_span,
+                            }
                         }
-                        BindingKind::Mutable { .. } => Statement::Assignment {
-                            target: Expression::Identifier(name, target_span),
-                            value,
-                            span,
-                        },
-                    }
-                } else {
-                    let origin = ValBindingOrigin::Implicit;
-                    let statement_span = expression_span(&value);
-                    self.declare_immutable(name.clone(), origin, target_span.clone(), true);
-                    let modifiers = Modifiers::default();
-                    self.record_late_init_seed(name.clone(), origin, true, &modifiers);
-                    Statement::ValDeclaration {
-                        name,
-                        type_annotation: None,
-                        initializer: value,
-                        modifiers,
-                        origin,
-                        span: statement_span,
                     }
                 }
             }

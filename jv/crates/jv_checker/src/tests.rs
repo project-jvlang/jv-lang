@@ -778,6 +778,33 @@ fn implicit_assignment_becomes_val_declaration() {
 }
 
 #[test]
+fn implicit_self_assignment_emits_jv4202() {
+    let span = dummy_span();
+    let program = Program {
+        package: None,
+        imports: Vec::new(),
+        statements: vec![Statement::Assignment {
+            target: Expression::Identifier("total".into(), span.clone()),
+            value: Expression::Identifier("total".into(), span.clone()),
+            span: span.clone(),
+        }],
+        span: span.clone(),
+    };
+
+    let mut checker = TypeChecker::new();
+    let result = checker.check_program(&program);
+    assert!(
+        result.is_err(),
+        "implicit self-assignment should produce JV4202 error"
+    );
+    let errors = result.err().unwrap();
+    assert!(errors.iter().any(|error| matches!(
+        error,
+        CheckError::ValidationError { message, .. } if message.contains("JV4202")
+    )));
+}
+
+#[test]
 fn reassigning_immutable_binding_emits_jv4201() {
     let span = dummy_span();
     let program = Program {
@@ -839,6 +866,40 @@ fn mutable_var_allows_reassignment() {
     assert!(
         result.is_ok(),
         "var reassignment should be permitted: {result:?}"
+    );
+}
+
+#[test]
+fn explicit_var_self_assignment_is_allowed() {
+    let span = dummy_span();
+    let program = Program {
+        package: None,
+        imports: Vec::new(),
+        statements: vec![
+            Statement::VarDeclaration {
+                name: "count".into(),
+                type_annotation: None,
+                initializer: Some(Expression::Literal(
+                    Literal::Number("0".into()),
+                    span.clone(),
+                )),
+                modifiers: default_modifiers(),
+                span: span.clone(),
+            },
+            Statement::Assignment {
+                target: Expression::Identifier("count".into(), span.clone()),
+                value: Expression::Identifier("count".into(), span.clone()),
+                span: span.clone(),
+            },
+        ],
+        span: span.clone(),
+    };
+
+    let mut checker = TypeChecker::new();
+    let result = checker.check_program(&program);
+    assert!(
+        result.is_ok(),
+        "explicit mutable binding should allow self-assignment: {result:?}"
     );
 }
 
