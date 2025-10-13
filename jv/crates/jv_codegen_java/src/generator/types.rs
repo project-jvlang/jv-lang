@@ -1,6 +1,7 @@
 use super::*;
 use jv_ast::{types::RawTypeDirective, Span};
 use jv_ir::{IrVariance, JavaWildcardKind};
+use std::borrow::Cow;
 
 const TYPE_TOKEN_ERROR_CODE: &str = "JV3201";
 
@@ -17,6 +18,26 @@ pub enum ErasurePlan {
 }
 
 impl JavaCodeGenerator {
+    pub(super) fn normalize_void_like<'a>(java_type: &'a JavaType) -> Cow<'a, JavaType> {
+        if Self::is_unit_like(java_type) {
+            Cow::Owned(JavaType::Void)
+        } else {
+            Cow::Borrowed(java_type)
+        }
+    }
+
+    pub(super) fn is_void_like(java_type: &JavaType) -> bool {
+        matches!(java_type, JavaType::Void) || Self::is_unit_like(java_type)
+    }
+
+    fn is_unit_like(java_type: &JavaType) -> bool {
+        matches!(
+            java_type,
+            JavaType::Reference { name, generic_args }
+                if name == "Unit" && generic_args.is_empty()
+        )
+    }
+
     /// Determine how to cope with Java's type erasure for the provided type.
     pub fn plan_erasure(&self, java_type: &JavaType) -> ErasurePlan {
         if let Some(token_expr) = Self::synthesize_type_token(java_type) {

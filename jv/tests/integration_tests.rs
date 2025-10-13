@@ -976,7 +976,10 @@ fn java_target_switch_emits_expected_sequence_collection_factories() {
     let fixture = workspace_file("tests/lang/collections/java21_compat.jv");
 
     for (target, expected_snippets) in [
-        (JavaTarget::Java25, vec![".toList()", ".toSet()"]),
+        (
+            JavaTarget::Java25,
+            vec![".toList()", ".collect(Collectors.toSet())"],
+        ),
         (
             JavaTarget::Java21,
             vec!["Collectors.toList()", "Collectors.toSet()"],
@@ -1014,12 +1017,12 @@ fn java_target_switch_emits_expected_sequence_collection_factories() {
         if target == JavaTarget::Java25 {
             assert!(
                 !java_source.contains("Collectors.toList()"),
-                "Java 25 output should avoid Collectors fallback:\n{}",
+                "Java 25 output should avoid Collectors.toList():\n{}",
                 java_source
             );
             assert!(
-                !java_source.contains("Collectors.toSet()"),
-                "Java 25 output should avoid Collectors fallback:\n{}",
+                java_source.contains(".collect(Collectors.toSet())"),
+                "Java 25 output should explicitly fallback to Collectors.toSet():\n{}",
                 java_source
             );
         }

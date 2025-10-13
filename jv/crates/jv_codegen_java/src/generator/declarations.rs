@@ -305,6 +305,7 @@ impl JavaCodeGenerator {
             ..
         } = JavaCodeGenerator::base_statement(method)
         {
+            let normalized_return_type = Self::normalize_void_like(return_type);
             let mut builder = self.builder();
             self.render_annotations(&mut builder, modifiers);
 
@@ -315,7 +316,7 @@ impl JavaCodeGenerator {
                 signature.push(' ');
             }
 
-            signature.push_str(&self.generate_type(return_type)?);
+            signature.push_str(&self.generate_type(normalized_return_type.as_ref())?);
             signature.push(' ');
             signature.push_str(name);
             signature.push('(');
@@ -331,7 +332,7 @@ impl JavaCodeGenerator {
                 Some(expr) => {
                     builder.push_line(&format!("{} {{", signature));
                     builder.indent();
-                    self.write_method_body(&mut builder, expr, return_type)?;
+                    self.write_method_body(&mut builder, expr, normalized_return_type.as_ref())?;
                     builder.dedent();
                     builder.push_line("}");
                 }
@@ -353,6 +354,7 @@ impl JavaCodeGenerator {
     ) -> Result<Vec<String>, CodeGenError> {
         let mut results = Vec::new();
         for overload in overloads {
+            let normalized_return_type = Self::normalize_void_like(&overload.return_type);
             let mut builder = self.builder();
             let modifiers_str = self.generate_modifiers(&overload.modifiers);
             let mut signature = String::new();
@@ -360,7 +362,7 @@ impl JavaCodeGenerator {
                 signature.push_str(&modifiers_str);
                 signature.push(' ');
             }
-            signature.push_str(&self.generate_type(&overload.return_type)?);
+            signature.push_str(&self.generate_type(normalized_return_type.as_ref())?);
             signature.push(' ');
             signature.push_str(&overload.name);
             signature.push('(');
@@ -369,7 +371,7 @@ impl JavaCodeGenerator {
             builder.push_line(&format!("{} {{", signature));
             builder.indent();
             let body_expr = self.generate_expression(&overload.body)?;
-            if matches!(overload.return_type, JavaType::Void) {
+            if Self::is_void_like(normalized_return_type.as_ref()) {
                 builder.push_line(&format!("{};", body_expr));
             } else {
                 builder.push_line(&format!("return {};", body_expr));
@@ -588,7 +590,7 @@ impl JavaCodeGenerator {
             }
         } else {
             let expr_code = self.generate_expression(body)?;
-            if matches!(return_type, JavaType::Void) {
+            if Self::is_void_like(return_type) {
                 builder.push_line(&format!("{};", expr_code));
             } else {
                 builder.push_line(&format!("return {};", expr_code));

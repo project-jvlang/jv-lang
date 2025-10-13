@@ -364,7 +364,7 @@ impl JavaCodeGenerator {
             }
         }
 
-        let result_is_void = matches!(java_type, JavaType::Void);
+        let result_is_void = Self::is_void_like(java_type);
         let subject_binding = "__subject";
         let result_binding = "__matchResult";
 
@@ -841,8 +841,9 @@ impl JavaCodeGenerator {
 
         if needs_resource_guard {
             let chained = self.render_sequence_chain("__jvStream", pipeline)?;
-            let return_type = self.generate_type(result_type)?;
-            let is_void = matches!(result_type, JavaType::Void);
+            let normalized_result_type = Self::normalize_void_like(result_type);
+            let return_type = self.generate_type(normalized_result_type.as_ref())?;
+            let is_void = Self::is_void_like(normalized_result_type.as_ref());
 
             let mut builder = self.builder();
             builder.push_line("new Object() {");
@@ -1010,8 +1011,9 @@ impl JavaCodeGenerator {
 
         self.ensure_sequence_helper();
 
-        let return_type = self.generate_type(result_type)?;
-        let is_void = matches!(result_type, JavaType::Void);
+        let normalized_result_type = Self::normalize_void_like(result_type);
+        let return_type = self.generate_type(normalized_result_type.as_ref())?;
+        let is_void = Self::is_void_like(normalized_result_type.as_ref());
         let helper_var = "__jvSequence";
 
         let helper_stream = format!("{}.toStream()", helper_var);
@@ -1080,12 +1082,8 @@ impl JavaCodeGenerator {
                 }
             }
             SequenceTerminalKind::ToSet => {
-                if self.targeting.supports_collection_factories() {
-                    Ok(format!("{}{}", chain, ".toSet()"))
-                } else {
-                    self.add_import("java.util.stream.Collectors");
-                    Ok(format!("{}.collect(Collectors.toSet())", chain))
-                }
+                self.add_import("java.util.stream.Collectors");
+                Ok(format!("{}.collect(Collectors.toSet())", chain))
             }
             SequenceTerminalKind::Fold {
                 initial,
