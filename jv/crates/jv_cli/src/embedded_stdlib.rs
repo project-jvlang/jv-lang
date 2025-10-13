@@ -569,7 +569,6 @@ import java.util.function.BinaryOperator;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Predicate;
-import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
 
@@ -638,7 +637,7 @@ public final class SequenceCore<T> implements AutoCloseable, Iterable<T> {
     }
 
     public List<T> toList() {
-        return delegate.collect(Collectors.toList());
+        return delegate.toList();
     }
 
     public <R> R fold(R initial, BiFunction<R, ? super T, R> operation) {
