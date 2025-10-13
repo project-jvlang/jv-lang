@@ -33,25 +33,32 @@ pub fn analyze(expression: &Expression) -> NarrowingFacts {
 
     for (index, arm) in arms.iter().enumerate() {
         let mut snapshot = NarrowingSnapshot::new(Some(arm.span.clone()));
+        let mut has_narrowing = false;
 
         if let Some(name) = subject_name.as_ref() {
             if matches_null_pattern(&arm.pattern) {
                 has_null_arm = true;
+                has_narrowing = true;
                 snapshot.push_on_match(NarrowedBinding::new(name, NarrowedNullability::Nullable));
                 snapshot.push_on_mismatch(NarrowedBinding::new(name, NarrowedNullability::NonNull));
                 fallback_snapshot
                     .push_on_match(NarrowedBinding::new(name, NarrowedNullability::NonNull));
             } else if pattern_implies_non_null(&arm.pattern) {
+                has_narrowing = true;
                 snapshot.push_on_match(NarrowedBinding::new(name, NarrowedNullability::NonNull));
             }
         }
 
         if let Some(guard) = &arm.guard {
+            has_narrowing = true;
             snapshot.set_guard_span(expression_span(guard).cloned());
             snapshot.mark_guard_evaluated();
         }
 
-        facts.insert_arm(index as ArmId, snapshot);
+        // Only record snapshots that actually narrow types or have guards
+        if has_narrowing {
+            facts.insert_arm(index as ArmId, snapshot);
+        }
     }
 
     if has_null_arm && subject_name.is_some() {

@@ -115,6 +115,24 @@ impl InferenceEngine {
             }
         }
 
+        let resolved_symbols: Vec<(String, TypeScheme)> = environment
+            .flattened_bindings()
+            .into_iter()
+            .filter_map(|(name, scheme)| {
+                let resolved = resolve_type(&scheme.ty, &substitutions);
+                if resolved.contains_unknown() {
+                    return None;
+                }
+                let quantifiers = resolved.free_type_vars();
+                let final_scheme = TypeScheme::new(quantifiers, resolved);
+                Some((name, final_scheme))
+            })
+            .collect();
+
+        for (name, scheme) in resolved_symbols {
+            environment.redefine_scheme(&name, scheme);
+        }
+
         self.bindings = solve_result.bindings;
         self.environment = environment;
         self.function_schemes = function_schemes;

@@ -1,9 +1,11 @@
 use std::collections::{HashMap, HashSet};
 
 use super::annotations::{lookup_nullability_hint, JavaNullabilityHint};
+use crate::binding::LateInitManifest;
 use crate::inference::{TypeEnvironment, TypeKind as CheckerTypeKind, TypeScheme};
 use crate::pattern::{PatternMatchFacts, PatternTarget};
 use crate::{InferenceSnapshot, TypeInferenceService};
+use jv_ast::ValBindingOrigin;
 use jv_inference::service::{TypeFacts, TypeFactsSnapshot};
 use jv_inference::types::{
     NullabilityFlag, TypeKind as FactsTypeKind, TypeVariant as FactsTypeVariant,
@@ -39,7 +41,7 @@ impl NullabilityKind {
         }
     }
 
-    fn from_facts_type(ty: &FactsTypeKind) -> Self {
+    pub(super) fn from_facts_type(ty: &FactsTypeKind) -> Self {
         use FactsTypeVariant::*;
 
         if matches!(ty.variant(), Optional(_)) {
@@ -133,6 +135,61 @@ impl NullabilityLattice {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NonNullContractOrigin {
+    InferenceEnvironment,
+    InferenceScheme,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct NonNullContract {
+    origin: NonNullContractOrigin,
+}
+
+impl NonNullContract {
+    pub fn origin(&self) -> NonNullContractOrigin {
+        self.origin
+    }
+}
+
+#[derive(Debug, Default, Clone)]
+pub struct NonNullContracts {
+    entries: HashMap<String, NonNullContract>,
+}
+
+impl NonNullContracts {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn insert(&mut self, name: impl Into<String>, origin: NonNullContractOrigin) {
+        let symbol = name.into();
+        self.entries
+            .entry(symbol)
+            .or_insert(NonNullContract { origin });
+    }
+
+    pub fn contains(&self, name: &str) -> bool {
+        self.entries.contains_key(name)
+    }
+
+    pub fn get(&self, name: &str) -> Option<&NonNullContract> {
+        self.entries.get(name)
+    }
+
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = (&String, &NonNullContract)> {
+        self.entries.iter()
+    }
+}
+
 #[derive(Debug, Default, Clone)]
 pub struct LateInitRegistry {
     required: HashSet<String>,
@@ -140,11 +197,11 @@ pub struct LateInitRegistry {
 }
 
 impl LateInitRegistry {
-    pub fn new(lattice: &NullabilityLattice) -> Self {
-        let required = lattice
+    pub fn new(lattice: &NullabilityLattice, manifest: Option<&LateInitManifest>) -> Self {
+        let mut required: HashSet<String> = lattice
             .iter()
             .filter_map(|(name, state)| {
-                if matches!(state, NullabilityKind::NonNull) {
+                if matches!(state, NullabilityKind::NonNull | NullabilityKind::Nullable) {
                     Some(name.clone())
                 } else {
                     None
@@ -152,10 +209,37 @@ impl LateInitRegistry {
             })
             .collect();
 
-        Self {
-            required,
-            exempt: HashSet::new(),
+        let mut exempt = HashSet::new();
+
+        if let Some(manifest) = manifest {
+            for (name, seed) in manifest.iter() {
+                if !required.contains(name) {
+                    continue;
+                }
+
+                if seed.explicit_late_init {
+                    exempt.remove(name);
+                    continue;
+                }
+
+                let Some(state) = lattice.get(name) else {
+                    continue;
+                };
+
+                if seed.origin == ValBindingOrigin::Implicit {
+                    required.remove(name);
+                    exempt.insert(name.clone());
+                    continue;
+                }
+
+                if matches!(state, NullabilityKind::NonNull) && seed.has_initializer {
+                    required.remove(name);
+                    exempt.insert(name.clone());
+                }
+            }
         }
+
+        Self { required, exempt }
     }
 
     pub fn is_tracked(&self, name: &str) -> bool {
@@ -177,12 +261,74 @@ impl LateInitRegistry {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LateInitContractKind {
+    ImplicitInitialized,
+    InferredNonNull,
+}
+
+#[derive(Debug, Default, Clone)]
+pub struct LateInitContracts {
+    enforced: HashMap<String, LateInitContractKind>,
+}
+
+impl LateInitContracts {
+    pub fn new(lattice: &NullabilityLattice, manifest: Option<&LateInitManifest>) -> Self {
+        let mut enforced = HashMap::new();
+
+        if let Some(manifest) = manifest {
+            for (name, seed) in manifest.iter() {
+                if seed.explicit_late_init {
+                    continue;
+                }
+
+                if !seed.has_initializer {
+                    continue;
+                }
+
+                let lattice_state = lattice.get(name);
+                let is_nonnull_contract = matches!(lattice_state, Some(NullabilityKind::NonNull));
+                let is_implicit_contract = matches!(seed.origin, ValBindingOrigin::Implicit);
+
+                if is_implicit_contract {
+                    enforced.insert(name.clone(), LateInitContractKind::ImplicitInitialized);
+                    continue;
+                }
+
+                if is_nonnull_contract {
+                    enforced.insert(name.clone(), LateInitContractKind::InferredNonNull);
+                }
+            }
+        }
+
+        Self { enforced }
+    }
+
+    pub fn contains(&self, name: &str) -> bool {
+        self.enforced.contains_key(name)
+    }
+
+    pub fn kind(&self, name: &str) -> Option<LateInitContractKind> {
+        self.enforced.get(name).copied()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.enforced.is_empty()
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = (&String, LateInitContractKind)> {
+        self.enforced.iter().map(|(name, kind)| (name, *kind))
+    }
+}
+
 /// Hydrates symbol tables and lattice state from inference snapshots for downstream flow analysis.
 pub struct NullSafetyContext<'facts> {
     facts: Option<&'facts TypeFactsSnapshot>,
     lattice: NullabilityLattice,
+    contracts: NonNullContracts,
     degraded: bool,
     late_init: LateInitRegistry,
+    late_init_contracts: LateInitContracts,
     java_metadata: HashMap<String, JavaSymbolMetadata>,
     pattern_facts: HashMap<u64, PatternMatchFacts>,
 }
@@ -192,8 +338,11 @@ impl<'facts> NullSafetyContext<'facts> {
     pub fn hydrate(snapshot: Option<&'facts InferenceSnapshot>) -> Self {
         match snapshot {
             Some(snapshot) => {
-                let mut context =
-                    Self::from_parts(Some(snapshot.type_facts()), Some(snapshot.environment()));
+                let mut context = Self::from_parts(
+                    Some(snapshot.type_facts()),
+                    Some(snapshot.environment()),
+                    Some(snapshot.late_init_manifest()),
+                );
                 for ((node_id, target), facts) in snapshot.pattern_facts() {
                     if *target == PatternTarget::Java25 {
                         context.register_pattern_facts(*node_id, facts.clone());
@@ -209,8 +358,10 @@ impl<'facts> NullSafetyContext<'facts> {
     pub fn from_parts(
         facts: Option<&'facts TypeFactsSnapshot>,
         environment: Option<&'facts TypeEnvironment>,
+        manifest: Option<&LateInitManifest>,
     ) -> Self {
         let mut lattice = NullabilityLattice::new();
+        let mut contracts = NonNullContracts::default();
 
         if let Some(env) = environment {
             for (name, scheme) in env.flattened_bindings() {
@@ -220,15 +371,7 @@ impl<'facts> NullSafetyContext<'facts> {
         }
 
         if let Some(facts) = facts {
-            for (name, ty) in facts.environment().values().iter() {
-                let state = NullabilityKind::from_facts_type(ty);
-                lattice.insert(name.clone(), state);
-            }
-
-            for (name, scheme) in facts.all_schemes() {
-                let state = NullabilityKind::from_facts_type(scheme.body());
-                lattice.insert(name.to_string(), state);
-            }
+            hydrate_from_facts(facts, &mut lattice, &mut contracts);
         }
 
         let mut java_metadata = HashMap::new();
@@ -237,13 +380,16 @@ impl<'facts> NullSafetyContext<'facts> {
             hydrate_java_annotations(facts, &mut lattice, &mut java_metadata);
         }
 
-        let late_init = LateInitRegistry::new(&lattice);
+        let late_init = LateInitRegistry::new(&lattice, manifest);
+        let late_init_contracts = LateInitContracts::new(&lattice, manifest);
 
         Self {
             facts,
             lattice,
+            contracts,
             degraded: facts.is_none() || environment.is_none(),
             late_init,
+            late_init_contracts,
             java_metadata,
             pattern_facts: HashMap::new(),
         }
@@ -253,8 +399,10 @@ impl<'facts> NullSafetyContext<'facts> {
         Self {
             facts: None,
             lattice: NullabilityLattice::new(),
+            contracts: NonNullContracts::default(),
             degraded: true,
             late_init: LateInitRegistry::default(),
+            late_init_contracts: LateInitContracts::default(),
             java_metadata: HashMap::new(),
             pattern_facts: HashMap::new(),
         }
@@ -270,6 +418,10 @@ impl<'facts> NullSafetyContext<'facts> {
         &self.lattice
     }
 
+    pub fn contracts(&self) -> &NonNullContracts {
+        &self.contracts
+    }
+
     /// Returns true when the context is operating in degraded mode due to missing inference data.
     pub fn is_degraded(&self) -> bool {
         self.degraded
@@ -282,6 +434,10 @@ impl<'facts> NullSafetyContext<'facts> {
 
     pub fn late_init_mut(&mut self) -> &mut LateInitRegistry {
         &mut self.late_init
+    }
+
+    pub fn late_init_contracts(&self) -> &LateInitContracts {
+        &self.late_init_contracts
     }
 
     /// Returns Java interop metadata collected during context hydration.
@@ -313,6 +469,32 @@ impl<'facts> NullSafetyContext<'facts> {
 
     pub fn pattern_facts(&self, node_id: u64) -> Option<&PatternMatchFacts> {
         self.pattern_facts.get(&node_id)
+    }
+}
+
+fn hydrate_from_facts(
+    facts: &TypeFactsSnapshot,
+    lattice: &mut NullabilityLattice,
+    contracts: &mut NonNullContracts,
+) {
+    for (name, ty) in facts.environment().values().iter() {
+        let symbol = name.to_string();
+        let state = NullabilityKind::from_facts_type(ty);
+        lattice.insert(symbol.clone(), state);
+
+        if matches!(state, NullabilityKind::NonNull) {
+            contracts.insert(symbol, NonNullContractOrigin::InferenceEnvironment);
+        }
+    }
+
+    for (name, scheme) in facts.all_schemes() {
+        let symbol = name.to_string();
+        let state = NullabilityKind::from_facts_type(scheme.body());
+        lattice.insert(symbol.clone(), state);
+
+        if matches!(state, NullabilityKind::NonNull) {
+            contracts.insert(symbol, NonNullContractOrigin::InferenceScheme);
+        }
     }
 }
 
@@ -426,6 +608,7 @@ impl JavaSymbolMetadata {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::binding::{LateInitManifest, LateInitSeed};
     use crate::inference::types::TypeKind;
     use crate::inference::TypeEnvironment;
     use jv_inference::service::TypeFactsBuilder;
@@ -462,7 +645,7 @@ mod tests {
         );
         let facts = builder.build();
 
-        let context = NullSafetyContext::from_parts(Some(&facts), Some(&env));
+        let context = NullSafetyContext::from_parts(Some(&facts), Some(&env), None);
 
         assert_eq!(context.is_degraded(), false);
         assert_eq!(context.lattice().len(), 3);
@@ -477,6 +660,17 @@ mod tests {
         assert_eq!(
             context.lattice().get("User::lookup"),
             Some(NullabilityKind::NonNull)
+        );
+        assert_eq!(context.contracts().len(), 1);
+        assert!(context.contracts().contains("User::lookup"));
+        assert!(!context.contracts().contains("user_id"));
+        assert!(!context.contracts().contains("maybe_email"));
+        assert_eq!(
+            context
+                .contracts()
+                .get("User::lookup")
+                .map(NonNullContract::origin),
+            Some(NonNullContractOrigin::InferenceScheme)
         );
         assert!(context.late_init().is_tracked("User::lookup"));
     }
@@ -497,7 +691,7 @@ mod tests {
         );
         let facts = builder.build();
 
-        let context = NullSafetyContext::from_parts(Some(&facts), None);
+        let context = NullSafetyContext::from_parts(Some(&facts), None, None);
         assert!(context.is_degraded());
         assert_eq!(
             context.lattice().get("external"),
@@ -516,7 +710,7 @@ mod tests {
         builder.add_java_annotation("external", "@NotNull");
         let facts = builder.build();
 
-        let context = NullSafetyContext::from_parts(Some(&facts), Some(&env));
+        let context = NullSafetyContext::from_parts(Some(&facts), Some(&env), None);
 
         assert_eq!(
             context.lattice().get("external"),
@@ -534,6 +728,127 @@ mod tests {
     }
 
     #[test]
+    fn late_init_manifest_filters_required_symbols() {
+        let mut env = TypeEnvironment::new();
+        env.define_monotype("implicitVal", TypeKind::Primitive("Int"));
+        env.define_monotype("explicitInitialized", TypeKind::Primitive("Int"));
+        env.define_monotype("explicitLate", TypeKind::Primitive("Int"));
+        env.define_monotype("annotatedLate", TypeKind::Primitive("Int"));
+        env.define_monotype(
+            "nullableVar",
+            TypeKind::Optional(Box::new(TypeKind::Primitive("String"))),
+        );
+
+        let mut builder = TypeFactsBuilder::new();
+        for name in [
+            "implicitVal",
+            "explicitInitialized",
+            "explicitLate",
+            "annotatedLate",
+        ] {
+            builder.environment_entry(
+                name,
+                FactsTypeKind::new(TypeVariant::Primitive("Int"))
+                    .with_nullability(NullabilityFlag::NonNull),
+            );
+        }
+        builder.environment_entry(
+            "nullableVar",
+            FactsTypeKind::new(TypeVariant::Optional(Box::new(FactsTypeKind::new(
+                TypeVariant::Primitive("String"),
+            ))))
+            .with_nullability(NullabilityFlag::Nullable),
+        );
+        let facts = builder.build();
+
+        let mut seeds = HashMap::new();
+        seeds.insert(
+            "implicitVal".to_string(),
+            LateInitSeed {
+                name: "implicitVal".to_string(),
+                origin: ValBindingOrigin::Implicit,
+                has_initializer: true,
+                explicit_late_init: false,
+            },
+        );
+        seeds.insert(
+            "explicitInitialized".to_string(),
+            LateInitSeed {
+                name: "explicitInitialized".to_string(),
+                origin: ValBindingOrigin::ExplicitKeyword,
+                has_initializer: true,
+                explicit_late_init: false,
+            },
+        );
+        seeds.insert(
+            "explicitLate".to_string(),
+            LateInitSeed {
+                name: "explicitLate".to_string(),
+                origin: ValBindingOrigin::ExplicitKeyword,
+                has_initializer: false,
+                explicit_late_init: false,
+            },
+        );
+        seeds.insert(
+            "annotatedLate".to_string(),
+            LateInitSeed {
+                name: "annotatedLate".to_string(),
+                origin: ValBindingOrigin::ExplicitKeyword,
+                has_initializer: false,
+                explicit_late_init: true,
+            },
+        );
+        seeds.insert(
+            "nullableVar".to_string(),
+            LateInitSeed {
+                name: "nullableVar".to_string(),
+                origin: ValBindingOrigin::ExplicitKeyword,
+                has_initializer: true,
+                explicit_late_init: false,
+            },
+        );
+
+        let manifest = LateInitManifest::new(seeds);
+
+        let context = NullSafetyContext::from_parts(Some(&facts), Some(&env), Some(&manifest));
+
+        assert!(!context.late_init().is_tracked("implicitVal"));
+        assert!(!context.late_init().is_tracked("explicitInitialized"));
+        assert!(context.late_init().is_tracked("explicitLate"));
+        assert!(context.late_init().is_tracked("annotatedLate"));
+        assert!(context.late_init().is_tracked("nullableVar"));
+    }
+
+    #[test]
+    fn implicit_nullable_val_registers_contract() {
+        let mut env = TypeEnvironment::new();
+        env.define_monotype("maybe", checker_optional("String"));
+
+        let mut facts_builder = TypeFactsBuilder::new();
+        facts_builder.environment_entry("maybe", facts_optional("String"));
+        let facts = facts_builder.build();
+
+        let mut seeds = HashMap::new();
+        seeds.insert(
+            "maybe".to_string(),
+            LateInitSeed {
+                name: "maybe".to_string(),
+                origin: ValBindingOrigin::Implicit,
+                has_initializer: true,
+                explicit_late_init: false,
+            },
+        );
+        let manifest = LateInitManifest::new(seeds);
+
+        let context = NullSafetyContext::from_parts(Some(&facts), Some(&env), Some(&manifest));
+
+        assert!(
+            context.late_init_contracts().contains("maybe"),
+            "implicit val with initializer should form a contract even if nullable"
+        );
+    }
+
+    #[test]
     fn unknown_annotations_are_exposed_for_diagnostics() {
         let env = TypeEnvironment::new();
         let mut builder = TypeFactsBuilder::new();
@@ -544,7 +859,7 @@ mod tests {
         builder.add_java_annotation("mystery", "@MaybeNull");
         let facts = builder.build();
 
-        let context = NullSafetyContext::from_parts(Some(&facts), Some(&env));
+        let context = NullSafetyContext::from_parts(Some(&facts), Some(&env), None);
         let unknowns: Vec<_> = context.unknown_java_annotations().collect();
 
         assert_eq!(unknowns.len(), 1);
@@ -564,7 +879,7 @@ mod tests {
         builder.add_java_annotation("symbol", "@org.jetbrains.annotations.Nullable");
         let facts = builder.build();
 
-        let context = NullSafetyContext::from_parts(Some(&facts), Some(&env));
+        let context = NullSafetyContext::from_parts(Some(&facts), Some(&env), None);
         let metadata = context
             .java_metadata()
             .get("symbol")
@@ -592,7 +907,7 @@ mod tests {
         builder.add_java_annotation("symbol", "@jakarta.annotation.Nullable");
         let facts = builder.build();
 
-        let context = NullSafetyContext::from_parts(Some(&facts), Some(&env));
+        let context = NullSafetyContext::from_parts(Some(&facts), Some(&env), None);
         let metadata = context
             .java_metadata()
             .get("symbol")

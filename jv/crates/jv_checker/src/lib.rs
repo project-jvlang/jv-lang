@@ -14,10 +14,12 @@ pub use inference::{
 pub use jv_inference::ParallelInferenceConfig;
 pub use regex::RegexAnalysis;
 
-use binding::{resolve_bindings, BindingResolution, BindingUsageSummary};
+use binding::{resolve_bindings, BindingResolution, BindingUsageSummary, LateInitManifest};
 use jv_ast::{Program, Span};
 use null_safety::{JavaLoweringHint, NullSafetyCoordinator};
-use pattern::{PatternCacheMetrics, PatternMatchFacts, PatternMatchService, PatternTarget};
+use pattern::{
+    NarrowedNullability, PatternCacheMetrics, PatternMatchFacts, PatternMatchService, PatternTarget,
+};
 use regex::RegexValidator;
 use std::collections::HashMap;
 use thiserror::Error;
@@ -25,7 +27,8 @@ use thiserror::Error;
 use jv_inference::service::{TypeFactsBuilder, TypeFactsSnapshot, TypeScheme as FactsTypeScheme};
 use jv_inference::solver::TypeBinding as FactsTypeBinding;
 use jv_inference::types::{
-    TypeId as FactsTypeId, TypeKind as FactsTypeKind, TypeVariant as FactsTypeVariant,
+    NullabilityFlag, TypeId as FactsTypeId, TypeKind as FactsTypeKind,
+    TypeVariant as FactsTypeVariant,
 };
 
 #[derive(Error, Debug)]
@@ -52,6 +55,7 @@ pub struct InferenceSnapshot {
     facts: TypeFactsSnapshot,
     pattern_facts: HashMap<(u64, PatternTarget), PatternMatchFacts>,
     regex_analyses: Vec<RegexAnalysis>,
+    late_init_manifest: LateInitManifest,
 }
 
 impl InferenceSnapshot {
@@ -59,6 +63,7 @@ impl InferenceSnapshot {
         engine: &InferenceEngine,
         pattern_facts: HashMap<(u64, PatternTarget), PatternMatchFacts>,
         regex_analyses: Vec<RegexAnalysis>,
+        late_init_manifest: LateInitManifest,
     ) -> Self {
         let environment = engine.environment().clone();
         let bindings = engine.bindings().to_vec();
@@ -80,6 +85,7 @@ impl InferenceSnapshot {
             facts,
             pattern_facts,
             regex_analyses,
+            late_init_manifest,
         }
     }
 
@@ -102,6 +108,80 @@ impl InferenceSnapshot {
     pub fn binding_scheme(&self, name: &str) -> Option<&TypeScheme> {
         self.environment.lookup(name)
     }
+
+    pub fn late_init_manifest(&self) -> &LateInitManifest {
+        &self.late_init_manifest
+    }
+}
+
+/// Summary of nullability information for each branch within a `when` expression.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WhenBranchNullability {
+    arm_nullability: Vec<NullabilityFlag>,
+    fallback_nullability: Option<NullabilityFlag>,
+}
+
+impl WhenBranchNullability {
+    fn new(arm_count: usize, has_fallback: bool) -> Self {
+        Self {
+            arm_nullability: vec![NullabilityFlag::Unknown; arm_count],
+            fallback_nullability: has_fallback.then_some(NullabilityFlag::Unknown),
+        }
+    }
+
+    /// Returns the inferred nullability for each `when` arm in source order.
+    pub fn arm_nullability(&self) -> &[NullabilityFlag] {
+        &self.arm_nullability
+    }
+
+    /// Returns the inferred nullability for the fallback branch (`else`), when present.
+    pub fn fallback_nullability(&self) -> Option<NullabilityFlag> {
+        self.fallback_nullability
+    }
+
+    fn update_from_pattern_facts(&mut self, subject: &str, facts: &PatternMatchFacts) {
+        let mut branch_flags: Vec<(usize, NullabilityFlag)> = facts
+            .narrowing()
+            .arms()
+            .filter_map(|(arm_id, snapshot)| {
+                snapshot
+                    .on_match()
+                    .iter()
+                    .find(|binding| binding.variable == subject)
+                    .map(|binding| (*arm_id as usize, to_nullability_flag(binding.nullability)))
+            })
+            .collect();
+        branch_flags.sort_by_key(|(index, _)| *index);
+        for (index, flag) in branch_flags {
+            if index >= self.arm_nullability.len() {
+                self.arm_nullability
+                    .resize(index + 1, NullabilityFlag::Unknown);
+            }
+            if let Some(slot) = self.arm_nullability.get_mut(index) {
+                *slot = flag;
+            }
+        }
+
+        if let Some(snapshot) = facts.fallback_narrowing() {
+            if let Some(binding) = snapshot
+                .on_match()
+                .iter()
+                .find(|binding| binding.variable == subject)
+            {
+                if let Some(fallback) = self.fallback_nullability.as_mut() {
+                    *fallback = to_nullability_flag(binding.nullability);
+                }
+            }
+        }
+    }
+}
+
+fn to_nullability_flag(value: NarrowedNullability) -> NullabilityFlag {
+    match value {
+        NarrowedNullability::NonNull => NullabilityFlag::NonNull,
+        NarrowedNullability::Nullable => NullabilityFlag::Nullable,
+        NarrowedNullability::Unknown => NullabilityFlag::Unknown,
+    }
 }
 
 /// 推論済み情報へアクセスするためのサービスレイヤ。
@@ -120,6 +200,23 @@ pub trait TypeInferenceService {
 
     /// 推論済みのトップレベル型を返す。
     fn result_type(&self) -> Option<&TypeKind>;
+
+    /// Late-init 用メタデータを返す。
+    fn late_init_manifest(&self) -> &LateInitManifest;
+
+    /// Retrieves branch-level nullability flags for a `when` expression.
+    ///
+    /// The caller must provide the node identifier used by the pattern service,
+    /// together with context information about the subject identifier and the
+    /// number of arms. Missing facts default to `Unknown`.
+    fn when_branch_nullability(
+        &self,
+        node_id: u64,
+        subject_name: Option<&str>,
+        arm_count: usize,
+        has_fallback: bool,
+        target: PatternTarget,
+    ) -> WhenBranchNullability;
 }
 
 impl TypeInferenceService for InferenceSnapshot {
@@ -141,6 +238,25 @@ impl TypeInferenceService for InferenceSnapshot {
 
     fn result_type(&self) -> Option<&TypeKind> {
         self.result_type.as_ref()
+    }
+
+    fn late_init_manifest(&self) -> &LateInitManifest {
+        &self.late_init_manifest
+    }
+
+    fn when_branch_nullability(
+        &self,
+        node_id: u64,
+        subject_name: Option<&str>,
+        arm_count: usize,
+        has_fallback: bool,
+        target: PatternTarget,
+    ) -> WhenBranchNullability {
+        let mut summary = WhenBranchNullability::new(arm_count, has_fallback);
+        if let (Some(subject), Some(facts)) = (subject_name, self.pattern_fact(node_id, target)) {
+            summary.update_from_pattern_facts(subject, facts);
+        }
+        summary
     }
 }
 
@@ -206,6 +322,7 @@ pub struct TypeChecker {
     regex_validator: RegexValidator,
     normalized_program: Option<Program>,
     binding_usage: BindingUsageSummary,
+    late_init_manifest: LateInitManifest,
 }
 
 impl TypeChecker {
@@ -228,6 +345,7 @@ impl TypeChecker {
             regex_validator: RegexValidator::new(),
             normalized_program: None,
             binding_usage: BindingUsageSummary::default(),
+            late_init_manifest: LateInitManifest::default(),
         }
     }
 
@@ -262,6 +380,10 @@ impl TypeChecker {
         &self.binding_usage
     }
 
+    pub fn late_init_manifest(&self) -> &LateInitManifest {
+        &self.late_init_manifest
+    }
+
     pub fn check_program(&mut self, program: &Program) -> Result<(), Vec<CheckError>> {
         self.engine.set_parallel_config(self.parallel_config);
         self.null_safety_hints.clear();
@@ -271,10 +393,12 @@ impl TypeChecker {
             program: normalized,
             diagnostics,
             usage,
+            late_init_manifest,
         } = binding_resolution;
 
         self.binding_usage = usage;
         self.normalized_program = Some(normalized);
+        self.late_init_manifest = late_init_manifest;
 
         if !diagnostics.is_empty() {
             self.snapshot = None;
@@ -327,6 +451,7 @@ impl TypeChecker {
                     &self.engine,
                     pattern_facts,
                     regex_analyses,
+                    self.late_init_manifest.clone(),
                 ));
                 self.merged_facts = self
                     .snapshot
@@ -509,7 +634,8 @@ fn convert_scheme(scheme: &TypeScheme) -> FactsTypeScheme {
 
 fn convert_type_kind(ty: &TypeKind) -> FactsTypeKind {
     match ty {
-        TypeKind::Primitive(name) => FactsTypeKind::new(FactsTypeVariant::Primitive(name)),
+        TypeKind::Primitive(name) => FactsTypeKind::new(FactsTypeVariant::Primitive(name))
+            .with_nullability(NullabilityFlag::NonNull),
         TypeKind::Optional(inner) => FactsTypeKind::optional(convert_type_kind(inner)),
         TypeKind::Variable(id) => {
             FactsTypeKind::new(FactsTypeVariant::Variable(FactsTypeId::new(id.to_raw())))
@@ -518,6 +644,7 @@ fn convert_type_kind(ty: &TypeKind) -> FactsTypeKind {
             let converted_params = params.iter().map(convert_type_kind).collect::<Vec<_>>();
             let converted_ret = convert_type_kind(ret);
             FactsTypeKind::function(converted_params, converted_ret)
+                .with_nullability(NullabilityFlag::NonNull)
         }
         TypeKind::Unknown => FactsTypeKind::default(),
     }

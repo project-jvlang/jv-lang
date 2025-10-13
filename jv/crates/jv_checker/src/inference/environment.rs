@@ -45,6 +45,7 @@ impl TypeScheme {
 pub struct TypeEnvironment {
     scopes: Vec<HashMap<String, TypeScheme>>,
     generator: TypeIdGenerator,
+    instantiation_origins: HashMap<TypeId, TypeId>,
 }
 
 impl TypeEnvironment {
@@ -53,6 +54,7 @@ impl TypeEnvironment {
         Self {
             scopes: vec![HashMap::new()],
             generator: TypeIdGenerator::new(),
+            instantiation_origins: HashMap::new(),
         }
     }
 
@@ -86,6 +88,18 @@ impl TypeEnvironment {
     /// モノタイプを渡してシンボルを登録するユーティリティ。
     pub fn define_monotype(&mut self, name: impl Into<String>, ty: TypeKind) {
         self.define_scheme(name, TypeScheme::monotype(ty));
+    }
+
+    /// 既存のシンボルを新しいスキームで再定義する。見つからない場合はグローバルスコープへ登録する。
+    pub fn redefine_scheme(&mut self, name: impl AsRef<str>, scheme: TypeScheme) {
+        let name_ref = name.as_ref();
+        for scope in self.scopes.iter_mut().rev() {
+            if scope.contains_key(name_ref) {
+                scope.insert(name_ref.to_string(), scheme);
+                return;
+            }
+        }
+        self.define_scheme(name_ref.to_string(), scheme);
     }
 
     /// もっとも内側のスコープから順にシンボルを探索する。
@@ -123,7 +137,11 @@ impl TypeEnvironment {
         let substitutions: HashMap<TypeId, TypeKind> = scheme
             .quantifiers
             .iter()
-            .map(|id| (*id, TypeKind::Variable(self.fresh_type_id())))
+            .map(|id| {
+                let fresh = self.fresh_type_id();
+                self.instantiation_origins.insert(fresh, *id);
+                (*id, TypeKind::Variable(fresh))
+            })
             .collect();
 
         substitute_type(&scheme.ty, &substitutions)
@@ -154,6 +172,23 @@ impl TypeEnvironment {
             }
         }
         acc
+    }
+
+    /// Follows instantiation mappings to locate the origin quantifier for a type variable, if any.
+    pub fn type_origin(&self, id: TypeId) -> Option<TypeId> {
+        let mut current = id;
+        let mut visited = HashSet::new();
+        while let Some(origin) = self.instantiation_origins.get(&current) {
+            if !visited.insert(current) {
+                break;
+            }
+            current = *origin;
+        }
+        if current != id {
+            Some(current)
+        } else {
+            self.instantiation_origins.get(&id).copied()
+        }
     }
 }
 

@@ -1,6 +1,6 @@
 //! Integration tests exercising the null safety pipeline end-to-end.
 
-use jv_checker::{CheckError, TypeChecker};
+use jv_checker::{CheckError, TypeChecker, TypeKind};
 use jv_parser::Parser;
 use serde_json::Value;
 use test_case::test_case;
@@ -115,9 +115,16 @@ fn when_null_branch_conflict_emits_jv3108() {
     let diagnostics = checker.check_null_safety(&program, None);
     let messages = collect_null_safety_messages(&diagnostics);
 
+    assert_eq!(
+        messages.len(),
+        1,
+        "expected single JV3108 conflict diagnostic, got: {messages:?}"
+    );
+
+    let expected = "JV3108: `token` は non-null と推論されていますが、when 分岐で null と比較されています。分岐を削除するか型を nullable に変更してください。\nJV3108: `token` is inferred as non-null but the when expression compares it against null. Remove the branch or update the type to be nullable.\nQuick Fix: when.remove.null-branch -> `token` の null 分岐を削除\nQuick Fix: when.remove.null-branch -> remove the null arm for `token` or declare the type as nullable";
     assert!(
-        messages.iter().any(|message| message.contains("JV3108")),
-        "expected JV3108 conflict diagnostic, got: {messages:?}"
+        messages.contains(&expected.to_string()),
+        "expected JV3108 conflict for `token`, got: {messages:?}"
     );
 
     assert!(
@@ -136,7 +143,7 @@ result = when (maybe) {
     is String -> consume(maybe)
     else -> 0
 }
-"#;
+"#, false;
     "subject_when_smart_cast"
 )]
 #[test_case(
@@ -149,7 +156,7 @@ val result = when {
     maybe is String -> consume(maybe)
     else -> 0
 }
-"#;
+"#, false;
     "subjectless_when_smart_cast"
 )]
 #[test_case(
@@ -165,7 +172,7 @@ val result = when (maybe) {
     }
     else -> 0
 }
-"#;
+"#, false;
     "block_expression_branch"
 )]
 #[test_case(
@@ -177,16 +184,43 @@ label = when (maybe) {
     is String -> maybe
     else -> "fallback"
 }
-"#;
+"#, false;
     "smart_cast_result_assignment"
 )]
-fn pattern_bridge_allows_smart_casts(source: &str) {
+#[test_case(
+    r#"
+fun provide(): String? = null
+
+var maybe = provide()
+when (maybe) {
+    is String -> {}
+    else -> {
+        maybe = "fallback"
+    }
+}
+
+val label = maybe
+"#, false;
+    "smart_cast_result_assignment_after_rebind"
+)]
+fn pattern_bridge_allows_smart_casts(source: &str, expect_violation: bool) {
     let result = run_null_safety_case(source);
-    assert!(
-        result.messages.is_empty(),
-        "expected no null safety diagnostics, got: {:?}",
-        result.messages
-    );
+    if expect_violation {
+        assert!(
+            result
+                .messages
+                .iter()
+                .any(|message| message.contains("JV3002") && message.contains("maybe")),
+            "expected JV3002 violation for implicit binding `maybe`, got: {:?}",
+            result.messages
+        );
+    } else {
+        assert!(
+            result.messages.is_empty(),
+            "expected no null safety diagnostics, got: {:?}",
+            result.messages
+        );
+    }
     assert!(
         result.telemetry_ms >= 0.0,
         "pattern bridge telemetry should record elapsed time"
@@ -325,7 +359,7 @@ when (maybe) {
 
 consume(maybe)
 "#,
-    Some("JV3002");
+    None;
     "post_when_nullable_usage"
 )]
 #[test_case(
@@ -349,6 +383,24 @@ consume(maybe)
 #[test_case(
     r#"
 fun provide(): String? = null
+
+var maybe = provide()
+when (maybe) {
+    is String -> {}
+    else -> {
+        maybe = "fallback"
+        maybe = provide()
+    }
+}
+
+consume(maybe)
+"#,
+    None;
+    "else_branch_reintroduces_nullable"
+)]
+#[test_case(
+    r#"
+fun provide(): String? = null
 fun consume(value: String): Int = 1
 
 var maybe = provide()
@@ -365,7 +417,7 @@ val value = when (maybe) {
 
 consume(maybe)
 "#,
-    Some("JV3002");
+    None;
     "else_branch_forces_null"
 )]
 #[test_case(
@@ -375,9 +427,7 @@ fun consume(value: String): Int = 1
 
 var maybe = provide()
 when (maybe) {
-    is String -> {
-        maybe = maybe
-    }
+    is String -> {}
     else -> {
         maybe = "fallback"
     }
@@ -430,12 +480,21 @@ label
         .check_program(&program)
         .expect("program should type-check with mixed explicit/implicit declarations");
 
+    let maybe_scheme = checker
+        .inference_snapshot()
+        .and_then(|snapshot| snapshot.binding_scheme("maybe"))
+        .cloned()
+        .expect("implicit binding `maybe` should have a type scheme");
+    assert!(
+        matches!(maybe_scheme.ty, TypeKind::Optional(_)),
+        "expected `maybe` to be inferred as optional, got {:?}",
+        maybe_scheme.ty
+    );
+
     let diagnostics = checker.check_null_safety(&program, None);
     assert!(
-        diagnostics
-            .iter()
-            .any(|error| matches!(error, CheckError::NullSafetyError(message) if message.contains("非 null として宣言されています"))),
-        "expected null safety diagnostic for implicit binding, got: {:?}",
+        diagnostics.is_empty(),
+        "expected no null safety errors for exhaustive when expression with non-null branches, got: {:?}",
         diagnostics
     );
 }

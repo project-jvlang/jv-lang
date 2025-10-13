@@ -1,7 +1,7 @@
-use std::collections::{hash_map::Entry, HashMap};
+use std::collections::{hash_map::Entry, HashMap, HashSet};
 
 use super::annotations::JavaNullabilityHint;
-use super::context::NullSafetyContext;
+use super::context::{LateInitContractKind, NullSafetyContext};
 use super::flow::FlowAnalysisOutcome;
 use super::graph::FlowStateSnapshot;
 use super::operators::{JavaLoweringHint, JavaLoweringStrategy, OperatorOperand};
@@ -32,7 +32,7 @@ impl<'ctx> DiagnosticsEmitter<'ctx> {
 
     pub fn emit(&self, outcome: &FlowAnalysisOutcome) -> DiagnosticsPayload {
         let mut overrides = aggregate_states(outcome);
-        let mut errors = self.verify_exit_state(outcome.exit_state.as_ref());
+        let mut errors = self.verify_exit_state(outcome.exit_state.as_ref(), &overrides);
         for error in &outcome.diagnostics {
             let message = ensure_code(&error.to_string(), DEFAULT_ERROR_CODE);
             errors.push(CheckError::NullSafetyError(message));
@@ -97,40 +97,177 @@ impl<'ctx> DiagnosticsEmitter<'ctx> {
         Some(builder.build())
     }
 
-    fn verify_exit_state(&self, exit_state: Option<&FlowStateSnapshot>) -> Vec<CheckError> {
+    fn verify_exit_state(
+        &self,
+        exit_state: Option<&FlowStateSnapshot>,
+        aggregated: &HashMap<String, NullabilityKind>,
+    ) -> Vec<CheckError> {
         let mut diagnostics = Vec::new();
         let Some(state) = exit_state else {
+            let mut processed: HashSet<String> = HashSet::new();
+
+            for (name, observed) in aggregated.iter() {
+                self.evaluate_exit_state(name, *observed, &mut diagnostics);
+                processed.insert(name.clone());
+            }
+
+            for (name, _) in self.context.contracts().iter() {
+                if processed.contains(name) {
+                    continue;
+                }
+                let observed = aggregated
+                    .get(name.as_str())
+                    .copied()
+                    .unwrap_or(NullabilityKind::Unknown);
+                self.evaluate_exit_state(name, observed, &mut diagnostics);
+                processed.insert(name.clone());
+            }
+
+            for (name, _) in self.context.late_init_contracts().iter() {
+                if processed.contains(name) {
+                    continue;
+                }
+                let observed = aggregated
+                    .get(name.as_str())
+                    .copied()
+                    .unwrap_or(NullabilityKind::Unknown);
+                self.evaluate_exit_state(name, observed, &mut diagnostics);
+                processed.insert(name.clone());
+            }
+
             return diagnostics;
         };
 
-        for (name, contract) in self.context.lattice().iter() {
-            if !matches!(contract, NullabilityKind::NonNull) {
+        let mut processed: HashSet<String> = HashSet::new();
+
+        for (name, _) in self.context.contracts().iter() {
+            let mut observed = state
+                .states
+                .get(name.as_str())
+                .copied()
+                .or_else(|| aggregated.get(name.as_str()).copied())
+                .unwrap_or(NullabilityKind::Unknown);
+
+            if matches!(observed, NullabilityKind::Unknown) {
+                if let Some(lattice_state) = self.context.lattice().get(name.as_str()) {
+                    if !matches!(lattice_state, NullabilityKind::Unknown) {
+                        observed = lattice_state;
+                    }
+                }
+            }
+
+            self.evaluate_exit_state(name.as_str(), observed, &mut diagnostics);
+            processed.insert(name.clone());
+        }
+
+        for (name, _) in self.context.late_init_contracts().iter() {
+            if processed.contains(name.as_str()) {
+                continue;
+            }
+
+            let mut observed = state
+                .states
+                .get(name.as_str())
+                .copied()
+                .or_else(|| aggregated.get(name.as_str()).copied())
+                .unwrap_or(NullabilityKind::Unknown);
+
+            if matches!(observed, NullabilityKind::Unknown) {
+                if let Some(lattice_state) = self.context.lattice().get(name.as_str()) {
+                    if !matches!(lattice_state, NullabilityKind::Unknown) {
+                        observed = lattice_state;
+                    }
+                }
+            }
+
+            self.evaluate_exit_state(name.as_str(), observed, &mut diagnostics);
+            processed.insert(name.clone());
+        }
+
+        for (name, contract_state) in self.context.lattice().iter() {
+            if !matches!(contract_state, NullabilityKind::NonNull) {
+                continue;
+            }
+
+            if self.has_contract(name.as_str()) {
                 continue;
             }
 
             let observed = state
                 .states
-                .get(name)
+                .get(name.as_str())
                 .copied()
+                .or_else(|| aggregated.get(name.as_str()).copied())
                 .unwrap_or(NullabilityKind::Unknown);
 
-            if matches!(observed, NullabilityKind::Nullable) {
-                diagnostics.push(CheckError::NullSafetyError(exit_violation_message(name)));
+            self.evaluate_exit_state(name.as_str(), observed, &mut diagnostics);
+            processed.insert(name.clone());
+        }
+
+        for (name, observed) in state.states.iter() {
+            if processed.contains(name.as_str()) {
                 continue;
             }
 
-            if self.context.late_init().is_tracked(name)
-                && !self.context.is_degraded()
-                && matches!(
-                    observed,
-                    NullabilityKind::Unknown | NullabilityKind::Platform
-                )
-            {
-                diagnostics.push(CheckError::NullSafetyError(late_init_message(name)));
+            self.evaluate_exit_state(name, *observed, &mut diagnostics);
+            processed.insert(name.clone());
+        }
+
+        for (name, observed) in aggregated.iter() {
+            if processed.contains(name.as_str()) {
+                continue;
             }
+
+            self.evaluate_exit_state(name, *observed, &mut diagnostics);
+            processed.insert(name.clone());
         }
 
         diagnostics
+    }
+
+    fn evaluate_exit_state(
+        &self,
+        name: &str,
+        observed: NullabilityKind,
+        diagnostics: &mut Vec<CheckError>,
+    ) {
+        let has_contract = self.has_contract(name);
+        let requires_initialization = self.context.late_init().is_tracked(name);
+        let degraded = self.context.is_degraded();
+        let manifest_contract_kind = self.context.late_init_contracts().kind(name);
+        let enforce_unknown = matches!(
+            manifest_contract_kind,
+            Some(LateInitContractKind::ImplicitInitialized)
+        );
+        match observed {
+            NullabilityKind::NonNull => {}
+            NullabilityKind::Nullable => {
+                if has_contract {
+                    if matches!(
+                        manifest_contract_kind,
+                        Some(LateInitContractKind::ImplicitInitialized)
+                    ) {
+                        // Implicit bindings with initialisers may legally remain nullable.
+                    } else {
+                        diagnostics.push(CheckError::NullSafetyError(exit_violation_message(name)));
+                    }
+                } else if requires_initialization && !degraded {
+                    diagnostics.push(CheckError::NullSafetyError(late_init_message(name)));
+                }
+            }
+            NullabilityKind::Unknown => {
+                if has_contract && enforce_unknown && !degraded {
+                    diagnostics.push(CheckError::NullSafetyError(exit_violation_message(name)));
+                }
+            }
+            NullabilityKind::Platform => {
+                if has_contract {
+                    diagnostics.push(CheckError::NullSafetyError(exit_violation_message(name)));
+                } else if requires_initialization && !degraded {
+                    diagnostics.push(CheckError::NullSafetyError(late_init_message(name)));
+                }
+            }
+        }
     }
 
     fn unknown_annotation_warnings(&self) -> Vec<CheckError> {
@@ -162,6 +299,10 @@ impl<'ctx> DiagnosticsEmitter<'ctx> {
         }
 
         warnings
+    }
+
+    fn has_contract(&self, name: &str) -> bool {
+        self.context.contracts().contains(name) || self.context.late_init_contracts().contains(name)
     }
 }
 
@@ -328,7 +469,7 @@ fn redundant_operator_message(
 
 fn exit_violation_message(name: &str) -> String {
     format!(
-        "JV3002: 非 null として宣言された値 `{name}` がスコープ終了時に null になる可能性があります。確実に non-null へ初期化するか、Nullable 型へ更新してください。\nJV3002: Value `{name}` declared non-null may be null when control leaves this scope. Ensure it is initialised with a non-null value or relax the type to nullable."
+        "JV3002: 値 `{name}` は non-null と宣言されていますが、スコープ終了時に null になる可能性があります。確実に non-null へ初期化するか、Nullable 型へ更新してください。\nJV3002: Value `{name}` declared non-null may be null when control leaves this scope. Ensure it is initialised with a non-null value or relax the type to nullable."
     )
 }
 
@@ -355,14 +496,17 @@ fn degraded_warning() -> CheckError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::binding::{LateInitManifest, LateInitSeed};
     use crate::inference::TypeEnvironment;
     use crate::null_safety::graph::FlowStateSnapshot;
     use crate::null_safety::operators::{JavaLoweringHint, JavaLoweringStrategy, OperatorOperand};
     use jv_ast::types::Span;
+    use jv_ast::ValBindingOrigin;
     use jv_inference::service::TypeFactsBuilder;
     use jv_inference::types::{
         NullabilityFlag, TypeKind as FactsTypeKind, TypeVariant as FactsTypeVariant,
     };
+    use std::collections::HashMap;
 
     #[test]
     fn degraded_mode_emits_warning() {
@@ -389,7 +533,7 @@ mod tests {
         );
         let base_snapshot = base_builder.build();
 
-        let context = NullSafetyContext::from_parts(Some(&base_snapshot), Some(&env));
+        let context = NullSafetyContext::from_parts(Some(&base_snapshot), Some(&env), None);
 
         let mut outcome = FlowAnalysisOutcome::default();
         let mut state = FlowStateSnapshot::new();
@@ -416,7 +560,7 @@ mod tests {
     fn platform_states_emit_jv3005_information_warning() {
         let env = TypeEnvironment::new();
         let facts = TypeFactsBuilder::new().build();
-        let context = NullSafetyContext::from_parts(Some(&facts), Some(&env));
+        let context = NullSafetyContext::from_parts(Some(&facts), Some(&env), None);
 
         let mut outcome = FlowAnalysisOutcome::default();
         let mut state = FlowStateSnapshot::new();
@@ -443,7 +587,7 @@ mod tests {
         builder.add_java_annotation("mystery", "@MaybeNull");
         let facts = builder.build();
 
-        let context = NullSafetyContext::from_parts(Some(&facts), Some(&env));
+        let context = NullSafetyContext::from_parts(Some(&facts), Some(&env), None);
         let outcome = FlowAnalysisOutcome::default();
         let emitter = DiagnosticsEmitter::new(&context);
         let payload = emitter.emit(&outcome);
@@ -466,7 +610,7 @@ mod tests {
         builder.add_java_annotation("external", "@NotNull");
         let facts = builder.build();
 
-        let context = NullSafetyContext::from_parts(Some(&facts), Some(&env));
+        let context = NullSafetyContext::from_parts(Some(&facts), Some(&env), None);
 
         let mut outcome = FlowAnalysisOutcome::default();
         let mut state = FlowStateSnapshot::new();
@@ -495,7 +639,7 @@ mod tests {
                 .with_nullability(NullabilityFlag::NonNull),
         );
         let facts = facts_builder.build();
-        let context = NullSafetyContext::from_parts(Some(&facts), Some(&env));
+        let context = NullSafetyContext::from_parts(Some(&facts), Some(&env), None);
 
         let operand = OperatorOperand::new(NullabilityKind::NonNull, Some("user".into()));
         let hint = JavaLoweringHint::new(
@@ -532,7 +676,7 @@ mod tests {
                 .with_nullability(NullabilityFlag::NonNull),
         );
         let facts = facts_builder.build();
-        let context = NullSafetyContext::from_parts(Some(&facts), Some(&env));
+        let context = NullSafetyContext::from_parts(Some(&facts), Some(&env), None);
 
         let operand = OperatorOperand::new(NullabilityKind::NonNull, Some("value".into()));
         let hint = JavaLoweringHint::new(
@@ -568,7 +712,7 @@ mod tests {
                 .with_nullability(NullabilityFlag::NonNull),
         );
         let facts = builder.build();
-        let context = NullSafetyContext::from_parts(Some(&facts), Some(&env));
+        let context = NullSafetyContext::from_parts(Some(&facts), Some(&env), None);
 
         let mut outcome = FlowAnalysisOutcome::default();
         let mut exit_state = FlowStateSnapshot::new();
@@ -594,6 +738,93 @@ mod tests {
     }
 
     #[test]
+    fn manifest_contract_unknown_exit_state_is_tolerated() {
+        let mut env = TypeEnvironment::new();
+        env.define_monotype("token", crate::inference::TypeKind::Primitive("String"));
+
+        let mut facts_builder = TypeFactsBuilder::new();
+        facts_builder.environment_entry(
+            "token",
+            FactsTypeKind::new(FactsTypeVariant::Primitive("String"))
+                .with_nullability(NullabilityFlag::NonNull),
+        );
+        let facts = facts_builder.build();
+
+        let mut seeds = HashMap::new();
+        seeds.insert(
+            "token".to_string(),
+            LateInitSeed {
+                name: "token".into(),
+                origin: ValBindingOrigin::ExplicitKeyword,
+                has_initializer: true,
+                explicit_late_init: false,
+            },
+        );
+        let manifest = LateInitManifest::new(seeds);
+
+        let context = NullSafetyContext::from_parts(Some(&facts), Some(&env), Some(&manifest));
+
+        let mut outcome = FlowAnalysisOutcome::default();
+        let mut exit_state = FlowStateSnapshot::new();
+        exit_state.assign("token".into(), NullabilityKind::Unknown);
+        outcome.exit_state = Some(exit_state);
+
+        let emitter = DiagnosticsEmitter::new(&context);
+        let payload = emitter.emit(&outcome);
+
+        assert!(
+            payload
+                .errors
+                .iter()
+                .all(|error| !error.to_string().contains("JV3002")
+                    && !error.to_string().contains("JV3003")),
+            "unexpected JV3002/JV3003 diagnostics: {:?}",
+            payload.errors
+        );
+    }
+
+    #[test]
+    fn manifest_contract_nullable_exit_state_emits_violation() {
+        let mut env = TypeEnvironment::new();
+        env.define_monotype("token", crate::inference::TypeKind::Primitive("String"));
+
+        let mut facts_builder = TypeFactsBuilder::new();
+        facts_builder.environment_entry(
+            "token",
+            FactsTypeKind::new(FactsTypeVariant::Primitive("String"))
+                .with_nullability(NullabilityFlag::NonNull),
+        );
+        let facts = facts_builder.build();
+
+        let mut seeds = HashMap::new();
+        seeds.insert(
+            "token".to_string(),
+            LateInitSeed {
+                name: "token".into(),
+                origin: ValBindingOrigin::ExplicitKeyword,
+                has_initializer: true,
+                explicit_late_init: false,
+            },
+        );
+        let manifest = LateInitManifest::new(seeds);
+
+        let context = NullSafetyContext::from_parts(Some(&facts), Some(&env), Some(&manifest));
+
+        let mut outcome = FlowAnalysisOutcome::default();
+        let mut exit_state = FlowStateSnapshot::new();
+        exit_state.assign("token".into(), NullabilityKind::Nullable);
+        outcome.exit_state = Some(exit_state);
+
+        let emitter = DiagnosticsEmitter::new(&context);
+        let payload = emitter.emit(&outcome);
+
+        assert!(payload
+            .errors
+            .iter()
+            .any(|error| error.to_string().contains("JV3002")));
+    }
+
+    #[test]
     fn exit_nonnull_state_is_ok() {
         let mut env = TypeEnvironment::new();
         env.define_monotype("token", crate::inference::TypeKind::Primitive("String"));
@@ -605,7 +836,7 @@ mod tests {
                 .with_nullability(NullabilityFlag::NonNull),
         );
         let facts = builder.build();
-        let context = NullSafetyContext::from_parts(Some(&facts), Some(&env));
+        let context = NullSafetyContext::from_parts(Some(&facts), Some(&env), None);
 
         let mut outcome = FlowAnalysisOutcome::default();
         let mut exit_state = FlowStateSnapshot::new();
@@ -630,7 +861,7 @@ mod tests {
                 .with_nullability(NullabilityFlag::NonNull),
         );
         let facts = builder.build();
-        let context = NullSafetyContext::from_parts(Some(&facts), Some(&env));
+        let context = NullSafetyContext::from_parts(Some(&facts), Some(&env), None);
 
         let mut outcome = FlowAnalysisOutcome::default();
         outcome.exit_state = Some(FlowStateSnapshot::new());
@@ -638,12 +869,18 @@ mod tests {
         let emitter = DiagnosticsEmitter::new(&context);
         let payload = emitter.emit(&outcome);
 
-        assert!(payload.errors.iter().any(|error| {
-            let message = error.to_string();
-            message.contains("JV3003")
-                && message.contains("session")
-                && message.contains("@LateInit")
-        }));
+        assert!(
+            payload
+                .errors
+                .iter()
+                .all(|error| !error.to_string().contains("JV3003")),
+            "unknown states should no longer emit JV3003, got {:?}",
+            payload
+                .errors
+                .iter()
+                .map(|err| err.to_string())
+                .collect::<Vec<_>>()
+        );
     }
 
     #[test]
@@ -655,7 +892,7 @@ mod tests {
                 .with_nullability(NullabilityFlag::NonNull),
         );
         let facts = builder.build();
-        let context = NullSafetyContext::from_parts(Some(&facts), None);
+        let context = NullSafetyContext::from_parts(Some(&facts), None, None);
 
         let mut outcome = FlowAnalysisOutcome::default();
         outcome.exit_state = Some(FlowStateSnapshot::new());
@@ -681,7 +918,7 @@ mod tests {
                 .with_nullability(NullabilityFlag::NonNull),
         );
         let facts = builder.build();
-        let mut context = NullSafetyContext::from_parts(Some(&facts), Some(&env));
+        let mut context = NullSafetyContext::from_parts(Some(&facts), Some(&env), None);
         context.late_init_mut().allow_late_init("session");
 
         let mut outcome = FlowAnalysisOutcome::default();

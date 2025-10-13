@@ -1,4 +1,6 @@
 use super::*;
+use crate::inference::environment::{TypeEnvironment, TypeScheme};
+use crate::inference::types::TypeBinding;
 use crate::pattern::{self, PatternTarget};
 use crate::regex::RegexValidator;
 use crate::TypeKind;
@@ -7,6 +9,10 @@ use jv_ast::{
     Annotation, AnnotationName, BinaryOp, Expression, Literal, Modifiers, Parameter, Pattern,
     Program, RegexLiteral, Span, Statement, TypeAnnotation, ValBindingOrigin, WhenArm,
 };
+use jv_inference::types::{NullabilityFlag, TypeVariant as FactsTypeVariant};
+use jv_inference::TypeFacts;
+use jv_parser::Parser;
+use std::collections::HashMap;
 
 fn dummy_span() -> Span {
     Span::new(1, 0, 1, 5)
@@ -22,6 +28,133 @@ fn annotation(name: &str) -> Annotation {
         arguments: Vec::new(),
         span: dummy_span(),
     }
+}
+
+fn collect_null_safety_messages(errors: &[CheckError]) -> Vec<String> {
+    errors
+        .iter()
+        .filter_map(|error| match error {
+            CheckError::NullSafetyError(message) => Some(message.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+fn random_identifier(rng: &mut Rng) -> String {
+    const START: &[u8] = b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_";
+    const CONT: &[u8] = b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_0123456789";
+
+    let length = rng.usize(1..=8);
+    let mut ident = String::with_capacity(length);
+    ident.push(START[rng.usize(0..START.len())] as char);
+    for _ in 1..length {
+        ident.push(CONT[rng.usize(0..CONT.len())] as char);
+    }
+    ident
+}
+
+#[test]
+fn convert_type_kind_exports_non_null_primitives() {
+    let facts = convert_type_kind(&TypeKind::Primitive("String"));
+    assert_eq!(facts.nullability(), NullabilityFlag::NonNull);
+    assert!(matches!(
+        facts.variant(),
+        FactsTypeVariant::Primitive(name) if *name == "String"
+    ));
+}
+
+#[test]
+fn convert_type_kind_exports_non_null_functions() {
+    let function = TypeKind::Function(
+        vec![TypeKind::Primitive("String")],
+        Box::new(TypeKind::Primitive("Int")),
+    );
+    let facts = convert_type_kind(&function);
+    assert_eq!(facts.nullability(), NullabilityFlag::NonNull);
+
+    if let FactsTypeVariant::Function(params, ret) = facts.variant() {
+        assert_eq!(params.len(), 1);
+        assert!(matches!(
+            params[0].variant(),
+            FactsTypeVariant::Primitive(name) if *name == "String"
+        ));
+        assert!(matches!(
+            ret.variant(),
+            FactsTypeVariant::Primitive(name) if *name == "Int"
+        ));
+    } else {
+        panic!("expected function variant");
+    }
+}
+
+#[test]
+fn convert_type_kind_preserves_optional_nullability() {
+    let optional = TypeKind::Optional(Box::new(TypeKind::Primitive("String")));
+    let facts = convert_type_kind(&optional);
+
+    assert_eq!(facts.nullability(), NullabilityFlag::Nullable);
+    if let FactsTypeVariant::Optional(inner) = facts.variant() {
+        assert_eq!(inner.nullability(), NullabilityFlag::NonNull);
+        assert!(matches!(
+            inner.variant(),
+            FactsTypeVariant::Primitive(name) if name == &"String"
+        ));
+    } else {
+        panic!("expected optional variant");
+    }
+}
+
+#[test]
+fn build_type_facts_propagates_environment_nullability() {
+    let mut environment = TypeEnvironment::new();
+    environment.define_monotype("user_id", TypeKind::Primitive("Int"));
+    environment.define_monotype(
+        "maybe_email",
+        TypeKind::Optional(Box::new(TypeKind::Primitive("String"))),
+    );
+
+    let bindings: Vec<TypeBinding> = Vec::new();
+    let function_schemes: HashMap<String, TypeScheme> = HashMap::new();
+
+    let facts = build_type_facts(&environment, &bindings, &function_schemes, None);
+    let env_facts = facts.environment().values();
+
+    assert_eq!(
+        env_facts
+            .get("user_id")
+            .expect("user_id fact")
+            .nullability(),
+        NullabilityFlag::NonNull
+    );
+    assert_eq!(
+        env_facts
+            .get("maybe_email")
+            .expect("maybe_email fact")
+            .nullability(),
+        NullabilityFlag::Nullable
+    );
+}
+
+#[test]
+fn build_type_facts_propagates_result_type_nullability() {
+    let environment = TypeEnvironment::new();
+    let bindings: Vec<TypeBinding> = Vec::new();
+    let function_schemes: HashMap<String, TypeScheme> = HashMap::new();
+    let result_type = TypeKind::Primitive("Boolean");
+
+    let facts = build_type_facts(
+        &environment,
+        &bindings,
+        &function_schemes,
+        Some(&result_type),
+    );
+
+    let root = facts.root_type().expect("root type");
+    assert_eq!(root.nullability(), NullabilityFlag::NonNull);
+    assert!(matches!(
+        root.variant(),
+        FactsTypeVariant::Primitive(name) if name == &"Boolean"
+    ));
 }
 
 #[test]
@@ -91,6 +224,88 @@ fn check_program_populates_inference_snapshot() {
         .expect("inference snapshot should be populated");
     assert!(snapshot.function_scheme("add").is_some());
     assert!(!snapshot.bindings().is_empty());
+
+    let manifest = snapshot.late_init_manifest();
+    let lhs_seed = manifest
+        .get("lhs")
+        .expect("lhs seed should be captured in snapshot");
+    assert_eq!(lhs_seed.origin, ValBindingOrigin::ExplicitKeyword);
+    assert!(lhs_seed.has_initializer);
+
+    let rhs_seed = manifest
+        .get("rhs")
+        .expect("rhs seed should be captured in snapshot");
+    assert_eq!(rhs_seed.origin, ValBindingOrigin::ExplicitKeyword);
+    assert!(rhs_seed.has_initializer);
+}
+
+#[test]
+fn binding_resolver_collects_late_init_metadata() {
+    let span = dummy_span();
+
+    let explicit_val = Statement::ValDeclaration {
+        name: "explicitVal".into(),
+        type_annotation: None,
+        initializer: Expression::Literal(Literal::Number("1".into()), span.clone()),
+        modifiers: default_modifiers(),
+        origin: ValBindingOrigin::ExplicitKeyword,
+        span: span.clone(),
+    };
+
+    let implicit_val = Statement::ValDeclaration {
+        name: "implicitVal".into(),
+        type_annotation: None,
+        initializer: Expression::Literal(Literal::Number("2".into()), span.clone()),
+        modifiers: default_modifiers(),
+        origin: ValBindingOrigin::Implicit,
+        span: span.clone(),
+    };
+
+    let mut late_init_modifiers = default_modifiers();
+    late_init_modifiers.annotations.push(annotation("LateInit"));
+
+    let late_var = Statement::VarDeclaration {
+        name: "lateVar".into(),
+        type_annotation: None,
+        initializer: None,
+        modifiers: late_init_modifiers,
+        span: span.clone(),
+    };
+
+    let program = Program {
+        package: None,
+        imports: Vec::new(),
+        statements: vec![explicit_val, implicit_val, late_var],
+        span,
+    };
+
+    let mut checker = TypeChecker::new();
+    checker
+        .check_program(&program)
+        .expect("binding resolution should succeed");
+
+    let manifest = checker.late_init_manifest();
+
+    let explicit = manifest
+        .get("explicitVal")
+        .expect("explicit val seed should be recorded");
+    assert_eq!(explicit.origin, ValBindingOrigin::ExplicitKeyword);
+    assert!(explicit.has_initializer);
+    assert!(!explicit.explicit_late_init);
+
+    let implicit = manifest
+        .get("implicitVal")
+        .expect("implicit val seed should be recorded");
+    assert_eq!(implicit.origin, ValBindingOrigin::Implicit);
+    assert!(implicit.has_initializer);
+    assert!(!implicit.explicit_late_init);
+
+    let late_var = manifest
+        .get("lateVar")
+        .expect("late var seed should be recorded");
+    assert_eq!(late_var.origin, ValBindingOrigin::ExplicitKeyword);
+    assert!(!late_var.has_initializer);
+    assert!(late_var.explicit_late_init);
 }
 
 #[test]
@@ -309,6 +524,102 @@ fn null_safety_violation_is_reported() {
     ));
 }
 
+#[test]
+fn null_safety_reports_jv3108_without_jv3003_regression() {
+    let span = dummy_span();
+
+    let implicit_val = Statement::ValDeclaration {
+        name: "implicitVal".into(),
+        type_annotation: None,
+        initializer: Expression::Literal(Literal::Number("1".into()), span.clone()),
+        modifiers: default_modifiers(),
+        origin: ValBindingOrigin::Implicit,
+        span: span.clone(),
+    };
+
+    let token_binding = Statement::ValDeclaration {
+        name: "token".into(),
+        type_annotation: Some(TypeAnnotation::Simple("String".into())),
+        initializer: Expression::Literal(Literal::String("hello".into()), span.clone()),
+        modifiers: default_modifiers(),
+        origin: ValBindingOrigin::ExplicitKeyword,
+        span: span.clone(),
+    };
+
+    let when_expr = Expression::When {
+        expr: Some(Box::new(Expression::Identifier(
+            "token".into(),
+            span.clone(),
+        ))),
+        arms: vec![WhenArm {
+            pattern: Pattern::Literal(Literal::Null, span.clone()),
+            guard: None,
+            body: Expression::Literal(Literal::String("none".into()), span.clone()),
+            span: span.clone(),
+        }],
+        else_arm: Some(Box::new(Expression::Identifier(
+            "token".into(),
+            span.clone(),
+        ))),
+        implicit_end: None,
+        span: span.clone(),
+    };
+
+    let null_branch_label = Statement::ValDeclaration {
+        name: "label".into(),
+        type_annotation: None,
+        initializer: when_expr,
+        modifiers: default_modifiers(),
+        origin: ValBindingOrigin::ExplicitKeyword,
+        span: span.clone(),
+    };
+
+    let program = Program {
+        package: None,
+        imports: Vec::new(),
+        statements: vec![implicit_val, token_binding, null_branch_label],
+        span: span.clone(),
+    };
+
+    let mut checker = TypeChecker::new();
+    checker
+        .check_program(&program)
+        .expect("program should type-check");
+
+    let snapshot = checker.inference_snapshot().cloned();
+    let diagnostics = checker.check_null_safety(&program, snapshot.as_ref());
+    let messages = collect_null_safety_messages(&diagnostics);
+
+    assert_eq!(
+        messages.len(),
+        1,
+        "expected a single null safety diagnostic, got: {messages:?}"
+    );
+    assert!(
+        messages.iter().any(|message| message.contains("JV3108")),
+        "expected JV3108 conflict, got: {messages:?}"
+    );
+    assert!(
+        messages.iter().all(|message| !message.contains("JV3003")),
+        "unexpected JV3003 regression detected: {messages:?}"
+    );
+
+    let snapshot = snapshot.expect("snapshot should be available for null safety");
+    let manifest = snapshot.late_init_manifest();
+
+    let implicit_seed = manifest
+        .get("implicitVal")
+        .expect("implicit val should be recorded in manifest");
+    assert_eq!(implicit_seed.origin, ValBindingOrigin::Implicit);
+    assert!(implicit_seed.has_initializer);
+
+    let token_seed = manifest
+        .get("token")
+        .expect("token binding should be recorded in manifest");
+    assert_eq!(token_seed.origin, ValBindingOrigin::ExplicitKeyword);
+    assert!(token_seed.has_initializer);
+}
+
 fn sample_when_arm(span: &Span) -> WhenArm {
     WhenArm {
         pattern: Pattern::Literal(Literal::Number("1".into()), span.clone()),
@@ -407,6 +718,83 @@ fn when_with_else_in_value_position_passes_validation() {
 }
 
 #[test]
+fn when_branch_nullability_is_exposed_via_inference_service() {
+    let program = Parser::parse(
+        r#"
+fun provide(): String? = null
+
+maybe = provide()
+val fallback = "fallback"
+label = when (maybe) {
+    is String -> maybe
+    else -> fallback
+}
+"#,
+    )
+    .expect("when sample should parse");
+
+    let mut checker = TypeChecker::new();
+    checker
+        .check_program(&program)
+        .expect("sample program should type-check");
+
+    let snapshot = checker
+        .inference_snapshot()
+        .expect("inference snapshot should be available");
+    let normalized = checker
+        .normalized_program()
+        .expect("normalized program should be available");
+
+    let (subject_name, arm_count, has_else, span) = normalized
+        .statements
+        .iter()
+        .find_map(|statement| match statement {
+            Statement::ValDeclaration {
+                name, initializer, ..
+            } if name == "label" => {
+                if let Expression::When {
+                    expr,
+                    arms,
+                    else_arm,
+                    span,
+                    ..
+                } = initializer
+                {
+                    let subject = expr.as_deref().and_then(|expr| match expr {
+                        Expression::Identifier(name, _) => Some(name.as_str()),
+                        _ => None,
+                    });
+                    Some((subject, arms.len(), else_arm.is_some(), span.clone()))
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        })
+        .expect("label declaration should contain when expression");
+
+    let node_id = pattern::node_identifier(&span);
+    let summary = snapshot.when_branch_nullability(
+        node_id,
+        subject_name,
+        arm_count,
+        has_else,
+        PatternTarget::Java25,
+    );
+
+    assert_eq!(
+        summary.arm_nullability(),
+        &[NullabilityFlag::NonNull],
+        "pattern facts should mark the matching arm as non-null"
+    );
+    assert_eq!(
+        summary.fallback_nullability(),
+        Some(NullabilityFlag::Unknown),
+        "else branch defaults to unknown without explicit narrowing facts"
+    );
+}
+
+#[test]
 fn when_without_else_in_statement_position_is_allowed() {
     let span = dummy_span();
     let when_expr = Expression::When {
@@ -470,6 +858,266 @@ fn implicit_assignment_becomes_val_declaration() {
     let usage = checker.binding_usage();
     assert_eq!(usage.implicit, 1);
     assert_eq!(usage.explicit + usage.implicit_typed + usage.vars, 0);
+
+    let manifest = checker.late_init_manifest();
+    let seed = manifest
+        .get("total")
+        .expect("implicit assignment should register a LateInit seed");
+    assert_eq!(seed.origin, ValBindingOrigin::Implicit);
+    assert!(seed.has_initializer);
+    assert!(!seed.explicit_late_init);
+}
+
+#[test]
+fn task15_debug_implicit_binding_manifest_and_missing_jv3002() {
+    let program = Parser::parse(
+        r#"
+fun provide(): String? = null
+
+maybe = provide()
+val fallback = "fallback"
+label = when (maybe) {
+    is String -> maybe
+    else -> fallback
+}
+
+label
+"#,
+    )
+    .expect("debug snippet should parse");
+
+    let mut checker = TypeChecker::new();
+    checker
+        .check_program(&program)
+        .expect("program should type-check for debug reproduction");
+
+    let normalized = checker
+        .normalized_program()
+        .expect("normalized program should exist");
+    let maybe_origin = normalized
+        .statements
+        .iter()
+        .find_map(|statement| match statement {
+            Statement::ValDeclaration { name, origin, .. } if name == "maybe" => Some(origin),
+            _ => None,
+        })
+        .expect("implicit assignment should normalize to val declaration");
+    assert_eq!(
+        *maybe_origin,
+        ValBindingOrigin::Implicit,
+        "implicit assignment must retain implicit origin"
+    );
+
+    let manifest = checker.late_init_manifest();
+    let maybe_seed = manifest
+        .get("maybe")
+        .expect("LateInit manifest should track implicit binding");
+    assert_eq!(maybe_seed.origin, ValBindingOrigin::Implicit);
+    assert!(maybe_seed.has_initializer);
+    assert!(
+        !maybe_seed.explicit_late_init,
+        "implicit binding should not be marked as explicit late init"
+    );
+
+    let diagnostics = checker.check_null_safety(&program, None);
+    let messages = collect_null_safety_messages(&diagnostics);
+    assert!(
+        messages.is_empty(),
+        "expected implicit binding scenario to avoid null safety diagnostics, got: {messages:?}"
+    );
+}
+
+#[test]
+fn implicit_assignment_normalization_is_stable_under_random_inputs() {
+    let mut rng = Rng::with_seed(0xA1CE_FACE);
+
+    for iteration in 0..64 {
+        let name = random_identifier(&mut rng);
+        let first_value = rng.u32(0..=1_000_000).to_string();
+        let second_value = (rng.u32(0..=1_000_000) + 1).to_string();
+
+        let base_line = iteration * 3 + 1;
+
+        let first_target_span = Span::new(base_line, 1, base_line, 1 + name.len());
+        let first_value_span = Span::new(base_line, 5, base_line, 5 + first_value.len());
+        let first_statement_span = Span::new(base_line, 1, base_line, 5 + first_value.len());
+
+        let single_program = Program {
+            package: None,
+            imports: Vec::new(),
+            statements: vec![Statement::Assignment {
+                target: Expression::Identifier(name.clone(), first_target_span.clone()),
+                value: Expression::Literal(
+                    Literal::Number(first_value.clone()),
+                    first_value_span.clone(),
+                ),
+                span: first_statement_span.clone(),
+            }],
+            span: first_statement_span.clone(),
+        };
+
+        let mut checker = TypeChecker::new();
+        let result = checker.check_program(&single_program);
+        assert!(
+            result.is_ok(),
+            "implicit assignment should normalize without diagnostics: {result:?}"
+        );
+
+        let normalized = checker
+            .normalized_program()
+            .expect("normalized program should be recorded");
+        match normalized.statements.first() {
+            Some(Statement::ValDeclaration {
+                name: normalized_name,
+                origin,
+                span,
+                initializer,
+                ..
+            }) => {
+                assert_eq!(
+                    normalized_name, &name,
+                    "normalized binding name should match source identifier"
+                );
+                assert_eq!(
+                    *origin,
+                    ValBindingOrigin::Implicit,
+                    "normalized binding origin should remain implicit"
+                );
+                assert_eq!(
+                    span, &first_statement_span,
+                    "normalized span should cover original assignment statement"
+                );
+                assert!(
+                    matches!(
+                        initializer,
+                        Expression::Literal(Literal::Number(value), literal_span)
+                            if value == &first_value && literal_span == &first_value_span
+                    ),
+                    "initializer literal should survive normalization with span preserved"
+                );
+            }
+            other => panic!(
+                "expected implicit assignment to normalize into val declaration, got {:?}",
+                other
+            ),
+        }
+
+        let manifest = checker.late_init_manifest();
+        let seed = manifest
+            .get(&name)
+            .unwrap_or_else(|| panic!("late init manifest should track implicit binding {name}"));
+        assert!(
+            seed.has_initializer,
+            "implicit binding must record initializer"
+        );
+        assert_eq!(
+            seed.origin,
+            ValBindingOrigin::Implicit,
+            "late init manifest should remember implicit origin"
+        );
+
+        let second_target_span = Span::new(base_line + 1, 1, base_line + 1, 1 + name.len());
+        let second_value_span = Span::new(base_line + 1, 5, base_line + 1, 5 + second_value.len());
+        let second_statement_span =
+            Span::new(base_line + 1, 1, base_line + 1, 5 + second_value.len());
+
+        let double_program = Program {
+            package: None,
+            imports: Vec::new(),
+            statements: vec![
+                Statement::Assignment {
+                    target: Expression::Identifier(name.clone(), first_target_span.clone()),
+                    value: Expression::Literal(
+                        Literal::Number(first_value.clone()),
+                        first_value_span.clone(),
+                    ),
+                    span: first_statement_span.clone(),
+                },
+                Statement::Assignment {
+                    target: Expression::Identifier(name.clone(), second_target_span.clone()),
+                    value: Expression::Literal(
+                        Literal::Number(second_value.clone()),
+                        second_value_span.clone(),
+                    ),
+                    span: second_statement_span.clone(),
+                },
+            ],
+            span: Span::new(base_line, 1, base_line + 1, 5 + second_value.len()),
+        };
+
+        let mut reassignment_checker = TypeChecker::new();
+        let reassignment = reassignment_checker.check_program(&double_program);
+        assert!(
+            reassignment.is_err(),
+            "reassignment program should emit diagnostic for immutable binding"
+        );
+        let errors = reassignment.err().unwrap();
+        assert!(
+            errors.iter().any(|error| matches!(
+                error,
+                CheckError::ValidationError { message, .. }
+                    if message.contains("JV4201")
+            )),
+            "expected JV4201 for reassignment of binding {name}, got {errors:?}"
+        );
+
+        let self_value_span = Span::new(base_line + 2, 5, base_line + 2, 5 + name.len());
+        let self_statement_span = Span::new(base_line + 2, 1, base_line + 2, 5 + name.len());
+
+        let self_assign_program = Program {
+            package: None,
+            imports: Vec::new(),
+            statements: vec![Statement::Assignment {
+                target: Expression::Identifier(name.clone(), second_target_span.clone()),
+                value: Expression::Identifier(name.clone(), self_value_span.clone()),
+                span: self_statement_span.clone(),
+            }],
+            span: self_statement_span.clone(),
+        };
+
+        let mut self_checker = TypeChecker::new();
+        let self_result = self_checker.check_program(&self_assign_program);
+        assert!(
+            self_result.is_err(),
+            "self assignment should be rejected for binding {name}"
+        );
+        let self_errors = self_result.err().unwrap();
+        assert!(
+            self_errors.iter().any(|error| matches!(
+                error,
+                CheckError::ValidationError { message, .. }
+                    if message.contains("JV4202")
+            )),
+            "expected JV4202 for self assignment of binding {name}, got {self_errors:?}"
+        );
+    }
+}
+
+#[test]
+fn implicit_self_assignment_emits_jv4202() {
+    let span = dummy_span();
+    let program = Program {
+        package: None,
+        imports: Vec::new(),
+        statements: vec![Statement::Assignment {
+            target: Expression::Identifier("total".into(), span.clone()),
+            value: Expression::Identifier("total".into(), span.clone()),
+            span: span.clone(),
+        }],
+        span: span.clone(),
+    };
+
+    let mut checker = TypeChecker::new();
+    let result = checker.check_program(&program);
+    assert!(
+        result.is_err(),
+        "implicit self-assignment should produce JV4202 error"
+    );
+    let errors = result.err().unwrap();
+    assert!(errors.iter().any(|error| matches!(
+        error,
+        CheckError::ValidationError { message, .. } if message.contains("JV4202")
+    )));
 }
 
 #[test]
@@ -534,6 +1182,40 @@ fn mutable_var_allows_reassignment() {
     assert!(
         result.is_ok(),
         "var reassignment should be permitted: {result:?}"
+    );
+}
+
+#[test]
+fn explicit_var_self_assignment_is_allowed() {
+    let span = dummy_span();
+    let program = Program {
+        package: None,
+        imports: Vec::new(),
+        statements: vec![
+            Statement::VarDeclaration {
+                name: "count".into(),
+                type_annotation: None,
+                initializer: Some(Expression::Literal(
+                    Literal::Number("0".into()),
+                    span.clone(),
+                )),
+                modifiers: default_modifiers(),
+                span: span.clone(),
+            },
+            Statement::Assignment {
+                target: Expression::Identifier("count".into(), span.clone()),
+                value: Expression::Identifier("count".into(), span.clone()),
+                span: span.clone(),
+            },
+        ],
+        span: span.clone(),
+    };
+
+    let mut checker = TypeChecker::new();
+    let result = checker.check_program(&program);
+    assert!(
+        result.is_ok(),
+        "explicit mutable binding should allow self-assignment: {result:?}"
     );
 }
 

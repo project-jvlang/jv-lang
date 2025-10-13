@@ -61,7 +61,7 @@ mod tests {
         builder.add_java_annotation("nativeCall", "@JNI");
         let facts = builder.build();
 
-        let context = NullSafetyContext::from_parts(Some(&facts), Some(&env));
+        let context = NullSafetyContext::from_parts(Some(&facts), Some(&env), None);
 
         let mut outcome = FlowAnalysisOutcome::default();
         let mut snapshot = FlowStateSnapshot::new();

@@ -15,11 +15,47 @@ pub struct BindingUsageSummary {
     pub vars: usize,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LateInitSeed {
+    pub name: String,
+    pub origin: ValBindingOrigin,
+    pub has_initializer: bool,
+    pub explicit_late_init: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct LateInitManifest {
+    pub items: HashMap<String, LateInitSeed>,
+}
+
+impl LateInitManifest {
+    pub fn new(items: HashMap<String, LateInitSeed>) -> Self {
+        Self { items }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.items.is_empty()
+    }
+
+    pub fn len(&self) -> usize {
+        self.items.len()
+    }
+
+    pub fn get(&self, name: &str) -> Option<&LateInitSeed> {
+        self.items.get(name)
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = (&String, &LateInitSeed)> {
+        self.items.iter()
+    }
+}
+
 #[derive(Debug)]
 pub struct BindingResolution {
     pub program: Program,
     pub diagnostics: Vec<CheckError>,
     pub usage: BindingUsageSummary,
+    pub late_init_manifest: LateInitManifest,
 }
 
 pub fn resolve_bindings(program: &Program) -> BindingResolution {
@@ -30,6 +66,7 @@ struct BindingResolver {
     scopes: Vec<HashMap<String, BindingKind>>,
     diagnostics: Vec<CheckError>,
     usage: BindingUsageSummary,
+    late_init_seeds: HashMap<String, LateInitSeed>,
 }
 
 #[derive(Clone)]
@@ -49,6 +86,7 @@ impl BindingResolver {
             scopes: vec![HashMap::new()],
             diagnostics: Vec::new(),
             usage: BindingUsageSummary::default(),
+            late_init_seeds: HashMap::new(),
         }
     }
 
@@ -62,7 +100,24 @@ impl BindingResolver {
             program: normalized,
             diagnostics: self.diagnostics,
             usage: self.usage,
+            late_init_manifest: LateInitManifest::new(self.late_init_seeds),
         }
+    }
+
+    fn record_late_init_seed(
+        &mut self,
+        name: String,
+        origin: ValBindingOrigin,
+        has_initializer: bool,
+        modifiers: &Modifiers,
+    ) {
+        let seed = LateInitSeed {
+            name: name.clone(),
+            origin,
+            has_initializer,
+            explicit_late_init: has_late_init_annotation(modifiers),
+        };
+        self.late_init_seeds.insert(name, seed);
     }
 
     fn resolve_statements(&mut self, statements: Vec<Statement>) -> Vec<Statement> {
@@ -84,6 +139,7 @@ impl BindingResolver {
             } => {
                 let initializer = self.resolve_expression(initializer);
                 self.declare_immutable(name.clone(), origin, span.clone(), true);
+                self.record_late_init_seed(name.clone(), origin, true, &modifiers);
                 Statement::ValDeclaration {
                     name,
                     type_annotation,
@@ -100,8 +156,20 @@ impl BindingResolver {
                 modifiers,
                 span,
             } => {
-                let initializer = initializer.map(|expr| self.resolve_expression(expr));
+                let (has_initializer, initializer) = match initializer {
+                    Some(expr) => {
+                        let resolved = self.resolve_expression(expr);
+                        (true, Some(resolved))
+                    }
+                    None => (false, None),
+                };
                 self.declare_mutable(name.clone(), span.clone(), true);
+                self.record_late_init_seed(
+                    name.clone(),
+                    ValBindingOrigin::ExplicitKeyword,
+                    has_initializer,
+                    &modifiers,
+                );
                 Statement::VarDeclaration {
                     name,
                     type_annotation,
@@ -298,21 +366,27 @@ impl BindingResolver {
         match target {
             Expression::Identifier(name, target_span) => {
                 let value = self.resolve_expression(value);
-                if self.is_self_reference(&name, &value) {
-                    self.diagnostics.push(CheckError::ValidationError {
-                        message: missing_initializer_message(&name),
-                        span: Some(span.clone()),
-                    });
-                    Statement::Assignment {
+                match self.lookup(&name) {
+                    Some(BindingKind::Immutable { .. }) => {
+                        self.diagnostics.push(CheckError::ValidationError {
+                            message: reassignment_message(&name),
+                            span: Some(span.clone()),
+                        });
+                        Statement::Assignment {
+                            target: Expression::Identifier(name, target_span),
+                            value,
+                            span,
+                        }
+                    }
+                    Some(BindingKind::Mutable { .. }) => Statement::Assignment {
                         target: Expression::Identifier(name, target_span),
                         value,
                         span,
-                    }
-                } else if let Some(kind) = self.lookup(&name) {
-                    match kind {
-                        BindingKind::Immutable { .. } => {
+                    },
+                    None => {
+                        if self.is_self_reference(&name, &value) {
                             self.diagnostics.push(CheckError::ValidationError {
-                                message: reassignment_message(&name),
+                                message: missing_initializer_message(&name),
                                 span: Some(span.clone()),
                             });
                             Statement::Assignment {
@@ -320,24 +394,20 @@ impl BindingResolver {
                                 value,
                                 span,
                             }
+                        } else {
+                            let origin = ValBindingOrigin::Implicit;
+                            self.declare_immutable(name.clone(), origin, target_span.clone(), true);
+                            let modifiers = Modifiers::default();
+                            self.record_late_init_seed(name.clone(), origin, true, &modifiers);
+                            Statement::ValDeclaration {
+                                name,
+                                type_annotation: None,
+                                initializer: value,
+                                modifiers,
+                                origin,
+                                span,
+                            }
                         }
-                        BindingKind::Mutable { .. } => Statement::Assignment {
-                            target: Expression::Identifier(name, target_span),
-                            value,
-                            span,
-                        },
-                    }
-                } else {
-                    let origin = ValBindingOrigin::Implicit;
-                    let statement_span = expression_span(&value);
-                    self.declare_immutable(name.clone(), origin, target_span.clone(), true);
-                    Statement::ValDeclaration {
-                        name,
-                        type_annotation: None,
-                        initializer: value,
-                        modifiers: Modifiers::default(),
-                        origin,
-                        span: statement_span,
                     }
                 }
             }
@@ -661,30 +731,13 @@ impl BindingResolver {
     }
 }
 
-fn expression_span(expr: &Expression) -> Span {
-    match expr {
-        Expression::Literal(_, span)
-        | Expression::Identifier(_, span)
-        | Expression::Binary { span, .. }
-        | Expression::Unary { span, .. }
-        | Expression::Call { span, .. }
-        | Expression::MemberAccess { span, .. }
-        | Expression::NullSafeMemberAccess { span, .. }
-        | Expression::IndexAccess { span, .. }
-        | Expression::NullSafeIndexAccess { span, .. }
-        | Expression::StringInterpolation { span, .. }
-        | Expression::When { span, .. }
-        | Expression::If { span, .. }
-        | Expression::Block { span, .. }
-        | Expression::Array { span, .. }
-        | Expression::Lambda { span, .. }
-        | Expression::Try { span, .. }
-        | Expression::This(span)
-        | Expression::Super(span) => span.clone(),
-        Expression::RegexLiteral(literal) => literal.span.clone(),
-        Expression::MultilineString(literal) => literal.span.clone(),
-        Expression::JsonLiteral(literal) => literal.span.clone(),
-    }
+fn has_late_init_annotation(modifiers: &Modifiers) -> bool {
+    modifiers.annotations.iter().any(|annotation| {
+        annotation
+            .name
+            .simple_name()
+            .eq_ignore_ascii_case("LateInit")
+    })
 }
 
 fn reassignment_message(name: &str) -> String {

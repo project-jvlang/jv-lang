@@ -152,6 +152,10 @@ impl NarrowingFacts {
     pub fn arms(&self) -> impl Iterator<Item = (&ArmId, &NarrowingSnapshot)> {
         self.arm_facts.iter()
     }
+
+    pub fn fallback(&self) -> Option<&NarrowingSnapshot> {
+        self.fallback.as_ref()
+    }
 }
 
 /// Nullability assumptions derived for a specific branch.

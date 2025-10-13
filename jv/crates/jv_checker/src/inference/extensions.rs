@@ -9,6 +9,12 @@
 use crate::inference::environment::TypeScheme;
 use std::collections::HashMap;
 
+#[derive(Debug, Clone)]
+struct MethodCandidate {
+    receiver: &'static str,
+    entry_index: usize,
+}
+
 /// Describes an extension function that can be applied to a receiver type.
 #[derive(Debug, Clone)]
 pub struct ExtensionEntry {
@@ -22,6 +28,7 @@ pub struct ExtensionEntry {
 #[derive(Debug, Default, Clone)]
 pub struct ExtensionRegistry {
     entries: HashMap<&'static str, Vec<ExtensionEntry>>,
+    method_index: HashMap<&'static str, Vec<MethodCandidate>>,
 }
 
 impl ExtensionRegistry {
@@ -29,15 +36,23 @@ impl ExtensionRegistry {
     pub fn new() -> Self {
         Self {
             entries: HashMap::new(),
+            method_index: HashMap::new(),
         }
     }
 
     /// Registers an extension function for the specified receiver type.
     pub fn register(&mut self, receiver: &'static str, method: &'static str, scheme: TypeScheme) {
-        self.entries
-            .entry(receiver)
+        let entry_vec = self.entries.entry(receiver).or_insert_with(Vec::new);
+        entry_vec.push(ExtensionEntry { method, scheme });
+        let entry_index = entry_vec.len().saturating_sub(1);
+
+        self.method_index
+            .entry(method)
             .or_insert_with(Vec::new)
-            .push(ExtensionEntry { method, scheme });
+            .push(MethodCandidate {
+                receiver,
+                entry_index,
+            });
     }
 
     /// Looks up the type scheme for a receiver/method pair.
@@ -48,5 +63,21 @@ impl ExtensionRegistry {
                 .find(|entry| entry.method == method)
                 .map(|entry| &entry.scheme)
         })
+    }
+
+    /// Returns all receivers that declare the given method.
+    pub fn candidates_for_method(&self, method: &str) -> Vec<(&'static str, &TypeScheme)> {
+        self.method_index
+            .get(method)
+            .into_iter()
+            .flat_map(|candidates| {
+                candidates.iter().filter_map(|candidate| {
+                    self.entries
+                        .get(candidate.receiver)
+                        .and_then(|entries| entries.get(candidate.entry_index))
+                        .map(|entry| (candidate.receiver, &entry.scheme))
+                })
+            })
+            .collect()
     }
 }
