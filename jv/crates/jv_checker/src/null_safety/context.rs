@@ -261,14 +261,20 @@ impl LateInitRegistry {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LateInitContractKind {
+    ImplicitInitialized,
+    InferredNonNull,
+}
+
 #[derive(Debug, Default, Clone)]
 pub struct LateInitContracts {
-    enforced: HashSet<String>,
+    enforced: HashMap<String, LateInitContractKind>,
 }
 
 impl LateInitContracts {
     pub fn new(lattice: &NullabilityLattice, manifest: Option<&LateInitManifest>) -> Self {
-        let mut enforced = HashSet::new();
+        let mut enforced = HashMap::new();
 
         if let Some(manifest) = manifest {
             for (name, seed) in manifest.iter() {
@@ -284,8 +290,13 @@ impl LateInitContracts {
                 let is_nonnull_contract = matches!(lattice_state, Some(NullabilityKind::NonNull));
                 let is_implicit_contract = matches!(seed.origin, ValBindingOrigin::Implicit);
 
-                if is_nonnull_contract || is_implicit_contract {
-                    enforced.insert(name.clone());
+                if is_implicit_contract {
+                    enforced.insert(name.clone(), LateInitContractKind::ImplicitInitialized);
+                    continue;
+                }
+
+                if is_nonnull_contract {
+                    enforced.insert(name.clone(), LateInitContractKind::InferredNonNull);
                 }
             }
         }
@@ -294,15 +305,19 @@ impl LateInitContracts {
     }
 
     pub fn contains(&self, name: &str) -> bool {
-        self.enforced.contains(name)
+        self.enforced.contains_key(name)
+    }
+
+    pub fn kind(&self, name: &str) -> Option<LateInitContractKind> {
+        self.enforced.get(name).copied()
     }
 
     pub fn is_empty(&self) -> bool {
         self.enforced.is_empty()
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = &String> {
-        self.enforced.iter()
+    pub fn iter(&self) -> impl Iterator<Item = (&String, LateInitContractKind)> {
+        self.enforced.iter().map(|(name, kind)| (name, *kind))
     }
 }
 

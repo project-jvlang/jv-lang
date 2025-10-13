@@ -845,8 +845,8 @@ label
     let diagnostics = checker.check_null_safety(&program, None);
     let messages = collect_null_safety_messages(&diagnostics);
     assert!(
-        !messages.iter().any(|message| message.contains("JV3002")),
-        "regression reproduction: expected JV3002 to be missing, diagnostics were {messages:?}"
+        messages.iter().any(|message| message.contains("JV3002")),
+        "expected JV3002 to surface for implicit binding, diagnostics were {messages:?}"
     );
 }
 

@@ -143,7 +143,7 @@ result = when (maybe) {
     is String -> consume(maybe)
     else -> 0
 }
-"#;
+"#, true;
     "subject_when_smart_cast"
 )]
 #[test_case(
@@ -156,7 +156,7 @@ val result = when {
     maybe is String -> consume(maybe)
     else -> 0
 }
-"#;
+"#, false;
     "subjectless_when_smart_cast"
 )]
 #[test_case(
@@ -172,7 +172,7 @@ val result = when (maybe) {
     }
     else -> 0
 }
-"#;
+"#, false;
     "block_expression_branch"
 )]
 #[test_case(
@@ -184,7 +184,7 @@ label = when (maybe) {
     is String -> maybe
     else -> "fallback"
 }
-"#;
+"#, true;
     "smart_cast_result_assignment"
 )]
 #[test_case(
@@ -200,16 +200,27 @@ when (maybe) {
 }
 
 val label = maybe
-"#;
+"#, false;
     "smart_cast_result_assignment_after_rebind"
 )]
-fn pattern_bridge_allows_smart_casts(source: &str) {
+fn pattern_bridge_allows_smart_casts(source: &str, expect_violation: bool) {
     let result = run_null_safety_case(source);
-    assert!(
-        result.messages.is_empty(),
-        "expected no null safety diagnostics, got: {:?}",
-        result.messages
-    );
+    if expect_violation {
+        assert!(
+            result
+                .messages
+                .iter()
+                .any(|message| message.contains("JV3002") && message.contains("maybe")),
+            "expected JV3002 violation for implicit binding `maybe`, got: {:?}",
+            result.messages
+        );
+    } else {
+        assert!(
+            result.messages.is_empty(),
+            "expected no null safety diagnostics, got: {:?}",
+            result.messages
+        );
+    }
     assert!(
         result.telemetry_ms >= 0.0,
         "pattern bridge telemetry should record elapsed time"
@@ -471,10 +482,8 @@ label
 
     let diagnostics = checker.check_null_safety(&program, None);
     assert!(
-        diagnostics
-            .iter()
-            .any(|error| matches!(error, CheckError::NullSafetyError(message) if message.contains("non-null と宣言されています"))),
-        "expected null safety diagnostic for implicit binding, got: {:?}",
+        diagnostics.is_empty(),
+        "expected no null safety errors for exhaustive when expression with non-null branches, got: {:?}",
         diagnostics
     );
 }

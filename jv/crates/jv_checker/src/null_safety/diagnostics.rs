@@ -1,7 +1,7 @@
 use std::collections::{hash_map::Entry, HashMap, HashSet};
 
 use super::annotations::JavaNullabilityHint;
-use super::context::NullSafetyContext;
+use super::context::{LateInitContractKind, NullSafetyContext};
 use super::flow::FlowAnalysisOutcome;
 use super::graph::FlowStateSnapshot;
 use super::operators::{JavaLoweringHint, JavaLoweringStrategy, OperatorOperand};
@@ -123,7 +123,7 @@ impl<'ctx> DiagnosticsEmitter<'ctx> {
                 processed.insert(name.clone());
             }
 
-            for name in self.context.late_init_contracts().iter() {
+            for (name, _) in self.context.late_init_contracts().iter() {
                 if processed.contains(name) {
                     continue;
                 }
@@ -141,28 +141,44 @@ impl<'ctx> DiagnosticsEmitter<'ctx> {
         let mut processed: HashSet<String> = HashSet::new();
 
         for (name, _) in self.context.contracts().iter() {
-            let observed = state
+            let mut observed = state
                 .states
                 .get(name.as_str())
                 .copied()
                 .or_else(|| aggregated.get(name.as_str()).copied())
                 .unwrap_or(NullabilityKind::Unknown);
+
+            if matches!(observed, NullabilityKind::Unknown) {
+                if let Some(lattice_state) = self.context.lattice().get(name.as_str()) {
+                    if !matches!(lattice_state, NullabilityKind::Unknown) {
+                        observed = lattice_state;
+                    }
+                }
+            }
 
             self.evaluate_exit_state(name.as_str(), observed, &mut diagnostics);
             processed.insert(name.clone());
         }
 
-        for name in self.context.late_init_contracts().iter() {
+        for (name, _) in self.context.late_init_contracts().iter() {
             if processed.contains(name.as_str()) {
                 continue;
             }
 
-            let observed = state
+            let mut observed = state
                 .states
                 .get(name.as_str())
                 .copied()
                 .or_else(|| aggregated.get(name.as_str()).copied())
                 .unwrap_or(NullabilityKind::Unknown);
+
+            if matches!(observed, NullabilityKind::Unknown) {
+                if let Some(lattice_state) = self.context.lattice().get(name.as_str()) {
+                    if !matches!(lattice_state, NullabilityKind::Unknown) {
+                        observed = lattice_state;
+                    }
+                }
+            }
 
             self.evaluate_exit_state(name.as_str(), observed, &mut diagnostics);
             processed.insert(name.clone());
@@ -218,7 +234,11 @@ impl<'ctx> DiagnosticsEmitter<'ctx> {
         let has_contract = self.has_contract(name);
         let requires_initialization = self.context.late_init().is_tracked(name);
         let degraded = self.context.is_degraded();
-
+        let manifest_contract_kind = self.context.late_init_contracts().kind(name);
+        let enforce_unknown = matches!(
+            manifest_contract_kind,
+            Some(LateInitContractKind::ImplicitInitialized)
+        );
         match observed {
             NullabilityKind::NonNull => {}
             NullabilityKind::Nullable => {
@@ -229,7 +249,9 @@ impl<'ctx> DiagnosticsEmitter<'ctx> {
                 }
             }
             NullabilityKind::Unknown => {
-                // Unknown states are tolerated to avoid spuriously emitting JV3002/JV3003.
+                if has_contract && enforce_unknown && !degraded {
+                    diagnostics.push(CheckError::NullSafetyError(exit_violation_message(name)));
+                }
             }
             NullabilityKind::Platform => {
                 if has_contract {
