@@ -1,4 +1,4 @@
-use std::collections::{hash_map::Entry, HashMap};
+use std::collections::{hash_map::Entry, HashMap, HashSet};
 
 use super::annotations::JavaNullabilityHint;
 use super::context::{NonNullContractOrigin, NullSafetyContext};
@@ -32,7 +32,7 @@ impl<'ctx> DiagnosticsEmitter<'ctx> {
 
     pub fn emit(&self, outcome: &FlowAnalysisOutcome) -> DiagnosticsPayload {
         let mut overrides = aggregate_states(outcome);
-        let mut errors = self.verify_exit_state(outcome.exit_state.as_ref());
+        let mut errors = self.verify_exit_state(outcome.exit_state.as_ref(), &overrides);
         for error in &outcome.diagnostics {
             let message = ensure_code(&error.to_string(), DEFAULT_ERROR_CODE);
             errors.push(CheckError::NullSafetyError(message));
@@ -97,17 +97,41 @@ impl<'ctx> DiagnosticsEmitter<'ctx> {
         Some(builder.build())
     }
 
-    fn verify_exit_state(&self, exit_state: Option<&FlowStateSnapshot>) -> Vec<CheckError> {
+    fn verify_exit_state(
+        &self,
+        exit_state: Option<&FlowStateSnapshot>,
+        aggregated: &HashMap<String, NullabilityKind>,
+    ) -> Vec<CheckError> {
         let mut diagnostics = Vec::new();
         let Some(state) = exit_state else {
+            // No explicit exit snapshot; fall back to aggregated states.
+            for (name, observed) in aggregated.iter() {
+                let enforce_contract = self.context.contracts().contains(name.as_str())
+                    || (self.context.late_init().is_tracked(name)
+                        && matches!(observed, NullabilityKind::Platform));
+                self.evaluate_exit_state(
+                    name,
+                    *observed,
+                    self.context
+                        .contracts()
+                        .get(name.as_str())
+                        .map(|entry| entry.origin()),
+                    enforce_contract,
+                    &mut diagnostics,
+                );
+            }
+
             return diagnostics;
         };
+
+        let mut processed: HashSet<&str> = HashSet::new();
 
         for (name, contract) in self.context.contracts().iter() {
             let observed = state
                 .states
                 .get(name.as_str())
                 .copied()
+                .or_else(|| aggregated.get(name.as_str()).copied())
                 .unwrap_or(NullabilityKind::Unknown);
 
             self.evaluate_exit_state(
@@ -117,6 +141,7 @@ impl<'ctx> DiagnosticsEmitter<'ctx> {
                 true,
                 &mut diagnostics,
             );
+            processed.insert(name.as_str());
         }
 
         for (name, contract_state) in self.context.lattice().iter() {
@@ -132,9 +157,45 @@ impl<'ctx> DiagnosticsEmitter<'ctx> {
                 .states
                 .get(name.as_str())
                 .copied()
+                .or_else(|| aggregated.get(name.as_str()).copied())
                 .unwrap_or(NullabilityKind::Unknown);
 
             self.evaluate_exit_state(name.as_str(), observed, None, false, &mut diagnostics);
+            processed.insert(name.as_str());
+        }
+
+        for (name, observed) in state.states.iter() {
+            if processed.contains(name.as_str()) {
+                continue;
+            }
+
+            let enforce_contract = self.context.late_init().is_tracked(name)
+                && matches!(observed, NullabilityKind::Platform);
+
+            self.evaluate_exit_state(name, *observed, None, enforce_contract, &mut diagnostics);
+            processed.insert(name.as_str());
+        }
+
+        for (name, observed) in aggregated.iter() {
+            if processed.contains(name.as_str()) {
+                continue;
+            }
+
+            let enforce_contract = self.context.contracts().contains(name.as_str())
+                || (self.context.late_init().is_tracked(name)
+                    && matches!(observed, NullabilityKind::Platform));
+
+            self.evaluate_exit_state(
+                name,
+                *observed,
+                self.context
+                    .contracts()
+                    .get(name.as_str())
+                    .map(|entry| entry.origin()),
+                enforce_contract,
+                &mut diagnostics,
+            );
+            processed.insert(name.as_str());
         }
 
         diagnostics

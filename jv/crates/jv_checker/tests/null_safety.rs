@@ -187,6 +187,22 @@ label = when (maybe) {
 "#;
     "smart_cast_result_assignment"
 )]
+#[test_case(
+    r#"
+fun provide(): String? = null
+
+var maybe = provide()
+when (maybe) {
+    is String -> {}
+    else -> {
+        maybe = "fallback"
+    }
+}
+
+val label = maybe
+"#;
+    "smart_cast_result_assignment_after_rebind"
+)]
 fn pattern_bridge_allows_smart_casts(source: &str) {
     let result = run_null_safety_case(source);
     assert!(
@@ -332,7 +348,7 @@ when (maybe) {
 
 consume(maybe)
 "#,
-    Some("JV3002");
+    None;
     "post_when_nullable_usage"
 )]
 #[test_case(
@@ -356,6 +372,24 @@ consume(maybe)
 #[test_case(
     r#"
 fun provide(): String? = null
+
+var maybe = provide()
+when (maybe) {
+    is String -> {}
+    else -> {
+        maybe = "fallback"
+        maybe = provide()
+    }
+}
+
+consume(maybe)
+"#,
+    None;
+    "else_branch_reintroduces_nullable"
+)]
+#[test_case(
+    r#"
+fun provide(): String? = null
 fun consume(value: String): Int = 1
 
 var maybe = provide()
@@ -372,7 +406,7 @@ val value = when (maybe) {
 
 consume(maybe)
 "#,
-    Some("JV3002");
+    None;
     "else_branch_forces_null"
 )]
 #[test_case(
@@ -382,9 +416,7 @@ fun consume(value: String): Int = 1
 
 var maybe = provide()
 when (maybe) {
-    is String -> {
-        maybe = maybe
-    }
+    is String -> {}
     else -> {
         maybe = "fallback"
     }
