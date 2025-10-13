@@ -10,6 +10,9 @@ use crate::inference::iteration::{
     classify_loop, expression_can_yield_iterable, LoopClassification,
 };
 use crate::inference::types::TypeKind;
+use crate::pattern::{
+    NarrowedBinding, NarrowedNullability, NarrowingSnapshot, PatternMatchService, PatternTarget,
+};
 use jv_ast::{
     Argument, BinaryOp, Expression, ForInStatement, Literal, Program, Statement, TypeAnnotation,
     UnaryOp,
@@ -22,6 +25,7 @@ pub struct ConstraintGenerator<'env, 'ext> {
     env: &'env mut TypeEnvironment,
     constraints: ConstraintSet,
     extensions: &'ext ExtensionRegistry,
+    pattern_service: PatternMatchService,
 }
 
 const DIAG_RANGE_BOUNDS: &str = "E_LOOP_002: numeric range bounds must resolve to the same type";
@@ -37,6 +41,7 @@ impl<'env, 'ext> ConstraintGenerator<'env, 'ext> {
             env,
             constraints: ConstraintSet::new(),
             extensions,
+            pattern_service: PatternMatchService::new(),
         }
     }
 
@@ -322,17 +327,25 @@ impl<'env, 'ext> ConstraintGenerator<'env, 'ext> {
                 body_ty
             }
             Expression::When {
-                expr,
+                expr: subject,
                 arms,
                 else_arm,
                 implicit_end: _,
                 ..
             } => {
-                if let Some(scrutinee) = expr {
+                if let Some(scrutinee) = subject {
                     self.infer_expression(scrutinee);
                 }
+                let facts = self.pattern_service.analyze(expr, PatternTarget::Java25);
+                let narrowing = facts.narrowing();
                 let mut branch_types = Vec::with_capacity(arms.len());
-                for arm in arms {
+                for (index, arm) in arms.iter().enumerate() {
+                    self.env.enter_scope();
+                    if let Some((_, snapshot)) =
+                        narrowing.arms().find(|(arm_id, _)| **arm_id == index)
+                    {
+                        self.apply_branch_narrowing(snapshot);
+                    }
                     if let Some(guard_expr) = &arm.guard {
                         let guard_ty = self.infer_expression(guard_expr);
                         self.push_constraint(
@@ -341,11 +354,18 @@ impl<'env, 'ext> ConstraintGenerator<'env, 'ext> {
                         );
                     }
                     let body_ty = self.infer_expression(&arm.body);
+                    self.env.leave_scope();
                     branch_types.push(body_ty);
                 }
-                let else_ty = else_arm
-                    .as_ref()
-                    .map(|else_body| self.infer_expression(else_body));
+                let else_ty = else_arm.as_ref().map(|else_body| {
+                    self.env.enter_scope();
+                    if let Some(snapshot) = narrowing.fallback() {
+                        self.apply_branch_narrowing(snapshot);
+                    }
+                    let ty = self.infer_expression(else_body);
+                    self.env.leave_scope();
+                    ty
+                });
 
                 if let Some(first_ty) = branch_types.first() {
                     for other in branch_types.iter().skip(1) {
@@ -603,6 +623,32 @@ impl<'env, 'ext> ConstraintGenerator<'env, 'ext> {
         };
         self.constraints.push(constraint);
     }
+
+    fn apply_branch_narrowing(&mut self, snapshot: &NarrowingSnapshot) {
+        for binding in snapshot.on_match() {
+            self.apply_binding_narrowing(binding);
+        }
+    }
+
+    fn apply_binding_narrowing(&mut self, binding: &NarrowedBinding) {
+        match binding.nullability {
+            NarrowedNullability::NonNull => {
+                self.shadow_binding_as_non_null(&binding.variable);
+            }
+            NarrowedNullability::Nullable | NarrowedNullability::Unknown => {}
+        }
+    }
+
+    fn shadow_binding_as_non_null(&mut self, name: &str) {
+        if let Some(original) = self.env.lookup(name).cloned() {
+            let narrowed_type = match original.ty {
+                TypeKind::Optional(inner) => *inner,
+                other => other,
+            };
+            self.env
+                .define_scheme(name.to_string(), TypeScheme::monotype(narrowed_type));
+        }
+    }
 }
 
 fn nullability_from_type(ty: &TypeKind) -> NullabilityFlag {
@@ -624,6 +670,7 @@ fn ensure_optional_type(ty: TypeKind) -> TypeKind {
 mod tests {
     use super::*;
     use jv_ast::{Modifiers, Pattern, Span, ValBindingOrigin, WhenArm};
+    use jv_parser::Parser;
 
     fn dummy_span() -> Span {
         Span::dummy()
@@ -774,6 +821,29 @@ mod tests {
             scheme.ty,
             TypeKind::Optional(Box::new(TypeKind::Primitive("String")))
         );
+    }
+
+    #[test]
+    fn when_branch_narrowing_unwraps_optional_subject() {
+        let program = Parser::parse(
+            r#"
+fun provide(): String? = null
+
+maybe = provide()
+val result = when (maybe) {
+    is String -> maybe
+    else -> ""
+}
+"#,
+        )
+        .expect("program should parse");
+
+        let mut env = TypeEnvironment::new();
+        let extensions = ExtensionRegistry::new();
+        let _constraints = ConstraintGenerator::new(&mut env, &extensions).generate(&program);
+
+        let scheme = env.lookup("result").expect("result binding must exist");
+        assert_eq!(scheme.ty, TypeKind::Primitive("String"));
     }
 
     #[test]
