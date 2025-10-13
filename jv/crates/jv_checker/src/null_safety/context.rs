@@ -135,6 +135,61 @@ impl NullabilityLattice {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NonNullContractOrigin {
+    InferenceEnvironment,
+    InferenceScheme,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct NonNullContract {
+    origin: NonNullContractOrigin,
+}
+
+impl NonNullContract {
+    pub fn origin(&self) -> NonNullContractOrigin {
+        self.origin
+    }
+}
+
+#[derive(Debug, Default, Clone)]
+pub struct NonNullContracts {
+    entries: HashMap<String, NonNullContract>,
+}
+
+impl NonNullContracts {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn insert(&mut self, name: impl Into<String>, origin: NonNullContractOrigin) {
+        let symbol = name.into();
+        self.entries
+            .entry(symbol)
+            .or_insert(NonNullContract { origin });
+    }
+
+    pub fn contains(&self, name: &str) -> bool {
+        self.entries.contains_key(name)
+    }
+
+    pub fn get(&self, name: &str) -> Option<&NonNullContract> {
+        self.entries.get(name)
+    }
+
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = (&String, &NonNullContract)> {
+        self.entries.iter()
+    }
+}
+
 #[derive(Debug, Default, Clone)]
 pub struct LateInitRegistry {
     required: HashSet<String>,
@@ -210,6 +265,7 @@ impl LateInitRegistry {
 pub struct NullSafetyContext<'facts> {
     facts: Option<&'facts TypeFactsSnapshot>,
     lattice: NullabilityLattice,
+    contracts: NonNullContracts,
     degraded: bool,
     late_init: LateInitRegistry,
     java_metadata: HashMap<String, JavaSymbolMetadata>,
@@ -244,6 +300,7 @@ impl<'facts> NullSafetyContext<'facts> {
         manifest: Option<&LateInitManifest>,
     ) -> Self {
         let mut lattice = NullabilityLattice::new();
+        let mut contracts = NonNullContracts::default();
 
         if let Some(env) = environment {
             for (name, scheme) in env.flattened_bindings() {
@@ -253,15 +310,7 @@ impl<'facts> NullSafetyContext<'facts> {
         }
 
         if let Some(facts) = facts {
-            for (name, ty) in facts.environment().values().iter() {
-                let state = NullabilityKind::from_facts_type(ty);
-                lattice.insert(name.clone(), state);
-            }
-
-            for (name, scheme) in facts.all_schemes() {
-                let state = NullabilityKind::from_facts_type(scheme.body());
-                lattice.insert(name.to_string(), state);
-            }
+            hydrate_from_facts(facts, &mut lattice, &mut contracts);
         }
 
         let mut java_metadata = HashMap::new();
@@ -275,6 +324,7 @@ impl<'facts> NullSafetyContext<'facts> {
         Self {
             facts,
             lattice,
+            contracts,
             degraded: facts.is_none() || environment.is_none(),
             late_init,
             java_metadata,
@@ -286,6 +336,7 @@ impl<'facts> NullSafetyContext<'facts> {
         Self {
             facts: None,
             lattice: NullabilityLattice::new(),
+            contracts: NonNullContracts::default(),
             degraded: true,
             late_init: LateInitRegistry::default(),
             java_metadata: HashMap::new(),
@@ -301,6 +352,10 @@ impl<'facts> NullSafetyContext<'facts> {
     /// Returns a reference to the symbol lattice used for flow analysis.
     pub fn lattice(&self) -> &NullabilityLattice {
         &self.lattice
+    }
+
+    pub fn contracts(&self) -> &NonNullContracts {
+        &self.contracts
     }
 
     /// Returns true when the context is operating in degraded mode due to missing inference data.
@@ -346,6 +401,32 @@ impl<'facts> NullSafetyContext<'facts> {
 
     pub fn pattern_facts(&self, node_id: u64) -> Option<&PatternMatchFacts> {
         self.pattern_facts.get(&node_id)
+    }
+}
+
+fn hydrate_from_facts(
+    facts: &TypeFactsSnapshot,
+    lattice: &mut NullabilityLattice,
+    contracts: &mut NonNullContracts,
+) {
+    for (name, ty) in facts.environment().values().iter() {
+        let symbol = name.to_string();
+        let state = NullabilityKind::from_facts_type(ty);
+        lattice.insert(symbol.clone(), state);
+
+        if matches!(state, NullabilityKind::NonNull) {
+            contracts.insert(symbol, NonNullContractOrigin::InferenceEnvironment);
+        }
+    }
+
+    for (name, scheme) in facts.all_schemes() {
+        let symbol = name.to_string();
+        let state = NullabilityKind::from_facts_type(scheme.body());
+        lattice.insert(symbol.clone(), state);
+
+        if matches!(state, NullabilityKind::NonNull) {
+            contracts.insert(symbol, NonNullContractOrigin::InferenceScheme);
+        }
     }
 }
 
@@ -511,6 +592,17 @@ mod tests {
         assert_eq!(
             context.lattice().get("User::lookup"),
             Some(NullabilityKind::NonNull)
+        );
+        assert_eq!(context.contracts().len(), 1);
+        assert!(context.contracts().contains("User::lookup"));
+        assert!(!context.contracts().contains("user_id"));
+        assert!(!context.contracts().contains("maybe_email"));
+        assert_eq!(
+            context
+                .contracts()
+                .get("User::lookup")
+                .map(NonNullContract::origin),
+            Some(NonNullContractOrigin::InferenceScheme)
         );
         assert!(context.late_init().is_tracked("User::lookup"));
     }
