@@ -718,6 +718,83 @@ fn when_with_else_in_value_position_passes_validation() {
 }
 
 #[test]
+fn when_branch_nullability_is_exposed_via_inference_service() {
+    let program = Parser::parse(
+        r#"
+fun provide(): String? = null
+
+maybe = provide()
+val fallback = "fallback"
+label = when (maybe) {
+    is String -> maybe
+    else -> fallback
+}
+"#,
+    )
+    .expect("when sample should parse");
+
+    let mut checker = TypeChecker::new();
+    checker
+        .check_program(&program)
+        .expect("sample program should type-check");
+
+    let snapshot = checker
+        .inference_snapshot()
+        .expect("inference snapshot should be available");
+    let normalized = checker
+        .normalized_program()
+        .expect("normalized program should be available");
+
+    let (subject_name, arm_count, has_else, span) = normalized
+        .statements
+        .iter()
+        .find_map(|statement| match statement {
+            Statement::ValDeclaration {
+                name, initializer, ..
+            } if name == "label" => {
+                if let Expression::When {
+                    expr,
+                    arms,
+                    else_arm,
+                    span,
+                    ..
+                } = initializer
+                {
+                    let subject = expr.as_deref().and_then(|expr| match expr {
+                        Expression::Identifier(name, _) => Some(name.as_str()),
+                        _ => None,
+                    });
+                    Some((subject, arms.len(), else_arm.is_some(), span.clone()))
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        })
+        .expect("label declaration should contain when expression");
+
+    let node_id = pattern::node_identifier(&span);
+    let summary = snapshot.when_branch_nullability(
+        node_id,
+        subject_name,
+        arm_count,
+        has_else,
+        PatternTarget::Java25,
+    );
+
+    assert_eq!(
+        summary.arm_nullability(),
+        &[NullabilityFlag::NonNull],
+        "pattern facts should mark the matching arm as non-null"
+    );
+    assert_eq!(
+        summary.fallback_nullability(),
+        Some(NullabilityFlag::Unknown),
+        "else branch defaults to unknown without explicit narrowing facts"
+    );
+}
+
+#[test]
 fn when_without_else_in_statement_position_is_allowed() {
     let span = dummy_span();
     let when_expr = Expression::When {

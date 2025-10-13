@@ -17,7 +17,9 @@ pub use regex::RegexAnalysis;
 use binding::{resolve_bindings, BindingResolution, BindingUsageSummary, LateInitManifest};
 use jv_ast::{Program, Span};
 use null_safety::{JavaLoweringHint, NullSafetyCoordinator};
-use pattern::{PatternCacheMetrics, PatternMatchFacts, PatternMatchService, PatternTarget};
+use pattern::{
+    NarrowedNullability, PatternCacheMetrics, PatternMatchFacts, PatternMatchService, PatternTarget,
+};
 use regex::RegexValidator;
 use std::collections::HashMap;
 use thiserror::Error;
@@ -112,6 +114,76 @@ impl InferenceSnapshot {
     }
 }
 
+/// Summary of nullability information for each branch within a `when` expression.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WhenBranchNullability {
+    arm_nullability: Vec<NullabilityFlag>,
+    fallback_nullability: Option<NullabilityFlag>,
+}
+
+impl WhenBranchNullability {
+    fn new(arm_count: usize, has_fallback: bool) -> Self {
+        Self {
+            arm_nullability: vec![NullabilityFlag::Unknown; arm_count],
+            fallback_nullability: has_fallback.then_some(NullabilityFlag::Unknown),
+        }
+    }
+
+    /// Returns the inferred nullability for each `when` arm in source order.
+    pub fn arm_nullability(&self) -> &[NullabilityFlag] {
+        &self.arm_nullability
+    }
+
+    /// Returns the inferred nullability for the fallback branch (`else`), when present.
+    pub fn fallback_nullability(&self) -> Option<NullabilityFlag> {
+        self.fallback_nullability
+    }
+
+    fn update_from_pattern_facts(&mut self, subject: &str, facts: &PatternMatchFacts) {
+        let mut branch_flags: Vec<(usize, NullabilityFlag)> = facts
+            .narrowing()
+            .arms()
+            .filter_map(|(arm_id, snapshot)| {
+                snapshot
+                    .on_match()
+                    .iter()
+                    .find(|binding| binding.variable == subject)
+                    .map(|binding| (*arm_id as usize, to_nullability_flag(binding.nullability)))
+            })
+            .collect();
+        branch_flags.sort_by_key(|(index, _)| *index);
+        for (index, flag) in branch_flags {
+            if index >= self.arm_nullability.len() {
+                self.arm_nullability
+                    .resize(index + 1, NullabilityFlag::Unknown);
+            }
+            if let Some(slot) = self.arm_nullability.get_mut(index) {
+                *slot = flag;
+            }
+        }
+
+        if let Some(snapshot) = facts.fallback_narrowing() {
+            if let Some(binding) = snapshot
+                .on_match()
+                .iter()
+                .find(|binding| binding.variable == subject)
+            {
+                if let Some(fallback) = self.fallback_nullability.as_mut() {
+                    *fallback = to_nullability_flag(binding.nullability);
+                }
+            }
+        }
+    }
+}
+
+fn to_nullability_flag(value: NarrowedNullability) -> NullabilityFlag {
+    match value {
+        NarrowedNullability::NonNull => NullabilityFlag::NonNull,
+        NarrowedNullability::Nullable => NullabilityFlag::Nullable,
+        NarrowedNullability::Unknown => NullabilityFlag::Unknown,
+    }
+}
+
 /// 推論済み情報へアクセスするためのサービスレイヤ。
 pub trait TypeInferenceService {
     /// すべての型束縛を取得する。
@@ -131,6 +203,20 @@ pub trait TypeInferenceService {
 
     /// Late-init 用メタデータを返す。
     fn late_init_manifest(&self) -> &LateInitManifest;
+
+    /// Retrieves branch-level nullability flags for a `when` expression.
+    ///
+    /// The caller must provide the node identifier used by the pattern service,
+    /// together with context information about the subject identifier and the
+    /// number of arms. Missing facts default to `Unknown`.
+    fn when_branch_nullability(
+        &self,
+        node_id: u64,
+        subject_name: Option<&str>,
+        arm_count: usize,
+        has_fallback: bool,
+        target: PatternTarget,
+    ) -> WhenBranchNullability;
 }
 
 impl TypeInferenceService for InferenceSnapshot {
@@ -156,6 +242,21 @@ impl TypeInferenceService for InferenceSnapshot {
 
     fn late_init_manifest(&self) -> &LateInitManifest {
         &self.late_init_manifest
+    }
+
+    fn when_branch_nullability(
+        &self,
+        node_id: u64,
+        subject_name: Option<&str>,
+        arm_count: usize,
+        has_fallback: bool,
+        target: PatternTarget,
+    ) -> WhenBranchNullability {
+        let mut summary = WhenBranchNullability::new(arm_count, has_fallback);
+        if let (Some(subject), Some(facts)) = (subject_name, self.pattern_fact(node_id, target)) {
+            summary.update_from_pattern_facts(subject, facts);
+        }
+        summary
     }
 }
 
