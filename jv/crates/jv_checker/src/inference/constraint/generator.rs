@@ -14,6 +14,7 @@ use jv_ast::{
     Argument, BinaryOp, Expression, ForInStatement, Literal, Program, Statement, TypeAnnotation,
     UnaryOp,
 };
+use jv_inference::types::NullabilityFlag;
 
 /// AST から制約を抽出するジェネレータ。
 #[derive(Debug)]
@@ -330,6 +331,7 @@ impl<'env, 'ext> ConstraintGenerator<'env, 'ext> {
                 if let Some(scrutinee) = expr {
                     self.infer_expression(scrutinee);
                 }
+                let mut branch_types = Vec::with_capacity(arms.len());
                 for arm in arms {
                     if let Some(guard_expr) = &arm.guard {
                         let guard_ty = self.infer_expression(guard_expr);
@@ -338,13 +340,59 @@ impl<'env, 'ext> ConstraintGenerator<'env, 'ext> {
                             Some("when guard must evaluate to boolean"),
                         );
                     }
-                    self.infer_expression(&arm.body);
+                    let body_ty = self.infer_expression(&arm.body);
+                    branch_types.push(body_ty);
                 }
-                if let Some(else_body) = else_arm {
-                    self.infer_expression(else_body)
+                let else_ty = else_arm
+                    .as_ref()
+                    .map(|else_body| self.infer_expression(else_body));
+
+                if let Some(first_ty) = branch_types.first() {
+                    for other in branch_types.iter().skip(1) {
+                        self.push_constraint(
+                            ConstraintKind::Equal(first_ty.clone(), other.clone()),
+                            Some("when branches must agree"),
+                        );
+                    }
+                    if let Some(else_ty_val) = &else_ty {
+                        self.push_constraint(
+                            ConstraintKind::Equal(first_ty.clone(), else_ty_val.clone()),
+                            Some("when branches must agree"),
+                        );
+                    }
+                }
+
+                let mut aggregated_flag = if branch_types.is_empty() && else_ty.is_none() {
+                    NullabilityFlag::Unknown
+                } else {
+                    NullabilityFlag::NonNull
+                };
+                for ty in &branch_types {
+                    aggregated_flag = aggregated_flag.combine(nullability_from_type(ty));
+                }
+                match &else_ty {
+                    Some(ty) => {
+                        aggregated_flag = aggregated_flag.combine(nullability_from_type(ty));
+                    }
+                    None if !branch_types.is_empty() => {
+                        aggregated_flag = aggregated_flag.combine(NullabilityFlag::Unknown);
+                    }
+                    None => {}
+                }
+
+                let mut result_ty = if let Some(ty) = &else_ty {
+                    ty.clone()
+                } else if let Some(first) = branch_types.first() {
+                    first.clone()
                 } else {
                     TypeKind::Unknown
+                };
+
+                if matches!(aggregated_flag, NullabilityFlag::Nullable) {
+                    result_ty = ensure_optional_type(result_ty);
                 }
+
+                result_ty
             }
             Expression::StringInterpolation { parts, .. } => {
                 for part in parts {
@@ -557,10 +605,25 @@ impl<'env, 'ext> ConstraintGenerator<'env, 'ext> {
     }
 }
 
+fn nullability_from_type(ty: &TypeKind) -> NullabilityFlag {
+    match ty {
+        TypeKind::Optional(_) => NullabilityFlag::Nullable,
+        TypeKind::Unknown | TypeKind::Variable(_) => NullabilityFlag::Unknown,
+        TypeKind::Primitive(_) | TypeKind::Function(_, _) => NullabilityFlag::NonNull,
+    }
+}
+
+fn ensure_optional_type(ty: TypeKind) -> TypeKind {
+    match ty {
+        TypeKind::Optional(_) => ty,
+        other => TypeKind::Optional(Box::new(other)),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use jv_ast::{Modifiers, Span, ValBindingOrigin};
+    use jv_ast::{Modifiers, Pattern, Span, ValBindingOrigin, WhenArm};
 
     fn dummy_span() -> Span {
         Span::dummy()
@@ -667,6 +730,50 @@ mod tests {
 
         let scheme = env.lookup("sum").expect("symbol sum must exist");
         assert_eq!(scheme.ty, TypeKind::Primitive("Int"));
+    }
+
+    #[test]
+    fn when_expression_with_nullable_branch_infers_optional_result() {
+        let span = dummy_span();
+        let when_expr = Expression::When {
+            expr: None,
+            arms: vec![WhenArm {
+                pattern: Pattern::Wildcard(span.clone()),
+                guard: None,
+                body: Expression::Literal(Literal::Null, span.clone()),
+                span: span.clone(),
+            }],
+            else_arm: Some(Box::new(Expression::Literal(
+                Literal::String("fallback".into()),
+                span.clone(),
+            ))),
+            implicit_end: None,
+            span: span.clone(),
+        };
+
+        let program = Program {
+            package: None,
+            imports: Vec::new(),
+            statements: vec![Statement::ValDeclaration {
+                name: "value".into(),
+                type_annotation: None,
+                initializer: when_expr,
+                modifiers: default_modifiers(),
+                origin: ValBindingOrigin::ExplicitKeyword,
+                span: span.clone(),
+            }],
+            span,
+        };
+
+        let mut env = TypeEnvironment::new();
+        let extensions = ExtensionRegistry::new();
+        let _constraints = ConstraintGenerator::new(&mut env, &extensions).generate(&program);
+
+        let scheme = env.lookup("value").expect("value binding must exist");
+        assert_eq!(
+            scheme.ty,
+            TypeKind::Optional(Box::new(TypeKind::Primitive("String")))
+        );
     }
 
     #[test]
