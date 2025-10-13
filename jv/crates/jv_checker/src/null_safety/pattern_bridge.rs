@@ -364,10 +364,29 @@ impl PatternFactsBridge {
     fn lookup_state(&self, name: &str, context: &NullSafetyContext) -> Option<NullabilityKind> {
         for scope in self.scopes.iter().rev() {
             if let Some(state) = scope.get(name) {
-                return Some(*state);
+                return Some(self.apply_contract_override(name, *state, context));
             }
         }
-        context.lattice().get(name)
+
+        let recorded = context.lattice().get(name);
+        if context.contracts().contains(name) {
+            Some(NullabilityKind::NonNull)
+        } else {
+            recorded
+        }
+    }
+
+    fn apply_contract_override(
+        &self,
+        name: &str,
+        state: NullabilityKind,
+        context: &NullSafetyContext,
+    ) -> NullabilityKind {
+        if context.contracts().contains(name) {
+            NullabilityKind::NonNull
+        } else {
+            state
+        }
     }
 
     fn detect_conflicts(
