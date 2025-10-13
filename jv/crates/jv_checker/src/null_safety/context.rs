@@ -261,6 +261,47 @@ impl LateInitRegistry {
     }
 }
 
+#[derive(Debug, Default, Clone)]
+pub struct LateInitContracts {
+    enforced: HashSet<String>,
+}
+
+impl LateInitContracts {
+    pub fn new(lattice: &NullabilityLattice, manifest: Option<&LateInitManifest>) -> Self {
+        let mut enforced = HashSet::new();
+
+        if let Some(manifest) = manifest {
+            for (name, seed) in manifest.iter() {
+                if seed.explicit_late_init {
+                    continue;
+                }
+
+                if !seed.has_initializer {
+                    continue;
+                }
+
+                if matches!(lattice.get(name), Some(NullabilityKind::NonNull)) {
+                    enforced.insert(name.clone());
+                }
+            }
+        }
+
+        Self { enforced }
+    }
+
+    pub fn contains(&self, name: &str) -> bool {
+        self.enforced.contains(name)
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.enforced.is_empty()
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = &String> {
+        self.enforced.iter()
+    }
+}
+
 /// Hydrates symbol tables and lattice state from inference snapshots for downstream flow analysis.
 pub struct NullSafetyContext<'facts> {
     facts: Option<&'facts TypeFactsSnapshot>,
@@ -268,6 +309,7 @@ pub struct NullSafetyContext<'facts> {
     contracts: NonNullContracts,
     degraded: bool,
     late_init: LateInitRegistry,
+    late_init_contracts: LateInitContracts,
     java_metadata: HashMap<String, JavaSymbolMetadata>,
     pattern_facts: HashMap<u64, PatternMatchFacts>,
 }
@@ -320,6 +362,7 @@ impl<'facts> NullSafetyContext<'facts> {
         }
 
         let late_init = LateInitRegistry::new(&lattice, manifest);
+        let late_init_contracts = LateInitContracts::new(&lattice, manifest);
 
         Self {
             facts,
@@ -327,6 +370,7 @@ impl<'facts> NullSafetyContext<'facts> {
             contracts,
             degraded: facts.is_none() || environment.is_none(),
             late_init,
+            late_init_contracts,
             java_metadata,
             pattern_facts: HashMap::new(),
         }
@@ -339,6 +383,7 @@ impl<'facts> NullSafetyContext<'facts> {
             contracts: NonNullContracts::default(),
             degraded: true,
             late_init: LateInitRegistry::default(),
+            late_init_contracts: LateInitContracts::default(),
             java_metadata: HashMap::new(),
             pattern_facts: HashMap::new(),
         }
@@ -370,6 +415,10 @@ impl<'facts> NullSafetyContext<'facts> {
 
     pub fn late_init_mut(&mut self) -> &mut LateInitRegistry {
         &mut self.late_init
+    }
+
+    pub fn late_init_contracts(&self) -> &LateInitContracts {
+        &self.late_init_contracts
     }
 
     /// Returns Java interop metadata collected during context hydration.
