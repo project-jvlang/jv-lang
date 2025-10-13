@@ -280,7 +280,11 @@ impl LateInitContracts {
                     continue;
                 }
 
-                if matches!(lattice.get(name), Some(NullabilityKind::NonNull)) {
+                let lattice_state = lattice.get(name);
+                let is_nonnull_contract = matches!(lattice_state, Some(NullabilityKind::NonNull));
+                let is_implicit_contract = matches!(seed.origin, ValBindingOrigin::Implicit);
+
+                if is_nonnull_contract || is_implicit_contract {
                     enforced.insert(name.clone());
                 }
             }
@@ -798,6 +802,35 @@ mod tests {
         assert!(context.late_init().is_tracked("explicitLate"));
         assert!(context.late_init().is_tracked("annotatedLate"));
         assert!(context.late_init().is_tracked("nullableVar"));
+    }
+
+    #[test]
+    fn implicit_nullable_val_registers_contract() {
+        let mut env = TypeEnvironment::new();
+        env.define_monotype("maybe", checker_optional("String"));
+
+        let mut facts_builder = TypeFactsBuilder::new();
+        facts_builder.environment_entry("maybe", facts_optional("String"));
+        let facts = facts_builder.build();
+
+        let mut seeds = HashMap::new();
+        seeds.insert(
+            "maybe".to_string(),
+            LateInitSeed {
+                name: "maybe".to_string(),
+                origin: ValBindingOrigin::Implicit,
+                has_initializer: true,
+                explicit_late_init: false,
+            },
+        );
+        let manifest = LateInitManifest::new(seeds);
+
+        let context = NullSafetyContext::from_parts(Some(&facts), Some(&env), Some(&manifest));
+
+        assert!(
+            context.late_init_contracts().contains("maybe"),
+            "implicit val with initializer should form a contract even if nullable"
+        );
     }
 
     #[test]
