@@ -146,7 +146,7 @@ impl LateInitRegistry {
         let mut required: HashSet<String> = lattice
             .iter()
             .filter_map(|(name, state)| {
-                if matches!(state, NullabilityKind::NonNull) {
+                if matches!(state, NullabilityKind::NonNull | NullabilityKind::Nullable) {
                     Some(name.clone())
                 } else {
                     None
@@ -162,14 +162,24 @@ impl LateInitRegistry {
                     continue;
                 }
 
-                let needs_strict_tracking =
-                    seed.origin != ValBindingOrigin::Implicit && !seed.has_initializer;
+                if seed.explicit_late_init {
+                    exempt.remove(name);
+                    continue;
+                }
 
-                if !needs_strict_tracking {
+                let Some(state) = lattice.get(name) else {
+                    continue;
+                };
+
+                if seed.origin == ValBindingOrigin::Implicit {
                     required.remove(name);
                     exempt.insert(name.clone());
-                } else if seed.explicit_late_init {
-                    exempt.remove(name);
+                    continue;
+                }
+
+                if matches!(state, NullabilityKind::NonNull) && seed.has_initializer {
+                    required.remove(name);
+                    exempt.insert(name.clone());
                 }
             }
         }
@@ -564,6 +574,10 @@ mod tests {
         env.define_monotype("explicitInitialized", TypeKind::Primitive("Int"));
         env.define_monotype("explicitLate", TypeKind::Primitive("Int"));
         env.define_monotype("annotatedLate", TypeKind::Primitive("Int"));
+        env.define_monotype(
+            "nullableVar",
+            TypeKind::Optional(Box::new(TypeKind::Primitive("String"))),
+        );
 
         let mut builder = TypeFactsBuilder::new();
         for name in [
@@ -578,6 +592,13 @@ mod tests {
                     .with_nullability(NullabilityFlag::NonNull),
             );
         }
+        builder.environment_entry(
+            "nullableVar",
+            FactsTypeKind::new(TypeVariant::Optional(Box::new(FactsTypeKind::new(
+                TypeVariant::Primitive("String"),
+            ))))
+            .with_nullability(NullabilityFlag::Nullable),
+        );
         let facts = builder.build();
 
         let mut seeds = HashMap::new();
@@ -617,6 +638,15 @@ mod tests {
                 explicit_late_init: true,
             },
         );
+        seeds.insert(
+            "nullableVar".to_string(),
+            LateInitSeed {
+                name: "nullableVar".to_string(),
+                origin: ValBindingOrigin::ExplicitKeyword,
+                has_initializer: true,
+                explicit_late_init: false,
+            },
+        );
 
         let manifest = LateInitManifest::new(seeds);
 
@@ -626,6 +656,7 @@ mod tests {
         assert!(!context.late_init().is_tracked("explicitInitialized"));
         assert!(context.late_init().is_tracked("explicitLate"));
         assert!(context.late_init().is_tracked("annotatedLate"));
+        assert!(context.late_init().is_tracked("nullableVar"));
     }
 
     #[test]
