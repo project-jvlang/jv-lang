@@ -533,14 +533,20 @@ fn null_safety_reports_jv3108_without_jv3003_regression() {
     };
 
     let when_expr = Expression::When {
-        expr: Some(Box::new(Expression::Identifier("token".into(), span.clone()))),
+        expr: Some(Box::new(Expression::Identifier(
+            "token".into(),
+            span.clone(),
+        ))),
         arms: vec![WhenArm {
             pattern: Pattern::Literal(Literal::Null, span.clone()),
             guard: None,
             body: Expression::Literal(Literal::String("none".into()), span.clone()),
             span: span.clone(),
         }],
-        else_arm: Some(Box::new(Expression::Identifier("token".into(), span.clone()))),
+        else_arm: Some(Box::new(Expression::Identifier(
+            "token".into(),
+            span.clone(),
+        ))),
         implicit_end: None,
         span: span.clone(),
     };
@@ -576,15 +582,11 @@ fn null_safety_reports_jv3108_without_jv3003_regression() {
         "expected a single null safety diagnostic, got: {messages:?}"
     );
     assert!(
-        messages
-            .iter()
-            .any(|message| message.contains("JV3108")),
+        messages.iter().any(|message| message.contains("JV3108")),
         "expected JV3108 conflict, got: {messages:?}"
     );
     assert!(
-        messages
-            .iter()
-            .all(|message| !message.contains("JV3003")),
+        messages.iter().all(|message| !message.contains("JV3003")),
         "unexpected JV3003 regression detected: {messages:?}"
     );
 

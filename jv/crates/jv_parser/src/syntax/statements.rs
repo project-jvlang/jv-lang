@@ -15,11 +15,11 @@ use super::parameters::parameter_list;
 use super::support::{
     block_expression_parser, expression_level_block_parser, expression_span, identifier,
     identifier_with_span, keyword as support_keyword, merge_spans, qualified_name_with_span,
-    span_from_token, token_any_comma, token_assign, token_at, token_class, token_colon,
-    token_data, token_defer, token_do_keyword, token_dot, token_for, token_fun,
-    token_greater, token_in_keyword, token_left_brace, token_left_paren, token_less,
-    token_question, token_return, token_right_brace, token_right_paren, token_spawn,
-    token_use, token_val, token_var, token_where_keyword, token_while_keyword, type_annotation,
+    span_from_token, token_any_comma, token_assign, token_at, token_class, token_colon, token_data,
+    token_defer, token_do_keyword, token_dot, token_for, token_fun, token_greater,
+    token_in_keyword, token_left_brace, token_left_paren, token_less, token_question, token_return,
+    token_right_brace, token_right_paren, token_spawn, token_use, token_val, token_var,
+    token_where_keyword, token_while_keyword, type_annotation,
 };
 
 fn attempt_statement_parser<P>(

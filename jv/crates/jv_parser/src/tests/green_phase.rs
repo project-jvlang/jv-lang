@@ -1253,10 +1253,7 @@ val result = when (value) {
         Statement::ValDeclaration { initializer, .. } => match initializer {
             Expression::When { arms, else_arm, .. } => {
                 assert_eq!(arms.len(), 1);
-                assert!(
-                    else_arm.is_some(),
-                    "else arm should be captured separately"
-                );
+                assert!(else_arm.is_some(), "else arm should be captured separately");
                 match &arms[0].body {
                     Expression::Block { statements, .. } => {
                         assert!(
@@ -1291,7 +1288,9 @@ val length = when (token) {
 
     match statement {
         Statement::ValDeclaration { initializer, .. } => match initializer {
-            Expression::MemberAccess { object, property, .. } => {
+            Expression::MemberAccess {
+                object, property, ..
+            } => {
                 assert_eq!(property, "length");
                 match object.as_ref() {
                     Expression::When { arms, else_arm, .. } => {
@@ -1314,15 +1313,13 @@ val length = when (token) {
                                     ),
                                 }
                             }
-                            other => panic!(
-                                "expected block expression in when arm, found {:?}",
-                                other
-                            ),
+                            other => {
+                                panic!("expected block expression in when arm, found {:?}", other)
+                            }
                         }
 
-                        let else_expression = else_arm
-                            .as_ref()
-                            .expect("expected else arm expression");
+                        let else_expression =
+                            else_arm.as_ref().expect("expected else arm expression");
                         match else_expression.as_ref() {
                             Expression::Block { statements, span } => {
                                 assert_eq!(statements.len(), 1);
@@ -1346,10 +1343,9 @@ val length = when (token) {
                                     ),
                                 }
                             }
-                            other => panic!(
-                                "expected block expression in else arm, found {:?}",
-                                other
-                            ),
+                            other => {
+                                panic!("expected block expression in else arm, found {:?}", other)
+                            }
                         }
                     }
                     other => panic!(
@@ -1372,12 +1368,17 @@ fn block_expression_supports_trailing_member_access() {
 
     match statement {
         Statement::ValDeclaration { initializer, .. } => match initializer {
-            Expression::MemberAccess { object, property, .. } => {
+            Expression::MemberAccess {
+                object, property, ..
+            } => {
                 assert_eq!(property, "length");
                 match object.as_ref() {
                     Expression::Block { statements, .. } => {
                         assert_eq!(statements.len(), 2);
-                        assert!(matches!(statements.last().unwrap(), Statement::Expression { .. }));
+                        assert!(matches!(
+                            statements.last().unwrap(),
+                            Statement::Expression { .. }
+                        ));
                     }
                     other => panic!("expected block expression receiver, found {:?}", other),
                 }

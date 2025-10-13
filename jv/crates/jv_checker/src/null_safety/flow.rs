@@ -505,8 +505,7 @@ impl<'g, 'ctx, 'facts> FlowGraphBuilder<'g, 'ctx, 'facts> {
             }
 
             let finally_end = self.handle_expression(finally_entry, finally_expr, None);
-            let merge_after_finally =
-                self.add_graph_node(FlowNodeKind::Merge, Some(span.clone()));
+            let merge_after_finally = self.add_graph_node(FlowNodeKind::Merge, Some(span.clone()));
             self.connect(finally_end, merge_after_finally, FlowEdgeKind::Normal);
 
             if catch_clauses.is_empty() {
@@ -1092,10 +1091,7 @@ mod tests {
             Statement::ValDeclaration {
                 name: "trimmed".into(),
                 type_annotation: None,
-                initializer: Expression::Identifier(
-                    "token".into(),
-                    Span::new(3, 18, 3, 23),
-                ),
+                initializer: Expression::Identifier("token".into(), Span::new(3, 18, 3, 23)),
                 modifiers: Default::default(),
                 origin: ValBindingOrigin::ExplicitKeyword,
                 span: Span::new(3, 8, 3, 24),
@@ -1169,7 +1165,9 @@ mod tests {
 
         assert!(
             normalized_spans.iter().any(|span| {
-                span.start_line == 3 && span.start_column == 4 && span.end_column > span.start_column
+                span.start_line == 3
+                    && span.start_column == 4
+                    && span.end_column > span.start_column
             }),
             "expected normalized span for when arm block, got: {:?}",
             normalized_spans
@@ -1177,7 +1175,9 @@ mod tests {
 
         assert!(
             normalized_spans.iter().any(|span| {
-                span.start_line == 4 && span.start_column == 8 && span.end_column > span.start_column
+                span.start_line == 4
+                    && span.start_column == 8
+                    && span.end_column > span.start_column
             }),
             "expected normalized span for else block, got: {:?}",
             normalized_spans
