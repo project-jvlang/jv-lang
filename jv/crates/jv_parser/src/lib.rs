@@ -281,19 +281,23 @@ fn preprocess_tokens(tokens: Vec<Token>) -> Vec<Token> {
                     let layout_needed = !ctx.prev_was_separator
                         && (ctx.pending_layout || has_layout_trivia(&token.leading_trivia));
                     if layout_needed {
-                        let mut synthetic = make_layout_comma_token(&token);
-                        let sequence = match ctx.kind {
-                            SequenceContextKind::Array => LayoutSequenceKind::Array,
-                            SequenceContextKind::Call => LayoutSequenceKind::Call,
-                        };
-                        let metadata = LayoutCommaMetadata {
-                            sequence,
-                            explicit_separator: ctx.last_explicit_separator.take(),
-                        };
-                        synthetic
-                            .metadata
-                            .push(TokenMetadata::LayoutComma(metadata));
-                        result.push(synthetic);
+                        match ctx.kind {
+                            SequenceContextKind::Array => {
+                                let metadata = LayoutCommaMetadata {
+                                    sequence: LayoutSequenceKind::Array,
+                                    explicit_separator: ctx.last_explicit_separator.take(),
+                                };
+                                let mut synthetic = make_layout_comma_token(&token);
+                                synthetic
+                                    .metadata
+                                    .push(TokenMetadata::LayoutComma(metadata));
+                                result.push(synthetic);
+                            }
+                            SequenceContextKind::Call => {
+                                ctx.last_explicit_separator = None;
+                            }
+                        }
+
                         ctx.prev_was_separator = true;
                     }
                     ctx.pending_layout = false;
