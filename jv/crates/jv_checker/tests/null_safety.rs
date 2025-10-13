@@ -1,6 +1,6 @@
 //! Integration tests exercising the null safety pipeline end-to-end.
 
-use jv_checker::{CheckError, TypeChecker};
+use jv_checker::{CheckError, TypeChecker, TypeKind};
 use jv_parser::Parser;
 use serde_json::Value;
 use test_case::test_case;
@@ -143,7 +143,7 @@ result = when (maybe) {
     is String -> consume(maybe)
     else -> 0
 }
-"#, true;
+"#, false;
     "subject_when_smart_cast"
 )]
 #[test_case(
@@ -184,7 +184,7 @@ label = when (maybe) {
     is String -> maybe
     else -> "fallback"
 }
-"#, true;
+"#, false;
     "smart_cast_result_assignment"
 )]
 #[test_case(
@@ -479,6 +479,17 @@ label
     checker
         .check_program(&program)
         .expect("program should type-check with mixed explicit/implicit declarations");
+
+    let maybe_scheme = checker
+        .inference_snapshot()
+        .and_then(|snapshot| snapshot.binding_scheme("maybe"))
+        .cloned()
+        .expect("implicit binding `maybe` should have a type scheme");
+    assert!(
+        matches!(maybe_scheme.ty, TypeKind::Optional(_)),
+        "expected `maybe` to be inferred as optional, got {:?}",
+        maybe_scheme.ty
+    );
 
     let diagnostics = checker.check_null_safety(&program, None);
     assert!(

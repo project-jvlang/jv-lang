@@ -243,7 +243,14 @@ impl<'ctx> DiagnosticsEmitter<'ctx> {
             NullabilityKind::NonNull => {}
             NullabilityKind::Nullable => {
                 if has_contract {
-                    diagnostics.push(CheckError::NullSafetyError(exit_violation_message(name)));
+                    if matches!(
+                        manifest_contract_kind,
+                        Some(LateInitContractKind::ImplicitInitialized)
+                    ) {
+                        // Implicit bindings with initialisers may legally remain nullable.
+                    } else {
+                        diagnostics.push(CheckError::NullSafetyError(exit_violation_message(name)));
+                    }
                 } else if requires_initialization && !degraded {
                     diagnostics.push(CheckError::NullSafetyError(late_init_message(name)));
                 }

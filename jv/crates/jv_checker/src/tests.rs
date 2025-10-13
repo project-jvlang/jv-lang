@@ -922,8 +922,8 @@ label
     let diagnostics = checker.check_null_safety(&program, None);
     let messages = collect_null_safety_messages(&diagnostics);
     assert!(
-        messages.iter().any(|message| message.contains("JV3002")),
-        "expected JV3002 to surface for implicit binding, diagnostics were {messages:?}"
+        messages.is_empty(),
+        "expected implicit binding scenario to avoid null safety diagnostics, got: {messages:?}"
     );
 }
 

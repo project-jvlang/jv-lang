@@ -88,6 +88,18 @@ impl TypeEnvironment {
         self.define_scheme(name, TypeScheme::monotype(ty));
     }
 
+    /// 既存のシンボルを新しいスキームで再定義する。見つからない場合はグローバルスコープへ登録する。
+    pub fn redefine_scheme(&mut self, name: impl AsRef<str>, scheme: TypeScheme) {
+        let name_ref = name.as_ref();
+        for scope in self.scopes.iter_mut().rev() {
+            if scope.contains_key(name_ref) {
+                scope.insert(name_ref.to_string(), scheme);
+                return;
+            }
+        }
+        self.define_scheme(name_ref.to_string(), scheme);
+    }
+
     /// もっとも内側のスコープから順にシンボルを探索する。
     pub fn lookup(&self, name: &str) -> Option<&TypeScheme> {
         self.scopes.iter().rev().find_map(|scope| scope.get(name))
