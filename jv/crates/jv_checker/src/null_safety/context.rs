@@ -41,7 +41,7 @@ impl NullabilityKind {
         }
     }
 
-    fn from_facts_type(ty: &FactsTypeKind) -> Self {
+    pub(super) fn from_facts_type(ty: &FactsTypeKind) -> Self {
         use FactsTypeVariant::*;
 
         if matches!(ty.variant(), Optional(_)) {

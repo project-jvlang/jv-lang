@@ -4,9 +4,12 @@ use crate::pattern::{
     PatternTarget,
 };
 use crate::CheckError;
-use jv_ast::expression::StringPart;
+use jv_ast::expression::{Parameter, StringPart};
 use jv_ast::statement::Property;
+use jv_ast::types::TypeAnnotation;
 use jv_ast::{Expression, Program, Statement};
+use jv_inference::types::TypeVariant as FactsTypeVariant;
+use std::collections::HashMap;
 
 #[derive(Debug, Default)]
 pub struct BridgeOutcome {
@@ -23,12 +26,14 @@ impl BridgeOutcome {
 
 pub struct PatternFactsBridge {
     target: PatternTarget,
+    scopes: Vec<HashMap<String, NullabilityKind>>,
 }
 
 impl PatternFactsBridge {
     pub fn new() -> Self {
         Self {
             target: PatternTarget::default(),
+            scopes: Vec::new(),
         }
     }
 
@@ -59,8 +64,17 @@ impl PatternFactsBridge {
                 .as_ref()
                 .map(|expr| self.visit_expression(expr, service, context))
                 .unwrap_or_default(),
-            Statement::FunctionDeclaration { body, .. } => {
-                self.visit_expression(body, service, context)
+            Statement::FunctionDeclaration {
+                name,
+                parameters,
+                body,
+                ..
+            } => {
+                let scope = self.build_parameter_scope(name, parameters, context);
+                self.scopes.push(scope);
+                let outcome = self.visit_expression(body, service, context);
+                self.scopes.pop();
+                outcome
             }
             Statement::ClassDeclaration {
                 properties,
@@ -192,7 +206,19 @@ impl PatternFactsBridge {
                 }
                 outcome
             }
-            Expression::Lambda { body, .. } => self.visit_expression(body, service, context),
+            Expression::Lambda {
+                parameters, body, ..
+            } => {
+                let scope = self.build_lambda_scope(parameters);
+                if !scope.is_empty() {
+                    self.scopes.push(scope);
+                    let outcome = self.visit_expression(body, service, context);
+                    self.scopes.pop();
+                    outcome
+                } else {
+                    self.visit_expression(body, service, context)
+                }
+            }
             Expression::Try {
                 body,
                 catch_clauses,
@@ -261,14 +287,14 @@ impl PatternFactsBridge {
                     outcome.assumptions_applied += facts.narrowing().arms().count();
                     outcome
                         .diagnostics
-                        .extend(detect_conflicts(&facts, context));
+                        .extend(self.detect_conflicts(&facts, context));
                     context.register_pattern_facts(id, facts.clone());
                 }
                 if node_id.is_none() {
                     outcome.assumptions_applied += facts.narrowing().arms().count();
                     outcome
                         .diagnostics
-                        .extend(detect_conflicts(&facts, context));
+                        .extend(self.detect_conflicts(&facts, context));
                 }
                 if let Some(subject_expr) = subject.as_deref() {
                     outcome.merge(self.visit_expression(subject_expr, service, context));
@@ -293,49 +319,109 @@ impl PatternFactsBridge {
             | Expression::Super(_) => BridgeOutcome::default(),
         }
     }
-}
 
-fn detect_conflicts(facts: &PatternMatchFacts, context: &NullSafetyContext) -> Vec<CheckError> {
-    let mut diagnostics = Vec::new();
+    fn build_parameter_scope(
+        &self,
+        function_name: &str,
+        parameters: &[Parameter],
+        context: &NullSafetyContext,
+    ) -> HashMap<String, NullabilityKind> {
+        let mut scope = HashMap::new();
 
-    for snapshot in facts.narrowing().arms().map(|(_, snap)| snap) {
-        diagnostics.extend(conflicts_for_snapshot(snapshot, context));
+        if let Some(facts) = context.facts() {
+            if let Some(signature) = facts.function_signature(function_name) {
+                if let FactsTypeVariant::Function(param_types, _) = signature.body.variant() {
+                    for (parameter, ty) in parameters.iter().zip(param_types.iter()) {
+                        scope.insert(parameter.name.clone(), NullabilityKind::from_facts_type(ty));
+                    }
+                }
+            }
+        }
+
+        for parameter in parameters {
+            if scope.contains_key(&parameter.name) {
+                continue;
+            }
+            if let Some(annotation) = &parameter.type_annotation {
+                let state = state_from_annotation(annotation);
+                scope.insert(parameter.name.clone(), state);
+            }
+        }
+
+        scope
     }
 
-    if let Some(fallback) = facts.fallback_narrowing() {
-        diagnostics.extend(conflicts_for_snapshot(fallback, context));
+    fn build_lambda_scope(&self, parameters: &[Parameter]) -> HashMap<String, NullabilityKind> {
+        let mut scope = HashMap::new();
+        for parameter in parameters {
+            if let Some(annotation) = &parameter.type_annotation {
+                scope.insert(parameter.name.clone(), state_from_annotation(annotation));
+            }
+        }
+        scope
     }
 
-    diagnostics
-}
+    fn lookup_state(&self, name: &str, context: &NullSafetyContext) -> Option<NullabilityKind> {
+        for scope in self.scopes.iter().rev() {
+            if let Some(state) = scope.get(name) {
+                return Some(*state);
+            }
+        }
+        context.lattice().get(name)
+    }
 
-fn conflicts_for_snapshot(
-    snapshot: &NarrowingSnapshot,
-    context: &NullSafetyContext,
-) -> Vec<CheckError> {
-    snapshot
-        .on_match()
-        .iter()
-        .filter_map(|binding| {
-            if !matches!(binding.nullability, NarrowedNullability::Nullable) {
-                return None;
-            }
-            let Some(recorded) = context.lattice().get(&binding.variable) else {
-                return None;
-            };
-            if matches!(recorded, NullabilityKind::NonNull) {
-                Some(CheckError::NullSafetyError(conflict_message(
-                    &binding.variable,
-                )))
-            } else {
-                None
-            }
-        })
-        .collect()
+    fn detect_conflicts(
+        &self,
+        facts: &PatternMatchFacts,
+        context: &NullSafetyContext,
+    ) -> Vec<CheckError> {
+        let mut diagnostics = Vec::new();
+
+        for snapshot in facts.narrowing().arms().map(|(_, snap)| snap) {
+            diagnostics.extend(self.conflicts_for_snapshot(snapshot, context));
+        }
+
+        if let Some(fallback) = facts.fallback_narrowing() {
+            diagnostics.extend(self.conflicts_for_snapshot(fallback, context));
+        }
+
+        diagnostics
+    }
+
+    fn conflicts_for_snapshot(
+        &self,
+        snapshot: &NarrowingSnapshot,
+        context: &NullSafetyContext,
+    ) -> Vec<CheckError> {
+        snapshot
+            .on_match()
+            .iter()
+            .filter_map(|binding| {
+                if !matches!(binding.nullability, NarrowedNullability::Nullable) {
+                    return None;
+                }
+                let recorded = self.lookup_state(&binding.variable, context)?;
+                if matches!(recorded, NullabilityKind::NonNull) {
+                    Some(CheckError::NullSafetyError(conflict_message(
+                        &binding.variable,
+                    )))
+                } else {
+                    None
+                }
+            })
+            .collect()
+    }
 }
 
 fn conflict_message(variable: &str) -> String {
     format!(
         "JV3108: `{variable}` は non-null と推論されていますが、when 分岐で null と比較されています。分岐を削除するか型を nullable に変更してください。\nJV3108: `{variable}` is inferred as non-null but the when expression compares it against null. Remove the branch or update the type to be nullable.\nQuick Fix: when.remove.null-branch -> `{variable}` の null 分岐を削除\nQuick Fix: when.remove.null-branch -> remove the null arm for `{variable}` or declare the type as nullable"
     )
+}
+
+fn state_from_annotation(annotation: &TypeAnnotation) -> NullabilityKind {
+    match annotation {
+        TypeAnnotation::Nullable(_) => NullabilityKind::Nullable,
+        _ => NullabilityKind::NonNull,
+    }
 }
