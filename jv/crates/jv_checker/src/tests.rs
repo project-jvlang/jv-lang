@@ -765,6 +765,14 @@ fn implicit_assignment_becomes_val_declaration() {
     let usage = checker.binding_usage();
     assert_eq!(usage.implicit, 1);
     assert_eq!(usage.explicit + usage.implicit_typed + usage.vars, 0);
+
+    let manifest = checker.late_init_manifest();
+    let seed = manifest
+        .get("total")
+        .expect("implicit assignment should register a LateInit seed");
+    assert_eq!(seed.origin, ValBindingOrigin::Implicit);
+    assert!(seed.has_initializer);
+    assert!(!seed.explicit_late_init);
 }
 
 #[test]
