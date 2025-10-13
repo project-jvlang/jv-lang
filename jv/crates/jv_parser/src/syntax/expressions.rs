@@ -517,8 +517,8 @@ fn argument_list(
         .ignore_then(argument(expr.clone()))
         .map(|argument| (CallArgumentStyle::Comma, argument));
 
-    let whitespace_argument = argument(expr.clone())
-        .map(|argument| (CallArgumentStyle::Whitespace, argument));
+    let whitespace_argument =
+        argument(expr.clone()).map(|argument| (CallArgumentStyle::Whitespace, argument));
 
     argument(expr.clone())
         .then(choice((comma_argument, whitespace_argument)).repeated())

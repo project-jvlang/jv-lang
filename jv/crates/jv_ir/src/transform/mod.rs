@@ -262,6 +262,7 @@ fn lower_program(
 ) -> Result<IrProgram, TransformError> {
     let Program {
         package,
+        imports,
         statements,
         span,
         ..
@@ -280,9 +281,31 @@ fn lower_program(
 
     let type_declarations = attach_trailing_comments(ir_statements);
 
+    let ir_imports = imports
+        .into_iter()
+        .filter_map(|statement| {
+            if let Statement::Import {
+                path,
+                is_wildcard,
+                span,
+                ..
+            } = statement
+            {
+                Some(IrStatement::Import {
+                    path,
+                    is_static: false,
+                    is_wildcard,
+                    span,
+                })
+            } else {
+                None
+            }
+        })
+        .collect();
+
     Ok(IrProgram {
         package,
-        imports: Vec::new(),
+        imports: ir_imports,
         type_declarations,
         generic_metadata: Default::default(),
         span,

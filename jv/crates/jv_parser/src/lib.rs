@@ -130,10 +130,23 @@ impl Parser {
                     syntax::merge_spans(&first_span, &last_span)
                 };
 
+                let package = statements.iter().find_map(|statement| match statement {
+                    Statement::Package { name, .. } => Some(name.clone()),
+                    _ => None,
+                });
+
+                let imports = statements
+                    .iter()
+                    .filter_map(|statement| match statement {
+                        Statement::Import { .. } => Some(statement.clone()),
+                        _ => None,
+                    })
+                    .collect();
+
                 Program {
+                    package,
+                    imports,
                     statements,
-                    package: None,
-                    imports: Vec::new(),
                     span,
                 }
             })

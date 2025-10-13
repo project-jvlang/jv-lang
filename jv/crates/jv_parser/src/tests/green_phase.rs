@@ -30,6 +30,70 @@ fn test_simple_val_declaration() {
 }
 
 #[test]
+fn test_program_collects_import_statements() {
+    let source = "import java.util.List\nfun main(): Unit {}";
+    let program = parse_program(source);
+
+    assert!(program.package.is_none(), "unexpected package detected");
+    assert_eq!(program.imports.len(), 1, "expected a single import entry");
+
+    match &program.imports[0] {
+        Statement::Import {
+            path,
+            alias,
+            is_wildcard,
+            ..
+        } => {
+            assert_eq!(path, "java.util.List");
+            assert!(alias.is_none());
+            assert!(!is_wildcard);
+        }
+        other => panic!("expected import statement, found {:?}", other),
+    }
+
+    match &program.statements[0] {
+        Statement::Import { .. } => {}
+        other => panic!("expected first statement to be import, found {:?}", other),
+    }
+}
+
+#[test]
+fn test_import_supports_alias_and_wildcard() {
+    let source = "import java.util.Map as JavaMap\nimport java.util.*";
+    let program = parse_program(source);
+
+    assert_eq!(program.imports.len(), 2, "expected two import entries");
+
+    match &program.imports[0] {
+        Statement::Import {
+            path,
+            alias,
+            is_wildcard,
+            ..
+        } => {
+            assert_eq!(path, "java.util.Map");
+            assert_eq!(alias.as_deref(), Some("JavaMap"));
+            assert!(!is_wildcard);
+        }
+        other => panic!("expected alias import, found {:?}", other),
+    }
+
+    match &program.imports[1] {
+        Statement::Import {
+            path,
+            alias,
+            is_wildcard,
+            ..
+        } => {
+            assert_eq!(path, "java.util");
+            assert!(alias.is_none());
+            assert!(*is_wildcard);
+        }
+        other => panic!("expected wildcard import, found {:?}", other),
+    }
+}
+
+#[test]
 fn test_implicit_typed_val_declaration() {
     let program = parse_program("name: String = \"hello\"");
     let statement = first_statement(&program);

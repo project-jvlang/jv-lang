@@ -93,6 +93,9 @@ impl BindingResolver {
     fn resolve(mut self, program: &Program) -> BindingResolution {
         let mut normalized = program.clone();
         self.enter_scope();
+        for import in &program.imports {
+            self.register_import_binding(import);
+        }
         normalized.statements = self.resolve_statements(program.statements.clone());
         self.exit_scope();
 
@@ -706,6 +709,37 @@ impl BindingResolver {
         }
         if count_usage {
             self.usage.vars += 1;
+        }
+    }
+
+    fn register_import_binding(&mut self, import: &Statement) {
+        if let Statement::Import {
+            path,
+            alias,
+            is_wildcard,
+            span,
+        } = import
+        {
+            if *is_wildcard {
+                return;
+            }
+
+            let binding_name = if let Some(alias) = alias {
+                alias.clone()
+            } else {
+                path.split('.').last().unwrap_or("").to_string()
+            };
+
+            if binding_name.is_empty() {
+                return;
+            }
+
+            self.declare_immutable(
+                binding_name,
+                ValBindingOrigin::Implicit,
+                span.clone(),
+                false,
+            );
         }
     }
 
