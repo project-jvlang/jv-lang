@@ -1,7 +1,7 @@
 use std::collections::{hash_map::Entry, HashMap};
 
 use super::annotations::JavaNullabilityHint;
-use super::context::NullSafetyContext;
+use super::context::{NonNullContractOrigin, NullSafetyContext};
 use super::flow::FlowAnalysisOutcome;
 use super::graph::FlowStateSnapshot;
 use super::operators::{JavaLoweringHint, JavaLoweringStrategy, OperatorOperand};
@@ -103,34 +103,69 @@ impl<'ctx> DiagnosticsEmitter<'ctx> {
             return diagnostics;
         };
 
-        for (name, contract) in self.context.lattice().iter() {
-            if !matches!(contract, NullabilityKind::NonNull) {
+        for (name, contract) in self.context.contracts().iter() {
+            let observed = state
+                .states
+                .get(name.as_str())
+                .copied()
+                .unwrap_or(NullabilityKind::Unknown);
+
+            self.evaluate_exit_state(
+                name.as_str(),
+                observed,
+                Some(contract.origin()),
+                true,
+                &mut diagnostics,
+            );
+        }
+
+        for (name, contract_state) in self.context.lattice().iter() {
+            if !matches!(contract_state, NullabilityKind::NonNull) {
+                continue;
+            }
+
+            if self.context.contracts().contains(name.as_str()) {
                 continue;
             }
 
             let observed = state
                 .states
-                .get(name)
+                .get(name.as_str())
                 .copied()
                 .unwrap_or(NullabilityKind::Unknown);
 
-            if matches!(observed, NullabilityKind::Nullable) {
-                diagnostics.push(CheckError::NullSafetyError(exit_violation_message(name)));
-                continue;
-            }
-
-            if self.context.late_init().is_tracked(name)
-                && !self.context.is_degraded()
-                && matches!(
-                    observed,
-                    NullabilityKind::Unknown | NullabilityKind::Platform
-                )
-            {
-                diagnostics.push(CheckError::NullSafetyError(late_init_message(name)));
-            }
+            self.evaluate_exit_state(name.as_str(), observed, None, false, &mut diagnostics);
         }
 
         diagnostics
+    }
+
+    fn evaluate_exit_state(
+        &self,
+        name: &str,
+        observed: NullabilityKind,
+        _origin: Option<NonNullContractOrigin>,
+        enforce_contract: bool,
+        diagnostics: &mut Vec<CheckError>,
+    ) {
+        match observed {
+            NullabilityKind::NonNull => {}
+            NullabilityKind::Nullable => {
+                diagnostics.push(CheckError::NullSafetyError(exit_violation_message(name)));
+            }
+            NullabilityKind::Unknown => {
+                if self.context.late_init().is_tracked(name) && !self.context.is_degraded() {
+                    diagnostics.push(CheckError::NullSafetyError(late_init_message(name)));
+                }
+            }
+            NullabilityKind::Platform => {
+                if self.context.late_init().is_tracked(name) && !self.context.is_degraded() {
+                    diagnostics.push(CheckError::NullSafetyError(late_init_message(name)));
+                } else if enforce_contract {
+                    diagnostics.push(CheckError::NullSafetyError(exit_violation_message(name)));
+                }
+            }
+        }
     }
 
     fn unknown_annotation_warnings(&self) -> Vec<CheckError> {
@@ -328,7 +363,7 @@ fn redundant_operator_message(
 
 fn exit_violation_message(name: &str) -> String {
     format!(
-        "JV3002: 非 null として宣言された値 `{name}` がスコープ終了時に null になる可能性があります。確実に non-null へ初期化するか、Nullable 型へ更新してください。\nJV3002: Value `{name}` declared non-null may be null when control leaves this scope. Ensure it is initialised with a non-null value or relax the type to nullable."
+        "JV3002: 値 `{name}` は non-null と宣言されていますが、スコープ終了時に null になる可能性があります。確実に non-null へ初期化するか、Nullable 型へ更新してください。\nJV3002: Value `{name}` declared non-null may be null when control leaves this scope. Ensure it is initialised with a non-null value or relax the type to nullable."
     )
 }
 
