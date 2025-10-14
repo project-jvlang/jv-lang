@@ -16,6 +16,7 @@ jv_ir = { workspace = true }
 jv_inference = { workspace = true }
 jv_build = { workspace = true }
 jv_pm = { workspace = true }
+jv_support = { workspace = true }
 
 [dev-dependencies]
 serde_json = { workspace = true }

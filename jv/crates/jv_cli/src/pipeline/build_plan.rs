@@ -34,6 +34,7 @@ pub struct CliOverrides {
     pub clean: bool,
     pub perf: bool,
     pub emit_types: bool,
+    pub verbose: bool,
     pub emit_telemetry: bool,
     pub parallel_inference: bool,
     pub inference_workers: Option<usize>,
@@ -50,6 +51,7 @@ pub struct BuildOptions {
     pub clean: bool,
     pub perf: bool,
     pub emit_types: bool,
+    pub verbose: bool,
     pub parallel_config: ParallelInferenceConfig,
     pub emit_telemetry: bool,
 }
@@ -120,6 +122,7 @@ impl BuildOptionsFactory {
             clean: overrides.clean || settings.output.clean,
             perf: overrides.perf,
             emit_types,
+            verbose: overrides.verbose,
             parallel_config,
             emit_telemetry,
         };

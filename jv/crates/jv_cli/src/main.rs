@@ -21,7 +21,15 @@ use jv_cli::pipeline::{
     compile, produce_binary, run_program, BuildOptionsFactory, CliOverrides, OutputManager,
 };
 use jv_cli::tour::TourOrchestrator;
-use jv_cli::{get_version, init_project as cli_init_project, tooling_failure, Cli, Commands};
+use jv_cli::{
+    format_resolved_import,
+    get_version,
+    init_project as cli_init_project,
+    resolved_imports_header,
+    tooling_failure,
+    Cli,
+    Commands,
+};
 use jv_pm::{Manifest, PackageInfo, ProjectSection};
 
 fn main() -> Result<()> {
@@ -56,6 +64,7 @@ fn main() -> Result<()> {
             perf,
             emit_types,
             emit_telemetry,
+            verbose,
             parallel_inference,
             inference_workers,
             constraint_batch,
@@ -111,6 +120,7 @@ fn main() -> Result<()> {
                 clean,
                 perf,
                 emit_types,
+                verbose,
                 emit_telemetry,
                 parallel_inference,
                 inference_workers,
@@ -155,6 +165,16 @@ fn main() -> Result<()> {
 
             for warning in &artifacts.warnings {
                 println!("Warning: {}", warning);
+            }
+
+            if plan.options.verbose {
+                let has_entries = !artifacts.resolved_imports.is_empty();
+                println!("{}", resolved_imports_header(has_entries));
+                if has_entries {
+                    for import in &artifacts.resolved_imports {
+                        println!("{}", format_resolved_import(import));
+                    }
+                }
             }
 
             let usage = &artifacts.binding_usage;
@@ -275,6 +295,7 @@ fn main() -> Result<()> {
                 clean: false,
                 perf: false,
                 emit_types: false,
+                verbose: false,
                 emit_telemetry: false,
                 parallel_inference: false,
                 inference_workers: None,

@@ -1,4 +1,8 @@
 // jv_lsp - Language Server Protocol implementation
+mod handlers;
+
+pub use handlers::imports::{ImportItem, ImportsParams, ImportsResponse};
+use handlers::imports::build_imports_response;
 use jv_ast::types::TypeLevelExpr;
 use jv_ast::{
     ConstParameter, GenericParameter, GenericSignature, Program, Span, Statement, TypeAnnotation,
@@ -27,6 +31,7 @@ use jv_ir::{transform_program_with_context, TransformContext};
 use jv_parser::Parser as JvParser;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::fmt;
 use std::sync::Arc;
 use thiserror::Error;
 
@@ -490,6 +495,29 @@ pub struct JvLanguageServer {
     parallel_config: ParallelInferenceConfig,
 }
 
+#[derive(Debug, Clone)]
+pub struct ImportPlanError {
+    message: String,
+}
+
+impl ImportPlanError {
+    pub fn new(message: String) -> Self {
+        Self { message }
+    }
+
+    pub fn message(&self) -> &str {
+        &self.message
+    }
+}
+
+impl fmt::Display for ImportPlanError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.message.fmt(f)
+    }
+}
+
+impl std::error::Error for ImportPlanError {}
+
 impl JvLanguageServer {
     pub fn new() -> Self {
         Self::with_parallel_config(ParallelInferenceConfig::default())
@@ -510,12 +538,69 @@ impl JvLanguageServer {
         self.parallel_config = config;
     }
 
+    pub fn import_plan_from_content(
+        &self,
+        content: &str,
+    ) -> Result<Vec<IrImport>, ImportPlanError> {
+        let program = JvParser::parse(content).map_err(|error| {
+            from_parse_error(&error)
+                .map(|diagnostic| ImportPlanError::new(diagnostic.message))
+                .unwrap_or_else(|| ImportPlanError::new(format!("Parser error: {error}")))
+        })?;
+
+        let build_config = BuildConfig::default();
+        let symbol_context = SymbolBuildContext::from_config(&build_config);
+        let cache = SymbolIndexCache::with_default_location();
+        let builder = SymbolIndexBuilder::new(&symbol_context);
+        let symbol_index = builder.build_with_cache(&cache).map_err(|error| {
+            ImportPlanError::new(format!(
+                "シンボルインデックスの構築に失敗しました: {error}\nSymbol index build failed: {error}"
+            ))
+        })?;
+        let symbol_index = Arc::new(symbol_index);
+
+        let import_service =
+            ImportResolutionService::new(Arc::clone(&symbol_index), build_config.target);
+        let mut resolved_imports = Vec::new();
+        for import_stmt in &program.imports {
+            match import_service.resolve(import_stmt) {
+                Ok(resolved) => resolved_imports.push(resolved),
+                Err(error) => {
+                    if let Some(diagnostic) = import_diagnostics::from_error(&error) {
+                        return Err(ImportPlanError::new(diagnostic.message));
+                    }
+                    return Err(ImportPlanError::new(format!(
+                        "Import resolution error: {error}"
+                    )));
+                }
+            }
+        }
+
+        Ok(lowered_import_plan(&resolved_imports))
+    }
+
+    pub fn imports_response(
+        &self,
+        content: &str,
+    ) -> Result<ImportsResponse, ImportPlanError> {
+        let plan = self.import_plan_from_content(content)?;
+        Ok(build_imports_response(&plan))
+    }
+
     pub fn open_document(&mut self, uri: String, content: String) {
         self.documents.insert(uri.clone(), content);
         self.type_facts.remove(&uri);
         self.regex_metadata.remove(&uri);
         self.programs.remove(&uri);
         self.generics.remove(&uri);
+    }
+
+    pub fn close_document(&mut self, uri: &str) {
+        self.documents.remove(uri);
+        self.type_facts.remove(uri);
+        self.regex_metadata.remove(uri);
+        self.programs.remove(uri);
+        self.generics.remove(uri);
     }
 
     pub fn get_diagnostics(&mut self, uri: &str) -> Vec<Diagnostic> {
@@ -1318,7 +1403,7 @@ fn default_range() -> Range {
     }
 }
 
-fn span_to_range(span: &jv_ast::Span) -> Range {
+pub(crate) fn span_to_range(span: &jv_ast::Span) -> Range {
     Range {
         start: Position {
             line: span.start_line.saturating_sub(1) as u32,

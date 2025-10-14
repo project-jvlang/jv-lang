@@ -1,8 +1,15 @@
 // jv-lsp - Language Server Protocol server for jv language
-use jv_lsp::JvLanguageServer;
+use jv_lsp::{ImportsParams, JvLanguageServer};
+use std::collections::HashMap;
 use std::error::Error;
 use tokio::io::{stdin, stdout};
-use tower_lsp::{jsonrpc::Result as LspResult, lsp_types::*, LspService, Server};
+use tokio::sync::{Mutex, RwLock};
+use tower_lsp::{
+    jsonrpc::{Error, ErrorCode, Result as LspResult},
+    lsp_types::*,
+    LspService,
+    Server,
+};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
@@ -19,15 +26,44 @@ async fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
 
 struct Backend {
     client: tower_lsp::Client,
-    language_server: JvLanguageServer,
+    language_server: Mutex<JvLanguageServer>,
+    documents: RwLock<HashMap<String, String>>,
 }
 
 impl Backend {
     fn new(client: tower_lsp::Client) -> Self {
         Self {
             client,
-            language_server: JvLanguageServer::new(),
+            language_server: Mutex::new(JvLanguageServer::new()),
+            documents: RwLock::new(HashMap::new()),
         }
+    }
+}
+
+fn map_diagnostic(diag: jv_lsp::Diagnostic) -> Diagnostic {
+    Diagnostic {
+        range: Range {
+            start: Position {
+                line: diag.range.start.line,
+                character: diag.range.start.character,
+            },
+            end: Position {
+                line: diag.range.end.line,
+                character: diag.range.end.character,
+            },
+        },
+        severity: diag.severity.map(|sev| match sev {
+            jv_lsp::DiagnosticSeverity::Error => DiagnosticSeverity::ERROR,
+            jv_lsp::DiagnosticSeverity::Warning => DiagnosticSeverity::WARNING,
+            jv_lsp::DiagnosticSeverity::Information => DiagnosticSeverity::INFORMATION,
+            jv_lsp::DiagnosticSeverity::Hint => DiagnosticSeverity::HINT,
+        }),
+        message: diag.message,
+        source: diag.source.clone(),
+        code: diag
+            .code
+            .map(tower_lsp::lsp_types::NumberOrString::String),
+        ..Default::default()
     }
 }
 
@@ -77,18 +113,46 @@ impl tower_lsp::LanguageServer for Backend {
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
         let uri = params.text_document.uri.to_string();
         let content = params.text_document.text;
+        {
+            let mut server = self.language_server.lock().await;
+            server.open_document(uri.clone(), content.clone());
+        }
+        {
+            let mut docs = self.documents.write().await;
+            docs.insert(uri.clone(), content);
+        }
 
-        // Store document content
-        // Note: This is a simplified approach. In a real implementation,
-        // you'd want thread-safe access to the language server state.
-        // For now, we'll just trigger diagnostics
-        self.publish_diagnostics(uri, content).await;
+        self.publish_diagnostics(uri).await;
     }
 
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
         let uri = params.text_document.uri.to_string();
         if let Some(change) = params.content_changes.into_iter().next() {
-            self.publish_diagnostics(uri, change.text).await;
+            let content = change.text;
+            {
+                let mut server = self.language_server.lock().await;
+                server.open_document(uri.clone(), content.clone());
+            }
+            {
+                let mut docs = self.documents.write().await;
+                docs.insert(uri.clone(), content);
+            }
+            self.publish_diagnostics(uri).await;
+        }
+    }
+    async fn did_close(&self, params: DidCloseTextDocumentParams) {
+        let uri = params.text_document.uri.to_string();
+        {
+            let mut server = self.language_server.lock().await;
+            server.close_document(&uri);
+        }
+        {
+            let mut docs = self.documents.write().await;
+            docs.remove(&uri);
+        }
+
+        if let Ok(url) = Url::parse(&uri) {
+            self.client.publish_diagnostics(url, Vec::new(), None).await;
         }
     }
 
@@ -101,7 +165,10 @@ impl tower_lsp::LanguageServer for Backend {
             character: position.character,
         };
 
-        let completions = self.language_server.get_completions(&uri, jv_position);
+        let completions = {
+            let server = self.language_server.lock().await;
+            server.get_completions(&uri, jv_position)
+        };
 
         let completion_items: Vec<CompletionItem> = completions
             .into_iter()
@@ -123,12 +190,35 @@ impl tower_lsp::LanguageServer for Backend {
             .to_string();
         let _position = params.text_document_position_params.position;
 
-        // Placeholder hover implementation
-        Ok(Some(Hover {
-            contents: HoverContents::Scalar(MarkedString::String(
-                "jv language hover support".to_string(),
-            )),
-            range: None,
+        let uri = params
+            .text_document_position_params
+            .text_document
+            .uri
+            .to_string();
+        let position = params.text_document_position_params.position;
+
+        let jv_position = jv_lsp::Position {
+            line: position.line,
+            character: position.character,
+        };
+
+        let hover = {
+            let server = self.language_server.lock().await;
+            server.get_hover(&uri, jv_position)
+        };
+
+        Ok(hover.map(|result| Hover {
+            contents: HoverContents::Scalar(MarkedString::String(result.contents)),
+            range: Some(Range {
+                start: Position {
+                    line: result.range.start.line,
+                    character: result.range.start.character,
+                },
+                end: Position {
+                    line: result.range.end.line,
+                    character: result.range.end.character,
+                },
+            }),
         }))
     }
 
@@ -149,56 +239,73 @@ impl tower_lsp::LanguageServer for Backend {
             }),
         ))
     }
+
+    async fn request(
+        &self,
+        method: &str,
+        params: serde_json::Value,
+    ) -> LspResult<Option<serde_json::Value>> {
+        match method {
+            "jv/imports" => {
+                let params: ImportsParams = serde_json::from_value(params).map_err(|error| {
+                    Error::invalid_params(format!("Invalid params: {error}"))
+                })?;
+                let uri = params.text_document.uri.to_string();
+                let content = {
+                    let docs = self.documents.read().await;
+                    docs.get(&uri).cloned()
+                }
+                .ok_or_else(|| Error::invalid_params(format!("Document not open: {uri}")))?;
+
+                let response = {
+                    let server = self.language_server.lock().await;
+                    match server.imports_response(&content) {
+                        Ok(response) => response,
+                        Err(error) => {
+                            return Err(Error {
+                                code: ErrorCode::InternalError,
+                                message: error.message().to_string(),
+                                data: None,
+                            });
+                        }
+                    }
+                };
+
+                let value = serde_json::to_value(response).map_err(|error| Error {
+                    code: ErrorCode::InternalError,
+                    message: error.to_string(),
+                    data: None,
+                })?;
+                Ok(Some(value))
+            }
+            _ => Ok(None),
+        }
+    }
 }
 
 impl Backend {
-    async fn publish_diagnostics(&self, uri: String, content: String) {
-        // For now, we'll create a temporary document storage approach
-        // In a real implementation, you'd want proper document management
-        let mut temp_server = JvLanguageServer::new();
-        temp_server.open_document(uri.clone(), content);
+    async fn publish_diagnostics(&self, uri: String) {
+        let diagnostics = {
+            let mut server = self.language_server.lock().await;
+            server.get_diagnostics(&uri)
+        };
 
-        let diagnostics = temp_server.get_diagnostics(&uri);
         let lsp_diagnostics = diagnostics
             .into_iter()
-            .map(|diag| Diagnostic {
-                range: Range {
-                    start: Position {
-                        line: diag.range.start.line,
-                        character: diag.range.start.character,
-                    },
-                    end: Position {
-                        line: diag.range.end.line,
-                        character: diag.range.end.character,
-                    },
-                },
-                severity: diag.severity.map(|sev| match sev {
-                    jv_lsp::DiagnosticSeverity::Error => DiagnosticSeverity::ERROR,
-                    jv_lsp::DiagnosticSeverity::Warning => DiagnosticSeverity::WARNING,
-                    jv_lsp::DiagnosticSeverity::Information => DiagnosticSeverity::INFORMATION,
-                    jv_lsp::DiagnosticSeverity::Hint => DiagnosticSeverity::HINT,
-                }),
-                message: diag.message,
-                source: diag.source.clone(),
-                code: diag
-                    .code
-                    .clone()
-                    .map(tower_lsp::lsp_types::NumberOrString::String),
-                ..Default::default()
-            })
-            .collect();
+            .map(|diag| map_diagnostic(diag))
+            .collect::<Vec<_>>();
 
-        self.client
-            .publish_diagnostics(
-                tower_lsp::lsp_types::Url::parse(&uri).unwrap(),
-                lsp_diagnostics,
-                None,
-            )
-            .await;
+        if let Ok(url) = Url::parse(&uri) {
+            self.client.publish_diagnostics(url, lsp_diagnostics, None).await;
+        }
     }
 
-    async fn get_diagnostics_for_document(&self, _uri: &str) -> Vec<Diagnostic> {
-        // Placeholder - in a real implementation you'd retrieve stored document content
-        Vec::new()
+    async fn get_diagnostics_for_document(&self, uri: &str) -> Vec<Diagnostic> {
+        let diagnostics = {
+            let mut server = self.language_server.lock().await;
+            server.get_diagnostics(uri)
+        };
+
+        diagnostics.into_iter().map(map_diagnostic).collect()
     }
 }

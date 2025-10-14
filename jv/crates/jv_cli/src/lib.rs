@@ -1,6 +1,9 @@
 // jv_cli - CLI functionality (library interface for testing)
 use anyhow::Result;
 use clap::Parser;
+use jv_ir::types::{IrImport, IrImportDetail};
+use jv_support::i18n::{catalog, LocaleCode};
+use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 
@@ -70,6 +73,9 @@ pub enum Commands {
         /// Emit inference telemetry summary to stdout
         #[arg(long)]
         emit_telemetry: bool,
+        /// Print resolved imports and additional context
+        #[arg(long)]
+        verbose: bool,
         /// Enable module-level parallel type inference
         #[arg(long)]
         parallel_inference: bool,
@@ -169,6 +175,147 @@ fn format_learning_hint(hint: Option<&str>) -> String {
         Some(value) => format!("\n  学習ヒント: {value}"),
         None => String::new(),
     }
+}
+
+pub fn resolved_imports_header(has_entries: bool) -> String {
+    let key = if has_entries {
+        "imports.plan.header"
+    } else {
+        "imports.plan.header_none"
+    };
+    let args = HashMap::new();
+    let fallback = if has_entries {
+        ("解決済み import 一覧".to_string(), "Resolved import list".to_string())
+    } else {
+        (
+            "解決済み import はありません".to_string(),
+            "No resolved imports found".to_string(),
+        )
+    };
+    bilingual_line_or(key, &args, fallback)
+}
+
+pub fn format_resolved_import(import: &IrImport) -> String {
+    let statement = render_import_statement(import);
+    let summary = match &import.detail {
+        IrImportDetail::Type { fqcn } => {
+            let mut args = HashMap::new();
+            args.insert("fqcn", fqcn.clone());
+            bilingual_line_or(
+                "imports.plan.type.summary",
+                &args,
+                (
+                    format!("型 import: {fqcn}"),
+                    format!("Type import: {fqcn}"),
+                ),
+            )
+        }
+        IrImportDetail::Package { name } => {
+            let mut args = HashMap::new();
+            args.insert("name", name.clone());
+            bilingual_line_or(
+                "imports.plan.package.summary",
+                &args,
+                (
+                    format!("パッケージ import: {name}.*"),
+                    format!("Package import: {name}.*"),
+                ),
+            )
+        }
+        IrImportDetail::Static { owner, member } => {
+            let mut args = HashMap::new();
+            args.insert("owner", owner.clone());
+            args.insert("member", member.clone());
+            bilingual_line_or(
+                "imports.plan.static.summary",
+                &args,
+                (
+                    format!("静的 import: {owner}.{member}"),
+                    format!("Static import: {owner}.{member}"),
+                ),
+            )
+        }
+        IrImportDetail::Module { name } => {
+            let mut args = HashMap::new();
+            args.insert("name", name.clone());
+            bilingual_line_or(
+                "imports.plan.module.summary",
+                &args,
+                (
+                    format!("モジュール import: {name}"),
+                    format!("Module import: {name}"),
+                ),
+            )
+        }
+    };
+
+    let extras = import_extras(import);
+    format!("  - {statement} → {summary}{extras}")
+}
+
+fn import_extras(import: &IrImport) -> String {
+    let mut entries = Vec::new();
+
+    if let Some(alias) = import.alias.as_ref() {
+        let mut args = HashMap::new();
+        args.insert("alias", alias.clone());
+        entries.push(bilingual_line_or(
+            "imports.plan.alias.summary",
+            &args,
+            (
+                format!("別名: {alias}"),
+                format!("Alias: {alias}"),
+            ),
+        ));
+    }
+
+    if let Some(module) = import.module_dependency.as_ref() {
+        let mut args = HashMap::new();
+        args.insert("module", module.clone());
+        entries.push(bilingual_line_or(
+            "imports.plan.module_dependency.summary",
+            &args,
+            (
+                format!("モジュール依存: {module}"),
+                format!("Module dependency: {module}"),
+            ),
+        ));
+    }
+
+    if entries.is_empty() {
+        String::new()
+    } else {
+        format!(" ({})", entries.join("; "))
+    }
+}
+
+fn render_import_statement(import: &IrImport) -> String {
+    match &import.detail {
+        IrImportDetail::Type { fqcn } => format!("import {fqcn}"),
+        IrImportDetail::Package { name } => format!("import {name}.*"),
+        IrImportDetail::Static { owner, member } => {
+            format!("import static {owner}.{member}")
+        }
+        IrImportDetail::Module { name } => format!("import module {name}"),
+    }
+}
+
+fn bilingual_line_or(
+    key: &str,
+    args: &HashMap<&str, String>,
+    fallback: (String, String),
+) -> String {
+    let (ja, en) = render_bilingual(key, args).unwrap_or(fallback);
+    format!("{ja} / {en}")
+}
+
+fn render_bilingual(
+    key: &str,
+    args: &HashMap<&str, String>,
+) -> Option<(String, String)> {
+    let ja = catalog(LocaleCode::Ja).render(key, args)?;
+    let en = catalog(LocaleCode::En).render(key, args)?;
+    Some((ja, en))
 }
 
 pub fn init_project(name: &str) -> Result<String> {
