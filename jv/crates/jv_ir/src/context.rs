@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use crate::types::{
-    DataFormat, JavaType, MethodOverload, SampleMode, StaticMethodCall, UtilityClass,
+    DataFormat, IrImport, JavaType, MethodOverload, SampleMode, StaticMethodCall, UtilityClass,
 };
 use jv_ast::Span;
 use jv_support::arena::{
@@ -38,6 +38,8 @@ pub struct TransformContext {
     pool_state: Option<TransformPoolState>,
     /// Recorded lowering strategies for `when` expressions (telemetry & debugging)
     when_strategies: Vec<WhenStrategyRecord>,
+    /// Resolved import plan used to enrich IR import statements
+    planned_imports: Vec<IrImport>,
 }
 
 impl TransformContext {
@@ -72,6 +74,7 @@ impl TransformContext {
             temp_counter: 0,
             pool_state: None,
             when_strategies: Vec::new(),
+            planned_imports: Vec::new(),
         }
     }
 
@@ -135,6 +138,21 @@ impl TransformContext {
         let mut ctx = Self::new();
         ctx.pool_state = Some(TransformPoolState::new(pools));
         ctx
+    }
+
+    /// Injects the resolved import plan to be consumed during lowering.
+    pub fn set_resolved_imports(&mut self, imports: Vec<IrImport>) {
+        self.planned_imports = imports;
+    }
+
+    /// Returns true when the context currently holds a resolved import plan.
+    pub fn has_resolved_imports(&self) -> bool {
+        !self.planned_imports.is_empty()
+    }
+
+    /// Takes ownership of the planned imports, leaving the context empty.
+    pub fn take_resolved_imports(&mut self) -> Vec<IrImport> {
+        std::mem::take(&mut self.planned_imports)
     }
 
     /// Enables pooling for an existing context.
@@ -233,6 +251,7 @@ impl Clone for TransformContext {
                 .as_ref()
                 .map(TransformPoolState::shallow_clone),
             when_strategies: self.when_strategies.clone(),
+            planned_imports: self.planned_imports.clone(),
         }
     }
 }

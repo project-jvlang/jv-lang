@@ -285,13 +285,22 @@ pub mod pipeline {
     use super::*;
     use anyhow::{anyhow, bail, Context};
     use generics::apply_type_facts;
+    use jv_ast::Span;
+    use jv_build::metadata::{
+        BuildContext as SymbolBuildContext, SymbolIndexBuilder, SymbolIndexCache,
+    };
     use jv_build::BuildSystem;
     use jv_checker::binding::BindingUsageSummary;
     use jv_checker::compat::diagnostics as compat_diagnostics;
+    use jv_checker::imports::{
+        diagnostics as import_diagnostics, ImportResolutionService, ResolvedImport,
+        ResolvedImportKind,
+    };
     use jv_checker::{InferenceSnapshot, InferenceTelemetry, TypeChecker};
     use jv_codegen_java::{JavaCodeGenConfig, JavaCodeGenerator};
     use jv_fmt::JavaFormatter;
     use jv_ir::context::WhenStrategyRecord;
+    use jv_ir::types::{IrImport, IrImportDetail};
     use jv_ir::TransformContext;
     use jv_ir::{
         transform_program_with_context, transform_program_with_context_profiled, TransformPools,
@@ -299,10 +308,13 @@ pub mod pipeline {
     };
     use jv_parser::Parser as JvParser;
     use serde_json::json;
+    use std::collections::{BTreeMap, HashSet};
     use std::ffi::OsStr;
     use std::path::{Path, PathBuf};
     use std::process::Command;
+    use std::sync::Arc;
     use std::time::Instant;
+    use tracing::debug;
 
     /// Resulting artifacts and diagnostics from the build pipeline.
     #[derive(Debug, Default, Clone)]
@@ -318,6 +330,7 @@ pub mod pipeline {
         pub when_strategies: Vec<StrategySummary>,
         pub script_main_class: String,
         pub binding_usage: BindingUsageSummary,
+        pub resolved_imports: Vec<IrImport>,
     }
 
     /// Aggregated summary of lowering strategies selected for `when` expressions.
@@ -466,7 +479,55 @@ pub mod pipeline {
 
         warnings.extend(sequence_warnings::collect_sequence_warnings(&program));
 
+        let import_cache_dir = plan
+            .root
+            .root_dir()
+            .join("target")
+            .join("jv")
+            .join("symbol-index");
+        let index_cache = SymbolIndexCache::new(import_cache_dir);
+        let build_context = SymbolBuildContext::from_config(&plan.build_config);
+        let builder = SymbolIndexBuilder::new(&build_context);
+        let symbol_index = builder
+            .build_with_cache(&index_cache)
+            .map_err(|error| anyhow!("failed to build symbol index: {error}"))?;
+        let symbol_index = Arc::new(symbol_index);
+
+        let import_service =
+            ImportResolutionService::new(Arc::clone(&symbol_index), plan.build_config.target);
+        let mut resolved_imports = Vec::new();
+        for import_stmt in &program.imports {
+            match import_service.resolve(import_stmt) {
+                Ok(resolved) => resolved_imports.push(resolved),
+                Err(error) => {
+                    if let Some(diagnostic) = import_diagnostics::from_error(&error) {
+                        return Err(tooling_failure(
+                            entrypoint,
+                            diagnostic.with_strategy(DiagnosticStrategy::Deferred),
+                        ));
+                    }
+                    return Err(anyhow!("failed to resolve import: {error}"));
+                }
+            }
+        }
+
+        let import_plan = lowered_import_plan(&resolved_imports);
+        let module_count = import_plan
+            .iter()
+            .filter(|entry| matches!(entry.detail, IrImportDetail::Module { .. }))
+            .count();
+        debug!(
+            target: "jv::imports",
+            resolved_count = resolved_imports.len(),
+            module_count,
+            "resolved import plan for {}",
+            entrypoint.display()
+        );
+
         let mut type_checker = TypeChecker::with_parallel_config(options.parallel_config);
+        if !resolved_imports.is_empty() {
+            type_checker.set_imports(Arc::clone(&symbol_index), resolved_imports.clone());
+        }
         let (inference_snapshot, telemetry_snapshot) = match type_checker.check_program(&program) {
             Ok(()) => {
                 if options.check {
@@ -529,6 +590,9 @@ pub mod pipeline {
         let mut ir_program = if options.perf {
             let pools = TransformPools::with_chunk_capacity(256 * 1024);
             let mut context = TransformContext::with_pools(pools);
+            if !import_plan.is_empty() {
+                context.set_resolved_imports(import_plan.clone());
+            }
             let mut profiler = TransformProfiler::new();
             let lowering_result = transform_program_with_context_profiled(
                 program_holder
@@ -562,6 +626,9 @@ pub mod pipeline {
             }
         } else {
             let mut context = TransformContext::new();
+            if !import_plan.is_empty() {
+                context.set_resolved_imports(import_plan.clone());
+            }
             let lowering_result = transform_program_with_context(
                 program_holder
                     .take()
@@ -674,6 +741,7 @@ pub mod pipeline {
             when_strategies: when_strategy_summary,
             script_main_class,
             binding_usage,
+            resolved_imports: import_plan.clone(),
         };
 
         if !options.java_only {
@@ -724,6 +792,58 @@ pub mod pipeline {
         artifacts.compatibility = Some(rendered_report);
 
         Ok(artifacts)
+    }
+
+    fn lowered_import_plan(resolved_imports: &[ResolvedImport]) -> Vec<IrImport> {
+        let mut imports = Vec::new();
+        let mut module_sources: BTreeMap<String, Span> = BTreeMap::new();
+        let mut explicit_modules = HashSet::new();
+
+        for resolved in resolved_imports {
+            let detail = match &resolved.kind {
+                ResolvedImportKind::Type { fqcn } => IrImportDetail::Type { fqcn: fqcn.clone() },
+                ResolvedImportKind::Package { name } => {
+                    IrImportDetail::Package { name: name.clone() }
+                }
+                ResolvedImportKind::StaticMember { owner, member } => IrImportDetail::Static {
+                    owner: owner.clone(),
+                    member: member.clone(),
+                },
+                ResolvedImportKind::Module { name } => {
+                    explicit_modules.insert(name.clone());
+                    IrImportDetail::Module { name: name.clone() }
+                }
+            };
+
+            if let Some(module) = &resolved.module_dependency {
+                module_sources
+                    .entry(module.clone())
+                    .or_insert_with(|| resolved.source_span.clone());
+            }
+
+            imports.push(IrImport {
+                original: resolved.original_path.clone(),
+                alias: resolved.alias.clone(),
+                detail,
+                module_dependency: resolved.module_dependency.clone(),
+                span: resolved.source_span.clone(),
+            });
+        }
+
+        for (module, span) in module_sources {
+            if explicit_modules.contains(&module) {
+                continue;
+            }
+            imports.push(IrImport {
+                original: module.clone(),
+                alias: None,
+                detail: IrImportDetail::Module { name: module },
+                module_dependency: None,
+                span,
+            });
+        }
+
+        imports
     }
 
     fn print_inference_telemetry(

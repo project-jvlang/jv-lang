@@ -560,6 +560,34 @@ pub enum IrCommentKind {
     Block,
 }
 
+/// Describes the resolved target of an import statement after analysis.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum IrImportDetail {
+    /// Regular type import (`import package.Type;`).
+    Type { fqcn: String },
+    /// Package wildcard import (`import package.*;`).
+    Package { name: String },
+    /// Static member import (`import static owner.member;`).
+    Static { owner: String, member: String },
+    /// Java module import (`import module java.sql;`).
+    Module { name: String },
+}
+
+/// Canonical IR representation of an import statement.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct IrImport {
+    /// Path exactly as written by the user (may include aliases or wildcards).
+    pub original: String,
+    /// Optional alias supplied via `as` in the source import.
+    pub alias: Option<String>,
+    /// Resolved target describing how the import should be rendered downstream.
+    pub detail: IrImportDetail,
+    /// Java module dependency inferred for the import (if any).
+    pub module_dependency: Option<String>,
+    /// Source span for diagnostics and tooling attribution.
+    pub span: Span,
+}
+
 /// Desugared statements
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum IrStatement {
@@ -742,12 +770,7 @@ pub enum IrStatement {
     },
 
     // Import statements
-    Import {
-        path: String,
-        is_static: bool,
-        is_wildcard: bool,
-        span: Span,
-    },
+    Import(IrImport),
 
     // Package declaration
     Package {

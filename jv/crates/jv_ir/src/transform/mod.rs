@@ -3,7 +3,9 @@ use crate::context::TransformContext;
 use crate::error::TransformError;
 use crate::profiling::{PerfMetrics, TransformProfiler};
 use crate::sequence_pipeline;
-use crate::types::{IrCommentKind, IrExpression, IrProgram, IrStatement, JavaType};
+use crate::types::{
+    IrCommentKind, IrExpression, IrImport, IrImportDetail, IrProgram, IrStatement, JavaType,
+};
 use jv_ast::{
     Argument, BinaryOp, CallArgumentMetadata, CallArgumentStyle, CommentKind, ConcurrencyConstruct,
     Expression, Literal, Program, ResourceManagement, SequenceDelimiter, Span, Statement,
@@ -281,27 +283,42 @@ fn lower_program(
 
     let type_declarations = attach_trailing_comments(ir_statements);
 
-    let ir_imports = imports
-        .into_iter()
-        .filter_map(|statement| {
-            if let Statement::Import {
-                path,
-                is_wildcard,
-                span,
-                ..
-            } = statement
-            {
-                Some(IrStatement::Import {
+    let ir_imports = if context.has_resolved_imports() {
+        context
+            .take_resolved_imports()
+            .into_iter()
+            .map(IrStatement::Import)
+            .collect()
+    } else {
+        imports
+            .into_iter()
+            .filter_map(|statement| {
+                if let Statement::Import {
                     path,
-                    is_static: false,
+                    alias,
                     is_wildcard,
                     span,
-                })
-            } else {
-                None
-            }
-        })
-        .collect();
+                } = statement
+                {
+                    let detail = if is_wildcard {
+                        IrImportDetail::Package { name: path.clone() }
+                    } else {
+                        IrImportDetail::Type { fqcn: path.clone() }
+                    };
+
+                    Some(IrStatement::Import(IrImport {
+                        original: path,
+                        alias,
+                        detail,
+                        module_dependency: None,
+                        span,
+                    }))
+                } else {
+                    None
+                }
+            })
+            .collect()
+    };
 
     Ok(IrProgram {
         package,
@@ -384,9 +401,9 @@ fn ir_statement_span(statement: &IrStatement) -> Option<Span> {
         | IrStatement::Break { span, .. }
         | IrStatement::Continue { span, .. }
         | IrStatement::Block { span, .. }
-        | IrStatement::Import { span, .. }
         | IrStatement::Package { span, .. }
         | IrStatement::Comment { span, .. } => Some(span.clone()),
+        IrStatement::Import(import) => Some(import.span.clone()),
         IrStatement::SampleDeclaration(decl) => Some(decl.span.clone()),
         IrStatement::Commented { statement, .. } => ir_statement_span(statement),
     }

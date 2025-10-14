@@ -216,22 +216,9 @@ impl JavaCodeGenerator {
                 None => "continue;".to_string(),
             },
             IrStatement::Package { name, .. } => format!("package {};", name),
-            IrStatement::Import {
-                path,
-                is_static,
-                is_wildcard,
-                ..
-            } => {
-                let mut stmt = String::from("import ");
-                if *is_static {
-                    stmt.push_str("static ");
-                }
-                stmt.push_str(path);
-                if *is_wildcard && !path.ends_with(".*") {
-                    stmt.push_str(".*");
-                }
-                stmt.push(';');
-                stmt
+            IrStatement::Import(import) => {
+                let entry = Self::render_import_entry(import);
+                format!("import {};", entry)
             }
         })
     }

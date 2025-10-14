@@ -1,11 +1,18 @@
 // jv_lsp - Language Server Protocol implementation
 use jv_ast::types::TypeLevelExpr;
 use jv_ast::{
-    ConstParameter, GenericParameter, GenericSignature, Program, Statement, TypeAnnotation,
+    ConstParameter, GenericParameter, GenericSignature, Program, Span, Statement, TypeAnnotation,
 };
+use jv_build::metadata::{
+    BuildContext as SymbolBuildContext, SymbolIndexBuilder, SymbolIndexCache,
+};
+use jv_build::BuildConfig;
 use jv_checker::diagnostics::{
     collect_raw_type_diagnostics, from_check_error, from_parse_error, from_transform_error,
     DiagnosticStrategy, EnhancedDiagnostic,
+};
+use jv_checker::imports::{
+    diagnostics as import_diagnostics, ImportResolutionService, ResolvedImport, ResolvedImportKind,
 };
 use jv_checker::regex::RegexValidator;
 use jv_checker::{CheckError, RegexAnalysis, TypeChecker};
@@ -15,10 +22,12 @@ use jv_inference::{
     types::{SymbolId, TypeId},
     ParallelInferenceConfig, TypeFacts,
 };
-use jv_ir::transform_program;
+use jv_ir::types::{IrImport, IrImportDetail};
+use jv_ir::{transform_program_with_context, TransformContext};
 use jv_parser::Parser as JvParser;
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
+use std::sync::Arc;
 use thiserror::Error;
 
 const COMPLETION_TEMPLATES: &[&str] = &[
@@ -541,7 +550,49 @@ impl JvLanguageServer {
             GenericDocumentIndex::from_program(&program),
         );
 
+        let build_config = BuildConfig::default();
+        let symbol_context = SymbolBuildContext::from_config(&build_config);
+        let cache = SymbolIndexCache::with_default_location();
+        let builder = SymbolIndexBuilder::new(&symbol_context);
+        let symbol_index = match builder.build_with_cache(&cache) {
+            Ok(index) => Arc::new(index),
+            Err(error) => {
+                diagnostics.push(fallback_diagnostic(
+                    uri,
+                    &format!("Symbol index build failed: {error}"),
+                ));
+                self.type_facts.remove(uri);
+                self.regex_metadata.remove(uri);
+                return diagnostics;
+            }
+        };
+
+        let import_service =
+            ImportResolutionService::new(Arc::clone(&symbol_index), build_config.target);
+        let mut resolved_imports = Vec::new();
+        for import_stmt in &program.imports {
+            match import_service.resolve(import_stmt) {
+                Ok(resolved) => resolved_imports.push(resolved),
+                Err(error) => {
+                    self.type_facts.remove(uri);
+                    self.regex_metadata.remove(uri);
+                    return vec![match import_diagnostics::from_error(&error) {
+                        Some(diagnostic) => tooling_diagnostic_to_lsp(
+                            uri,
+                            diagnostic.with_strategy(DiagnosticStrategy::Interactive),
+                        ),
+                        None => fallback_diagnostic(uri, "Import resolution error"),
+                    }];
+                }
+            }
+        }
+
+        let import_plan = lowered_import_plan(&resolved_imports);
+
         let mut checker = TypeChecker::with_parallel_config(self.parallel_config);
+        if !resolved_imports.is_empty() {
+            checker.set_imports(Arc::clone(&symbol_index), resolved_imports.clone());
+        }
         let check_result = checker.check_program(&program);
 
         if let Some(analyses) = checker.regex_analyses() {
@@ -589,7 +640,11 @@ impl JvLanguageServer {
         }
 
         let lowering_input = checker.take_normalized_program().unwrap_or(program);
-        let ir_program = match transform_program(lowering_input) {
+        let mut context = TransformContext::new();
+        if !import_plan.is_empty() {
+            context.set_resolved_imports(import_plan.clone());
+        }
+        let ir_program = match transform_program_with_context(lowering_input, &mut context) {
             Ok(ir) => Some(ir),
             Err(error) => {
                 diagnostics.push(match from_transform_error(&error) {
@@ -1189,6 +1244,56 @@ fn type_error_to_diagnostic(uri: &str, error: CheckError) -> Diagnostic {
             strategy: Some("Immediate".to_string()),
         }
     }
+}
+
+fn lowered_import_plan(resolved_imports: &[ResolvedImport]) -> Vec<IrImport> {
+    let mut imports = Vec::new();
+    let mut module_sources: BTreeMap<String, Span> = BTreeMap::new();
+    let mut explicit_modules = HashSet::new();
+
+    for resolved in resolved_imports {
+        let detail = match &resolved.kind {
+            ResolvedImportKind::Type { fqcn } => IrImportDetail::Type { fqcn: fqcn.clone() },
+            ResolvedImportKind::Package { name } => IrImportDetail::Package { name: name.clone() },
+            ResolvedImportKind::StaticMember { owner, member } => IrImportDetail::Static {
+                owner: owner.clone(),
+                member: member.clone(),
+            },
+            ResolvedImportKind::Module { name } => {
+                explicit_modules.insert(name.clone());
+                IrImportDetail::Module { name: name.clone() }
+            }
+        };
+
+        if let Some(module) = &resolved.module_dependency {
+            module_sources
+                .entry(module.clone())
+                .or_insert_with(|| resolved.source_span.clone());
+        }
+
+        imports.push(IrImport {
+            original: resolved.original_path.clone(),
+            alias: resolved.alias.clone(),
+            detail,
+            module_dependency: resolved.module_dependency.clone(),
+            span: resolved.source_span.clone(),
+        });
+    }
+
+    for (module, span) in module_sources {
+        if explicit_modules.contains(&module) {
+            continue;
+        }
+        imports.push(IrImport {
+            original: module.clone(),
+            alias: None,
+            detail: IrImportDetail::Module { name: module },
+            module_dependency: None,
+            span,
+        });
+    }
+
+    imports
 }
 
 fn map_severity(severity: jv_checker::diagnostics::DiagnosticSeverity) -> DiagnosticSeverity {

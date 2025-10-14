@@ -6,9 +6,10 @@ use jv_ast::{BinaryOp, CallArgumentStyle, Literal, SequenceDelimiter, UnaryOp};
 use jv_ir::{
     CompletableFutureOp, IrCaseLabel, IrCatchClause, IrDeconstructionComponent,
     IrDeconstructionPattern, IrExpression, IrForEachKind, IrForLoopMetadata, IrGenericMetadata,
-    IrImplicitWhenEnd, IrModifiers, IrNumericRangeLoop, IrParameter, IrProgram, IrRecordComponent,
-    IrResource, IrSampleDeclaration, IrStatement, IrSwitchCase, IrTypeParameter, IrVariance,
-    IrVisibility, JavaType, MethodOverload, UtilityClass, VirtualThreadOp,
+    IrImplicitWhenEnd, IrImport, IrImportDetail, IrModifiers, IrNumericRangeLoop, IrParameter,
+    IrProgram, IrRecordComponent, IrResource, IrSampleDeclaration, IrStatement, IrSwitchCase,
+    IrTypeParameter, IrVariance, IrVisibility, JavaType, MethodOverload, UtilityClass,
+    VirtualThreadOp,
 };
 use std::collections::{BTreeMap, HashMap};
 
@@ -64,22 +65,8 @@ impl JavaCodeGenerator {
         unit.package_declaration = program.package.clone();
 
         for import in &program.imports {
-            if let IrStatement::Import {
-                path,
-                is_static,
-                is_wildcard,
-                ..
-            } = Self::base_statement(import)
-            {
-                let mut entry = String::new();
-                if *is_static {
-                    entry.push_str("static ");
-                }
-                entry.push_str(path);
-                if *is_wildcard && !path.ends_with(".*") {
-                    entry.push_str(".*");
-                }
-                unit.imports.push(entry);
+            if let IrStatement::Import(spec) = Self::base_statement(import) {
+                unit.imports.push(Self::render_import_entry(spec));
             }
         }
 
@@ -199,7 +186,7 @@ impl JavaCodeGenerator {
                 | IrStatement::Continue { .. }
                 | IrStatement::FieldDeclaration { .. }
                 | IrStatement::Package { .. }
-                | IrStatement::Import { .. }
+                | IrStatement::Import(..)
                 | IrStatement::Comment { .. } => self.generate_statement(&declaration)?,
                 IrStatement::Commented { .. } => {
                     unreachable!("base_statement must unwrap commented statements")
@@ -316,6 +303,21 @@ impl JavaCodeGenerator {
         match statement {
             IrStatement::Commented { statement, .. } => Self::base_statement(statement),
             other => other,
+        }
+    }
+
+    fn render_import_entry(import: &IrImport) -> String {
+        match &import.detail {
+            IrImportDetail::Type { fqcn } => fqcn.clone(),
+            IrImportDetail::Package { name } => format!("{name}.*"),
+            IrImportDetail::Static { owner, member } => {
+                if member == "*" {
+                    format!("static {owner}.*")
+                } else {
+                    format!("static {owner}.{member}")
+                }
+            }
+            IrImportDetail::Module { name } => format!("module {name}"),
         }
     }
 

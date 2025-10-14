@@ -1,8 +1,8 @@
 use std::borrow::Cow;
 
 use crate::types::{
-    IrCommentKind, IrExpression, IrModifiers, IrParameter, IrProgram, IrStatement, IrVisibility,
-    JavaType, JavaWildcardKind,
+    IrCommentKind, IrExpression, IrImportDetail, IrModifiers, IrParameter, IrProgram, IrStatement,
+    IrVisibility, JavaType, JavaWildcardKind,
 };
 use jv_ast::{
     Argument, CallArgumentMetadata, CommentKind, CommentStatement, CommentVisibility, Expression,
@@ -162,18 +162,33 @@ impl<'a> ReconstructionContext<'a> {
     ) -> Result<Option<Statement>, ReconstructionError> {
         self.visit_node();
         match stmt {
-            IrStatement::Import {
-                path,
-                is_wildcard,
-                span,
-                ..
-            } => {
+            IrStatement::Import(import) => {
                 self.record_success();
+                let (path, is_wildcard) = match &import.detail {
+                    IrImportDetail::Type { fqcn } => (fqcn.clone(), false),
+                    IrImportDetail::Package { name } => (name.clone(), true),
+                    IrImportDetail::Static { owner, member } => {
+                        if member == "*" {
+                            (format!("{owner}.*"), true)
+                        } else {
+                            (format!("{owner}.{member}"), false)
+                        }
+                    }
+                    IrImportDetail::Module { .. } => {
+                        let placeholder = self.insert_placeholder_statement(
+                            Some(import.span.clone()),
+                            WarningKind::UnsupportedNode,
+                            "module import を AST へ再構成する処理は未対応です",
+                        )?;
+                        return Ok(Some(placeholder));
+                    }
+                };
+
                 Ok(Some(Statement::Import {
-                    path: path.clone(),
-                    alias: None,
-                    is_wildcard: *is_wildcard,
-                    span: span.clone(),
+                    path,
+                    alias: import.alias.clone(),
+                    is_wildcard,
+                    span: import.span.clone(),
                 }))
             }
             IrStatement::Package { name, span } => {
@@ -779,9 +794,9 @@ fn extract_span(stmt: &IrStatement) -> Option<Span> {
         | IrStatement::Break { span, .. }
         | IrStatement::Continue { span, .. }
         | IrStatement::Block { span, .. }
-        | IrStatement::Import { span, .. }
         | IrStatement::Package { span, .. }
         | IrStatement::Comment { span, .. } => Some(span.clone()),
+        IrStatement::Import(import) => Some(import.span.clone()),
         IrStatement::Commented { statement, .. } => extract_span(statement),
         IrStatement::SampleDeclaration(decl) => Some(decl.span.clone()),
     }

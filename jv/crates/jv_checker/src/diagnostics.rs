@@ -561,7 +561,7 @@ fn collect_statement_raw_diagnostics(
         | IrStatement::Throw { .. }
         | IrStatement::Break { .. }
         | IrStatement::Continue { .. }
-        | IrStatement::Import { .. }
+        | IrStatement::Import(..)
         | IrStatement::Package { .. } => {}
     }
 }
