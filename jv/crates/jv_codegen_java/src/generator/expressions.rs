@@ -26,6 +26,9 @@ impl JavaCodeGenerator {
             } => {
                 let mut invocation = String::new();
                 if let Some(target) = receiver {
+                    if let Some(java_type) = Self::expression_java_type(target) {
+                        self.ensure_stdlib_import(java_type);
+                    }
                     invocation.push_str(&self.generate_expression(target)?);
                     invocation.push('.');
                 }
@@ -908,8 +911,10 @@ impl JavaCodeGenerator {
             }
         }
 
-        self.add_import("jv.collections.SequenceFactory");
-        Ok(format!("SequenceFactory.fromStream({})", stream_expr))
+        const FACTORY_OWNER: &str = "jv.collections.GeneratedMain";
+        self.ensure_stdlib_import_name(FACTORY_OWNER);
+        let simple_name = FACTORY_OWNER.rsplit('.').next().unwrap_or(FACTORY_OWNER);
+        Ok(format!("{simple_name}.sequenceFromStream({})", stream_expr))
     }
 
     fn render_sequence_source(
@@ -981,6 +986,18 @@ impl JavaCodeGenerator {
                 name == "SequenceCore" || name == "jv.collections.SequenceCore"
             }
             _ => false,
+        }
+    }
+
+    fn ensure_stdlib_import(&mut self, java_type: &JavaType) {
+        if let JavaType::Reference { name, .. } = java_type {
+            self.ensure_stdlib_import_name(name);
+        }
+    }
+
+    fn ensure_stdlib_import_name(&mut self, fqcn: &str) {
+        if fqcn.starts_with("jv.") {
+            self.add_import(fqcn);
         }
     }
 

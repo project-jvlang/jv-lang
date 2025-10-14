@@ -532,22 +532,22 @@ enum ModuleError {
     Fatal(anyhow::Error),
 }
 
-const SEQUENCE_FACTORY_JAVA: &str = r#"package jv.collections;
+const STDLIB_SEQUENCE_JAVA: &str = r#"package jv.collections;
 
 import java.util.Objects;
 import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
 
-public final class SequenceFactory {
-    private SequenceFactory() {}
+public final class StdlibCollectionsSequence {
+    private StdlibCollectionsSequence() {}
 
-    public static <T> SequenceCore<T> fromIterable(Iterable<T> source) {
+    public static <T> SequenceCore<T> sequenceFromIterable(Iterable<T> source) {
         Objects.requireNonNull(source, "source");
         Stream<T> stream = StreamSupport.stream(source.spliterator(), false);
         return new SequenceCore<>(stream);
     }
 
-    public static <T> SequenceCore<T> fromStream(Stream<T> stream) {
+    public static <T> SequenceCore<T> sequenceFromStream(Stream<T> stream) {
         Objects.requireNonNull(stream, "stream");
         return new SequenceCore<>(stream);
     }
@@ -595,20 +595,20 @@ public final class SequenceCore<T> implements AutoCloseable, Iterable<T> {
 
     public <R> SequenceCore<R> map(Function<? super T, ? extends R> transform) {
         Objects.requireNonNull(transform, "transform");
-        return SequenceFactory.fromStream(delegate.map(transform));
+        return StdlibCollectionsSequence.sequenceFromStream(delegate.map(transform));
     }
 
     public SequenceCore<T> filter(Predicate<? super T> predicate) {
         Objects.requireNonNull(predicate, "predicate");
-        return SequenceFactory.fromStream(delegate.filter(predicate));
+        return StdlibCollectionsSequence.sequenceFromStream(delegate.filter(predicate));
     }
 
     public SequenceCore<T> take(int count) {
-        return SequenceFactory.fromStream(delegate.limit(count));
+        return StdlibCollectionsSequence.sequenceFromStream(delegate.limit(count));
     }
 
     public SequenceCore<T> drop(int count) {
-        return SequenceFactory.fromStream(delegate.skip(count));
+        return StdlibCollectionsSequence.sequenceFromStream(delegate.skip(count));
     }
 
     public <R> SequenceCore<R> flatMap(Function<? super T, ? extends Iterable<R>> transform) {
@@ -617,23 +617,23 @@ public final class SequenceCore<T> implements AutoCloseable, Iterable<T> {
             Iterable<R> next = transform.apply(value);
             return StreamSupport.stream(next.spliterator(), false);
         });
-        return SequenceFactory.fromStream(flattened);
+        return StdlibCollectionsSequence.sequenceFromStream(flattened);
     }
 
     public <R> SequenceCore<R> flatMapSequence(Function<? super T, SequenceCore<R>> transform) {
         Objects.requireNonNull(transform, "transform");
         Stream<R> flattened = delegate.flatMap(value -> transform.apply(value).toStream());
-        return SequenceFactory.fromStream(flattened);
+        return StdlibCollectionsSequence.sequenceFromStream(flattened);
     }
 
     public SequenceCore<T> sorted() {
-        return SequenceFactory.fromStream(delegate.sorted());
+        return StdlibCollectionsSequence.sequenceFromStream(delegate.sorted());
     }
 
     public <R extends Comparable<R>> SequenceCore<T> sortedBy(Function<? super T, ? extends R> selector) {
         Objects.requireNonNull(selector, "selector");
         Comparator<T> comparator = Comparator.comparing(selector);
-        return SequenceFactory.fromStream(delegate.sorted(comparator));
+        return StdlibCollectionsSequence.sequenceFromStream(delegate.sorted(comparator));
     }
 
     public List<T> toList() {
@@ -643,23 +643,26 @@ public final class SequenceCore<T> implements AutoCloseable, Iterable<T> {
     public <R> R fold(R initial, BiFunction<R, ? super T, R> operation) {
         Objects.requireNonNull(operation, "operation");
         R accumulator = initial;
-        Iterator<T> iterator = delegate.iterator();
-        while (iterator.hasNext()) {
-            accumulator = operation.apply(accumulator, iterator.next());
+        for (T value : this) {
+            accumulator = operation.apply(accumulator, value);
         }
         return accumulator;
     }
 
     public T reduce(BinaryOperator<T> operation) {
         Objects.requireNonNull(operation, "operation");
-        Iterator<T> iterator = delegate.iterator();
-        if (!iterator.hasNext()) {
-            throw new IllegalArgumentException("Sequence reduce() on empty source");
+        boolean hasValue = false;
+        T accumulator = null;
+        for (T value : this) {
+            if (!hasValue) {
+                accumulator = value;
+                hasValue = true;
+            } else {
+                accumulator = operation.apply(accumulator, value);
+            }
         }
-        T accumulator = iterator.next();
-        while (iterator.hasNext()) {
-            T value = iterator.next();
-            accumulator = operation.apply(accumulator, value);
+        if (!hasValue) {
+            throw new IllegalArgumentException("Sequence reduce() on empty source");
         }
         return accumulator;
     }
@@ -670,9 +673,8 @@ public final class SequenceCore<T> implements AutoCloseable, Iterable<T> {
 
     public long sum() {
         long total = 0;
-        Iterator<T> iterator = delegate.iterator();
-        while (iterator.hasNext()) {
-            Object value = iterator.next();
+        for (T candidate : this) {
+            Object value = candidate;
             if (value instanceof Number number) {
                 total += number.longValue();
             } else {
@@ -688,10 +690,8 @@ public final class SequenceCore<T> implements AutoCloseable, Iterable<T> {
 
     public <K> Map<K, List<T>> groupBy(Function<? super T, ? extends K> keySelector) {
         Objects.requireNonNull(keySelector, "keySelector");
-        Iterator<T> iterator = delegate.iterator();
         LinkedHashMap<K, List<T>> result = new LinkedHashMap<>();
-        while (iterator.hasNext()) {
-            T element = iterator.next();
+        for (T element : this) {
             K key = keySelector.apply(element);
             result.computeIfAbsent(key, ignored -> new ArrayList<>()).add(element);
         }
@@ -700,10 +700,9 @@ public final class SequenceCore<T> implements AutoCloseable, Iterable<T> {
 
     public <K, V> Map<K, V> associate(Function<? super T, Map.Entry<K, V>> transform) {
         Objects.requireNonNull(transform, "transform");
-        Iterator<T> iterator = delegate.iterator();
         LinkedHashMap<K, V> result = new LinkedHashMap<>();
-        while (iterator.hasNext()) {
-            Map.Entry<K, V> entry = transform.apply(iterator.next());
+        for (T element : this) {
+            Map.Entry<K, V> entry = transform.apply(element);
             result.put(entry.getKey(), entry.getValue());
         }
         return result;
@@ -715,13 +714,13 @@ fn write_prebuilt_sequence(output_dir: &Path) -> Result<Vec<PathBuf>> {
     let package_dir = output_dir.join("jv/collections");
     fs::create_dir_all(&package_dir)?;
 
-    let factory_path = package_dir.join("SequenceFactory.java");
-    fs::write(&factory_path, SEQUENCE_FACTORY_JAVA)?;
+    let helpers_path = package_dir.join("StdlibCollectionsSequence.java");
+    fs::write(&helpers_path, STDLIB_SEQUENCE_JAVA)?;
 
     let core_path = package_dir.join("SequenceCore.java");
     fs::write(&core_path, SEQUENCE_CORE_JAVA)?;
 
-    Ok(vec![factory_path, core_path])
+    Ok(vec![helpers_path, core_path])
 }
 
 #[cfg(test)]

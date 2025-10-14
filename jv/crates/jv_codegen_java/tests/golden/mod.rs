@@ -42,14 +42,14 @@ pub(crate) fn collection_source(name: &str) -> SequenceSource {
 pub(crate) fn sequence_factory_stream_source(name: &str) -> SequenceSource {
     let call = IrExpression::MethodCall {
         receiver: Some(Box::new(IrExpression::Identifier {
-            name: "SequenceFactory".to_string(),
+            name: "GeneratedMain".to_string(),
             java_type: JavaType::Reference {
-                name: "jv.collections.SequenceFactory".to_string(),
+                name: "jv.collections.GeneratedMain".to_string(),
                 generic_args: vec![],
             },
             span: dummy_span(),
         })),
-        method_name: "fromIterable".to_string(),
+        method_name: "sequenceFromIterable".to_string(),
         args: vec![identifier(name)],
         argument_style: CallArgumentStyle::Comma,
         java_type: JavaType::Reference {

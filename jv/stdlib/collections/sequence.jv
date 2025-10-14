@@ -21,22 +21,16 @@ data SequenceCore<T>(stream: Stream<T>)
  * stdlib 内部で Iterable/Stream から遅延チェーンを開始する用途に限定し、
  * Zero runtime 原則に従って JDK Stream 以外の補助ランタイムを導入しないことを明記する。
  */
-object SequenceFactory {
-    /**
-     * Iterable から遅延チェーンを開始する内部用エントリポイント。
-     * Zero runtime ポリシーに従い、JDK 標準 API だけで SequenceCore を構築する。
-     */
-    fun <T> fromIterable(source: Iterable<T>): SequenceCore<T> {
-        return SequenceCore(StreamSupport.stream(source.spliterator(), false))
-    }
 
-    /**
-     * 既存の Stream を追加オブジェクトなしで SequenceCore に包む内部用ヘルパー。
-     * Zero runtime 原則により、保持するのは受け取った Stream のみとする。
-     */
-    fun <T> fromStream(stream: Stream<T>): SequenceCore<T> {
-        return SequenceCore(stream)
-    }
+fun <T> sequenceFromIterable(source: Iterable<T>): SequenceCore<T> {
+    val stream: Stream<T> = StreamSupport.stream
+        source.spliterator()
+        false
+    return SequenceCore<T>(stream)
+}
+
+fun <T> sequenceFromStream(stream: Stream<T>): SequenceCore<T> {
+    return SequenceCore<T>(stream)
 }
 
 fun <T> SequenceCore<T>.iterator(): Iterator<T> {
@@ -55,7 +49,7 @@ fun <T> SequenceCore<T>.toStream(): Stream<T> {
  * Kotlin `Sequence.map` と同等の変換操作。
  */
 fun <T, R> SequenceCore<T>.map(transform: (T) -> R): SequenceCore<R> {
-    return SequenceFactory.fromStream(
+    return sequenceFromStream(
         this.toStream().map { value -> transform(value) }
     )
 }
@@ -64,7 +58,7 @@ fun <T, R> SequenceCore<T>.map(transform: (T) -> R): SequenceCore<R> {
  * Kotlin `Sequence.filter` と同等のフィルタ操作。
  */
 fun <T> SequenceCore<T>.filter(predicate: (T) -> Boolean): SequenceCore<T> {
-    return SequenceFactory.fromStream(
+    return sequenceFromStream(
         this.toStream().filter { value -> predicate(value) }
     )
 }
@@ -73,7 +67,7 @@ fun <T> SequenceCore<T>.filter(predicate: (T) -> Boolean): SequenceCore<T> {
  * Kotlin `Sequence.take` と同等の範囲制御操作。
  */
 fun <T> SequenceCore<T>.take(count: Int): SequenceCore<T> {
-    return SequenceFactory.fromStream(
+    return sequenceFromStream(
         this.toStream().limit(count.toLong())
     )
 }
@@ -82,7 +76,7 @@ fun <T> SequenceCore<T>.take(count: Int): SequenceCore<T> {
  * Kotlin `Sequence.drop` と同等のスキップ操作。
  */
 fun <T> SequenceCore<T>.drop(count: Int): SequenceCore<T> {
-    return SequenceFactory.fromStream(
+    return sequenceFromStream(
         this.toStream().skip(count.toLong())
     )
 }
@@ -91,15 +85,17 @@ fun <T> SequenceCore<T>.drop(count: Int): SequenceCore<T> {
  * Kotlin `Sequence.flatMap` と同等のフラット化操作。
  */
 fun <T, R> SequenceCore<T>.flatMap(transform: (T) -> Iterable<R>): SequenceCore<R> {
-    return SequenceFactory.fromStream(
+    return sequenceFromStream(
         this.toStream().flatMap { value ->
-            StreamSupport.stream(transform(value).spliterator(), false)
+            StreamSupport.stream
+                transform(value).spliterator()
+                false
         }
     )
 }
 
 fun <T, R> SequenceCore<T>.flatMap(transform: (T) -> SequenceCore<R>): SequenceCore<R> {
-    return SequenceFactory.fromStream(
+    return sequenceFromStream(
         this.toStream().flatMap { value -> transform(value).toStream() }
     )
 }
@@ -108,14 +104,14 @@ fun <T, R> SequenceCore<T>.flatMap(transform: (T) -> SequenceCore<R>): SequenceC
  * Kotlin `Sequence.sorted` と同等のソート操作。
  */
 fun <T : Comparable<T>> SequenceCore<T>.sorted(): SequenceCore<T> {
-    return SequenceFactory.fromStream(this.toStream().sorted())
+    return sequenceFromStream(this.toStream().sorted())
 }
 
 /**
  * Kotlin `Sequence.sortedBy` と同等のキー指定ソート。
  */
 fun <T, R : Comparable<R>> SequenceCore<T>.sortedBy(selector: (T) -> R): SequenceCore<T> {
-    return SequenceFactory.fromStream(
+    return sequenceFromStream(
         this.toStream().sorted(
             Comparator.comparing { value -> selector(value) }
         )
@@ -133,30 +129,28 @@ fun <T> SequenceCore<T>.toList(): List<T> {
  * Kotlin `Sequence.fold` と同等の集約操作。
  */
 fun <T, R> SequenceCore<T>.fold(initial: R, operation: (R, T) -> R): R {
-    var accumulator = initial
-    val iterator = this.toStream().iterator()
-    while (iterator.hasNext()) {
-        val value = iterator.next()
-        accumulator = operation(accumulator, value)
+    return this.toStream().reduce(initial) { accumulator value ->
+        operation(
+            accumulator
+            value
+        )
     }
-    return accumulator
 }
 
 /**
  * Kotlin `Sequence.reduce` と同等の集約操作。
  */
 fun <T> SequenceCore<T>.reduce(operation: (T, T) -> T): T {
-    val iterator = this.toStream().iterator()
-    if (!iterator.hasNext()) {
-        throw IllegalArgumentException("Sequence reduce() on empty source")
+    val reduced = this.toStream().reduce { left right ->
+        operation(
+            left
+            right
+        )
     }
 
-    var accumulator = iterator.next()
-    while (iterator.hasNext()) {
-        val value = iterator.next()
-        accumulator = operation(accumulator, value)
+    return reduced.orElseThrow {
+        IllegalArgumentException("Sequence reduce() on empty source")
     }
-    return accumulator
 }
 
 /**
@@ -171,10 +165,9 @@ fun <T> SequenceCore<T>.count(): Long {
  */
 fun <T> SequenceCore<T>.sum(): Long {
     var total: Long = 0
-    val iterator = this.toStream().iterator()
-    while (iterator.hasNext()) {
-        val value = iterator.next() as Number
-        total += value.longValue()
+    for (candidate in this) {
+        val value = candidate as Number
+        total = total + value.longValue()
     }
     return total
 }
@@ -190,16 +183,20 @@ fun <T> SequenceCore<T>.forEach(action: (T) -> Unit) {
  * Kotlin `Sequence.groupBy` と同等のキー集約操作。
  */
 fun <T, K> SequenceCore<T>.groupBy(keySelector: (T) -> K): Map<K, List<T>> {
-    val iterator = this.toStream().iterator()
     val result: LinkedHashMap<K, List<T>> = LinkedHashMap()
-    while (iterator.hasNext()) {
-        val element = iterator.next()
+    for (element in this) {
         val key = keySelector(element)
 
         var bucket = result.get(key)
-        if (bucket == null) {
-            bucket = ArrayList()
-            result.put(key, bucket)
+        when (bucket == null) {
+            true -> {
+                bucket = ArrayList()
+                result.put(
+                    key
+                    bucket
+                )
+            }
+            else -> {}
         }
 
         bucket.add(element)
@@ -211,12 +208,13 @@ fun <T, K> SequenceCore<T>.groupBy(keySelector: (T) -> K): Map<K, List<T>> {
  * Kotlin `Sequence.associate` と同等のキー／値マップ生成。
  */
 fun <T, K, V> SequenceCore<T>.associate(transform: (T) -> Map.Entry<K, V>): Map<K, V> {
-    val iterator = this.toStream().iterator()
     val result: LinkedHashMap<K, V> = LinkedHashMap()
-    while (iterator.hasNext()) {
-        val element = iterator.next()
+    for (element in this) {
         val entry = transform(element)
-        result.put(entry.getKey(), entry.getValue())
+        result.put(
+            entry.getKey()
+            entry.getValue()
+        )
     }
     return result
 }
@@ -225,100 +223,103 @@ fun <T, K, V> SequenceCore<T>.associate(transform: (T) -> Map.Entry<K, V>): Map<
  * コレクションから Kotlin `Sequence.map` 相当の遅延チェーンを開始する拡張。
  */
 fun <T, R> Iterable<T>.map(transform: (T) -> R): SequenceCore<R> {
-    return SequenceFactory.fromIterable(this).map(transform)
+    return sequenceFromIterable(this).map(transform)
 }
 
 /**
  * コレクションから Kotlin `Sequence.filter` 相当の遅延チェーンを開始する拡張。
  */
 fun <T> Iterable<T>.filter(predicate: (T) -> Boolean): SequenceCore<T> {
-    return SequenceFactory.fromIterable(this).filter(predicate)
+    return sequenceFromIterable(this).filter(predicate)
 }
 
 /**
  * コレクションから Kotlin `Sequence.take` 相当の遅延チェーンを開始する拡張。
  */
 fun <T> Iterable<T>.take(count: Int): SequenceCore<T> {
-    return SequenceFactory.fromIterable(this).take(count)
+    return sequenceFromIterable(this).take(count)
 }
 
 /**
  * コレクションから Kotlin `Sequence.drop` 相当の遅延チェーンを開始する拡張。
  */
 fun <T> Iterable<T>.drop(count: Int): SequenceCore<T> {
-    return SequenceFactory.fromIterable(this).drop(count)
+    return sequenceFromIterable(this).drop(count)
 }
 
 /**
  * コレクションから Kotlin `Sequence.flatMap` 相当の遅延チェーンを開始する拡張。
  */
 fun <T, R> Iterable<T>.flatMap(transform: (T) -> Iterable<R>): SequenceCore<R> {
-    return SequenceFactory.fromIterable(this).flatMap(transform)
+    return sequenceFromIterable(this).flatMap(transform)
 }
 
 fun <T, R> Iterable<T>.flatMap(transform: (T) -> SequenceCore<R>): SequenceCore<R> {
-    return SequenceFactory.fromIterable(this).flatMap(transform)
+    return sequenceFromIterable(this).flatMap(transform)
 }
 
 /**
  * Kotlin `Iterable.sorted` に準拠した遅延ソート開始。
  */
 fun <T : Comparable<T>> Iterable<T>.sorted(): SequenceCore<T> {
-    return SequenceFactory.fromIterable(this).sorted()
+    return sequenceFromIterable(this).sorted()
 }
 
 /**
  * Kotlin `Iterable.sortedBy` に準拠したキー指定ソートの遅延チェーン。
  */
 fun <T, R : Comparable<R>> Iterable<T>.sortedBy(selector: (T) -> R): SequenceCore<T> {
-    return SequenceFactory.fromIterable(this).sortedBy(selector)
+    return sequenceFromIterable(this).sortedBy(selector)
 }
 
 /**
  * Kotlin `Iterable.fold` と同等の集約操作。
  */
 fun <T, R> Iterable<T>.fold(initial: R, operation: (R, T) -> R): R {
-    return SequenceFactory.fromIterable(this).fold(initial, operation)
+    return sequenceFromIterable(this).fold(
+        initial
+        operation
+    )
 }
 
 /**
  * Kotlin `Iterable.reduce` と同等の集約操作。
  */
 fun <T> Iterable<T>.reduce(operation: (T, T) -> T): T {
-    return SequenceFactory.fromIterable(this).reduce(operation)
+    return sequenceFromIterable(this).reduce(operation)
 }
 
 /**
  * Kotlin `Iterable.count` と同等の要素数集計。
  */
 fun <T> Iterable<T>.count(): Long {
-    return SequenceFactory.fromIterable(this).count()
+    return sequenceFromIterable(this).count()
 }
 
 /**
  * Kotlin `Iterable.sum` と同等の数値集計。
  */
 fun <T> Iterable<T>.sum(): Long {
-    return SequenceFactory.fromIterable(this).sum()
+    return sequenceFromIterable(this).sum()
 }
 
 /**
  * Kotlin `Iterable.forEach` と同等の副作用操作。
  */
 fun <T> Iterable<T>.forEach(action: (T) -> Unit) {
-    SequenceFactory.fromIterable(this).forEach(action)
+    sequenceFromIterable(this).forEach(action)
 }
 
 /**
  * Kotlin `Iterable.groupBy` と同等のマップ生成。
  */
 fun <T, K> Iterable<T>.groupBy(keySelector: (T) -> K): Map<K, List<T>> {
-    return SequenceFactory.fromIterable(this).groupBy(keySelector)
+    return sequenceFromIterable(this).groupBy(keySelector)
 }
 
 /**
  * Kotlin `Iterable.associate` と同等のキー／値マップ生成。
  */
 fun <T, K, V> Iterable<T>.associate(transform: (T) -> Map.Entry<K, V>): Map<K, V> {
-    return SequenceFactory.fromIterable(this).associate(transform)
+    return sequenceFromIterable(this).associate(transform)
 }

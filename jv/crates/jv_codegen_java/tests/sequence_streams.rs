@@ -347,7 +347,7 @@ fn lazy_sequence_pipeline_produces_sequence_wrapper() {
 
     assert_eq!(
         rendered,
-        "SequenceFactory.fromStream((numbers).stream().map((x) -> x))"
+        "GeneratedMain.sequenceFromStream((numbers).stream().map((x) -> x))"
     );
 }
 

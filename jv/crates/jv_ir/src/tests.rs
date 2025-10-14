@@ -2420,9 +2420,19 @@ mod tests {
         };
 
         let java_type = convert_type_annotation(type_annotation)
-            .expect("generic annotations should currently erase to Object");
+            .expect("generic annotations should preserve type parameters");
 
-        assert_eq!(java_type, JavaType::object());
+        // Generic types are now preserved, not erased to Object
+        assert_eq!(
+            java_type,
+            JavaType::Reference {
+                name: "List".to_string(),
+                generic_args: vec![JavaType::Reference {
+                    name: "String".to_string(),
+                    generic_args: vec![],
+                }],
+            }
+        );
     }
 
     // Test for utility class name generation

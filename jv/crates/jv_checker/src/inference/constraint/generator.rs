@@ -797,9 +797,6 @@ fn map_annotation_type(name: &str) -> TypeKind {
         "SequenceCore" | "jv.collections.SequenceCore" => {
             TypeKind::Primitive("jv.collections.SequenceCore")
         }
-        "SequenceFactory" | "jv.collections.SequenceFactory" => {
-            TypeKind::Primitive("jv.collections.SequenceFactory")
-        }
         "Iterable" | "java.lang.Iterable" => TypeKind::Primitive("java.lang.Iterable"),
         "Iterator" | "java.util.Iterator" => TypeKind::Primitive("java.util.Iterator"),
         "Stream" | "java.util.stream.Stream" => TypeKind::Primitive("java.util.stream.Stream"),

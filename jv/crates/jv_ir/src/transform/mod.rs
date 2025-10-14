@@ -763,10 +763,10 @@ fn coerce_argument_for_parameter(arg: IrExpression, param_type: &JavaType) -> Ir
 
     match extract_java_type(&arg) {
         Some(JavaType::Reference { name, .. }) if is_iterable_like(&name) => {
-            make_sequence_factory_call("fromIterable", arg, param_type.clone())
+            make_sequence_factory_call("sequenceFromIterable", arg, param_type.clone())
         }
         Some(JavaType::Reference { name, .. }) if is_stream_type(&name) => {
-            make_sequence_factory_call("fromStream", arg, param_type.clone())
+            make_sequence_factory_call("sequenceFromStream", arg, param_type.clone())
         }
         _ => arg,
     }
@@ -779,9 +779,9 @@ fn make_sequence_factory_call(
 ) -> IrExpression {
     let span = ir_expression_span(&argument);
     let factory_identifier = IrExpression::Identifier {
-        name: "SequenceFactory".to_string(),
+        name: "GeneratedMain".to_string(),
         java_type: JavaType::Reference {
-            name: "SequenceFactory".to_string(),
+            name: "jv.collections.GeneratedMain".to_string(),
             generic_args: vec![],
         },
         span: span.clone(),
@@ -791,7 +791,7 @@ fn make_sequence_factory_call(
         receiver: Some(Box::new(factory_identifier)),
         method_name: method.to_string(),
         args: vec![argument],
-        argument_style: CallArgumentStyle::Comma,
+        argument_style: CallArgumentStyle::Whitespace,
         java_type: result_type,
         span,
     }

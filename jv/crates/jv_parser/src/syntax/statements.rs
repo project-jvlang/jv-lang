@@ -45,6 +45,8 @@ pub(crate) fn statement_parser(
         let var_decl = attempt_statement_parser(var_declaration_parser(expr.clone()));
         let assignment = assignment_statement_parser(expr.clone());
         let function_decl = function_declaration_parser(statement.clone(), expr.clone());
+        let class_decl =
+            attempt_statement_parser(class_declaration_parser(statement.clone(), expr.clone()));
         let data_class_decl = data_class_declaration_parser(expr.clone());
         let use_stmt = use_statement_parser(statement.clone(), expr.clone());
         let defer_stmt = defer_statement_parser(statement.clone());
@@ -63,6 +65,7 @@ pub(crate) fn statement_parser(
             var_decl,
             assignment,
             function_decl,
+            class_decl,
             data_class_decl,
             use_stmt,
             defer_stmt,
@@ -372,6 +375,44 @@ fn data_class_declaration_parser(
                 modifiers,
                 type_parameters,
                 generic_signature,
+                span: Span::dummy(),
+            }
+        })
+}
+
+fn class_declaration_parser(
+    statement: impl ChumskyParser<Token, Statement, Error = Simple<Token>> + Clone,
+    expr: impl ChumskyParser<Token, Expression, Error = Simple<Token>> + Clone,
+) -> impl ChumskyParser<Token, Statement, Error = Simple<Token>> + Clone {
+    let member_parser =
+        comment_statement_parser().or(function_declaration_parser(statement.clone(), expr.clone()));
+
+    modifiers_parser()
+        .then_ignore(token_class())
+        .then(identifier())
+        .then(type_parameter_list().or_not())
+        .then_ignore(token_left_brace())
+        .then(member_parser.repeated())
+        .then_ignore(token_right_brace())
+        .map(|(((modifiers, name), generics), members)| {
+            let (type_parameters, generic_signature) =
+                extract_type_parameters_and_signature(generics);
+
+            let methods = members
+                .into_iter()
+                .filter(|member| matches!(member, Statement::FunctionDeclaration { .. }))
+                .map(Box::new)
+                .collect();
+
+            Statement::ClassDeclaration {
+                name,
+                type_parameters,
+                generic_signature,
+                superclass: None,
+                interfaces: Vec::new(),
+                properties: Vec::new(),
+                methods,
+                modifiers,
                 span: Span::dummy(),
             }
         })

@@ -3,14 +3,13 @@
 //! The prelude seeds the type environment with well-known symbols so that end-user
 //! programs can rely on stdlib facilities without explicitly compiling the stdlib
 //! sources as part of the same unit. At the moment we focus on the rewritten
-//! Sequence API (`SequenceCore`, `SequenceFactory`, and their extension functions).
+//! Sequence API (`SequenceCore`, the factory helpers, and their extension functions).
 
 use crate::inference::environment::{TypeEnvironment, TypeScheme};
 use crate::inference::extensions::ExtensionRegistry;
 use crate::inference::types::{TypeId, TypeKind};
 
 const SEQUENCE_CORE: &str = "jv.collections.SequenceCore";
-const SEQUENCE_FACTORY: &str = "jv.collections.SequenceFactory";
 const ITERABLE: &str = "java.lang.Iterable";
 const ITERATOR: &str = "java.util.Iterator";
 const STREAM: &str = "java.util.stream.Stream";
@@ -46,28 +45,21 @@ pub fn install_prelude(env: &mut TypeEnvironment) -> ExtensionRegistry {
 }
 
 fn register_sequence_symbols(env: &mut TypeEnvironment, registry: &mut ExtensionRegistry) {
-    // Top-level objects exposed by the stdlib Sequence rewrite.
-    env.define_monotype("SequenceFactory", primitive(SEQUENCE_FACTORY));
-
-    register_sequence_factory_functions(registry);
+    register_sequence_factory_functions(env);
     register_sequence_core_extensions(env, registry);
     register_iterable_extensions(env, registry);
 }
 
-fn register_sequence_factory_functions(registry: &mut ExtensionRegistry) {
-    registry.register(
-        SEQUENCE_FACTORY,
-        "fromIterable",
-        TypeScheme::monotype(function(
-            vec![primitive(ITERABLE)],
-            primitive(SEQUENCE_CORE),
-        )),
-    );
-    registry.register(
-        SEQUENCE_FACTORY,
-        "fromStream",
-        TypeScheme::monotype(function(vec![primitive(STREAM)], primitive(SEQUENCE_CORE))),
-    );
+fn register_sequence_factory_functions(env: &mut TypeEnvironment) {
+    let from_iterable = TypeScheme::monotype(function(
+        vec![primitive(ITERABLE)],
+        primitive(SEQUENCE_CORE),
+    ));
+    env.define_scheme("sequenceFromIterable", from_iterable);
+
+    let from_stream =
+        TypeScheme::monotype(function(vec![primitive(STREAM)], primitive(SEQUENCE_CORE)));
+    env.define_scheme("sequenceFromStream", from_stream);
 }
 
 fn register_sequence_core_extensions(env: &mut TypeEnvironment, registry: &mut ExtensionRegistry) {

@@ -1,7 +1,7 @@
 package jv.stdlib.collections.tests
 
 import java.util.Map
-import jv.collections.SequenceFactory
+import jv.collections.sequenceFromIterable
 
 data Person(name: String age: Int)
 
@@ -43,14 +43,14 @@ fun validatePhase1MapFilterToList() {
 
 fun validatePhase1SequenceFromIterableToList() {
     numbers = [10 20 30]
-    sequence = SequenceFactory.fromIterable(numbers)
+    sequence = sequenceFromIterable(numbers)
     result = sequence
         .map { value -> value / 10 }
         .toList()
 
     expected = [1 2 3]
     if (result != expected) {
-        throw IllegalStateException("SequenceFactory.fromIterable toList expected ${expected} but was ${result}")
+        throw IllegalStateException("sequenceFromIterable toList expected ${expected} but was ${result}")
     }
 }
 
@@ -98,7 +98,7 @@ fun validatePhase2FlatMapFromIterable() {
 }
 
 fun validatePhase2FlatMapFromSequence() {
-    base = SequenceFactory.fromIterable([1 2 3])
+    base = sequenceFromIterable([1 2 3])
     result = base
         .flatMap { value -> [value value * 10] }
         .take(4)
@@ -122,7 +122,7 @@ fun validatePhase3FoldAggregates() {
 }
 
 fun validatePhase3ReduceAggregates() {
-    numbers = SequenceFactory.fromIterable([5 6 7])
+    numbers = sequenceFromIterable([5 6 7])
     reduceResult = numbers.reduce { left right -> left + right }
 
     if (reduceResult != 18) {
@@ -131,7 +131,7 @@ fun validatePhase3ReduceAggregates() {
 }
 
 fun validatePhase3ReduceEmptyThrows() {
-    emptySequence = SequenceFactory.fromIterable([])
+    emptySequence = sequenceFromIterable([])
 
     try {
         emptySequence.reduce { left right -> left + right }
