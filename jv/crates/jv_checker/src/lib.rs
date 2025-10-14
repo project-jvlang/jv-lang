@@ -15,14 +15,17 @@ pub use inference::{
 pub use jv_inference::ParallelInferenceConfig;
 pub use regex::RegexAnalysis;
 
+use crate::imports::ResolvedImport;
 use binding::{resolve_bindings, BindingResolution, BindingUsageSummary, LateInitManifest};
 use jv_ast::{Program, Span};
+use jv_build::metadata::SymbolIndex;
 use null_safety::{JavaLoweringHint, NullSafetyCoordinator};
 use pattern::{
     NarrowedNullability, PatternCacheMetrics, PatternMatchFacts, PatternMatchService, PatternTarget,
 };
 use regex::RegexValidator;
 use std::collections::HashMap;
+use std::sync::Arc;
 use thiserror::Error;
 
 use jv_inference::service::{TypeFactsBuilder, TypeFactsSnapshot, TypeScheme as FactsTypeScheme};
@@ -385,6 +388,14 @@ impl TypeChecker {
         &self.late_init_manifest
     }
 
+    pub fn set_imports(&mut self, symbol_index: Arc<SymbolIndex>, imports: Vec<ResolvedImport>) {
+        self.engine.set_imports(symbol_index, imports);
+    }
+
+    pub fn clear_imports(&mut self) {
+        self.engine.clear_imports();
+    }
+
     pub fn check_program(&mut self, program: &Program) -> Result<(), Vec<CheckError>> {
         self.engine.set_parallel_config(self.parallel_config);
         self.null_safety_hints.clear();
@@ -637,6 +648,9 @@ fn convert_type_kind(ty: &TypeKind) -> FactsTypeKind {
     match ty {
         TypeKind::Primitive(name) => FactsTypeKind::new(FactsTypeVariant::Primitive(name))
             .with_nullability(NullabilityFlag::NonNull),
+        TypeKind::Reference(_) => {
+            FactsTypeKind::new(FactsTypeVariant::Unknown).with_nullability(NullabilityFlag::NonNull)
+        }
         TypeKind::Optional(inner) => FactsTypeKind::optional(convert_type_kind(inner)),
         TypeKind::Variable(id) => {
             FactsTypeKind::new(FactsTypeVariant::Variable(FactsTypeId::new(id.to_raw())))

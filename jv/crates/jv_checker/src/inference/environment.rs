@@ -195,6 +195,7 @@ impl TypeEnvironment {
 fn substitute_type(ty: &TypeKind, subs: &HashMap<TypeId, TypeKind>) -> TypeKind {
     match ty {
         TypeKind::Primitive(name) => TypeKind::Primitive(name),
+        TypeKind::Reference(name) => TypeKind::Reference(name.clone()),
         TypeKind::Optional(inner) => TypeKind::Optional(Box::new(substitute_type(inner, subs))),
         TypeKind::Variable(id) => subs
             .get(id)

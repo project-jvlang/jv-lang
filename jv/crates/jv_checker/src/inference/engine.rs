@@ -4,15 +4,19 @@
 //! `TypeScheme` として公開する。タスク5では特に関数パラメータ・デフォルト値・
 //! return 経路を制約に反映し、解決結果から曖昧なシグネチャを検出する。
 
+use crate::imports::ResolvedImport;
 use crate::inference::constraint::ConstraintGenerator;
 use crate::inference::environment::{TypeEnvironment, TypeScheme};
+use crate::inference::imports::ImportRegistry;
 use crate::inference::prelude;
 use crate::inference::types::{TypeBinding, TypeId, TypeKind};
 use crate::inference::unify::{ConstraintSolver, SolveError};
 use crate::InferenceTelemetry;
 use jv_ast::{Program, Statement};
+use jv_build::metadata::SymbolIndex;
 use jv_inference::ParallelInferenceConfig;
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 use std::time::Instant;
 
 /// 型推論処理で発生し得るエラーを表す。
@@ -38,6 +42,8 @@ pub struct InferenceEngine {
     function_schemes: HashMap<String, TypeScheme>,
     parallel_config: ParallelInferenceConfig,
     telemetry: InferenceTelemetry,
+    import_index: Option<Arc<SymbolIndex>>,
+    resolved_imports: Vec<ResolvedImport>,
 }
 
 impl Default for InferenceEngine {
@@ -49,6 +55,8 @@ impl Default for InferenceEngine {
             function_schemes: HashMap::new(),
             parallel_config: ParallelInferenceConfig::default(),
             telemetry: InferenceTelemetry::default(),
+            import_index: None,
+            resolved_imports: Vec::new(),
         }
     }
 }
@@ -80,11 +88,29 @@ impl InferenceEngine {
         &mut self.telemetry
     }
 
+    /// Supplies the resolved import list and associated symbol index for the next inference run.
+    pub fn set_imports(&mut self, symbol_index: Arc<SymbolIndex>, imports: Vec<ResolvedImport>) {
+        self.import_index = Some(symbol_index);
+        self.resolved_imports = imports;
+    }
+
+    /// Clears previously registered import context.
+    pub fn clear_imports(&mut self) {
+        self.import_index = None;
+        self.resolved_imports.clear();
+    }
+
     /// AST 全体に対する推論を実行し、各種結果を内部状態へ保持する。
     pub fn infer_program(&mut self, program: &Program) -> InferenceResult<()> {
         let mut environment = TypeEnvironment::new();
         let extensions = prelude::install_prelude(&mut environment);
-        let generator = ConstraintGenerator::new(&mut environment, &extensions);
+        let mut import_registry = self.import_index.clone().map(|index| {
+            let mut registry = ImportRegistry::new(index);
+            registry.register_imports(&mut environment, &self.resolved_imports);
+            registry
+        });
+        let generator =
+            ConstraintGenerator::new(&mut environment, &extensions, import_registry.as_mut());
         let constraints = generator.generate(program);
         let constraint_count = constraints.len();
         let inference_start = Instant::now();
@@ -183,6 +209,7 @@ fn build_substitution_map(bindings: &[TypeBinding]) -> HashMap<TypeId, TypeKind>
 fn resolve_type(ty: &TypeKind, substitutions: &HashMap<TypeId, TypeKind>) -> TypeKind {
     match ty {
         TypeKind::Primitive(name) => TypeKind::Primitive(name),
+        TypeKind::Reference(name) => TypeKind::Reference(name.clone()),
         TypeKind::Optional(inner) => {
             TypeKind::Optional(Box::new(resolve_type(inner, substitutions)))
         }
