@@ -6,9 +6,11 @@
 //! large archives do not have to be fully loaded in memory.
 
 mod builder;
+mod cache;
 mod classfile;
 mod index;
 
 pub use builder::{BuildContext, IndexError, SymbolIndexBuilder};
+pub use cache::{CacheError, CacheMetrics, CacheStoreStats, SymbolIndexCache};
 pub use classfile::{JavaMethodSignature, ModuleInfo, StaticMember, StaticMemberKind};
 pub use index::{ModuleEntry, PackageEntry, SymbolIndex, TypeEntry};

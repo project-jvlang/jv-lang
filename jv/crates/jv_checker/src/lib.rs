@@ -2,6 +2,7 @@
 pub mod binding;
 pub mod compat;
 pub mod diagnostics;
+pub mod imports;
 pub mod inference;
 pub mod null_safety;
 pub mod pattern;

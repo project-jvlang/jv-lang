@@ -1,3 +1,4 @@
+use super::cache::{CacheStoreStats, SymbolIndexCache};
 use super::classfile::{parse_class, parse_module_info, ClassParseError, ModuleInfo};
 use super::index::{ModuleEntry, SymbolIndex, TypeEntry};
 use crate::config::BuildConfig;
@@ -7,9 +8,13 @@ use std::ffi::OsStr;
 use std::fs::{self, File};
 use std::io::{self, BufReader, Read};
 use std::path::{Path, PathBuf};
+use std::time::Instant;
 use thiserror::Error;
+use tracing::{debug, info, warn};
 use zip::result::ZipError;
 use zip::ZipArchive;
+
+const LOG_TARGET: &str = "jv::build::symbol_index";
 
 #[derive(Debug, Clone)]
 pub struct BuildContext {
@@ -86,12 +91,122 @@ impl<'a> SymbolIndexBuilder<'a> {
     }
 
     pub fn build(&self) -> Result<SymbolIndex, IndexError> {
+        let module_artifacts = self.resolve_module_artifacts()?;
+        self.build_with_artifacts(&module_artifacts)
+    }
+
+    pub fn build_with_cache(&self, cache: &SymbolIndexCache) -> Result<SymbolIndex, IndexError> {
+        let module_artifacts = self.resolve_module_artifacts()?;
+
+        let fingerprint = match cache.fingerprint(self.context, &module_artifacts) {
+            Ok(fp) => fp,
+            Err(error) => {
+                warn!(target: LOG_TARGET, %error, "Failed to compute symbol index fingerprint; rebuilding without cache");
+                return self.build_with_artifacts(&module_artifacts);
+            }
+        };
+
+        let cache_key = match cache.cache_key(&fingerprint) {
+            Ok(key) => key,
+            Err(error) => {
+                warn!(target: LOG_TARGET, %error, "Failed to derive cache key; rebuilding without cache");
+                return self.build_with_artifacts(&module_artifacts);
+            }
+        };
+
+        let load_started = Instant::now();
+        match cache.load(&fingerprint) {
+            Ok(Some(entry)) => {
+                let load_elapsed = load_started.elapsed();
+                info!(
+                    target: LOG_TARGET,
+                    action = "cache-hit",
+                    cache_key = cache_key.as_str(),
+                    load_ms = load_elapsed.as_millis() as u64,
+                    recorded_build_ms = entry.metrics.build_ms,
+                    recorded_artifact_count = entry.metrics.artifact_count,
+                    recorded_memory_bytes = entry.metrics.memory_bytes.unwrap_or(0),
+                    "Reusing cached SymbolIndex"
+                );
+                return Ok(entry.index);
+            }
+            Ok(None) => {
+                debug!(
+                    target: LOG_TARGET,
+                    action = "cache-miss",
+                    cache_key = cache_key.as_str(),
+                    "SymbolIndex cache miss"
+                );
+            }
+            Err(error) => {
+                warn!(
+                    target: LOG_TARGET,
+                    action = "cache-error",
+                    cache_key = cache_key.as_str(),
+                    %error,
+                    "Failed to load SymbolIndex cache; rebuilding"
+                );
+            }
+        }
+
+        let build_started = Instant::now();
+        let memory_before = memory_usage_bytes();
+        let result = self.build_with_artifacts(&module_artifacts);
+        let build_elapsed = build_started.elapsed();
+        let memory_after = memory_usage_bytes();
+
+        match result {
+            Ok(index) => {
+                info!(
+                    target: LOG_TARGET,
+                    action = "cold-build",
+                    cache_key = cache_key.as_str(),
+                    duration_ms = build_elapsed.as_millis() as u64,
+                    memory_before_bytes = memory_before.unwrap_or(0),
+                    memory_after_bytes = memory_after.unwrap_or(0),
+                    artifact_inputs = fingerprint.artifact_count() as u64,
+                    "Indexed symbols from scratch"
+                );
+
+                let store_stats = CacheStoreStats {
+                    build_duration: build_elapsed,
+                    artifact_count: fingerprint.artifact_count(),
+                    memory_bytes: memory_after,
+                };
+
+                if let Err(error) = cache.store(&fingerprint, &index, store_stats) {
+                    warn!(
+                        target: LOG_TARGET,
+                        action = "cache-store-error",
+                        cache_key = cache_key.as_str(),
+                        %error,
+                        "Failed to persist SymbolIndex cache"
+                    );
+                } else {
+                    debug!(
+                        target: LOG_TARGET,
+                        action = "cache-store",
+                        cache_key = cache_key.as_str(),
+                        "Stored SymbolIndex cache entry"
+                    );
+                }
+
+                Ok(index)
+            }
+            Err(error) => Err(error),
+        }
+    }
+
+    fn build_with_artifacts(
+        &self,
+        module_artifacts: &[PathBuf],
+    ) -> Result<SymbolIndex, IndexError> {
         let jdk_release = self.context.target.as_str().parse::<u16>().ok();
         let mut index = SymbolIndex::new(jdk_release);
 
         // Scan module path first (JDK modules, explicit module path entries).
-        for path in self.resolve_module_artifacts()? {
-            self.scan_artifact(&path, ArtifactKind::Module, &mut index)?;
+        for path in module_artifacts {
+            self.scan_artifact(path, ArtifactKind::Module, &mut index)?;
         }
 
         // Then scan classpath entries (project dependencies, compiled output directories, etc.).
@@ -502,4 +617,13 @@ fn archive_entry_path(archive: &Path, entry: &str) -> PathBuf {
     display.push('/');
     display.push_str(entry);
     PathBuf::from(display)
+}
+
+fn memory_usage_bytes() -> Option<u64> {
+    use sysinfo::{get_current_pid, ProcessExt, System, SystemExt};
+
+    let pid = get_current_pid().ok()?;
+    let mut system = System::new();
+    system.refresh_process(pid);
+    system.process(pid).map(|process| process.memory() * 1024)
 }
