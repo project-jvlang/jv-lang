@@ -1,6 +1,9 @@
 use jv_ast::{Span, Statement};
 use jv_build::metadata::{JavaMethodSignature, ModuleEntry, PackageEntry, SymbolIndex, TypeEntry};
-use jv_checker::imports::{ImportResolutionService, ResolvedImportKind};
+use jv_checker::imports::{
+    from_error as import_diagnostic_from_error, missing_module, ImportError,
+    ImportResolutionService, ResolvedImportKind,
+};
 use jv_ir::types::JavaType;
 use jv_pm::JavaTarget;
 use std::collections::HashSet;
@@ -135,4 +138,92 @@ fn resolves_package_wildcard_import() {
         entry.kind,
         ResolvedImportKind::Type { ref fqcn } if fqcn == "java.util.List"
     )));
+}
+
+#[test]
+fn expands_static_wildcard_for_type_members() {
+    let service = ImportResolutionService::new(base_index(), JavaTarget::Java25);
+    let expanded = service.expand_wildcard("java.lang.Math");
+
+    assert!(
+        expanded.iter().any(|entry| matches!(
+            entry.kind,
+            ResolvedImportKind::StaticMember { ref owner, ref member }
+                if owner == "java.lang.Math" && member == "max"
+        )),
+        "expected java.lang.Math.max to be part of wildcard expansion"
+    );
+}
+
+#[test]
+fn unknown_import_diagnostic_contains_candidates() {
+    let span = dummy_span();
+    let error = ImportError::UnknownSymbol {
+        path: "foo.Bar".into(),
+        span: span.clone(),
+        candidates: vec!["foo.BarBaz".into(), "foo.bar.Bar".into()],
+    };
+
+    let diagnostic = import_diagnostic_from_error(&error).expect("diagnostic");
+    assert_eq!(diagnostic.code, "JV4100");
+    assert_eq!(diagnostic.span, Some(span));
+    assert!(diagnostic.message.contains("foo.BarBaz"));
+    assert!(diagnostic
+        .suggestions
+        .iter()
+        .any(|suggestion| suggestion.contains("import foo.BarBaz")));
+}
+
+#[test]
+fn ambiguous_import_diagnostic_lists_candidates() {
+    let mut index = SymbolIndex::default();
+    with_type(
+        &mut index,
+        "com.example.logging.Logger",
+        Some("example.logging"),
+        &[],
+    );
+    with_type(&mut index, "org.slf4j.Logger", Some("org.slf4j"), &[]);
+
+    let service = ImportResolutionService::new(Arc::new(index), JavaTarget::Java25);
+    let span = dummy_span();
+    let stmt = Statement::Import {
+        path: "Logger".into(),
+        alias: None,
+        is_wildcard: false,
+        span: span.clone(),
+    };
+
+    let error = service.resolve(&stmt).expect_err("expected ambiguity");
+    match &error {
+        ImportError::AmbiguousSymbol { candidates, .. } => {
+            assert!(candidates
+                .iter()
+                .any(|entry| entry == "com.example.logging.Logger"));
+            assert!(candidates.iter().any(|entry| entry == "org.slf4j.Logger"));
+        }
+        other => panic!("unexpected error: {other:?}"),
+    }
+
+    let diagnostic = import_diagnostic_from_error(&error).expect("diagnostic");
+    assert_eq!(diagnostic.code, "JV4101");
+    assert_eq!(diagnostic.span, Some(span));
+    assert!(diagnostic.message.contains("org.slf4j.Logger"));
+    assert!(diagnostic
+        .suggestions
+        .iter()
+        .any(|suggestion| suggestion.contains("import com.example.logging.Logger")));
+}
+
+#[test]
+fn missing_module_diagnostic_suggests_add_modules() {
+    let span = dummy_span();
+    let diagnostic = missing_module("java.sql", "java.sql.DriverManager", &span);
+
+    assert_eq!(diagnostic.code, "JV4102");
+    assert_eq!(diagnostic.span, Some(span));
+    assert!(diagnostic
+        .suggestions
+        .iter()
+        .any(|suggestion| suggestion.contains("--add-modules java.sql")));
 }
