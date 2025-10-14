@@ -1,23 +1,25 @@
 // jv-lsp - Language Server Protocol server for jv language
-use jv_lsp::{ImportsParams, JvLanguageServer};
+use jv_lsp::{ImportsParams, ImportsResponse, JvLanguageServer};
 use std::collections::HashMap;
-use std::error::Error;
+use std::error::Error as StdError;
 use tokio::io::{stdin, stdout};
 use tokio::sync::{Mutex, RwLock};
 use tower_lsp::{
-    jsonrpc::{Error, ErrorCode, Result as LspResult},
+    jsonrpc::{Error as JsonRpcError, ErrorCode, Result as LspResult},
     lsp_types::*,
     LspService, Server,
 };
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
+async fn main() -> Result<(), Box<dyn StdError + Sync + Send>> {
     tracing_subscriber::fmt().init();
 
     let stdin = stdin();
     let stdout = stdout();
 
-    let (service, socket) = LspService::new(|client| Backend::new(client));
+    let (service, socket) = LspService::build(|client| Backend::new(client))
+        .custom_method("jv/imports", Backend::handle_imports)
+        .finish();
     Server::new(stdin, stdout, socket).serve(service).await;
 
     Ok(())
@@ -237,49 +239,34 @@ impl tower_lsp::LanguageServer for Backend {
         ))
     }
 
-    async fn request(
-        &self,
-        method: &str,
-        params: serde_json::Value,
-    ) -> LspResult<Option<serde_json::Value>> {
-        match method {
-            "jv/imports" => {
-                let params: ImportsParams = serde_json::from_value(params)
-                    .map_err(|error| Error::invalid_params(format!("Invalid params: {error}")))?;
-                let uri = params.text_document.uri.to_string();
-                let content = {
-                    let docs = self.documents.read().await;
-                    docs.get(&uri).cloned()
-                }
-                .ok_or_else(|| Error::invalid_params(format!("Document not open: {uri}")))?;
-
-                let response = {
-                    let server = self.language_server.lock().await;
-                    match server.imports_response(&content) {
-                        Ok(response) => response,
-                        Err(error) => {
-                            return Err(Error {
-                                code: ErrorCode::InternalError,
-                                message: error.message().to_string(),
-                                data: None,
-                            });
-                        }
-                    }
-                };
-
-                let value = serde_json::to_value(response).map_err(|error| Error {
-                    code: ErrorCode::InternalError,
-                    message: error.to_string(),
-                    data: None,
-                })?;
-                Ok(Some(value))
-            }
-            _ => Ok(None),
-        }
-    }
 }
 
 impl Backend {
+    async fn handle_imports(&self, params: ImportsParams) -> LspResult<ImportsResponse> {
+        let uri = params.text_document.uri.to_string();
+        let content = {
+            let docs = self.documents.read().await;
+            docs.get(&uri).cloned()
+        }
+        .ok_or_else(|| JsonRpcError::invalid_params(format!("Document not open: {uri}")))?;
+
+        let response = {
+            let server = self.language_server.lock().await;
+            match server.imports_response(&content) {
+                Ok(response) => response,
+                Err(error) => {
+                    return Err(JsonRpcError {
+                        code: ErrorCode::InternalError,
+                        message: error.message().to_string().into(),
+                        data: None,
+                    });
+                }
+            }
+        };
+
+        Ok(response)
+    }
+
     async fn publish_diagnostics(&self, uri: String) {
         let diagnostics = {
             let mut server = self.language_server.lock().await;
