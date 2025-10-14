@@ -1,6 +1,7 @@
 // jv_build - Build system and javac integration
 mod compat;
 mod config;
+pub mod metadata;
 
 pub use compat::{
     CompatibilityAnalyzer, CompatibilityError, CompatibilityEvidence, CompatibilityFinding,
