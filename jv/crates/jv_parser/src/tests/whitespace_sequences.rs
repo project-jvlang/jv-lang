@@ -43,12 +43,18 @@ fn assert_offset_array_structure(elements: &[Expression]) {
 
     match &elements[5] {
         Expression::Identifier(name, _) => assert_eq!(name, "i"),
-        other => panic!("expected trailing identifier before last unary plus, found {:?}", other),
+        other => panic!(
+            "expected trailing identifier before last unary plus, found {:?}",
+            other
+        ),
     }
 
     match &elements[6] {
         Expression::Unary { op, .. } if *op == UnaryOp::Plus => {}
-        other => panic!("expected final unary plus offset element, found {:?}", other),
+        other => panic!(
+            "expected final unary plus offset element, found {:?}",
+            other
+        ),
     }
 }
 
@@ -99,7 +105,9 @@ fn whitespace_array_with_expression_elements_preserves_structure() {
     };
 
     let Expression::Array {
-        elements, delimiter, ..
+        elements,
+        delimiter,
+        ..
     } = initializer
     else {
         panic!("expected array initializer for offsets");
@@ -111,8 +119,7 @@ fn whitespace_array_with_expression_elements_preserves_structure() {
 
 #[test]
 fn whitespace_array_inside_lambda_body_preserves_delimiter() {
-    let program =
-        parse_program("val mapped = numbers.map { i -> [i (i +1) i +2 i+3 i +4] }");
+    let program = parse_program("val mapped = numbers.map { i -> [i (i +1) i +2 i+3 i +4] }");
     let statement = program
         .statements
         .get(0)
@@ -133,7 +140,9 @@ fn whitespace_array_inside_lambda_body_preserves_delimiter() {
     };
 
     let Expression::Array {
-        elements, delimiter, ..
+        elements,
+        delimiter,
+        ..
     } = body.as_ref()
     else {
         panic!("expected lambda body to be an array literal");

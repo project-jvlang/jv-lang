@@ -929,7 +929,10 @@ fn layout_commas_preserve_whitespace_array_of_expressions() {
         .filter(|token| {
             token.leading_trivia.newlines == 0
                 && token.leading_trivia.spaces > 0
-                && matches!(token.token_type, TokenType::Identifier(_) | TokenType::LeftParen)
+                && matches!(
+                    token.token_type,
+                    TokenType::Identifier(_) | TokenType::LeftParen
+                )
         })
         .count();
     assert_eq!(

@@ -80,8 +80,5 @@ fn whitespace_array_inside_lambda_uses_list_of() {
         .generate_expression(&expression)
         .expect("lambda with whitespace array should render");
 
-    assert_eq!(
-        rendered,
-        "(i) -> List.of(i, i + 1, i + 2, i + 3, i + 4)"
-    );
+    assert_eq!(rendered, "(i) -> List.of(i, i + 1, i + 2, i + 3, i + 4)");
 }

@@ -613,7 +613,8 @@ fn whitespace_array_with_offsets_lowers_to_array_creation() {
         elements.iter().skip(1).all(|element| matches!(
             element,
             IrExpression::Binary {
-                op: BinaryOp::Add, ..
+                op: BinaryOp::Add,
+                ..
             }
         )),
         "subsequent elements should remain binary additions"
@@ -657,7 +658,8 @@ fn whitespace_array_inside_lambda_preserves_array_creation_body() {
         elements.iter().skip(1).all(|element| matches!(
             element,
             IrExpression::Binary {
-                op: BinaryOp::Add, ..
+                op: BinaryOp::Add,
+                ..
             }
         )),
         "lambda should retain binary additions inside array literal"
