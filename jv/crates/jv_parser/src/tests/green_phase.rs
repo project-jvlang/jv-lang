@@ -39,7 +39,11 @@ fn test_package_declaration() {
         Some("com.example.app"),
         "expected package name to be captured"
     );
-    assert_eq!(program.statements.len(), 1, "package declaration should be in statements");
+    assert_eq!(
+        program.statements.len(),
+        1,
+        "package declaration should be in statements"
+    );
 
     match &program.statements[0] {
         Statement::Package { name, .. } => {

@@ -309,8 +309,8 @@ where
 
     expr.clone()
         .then(separator.clone().then(expr.clone()).repeated())
-        .then(token_comma().or_not())
-        .try_map(|((first, rest), trailing_comma), span| {
+        .then(token_any_comma().or_not())
+        .try_map(|((first, rest), trailing_separator), span| {
             let mut elements = Vec::with_capacity(rest.len() + 1);
             let mut saw_comma = false;
             let mut saw_layout = false;
@@ -325,8 +325,12 @@ where
                 elements.push(expr);
             }
 
-            if trailing_comma.is_some() {
-                saw_comma = true;
+            if let Some(trailing) = trailing_separator {
+                match trailing.token_type {
+                    TokenType::Comma => saw_comma = true,
+                    TokenType::LayoutComma => saw_layout = true,
+                    _ => {}
+                }
             }
 
             if saw_comma {

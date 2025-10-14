@@ -49,6 +49,15 @@ impl<'env, 'ext> ConstraintGenerator<'env, 'ext> {
         }
     }
 
+    fn push_constraint(&mut self, kind: ConstraintKind, note: Option<&str>) {
+        self.record_type_vars_in_constraint(&kind);
+        let constraint = if let Some(text) = note {
+            Constraint::new(kind).with_note(text)
+        } else {
+            Constraint::new(kind)
+        };
+        self.constraints.push(constraint);
+    }
     /// プログラム全体を走査して制約集合を構築する。
     pub fn generate(mut self, program: &Program) -> ConstraintSet {
         for stmt in &program.statements {
@@ -680,13 +689,8 @@ impl<'env, 'ext> ConstraintGenerator<'env, 'ext> {
 
     fn type_from_annotation(&mut self, annotation: &TypeAnnotation) -> TypeKind {
         match annotation {
-            TypeAnnotation::Simple(name) => match name.as_str() {
-                "Int" | "Integer" => TypeKind::Primitive("Int"),
-                "Double" | "Float" => TypeKind::Primitive("Double"),
-                "Boolean" | "Bool" => TypeKind::Primitive("Boolean"),
-                "String" => TypeKind::Primitive("String"),
-                _ => TypeKind::Unknown,
-            },
+            TypeAnnotation::Simple(name) => map_annotation_type(name),
+            TypeAnnotation::Generic { name, .. } => map_annotation_type(name),
             TypeAnnotation::Nullable(inner) => {
                 let inner_ty = self.type_from_annotation(inner);
                 TypeKind::Optional(Box::new(inner_ty))
@@ -704,16 +708,6 @@ impl<'env, 'ext> ConstraintGenerator<'env, 'ext> {
             }
             _ => TypeKind::Unknown,
         }
-    }
-
-    fn push_constraint(&mut self, kind: ConstraintKind, note: Option<&str>) {
-        self.record_type_vars_in_constraint(&kind);
-        let constraint = if let Some(text) = note {
-            Constraint::new(kind).with_note(text)
-        } else {
-            Constraint::new(kind)
-        };
-        self.constraints.push(constraint);
     }
 
     fn enqueue_receiver_constraint(&mut self, id: TypeId, primitive: &'static str, property: &str) {
@@ -781,6 +775,27 @@ impl<'env, 'ext> ConstraintGenerator<'env, 'ext> {
             self.env
                 .define_scheme(name.to_string(), TypeScheme::monotype(narrowed_type));
         }
+    }
+}
+
+fn map_annotation_type(name: &str) -> TypeKind {
+    match name {
+        "Int" | "Integer" => TypeKind::Primitive("Int"),
+        "Double" | "Float" => TypeKind::Primitive("Double"),
+        "Boolean" | "Bool" => TypeKind::Primitive("Boolean"),
+        "String" => TypeKind::Primitive("String"),
+        "SequenceCore" | "jv.collections.SequenceCore" => {
+            TypeKind::Primitive("jv.collections.SequenceCore")
+        }
+        "SequenceFactory" | "jv.collections.SequenceFactory" => {
+            TypeKind::Primitive("jv.collections.SequenceFactory")
+        }
+        "Iterable" | "java.lang.Iterable" => TypeKind::Primitive("java.lang.Iterable"),
+        "Iterator" | "java.util.Iterator" => TypeKind::Primitive("java.util.Iterator"),
+        "Stream" | "java.util.stream.Stream" => TypeKind::Primitive("java.util.stream.Stream"),
+        "List" | "java.util.List" => TypeKind::Primitive("java.util.List"),
+        "Map" | "java.util.Map" => TypeKind::Primitive("java.util.Map"),
+        _ => TypeKind::Unknown,
     }
 }
 

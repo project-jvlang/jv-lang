@@ -112,8 +112,8 @@ fn comment_statement_parser() -> impl ChumskyParser<Token, Statement, Error = Si
     })
 }
 
-fn package_declaration_parser() -> impl ChumskyParser<Token, Statement, Error = Simple<Token>> + Clone
-{
+fn package_declaration_parser(
+) -> impl ChumskyParser<Token, Statement, Error = Simple<Token>> + Clone {
     token_package()
         .map(|token| span_from_token(&token))
         .then(qualified_name_with_span())

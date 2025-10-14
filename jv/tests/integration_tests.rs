@@ -909,7 +909,7 @@ fn sequence_pipeline_fixture_runs_consistently_across_targets() {
         return;
     }
 
-    let fixture = workspace_file("tests/lang/collections/sequence_chain.jv");
+    let fixture = workspace_file("tests/fixtures/sequence/sequence_chain.jv");
     let expected_output = "[2, 4, 6, 8, 10]\n[5, 8]\n3\ntrue\n15\n3";
 
     for target in [JavaTarget::Java25, JavaTarget::Java21] {
@@ -973,7 +973,7 @@ fn sequence_pipeline_fixture_runs_consistently_across_targets() {
 
 #[test]
 fn java_target_switch_emits_expected_sequence_collection_factories() {
-    let fixture = workspace_file("tests/lang/collections/java21_compat.jv");
+    let fixture = workspace_file("tests/fixtures/sequence/java21_compat.jv");
 
     for (target, expected_snippets) in [
         (
@@ -1036,7 +1036,7 @@ fn java21_compat_fixture_runs_across_targets() {
         return;
     }
 
-    let fixture = workspace_file("tests/lang/collections/java21_compat.jv");
+    let fixture = workspace_file("tests/fixtures/sequence/java21_compat.jv");
     let expected_output = "[2, 3, 4, 5]\ntrue\n2";
 
     for target in [JavaTarget::Java25, JavaTarget::Java21] {

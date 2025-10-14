@@ -1,4 +1,5 @@
 use super::transform_expression;
+use super::type_system::convert_type_annotation;
 use crate::context::TransformContext;
 use crate::error::TransformError;
 use crate::types::{IrExpression, IrStatement, JavaType, MethodOverload};
@@ -129,51 +130,6 @@ pub fn desugar_default_parameters(
     Ok(overloads)
 }
 
-// Helper function to convert TypeAnnotation to JavaType
-fn convert_type_annotation(type_ann: TypeAnnotation) -> Result<JavaType, TransformError> {
-    match type_ann {
-        TypeAnnotation::Simple(name) => match name.as_str() {
-            "int" => Ok(JavaType::int()),
-            "boolean" => Ok(JavaType::boolean()),
-            "String" => Ok(JavaType::string()),
-            "void" => Ok(JavaType::void()),
-            _ => Ok(JavaType::Reference {
-                name,
-                generic_args: vec![],
-            }),
-        },
-        TypeAnnotation::Nullable(inner) => {
-            // For now, just convert the inner type (Java's type system handles nullability)
-            convert_type_annotation(*inner)
-        }
-        TypeAnnotation::Generic { name, type_args } => {
-            let generic_args: Result<Vec<JavaType>, TransformError> =
-                type_args.into_iter().map(convert_type_annotation).collect();
-            Ok(JavaType::Reference {
-                name,
-                generic_args: generic_args?,
-            })
-        }
-        TypeAnnotation::Array(element_type) => Ok(JavaType::Array {
-            element_type: Box::new(convert_type_annotation(*element_type)?),
-            dimensions: 1,
-        }),
-        TypeAnnotation::Function {
-            params,
-            return_type,
-        } => {
-            let param_types: Result<Vec<JavaType>, TransformError> =
-                params.into_iter().map(convert_type_annotation).collect();
-            Ok(JavaType::Functional {
-                interface_name: "Function".to_string(), // Default functional interface
-                param_types: param_types?,
-                return_type: Box::new(convert_type_annotation(*return_type)?),
-            })
-        }
-    }
-}
-
-// Helper function to convert Expression to IrExpression (simplified)
 // Helper function to create delegating method calls
 fn create_delegating_call(
     function_name: &str,
@@ -410,6 +366,12 @@ pub fn desugar_top_level_function(
                     });
                 }
             }
+
+            let signature_params: Vec<JavaType> = ir_parameters
+                .iter()
+                .map(|param| param.java_type.clone())
+                .collect();
+            context.register_function_signature(name.clone(), signature_params);
 
             // Convert function body to IR expression
             let body_ir_result = convert_expression_to_ir(*body, context);

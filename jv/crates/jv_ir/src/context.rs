@@ -16,6 +16,8 @@ use jv_support::arena::{
 pub struct TransformContext {
     /// Type information gathered from analysis
     pub type_info: HashMap<String, JavaType>,
+    /// Recorded Java signatures for top-level functions
+    pub function_signatures: HashMap<String, Vec<JavaType>>,
     /// Current scope for variable resolution
     pub scope_stack: Vec<HashMap<String, JavaType>>,
     /// Generated utility classes
@@ -59,6 +61,7 @@ impl TransformContext {
     pub fn new() -> Self {
         Self {
             type_info: HashMap::new(),
+            function_signatures: HashMap::new(),
             scope_stack: vec![HashMap::new()],
             utility_classes: Vec::new(),
             method_overloads: Vec::new(),
@@ -93,6 +96,16 @@ impl TransformContext {
             }
         }
         self.type_info.get(name)
+    }
+
+    pub fn register_function_signature(&mut self, name: String, params: Vec<JavaType>) {
+        self.function_signatures.insert(name, params);
+    }
+
+    pub fn function_signature(&self, name: &str) -> Option<&[JavaType]> {
+        self.function_signatures
+            .get(name)
+            .map(|types| types.as_slice())
     }
 
     pub fn fresh_identifier(&mut self, prefix: &str) -> String {
@@ -206,6 +219,7 @@ impl Clone for TransformContext {
     fn clone(&self) -> Self {
         Self {
             type_info: self.type_info.clone(),
+            function_signatures: self.function_signatures.clone(),
             scope_stack: self.scope_stack.clone(),
             utility_classes: self.utility_classes.clone(),
             method_overloads: self.method_overloads.clone(),

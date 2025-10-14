@@ -31,7 +31,16 @@ impl JavaCodeGenerator {
                 }
                 invocation.push_str(method_name);
                 invocation.push('(');
-                invocation.push_str(&self.render_arguments_with_style(args, *argument_style)?);
+                let rendered_args = if method_name == "println"
+                    && Self::is_system_out(receiver.as_deref())
+                    && args.len() == 1
+                    && matches!(args[0], IrExpression::Literal(Literal::Null, _))
+                {
+                    "(Object) null".to_string()
+                } else {
+                    self.render_arguments_with_style(args, *argument_style)?
+                };
+                invocation.push_str(&rendered_args);
                 invocation.push(')');
                 Ok(invocation)
             }
@@ -910,7 +919,11 @@ impl JavaCodeGenerator {
         match source {
             SequenceSource::Collection { expr, .. } => {
                 let rendered = self.generate_expression(expr)?;
-                Ok((format!("({}).stream()", rendered), false))
+                if self.is_sequence_core_expression(expr) {
+                    Ok((format!("({}).toStream()", rendered), false))
+                } else {
+                    Ok((format!("({}).stream()", rendered), false))
+                }
             }
             SequenceSource::Array { expr, .. } => {
                 let rendered = self.generate_expression(expr)?;
@@ -927,6 +940,63 @@ impl JavaCodeGenerator {
                 let rendered = self.generate_expression(expr)?;
                 Ok((rendered, *auto_close))
             }
+        }
+    }
+
+    fn is_sequence_core_expression(&self, expr: &IrExpression) -> bool {
+        Self::expression_java_type(expr)
+            .map(Self::is_sequence_core_type)
+            .unwrap_or(false)
+    }
+
+    fn expression_java_type(expr: &IrExpression) -> Option<&JavaType> {
+        match expr {
+            IrExpression::Identifier { java_type, .. }
+            | IrExpression::MethodCall { java_type, .. }
+            | IrExpression::FieldAccess { java_type, .. }
+            | IrExpression::ArrayAccess { java_type, .. }
+            | IrExpression::Binary { java_type, .. }
+            | IrExpression::Unary { java_type, .. }
+            | IrExpression::Assignment { java_type, .. }
+            | IrExpression::Conditional { java_type, .. }
+            | IrExpression::Block { java_type, .. }
+            | IrExpression::ObjectCreation { java_type, .. }
+            | IrExpression::Lambda { java_type, .. }
+            | IrExpression::SequencePipeline { java_type, .. }
+            | IrExpression::Switch { java_type, .. }
+            | IrExpression::NullSafeOperation { java_type, .. }
+            | IrExpression::CompletableFuture { java_type, .. }
+            | IrExpression::VirtualThread { java_type, .. }
+            | IrExpression::TryWithResources { java_type, .. }
+            | IrExpression::This { java_type, .. }
+            | IrExpression::Super { java_type, .. } => Some(java_type),
+            IrExpression::Cast { target_type, .. } => Some(target_type),
+            _ => None,
+        }
+    }
+
+    fn is_sequence_core_type(java_type: &JavaType) -> bool {
+        match java_type {
+            JavaType::Reference { name, .. } => {
+                name == "SequenceCore" || name == "jv.collections.SequenceCore"
+            }
+            _ => false,
+        }
+    }
+
+    fn is_system_out(receiver: Option<&IrExpression>) -> bool {
+        match receiver {
+            Some(IrExpression::FieldAccess {
+                receiver,
+                field_name,
+                ..
+            }) if field_name == "out" => {
+                matches!(
+                    receiver.as_ref(),
+                    IrExpression::Identifier { name, .. } if name == "System"
+                )
+            }
+            _ => false,
         }
     }
 

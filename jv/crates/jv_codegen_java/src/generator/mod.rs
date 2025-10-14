@@ -71,16 +71,15 @@ impl JavaCodeGenerator {
                 ..
             } = Self::base_statement(import)
             {
-                let mut stmt = String::from("import ");
+                let mut entry = String::new();
                 if *is_static {
-                    stmt.push_str("static ");
+                    entry.push_str("static ");
                 }
-                stmt.push_str(path);
+                entry.push_str(path);
                 if *is_wildcard && !path.ends_with(".*") {
-                    stmt.push_str(".*");
+                    entry.push_str(".*");
                 }
-                stmt.push(';');
-                unit.imports.push(stmt);
+                unit.imports.push(entry);
             }
         }
 

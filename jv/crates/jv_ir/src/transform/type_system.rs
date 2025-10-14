@@ -1,4 +1,4 @@
-use super::utils::{extract_java_type, ir_expression_span};
+use super::utils::{boxed_java_type, extract_java_type, ir_expression_span};
 use crate::context::TransformContext;
 use crate::error::TransformError;
 use crate::types::{IrExpression, JavaType, JavaWildcardKind};
@@ -36,24 +36,16 @@ pub fn convert_type_annotation(
     type_annotation: TypeAnnotation,
 ) -> Result<JavaType, TransformError> {
     match type_annotation {
-        TypeAnnotation::Simple(name) => Ok(match name.as_str() {
-            "Int" | "int" => JavaType::Primitive("int".to_string()),
-            "String" => JavaType::Reference {
-                name: "String".to_string(),
-                generic_args: vec![],
-            },
-            "Boolean" | "boolean" => JavaType::Primitive("boolean".to_string()),
-            "Double" | "double" => JavaType::Primitive("double".to_string()),
-            "Float" | "float" => JavaType::Primitive("float".to_string()),
-            "Long" | "long" => JavaType::Primitive("long".to_string()),
-            "Char" | "char" => JavaType::Primitive("char".to_string()),
-            "Byte" | "byte" => JavaType::Primitive("byte".to_string()),
-            "Short" | "short" => JavaType::Primitive("short".to_string()),
-            _ => JavaType::Reference {
-                name,
-                generic_args: vec![],
-            },
-        }),
+        TypeAnnotation::Simple(name) => Ok(convert_simple_type(&name)),
+        TypeAnnotation::Generic { name, type_args } => {
+            let mut generic_args = Vec::with_capacity(type_args.len());
+            for arg in type_args {
+                let java_arg = convert_type_annotation(arg)?;
+                generic_args.push(boxed_java_type(&java_arg));
+            }
+
+            Ok(JavaType::Reference { name, generic_args })
+        }
         TypeAnnotation::Nullable(inner) => convert_type_annotation(*inner),
         TypeAnnotation::Array(element_type) => {
             let element_java_type = convert_type_annotation(*element_type)?;
@@ -66,6 +58,27 @@ pub fn convert_type_annotation(
             name: "Object".to_string(),
             generic_args: vec![],
         }),
+    }
+}
+
+fn convert_simple_type(name: &str) -> JavaType {
+    match name {
+        "Int" | "int" => JavaType::Primitive("int".to_string()),
+        "Boolean" | "boolean" => JavaType::Primitive("boolean".to_string()),
+        "Double" | "double" => JavaType::Primitive("double".to_string()),
+        "Float" | "float" => JavaType::Primitive("float".to_string()),
+        "Long" | "long" => JavaType::Primitive("long".to_string()),
+        "Char" | "char" => JavaType::Primitive("char".to_string()),
+        "Byte" | "byte" => JavaType::Primitive("byte".to_string()),
+        "Short" | "short" => JavaType::Primitive("short".to_string()),
+        "String" => JavaType::Reference {
+            name: "String".to_string(),
+            generic_args: vec![],
+        },
+        _ => JavaType::Reference {
+            name: name.to_string(),
+            generic_args: vec![],
+        },
     }
 }
 

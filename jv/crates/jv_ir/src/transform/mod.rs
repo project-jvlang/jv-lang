@@ -1,12 +1,12 @@
-use self::utils::extract_java_type;
+use self::utils::{extract_java_type, ir_expression_span};
 use crate::context::TransformContext;
 use crate::error::TransformError;
 use crate::profiling::{PerfMetrics, TransformProfiler};
 use crate::sequence_pipeline;
 use crate::types::{IrCommentKind, IrExpression, IrProgram, IrStatement, JavaType};
 use jv_ast::{
-    Argument, BinaryOp, CallArgumentMetadata, CommentKind, ConcurrencyConstruct, Expression,
-    Literal, Program, ResourceManagement, SequenceDelimiter, Span, Statement,
+    Argument, BinaryOp, CallArgumentMetadata, CallArgumentStyle, CommentKind, ConcurrencyConstruct,
+    Expression, Literal, Program, ResourceManagement, SequenceDelimiter, Span, Statement,
 };
 
 mod concurrency;
@@ -629,7 +629,7 @@ fn lower_call_expression(
     context: &mut TransformContext,
 ) -> Result<IrExpression, TransformError> {
     let argument_style = argument_metadata.style;
-    let ir_args = lower_call_arguments(args, context)?;
+    let mut ir_args = lower_call_arguments(args, context)?;
 
     match function {
         Expression::Identifier(name, fn_span) => {
@@ -644,6 +644,12 @@ fn lower_call_expression(
                     java_type: return_type,
                     span,
                 });
+            }
+
+            if let Some(param_types) = context.function_signature(&name) {
+                if param_types.len() == ir_args.len() {
+                    ir_args = adjust_call_arguments_for_signature(ir_args, param_types);
+                }
             }
 
             let java_type = context
@@ -717,6 +723,81 @@ fn lower_call_arguments(
         lowered.push(transform_expression(expr, context)?);
     }
     Ok(lowered)
+}
+
+fn adjust_call_arguments_for_signature(
+    args: Vec<IrExpression>,
+    param_types: &[JavaType],
+) -> Vec<IrExpression> {
+    if args.len() != param_types.len() {
+        return args;
+    }
+
+    args.into_iter()
+        .zip(param_types.iter())
+        .map(|(arg, param)| coerce_argument_for_parameter(arg, param))
+        .collect()
+}
+
+fn coerce_argument_for_parameter(arg: IrExpression, param_type: &JavaType) -> IrExpression {
+    if !is_sequence_core_type(param_type) {
+        return arg;
+    }
+
+    match extract_java_type(&arg) {
+        Some(JavaType::Reference { name, .. }) if is_iterable_like(&name) => {
+            make_sequence_factory_call("fromIterable", arg, param_type.clone())
+        }
+        Some(JavaType::Reference { name, .. }) if is_stream_type(&name) => {
+            make_sequence_factory_call("fromStream", arg, param_type.clone())
+        }
+        _ => arg,
+    }
+}
+
+fn make_sequence_factory_call(
+    method: &str,
+    argument: IrExpression,
+    result_type: JavaType,
+) -> IrExpression {
+    let span = ir_expression_span(&argument);
+    let factory_identifier = IrExpression::Identifier {
+        name: "SequenceFactory".to_string(),
+        java_type: JavaType::Reference {
+            name: "SequenceFactory".to_string(),
+            generic_args: vec![],
+        },
+        span: span.clone(),
+    };
+
+    IrExpression::MethodCall {
+        receiver: Some(Box::new(factory_identifier)),
+        method_name: method.to_string(),
+        args: vec![argument],
+        argument_style: CallArgumentStyle::Comma,
+        java_type: result_type,
+        span,
+    }
+}
+
+fn is_sequence_core_type(java_type: &JavaType) -> bool {
+    match java_type {
+        JavaType::Reference { name, .. } => {
+            name == "SequenceCore" || name == "jv.collections.SequenceCore"
+        }
+        _ => false,
+    }
+}
+
+fn is_iterable_like(name: &str) -> bool {
+    matches!(
+        name,
+        "java.util.List" | "java.lang.Iterable" | "java.util.Collection"
+    )
+}
+
+fn is_stream_type(name: &str) -> bool {
+    name == "java.util.stream.Stream"
 }
 
 fn lower_system_receiver_expression(expr: Expression) -> Option<(IrExpression, SystemReceiver)> {

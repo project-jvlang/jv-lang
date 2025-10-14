@@ -197,7 +197,7 @@ fn list_type_for(element_type: &JavaType) -> JavaType {
     }
 }
 
-fn boxed_java_type(java_type: &JavaType) -> JavaType {
+pub fn boxed_java_type(java_type: &JavaType) -> JavaType {
     match java_type {
         JavaType::Primitive(name) => {
             let boxed_name = match name.as_str() {
