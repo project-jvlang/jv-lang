@@ -30,6 +30,26 @@ fn test_simple_val_declaration() {
 }
 
 #[test]
+fn test_package_declaration() {
+    let source = "package com.example.app";
+    let program = parse_program(source);
+
+    assert_eq!(
+        program.package.as_deref(),
+        Some("com.example.app"),
+        "expected package name to be captured"
+    );
+    assert_eq!(program.statements.len(), 1, "package declaration should be in statements");
+
+    match &program.statements[0] {
+        Statement::Package { name, .. } => {
+            assert_eq!(name, "com.example.app");
+        }
+        other => panic!("expected package statement, found {:?}", other),
+    }
+}
+
+#[test]
 fn test_program_collects_import_statements() {
     let source = "import java.util.List\nfun main(): Unit {}";
     let program = parse_program(source);

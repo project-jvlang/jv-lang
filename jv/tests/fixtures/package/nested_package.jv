@@ -1,0 +1,5 @@
+package com.example.app.service.impl
+
+fun greet(name: String): String {
+    return "Hello, ${name}"
+}

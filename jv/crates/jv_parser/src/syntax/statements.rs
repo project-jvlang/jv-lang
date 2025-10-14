@@ -18,8 +18,8 @@ use super::support::{
     span_from_token, token_any_comma, token_assign, token_at, token_class, token_colon, token_data,
     token_defer, token_do_keyword, token_dot, token_for, token_fun, token_greater,
     token_in_keyword, token_left_brace, token_left_paren, token_less, token_multiply,
-    token_question, token_return, token_right_brace, token_right_paren, token_spawn, token_use,
-    token_val, token_var, token_where_keyword, token_while_keyword, type_annotation,
+    token_package, token_question, token_return, token_right_brace, token_right_paren, token_spawn,
+    token_use, token_val, token_var, token_where_keyword, token_while_keyword, type_annotation,
 };
 
 fn attempt_statement_parser<P>(
@@ -37,6 +37,7 @@ pub(crate) fn statement_parser(
         let expr = expressions::expression_parser(expression_level_block_parser(statement.clone()));
 
         let comment_stmt = comment_statement_parser();
+        let package_stmt = attempt_statement_parser(package_declaration_parser());
         let import_stmt = attempt_statement_parser(import_statement_parser());
         let val_decl = attempt_statement_parser(val_declaration_parser(expr.clone()));
         let implicit_typed_val_decl =
@@ -55,6 +56,7 @@ pub(crate) fn statement_parser(
 
         choice((
             comment_stmt,
+            package_stmt,
             import_stmt,
             val_decl,
             implicit_typed_val_decl,
@@ -108,6 +110,19 @@ fn comment_statement_parser() -> impl ChumskyParser<Token, Statement, Error = Si
             _ => Err(Simple::expected_input_found(span, Vec::new(), Some(token))),
         }
     })
+}
+
+fn package_declaration_parser() -> impl ChumskyParser<Token, Statement, Error = Simple<Token>> + Clone
+{
+    token_package()
+        .map(|token| span_from_token(&token))
+        .then(qualified_name_with_span())
+        .map(|(package_span, (segments, path_span))| {
+            let span = merge_spans(&package_span, &path_span);
+            let name = segments.join(".");
+
+            Statement::Package { name, span }
+        })
 }
 
 fn import_statement_parser() -> impl ChumskyParser<Token, Statement, Error = Simple<Token>> + Clone

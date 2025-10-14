@@ -57,6 +57,14 @@ pub(crate) fn token_class() -> impl ChumskyParser<Token, Token, Error = Simple<T
     filter(|token: &Token| matches!(token.token_type, TokenType::Class))
 }
 
+pub(crate) fn token_package() -> impl ChumskyParser<Token, Token, Error = Simple<Token>> + Clone {
+    filter(|token: &Token| matches!(token.token_type, TokenType::Package))
+}
+
+pub(crate) fn token_import() -> impl ChumskyParser<Token, Token, Error = Simple<Token>> + Clone {
+    filter(|token: &Token| matches!(token.token_type, TokenType::Import))
+}
+
 pub(crate) fn token_return() -> impl ChumskyParser<Token, Token, Error = Simple<Token>> + Clone {
     filter(|token: &Token| match &token.token_type {
         TokenType::Return => true,

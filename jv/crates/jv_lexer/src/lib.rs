@@ -38,6 +38,8 @@ pub enum TokenType {
     True,
     False,
     Null,
+    Package,
+    Import,
 
     // Operators
     Assign,         // =

@@ -1162,3 +1162,51 @@ fn sequence_interpolation_materializes_sequences_before_string_format() {
         );
     }
 }
+
+#[test]
+fn pipeline_parses_package_declarations() {
+    let fixtures = [
+        ("simple_package", "com.example.app"),
+        ("nested_package", "com.example.app.service.impl"),
+        ("package_with_class", "org.jv.test"),
+        ("package_single_segment", "utils"),
+    ];
+
+    for (name, expected_package) in &fixtures {
+        let fixture = workspace_file(&format!("tests/fixtures/package/{}.jv", name));
+        let temp_dir = TempDirGuard::new(&format!("package-{name}"))
+            .expect("create temp directory for package fixture");
+        let plan = compose_plan_from_fixture(
+            temp_dir.path(),
+            &fixture,
+            CliOverrides {
+                java_only: true,
+                ..CliOverrides::default()
+            },
+        );
+
+        let artifacts = compile(&plan).expect(&format!("package fixture {} compiles", name));
+
+        // Verify that Java files were generated
+        assert!(
+            !artifacts.java_files.is_empty(),
+            "expected generated Java files for {}",
+            name
+        );
+
+        // Read generated Java source to verify package declaration
+        for java_file in &artifacts.java_files {
+            let java_source = fs::read_to_string(java_file)
+                .expect(&format!("read generated Java for {}", name));
+
+            // Verify package declaration in generated Java code
+            assert!(
+                java_source.contains(&format!("package {};", expected_package)),
+                "expected 'package {};' in generated Java for {}, got:\n{}",
+                expected_package,
+                name,
+                java_source
+            );
+        }
+    }
+}
