@@ -1,8 +1,8 @@
 // jv_lsp - Language Server Protocol implementation
 mod handlers;
 
-pub use handlers::imports::{ImportItem, ImportsParams, ImportsResponse};
 use handlers::imports::build_imports_response;
+pub use handlers::imports::{ImportItem, ImportsParams, ImportsResponse};
 use jv_ast::types::TypeLevelExpr;
 use jv_ast::{
     ConstParameter, GenericParameter, GenericSignature, Program, Span, Statement, TypeAnnotation,
@@ -579,10 +579,7 @@ impl JvLanguageServer {
         Ok(lowered_import_plan(&resolved_imports))
     }
 
-    pub fn imports_response(
-        &self,
-        content: &str,
-    ) -> Result<ImportsResponse, ImportPlanError> {
+    pub fn imports_response(&self, content: &str) -> Result<ImportsResponse, ImportPlanError> {
         let plan = self.import_plan_from_content(content)?;
         Ok(build_imports_response(&plan))
     }

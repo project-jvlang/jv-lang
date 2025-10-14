@@ -7,8 +7,7 @@ use tokio::sync::{Mutex, RwLock};
 use tower_lsp::{
     jsonrpc::{Error, ErrorCode, Result as LspResult},
     lsp_types::*,
-    LspService,
-    Server,
+    LspService, Server,
 };
 
 #[tokio::main]
@@ -60,9 +59,7 @@ fn map_diagnostic(diag: jv_lsp::Diagnostic) -> Diagnostic {
         }),
         message: diag.message,
         source: diag.source.clone(),
-        code: diag
-            .code
-            .map(tower_lsp::lsp_types::NumberOrString::String),
+        code: diag.code.map(tower_lsp::lsp_types::NumberOrString::String),
         ..Default::default()
     }
 }
@@ -247,9 +244,8 @@ impl tower_lsp::LanguageServer for Backend {
     ) -> LspResult<Option<serde_json::Value>> {
         match method {
             "jv/imports" => {
-                let params: ImportsParams = serde_json::from_value(params).map_err(|error| {
-                    Error::invalid_params(format!("Invalid params: {error}"))
-                })?;
+                let params: ImportsParams = serde_json::from_value(params)
+                    .map_err(|error| Error::invalid_params(format!("Invalid params: {error}")))?;
                 let uri = params.text_document.uri.to_string();
                 let content = {
                     let docs = self.documents.read().await;
@@ -296,7 +292,9 @@ impl Backend {
             .collect::<Vec<_>>();
 
         if let Ok(url) = Url::parse(&uri) {
-            self.client.publish_diagnostics(url, lsp_diagnostics, None).await;
+            self.client
+                .publish_diagnostics(url, lsp_diagnostics, None)
+                .await;
         }
     }
 

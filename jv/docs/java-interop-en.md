@@ -716,6 +716,43 @@ declare explicit parameter names; the implicit `it` placeholder is not supported
    }
    ```
 
+### Inspecting Resolved Imports
+
+- **CLI verbose mode** – `jv build --verbose` prints a bilingual summary for every resolved import, including aliases and inferred module dependencies. This is the quickest way to confirm that smart import resolution found the symbols you expected.
+
+  ```console
+  $ jv build --verbose --java-only src/main.jv
+  解決済み import 一覧 / Resolved import list
+    - import java.time.LocalDate → 型 import: java.time.LocalDate / Type import: java.time.LocalDate (別名: Date / Alias: Date)
+    - import static java.lang.Math.max → 静的 import: java.lang.Math.max / Static import: java.lang.Math.max
+    - import static java.util.Collections.* → 静的 import: java.util.Collections.* / Static import: java.util.Collections.*
+    - import module java.sql → モジュール import: java.sql / Module import: java.sql (モジュール依存: java.sql / Module dependency: java.sql)
+  ```
+
+  Switching the target to Java 21 removes the module entry automatically while keeping the remaining imports intact.
+
+- **LSP request `jv/imports`** – Editor integrations can call the custom request with `{ "textDocument": { "uri": "file:///path/to/Main.jv" } }` to receive structured data:
+
+  ```json
+  {
+    "imports": [
+      {
+        "statement": "import module java.sql",
+        "summary": { "ja": "モジュール import: java.sql", "en": "Module import: java.sql" },
+        "details": [
+          { "ja": "モジュール依存: java.sql", "en": "Module dependency: java.sql" }
+        ],
+        "kind": { "type": "module", "name": "java.sql" },
+        "module_dependency": "java.sql"
+      }
+    ]
+  }
+  ```
+
+  Each item also carries the source range, enabling editors to highlight the original `import` statement or provide quick navigation.
+
+- **Symbol-index performance guard** – The first build writes a cache file to `target/jv/symbol-index/` that stores the index alongside metrics (`build_ms`, `artifact_count`, optional `memory_bytes`). Run the CLI with `RUST_LOG=jv::build::symbol_index=info` to surface lines such as `Indexed symbols from scratch action=cold-build artifact_inputs=146 duration_ms=732`, confirming that large JDK/classpath scans stay within budget. Subsequent warm builds emit `action=cache-hit`, showing that the cached index was reused.
+
 ### Type Safety
 
 1. **Use Specific Types**: Prefer specific Java types over generic ones

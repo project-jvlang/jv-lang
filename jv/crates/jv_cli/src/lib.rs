@@ -185,7 +185,10 @@ pub fn resolved_imports_header(has_entries: bool) -> String {
     };
     let args = HashMap::new();
     let fallback = if has_entries {
-        ("解決済み import 一覧".to_string(), "Resolved import list".to_string())
+        (
+            "解決済み import 一覧".to_string(),
+            "Resolved import list".to_string(),
+        )
     } else {
         (
             "解決済み import はありません".to_string(),
@@ -204,10 +207,7 @@ pub fn format_resolved_import(import: &IrImport) -> String {
             bilingual_line_or(
                 "imports.plan.type.summary",
                 &args,
-                (
-                    format!("型 import: {fqcn}"),
-                    format!("Type import: {fqcn}"),
-                ),
+                (format!("型 import: {fqcn}"), format!("Type import: {fqcn}")),
             )
         }
         IrImportDetail::Package { name } => {
@@ -262,10 +262,7 @@ fn import_extras(import: &IrImport) -> String {
         entries.push(bilingual_line_or(
             "imports.plan.alias.summary",
             &args,
-            (
-                format!("別名: {alias}"),
-                format!("Alias: {alias}"),
-            ),
+            (format!("別名: {alias}"), format!("Alias: {alias}")),
         ));
     }
 
@@ -309,10 +306,7 @@ fn bilingual_line_or(
     format!("{ja} / {en}")
 }
 
-fn render_bilingual(
-    key: &str,
-    args: &HashMap<&str, String>,
-) -> Option<(String, String)> {
+fn render_bilingual(key: &str, args: &HashMap<&str, String>) -> Option<(String, String)> {
     let ja = catalog(LocaleCode::Ja).render(key, args)?;
     let en = catalog(LocaleCode::En).render(key, args)?;
     Some((ja, en))

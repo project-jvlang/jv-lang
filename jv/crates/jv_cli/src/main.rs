@@ -22,13 +22,8 @@ use jv_cli::pipeline::{
 };
 use jv_cli::tour::TourOrchestrator;
 use jv_cli::{
-    format_resolved_import,
-    get_version,
-    init_project as cli_init_project,
-    resolved_imports_header,
-    tooling_failure,
-    Cli,
-    Commands,
+    format_resolved_import, get_version, init_project as cli_init_project, resolved_imports_header,
+    tooling_failure, Cli, Commands,
 };
 use jv_pm::{Manifest, PackageInfo, ProjectSection};
 

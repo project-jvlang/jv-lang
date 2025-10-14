@@ -51,22 +51,22 @@ pub fn build_imports_response(plan: &[IrImport]) -> ImportsResponse {
         .map(|import| {
             let internal_range = span_to_range(&import.span);
             ImportItem {
-            statement: render_statement(import),
-            summary: summary_text(import),
-            details: detail_texts(import),
-            kind: import_kind(import),
-            module_dependency: import.module_dependency.clone(),
-            range: Some(Range {
-                start: Position {
-                    line: internal_range.start.line,
-                    character: internal_range.start.character,
-                },
-                end: Position {
-                    line: internal_range.end.line,
-                    character: internal_range.end.character,
-                },
-            }),
-        }
+                statement: render_statement(import),
+                summary: summary_text(import),
+                details: detail_texts(import),
+                kind: import_kind(import),
+                module_dependency: import.module_dependency.clone(),
+                range: Some(Range {
+                    start: Position {
+                        line: internal_range.start.line,
+                        character: internal_range.start.character,
+                    },
+                    end: Position {
+                        line: internal_range.end.line,
+                        character: internal_range.end.character,
+                    },
+                }),
+            }
         })
         .collect();
     ImportsResponse { imports }
@@ -148,19 +148,13 @@ fn detail_texts(import: &IrImport) -> Vec<BilingualText> {
 
 fn import_kind(import: &IrImport) -> ImportKind {
     match &import.detail {
-        IrImportDetail::Type { fqcn } => ImportKind::Type {
-            fqcn: fqcn.clone(),
-        },
-        IrImportDetail::Package { name } => ImportKind::Package {
-            name: name.clone(),
-        },
+        IrImportDetail::Type { fqcn } => ImportKind::Type { fqcn: fqcn.clone() },
+        IrImportDetail::Package { name } => ImportKind::Package { name: name.clone() },
         IrImportDetail::Static { owner, member } => ImportKind::Static {
             owner: owner.clone(),
             member: member.clone(),
         },
-        IrImportDetail::Module { name } => ImportKind::Module {
-            name: name.clone(),
-        },
+        IrImportDetail::Module { name } => ImportKind::Module { name: name.clone() },
     }
 }
 

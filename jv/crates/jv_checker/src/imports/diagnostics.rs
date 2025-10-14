@@ -70,16 +70,13 @@ pub fn unknown_import(path: &str, span: &Span, candidates: &[String]) -> Enhance
 
     let mut diagnostic = EnhancedDiagnostic::new(descriptor, message, Some(span.clone()));
     if !candidates.is_empty() {
-        let suggestions = candidates
-            .iter()
-            .take(MAX_SUGGESTIONS)
-            .map(|candidate| {
-                let mut args = HashMap::new();
-                args.insert("candidate", candidate.clone());
-                bilingual_inline("imports.diagnostic.unknown.suggestion", &args).unwrap_or_else(|| {
-                    format!("`import {candidate}` を使用 / Use `import {candidate}`")
-                })
-            });
+        let suggestions = candidates.iter().take(MAX_SUGGESTIONS).map(|candidate| {
+            let mut args = HashMap::new();
+            args.insert("candidate", candidate.clone());
+            bilingual_inline("imports.diagnostic.unknown.suggestion", &args).unwrap_or_else(|| {
+                format!("`import {candidate}` を使用 / Use `import {candidate}`")
+            })
+        });
         diagnostic = diagnostic.with_suggestions(suggestions);
     }
     diagnostic
@@ -119,9 +116,8 @@ pub fn ambiguous_import(path: &str, span: &Span, candidates: &[String]) -> Enhan
         });
         diagnostic = diagnostic.with_suggestions(suggestions);
     } else {
-        let fallback = String::from(
-            "`as` で別名を付けて曖昧さを解消 / Use `as` to provide an explicit alias",
-        );
+        let fallback =
+            String::from("`as` で別名を付けて曖昧さを解消 / Use `as` to provide an explicit alias");
         let args = HashMap::new();
         let suggestion = bilingual_inline("imports.diagnostic.ambiguous.generic_suggestion", &args)
             .unwrap_or(fallback);
