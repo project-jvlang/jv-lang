@@ -912,6 +912,42 @@ fn trivia_records_whitespace_for_array_elements() {
 }
 
 #[test]
+fn layout_commas_preserve_whitespace_array_of_expressions() {
+    let source = "[i (i +1) i +2 i+3 i +4]";
+    let mut lexer = Lexer::new(source.to_string());
+    let tokens = lexer.tokenize().expect("lex whitespace-delimited array");
+
+    assert!(
+        !tokens
+            .iter()
+            .any(|token| matches!(token.token_type, TokenType::Comma)),
+        "explicit commas should not be synthesized for whitespace arrays"
+    );
+
+    let spaced_element_starts = tokens
+        .iter()
+        .filter(|token| {
+            token.leading_trivia.newlines == 0
+                && token.leading_trivia.spaces > 0
+                && matches!(token.token_type, TokenType::Identifier(_) | TokenType::LeftParen)
+        })
+        .count();
+    assert_eq!(
+        spaced_element_starts, 4,
+        "whitespace gaps between elements should be preserved via trivia"
+    );
+
+    let identifier_count = tokens
+        .iter()
+        .filter(|token| matches!(token.token_type, TokenType::Identifier(ref name) if name == "i"))
+        .count();
+    assert!(
+        identifier_count >= 5,
+        "expected repeated identifier tokens for each element"
+    );
+}
+
+#[test]
 fn trivia_records_absence_of_whitespace_for_comma_arrays() {
     let mut lexer = Lexer::new("[1,2,3]".to_string());
     let tokens = lexer.tokenize().unwrap();

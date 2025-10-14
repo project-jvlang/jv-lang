@@ -1,5 +1,56 @@
 use super::support::parse_program;
-use jv_ast::{CallArgumentStyle, Expression, SequenceDelimiter, Statement};
+use jv_ast::{
+    Argument, BinaryOp, CallArgumentStyle, Expression, SequenceDelimiter, Statement, UnaryOp,
+};
+
+fn assert_offset_array_structure(elements: &[Expression]) {
+    assert_eq!(
+        elements.len(),
+        7,
+        "layout-delimited array should surface seven expression nodes"
+    );
+
+    match &elements[0] {
+        Expression::Identifier(name, _) => assert_eq!(name, "i"),
+        other => panic!("expected leading identifier element, found {:?}", other),
+    }
+
+    match &elements[1] {
+        Expression::Binary { op, .. } if *op == BinaryOp::Add => {}
+        other => panic!(
+            "expected parenthesized addition element at position 1, found {:?}",
+            other
+        ),
+    }
+
+    match &elements[2] {
+        Expression::Identifier(name, _) => assert_eq!(name, "i"),
+        other => panic!("expected identifier before unary plus, found {:?}", other),
+    }
+
+    match &elements[3] {
+        Expression::Unary { op, .. } if *op == UnaryOp::Plus => {}
+        other => panic!("expected unary plus offset element, found {:?}", other),
+    }
+
+    match &elements[4] {
+        Expression::Binary { op, .. } if *op == BinaryOp::Add => {}
+        other => panic!(
+            "expected tight addition element at position 4, found {:?}",
+            other
+        ),
+    }
+
+    match &elements[5] {
+        Expression::Identifier(name, _) => assert_eq!(name, "i"),
+        other => panic!("expected trailing identifier before last unary plus, found {:?}", other),
+    }
+
+    match &elements[6] {
+        Expression::Unary { op, .. } if *op == UnaryOp::Plus => {}
+        other => panic!("expected final unary plus offset element, found {:?}", other),
+    }
+}
 
 #[test]
 fn whitespace_array_does_not_leak_into_comma_array() {
@@ -33,6 +84,63 @@ fn whitespace_array_does_not_leak_into_comma_array() {
         },
         other => panic!("expected val declaration, found {:?}", other),
     }
+}
+
+#[test]
+fn whitespace_array_with_expression_elements_preserves_structure() {
+    let program = parse_program("val offsets = [i (i +1) i +2 i+3 i +4]");
+    let statement = program
+        .statements
+        .get(0)
+        .expect("expected offsets declaration");
+
+    let Statement::ValDeclaration { initializer, .. } = statement else {
+        panic!("expected val declaration for offsets");
+    };
+
+    let Expression::Array {
+        elements, delimiter, ..
+    } = initializer
+    else {
+        panic!("expected array initializer for offsets");
+    };
+
+    assert_eq!(*delimiter, SequenceDelimiter::Whitespace);
+    assert_offset_array_structure(elements);
+}
+
+#[test]
+fn whitespace_array_inside_lambda_body_preserves_delimiter() {
+    let program =
+        parse_program("val mapped = numbers.map { i -> [i (i +1) i +2 i+3 i +4] }");
+    let statement = program
+        .statements
+        .get(0)
+        .expect("expected mapped declaration");
+
+    let Statement::ValDeclaration { initializer, .. } = statement else {
+        panic!("expected val declaration for mapped");
+    };
+
+    let Expression::Call { args, .. } = initializer else {
+        panic!("expected call expression for mapped initializer");
+    };
+
+    assert_eq!(args.len(), 1, "expected single lambda argument to map");
+
+    let Argument::Positional(Expression::Lambda { body, .. }) = &args[0] else {
+        panic!("expected lambda argument to map call");
+    };
+
+    let Expression::Array {
+        elements, delimiter, ..
+    } = body.as_ref()
+    else {
+        panic!("expected lambda body to be an array literal");
+    };
+
+    assert_eq!(*delimiter, SequenceDelimiter::Whitespace);
+    assert_offset_array_structure(elements);
 }
 
 #[test]

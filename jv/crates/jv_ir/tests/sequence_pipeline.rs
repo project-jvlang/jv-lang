@@ -50,6 +50,20 @@ fn add(lhs: Expression, rhs: Expression) -> Expression {
     }
 }
 
+fn add_offset(rhs: &str) -> Expression {
+    add(identifier("i"), number_literal(rhs))
+}
+
+fn whitespace_offset_array() -> Expression {
+    array_literal(vec![
+        identifier("i"),
+        add_offset("1"),
+        add_offset("2"),
+        add_offset("3"),
+        add_offset("4"),
+    ])
+}
+
 fn multiply(lhs: Expression, rhs: Expression) -> Expression {
     Expression::Binary {
         left: Box::new(lhs),
@@ -567,6 +581,87 @@ fn whitespace_list_literal_becomes_list_sequence_source() {
         "list literal elements should lower to literal IR nodes",
     );
     assert_eq!(pipeline.stages.len(), 2, "map + filter stages expected");
+}
+
+#[test]
+fn whitespace_array_with_offsets_lowers_to_array_creation() {
+    let mut context = TransformContext::new();
+    context.add_variable("i".to_string(), JavaType::int());
+
+    let ir = transform_expression(whitespace_offset_array(), &mut context)
+        .expect("offset array literal lowers to IR");
+
+    let IrExpression::ArrayCreation {
+        element_type,
+        initializer,
+        delimiter,
+        ..
+    } = ir
+    else {
+        panic!("expected array creation IR");
+    };
+
+    let elements = initializer.expect("array literal initializer present");
+    assert_eq!(delimiter, SequenceDelimiter::Whitespace);
+    assert_eq!(element_type, JavaType::int());
+    assert_eq!(elements.len(), 5, "array should preserve all elements");
+    assert!(
+        matches!(elements[0], IrExpression::Identifier { ref name, .. } if name == "i"),
+        "first element should remain an identifier",
+    );
+    assert!(
+        elements.iter().skip(1).all(|element| matches!(
+            element,
+            IrExpression::Binary {
+                op: BinaryOp::Add, ..
+            }
+        )),
+        "subsequent elements should remain binary additions"
+    );
+}
+
+#[test]
+fn whitespace_array_inside_lambda_preserves_array_creation_body() {
+    let mut context = TransformContext::new();
+    let lambda_expr = lambda(&["i"], whitespace_offset_array());
+
+    let ir =
+        transform_expression(lambda_expr, &mut context).expect("lambda lowers to IR expression");
+
+    let IrExpression::Lambda {
+        param_names,
+        param_types,
+        body,
+        ..
+    } = ir
+    else {
+        panic!("expected lambda IR");
+    };
+
+    assert_eq!(param_names, vec!["i".to_string()]);
+    assert_eq!(param_types, vec![JavaType::object()]);
+
+    let IrExpression::ArrayCreation {
+        initializer,
+        delimiter,
+        ..
+    } = *body
+    else {
+        panic!("expected lambda body to remain array creation");
+    };
+
+    let elements = initializer.expect("array literal initializer present");
+    assert_eq!(delimiter, SequenceDelimiter::Whitespace);
+    assert_eq!(elements.len(), 5);
+    assert!(
+        elements.iter().skip(1).all(|element| matches!(
+            element,
+            IrExpression::Binary {
+                op: BinaryOp::Add, ..
+            }
+        )),
+        "lambda should retain binary additions inside array literal"
+    );
 }
 
 #[test]
