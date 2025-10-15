@@ -17,8 +17,6 @@ pub enum ClassParseError {
     UnsupportedConstant { tag: u8 },
     #[error("invalid constant pool index {index}")]
     InvalidConstantIndex { index: u16 },
-    #[error("invalid UTF-8 string in constant pool: {0}")]
-    Utf8Decode(#[from] std::string::FromUtf8Error),
     #[error("malformed descriptor: {0}")]
     InvalidDescriptor(String),
 }
@@ -276,7 +274,9 @@ impl ConstantPool {
                 1 => {
                     let length = reader.read_u2()? as usize;
                     let bytes = reader.read_slice(length)?;
-                    let string = String::from_utf8(bytes.to_vec())?;
+                    // Java class files use Modified UTF-8, which may not be standard UTF-8.
+                    // Use lossy conversion to handle invalid sequences gracefully.
+                    let string = String::from_utf8_lossy(bytes).into_owned();
                     Constant::Utf8(string)
                 }
                 3 | 4 => {
@@ -596,7 +596,7 @@ impl<'a> DescriptorParser<'a> {
         }
         let name = &self.bytes[start..self.pos];
         self.pos += 1; // consume ';'
-        let fqcn = String::from_utf8(name.to_vec())?.replace('/', ".");
+        let fqcn = String::from_utf8_lossy(name).replace('/', ".");
         Ok(JavaType::Reference {
             name: fqcn,
             generic_args: Vec::new(),
