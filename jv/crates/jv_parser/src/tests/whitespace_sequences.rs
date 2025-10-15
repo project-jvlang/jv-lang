@@ -189,3 +189,49 @@ fn whitespace_call_does_not_force_following_calls_to_layout_style() {
         other => panic!("expected val declaration, found {:?}", other),
     }
 }
+
+#[test]
+fn whitespace_call_supports_parenthesized_static_access() {
+    let program = parse_program(
+        "fun builder() {
+    return StreamSupport.stream(
+        values()
+        false
+    )
+}",
+    );
+
+    let statement = program
+        .statements
+        .iter()
+        .find_map(|stmt| match stmt {
+            Statement::FunctionDeclaration { body, .. } => Some(body),
+            _ => None,
+        })
+        .expect("expected function declaration");
+
+    let Expression::Block { statements, .. } = statement.as_ref() else {
+        panic!("expected block body");
+    };
+
+    let return_expr = match statements.first() {
+        Some(Statement::Return { value, .. }) => value.as_ref().expect("return expression"),
+        other => panic!("expected return statement, found {:?}", other),
+    };
+
+    let Expression::Call {
+        args,
+        argument_metadata,
+        ..
+    } = return_expr
+    else {
+        panic!("expected return call expression");
+    };
+
+    assert_eq!(argument_metadata.style, CallArgumentStyle::Whitespace);
+    assert_eq!(
+        args.len(),
+        2,
+        "expected two positional arguments parsed via whitespace"
+    );
+}

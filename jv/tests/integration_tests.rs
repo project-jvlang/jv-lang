@@ -448,6 +448,47 @@ fn pipeline_preserves_annotations_in_java_output() {
 }
 
 #[test]
+fn sequence_runtime_java_omits_null_prints() {
+    let temp_dir = TempDirGuard::new("sequence-runtime-null").expect("create temp dir");
+    let input = workspace_file("test_simple.jv");
+
+    let plan = compose_plan_from_fixture(
+        temp_dir.path(),
+        &input,
+        CliOverrides {
+            java_only: true,
+            ..CliOverrides::default()
+        },
+    );
+
+    let artifacts = compile(&plan).expect("sequence runtime compilation succeeds");
+
+    let offending = artifacts
+        .java_files
+        .iter()
+        .filter(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .map(|name| name.contains("Sequence"))
+                .unwrap_or(false)
+        })
+        .find_map(|path| {
+            let source = fs::read_to_string(path).expect("read generated Java");
+            if source.contains("System.out.println(null)") {
+                Some(path.clone())
+            } else {
+                None
+            }
+        });
+
+    assert!(
+        offending.is_none(),
+        "Sequence runtime should not emit System.out.println(null) (file: {})",
+        offending.unwrap().display()
+    );
+}
+
+#[test]
 fn pipeline_emit_types_produces_type_facts_json() {
     let temp_dir = TempDirGuard::new("pipeline-emit-types").expect("create temp dir");
     let input = workspace_file("test_simple.jv");

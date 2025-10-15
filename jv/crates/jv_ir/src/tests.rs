@@ -2378,7 +2378,7 @@ mod tests {
     }
 
     #[test]
-    fn test_whitespace_call_mixed_type_returns_error() {
+    fn test_whitespace_call_mixed_type_is_permitted() {
         let mut context = test_context();
 
         let whitespace_call = IrExpression::MethodCall {
@@ -2394,21 +2394,10 @@ mod tests {
             span: dummy_span(),
         };
 
-        let error = infer_java_type(None, Some(&whitespace_call), &mut context)
-            .expect_err("mixed whitespace call should error");
+        let inferred = infer_java_type(None, Some(&whitespace_call), &mut context)
+            .expect("mixed whitespace call should be accepted");
 
-        match error {
-            TransformError::WhitespaceSequenceTypeMismatch {
-                expected, found, ..
-            } => {
-                assert!(expected.contains("int") || expected.contains("Int"));
-                assert!(found.contains("String"));
-            }
-            other => panic!(
-                "expected whitespace sequence mismatch error, got {:?}",
-                other
-            ),
-        }
+        assert_eq!(inferred, JavaType::void());
     }
 
     // Test for type annotation conversion

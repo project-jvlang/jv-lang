@@ -63,18 +63,8 @@ pub fn compile_stdlib_modules(
     let mut generated_files = Vec::new();
 
     for module in &modules {
-        match compile_module(module, output_dir, target, format, parallel_config) {
-            Ok(files) => generated_files.extend(files),
-            Err(ModuleError::Unsupported(reason)) => {
-                eprintln!(
-                    "warning: falling back to prebuilt Sequence runtime: {}",
-                    reason
-                );
-                let fallback = write_prebuilt_sequence(output_dir)?;
-                generated_files.extend(fallback);
-            }
-            Err(ModuleError::Fatal(err)) => return Err(err),
-        }
+        let files = compile_module(module, output_dir, target, format, parallel_config)?;
+        generated_files.extend(files);
     }
 
     Ok(generated_files)
@@ -161,20 +151,17 @@ fn compile_module(
     target: JavaTarget,
     format: bool,
     parallel_config: ParallelInferenceConfig,
-) -> Result<Vec<PathBuf>, ModuleError> {
+) -> Result<Vec<PathBuf>> {
     let program = match JvParser::parse(&module.source) {
         Ok(program) => program,
         Err(error) => {
             if let Some(diagnostic) = from_parse_error(&error) {
-                return Err(ModuleError::Unsupported(tooling_failure(
+                return Err(tooling_failure(
                     module.path.as_path(),
                     diagnostic.with_strategy(DiagnosticStrategy::Deferred),
-                )));
+                ));
             }
-            return Err(ModuleError::Unsupported(anyhow!(
-                "Parser error: {:?}",
-                error
-            )));
+            return Err(anyhow!("Parser error: {:?}", error));
         }
     };
 
@@ -183,20 +170,17 @@ fn compile_module(
         Ok(()) => type_checker.take_inference_snapshot(),
         Err(errors) => {
             if let Some(diagnostic) = errors.iter().find_map(from_check_error) {
-                return Err(ModuleError::Fatal(tooling_failure(
+                return Err(tooling_failure(
                     module.path.as_path(),
                     diagnostic.with_strategy(DiagnosticStrategy::Deferred),
-                )));
+                ));
             }
             let details = errors
                 .iter()
                 .map(|error| error.to_string())
                 .collect::<Vec<_>>()
                 .join("; ");
-            return Err(ModuleError::Fatal(anyhow!(
-                "Type checking failed: {}",
-                details
-            )));
+            return Err(anyhow!("Type checking failed: {}", details));
         }
     };
 
@@ -207,15 +191,12 @@ fn compile_module(
         Ok(ir) => ir,
         Err(error) => {
             if let Some(diagnostic) = from_transform_error(&error) {
-                return Err(ModuleError::Fatal(tooling_failure(
+                return Err(tooling_failure(
                     module.path.as_path(),
                     diagnostic.with_strategy(DiagnosticStrategy::Deferred),
-                )));
+                ));
             }
-            return Err(ModuleError::Fatal(anyhow!(
-                "IR transformation error: {:?}",
-                error
-            )));
+            return Err(anyhow!("IR transformation error: {:?}", error));
         }
     };
 
@@ -229,7 +210,7 @@ fn compile_module(
     let mut generator = JavaCodeGenerator::with_config(codegen_config);
     let java_unit = generator
         .generate_compilation_unit(&ir_program)
-        .map_err(|error| ModuleError::Fatal(anyhow!("Code generation error: {:?}", error)))?;
+        .map_err(|error| anyhow!("Code generation error: {:?}", error))?;
 
     let formatter = JavaFormatter::default();
     let package_path = java_unit
@@ -248,11 +229,11 @@ fn compile_module(
             directory.push(package_dir);
         }
         fs::create_dir_all(&directory).map_err(|error| {
-            ModuleError::Fatal(anyhow!(
+            anyhow!(
                 "Failed to create directory {}: {}",
                 directory.display(),
                 error
-            ))
+            )
         })?;
 
         let java_path = directory.join(format!("{}.java", file_name));
@@ -285,13 +266,8 @@ fn compile_module(
             java_content
         };
 
-        fs::write(&java_path, java_content).map_err(|error| {
-            ModuleError::Fatal(anyhow!(
-                "Failed to write {}: {}",
-                java_path.display(),
-                error
-            ))
-        })?;
+        fs::write(&java_path, java_content)
+            .map_err(|error| anyhow!("Failed to write {}: {}", java_path.display(), error))?;
         emitted_paths.push(java_path);
     }
 
@@ -303,20 +279,15 @@ fn compile_module(
 
     if !manifest.declarations.is_empty() {
         let manifest_json = serde_json::to_string_pretty(&manifest).map_err(|error| {
-            ModuleError::Fatal(anyhow!(
+            anyhow!(
                 "Failed to serialize generic manifest for {}: {}",
                 module.path.display(),
                 error
-            ))
+            )
         })?;
         let manifest_path = output_dir.join(format!("{}-generics.json", module.script_main_class));
-        fs::write(&manifest_path, manifest_json).map_err(|error| {
-            ModuleError::Fatal(anyhow!(
-                "Failed to write {}: {}",
-                manifest_path.display(),
-                error
-            ))
-        })?;
+        fs::write(&manifest_path, manifest_json)
+            .map_err(|error| anyhow!("Failed to write {}: {}", manifest_path.display(), error))?;
         emitted_paths.push(manifest_path);
     }
 
@@ -527,207 +498,45 @@ fn clean_type_token(raw: &str) -> String {
     split.trim().to_string()
 }
 
-enum ModuleError {
-    Unsupported(anyhow::Error),
-    Fatal(anyhow::Error),
-}
-
-const STDLIB_SEQUENCE_JAVA: &str = r#"package jv.collections;
-
-import java.util.Objects;
-import java.util.stream.Stream;
-import java.util.stream.StreamSupport;
-
-public final class StdlibCollectionsSequence {
-    private StdlibCollectionsSequence() {}
-
-    public static <T> SequenceCore<T> sequenceFromIterable(Iterable<T> source) {
-        Objects.requireNonNull(source, "source");
-        Stream<T> stream = StreamSupport.stream(source.spliterator(), false);
-        return new SequenceCore<>(stream);
-    }
-
-    public static <T> SequenceCore<T> sequenceFromStream(Stream<T> stream) {
-        Objects.requireNonNull(stream, "stream");
-        return new SequenceCore<>(stream);
-    }
-}
-"#;
-
-const SEQUENCE_CORE_JAVA: &str = r#"package jv.collections;
-
-import java.lang.IllegalArgumentException;
-import java.util.ArrayList;
-import java.util.Comparator;
-import java.util.Iterator;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Objects;
-import java.util.function.BiFunction;
-import java.util.function.BinaryOperator;
-import java.util.function.Consumer;
-import java.util.function.Function;
-import java.util.function.Predicate;
-import java.util.stream.Stream;
-import java.util.stream.StreamSupport;
-
-public final class SequenceCore<T> implements AutoCloseable, Iterable<T> {
-    private final Stream<T> delegate;
-
-    SequenceCore(Stream<T> delegate) {
-        this.delegate = Objects.requireNonNull(delegate, "delegate");
-    }
-
-    public Stream<T> toStream() {
-        return delegate;
-    }
-
-    @Override
-    public Iterator<T> iterator() {
-        return delegate.iterator();
-    }
-
-    @Override
-    public void close() {
-        delegate.close();
-    }
-
-    public <R> SequenceCore<R> map(Function<? super T, ? extends R> transform) {
-        Objects.requireNonNull(transform, "transform");
-        return StdlibCollectionsSequence.sequenceFromStream(delegate.map(transform));
-    }
-
-    public SequenceCore<T> filter(Predicate<? super T> predicate) {
-        Objects.requireNonNull(predicate, "predicate");
-        return StdlibCollectionsSequence.sequenceFromStream(delegate.filter(predicate));
-    }
-
-    public SequenceCore<T> take(int count) {
-        return StdlibCollectionsSequence.sequenceFromStream(delegate.limit(count));
-    }
-
-    public SequenceCore<T> drop(int count) {
-        return StdlibCollectionsSequence.sequenceFromStream(delegate.skip(count));
-    }
-
-    public <R> SequenceCore<R> flatMap(Function<? super T, ? extends Iterable<R>> transform) {
-        Objects.requireNonNull(transform, "transform");
-        Stream<R> flattened = delegate.flatMap(value -> {
-            Iterable<R> next = transform.apply(value);
-            return StreamSupport.stream(next.spliterator(), false);
-        });
-        return StdlibCollectionsSequence.sequenceFromStream(flattened);
-    }
-
-    public <R> SequenceCore<R> flatMapSequence(Function<? super T, SequenceCore<R>> transform) {
-        Objects.requireNonNull(transform, "transform");
-        Stream<R> flattened = delegate.flatMap(value -> transform.apply(value).toStream());
-        return StdlibCollectionsSequence.sequenceFromStream(flattened);
-    }
-
-    public SequenceCore<T> sorted() {
-        return StdlibCollectionsSequence.sequenceFromStream(delegate.sorted());
-    }
-
-    public <R extends Comparable<R>> SequenceCore<T> sortedBy(Function<? super T, ? extends R> selector) {
-        Objects.requireNonNull(selector, "selector");
-        Comparator<T> comparator = Comparator.comparing(selector);
-        return StdlibCollectionsSequence.sequenceFromStream(delegate.sorted(comparator));
-    }
-
-    public List<T> toList() {
-        return delegate.toList();
-    }
-
-    public <R> R fold(R initial, BiFunction<R, ? super T, R> operation) {
-        Objects.requireNonNull(operation, "operation");
-        R accumulator = initial;
-        for (T value : this) {
-            accumulator = operation.apply(accumulator, value);
-        }
-        return accumulator;
-    }
-
-    public T reduce(BinaryOperator<T> operation) {
-        Objects.requireNonNull(operation, "operation");
-        boolean hasValue = false;
-        T accumulator = null;
-        for (T value : this) {
-            if (!hasValue) {
-                accumulator = value;
-                hasValue = true;
-            } else {
-                accumulator = operation.apply(accumulator, value);
-            }
-        }
-        if (!hasValue) {
-            throw new IllegalArgumentException("Sequence reduce() on empty source");
-        }
-        return accumulator;
-    }
-
-    public long count() {
-        return delegate.count();
-    }
-
-    public long sum() {
-        long total = 0;
-        for (T candidate : this) {
-            Object value = candidate;
-            if (value instanceof Number number) {
-                total += number.longValue();
-            } else {
-                throw new IllegalArgumentException("sum() requires numeric elements");
-            }
-        }
-        return total;
-    }
-
-    public void forEach(Consumer<? super T> action) {
-        delegate.forEach(action);
-    }
-
-    public <K> Map<K, List<T>> groupBy(Function<? super T, ? extends K> keySelector) {
-        Objects.requireNonNull(keySelector, "keySelector");
-        LinkedHashMap<K, List<T>> result = new LinkedHashMap<>();
-        for (T element : this) {
-            K key = keySelector.apply(element);
-            result.computeIfAbsent(key, ignored -> new ArrayList<>()).add(element);
-        }
-        return result;
-    }
-
-    public <K, V> Map<K, V> associate(Function<? super T, Map.Entry<K, V>> transform) {
-        Objects.requireNonNull(transform, "transform");
-        LinkedHashMap<K, V> result = new LinkedHashMap<>();
-        for (T element : this) {
-            Map.Entry<K, V> entry = transform.apply(element);
-            result.put(entry.getKey(), entry.getValue());
-        }
-        return result;
-    }
-}
-"#;
-
-fn write_prebuilt_sequence(output_dir: &Path) -> Result<Vec<PathBuf>> {
-    let package_dir = output_dir.join("jv/collections");
-    fs::create_dir_all(&package_dir)?;
-
-    let helpers_path = package_dir.join("StdlibCollectionsSequence.java");
-    fs::write(&helpers_path, STDLIB_SEQUENCE_JAVA)?;
-
-    let core_path = package_dir.join("SequenceCore.java");
-    fs::write(&core_path, SEQUENCE_CORE_JAVA)?;
-
-    Ok(vec![helpers_path, core_path])
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use jv_ast::Span;
     use jv_ir::{IrModifiers, IrStatement};
+    use std::{
+        fs,
+        time::{SystemTime, UNIX_EPOCH},
+    };
+
+    #[test]
+    fn compile_module_returns_error_on_parse_failure() {
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis();
+        let temp_root =
+            std::env::temp_dir().join(format!("jv-embedded-stdlib-parse-{}", timestamp));
+        let output_dir = temp_root.join("out");
+        fs::create_dir_all(&output_dir).expect("create temp output directory");
+
+        let module = StdlibModule {
+            path: temp_root.join("broken_sequence.jv"),
+            source: "fun this is not valid syntax".to_string(),
+            script_main_class: "BrokenSequence".to_string(),
+        };
+
+        let result = compile_module(
+            &module,
+            &output_dir,
+            JavaTarget::Java25,
+            false,
+            ParallelInferenceConfig::default(),
+        );
+
+        assert!(result.is_err(), "expected parse failure, got {result:?}");
+
+        let _ = fs::remove_dir_all(&temp_root);
+    }
 
     #[test]
     fn collect_manifest_includes_generic_metadata() {

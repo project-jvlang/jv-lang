@@ -162,17 +162,23 @@ fn validate_whitespace_call(
     context: &mut TransformContext,
 ) -> Result<(), TransformError> {
     let mut canonical: Option<JavaType> = None;
+    let mut heterogeneous = false;
 
     for arg in args {
         if let Some(arg_type) = extract_java_type(arg) {
             match &canonical {
                 Some(expected) if *expected != arg_type => {
-                    return Err(sequence_type_mismatch(expected, &arg_type, span));
+                    heterogeneous = true;
+                    break;
                 }
                 None => canonical = Some(arg_type.clone()),
                 _ => {}
             }
         }
+    }
+
+    if heterogeneous {
+        return Ok(());
     }
 
     if let Some(arg_type) = canonical {

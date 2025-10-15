@@ -8,7 +8,6 @@ import java.util.LinkedHashMap
 import java.util.List
 import java.util.Map
 import java.util.stream.Stream
-import java.util.stream.StreamSupport
 
 /**
  * SequenceCore は Java Stream を直接保持する最小限の遅延チェーンコンテナ。
@@ -23,14 +22,15 @@ data SequenceCore<T>(stream: Stream<T>)
  */
 
 fun <T> sequenceFromIterable(source: Iterable<T>): SequenceCore<T> {
-    val stream: Stream<T> = StreamSupport.stream
+    val stream: Stream<T> = java.util.stream.StreamSupport.stream(
         source.spliterator()
         false
-    return SequenceCore<T>(stream)
+    )
+    return SequenceCore(stream)
 }
 
 fun <T> sequenceFromStream(stream: Stream<T>): SequenceCore<T> {
-    return SequenceCore<T>(stream)
+    return SequenceCore(stream)
 }
 
 fun <T> SequenceCore<T>.iterator(): Iterator<T> {
@@ -87,9 +87,10 @@ fun <T> SequenceCore<T>.drop(count: Int): SequenceCore<T> {
 fun <T, R> SequenceCore<T>.flatMap(transform: (T) -> Iterable<R>): SequenceCore<R> {
     return sequenceFromStream(
         this.toStream().flatMap { value ->
-            StreamSupport.stream
+            java.util.stream.StreamSupport.stream(
                 transform(value).spliterator()
                 false
+            )
         }
     )
 }
