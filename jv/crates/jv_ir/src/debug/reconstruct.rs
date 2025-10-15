@@ -319,6 +319,7 @@ impl<'a> ReconstructionContext<'a> {
             }
             IrStatement::MethodDeclaration {
                 name,
+                type_parameters,
                 parameters,
                 return_type,
                 body,
@@ -357,7 +358,7 @@ impl<'a> ReconstructionContext<'a> {
 
                 Ok(Statement::FunctionDeclaration {
                     name: name.clone(),
-                    type_parameters: Vec::new(),
+                    type_parameters: type_parameters.iter().map(|tp| tp.name.clone()).collect(),
                     generic_signature: None,
                     where_clause: None,
                     parameters: params,

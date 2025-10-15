@@ -108,10 +108,10 @@ impl JavaCodeGenerator {
         if !script_statements.is_empty()
             || !script_methods.is_empty()
             || !hoisted_regex_fields.is_empty()
-        {
-            let script_class = &self.config.script_main_class;
-            let mut builder = self.builder();
-            builder.push_line(&format!("public final class {} {{", script_class));
+            {
+                let script_class = self.config.script_main_class.clone();
+                let mut builder = self.builder();
+                builder.push_line(&format!("public final class {} {{", script_class));
             builder.indent();
 
             if !hoisted_regex_fields.is_empty() {
@@ -144,11 +144,25 @@ impl JavaCodeGenerator {
                 }
             }
 
-            for method in &script_methods {
-                builder.push_line("");
-                let method_code = self.generate_method(method)?;
-                Self::push_lines(&mut builder, &method_code);
+            let pushed_script_class = !script_methods.is_empty();
+            if pushed_script_class {
+                self.metadata_path.push(script_class.clone());
             }
+
+            let methods_result = (|| -> Result<(), CodeGenError> {
+                for method in &script_methods {
+                    builder.push_line("");
+                    let method_code = self.generate_method(method)?;
+                    Self::push_lines(&mut builder, &method_code);
+                }
+                Ok(())
+            })();
+
+            if pushed_script_class {
+                self.metadata_path.pop();
+            }
+
+            methods_result?;
 
             builder.dedent();
             builder.push_line("}");

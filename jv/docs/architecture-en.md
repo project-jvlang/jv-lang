@@ -174,7 +174,7 @@ Thread.ofVirtual().start(() -> doWork())
 ```rust
 pub enum IrStatement {
     ClassDeclaration { name: String, modifiers: IrModifiers, fields: Vec<IrField>, methods: Vec<IrMethod> },
-    MethodDeclaration { name: String, modifiers: IrModifiers, parameters: Vec<IrParameter>, return_type: JavaType, body: Vec<IrStatement> },
+    MethodDeclaration { name: String, type_parameters: Vec<IrTypeParameter>, modifiers: IrModifiers, parameters: Vec<IrParameter>, return_type: JavaType, body: Vec<IrStatement> },
     VariableDeclaration { name: String, java_type: JavaType, initializer: Option<IrExpression> },
     Assignment { target: String, value: IrExpression },
     Return { value: Option<IrExpression> },

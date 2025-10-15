@@ -622,6 +622,8 @@ pub enum IrStatement {
     // Method declarations
     MethodDeclaration {
         name: String,
+        #[serde(default)]
+        type_parameters: Vec<IrTypeParameter>,
         parameters: Vec<IrParameter>,
         return_type: JavaType,
         body: Option<IrExpression>, // None for abstract methods

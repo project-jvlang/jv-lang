@@ -102,6 +102,7 @@ fn example1_program() -> IrProgram {
 
     let evaluate_method = IrStatement::MethodDeclaration {
         name: "evaluate".to_string(),
+        type_parameters: vec![],
         parameters: vec![IrParameter {
             name: "x".to_string(),
             java_type: object_type,
@@ -237,6 +238,7 @@ fn example2_program() -> IrProgram {
 
     let method = IrStatement::MethodDeclaration {
         name: "categorize".to_string(),
+        type_parameters: vec![],
         parameters: vec![IrParameter {
             name: "score".to_string(),
             java_type: int_type(),
@@ -376,6 +378,7 @@ fn example5_program() -> IrProgram {
 
     let total_method = IrStatement::MethodDeclaration {
         name: "total".to_string(),
+        type_parameters: vec![],
         parameters: vec![IrParameter {
             name: "value".to_string(),
             java_type: outer_type,

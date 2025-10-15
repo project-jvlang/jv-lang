@@ -295,6 +295,7 @@ pub fn desugar_top_level_function(
             body,
             modifiers,
             span,
+            type_parameters,
             ..
         } => {
             // Convert return type
@@ -302,6 +303,11 @@ pub fn desugar_top_level_function(
                 Some(type_ann) => convert_type_annotation(type_ann)?,
                 None => JavaType::void(),
             };
+
+            let ir_type_parameters = type_parameters
+                .into_iter()
+                .map(|tp| crate::types::IrTypeParameter::new(tp, span.clone()))
+                .collect::<Vec<_>>();
 
             // Register the function's return type so subsequent calls can resolve it.
             context
@@ -381,6 +387,7 @@ pub fn desugar_top_level_function(
             // Create method declaration
             Ok(IrStatement::MethodDeclaration {
                 name,
+                type_parameters: ir_type_parameters,
                 parameters: ir_parameters,
                 return_type: java_return_type,
                 body: Some(ir_body),

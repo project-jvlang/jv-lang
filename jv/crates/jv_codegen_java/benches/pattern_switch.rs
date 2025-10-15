@@ -123,6 +123,7 @@ fn build_switch_program(
 
     let match_method = IrStatement::MethodDeclaration {
         name: method_name.to_string(),
+        type_parameters: vec![],
         parameters: vec![IrParameter {
             name: subject_name.to_string(),
             java_type: subject_type,

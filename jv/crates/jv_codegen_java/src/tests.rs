@@ -6,8 +6,9 @@ use jv_ir::TransformContext;
 use jv_ir::{
     DataFormat, IrCaseLabel, IrCommentKind, IrDeconstructionComponent, IrDeconstructionPattern,
     IrExpression, IrImplicitWhenEnd, IrModifiers, IrParameter, IrProgram, IrRecordComponent,
-    IrSampleDeclaration, IrStatement, IrSwitchCase, IrVisibility, JavaType, MethodOverload,
-    PrimitiveType, SampleMode, SampleRecordDescriptor, SampleRecordField, SampleSourceKind, Schema,
+    IrSampleDeclaration, IrStatement, IrSwitchCase, IrTypeParameter, IrVisibility, JavaType,
+    MethodOverload, PrimitiveType, SampleMode, SampleRecordDescriptor, SampleRecordField,
+    SampleSourceKind, Schema,
 };
 use jv_parser::Parser;
 use serde_json::to_string_pretty;
@@ -310,6 +311,7 @@ fn load_read_string_call() -> IrExpression {
 fn load_users_method() -> IrStatement {
     IrStatement::MethodDeclaration {
         name: "loadUsers".to_string(),
+        type_parameters: vec![],
         parameters: vec![],
         return_type: string_type(),
         body: Some(IrExpression::Block {
@@ -412,6 +414,7 @@ fn simple_method() -> IrStatement {
     };
     IrStatement::MethodDeclaration {
         name: "sayHello".to_string(),
+        type_parameters: vec![],
         parameters: vec![],
         return_type: string_type(),
         body: Some(body),
@@ -534,6 +537,7 @@ fn snapshot_program() -> IrProgram {
 
     let method = IrStatement::MethodDeclaration {
         name: "greet".to_string(),
+        type_parameters: vec![],
         parameters: vec![IrParameter {
             name: "input".to_string(),
             java_type: string_type(),
@@ -586,6 +590,66 @@ fn class_generation_renders_members() {
     assert!(class_code.contains("private final String greeting = \"Hello\";"));
     assert!(class_code.contains("public String sayHello"));
     assert!(class_code.contains("return this.greeting"));
+}
+
+#[test]
+fn method_generation_renders_generic_type_parameters() {
+    let mut generator = JavaCodeGenerator::new();
+    let span = dummy_span();
+    let iterable_type = JavaType::Reference {
+        name: "Iterable".to_string(),
+        generic_args: vec![JavaType::Reference {
+            name: "T".to_string(),
+            generic_args: vec![],
+        }],
+    };
+    let sequence_core_type = JavaType::Reference {
+        name: "SequenceCore".to_string(),
+        generic_args: vec![JavaType::Reference {
+            name: "T".to_string(),
+            generic_args: vec![],
+        }],
+    };
+
+    let method = IrStatement::MethodDeclaration {
+        name: "sequenceFromIterable".to_string(),
+        type_parameters: vec![IrTypeParameter::new("T", span.clone())],
+        parameters: vec![IrParameter {
+            name: "source".to_string(),
+            java_type: iterable_type,
+            modifiers: IrModifiers::default(),
+            span: span.clone(),
+        }],
+        return_type: sequence_core_type.clone(),
+        body: Some(IrExpression::Block {
+            statements: vec![IrStatement::Return {
+                value: Some(IrExpression::Literal(Literal::Null, span.clone())),
+                span: span.clone(),
+            }],
+            java_type: sequence_core_type,
+            span: span.clone(),
+        }),
+        modifiers: IrModifiers {
+            visibility: IrVisibility::Private,
+            is_static: true,
+            ..IrModifiers::default()
+        },
+        throws: vec![],
+        span,
+    };
+
+    let code = generator
+        .generate_method(&method)
+        .expect("method generation should succeed");
+
+    let first_line = code
+        .lines()
+        .next()
+        .expect("method should have a signature line");
+    assert_eq!(
+        first_line,
+        "private static <T> SequenceCore<T> sequenceFromIterable(Iterable<T> source) {"
+    );
 }
 
 #[test]
@@ -944,6 +1008,7 @@ fn snapshot_ir_program() {
           {
             "MethodDeclaration": {
               "name": "greet",
+              "type_parameters": [],
               "parameters": [
                 {
                   "name": "input",
