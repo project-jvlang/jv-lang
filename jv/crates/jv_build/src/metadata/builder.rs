@@ -1,9 +1,8 @@
 use super::cache::{CacheStoreStats, SymbolIndexCache};
 use super::classfile::{parse_class, parse_module_info, ClassParseError, ModuleInfo};
 use super::index::{ModuleEntry, SymbolIndex, TypeEntry};
-use crate::config::BuildConfig;
+use crate::{config::BuildConfig, jdk};
 use jv_pm::JavaTarget;
-use std::env;
 use std::ffi::OsStr;
 use std::fs::{self, File};
 use std::io::{self, BufReader, Read};
@@ -459,22 +458,7 @@ enum ArtifactKind {
 }
 
 fn detect_java_home() -> Option<PathBuf> {
-    if let Ok(path) = env::var("JAVA_HOME") {
-        let candidate = PathBuf::from(path);
-        if candidate.exists() {
-            return Some(candidate);
-        }
-    }
-
-    if let Ok(java_path) = which::which("java") {
-        if let Some(bin_dir) = java_path.parent() {
-            if let Some(home) = bin_dir.parent() {
-                return Some(home.to_path_buf());
-            }
-        }
-    }
-
-    None
+    jdk::discover_jdk().map(|info| info.java_home).ok()
 }
 
 fn expand_classpath(raw: &[String]) -> Vec<PathBuf> {

@@ -1,6 +1,7 @@
 // jv_build - Build system and javac integration
 mod compat;
 mod config;
+mod jdk;
 pub mod metadata;
 
 pub use compat::{
@@ -25,6 +26,10 @@ pub enum BuildError {
     JavacError(String),
     #[error("JDK not found: {0}")]
     JdkNotFound(String),
+    #[error("Unsupported JDK version '{detected}', expected 21 or 25")]
+    UnsupportedJdkVersion { detected: u32 },
+    #[error("Failed to parse JDK version: {0}")]
+    JdkVersionParse(String),
     #[error("IO error: {0}")]
     IoError(#[from] std::io::Error),
     #[error("Compatibility analysis error: {0}")]
@@ -77,7 +82,9 @@ impl BuildSystem {
         }
 
         // Build javac command
-        let mut cmd = Command::new("javac");
+        let jdk = jdk::discover_jdk()?;
+        let mut cmd = Command::new(&jdk.javac_path);
+        cmd.env("JAVA_HOME", &jdk.java_home);
 
         // Add compiler options
         for option in &self.config.compiler_options {
@@ -114,37 +121,26 @@ impl BuildSystem {
 
     /// Check if javac is available and get version
     pub fn check_javac_availability(&self) -> Result<String, BuildError> {
-        let try_version = |flag: &str| -> Result<Option<String>, BuildError> {
-            let output = Command::new("javac")
-                .arg(flag)
-                .output()
-                .map_err(|_| BuildError::JdkNotFound("javac command not found".to_string()))?;
+        let info = jdk::discover_jdk()?;
+        let output = Command::new(&info.javac_path)
+            .arg("--version")
+            .output()
+            .map_err(|error| {
+                BuildError::JdkNotFound(format!(
+                    "Failed to execute '{} --version': {}",
+                    info.javac_path.display(),
+                    error
+                ))
+            })?;
 
-            if output.status.success() {
-                let stderr = String::from_utf8_lossy(&output.stderr);
-                let stdout = String::from_utf8_lossy(&output.stdout);
-                let version = if !stderr.trim().is_empty() {
-                    stderr.trim().to_string()
-                } else {
-                    stdout.trim().to_string()
-                };
-                Ok(Some(version))
-            } else {
-                Ok(None)
-            }
-        };
-
-        if let Some(version) = try_version("--version")? {
-            return Ok(version);
+        let mut version = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if version.is_empty() {
+            version = String::from_utf8_lossy(&output.stderr).trim().to_string();
         }
-
-        if let Some(version) = try_version("-version")? {
-            return Ok(version);
+        if version.is_empty() {
+            version = format!("javac {}", info.major_version);
         }
-
-        Err(BuildError::JdkNotFound(
-            "javac not available (version check failed)".to_string(),
-        ))
+        Ok(version)
     }
 
     /// Create output directory if it doesn't exist

@@ -604,7 +604,7 @@ pub mod pipeline {
             .with_context(|| format!("Failed to read file: {}", entrypoint.display()))?;
 
         let parse_start = Instant::now();
-        let program = match JvParser::parse(&source) {
+        let mut program = match JvParser::parse(&source) {
             Ok(program) => program,
             Err(error) => {
                 if let Some(diagnostic) = from_parse_error(&error) {
@@ -616,6 +616,8 @@ pub mod pipeline {
                 return Err(anyhow!("Parser error: {:?}", error));
             }
         };
+
+        embedded_stdlib::rewrite_collection_property_access(&mut program);
         let parse_duration = parse_start.elapsed();
 
         warnings.extend(sequence_warnings::collect_sequence_warnings(&program));
@@ -652,6 +654,10 @@ pub mod pipeline {
             }
         }
 
+        let stdlib_catalog = embedded_stdlib::stdlib_catalog()?;
+        let mut stdlib_usage =
+            embedded_stdlib::StdlibUsage::from_resolved_imports(&resolved_imports, stdlib_catalog);
+        stdlib_usage.record_program_usage(&program, stdlib_catalog);
         let import_plan = lowered_import_plan(&resolved_imports);
         let module_count = import_plan
             .iter()
@@ -809,6 +815,8 @@ pub mod pipeline {
         let java_unit = code_generator
             .generate_compilation_unit(&ir_program)
             .map_err(|e| anyhow!("Code generation error: {:?}", e))?;
+        stdlib_usage
+            .extend_with_java_imports(java_unit.imports.iter().map(|s| s.as_str()), stdlib_catalog);
 
         fs::create_dir_all(&options.output_dir).with_context(|| {
             format!(
@@ -835,6 +843,7 @@ pub mod pipeline {
             }
             java_content.push('\n');
             java_content.push_str(type_decl);
+            stdlib_usage.scan_java_source(type_decl, stdlib_catalog);
 
             if options.format {
                 let formatter = JavaFormatter::default();
@@ -854,6 +863,8 @@ pub mod pipeline {
             plan.build_config.target,
             options.format,
             options.parallel_config,
+            &stdlib_usage,
+            Arc::clone(&symbol_index),
         )?;
         java_files.extend(stdlib_helpers);
 
@@ -888,38 +899,32 @@ pub mod pipeline {
         if !options.java_only {
             let build_system = BuildSystem::new(build_config.clone());
 
-            match build_system.check_javac_availability() {
-                Ok(version) => {
-                    artifacts.javac_version = Some(version.clone());
-                    let java_paths: Vec<&Path> =
-                        artifacts.java_files.iter().map(|p| p.as_path()).collect();
-                    if !java_paths.is_empty() {
-                        build_system
-                            .compile_java_files(java_paths)
-                            .map_err(|e| anyhow!("Java compilation failed: {}", e))?;
+            let javac_version = build_system
+                .check_javac_availability()
+                .map_err(|err| anyhow!("JDK not available: {}", err))?;
+            artifacts.javac_version = Some(javac_version);
 
-                        let entries = fs::read_dir(&options.output_dir).with_context(|| {
-                            format!(
-                                "Failed to enumerate output directory: {}",
-                                options.output_dir.display()
-                            )
-                        })?;
+            let java_paths: Vec<&Path> = artifacts.java_files.iter().map(|p| p.as_path()).collect();
+            if !java_paths.is_empty() {
+                build_system
+                    .compile_java_files(java_paths)
+                    .map_err(|e| anyhow!("Java compilation failed: {}", e))?;
 
-                        let mut class_files = Vec::new();
-                        for entry in entries {
-                            let path = entry?.path();
-                            if path.extension().and_then(OsStr::to_str) == Some("class") {
-                                class_files.push(path);
-                            }
-                        }
-                        artifacts.class_files = class_files;
+                let entries = fs::read_dir(&options.output_dir).with_context(|| {
+                    format!(
+                        "Failed to enumerate output directory: {}",
+                        options.output_dir.display()
+                    )
+                })?;
+
+                let mut class_files = Vec::new();
+                for entry in entries {
+                    let path = entry?.path();
+                    if path.extension().and_then(OsStr::to_str) == Some("class") {
+                        class_files.push(path);
                     }
                 }
-                Err(err) => {
-                    artifacts
-                        .warnings
-                        .push(format!("Skipping Java compilation: {}", err));
-                }
+                artifacts.class_files = class_files;
             }
         }
 
