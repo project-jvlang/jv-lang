@@ -446,6 +446,14 @@ impl<'a> SymbolIndexBuilder<'a> {
             entry.add_static_method(name, signature);
         }
 
+        for name in parsed.instance_fields {
+            entry.add_instance_field(name);
+        }
+
+        for name in parsed.instance_methods {
+            entry.add_instance_method(name);
+        }
+
         index.insert_type(entry);
         Ok(())
     }

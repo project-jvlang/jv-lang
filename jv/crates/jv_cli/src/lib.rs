@@ -812,6 +812,7 @@ pub mod pipeline {
         codegen_config.script_main_class = script_main_class.clone();
 
         let mut code_generator = JavaCodeGenerator::with_config(codegen_config);
+        code_generator.set_symbol_index(Some(Arc::clone(&symbol_index)));
         let java_unit = code_generator
             .generate_compilation_unit(&ir_program)
             .map_err(|e| anyhow!("Code generation error: {:?}", e))?;

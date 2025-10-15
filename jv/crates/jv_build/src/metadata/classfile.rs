@@ -3,6 +3,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use thiserror::Error;
 
+const ACC_PUBLIC: u16 = 0x0001;
+const ACC_PROTECTED: u16 = 0x0004;
 const ACC_STATIC: u16 = 0x0008;
 
 #[derive(Debug, Error)]
@@ -27,6 +29,8 @@ pub struct ParsedClass {
     pub package: String,
     pub static_fields: Vec<(String, JavaType)>,
     pub static_methods: Vec<(String, JavaMethodSignature)>,
+    pub instance_fields: Vec<String>,
+    pub instance_methods: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -71,6 +75,7 @@ pub fn parse_class(bytes: &[u8]) -> Result<ParsedClass, ClassParseError> {
     }
 
     let mut static_fields = Vec::new();
+    let mut instance_fields = Vec::new();
     let fields_count = reader.read_u2()?;
     for _ in 0..fields_count {
         let access_flags = reader.read_u2()?;
@@ -81,16 +86,22 @@ pub fn parse_class(bytes: &[u8]) -> Result<ParsedClass, ClassParseError> {
         let name = constant_pool.utf8(name_index)?;
         let descriptor = constant_pool.utf8(descriptor_index)?;
 
-        if access_flags & ACC_STATIC != 0 {
+        let is_static = access_flags & ACC_STATIC != 0;
+        let is_accessible = access_flags & (ACC_PUBLIC | ACC_PROTECTED) != 0;
+
+        if is_static {
             if let Ok(java_type) = parse_field_descriptor(descriptor) {
                 static_fields.push((name.to_string(), java_type));
             }
+        } else if is_accessible {
+            instance_fields.push(name.to_string());
         }
 
         skip_attributes(&mut reader, attributes_count)?;
     }
 
     let mut static_methods = Vec::new();
+    let mut instance_methods = Vec::new();
     let methods_count = reader.read_u2()?;
     for _ in 0..methods_count {
         let access_flags = reader.read_u2()?;
@@ -101,10 +112,17 @@ pub fn parse_class(bytes: &[u8]) -> Result<ParsedClass, ClassParseError> {
         let name = constant_pool.utf8(name_index)?;
         let descriptor = constant_pool.utf8(descriptor_index)?;
 
-        if access_flags & ACC_STATIC != 0 && name != "<clinit>" {
-            if let Ok(signature) = parse_method_descriptor(descriptor) {
-                static_methods.push((name.to_string(), signature));
+        let is_static = access_flags & ACC_STATIC != 0;
+        let is_accessible = access_flags & (ACC_PUBLIC | ACC_PROTECTED) != 0;
+
+        if is_static {
+            if name != "<clinit>" {
+                if let Ok(signature) = parse_method_descriptor(descriptor) {
+                    static_methods.push((name.to_string(), signature));
+                }
             }
+        } else if is_accessible && name != "<init>" {
+            instance_methods.push(name.to_string());
         }
 
         skip_attributes(&mut reader, attributes_count)?;
@@ -126,6 +144,8 @@ pub fn parse_class(bytes: &[u8]) -> Result<ParsedClass, ClassParseError> {
         package,
         static_fields,
         static_methods,
+        instance_fields,
+        instance_methods,
     })
 }
 

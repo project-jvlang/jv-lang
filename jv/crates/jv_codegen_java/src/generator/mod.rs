@@ -3,6 +3,7 @@ use crate::config::JavaCodeGenConfig;
 use crate::error::CodeGenError;
 use crate::target_version::TargetedJavaEmitter;
 use jv_ast::{BinaryOp, CallArgumentStyle, Literal, SequenceDelimiter, UnaryOp};
+use jv_build::metadata::SymbolIndex;
 use jv_ir::{
     CompletableFutureOp, IrCaseLabel, IrCatchClause, IrDeconstructionComponent,
     IrDeconstructionPattern, IrExpression, IrForEachKind, IrForLoopMetadata, IrGenericMetadata,
@@ -12,6 +13,7 @@ use jv_ir::{
     VirtualThreadOp,
 };
 use std::collections::{BTreeMap, HashMap};
+use std::sync::Arc;
 
 mod declarations;
 mod expressions;
@@ -31,6 +33,7 @@ pub struct JavaCodeGenerator {
     generic_metadata: BTreeMap<String, IrGenericMetadata>,
     metadata_path: Vec<String>,
     package: Option<String>,
+    symbol_index: Option<Arc<SymbolIndex>>,
 }
 
 impl JavaCodeGenerator {
@@ -49,7 +52,12 @@ impl JavaCodeGenerator {
             generic_metadata: BTreeMap::new(),
             metadata_path: Vec::new(),
             package: None,
+            symbol_index: None,
         }
+    }
+
+    pub fn set_symbol_index(&mut self, index: Option<Arc<SymbolIndex>>) {
+        self.symbol_index = index;
     }
 
     pub fn generate_compilation_unit(
@@ -108,10 +116,10 @@ impl JavaCodeGenerator {
         if !script_statements.is_empty()
             || !script_methods.is_empty()
             || !hoisted_regex_fields.is_empty()
-            {
-                let script_class = self.config.script_main_class.clone();
-                let mut builder = self.builder();
-                builder.push_line(&format!("public final class {} {{", script_class));
+        {
+            let script_class = self.config.script_main_class.clone();
+            let mut builder = self.builder();
+            builder.push_line(&format!("public final class {} {{", script_class));
             builder.indent();
 
             if !hoisted_regex_fields.is_empty() {
@@ -238,6 +246,10 @@ impl JavaCodeGenerator {
         self.variance_stack.clear();
         self.sequence_helper = None;
         self.metadata_path.clear();
+    }
+
+    fn symbol_index(&self) -> Option<&SymbolIndex> {
+        self.symbol_index.as_deref()
     }
 
     fn metadata_lookup_key(&self) -> Option<String> {

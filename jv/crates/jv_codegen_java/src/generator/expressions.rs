@@ -51,11 +51,13 @@ impl JavaCodeGenerator {
                 receiver,
                 field_name,
                 ..
-            } => Ok(format!(
-                "{}.{}",
-                self.generate_expression(receiver)?,
-                field_name
-            )),
+            } => {
+                let receiver_code = self.generate_expression(receiver)?;
+                if self.should_call_method_for_field(receiver.as_ref(), field_name) {
+                    return Ok(format!("{}.{field_name}()", receiver_code));
+                }
+                Ok(format!("{receiver_code}.{field_name}"))
+            }
             IrExpression::ArrayAccess { array, index, .. } => Ok(format!(
                 "{}[{}]",
                 self.generate_expression(array)?,
@@ -980,6 +982,27 @@ impl JavaCodeGenerator {
         }
     }
 
+    fn should_call_method_for_field(&self, receiver: &IrExpression, field_name: &str) -> bool {
+        if field_name != "size" {
+            return false;
+        }
+
+        if let Some(index) = self.symbol_index() {
+            if let Some(JavaType::Reference { name, .. }) = Self::expression_java_type(receiver) {
+                if let Some(entry) = index.lookup_type(name) {
+                    if entry.has_field(field_name) {
+                        return false;
+                    }
+                    if entry.has_instance_method(field_name) {
+                        return true;
+                    }
+                }
+            }
+        }
+
+        self.is_sequence_core_expression(receiver)
+    }
+
     fn is_sequence_core_type(java_type: &JavaType) -> bool {
         match java_type {
             JavaType::Reference { name, .. } => {
@@ -1472,5 +1495,83 @@ impl JavaCodeGenerator {
                 Self::escape_string(&regex.pattern)
             ),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use jv_build::metadata::{SymbolIndex, TypeEntry};
+    use jv_ir::IrExpression;
+    use std::sync::Arc;
+
+    fn list_identifier(name: &str) -> IrExpression {
+        IrExpression::Identifier {
+            name: name.to_string(),
+            java_type: JavaType::Reference {
+                name: "java.util.List".to_string(),
+                generic_args: Vec::new(),
+            },
+            span: Span::dummy(),
+        }
+    }
+
+    #[test]
+    fn converts_size_field_to_method_when_instance_method_exists() {
+        let mut generator = JavaCodeGenerator::new();
+
+        let mut index = SymbolIndex::new(None);
+        let mut entry = TypeEntry::new("java.util.List".to_string(), "java.util".to_string(), None);
+        entry.add_instance_method("size".to_string());
+        index.types.insert("java.util.List".to_string(), entry);
+
+        generator.set_symbol_index(Some(Arc::new(index)));
+
+        let expr = IrExpression::FieldAccess {
+            receiver: Box::new(list_identifier("items")),
+            field_name: "size".to_string(),
+            java_type: JavaType::Primitive("int".to_string()),
+            span: Span::dummy(),
+        };
+
+        let rendered = generator
+            .generate_expression(&expr)
+            .expect("codegen succeeds");
+        assert_eq!(rendered, "items.size()");
+    }
+
+    #[test]
+    fn preserves_field_access_when_field_exists() {
+        let mut generator = JavaCodeGenerator::new();
+
+        let mut index = SymbolIndex::new(None);
+        let mut entry = TypeEntry::new(
+            "com.example.Counter".to_string(),
+            "com.example".to_string(),
+            None,
+        );
+        entry.add_instance_field("size".to_string());
+        index.types.insert("com.example.Counter".to_string(), entry);
+
+        generator.set_symbol_index(Some(Arc::new(index)));
+
+        let expr = IrExpression::FieldAccess {
+            receiver: Box::new(IrExpression::Identifier {
+                name: "counter".to_string(),
+                java_type: JavaType::Reference {
+                    name: "com.example.Counter".to_string(),
+                    generic_args: Vec::new(),
+                },
+                span: Span::dummy(),
+            }),
+            field_name: "size".to_string(),
+            java_type: JavaType::Primitive("int".to_string()),
+            span: Span::dummy(),
+        };
+
+        let rendered = generator
+            .generate_expression(&expr)
+            .expect("codegen succeeds");
+        assert_eq!(rendered, "counter.size");
     }
 }
