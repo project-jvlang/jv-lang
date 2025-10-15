@@ -1,0 +1,21 @@
+import java.time.LocalDate as Date
+import java.util.*
+import java.util.Collections.*
+import java.lang.Math.max
+import java.sql.DriverManager
+
+fun describeImportPipeline(): String {
+    val today = Date.now()
+    val list: ArrayList<Int> = ArrayList()
+    list.add(3)
+    list.add(1)
+    list.add(4)
+    sort(list)
+    val biggest = max(list.get(0) list.get(2))
+    val drivers = DriverManager.getDrivers()
+    return "today=${today.toString()} first=${list.get(0)} last=${list.get(2)} biggest=${biggest} drivers=${drivers.hasMoreElements()}"
+}
+
+fun main(): Unit {
+    println(describeImportPipeline())
+}

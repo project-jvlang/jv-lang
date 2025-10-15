@@ -3,7 +3,8 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use crate::types::{
-    DataFormat, JavaType, MethodOverload, SampleMode, StaticMethodCall, UtilityClass,
+    DataFormat, IrImport, IrImportDetail, JavaType, MethodOverload, SampleMode, StaticMethodCall,
+    UtilityClass,
 };
 use jv_ast::Span;
 use jv_support::arena::{
@@ -16,6 +17,8 @@ use jv_support::arena::{
 pub struct TransformContext {
     /// Type information gathered from analysis
     pub type_info: HashMap<String, JavaType>,
+    /// Recorded Java signatures for top-level functions
+    pub function_signatures: HashMap<String, Vec<JavaType>>,
     /// Current scope for variable resolution
     pub scope_stack: Vec<HashMap<String, JavaType>>,
     /// Generated utility classes
@@ -36,6 +39,10 @@ pub struct TransformContext {
     pool_state: Option<TransformPoolState>,
     /// Recorded lowering strategies for `when` expressions (telemetry & debugging)
     when_strategies: Vec<WhenStrategyRecord>,
+    /// Resolved import plan used to enrich IR import statements
+    planned_imports: Vec<IrImport>,
+    /// Alias lookup for resolved import entries
+    import_aliases: HashMap<String, JavaType>,
 }
 
 impl TransformContext {
@@ -59,6 +66,7 @@ impl TransformContext {
     pub fn new() -> Self {
         Self {
             type_info: HashMap::new(),
+            function_signatures: HashMap::new(),
             scope_stack: vec![HashMap::new()],
             utility_classes: Vec::new(),
             method_overloads: Vec::new(),
@@ -69,6 +77,8 @@ impl TransformContext {
             temp_counter: 0,
             pool_state: None,
             when_strategies: Vec::new(),
+            planned_imports: Vec::new(),
+            import_aliases: HashMap::new(),
         }
     }
 
@@ -87,12 +97,25 @@ impl TransformContext {
     }
 
     pub fn lookup_variable(&self, name: &str) -> Option<&JavaType> {
+        if let Some(java_type) = self.import_aliases.get(name) {
+            return Some(java_type);
+        }
         for scope in self.scope_stack.iter().rev() {
             if let Some(java_type) = scope.get(name) {
                 return Some(java_type);
             }
         }
         self.type_info.get(name)
+    }
+
+    pub fn register_function_signature(&mut self, name: String, params: Vec<JavaType>) {
+        self.function_signatures.insert(name, params);
+    }
+
+    pub fn function_signature(&self, name: &str) -> Option<&[JavaType]> {
+        self.function_signatures
+            .get(name)
+            .map(|types| types.as_slice())
     }
 
     pub fn fresh_identifier(&mut self, prefix: &str) -> String {
@@ -122,6 +145,37 @@ impl TransformContext {
         let mut ctx = Self::new();
         ctx.pool_state = Some(TransformPoolState::new(pools));
         ctx
+    }
+
+    /// Injects the resolved import plan to be consumed during lowering.
+    pub fn set_resolved_imports(&mut self, imports: Vec<IrImport>) {
+        let mut aliases = HashMap::new();
+        for import in &imports {
+            if let IrImportDetail::Type { fqcn } = &import.detail {
+                let java_type = JavaType::Reference {
+                    name: fqcn.clone(),
+                    generic_args: vec![],
+                };
+
+                if let Some(alias) = &import.alias {
+                    aliases.insert(alias.clone(), java_type.clone());
+                } else if let Some(simple_name) = fqcn.rsplit('.').next() {
+                    aliases.insert(simple_name.to_string(), java_type.clone());
+                }
+            }
+        }
+        self.import_aliases = aliases;
+        self.planned_imports = imports;
+    }
+
+    /// Returns true when the context currently holds a resolved import plan.
+    pub fn has_resolved_imports(&self) -> bool {
+        !self.planned_imports.is_empty()
+    }
+
+    /// Takes ownership of the planned imports, leaving the context empty.
+    pub fn take_resolved_imports(&mut self) -> Vec<IrImport> {
+        std::mem::take(&mut self.planned_imports)
     }
 
     /// Enables pooling for an existing context.
@@ -206,6 +260,7 @@ impl Clone for TransformContext {
     fn clone(&self) -> Self {
         Self {
             type_info: self.type_info.clone(),
+            function_signatures: self.function_signatures.clone(),
             scope_stack: self.scope_stack.clone(),
             utility_classes: self.utility_classes.clone(),
             method_overloads: self.method_overloads.clone(),
@@ -219,6 +274,8 @@ impl Clone for TransformContext {
                 .as_ref()
                 .map(TransformPoolState::shallow_clone),
             when_strategies: self.when_strategies.clone(),
+            planned_imports: self.planned_imports.clone(),
+            import_aliases: self.import_aliases.clone(),
         }
     }
 }

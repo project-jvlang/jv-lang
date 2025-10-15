@@ -99,6 +99,7 @@ pub fn descriptor(code: &str) -> Option<&'static DiagnosticDescriptor> {
     DIAGNOSTICS
         .iter()
         .chain(crate::compat::diagnostics::ENTRIES.iter())
+        .chain(crate::imports::diagnostics::ENTRIES.iter())
         .find(|descriptor| descriptor.code == code)
 }
 
@@ -560,7 +561,7 @@ fn collect_statement_raw_diagnostics(
         | IrStatement::Throw { .. }
         | IrStatement::Break { .. }
         | IrStatement::Continue { .. }
-        | IrStatement::Import { .. }
+        | IrStatement::Import(..)
         | IrStatement::Package { .. } => {}
     }
 }

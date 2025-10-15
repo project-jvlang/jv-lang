@@ -26,3 +26,40 @@ note_hint = "preferredImpl または明示的な型注釈で使用する実装�
 message = "{symbol} の型パラメータ {type_param} は kind {expected} を要求しますが、提供された引数は {actual} でした。"
 note_span = "型引数は {span} で指定されています。"
 note_hint = "kind 注釈または部分適用のスロット数を確認してください。"
+
+[imports.diagnostic.unknown]
+message = "import `{path}` は既知のシンボルに一致しません。"
+message_with_candidates = "import `{path}` は既知のシンボルに一致しません。近い候補:\n{candidates}"
+suggestion = "`import {candidate}` を使用"
+
+[imports.diagnostic.ambiguous]
+message = "import `{path}` は複数のシンボルに一致します。"
+message_with_candidates = "import `{path}` は複数のシンボルに一致します。明示的に選択してください:\n{candidates}"
+suggestion = "`import {candidate}` または `import {candidate} as ...` を使用"
+generic_suggestion = "`as` で別名を付けて曖昧さを解消"
+
+[imports.diagnostic.missing_module]
+message = "モジュール `{module}` がモジュールグラフに存在しないため `{required_by}` を解決できません。"
+suggestion = "`--add-modules {module}` を指定するか jv.toml の build.modules に追加してください。"
+
+[imports.plan]
+header = "解決済み import 一覧"
+header_none = "解決済み import はありません"
+
+[imports.plan.type]
+summary = "型 import: {fqcn}"
+
+[imports.plan.package]
+summary = "パッケージ import: {name}.*"
+
+[imports.plan.static]
+summary = "静的 import: {owner}.{member}"
+
+[imports.plan.module]
+summary = "モジュール import: {name}"
+
+[imports.plan.alias]
+summary = "別名: {alias}"
+
+[imports.plan.module_dependency]
+summary = "モジュール依存: {module}"

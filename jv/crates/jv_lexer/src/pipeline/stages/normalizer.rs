@@ -136,15 +136,15 @@ fn can_begin_layout_item(source: &str, idx: usize, ch: char) -> bool {
         '(' | '[' | '{' => true,
         '@' => true,
         '-' | '+' => {
-            let mut cursor = idx + ch.len_utf8();
-            while let Some(next) = source[cursor..].chars().next() {
-                if next.is_whitespace() {
-                    cursor += next.len_utf8();
-                    continue;
-                }
-                return next.is_ascii_digit();
+            let cursor = idx + ch.len_utf8();
+            if cursor >= source.len() {
+                return false;
             }
-            false
+
+            match source[cursor..].chars().next() {
+                Some(next) if next.is_ascii_digit() => true,
+                _ => false,
+            }
         }
         '$' => true,
         _ => false,

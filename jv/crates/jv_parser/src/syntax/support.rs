@@ -57,6 +57,14 @@ pub(crate) fn token_class() -> impl ChumskyParser<Token, Token, Error = Simple<T
     filter(|token: &Token| matches!(token.token_type, TokenType::Class))
 }
 
+pub(crate) fn token_package() -> impl ChumskyParser<Token, Token, Error = Simple<Token>> + Clone {
+    filter(|token: &Token| matches!(token.token_type, TokenType::Package))
+}
+
+pub(crate) fn token_import() -> impl ChumskyParser<Token, Token, Error = Simple<Token>> + Clone {
+    filter(|token: &Token| matches!(token.token_type, TokenType::Import))
+}
+
 pub(crate) fn token_return() -> impl ChumskyParser<Token, Token, Error = Simple<Token>> + Clone {
     filter(|token: &Token| match &token.token_type {
         TokenType::Return => true,
@@ -413,6 +421,18 @@ pub(crate) fn type_annotation(
     recursive(|annotation| {
         let qualified = qualified_name_with_span();
 
+        let function = annotation
+            .clone()
+            .separated_by(token_any_comma())
+            .allow_trailing()
+            .delimited_by(token_left_paren(), token_right_paren())
+            .then_ignore(token_arrow())
+            .then(annotation.clone())
+            .map(|(params, return_type)| TypeAnnotation::Function {
+                params,
+                return_type: Box::new(return_type),
+            });
+
         let type_arguments = annotation
             .clone()
             .separated_by(token_any_comma())
@@ -434,12 +454,15 @@ pub(crate) fn type_annotation(
                 }
             });
 
-        base.then(token_question().or_not()).map(|(ty, nullable)| {
-            if nullable.is_some() {
-                TypeAnnotation::Nullable(Box::new(ty))
-            } else {
-                ty
-            }
-        })
+        function
+            .or(base)
+            .then(token_question().or_not())
+            .map(|(ty, nullable)| {
+                if nullable.is_some() {
+                    TypeAnnotation::Nullable(Box::new(ty))
+                } else {
+                    ty
+                }
+            })
     })
 }

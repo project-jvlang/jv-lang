@@ -1,0 +1,66 @@
+package jv.test.collections
+
+/**
+ * Test data class with generic type
+ */
+data CollectionWrapper<T>(items: String)
+
+/**
+ * Factory object for creating collections
+ */
+object CollectionFactory {
+    fun <T> createEmpty(): CollectionWrapper<T> {
+        return CollectionWrapper(ArrayList())
+    }
+
+    fun <T> fromList(items: List<T>): CollectionWrapper<T> {
+        return CollectionWrapper(items)
+    }
+}
+
+/**
+ * Top-level utility function
+ */
+fun <T> createSingletonWrapper(item: T): CollectionWrapper<T> {
+    val list: ArrayList<T> = ArrayList()
+    list.add(item)
+    return CollectionWrapper(list)
+}
+
+/**
+ * Extension function on CollectionWrapper
+ */
+fun <T> CollectionWrapper<T>.size(): Int {
+    return this.items.size()
+}
+
+/**
+ * Another extension function
+ */
+fun <T> CollectionWrapper<T>.isEmpty(): Boolean {
+    return this.items.isEmpty()
+}
+
+/**
+ * Extension function on List with generic parameters
+ */
+fun <T, R> List<T>.mapToWrapper(transform: (T) -> R): CollectionWrapper<R> {
+    val result: ArrayList<R> = ArrayList()
+    val iterator = this.iterator()
+    while (iterator.hasNext()) {
+        result.add(transform(iterator.next()))
+    }
+    return CollectionWrapper(result)
+}
+
+/**
+ * Top-level function that uses all components
+ */
+fun demonstrateUsage(): String {
+    val wrapper = CollectionFactory.createEmpty<String>()
+    val singleton = createSingletonWrapper("test")
+    val size = singleton.size()
+    val empty = wrapper.isEmpty()
+
+    return "Size: ${size}, Empty: ${empty}"
+}

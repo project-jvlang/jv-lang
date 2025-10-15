@@ -131,6 +131,7 @@ pub fn desugar_extension_function(
 
     let (
         function_name,
+        function_type_parameters,
         function_parameters,
         function_return_type,
         function_body,
@@ -139,13 +140,22 @@ pub fn desugar_extension_function(
     ) = match *function {
         Statement::FunctionDeclaration {
             name,
+            type_parameters,
             parameters,
             return_type,
             body,
             modifiers,
             span,
             ..
-        } => (name, parameters, return_type, body, modifiers, span),
+        } => (
+            name,
+            type_parameters,
+            parameters,
+            return_type,
+            body,
+            modifiers,
+            span,
+        ),
         _ => {
             return Err(TransformError::ExtensionFunctionError {
                 message: "Extension function must wrap a function declaration".to_string(),
@@ -153,6 +163,11 @@ pub fn desugar_extension_function(
             })
         }
     };
+
+    let ir_type_parameters = function_type_parameters
+        .into_iter()
+        .map(|tp| IrTypeParameter::new(tp, function_span.clone()))
+        .collect::<Vec<_>>();
 
     context.enter_scope();
 
@@ -202,6 +217,7 @@ pub fn desugar_extension_function(
 
     Ok(IrStatement::MethodDeclaration {
         name: function_name,
+        type_parameters: ir_type_parameters,
         parameters: ir_parameters,
         return_type: return_java_type,
         body: Some(body_ir),
@@ -300,6 +316,14 @@ fn replace_this_ir_expression(
     replacement_type: &JavaType,
 ) -> IrExpression {
     match expr {
+        IrExpression::Identifier { name, span, .. } if name == "this" =>
+        {
+            IrExpression::Identifier {
+                name: replacement_name.to_string(),
+                java_type: replacement_type.clone(),
+                span,
+            }
+        }
         IrExpression::This { span, .. } => IrExpression::Identifier {
             name: replacement_name.to_string(),
             java_type: replacement_type.clone(),
@@ -699,6 +723,21 @@ fn replace_this_in_statement(
                 .map(|expr| replace_this_ir_expression(expr, replacement_name, replacement_type)),
             is_final,
             modifiers,
+            span,
+        },
+        IrStatement::ForEach {
+            variable,
+            variable_type,
+            iterable,
+            body,
+            iterable_kind,
+            span,
+        } => IrStatement::ForEach {
+            variable,
+            variable_type,
+            iterable: replace_this_ir_expression(iterable, replacement_name, replacement_type),
+            body: Box::new(replace_this_in_statement(*body, replacement_name, replacement_type)),
+            iterable_kind,
             span,
         },
         other => other,

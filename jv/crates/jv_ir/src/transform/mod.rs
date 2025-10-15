@@ -1,12 +1,14 @@
-use self::utils::extract_java_type;
+use self::utils::{extract_java_type, ir_expression_span};
 use crate::context::TransformContext;
 use crate::error::TransformError;
 use crate::profiling::{PerfMetrics, TransformProfiler};
 use crate::sequence_pipeline;
-use crate::types::{IrCommentKind, IrExpression, IrProgram, IrStatement, JavaType};
+use crate::types::{
+    IrCommentKind, IrExpression, IrImport, IrImportDetail, IrProgram, IrStatement, JavaType,
+};
 use jv_ast::{
-    Argument, BinaryOp, CallArgumentMetadata, CommentKind, ConcurrencyConstruct, Expression,
-    Literal, Program, ResourceManagement, SequenceDelimiter, Span, Statement,
+    Argument, BinaryOp, CallArgumentMetadata, CallArgumentStyle, CommentKind, ConcurrencyConstruct,
+    Expression, Literal, Program, ResourceManagement, SequenceDelimiter, Span, Statement,
 };
 
 mod concurrency;
@@ -171,6 +173,33 @@ pub fn transform_statement(
             },
             context,
         )?]),
+        Statement::DataClassDeclaration {
+            name,
+            parameters,
+            type_parameters,
+            is_mutable,
+            modifiers,
+            span,
+            ..
+        } => Ok(vec![desugar_data_class(
+            name,
+            parameters,
+            type_parameters,
+            is_mutable,
+            modifiers,
+            span,
+            context,
+        )?]),
+        Statement::ExtensionFunction(extension) => Ok(vec![desugar_extension_function(
+            extension.receiver_type,
+            extension.function,
+            extension.span,
+            context,
+        )?]),
+        Statement::Expression {
+            expr: Expression::Identifier(name, _),
+            ..
+        } if name.eq_ignore_ascii_case("as") || is_constructor_like(&name) => Ok(Vec::new()),
         Statement::Expression { expr, span } => {
             let ir_expr = transform_expression(expr, context)?;
             Ok(vec![IrStatement::Expression {
@@ -262,6 +291,7 @@ fn lower_program(
 ) -> Result<IrProgram, TransformError> {
     let Program {
         package,
+        imports,
         statements,
         span,
         ..
@@ -280,9 +310,46 @@ fn lower_program(
 
     let type_declarations = attach_trailing_comments(ir_statements);
 
+    let ir_imports = if context.has_resolved_imports() {
+        context
+            .take_resolved_imports()
+            .into_iter()
+            .map(IrStatement::Import)
+            .collect()
+    } else {
+        imports
+            .into_iter()
+            .filter_map(|statement| {
+                if let Statement::Import {
+                    path,
+                    alias,
+                    is_wildcard,
+                    span,
+                } = statement
+                {
+                    let detail = if is_wildcard {
+                        IrImportDetail::Package { name: path.clone() }
+                    } else {
+                        IrImportDetail::Type { fqcn: path.clone() }
+                    };
+
+                    Some(IrStatement::Import(IrImport {
+                        original: path,
+                        alias,
+                        detail,
+                        module_dependency: None,
+                        span,
+                    }))
+                } else {
+                    None
+                }
+            })
+            .collect()
+    };
+
     Ok(IrProgram {
         package,
-        imports: Vec::new(),
+        imports: ir_imports,
         type_declarations,
         generic_metadata: Default::default(),
         span,
@@ -361,9 +428,9 @@ fn ir_statement_span(statement: &IrStatement) -> Option<Span> {
         | IrStatement::Break { span, .. }
         | IrStatement::Continue { span, .. }
         | IrStatement::Block { span, .. }
-        | IrStatement::Import { span, .. }
         | IrStatement::Package { span, .. }
         | IrStatement::Comment { span, .. } => Some(span.clone()),
+        IrStatement::Import(import) => Some(import.span.clone()),
         IrStatement::SampleDeclaration(decl) => Some(decl.span.clone()),
         IrStatement::Commented { statement, .. } => ir_statement_span(statement),
     }
@@ -391,17 +458,33 @@ pub fn transform_expression(
         }),
         Expression::Identifier(name, span) => {
             if let Some(java_type) = context.lookup_variable(&name).cloned() {
-                Ok(IrExpression::Identifier {
+                return Ok(IrExpression::Identifier {
                     name,
                     java_type,
                     span,
-                })
-            } else {
-                Err(TransformError::ScopeError {
-                    message: format!("Unknown identifier '{name}'"),
-                    span,
-                })
+                });
             }
+
+            if is_constructor_like(&name) {
+                let fqcn = if let Some(package) = context.current_package.as_deref() {
+                    format!("{package}.{name}")
+                } else {
+                    name.clone()
+                };
+                return Ok(IrExpression::Identifier {
+                    name,
+                    java_type: JavaType::Reference {
+                        name: fqcn,
+                        generic_args: vec![],
+                    },
+                    span,
+                });
+            }
+
+            Err(TransformError::ScopeError {
+                message: format!("Unknown identifier '{name}'"),
+                span,
+            })
         }
         Expression::NullSafeMemberAccess {
             object,
@@ -516,11 +599,41 @@ pub fn transform_expression(
             property,
             span,
         } => {
-            if let Some((field_expr, _)) = lower_system_field(*object, property, span.clone()) {
-                Ok(field_expr)
-            } else {
-                Ok(IrExpression::Literal(Literal::Null, Span::default()))
+            if let Some((field_expr, _)) =
+                lower_system_field((*object).clone(), property.clone(), span.clone())
+            {
+                return Ok(field_expr);
             }
+
+            if let Some(segments) = flatten_member_access_chain(&Expression::MemberAccess {
+                object: object.clone(),
+                property: property.clone(),
+                span: span.clone(),
+            }) {
+                if !segments.is_empty()
+                    && context.lookup_variable(&segments[0]).is_none()
+                {
+                    let name = segments.join(".");
+                    let java_type = context
+                        .lookup_variable(&name)
+                        .cloned()
+                        .unwrap_or_else(|| JavaType::Reference {
+                            name: name.clone(),
+                            generic_args: vec![],
+                        });
+                    return Ok(IrExpression::Identifier { name, java_type, span });
+                }
+            }
+
+            let receiver_expr = transform_expression(*object, context)?;
+            let java_type = extract_java_type(&receiver_expr).unwrap_or_else(JavaType::object);
+
+            Ok(IrExpression::FieldAccess {
+                receiver: Box::new(receiver_expr),
+                field_name: property,
+                java_type,
+                span,
+            })
         }
         Expression::Call {
             function,
@@ -606,7 +719,7 @@ fn lower_call_expression(
     context: &mut TransformContext,
 ) -> Result<IrExpression, TransformError> {
     let argument_style = argument_metadata.style;
-    let ir_args = lower_call_arguments(args, context)?;
+    let mut ir_args = lower_call_arguments(args, context)?;
 
     match function {
         Expression::Identifier(name, fn_span) => {
@@ -623,10 +736,55 @@ fn lower_call_expression(
                 });
             }
 
-            let java_type = context
-                .lookup_variable(&name)
-                .cloned()
-                .unwrap_or_else(JavaType::object);
+            if let Some(param_types) = context.function_signature(&name) {
+                if param_types.len() == ir_args.len() {
+                    ir_args = adjust_call_arguments_for_signature(ir_args, param_types);
+                }
+            }
+
+            let resolved_type = context.lookup_variable(&name).cloned();
+
+            if resolved_type.is_none() && is_constructor_like(&name) {
+                let class_name = name.clone();
+                let fqcn = if let Some(package) = context.current_package.as_deref() {
+                    format!("{package}.{class_name}")
+                } else {
+                    class_name.clone()
+                };
+                return Ok(IrExpression::ObjectCreation {
+                    class_name,
+                    generic_args: Vec::new(),
+                    args: ir_args,
+                    java_type: JavaType::Reference {
+                        name: fqcn,
+                        generic_args: vec![],
+                    },
+                    span,
+                });
+            }
+
+            let java_type = resolved_type.unwrap_or_else(JavaType::object);
+
+            if let Some((method_name, return_type)) = functional_interface_method(&java_type) {
+                let receiver = IrExpression::Identifier {
+                    name: name.clone(),
+                    java_type: java_type.clone(),
+                    span: span.clone(),
+                };
+                return Ok(IrExpression::MethodCall {
+                    receiver: Some(Box::new(receiver)),
+                    method_name,
+                    args: ir_args,
+                    argument_style,
+                    java_type: return_type,
+                    span,
+                });
+            }
+
+            #[cfg(debug_assertions)]
+            if name == "SequenceCore" {
+                eprintln!("[debug] lowering call to SequenceCore with inferred type: {:?}", java_type);
+            }
 
             Ok(IrExpression::MethodCall {
                 receiver: None,
@@ -694,6 +852,137 @@ fn lower_call_arguments(
         lowered.push(transform_expression(expr, context)?);
     }
     Ok(lowered)
+}
+
+fn adjust_call_arguments_for_signature(
+    args: Vec<IrExpression>,
+    param_types: &[JavaType],
+) -> Vec<IrExpression> {
+    if args.len() != param_types.len() {
+        return args;
+    }
+
+    args.into_iter()
+        .zip(param_types.iter())
+        .map(|(arg, param)| coerce_argument_for_parameter(arg, param))
+        .collect()
+}
+
+fn coerce_argument_for_parameter(arg: IrExpression, param_type: &JavaType) -> IrExpression {
+    if !is_sequence_core_type(param_type) {
+        return arg;
+    }
+
+    match extract_java_type(&arg) {
+        Some(JavaType::Reference { name, .. }) if is_iterable_like(&name) => {
+            make_sequence_factory_call("sequenceFromIterable", arg, param_type.clone())
+        }
+        Some(JavaType::Reference { name, .. }) if is_stream_type(&name) => {
+            make_sequence_factory_call("sequenceFromStream", arg, param_type.clone())
+        }
+        _ => arg,
+    }
+}
+
+fn make_sequence_factory_call(
+    method: &str,
+    argument: IrExpression,
+    result_type: JavaType,
+) -> IrExpression {
+    let span = ir_expression_span(&argument);
+    let factory_identifier = IrExpression::Identifier {
+        name: "Sequence".to_string(),
+        java_type: JavaType::Reference {
+            name: "jv.collections.Sequence".to_string(),
+            generic_args: vec![],
+        },
+        span: span.clone(),
+    };
+
+    IrExpression::MethodCall {
+        receiver: Some(Box::new(factory_identifier)),
+        method_name: method.to_string(),
+        args: vec![argument],
+        argument_style: CallArgumentStyle::Whitespace,
+        java_type: result_type,
+        span,
+    }
+}
+
+fn is_sequence_core_type(java_type: &JavaType) -> bool {
+    match java_type {
+        JavaType::Reference { name, .. } => {
+            name == "SequenceCore" || name == "jv.collections.SequenceCore"
+        }
+        _ => false,
+    }
+}
+
+fn is_iterable_like(name: &str) -> bool {
+    matches!(
+        name,
+        "java.util.List" | "java.lang.Iterable" | "java.util.Collection"
+    )
+}
+
+fn is_stream_type(name: &str) -> bool {
+    name == "java.util.stream.Stream"
+}
+
+fn flatten_member_access_chain(expr: &Expression) -> Option<Vec<String>> {
+    match expr {
+        Expression::Identifier(name, _) => Some(vec![name.clone()]),
+        Expression::MemberAccess {
+            object,
+            property,
+            ..
+        } => {
+            let mut segments = flatten_member_access_chain(object)?;
+            segments.push(property.clone());
+            Some(segments)
+        }
+        _ => None,
+    }
+}
+
+fn is_constructor_like(name: &str) -> bool {
+    name.chars().next().map(|ch| ch.is_ascii_uppercase()).unwrap_or(false)
+}
+
+fn functional_interface_method(java_type: &JavaType) -> Option<(String, JavaType)> {
+    match java_type {
+        JavaType::Reference { name, generic_args } => match name.as_str() {
+            "java.util.function.Function" => {
+                let return_type = generic_args
+                    .get(1)
+                    .cloned()
+                    .unwrap_or_else(JavaType::object);
+                Some(("apply".to_string(), return_type))
+            }
+            "java.util.function.Predicate" => Some((
+                "test".to_string(),
+                JavaType::Primitive("boolean".to_string()),
+            )),
+            "java.util.function.Consumer" => Some(("accept".to_string(), JavaType::Void)),
+            "java.util.function.Supplier" => {
+                let return_type = generic_args
+                    .get(0)
+                    .cloned()
+                    .unwrap_or_else(JavaType::object);
+                Some(("get".to_string(), return_type))
+            }
+            "java.util.function.BiFunction" => {
+                let return_type = generic_args
+                    .get(2)
+                    .cloned()
+                    .unwrap_or_else(JavaType::object);
+                Some(("apply".to_string(), return_type))
+            }
+            "java.util.function.BiConsumer" => Some(("accept".to_string(), JavaType::Void)),
+            _ => None,
+        },
+        _ => None,
+    }
 }
 
 fn lower_system_receiver_expression(expr: Expression) -> Option<(IrExpression, SystemReceiver)> {

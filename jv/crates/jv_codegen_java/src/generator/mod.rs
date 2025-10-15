@@ -3,14 +3,17 @@ use crate::config::JavaCodeGenConfig;
 use crate::error::CodeGenError;
 use crate::target_version::TargetedJavaEmitter;
 use jv_ast::{BinaryOp, CallArgumentStyle, Literal, SequenceDelimiter, UnaryOp};
+use jv_build::metadata::SymbolIndex;
 use jv_ir::{
     CompletableFutureOp, IrCaseLabel, IrCatchClause, IrDeconstructionComponent,
     IrDeconstructionPattern, IrExpression, IrForEachKind, IrForLoopMetadata, IrGenericMetadata,
-    IrImplicitWhenEnd, IrModifiers, IrNumericRangeLoop, IrParameter, IrProgram, IrRecordComponent,
-    IrResource, IrSampleDeclaration, IrStatement, IrSwitchCase, IrTypeParameter, IrVariance,
-    IrVisibility, JavaType, MethodOverload, UtilityClass, VirtualThreadOp,
+    IrImplicitWhenEnd, IrImport, IrImportDetail, IrModifiers, IrNumericRangeLoop, IrParameter,
+    IrProgram, IrRecordComponent, IrResource, IrSampleDeclaration, IrStatement, IrSwitchCase,
+    IrTypeParameter, IrVariance, IrVisibility, JavaType, MethodOverload, UtilityClass,
+    VirtualThreadOp,
 };
 use std::collections::{BTreeMap, HashMap};
+use std::sync::Arc;
 
 mod declarations;
 mod expressions;
@@ -30,6 +33,7 @@ pub struct JavaCodeGenerator {
     generic_metadata: BTreeMap<String, IrGenericMetadata>,
     metadata_path: Vec<String>,
     package: Option<String>,
+    symbol_index: Option<Arc<SymbolIndex>>,
 }
 
 impl JavaCodeGenerator {
@@ -48,7 +52,12 @@ impl JavaCodeGenerator {
             generic_metadata: BTreeMap::new(),
             metadata_path: Vec::new(),
             package: None,
+            symbol_index: None,
         }
+    }
+
+    pub fn set_symbol_index(&mut self, index: Option<Arc<SymbolIndex>>) {
+        self.symbol_index = index;
     }
 
     pub fn generate_compilation_unit(
@@ -64,23 +73,8 @@ impl JavaCodeGenerator {
         unit.package_declaration = program.package.clone();
 
         for import in &program.imports {
-            if let IrStatement::Import {
-                path,
-                is_static,
-                is_wildcard,
-                ..
-            } = Self::base_statement(import)
-            {
-                let mut stmt = String::from("import ");
-                if *is_static {
-                    stmt.push_str("static ");
-                }
-                stmt.push_str(path);
-                if *is_wildcard && !path.ends_with(".*") {
-                    stmt.push_str(".*");
-                }
-                stmt.push(';');
-                unit.imports.push(stmt);
+            if let IrStatement::Import(spec) = Self::base_statement(import) {
+                unit.imports.push(Self::render_import_entry(spec));
             }
         }
 
@@ -123,7 +117,7 @@ impl JavaCodeGenerator {
             || !script_methods.is_empty()
             || !hoisted_regex_fields.is_empty()
         {
-            let script_class = &self.config.script_main_class;
+            let script_class = self.config.script_main_class.clone();
             let mut builder = self.builder();
             builder.push_line(&format!("public final class {} {{", script_class));
             builder.indent();
@@ -158,11 +152,25 @@ impl JavaCodeGenerator {
                 }
             }
 
-            for method in &script_methods {
-                builder.push_line("");
-                let method_code = self.generate_method(method)?;
-                Self::push_lines(&mut builder, &method_code);
+            let pushed_script_class = !script_methods.is_empty();
+            if pushed_script_class {
+                self.metadata_path.push(script_class.clone());
             }
+
+            let methods_result = (|| -> Result<(), CodeGenError> {
+                for method in &script_methods {
+                    builder.push_line("");
+                    let method_code = self.generate_method(method)?;
+                    Self::push_lines(&mut builder, &method_code);
+                }
+                Ok(())
+            })();
+
+            if pushed_script_class {
+                self.metadata_path.pop();
+            }
+
+            methods_result?;
 
             builder.dedent();
             builder.push_line("}");
@@ -200,7 +208,7 @@ impl JavaCodeGenerator {
                 | IrStatement::Continue { .. }
                 | IrStatement::FieldDeclaration { .. }
                 | IrStatement::Package { .. }
-                | IrStatement::Import { .. }
+                | IrStatement::Import(..)
                 | IrStatement::Comment { .. } => self.generate_statement(&declaration)?,
                 IrStatement::Commented { .. } => {
                     unreachable!("base_statement must unwrap commented statements")
@@ -238,6 +246,10 @@ impl JavaCodeGenerator {
         self.variance_stack.clear();
         self.sequence_helper = None;
         self.metadata_path.clear();
+    }
+
+    fn symbol_index(&self) -> Option<&SymbolIndex> {
+        self.symbol_index.as_deref()
     }
 
     fn metadata_lookup_key(&self) -> Option<String> {
@@ -317,6 +329,21 @@ impl JavaCodeGenerator {
         match statement {
             IrStatement::Commented { statement, .. } => Self::base_statement(statement),
             other => other,
+        }
+    }
+
+    fn render_import_entry(import: &IrImport) -> String {
+        match &import.detail {
+            IrImportDetail::Type { fqcn } => fqcn.clone(),
+            IrImportDetail::Package { name } => format!("{name}.*"),
+            IrImportDetail::Static { owner, member } => {
+                if member == "*" {
+                    format!("static {owner}.*")
+                } else {
+                    format!("static {owner}.{member}")
+                }
+            }
+            IrImportDetail::Module { name } => format!("module {name}"),
         }
     }
 

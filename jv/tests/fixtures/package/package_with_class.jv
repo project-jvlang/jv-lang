@@ -1,0 +1,5 @@
+package org.jv.test
+
+fun main() {
+    println("Package test with function")
+}

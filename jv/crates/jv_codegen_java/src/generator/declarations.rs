@@ -155,8 +155,7 @@ impl JavaCodeGenerator {
                 header.push_str(&implements);
 
                 if methods.is_empty() {
-                    header.push(';');
-                    builder.push_line(&header);
+                    builder.push_line(&format!("{} {{}}", header));
                     return Ok(builder.build());
                 }
 
@@ -297,6 +296,7 @@ impl JavaCodeGenerator {
     pub fn generate_method(&mut self, method: &IrStatement) -> Result<String, CodeGenError> {
         if let IrStatement::MethodDeclaration {
             name,
+            type_parameters,
             parameters,
             return_type,
             body,
@@ -305,40 +305,63 @@ impl JavaCodeGenerator {
             ..
         } = JavaCodeGenerator::base_statement(method)
         {
-            let mut builder = self.builder();
-            self.render_annotations(&mut builder, modifiers);
+            let metadata_depth = self.metadata_path.len();
+            self.metadata_path.push(name.clone());
+            let scope_len = self.variance_scope_len();
+            self.push_variance_scope(type_parameters);
 
-            let mut signature = String::new();
-            let modifiers_str = self.generate_modifiers(modifiers);
-            if !modifiers_str.is_empty() {
-                signature.push_str(&modifiers_str);
-                signature.push(' ');
-            }
+            let result = (|| -> Result<String, CodeGenError> {
+                let normalized_return_type = Self::normalize_void_like(return_type);
+                let mut builder = self.builder();
+                self.render_annotations(&mut builder, modifiers);
 
-            signature.push_str(&self.generate_type(return_type)?);
-            signature.push(' ');
-            signature.push_str(name);
-            signature.push('(');
-            signature.push_str(&self.render_parameters(parameters)?);
-            signature.push(')');
-
-            if !throws.is_empty() {
-                signature.push_str(" throws ");
-                signature.push_str(&throws.join(", "));
-            }
-
-            match body {
-                Some(expr) => {
-                    builder.push_line(&format!("{} {{", signature));
-                    builder.indent();
-                    self.write_method_body(&mut builder, expr, return_type)?;
-                    builder.dedent();
-                    builder.push_line("}");
+                let mut signature = String::new();
+                let modifiers_str = self.generate_modifiers(modifiers);
+                if !modifiers_str.is_empty() {
+                    signature.push_str(&modifiers_str);
+                    signature.push(' ');
                 }
-                None => builder.push_line(&format!("{};", signature)),
-            }
 
-            Ok(builder.build())
+                if !type_parameters.is_empty() {
+                    let generics = self.render_type_parameters(type_parameters)?;
+                    signature.push_str(&generics);
+                    signature.push(' ');
+                }
+
+                signature.push_str(&self.generate_type(normalized_return_type.as_ref())?);
+                signature.push(' ');
+                signature.push_str(name);
+                signature.push('(');
+                signature.push_str(&self.render_parameters(parameters)?);
+                signature.push(')');
+
+                if !throws.is_empty() {
+                    signature.push_str(" throws ");
+                    signature.push_str(&throws.join(", "));
+                }
+
+                match body {
+                    Some(expr) => {
+                        builder.push_line(&format!("{} {{", signature));
+                        builder.indent();
+                        self.write_method_body(
+                            &mut builder,
+                            expr,
+                            normalized_return_type.as_ref(),
+                        )?;
+                        builder.dedent();
+                        builder.push_line("}");
+                    }
+                    None => builder.push_line(&format!("{};", signature)),
+                }
+
+                Ok(builder.build())
+            })();
+
+            self.truncate_variance_scopes(scope_len);
+            self.metadata_path.truncate(metadata_depth);
+
+            result
         } else {
             Err(CodeGenError::UnsupportedConstruct {
                 construct: "Expected method declaration".to_string(),
@@ -353,6 +376,7 @@ impl JavaCodeGenerator {
     ) -> Result<Vec<String>, CodeGenError> {
         let mut results = Vec::new();
         for overload in overloads {
+            let normalized_return_type = Self::normalize_void_like(&overload.return_type);
             let mut builder = self.builder();
             let modifiers_str = self.generate_modifiers(&overload.modifiers);
             let mut signature = String::new();
@@ -360,7 +384,7 @@ impl JavaCodeGenerator {
                 signature.push_str(&modifiers_str);
                 signature.push(' ');
             }
-            signature.push_str(&self.generate_type(&overload.return_type)?);
+            signature.push_str(&self.generate_type(normalized_return_type.as_ref())?);
             signature.push(' ');
             signature.push_str(&overload.name);
             signature.push('(');
@@ -369,7 +393,7 @@ impl JavaCodeGenerator {
             builder.push_line(&format!("{} {{", signature));
             builder.indent();
             let body_expr = self.generate_expression(&overload.body)?;
-            if matches!(overload.return_type, JavaType::Void) {
+            if Self::is_void_like(normalized_return_type.as_ref()) {
                 builder.push_line(&format!("{};", body_expr));
             } else {
                 builder.push_line(&format!("return {};", body_expr));
@@ -588,7 +612,7 @@ impl JavaCodeGenerator {
             }
         } else {
             let expr_code = self.generate_expression(body)?;
-            if matches!(return_type, JavaType::Void) {
+            if Self::is_void_like(return_type) {
                 builder.push_line(&format!("{};", expr_code));
             } else {
                 builder.push_line(&format!("return {};", expr_code));

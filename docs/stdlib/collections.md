@@ -39,7 +39,7 @@ catalog = products
 | `take(n)` | `take(n)` | `.limit(n)` | `.limit(n)` | |
 | `drop(n)` | `drop(n)` | `.skip(n)` | `.skip(n)` | |
 | `toList()` | `toList()` | `.toList()` | `.collect(Collectors.toList())` | |
-| `toSet()` | `toSet()` | `.toSet()` | `.collect(Collectors.toSet())` | |
+| `toSet()` | `toSet()` | `.collect(Collectors.toSet())` | `.collect(Collectors.toSet())` | Java 25 でも安全性確保のため Collectors を使用 |
 | `fold(initial)` | `fold(initial) { acc, x -> ... }` | `reduce(initial, (acc, x) -> ...)` | 同左 | 逐次評価・副作用なし |
 | `reduce { acc, x -> ... }` | `reduce { acc, x -> ... }` | `.reduce((acc, x) -> ...)` | 同左 | 空コレクション時は `IllegalArgumentException` |
 | `groupBy { ... }` | `groupBy { item -> item.category }` | `.collect(Collectors.groupingBy(...))` | 同左 | 値は `List` で収集 |
@@ -58,11 +58,13 @@ catalog = products
 | 操作 | Java 25 出力 | Java 21 フォールバック | 備考 |
 |------|---------------|-------------------------|------|
 | `toList` | `.toList()` | `.collect(Collectors.toList())` | Java 21 互換 |
-| `toSet` | `.toSet()` | `.collect(Collectors.toSet())` | |
+| `toSet` | `.collect(Collectors.toSet())` | `.collect(Collectors.toSet())` | Java 25/21 で統一挙動 |
 | `associate` | `.collect(Collectors.toMap(...))` | 同左 | キー重複ポリシーを統一 |
 | `groupBy` | `.collect(Collectors.groupingBy(...))` | 同左 | 値は `List` |
 | `sum` | `mapToDouble(...).sum()` 等 | 同左 | 型ごとに最適化 |
 | `forEach` | `.forEach(...)` | 同左 | `AutoCloseable` ソースは `try-with-resources` 生成 |
+
+- Java 25 ターゲットでも `Stream#toSet()` を提供しない JDK リリースが存在するため、常に `Collectors.toSet()` へフォールバックして互換性を維持します。
 
 ## Java Stream ブリッジと注意点
 - `Iterable`/配列 → `Stream` 変換は必要な場合にだけ生成され、短いチェーンでは逐次 `for` ループに切り替わります。

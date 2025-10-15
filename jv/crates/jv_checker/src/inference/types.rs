@@ -29,6 +29,7 @@ impl fmt::Display for TypeId {
 #[derive(Debug, Clone, PartialEq)]
 pub enum TypeKind {
     Primitive(&'static str),
+    Reference(String),
     Optional(Box<TypeKind>),
     Variable(TypeId),
     Function(Vec<TypeKind>, Box<TypeKind>),
@@ -55,7 +56,7 @@ impl TypeKind {
             TypeKind::Function(params, ret) => {
                 params.iter().any(TypeKind::contains_unknown) || ret.contains_unknown()
             }
-            TypeKind::Primitive(_) | TypeKind::Variable(_) => false,
+            TypeKind::Primitive(_) | TypeKind::Reference(_) | TypeKind::Variable(_) => false,
         }
     }
 
@@ -70,7 +71,7 @@ impl TypeKind {
 
     pub(crate) fn collect_free_type_vars_into(&self, acc: &mut HashSet<TypeId>) {
         match self {
-            TypeKind::Primitive(_) | TypeKind::Unknown => {}
+            TypeKind::Primitive(_) | TypeKind::Reference(_) | TypeKind::Unknown => {}
             TypeKind::Variable(id) => {
                 acc.insert(*id);
             }

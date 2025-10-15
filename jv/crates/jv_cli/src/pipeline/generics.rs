@@ -75,6 +75,26 @@ fn apply_to_statement(
             );
             path.pop();
         }
+        IrStatement::MethodDeclaration {
+            name,
+            type_parameters,
+            modifiers,
+            ..
+        } => {
+            if type_parameters.is_empty() {
+                return;
+            }
+            path.push(name.clone());
+            enrich_type_parameters(
+                package,
+                path.as_slice(),
+                type_parameters,
+                modifiers,
+                facts,
+                metadata,
+            );
+            path.pop();
+        }
         _ => {}
     }
 }

@@ -4,10 +4,14 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use jv_build::JavaTarget;
+use jv_build::{
+    metadata::{BuildContext as SymbolBuildContext, SymbolIndexCache},
+    JavaTarget,
+};
 use jv_checker::{TypeInferenceService, TypeKind};
 use jv_cli::pipeline::{compile, BuildOptionsFactory, CliOverrides};
 use jv_cli::pipeline::project::{layout::ProjectLayout, locator::ProjectRoot, manifest::ManifestLoader};
+use jv_ir::types::IrImportDetail;
 
 struct TempDirGuard {
     path: PathBuf,
@@ -104,6 +108,49 @@ fn has_java_runtime() -> bool {
         .status()
         .map(|status| status.success())
         .unwrap_or(false)
+}
+
+fn resolve_module_artifacts(context: &SymbolBuildContext) -> Vec<PathBuf> {
+    let mut artifacts = Vec::new();
+
+    if !context.module_path.is_empty() {
+        for entry in &context.module_path {
+            collect_module_artifact(entry, &mut artifacts);
+        }
+    } else if let Some(java_home) = &context.java_home {
+        let jmods = java_home.join("jmods");
+        collect_module_artifact(&jmods, &mut artifacts);
+    }
+
+    artifacts
+}
+
+fn collect_module_artifact(path: &Path, artifacts: &mut Vec<PathBuf>) {
+    if !path.exists() {
+        return;
+    }
+
+    if path.is_file() {
+        artifacts.push(path.to_path_buf());
+        return;
+    }
+
+    if let Ok(entries) = fs::read_dir(path) {
+        for entry in entries.flatten() {
+            let candidate = entry.path();
+            if candidate.is_file() {
+                artifacts.push(candidate);
+            }
+        }
+    }
+}
+
+fn read_java_sources(paths: &[PathBuf]) -> String {
+    paths
+        .iter()
+        .map(|path| fs::read_to_string(path).expect("read java source"))
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 #[test]
@@ -330,6 +377,7 @@ fn pipeline_compile_produces_artifacts() {
             clean: false,
             perf: false,
             emit_types: false,
+            verbose: false,
             emit_telemetry: false,
             parallel_inference: false,
             inference_workers: None,
@@ -368,6 +416,7 @@ fn pipeline_preserves_annotations_in_java_output() {
             clean: false,
             perf: false,
             emit_types: false,
+            verbose: false,
             emit_telemetry: false,
             parallel_inference: false,
             inference_workers: None,
@@ -399,6 +448,47 @@ fn pipeline_preserves_annotations_in_java_output() {
 }
 
 #[test]
+fn sequence_runtime_java_omits_null_prints() {
+    let temp_dir = TempDirGuard::new("sequence-runtime-null").expect("create temp dir");
+    let input = workspace_file("test_simple.jv");
+
+    let plan = compose_plan_from_fixture(
+        temp_dir.path(),
+        &input,
+        CliOverrides {
+            java_only: true,
+            ..CliOverrides::default()
+        },
+    );
+
+    let artifacts = compile(&plan).expect("sequence runtime compilation succeeds");
+
+    let offending = artifacts
+        .java_files
+        .iter()
+        .filter(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .map(|name| name.contains("Sequence"))
+                .unwrap_or(false)
+        })
+        .find_map(|path| {
+            let source = fs::read_to_string(path).expect("read generated Java");
+            if source.contains("System.out.println(null)") {
+                Some(path.clone())
+            } else {
+                None
+            }
+        });
+
+    assert!(
+        offending.is_none(),
+        "Sequence runtime should not emit System.out.println(null) (file: {})",
+        offending.unwrap().display()
+    );
+}
+
+#[test]
 fn pipeline_emit_types_produces_type_facts_json() {
     let temp_dir = TempDirGuard::new("pipeline-emit-types").expect("create temp dir");
     let input = workspace_file("test_simple.jv");
@@ -416,6 +506,7 @@ fn pipeline_emit_types_produces_type_facts_json() {
             clean: false,
             perf: false,
             emit_types: true,
+            verbose: false,
             emit_telemetry: false,
             parallel_inference: false,
             inference_workers: None,
@@ -455,6 +546,7 @@ fn type_inference_snapshot_emitted_with_emit_types() {
             clean: false,
             perf: false,
             emit_types: true,
+            verbose: false,
             emit_telemetry: false,
             parallel_inference: false,
             inference_workers: None,
@@ -495,6 +587,7 @@ fn type_inference_snapshot_tracks_program_changes() {
             clean: false,
             perf: false,
             emit_types: true,
+            verbose: false,
             emit_telemetry: false,
             parallel_inference: false,
             inference_workers: None,
@@ -550,6 +643,7 @@ fn null_safety_warnings_survive_pipeline() {
             clean: false,
             perf: false,
             emit_types: false,
+            verbose: false,
             emit_telemetry: false,
             parallel_inference: false,
             inference_workers: None,
@@ -583,6 +677,7 @@ fn ambiguous_function_causes_type_error() {
             clean: false,
             perf: false,
             emit_types: false,
+            verbose: false,
             emit_telemetry: false,
             parallel_inference: false,
             inference_workers: None,
@@ -624,6 +719,7 @@ fn pipeline_reports_missing_else_in_value_when() {
             clean: false,
             perf: false,
             emit_types: false,
+            verbose: false,
             emit_telemetry: false,
             parallel_inference: false,
             inference_workers: None,
@@ -662,6 +758,7 @@ fn pipeline_runs_javac_when_available() {
             clean: false,
             perf: false,
             emit_types: false,
+            verbose: false,
             emit_telemetry: false,
             parallel_inference: false,
             inference_workers: None,
@@ -909,7 +1006,7 @@ fn sequence_pipeline_fixture_runs_consistently_across_targets() {
         return;
     }
 
-    let fixture = workspace_file("tests/lang/collections/sequence_chain.jv");
+    let fixture = workspace_file("tests/fixtures/sequence/sequence_chain.jv");
     let expected_output = "[2, 4, 6, 8, 10]\n[5, 8]\n3\ntrue\n15\n3";
 
     for target in [JavaTarget::Java25, JavaTarget::Java21] {
@@ -973,10 +1070,13 @@ fn sequence_pipeline_fixture_runs_consistently_across_targets() {
 
 #[test]
 fn java_target_switch_emits_expected_sequence_collection_factories() {
-    let fixture = workspace_file("tests/lang/collections/java21_compat.jv");
+    let fixture = workspace_file("tests/fixtures/sequence/java21_compat.jv");
 
     for (target, expected_snippets) in [
-        (JavaTarget::Java25, vec![".toList()", ".toSet()"]),
+        (
+            JavaTarget::Java25,
+            vec![".toList()", ".collect(Collectors.toSet())"],
+        ),
         (
             JavaTarget::Java21,
             vec!["Collectors.toList()", "Collectors.toSet()"],
@@ -1014,12 +1114,12 @@ fn java_target_switch_emits_expected_sequence_collection_factories() {
         if target == JavaTarget::Java25 {
             assert!(
                 !java_source.contains("Collectors.toList()"),
-                "Java 25 output should avoid Collectors fallback:\n{}",
+                "Java 25 output should avoid Collectors.toList():\n{}",
                 java_source
             );
             assert!(
-                !java_source.contains("Collectors.toSet()"),
-                "Java 25 output should avoid Collectors fallback:\n{}",
+                java_source.contains(".collect(Collectors.toSet())"),
+                "Java 25 output should explicitly fallback to Collectors.toSet():\n{}",
                 java_source
             );
         }
@@ -1033,7 +1133,7 @@ fn java21_compat_fixture_runs_across_targets() {
         return;
     }
 
-    let fixture = workspace_file("tests/lang/collections/java21_compat.jv");
+    let fixture = workspace_file("tests/fixtures/sequence/java21_compat.jv");
     let expected_output = "[2, 3, 4, 5]\ntrue\n2";
 
     for target in [JavaTarget::Java25, JavaTarget::Java21] {
@@ -1157,5 +1257,215 @@ fn sequence_interpolation_materializes_sequences_before_string_format() {
             "unexpected output for target {}",
             target.as_str()
         );
+    }
+}
+
+#[test]
+fn smart_imports_resolve_alias_wildcard_static_and_module() {
+    if !has_javac() || !has_java_runtime() {
+        eprintln!(
+            "Skipping smart import integration test: java runtime or javac missing"
+        );
+        return;
+    }
+
+    let fixture = workspace_file("tests/lang/imports/smart_imports.jv");
+    let temp_dir = TempDirGuard::new("smart-imports").expect("create temp directory for smart imports fixture");
+    let mut metrics_checked = false;
+
+    for target in [JavaTarget::Java25, JavaTarget::Java21] {
+        let plan = compose_plan_from_fixture(
+            temp_dir.path(),
+            &fixture,
+            CliOverrides {
+                java_only: true,
+                verbose: true,
+                target: Some(target),
+                ..CliOverrides::default()
+            },
+        );
+
+        let artifacts = compile(&plan).expect("smart imports fixture compiles");
+        assert!(!artifacts.java_files.is_empty(), "expected generated Java output");
+
+        let java_source = read_java_sources(&artifacts.java_files);
+
+        let local_date_import = artifacts
+            .resolved_imports
+            .iter()
+            .find(|import| matches!(
+                import.detail,
+                IrImportDetail::Type { ref fqcn } if fqcn == "java.time.LocalDate"
+            ))
+            .expect("LocalDate import should be resolved");
+        assert_eq!(
+            local_date_import.alias.as_deref(),
+            Some("Date"),
+            "LocalDate import should keep the alias"
+        );
+
+        assert!(
+            artifacts.resolved_imports.iter().any(|import| matches!(
+                import.detail,
+                IrImportDetail::Package { ref name } if name == "java.util"
+            )),
+            "package wildcard import should be present"
+        );
+
+        assert!(
+            artifacts.resolved_imports.iter().any(|import| matches!(
+                import.detail,
+                IrImportDetail::Static { ref owner, ref member }
+                    if owner == "java.util.Collections" && member == "*"
+            )),
+            "static wildcard import should be present"
+        );
+
+        assert!(
+            artifacts.resolved_imports.iter().any(|import| matches!(
+                import.detail,
+                IrImportDetail::Static { ref owner, ref member }
+                    if owner == "java.lang.Math" && member == "max"
+            )),
+            "static single-member import should be present"
+        );
+
+        let driver_import = artifacts
+            .resolved_imports
+            .iter()
+            .find(|import| matches!(
+                import.detail,
+                IrImportDetail::Type { ref fqcn } if fqcn == "java.sql.DriverManager"
+            ))
+            .expect("DriverManager import should be resolved");
+
+        let module_imports: Vec<String> = artifacts
+            .resolved_imports
+            .iter()
+            .filter_map(|import| match &import.detail {
+                IrImportDetail::Module { name } => Some(name.clone()),
+                _ => None,
+            })
+            .collect();
+
+        if target == JavaTarget::Java25 {
+            assert_eq!(
+                driver_import.module_dependency.as_deref(),
+                Some("java.sql"),
+                "DriverManager should carry java.sql module dependency for Java 25"
+            );
+            assert!(
+                module_imports.iter().any(|name| name == "java.sql"),
+                "module import for java.sql should be emitted"
+            );
+            assert!(
+                java_source.contains("import module java.sql;"),
+                "generated Java should include module import"
+            );
+        } else {
+            assert!(
+                driver_import.module_dependency.is_none(),
+                "Java 21 target should not attach module dependency"
+            );
+            assert!(
+                module_imports.is_empty(),
+                "Java 21 target should not emit module imports"
+            );
+            assert!(
+                !java_source.contains("import module java.sql;"),
+                "Java 21 output should omit module imports"
+            );
+        }
+
+        assert!(
+            java_source.contains("import java.time.LocalDate;"),
+            "generated Java should import LocalDate"
+        );
+        assert!(
+            java_source.contains("import static java.lang.Math.max;"),
+            "generated Java should include static Math.max import"
+        );
+        assert!(
+            java_source.contains("import static java.util.Collections.*;"),
+            "generated Java should include static wildcard import"
+        );
+
+        if target == JavaTarget::Java25 && !metrics_checked {
+            let cache_dir = plan
+                .root
+                .root_dir()
+                .join("target")
+                .join("jv")
+                .join("symbol-index");
+            let cache = SymbolIndexCache::new(cache_dir);
+            let context = SymbolBuildContext::from_config(&plan.build_config);
+            let module_artifacts = resolve_module_artifacts(&context);
+            let fingerprint = cache
+                .fingerprint(&context, &module_artifacts)
+                .expect("fingerprint generation");
+            let cache_entry = cache
+                .load(&fingerprint)
+                .expect("load symbol index cache")
+                .expect("symbol index cache entry should exist");
+            assert!(
+                cache_entry.metrics.artifact_count > 0,
+                "cache metrics should record scanned artifacts"
+            );
+            assert!(
+                cache_entry.metrics.build_ms > 0,
+                "cache metrics should record build duration"
+            );
+            metrics_checked = true;
+        }
+    }
+
+    assert!(metrics_checked, "performance guard metrics were not validated");
+}
+
+#[test]
+fn pipeline_parses_package_declarations() {
+    let fixtures = [
+        ("simple_package", "com.example.app"),
+        ("nested_package", "com.example.app.service.impl"),
+        ("package_with_class", "org.jv.test"),
+        ("package_single_segment", "utils"),
+    ];
+
+    for (name, expected_package) in &fixtures {
+        let fixture = workspace_file(&format!("tests/fixtures/package/{}.jv", name));
+        let temp_dir = TempDirGuard::new(&format!("package-{name}"))
+            .expect("create temp directory for package fixture");
+        let plan = compose_plan_from_fixture(
+            temp_dir.path(),
+            &fixture,
+            CliOverrides {
+                java_only: true,
+                ..CliOverrides::default()
+            },
+        );
+
+        let artifacts = compile(&plan).expect(&format!("package fixture {} compiles", name));
+
+        // Verify that Java files were generated
+        assert!(
+            !artifacts.java_files.is_empty(),
+            "expected generated Java files for {}",
+            name
+        );
+
+        // Read generated Java source to verify package declaration
+        for java_file in &artifacts.java_files {
+            let java_source = fs::read_to_string(java_file)
+                .expect(&format!("read generated Java for {}", name));
+
+            // Verify package declaration in generated Java code
+            assert!(
+                java_source.contains(&format!("package {};", expected_package)),
+                "expected 'package {};' in generated Java for {}, got:\n{}",
+                expected_package,
+                name,
+                java_source
+            );
+        }
     }
 }

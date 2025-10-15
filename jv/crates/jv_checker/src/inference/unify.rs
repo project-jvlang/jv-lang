@@ -279,7 +279,7 @@ impl ConstraintSolver {
             TypeKind::Function(params, ret) => {
                 params.iter().any(|param| self.occurs_in(id, param)) || self.occurs_in(id, ret)
             }
-            TypeKind::Primitive(_) | TypeKind::Unknown => false,
+            TypeKind::Primitive(_) | TypeKind::Reference(_) | TypeKind::Unknown => false,
         }
     }
 }

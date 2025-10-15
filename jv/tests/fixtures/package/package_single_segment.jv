@@ -1,0 +1,10 @@
+package utils
+
+fun formatMessage(msg: String): String {
+    return "[INFO] ${msg}"
+}
+
+fun main() {
+    val formatted = formatMessage("Test message")
+    println(formatted)
+}

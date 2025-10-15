@@ -309,8 +309,8 @@ where
 
     expr.clone()
         .then(separator.clone().then(expr.clone()).repeated())
-        .then(token_comma().or_not())
-        .try_map(|((first, rest), trailing_comma), span| {
+        .then(token_any_comma().or_not())
+        .try_map(|((first, rest), trailing_separator), span| {
             let mut elements = Vec::with_capacity(rest.len() + 1);
             let mut saw_comma = false;
             let mut saw_layout = false;
@@ -325,8 +325,12 @@ where
                 elements.push(expr);
             }
 
-            if trailing_comma.is_some() {
-                saw_comma = true;
+            if let Some(trailing) = trailing_separator {
+                match trailing.token_type {
+                    TokenType::Comma => saw_comma = true,
+                    TokenType::LayoutComma => saw_layout = true,
+                    _ => {}
+                }
             }
 
             if saw_comma {
@@ -513,19 +517,20 @@ fn argument_list(
     expr: impl ChumskyParser<Token, Expression, Error = Simple<Token>> + Clone,
 ) -> impl ChumskyParser<Token, (Vec<Argument>, CallArgumentMetadata), Error = Simple<Token>> + Clone
 {
-    // Layout-aware parsing: allow either comma separators or lexer-emitted layout commas.
-    let separator = choice((
-        token_comma().to(CallArgumentStyle::Comma),
-        token_layout_comma().to(CallArgumentStyle::Whitespace),
-    ));
+    let comma_argument = token_comma()
+        .ignore_then(argument(expr.clone()))
+        .map(|argument| (CallArgumentStyle::Comma, argument));
+
+    let whitespace_argument =
+        argument(expr.clone()).map(|argument| (CallArgumentStyle::Whitespace, argument));
 
     argument(expr.clone())
-        .then(separator.clone().then(argument(expr.clone())).repeated())
+        .then(choice((comma_argument, whitespace_argument)).repeated())
         .then(token_comma().or_not())
         .try_map(|((first, rest), trailing_comma), span| {
             let mut args = Vec::with_capacity(rest.len() + 1);
             let mut saw_comma = false;
-            let mut saw_layout = false;
+            let mut saw_whitespace = false;
             let mut saw_named = matches!(first, Argument::Named { .. });
 
             args.push(first);
@@ -533,7 +538,7 @@ fn argument_list(
             for (separator_kind, argument) in rest {
                 match separator_kind {
                     CallArgumentStyle::Comma => saw_comma = true,
-                    CallArgumentStyle::Whitespace => saw_layout = true,
+                    CallArgumentStyle::Whitespace => saw_whitespace = true,
                 }
 
                 if matches!(argument, Argument::Named { .. }) {
@@ -552,14 +557,14 @@ fn argument_list(
                 return Err(Simple::custom(span, message));
             }
 
-            if saw_layout {
+            if saw_whitespace {
                 if saw_named {
                     let message = call_argument_named_argument_error();
                     return Err(Simple::custom(span, message));
                 }
             }
 
-            let style = if saw_layout {
+            let style = if saw_whitespace {
                 CallArgumentStyle::Whitespace
             } else {
                 CallArgumentStyle::Comma

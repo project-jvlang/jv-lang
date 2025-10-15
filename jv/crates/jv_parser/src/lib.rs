@@ -130,10 +130,23 @@ impl Parser {
                     syntax::merge_spans(&first_span, &last_span)
                 };
 
+                let package = statements.iter().find_map(|statement| match statement {
+                    Statement::Package { name, .. } => Some(name.clone()),
+                    _ => None,
+                });
+
+                let imports = statements
+                    .iter()
+                    .filter_map(|statement| match statement {
+                        Statement::Import { .. } => Some(statement.clone()),
+                        _ => None,
+                    })
+                    .collect();
+
                 Program {
+                    package,
+                    imports,
                     statements,
-                    package: None,
-                    imports: Vec::new(),
                     span,
                 }
             })
@@ -191,18 +204,63 @@ fn allows_call_suffix(token_type: &TokenType) -> bool {
     )
 }
 
-fn is_sequence_layout_candidate(token_type: &TokenType) -> bool {
-    !matches!(
+fn requires_right_operand(token_type: &TokenType) -> bool {
+    matches!(
         token_type,
-        TokenType::Comma
-            | TokenType::RightBracket
-            | TokenType::RightParen
-            | TokenType::Assign
-            | TokenType::Colon
-            | TokenType::Dot
-            | TokenType::Arrow
-            | TokenType::FatArrow
+        TokenType::Plus
+            | TokenType::Minus
+            | TokenType::Multiply
+            | TokenType::Divide
+            | TokenType::Modulo
+            | TokenType::Equal
+            | TokenType::NotEqual
+            | TokenType::Less
+            | TokenType::LessEqual
+            | TokenType::Greater
+            | TokenType::GreaterEqual
+            | TokenType::And
+            | TokenType::Or
+            | TokenType::RangeExclusive
+            | TokenType::RangeInclusive
+            | TokenType::Elvis
     )
+}
+
+fn is_sequence_layout_candidate(
+    prev_token: Option<&TokenType>,
+    token_type: &TokenType,
+    next_token: Option<&Token>,
+) -> bool {
+    if let Some(prev) = prev_token {
+        if requires_right_operand(prev) {
+            return false;
+        }
+    }
+
+    match token_type {
+        TokenType::Plus | TokenType::Minus => {
+            if let Some(next) = next_token {
+                matches!(next.token_type, TokenType::Number(_))
+                    && next.leading_trivia.spaces == 0
+                    && next.leading_trivia.newlines == 0
+                    && !next.leading_trivia.comments
+            } else {
+                false
+            }
+        }
+        _ => !matches!(
+            token_type,
+            TokenType::Comma
+                | TokenType::LayoutComma
+                | TokenType::RightBracket
+                | TokenType::RightParen
+                | TokenType::Assign
+                | TokenType::Colon
+                | TokenType::Dot
+                | TokenType::Arrow
+                | TokenType::FatArrow
+        ),
+    }
 }
 
 fn preprocess_tokens(tokens: Vec<Token>) -> Vec<Token> {
@@ -213,8 +271,12 @@ fn preprocess_tokens(tokens: Vec<Token>) -> Vec<Token> {
     let mut suppress_definition_call = false;
     let mut in_interpolation_expr = false;
     let mut expect_interpolation_expr = false;
+    let mut prev_token_type: Option<TokenType> = None;
 
-    for (index, mut token) in tokens.into_iter().enumerate() {
+    let mut iter = tokens.into_iter().enumerate().peekable();
+
+    while let Some((index, mut token)) = iter.next() {
+        let next_token = iter.peek().map(|(_, token)| token);
         let json_confidence = json_contexts.get(index).copied().flatten();
         update_token_json_metadata(&mut token, json_confidence);
 
@@ -239,6 +301,7 @@ fn preprocess_tokens(tokens: Vec<Token>) -> Vec<Token> {
         }
 
         let token_type_ref = &token.token_type;
+        let current_token_type = token.token_type.clone();
         if expect_interpolation_expr {
             in_interpolation_expr = true;
             expect_interpolation_expr = false;
@@ -276,24 +339,32 @@ fn preprocess_tokens(tokens: Vec<Token>) -> Vec<Token> {
                     SequenceContextKind::Call => {
                         !matches!(token.token_type, TokenType::Comma | TokenType::RightParen)
                     }
-                } && is_sequence_layout_candidate(token_type_ref);
+                } && is_sequence_layout_candidate(
+                    prev_token_type.as_ref(),
+                    token_type_ref,
+                    next_token,
+                );
                 if eligible {
                     let layout_needed = !ctx.prev_was_separator
                         && (ctx.pending_layout || has_layout_trivia(&token.leading_trivia));
                     if layout_needed {
-                        let mut synthetic = make_layout_comma_token(&token);
-                        let sequence = match ctx.kind {
-                            SequenceContextKind::Array => LayoutSequenceKind::Array,
-                            SequenceContextKind::Call => LayoutSequenceKind::Call,
-                        };
-                        let metadata = LayoutCommaMetadata {
-                            sequence,
-                            explicit_separator: ctx.last_explicit_separator.take(),
-                        };
-                        synthetic
-                            .metadata
-                            .push(TokenMetadata::LayoutComma(metadata));
-                        result.push(synthetic);
+                        match ctx.kind {
+                            SequenceContextKind::Array => {
+                                let metadata = LayoutCommaMetadata {
+                                    sequence: LayoutSequenceKind::Array,
+                                    explicit_separator: ctx.last_explicit_separator.take(),
+                                };
+                                let mut synthetic = make_layout_comma_token(&token);
+                                synthetic
+                                    .metadata
+                                    .push(TokenMetadata::LayoutComma(metadata));
+                                result.push(synthetic);
+                            }
+                            SequenceContextKind::Call => {
+                                ctx.last_explicit_separator = None;
+                            }
+                        }
+
                         ctx.prev_was_separator = true;
                     }
                     ctx.pending_layout = false;
@@ -391,6 +462,7 @@ fn preprocess_tokens(tokens: Vec<Token>) -> Vec<Token> {
         }
 
         call_eligible = next_call_state;
+        prev_token_type = Some(current_token_type);
     }
 
     result

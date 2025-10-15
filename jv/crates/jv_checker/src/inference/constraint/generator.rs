@@ -6,6 +6,7 @@
 use crate::inference::constraint::{Constraint, ConstraintKind, ConstraintSet};
 use crate::inference::environment::{TypeEnvironment, TypeScheme};
 use crate::inference::extensions::ExtensionRegistry;
+use crate::inference::imports::ImportRegistry;
 use crate::inference::iteration::{
     classify_loop, expression_can_yield_iterable, LoopClassification,
 };
@@ -22,10 +23,11 @@ use std::collections::HashMap;
 
 /// AST から制約を抽出するジェネレータ。
 #[derive(Debug)]
-pub struct ConstraintGenerator<'env, 'ext> {
+pub struct ConstraintGenerator<'env, 'ext, 'imp> {
     env: &'env mut TypeEnvironment,
     constraints: ConstraintSet,
     extensions: &'ext ExtensionRegistry,
+    imports: Option<&'imp mut ImportRegistry>,
     pattern_service: PatternMatchService,
     type_var_usage: HashMap<TypeId, usize>,
 }
@@ -37,18 +39,32 @@ const DIAG_ITERABLE_PROTOCOL: &str =
     "E_LOOP_003: loop target expression does not expose iterable semantics";
 const DIAG_AMBIGUOUS_EXTENSION: &str = "E_EXT_001: ambiguous extension method resolution";
 
-impl<'env, 'ext> ConstraintGenerator<'env, 'ext> {
+impl<'env, 'ext, 'imp> ConstraintGenerator<'env, 'ext, 'imp> {
     /// 環境への可変参照を受け取ってジェネレータを初期化する。
-    pub fn new(env: &'env mut TypeEnvironment, extensions: &'ext ExtensionRegistry) -> Self {
+    pub fn new(
+        env: &'env mut TypeEnvironment,
+        extensions: &'ext ExtensionRegistry,
+        imports: Option<&'imp mut ImportRegistry>,
+    ) -> Self {
         Self {
             env,
             constraints: ConstraintSet::new(),
             extensions,
+            imports,
             pattern_service: PatternMatchService::new(),
             type_var_usage: HashMap::new(),
         }
     }
 
+    fn push_constraint(&mut self, kind: ConstraintKind, note: Option<&str>) {
+        self.record_type_vars_in_constraint(&kind);
+        let constraint = if let Some(text) = note {
+            Constraint::new(kind).with_note(text)
+        } else {
+            Constraint::new(kind)
+        };
+        self.constraints.push(constraint);
+    }
     /// プログラム全体を走査して制約集合を構築する。
     pub fn generate(mut self, program: &Program) -> ConstraintSet {
         for stmt in &program.statements {
@@ -243,7 +259,10 @@ impl<'env, 'ext> ConstraintGenerator<'env, 'ext> {
                 if let Some(scheme) = self.env.lookup(name).cloned() {
                     self.env.instantiate(&scheme)
                 } else {
-                    TypeKind::Unknown
+                    self.imports
+                        .as_deref_mut()
+                        .and_then(|imports| imports.resolve_identifier(self.env, name))
+                        .unwrap_or(TypeKind::Unknown)
                 }
             }
             Expression::Binary {
@@ -680,13 +699,8 @@ impl<'env, 'ext> ConstraintGenerator<'env, 'ext> {
 
     fn type_from_annotation(&mut self, annotation: &TypeAnnotation) -> TypeKind {
         match annotation {
-            TypeAnnotation::Simple(name) => match name.as_str() {
-                "Int" | "Integer" => TypeKind::Primitive("Int"),
-                "Double" | "Float" => TypeKind::Primitive("Double"),
-                "Boolean" | "Bool" => TypeKind::Primitive("Boolean"),
-                "String" => TypeKind::Primitive("String"),
-                _ => TypeKind::Unknown,
-            },
+            TypeAnnotation::Simple(name) => map_annotation_type(name),
+            TypeAnnotation::Generic { name, .. } => map_annotation_type(name),
             TypeAnnotation::Nullable(inner) => {
                 let inner_ty = self.type_from_annotation(inner);
                 TypeKind::Optional(Box::new(inner_ty))
@@ -704,16 +718,6 @@ impl<'env, 'ext> ConstraintGenerator<'env, 'ext> {
             }
             _ => TypeKind::Unknown,
         }
-    }
-
-    fn push_constraint(&mut self, kind: ConstraintKind, note: Option<&str>) {
-        self.record_type_vars_in_constraint(&kind);
-        let constraint = if let Some(text) = note {
-            Constraint::new(kind).with_note(text)
-        } else {
-            Constraint::new(kind)
-        };
-        self.constraints.push(constraint);
     }
 
     fn enqueue_receiver_constraint(&mut self, id: TypeId, primitive: &'static str, property: &str) {
@@ -753,7 +757,7 @@ impl<'env, 'ext> ConstraintGenerator<'env, 'ext> {
                 }
                 self.record_type_vars(result);
             }
-            TypeKind::Primitive(_) | TypeKind::Unknown => {}
+            TypeKind::Primitive(_) | TypeKind::Reference(_) | TypeKind::Unknown => {}
         }
     }
 
@@ -784,11 +788,31 @@ impl<'env, 'ext> ConstraintGenerator<'env, 'ext> {
     }
 }
 
+fn map_annotation_type(name: &str) -> TypeKind {
+    match name {
+        "Int" | "Integer" => TypeKind::Primitive("Int"),
+        "Double" | "Float" => TypeKind::Primitive("Double"),
+        "Boolean" | "Bool" => TypeKind::Primitive("Boolean"),
+        "String" => TypeKind::Primitive("String"),
+        "SequenceCore" | "jv.collections.SequenceCore" => {
+            TypeKind::Primitive("jv.collections.SequenceCore")
+        }
+        "Iterable" | "java.lang.Iterable" => TypeKind::Primitive("java.lang.Iterable"),
+        "Iterator" | "java.util.Iterator" => TypeKind::Primitive("java.util.Iterator"),
+        "Stream" | "java.util.stream.Stream" => TypeKind::Primitive("java.util.stream.Stream"),
+        "List" | "java.util.List" => TypeKind::Primitive("java.util.List"),
+        "Map" | "java.util.Map" => TypeKind::Primitive("java.util.Map"),
+        other => TypeKind::Reference(other.to_string()),
+    }
+}
+
 fn nullability_from_type(ty: &TypeKind) -> NullabilityFlag {
     match ty {
         TypeKind::Optional(_) => NullabilityFlag::Nullable,
         TypeKind::Unknown | TypeKind::Variable(_) => NullabilityFlag::Unknown,
-        TypeKind::Primitive(_) | TypeKind::Function(_, _) => NullabilityFlag::NonNull,
+        TypeKind::Primitive(_) | TypeKind::Reference(_) | TypeKind::Function(_, _) => {
+            NullabilityFlag::NonNull
+        }
     }
 }
 
@@ -840,7 +864,7 @@ mod tests {
 
         let mut env = TypeEnvironment::new();
         let extensions = ExtensionRegistry::new();
-        let constraints = ConstraintGenerator::new(&mut env, &extensions).generate(&program);
+        let constraints = ConstraintGenerator::new(&mut env, &extensions, None).generate(&program);
         let collected = collect_constraints(constraints);
 
         assert!(collected.iter().any(|constraint| matches!(
@@ -889,7 +913,7 @@ mod tests {
 
         let mut env = TypeEnvironment::new();
         let extensions = ExtensionRegistry::new();
-        let constraints = ConstraintGenerator::new(&mut env, &extensions).generate(&program);
+        let constraints = ConstraintGenerator::new(&mut env, &extensions, None).generate(&program);
         let collected = collect_constraints(constraints);
 
         assert!(collected.iter().any(|constraint| matches!(
@@ -947,7 +971,7 @@ mod tests {
 
         let mut env = TypeEnvironment::new();
         let extensions = ExtensionRegistry::new();
-        let _constraints = ConstraintGenerator::new(&mut env, &extensions).generate(&program);
+        let _constraints = ConstraintGenerator::new(&mut env, &extensions, None).generate(&program);
 
         let scheme = env.lookup("value").expect("value binding must exist");
         assert_eq!(
@@ -973,7 +997,7 @@ val result = when (maybe) {
 
         let mut env = TypeEnvironment::new();
         let extensions = ExtensionRegistry::new();
-        let _constraints = ConstraintGenerator::new(&mut env, &extensions).generate(&program);
+        let _constraints = ConstraintGenerator::new(&mut env, &extensions, None).generate(&program);
 
         let scheme = env.lookup("result").expect("result binding must exist");
         assert_eq!(scheme.ty, TypeKind::Primitive("String"));
@@ -1032,7 +1056,7 @@ val result = when (maybe) {
 
         let mut env = TypeEnvironment::new();
         let extensions = ExtensionRegistry::new();
-        let constraints = ConstraintGenerator::new(&mut env, &extensions).generate(&program);
+        let constraints = ConstraintGenerator::new(&mut env, &extensions, None).generate(&program);
         let collected = collect_constraints(constraints);
 
         assert!(collected.iter().any(|constraint| {

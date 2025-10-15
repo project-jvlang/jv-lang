@@ -26,12 +26,24 @@ impl JavaCodeGenerator {
             } => {
                 let mut invocation = String::new();
                 if let Some(target) = receiver {
+                    if let Some(java_type) = Self::expression_java_type(target) {
+                        self.ensure_stdlib_import(java_type);
+                    }
                     invocation.push_str(&self.generate_expression(target)?);
                     invocation.push('.');
                 }
                 invocation.push_str(method_name);
                 invocation.push('(');
-                invocation.push_str(&self.render_arguments_with_style(args, *argument_style)?);
+                let rendered_args = if method_name == "println"
+                    && Self::is_system_out(receiver.as_deref())
+                    && args.len() == 1
+                    && matches!(args[0], IrExpression::Literal(Literal::Null, _))
+                {
+                    "(Object) null".to_string()
+                } else {
+                    self.render_arguments_with_style(args, *argument_style)?
+                };
+                invocation.push_str(&rendered_args);
                 invocation.push(')');
                 Ok(invocation)
             }
@@ -39,11 +51,13 @@ impl JavaCodeGenerator {
                 receiver,
                 field_name,
                 ..
-            } => Ok(format!(
-                "{}.{}",
-                self.generate_expression(receiver)?,
-                field_name
-            )),
+            } => {
+                let receiver_code = self.generate_expression(receiver)?;
+                if self.should_call_method_for_field(receiver.as_ref(), field_name) {
+                    return Ok(format!("{}.{field_name}()", receiver_code));
+                }
+                Ok(format!("{receiver_code}.{field_name}"))
+            }
             IrExpression::ArrayAccess { array, index, .. } => Ok(format!(
                 "{}[{}]",
                 self.generate_expression(array)?,
@@ -364,7 +378,7 @@ impl JavaCodeGenerator {
             }
         }
 
-        let result_is_void = matches!(java_type, JavaType::Void);
+        let result_is_void = Self::is_void_like(java_type);
         let subject_binding = "__subject";
         let result_binding = "__matchResult";
 
@@ -841,8 +855,9 @@ impl JavaCodeGenerator {
 
         if needs_resource_guard {
             let chained = self.render_sequence_chain("__jvStream", pipeline)?;
-            let return_type = self.generate_type(result_type)?;
-            let is_void = matches!(result_type, JavaType::Void);
+            let normalized_result_type = Self::normalize_void_like(result_type);
+            let return_type = self.generate_type(normalized_result_type.as_ref())?;
+            let is_void = Self::is_void_like(normalized_result_type.as_ref());
 
             let mut builder = self.builder();
             builder.push_line("new Object() {");
@@ -898,8 +913,10 @@ impl JavaCodeGenerator {
             }
         }
 
-        self.add_import("jv.collections.SequenceFactory");
-        Ok(format!("SequenceFactory.fromStream({})", stream_expr))
+        const FACTORY_OWNER: &str = "jv.collections.Sequence";
+        self.ensure_stdlib_import_name(FACTORY_OWNER);
+        let simple_name = FACTORY_OWNER.rsplit('.').next().unwrap_or(FACTORY_OWNER);
+        Ok(format!("{simple_name}.sequenceFromStream({})", stream_expr))
     }
 
     fn render_sequence_source(
@@ -909,7 +926,11 @@ impl JavaCodeGenerator {
         match source {
             SequenceSource::Collection { expr, .. } => {
                 let rendered = self.generate_expression(expr)?;
-                Ok((format!("({}).stream()", rendered), false))
+                if self.is_sequence_core_expression(expr) {
+                    Ok((format!("({}).toStream()", rendered), false))
+                } else {
+                    Ok((format!("({}).stream()", rendered), false))
+                }
             }
             SequenceSource::Array { expr, .. } => {
                 let rendered = self.generate_expression(expr)?;
@@ -926,6 +947,100 @@ impl JavaCodeGenerator {
                 let rendered = self.generate_expression(expr)?;
                 Ok((rendered, *auto_close))
             }
+        }
+    }
+
+    fn is_sequence_core_expression(&self, expr: &IrExpression) -> bool {
+        Self::expression_java_type(expr)
+            .map(Self::is_sequence_core_type)
+            .unwrap_or(false)
+    }
+
+    fn expression_java_type(expr: &IrExpression) -> Option<&JavaType> {
+        match expr {
+            IrExpression::Identifier { java_type, .. }
+            | IrExpression::MethodCall { java_type, .. }
+            | IrExpression::FieldAccess { java_type, .. }
+            | IrExpression::ArrayAccess { java_type, .. }
+            | IrExpression::Binary { java_type, .. }
+            | IrExpression::Unary { java_type, .. }
+            | IrExpression::Assignment { java_type, .. }
+            | IrExpression::Conditional { java_type, .. }
+            | IrExpression::Block { java_type, .. }
+            | IrExpression::ObjectCreation { java_type, .. }
+            | IrExpression::Lambda { java_type, .. }
+            | IrExpression::SequencePipeline { java_type, .. }
+            | IrExpression::Switch { java_type, .. }
+            | IrExpression::NullSafeOperation { java_type, .. }
+            | IrExpression::CompletableFuture { java_type, .. }
+            | IrExpression::VirtualThread { java_type, .. }
+            | IrExpression::TryWithResources { java_type, .. }
+            | IrExpression::This { java_type, .. }
+            | IrExpression::Super { java_type, .. } => Some(java_type),
+            IrExpression::Cast { target_type, .. } => Some(target_type),
+            _ => None,
+        }
+    }
+
+    fn should_call_method_for_field(&self, receiver: &IrExpression, field_name: &str) -> bool {
+        if self.is_sequence_core_expression(receiver) {
+            return true;
+        }
+
+        if field_name != "size" {
+            return false;
+        }
+
+        if let Some(index) = self.symbol_index() {
+            if let Some(JavaType::Reference { name, .. }) = Self::expression_java_type(receiver) {
+                if let Some(entry) = index.lookup_type(name) {
+                    if entry.has_field(field_name) {
+                        return false;
+                    }
+                    if entry.has_instance_method(field_name) {
+                        return true;
+                    }
+                }
+            }
+        }
+
+        self.is_sequence_core_expression(receiver)
+    }
+
+    fn is_sequence_core_type(java_type: &JavaType) -> bool {
+        match java_type {
+            JavaType::Reference { name, .. } => {
+                name == "SequenceCore" || name == "jv.collections.SequenceCore"
+            }
+            _ => false,
+        }
+    }
+
+    fn ensure_stdlib_import(&mut self, java_type: &JavaType) {
+        if let JavaType::Reference { name, .. } = java_type {
+            self.ensure_stdlib_import_name(name);
+        }
+    }
+
+    fn ensure_stdlib_import_name(&mut self, fqcn: &str) {
+        if fqcn.starts_with("jv.") {
+            self.add_import(fqcn);
+        }
+    }
+
+    fn is_system_out(receiver: Option<&IrExpression>) -> bool {
+        match receiver {
+            Some(IrExpression::FieldAccess {
+                receiver,
+                field_name,
+                ..
+            }) if field_name == "out" => {
+                matches!(
+                    receiver.as_ref(),
+                    IrExpression::Identifier { name, .. } if name == "System"
+                )
+            }
+            _ => false,
         }
     }
 
@@ -1010,8 +1125,9 @@ impl JavaCodeGenerator {
 
         self.ensure_sequence_helper();
 
-        let return_type = self.generate_type(result_type)?;
-        let is_void = matches!(result_type, JavaType::Void);
+        let normalized_result_type = Self::normalize_void_like(result_type);
+        let return_type = self.generate_type(normalized_result_type.as_ref())?;
+        let is_void = Self::is_void_like(normalized_result_type.as_ref());
         let helper_var = "__jvSequence";
 
         let helper_stream = format!("{}.toStream()", helper_var);
@@ -1080,12 +1196,8 @@ impl JavaCodeGenerator {
                 }
             }
             SequenceTerminalKind::ToSet => {
-                if self.targeting.supports_collection_factories() {
-                    Ok(format!("{}{}", chain, ".toSet()"))
-                } else {
-                    self.add_import("java.util.stream.Collectors");
-                    Ok(format!("{}.collect(Collectors.toSet())", chain))
-                }
+                self.add_import("java.util.stream.Collectors");
+                Ok(format!("{}.collect(Collectors.toSet())", chain))
             }
             SequenceTerminalKind::Fold {
                 initial,
@@ -1387,5 +1499,83 @@ impl JavaCodeGenerator {
                 Self::escape_string(&regex.pattern)
             ),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use jv_build::metadata::{SymbolIndex, TypeEntry};
+    use jv_ir::IrExpression;
+    use std::sync::Arc;
+
+    fn list_identifier(name: &str) -> IrExpression {
+        IrExpression::Identifier {
+            name: name.to_string(),
+            java_type: JavaType::Reference {
+                name: "java.util.List".to_string(),
+                generic_args: Vec::new(),
+            },
+            span: Span::dummy(),
+        }
+    }
+
+    #[test]
+    fn converts_size_field_to_method_when_instance_method_exists() {
+        let mut generator = JavaCodeGenerator::new();
+
+        let mut index = SymbolIndex::new(None);
+        let mut entry = TypeEntry::new("java.util.List".to_string(), "java.util".to_string(), None);
+        entry.add_instance_method("size".to_string());
+        index.types.insert("java.util.List".to_string(), entry);
+
+        generator.set_symbol_index(Some(Arc::new(index)));
+
+        let expr = IrExpression::FieldAccess {
+            receiver: Box::new(list_identifier("items")),
+            field_name: "size".to_string(),
+            java_type: JavaType::Primitive("int".to_string()),
+            span: Span::dummy(),
+        };
+
+        let rendered = generator
+            .generate_expression(&expr)
+            .expect("codegen succeeds");
+        assert_eq!(rendered, "items.size()");
+    }
+
+    #[test]
+    fn preserves_field_access_when_field_exists() {
+        let mut generator = JavaCodeGenerator::new();
+
+        let mut index = SymbolIndex::new(None);
+        let mut entry = TypeEntry::new(
+            "com.example.Counter".to_string(),
+            "com.example".to_string(),
+            None,
+        );
+        entry.add_instance_field("size".to_string());
+        index.types.insert("com.example.Counter".to_string(), entry);
+
+        generator.set_symbol_index(Some(Arc::new(index)));
+
+        let expr = IrExpression::FieldAccess {
+            receiver: Box::new(IrExpression::Identifier {
+                name: "counter".to_string(),
+                java_type: JavaType::Reference {
+                    name: "com.example.Counter".to_string(),
+                    generic_args: Vec::new(),
+                },
+                span: Span::dummy(),
+            }),
+            field_name: "size".to_string(),
+            java_type: JavaType::Primitive("int".to_string()),
+            span: Span::dummy(),
+        };
+
+        let rendered = generator
+            .generate_expression(&expr)
+            .expect("codegen succeeds");
+        assert_eq!(rendered, "counter.size");
     }
 }

@@ -51,6 +51,8 @@ impl ClassificationModule for KeywordModule {
             "true" => Some(TokenType::Boolean(true)),
             "false" => Some(TokenType::Boolean(false)),
             "null" => Some(TokenType::Null),
+            "package" => Some(TokenType::Package),
+            "import" => Some(TokenType::Import),
             _ => None,
         };
 

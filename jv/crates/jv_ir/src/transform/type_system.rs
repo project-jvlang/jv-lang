@@ -1,4 +1,4 @@
-use super::utils::{extract_java_type, ir_expression_span};
+use super::utils::{boxed_java_type, extract_java_type, ir_expression_span};
 use crate::context::TransformContext;
 use crate::error::TransformError;
 use crate::types::{IrExpression, JavaType, JavaWildcardKind};
@@ -36,24 +36,16 @@ pub fn convert_type_annotation(
     type_annotation: TypeAnnotation,
 ) -> Result<JavaType, TransformError> {
     match type_annotation {
-        TypeAnnotation::Simple(name) => Ok(match name.as_str() {
-            "Int" | "int" => JavaType::Primitive("int".to_string()),
-            "String" => JavaType::Reference {
-                name: "String".to_string(),
-                generic_args: vec![],
-            },
-            "Boolean" | "boolean" => JavaType::Primitive("boolean".to_string()),
-            "Double" | "double" => JavaType::Primitive("double".to_string()),
-            "Float" | "float" => JavaType::Primitive("float".to_string()),
-            "Long" | "long" => JavaType::Primitive("long".to_string()),
-            "Char" | "char" => JavaType::Primitive("char".to_string()),
-            "Byte" | "byte" => JavaType::Primitive("byte".to_string()),
-            "Short" | "short" => JavaType::Primitive("short".to_string()),
-            _ => JavaType::Reference {
-                name,
-                generic_args: vec![],
-            },
-        }),
+        TypeAnnotation::Simple(name) => Ok(convert_simple_type(&name)),
+        TypeAnnotation::Generic { name, type_args } => {
+            let mut generic_args = Vec::with_capacity(type_args.len());
+            for arg in type_args {
+                let java_arg = convert_type_annotation(arg)?;
+                generic_args.push(boxed_java_type(&java_arg));
+            }
+
+            Ok(JavaType::Reference { name, generic_args })
+        }
         TypeAnnotation::Nullable(inner) => convert_type_annotation(*inner),
         TypeAnnotation::Array(element_type) => {
             let element_java_type = convert_type_annotation(*element_type)?;
@@ -62,10 +54,92 @@ pub fn convert_type_annotation(
                 dimensions: 1,
             })
         }
-        _ => Ok(JavaType::Reference {
-            name: "Object".to_string(),
+        TypeAnnotation::Function {
+            params,
+            return_type,
+        } => {
+            let mut param_types = Vec::with_capacity(params.len());
+            for param in params {
+                param_types.push(convert_type_annotation(param)?);
+            }
+            let return_type = convert_type_annotation(*return_type)?;
+            Ok(functional_interface_type(&param_types, &return_type))
+        }
+    }
+}
+
+fn convert_simple_type(name: &str) -> JavaType {
+    match name {
+        "Int" | "int" => JavaType::Primitive("int".to_string()),
+        "Boolean" | "boolean" => JavaType::Primitive("boolean".to_string()),
+        "Double" | "double" => JavaType::Primitive("double".to_string()),
+        "Float" | "float" => JavaType::Primitive("float".to_string()),
+        "Long" | "long" => JavaType::Primitive("long".to_string()),
+        "Char" | "char" => JavaType::Primitive("char".to_string()),
+        "Byte" | "byte" => JavaType::Primitive("byte".to_string()),
+        "Short" | "short" => JavaType::Primitive("short".to_string()),
+        "Unit" => JavaType::Void,
+        "String" => JavaType::Reference {
+            name: "String".to_string(),
             generic_args: vec![],
-        }),
+        },
+        "Iterator" => JavaType::Reference {
+            name: "java.util.Iterator".to_string(),
+            generic_args: vec![],
+        },
+        "Iterable" => JavaType::Reference {
+            name: "java.lang.Iterable".to_string(),
+            generic_args: vec![],
+        },
+        _ => JavaType::Reference {
+            name: name.to_string(),
+            generic_args: vec![],
+        },
+    }
+}
+
+fn functional_interface_type(params: &[JavaType], return_type: &JavaType) -> JavaType {
+    match params.len() {
+        0 => JavaType::Reference {
+            name: "java.util.function.Supplier".to_string(),
+            generic_args: vec![boxed_java_type(return_type)],
+        },
+        1 => {
+            let param = boxed_java_type(&params[0]);
+            match return_type {
+                JavaType::Primitive(name) if name == "boolean" => JavaType::Reference {
+                    name: "java.util.function.Predicate".to_string(),
+                    generic_args: vec![param],
+                },
+                JavaType::Void => JavaType::Reference {
+                    name: "java.util.function.Consumer".to_string(),
+                    generic_args: vec![param],
+                },
+                _ => JavaType::Reference {
+                    name: "java.util.function.Function".to_string(),
+                    generic_args: vec![param, boxed_java_type(return_type)],
+                },
+            }
+        }
+        2 => {
+            let left = boxed_java_type(&params[0]);
+            let right = boxed_java_type(&params[1]);
+            if matches!(return_type, JavaType::Void) {
+                JavaType::Reference {
+                    name: "java.util.function.BiConsumer".to_string(),
+                    generic_args: vec![left, right],
+                }
+            } else {
+                JavaType::Reference {
+                    name: "java.util.function.BiFunction".to_string(),
+                    generic_args: vec![left, right, boxed_java_type(return_type)],
+                }
+            }
+        }
+        _ => JavaType::Reference {
+            name: "java.util.function.Function".to_string(),
+            generic_args: vec![JavaType::object(), boxed_java_type(return_type)],
+        },
     }
 }
 
@@ -149,17 +223,23 @@ fn validate_whitespace_call(
     context: &mut TransformContext,
 ) -> Result<(), TransformError> {
     let mut canonical: Option<JavaType> = None;
+    let mut heterogeneous = false;
 
     for arg in args {
         if let Some(arg_type) = extract_java_type(arg) {
             match &canonical {
                 Some(expected) if *expected != arg_type => {
-                    return Err(sequence_type_mismatch(expected, &arg_type, span));
+                    heterogeneous = true;
+                    break;
                 }
                 None => canonical = Some(arg_type.clone()),
                 _ => {}
             }
         }
+    }
+
+    if heterogeneous {
+        return Ok(());
     }
 
     if let Some(arg_type) = canonical {

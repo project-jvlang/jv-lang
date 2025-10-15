@@ -484,6 +484,69 @@ public static boolean isNumber(String input) {
   正規表現リテラルと混同されません。
 - 追加のランタイム依存関係は不要で、`java.util.regex.Pattern` のみを使用します。
 
+## スマートインポート
+
+jv の `import` 文はソースの形に応じて型・パッケージ・静的メンバー・モジュールを自動的に判別します。
+
+- `import foo.Bar as Baz` … 型に別名を付けます（別名は jv ソース内のみで使用され、生成コードでは完全修飾名が使われます）。
+- `import foo.*` … パッケージ全体をワイルドカードで取り込みます。
+- `import foo.Bar.*` … クラス `foo.Bar` の静的メンバーをワイルドカードで取り込みます。
+- Java 25 をターゲットにすると、必要な場合に `import module <name>;` が自動で追加されます（Java 21 ではモジュール宣言は抑制されます）。
+
+```jv
+import java.time.LocalDate as Date
+import java.util.*
+import java.util.Collections.*
+import java.lang.Math.max
+import java.sql.DriverManager
+
+fun report(): String {
+    val today = Date.now()
+    val list: ArrayList<Int> = ArrayList()
+    list.add(3)
+    list.add(1)
+    list.add(4)
+    sort(list)
+    val biggest = max(list.get(0), list.get(2))
+    val drivers = DriverManager.getDrivers()
+    return "${today.toString()} ${biggest} drivers=${drivers.hasMoreElements()}"
+}
+```
+
+**生成されるJava (Java 25ターゲット):**
+```java
+import module java.sql;
+import java.sql.DriverManager;
+import java.time.LocalDate;
+import java.util.ArrayList;
+import static java.lang.Math.max;
+import static java.util.Collections.*;
+
+final class Main {
+    static String report() {
+        LocalDate today = LocalDate.now();
+        ArrayList<Integer> list = new ArrayList<>();
+        sort(list);
+        int biggest = max(list.get(0), list.get(2));
+        var drivers = DriverManager.getDrivers();
+        return today.toString() + " " + biggest + " drivers=" + drivers.hasMoreElements();
+    }
+}
+```
+
+CLI で `--verbose` を付けると、解決済みインポートの一覧と別名・モジュール依存がバイリンガル表示されます。
+
+```console
+$ jv build --verbose --java-only
+解決済み import 一覧 / Resolved import list
+  - import java.time.LocalDate → 型 import: java.time.LocalDate / Type import: java.time.LocalDate (別名: Date / Alias: Date)
+  - import static java.lang.Math.max → 静的 import: java.lang.Math.max / Static import: java.lang.Math.max
+  - import static java.util.Collections.* → 静的 import: java.util.Collections.* / Static import: java.util.Collections.*
+  - import module java.sql → モジュール import: java.sql / Module import: java.sql (モジュール依存: java.sql / Module dependency: java.sql)
+```
+
+初回ビルドで作成されるシンボルインデックスは `target/jv/symbol-index/` にキャッシュされ、所要時間・入力アーティファクト・メモリ使用量がメトリクスとして記録されます。大規模クラスパスを扱う場合は `RUST_LOG=jv::build::symbol_index=info` を指定してビルドすると、`Indexed symbols from scratch ... artifact_inputs=<N>` といったログで性能ガードの値を確認できます。
+
 ## 並行性
 
 ### 仮想スレッド（spawn）

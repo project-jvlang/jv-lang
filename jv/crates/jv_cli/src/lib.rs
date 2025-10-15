@@ -1,6 +1,9 @@
 // jv_cli - CLI functionality (library interface for testing)
 use anyhow::Result;
 use clap::Parser;
+use jv_ir::types::{IrImport, IrImportDetail};
+use jv_support::i18n::{catalog, LocaleCode};
+use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 
@@ -70,6 +73,9 @@ pub enum Commands {
         /// Emit inference telemetry summary to stdout
         #[arg(long)]
         emit_telemetry: bool,
+        /// Print resolved imports and additional context
+        #[arg(long)]
+        verbose: bool,
         /// Enable module-level parallel type inference
         #[arg(long)]
         parallel_inference: bool,
@@ -169,6 +175,141 @@ fn format_learning_hint(hint: Option<&str>) -> String {
         Some(value) => format!("\n  学習ヒント: {value}"),
         None => String::new(),
     }
+}
+
+pub fn resolved_imports_header(has_entries: bool) -> String {
+    let key = if has_entries {
+        "imports.plan.header"
+    } else {
+        "imports.plan.header_none"
+    };
+    let args = HashMap::new();
+    let fallback = if has_entries {
+        (
+            "解決済み import 一覧".to_string(),
+            "Resolved import list".to_string(),
+        )
+    } else {
+        (
+            "解決済み import はありません".to_string(),
+            "No resolved imports found".to_string(),
+        )
+    };
+    bilingual_line_or(key, &args, fallback)
+}
+
+pub fn format_resolved_import(import: &IrImport) -> String {
+    let statement = render_import_statement(import);
+    let summary = match &import.detail {
+        IrImportDetail::Type { fqcn } => {
+            let mut args = HashMap::new();
+            args.insert("fqcn", fqcn.clone());
+            bilingual_line_or(
+                "imports.plan.type.summary",
+                &args,
+                (format!("型 import: {fqcn}"), format!("Type import: {fqcn}")),
+            )
+        }
+        IrImportDetail::Package { name } => {
+            let mut args = HashMap::new();
+            args.insert("name", name.clone());
+            bilingual_line_or(
+                "imports.plan.package.summary",
+                &args,
+                (
+                    format!("パッケージ import: {name}.*"),
+                    format!("Package import: {name}.*"),
+                ),
+            )
+        }
+        IrImportDetail::Static { owner, member } => {
+            let mut args = HashMap::new();
+            args.insert("owner", owner.clone());
+            args.insert("member", member.clone());
+            bilingual_line_or(
+                "imports.plan.static.summary",
+                &args,
+                (
+                    format!("静的 import: {owner}.{member}"),
+                    format!("Static import: {owner}.{member}"),
+                ),
+            )
+        }
+        IrImportDetail::Module { name } => {
+            let mut args = HashMap::new();
+            args.insert("name", name.clone());
+            bilingual_line_or(
+                "imports.plan.module.summary",
+                &args,
+                (
+                    format!("モジュール import: {name}"),
+                    format!("Module import: {name}"),
+                ),
+            )
+        }
+    };
+
+    let extras = import_extras(import);
+    format!("  - {statement} → {summary}{extras}")
+}
+
+fn import_extras(import: &IrImport) -> String {
+    let mut entries = Vec::new();
+
+    if let Some(alias) = import.alias.as_ref() {
+        let mut args = HashMap::new();
+        args.insert("alias", alias.clone());
+        entries.push(bilingual_line_or(
+            "imports.plan.alias.summary",
+            &args,
+            (format!("別名: {alias}"), format!("Alias: {alias}")),
+        ));
+    }
+
+    if let Some(module) = import.module_dependency.as_ref() {
+        let mut args = HashMap::new();
+        args.insert("module", module.clone());
+        entries.push(bilingual_line_or(
+            "imports.plan.module_dependency.summary",
+            &args,
+            (
+                format!("モジュール依存: {module}"),
+                format!("Module dependency: {module}"),
+            ),
+        ));
+    }
+
+    if entries.is_empty() {
+        String::new()
+    } else {
+        format!(" ({})", entries.join("; "))
+    }
+}
+
+fn render_import_statement(import: &IrImport) -> String {
+    match &import.detail {
+        IrImportDetail::Type { fqcn } => format!("import {fqcn}"),
+        IrImportDetail::Package { name } => format!("import {name}.*"),
+        IrImportDetail::Static { owner, member } => {
+            format!("import static {owner}.{member}")
+        }
+        IrImportDetail::Module { name } => format!("import module {name}"),
+    }
+}
+
+fn bilingual_line_or(
+    key: &str,
+    args: &HashMap<&str, String>,
+    fallback: (String, String),
+) -> String {
+    let (ja, en) = render_bilingual(key, args).unwrap_or(fallback);
+    format!("{ja} / {en}")
+}
+
+fn render_bilingual(key: &str, args: &HashMap<&str, String>) -> Option<(String, String)> {
+    let ja = catalog(LocaleCode::Ja).render(key, args)?;
+    let en = catalog(LocaleCode::En).render(key, args)?;
+    Some((ja, en))
 }
 
 pub fn init_project(name: &str) -> Result<String> {
@@ -285,13 +426,22 @@ pub mod pipeline {
     use super::*;
     use anyhow::{anyhow, bail, Context};
     use generics::apply_type_facts;
+    use jv_ast::Span;
+    use jv_build::metadata::{
+        BuildContext as SymbolBuildContext, SymbolIndexBuilder, SymbolIndexCache,
+    };
     use jv_build::BuildSystem;
     use jv_checker::binding::BindingUsageSummary;
     use jv_checker::compat::diagnostics as compat_diagnostics;
+    use jv_checker::imports::{
+        diagnostics as import_diagnostics, ImportResolutionService, ResolvedImport,
+        ResolvedImportKind,
+    };
     use jv_checker::{InferenceSnapshot, InferenceTelemetry, TypeChecker};
     use jv_codegen_java::{JavaCodeGenConfig, JavaCodeGenerator};
     use jv_fmt::JavaFormatter;
     use jv_ir::context::WhenStrategyRecord;
+    use jv_ir::types::{IrImport, IrImportDetail};
     use jv_ir::TransformContext;
     use jv_ir::{
         transform_program_with_context, transform_program_with_context_profiled, TransformPools,
@@ -299,10 +449,13 @@ pub mod pipeline {
     };
     use jv_parser::Parser as JvParser;
     use serde_json::json;
+    use std::collections::{BTreeMap, HashSet};
     use std::ffi::OsStr;
     use std::path::{Path, PathBuf};
     use std::process::Command;
+    use std::sync::Arc;
     use std::time::Instant;
+    use tracing::debug;
 
     /// Resulting artifacts and diagnostics from the build pipeline.
     #[derive(Debug, Default, Clone)]
@@ -318,6 +471,7 @@ pub mod pipeline {
         pub when_strategies: Vec<StrategySummary>,
         pub script_main_class: String,
         pub binding_usage: BindingUsageSummary,
+        pub resolved_imports: Vec<IrImport>,
     }
 
     /// Aggregated summary of lowering strategies selected for `when` expressions.
@@ -450,7 +604,7 @@ pub mod pipeline {
             .with_context(|| format!("Failed to read file: {}", entrypoint.display()))?;
 
         let parse_start = Instant::now();
-        let program = match JvParser::parse(&source) {
+        let mut program = match JvParser::parse(&source) {
             Ok(program) => program,
             Err(error) => {
                 if let Some(diagnostic) = from_parse_error(&error) {
@@ -462,11 +616,78 @@ pub mod pipeline {
                 return Err(anyhow!("Parser error: {:?}", error));
             }
         };
+
+        embedded_stdlib::rewrite_collection_property_access(&mut program);
         let parse_duration = parse_start.elapsed();
 
         warnings.extend(sequence_warnings::collect_sequence_warnings(&program));
 
+        let import_cache_dir = plan
+            .root
+            .root_dir()
+            .join("target")
+            .join("jv")
+            .join("symbol-index");
+        let index_cache = SymbolIndexCache::new(import_cache_dir);
+        let build_context = SymbolBuildContext::from_config(&plan.build_config);
+        let builder = SymbolIndexBuilder::new(&build_context);
+        let mut symbol_index = builder
+            .build_with_cache(&index_cache)
+            .map_err(|error| anyhow!("failed to build symbol index: {error}"))?;
+
+        // Populate stdlib types into symbol index before import resolution
+        let stdlib_catalog = embedded_stdlib::stdlib_catalog()?;
+        for fqcn in stdlib_catalog.fully_qualified_type_names() {
+            if symbol_index.lookup_type(fqcn).is_some() {
+                continue;
+            }
+            if let Some((package, _type_name)) = fqcn.rsplit_once('.') {
+                use jv_build::metadata::TypeEntry;
+                let entry = TypeEntry::new(fqcn.to_string(), package.to_string(), None);
+                symbol_index.add_type(entry);
+            }
+        }
+
+        let symbol_index = Arc::new(symbol_index);
+
+        let import_service =
+            ImportResolutionService::new(Arc::clone(&symbol_index), plan.build_config.target);
+        let mut resolved_imports = Vec::new();
+        for import_stmt in &program.imports {
+            match import_service.resolve(import_stmt) {
+                Ok(resolved) => resolved_imports.push(resolved),
+                Err(error) => {
+                    if let Some(diagnostic) = import_diagnostics::from_error(&error) {
+                        return Err(tooling_failure(
+                            entrypoint,
+                            diagnostic.with_strategy(DiagnosticStrategy::Deferred),
+                        ));
+                    }
+                    return Err(anyhow!("failed to resolve import: {error}"));
+                }
+            }
+        }
+
+        let mut stdlib_usage =
+            embedded_stdlib::StdlibUsage::from_resolved_imports(&resolved_imports, stdlib_catalog);
+        stdlib_usage.record_program_usage(&program, stdlib_catalog);
+        let import_plan = lowered_import_plan(&resolved_imports);
+        let module_count = import_plan
+            .iter()
+            .filter(|entry| matches!(entry.detail, IrImportDetail::Module { .. }))
+            .count();
+        debug!(
+            target: "jv::imports",
+            resolved_count = resolved_imports.len(),
+            module_count,
+            "resolved import plan for {}",
+            entrypoint.display()
+        );
+
         let mut type_checker = TypeChecker::with_parallel_config(options.parallel_config);
+        if !resolved_imports.is_empty() {
+            type_checker.set_imports(Arc::clone(&symbol_index), resolved_imports.clone());
+        }
         let (inference_snapshot, telemetry_snapshot) = match type_checker.check_program(&program) {
             Ok(()) => {
                 if options.check {
@@ -529,6 +750,9 @@ pub mod pipeline {
         let mut ir_program = if options.perf {
             let pools = TransformPools::with_chunk_capacity(256 * 1024);
             let mut context = TransformContext::with_pools(pools);
+            if !import_plan.is_empty() {
+                context.set_resolved_imports(import_plan.clone());
+            }
             let mut profiler = TransformProfiler::new();
             let lowering_result = transform_program_with_context_profiled(
                 program_holder
@@ -562,6 +786,9 @@ pub mod pipeline {
             }
         } else {
             let mut context = TransformContext::new();
+            if !import_plan.is_empty() {
+                context.set_resolved_imports(import_plan.clone());
+            }
             let lowering_result = transform_program_with_context(
                 program_holder
                     .take()
@@ -598,9 +825,12 @@ pub mod pipeline {
         codegen_config.script_main_class = script_main_class.clone();
 
         let mut code_generator = JavaCodeGenerator::with_config(codegen_config);
+        code_generator.set_symbol_index(Some(Arc::clone(&symbol_index)));
         let java_unit = code_generator
             .generate_compilation_unit(&ir_program)
             .map_err(|e| anyhow!("Code generation error: {:?}", e))?;
+        stdlib_usage
+            .extend_with_java_imports(java_unit.imports.iter().map(|s| s.as_str()), stdlib_catalog);
 
         fs::create_dir_all(&options.output_dir).with_context(|| {
             format!(
@@ -627,6 +857,7 @@ pub mod pipeline {
             }
             java_content.push('\n');
             java_content.push_str(type_decl);
+            stdlib_usage.scan_java_source(type_decl, stdlib_catalog);
 
             if options.format {
                 let formatter = JavaFormatter::default();
@@ -646,6 +877,8 @@ pub mod pipeline {
             plan.build_config.target,
             options.format,
             options.parallel_config,
+            &stdlib_usage,
+            Arc::clone(&symbol_index),
         )?;
         java_files.extend(stdlib_helpers);
 
@@ -674,43 +907,38 @@ pub mod pipeline {
             when_strategies: when_strategy_summary,
             script_main_class,
             binding_usage,
+            resolved_imports: import_plan.clone(),
         };
 
         if !options.java_only {
             let build_system = BuildSystem::new(build_config.clone());
 
-            match build_system.check_javac_availability() {
-                Ok(version) => {
-                    artifacts.javac_version = Some(version.clone());
-                    let java_paths: Vec<&Path> =
-                        artifacts.java_files.iter().map(|p| p.as_path()).collect();
-                    if !java_paths.is_empty() {
-                        build_system
-                            .compile_java_files(java_paths)
-                            .map_err(|e| anyhow!("Java compilation failed: {}", e))?;
+            let javac_version = build_system
+                .check_javac_availability()
+                .map_err(|err| anyhow!("JDK not available: {}", err))?;
+            artifacts.javac_version = Some(javac_version);
 
-                        let entries = fs::read_dir(&options.output_dir).with_context(|| {
-                            format!(
-                                "Failed to enumerate output directory: {}",
-                                options.output_dir.display()
-                            )
-                        })?;
+            let java_paths: Vec<&Path> = artifacts.java_files.iter().map(|p| p.as_path()).collect();
+            if !java_paths.is_empty() {
+                build_system
+                    .compile_java_files(java_paths)
+                    .map_err(|e| anyhow!("Java compilation failed: {}", e))?;
 
-                        let mut class_files = Vec::new();
-                        for entry in entries {
-                            let path = entry?.path();
-                            if path.extension().and_then(OsStr::to_str) == Some("class") {
-                                class_files.push(path);
-                            }
-                        }
-                        artifacts.class_files = class_files;
+                let entries = fs::read_dir(&options.output_dir).with_context(|| {
+                    format!(
+                        "Failed to enumerate output directory: {}",
+                        options.output_dir.display()
+                    )
+                })?;
+
+                let mut class_files = Vec::new();
+                for entry in entries {
+                    let path = entry?.path();
+                    if path.extension().and_then(OsStr::to_str) == Some("class") {
+                        class_files.push(path);
                     }
                 }
-                Err(err) => {
-                    artifacts
-                        .warnings
-                        .push(format!("Skipping Java compilation: {}", err));
-                }
+                artifacts.class_files = class_files;
             }
         }
 
@@ -724,6 +952,58 @@ pub mod pipeline {
         artifacts.compatibility = Some(rendered_report);
 
         Ok(artifacts)
+    }
+
+    fn lowered_import_plan(resolved_imports: &[ResolvedImport]) -> Vec<IrImport> {
+        let mut imports = Vec::new();
+        let mut module_sources: BTreeMap<String, Span> = BTreeMap::new();
+        let mut explicit_modules = HashSet::new();
+
+        for resolved in resolved_imports {
+            let detail = match &resolved.kind {
+                ResolvedImportKind::Type { fqcn } => IrImportDetail::Type { fqcn: fqcn.clone() },
+                ResolvedImportKind::Package { name } => {
+                    IrImportDetail::Package { name: name.clone() }
+                }
+                ResolvedImportKind::StaticMember { owner, member } => IrImportDetail::Static {
+                    owner: owner.clone(),
+                    member: member.clone(),
+                },
+                ResolvedImportKind::Module { name } => {
+                    explicit_modules.insert(name.clone());
+                    IrImportDetail::Module { name: name.clone() }
+                }
+            };
+
+            if let Some(module) = &resolved.module_dependency {
+                module_sources
+                    .entry(module.clone())
+                    .or_insert_with(|| resolved.source_span.clone());
+            }
+
+            imports.push(IrImport {
+                original: resolved.original_path.clone(),
+                alias: resolved.alias.clone(),
+                detail,
+                module_dependency: resolved.module_dependency.clone(),
+                span: resolved.source_span.clone(),
+            });
+        }
+
+        for (module, span) in module_sources {
+            if explicit_modules.contains(&module) {
+                continue;
+            }
+            imports.push(IrImport {
+                original: module.clone(),
+                alias: None,
+                detail: IrImportDetail::Module { name: module },
+                module_dependency: None,
+                span,
+            });
+        }
+
+        imports
     }
 
     fn print_inference_telemetry(

@@ -26,3 +26,40 @@ note_hint = "Set preferredImpl or add an explicit annotation to select the desir
 message = "Type parameter {type_param} of {symbol} expects kind {expected}, but the argument has kind {actual}."
 note_span = "The type argument originates at {span}."
 note_hint = "Adjust the kind annotation or supply the missing type constructors."
+
+[imports.diagnostic.unknown]
+message = "Import `{path}` could not be resolved."
+message_with_candidates = "Import `{path}` could not be resolved. Close matches:\n{candidates}"
+suggestion = "Use `import {candidate}`"
+
+[imports.diagnostic.ambiguous]
+message = "Import `{path}` matches multiple symbols."
+message_with_candidates = "Import `{path}` matches multiple symbols. Pick an explicit target:\n{candidates}"
+suggestion = "Use `import {candidate}` or `import {candidate} as ...`"
+generic_suggestion = "Provide an `as` alias to disambiguate the import"
+
+[imports.diagnostic.missing_module]
+message = "Module `{module}` is missing from the module graph, preventing `{required_by}` from resolving."
+suggestion = "Add `--add-modules {module}` or list it under build.modules in jv.toml."
+
+[imports.plan]
+header = "Resolved import list"
+header_none = "No resolved imports found"
+
+[imports.plan.type]
+summary = "Type import: {fqcn}"
+
+[imports.plan.package]
+summary = "Package import: {name}.*"
+
+[imports.plan.static]
+summary = "Static import: {owner}.{member}"
+
+[imports.plan.module]
+summary = "Module import: {name}"
+
+[imports.plan.alias]
+summary = "Alias: {alias}"
+
+[imports.plan.module_dependency]
+summary = "Module dependency: {module}"

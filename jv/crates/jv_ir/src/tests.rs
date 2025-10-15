@@ -1862,6 +1862,7 @@ mod tests {
 
         match result {
             IrStatement::MethodDeclaration {
+                type_parameters,
                 name,
                 parameters,
                 return_type,
@@ -1869,12 +1870,66 @@ mod tests {
                 body,
                 ..
             } => {
+                assert!(type_parameters.is_empty());
                 assert_eq!(name, "topLevelFunction");
                 assert_eq!(parameters.len(), 1);
                 assert_eq!(parameters[0].name, "x");
                 assert_eq!(return_type, JavaType::string());
                 assert!(modifiers.is_static); // Top-level functions become static
                 assert!(body.is_some()); // Should have a body
+            }
+            other => panic!("Expected method declaration, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_desugar_top_level_function_carries_type_parameters() {
+        let mut context = test_context();
+
+        let function = Statement::FunctionDeclaration {
+            name: "identity".to_string(),
+            type_parameters: vec!["T".to_string()],
+            generic_signature: None,
+            where_clause: None,
+            parameters: vec![Parameter {
+                name: "value".to_string(),
+                type_annotation: Some(TypeAnnotation::Simple("T".to_string())),
+                default_value: None,
+                span: dummy_span(),
+            }],
+            return_type: Some(TypeAnnotation::Simple("T".to_string())),
+            body: Box::new(Expression::Identifier("value".to_string(), dummy_span())),
+            modifiers: Modifiers::default(),
+            span: dummy_span(),
+        };
+
+        let result = desugar_top_level_function(function, &mut context)
+            .expect("generic top-level function should desugar successfully");
+
+        match result {
+            IrStatement::MethodDeclaration {
+                type_parameters,
+                parameters,
+                return_type,
+                ..
+            } => {
+                assert_eq!(type_parameters.len(), 1);
+                assert_eq!(type_parameters[0].name, "T");
+                assert_eq!(parameters.len(), 1);
+                assert_eq!(
+                    parameters[0].java_type,
+                    JavaType::Reference {
+                        name: "T".to_string(),
+                        generic_args: vec![],
+                    }
+                );
+                assert_eq!(
+                    return_type,
+                    JavaType::Reference {
+                        name: "T".to_string(),
+                        generic_args: vec![],
+                    }
+                );
             }
             other => panic!("Expected method declaration, got {:?}", other),
         }
@@ -2378,7 +2433,7 @@ mod tests {
     }
 
     #[test]
-    fn test_whitespace_call_mixed_type_returns_error() {
+    fn test_whitespace_call_mixed_type_is_permitted() {
         let mut context = test_context();
 
         let whitespace_call = IrExpression::MethodCall {
@@ -2394,21 +2449,10 @@ mod tests {
             span: dummy_span(),
         };
 
-        let error = infer_java_type(None, Some(&whitespace_call), &mut context)
-            .expect_err("mixed whitespace call should error");
+        let inferred = infer_java_type(None, Some(&whitespace_call), &mut context)
+            .expect("mixed whitespace call should be accepted");
 
-        match error {
-            TransformError::WhitespaceSequenceTypeMismatch {
-                expected, found, ..
-            } => {
-                assert!(expected.contains("int") || expected.contains("Int"));
-                assert!(found.contains("String"));
-            }
-            other => panic!(
-                "expected whitespace sequence mismatch error, got {:?}",
-                other
-            ),
-        }
+        assert_eq!(inferred, JavaType::void());
     }
 
     // Test for type annotation conversion
@@ -2420,9 +2464,19 @@ mod tests {
         };
 
         let java_type = convert_type_annotation(type_annotation)
-            .expect("generic annotations should currently erase to Object");
+            .expect("generic annotations should preserve type parameters");
 
-        assert_eq!(java_type, JavaType::object());
+        // Generic types are now preserved, not erased to Object
+        assert_eq!(
+            java_type,
+            JavaType::Reference {
+                name: "List".to_string(),
+                generic_args: vec![JavaType::Reference {
+                    name: "String".to_string(),
+                    generic_args: vec![],
+                }],
+            }
+        );
     }
 
     // Test for utility class name generation
@@ -2810,7 +2864,7 @@ mod tests {
 
         let function_decl = Statement::FunctionDeclaration {
             name: "secondOrNull".to_string(),
-            type_parameters: Vec::new(),
+            type_parameters: vec!["T".to_string()],
             generic_signature: None,
             where_clause: None,
             parameters: vec![],
@@ -2856,6 +2910,7 @@ mod tests {
 
         match method {
             IrStatement::MethodDeclaration {
+                type_parameters,
                 parameters,
                 return_type,
                 ..
@@ -2865,6 +2920,8 @@ mod tests {
                     JavaType::Reference { ref name, .. } => assert_eq!(name, "T"),
                     other => panic!("Expected reference return type, got {:?}", other),
                 }
+                assert_eq!(type_parameters.len(), 1);
+                assert_eq!(type_parameters[0].name, "T");
             }
             other => panic!("Expected method declaration, got {:?}", other),
         }

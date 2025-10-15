@@ -90,6 +90,7 @@ fn build_plan_for_input(input_path: &Path) -> Result<BuildPlan> {
         clean: false,
         perf: false,
         emit_types: false,
+        verbose: false,
         emit_telemetry: false,
         parallel_inference: false,
         inference_workers: None,

@@ -201,9 +201,9 @@ fn type_facts_update_after_rechecking_program() {
 fn sequence_extension_chain_maintains_inference() {
     let program = parse_program(
         r#"
-        import jv.collections.SequenceFactory
+        import jv.collections.sequenceFromIterable
 
-        val numbers = SequenceFactory.fromIterable([1 2 3 4 5])
+        val numbers = sequenceFromIterable([1 2 3 4 5])
         val doubled = numbers.map { value -> value * 2 }
         val filtered = doubled.filter { value -> value > 4 }
         val total = filtered.reduce { (acc value) -> acc + value }
@@ -240,9 +240,9 @@ fn sequence_extension_chain_maintains_inference() {
 fn lambda_extension_receiver_resolves_sequence_core() {
     let program = parse_program(
         r#"
-        import jv.collections.SequenceFactory
+        import jv.collections.sequenceFromIterable
 
-        val source = SequenceFactory.fromIterable([1 2 3])
+        val source = sequenceFromIterable([1 2 3])
         val toStream = { seq -> seq.toStream() }
         val stream = toStream(source)
     "#,

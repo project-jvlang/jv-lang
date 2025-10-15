@@ -16,10 +16,10 @@ use super::support::{
     block_expression_parser, expression_level_block_parser, expression_span, identifier,
     identifier_with_span, keyword as support_keyword, merge_spans, qualified_name_with_span,
     span_from_token, token_any_comma, token_assign, token_at, token_class, token_colon, token_data,
-    token_defer, token_do_keyword, token_dot, token_for, token_fun, token_greater,
-    token_in_keyword, token_left_brace, token_left_paren, token_less, token_question, token_return,
-    token_right_brace, token_right_paren, token_spawn, token_use, token_val, token_var,
-    token_where_keyword, token_while_keyword, type_annotation,
+    token_defer, token_do_keyword, token_dot, token_for, token_fun, token_greater, token_import,
+    token_in_keyword, token_left_brace, token_left_paren, token_less, token_multiply,
+    token_package, token_question, token_return, token_right_brace, token_right_paren, token_spawn,
+    token_use, token_val, token_var, token_where_keyword, token_while_keyword, type_annotation,
 };
 
 fn attempt_statement_parser<P>(
@@ -37,12 +37,16 @@ pub(crate) fn statement_parser(
         let expr = expressions::expression_parser(expression_level_block_parser(statement.clone()));
 
         let comment_stmt = comment_statement_parser();
+        let package_stmt = attempt_statement_parser(package_declaration_parser());
+        let import_stmt = attempt_statement_parser(import_statement_parser());
         let val_decl = attempt_statement_parser(val_declaration_parser(expr.clone()));
         let implicit_typed_val_decl =
             attempt_statement_parser(implicit_typed_val_declaration_parser(expr.clone()));
         let var_decl = attempt_statement_parser(var_declaration_parser(expr.clone()));
         let assignment = assignment_statement_parser(expr.clone());
         let function_decl = function_declaration_parser(statement.clone(), expr.clone());
+        let class_decl =
+            attempt_statement_parser(class_declaration_parser(statement.clone(), expr.clone()));
         let data_class_decl = data_class_declaration_parser(expr.clone());
         let use_stmt = use_statement_parser(statement.clone(), expr.clone());
         let defer_stmt = defer_statement_parser(statement.clone());
@@ -54,11 +58,14 @@ pub(crate) fn statement_parser(
 
         choice((
             comment_stmt,
+            package_stmt,
+            import_stmt,
             val_decl,
             implicit_typed_val_decl,
             var_decl,
             assignment,
             function_decl,
+            class_decl,
             data_class_decl,
             use_stmt,
             defer_stmt,
@@ -106,6 +113,75 @@ fn comment_statement_parser() -> impl ChumskyParser<Token, Statement, Error = Si
             _ => Err(Simple::expected_input_found(span, Vec::new(), Some(token))),
         }
     })
+}
+
+fn package_declaration_parser(
+) -> impl ChumskyParser<Token, Statement, Error = Simple<Token>> + Clone {
+    token_package()
+        .map(|token| span_from_token(&token))
+        .then(qualified_name_with_span())
+        .map(|(package_span, (segments, path_span))| {
+            let span = merge_spans(&package_span, &path_span);
+            let name = segments.join(".");
+
+            Statement::Package { name, span }
+        })
+}
+
+fn import_statement_parser() -> impl ChumskyParser<Token, Statement, Error = Simple<Token>> + Clone
+{
+    #[derive(Clone)]
+    enum ImportSuffix {
+        Wildcard(Span),
+        Alias { name: String, span: Span },
+    }
+
+    let wildcard = token_dot()
+        .ignore_then(token_multiply())
+        .map(|token| ImportSuffix::Wildcard(span_from_token(&token)));
+
+    let alias = support_keyword("as")
+        .map(|token| span_from_token(&token))
+        .then(identifier_with_span())
+        .map(|(as_span, (alias, alias_span))| {
+            let span = merge_spans(&as_span, &alias_span);
+            ImportSuffix::Alias { name: alias, span }
+        });
+
+    token_import()
+        .map(|token| span_from_token(&token))
+        .then(qualified_name_with_span())
+        .then(choice((wildcard, alias)).or_not())
+        .map(|((import_span, (segments, path_span)), suffix)| {
+            let mut span = merge_spans(&import_span, &path_span);
+            let mut alias = None;
+            let mut is_wildcard = false;
+
+            if let Some(suffix) = suffix {
+                match suffix {
+                    ImportSuffix::Wildcard(suffix_span) => {
+                        span = merge_spans(&span, &suffix_span);
+                        is_wildcard = true;
+                    }
+                    ImportSuffix::Alias {
+                        name,
+                        span: alias_span,
+                    } => {
+                        span = merge_spans(&span, &alias_span);
+                        alias = Some(name);
+                    }
+                }
+            }
+
+            let path = segments.join(".");
+
+            Statement::Import {
+                path,
+                alias,
+                is_wildcard,
+                span,
+            }
+        })
 }
 
 fn is_jv_only_line_comment(raw: &str) -> bool {
@@ -299,6 +375,44 @@ fn data_class_declaration_parser(
                 modifiers,
                 type_parameters,
                 generic_signature,
+                span: Span::dummy(),
+            }
+        })
+}
+
+fn class_declaration_parser(
+    statement: impl ChumskyParser<Token, Statement, Error = Simple<Token>> + Clone,
+    expr: impl ChumskyParser<Token, Expression, Error = Simple<Token>> + Clone,
+) -> impl ChumskyParser<Token, Statement, Error = Simple<Token>> + Clone {
+    let member_parser =
+        comment_statement_parser().or(function_declaration_parser(statement.clone(), expr.clone()));
+
+    modifiers_parser()
+        .then_ignore(token_class())
+        .then(identifier())
+        .then(type_parameter_list().or_not())
+        .then_ignore(token_left_brace())
+        .then(member_parser.repeated())
+        .then_ignore(token_right_brace())
+        .map(|(((modifiers, name), generics), members)| {
+            let (type_parameters, generic_signature) =
+                extract_type_parameters_and_signature(generics);
+
+            let methods = members
+                .into_iter()
+                .filter(|member| matches!(member, Statement::FunctionDeclaration { .. }))
+                .map(Box::new)
+                .collect();
+
+            Statement::ClassDeclaration {
+                name,
+                type_parameters,
+                generic_signature,
+                superclass: None,
+                interfaces: Vec::new(),
+                properties: Vec::new(),
+                methods,
+                modifiers,
                 span: Span::dummy(),
             }
         })

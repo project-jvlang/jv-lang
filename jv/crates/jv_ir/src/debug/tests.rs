@@ -2,7 +2,10 @@
 
 use super::*;
 use crate::transform::transform_program;
-use crate::types::{IrExpression, IrModifiers, IrProgram, IrStatement, IrVisibility, JavaType};
+use crate::types::{
+    IrExpression, IrImport, IrImportDetail, IrModifiers, IrProgram, IrStatement, IrVisibility,
+    JavaType,
+};
 use jv_ast::{
     Expression, Literal, Modifiers, Program, Span, Statement, TypeAnnotation, ValBindingOrigin,
     Visibility,
@@ -42,12 +45,15 @@ fn sample_program() -> Program {
 fn reconstructs_basic_program_with_variable_and_expression() {
     let program = IrProgram {
         package: Some("com.example".to_string()),
-        imports: vec![IrStatement::Import {
-            path: "java.util.List".to_string(),
-            is_static: false,
-            is_wildcard: false,
+        imports: vec![IrStatement::Import(IrImport {
+            original: "java.util.List".to_string(),
+            alias: None,
+            detail: IrImportDetail::Type {
+                fqcn: "java.util.List".to_string(),
+            },
+            module_dependency: None,
             span: span(),
-        }],
+        })],
         type_declarations: vec![
             IrStatement::VariableDeclaration {
                 name: "answer".to_string(),
