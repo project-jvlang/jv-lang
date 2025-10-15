@@ -248,20 +248,18 @@ fn is_sequence_layout_candidate(
                 false
             }
         }
-        _ => {
-            !matches!(
-                token_type,
-                TokenType::Comma
-                    | TokenType::LayoutComma
-                    | TokenType::RightBracket
-                    | TokenType::RightParen
-                    | TokenType::Assign
-                    | TokenType::Colon
-                    | TokenType::Dot
-                    | TokenType::Arrow
-                    | TokenType::FatArrow
-            )
-        }
+        _ => !matches!(
+            token_type,
+            TokenType::Comma
+                | TokenType::LayoutComma
+                | TokenType::RightBracket
+                | TokenType::RightParen
+                | TokenType::Assign
+                | TokenType::Colon
+                | TokenType::Dot
+                | TokenType::Arrow
+                | TokenType::FatArrow
+        ),
     }
 }
 
@@ -341,7 +339,11 @@ fn preprocess_tokens(tokens: Vec<Token>) -> Vec<Token> {
                     SequenceContextKind::Call => {
                         !matches!(token.token_type, TokenType::Comma | TokenType::RightParen)
                     }
-                } && is_sequence_layout_candidate(prev_token_type.as_ref(), token_type_ref, next_token);
+                } && is_sequence_layout_candidate(
+                    prev_token_type.as_ref(),
+                    token_type_ref,
+                    next_token,
+                );
                 if eligible {
                     let layout_needed = !ctx.prev_was_separator
                         && (ctx.pending_layout || has_layout_trivia(&token.leading_trivia));

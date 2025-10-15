@@ -154,8 +154,7 @@ fn whitespace_array_inside_lambda_body_preserves_delimiter() {
 
 #[test]
 fn whitespace_array_lambda_allows_binary_operator_elements() {
-    let program =
-        parse_program("val flattened = values.flatMap { value -> [value value + 1] }");
+    let program = parse_program("val flattened = values.flatMap { value -> [value value + 1] }");
     let statement = program
         .statements
         .get(0)

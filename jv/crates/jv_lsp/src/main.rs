@@ -238,7 +238,6 @@ impl tower_lsp::LanguageServer for Backend {
             }),
         ))
     }
-
 }
 
 impl Backend {
