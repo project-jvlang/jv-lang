@@ -39,6 +39,10 @@ impl SymbolIndex {
             .and_then(|module| self.modules.get(module))
     }
 
+    pub fn add_type(&mut self, entry: TypeEntry) {
+        self.insert_type(entry);
+    }
+
     pub(crate) fn insert_module(&mut self, module: ModuleEntry) {
         self.modules
             .entry(module.name.clone())

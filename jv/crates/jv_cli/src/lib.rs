@@ -631,9 +631,23 @@ pub mod pipeline {
         let index_cache = SymbolIndexCache::new(import_cache_dir);
         let build_context = SymbolBuildContext::from_config(&plan.build_config);
         let builder = SymbolIndexBuilder::new(&build_context);
-        let symbol_index = builder
+        let mut symbol_index = builder
             .build_with_cache(&index_cache)
             .map_err(|error| anyhow!("failed to build symbol index: {error}"))?;
+
+        // Populate stdlib types into symbol index before import resolution
+        let stdlib_catalog = embedded_stdlib::stdlib_catalog()?;
+        for fqcn in stdlib_catalog.fully_qualified_type_names() {
+            if symbol_index.lookup_type(fqcn).is_some() {
+                continue;
+            }
+            if let Some((package, _type_name)) = fqcn.rsplit_once('.') {
+                use jv_build::metadata::TypeEntry;
+                let entry = TypeEntry::new(fqcn.to_string(), package.to_string(), None);
+                symbol_index.add_type(entry);
+            }
+        }
+
         let symbol_index = Arc::new(symbol_index);
 
         let import_service =
@@ -654,7 +668,6 @@ pub mod pipeline {
             }
         }
 
-        let stdlib_catalog = embedded_stdlib::stdlib_catalog()?;
         let mut stdlib_usage =
             embedded_stdlib::StdlibUsage::from_resolved_imports(&resolved_imports, stdlib_catalog);
         stdlib_usage.record_program_usage(&program, stdlib_catalog);

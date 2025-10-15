@@ -805,6 +805,10 @@ impl StdlibCatalog {
         }
     }
 
+    pub fn fully_qualified_type_names(&self) -> impl Iterator<Item = &str> + '_ {
+        self.types_fq.keys().map(String::as_str)
+    }
+
     fn has_package(&self, package: &str) -> bool {
         self.packages.contains(package)
     }
