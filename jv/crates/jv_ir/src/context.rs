@@ -3,7 +3,8 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use crate::types::{
-    DataFormat, IrImport, JavaType, MethodOverload, SampleMode, StaticMethodCall, UtilityClass,
+    DataFormat, IrImport, IrImportDetail, JavaType, MethodOverload, SampleMode, StaticMethodCall,
+    UtilityClass,
 };
 use jv_ast::Span;
 use jv_support::arena::{
@@ -40,6 +41,8 @@ pub struct TransformContext {
     when_strategies: Vec<WhenStrategyRecord>,
     /// Resolved import plan used to enrich IR import statements
     planned_imports: Vec<IrImport>,
+    /// Alias lookup for resolved import entries
+    import_aliases: HashMap<String, JavaType>,
 }
 
 impl TransformContext {
@@ -75,6 +78,7 @@ impl TransformContext {
             pool_state: None,
             when_strategies: Vec::new(),
             planned_imports: Vec::new(),
+            import_aliases: HashMap::new(),
         }
     }
 
@@ -93,6 +97,9 @@ impl TransformContext {
     }
 
     pub fn lookup_variable(&self, name: &str) -> Option<&JavaType> {
+        if let Some(java_type) = self.import_aliases.get(name) {
+            return Some(java_type);
+        }
         for scope in self.scope_stack.iter().rev() {
             if let Some(java_type) = scope.get(name) {
                 return Some(java_type);
@@ -142,6 +149,22 @@ impl TransformContext {
 
     /// Injects the resolved import plan to be consumed during lowering.
     pub fn set_resolved_imports(&mut self, imports: Vec<IrImport>) {
+        let mut aliases = HashMap::new();
+        for import in &imports {
+            if let IrImportDetail::Type { fqcn } = &import.detail {
+                let java_type = JavaType::Reference {
+                    name: fqcn.clone(),
+                    generic_args: vec![],
+                };
+
+                if let Some(alias) = &import.alias {
+                    aliases.insert(alias.clone(), java_type.clone());
+                } else if let Some(simple_name) = fqcn.rsplit('.').next() {
+                    aliases.insert(simple_name.to_string(), java_type.clone());
+                }
+            }
+        }
+        self.import_aliases = aliases;
         self.planned_imports = imports;
     }
 
@@ -252,6 +275,7 @@ impl Clone for TransformContext {
                 .map(TransformPoolState::shallow_clone),
             when_strategies: self.when_strategies.clone(),
             planned_imports: self.planned_imports.clone(),
+            import_aliases: self.import_aliases.clone(),
         }
     }
 }
