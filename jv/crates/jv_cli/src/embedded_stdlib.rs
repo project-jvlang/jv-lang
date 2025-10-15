@@ -100,14 +100,10 @@ fn promote_visibility(statement: &mut Statement) {
         Statement::FunctionDeclaration { modifiers, .. }
         | Statement::DataClassDeclaration { modifiers, .. } => promote_modifiers(modifiers),
         Statement::ClassDeclaration {
-            modifiers,
-            methods,
-            ..
+            modifiers, methods, ..
         }
         | Statement::InterfaceDeclaration {
-            modifiers,
-            methods,
-            ..
+            modifiers, methods, ..
         } => {
             promote_modifiers(modifiers);
             for method in methods {
@@ -917,6 +913,18 @@ struct ManifestTypeParameter {
     kind: Option<Kind>,
 }
 
+#[derive(Debug, Default)]
+pub struct StdlibCompilationArtifacts {
+    pub java_files: Vec<PathBuf>,
+    pub metadata_files: Vec<PathBuf>,
+}
+
+#[derive(Debug, Default)]
+struct StdlibModuleArtifacts {
+    java_files: Vec<PathBuf>,
+    metadata_files: Vec<PathBuf>,
+}
+
 pub fn compile_stdlib_modules(
     output_dir: &Path,
     target: JavaTarget,
@@ -924,26 +932,26 @@ pub fn compile_stdlib_modules(
     parallel_config: ParallelInferenceConfig,
     usage: &StdlibUsage,
     symbol_index: Arc<SymbolIndex>,
-) -> Result<Vec<PathBuf>> {
+) -> Result<StdlibCompilationArtifacts> {
     let inventory = stdlib_inventory()?;
     let modules = &inventory.modules;
     if usage.is_empty() {
-        return Ok(Vec::new());
+        return Ok(StdlibCompilationArtifacts::default());
     }
 
     let required_indices = resolve_required_modules(modules, usage);
     if required_indices.is_empty() {
-        return Ok(Vec::new());
+        return Ok(StdlibCompilationArtifacts::default());
     }
 
-    let mut generated_files = Vec::new();
+    let mut compilation_artifacts = StdlibCompilationArtifacts::default();
 
     for (index, module) in modules.iter().enumerate() {
         if !required_indices.contains(&index) || !module.emit_java {
             continue;
         }
 
-        let files = compile_module(
+        let module_artifacts = compile_module(
             module,
             output_dir,
             target,
@@ -951,10 +959,15 @@ pub fn compile_stdlib_modules(
             parallel_config,
             &symbol_index,
         )?;
-        generated_files.extend(files);
+        compilation_artifacts
+            .java_files
+            .extend(module_artifacts.java_files);
+        compilation_artifacts
+            .metadata_files
+            .extend(module_artifacts.metadata_files);
     }
 
-    Ok(generated_files)
+    Ok(compilation_artifacts)
 }
 
 fn collect_stdlib_inventory() -> Result<StdlibInventory> {
@@ -1154,13 +1167,13 @@ fn compile_module(
     format: bool,
     parallel_config: ParallelInferenceConfig,
     symbol_index: &Arc<SymbolIndex>,
-) -> Result<Vec<PathBuf>> {
-        let mut program = match JvParser::parse(&module.source) {
-            Ok(program) => program,
-            Err(error) => {
-                if let Some(diagnostic) = from_parse_error(&error) {
-                    return Err(tooling_failure(
-                        module.path.as_path(),
+) -> Result<StdlibModuleArtifacts> {
+    let mut program = match JvParser::parse(&module.source) {
+        Ok(program) => program,
+        Err(error) => {
+            if let Some(diagnostic) = from_parse_error(&error) {
+                return Err(tooling_failure(
+                    module.path.as_path(),
                     diagnostic.with_strategy(DiagnosticStrategy::Deferred),
                 ));
             }
@@ -1219,12 +1232,7 @@ fn compile_module(
         .map_err(|error| anyhow!("Code generation error: {:?}", error))?;
 
     #[cfg(debug_assertions)]
-    if module
-        .path
-        .file_name()
-        .and_then(|name| name.to_str())
-        == Some("sequence.jv")
-    {
+    if module.path.file_name().and_then(|name| name.to_str()) == Some("sequence.jv") {
         eprintln!(
             "[debug] stdlib module {:?} emitted {} type declarations",
             module.path,
@@ -1238,7 +1246,8 @@ fn compile_module(
         .as_ref()
         .map(|package| package.replace('.', "/"));
 
-    let mut emitted_paths = Vec::new();
+    let mut java_files = Vec::new();
+    let mut metadata_files = Vec::new();
 
     for (index, type_decl) in java_unit.type_declarations.iter().enumerate() {
         let file_name = derive_type_name(type_decl)
@@ -1288,7 +1297,7 @@ fn compile_module(
 
         fs::write(&java_path, java_content)
             .map_err(|error| anyhow!("Failed to write {}: {}", java_path.display(), error))?;
-        emitted_paths.push(java_path);
+        java_files.push(java_path);
     }
 
     let manifest = GenericManifest {
@@ -1308,10 +1317,13 @@ fn compile_module(
         let manifest_path = output_dir.join(format!("{}-generics.json", module.script_main_class));
         fs::write(&manifest_path, manifest_json)
             .map_err(|error| anyhow!("Failed to write {}: {}", manifest_path.display(), error))?;
-        emitted_paths.push(manifest_path);
+        metadata_files.push(manifest_path);
     }
 
-    Ok(emitted_paths)
+    Ok(StdlibModuleArtifacts {
+        java_files,
+        metadata_files,
+    })
 }
 
 fn collect_generic_manifest(program: &IrProgram) -> Vec<GenericManifestEntry> {

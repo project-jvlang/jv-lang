@@ -610,18 +610,19 @@ pub fn transform_expression(
                 property: property.clone(),
                 span: span.clone(),
             }) {
-                if !segments.is_empty()
-                    && context.lookup_variable(&segments[0]).is_none()
-                {
+                if !segments.is_empty() && context.lookup_variable(&segments[0]).is_none() {
                     let name = segments.join(".");
-                    let java_type = context
-                        .lookup_variable(&name)
-                        .cloned()
-                        .unwrap_or_else(|| JavaType::Reference {
+                    let java_type = context.lookup_variable(&name).cloned().unwrap_or_else(|| {
+                        JavaType::Reference {
                             name: name.clone(),
                             generic_args: vec![],
-                        });
-                    return Ok(IrExpression::Identifier { name, java_type, span });
+                        }
+                    });
+                    return Ok(IrExpression::Identifier {
+                        name,
+                        java_type,
+                        span,
+                    });
                 }
             }
 
@@ -783,7 +784,10 @@ fn lower_call_expression(
 
             #[cfg(debug_assertions)]
             if name == "SequenceCore" {
-                eprintln!("[debug] lowering call to SequenceCore with inferred type: {:?}", java_type);
+                eprintln!(
+                    "[debug] lowering call to SequenceCore with inferred type: {:?}",
+                    java_type
+                );
             }
 
             Ok(IrExpression::MethodCall {
@@ -933,9 +937,7 @@ fn flatten_member_access_chain(expr: &Expression) -> Option<Vec<String>> {
     match expr {
         Expression::Identifier(name, _) => Some(vec![name.clone()]),
         Expression::MemberAccess {
-            object,
-            property,
-            ..
+            object, property, ..
         } => {
             let mut segments = flatten_member_access_chain(object)?;
             segments.push(property.clone());
@@ -946,7 +948,10 @@ fn flatten_member_access_chain(expr: &Expression) -> Option<Vec<String>> {
 }
 
 fn is_constructor_like(name: &str) -> bool {
-    name.chars().next().map(|ch| ch.is_ascii_uppercase()).unwrap_or(false)
+    name.chars()
+        .next()
+        .map(|ch| ch.is_ascii_uppercase())
+        .unwrap_or(false)
 }
 
 fn functional_interface_method(java_type: &JavaType) -> Option<(String, JavaType)> {

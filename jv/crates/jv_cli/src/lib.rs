@@ -461,6 +461,7 @@ pub mod pipeline {
     #[derive(Debug, Default, Clone)]
     pub struct BuildArtifacts {
         pub java_files: Vec<PathBuf>,
+        pub metadata_files: Vec<PathBuf>,
         pub class_files: Vec<PathBuf>,
         pub javac_version: Option<String>,
         pub warnings: Vec<String>,
@@ -872,7 +873,10 @@ pub mod pipeline {
             java_files.push(java_path);
         }
 
-        let stdlib_helpers = embedded_stdlib::compile_stdlib_modules(
+        let embedded_stdlib::StdlibCompilationArtifacts {
+            java_files: stdlib_java_files,
+            metadata_files: stdlib_metadata_files,
+        } = embedded_stdlib::compile_stdlib_modules(
             &options.output_dir,
             plan.build_config.target,
             options.format,
@@ -880,7 +884,7 @@ pub mod pipeline {
             &stdlib_usage,
             Arc::clone(&symbol_index),
         )?;
-        java_files.extend(stdlib_helpers);
+        java_files.extend(stdlib_java_files);
 
         if options.emit_telemetry {
             if let Some(telemetry) = telemetry_snapshot.as_ref() {
@@ -908,6 +912,7 @@ pub mod pipeline {
             script_main_class,
             binding_usage,
             resolved_imports: import_plan.clone(),
+            metadata_files: stdlib_metadata_files,
         };
 
         if !options.java_only {
