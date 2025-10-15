@@ -1,13 +1,13 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, Result};
 use jv_ast::{
     types::{Kind, Pattern},
     Argument, CallArgumentMetadata, Expression, JsonLiteral, JsonValue, Program, Statement,
-    StringPart,
+    StringPart, Visibility,
 };
 use jv_build::{metadata::SymbolIndex, JavaTarget};
 use jv_checker::diagnostics::{
@@ -22,7 +22,7 @@ use jv_ir::{
     IrTypeParameter, IrVariance, JavaType, JavaWildcardKind, TransformContext,
 };
 use jv_parser::Parser as JvParser;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 
 use crate::pipeline::generics::apply_type_facts;
 use crate::tooling_failure;
@@ -63,28 +63,6 @@ struct StdlibInventory {
 
 static STDLIB_INVENTORY: OnceLock<StdlibInventory> = OnceLock::new();
 
-#[derive(Debug, Default, Deserialize)]
-struct StdlibManifest {
-    #[serde(default)]
-    modules: Vec<StdlibManifestEntry>,
-}
-
-#[derive(Debug, Deserialize)]
-struct StdlibManifestEntry {
-    path: String,
-    #[serde(default = "default_emit_java")]
-    emit_java: bool,
-}
-
-fn default_emit_java() -> bool {
-    true
-}
-
-#[derive(Debug, Clone)]
-struct StdlibModuleConfig {
-    emit_java: bool,
-}
-
 fn stdlib_inventory() -> Result<&'static StdlibInventory> {
     if let Some(inventory) = STDLIB_INVENTORY.get() {
         return Ok(inventory);
@@ -108,6 +86,56 @@ pub struct StdlibUsage {
 pub fn rewrite_collection_property_access(program: &mut Program) {
     for statement in &mut program.statements {
         rewrite_statement(statement);
+    }
+}
+
+fn promote_stdlib_visibility(program: &mut Program) {
+    for statement in &mut program.statements {
+        promote_visibility(statement);
+    }
+}
+
+fn promote_visibility(statement: &mut Statement) {
+    match statement {
+        Statement::FunctionDeclaration { modifiers, .. }
+        | Statement::DataClassDeclaration { modifiers, .. } => promote_modifiers(modifiers),
+        Statement::ClassDeclaration {
+            modifiers,
+            methods,
+            ..
+        }
+        | Statement::InterfaceDeclaration {
+            modifiers,
+            methods,
+            ..
+        } => {
+            promote_modifiers(modifiers);
+            for method in methods {
+                promote_visibility(method);
+            }
+        }
+        Statement::ExtensionFunction(extension) => {
+            promote_visibility(extension.function.as_mut());
+        }
+        Statement::Expression { .. }
+        | Statement::Return { .. }
+        | Statement::Assignment { .. }
+        | Statement::ValDeclaration { .. }
+        | Statement::VarDeclaration { .. }
+        | Statement::ForIn(_)
+        | Statement::Concurrency(_)
+        | Statement::ResourceManagement(_)
+        | Statement::Comment(_)
+        | Statement::Import { .. }
+        | Statement::Package { .. }
+        | Statement::Break(_)
+        | Statement::Continue(_) => {}
+    }
+}
+
+fn promote_modifiers(modifiers: &mut jv_ast::Modifiers) {
+    if matches!(modifiers.visibility, Visibility::Private) {
+        modifiers.visibility = Visibility::Public;
     }
 }
 
@@ -929,41 +957,11 @@ pub fn compile_stdlib_modules(
     Ok(generated_files)
 }
 
-fn load_stdlib_module_configs(root: &Path) -> Result<BTreeMap<String, StdlibModuleConfig>> {
-    let manifest_path = root.join("manifest.toml");
-    if !manifest_path.exists() {
-        return Ok(BTreeMap::new());
-    }
-
-    let data = fs::read_to_string(&manifest_path)
-        .with_context(|| format!("Failed to read stdlib manifest {}", manifest_path.display()))?;
-    let manifest: StdlibManifest = toml::from_str(&data).with_context(|| {
-        format!(
-            "Failed to parse stdlib manifest {}",
-            manifest_path.display()
-        )
-    })?;
-
-    let mut configs = BTreeMap::new();
-    for entry in manifest.modules {
-        let key = entry.path.replace('\\', "/");
-        configs.insert(
-            key,
-            StdlibModuleConfig {
-                emit_java: entry.emit_java,
-            },
-        );
-    }
-
-    Ok(configs)
-}
-
 fn collect_stdlib_inventory() -> Result<StdlibInventory> {
     let root = Path::new(STDLIB_ROOT);
-    let module_configs = load_stdlib_module_configs(root)?;
     let mut modules = Vec::new();
     let mut catalog = StdlibCatalog::default();
-    visit_stdlib(root, root, &mut modules, &mut catalog, &module_configs)?;
+    visit_stdlib(root, root, &mut modules, &mut catalog)?;
     Ok(StdlibInventory { modules, catalog })
 }
 
@@ -972,7 +970,6 @@ fn visit_stdlib(
     dir: &Path,
     modules: &mut Vec<StdlibModule>,
     catalog: &mut StdlibCatalog,
-    configs: &BTreeMap<String, StdlibModuleConfig>,
 ) -> Result<()> {
     for entry in fs::read_dir(dir)? {
         let entry = entry?;
@@ -982,7 +979,7 @@ fn visit_stdlib(
             if path.file_name().map_or(false, |name| name == "tests") {
                 continue;
             }
-            visit_stdlib(root, &path, modules, catalog, configs)?;
+            visit_stdlib(root, &path, modules, catalog)?;
             continue;
         }
 
@@ -998,26 +995,28 @@ fn visit_stdlib(
         }
 
         let source = fs::read_to_string(&path)?;
-        let script_main_class = derive_script_name(root, &path);
-        let program = JvParser::parse(&source).map_err(|error| {
+        let mut program = JvParser::parse(&source).map_err(|error| {
             anyhow!(
                 "Failed to parse embedded stdlib module {}: {:?}",
                 path.display(),
                 error
             )
         })?;
+        promote_stdlib_visibility(&mut program);
+        #[cfg(debug_assertions)]
+        if path.ends_with("sequence.jv") {
+            let dump_path = root.join("../debug-sequence-ast.json");
+            if let Ok(json) = serde_json::to_string_pretty(&program) {
+                let _ = fs::write(&dump_path, json);
+            }
+        }
         let package = program.package.clone();
-        let metadata = StdlibModuleMetadata::from_program(&program);
+        let script_main_class = derive_script_name(&path, package.as_deref());
+        let mut metadata = StdlibModuleMetadata::from_program(&program);
+        if !metadata.type_names.contains(&script_main_class) {
+            metadata.type_names.insert(script_main_class.clone());
+        }
         let dependencies = extract_stdlib_dependencies(&program);
-        let relative = path
-            .strip_prefix(root)
-            .unwrap_or(&path)
-            .to_string_lossy()
-            .replace('\\', "/");
-        let emit_java = configs
-            .get(&relative)
-            .map(|config| config.emit_java)
-            .unwrap_or(true);
         let module = StdlibModule {
             path,
             source,
@@ -1025,7 +1024,7 @@ fn visit_stdlib(
             package,
             dependencies,
             metadata,
-            emit_java,
+            emit_java: true,
         };
 
         if let Some(pkg) = module.package.as_deref() {
@@ -1110,26 +1109,32 @@ fn package_of(name: &str) -> Option<&str> {
     name.rsplit_once('.').map(|(package, _)| package)
 }
 
-fn derive_script_name(root: &Path, path: &Path) -> String {
-    let relative = path.strip_prefix(root).unwrap_or(path);
-    let mut name = String::from("Stdlib");
-
-    for component in relative.components() {
-        if let Component::Normal(os) = component {
-            let mut part = os.to_string_lossy().to_string();
-            if part.ends_with(".jv") {
-                part.truncate(part.len() - 3);
+fn derive_script_name(path: &Path, package: Option<&str>) -> String {
+    if let Some(stem) = path.file_stem().and_then(|value| value.to_str()) {
+        let mut name = String::new();
+        for segment in stem.split(|c: char| !c.is_alphanumeric()) {
+            if segment.is_empty() {
+                continue;
             }
-            for segment in part.split(|c: char| !c.is_alphanumeric()) {
-                if segment.is_empty() {
-                    continue;
-                }
-                name.push_str(&capitalize(segment));
-            }
+            name.push_str(&capitalize(segment));
+        }
+        if !name.is_empty() {
+            return name;
         }
     }
 
-    name
+    if let Some(package) = package {
+        // Fallback: use the last non-empty package segment when file name is not informative.
+        if let Some(segment) = package
+            .split('.')
+            .rev()
+            .find(|segment| !segment.is_empty() && !segment.eq_ignore_ascii_case("jv"))
+        {
+            return capitalize(segment);
+        }
+    }
+
+    "StdlibModule".to_string()
 }
 
 fn capitalize(input: &str) -> String {
@@ -1150,12 +1155,12 @@ fn compile_module(
     parallel_config: ParallelInferenceConfig,
     symbol_index: &Arc<SymbolIndex>,
 ) -> Result<Vec<PathBuf>> {
-    let program = match JvParser::parse(&module.source) {
-        Ok(program) => program,
-        Err(error) => {
-            if let Some(diagnostic) = from_parse_error(&error) {
-                return Err(tooling_failure(
-                    module.path.as_path(),
+        let mut program = match JvParser::parse(&module.source) {
+            Ok(program) => program,
+            Err(error) => {
+                if let Some(diagnostic) = from_parse_error(&error) {
+                    return Err(tooling_failure(
+                        module.path.as_path(),
                     diagnostic.with_strategy(DiagnosticStrategy::Deferred),
                 ));
             }
@@ -1163,6 +1168,7 @@ fn compile_module(
         }
     };
 
+    promote_stdlib_visibility(&mut program);
     let mut type_checker = TypeChecker::with_parallel_config(parallel_config);
     type_checker.set_imports(Arc::clone(symbol_index), Vec::new());
     let inference_snapshot = match type_checker.check_program(&program) {
@@ -1211,6 +1217,20 @@ fn compile_module(
     let java_unit = generator
         .generate_compilation_unit(&ir_program)
         .map_err(|error| anyhow!("Code generation error: {:?}", error))?;
+
+    #[cfg(debug_assertions)]
+    if module
+        .path
+        .file_name()
+        .and_then(|name| name.to_str())
+        == Some("sequence.jv")
+    {
+        eprintln!(
+            "[debug] stdlib module {:?} emitted {} type declarations",
+            module.path,
+            java_unit.type_declarations.len()
+        );
+    }
 
     let formatter = JavaFormatter::default();
     let package_path = java_unit
@@ -1515,7 +1535,7 @@ mod tests {
         let mut catalog = StdlibCatalog::default();
         let mut metadata = StdlibModuleMetadata::default();
         metadata.type_names.insert("SequenceCore".to_string());
-        metadata.type_names.insert("GeneratedMain".to_string());
+        metadata.type_names.insert("Sequence".to_string());
         metadata.extension_methods.insert("map".to_string());
         metadata
             .functions

@@ -164,11 +164,11 @@ fun <T> SequenceCore<T>.count(): Long {
 /**
  * Kotlin `Sequence.sum` 相当の数値集計。
  */
-fun <T> SequenceCore<T>.sum(): Long {
+fun SequenceCore<Number>.sum(): Long {
+    val elements = Sequence.toList(this)
     var total: Long = 0
-    for (candidate in this) {
-        val value = candidate as Number
-        total = total + value.longValue()
+    for (candidate in elements) {
+        total = total + candidate.longValue()
     }
     return total
 }
@@ -185,7 +185,8 @@ fun <T> SequenceCore<T>.forEach(action: (T) -> Unit) {
  */
 fun <T, K> SequenceCore<T>.groupBy(keySelector: (T) -> K): Map<K, List<T>> {
     val result: LinkedHashMap<K, List<T>> = LinkedHashMap()
-    for (element in this) {
+    val elements = Sequence.toList(this)
+    for (element in elements) {
         val key = keySelector(element)
 
         var bucket = result.get(key)
@@ -210,7 +211,8 @@ fun <T, K> SequenceCore<T>.groupBy(keySelector: (T) -> K): Map<K, List<T>> {
  */
 fun <T, K, V> SequenceCore<T>.associate(transform: (T) -> Map.Entry<K, V>): Map<K, V> {
     val result: LinkedHashMap<K, V> = LinkedHashMap()
-    for (element in this) {
+    val elements = Sequence.toList(this)
+    for (element in elements) {
         val entry = transform(element)
         result.put(
             entry.getKey()

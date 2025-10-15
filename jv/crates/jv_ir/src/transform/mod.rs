@@ -173,6 +173,33 @@ pub fn transform_statement(
             },
             context,
         )?]),
+        Statement::DataClassDeclaration {
+            name,
+            parameters,
+            type_parameters,
+            is_mutable,
+            modifiers,
+            span,
+            ..
+        } => Ok(vec![desugar_data_class(
+            name,
+            parameters,
+            type_parameters,
+            is_mutable,
+            modifiers,
+            span,
+            context,
+        )?]),
+        Statement::ExtensionFunction(extension) => Ok(vec![desugar_extension_function(
+            extension.receiver_type,
+            extension.function,
+            extension.span,
+            context,
+        )?]),
+        Statement::Expression {
+            expr: Expression::Identifier(name, _),
+            ..
+        } if name.eq_ignore_ascii_case("as") || is_constructor_like(&name) => Ok(Vec::new()),
         Statement::Expression { expr, span } => {
             let ir_expr = transform_expression(expr, context)?;
             Ok(vec![IrStatement::Expression {
@@ -431,17 +458,33 @@ pub fn transform_expression(
         }),
         Expression::Identifier(name, span) => {
             if let Some(java_type) = context.lookup_variable(&name).cloned() {
-                Ok(IrExpression::Identifier {
+                return Ok(IrExpression::Identifier {
                     name,
                     java_type,
                     span,
-                })
-            } else {
-                Err(TransformError::ScopeError {
-                    message: format!("Unknown identifier '{name}'"),
-                    span,
-                })
+                });
             }
+
+            if is_constructor_like(&name) {
+                let fqcn = if let Some(package) = context.current_package.as_deref() {
+                    format!("{package}.{name}")
+                } else {
+                    name.clone()
+                };
+                return Ok(IrExpression::Identifier {
+                    name,
+                    java_type: JavaType::Reference {
+                        name: fqcn,
+                        generic_args: vec![],
+                    },
+                    span,
+                });
+            }
+
+            Err(TransformError::ScopeError {
+                message: format!("Unknown identifier '{name}'"),
+                span,
+            })
         }
         Expression::NullSafeMemberAccess {
             object,
@@ -556,11 +599,41 @@ pub fn transform_expression(
             property,
             span,
         } => {
-            if let Some((field_expr, _)) = lower_system_field(*object, property, span.clone()) {
-                Ok(field_expr)
-            } else {
-                Ok(IrExpression::Literal(Literal::Null, Span::default()))
+            if let Some((field_expr, _)) =
+                lower_system_field((*object).clone(), property.clone(), span.clone())
+            {
+                return Ok(field_expr);
             }
+
+            if let Some(segments) = flatten_member_access_chain(&Expression::MemberAccess {
+                object: object.clone(),
+                property: property.clone(),
+                span: span.clone(),
+            }) {
+                if !segments.is_empty()
+                    && context.lookup_variable(&segments[0]).is_none()
+                {
+                    let name = segments.join(".");
+                    let java_type = context
+                        .lookup_variable(&name)
+                        .cloned()
+                        .unwrap_or_else(|| JavaType::Reference {
+                            name: name.clone(),
+                            generic_args: vec![],
+                        });
+                    return Ok(IrExpression::Identifier { name, java_type, span });
+                }
+            }
+
+            let receiver_expr = transform_expression(*object, context)?;
+            let java_type = extract_java_type(&receiver_expr).unwrap_or_else(JavaType::object);
+
+            Ok(IrExpression::FieldAccess {
+                receiver: Box::new(receiver_expr),
+                field_name: property,
+                java_type,
+                span,
+            })
         }
         Expression::Call {
             function,
@@ -669,10 +742,49 @@ fn lower_call_expression(
                 }
             }
 
-            let java_type = context
-                .lookup_variable(&name)
-                .cloned()
-                .unwrap_or_else(JavaType::object);
+            let resolved_type = context.lookup_variable(&name).cloned();
+
+            if resolved_type.is_none() && is_constructor_like(&name) {
+                let class_name = name.clone();
+                let fqcn = if let Some(package) = context.current_package.as_deref() {
+                    format!("{package}.{class_name}")
+                } else {
+                    class_name.clone()
+                };
+                return Ok(IrExpression::ObjectCreation {
+                    class_name,
+                    generic_args: Vec::new(),
+                    args: ir_args,
+                    java_type: JavaType::Reference {
+                        name: fqcn,
+                        generic_args: vec![],
+                    },
+                    span,
+                });
+            }
+
+            let java_type = resolved_type.unwrap_or_else(JavaType::object);
+
+            if let Some((method_name, return_type)) = functional_interface_method(&java_type) {
+                let receiver = IrExpression::Identifier {
+                    name: name.clone(),
+                    java_type: java_type.clone(),
+                    span: span.clone(),
+                };
+                return Ok(IrExpression::MethodCall {
+                    receiver: Some(Box::new(receiver)),
+                    method_name,
+                    args: ir_args,
+                    argument_style,
+                    java_type: return_type,
+                    span,
+                });
+            }
+
+            #[cfg(debug_assertions)]
+            if name == "SequenceCore" {
+                eprintln!("[debug] lowering call to SequenceCore with inferred type: {:?}", java_type);
+            }
 
             Ok(IrExpression::MethodCall {
                 receiver: None,
@@ -779,9 +891,9 @@ fn make_sequence_factory_call(
 ) -> IrExpression {
     let span = ir_expression_span(&argument);
     let factory_identifier = IrExpression::Identifier {
-        name: "GeneratedMain".to_string(),
+        name: "Sequence".to_string(),
         java_type: JavaType::Reference {
-            name: "jv.collections.GeneratedMain".to_string(),
+            name: "jv.collections.Sequence".to_string(),
             generic_args: vec![],
         },
         span: span.clone(),
@@ -815,6 +927,62 @@ fn is_iterable_like(name: &str) -> bool {
 
 fn is_stream_type(name: &str) -> bool {
     name == "java.util.stream.Stream"
+}
+
+fn flatten_member_access_chain(expr: &Expression) -> Option<Vec<String>> {
+    match expr {
+        Expression::Identifier(name, _) => Some(vec![name.clone()]),
+        Expression::MemberAccess {
+            object,
+            property,
+            ..
+        } => {
+            let mut segments = flatten_member_access_chain(object)?;
+            segments.push(property.clone());
+            Some(segments)
+        }
+        _ => None,
+    }
+}
+
+fn is_constructor_like(name: &str) -> bool {
+    name.chars().next().map(|ch| ch.is_ascii_uppercase()).unwrap_or(false)
+}
+
+fn functional_interface_method(java_type: &JavaType) -> Option<(String, JavaType)> {
+    match java_type {
+        JavaType::Reference { name, generic_args } => match name.as_str() {
+            "java.util.function.Function" => {
+                let return_type = generic_args
+                    .get(1)
+                    .cloned()
+                    .unwrap_or_else(JavaType::object);
+                Some(("apply".to_string(), return_type))
+            }
+            "java.util.function.Predicate" => Some((
+                "test".to_string(),
+                JavaType::Primitive("boolean".to_string()),
+            )),
+            "java.util.function.Consumer" => Some(("accept".to_string(), JavaType::Void)),
+            "java.util.function.Supplier" => {
+                let return_type = generic_args
+                    .get(0)
+                    .cloned()
+                    .unwrap_or_else(JavaType::object);
+                Some(("get".to_string(), return_type))
+            }
+            "java.util.function.BiFunction" => {
+                let return_type = generic_args
+                    .get(2)
+                    .cloned()
+                    .unwrap_or_else(JavaType::object);
+                Some(("apply".to_string(), return_type))
+            }
+            "java.util.function.BiConsumer" => Some(("accept".to_string(), JavaType::Void)),
+            _ => None,
+        },
+        _ => None,
+    }
 }
 
 fn lower_system_receiver_expression(expr: Expression) -> Option<(IrExpression, SystemReceiver)> {

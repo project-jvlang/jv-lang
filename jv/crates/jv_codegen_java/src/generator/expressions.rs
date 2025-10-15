@@ -913,7 +913,7 @@ impl JavaCodeGenerator {
             }
         }
 
-        const FACTORY_OWNER: &str = "jv.collections.GeneratedMain";
+        const FACTORY_OWNER: &str = "jv.collections.Sequence";
         self.ensure_stdlib_import_name(FACTORY_OWNER);
         let simple_name = FACTORY_OWNER.rsplit('.').next().unwrap_or(FACTORY_OWNER);
         Ok(format!("{simple_name}.sequenceFromStream({})", stream_expr))
@@ -983,6 +983,10 @@ impl JavaCodeGenerator {
     }
 
     fn should_call_method_for_field(&self, receiver: &IrExpression, field_name: &str) -> bool {
+        if self.is_sequence_core_expression(receiver) {
+            return true;
+        }
+
         if field_name != "size" {
             return false;
         }

@@ -155,8 +155,7 @@ impl JavaCodeGenerator {
                 header.push_str(&implements);
 
                 if methods.is_empty() {
-                    header.push(';');
-                    builder.push_line(&header);
+                    builder.push_line(&format!("{} {{}}", header));
                     return Ok(builder.build());
                 }
 

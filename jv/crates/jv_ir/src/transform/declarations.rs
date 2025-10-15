@@ -316,6 +316,14 @@ fn replace_this_ir_expression(
     replacement_type: &JavaType,
 ) -> IrExpression {
     match expr {
+        IrExpression::Identifier { name, span, .. } if name == "this" =>
+        {
+            IrExpression::Identifier {
+                name: replacement_name.to_string(),
+                java_type: replacement_type.clone(),
+                span,
+            }
+        }
         IrExpression::This { span, .. } => IrExpression::Identifier {
             name: replacement_name.to_string(),
             java_type: replacement_type.clone(),
@@ -715,6 +723,21 @@ fn replace_this_in_statement(
                 .map(|expr| replace_this_ir_expression(expr, replacement_name, replacement_type)),
             is_final,
             modifiers,
+            span,
+        },
+        IrStatement::ForEach {
+            variable,
+            variable_type,
+            iterable,
+            body,
+            iterable_kind,
+            span,
+        } => IrStatement::ForEach {
+            variable,
+            variable_type,
+            iterable: replace_this_ir_expression(iterable, replacement_name, replacement_type),
+            body: Box::new(replace_this_in_statement(*body, replacement_name, replacement_type)),
+            iterable_kind,
             span,
         },
         other => other,

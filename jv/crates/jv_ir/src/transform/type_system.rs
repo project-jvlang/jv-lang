@@ -54,10 +54,17 @@ pub fn convert_type_annotation(
                 dimensions: 1,
             })
         }
-        _ => Ok(JavaType::Reference {
-            name: "Object".to_string(),
-            generic_args: vec![],
-        }),
+        TypeAnnotation::Function {
+            params,
+            return_type,
+        } => {
+            let mut param_types = Vec::with_capacity(params.len());
+            for param in params {
+                param_types.push(convert_type_annotation(param)?);
+            }
+            let return_type = convert_type_annotation(*return_type)?;
+            Ok(functional_interface_type(&param_types, &return_type))
+        }
     }
 }
 
@@ -71,13 +78,67 @@ fn convert_simple_type(name: &str) -> JavaType {
         "Char" | "char" => JavaType::Primitive("char".to_string()),
         "Byte" | "byte" => JavaType::Primitive("byte".to_string()),
         "Short" | "short" => JavaType::Primitive("short".to_string()),
+        "Unit" => JavaType::Void,
         "String" => JavaType::Reference {
             name: "String".to_string(),
+            generic_args: vec![],
+        },
+        "Iterator" => JavaType::Reference {
+            name: "java.util.Iterator".to_string(),
+            generic_args: vec![],
+        },
+        "Iterable" => JavaType::Reference {
+            name: "java.lang.Iterable".to_string(),
             generic_args: vec![],
         },
         _ => JavaType::Reference {
             name: name.to_string(),
             generic_args: vec![],
+        },
+    }
+}
+
+fn functional_interface_type(params: &[JavaType], return_type: &JavaType) -> JavaType {
+    match params.len() {
+        0 => JavaType::Reference {
+            name: "java.util.function.Supplier".to_string(),
+            generic_args: vec![boxed_java_type(return_type)],
+        },
+        1 => {
+            let param = boxed_java_type(&params[0]);
+            match return_type {
+                JavaType::Primitive(name) if name == "boolean" => JavaType::Reference {
+                    name: "java.util.function.Predicate".to_string(),
+                    generic_args: vec![param],
+                },
+                JavaType::Void => JavaType::Reference {
+                    name: "java.util.function.Consumer".to_string(),
+                    generic_args: vec![param],
+                },
+                _ => JavaType::Reference {
+                    name: "java.util.function.Function".to_string(),
+                    generic_args: vec![param, boxed_java_type(return_type)],
+                },
+            }
+        }
+        2 => {
+            let left = boxed_java_type(&params[0]);
+            let right = boxed_java_type(&params[1]);
+            if matches!(return_type, JavaType::Void) {
+                JavaType::Reference {
+                    name: "java.util.function.BiConsumer".to_string(),
+                    generic_args: vec![left, right],
+                }
+            } else {
+                JavaType::Reference {
+                    name: "java.util.function.BiFunction".to_string(),
+                    generic_args: vec![left, right, boxed_java_type(return_type)],
+                }
+            }
+        }
+        _ => JavaType::Reference {
+            name: "java.util.function.Function".to_string(),
+            generic_args: vec![JavaType::object(), boxed_java_type(return_type)],
         },
     }
 }
