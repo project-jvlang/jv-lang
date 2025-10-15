@@ -153,6 +153,54 @@ fn whitespace_array_inside_lambda_body_preserves_delimiter() {
 }
 
 #[test]
+fn whitespace_array_lambda_allows_binary_operator_elements() {
+    let program =
+        parse_program("val flattened = values.flatMap { value -> [value value + 1] }");
+    let statement = program
+        .statements
+        .get(0)
+        .expect("expected flattened declaration");
+
+    let Statement::ValDeclaration { initializer, .. } = statement else {
+        panic!("expected val declaration for flattened");
+    };
+
+    let Expression::Call { args, .. } = initializer else {
+        panic!("expected call expression for flattened initializer");
+    };
+
+    assert_eq!(args.len(), 1, "expected single lambda argument to flatMap");
+
+    let Argument::Positional(Expression::Lambda { body, .. }) = &args[0] else {
+        panic!("expected lambda argument to flatMap call");
+    };
+
+    let Expression::Array {
+        elements,
+        delimiter,
+        ..
+    } = body.as_ref()
+    else {
+        panic!("expected lambda body to be an array literal");
+    };
+
+    assert_eq!(*delimiter, SequenceDelimiter::Whitespace);
+    assert_eq!(elements.len(), 2, "expected two array elements");
+
+    match &elements[0] {
+        Expression::Identifier(name, _) => assert_eq!(name, "value"),
+        other => panic!("expected identifier element, found {:?}", other),
+    }
+
+    match &elements[1] {
+        Expression::Binary { op, .. } => {
+            assert_eq!(*op, BinaryOp::Add, "expected addition in second element");
+        }
+        other => panic!("expected binary addition element, found {:?}", other),
+    }
+}
+
+#[test]
 fn whitespace_call_does_not_force_following_calls_to_layout_style() {
     let program = parse_program("val layout_call = plot(1 2 3)\nval regular_call = plot(value)");
 
