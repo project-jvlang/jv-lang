@@ -314,6 +314,11 @@ impl ConstantPool {
                     reader.read_u2()?;
                     Constant::Other
                 }
+                17 => {
+                    // CONSTANT_Dynamic (Java 11+)
+                    reader.skip(4)?;
+                    Constant::Other
+                }
                 18 => {
                     reader.skip(4)?;
                     Constant::Other
