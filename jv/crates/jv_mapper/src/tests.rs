@@ -99,7 +99,6 @@ fn invalid_ir_span_returns_error() {
         "broken",
         MappingCategory::Statement,
         None,
-        None,
     );
 
     assert!(matches!(result, Err(MappingError::InvalidPosition(_))));

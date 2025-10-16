@@ -6,6 +6,7 @@ pub use types::lower_generic_signature;
 use jv_ast::Span;
 use jv_ir::ConversionMetadata;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
@@ -115,7 +116,7 @@ pub struct SourceMap {
 }
 
 impl SourceMap {
-    pub const VERSION: u8 = 1;
+    pub const VERSION: u8 = 2;
 
     /// Create an empty source map that associates the given source and generated files.
     ///
@@ -147,7 +148,24 @@ impl SourceMap {
     }
 
     pub fn from_json(json: &str) -> Result<Self, MappingError> {
-        let mut map: SourceMap = serde_json::from_str(json)?;
+        let value: Value = serde_json::from_str(json)?;
+        let version = value
+            .get("version")
+            .and_then(|v| v.as_u64())
+            .map(|v| v as u8)
+            .unwrap_or(1);
+
+        let mut map: SourceMap = serde_json::from_value(value)?;
+
+        if version < 2 {
+            // Older source maps never carried conversion metadata; ensure the field exists.
+            for entry in &mut map.entries {
+                if entry.conversions.is_none() {
+                    entry.conversions = None;
+                }
+            }
+        }
+
         map.version = Self::VERSION;
         Ok(map)
     }
@@ -162,6 +180,114 @@ impl SourceMap {
         self.entries
             .iter()
             .find(|entry| entry.java_span.contains(line, column))
+    }
+}
+
+/// Mapping between an IR span and the generated Java span alongside conversion metadata.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ConversionMapping {
+    pub source_file: String,
+    pub generated_file: String,
+    pub ir_span: Span,
+    pub java_span: JavaSpan,
+    pub metadata: ConversionMetadata,
+    pub ir_node: Option<String>,
+}
+
+impl ConversionMapping {
+    pub fn new(
+        source_file: impl Into<String>,
+        generated_file: impl Into<String>,
+        ir_span: Span,
+        java_span: JavaSpan,
+        metadata: ConversionMetadata,
+        ir_node: Option<String>,
+    ) -> Self {
+        Self {
+            source_file: source_file.into(),
+            generated_file: generated_file.into(),
+            ir_span,
+            java_span,
+            metadata,
+            ir_node,
+        }
+    }
+}
+
+/// Utilities for enriching source maps with conversion metadata.
+#[derive(Debug, Default)]
+pub struct Mapper;
+
+impl Mapper {
+    /// Applies conversion metadata recorded during code generation to an existing source map.
+    ///
+    /// Returns flattened conversion-to-span mappings that can be consumed by telemetry pipelines.
+    pub fn apply_conversions(
+        target: &mut SourceMap,
+        conversion_map: &SourceMap,
+    ) -> Vec<ConversionMapping> {
+        target.version = SourceMap::VERSION;
+
+        let mut mappings = Vec::new();
+        for entry in &conversion_map.entries {
+            let Some(conversions) = entry.conversions.as_ref() else {
+                continue;
+            };
+
+            Self::merge_entry(target, entry, conversions);
+
+            for metadata in conversions {
+                mappings.push(ConversionMapping::new(
+                    conversion_map.source_file.clone(),
+                    conversion_map.generated_file.clone(),
+                    entry.ir_span.clone(),
+                    entry.java_span.clone(),
+                    metadata.clone(),
+                    entry.ir_node.clone(),
+                ));
+            }
+        }
+
+        Self::sort_entries(&mut target.entries);
+        mappings
+    }
+
+    fn merge_entry(
+        target: &mut SourceMap,
+        entry: &MappingEntry,
+        conversions: &[ConversionMetadata],
+    ) {
+        if let Some(existing) = target
+            .entries
+            .iter_mut()
+            .find(|current| current.ir_span == entry.ir_span && current.category == entry.category)
+        {
+            existing.java_span = entry.java_span.clone();
+            if existing.ir_node.is_none() && entry.ir_node.is_some() {
+                existing.ir_node = entry.ir_node.clone();
+            }
+
+            let bucket = existing.conversions.get_or_insert_with(Vec::new);
+            for metadata in conversions {
+                if !bucket.contains(metadata) {
+                    bucket.push(metadata.clone());
+                }
+            }
+        } else {
+            target.entries.push(entry.clone());
+        }
+    }
+
+    fn sort_entries(entries: &mut Vec<MappingEntry>) {
+        entries.sort_by(|a, b| {
+            a.java_span
+                .start
+                .line
+                .cmp(&b.java_span.start.line)
+                .then(a.java_span.start.column.cmp(&b.java_span.start.column))
+                .then(a.ir_span.start_line.cmp(&b.ir_span.start_line))
+                .then(a.ir_span.start_column.cmp(&b.ir_span.start_column))
+        });
     }
 }
 

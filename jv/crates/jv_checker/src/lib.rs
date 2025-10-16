@@ -8,6 +8,7 @@ pub mod java;
 pub mod null_safety;
 pub mod pattern;
 pub mod regex;
+pub mod telemetry;
 
 pub use inference::{
     InferenceEngine, InferenceError, InferenceResult, NullabilityAnalyzer, TypeBinding,
@@ -365,6 +366,11 @@ impl InferenceTelemetry {
 
             self.conversion_events.push(conversion.clone());
         }
+    }
+
+    /// Enriches conversion events with span information derived from source map data.
+    pub fn attach_conversion_spans(&mut self, mappings: &[jv_mapper::ConversionMapping]) {
+        crate::telemetry::report::attach_conversion_spans(&mut self.conversion_events, mappings);
     }
 }
 
