@@ -564,7 +564,10 @@ fn type_inference_snapshot_emitted_with_emit_types() {
     let scheme = environment
         .get("answer")
         .expect("answer binding exported in environment");
-    assert!(matches!(scheme.ty, TypeKind::primitive(PrimitiveType::Int)));
+    assert!(matches!(
+        scheme.ty,
+        TypeKind::Primitive(PrimitiveType::Int)
+    ));
     assert!(snapshot.bindings().len() >= 1);
 }
 
@@ -621,7 +624,10 @@ fn type_inference_snapshot_tracks_program_changes() {
     let incremented = second_env
         .get("incremented")
         .expect("incremented binding present");
-    assert!(matches!(incremented.ty, TypeKind::primitive(PrimitiveType::Int)));
+    assert!(matches!(
+        incremented.ty,
+        TypeKind::Primitive(PrimitiveType::Int)
+    ));
 }
 
 #[test]
