@@ -194,7 +194,8 @@ impl TypeEnvironment {
 
 fn substitute_type(ty: &TypeKind, subs: &HashMap<TypeId, TypeKind>) -> TypeKind {
     match ty {
-        TypeKind::Primitive(name) => TypeKind::Primitive(name),
+        TypeKind::Primitive(primitive) => TypeKind::Primitive(*primitive),
+        TypeKind::Boxed(primitive) => TypeKind::Boxed(*primitive),
         TypeKind::Reference(name) => TypeKind::Reference(name.clone()),
         TypeKind::Optional(inner) => TypeKind::Optional(Box::new(substitute_type(inner, subs))),
         TypeKind::Variable(id) => subs
@@ -215,15 +216,16 @@ fn substitute_type(ty: &TypeKind, subs: &HashMap<TypeId, TypeKind>) -> TypeKind 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::inference::types::PrimitiveType;
 
     #[test]
     fn scope_push_and_pop_respects_shadowing() {
         let mut env = TypeEnvironment::new();
-        env.define_monotype("x", TypeKind::Primitive("Int"));
+        env.define_monotype("x", TypeKind::primitive(PrimitiveType::Int));
         assert!(env.lookup("x").is_some());
 
         env.enter_scope();
-        env.define_monotype("y", TypeKind::Primitive("Boolean"));
+        env.define_monotype("y", TypeKind::primitive(PrimitiveType::Boolean));
         assert!(env.lookup("y").is_some());
 
         env.leave_scope();

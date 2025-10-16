@@ -5,7 +5,7 @@
 //! 伝播させ、Null 安全と一致する解を導出する。
 
 use crate::inference::constraint::{Constraint, ConstraintKind, ConstraintSet};
-use crate::inference::types::{TypeBinding, TypeId, TypeKind, TypeVariable, TypeVariableKind};
+use crate::inference::types::{TypeBinding, TypeError, TypeId, TypeKind, TypeVariable, TypeVariableKind};
 use jv_inference::ParallelInferenceConfig;
 use std::collections::HashMap;
 use std::fmt;
@@ -27,6 +27,7 @@ pub enum SolveError {
         ty: TypeKind,
         note: Option<String>,
     },
+    TypeError(TypeError),
 }
 
 impl SolveError {
@@ -38,6 +39,7 @@ impl SolveError {
                 .as_ref()
                 .map(|n| format!(" ({})", n))
                 .unwrap_or_default(),
+            SolveError::TypeError(_) => String::new(),
         }
     }
 }
@@ -66,6 +68,7 @@ impl fmt::Display for SolveError {
                     self.note_suffix()
                 )
             }
+            SolveError::TypeError(error) => write!(f, "type error: {error}"),
         }
     }
 }
@@ -157,6 +160,9 @@ impl ConstraintSolver {
                     note: constraint.note.clone(),
                 });
             }
+            ConstraintKind::ReportError(error) => {
+                return Err(SolveError::TypeError(error.clone()));
+            }
         }
         Ok(())
     }
@@ -186,6 +192,28 @@ impl ConstraintSolver {
                     Err(SolveError::TypeMismatch {
                         left: TypeKind::Primitive(a),
                         right: TypeKind::Primitive(b),
+                        note,
+                    })
+                }
+            }
+            (TypeKind::Boxed(a), TypeKind::Boxed(b)) => {
+                if a == b {
+                    Ok(TypeKind::Boxed(a))
+                } else {
+                    Err(SolveError::TypeMismatch {
+                        left: TypeKind::Boxed(a),
+                        right: TypeKind::Boxed(b),
+                        note,
+                    })
+                }
+            }
+            (TypeKind::Reference(a), TypeKind::Reference(b)) => {
+                if a == b {
+                    Ok(TypeKind::reference(a))
+                } else {
+                    Err(SolveError::TypeMismatch {
+                        left: TypeKind::Reference(a),
+                        right: TypeKind::Reference(b),
                         note,
                     })
                 }
@@ -279,7 +307,10 @@ impl ConstraintSolver {
             TypeKind::Function(params, ret) => {
                 params.iter().any(|param| self.occurs_in(id, param)) || self.occurs_in(id, ret)
             }
-            TypeKind::Primitive(_) | TypeKind::Reference(_) | TypeKind::Unknown => false,
+            TypeKind::Primitive(_)
+            | TypeKind::Boxed(_)
+            | TypeKind::Reference(_)
+            | TypeKind::Unknown => false,
         }
     }
 }
@@ -287,6 +318,7 @@ impl ConstraintSolver {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::inference::types::PrimitiveType;
 
     fn constraint_equal(left: TypeKind, right: TypeKind) -> Constraint {
         Constraint::new(ConstraintKind::Equal(left, right))
@@ -309,7 +341,7 @@ mod tests {
         let mut set = ConstraintSet::new();
         set.push(constraint_equal(
             TypeKind::Variable(TypeId::new(0)),
-            TypeKind::Primitive("Int"),
+            TypeKind::primitive(PrimitiveType::Int),
         ));
 
         let solver = ConstraintSolver::new();
@@ -318,7 +350,7 @@ mod tests {
         let bindings = collect_bindings(result);
         assert_eq!(bindings.len(), 1);
         assert_eq!(bindings[0].0, TypeId::new(0));
-        assert_eq!(bindings[0].1, TypeKind::Primitive("Int"));
+        assert_eq!(bindings[0].1, TypeKind::primitive(PrimitiveType::Int));
     }
 
     #[test]
@@ -326,7 +358,7 @@ mod tests {
         let mut set = ConstraintSet::new();
         set.push(constraint_equal(
             TypeKind::Optional(Box::new(TypeKind::Variable(TypeId::new(1)))),
-            TypeKind::Primitive("String"),
+            TypeKind::reference("java.lang.String"),
         ));
 
         let solver = ConstraintSolver::new();
@@ -335,7 +367,7 @@ mod tests {
         let bindings = collect_bindings(result);
         assert_eq!(bindings.len(), 1);
         assert_eq!(bindings[0].0, TypeId::new(1));
-        assert_eq!(bindings[0].1, TypeKind::Primitive("String"));
+        assert_eq!(bindings[0].1, TypeKind::reference("java.lang.String"));
     }
 
     #[test]
@@ -360,7 +392,7 @@ mod tests {
         let mut set = ConstraintSet::new();
         set.push(constraint_assign(
             TypeId::new(3),
-            TypeKind::Optional(Box::new(TypeKind::Primitive("Boolean"))),
+            TypeKind::optional(TypeKind::primitive(PrimitiveType::Boolean)),
         ));
 
         let solver = ConstraintSolver::new();
@@ -371,7 +403,7 @@ mod tests {
         assert_eq!(bindings[0].0, TypeId::new(3));
         assert_eq!(
             bindings[0].1,
-            TypeKind::Optional(Box::new(TypeKind::Primitive("Boolean")))
+            TypeKind::optional(TypeKind::primitive(PrimitiveType::Boolean))
         );
     }
 
@@ -380,11 +412,11 @@ mod tests {
         let mut set = ConstraintSet::new();
         set.push(constraint_assign(
             TypeId::new(4),
-            TypeKind::Primitive("Int"),
+            TypeKind::primitive(PrimitiveType::Int),
         ));
         set.push(constraint_equal(
             TypeKind::Variable(TypeId::new(4)),
-            TypeKind::Primitive("Int"),
+            TypeKind::primitive(PrimitiveType::Int),
         ));
 
         let solver = ConstraintSolver::with_config(ParallelInferenceConfig::new(false, 8, 1));

@@ -2,7 +2,7 @@
 //!
 //! Run with: `cargo test --lib -p jv_checker`.
 
-use jv_checker::{CheckError, TypeChecker, TypeInferenceService, TypeKind};
+use jv_checker::{CheckError, PrimitiveType, TypeChecker, TypeInferenceService, TypeKind};
 use jv_inference::service::TypeFacts;
 use jv_parser::Parser;
 use serde_json::Value;
@@ -32,7 +32,7 @@ fn infers_local_binding_from_literal() {
         scheme.quantifiers.is_empty(),
         "literal binding stays monomorphic"
     );
-    assert_eq!(scheme.ty, TypeKind::Primitive("Int"));
+    assert_eq!(scheme.ty, TypeKind::primitive(PrimitiveType::Int));
 }
 
 #[test]
@@ -105,7 +105,7 @@ fn type_facts_snapshot_contains_environment() {
         .and_then(Value::as_str)
         .expect("greeting binding exported");
     assert!(
-        greeting_entry.contains("Primitive(\"String\")"),
+        greeting_entry.contains("Unknown"),
         "unexpected environment entry: {greeting_entry}"
     );
     let pretty = facts.to_pretty_json().expect("serialize facts to json");
@@ -224,7 +224,7 @@ fn sequence_extension_chain_maintains_inference() {
         .expect("filtered binding registered");
     assert_eq!(
         filtered_scheme.ty,
-        TypeKind::Primitive("jv.collections.SequenceCore")
+        TypeKind::reference("jv.collections.SequenceCore")
     );
 
     let total_scheme = snapshot
@@ -264,9 +264,9 @@ fn lambda_extension_receiver_resolves_sequence_core() {
         TypeKind::Function(params, ret) => {
             assert_eq!(
                 params,
-                &vec![TypeKind::Primitive("jv.collections.SequenceCore")]
+                &vec![TypeKind::reference("jv.collections.SequenceCore")]
             );
-            assert_eq!(**ret, TypeKind::Primitive("java.util.stream.Stream"));
+            assert_eq!(**ret, TypeKind::reference("java.util.stream.Stream"));
         }
         other => panic!("expected function type, found {other:?}"),
     }

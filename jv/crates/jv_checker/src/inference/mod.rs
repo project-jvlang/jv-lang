@@ -11,6 +11,7 @@ pub mod imports;
 pub mod iteration;
 pub mod nullability;
 pub mod prelude;
+pub mod type_factory;
 pub mod types;
 pub mod unify;
 pub mod utils;
@@ -20,6 +21,9 @@ pub use engine::{InferenceEngine, InferenceError, InferenceResult};
 pub use environment::{TypeEnvironment, TypeScheme};
 pub use iteration::LoopClassification;
 pub use nullability::NullabilityAnalyzer;
-pub use types::{TypeBinding, TypeId, TypeKind, TypeVariable, TypeVariableKind};
+pub use type_factory::TypeFactory;
+pub use types::{
+    PrimitiveType, TypeBinding, TypeError, TypeId, TypeKind, TypeVariable, TypeVariableKind,
+};
 pub use unify::{ConstraintSolver, SolveError, SolveResult};
 pub use utils::TypeIdGenerator;

@@ -3,7 +3,7 @@ use crate::inference::environment::{TypeEnvironment, TypeScheme};
 use crate::inference::types::TypeBinding;
 use crate::pattern::{self, PatternTarget};
 use crate::regex::RegexValidator;
-use crate::TypeKind;
+use crate::inference::{PrimitiveType, TypeKind};
 use fastrand::Rng;
 use jv_ast::{
     Annotation, AnnotationName, BinaryOp, Expression, Literal, Modifiers, Parameter, Pattern,
@@ -55,19 +55,19 @@ fn random_identifier(rng: &mut Rng) -> String {
 
 #[test]
 fn convert_type_kind_exports_non_null_primitives() {
-    let facts = convert_type_kind(&TypeKind::Primitive("String"));
+    let facts = convert_type_kind(&TypeKind::primitive(PrimitiveType::Int));
     assert_eq!(facts.nullability(), NullabilityFlag::NonNull);
     assert!(matches!(
         facts.variant(),
-        FactsTypeVariant::Primitive(name) if *name == "String"
+        FactsTypeVariant::Primitive(name) if *name == "Int"
     ));
 }
 
 #[test]
 fn convert_type_kind_exports_non_null_functions() {
     let function = TypeKind::Function(
-        vec![TypeKind::Primitive("String")],
-        Box::new(TypeKind::Primitive("Int")),
+        vec![TypeKind::primitive(PrimitiveType::Boolean)],
+        Box::new(TypeKind::primitive(PrimitiveType::Int)),
     );
     let facts = convert_type_kind(&function);
     assert_eq!(facts.nullability(), NullabilityFlag::NonNull);
@@ -76,7 +76,7 @@ fn convert_type_kind_exports_non_null_functions() {
         assert_eq!(params.len(), 1);
         assert!(matches!(
             params[0].variant(),
-            FactsTypeVariant::Primitive(name) if *name == "String"
+            FactsTypeVariant::Primitive(name) if *name == "Boolean"
         ));
         assert!(matches!(
             ret.variant(),
@@ -89,7 +89,7 @@ fn convert_type_kind_exports_non_null_functions() {
 
 #[test]
 fn convert_type_kind_preserves_optional_nullability() {
-    let optional = TypeKind::Optional(Box::new(TypeKind::Primitive("String")));
+    let optional = TypeKind::optional(TypeKind::primitive(PrimitiveType::Int));
     let facts = convert_type_kind(&optional);
 
     assert_eq!(facts.nullability(), NullabilityFlag::Nullable);
@@ -97,7 +97,7 @@ fn convert_type_kind_preserves_optional_nullability() {
         assert_eq!(inner.nullability(), NullabilityFlag::NonNull);
         assert!(matches!(
             inner.variant(),
-            FactsTypeVariant::Primitive(name) if name == &"String"
+            FactsTypeVariant::Primitive(name) if name == &"Int"
         ));
     } else {
         panic!("expected optional variant");
@@ -107,10 +107,10 @@ fn convert_type_kind_preserves_optional_nullability() {
 #[test]
 fn build_type_facts_propagates_environment_nullability() {
     let mut environment = TypeEnvironment::new();
-    environment.define_monotype("user_id", TypeKind::Primitive("Int"));
+    environment.define_monotype("user_id", TypeKind::primitive(PrimitiveType::Int));
     environment.define_monotype(
         "maybe_email",
-        TypeKind::Optional(Box::new(TypeKind::Primitive("String"))),
+        TypeKind::optional(TypeKind::reference("java.lang.String")),
     );
 
     let bindings: Vec<TypeBinding> = Vec::new();
@@ -140,7 +140,7 @@ fn build_type_facts_propagates_result_type_nullability() {
     let environment = TypeEnvironment::new();
     let bindings: Vec<TypeBinding> = Vec::new();
     let function_schemes: HashMap<String, TypeScheme> = HashMap::new();
-    let result_type = TypeKind::Primitive("Boolean");
+    let result_type = TypeKind::primitive(PrimitiveType::Boolean);
 
     let facts = build_type_facts(
         &environment,
@@ -1256,7 +1256,7 @@ fn regex_literal_infers_pattern_type() {
         .expect("binding scheme for pattern");
     assert_eq!(
         scheme.ty,
-        TypeKind::Primitive("java.util.regex.Pattern"),
+        TypeKind::reference("java.util.regex.Pattern"),
         "regex literal should infer Pattern type"
     );
     let analyses = snapshot.regex_analyses();

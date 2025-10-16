@@ -646,10 +646,18 @@ fn convert_scheme(scheme: &TypeScheme) -> FactsTypeScheme {
 
 fn convert_type_kind(ty: &TypeKind) -> FactsTypeKind {
     match ty {
-        TypeKind::Primitive(name) => FactsTypeKind::new(FactsTypeVariant::Primitive(name))
-            .with_nullability(NullabilityFlag::NonNull),
-        TypeKind::Reference(_) => {
-            FactsTypeKind::new(FactsTypeVariant::Unknown).with_nullability(NullabilityFlag::NonNull)
+        TypeKind::Primitive(primitive) => {
+            FactsTypeKind::new(FactsTypeVariant::Primitive(primitive.jv_name()))
+                .with_nullability(NullabilityFlag::NonNull)
+        }
+        TypeKind::Boxed(primitive) => {
+            FactsTypeKind::new(FactsTypeVariant::Primitive(primitive.boxed_fqcn()))
+                .with_nullability(NullabilityFlag::NonNull)
+        }
+        TypeKind::Reference(name) => {
+            let interned: &'static str = Box::leak(name.clone().into_boxed_str());
+            FactsTypeKind::new(FactsTypeVariant::Primitive(interned))
+                .with_nullability(NullabilityFlag::NonNull)
         }
         TypeKind::Optional(inner) => FactsTypeKind::optional(convert_type_kind(inner)),
         TypeKind::Variable(id) => {

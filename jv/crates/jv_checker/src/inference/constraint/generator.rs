@@ -10,7 +10,8 @@ use crate::inference::imports::ImportRegistry;
 use crate::inference::iteration::{
     classify_loop, expression_can_yield_iterable, LoopClassification,
 };
-use crate::inference::types::{TypeId, TypeKind};
+use crate::inference::type_factory::TypeFactory;
+use crate::inference::types::{PrimitiveType, TypeError, TypeId, TypeKind};
 use crate::pattern::{
     NarrowedBinding, NarrowedNullability, NarrowingSnapshot, PatternMatchService, PatternTarget,
 };
@@ -253,7 +254,7 @@ impl<'env, 'ext, 'imp> ConstraintGenerator<'env, 'ext, 'imp> {
 
     fn infer_expression(&mut self, expr: &Expression) -> TypeKind {
         match expr {
-            Expression::RegexLiteral(_) => TypeKind::Primitive("java.util.regex.Pattern"),
+            Expression::RegexLiteral(_) => TypeKind::reference("java.util.regex.Pattern"),
             Expression::Literal(literal, _) => self.type_from_literal(literal),
             Expression::Identifier(name, _) => {
                 if let Some(scheme) = self.env.lookup(name).cloned() {
@@ -297,7 +298,7 @@ impl<'env, 'ext, 'imp> ConstraintGenerator<'env, 'ext, 'imp> {
             } => {
                 let cond_ty = self.infer_expression(condition);
                 self.push_constraint(
-                    ConstraintKind::Equal(cond_ty, TypeKind::Primitive("Boolean")),
+                    ConstraintKind::Equal(cond_ty, TypeKind::primitive(PrimitiveType::Boolean)),
                     Some("if condition requires boolean"),
                 );
                 let then_ty = self.infer_expression(then_branch);
@@ -378,7 +379,10 @@ impl<'env, 'ext, 'imp> ConstraintGenerator<'env, 'ext, 'imp> {
                     if let Some(guard_expr) = &arm.guard {
                         let guard_ty = self.infer_expression(guard_expr);
                         self.push_constraint(
-                            ConstraintKind::Equal(guard_ty, TypeKind::Primitive("Boolean")),
+                            ConstraintKind::Equal(
+                                guard_ty,
+                                TypeKind::primitive(PrimitiveType::Boolean),
+                            ),
                             Some("when guard must evaluate to boolean"),
                         );
                     }
@@ -449,9 +453,9 @@ impl<'env, 'ext, 'imp> ConstraintGenerator<'env, 'ext, 'imp> {
                         self.infer_expression(expr);
                     }
                 }
-                TypeKind::Primitive("String")
+                TypeKind::reference("java.lang.String")
             }
-            Expression::MultilineString(_) => TypeKind::Primitive("String"),
+            Expression::MultilineString(_) => TypeKind::reference("java.lang.String"),
             Expression::JsonLiteral(_) => TypeKind::Unknown,
             Expression::This(_) | Expression::Super(_) => TypeKind::Unknown,
         }
@@ -480,8 +484,8 @@ impl<'env, 'ext, 'imp> ConstraintGenerator<'env, 'ext, 'imp> {
             return self.resolve_extension_call(inner, property, span);
         }
 
-        if let Some(primitive) = Self::primitive_name(receiver_ty) {
-            let scheme = self.extensions.lookup(primitive, property)?;
+        if let Some(receiver) = Self::receiver_name(receiver_ty) {
+            let scheme = self.extensions.lookup(receiver, property)?;
             return Some(self.env.instantiate(scheme));
         }
 
@@ -492,8 +496,8 @@ impl<'env, 'ext, 'imp> ConstraintGenerator<'env, 'ext, 'imp> {
             }
 
             if candidates.len() == 1 {
-                let (primitive, scheme) = candidates[0];
-                self.enqueue_receiver_constraint(*id, primitive, property);
+                let (receiver, scheme) = candidates[0];
+                self.enqueue_receiver_constraint(*id, receiver, property);
                 return Some(self.env.instantiate(scheme));
             }
 
@@ -520,8 +524,8 @@ impl<'env, 'ext, 'imp> ConstraintGenerator<'env, 'ext, 'imp> {
                 return None;
             }
 
-            let (primitive, scheme) = candidates[0];
-            self.enqueue_receiver_constraint(*id, primitive, property);
+            let (receiver, scheme) = candidates[0];
+            self.enqueue_receiver_constraint(*id, receiver, property);
             return Some(self.env.instantiate(scheme));
         }
 
@@ -557,9 +561,11 @@ impl<'env, 'ext, 'imp> ConstraintGenerator<'env, 'ext, 'imp> {
         TypeKind::function(param_types, body_ty)
     }
 
-    fn primitive_name(ty: &TypeKind) -> Option<&'static str> {
+    fn receiver_name<'a>(ty: &'a TypeKind) -> Option<&'a str> {
         match ty {
-            TypeKind::Primitive(name) => Some(*name),
+            TypeKind::Primitive(primitive) => Some(primitive.java_name()),
+            TypeKind::Boxed(primitive) => Some(primitive.boxed_fqcn()),
+            TypeKind::Reference(name) => Some(name.as_str()),
             _ => None,
         }
     }
@@ -608,7 +614,7 @@ impl<'env, 'ext, 'imp> ConstraintGenerator<'env, 'ext, 'imp> {
                 left_ty
             }
             BitAnd | BitOr | BitXor => {
-                let expected = TypeKind::Primitive("Int");
+                let expected = TypeKind::primitive(PrimitiveType::Int);
                 self.push_constraint(
                     ConstraintKind::Equal(left_ty.clone(), expected.clone()),
                     Some("bitwise operations require Int operands"),
@@ -620,7 +626,7 @@ impl<'env, 'ext, 'imp> ConstraintGenerator<'env, 'ext, 'imp> {
                 expected
             }
             And | Or => {
-                let expected = TypeKind::Primitive("Boolean");
+                let expected = TypeKind::primitive(PrimitiveType::Boolean);
                 self.push_constraint(
                     ConstraintKind::Equal(left_ty.clone(), expected.clone()),
                     Some("logical operations require boolean operands"),
@@ -636,9 +642,9 @@ impl<'env, 'ext, 'imp> ConstraintGenerator<'env, 'ext, 'imp> {
                     ConstraintKind::Equal(left_ty.clone(), right_ty.clone()),
                     Some("comparison operands must share the same type"),
                 );
-                TypeKind::Primitive("Boolean")
+                TypeKind::primitive(PrimitiveType::Boolean)
             }
-            Is => TypeKind::Primitive("Boolean"),
+            Is => TypeKind::primitive(PrimitiveType::Boolean),
             RangeExclusive | RangeInclusive => {
                 self.push_constraint(
                     ConstraintKind::Equal(left_ty.clone(), right_ty.clone()),
@@ -669,7 +675,7 @@ impl<'env, 'ext, 'imp> ConstraintGenerator<'env, 'ext, 'imp> {
 
         match op {
             Not => {
-                let expected = TypeKind::Primitive("Boolean");
+                let expected = TypeKind::primitive(PrimitiveType::Boolean);
                 self.push_constraint(
                     ConstraintKind::Equal(operand_ty, expected.clone()),
                     Some("logical not requires boolean"),
@@ -682,28 +688,28 @@ impl<'env, 'ext, 'imp> ConstraintGenerator<'env, 'ext, 'imp> {
 
     fn type_from_literal(&mut self, literal: &Literal) -> TypeKind {
         match literal {
-            Literal::String(_) => TypeKind::Primitive("String"),
+            Literal::String(_) => TypeKind::reference("java.lang.String"),
             Literal::Number(n) => {
                 if n.contains('.') {
-                    TypeKind::Primitive("Double")
+                    TypeKind::primitive(PrimitiveType::Double)
                 } else {
-                    TypeKind::Primitive("Int")
+                    TypeKind::primitive(PrimitiveType::Int)
                 }
             }
-            Literal::Boolean(_) => TypeKind::Primitive("Boolean"),
-            Literal::Character(_) => TypeKind::Primitive("String"),
-            Literal::Regex(_) => TypeKind::Primitive("java.util.regex.Pattern"),
+            Literal::Boolean(_) => TypeKind::primitive(PrimitiveType::Boolean),
+            Literal::Character(_) => TypeKind::primitive(PrimitiveType::Char),
+            Literal::Regex(_) => TypeKind::reference("java.util.regex.Pattern"),
             Literal::Null => TypeKind::Optional(Box::new(TypeKind::Unknown)),
         }
     }
 
     fn type_from_annotation(&mut self, annotation: &TypeAnnotation) -> TypeKind {
         match annotation {
-            TypeAnnotation::Simple(name) => map_annotation_type(name),
-            TypeAnnotation::Generic { name, .. } => map_annotation_type(name),
+            TypeAnnotation::Simple(name) => self.type_from_identifier(name),
+            TypeAnnotation::Generic { name, .. } => self.type_from_identifier(name),
             TypeAnnotation::Nullable(inner) => {
                 let inner_ty = self.type_from_annotation(inner);
-                TypeKind::Optional(Box::new(inner_ty))
+                TypeKind::optional(inner_ty)
             }
             TypeAnnotation::Function {
                 params,
@@ -720,15 +726,37 @@ impl<'env, 'ext, 'imp> ConstraintGenerator<'env, 'ext, 'imp> {
         }
     }
 
-    fn enqueue_receiver_constraint(&mut self, id: TypeId, primitive: &'static str, property: &str) {
+    fn type_from_identifier(&mut self, identifier: &str) -> TypeKind {
+        match TypeFactory::from_annotation(identifier) {
+            Ok(kind) => kind,
+            Err(error) => {
+                self.report_type_error(error);
+                TypeKind::Unknown
+            }
+        }
+    }
+
+    fn enqueue_receiver_constraint(&mut self, id: TypeId, receiver: &str, property: &str) {
+        let receiver_ty = match TypeFactory::from_annotation(receiver) {
+            Ok(kind) => kind,
+            Err(error) => {
+                self.report_type_error(error);
+                TypeKind::Unknown
+            }
+        };
         let note = format!(
             "extension receiver must be {} to call {}",
-            primitive, property
+            receiver, property
         );
-        let kind = ConstraintKind::Equal(TypeKind::Variable(id), TypeKind::Primitive(primitive));
+        let kind = ConstraintKind::Equal(TypeKind::Variable(id), receiver_ty);
         self.record_type_vars_in_constraint(&kind);
         let constraint = Constraint::new(kind).with_note(note);
         self.constraints.push(constraint);
+    }
+
+    fn report_type_error(&mut self, error: TypeError) {
+        self.constraints
+            .push(Constraint::new(ConstraintKind::ReportError(error)));
     }
 
     fn record_type_vars_in_constraint(&mut self, kind: &ConstraintKind) {
@@ -741,7 +769,7 @@ impl<'env, 'ext, 'imp> ConstraintGenerator<'env, 'ext, 'imp> {
                 *self.type_var_usage.entry(*id).or_default() += 1;
                 self.record_type_vars(ty);
             }
-            ConstraintKind::Placeholder(_) => {}
+            ConstraintKind::Placeholder(_) | ConstraintKind::ReportError(_) => {}
         }
     }
 
@@ -757,7 +785,10 @@ impl<'env, 'ext, 'imp> ConstraintGenerator<'env, 'ext, 'imp> {
                 }
                 self.record_type_vars(result);
             }
-            TypeKind::Primitive(_) | TypeKind::Reference(_) | TypeKind::Unknown => {}
+            TypeKind::Primitive(_)
+            | TypeKind::Boxed(_)
+            | TypeKind::Reference(_)
+            | TypeKind::Unknown => {}
         }
     }
 
@@ -788,31 +819,14 @@ impl<'env, 'ext, 'imp> ConstraintGenerator<'env, 'ext, 'imp> {
     }
 }
 
-fn map_annotation_type(name: &str) -> TypeKind {
-    match name {
-        "Int" | "Integer" => TypeKind::Primitive("Int"),
-        "Double" | "Float" => TypeKind::Primitive("Double"),
-        "Boolean" | "Bool" => TypeKind::Primitive("Boolean"),
-        "String" => TypeKind::Primitive("String"),
-        "SequenceCore" | "jv.collections.SequenceCore" => {
-            TypeKind::Primitive("jv.collections.SequenceCore")
-        }
-        "Iterable" | "java.lang.Iterable" => TypeKind::Primitive("java.lang.Iterable"),
-        "Iterator" | "java.util.Iterator" => TypeKind::Primitive("java.util.Iterator"),
-        "Stream" | "java.util.stream.Stream" => TypeKind::Primitive("java.util.stream.Stream"),
-        "List" | "java.util.List" => TypeKind::Primitive("java.util.List"),
-        "Map" | "java.util.Map" => TypeKind::Primitive("java.util.Map"),
-        other => TypeKind::Reference(other.to_string()),
-    }
-}
-
 fn nullability_from_type(ty: &TypeKind) -> NullabilityFlag {
     match ty {
         TypeKind::Optional(_) => NullabilityFlag::Nullable,
         TypeKind::Unknown | TypeKind::Variable(_) => NullabilityFlag::Unknown,
-        TypeKind::Primitive(_) | TypeKind::Reference(_) | TypeKind::Function(_, _) => {
-            NullabilityFlag::NonNull
-        }
+        TypeKind::Primitive(_)
+        | TypeKind::Boxed(_)
+        | TypeKind::Reference(_)
+        | TypeKind::Function(_, _) => NullabilityFlag::NonNull,
     }
 }
 
@@ -869,11 +883,12 @@ mod tests {
 
         assert!(collected.iter().any(|constraint| matches!(
             &constraint.kind,
-            ConstraintKind::Equal(TypeKind::Variable(_), TypeKind::Primitive(name)) if *name == "Int"
+            ConstraintKind::Equal(TypeKind::Variable(_), TypeKind::Primitive(primitive))
+                if *primitive == PrimitiveType::Int
         )));
 
         let scheme = env.lookup("x").expect("symbol x must exist");
-        assert_eq!(scheme.ty, TypeKind::Primitive("Int"));
+        assert_eq!(scheme.ty, TypeKind::primitive(PrimitiveType::Int));
     }
 
     #[test]
@@ -918,7 +933,10 @@ mod tests {
 
         assert!(collected.iter().any(|constraint| matches!(
             &constraint.kind,
-            ConstraintKind::Equal(TypeKind::Primitive("Int"), TypeKind::Primitive("Int"))
+            ConstraintKind::Equal(
+                TypeKind::Primitive(PrimitiveType::Int),
+                TypeKind::Primitive(PrimitiveType::Int)
+            )
         )));
 
         let count_int_var = collected
@@ -926,14 +944,17 @@ mod tests {
             .filter(|constraint| {
                 matches!(
                     &constraint.kind,
-                    ConstraintKind::Equal(TypeKind::Variable(_), TypeKind::Primitive("Int"))
+                    ConstraintKind::Equal(
+                        TypeKind::Variable(_),
+                        TypeKind::Primitive(PrimitiveType::Int)
+                    )
                 )
             })
             .count();
         assert!(count_int_var >= 2);
 
         let scheme = env.lookup("sum").expect("symbol sum must exist");
-        assert_eq!(scheme.ty, TypeKind::Primitive("Int"));
+        assert_eq!(scheme.ty, TypeKind::primitive(PrimitiveType::Int));
     }
 
     #[test]
@@ -976,7 +997,7 @@ mod tests {
         let scheme = env.lookup("value").expect("value binding must exist");
         assert_eq!(
             scheme.ty,
-            TypeKind::Optional(Box::new(TypeKind::Primitive("String")))
+            TypeKind::Optional(Box::new(TypeKind::reference("java.lang.String")))
         );
     }
 
@@ -1000,7 +1021,7 @@ val result = when (maybe) {
         let _constraints = ConstraintGenerator::new(&mut env, &extensions, None).generate(&program);
 
         let scheme = env.lookup("result").expect("result binding must exist");
-        assert_eq!(scheme.ty, TypeKind::Primitive("String"));
+        assert_eq!(scheme.ty, TypeKind::reference("java.lang.String"));
     }
 
     #[test]
@@ -1070,7 +1091,7 @@ val result = when (maybe) {
         }));
 
         let outer = env.lookup("value").expect("outer value must exist");
-        assert_eq!(outer.ty, TypeKind::Primitive("Int"));
+        assert_eq!(outer.ty, TypeKind::primitive(PrimitiveType::Int));
 
         let maybe = env.lookup("maybe").expect("maybe binding must exist");
         match &maybe.ty {

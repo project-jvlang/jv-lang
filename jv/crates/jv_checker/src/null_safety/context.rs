@@ -37,7 +37,10 @@ impl NullabilityKind {
             Optional(_) => NullabilityKind::Nullable,
             Unknown => NullabilityKind::Unknown,
             Variable(_) => NullabilityKind::Unknown,
-            Primitive(_) | Reference(_) | Function(_, _) => NullabilityKind::NonNull,
+            Primitive(_)
+            | Boxed(_)
+            | Reference(_)
+            | Function(_, _) => NullabilityKind::NonNull,
         }
     }
 
@@ -609,14 +612,18 @@ impl JavaSymbolMetadata {
 mod tests {
     use super::*;
     use crate::binding::{LateInitManifest, LateInitSeed};
+    use crate::inference::type_factory::TypeFactory;
     use crate::inference::types::TypeKind;
+    use crate::inference::PrimitiveType;
     use crate::inference::TypeEnvironment;
     use jv_inference::service::TypeFactsBuilder;
     use jv_inference::service::TypeScheme as FactsTypeScheme;
     use jv_inference::types::{NullabilityFlag, TypeKind as FactsTypeKind, TypeVariant};
 
     fn checker_optional(inner: &'static str) -> TypeKind {
-        TypeKind::Optional(Box::new(TypeKind::Primitive(inner)))
+        let base =
+            TypeFactory::from_annotation(inner).unwrap_or_else(|_| TypeKind::reference(inner));
+        TypeKind::optional(base)
     }
 
     fn facts_optional(inner: &'static str) -> FactsTypeKind {
@@ -629,7 +636,7 @@ mod tests {
     #[test]
     fn hydrates_symbol_lattice_from_environment_and_facts() {
         let mut env = TypeEnvironment::new();
-        env.define_monotype("user_id", TypeKind::Primitive("Int"));
+        env.define_monotype("user_id", TypeKind::primitive(PrimitiveType::Int));
         env.define_monotype("maybe_email", checker_optional("String"));
 
         let mut builder = TypeFactsBuilder::new();
@@ -730,13 +737,16 @@ mod tests {
     #[test]
     fn late_init_manifest_filters_required_symbols() {
         let mut env = TypeEnvironment::new();
-        env.define_monotype("implicitVal", TypeKind::Primitive("Int"));
-        env.define_monotype("explicitInitialized", TypeKind::Primitive("Int"));
-        env.define_monotype("explicitLate", TypeKind::Primitive("Int"));
-        env.define_monotype("annotatedLate", TypeKind::Primitive("Int"));
+        env.define_monotype("implicitVal", TypeKind::primitive(PrimitiveType::Int));
+        env.define_monotype(
+            "explicitInitialized",
+            TypeKind::primitive(PrimitiveType::Int),
+        );
+        env.define_monotype("explicitLate", TypeKind::primitive(PrimitiveType::Int));
+        env.define_monotype("annotatedLate", TypeKind::primitive(PrimitiveType::Int));
         env.define_monotype(
             "nullableVar",
-            TypeKind::Optional(Box::new(TypeKind::Primitive("String"))),
+            TypeKind::Optional(Box::new(TypeKind::reference("java.lang.String"))),
         );
 
         let mut builder = TypeFactsBuilder::new();

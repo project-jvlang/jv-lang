@@ -208,11 +208,10 @@ fn build_substitution_map(bindings: &[TypeBinding]) -> HashMap<TypeId, TypeKind>
 
 fn resolve_type(ty: &TypeKind, substitutions: &HashMap<TypeId, TypeKind>) -> TypeKind {
     match ty {
-        TypeKind::Primitive(name) => TypeKind::Primitive(name),
-        TypeKind::Reference(name) => TypeKind::Reference(name.clone()),
-        TypeKind::Optional(inner) => {
-            TypeKind::Optional(Box::new(resolve_type(inner, substitutions)))
-        }
+        TypeKind::Primitive(primitive) => TypeKind::Primitive(*primitive),
+        TypeKind::Boxed(primitive) => TypeKind::Boxed(*primitive),
+        TypeKind::Reference(name) => TypeKind::reference(name.clone()),
+        TypeKind::Optional(inner) => TypeKind::optional(resolve_type(inner, substitutions)),
         TypeKind::Variable(id) => {
             if let Some(resolved) = substitutions.get(id) {
                 resolve_type(resolved, substitutions)
@@ -251,6 +250,7 @@ mod tests {
     use jv_ast::{
         BinaryOp, Expression, Literal, Modifiers, Parameter, Span, Statement, TypeAnnotation,
     };
+    use crate::inference::types::PrimitiveType;
 
     fn dummy_span() -> Span {
         Span::dummy()
@@ -327,9 +327,9 @@ mod tests {
         match &scheme.ty {
             TypeKind::Function(params, ret) => {
                 assert_eq!(params.len(), 2);
-                assert_eq!(params[0], TypeKind::Primitive("Int"));
-                assert_eq!(params[1], TypeKind::Primitive("Int"));
-                assert_eq!(**ret, TypeKind::Primitive("Int"));
+                assert_eq!(params[0], TypeKind::primitive(PrimitiveType::Int));
+                assert_eq!(params[1], TypeKind::primitive(PrimitiveType::Int));
+                assert_eq!(**ret, TypeKind::primitive(PrimitiveType::Int));
             }
             other => panic!("expected function type, found {other:?}"),
         }
@@ -405,8 +405,8 @@ mod tests {
         match &scheme.ty {
             TypeKind::Function(params, ret) => {
                 assert_eq!(params.len(), 1);
-                assert_eq!(params[0], TypeKind::Primitive("String"));
-                assert_eq!(**ret, TypeKind::Primitive("String"));
+                assert_eq!(params[0], TypeKind::reference("java.lang.String"));
+                assert_eq!(**ret, TypeKind::reference("java.lang.String"));
             }
             other => panic!("expected function type, found {other:?}"),
         }

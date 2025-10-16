@@ -8,7 +8,7 @@ use jv_build::{
     metadata::{BuildContext as SymbolBuildContext, SymbolIndexCache},
     JavaTarget,
 };
-use jv_checker::{TypeInferenceService, TypeKind};
+use jv_checker::{PrimitiveType, TypeInferenceService, TypeKind};
 use jv_cli::pipeline::{compile, BuildOptionsFactory, CliOverrides};
 use jv_cli::pipeline::project::{layout::ProjectLayout, locator::ProjectRoot, manifest::ManifestLoader};
 use jv_ir::types::IrImportDetail;
@@ -564,7 +564,7 @@ fn type_inference_snapshot_emitted_with_emit_types() {
     let scheme = environment
         .get("answer")
         .expect("answer binding exported in environment");
-    assert!(matches!(scheme.ty, TypeKind::Primitive("Int")));
+    assert!(matches!(scheme.ty, TypeKind::primitive(PrimitiveType::Int)));
     assert!(snapshot.bindings().len() >= 1);
 }
 
@@ -621,7 +621,7 @@ fn type_inference_snapshot_tracks_program_changes() {
     let incremented = second_env
         .get("incremented")
         .expect("incremented binding present");
-    assert!(matches!(incremented.ty, TypeKind::Primitive("Int")));
+    assert!(matches!(incremented.ty, TypeKind::primitive(PrimitiveType::Int)));
 }
 
 #[test]

@@ -1,5 +1,6 @@
 use crate::imports::{ResolvedImport, ResolvedImportKind};
 use crate::inference::environment::{TypeEnvironment, TypeScheme};
+use crate::inference::type_factory::TypeFactory;
 use crate::inference::types::TypeKind;
 use jv_build::metadata::{JavaMethodSignature, StaticMemberKind, SymbolIndex};
 use jv_ir::types::JavaType;
@@ -102,7 +103,7 @@ impl ImportRegistry {
 
     fn register_type_alias(&mut self, env: &mut TypeEnvironment, alias: String, fqcn: String) {
         self.type_aliases.insert(alias.clone(), fqcn.clone());
-        let ty = TypeKind::Reference(fqcn);
+        let ty = TypeKind::reference(fqcn);
         env.define_scheme(alias, TypeScheme::monotype(ty));
     }
 
@@ -114,7 +115,7 @@ impl ImportRegistry {
         for package in &self.package_wildcards {
             let candidate = format!("{package}.{name}");
             if self.symbol_index.lookup_type(&candidate).is_some() {
-                let ty = TypeKind::Reference(candidate.clone());
+                let ty = TypeKind::reference(candidate.clone());
                 self.type_aliases
                     .insert(name.to_string(), candidate.clone());
                 env.define_scheme(name.to_string(), TypeScheme::monotype(ty.clone()));
@@ -174,32 +175,35 @@ fn method_signature_to_type(signature: &JavaMethodSignature) -> TypeKind {
 
 fn java_type_to_type_kind(java_type: &JavaType) -> TypeKind {
     match java_type {
-        JavaType::Primitive(name) => match name.as_str() {
-            "int" | "short" | "byte" => TypeKind::Primitive("Int"),
-            "long" => TypeKind::Primitive("Long"),
-            "float" | "double" => TypeKind::Primitive("Double"),
-            "boolean" => TypeKind::Primitive("Boolean"),
-            "char" => TypeKind::Primitive("Char"),
-            other => TypeKind::Reference(other.to_string()),
-        },
-        JavaType::Reference { name, .. } => TypeKind::Reference(name.clone()),
+        JavaType::Primitive(name) => {
+            TypeFactory::primitive_from_java_name(name).unwrap_or(TypeKind::Unknown)
+        }
+        JavaType::Reference { name, .. } => {
+            if let Some(kind) = TypeFactory::boxed_from_fqcn(name) {
+                kind
+            } else {
+                TypeKind::reference(name.clone())
+            }
+        }
         JavaType::Array {
             element_type,
             dimensions,
         } => {
-            let mut base = match java_type_to_type_kind(element_type) {
-                TypeKind::Primitive(name) => name.to_string(),
+            let element = java_type_to_type_kind(element_type);
+            let mut base = match element {
+                TypeKind::Primitive(primitive) => primitive.java_name().to_string(),
+                TypeKind::Boxed(primitive) => primitive.boxed_fqcn().to_string(),
                 TypeKind::Reference(name) => name,
                 _ => return TypeKind::Unknown,
             };
             for _ in 0..*dimensions {
                 base.push_str("[]");
             }
-            TypeKind::Reference(base)
+            TypeKind::reference(base)
         }
-        JavaType::Functional { interface_name, .. } => TypeKind::Reference(interface_name.clone()),
+        JavaType::Functional { interface_name, .. } => TypeKind::reference(interface_name.clone()),
         JavaType::Wildcard { .. } => TypeKind::Unknown,
-        JavaType::Void => TypeKind::Primitive("Unit"),
+        JavaType::Void => TypeKind::reference("Unit"),
     }
 }
 

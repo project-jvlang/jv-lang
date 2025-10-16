@@ -7,6 +7,7 @@
 
 use crate::inference::environment::{TypeEnvironment, TypeScheme};
 use crate::inference::extensions::ExtensionRegistry;
+use crate::inference::type_factory::TypeFactory;
 use crate::inference::types::{TypeId, TypeKind};
 
 const SEQUENCE_CORE: &str = "jv.collections.SequenceCore";
@@ -22,7 +23,7 @@ const LONG: &str = "Long";
 const UNIT: &str = "Unit";
 
 fn primitive(name: &'static str) -> TypeKind {
-    TypeKind::Primitive(name)
+    TypeFactory::from_annotation(name).unwrap_or_else(|_| TypeKind::reference(name))
 }
 
 fn function(params: Vec<TypeKind>, return_ty: TypeKind) -> TypeKind {

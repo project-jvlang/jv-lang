@@ -496,8 +496,9 @@ fn degraded_warning() -> CheckError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::binding::{LateInitManifest, LateInitSeed};
-    use crate::inference::TypeEnvironment;
+use crate::binding::{LateInitManifest, LateInitSeed};
+use crate::inference::PrimitiveType;
+use crate::inference::TypeEnvironment;
     use crate::null_safety::graph::FlowStateSnapshot;
     use crate::null_safety::operators::{JavaLoweringHint, JavaLoweringStrategy, OperatorOperand};
     use jv_ast::types::Span;
@@ -524,7 +525,10 @@ mod tests {
     #[test]
     fn collects_flow_states_into_type_facts() {
         let mut env = TypeEnvironment::new();
-        env.define_monotype("user_id", crate::inference::TypeKind::Primitive("Int"));
+        env.define_monotype(
+            "user_id",
+            crate::inference::TypeKind::primitive(PrimitiveType::Int),
+        );
 
         let mut base_builder = TypeFactsBuilder::new();
         base_builder.environment_entry(
@@ -630,7 +634,7 @@ mod tests {
     #[test]
     fn redundant_null_safe_member_access_emits_warning() {
         let mut env = TypeEnvironment::new();
-        env.define_monotype("user", crate::inference::TypeKind::Primitive("User"));
+        env.define_monotype("user", crate::inference::TypeKind::reference("User"));
 
         let mut facts_builder = TypeFactsBuilder::new();
         facts_builder.environment_entry(
@@ -667,7 +671,10 @@ mod tests {
     #[test]
     fn redundant_not_null_assertion_emits_warning() {
         let mut env = TypeEnvironment::new();
-        env.define_monotype("value", crate::inference::TypeKind::Primitive("String"));
+        env.define_monotype(
+            "value",
+            crate::inference::TypeKind::reference("java.lang.String"),
+        );
 
         let mut facts_builder = TypeFactsBuilder::new();
         facts_builder.environment_entry(
@@ -703,7 +710,10 @@ mod tests {
     #[test]
     fn exit_violation_emits_error() {
         let mut env = TypeEnvironment::new();
-        env.define_monotype("token", crate::inference::TypeKind::Primitive("String"));
+        env.define_monotype(
+            "token",
+            crate::inference::TypeKind::reference("java.lang.String"),
+        );
 
         let mut builder = TypeFactsBuilder::new();
         builder.environment_entry(
@@ -740,7 +750,10 @@ mod tests {
     #[test]
     fn manifest_contract_unknown_exit_state_is_tolerated() {
         let mut env = TypeEnvironment::new();
-        env.define_monotype("token", crate::inference::TypeKind::Primitive("String"));
+        env.define_monotype(
+            "token",
+            crate::inference::TypeKind::reference("java.lang.String"),
+        );
 
         let mut facts_builder = TypeFactsBuilder::new();
         facts_builder.environment_entry(
@@ -786,7 +799,10 @@ mod tests {
     #[test]
     fn manifest_contract_nullable_exit_state_emits_violation() {
         let mut env = TypeEnvironment::new();
-        env.define_monotype("token", crate::inference::TypeKind::Primitive("String"));
+        env.define_monotype(
+            "token",
+            crate::inference::TypeKind::reference("java.lang.String"),
+        );
 
         let mut facts_builder = TypeFactsBuilder::new();
         facts_builder.environment_entry(
@@ -827,7 +843,10 @@ mod tests {
     #[test]
     fn exit_nonnull_state_is_ok() {
         let mut env = TypeEnvironment::new();
-        env.define_monotype("token", crate::inference::TypeKind::Primitive("String"));
+        env.define_monotype(
+            "token",
+            crate::inference::TypeKind::reference("java.lang.String"),
+        );
 
         let mut builder = TypeFactsBuilder::new();
         builder.environment_entry(
@@ -852,7 +871,7 @@ mod tests {
     #[test]
     fn exit_unknown_emits_late_init_guidance() {
         let mut env = TypeEnvironment::new();
-        env.define_monotype("session", crate::inference::TypeKind::Primitive("Session"));
+        env.define_monotype("session", crate::inference::TypeKind::reference("Session"));
 
         let mut builder = TypeFactsBuilder::new();
         builder.environment_entry(
@@ -909,7 +928,7 @@ mod tests {
     #[test]
     fn annotated_late_init_suppresses_guidance() {
         let mut env = TypeEnvironment::new();
-        env.define_monotype("session", crate::inference::TypeKind::Primitive("Session"));
+        env.define_monotype("session", crate::inference::TypeKind::reference("Session"));
 
         let mut builder = TypeFactsBuilder::new();
         builder.environment_entry(
