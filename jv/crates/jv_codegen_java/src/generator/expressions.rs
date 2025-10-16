@@ -1051,8 +1051,15 @@ impl JavaCodeGenerator {
     ) -> Result<(String, bool), CodeGenError> {
         match source {
             SequenceSource::Collection { expr, .. } => {
+                let sequence_stream_field = self.is_sequence_core_stream_field(expr);
+                let java_stream = Self::is_java_stream_expression(expr);
+                let needs_sequence_core_conversion =
+                    self.is_sequence_core_expression(expr) && !sequence_stream_field;
                 let rendered = self.generate_expression(expr)?;
-                if self.is_sequence_core_expression(expr) {
+
+                if sequence_stream_field || java_stream {
+                    Ok((rendered, false))
+                } else if needs_sequence_core_conversion {
                     Ok((format!("({}).toStream()", rendered), false))
                 } else {
                     Ok((format!("({}).stream()", rendered), false))
@@ -1079,6 +1086,23 @@ impl JavaCodeGenerator {
     fn is_sequence_core_expression(&self, expr: &IrExpression) -> bool {
         Self::expression_java_type(expr)
             .map(Self::is_sequence_core_type)
+            .unwrap_or(false)
+    }
+
+    fn is_sequence_core_stream_field(&self, expr: &IrExpression) -> bool {
+        match expr {
+            IrExpression::FieldAccess {
+                receiver,
+                field_name,
+                ..
+            } => field_name == "stream" && self.is_sequence_core_expression(receiver),
+            _ => false,
+        }
+    }
+
+    fn is_java_stream_expression(expr: &IrExpression) -> bool {
+        Self::expression_java_type(expr)
+            .map(Self::is_java_stream_type)
             .unwrap_or(false)
     }
 
@@ -1137,6 +1161,15 @@ impl JavaCodeGenerator {
         match java_type {
             JavaType::Reference { name, .. } => {
                 name == "SequenceCore" || name == "jv.collections.SequenceCore"
+            }
+            _ => false,
+        }
+    }
+
+    fn is_java_stream_type(java_type: &JavaType) -> bool {
+        match java_type {
+            JavaType::Reference { name, .. } => {
+                name == "Stream" || name == "java.util.stream.Stream"
             }
             _ => false,
         }
