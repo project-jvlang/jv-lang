@@ -1,10 +1,11 @@
 use jv_build::metadata::{ConversionCatalog, JavaMethodSignature, SymbolIndex, TypeEntry};
+use jv_checker::inference::conversions::ConversionHelperCatalog;
 use jv_checker::inference::{
     AppliedConversion, CompatibilityChecker, Constraint, ConstraintKind, ConstraintSet,
-    ConstraintSolver, ConversionHelperCatalog, ConversionKind, ConversionOutcome,
-    ConversionRulesEngine, InferenceTelemetry, NullableGuardReason, PrimitiveType, TypeEnvironment,
-    TypeError, TypeFactory, TypeKind,
+    ConstraintSolver, ConversionKind, ConversionOutcome, ConversionRulesEngine,
+    NullableGuardReason, PrimitiveType, TypeEnvironment, TypeError, TypeFactory, TypeKind,
 };
+use jv_checker::InferenceTelemetry;
 use jv_ir::types::JavaType;
 use std::sync::Arc;
 
@@ -153,22 +154,22 @@ fn telemetry_records_conversion_events_and_catalog_hits() {
 
     assert_eq!(telemetry.conversion_events.len(), 1);
     let event = &telemetry.conversion_events[0];
-    assert_eq!(event.kind, ConversionKind::MethodInvocation);
+    assert_eq!(event.kind, ConversionKind::StringConversion);
     let helper = event
         .helper_method
         .as_ref()
         .expect("helper metadata should be recorded");
-    assert_eq!(helper.owner, "java.lang.String");
-    assert_eq!(helper.method, "valueOf");
-    assert!(helper.is_static);
+    assert_eq!(helper.owner, "java.lang.Integer");
+    assert_eq!(helper.method, "toString");
+    assert!(!helper.is_static);
     assert!(!event.warned);
     assert!(event.nullable_guard.is_none());
 
     assert_eq!(telemetry.catalog_hits.len(), 1);
     let hit = &telemetry.catalog_hits[0];
-    assert_eq!(hit.owner, "java.lang.String");
-    assert_eq!(hit.method, "valueOf");
-    assert!(hit.is_static);
+    assert_eq!(hit.owner, "java.lang.Integer");
+    assert_eq!(hit.method, "toString");
+    assert!(!hit.is_static);
     assert!(telemetry.nullable_guards.is_empty());
 }
 
@@ -187,6 +188,61 @@ fn conversion_diagnostic_reports_boxing_event() {
         .expect("diagnostic produced");
     assert_eq!(diagnostic.code, "JV_TYPE_001");
     assert!(diagnostic.message.contains("Implicitly boxed"));
+}
+
+#[test]
+fn optional_reference_conversion_requests_guard() {
+    let source =
+        TypeKind::optional(TypeKind::reference("java.lang.String"));
+    let target = TypeKind::reference("java.lang.String");
+
+    let outcome = ConversionRulesEngine::analyze(&source, &target);
+    match outcome {
+        ConversionOutcome::Allowed(metadata) => {
+            let guard = metadata
+                .nullable_guard
+                .expect("optional conversion should request a nullable guard");
+            assert_eq!(guard.reason, NullableGuardReason::OptionalLift);
+        }
+        other => panic!("expected optional lift conversion metadata, got {other:?}"),
+    }
+}
+
+#[test]
+fn collection_transform_conversion_integrates_with_solver_and_telemetry() {
+    let mut set = ConstraintSet::new();
+    set.push(Constraint::new(ConstraintKind::Convertible {
+        from: TypeKind::reference("java.util.List"),
+        to: TypeKind::reference("java.util.stream.Stream"),
+    }));
+
+    let catalog = Arc::new(collection_catalog());
+    let mut solver = ConstraintSolver::new();
+    solver.set_conversion_catalog(Some(Arc::clone(&catalog)));
+
+    let solve_result = solver
+        .solve(set)
+        .expect("collection transform should be resolved via helper catalog");
+
+    assert_eq!(solve_result.conversions.len(), 1);
+    let conversion = &solve_result.conversions[0];
+    assert_eq!(conversion.kind, ConversionKind::MethodInvocation);
+    let helper = conversion
+        .helper_method
+        .as_ref()
+        .expect("method invocation conversion should carry helper metadata");
+    assert_eq!(helper.method, "stream");
+    assert!(!helper.is_static);
+
+    let mut telemetry = InferenceTelemetry::default();
+    telemetry.record_conversions(&solve_result.conversions);
+    assert_eq!(telemetry.method_invocation_conversions, 1);
+    assert_eq!(telemetry.conversion_events.len(), 1);
+    assert_eq!(telemetry.catalog_hits.len(), 1);
+    assert_eq!(
+        telemetry.catalog_hits[0].method, "stream",
+        "telemetry should record the helper method for collection transforms"
+    );
 }
 
 fn catalog_from_entries(entries: Vec<TypeEntry>) -> ConversionHelperCatalog {
@@ -265,7 +321,7 @@ fn functional_catalog() -> ConversionHelperCatalog {
 }
 
 #[test]
-fn conversion_rules_uses_catalog_for_method_invocation() {
+fn string_conversion_prefers_instance_helper() {
     let catalog = helper_catalog();
     let outcome = ConversionRulesEngine::analyze_with_catalog(
         &TypeKind::primitive(PrimitiveType::Int),
@@ -275,13 +331,13 @@ fn conversion_rules_uses_catalog_for_method_invocation() {
 
     match outcome {
         ConversionOutcome::Allowed(metadata) => {
-            assert_eq!(metadata.kind, ConversionKind::MethodInvocation);
+            assert_eq!(metadata.kind, ConversionKind::StringConversion);
             let helper = metadata.helper.expect("helper metadata expected");
-            assert_eq!(helper.owner, "java.lang.String");
-            assert_eq!(helper.method, "valueOf");
-            assert!(helper.is_static);
+            assert_eq!(helper.owner, "java.lang.Integer");
+            assert_eq!(helper.method, "toString");
+            assert!(!helper.is_static);
         }
-        other => panic!("expected method invocation conversion, got {other:?}"),
+        other => panic!("expected string conversion metadata, got {other:?}"),
     }
 }
 

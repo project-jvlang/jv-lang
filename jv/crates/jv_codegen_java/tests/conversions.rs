@@ -1,8 +1,8 @@
 use jv_ast::{Literal, Span};
 use jv_codegen_java::{JavaCodeGenConfig, JavaCodeGenerator};
 use jv_ir::{
-    ConversionKind, ConversionMetadata, ConversionMetadataEntry, IrExpression, IrProgram,
-    IrStatement, JavaType, NullableGuard, NullableGuardReason,
+    ConversionHelper, ConversionKind, ConversionMetadata, ConversionMetadataEntry, IrExpression,
+    IrProgram, IrStatement, JavaType, NullableGuard, NullableGuardReason,
 };
 use jv_mapper::SourceMap;
 
@@ -32,7 +32,7 @@ fn boxing_conversion_wraps_literal_expression() {
         span: expr_span.clone(),
     };
 
-    let mut program = IrProgram {
+    let program = IrProgram {
         package: None,
         imports: Vec::new(),
         type_declarations: vec![statement],
@@ -108,4 +108,66 @@ fn unboxing_conversion_injects_nullable_guard() {
     assert_eq!(metadata.from_type, "java.lang.Integer");
     assert_eq!(metadata.to_type, "int");
     assert!(metadata.nullable_guard.is_some());
+}
+
+#[test]
+fn method_invocation_conversion_wraps_collection_transform() {
+    let expr_span = span(3);
+    let expression = IrExpression::Identifier {
+        name: "values".to_string(),
+        java_type: JavaType::Reference {
+            name: "java.util.List".to_string(),
+            generic_args: Vec::new(),
+        },
+        span: expr_span.clone(),
+    };
+    let statement = IrStatement::Expression {
+        expr: expression,
+        span: expr_span.clone(),
+    };
+
+    let metadata = ConversionMetadata::new(
+        ConversionKind::MethodInvocation,
+        "java.util.List",
+        "java.util.stream.Stream",
+    )
+    .with_helper(ConversionHelper {
+        owner: "java.util.List".to_string(),
+        method: "stream".to_string(),
+        is_static: false,
+    });
+
+    let mut program = IrProgram {
+        package: None,
+        imports: Vec::new(),
+        type_declarations: vec![statement],
+        generic_metadata: Default::default(),
+        conversion_metadata: vec![ConversionMetadataEntry {
+            span: expr_span.clone(),
+            metadata,
+        }],
+        span: expr_span.clone(),
+    };
+
+    let (source, source_map) = generate_source_and_map(&program);
+    assert!(
+        source.contains("(values).stream();"),
+        "collection transform should invoke stream() helper"
+    );
+
+    assert_eq!(source_map.entries.len(), 1);
+    let entry = &source_map.entries[0];
+    let conversions = entry
+        .conversions
+        .as_ref()
+        .expect("conversion metadata should be recorded in source map");
+    assert_eq!(conversions.len(), 1);
+    let metadata = &conversions[0];
+    assert_eq!(metadata.kind, ConversionKind::MethodInvocation);
+    let helper = metadata
+        .helper
+        .as_ref()
+        .expect("helper metadata should be preserved");
+    assert_eq!(helper.method, "stream");
+    assert!(!helper.is_static);
 }

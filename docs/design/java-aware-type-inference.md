@@ -1615,6 +1615,30 @@ fn generates_to_string_conversion() {
 - [ ] 既存のjvサンプルコードが全て正常にコンパイルされる
 - [ ] パフォーマンスが従来比で20%以内の劣化に収まる
 
+### Phase 4 手動検証と性能監視
+
+以下のサンプルを用いてフェーズ横断の変換挙動と Telemetry を確認する。  
+```jv
+import java.util.List
+import java.util.stream.Stream
+
+fun analyze(count: Int, values: List<Int>, fallback: String?): String {
+    val stream: Stream<Int> = values
+    val text: String = count
+    val safe: String = fallback ?: "unknown"
+    return text
+}
+```
+
+- `cargo test -p jv_checker --test inference_conversions -- collection_transform_conversion_integrates_with_solver_and_telemetry optional_reference_conversion_requests_guard`  
+  制約ソルバが `CollectionTransformRule` を介してヘルパーを解決し、`InferenceTelemetry` が `method_invocation_conversions` と `catalog_hits` を更新することを確認する。
+- `cargo test -p jv_checker --test java_codegen -- --nocapture phase_four_conversion_pipeline_records_telemetry`  
+  上記サンプルを解析し、Telemetry に次の値が記録されることを検証する:  
+  `string_conversions=1`, `method_invocation_conversions=1`, `nullable_guards_generated>=1`。  
+  `catalog_hits[0].method` が `stream` であること、および `nullable_guards` に `OptionalLift` が含まれることを確認する。
+- `cargo test -p jv_checker --test java_inference_bench -- --ignored --exact java_inference_regression_guard`  
+  タイプ推論の計測を行い、基準時間 80ms に対して 10% 以内 (88ms) に収まることをチェックする。CI では `--ignored` テストを定期実行して性能退行を監視する。
+
 ## 参考資料
 
 - **JLS Chapter 5**: Type Conversions (https://docs.oracle.com/javase/specs/jls/se25/html/jls-5.html)
