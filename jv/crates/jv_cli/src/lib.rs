@@ -437,7 +437,8 @@ pub mod pipeline {
         diagnostics as import_diagnostics, ImportResolutionService, ResolvedImport,
         ResolvedImportKind,
     };
-    use jv_checker::{InferenceSnapshot, InferenceTelemetry, TypeChecker};
+    use jv_checker::inference::{AppliedConversion, HelperSpec, NullableGuardReason};
+    use jv_checker::{InferenceSnapshot, InferenceTelemetry, TypeChecker, TypeKind};
     use jv_codegen_java::{JavaCodeGenConfig, JavaCodeGenerator};
     use jv_fmt::JavaFormatter;
     use jv_ir::context::WhenStrategyRecord;
@@ -1056,6 +1057,10 @@ pub mod pipeline {
             binding_usage.vars
         );
 
+        print_conversion_events(telemetry);
+        print_nullable_guards(telemetry);
+        print_catalog_hits(telemetry);
+
         if strategies.is_empty() {
             println!(
                 "  when_strategies: (none recorded)\n  pattern_diagnostic_hint: JV3199 surfaces when destructuring depth exceeds supported limits or when guards require Phase 5 features. Use --explain JV3199 for guidance."
@@ -1076,6 +1081,42 @@ pub mod pipeline {
         }
 
         emit_binding_usage_json(entrypoint, Some(telemetry), strategies, binding_usage);
+    }
+
+    fn print_conversion_events(telemetry: &InferenceTelemetry) {
+        if telemetry.conversion_events.is_empty() {
+            println!("  conversion_events: (none recorded)");
+            return;
+        }
+
+        println!("  conversion_events:");
+        for event in &telemetry.conversion_events {
+            println!("    - {}", format_conversion_event(event));
+        }
+    }
+
+    fn print_nullable_guards(telemetry: &InferenceTelemetry) {
+        if telemetry.nullable_guards.is_empty() {
+            println!("  nullable_guards: (none recorded)");
+            return;
+        }
+
+        println!("  nullable_guards:");
+        for guard in &telemetry.nullable_guards {
+            println!("    - {}", format_nullable_guard_reason(guard.reason));
+        }
+    }
+
+    fn print_catalog_hits(telemetry: &InferenceTelemetry) {
+        if telemetry.catalog_hits.is_empty() {
+            println!("  catalog_hits: (none recorded)");
+            return;
+        }
+
+        println!("  catalog_hits:");
+        for helper in &telemetry.catalog_hits {
+            println!("    - {}", format_helper_spec(helper));
+        }
     }
 
     fn print_strategy_telemetry(
@@ -1129,6 +1170,71 @@ pub mod pipeline {
             .collect()
     }
 
+    fn format_conversion_event(event: &AppliedConversion) -> String {
+        let mut details = format!(
+            "{} -> {} [{}]",
+            format_type_kind(&event.from_type),
+            format_type_kind(&event.to_type),
+            event.kind.label()
+        );
+
+        if let Some(helper) = event.helper_method.as_ref() {
+            details.push_str(&format!(" via {}", format_helper_spec(helper)));
+        }
+
+        if event.warned {
+            details.push_str(" (warn)");
+        }
+
+        if let Some(span) = event.source_span.as_ref() {
+            details.push_str(&format!(" @{}", format_span(span)));
+        }
+
+        if let Some(hint) = event.java_span_hint.as_ref() {
+            details.push_str(&format!(" -> {}", hint));
+        }
+
+        details
+    }
+
+    fn format_helper_spec(helper: &HelperSpec) -> String {
+        let qualifier = if helper.is_static { "static " } else { "" };
+        format!("{qualifier}{}::{}", helper.owner, helper.method)
+    }
+
+    fn format_nullable_guard_reason(reason: NullableGuardReason) -> &'static str {
+        match reason {
+            NullableGuardReason::OptionalLift => "optional-lift",
+            NullableGuardReason::Unboxing => "unboxing",
+        }
+    }
+
+    fn format_span(span: &Span) -> String {
+        format!(
+            "L{}C{}-L{}C{}",
+            span.start_line, span.start_column, span.end_line, span.end_column
+        )
+    }
+
+    fn format_type_kind(kind: &TypeKind) -> String {
+        match kind {
+            TypeKind::Primitive(primitive) => primitive.java_name().to_string(),
+            TypeKind::Boxed(primitive) => primitive.boxed_fqcn().to_string(),
+            TypeKind::Reference(name) => name.clone(),
+            TypeKind::Optional(inner) => format!("{}?", format_type_kind(inner)),
+            TypeKind::Variable(id) => format!("t{}", id.to_raw()),
+            TypeKind::Function(params, result) => {
+                let param_repr = params
+                    .iter()
+                    .map(format_type_kind)
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("fn({}) -> {}", param_repr, format_type_kind(result))
+            }
+            TypeKind::Unknown => "unknown".to_string(),
+        }
+    }
+
     fn emit_binding_usage_json(
         entrypoint: &Path,
         telemetry: Option<&InferenceTelemetry>,
@@ -1162,6 +1268,48 @@ pub mod pipeline {
                 "sealed_hierarchy_checks": telemetry.sealed_hierarchy_checks,
                 "generic_solver_ms": telemetry.generic_solver_ms,
                 "variance_analysis_ms": telemetry.variance_analysis_ms,
+                "widening_conversions": telemetry.widening_conversions,
+                "boxing_conversions": telemetry.boxing_conversions,
+                "unboxing_conversions": telemetry.unboxing_conversions,
+                "string_conversions": telemetry.string_conversions,
+                "nullable_guards_generated": telemetry.nullable_guards_generated,
+                "method_invocation_conversions": telemetry.method_invocation_conversions,
+                "conversion_catalog_hits": telemetry.conversion_catalog_hits,
+                "conversion_catalog_misses": telemetry.conversion_catalog_misses,
+                "conversion_events": telemetry
+                    .conversion_events
+                    .iter()
+                    .map(|event| {
+                        json!({
+                            "from": format_type_kind(&event.from_type),
+                            "to": format_type_kind(&event.to_type),
+                            "kind": event.kind.label(),
+                            "helper": event
+                                .helper_method
+                                .as_ref()
+                                .map(|helper| format_helper_spec(helper)),
+                            "warned": event.warned,
+                            "source_span": event
+                                .source_span
+                                .as_ref()
+                                .map(|span| format_span(span)),
+                            "java_span_hint": event.java_span_hint.clone(),
+                            "nullable_guard": event
+                                .nullable_guard
+                                .map(|guard| format_nullable_guard_reason(guard.reason)),
+                        })
+                    })
+                    .collect::<Vec<_>>(),
+                "nullable_guards": telemetry
+                    .nullable_guards
+                    .iter()
+                    .map(|guard| format_nullable_guard_reason(guard.reason))
+                    .collect::<Vec<_>>(),
+                "catalog_hits": telemetry
+                    .catalog_hits
+                    .iter()
+                    .map(|helper| format_helper_spec(helper))
+                    .collect::<Vec<_>>(),
             })
         });
 

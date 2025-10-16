@@ -1,9 +1,10 @@
 //! Java 固有のプリミティブ型情報とボクシング/ヌル許容ポリシー。
 
+use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 
 /// Java プリミティブ型の列挙。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum JavaPrimitive {
     Boolean,
     Byte,

@@ -4,15 +4,18 @@
 //! ここでは変換判定に必要な基礎的な型・構造体のみを定義する。
 
 mod catalog;
+mod decision;
 mod rules;
 
 pub use catalog::ConversionHelperCatalog;
+pub use decision::AppliedConversion;
 pub use rules::ConversionRulesEngine;
 
-use crate::inference::types::{TypeError, TypeKind};
+use crate::inference::types::TypeError;
+use serde::{Deserialize, Serialize};
 
 /// 暗黙・半暗黙変換の種別（JLS Chapter 5をベースに簡略化）。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ConversionKind {
     /// 型が完全一致し変換不要な場合。
     Identity,
@@ -43,7 +46,7 @@ impl ConversionKind {
 }
 
 /// 変換時に利用される補助メソッド情報。
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HelperSpec {
     /// メソッドを所有する型（FQCN）。
     pub owner: String,
@@ -74,7 +77,7 @@ impl HelperSpec {
 }
 
 /// null ガード挿入が必要な理由を表す。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum NullableGuardReason {
     /// Optional<T> から T へ抜ける際の非 null 保証。
     OptionalLift,
@@ -83,7 +86,7 @@ pub enum NullableGuardReason {
 }
 
 /// null ガード挿入メタデータ。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NullableGuard {
     pub reason: NullableGuardReason,
 }
@@ -95,7 +98,7 @@ impl NullableGuard {
 }
 
 /// 変換時のメタデータ。Helper/ガード情報を含む。
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ConversionMetadata {
     pub kind: ConversionKind,
     pub helper: Option<HelperSpec>,
@@ -120,15 +123,6 @@ impl ConversionMetadata {
         self.nullable_guard = Some(guard);
         self
     }
-}
-
-/// ソルバが適用した変換結果。
-#[derive(Debug, Clone)]
-pub struct AppliedConversion {
-    pub from: TypeKind,
-    pub to: TypeKind,
-    pub metadata: ConversionMetadata,
-    pub warned: bool,
 }
 
 /// 変換判定の結果。

@@ -19,7 +19,7 @@ pub use regex::RegexAnalysis;
 
 use crate::imports::ResolvedImport;
 use binding::{resolve_bindings, BindingResolution, BindingUsageSummary, LateInitManifest};
-use inference::conversions::{AppliedConversion, ConversionKind};
+use inference::conversions::{AppliedConversion, ConversionKind, HelperSpec, NullableGuard};
 use jv_ast::{Program, Span};
 use jv_build::metadata::SymbolIndex;
 use null_safety::{JavaLoweringHint, NullSafetyCoordinator};
@@ -27,6 +27,7 @@ use pattern::{
     NarrowedNullability, PatternCacheMetrics, PatternMatchFacts, PatternMatchService, PatternTarget,
 };
 use regex::RegexValidator;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use thiserror::Error;
@@ -269,7 +270,7 @@ impl TypeInferenceService for InferenceSnapshot {
 }
 
 /// Telemetry captured during the most recent inference run.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InferenceTelemetry {
     pub constraints_emitted: usize,
     pub bindings_resolved: usize,
@@ -298,6 +299,9 @@ pub struct InferenceTelemetry {
     pub method_invocation_conversions: usize,
     pub conversion_catalog_hits: u64,
     pub conversion_catalog_misses: u64,
+    pub conversion_events: Vec<AppliedConversion>,
+    pub nullable_guards: Vec<NullableGuard>,
+    pub catalog_hits: Vec<HelperSpec>,
 }
 
 impl Default for InferenceTelemetry {
@@ -330,6 +334,9 @@ impl Default for InferenceTelemetry {
             method_invocation_conversions: 0,
             conversion_catalog_hits: 0,
             conversion_catalog_misses: 0,
+            conversion_events: Vec::new(),
+            nullable_guards: Vec::new(),
+            catalog_hits: Vec::new(),
         }
     }
 }
@@ -338,7 +345,7 @@ impl InferenceTelemetry {
     /// 変換適用結果を集計し、Telemetry カウンタへ反映する。
     pub fn record_conversions(&mut self, conversions: &[AppliedConversion]) {
         for conversion in conversions {
-            match conversion.metadata.kind {
+            match conversion.kind {
                 ConversionKind::WideningPrimitive => self.widening_conversions += 1,
                 ConversionKind::Boxing => self.boxing_conversions += 1,
                 ConversionKind::Unboxing => self.unboxing_conversions += 1,
@@ -347,9 +354,16 @@ impl InferenceTelemetry {
                 ConversionKind::Identity => {}
             }
 
-            if conversion.metadata.nullable_guard.is_some() {
+            if let Some(guard) = conversion.nullable_guard {
                 self.nullable_guards_generated += 1;
+                self.nullable_guards.push(guard);
             }
+
+            if let Some(helper) = conversion.helper_method.as_ref() {
+                self.catalog_hits.push(helper.clone());
+            }
+
+            self.conversion_events.push(conversion.clone());
         }
     }
 }

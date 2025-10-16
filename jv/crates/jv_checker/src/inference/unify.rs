@@ -223,12 +223,19 @@ impl ConstraintSolver {
         metadata: ConversionMetadata,
         warned: bool,
     ) {
-        self.conversions.push(AppliedConversion {
+        let ConversionMetadata {
+            kind,
+            helper,
+            nullable_guard,
+        } = metadata;
+        self.conversions.push(AppliedConversion::new(
             from,
             to,
-            metadata,
+            kind,
+            helper,
+            nullable_guard,
             warned,
-        });
+        ));
     }
 
     fn bind_for_conversion(

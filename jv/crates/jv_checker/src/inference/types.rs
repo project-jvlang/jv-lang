@@ -1,12 +1,13 @@
 //! 型推論で扱う型表現・型変数・束縛を定義する。
 
 use crate::java::{JavaBoxingTable, JavaNullabilityPolicy, JavaPrimitive};
+use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::fmt;
 use thiserror::Error;
 
 /// 推論で利用する型変数ID。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct TypeId(u32);
 
 impl TypeId {
@@ -31,7 +32,7 @@ impl fmt::Display for TypeId {
 pub type PrimitiveType = JavaPrimitive;
 
 /// 型推論で用いる主な型表現。
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum TypeKind {
     Primitive(PrimitiveType),
     Boxed(PrimitiveType),

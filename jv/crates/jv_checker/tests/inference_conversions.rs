@@ -102,9 +102,9 @@ fn constraint_solver_records_boxing_conversion() {
         .expect("boxing conversion should be accepted");
     assert_eq!(result.conversions.len(), 1);
     let entry = &result.conversions[0];
-    assert_eq!(entry.metadata.kind, ConversionKind::Boxing);
+    assert_eq!(entry.kind, ConversionKind::Boxing);
     assert!(!entry.warned);
-    assert!(entry.metadata.nullable_guard.is_none());
+    assert!(entry.nullable_guard.is_none());
 }
 
 #[test]
@@ -124,6 +124,52 @@ fn telemetry_counts_unboxing_and_guards() {
 
     assert_eq!(telemetry.unboxing_conversions, 1);
     assert_eq!(telemetry.nullable_guards_generated, 1);
+    assert_eq!(telemetry.conversion_events.len(), 1);
+    assert_eq!(telemetry.nullable_guards.len(), 1);
+    assert_eq!(
+        telemetry.nullable_guards[0].reason,
+        NullableGuardReason::Unboxing
+    );
+    assert!(telemetry.catalog_hits.is_empty());
+}
+
+#[test]
+fn telemetry_records_conversion_events_and_catalog_hits() {
+    let mut set = ConstraintSet::new();
+    set.push(Constraint::new(ConstraintKind::Convertible {
+        from: TypeKind::primitive(PrimitiveType::Int),
+        to: TypeKind::reference("java.lang.String"),
+    }));
+
+    let catalog = Arc::new(helper_catalog());
+    let mut solver = ConstraintSolver::new();
+    solver.set_conversion_catalog(Some(Arc::clone(&catalog)));
+
+    let result = solver
+        .solve(set)
+        .expect("string conversion via helper should succeed");
+    let mut telemetry = InferenceTelemetry::default();
+    telemetry.record_conversions(&result.conversions);
+
+    assert_eq!(telemetry.conversion_events.len(), 1);
+    let event = &telemetry.conversion_events[0];
+    assert_eq!(event.kind, ConversionKind::MethodInvocation);
+    let helper = event
+        .helper_method
+        .as_ref()
+        .expect("helper metadata should be recorded");
+    assert_eq!(helper.owner, "java.lang.String");
+    assert_eq!(helper.method, "valueOf");
+    assert!(helper.is_static);
+    assert!(!event.warned);
+    assert!(event.nullable_guard.is_none());
+
+    assert_eq!(telemetry.catalog_hits.len(), 1);
+    let hit = &telemetry.catalog_hits[0];
+    assert_eq!(hit.owner, "java.lang.String");
+    assert_eq!(hit.method, "valueOf");
+    assert!(hit.is_static);
+    assert!(telemetry.nullable_guards.is_empty());
 }
 
 fn catalog_from_entries(entries: Vec<TypeEntry>) -> ConversionHelperCatalog {
