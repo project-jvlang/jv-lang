@@ -10,7 +10,7 @@ impl JavaCodeGenerator {
         let span = expr.span();
         let base = self.generate_expression_inner(expr)?;
         if let Some(metadata) = self.take_conversion_metadata_for_span(&span) {
-            self.wrap_with_conversions(base, metadata)
+            self.wrap_with_conversions(base, metadata, span)
         } else {
             Ok(base)
         }
@@ -940,10 +940,20 @@ impl JavaCodeGenerator {
         &mut self,
         mut value: String,
         metadata: Vec<ConversionMetadata>,
+        span: Span,
     ) -> Result<String, CodeGenError> {
-        for metadata_entry in metadata {
-            value = self.apply_conversion(value, &metadata_entry)?;
+        for metadata_entry in &metadata {
+            value = self.apply_conversion(value, metadata_entry)?;
         }
+
+        let ir_node = self.metadata_lookup_key();
+        self.conversion_map_records.push(ConversionSourceMapRecord {
+            span,
+            java_snippet: value.clone(),
+            metadata,
+            ir_node,
+        });
+
         Ok(value)
     }
 

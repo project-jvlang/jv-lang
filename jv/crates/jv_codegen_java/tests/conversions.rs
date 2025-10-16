@@ -1,12 +1,26 @@
 use jv_ast::{Literal, Span};
-use jv_codegen_java::generate_java_source;
+use jv_codegen_java::{JavaCodeGenConfig, JavaCodeGenerator};
 use jv_ir::{
     ConversionKind, ConversionMetadata, ConversionMetadataEntry, IrExpression, IrProgram,
     IrStatement, JavaType, NullableGuard, NullableGuardReason,
 };
+use jv_mapper::SourceMap;
 
 fn span(line: usize) -> Span {
     Span::new(line, 0, line, 10)
+}
+
+fn generate_source_and_map(program: &IrProgram) -> (String, SourceMap) {
+    let mut generator = JavaCodeGenerator::new();
+    let unit = generator
+        .generate_compilation_unit(program)
+        .expect("java code generation");
+    let config = JavaCodeGenConfig::default();
+    let source = unit.to_source(&config);
+    let source_map = generator
+        .build_conversion_source_map(&source, "test.jv", "Test.java")
+        .expect("source map generation");
+    (source, source_map)
 }
 
 #[test]
@@ -30,8 +44,21 @@ fn boxing_conversion_wraps_literal_expression() {
         span: expr_span,
     };
 
-    let source = generate_java_source(&program).expect("java source generation");
+    let (source, source_map) = generate_source_and_map(&program);
     assert!(source.contains("Integer.valueOf(1);") || source.contains("Integer.valueOf(1)"));
+
+    assert_eq!(source_map.entries.len(), 1);
+    let entry = &source_map.entries[0];
+    assert_eq!(entry.ir_span, expr_span);
+    let conversions = entry
+        .conversions
+        .as_ref()
+        .expect("conversion metadata associated with source map entry");
+    assert_eq!(conversions.len(), 1);
+    let metadata = &conversions[0];
+    assert_eq!(metadata.kind, ConversionKind::Boxing);
+    assert_eq!(metadata.from_type, "int");
+    assert_eq!(metadata.to_type, "java.lang.Integer");
 }
 
 #[test]
@@ -65,7 +92,20 @@ fn unboxing_conversion_injects_nullable_guard() {
         span: expr_span,
     };
 
-    let source = generate_java_source(&program).expect("java source generation");
+    let (source, source_map) = generate_source_and_map(&program);
     assert!(source.contains("Objects.requireNonNull(boxed).intValue();"));
     assert!(source.contains("import java.util.Objects;"));
+
+    assert_eq!(source_map.entries.len(), 1);
+    let entry = &source_map.entries[0];
+    let conversions = entry
+        .conversions
+        .as_ref()
+        .expect("conversion metadata associated with source map entry");
+    assert_eq!(conversions.len(), 1);
+    let metadata = &conversions[0];
+    assert_eq!(metadata.kind, ConversionKind::Unboxing);
+    assert_eq!(metadata.from_type, "java.lang.Integer");
+    assert_eq!(metadata.to_type, "int");
+    assert!(metadata.nullable_guard.is_some());
 }

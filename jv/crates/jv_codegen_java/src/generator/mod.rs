@@ -12,6 +12,9 @@ use jv_ir::{
     IrStatement, IrSwitchCase, IrTypeParameter, IrVariance, IrVisibility, JavaType, MethodOverload,
     NullableGuard, NullableGuardReason, UtilityClass, VirtualThreadOp,
 };
+use jv_mapper::{
+    JavaPosition, JavaSpan, MappingCategory, MappingError, SourceMap, SourceMapBuilder,
+};
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
@@ -36,6 +39,7 @@ pub struct JavaCodeGenerator {
     symbol_index: Option<Arc<SymbolIndex>>,
     instance_extension_methods: HashMap<String, Vec<IrStatement>>,
     conversion_metadata: HashMap<SpanKey, Vec<ConversionMetadata>>,
+    conversion_map_records: Vec<ConversionSourceMapRecord>,
 }
 
 impl JavaCodeGenerator {
@@ -57,6 +61,7 @@ impl JavaCodeGenerator {
             symbol_index: None,
             instance_extension_methods: HashMap::new(),
             conversion_metadata: HashMap::new(),
+            conversion_map_records: Vec::new(),
         }
     }
 
@@ -262,6 +267,55 @@ impl JavaCodeGenerator {
         self.metadata_path.clear();
         self.instance_extension_methods.clear();
         self.conversion_metadata.clear();
+        self.conversion_map_records.clear();
+    }
+
+    pub fn build_conversion_source_map(
+        &mut self,
+        java_source: &str,
+        source_file: impl Into<String>,
+        generated_file: impl Into<String>,
+    ) -> Result<SourceMap, MappingError> {
+        let records = std::mem::take(&mut self.conversion_map_records);
+        let mut builder = SourceMapBuilder::new(source_file, generated_file);
+        let mut search_from = 0;
+
+        for record in records {
+            if record.java_snippet.trim().is_empty() {
+                continue;
+            }
+
+            if let Some((start, end)) =
+                find_snippet_span(java_source, &record.java_snippet, search_from)
+            {
+                let (start_line, start_column) = offset_to_line_column(java_source, start);
+                let (end_line, end_column) = offset_to_line_column(java_source, end);
+                let java_span = JavaSpan::new(
+                    JavaPosition::new(start_line, start_column),
+                    JavaPosition::new(end_line, end_column),
+                )?;
+
+                builder.record_mapping(
+                    record.span.clone(),
+                    java_span,
+                    MappingCategory::Expression,
+                    record.ir_node.clone(),
+                    Some(record.metadata.clone()),
+                )?;
+
+                search_from = end;
+            } else {
+                return Err(MappingError::GenerationError(format!(
+                    "Unable to locate Java snippet for conversion at span {}:{}-{}:{}",
+                    record.span.start_line,
+                    record.span.start_column,
+                    record.span.end_line,
+                    record.span.end_column
+                )));
+            }
+        }
+
+        Ok(builder.build())
     }
 
     fn symbol_index(&self) -> Option<&SymbolIndex> {
@@ -530,6 +584,58 @@ impl JavaCodeGenerator {
             .remove(type_name)
             .unwrap_or_default()
     }
+}
+
+#[derive(Debug, Clone)]
+struct ConversionSourceMapRecord {
+    span: Span,
+    java_snippet: String,
+    metadata: Vec<ConversionMetadata>,
+    ir_node: Option<String>,
+}
+
+fn find_snippet_span(haystack: &str, needle: &str, start_index: usize) -> Option<(usize, usize)> {
+    if needle.is_empty() || start_index >= haystack.len() {
+        return None;
+    }
+
+    haystack[start_index..].find(needle).map(|relative| {
+        let absolute_start = start_index + relative;
+        let absolute_end = absolute_start + needle.len();
+        (absolute_start, absolute_end)
+    })
+}
+
+fn offset_to_line_column(text: &str, offset: usize) -> (usize, usize) {
+    let bytes = text.as_bytes();
+    let mut line = 1;
+    let mut column = 0;
+    let mut index = 0;
+
+    while index < offset && index < bytes.len() {
+        match bytes[index] {
+            b'\r' => {
+                line += 1;
+                column = 0;
+                if index + 1 < bytes.len() && bytes[index + 1] == b'\n' && index + 1 < offset {
+                    index += 2;
+                } else {
+                    index += 1;
+                }
+            }
+            b'\n' => {
+                line += 1;
+                column = 0;
+                index += 1;
+            }
+            _ => {
+                column += 1;
+                index += 1;
+            }
+        }
+    }
+
+    (line, column)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

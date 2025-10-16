@@ -34,12 +34,14 @@ fn record_mapping_deduplicates_entries() -> Result<(), MappingError> {
         java_span.clone(),
         MappingCategory::Method,
         Some("IrStatement::MethodDeclaration".to_string()),
+        None,
     )?;
     builder.record_mapping(
         ir_span.clone(),
         java_span.clone(),
         MappingCategory::Method,
         Some("IrStatement::MethodDeclaration".to_string()),
+        None,
     )?;
 
     let map = builder.build();
@@ -97,6 +99,7 @@ fn invalid_ir_span_returns_error() {
         "broken",
         MappingCategory::Statement,
         None,
+        None,
     );
 
     assert!(matches!(result, Err(MappingError::InvalidPosition(_))));
@@ -116,6 +119,7 @@ fn invalid_java_span_is_rejected() {
             end: JavaPosition::new(2, 0),
         },
         MappingCategory::Statement,
+        None,
         None,
     );
     assert!(matches!(result, Err(MappingError::InvalidPosition(_))));

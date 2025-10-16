@@ -4,6 +4,7 @@ pub mod types;
 pub use types::lower_generic_signature;
 
 use jv_ast::Span;
+use jv_ir::ConversionMetadata;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
@@ -100,6 +101,8 @@ pub struct MappingEntry {
     pub category: MappingCategory,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ir_node: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub conversions: Option<Vec<ConversionMetadata>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -194,6 +197,7 @@ impl SourceMapBuilder {
         java_span: JavaSpan,
         category: MappingCategory,
         ir_node: Option<String>,
+        conversions: Option<Vec<ConversionMetadata>>,
     ) -> Result<(), MappingError> {
         validate_ir_span(&ir_span)?;
         java_span.validate()?;
@@ -203,12 +207,14 @@ impl SourceMapBuilder {
                 && entry.java_span == java_span
                 && entry.category == category
                 && entry.ir_node == ir_node
+                && entry.conversions == conversions
         }) {
             self.entries.push(MappingEntry {
                 ir_span,
                 java_span,
                 category,
                 ir_node,
+                conversions,
             });
         }
 
@@ -229,6 +235,7 @@ impl SourceMapBuilder {
             java_span: java_span.clone(),
             category,
             ir_node,
+            conversions: None,
         });
         Ok(java_span)
     }
