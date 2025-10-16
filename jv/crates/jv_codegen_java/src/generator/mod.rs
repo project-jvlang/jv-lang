@@ -15,7 +15,7 @@ use jv_ir::{
 use jv_mapper::{
     JavaPosition, JavaSpan, MappingCategory, MappingError, SourceMap, SourceMapBuilder,
 };
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
 mod declarations;
@@ -38,6 +38,8 @@ pub struct JavaCodeGenerator {
     package: Option<String>,
     symbol_index: Option<Arc<SymbolIndex>>,
     instance_extension_methods: HashMap<String, Vec<IrStatement>>,
+    script_method_names: HashSet<String>,
+    script_class_simple_name: Option<String>,
     conversion_metadata: HashMap<SpanKey, Vec<ConversionMetadata>>,
     conversion_map_records: Vec<ConversionSourceMapRecord>,
 }
@@ -60,6 +62,8 @@ impl JavaCodeGenerator {
             package: None,
             symbol_index: None,
             instance_extension_methods: HashMap::new(),
+            script_method_names: HashSet::new(),
+            script_class_simple_name: None,
             conversion_metadata: HashMap::new(),
             conversion_map_records: Vec::new(),
         }
@@ -137,6 +141,18 @@ impl JavaCodeGenerator {
             || !hoisted_regex_fields.is_empty()
         {
             let script_class = self.config.script_main_class.clone();
+
+            self.script_method_names = script_methods
+                .iter()
+                .filter_map(|method| match Self::base_statement(method) {
+                    IrStatement::MethodDeclaration { name, .. } => Some(name.clone()),
+                    _ => None,
+                })
+                .collect();
+            if !self.script_method_names.is_empty() {
+                self.script_class_simple_name = Some(script_class.clone());
+            }
+
             let mut builder = self.builder();
             builder.push_line(&format!("public final class {} {{", script_class));
             builder.indent();
@@ -266,6 +282,8 @@ impl JavaCodeGenerator {
         self.sequence_helper = None;
         self.metadata_path.clear();
         self.instance_extension_methods.clear();
+        self.script_method_names.clear();
+        self.script_class_simple_name = None;
         self.conversion_metadata.clear();
         self.conversion_map_records.clear();
     }

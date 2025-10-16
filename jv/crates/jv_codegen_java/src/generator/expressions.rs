@@ -41,6 +41,9 @@ impl JavaCodeGenerator {
                     }
                     invocation.push_str(&self.generate_expression(target)?);
                     invocation.push('.');
+                } else if let Some(owner) = self.owner_for_unqualified_call(method_name) {
+                    invocation.push_str(owner);
+                    invocation.push('.');
                 }
                 invocation.push_str(method_name);
                 invocation.push('(');
@@ -1130,6 +1133,15 @@ impl JavaCodeGenerator {
             IrExpression::Cast { target_type, .. } => Some(target_type),
             _ => None,
         }
+    }
+
+    fn owner_for_unqualified_call(&self, method_name: &str) -> Option<&str> {
+        if let Some(owner) = self.script_class_simple_name.as_deref() {
+            if self.script_method_names.contains(method_name) {
+                return Some(owner);
+            }
+        }
+        None
     }
 
     fn should_call_method_for_field(&self, receiver: &IrExpression, field_name: &str) -> bool {
