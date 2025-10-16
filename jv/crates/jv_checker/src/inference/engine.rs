@@ -137,13 +137,10 @@ impl InferenceEngine {
             }
             Arc::new(ConversionHelperCatalog::new(access.catalog))
         });
-        self.active_conversion_catalog = conversion_catalog;
-        let generator = ConstraintGenerator::new(
-            &mut environment,
-            &extensions,
-            import_registry.as_mut(),
-            self.active_conversion_catalog.as_deref(),
-        );
+        environment.set_conversion_catalog(conversion_catalog.clone());
+        self.active_conversion_catalog = conversion_catalog.clone();
+        let generator =
+            ConstraintGenerator::new(&mut environment, &extensions, import_registry.as_mut());
         let constraints = generator.generate(program);
         let constraint_count = constraints.len();
         let inference_start = Instant::now();

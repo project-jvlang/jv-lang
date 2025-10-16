@@ -3,6 +3,7 @@
 //! このモジュールはサブモジュールとして制約処理、型表現、推論ユーティリティを
 //! 提供し、将来的に `TypeChecker` から呼び出されるエントリーポイントをまとめる。
 
+pub mod compatibility;
 pub mod constraint;
 pub mod conversions;
 pub mod engine;
@@ -18,6 +19,7 @@ pub mod unify;
 pub mod utils;
 
 pub use crate::java::{JavaBoxingTable, JavaNullabilityPolicy, JavaPrimitive};
+pub use compatibility::CompatibilityChecker;
 pub use constraint::{Constraint, ConstraintGenerator, ConstraintKind, ConstraintSet};
 pub use conversions::{
     AppliedConversion, ConversionKind, ConversionMetadata, ConversionOutcome,

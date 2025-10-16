@@ -17,7 +17,16 @@ fn sample_type_entry(fqcn: &str) -> TypeEntry {
             },
         },
     );
-    entry.instance_methods.insert("toString".to_string());
+    entry.instance_methods.insert(
+        "toString".to_string(),
+        JavaMethodSignature {
+            parameters: Vec::new(),
+            return_type: JavaType::Reference {
+                name: "java.lang.String".to_string(),
+                generic_args: Vec::new(),
+            },
+        },
+    );
     entry
 }
 

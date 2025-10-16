@@ -1,3 +1,4 @@
+use crate::metadata::conversion_detector::ConversionDetector;
 use crate::metadata::{JavaMethodSignature, SymbolIndex, TypeEntry};
 use blake3::Hasher;
 use jv_ir::types::{JavaType, JavaWildcardKind};
@@ -52,8 +53,9 @@ impl ConversionCatalog {
 
     pub fn from_symbol_index(index: &SymbolIndex) -> Self {
         let mut catalog = ConversionCatalog::new();
+        let detector = ConversionDetector::new();
         for entry in index.types.values() {
-            catalog.collect_from_entry(entry);
+            catalog.collect_from_entry(entry, &detector);
         }
         catalog
     }
@@ -72,7 +74,7 @@ impl ConversionCatalog {
         })
     }
 
-    fn collect_from_entry(&mut self, entry: &TypeEntry) {
+    fn collect_from_entry(&mut self, entry: &TypeEntry, detector: &ConversionDetector) {
         for (name, signature) in &entry.static_methods {
             if let Some((source, target, helper)) = detect_static_conversion(entry, name, signature)
             {
@@ -80,7 +82,9 @@ impl ConversionCatalog {
             }
         }
 
-        if entry.instance_methods.contains("toString") {
+        self.apply_detected_conversions(entry, detector);
+
+        if entry.instance_methods.contains_key("toString") {
             let source = JavaType::Reference {
                 name: entry.fqcn.clone(),
                 generic_args: Vec::new(),
@@ -100,6 +104,26 @@ impl ConversionCatalog {
         let record = ConversionRecord { target, helper };
         if !records.contains(&record) {
             records.push(record);
+        }
+    }
+
+    fn apply_detected_conversions(&mut self, entry: &TypeEntry, detector: &ConversionDetector) {
+        for signature in detector.detect_conversions(entry) {
+            if signature.confidence < 0.8 {
+                continue;
+            }
+
+            let helper = if signature.is_static {
+                HelperMethod::static_method(entry.fqcn.clone(), signature.method_name.clone())
+            } else {
+                HelperMethod::instance(entry.fqcn.clone(), signature.method_name.clone())
+            };
+
+            self.record_conversion(
+                signature.source_type.clone(),
+                signature.target_type.clone(),
+                helper,
+            );
         }
     }
 }
@@ -246,9 +270,13 @@ fn symbol_index_hash(index: &SymbolIndex) -> String {
             }
 
             let mut instance_methods: Vec<_> = entry.instance_methods.iter().collect();
-            instance_methods.sort();
-            for method in instance_methods {
-                fragments.push(format!("im:{method}"));
+            instance_methods.sort_by(|left, right| left.0.cmp(right.0));
+            for (name, signature) in instance_methods {
+                fragments.push(format!(
+                    "im:{name}({})->{}",
+                    signature_params_key(&signature.parameters),
+                    java_type_key(&signature.return_type)
+                ));
             }
         }
     }
@@ -375,7 +403,16 @@ mod tests {
                 },
             },
         );
-        entry.instance_methods.insert("toString".to_string());
+        entry.instance_methods.insert(
+            "toString".to_string(),
+            JavaMethodSignature {
+                parameters: Vec::new(),
+                return_type: JavaType::Reference {
+                    name: "java.lang.String".to_string(),
+                    generic_args: Vec::new(),
+                },
+            },
+        );
         entry
     }
 

@@ -5,9 +5,11 @@
 //! インスタンス化（instantiation）を提供する。これにより制約ジェネレータや
 //! 単一化ソルバが決定的で借用しやすい API を通じて推論状態へアクセスできる。
 
+use crate::inference::conversions::ConversionHelperCatalog;
 use crate::inference::types::{TypeId, TypeKind};
 use crate::inference::utils::TypeIdGenerator;
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 /// 汎用型を表現する型スキーム。
 #[derive(Debug, Clone, PartialEq)]
@@ -46,6 +48,7 @@ pub struct TypeEnvironment {
     scopes: Vec<HashMap<String, TypeScheme>>,
     generator: TypeIdGenerator,
     instantiation_origins: HashMap<TypeId, TypeId>,
+    conversion_catalog: Option<Arc<ConversionHelperCatalog>>,
 }
 
 impl TypeEnvironment {
@@ -55,6 +58,7 @@ impl TypeEnvironment {
             scopes: vec![HashMap::new()],
             generator: TypeIdGenerator::new(),
             instantiation_origins: HashMap::new(),
+            conversion_catalog: None,
         }
     }
 
@@ -189,6 +193,21 @@ impl TypeEnvironment {
         } else {
             self.instantiation_origins.get(&id).copied()
         }
+    }
+
+    /// Registers a conversion catalog that can be consulted during compatibility checks.
+    pub fn set_conversion_catalog(&mut self, catalog: Option<Arc<ConversionHelperCatalog>>) {
+        self.conversion_catalog = catalog;
+    }
+
+    /// Returns the currently configured conversion catalog, if any.
+    pub fn conversion_catalog(&self) -> Option<&ConversionHelperCatalog> {
+        self.conversion_catalog.as_deref()
+    }
+
+    /// Returns a cloned handle to the conversion catalog, if one is registered.
+    pub fn conversion_catalog_handle(&self) -> Option<Arc<ConversionHelperCatalog>> {
+        self.conversion_catalog.as_ref().map(Arc::clone)
     }
 }
 

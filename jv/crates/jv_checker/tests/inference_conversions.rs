@@ -1,8 +1,9 @@
 use jv_build::metadata::{ConversionCatalog, JavaMethodSignature, SymbolIndex, TypeEntry};
 use jv_checker::inference::{
-    Constraint, ConstraintKind, ConstraintSet, ConstraintSolver, ConversionHelperCatalog,
-    ConversionKind, ConversionOutcome, ConversionRulesEngine, InferenceTelemetry,
-    NullableGuardReason, PrimitiveType, TypeError, TypeFactory, TypeKind,
+    CompatibilityChecker, Constraint, ConstraintKind, ConstraintSet, ConstraintSolver,
+    ConversionHelperCatalog, ConversionKind, ConversionOutcome, ConversionRulesEngine,
+    InferenceTelemetry, NullableGuardReason, PrimitiveType, TypeEnvironment, TypeError,
+    TypeFactory, TypeKind,
 };
 use jv_ir::types::JavaType;
 use std::sync::Arc;
@@ -125,6 +126,15 @@ fn telemetry_counts_unboxing_and_guards() {
     assert_eq!(telemetry.nullable_guards_generated, 1);
 }
 
+fn catalog_from_entries(entries: Vec<TypeEntry>) -> ConversionHelperCatalog {
+    let mut index = SymbolIndex::new(Some(25));
+    for entry in entries {
+        index.add_type(entry);
+    }
+    let catalog = ConversionCatalog::from_symbol_index(&index);
+    ConversionHelperCatalog::new(Arc::new(catalog))
+}
+
 fn helper_catalog() -> ConversionHelperCatalog {
     let mut entry = TypeEntry::new(
         "java.lang.String".to_string(),
@@ -142,10 +152,53 @@ fn helper_catalog() -> ConversionHelperCatalog {
         },
     );
 
-    let mut index = SymbolIndex::new(Some(25));
-    index.add_type(entry);
-    let catalog = ConversionCatalog::from_symbol_index(&index);
-    ConversionHelperCatalog::new(Arc::new(catalog))
+    catalog_from_entries(vec![entry])
+}
+
+fn collection_catalog() -> ConversionHelperCatalog {
+    let mut entry = TypeEntry::new("java.util.List".to_string(), "java.util".to_string(), None);
+    entry.instance_methods.insert(
+        "stream".to_string(),
+        JavaMethodSignature {
+            parameters: Vec::new(),
+            return_type: JavaType::Reference {
+                name: "java.util.stream.Stream".to_string(),
+                generic_args: Vec::new(),
+            },
+        },
+    );
+
+    catalog_from_entries(vec![entry])
+}
+
+fn functional_catalog() -> ConversionHelperCatalog {
+    let mut entry = TypeEntry::new(
+        "java.util.stream.Stream".to_string(),
+        "java.util.stream".to_string(),
+        None,
+    );
+    entry.instance_methods.insert(
+        "map".to_string(),
+        JavaMethodSignature {
+            parameters: vec![JavaType::Functional {
+                interface_name: "java.util.function.Function".to_string(),
+                param_types: vec![JavaType::Reference {
+                    name: "java.lang.String".to_string(),
+                    generic_args: Vec::new(),
+                }],
+                return_type: Box::new(JavaType::Reference {
+                    name: "java.lang.Integer".to_string(),
+                    generic_args: Vec::new(),
+                }),
+            }],
+            return_type: JavaType::Reference {
+                name: "java.util.Optional".to_string(),
+                generic_args: Vec::new(),
+            },
+        },
+    );
+
+    catalog_from_entries(vec![entry])
 }
 
 #[test]
@@ -164,6 +217,66 @@ fn conversion_rules_uses_catalog_for_method_invocation() {
             assert_eq!(helper.owner, "java.lang.String");
             assert_eq!(helper.method, "valueOf");
             assert!(helper.is_static);
+        }
+        other => panic!("expected method invocation conversion, got {other:?}"),
+    }
+}
+
+#[test]
+fn conversion_catalog_detects_collection_transform() {
+    let catalog = collection_catalog();
+    let outcome = ConversionRulesEngine::analyze_with_catalog(
+        &TypeKind::reference("java.util.List"),
+        &TypeKind::reference("java.util.stream.Stream"),
+        Some(&catalog),
+    );
+
+    match outcome {
+        ConversionOutcome::Allowed(metadata) => {
+            assert_eq!(metadata.kind, ConversionKind::MethodInvocation);
+            let helper = metadata.helper.expect("helper metadata expected");
+            assert_eq!(helper.method, "stream");
+            assert!(!helper.is_static);
+        }
+        other => panic!("expected method invocation conversion, got {other:?}"),
+    }
+}
+
+#[test]
+fn conversion_catalog_detects_functional_transform() {
+    let catalog = functional_catalog();
+    let outcome = ConversionRulesEngine::analyze_with_catalog(
+        &TypeKind::reference("java.util.stream.Stream"),
+        &TypeKind::reference("java.util.Optional"),
+        Some(&catalog),
+    );
+
+    match outcome {
+        ConversionOutcome::Allowed(metadata) => {
+            assert_eq!(metadata.kind, ConversionKind::MethodInvocation);
+            let helper = metadata.helper.expect("helper metadata expected");
+            assert_eq!(helper.method, "map");
+            assert!(!helper.is_static);
+        }
+        other => panic!("expected method invocation conversion, got {other:?}"),
+    }
+}
+
+#[test]
+fn compatibility_consults_environment_catalog() {
+    let catalog = Arc::new(collection_catalog());
+    let mut env = TypeEnvironment::new();
+    env.set_conversion_catalog(Some(Arc::clone(&catalog)));
+
+    let outcome = CompatibilityChecker::analyze(
+        &env,
+        &TypeKind::reference("java.util.List"),
+        &TypeKind::reference("java.util.stream.Stream"),
+    );
+
+    match outcome {
+        ConversionOutcome::Allowed(metadata) => {
+            assert_eq!(metadata.kind, ConversionKind::MethodInvocation);
         }
         other => panic!("expected method invocation conversion, got {other:?}"),
     }
