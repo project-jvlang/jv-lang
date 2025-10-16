@@ -5,7 +5,9 @@
 //! 伝播させ、Null 安全と一致する解を導出する。
 
 use crate::inference::constraint::{Constraint, ConstraintKind, ConstraintSet};
-use crate::inference::types::{TypeBinding, TypeError, TypeId, TypeKind, TypeVariable, TypeVariableKind};
+use crate::inference::types::{
+    TypeBinding, TypeError, TypeId, TypeKind, TypeVariable, TypeVariableKind,
+};
 use jv_inference::ParallelInferenceConfig;
 use std::collections::HashMap;
 use std::fmt;

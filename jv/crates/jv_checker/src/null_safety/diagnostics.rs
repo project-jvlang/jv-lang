@@ -496,9 +496,9 @@ fn degraded_warning() -> CheckError {
 #[cfg(test)]
 mod tests {
     use super::*;
-use crate::binding::{LateInitManifest, LateInitSeed};
-use crate::inference::PrimitiveType;
-use crate::inference::TypeEnvironment;
+    use crate::binding::{LateInitManifest, LateInitSeed};
+    use crate::inference::PrimitiveType;
+    use crate::inference::TypeEnvironment;
     use crate::null_safety::graph::FlowStateSnapshot;
     use crate::null_safety::operators::{JavaLoweringHint, JavaLoweringStrategy, OperatorOperand};
     use jv_ast::types::Span;

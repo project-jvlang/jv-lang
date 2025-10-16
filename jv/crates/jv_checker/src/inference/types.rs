@@ -1,5 +1,6 @@
 //! 型推論で扱う型表現・型変数・束縛を定義する。
 
+use crate::java::{JavaNullabilityPolicy, JavaPrimitive};
 use std::collections::HashSet;
 use std::fmt;
 use thiserror::Error;
@@ -26,119 +27,8 @@ impl fmt::Display for TypeId {
     }
 }
 
-/// Java プリミティブ型を表現する列挙体。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum PrimitiveType {
-    Boolean,
-    Byte,
-    Short,
-    Int,
-    Long,
-    Float,
-    Double,
-    Char,
-}
-
-impl PrimitiveType {
-    /// Java のプリミティブ型表記（lower snake case）を返す。
-    pub const fn java_name(self) -> &'static str {
-        match self {
-            PrimitiveType::Boolean => "boolean",
-            PrimitiveType::Byte => "byte",
-            PrimitiveType::Short => "short",
-            PrimitiveType::Int => "int",
-            PrimitiveType::Long => "long",
-            PrimitiveType::Float => "float",
-            PrimitiveType::Double => "double",
-            PrimitiveType::Char => "char",
-        }
-    }
-
-    /// jv 言語でのプリミティブ型名称（先頭大文字）を返す。
-    pub const fn jv_name(self) -> &'static str {
-        match self {
-            PrimitiveType::Boolean => "Boolean",
-            PrimitiveType::Byte => "Byte",
-            PrimitiveType::Short => "Short",
-            PrimitiveType::Int => "Int",
-            PrimitiveType::Long => "Long",
-            PrimitiveType::Float => "Float",
-            PrimitiveType::Double => "Double",
-            PrimitiveType::Char => "Char",
-        }
-    }
-
-    /// 対応する boxed 型の完全修飾クラス名を返す。
-    pub const fn boxed_fqcn(self) -> &'static str {
-        match self {
-            PrimitiveType::Boolean => "java.lang.Boolean",
-            PrimitiveType::Byte => "java.lang.Byte",
-            PrimitiveType::Short => "java.lang.Short",
-            PrimitiveType::Int => "java.lang.Integer",
-            PrimitiveType::Long => "java.lang.Long",
-            PrimitiveType::Float => "java.lang.Float",
-            PrimitiveType::Double => "java.lang.Double",
-            PrimitiveType::Char => "java.lang.Character",
-        }
-    }
-
-    /// Java 言語仕様における widening conversion の対象を返す。
-    pub fn widening_targets(self) -> &'static [PrimitiveType] {
-        const NONE: &[PrimitiveType] = &[];
-        const BYTE_TARGETS: &[PrimitiveType] = &[
-            PrimitiveType::Short,
-            PrimitiveType::Int,
-            PrimitiveType::Long,
-            PrimitiveType::Float,
-            PrimitiveType::Double,
-        ];
-        const SHORT_TARGETS: &[PrimitiveType] = &[
-            PrimitiveType::Int,
-            PrimitiveType::Long,
-            PrimitiveType::Float,
-            PrimitiveType::Double,
-        ];
-        const CHAR_TARGETS: &[PrimitiveType] = &[
-            PrimitiveType::Int,
-            PrimitiveType::Long,
-            PrimitiveType::Float,
-            PrimitiveType::Double,
-        ];
-        const INT_TARGETS: &[PrimitiveType] = &[
-            PrimitiveType::Long,
-            PrimitiveType::Float,
-            PrimitiveType::Double,
-        ];
-        const LONG_TARGETS: &[PrimitiveType] = &[PrimitiveType::Float, PrimitiveType::Double];
-        const FLOAT_TARGETS: &[PrimitiveType] = &[PrimitiveType::Double];
-
-        match self {
-            PrimitiveType::Boolean => NONE,
-            PrimitiveType::Byte => BYTE_TARGETS,
-            PrimitiveType::Short => SHORT_TARGETS,
-            PrimitiveType::Char => CHAR_TARGETS,
-            PrimitiveType::Int => INT_TARGETS,
-            PrimitiveType::Long => LONG_TARGETS,
-            PrimitiveType::Float => FLOAT_TARGETS,
-            PrimitiveType::Double => NONE,
-        }
-    }
-
-    /// Java のプリミティブ型表記から `PrimitiveType` を生成する。
-    pub fn from_java_name(name: &str) -> Option<Self> {
-        match name {
-            "boolean" => Some(PrimitiveType::Boolean),
-            "byte" => Some(PrimitiveType::Byte),
-            "short" => Some(PrimitiveType::Short),
-            "int" => Some(PrimitiveType::Int),
-            "long" => Some(PrimitiveType::Long),
-            "float" => Some(PrimitiveType::Float),
-            "double" => Some(PrimitiveType::Double),
-            "char" => Some(PrimitiveType::Char),
-            _ => None,
-        }
-    }
-}
+/// Java プリミティブ型を表現する列挙体へのエイリアス。
+pub type PrimitiveType = JavaPrimitive;
 
 /// 型推論で用いる主な型表現。
 #[derive(Debug, Clone, PartialEq)]
@@ -186,7 +76,11 @@ impl TypeKind {
 
     /// プリミティブ型の nullable 版を生成する（ボックス型を Optional で包む）。
     pub fn optional_primitive(primitive: PrimitiveType) -> Self {
-        TypeKind::Optional(Box::new(TypeKind::Boxed(primitive)))
+        if JavaNullabilityPolicy::requires_boxing_for_nullable(primitive) {
+            TypeKind::Optional(Box::new(TypeKind::boxed(primitive)))
+        } else {
+            TypeKind::Optional(Box::new(TypeKind::primitive(primitive)))
+        }
     }
 
     /// プリミティブ型かどうかを判定する。
@@ -201,7 +95,10 @@ impl TypeKind {
 
     /// null 許容かどうかを判定する。
     pub fn is_nullable(&self) -> bool {
-        !matches!(self, TypeKind::Primitive(_))
+        match self {
+            TypeKind::Primitive(_) => JavaNullabilityPolicy::primitives_allow_null(),
+            _ => true,
+        }
     }
 
     /// 型表現に未決定な `Unknown` が含まれているか判定する。

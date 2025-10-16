@@ -247,10 +247,10 @@ fn collect_function_names(program: &Program) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::inference::types::PrimitiveType;
     use jv_ast::{
         BinaryOp, Expression, Literal, Modifiers, Parameter, Span, Statement, TypeAnnotation,
     };
-    use crate::inference::types::PrimitiveType;
 
     fn dummy_span() -> Span {
         Span::dummy()

@@ -4,6 +4,7 @@ pub mod compat;
 pub mod diagnostics;
 pub mod imports;
 pub mod inference;
+pub mod java;
 pub mod null_safety;
 pub mod pattern;
 pub mod regex;
@@ -12,6 +13,7 @@ pub use inference::{
     InferenceEngine, InferenceError, InferenceResult, NullabilityAnalyzer, TypeBinding,
     TypeEnvironment, TypeId, TypeKind, TypeScheme,
 };
+pub use java::{JavaBoxingTable, JavaNullabilityPolicy, JavaPrimitive};
 pub use jv_inference::ParallelInferenceConfig;
 pub use regex::RegexAnalysis;
 

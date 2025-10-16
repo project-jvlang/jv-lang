@@ -1,6 +1,7 @@
 //! ユーティリティ: 識別子やFQCNから `TypeKind` を生成するヘルパ。
 
 use crate::inference::types::{PrimitiveType, TypeError, TypeKind};
+use crate::java::{JavaBoxingTable, JavaPrimitive};
 
 /// 型生成に関する補助関数群。
 #[derive(Debug, Default)]
@@ -10,38 +11,36 @@ impl TypeFactory {
     /// 既知のプリミティブ識別子から `PrimitiveType` を生成する。
     pub fn primitive_from_identifier(identifier: &str) -> Result<PrimitiveType, TypeError> {
         let normalized = identifier.trim();
-        Self::primitive_alias(normalized)
-            .or_else(|| PrimitiveType::from_java_name(normalized.to_ascii_lowercase().as_str()))
-            .ok_or_else(|| TypeError::UnknownPrimitive {
-                identifier: identifier.to_string(),
-            })
+        JavaPrimitive::from_identifier(normalized).ok_or_else(|| TypeError::UnknownPrimitive {
+            identifier: identifier.to_string(),
+        })
     }
 
     /// Java boxed 型の FQCN もしくは短縮名からプリミティブ種別を検出する。
     pub fn boxed_primitive(identifier: &str) -> Option<PrimitiveType> {
-        match identifier {
-            "Integer" | "java.lang.Integer" => Some(PrimitiveType::Int),
-            "Long" | "java.lang.Long" => Some(PrimitiveType::Long),
-            "Short" | "java.lang.Short" => Some(PrimitiveType::Short),
-            "Byte" | "java.lang.Byte" => Some(PrimitiveType::Byte),
-            "Float" | "java.lang.Float" => Some(PrimitiveType::Float),
-            "Double" | "java.lang.Double" => Some(PrimitiveType::Double),
-            "Boolean" | "java.lang.Boolean" => Some(PrimitiveType::Boolean),
-            "Char" | "Character" | "java.lang.Character" => Some(PrimitiveType::Char),
-            _ => None,
-        }
+        JavaBoxingTable::primitive_from_boxed(identifier.trim())
     }
 
     /// 型注釈などの識別子から `TypeKind` を生成する。未知プリミティブはエラーとする。
     pub fn from_annotation(identifier: &str) -> Result<TypeKind, TypeError> {
-        if let Some(primitive) = Self::primitive_alias(identifier) {
+        let normalized = identifier.trim();
+        let normalized_lower = normalized.to_ascii_lowercase();
+
+        if matches!(
+            normalized_lower.as_str(),
+            "bigdecimal" | "decimal" | "java.math.bigdecimal" | "math.bigdecimal"
+        ) {
+            return Ok(TypeKind::reference("java.math.BigDecimal"));
+        }
+
+        if let Some(primitive) = JavaPrimitive::from_identifier(normalized) {
             return Ok(TypeKind::primitive(primitive));
         }
-        if let Some(primitive) = Self::boxed_primitive(identifier) {
+        if let Some(primitive) = Self::boxed_primitive(normalized) {
             return Ok(TypeKind::boxed(primitive));
         }
 
-        match identifier {
+        match normalized {
             "String" => Ok(TypeKind::reference("java.lang.String")),
             "SequenceCore" => Ok(TypeKind::reference("jv.collections.SequenceCore")),
             "jv.collections.SequenceCore" => Ok(TypeKind::reference("jv.collections.SequenceCore")),
@@ -58,7 +57,7 @@ impl TypeFactory {
 
     /// Java プリミティブ名から `TypeKind::Primitive` を生成する。
     pub fn primitive_from_java_name(name: &str) -> Result<TypeKind, TypeError> {
-        PrimitiveType::from_java_name(name)
+        JavaPrimitive::from_java_name(name)
             .map(TypeKind::primitive)
             .ok_or_else(|| TypeError::UnknownPrimitive {
                 identifier: name.to_string(),
@@ -68,19 +67,5 @@ impl TypeFactory {
     /// ボックス型 FQCN から `TypeKind::Boxed` を生成する。
     pub fn boxed_from_fqcn(name: &str) -> Option<TypeKind> {
         Self::boxed_primitive(name).map(TypeKind::boxed)
-    }
-
-    fn primitive_alias(identifier: &str) -> Option<PrimitiveType> {
-        match identifier {
-            "bool" | "Bool" | "boolean" | "Boolean" => Some(PrimitiveType::Boolean),
-            "byte" | "Byte" => Some(PrimitiveType::Byte),
-            "short" | "Short" => Some(PrimitiveType::Short),
-            "int" | "Int" => Some(PrimitiveType::Int),
-            "long" | "Long" => Some(PrimitiveType::Long),
-            "float" | "Float" => Some(PrimitiveType::Float),
-            "double" | "Double" => Some(PrimitiveType::Double),
-            "char" | "Char" => Some(PrimitiveType::Char),
-            _ => None,
-        }
     }
 }

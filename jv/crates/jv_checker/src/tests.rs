@@ -1,9 +1,9 @@
 use super::*;
 use crate::inference::environment::{TypeEnvironment, TypeScheme};
 use crate::inference::types::TypeBinding;
+use crate::inference::{PrimitiveType, TypeKind};
 use crate::pattern::{self, PatternTarget};
 use crate::regex::RegexValidator;
-use crate::inference::{PrimitiveType, TypeKind};
 use fastrand::Rng;
 use jv_ast::{
     Annotation, AnnotationName, BinaryOp, Expression, Literal, Modifiers, Parameter, Pattern,

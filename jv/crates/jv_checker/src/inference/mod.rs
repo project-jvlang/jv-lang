@@ -16,6 +16,7 @@ pub mod types;
 pub mod unify;
 pub mod utils;
 
+pub use crate::java::{JavaBoxingTable, JavaNullabilityPolicy, JavaPrimitive};
 pub use constraint::{Constraint, ConstraintGenerator, ConstraintKind, ConstraintSet};
 pub use engine::{InferenceEngine, InferenceError, InferenceResult};
 pub use environment::{TypeEnvironment, TypeScheme};

@@ -37,10 +37,7 @@ impl NullabilityKind {
             Optional(_) => NullabilityKind::Nullable,
             Unknown => NullabilityKind::Unknown,
             Variable(_) => NullabilityKind::Unknown,
-            Primitive(_)
-            | Boxed(_)
-            | Reference(_)
-            | Function(_, _) => NullabilityKind::NonNull,
+            Primitive(_) | Boxed(_) | Reference(_) | Function(_, _) => NullabilityKind::NonNull,
         }
     }
 

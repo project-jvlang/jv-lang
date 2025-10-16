@@ -67,6 +67,16 @@ val list: List<Int> = [1, 2, 3]  // int → Integer の自動変換を期待
 - **Phase 3**: 変換メソッドの自動検出とカタログ化
 - **Phase 4**: 型互換性判定の高度化と制約生成への統合
 
+## Architecture
+
+Java 固有のロジックを `jv_checker::java` モジュールへ集約し、型推論層との依存関係を明示的に切り分けた。
+
+- `jv_checker::java::primitive` — `JavaPrimitive` 列挙と `JavaBoxingTable`、`JavaNullabilityPolicy` を提供し、プリミティブ名称解決・boxing/unboxing・null 許容判定を一元管理する。
+- `jv_checker::inference::types` — `JavaPrimitive` を `PrimitiveType` として利用し、推論層は `crate::java::*` 経由で Java 固有機能へアクセスする。
+- `jv_checker::inference::type_factory` — 型注釈解析時に `JavaPrimitive`/`JavaBoxingTable` を参照し、Java 固有知識を型生成ユーティリティから排除する。
+
+この分離により、将来的な Java 仕様変更や JVM バージョン追加時には `jv_checker::java` を中心に更新すればよく、推論アルゴリズムの汎用性と保守性が向上する。
+
 ## Phase 1: 型表現の拡張
 
 ### 目的
