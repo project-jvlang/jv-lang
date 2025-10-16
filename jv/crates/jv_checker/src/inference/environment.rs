@@ -5,9 +5,11 @@
 //! インスタンス化（instantiation）を提供する。これにより制約ジェネレータや
 //! 単一化ソルバが決定的で借用しやすい API を通じて推論状態へアクセスできる。
 
+use crate::inference::conversions::ConversionHelperCatalog;
 use crate::inference::types::{TypeId, TypeKind};
 use crate::inference::utils::TypeIdGenerator;
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 /// 汎用型を表現する型スキーム。
 #[derive(Debug, Clone, PartialEq)]
@@ -46,6 +48,7 @@ pub struct TypeEnvironment {
     scopes: Vec<HashMap<String, TypeScheme>>,
     generator: TypeIdGenerator,
     instantiation_origins: HashMap<TypeId, TypeId>,
+    conversion_catalog: Option<Arc<ConversionHelperCatalog>>,
 }
 
 impl TypeEnvironment {
@@ -55,6 +58,7 @@ impl TypeEnvironment {
             scopes: vec![HashMap::new()],
             generator: TypeIdGenerator::new(),
             instantiation_origins: HashMap::new(),
+            conversion_catalog: None,
         }
     }
 
@@ -190,11 +194,27 @@ impl TypeEnvironment {
             self.instantiation_origins.get(&id).copied()
         }
     }
+
+    /// Registers a conversion catalog that can be consulted during compatibility checks.
+    pub fn set_conversion_catalog(&mut self, catalog: Option<Arc<ConversionHelperCatalog>>) {
+        self.conversion_catalog = catalog;
+    }
+
+    /// Returns the currently configured conversion catalog, if any.
+    pub fn conversion_catalog(&self) -> Option<&ConversionHelperCatalog> {
+        self.conversion_catalog.as_deref()
+    }
+
+    /// Returns a cloned handle to the conversion catalog, if one is registered.
+    pub fn conversion_catalog_handle(&self) -> Option<Arc<ConversionHelperCatalog>> {
+        self.conversion_catalog.as_ref().map(Arc::clone)
+    }
 }
 
 fn substitute_type(ty: &TypeKind, subs: &HashMap<TypeId, TypeKind>) -> TypeKind {
     match ty {
-        TypeKind::Primitive(name) => TypeKind::Primitive(name),
+        TypeKind::Primitive(primitive) => TypeKind::Primitive(*primitive),
+        TypeKind::Boxed(primitive) => TypeKind::Boxed(*primitive),
         TypeKind::Reference(name) => TypeKind::Reference(name.clone()),
         TypeKind::Optional(inner) => TypeKind::Optional(Box::new(substitute_type(inner, subs))),
         TypeKind::Variable(id) => subs
@@ -215,15 +235,16 @@ fn substitute_type(ty: &TypeKind, subs: &HashMap<TypeId, TypeKind>) -> TypeKind 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::inference::types::PrimitiveType;
 
     #[test]
     fn scope_push_and_pop_respects_shadowing() {
         let mut env = TypeEnvironment::new();
-        env.define_monotype("x", TypeKind::Primitive("Int"));
+        env.define_monotype("x", TypeKind::primitive(PrimitiveType::Int));
         assert!(env.lookup("x").is_some());
 
         env.enter_scope();
-        env.define_monotype("y", TypeKind::Primitive("Boolean"));
+        env.define_monotype("y", TypeKind::primitive(PrimitiveType::Boolean));
         assert!(env.lookup("y").is_some());
 
         env.leave_scope();

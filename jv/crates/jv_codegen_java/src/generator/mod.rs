@@ -2,15 +2,18 @@ use crate::builder::{JavaCompilationUnit, JavaSourceBuilder};
 use crate::config::JavaCodeGenConfig;
 use crate::error::CodeGenError;
 use crate::target_version::TargetedJavaEmitter;
-use jv_ast::{BinaryOp, CallArgumentStyle, Literal, SequenceDelimiter, UnaryOp};
+use jv_ast::{BinaryOp, CallArgumentStyle, Literal, SequenceDelimiter, Span, UnaryOp};
 use jv_build::metadata::SymbolIndex;
 use jv_ir::{
-    CompletableFutureOp, IrCaseLabel, IrCatchClause, IrDeconstructionComponent,
-    IrDeconstructionPattern, IrExpression, IrForEachKind, IrForLoopMetadata, IrGenericMetadata,
-    IrImplicitWhenEnd, IrImport, IrImportDetail, IrModifiers, IrNumericRangeLoop, IrParameter,
-    IrProgram, IrRecordComponent, IrResource, IrSampleDeclaration, IrStatement, IrSwitchCase,
-    IrTypeParameter, IrVariance, IrVisibility, JavaType, MethodOverload, UtilityClass,
-    VirtualThreadOp,
+    CompletableFutureOp, ConversionHelper, ConversionKind, ConversionMetadata, IrCaseLabel,
+    IrCatchClause, IrDeconstructionComponent, IrDeconstructionPattern, IrExpression, IrForEachKind,
+    IrForLoopMetadata, IrGenericMetadata, IrImplicitWhenEnd, IrImport, IrImportDetail, IrModifiers,
+    IrNumericRangeLoop, IrParameter, IrProgram, IrRecordComponent, IrResource, IrSampleDeclaration,
+    IrStatement, IrSwitchCase, IrTypeParameter, IrVariance, IrVisibility, JavaType, MethodOverload,
+    NullableGuard, NullableGuardReason, UtilityClass, VirtualThreadOp,
+};
+use jv_mapper::{
+    JavaPosition, JavaSpan, MappingCategory, MappingError, SourceMap, SourceMapBuilder,
 };
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
@@ -34,6 +37,9 @@ pub struct JavaCodeGenerator {
     metadata_path: Vec<String>,
     package: Option<String>,
     symbol_index: Option<Arc<SymbolIndex>>,
+    instance_extension_methods: HashMap<String, Vec<IrStatement>>,
+    conversion_metadata: HashMap<SpanKey, Vec<ConversionMetadata>>,
+    conversion_map_records: Vec<ConversionSourceMapRecord>,
 }
 
 impl JavaCodeGenerator {
@@ -53,6 +59,9 @@ impl JavaCodeGenerator {
             metadata_path: Vec::new(),
             package: None,
             symbol_index: None,
+            instance_extension_methods: HashMap::new(),
+            conversion_metadata: HashMap::new(),
+            conversion_map_records: Vec::new(),
         }
     }
 
@@ -68,6 +77,13 @@ impl JavaCodeGenerator {
         self.package = program.package.clone();
         self.generic_metadata = program.generic_metadata.clone();
         self.metadata_path.clear();
+        self.conversion_metadata.clear();
+        for entry in &program.conversion_metadata {
+            self.conversion_metadata
+                .entry(SpanKey::from(&entry.span))
+                .or_default()
+                .push(entry.metadata.clone());
+        }
 
         let mut unit = JavaCompilationUnit::new();
         unit.package_declaration = program.package.clone();
@@ -91,6 +107,9 @@ impl JavaCodeGenerator {
                     remaining_declarations.push(declaration.clone());
                 }
                 IrStatement::MethodDeclaration { .. } => {
+                    if self.try_register_instance_extension_method(declaration, program) {
+                        continue;
+                    }
                     script_methods.push(declaration.clone());
                 }
                 _ => {
@@ -246,6 +265,57 @@ impl JavaCodeGenerator {
         self.variance_stack.clear();
         self.sequence_helper = None;
         self.metadata_path.clear();
+        self.instance_extension_methods.clear();
+        self.conversion_metadata.clear();
+        self.conversion_map_records.clear();
+    }
+
+    pub fn build_conversion_source_map(
+        &mut self,
+        java_source: &str,
+        source_file: impl Into<String>,
+        generated_file: impl Into<String>,
+    ) -> Result<SourceMap, MappingError> {
+        let records = std::mem::take(&mut self.conversion_map_records);
+        let mut builder = SourceMapBuilder::new(source_file, generated_file);
+        let mut search_from = 0;
+
+        for record in records {
+            if record.java_snippet.trim().is_empty() {
+                continue;
+            }
+
+            if let Some((start, end)) =
+                find_snippet_span(java_source, &record.java_snippet, search_from)
+            {
+                let (start_line, start_column) = offset_to_line_column(java_source, start);
+                let (end_line, end_column) = offset_to_line_column(java_source, end);
+                let java_span = JavaSpan::new(
+                    JavaPosition::new(start_line, start_column),
+                    JavaPosition::new(end_line, end_column),
+                )?;
+
+                builder.record_mapping(
+                    record.span.clone(),
+                    java_span,
+                    MappingCategory::Expression,
+                    record.ir_node.clone(),
+                    Some(record.metadata.clone()),
+                )?;
+
+                search_from = end;
+            } else {
+                return Err(MappingError::GenerationError(format!(
+                    "Unable to locate Java snippet for conversion at span {}:{}-{}:{}",
+                    record.span.start_line,
+                    record.span.start_column,
+                    record.span.end_line,
+                    record.span.end_column
+                )));
+            }
+        }
+
+        Ok(builder.build())
     }
 
     fn symbol_index(&self) -> Option<&SymbolIndex> {
@@ -436,6 +506,153 @@ impl JavaCodeGenerator {
                 None
             }
             _ => None,
+        }
+    }
+
+    fn try_register_instance_extension_method(
+        &mut self,
+        declaration: &IrStatement,
+        program: &IrProgram,
+    ) -> bool {
+        match Self::base_statement(declaration) {
+            IrStatement::MethodDeclaration {
+                parameters,
+                modifiers,
+                ..
+            } => {
+                if !modifiers.is_static || parameters.is_empty() {
+                    return false;
+                }
+                let receiver_param = &parameters[0];
+                if receiver_param.name != "receiver" {
+                    return false;
+                }
+                if !self.should_emit_as_instance_method(&receiver_param.java_type, program) {
+                    return false;
+                }
+                if let Some(type_name) = Self::extract_type_name(&receiver_param.java_type) {
+                    self.instance_extension_methods
+                        .entry(type_name)
+                        .or_default()
+                        .push(declaration.clone());
+                    return true;
+                }
+                false
+            }
+            _ => false,
+        }
+    }
+
+    fn should_emit_as_instance_method(
+        &self,
+        receiver_type: &JavaType,
+        program: &IrProgram,
+    ) -> bool {
+        if let Some(type_name) = Self::extract_type_name(receiver_type) {
+            self.is_defined_in_current_program(&type_name, program)
+        } else {
+            false
+        }
+    }
+
+    fn is_defined_in_current_program(&self, type_name: &str, program: &IrProgram) -> bool {
+        program
+            .type_declarations
+            .iter()
+            .any(|decl| match Self::base_statement(decl) {
+                IrStatement::ClassDeclaration { name, .. }
+                | IrStatement::RecordDeclaration { name, .. }
+                | IrStatement::InterfaceDeclaration { name, .. } => name == type_name,
+                _ => false,
+            })
+    }
+
+    fn extract_type_name(java_type: &JavaType) -> Option<String> {
+        match java_type {
+            JavaType::Reference { name, .. } => Some(Self::simple_name(name)),
+            JavaType::Array { element_type, .. } => Self::extract_type_name(element_type),
+            _ => None,
+        }
+    }
+
+    fn simple_name(name: &str) -> String {
+        name.rsplit('.').next().unwrap_or(name).to_string()
+    }
+
+    fn take_instance_extension_methods(&mut self, type_name: &str) -> Vec<IrStatement> {
+        self.instance_extension_methods
+            .remove(type_name)
+            .unwrap_or_default()
+    }
+}
+
+#[derive(Debug, Clone)]
+struct ConversionSourceMapRecord {
+    span: Span,
+    java_snippet: String,
+    metadata: Vec<ConversionMetadata>,
+    ir_node: Option<String>,
+}
+
+fn find_snippet_span(haystack: &str, needle: &str, start_index: usize) -> Option<(usize, usize)> {
+    if needle.is_empty() || start_index >= haystack.len() {
+        return None;
+    }
+
+    haystack[start_index..].find(needle).map(|relative| {
+        let absolute_start = start_index + relative;
+        let absolute_end = absolute_start + needle.len();
+        (absolute_start, absolute_end)
+    })
+}
+
+fn offset_to_line_column(text: &str, offset: usize) -> (usize, usize) {
+    let bytes = text.as_bytes();
+    let mut line = 1;
+    let mut column = 0;
+    let mut index = 0;
+
+    while index < offset && index < bytes.len() {
+        match bytes[index] {
+            b'\r' => {
+                line += 1;
+                column = 0;
+                if index + 1 < bytes.len() && bytes[index + 1] == b'\n' && index + 1 < offset {
+                    index += 2;
+                } else {
+                    index += 1;
+                }
+            }
+            b'\n' => {
+                line += 1;
+                column = 0;
+                index += 1;
+            }
+            _ => {
+                column += 1;
+                index += 1;
+            }
+        }
+    }
+
+    (line, column)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct SpanKey {
+    start_line: usize,
+    start_column: usize,
+    end_line: usize,
+    end_column: usize,
+}
+
+impl From<&Span> for SpanKey {
+    fn from(span: &Span) -> Self {
+        Self {
+            start_line: span.start_line,
+            start_column: span.start_column,
+            end_line: span.end_line,
+            end_column: span.end_column,
         }
     }
 }

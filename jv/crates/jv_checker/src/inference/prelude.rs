@@ -7,7 +7,8 @@
 
 use crate::inference::environment::{TypeEnvironment, TypeScheme};
 use crate::inference::extensions::ExtensionRegistry;
-use crate::inference::types::{TypeId, TypeKind};
+use crate::inference::type_factory::TypeFactory;
+use crate::inference::types::{PrimitiveType, TypeId, TypeKind};
 
 const SEQUENCE_CORE: &str = "jv.collections.SequenceCore";
 const ITERABLE: &str = "java.lang.Iterable";
@@ -16,13 +17,12 @@ const STREAM: &str = "java.util.stream.Stream";
 const LIST: &str = "java.util.List";
 const MAP: &str = "java.util.Map";
 const MAP_ENTRY: &str = "java.util.Map.Entry";
-const BOOLEAN: &str = "Boolean";
 const INT: &str = "Int";
 const LONG: &str = "Long";
 const UNIT: &str = "Unit";
 
 fn primitive(name: &'static str) -> TypeKind {
-    TypeKind::Primitive(name)
+    TypeFactory::from_annotation(name).unwrap_or_else(|_| TypeKind::reference(name))
 }
 
 fn function(params: Vec<TypeKind>, return_ty: TypeKind) -> TypeKind {
@@ -96,7 +96,10 @@ fn register_sequence_core_extensions(env: &mut TypeEnvironment, registry: &mut E
 
     // filter: (T -> Boolean) -> SequenceCore
     let filter_t = env.fresh_type_id();
-    let filter_predicate = function(vec![type_var(filter_t)], primitive(BOOLEAN));
+    let filter_predicate = function(
+        vec![type_var(filter_t)],
+        TypeKind::primitive(PrimitiveType::Boolean),
+    );
     registry.register(
         SEQUENCE_CORE,
         "filter",
@@ -240,7 +243,10 @@ fn register_iterable_extensions(env: &mut TypeEnvironment, registry: &mut Extens
     );
 
     let iterable_filter_t = env.fresh_type_id();
-    let iterable_filter_predicate = function(vec![type_var(iterable_filter_t)], primitive(BOOLEAN));
+    let iterable_filter_predicate = function(
+        vec![type_var(iterable_filter_t)],
+        TypeKind::primitive(PrimitiveType::Boolean),
+    );
     registry.register(
         ITERABLE,
         "filter",

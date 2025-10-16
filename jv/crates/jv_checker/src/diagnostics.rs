@@ -1,3 +1,5 @@
+pub mod messages;
+
 use crate::CheckError;
 use jv_ast::{types::RawTypeContinuation, Span};
 use jv_ir::{
@@ -98,6 +100,7 @@ impl EnhancedDiagnostic {
 pub fn descriptor(code: &str) -> Option<&'static DiagnosticDescriptor> {
     DIAGNOSTICS
         .iter()
+        .chain(crate::inference::diagnostics::CONVERSION_DIAGNOSTICS.iter())
         .chain(crate::compat::diagnostics::ENTRIES.iter())
         .chain(crate::imports::diagnostics::ENTRIES.iter())
         .find(|descriptor| descriptor.code == code)
@@ -684,6 +687,7 @@ mod tests {
             imports: Vec::new(),
             type_declarations: vec![statement],
             generic_metadata: Default::default(),
+            conversion_metadata: Vec::new(),
             span,
         }
     }

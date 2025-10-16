@@ -450,8 +450,8 @@ impl<'a> SymbolIndexBuilder<'a> {
             entry.add_instance_field(name);
         }
 
-        for name in parsed.instance_methods {
-            entry.add_instance_method(name);
+        for (name, signature) in parsed.instance_methods {
+            entry.add_instance_method(name, signature);
         }
 
         index.insert_type(entry);

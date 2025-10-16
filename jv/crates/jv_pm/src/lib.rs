@@ -21,7 +21,7 @@ pub enum PackageError {
     IoError(#[from] std::io::Error),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum JavaTarget {
     Java21,
     Java25,

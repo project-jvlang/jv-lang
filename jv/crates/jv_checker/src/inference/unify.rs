@@ -5,10 +5,17 @@
 //! 伝播させ、Null 安全と一致する解を導出する。
 
 use crate::inference::constraint::{Constraint, ConstraintKind, ConstraintSet};
-use crate::inference::types::{TypeBinding, TypeId, TypeKind, TypeVariable, TypeVariableKind};
+use crate::inference::conversions::{
+    AppliedConversion, ConversionHelperCatalog, ConversionMetadata, ConversionOutcome,
+    ConversionRulesEngine,
+};
+use crate::inference::types::{
+    TypeBinding, TypeError, TypeId, TypeKind, TypeVariable, TypeVariableKind,
+};
 use jv_inference::ParallelInferenceConfig;
 use std::collections::HashMap;
 use std::fmt;
+use std::sync::Arc;
 
 /// 制約解決におけるエラー。
 #[derive(Debug, PartialEq)]
@@ -27,6 +34,7 @@ pub enum SolveError {
         ty: TypeKind,
         note: Option<String>,
     },
+    TypeError(TypeError),
 }
 
 impl SolveError {
@@ -38,6 +46,7 @@ impl SolveError {
                 .as_ref()
                 .map(|n| format!(" ({})", n))
                 .unwrap_or_default(),
+            SolveError::TypeError(_) => String::new(),
         }
     }
 }
@@ -66,6 +75,7 @@ impl fmt::Display for SolveError {
                     self.note_suffix()
                 )
             }
+            SolveError::TypeError(error) => write!(f, "type error: {error}"),
         }
     }
 }
@@ -77,6 +87,7 @@ impl std::error::Error for SolveError {}
 pub struct SolveResult {
     pub bindings: Vec<TypeBinding>,
     pub remaining: ConstraintSet,
+    pub conversions: Vec<AppliedConversion>,
 }
 
 /// 単一化ソルバ本体。
@@ -84,6 +95,8 @@ pub struct SolveResult {
 pub struct ConstraintSolver {
     substitutions: HashMap<TypeId, TypeKind>,
     parallel_config: ParallelInferenceConfig,
+    conversions: Vec<AppliedConversion>,
+    conversion_catalog: Option<Arc<ConversionHelperCatalog>>,
 }
 
 impl Default for ConstraintSolver {
@@ -103,6 +116,8 @@ impl ConstraintSolver {
         Self {
             substitutions: HashMap::new(),
             parallel_config: config.sanitized(),
+            conversions: Vec::new(),
+            conversion_catalog: None,
         }
     }
 
@@ -140,7 +155,12 @@ impl ConstraintSolver {
         Ok(SolveResult {
             bindings,
             remaining: constraints,
+            conversions: self.conversions,
         })
+    }
+
+    pub fn set_conversion_catalog(&mut self, catalog: Option<Arc<ConversionHelperCatalog>>) {
+        self.conversion_catalog = catalog;
     }
 
     fn process_constraint(&mut self, constraint: &Constraint) -> Result<(), SolveError> {
@@ -151,13 +171,102 @@ impl ConstraintSolver {
             ConstraintKind::Assign(id, ty) => {
                 self.unify(TypeKind::Variable(*id), ty.clone(), constraint.note.clone())?;
             }
+            ConstraintKind::Convertible { from, to } => {
+                self.handle_convertible(from.clone(), to.clone(), false, constraint.note.clone())?;
+            }
+            ConstraintKind::ConvertibleWithWarning { from, to } => {
+                self.handle_convertible(from.clone(), to.clone(), true, constraint.note.clone())?;
+            }
             ConstraintKind::Placeholder(placeholder) => {
                 return Err(SolveError::Placeholder {
                     placeholder: *placeholder,
                     note: constraint.note.clone(),
                 });
             }
+            ConstraintKind::ReportError(error) => {
+                return Err(SolveError::TypeError(error.clone()));
+            }
         }
+        Ok(())
+    }
+
+    fn handle_convertible(
+        &mut self,
+        from: TypeKind,
+        to: TypeKind,
+        warned: bool,
+        note: Option<String>,
+    ) -> Result<(), SolveError> {
+        let from = self.prune(from);
+        let to = self.prune(to);
+
+        match ConversionRulesEngine::analyze_with_catalog(
+            &from,
+            &to,
+            self.conversion_catalog.as_deref(),
+        ) {
+            ConversionOutcome::Identity => {
+                self.unify(from, to, note)?;
+            }
+            ConversionOutcome::Allowed(metadata) => {
+                self.register_conversion(from.clone(), to.clone(), metadata, warned);
+                self.bind_for_conversion(&from, &to, note)?;
+            }
+            ConversionOutcome::Rejected(error) => {
+                return Err(SolveError::TypeError(error));
+            }
+        }
+        Ok(())
+    }
+
+    fn register_conversion(
+        &mut self,
+        from: TypeKind,
+        to: TypeKind,
+        metadata: ConversionMetadata,
+        warned: bool,
+    ) {
+        let ConversionMetadata {
+            kind,
+            helper,
+            nullable_guard,
+        } = metadata;
+        self.conversions.push(AppliedConversion::new(
+            from,
+            to,
+            kind,
+            helper,
+            nullable_guard,
+            warned,
+        ));
+    }
+
+    fn bind_for_conversion(
+        &mut self,
+        from: &TypeKind,
+        to: &TypeKind,
+        note: Option<String>,
+    ) -> Result<(), SolveError> {
+        match from {
+            TypeKind::Variable(id) => {
+                self.bind_variable(*id, to.clone(), note.clone())?;
+            }
+            TypeKind::Optional(inner) => {
+                self.bind_for_conversion(inner, to, note.clone())?;
+            }
+            _ => {}
+        }
+
+        match to {
+            TypeKind::Variable(id) => {
+                self.bind_variable(*id, from.clone(), note)?;
+            }
+            TypeKind::Optional(inner) => {
+                self.bind_for_conversion(from, inner, None)?;
+            }
+            _ => {}
+        }
+
         Ok(())
     }
 
@@ -186,6 +295,28 @@ impl ConstraintSolver {
                     Err(SolveError::TypeMismatch {
                         left: TypeKind::Primitive(a),
                         right: TypeKind::Primitive(b),
+                        note,
+                    })
+                }
+            }
+            (TypeKind::Boxed(a), TypeKind::Boxed(b)) => {
+                if a == b {
+                    Ok(TypeKind::Boxed(a))
+                } else {
+                    Err(SolveError::TypeMismatch {
+                        left: TypeKind::Boxed(a),
+                        right: TypeKind::Boxed(b),
+                        note,
+                    })
+                }
+            }
+            (TypeKind::Reference(a), TypeKind::Reference(b)) => {
+                if a == b {
+                    Ok(TypeKind::reference(a))
+                } else {
+                    Err(SolveError::TypeMismatch {
+                        left: TypeKind::Reference(a),
+                        right: TypeKind::Reference(b),
                         note,
                     })
                 }
@@ -279,7 +410,10 @@ impl ConstraintSolver {
             TypeKind::Function(params, ret) => {
                 params.iter().any(|param| self.occurs_in(id, param)) || self.occurs_in(id, ret)
             }
-            TypeKind::Primitive(_) | TypeKind::Reference(_) | TypeKind::Unknown => false,
+            TypeKind::Primitive(_)
+            | TypeKind::Boxed(_)
+            | TypeKind::Reference(_)
+            | TypeKind::Unknown => false,
         }
     }
 }
@@ -287,6 +421,7 @@ impl ConstraintSolver {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::inference::types::PrimitiveType;
 
     fn constraint_equal(left: TypeKind, right: TypeKind) -> Constraint {
         Constraint::new(ConstraintKind::Equal(left, right))
@@ -309,7 +444,7 @@ mod tests {
         let mut set = ConstraintSet::new();
         set.push(constraint_equal(
             TypeKind::Variable(TypeId::new(0)),
-            TypeKind::Primitive("Int"),
+            TypeKind::primitive(PrimitiveType::Int),
         ));
 
         let solver = ConstraintSolver::new();
@@ -318,7 +453,7 @@ mod tests {
         let bindings = collect_bindings(result);
         assert_eq!(bindings.len(), 1);
         assert_eq!(bindings[0].0, TypeId::new(0));
-        assert_eq!(bindings[0].1, TypeKind::Primitive("Int"));
+        assert_eq!(bindings[0].1, TypeKind::primitive(PrimitiveType::Int));
     }
 
     #[test]
@@ -326,7 +461,7 @@ mod tests {
         let mut set = ConstraintSet::new();
         set.push(constraint_equal(
             TypeKind::Optional(Box::new(TypeKind::Variable(TypeId::new(1)))),
-            TypeKind::Primitive("String"),
+            TypeKind::reference("java.lang.String"),
         ));
 
         let solver = ConstraintSolver::new();
@@ -335,7 +470,7 @@ mod tests {
         let bindings = collect_bindings(result);
         assert_eq!(bindings.len(), 1);
         assert_eq!(bindings[0].0, TypeId::new(1));
-        assert_eq!(bindings[0].1, TypeKind::Primitive("String"));
+        assert_eq!(bindings[0].1, TypeKind::reference("java.lang.String"));
     }
 
     #[test]
@@ -360,7 +495,7 @@ mod tests {
         let mut set = ConstraintSet::new();
         set.push(constraint_assign(
             TypeId::new(3),
-            TypeKind::Optional(Box::new(TypeKind::Primitive("Boolean"))),
+            TypeKind::optional(TypeKind::primitive(PrimitiveType::Boolean)),
         ));
 
         let solver = ConstraintSolver::new();
@@ -371,7 +506,7 @@ mod tests {
         assert_eq!(bindings[0].0, TypeId::new(3));
         assert_eq!(
             bindings[0].1,
-            TypeKind::Optional(Box::new(TypeKind::Primitive("Boolean")))
+            TypeKind::optional(TypeKind::primitive(PrimitiveType::Boolean))
         );
     }
 
@@ -380,11 +515,11 @@ mod tests {
         let mut set = ConstraintSet::new();
         set.push(constraint_assign(
             TypeId::new(4),
-            TypeKind::Primitive("Int"),
+            TypeKind::primitive(PrimitiveType::Int),
         ));
         set.push(constraint_equal(
             TypeKind::Variable(TypeId::new(4)),
-            TypeKind::Primitive("Int"),
+            TypeKind::primitive(PrimitiveType::Int),
         ));
 
         let solver = ConstraintSolver::with_config(ParallelInferenceConfig::new(false, 8, 1));

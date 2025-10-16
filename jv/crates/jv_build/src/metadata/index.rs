@@ -102,7 +102,7 @@ pub struct TypeEntry {
     #[serde(default)]
     pub instance_fields: HashSet<String>,
     #[serde(default)]
-    pub instance_methods: HashSet<String>,
+    pub instance_methods: HashMap<String, JavaMethodSignature>,
 }
 
 impl TypeEntry {
@@ -114,7 +114,7 @@ impl TypeEntry {
             static_fields: HashMap::new(),
             static_methods: HashMap::new(),
             instance_fields: HashSet::new(),
-            instance_methods: HashSet::new(),
+            instance_methods: HashMap::new(),
         }
     }
 
@@ -130,8 +130,8 @@ impl TypeEntry {
         self.instance_fields.insert(name);
     }
 
-    pub fn add_instance_method(&mut self, name: String) {
-        self.instance_methods.insert(name);
+    pub fn add_instance_method(&mut self, name: String, signature: JavaMethodSignature) {
+        self.instance_methods.insert(name, signature);
     }
 
     pub fn has_field(&self, name: &str) -> bool {
@@ -139,7 +139,7 @@ impl TypeEntry {
     }
 
     pub fn has_instance_method(&self, name: &str) -> bool {
-        self.instance_methods.contains(name)
+        self.instance_methods.contains_key(name)
     }
 
     pub fn lookup_static(&self, member: &str) -> Option<StaticMember> {

@@ -10,3 +10,4 @@ serde_json.workspace = true
 thiserror.workspace = true
 jv_ast.workspace = true
 jv_inference.workspace = true
+jv_ir.workspace = true

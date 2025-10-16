@@ -6,15 +6,17 @@
 
 use crate::imports::ResolvedImport;
 use crate::inference::constraint::ConstraintGenerator;
+use crate::inference::conversions::ConversionHelperCatalog;
 use crate::inference::environment::{TypeEnvironment, TypeScheme};
 use crate::inference::imports::ImportRegistry;
 use crate::inference::prelude;
 use crate::inference::types::{TypeBinding, TypeId, TypeKind};
-use crate::inference::unify::{ConstraintSolver, SolveError};
+use crate::inference::unify::{ConstraintSolver, SolveError, SolveResult};
 use crate::InferenceTelemetry;
 use jv_ast::{Program, Statement};
-use jv_build::metadata::SymbolIndex;
+use jv_build::metadata::{ConversionCatalogCache, SymbolIndex};
 use jv_inference::ParallelInferenceConfig;
+use jv_pm::JavaTarget;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Instant;
@@ -44,6 +46,9 @@ pub struct InferenceEngine {
     telemetry: InferenceTelemetry,
     import_index: Option<Arc<SymbolIndex>>,
     resolved_imports: Vec<ResolvedImport>,
+    java_target: JavaTarget,
+    conversion_cache: ConversionCatalogCache,
+    active_conversion_catalog: Option<Arc<ConversionHelperCatalog>>,
 }
 
 impl Default for InferenceEngine {
@@ -57,6 +62,9 @@ impl Default for InferenceEngine {
             telemetry: InferenceTelemetry::default(),
             import_index: None,
             resolved_imports: Vec::new(),
+            java_target: JavaTarget::default(),
+            conversion_cache: ConversionCatalogCache::new(),
+            active_conversion_catalog: None,
         }
     }
 }
@@ -83,6 +91,11 @@ impl InferenceEngine {
         &self.telemetry
     }
 
+    /// Configures the Java target for catalog lookups.
+    pub fn set_java_target(&mut self, target: JavaTarget) {
+        self.java_target = target;
+    }
+
     /// Provides mutable access to telemetry for downstream stages.
     pub fn telemetry_mut(&mut self) -> &mut InferenceTelemetry {
         &mut self.telemetry
@@ -92,12 +105,14 @@ impl InferenceEngine {
     pub fn set_imports(&mut self, symbol_index: Arc<SymbolIndex>, imports: Vec<ResolvedImport>) {
         self.import_index = Some(symbol_index);
         self.resolved_imports = imports;
+        self.active_conversion_catalog = None;
     }
 
     /// Clears previously registered import context.
     pub fn clear_imports(&mut self) {
         self.import_index = None;
         self.resolved_imports.clear();
+        self.active_conversion_catalog = None;
     }
 
     /// AST 全体に対する推論を実行し、各種結果を内部状態へ保持する。
@@ -109,6 +124,21 @@ impl InferenceEngine {
             registry.register_imports(&mut environment, &self.resolved_imports);
             registry
         });
+        let mut catalog_hits = 0u64;
+        let mut catalog_misses = 0u64;
+        let conversion_catalog = self.import_index.as_ref().map(|index| {
+            let access = self
+                .conversion_cache
+                .access(self.java_target, index.as_ref());
+            if access.hit {
+                catalog_hits += 1;
+            } else {
+                catalog_misses += 1;
+            }
+            Arc::new(ConversionHelperCatalog::new(access.catalog))
+        });
+        environment.set_conversion_catalog(conversion_catalog.clone());
+        self.active_conversion_catalog = conversion_catalog.clone();
         let generator =
             ConstraintGenerator::new(&mut environment, &extensions, import_registry.as_mut());
         let constraints = generator.generate(program);
@@ -116,14 +146,15 @@ impl InferenceEngine {
         let inference_start = Instant::now();
 
         // 制約を解決し、型変数への束縛を得る。
-        let solve_result =
-            match ConstraintSolver::with_config(self.parallel_config).solve(constraints) {
-                Ok(result) => result,
-                Err(error) => {
-                    self.telemetry = InferenceTelemetry::default();
-                    return Err(InferenceError::from(error));
-                }
-            };
+        let mut solver = ConstraintSolver::with_config(self.parallel_config);
+        solver.set_conversion_catalog(self.active_conversion_catalog.clone());
+        let solve_result = match solver.solve(constraints) {
+            Ok(result) => result,
+            Err(error) => {
+                self.telemetry = InferenceTelemetry::default();
+                return Err(InferenceError::from(error));
+            }
+        };
         let substitutions = build_substitution_map(&solve_result.bindings);
 
         // 関数シグネチャを精算し、曖昧さを検出する。
@@ -159,17 +190,27 @@ impl InferenceEngine {
             environment.redefine_scheme(&name, scheme);
         }
 
-        self.bindings = solve_result.bindings;
+        let SolveResult {
+            bindings,
+            remaining: _,
+            conversions,
+        } = solve_result;
+
+        self.bindings = bindings;
         self.environment = environment;
         self.function_schemes = function_schemes;
         self.result_type = None;
         let duration_ms = inference_start.elapsed().as_secs_f64() * 1_000.0;
-        self.telemetry = InferenceTelemetry {
+        let mut telemetry = InferenceTelemetry {
             constraints_emitted: constraint_count,
             bindings_resolved: self.bindings.len(),
             inference_duration_ms: duration_ms,
             ..InferenceTelemetry::default()
         };
+        telemetry.conversion_catalog_hits = catalog_hits;
+        telemetry.conversion_catalog_misses = catalog_misses;
+        telemetry.record_conversions(&conversions);
+        self.telemetry = telemetry;
         Ok(())
     }
 
@@ -208,11 +249,10 @@ fn build_substitution_map(bindings: &[TypeBinding]) -> HashMap<TypeId, TypeKind>
 
 fn resolve_type(ty: &TypeKind, substitutions: &HashMap<TypeId, TypeKind>) -> TypeKind {
     match ty {
-        TypeKind::Primitive(name) => TypeKind::Primitive(name),
-        TypeKind::Reference(name) => TypeKind::Reference(name.clone()),
-        TypeKind::Optional(inner) => {
-            TypeKind::Optional(Box::new(resolve_type(inner, substitutions)))
-        }
+        TypeKind::Primitive(primitive) => TypeKind::Primitive(*primitive),
+        TypeKind::Boxed(primitive) => TypeKind::Boxed(*primitive),
+        TypeKind::Reference(name) => TypeKind::reference(name.clone()),
+        TypeKind::Optional(inner) => TypeKind::optional(resolve_type(inner, substitutions)),
         TypeKind::Variable(id) => {
             if let Some(resolved) = substitutions.get(id) {
                 resolve_type(resolved, substitutions)
@@ -248,6 +288,7 @@ fn collect_function_names(program: &Program) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::inference::types::PrimitiveType;
     use jv_ast::{
         BinaryOp, Expression, Literal, Modifiers, Parameter, Span, Statement, TypeAnnotation,
     };
@@ -327,9 +368,9 @@ mod tests {
         match &scheme.ty {
             TypeKind::Function(params, ret) => {
                 assert_eq!(params.len(), 2);
-                assert_eq!(params[0], TypeKind::Primitive("Int"));
-                assert_eq!(params[1], TypeKind::Primitive("Int"));
-                assert_eq!(**ret, TypeKind::Primitive("Int"));
+                assert_eq!(params[0], TypeKind::primitive(PrimitiveType::Int));
+                assert_eq!(params[1], TypeKind::primitive(PrimitiveType::Int));
+                assert_eq!(**ret, TypeKind::primitive(PrimitiveType::Int));
             }
             other => panic!("expected function type, found {other:?}"),
         }
@@ -405,8 +446,8 @@ mod tests {
         match &scheme.ty {
             TypeKind::Function(params, ret) => {
                 assert_eq!(params.len(), 1);
-                assert_eq!(params[0], TypeKind::Primitive("String"));
-                assert_eq!(**ret, TypeKind::Primitive("String"));
+                assert_eq!(params[0], TypeKind::reference("java.lang.String"));
+                assert_eq!(**ret, TypeKind::reference("java.lang.String"));
             }
             other => panic!("expected function type, found {other:?}"),
         }

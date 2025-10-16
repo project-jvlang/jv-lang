@@ -1,10 +1,13 @@
 //! 型推論で扱う型表現・型変数・束縛を定義する。
 
+use crate::java::{JavaBoxingTable, JavaNullabilityPolicy, JavaPrimitive};
+use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::fmt;
+use thiserror::Error;
 
 /// 推論で利用する型変数ID。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct TypeId(u32);
 
 impl TypeId {
@@ -25,10 +28,14 @@ impl fmt::Display for TypeId {
     }
 }
 
+/// Java プリミティブ型を表現する列挙体へのエイリアス。
+pub type PrimitiveType = JavaPrimitive;
+
 /// 型推論で用いる主な型表現。
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum TypeKind {
-    Primitive(&'static str),
+    Primitive(PrimitiveType),
+    Boxed(PrimitiveType),
     Reference(String),
     Optional(Box<TypeKind>),
     Variable(TypeId),
@@ -48,6 +55,53 @@ impl TypeKind {
         TypeKind::Function(params, Box::new(return_type))
     }
 
+    /// プリミティブ型を生成する。
+    pub fn primitive(primitive: PrimitiveType) -> Self {
+        TypeKind::Primitive(primitive)
+    }
+
+    /// ボックス化されたプリミティブ型を生成する。
+    pub fn boxed(primitive: PrimitiveType) -> Self {
+        TypeKind::Boxed(primitive)
+    }
+
+    /// 参照型を生成する。
+    pub fn reference(name: impl Into<String>) -> Self {
+        TypeKind::Reference(name.into())
+    }
+
+    /// Optional 型を生成する。
+    pub fn optional(inner: TypeKind) -> Self {
+        TypeKind::Optional(Box::new(inner))
+    }
+
+    /// プリミティブ型の nullable 版を生成する（ボックス型を Optional で包む）。
+    pub fn optional_primitive(primitive: PrimitiveType) -> Self {
+        if JavaNullabilityPolicy::requires_boxing_for_nullable(primitive) {
+            TypeKind::Optional(Box::new(TypeKind::boxed(primitive)))
+        } else {
+            TypeKind::Optional(Box::new(TypeKind::primitive(primitive)))
+        }
+    }
+
+    /// プリミティブ型かどうかを判定する。
+    pub fn is_primitive(&self) -> bool {
+        matches!(self, TypeKind::Primitive(_))
+    }
+
+    /// ボックスプリミティブ型かどうかを判定する。
+    pub fn is_boxed(&self) -> bool {
+        matches!(self, TypeKind::Boxed(_))
+    }
+
+    /// null 許容かどうかを判定する。
+    pub fn is_nullable(&self) -> bool {
+        match self {
+            TypeKind::Primitive(_) => JavaNullabilityPolicy::primitives_allow_null(),
+            _ => true,
+        }
+    }
+
     /// 型表現に未決定な `Unknown` が含まれているか判定する。
     pub fn contains_unknown(&self) -> bool {
         match self {
@@ -56,7 +110,10 @@ impl TypeKind {
             TypeKind::Function(params, ret) => {
                 params.iter().any(TypeKind::contains_unknown) || ret.contains_unknown()
             }
-            TypeKind::Primitive(_) | TypeKind::Reference(_) | TypeKind::Variable(_) => false,
+            TypeKind::Primitive(_)
+            | TypeKind::Boxed(_)
+            | TypeKind::Reference(_)
+            | TypeKind::Variable(_) => false,
         }
     }
 
@@ -71,7 +128,10 @@ impl TypeKind {
 
     pub(crate) fn collect_free_type_vars_into(&self, acc: &mut HashSet<TypeId>) {
         match self {
-            TypeKind::Primitive(_) | TypeKind::Reference(_) | TypeKind::Unknown => {}
+            TypeKind::Primitive(_)
+            | TypeKind::Boxed(_)
+            | TypeKind::Reference(_)
+            | TypeKind::Unknown => {}
             TypeKind::Variable(id) => {
                 acc.insert(*id);
             }
@@ -83,6 +143,47 @@ impl TypeKind {
                 ret.collect_free_type_vars_into(acc);
             }
         }
+    }
+
+    /// ヒューマンリーダブルな型表現を返す。
+    pub fn describe(&self) -> String {
+        match self {
+            TypeKind::Primitive(p) => p.java_name().to_string(),
+            TypeKind::Boxed(p) => JavaBoxingTable::boxed_fqcn(*p).to_string(),
+            TypeKind::Reference(name) => name.clone(),
+            TypeKind::Optional(inner) => format!("{}?", inner.describe()),
+            TypeKind::Variable(id) => format!("{id}"),
+            TypeKind::Function(params, ret) => {
+                let params = params
+                    .iter()
+                    .map(TypeKind::describe)
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("fn({params}) -> {}", ret.describe())
+            }
+            TypeKind::Unknown => "unknown".to_string(),
+        }
+    }
+}
+
+/// 型関連のエラーを表現する。
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+pub enum TypeError {
+    #[error("unknown primitive type `{identifier}`")]
+    UnknownPrimitive { identifier: String },
+    #[error("nullability mismatch when converting `{from}` to `{to}`")]
+    NullabilityMismatch { from: String, to: String },
+    #[error("cannot convert `{from}` to `{to}`")]
+    IncompatibleConversion { from: String, to: String },
+}
+
+impl TypeError {
+    pub fn nullability_mismatch(from: String, to: String) -> Self {
+        Self::NullabilityMismatch { from, to }
+    }
+
+    pub fn incompatible_conversion(from: String, to: String) -> Self {
+        Self::IncompatibleConversion { from, to }
     }
 }
 

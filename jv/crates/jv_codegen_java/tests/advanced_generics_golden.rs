@@ -42,6 +42,7 @@ fn build_program() -> IrProgram {
         imports: Vec::new(),
         type_declarations: vec![class],
         generic_metadata: metadata,
+        conversion_metadata: Vec::new(),
         span,
     }
 }

@@ -1016,7 +1016,7 @@ fn visit_stdlib(
             )
         })?;
         promote_stdlib_visibility(&mut program);
-        #[cfg(debug_assertions)]
+        #[cfg(feature = "dump-sequence-ast")]
         if path.ends_with("sequence.jv") {
             let dump_path = root.join("../debug-sequence-ast.json");
             if let Ok(json) = serde_json::to_string_pretty(&program) {
@@ -1696,6 +1696,7 @@ mod tests {
             imports: Vec::new(),
             type_declarations: vec![class_decl],
             generic_metadata: BTreeMap::new(),
+            conversion_metadata: Vec::new(),
             span,
         };
 

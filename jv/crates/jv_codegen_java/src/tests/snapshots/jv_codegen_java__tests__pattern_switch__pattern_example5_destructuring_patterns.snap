@@ -6,9 +6,9 @@ expression: combined
 // ---- Java 25 ----
 package patterns;
 
-public record Inner(int x, int y);
+public record Inner(int x, int y) {}
 
-public record Outer(Inner inner, int count);
+public record Outer(Inner inner, int count) {}
 
 public class Example5 {
     public static int total(Outer value) {
@@ -25,9 +25,9 @@ public class Example5 {
 // ---- Java 21 ----
 package patterns;
 
-public record Inner(int x, int y);
+public record Inner(int x, int y) {}
 
-public record Outer(Inner inner, int count);
+public record Outer(Inner inner, int count) {}
 
 public class Example5 {
     public static int total(Outer value) {

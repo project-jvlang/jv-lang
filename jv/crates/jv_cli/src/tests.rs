@@ -668,6 +668,7 @@ fn apply_type_facts_enriches_class_metadata() {
             span: span.clone(),
         }],
         generic_metadata: Default::default(),
+        conversion_metadata: Vec::new(),
         span,
     };
 
@@ -782,6 +783,7 @@ fn apply_type_facts_records_nested_metadata() {
             span: span.clone(),
         }],
         generic_metadata: Default::default(),
+        conversion_metadata: Vec::new(),
         span,
     };
 
@@ -844,6 +846,7 @@ fn apply_type_facts_records_metadata_without_generics() {
         imports: Vec::new(),
         type_declarations: vec![class],
         generic_metadata: Default::default(),
+        conversion_metadata: Vec::new(),
         span,
     };
 
@@ -899,6 +902,7 @@ fn where_constraints_flow_into_ir_bounds() {
             span: span.clone(),
         }],
         generic_metadata: Default::default(),
+        conversion_metadata: Vec::new(),
         span: span.clone(),
     };
 

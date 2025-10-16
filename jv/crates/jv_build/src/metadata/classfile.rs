@@ -28,7 +28,7 @@ pub struct ParsedClass {
     pub static_fields: Vec<(String, JavaType)>,
     pub static_methods: Vec<(String, JavaMethodSignature)>,
     pub instance_fields: Vec<String>,
-    pub instance_methods: Vec<String>,
+    pub instance_methods: Vec<(String, JavaMethodSignature)>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -120,7 +120,9 @@ pub fn parse_class(bytes: &[u8]) -> Result<ParsedClass, ClassParseError> {
                 }
             }
         } else if is_accessible && name != "<init>" {
-            instance_methods.push(name.to_string());
+            if let Ok(signature) = parse_method_descriptor(descriptor) {
+                instance_methods.push((name.to_string(), signature));
+            }
         }
 
         skip_attributes(&mut reader, attributes_count)?;

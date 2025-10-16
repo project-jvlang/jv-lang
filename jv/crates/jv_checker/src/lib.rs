@@ -4,19 +4,23 @@ pub mod compat;
 pub mod diagnostics;
 pub mod imports;
 pub mod inference;
+pub mod java;
 pub mod null_safety;
 pub mod pattern;
 pub mod regex;
+pub mod telemetry;
 
 pub use inference::{
-    InferenceEngine, InferenceError, InferenceResult, NullabilityAnalyzer, TypeBinding,
-    TypeEnvironment, TypeId, TypeKind, TypeScheme,
+    InferenceEngine, InferenceError, InferenceResult, NullabilityAnalyzer, PrimitiveType,
+    TypeBinding, TypeEnvironment, TypeId, TypeKind, TypeScheme,
 };
+pub use java::{JavaBoxingTable, JavaNullabilityPolicy, JavaPrimitive};
 pub use jv_inference::ParallelInferenceConfig;
 pub use regex::RegexAnalysis;
 
 use crate::imports::ResolvedImport;
 use binding::{resolve_bindings, BindingResolution, BindingUsageSummary, LateInitManifest};
+use inference::conversions::{AppliedConversion, ConversionKind, HelperSpec, NullableGuard};
 use jv_ast::{Program, Span};
 use jv_build::metadata::SymbolIndex;
 use null_safety::{JavaLoweringHint, NullSafetyCoordinator};
@@ -24,6 +28,7 @@ use pattern::{
     NarrowedNullability, PatternCacheMetrics, PatternMatchFacts, PatternMatchService, PatternTarget,
 };
 use regex::RegexValidator;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use thiserror::Error;
@@ -34,6 +39,7 @@ use jv_inference::types::{
     NullabilityFlag, TypeId as FactsTypeId, TypeKind as FactsTypeKind,
     TypeVariant as FactsTypeVariant,
 };
+use jv_pm::JavaTarget;
 
 #[derive(Error, Debug)]
 pub enum CheckError {
@@ -265,7 +271,7 @@ impl TypeInferenceService for InferenceSnapshot {
 }
 
 /// Telemetry captured during the most recent inference run.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InferenceTelemetry {
     pub constraints_emitted: usize,
     pub bindings_resolved: usize,
@@ -286,6 +292,17 @@ pub struct InferenceTelemetry {
     pub kind_cache_hit_rate: Option<f64>,
     pub const_evaluations: u64,
     pub type_level_cache_size: usize,
+    pub widening_conversions: usize,
+    pub boxing_conversions: usize,
+    pub unboxing_conversions: usize,
+    pub string_conversions: usize,
+    pub nullable_guards_generated: usize,
+    pub method_invocation_conversions: usize,
+    pub conversion_catalog_hits: u64,
+    pub conversion_catalog_misses: u64,
+    pub conversion_events: Vec<AppliedConversion>,
+    pub nullable_guards: Vec<NullableGuard>,
+    pub catalog_hits: Vec<HelperSpec>,
 }
 
 impl Default for InferenceTelemetry {
@@ -310,7 +327,50 @@ impl Default for InferenceTelemetry {
             kind_cache_hit_rate: None,
             const_evaluations: 0,
             type_level_cache_size: 0,
+            widening_conversions: 0,
+            boxing_conversions: 0,
+            unboxing_conversions: 0,
+            string_conversions: 0,
+            nullable_guards_generated: 0,
+            method_invocation_conversions: 0,
+            conversion_catalog_hits: 0,
+            conversion_catalog_misses: 0,
+            conversion_events: Vec::new(),
+            nullable_guards: Vec::new(),
+            catalog_hits: Vec::new(),
         }
+    }
+}
+
+impl InferenceTelemetry {
+    /// 変換適用結果を集計し、Telemetry カウンタへ反映する。
+    pub fn record_conversions(&mut self, conversions: &[AppliedConversion]) {
+        for conversion in conversions {
+            match conversion.kind {
+                ConversionKind::WideningPrimitive => self.widening_conversions += 1,
+                ConversionKind::Boxing => self.boxing_conversions += 1,
+                ConversionKind::Unboxing => self.unboxing_conversions += 1,
+                ConversionKind::StringConversion => self.string_conversions += 1,
+                ConversionKind::MethodInvocation => self.method_invocation_conversions += 1,
+                ConversionKind::Identity => {}
+            }
+
+            if let Some(guard) = conversion.nullable_guard {
+                self.nullable_guards_generated += 1;
+                self.nullable_guards.push(guard);
+            }
+
+            if let Some(helper) = conversion.helper_method.as_ref() {
+                self.catalog_hits.push(helper.clone());
+            }
+
+            self.conversion_events.push(conversion.clone());
+        }
+    }
+
+    /// Enriches conversion events with span information derived from source map data.
+    pub fn attach_conversion_spans(&mut self, mappings: &[jv_mapper::ConversionMapping]) {
+        crate::telemetry::report::attach_conversion_spans(&mut self.conversion_events, mappings);
     }
 }
 
@@ -358,6 +418,10 @@ impl TypeChecker {
         let config = config.sanitized();
         self.parallel_config = config;
         self.engine.set_parallel_config(config);
+    }
+
+    pub fn set_java_target(&mut self, target: JavaTarget) {
+        self.engine.set_java_target(target);
     }
 
     /// Returns the current parallel inference configuration.
@@ -646,10 +710,18 @@ fn convert_scheme(scheme: &TypeScheme) -> FactsTypeScheme {
 
 fn convert_type_kind(ty: &TypeKind) -> FactsTypeKind {
     match ty {
-        TypeKind::Primitive(name) => FactsTypeKind::new(FactsTypeVariant::Primitive(name))
-            .with_nullability(NullabilityFlag::NonNull),
-        TypeKind::Reference(_) => {
-            FactsTypeKind::new(FactsTypeVariant::Unknown).with_nullability(NullabilityFlag::NonNull)
+        TypeKind::Primitive(primitive) => {
+            FactsTypeKind::new(FactsTypeVariant::Primitive(primitive.jv_name()))
+                .with_nullability(NullabilityFlag::NonNull)
+        }
+        TypeKind::Boxed(primitive) => {
+            FactsTypeKind::new(FactsTypeVariant::Primitive(primitive.boxed_fqcn()))
+                .with_nullability(NullabilityFlag::NonNull)
+        }
+        TypeKind::Reference(name) => {
+            let interned: &'static str = Box::leak(name.clone().into_boxed_str());
+            FactsTypeKind::new(FactsTypeVariant::Primitive(interned))
+                .with_nullability(NullabilityFlag::NonNull)
         }
         TypeKind::Optional(inner) => FactsTypeKind::optional(convert_type_kind(inner)),
         TypeKind::Variable(id) => {

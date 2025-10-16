@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
+autobenches = false
 
 [dependencies]
 thiserror = { workspace = true }
@@ -17,9 +18,18 @@ jv_inference = { workspace = true }
 jv_build = { workspace = true }
 jv_pm = { workspace = true }
 jv_support = { workspace = true }
+jv_mapper = { workspace = true }
 once_cell = { workspace = true }
 
 [dev-dependencies]
 serde_json = { workspace = true }
 test-case = { workspace = true }
 fastrand = { workspace = true }
+
+[[test]]
+name = "java_inference_bench"
+path = "benches/java_inference.rs"
+
+[[test]]
+name = "java_codegen"
+path = "../../tests/java_codegen.rs"
