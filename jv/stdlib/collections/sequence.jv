@@ -37,10 +37,6 @@ fun <T> SequenceCore<T>.close() {
     this.stream.close()
 }
 
-fun <T> SequenceCore<T>.toStream(): Stream<T> {
-    return this.stream
-}
-
 /**
  * Kotlin `Sequence.map` と同等の変換操作。
  */
