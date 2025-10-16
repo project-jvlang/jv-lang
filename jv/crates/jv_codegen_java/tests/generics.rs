@@ -55,6 +55,7 @@ fn sealed_classes_emit_target_specific_metadata() {
         imports: Vec::new(),
         type_declarations: vec![class],
         generic_metadata: Default::default(),
+        conversion_metadata: Vec::new(),
         span,
     };
 
@@ -113,6 +114,7 @@ fn class_signature_includes_generic_bounds() {
         imports: Vec::new(),
         type_declarations: vec![class],
         generic_metadata: Default::default(),
+        conversion_metadata: Vec::new(),
         span,
     };
 
@@ -172,6 +174,7 @@ fn generic_metadata_comment_emitted() {
         imports: Vec::new(),
         type_declarations: vec![class],
         generic_metadata: metadata_map,
+        conversion_metadata: Vec::new(),
         span,
     };
 
@@ -222,6 +225,7 @@ fn metadata_kind_comment_uses_fallback_entry() {
         imports: Vec::new(),
         type_declarations: vec![class],
         generic_metadata: metadata_map,
+        conversion_metadata: Vec::new(),
         span,
     };
 
@@ -280,6 +284,7 @@ fn covariant_type_arguments_render_wildcards() {
         imports: Vec::new(),
         type_declarations: vec![class],
         generic_metadata: Default::default(),
+        conversion_metadata: Vec::new(),
         span,
     };
 
@@ -336,6 +341,7 @@ fn contravariant_type_arguments_render_wildcards() {
         imports: Vec::new(),
         type_declarations: vec![class],
         generic_metadata: Default::default(),
+        conversion_metadata: Vec::new(),
         span,
     };
 
@@ -441,6 +447,7 @@ fn raw_default_comment_on_field_adds_import_and_guard() {
         imports: Vec::new(),
         type_declarations: vec![class],
         generic_metadata: Default::default(),
+        conversion_metadata: Vec::new(),
         span,
     };
 
@@ -502,6 +509,7 @@ fn raw_allow_comment_on_field_keeps_imports_clean() {
         imports: Vec::new(),
         type_declarations: vec![class],
         generic_metadata: Default::default(),
+        conversion_metadata: Vec::new(),
         span,
     };
 
