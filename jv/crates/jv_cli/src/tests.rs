@@ -899,6 +899,7 @@ fn where_constraints_flow_into_ir_bounds() {
             span: span.clone(),
         }],
         generic_metadata: Default::default(),
+        conversion_metadata: Vec::new(),
         span: span.clone(),
     };
 

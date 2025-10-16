@@ -6,6 +6,7 @@
 pub mod compatibility;
 pub mod constraint;
 pub mod conversions;
+pub mod diagnostics;
 pub mod engine;
 pub mod environment;
 pub mod extensions;

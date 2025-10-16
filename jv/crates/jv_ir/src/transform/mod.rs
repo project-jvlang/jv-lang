@@ -352,6 +352,7 @@ fn lower_program(
         imports: ir_imports,
         type_declarations,
         generic_metadata: Default::default(),
+        conversion_metadata: Vec::new(),
         span,
     })
 }

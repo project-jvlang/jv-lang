@@ -7,6 +7,16 @@ use jv_ir::{
 
 impl JavaCodeGenerator {
     pub fn generate_expression(&mut self, expr: &IrExpression) -> Result<String, CodeGenError> {
+        let span = expr.span();
+        let base = self.generate_expression_inner(expr)?;
+        if let Some(metadata) = self.take_conversion_metadata_for_span(&span) {
+            self.wrap_with_conversions(base, metadata)
+        } else {
+            Ok(base)
+        }
+    }
+
+    fn generate_expression_inner(&mut self, expr: &IrExpression) -> Result<String, CodeGenError> {
         match expr {
             IrExpression::Literal(literal, _) => Ok(Self::literal_to_string(literal)),
             IrExpression::RegexPattern { pattern, .. } => {
@@ -919,6 +929,112 @@ impl JavaCodeGenerator {
         Ok(format!("{simple_name}.sequenceFromStream({})", stream_expr))
     }
 
+    fn take_conversion_metadata_for_span(
+        &mut self,
+        span: &Span,
+    ) -> Option<Vec<ConversionMetadata>> {
+        self.conversion_metadata.remove(&super::SpanKey::from(span))
+    }
+
+    fn wrap_with_conversions(
+        &mut self,
+        mut value: String,
+        metadata: Vec<ConversionMetadata>,
+    ) -> Result<String, CodeGenError> {
+        for metadata_entry in metadata {
+            value = self.apply_conversion(value, &metadata_entry)?;
+        }
+        Ok(value)
+    }
+
+    fn apply_conversion(
+        &mut self,
+        input: String,
+        metadata: &ConversionMetadata,
+    ) -> Result<String, CodeGenError> {
+        let guarded = if let Some(guard) = metadata.nullable_guard {
+            self.wrap_with_nullable_guard(input, guard)
+        } else {
+            input
+        };
+
+        let result = match metadata.kind {
+            ConversionKind::Identity => guarded,
+            ConversionKind::WideningPrimitive => guarded,
+            ConversionKind::Boxing => self.apply_boxing(guarded, metadata)?,
+            ConversionKind::Unboxing => self.apply_unboxing(guarded, metadata)?,
+            ConversionKind::StringConversion | ConversionKind::MethodInvocation => {
+                self.apply_helper_conversion(guarded, metadata)
+            }
+        };
+
+        Ok(result)
+    }
+
+    fn apply_helper_conversion(&mut self, input: String, metadata: &ConversionMetadata) -> String {
+        if let Some(helper) = metadata.helper.as_ref() {
+            self.invoke_helper(helper, input)
+        } else {
+            input
+        }
+    }
+
+    fn invoke_helper(&mut self, helper: &ConversionHelper, input: String) -> String {
+        if helper.is_static {
+            let owner = self.helper_owner_simple_name(&helper.owner);
+            format!("{owner}.{}({input})", helper.method)
+        } else {
+            format!("({input}).{}()", helper.method)
+        }
+    }
+
+    fn apply_boxing(
+        &mut self,
+        input: String,
+        metadata: &ConversionMetadata,
+    ) -> Result<String, CodeGenError> {
+        if let Some(info) = primitive_info_by_primitive(&metadata.from_type) {
+            let owner = self.helper_owner_simple_name(info.wrapper);
+            Ok(format!("{owner}.valueOf({input})"))
+        } else if let Some(helper) = metadata.helper.as_ref() {
+            Ok(self.invoke_helper(helper, input))
+        } else {
+            Ok(input)
+        }
+    }
+
+    fn apply_unboxing(
+        &mut self,
+        input: String,
+        metadata: &ConversionMetadata,
+    ) -> Result<String, CodeGenError> {
+        if let Some(info) = primitive_info_by_wrapper(&metadata.from_type) {
+            Ok(format!("({input}).{}()", info.unboxing_method))
+        } else if let Some(helper) = metadata.helper.as_ref() {
+            Ok(self.invoke_helper(helper, input))
+        } else {
+            Ok(input)
+        }
+    }
+
+    fn helper_owner_simple_name(&mut self, owner: &str) -> String {
+        if owner.starts_with("java.lang.") {
+            Self::simple_name(owner)
+        } else {
+            self.add_import(owner);
+            Self::simple_name(owner)
+        }
+    }
+
+    fn wrap_with_nullable_guard(&mut self, input: String, guard: NullableGuard) -> String {
+        self.add_import("java.util.Objects");
+        match guard.reason {
+            NullableGuardReason::OptionalLift | NullableGuardReason::Unboxing => {
+                format!("Objects.requireNonNull({input})")
+            }
+        }
+    }
+
     fn render_sequence_source(
         &mut self,
         source: &SequenceSource,
@@ -1505,7 +1621,7 @@ impl JavaCodeGenerator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use jv_build::metadata::{SymbolIndex, TypeEntry};
+    use jv_build::metadata::{JavaMethodSignature, SymbolIndex, TypeEntry};
     use jv_ir::IrExpression;
     use std::sync::Arc;
 
@@ -1526,7 +1642,13 @@ mod tests {
 
         let mut index = SymbolIndex::new(None);
         let mut entry = TypeEntry::new("java.util.List".to_string(), "java.util".to_string(), None);
-        entry.add_instance_method("size".to_string());
+        entry.add_instance_method(
+            "size".to_string(),
+            JavaMethodSignature {
+                parameters: Vec::new(),
+                return_type: JavaType::Primitive("int".to_string()),
+            },
+        );
         index.types.insert("java.util.List".to_string(), entry);
 
         generator.set_symbol_index(Some(Arc::new(index)));
@@ -1578,4 +1700,72 @@ mod tests {
             .expect("codegen succeeds");
         assert_eq!(rendered, "counter.size");
     }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct PrimitiveConversionInfo {
+    primitive: &'static str,
+    wrapper: &'static str,
+    unboxing_method: &'static str,
+}
+
+const PRIMITIVE_CONVERSIONS: &[PrimitiveConversionInfo] = &[
+    PrimitiveConversionInfo {
+        primitive: "boolean",
+        wrapper: "java.lang.Boolean",
+        unboxing_method: "booleanValue",
+    },
+    PrimitiveConversionInfo {
+        primitive: "byte",
+        wrapper: "java.lang.Byte",
+        unboxing_method: "byteValue",
+    },
+    PrimitiveConversionInfo {
+        primitive: "short",
+        wrapper: "java.lang.Short",
+        unboxing_method: "shortValue",
+    },
+    PrimitiveConversionInfo {
+        primitive: "int",
+        wrapper: "java.lang.Integer",
+        unboxing_method: "intValue",
+    },
+    PrimitiveConversionInfo {
+        primitive: "long",
+        wrapper: "java.lang.Long",
+        unboxing_method: "longValue",
+    },
+    PrimitiveConversionInfo {
+        primitive: "float",
+        wrapper: "java.lang.Float",
+        unboxing_method: "floatValue",
+    },
+    PrimitiveConversionInfo {
+        primitive: "double",
+        wrapper: "java.lang.Double",
+        unboxing_method: "doubleValue",
+    },
+    PrimitiveConversionInfo {
+        primitive: "char",
+        wrapper: "java.lang.Character",
+        unboxing_method: "charValue",
+    },
+];
+
+fn primitive_info_by_primitive(name: &str) -> Option<&'static PrimitiveConversionInfo> {
+    PRIMITIVE_CONVERSIONS
+        .iter()
+        .find(|info| info.primitive.eq_ignore_ascii_case(name))
+}
+
+fn primitive_info_by_wrapper(name: &str) -> Option<&'static PrimitiveConversionInfo> {
+    PRIMITIVE_CONVERSIONS.iter().find(|info| {
+        info.wrapper.eq_ignore_ascii_case(name)
+            || info
+                .wrapper
+                .rsplit('.')
+                .next()
+                .map(|simple| simple.eq_ignore_ascii_case(name))
+                .unwrap_or(false)
+    })
 }

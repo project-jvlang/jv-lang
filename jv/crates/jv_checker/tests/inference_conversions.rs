@@ -1,9 +1,9 @@
 use jv_build::metadata::{ConversionCatalog, JavaMethodSignature, SymbolIndex, TypeEntry};
 use jv_checker::inference::{
-    CompatibilityChecker, Constraint, ConstraintKind, ConstraintSet, ConstraintSolver,
-    ConversionHelperCatalog, ConversionKind, ConversionOutcome, ConversionRulesEngine,
-    InferenceTelemetry, NullableGuardReason, PrimitiveType, TypeEnvironment, TypeError,
-    TypeFactory, TypeKind,
+    AppliedConversion, CompatibilityChecker, Constraint, ConstraintKind, ConstraintSet,
+    ConstraintSolver, ConversionHelperCatalog, ConversionKind, ConversionOutcome,
+    ConversionRulesEngine, InferenceTelemetry, NullableGuardReason, PrimitiveType, TypeEnvironment,
+    TypeError, TypeFactory, TypeKind,
 };
 use jv_ir::types::JavaType;
 use std::sync::Arc;
@@ -170,6 +170,23 @@ fn telemetry_records_conversion_events_and_catalog_hits() {
     assert_eq!(hit.method, "valueOf");
     assert!(hit.is_static);
     assert!(telemetry.nullable_guards.is_empty());
+}
+
+#[test]
+fn conversion_diagnostic_reports_boxing_event() {
+    let conversion = AppliedConversion::new(
+        TypeKind::primitive(PrimitiveType::Int),
+        TypeKind::boxed(PrimitiveType::Int),
+        ConversionKind::Boxing,
+        None,
+        None,
+        false,
+    );
+
+    let diagnostic = jv_checker::inference::diagnostics::conversion_diagnostic(&conversion)
+        .expect("diagnostic produced");
+    assert_eq!(diagnostic.code, "JV_TYPE_001");
+    assert!(diagnostic.message.contains("Implicitly boxed"));
 }
 
 fn catalog_from_entries(entries: Vec<TypeEntry>) -> ConversionHelperCatalog {

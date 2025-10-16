@@ -2,15 +2,15 @@ use crate::builder::{JavaCompilationUnit, JavaSourceBuilder};
 use crate::config::JavaCodeGenConfig;
 use crate::error::CodeGenError;
 use crate::target_version::TargetedJavaEmitter;
-use jv_ast::{BinaryOp, CallArgumentStyle, Literal, SequenceDelimiter, UnaryOp};
+use jv_ast::{BinaryOp, CallArgumentStyle, Literal, SequenceDelimiter, Span, UnaryOp};
 use jv_build::metadata::SymbolIndex;
 use jv_ir::{
-    CompletableFutureOp, IrCaseLabel, IrCatchClause, IrDeconstructionComponent,
-    IrDeconstructionPattern, IrExpression, IrForEachKind, IrForLoopMetadata, IrGenericMetadata,
-    IrImplicitWhenEnd, IrImport, IrImportDetail, IrModifiers, IrNumericRangeLoop, IrParameter,
-    IrProgram, IrRecordComponent, IrResource, IrSampleDeclaration, IrStatement, IrSwitchCase,
-    IrTypeParameter, IrVariance, IrVisibility, JavaType, MethodOverload, UtilityClass,
-    VirtualThreadOp,
+    CompletableFutureOp, ConversionHelper, ConversionKind, ConversionMetadata, IrCaseLabel,
+    IrCatchClause, IrDeconstructionComponent, IrDeconstructionPattern, IrExpression, IrForEachKind,
+    IrForLoopMetadata, IrGenericMetadata, IrImplicitWhenEnd, IrImport, IrImportDetail, IrModifiers,
+    IrNumericRangeLoop, IrParameter, IrProgram, IrRecordComponent, IrResource, IrSampleDeclaration,
+    IrStatement, IrSwitchCase, IrTypeParameter, IrVariance, IrVisibility, JavaType, MethodOverload,
+    NullableGuard, NullableGuardReason, UtilityClass, VirtualThreadOp,
 };
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
@@ -35,6 +35,7 @@ pub struct JavaCodeGenerator {
     package: Option<String>,
     symbol_index: Option<Arc<SymbolIndex>>,
     instance_extension_methods: HashMap<String, Vec<IrStatement>>,
+    conversion_metadata: HashMap<SpanKey, Vec<ConversionMetadata>>,
 }
 
 impl JavaCodeGenerator {
@@ -55,6 +56,7 @@ impl JavaCodeGenerator {
             package: None,
             symbol_index: None,
             instance_extension_methods: HashMap::new(),
+            conversion_metadata: HashMap::new(),
         }
     }
 
@@ -70,6 +72,13 @@ impl JavaCodeGenerator {
         self.package = program.package.clone();
         self.generic_metadata = program.generic_metadata.clone();
         self.metadata_path.clear();
+        self.conversion_metadata.clear();
+        for entry in &program.conversion_metadata {
+            self.conversion_metadata
+                .entry(SpanKey::from(&entry.span))
+                .or_default()
+                .push(entry.metadata.clone());
+        }
 
         let mut unit = JavaCompilationUnit::new();
         unit.package_declaration = program.package.clone();
@@ -252,6 +261,7 @@ impl JavaCodeGenerator {
         self.sequence_helper = None;
         self.metadata_path.clear();
         self.instance_extension_methods.clear();
+        self.conversion_metadata.clear();
     }
 
     fn symbol_index(&self) -> Option<&SymbolIndex> {
@@ -519,5 +529,24 @@ impl JavaCodeGenerator {
         self.instance_extension_methods
             .remove(type_name)
             .unwrap_or_default()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct SpanKey {
+    start_line: usize,
+    start_column: usize,
+    end_line: usize,
+    end_column: usize,
+}
+
+impl From<&Span> for SpanKey {
+    fn from(span: &Span) -> Self {
+        Self {
+            start_line: span.start_line,
+            start_column: span.start_column,
+            end_line: span.end_line,
+            end_column: span.end_column,
+        }
     }
 }

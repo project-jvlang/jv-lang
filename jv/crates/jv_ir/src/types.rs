@@ -243,6 +243,135 @@ pub enum IrExpression {
     },
 }
 
+/// Conversion metadata kinds mirrored from the inference engine.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ConversionKind {
+    Identity,
+    WideningPrimitive,
+    Boxing,
+    Unboxing,
+    StringConversion,
+    MethodInvocation,
+}
+
+impl ConversionKind {
+    pub fn label(self) -> &'static str {
+        match self {
+            ConversionKind::Identity => "identity",
+            ConversionKind::WideningPrimitive => "widening",
+            ConversionKind::Boxing => "boxing",
+            ConversionKind::Unboxing => "unboxing",
+            ConversionKind::StringConversion => "string",
+            ConversionKind::MethodInvocation => "method",
+        }
+    }
+}
+
+/// Helper invocation description for conversions that rely on Java helpers.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ConversionHelper {
+    pub owner: String,
+    pub method: String,
+    pub is_static: bool,
+}
+
+/// Reason why a nullable guard is required before applying the conversion.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum NullableGuardReason {
+    OptionalLift,
+    Unboxing,
+}
+
+/// Nullable guard metadata propagated to code generation and tooling.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NullableGuard {
+    pub reason: NullableGuardReason,
+}
+
+impl NullableGuard {
+    pub const fn new(reason: NullableGuardReason) -> Self {
+        Self { reason }
+    }
+}
+
+/// Rich metadata describing a single conversion attached to an IR node.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ConversionMetadata {
+    pub from_type: String,
+    pub to_type: String,
+    pub kind: ConversionKind,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub helper: Option<ConversionHelper>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub nullable_guard: Option<NullableGuard>,
+}
+
+impl ConversionMetadata {
+    pub fn new(
+        kind: ConversionKind,
+        from_type: impl Into<String>,
+        to_type: impl Into<String>,
+    ) -> Self {
+        Self {
+            from_type: from_type.into(),
+            to_type: to_type.into(),
+            kind,
+            helper: None,
+            nullable_guard: None,
+        }
+    }
+
+    pub fn with_helper(mut self, helper: ConversionHelper) -> Self {
+        self.helper = Some(helper);
+        self
+    }
+
+    pub fn with_nullable_guard(mut self, guard: NullableGuard) -> Self {
+        self.nullable_guard = Some(guard);
+        self
+    }
+}
+
+/// Mapping entry tying a conversion metadata record to a concrete Span.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ConversionMetadataEntry {
+    pub span: Span,
+    pub metadata: ConversionMetadata,
+}
+
+impl IrExpression {
+    /// Returns the source span associated with the expression node.
+    pub fn span(&self) -> Span {
+        match self {
+            IrExpression::Literal(_, span)
+            | IrExpression::RegexPattern { span, .. }
+            | IrExpression::Identifier { span, .. }
+            | IrExpression::MethodCall { span, .. }
+            | IrExpression::FieldAccess { span, .. }
+            | IrExpression::ArrayAccess { span, .. }
+            | IrExpression::Binary { span, .. }
+            | IrExpression::Unary { span, .. }
+            | IrExpression::Assignment { span, .. }
+            | IrExpression::Conditional { span, .. }
+            | IrExpression::Block { span, .. }
+            | IrExpression::ArrayCreation { span, .. }
+            | IrExpression::ObjectCreation { span, .. }
+            | IrExpression::Lambda { span, .. }
+            | IrExpression::SequencePipeline { span, .. }
+            | IrExpression::Switch { span, .. }
+            | IrExpression::Cast { span, .. }
+            | IrExpression::InstanceOf { span, .. }
+            | IrExpression::This { span, .. }
+            | IrExpression::Super { span, .. }
+            | IrExpression::NullSafeOperation { span, .. }
+            | IrExpression::StringFormat { span, .. }
+            | IrExpression::CompletableFuture { span, .. }
+            | IrExpression::VirtualThread { span, .. }
+            | IrExpression::TryWithResources { span, .. } => span.clone(),
+        }
+    }
+}
+
 /// Sample data mode selected via @Sample annotation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SampleMode {
@@ -979,7 +1108,24 @@ pub struct IrProgram {
     pub type_declarations: Vec<IrStatement>, // Classes, interfaces, records
     #[serde(default)]
     pub generic_metadata: GenericMetadataMap,
+    #[serde(default)]
+    pub conversion_metadata: Vec<ConversionMetadataEntry>,
     pub span: Span,
+}
+
+impl IrProgram {
+    pub fn conversion_metadata(&self) -> &[ConversionMetadataEntry] {
+        &self.conversion_metadata
+    }
+
+    pub fn conversion_metadata_mut(&mut self) -> &mut Vec<ConversionMetadataEntry> {
+        &mut self.conversion_metadata
+    }
+
+    pub fn add_conversion_metadata(&mut self, span: Span, metadata: ConversionMetadata) {
+        self.conversion_metadata
+            .push(ConversionMetadataEntry { span, metadata });
+    }
 }
 
 /// Method overload generated from default/named parameters

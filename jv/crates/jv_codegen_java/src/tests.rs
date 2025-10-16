@@ -271,6 +271,7 @@ fn sample_embed_program() -> IrProgram {
         imports: vec![],
         type_declarations: vec![user_sample_record(), embed_data_class()],
         generic_metadata: Default::default(),
+        conversion_metadata: Vec::new(),
         span: dummy_span(),
     }
 }
@@ -355,6 +356,7 @@ fn sample_load_program() -> IrProgram {
         imports: vec![],
         type_declarations: vec![load_helper_class()],
         generic_metadata: Default::default(),
+        conversion_metadata: Vec::new(),
         span: dummy_span(),
     }
 }
@@ -575,6 +577,7 @@ fn snapshot_program() -> IrProgram {
         imports: vec![],
         type_declarations: vec![class],
         generic_metadata: Default::default(),
+        conversion_metadata: Vec::new(),
         span: dummy_span(),
     }
 }
@@ -714,6 +717,7 @@ fn record_extension_method_is_emitted_as_instance_method() {
         imports: vec![],
         type_declarations: vec![record_declaration, extension_method],
         generic_metadata: Default::default(),
+        conversion_metadata: Vec::new(),
         span,
     };
 
@@ -810,6 +814,7 @@ fn class_extension_method_is_emitted_as_instance_method() {
         imports: vec![],
         type_declarations: vec![class_declaration, extension_method],
         generic_metadata: Default::default(),
+        conversion_metadata: Vec::new(),
         span,
     };
 
@@ -890,6 +895,7 @@ fn external_extension_method_remains_static_utility() {
         imports: vec![],
         type_declarations: vec![method],
         generic_metadata: Default::default(),
+        conversion_metadata: Vec::new(),
         span,
     };
 
@@ -1042,6 +1048,7 @@ fn compilation_unit_collects_type_declarations() {
         imports: vec![],
         type_declarations: vec![simple_class()],
         generic_metadata: Default::default(),
+        conversion_metadata: Vec::new(),
         span: dummy_span(),
     };
 
@@ -1106,6 +1113,7 @@ fn script_statements_are_wrapped_in_generated_main() {
             },
         ],
         generic_metadata: Default::default(),
+        conversion_metadata: Vec::new(),
         span: dummy_span(),
     };
 
@@ -1140,6 +1148,7 @@ fn script_regex_val_is_hoisted_to_static_field() {
         imports: vec![],
         type_declarations: vec![regex_decl],
         generic_metadata: Default::default(),
+        conversion_metadata: Vec::new(),
         span: dummy_span(),
     };
 
@@ -1208,6 +1217,7 @@ fn class_regex_field_is_emitted_as_static_final() {
         imports: vec![],
         type_declarations: vec![class],
         generic_metadata: Default::default(),
+        conversion_metadata: Vec::new(),
         span: dummy_span(),
     };
 
@@ -1579,6 +1589,7 @@ fn snapshot_ir_program() {
     }
   ],
   "generic_metadata": {},
+  "conversion_metadata": [],
   "span": {
     "start_line": 0,
     "start_column": 0,
@@ -1626,6 +1637,7 @@ fn sample_record_generation_emits_expected_record() {
         imports: vec![],
         type_declarations: vec![user_sample_record()],
         generic_metadata: Default::default(),
+        conversion_metadata: Vec::new(),
         span: dummy_span(),
     };
 
@@ -1646,6 +1658,7 @@ fn sample_declaration_generates_records_from_descriptors() {
         imports: vec![],
         type_declarations: vec![IrStatement::SampleDeclaration(declaration)],
         generic_metadata: Default::default(),
+        conversion_metadata: Vec::new(),
         span: dummy_span(),
     };
 
@@ -1697,6 +1710,7 @@ fn embed_mode_sample_declaration_handles_csv() {
         imports: vec![],
         type_declarations: vec![IrStatement::SampleDeclaration(declaration)],
         generic_metadata: Default::default(),
+        conversion_metadata: Vec::new(),
         span: dummy_span(),
     };
 
@@ -1726,6 +1740,7 @@ fn embed_mode_sample_declaration_handles_tsv() {
         imports: vec![],
         type_declarations: vec![IrStatement::SampleDeclaration(declaration)],
         generic_metadata: Default::default(),
+        conversion_metadata: Vec::new(),
         span: dummy_span(),
     };
 
@@ -1755,6 +1770,7 @@ fn embed_mode_sample_declaration_produces_helper_class() {
         imports: vec![],
         type_declarations: vec![IrStatement::SampleDeclaration(declaration)],
         generic_metadata: Default::default(),
+        conversion_metadata: Vec::new(),
         span: dummy_span(),
     };
 
@@ -1885,6 +1901,7 @@ fn load_mode_sample_declaration_generates_http_fetch_pipeline() {
         imports: vec![],
         type_declarations: vec![IrStatement::SampleDeclaration(declaration)],
         generic_metadata: Default::default(),
+        conversion_metadata: Vec::new(),
         span: dummy_span(),
     };
 
@@ -1962,6 +1979,7 @@ fn load_mode_sample_declaration_supports_s3_and_tabular_decoding() {
         imports: vec![],
         type_declarations: vec![IrStatement::SampleDeclaration(declaration)],
         generic_metadata: Default::default(),
+        conversion_metadata: Vec::new(),
         span: dummy_span(),
     };
 

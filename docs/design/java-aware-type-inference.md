@@ -1443,6 +1443,8 @@ pub struct AppliedConversion {
 
 #### 4.2 IR への変換情報の記録
 
+`IrProgram` に `conversion_metadata: Vec<ConversionMetadataEntry>` を追加し、各 IR ノードの `Span` に紐づく変換メタデータを蓄積する。`ConversionMetadata` には `from_type`／`to_type`／`ConversionKind`／`ConversionHelper`／`NullableGuard` を含め、後続フェーズがそのまま利用できるようシリアライズ可能な構造に整備する。
+
 **ファイル**: `jv/crates/jv_mapper/src/lib.rs`
 
 ```rust
@@ -1470,6 +1472,8 @@ impl Mapper {
 ```
 
 #### 4.3 コード生成への反映
+
+`JavaCodeGenerator` は `IrProgram::conversion_metadata` をハッシュマップへ読み込み、式レンダリング後に対応するメタデータを逐次取り出してラップ処理を適用する。ボクシングでは `Integer.valueOf(expr)`、アンボクシングでは `expr.intValue()` を生成し、`NullableGuard` が付与されている場合は `Objects.requireNonNull(expr)` を挿入する。変換を伴うケースを回帰テストとして `jv_codegen_java/tests/conversions.rs` に追加する。
 
 **ファイル**: `jv/crates/jv_codegen_java/src/generator/expressions.rs`
 
@@ -1555,6 +1559,9 @@ pub static CONVERSION_DIAGNOSTICS: &[DiagnosticDescriptor] = &[
 ```
 
 ### テスト追加
+
+- `jv_checker/tests/inference_conversions.rs`: 変換イベントが Telemetry と診断へ反映されることを検証するケースを追加する。
+- `jv_codegen_java/tests/conversions.rs`: IR 上の `ConversionMetadata` に基づいて Java コード生成がラップ処理を行うゴールデンテストを追加する。
 
 **ファイル**: `jv/crates/jv_codegen_java/tests/conversions.rs`
 

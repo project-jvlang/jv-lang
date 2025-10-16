@@ -82,6 +82,7 @@ fn audited_program() -> IrProgram {
         imports: vec![],
         type_declarations: vec![class],
         generic_metadata: Default::default(),
+        conversion_metadata: Vec::new(),
         span: dummy_span(),
     }
 }

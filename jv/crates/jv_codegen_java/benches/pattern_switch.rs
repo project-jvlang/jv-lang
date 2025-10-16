@@ -163,6 +163,7 @@ fn build_switch_program(
         imports: vec![],
         type_declarations: extra_declarations,
         generic_metadata: Default::default(),
+        conversion_metadata: Vec::new(),
         span: dummy_span(),
     }
 }
