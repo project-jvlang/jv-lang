@@ -34,6 +34,7 @@ pub struct JavaCodeGenerator {
     metadata_path: Vec<String>,
     package: Option<String>,
     symbol_index: Option<Arc<SymbolIndex>>,
+    instance_extension_methods: HashMap<String, Vec<IrStatement>>,
 }
 
 impl JavaCodeGenerator {
@@ -53,6 +54,7 @@ impl JavaCodeGenerator {
             metadata_path: Vec::new(),
             package: None,
             symbol_index: None,
+            instance_extension_methods: HashMap::new(),
         }
     }
 
@@ -91,6 +93,9 @@ impl JavaCodeGenerator {
                     remaining_declarations.push(declaration.clone());
                 }
                 IrStatement::MethodDeclaration { .. } => {
+                    if self.try_register_instance_extension_method(declaration, program) {
+                        continue;
+                    }
                     script_methods.push(declaration.clone());
                 }
                 _ => {
@@ -246,6 +251,7 @@ impl JavaCodeGenerator {
         self.variance_stack.clear();
         self.sequence_helper = None;
         self.metadata_path.clear();
+        self.instance_extension_methods.clear();
     }
 
     fn symbol_index(&self) -> Option<&SymbolIndex> {
@@ -437,5 +443,81 @@ impl JavaCodeGenerator {
             }
             _ => None,
         }
+    }
+
+    fn try_register_instance_extension_method(
+        &mut self,
+        declaration: &IrStatement,
+        program: &IrProgram,
+    ) -> bool {
+        match Self::base_statement(declaration) {
+            IrStatement::MethodDeclaration {
+                parameters,
+                modifiers,
+                ..
+            } => {
+                if !modifiers.is_static || parameters.is_empty() {
+                    return false;
+                }
+                let receiver_param = &parameters[0];
+                if receiver_param.name != "receiver" {
+                    return false;
+                }
+                if !self.should_emit_as_instance_method(&receiver_param.java_type, program) {
+                    return false;
+                }
+                if let Some(type_name) = Self::extract_type_name(&receiver_param.java_type) {
+                    self.instance_extension_methods
+                        .entry(type_name)
+                        .or_default()
+                        .push(declaration.clone());
+                    return true;
+                }
+                false
+            }
+            _ => false,
+        }
+    }
+
+    fn should_emit_as_instance_method(
+        &self,
+        receiver_type: &JavaType,
+        program: &IrProgram,
+    ) -> bool {
+        if let Some(type_name) = Self::extract_type_name(receiver_type) {
+            self.is_defined_in_current_program(&type_name, program)
+        } else {
+            false
+        }
+    }
+
+    fn is_defined_in_current_program(&self, type_name: &str, program: &IrProgram) -> bool {
+        program
+            .type_declarations
+            .iter()
+            .any(|decl| match Self::base_statement(decl) {
+                IrStatement::ClassDeclaration { name, .. }
+                | IrStatement::RecordDeclaration { name, .. }
+                | IrStatement::InterfaceDeclaration { name, .. } => name == type_name,
+                _ => false,
+            })
+    }
+
+    fn extract_type_name(java_type: &JavaType) -> Option<String> {
+        match java_type {
+            JavaType::Reference { name, .. } => Some(Self::simple_name(name)),
+            JavaType::Array { element_type, .. } => Self::extract_type_name(element_type),
+            _ => None,
+        }
+    }
+
+    fn simple_name(name: &str) -> String {
+        name.rsplit('.').next().unwrap_or(name).to_string()
+    }
+
+    fn take_instance_extension_methods(&mut self, type_name: &str) -> Vec<IrStatement> {
+        self.instance_extension_methods
+            .remove(type_name)
+            .unwrap_or_default()
     }
 }

@@ -653,6 +653,276 @@ fn method_generation_renders_generic_type_parameters() {
 }
 
 #[test]
+fn record_extension_method_is_emitted_as_instance_method() {
+    let mut generator = JavaCodeGenerator::new();
+    let span = dummy_span();
+    let record_type = JavaType::Reference {
+        name: "SequenceCore".to_string(),
+        generic_args: vec![],
+    };
+
+    let record_declaration = IrStatement::RecordDeclaration {
+        name: "SequenceCore".to_string(),
+        type_parameters: vec![],
+        components: vec![IrRecordComponent {
+            name: "value".to_string(),
+            java_type: string_type(),
+            span: span.clone(),
+        }],
+        interfaces: vec![],
+        methods: vec![],
+        modifiers: IrModifiers {
+            visibility: IrVisibility::Public,
+            ..IrModifiers::default()
+        },
+        span: span.clone(),
+    };
+
+    let mut extension_modifiers = IrModifiers::default();
+    extension_modifiers.visibility = IrVisibility::Public;
+    extension_modifiers.is_static = true;
+
+    let extension_method = IrStatement::MethodDeclaration {
+        name: "identity".to_string(),
+        type_parameters: vec![],
+        parameters: vec![IrParameter {
+            name: "receiver".to_string(),
+            java_type: record_type.clone(),
+            modifiers: IrModifiers::default(),
+            span: span.clone(),
+        }],
+        return_type: record_type.clone(),
+        body: Some(IrExpression::Block {
+            statements: vec![IrStatement::Return {
+                value: Some(IrExpression::Identifier {
+                    name: "receiver".to_string(),
+                    java_type: record_type.clone(),
+                    span: span.clone(),
+                }),
+                span: span.clone(),
+            }],
+            java_type: record_type.clone(),
+            span: span.clone(),
+        }),
+        modifiers: extension_modifiers,
+        throws: vec![],
+        span: span.clone(),
+    };
+
+    let program = IrProgram {
+        package: Some("demo.sequence".to_string()),
+        imports: vec![],
+        type_declarations: vec![record_declaration, extension_method],
+        generic_metadata: Default::default(),
+        span,
+    };
+
+    let unit = generator
+        .generate_compilation_unit(&program)
+        .expect("code generation should succeed");
+
+    assert_eq!(
+        unit.type_declarations.len(),
+        1,
+        "record should own the extension instance methods"
+    );
+
+    let record_java = &unit.type_declarations[0];
+    assert!(
+        record_java.contains("public record SequenceCore(String value)"),
+        "record declaration should be generated"
+    );
+    assert!(
+        record_java.contains("public SequenceCore identity()"),
+        "extension must become an instance method"
+    );
+    assert!(
+        record_java.contains("return this;"),
+        "receiver references should be rewritten to `this`"
+    );
+    assert!(
+        !record_java.contains("static SequenceCore identity"),
+        "static modifier must be removed from instance method"
+    );
+    assert!(
+        !record_java.contains("SequenceCore identity(SequenceCore receiver)"),
+        "receiver parameter must be removed from instance method signature"
+    );
+}
+
+#[test]
+fn class_extension_method_is_emitted_as_instance_method() {
+    let mut generator = JavaCodeGenerator::new();
+    let span = dummy_span();
+    let class_type = JavaType::Reference {
+        name: "Greeter".to_string(),
+        generic_args: vec![],
+    };
+
+    let class_declaration = IrStatement::ClassDeclaration {
+        name: "Greeter".to_string(),
+        type_parameters: vec![],
+        superclass: None,
+        interfaces: vec![],
+        fields: vec![],
+        methods: vec![],
+        nested_classes: vec![],
+        modifiers: IrModifiers {
+            visibility: IrVisibility::Public,
+            ..IrModifiers::default()
+        },
+        span: span.clone(),
+    };
+
+    let mut extension_modifiers = IrModifiers::default();
+    extension_modifiers.visibility = IrVisibility::Public;
+    extension_modifiers.is_static = true;
+
+    let extension_method = IrStatement::MethodDeclaration {
+        name: "self".to_string(),
+        type_parameters: vec![],
+        parameters: vec![IrParameter {
+            name: "receiver".to_string(),
+            java_type: class_type.clone(),
+            modifiers: IrModifiers::default(),
+            span: span.clone(),
+        }],
+        return_type: class_type.clone(),
+        body: Some(IrExpression::Block {
+            statements: vec![IrStatement::Return {
+                value: Some(IrExpression::Identifier {
+                    name: "receiver".to_string(),
+                    java_type: class_type.clone(),
+                    span: span.clone(),
+                }),
+                span: span.clone(),
+            }],
+            java_type: class_type.clone(),
+            span: span.clone(),
+        }),
+        modifiers: extension_modifiers,
+        throws: vec![],
+        span: span.clone(),
+    };
+
+    let program = IrProgram {
+        package: Some("demo.greeter".to_string()),
+        imports: vec![],
+        type_declarations: vec![class_declaration, extension_method],
+        generic_metadata: Default::default(),
+        span,
+    };
+
+    let unit = generator
+        .generate_compilation_unit(&program)
+        .expect("code generation should succeed");
+
+    assert_eq!(
+        unit.type_declarations.len(),
+        1,
+        "class should own the extension instance methods"
+    );
+
+    let class_java = &unit.type_declarations[0];
+    assert!(
+        class_java.contains("public class Greeter"),
+        "class declaration should be generated"
+    );
+    assert!(
+        class_java.contains("public Greeter self()"),
+        "extension must become an instance method on the class"
+    );
+    assert!(
+        class_java.contains("return this;"),
+        "receiver references should be rewritten to `this`"
+    );
+    assert!(
+        !class_java.contains("static Greeter self"),
+        "static modifier must be removed from class-backed instance method"
+    );
+    assert!(
+        !class_java.contains("Greeter self(Greeter receiver)"),
+        "receiver parameter must be removed from class-backed instance method signature"
+    );
+}
+
+#[test]
+fn external_extension_method_remains_static_utility() {
+    let mut generator = JavaCodeGenerator::new();
+    let span = dummy_span();
+    let list_type = JavaType::Reference {
+        name: "java.util.List".to_string(),
+        generic_args: vec![],
+    };
+
+    let mut modifiers = IrModifiers::default();
+    modifiers.visibility = IrVisibility::Public;
+    modifiers.is_static = true;
+
+    let method = IrStatement::MethodDeclaration {
+        name: "size".to_string(),
+        type_parameters: vec![],
+        parameters: vec![IrParameter {
+            name: "receiver".to_string(),
+            java_type: list_type.clone(),
+            modifiers: IrModifiers::default(),
+            span: span.clone(),
+        }],
+        return_type: JavaType::Primitive("int".to_string()),
+        body: Some(IrExpression::Block {
+            statements: vec![IrStatement::Return {
+                value: Some(IrExpression::Literal(
+                    Literal::Number("0".to_string()),
+                    span.clone(),
+                )),
+                span: span.clone(),
+            }],
+            java_type: JavaType::Primitive("int".to_string()),
+            span: span.clone(),
+        }),
+        modifiers,
+        throws: vec![],
+        span: span.clone(),
+    };
+
+    let program = IrProgram {
+        package: Some("demo.collections".to_string()),
+        imports: vec![],
+        type_declarations: vec![method],
+        generic_metadata: Default::default(),
+        span,
+    };
+
+    let unit = generator
+        .generate_compilation_unit(&program)
+        .expect("code generation should succeed");
+
+    assert_eq!(
+        unit.type_declarations.len(),
+        1,
+        "script utility class should be generated for external extensions"
+    );
+
+    let utility_java = &unit.type_declarations[0];
+    assert!(
+        utility_java.contains("public final class GeneratedMain"),
+        "script wrapper class should be emitted"
+    );
+    assert!(
+        utility_java.contains("public static int size(java.util.List receiver)"),
+        "external extension must remain a static utility method with receiver parameter"
+    );
+    assert!(
+        !utility_java.contains("public int size()"),
+        "external extension must not be converted to an instance method"
+    );
+    assert!(
+        utility_java.contains("return 0;"),
+        "method body should remain intact when kept static"
+    );
+}
+
+#[test]
 fn expression_generation_handles_binary_arithmetic() {
     let mut generator = JavaCodeGenerator::new();
     let expression = IrExpression::Binary {
@@ -1549,7 +1819,7 @@ fn embed_mode_java_source_snapshot() {
         source.as_str(),
         @r###"package sample.embed;
 
-public record UserSample(int id, String name, String email);
+public record UserSample(int id, String name, String email) {}
 
 public class UserSampleData {
     private static final String RAW_JSON = "{\"users\": 2}";

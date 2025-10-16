@@ -71,6 +71,8 @@ impl JavaCodeGenerator {
                     builder.push_line(&comment);
                 }
 
+                let extension_methods = self.take_instance_extension_methods(name);
+
                 for field in fields {
                     let field_code = self.generate_statement(field)?;
                     Self::push_lines(&mut builder, &field_code);
@@ -82,6 +84,12 @@ impl JavaCodeGenerator {
 
                 for method in methods {
                     let method_code = self.generate_method(method)?;
+                    Self::push_lines(&mut builder, &method_code);
+                    builder.push_line("");
+                }
+
+                for method in extension_methods {
+                    let method_code = self.generate_instance_method_from_extension(&method)?;
                     Self::push_lines(&mut builder, &method_code);
                     builder.push_line("");
                 }
@@ -154,7 +162,9 @@ impl JavaCodeGenerator {
                 let implements = self.render_interface_clause("implements", interfaces)?;
                 header.push_str(&implements);
 
-                if methods.is_empty() {
+                let extension_methods = self.take_instance_extension_methods(name);
+
+                if methods.is_empty() && extension_methods.is_empty() {
                     builder.push_line(&format!("{} {{}}", header));
                     return Ok(builder.build());
                 }
@@ -163,6 +173,11 @@ impl JavaCodeGenerator {
                 builder.indent();
                 for method in methods {
                     let method_code = self.generate_method(method)?;
+                    Self::push_lines(&mut builder, &method_code);
+                    builder.push_line("");
+                }
+                for method in extension_methods {
+                    let method_code = self.generate_instance_method_from_extension(&method)?;
                     Self::push_lines(&mut builder, &method_code);
                     builder.push_line("");
                 }
@@ -367,6 +382,66 @@ impl JavaCodeGenerator {
                 construct: "Expected method declaration".to_string(),
                 span: None,
             })
+        }
+    }
+
+    pub fn generate_instance_method_from_extension(
+        &mut self,
+        method: &IrStatement,
+    ) -> Result<String, CodeGenError> {
+        match method {
+            IrStatement::Commented {
+                statement, comment, ..
+            } => {
+                let rendered = self.generate_instance_method_from_extension(statement)?;
+                Ok(Self::append_inline_comment(rendered, comment))
+            }
+            IrStatement::MethodDeclaration {
+                name,
+                type_parameters,
+                parameters,
+                return_type,
+                body,
+                modifiers,
+                throws,
+                span,
+            } => {
+                if parameters.is_empty() {
+                    return Err(CodeGenError::UnsupportedConstruct {
+                        construct: format!(
+                            "Extension method {} must have a receiver parameter",
+                            name
+                        ),
+                        span: Some(span.clone()),
+                    });
+                }
+
+                let receiver_type = parameters[0].java_type.clone();
+                let mut instance_modifiers = modifiers.clone();
+                instance_modifiers.is_static = false;
+
+                let instance_parameters = parameters[1..].to_vec();
+                let instance_body = body
+                    .as_ref()
+                    .map(|expr| replace_receiver_expression(expr.clone(), &receiver_type));
+
+                let instance_method = IrStatement::MethodDeclaration {
+                    name: name.clone(),
+                    type_parameters: type_parameters.clone(),
+                    parameters: instance_parameters,
+                    return_type: return_type.clone(),
+                    body: instance_body,
+                    modifiers: instance_modifiers,
+                    throws: throws.clone(),
+                    span: span.clone(),
+                };
+
+                self.generate_method(&instance_method)
+            }
+            _ => Err(CodeGenError::UnsupportedConstruct {
+                construct: "Expected method declaration for extension".to_string(),
+                span: None,
+            }),
         }
     }
 
@@ -769,5 +844,468 @@ impl JavaCodeGenerator {
         } else {
             String::new()
         }
+    }
+}
+
+fn replace_receiver_expression(expr: IrExpression, receiver_type: &JavaType) -> IrExpression {
+    match expr {
+        IrExpression::Identifier { name, span, .. } if name == "receiver" => IrExpression::This {
+            java_type: receiver_type.clone(),
+            span,
+        },
+        IrExpression::MethodCall {
+            receiver,
+            method_name,
+            args,
+            argument_style,
+            java_type,
+            span,
+        } => IrExpression::MethodCall {
+            receiver: receiver
+                .map(|inner| Box::new(replace_receiver_expression(*inner, receiver_type))),
+            method_name,
+            args: args
+                .into_iter()
+                .map(|arg| replace_receiver_expression(arg, receiver_type))
+                .collect(),
+            argument_style,
+            java_type,
+            span,
+        },
+        IrExpression::FieldAccess {
+            receiver,
+            field_name,
+            java_type,
+            span,
+        } => IrExpression::FieldAccess {
+            receiver: Box::new(replace_receiver_expression(*receiver, receiver_type)),
+            field_name,
+            java_type,
+            span,
+        },
+        IrExpression::ArrayAccess {
+            array,
+            index,
+            java_type,
+            span,
+        } => IrExpression::ArrayAccess {
+            array: Box::new(replace_receiver_expression(*array, receiver_type)),
+            index: Box::new(replace_receiver_expression(*index, receiver_type)),
+            java_type,
+            span,
+        },
+        IrExpression::Binary {
+            left,
+            op,
+            right,
+            java_type,
+            span,
+        } => IrExpression::Binary {
+            left: Box::new(replace_receiver_expression(*left, receiver_type)),
+            op,
+            right: Box::new(replace_receiver_expression(*right, receiver_type)),
+            java_type,
+            span,
+        },
+        IrExpression::Unary {
+            op,
+            operand,
+            java_type,
+            span,
+        } => IrExpression::Unary {
+            op,
+            operand: Box::new(replace_receiver_expression(*operand, receiver_type)),
+            java_type,
+            span,
+        },
+        IrExpression::Assignment {
+            target,
+            value,
+            java_type,
+            span,
+        } => IrExpression::Assignment {
+            target: Box::new(replace_receiver_expression(*target, receiver_type)),
+            value: Box::new(replace_receiver_expression(*value, receiver_type)),
+            java_type,
+            span,
+        },
+        IrExpression::Conditional {
+            condition,
+            then_expr,
+            else_expr,
+            java_type,
+            span,
+        } => IrExpression::Conditional {
+            condition: Box::new(replace_receiver_expression(*condition, receiver_type)),
+            then_expr: Box::new(replace_receiver_expression(*then_expr, receiver_type)),
+            else_expr: Box::new(replace_receiver_expression(*else_expr, receiver_type)),
+            java_type,
+            span,
+        },
+        IrExpression::Block {
+            statements,
+            java_type,
+            span,
+        } => IrExpression::Block {
+            statements: statements
+                .into_iter()
+                .map(|stmt| replace_receiver_in_statement(stmt, receiver_type))
+                .collect(),
+            java_type,
+            span,
+        },
+        IrExpression::ArrayCreation {
+            element_type,
+            dimensions,
+            initializer,
+            delimiter,
+            span,
+        } => IrExpression::ArrayCreation {
+            element_type,
+            dimensions: dimensions
+                .into_iter()
+                .map(|dim| dim.map(|expr| replace_receiver_expression(expr, receiver_type)))
+                .collect(),
+            initializer: initializer.map(|values| {
+                values
+                    .into_iter()
+                    .map(|expr| replace_receiver_expression(expr, receiver_type))
+                    .collect()
+            }),
+            delimiter,
+            span,
+        },
+        IrExpression::ObjectCreation {
+            class_name,
+            generic_args,
+            args,
+            java_type,
+            span,
+        } => IrExpression::ObjectCreation {
+            class_name,
+            generic_args,
+            args: args
+                .into_iter()
+                .map(|expr| replace_receiver_expression(expr, receiver_type))
+                .collect(),
+            java_type,
+            span,
+        },
+        IrExpression::Lambda {
+            functional_interface,
+            param_names,
+            param_types,
+            body,
+            java_type,
+            span,
+        } => IrExpression::Lambda {
+            functional_interface,
+            param_names,
+            param_types,
+            body: Box::new(replace_receiver_expression(*body, receiver_type)),
+            java_type,
+            span,
+        },
+        IrExpression::Switch {
+            discriminant,
+            cases,
+            java_type,
+            implicit_end,
+            span,
+            strategy_description,
+        } => IrExpression::Switch {
+            discriminant: Box::new(replace_receiver_expression(*discriminant, receiver_type)),
+            cases: cases
+                .into_iter()
+                .map(|case| IrSwitchCase {
+                    labels: case.labels,
+                    guard: case
+                        .guard
+                        .map(|expr| replace_receiver_expression(expr, receiver_type)),
+                    body: replace_receiver_expression(case.body, receiver_type),
+                    span: case.span,
+                })
+                .collect(),
+            java_type,
+            implicit_end,
+            strategy_description,
+            span,
+        },
+        IrExpression::Cast {
+            expr,
+            target_type,
+            span,
+        } => IrExpression::Cast {
+            expr: Box::new(replace_receiver_expression(*expr, receiver_type)),
+            target_type,
+            span,
+        },
+        IrExpression::InstanceOf {
+            expr,
+            target_type,
+            span,
+        } => IrExpression::InstanceOf {
+            expr: Box::new(replace_receiver_expression(*expr, receiver_type)),
+            target_type,
+            span,
+        },
+        IrExpression::NullSafeOperation {
+            expr,
+            operation,
+            default_value,
+            java_type,
+            span,
+        } => IrExpression::NullSafeOperation {
+            expr: Box::new(replace_receiver_expression(*expr, receiver_type)),
+            operation: Box::new(replace_receiver_expression(*operation, receiver_type)),
+            default_value: default_value
+                .map(|expr| Box::new(replace_receiver_expression(*expr, receiver_type))),
+            java_type,
+            span,
+        },
+        IrExpression::StringFormat {
+            format_string,
+            args,
+            span,
+        } => IrExpression::StringFormat {
+            format_string,
+            args: args
+                .into_iter()
+                .map(|expr| replace_receiver_expression(expr, receiver_type))
+                .collect(),
+            span,
+        },
+        IrExpression::CompletableFuture {
+            operation,
+            args,
+            java_type,
+            span,
+        } => IrExpression::CompletableFuture {
+            operation,
+            args: args
+                .into_iter()
+                .map(|expr| replace_receiver_expression(expr, receiver_type))
+                .collect(),
+            java_type,
+            span,
+        },
+        IrExpression::VirtualThread {
+            operation,
+            args,
+            java_type,
+            span,
+        } => IrExpression::VirtualThread {
+            operation,
+            args: args
+                .into_iter()
+                .map(|expr| replace_receiver_expression(expr, receiver_type))
+                .collect(),
+            java_type,
+            span,
+        },
+        IrExpression::TryWithResources {
+            resources,
+            body,
+            java_type,
+            span,
+        } => IrExpression::TryWithResources {
+            resources: resources
+                .into_iter()
+                .map(|res| IrResource {
+                    name: res.name,
+                    initializer: replace_receiver_expression(res.initializer, receiver_type),
+                    java_type: res.java_type,
+                    span: res.span,
+                })
+                .collect(),
+            body: Box::new(replace_receiver_expression(*body, receiver_type)),
+            java_type,
+            span,
+        },
+        other => other,
+    }
+}
+
+fn replace_receiver_in_statement(stmt: IrStatement, receiver_type: &JavaType) -> IrStatement {
+    match stmt {
+        IrStatement::Expression { expr, span } => IrStatement::Expression {
+            expr: replace_receiver_expression(expr, receiver_type),
+            span,
+        },
+        IrStatement::Return { value, span } => IrStatement::Return {
+            value: value.map(|expr| replace_receiver_expression(expr, receiver_type)),
+            span,
+        },
+        IrStatement::VariableDeclaration {
+            name,
+            java_type,
+            initializer,
+            is_final,
+            modifiers,
+            span,
+        } => IrStatement::VariableDeclaration {
+            name,
+            java_type,
+            initializer: initializer.map(|expr| replace_receiver_expression(expr, receiver_type)),
+            is_final,
+            modifiers,
+            span,
+        },
+        IrStatement::FieldDeclaration {
+            name,
+            java_type,
+            initializer,
+            modifiers,
+            span,
+        } => IrStatement::FieldDeclaration {
+            name,
+            java_type,
+            initializer: initializer.map(|expr| replace_receiver_expression(expr, receiver_type)),
+            modifiers,
+            span,
+        },
+        IrStatement::Block { statements, span } => IrStatement::Block {
+            statements: statements
+                .into_iter()
+                .map(|inner| replace_receiver_in_statement(inner, receiver_type))
+                .collect(),
+            span,
+        },
+        IrStatement::If {
+            condition,
+            then_stmt,
+            else_stmt,
+            span,
+        } => IrStatement::If {
+            condition: replace_receiver_expression(condition, receiver_type),
+            then_stmt: Box::new(replace_receiver_in_statement(*then_stmt, receiver_type)),
+            else_stmt: else_stmt
+                .map(|stmt| Box::new(replace_receiver_in_statement(*stmt, receiver_type))),
+            span,
+        },
+        IrStatement::While {
+            condition,
+            body,
+            span,
+        } => IrStatement::While {
+            condition: replace_receiver_expression(condition, receiver_type),
+            body: Box::new(replace_receiver_in_statement(*body, receiver_type)),
+            span,
+        },
+        IrStatement::ForEach {
+            variable,
+            variable_type,
+            iterable,
+            body,
+            iterable_kind,
+            span,
+        } => IrStatement::ForEach {
+            variable,
+            variable_type,
+            iterable: replace_receiver_expression(iterable, receiver_type),
+            body: Box::new(replace_receiver_in_statement(*body, receiver_type)),
+            iterable_kind,
+            span,
+        },
+        IrStatement::For {
+            init,
+            condition,
+            update,
+            body,
+            metadata,
+            span,
+        } => IrStatement::For {
+            init: init.map(|stmt| Box::new(replace_receiver_in_statement(*stmt, receiver_type))),
+            condition: condition.map(|expr| replace_receiver_expression(expr, receiver_type)),
+            update: update.map(|expr| replace_receiver_expression(expr, receiver_type)),
+            body: Box::new(replace_receiver_in_statement(*body, receiver_type)),
+            metadata,
+            span,
+        },
+        IrStatement::Switch {
+            discriminant,
+            cases,
+            span,
+        } => IrStatement::Switch {
+            discriminant: replace_receiver_expression(discriminant, receiver_type),
+            cases: cases
+                .into_iter()
+                .map(|case| IrSwitchCase {
+                    labels: case.labels,
+                    guard: case
+                        .guard
+                        .map(|expr| replace_receiver_expression(expr, receiver_type)),
+                    body: replace_receiver_expression(case.body, receiver_type),
+                    span: case.span,
+                })
+                .collect(),
+            span,
+        },
+        IrStatement::Try {
+            body,
+            catch_clauses,
+            finally_block,
+            span,
+        } => IrStatement::Try {
+            body: Box::new(replace_receiver_in_statement(*body, receiver_type)),
+            catch_clauses: catch_clauses
+                .into_iter()
+                .map(|clause| IrCatchClause {
+                    exception_type: clause.exception_type,
+                    variable_name: clause.variable_name,
+                    body: replace_receiver_in_statement(clause.body, receiver_type),
+                    span: clause.span,
+                })
+                .collect(),
+            finally_block: finally_block
+                .map(|stmt| Box::new(replace_receiver_in_statement(*stmt, receiver_type))),
+            span,
+        },
+        IrStatement::TryWithResources {
+            resources,
+            body,
+            catch_clauses,
+            finally_block,
+            span,
+        } => IrStatement::TryWithResources {
+            resources: resources
+                .into_iter()
+                .map(|res| IrResource {
+                    name: res.name,
+                    initializer: replace_receiver_expression(res.initializer, receiver_type),
+                    java_type: res.java_type,
+                    span: res.span,
+                })
+                .collect(),
+            body: Box::new(replace_receiver_in_statement(*body, receiver_type)),
+            catch_clauses: catch_clauses
+                .into_iter()
+                .map(|clause| IrCatchClause {
+                    exception_type: clause.exception_type,
+                    variable_name: clause.variable_name,
+                    body: replace_receiver_in_statement(clause.body, receiver_type),
+                    span: clause.span,
+                })
+                .collect(),
+            finally_block: finally_block
+                .map(|stmt| Box::new(replace_receiver_in_statement(*stmt, receiver_type))),
+            span,
+        },
+        IrStatement::Throw { expr, span } => IrStatement::Throw {
+            expr: replace_receiver_expression(expr, receiver_type),
+            span,
+        },
+        IrStatement::Commented {
+            statement,
+            comment,
+            kind,
+            comment_span,
+        } => IrStatement::Commented {
+            statement: Box::new(replace_receiver_in_statement(*statement, receiver_type)),
+            comment,
+            kind,
+            comment_span,
+        },
+        _ => stmt,
     }
 }
