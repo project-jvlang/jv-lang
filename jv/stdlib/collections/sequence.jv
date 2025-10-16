@@ -1,7 +1,10 @@
 package jv.collections
 
+import java.lang.Number
 import java.lang.IllegalArgumentException
 import java.util.*
+import java.util.stream.StreamSupport
+import java.util.stream.Stream
 
 /**
  * SequenceCore は Java Stream を直接保持する最小限の遅延チェーンコンテナ。
@@ -62,7 +65,7 @@ fun <T> SequenceCore<T>.filter(predicate: (T) -> Boolean): SequenceCore<T> {
  */
 fun <T> SequenceCore<T>.take(count: Int): SequenceCore<T> {
     return sequenceFromStream(
-        this.stream.limit(count.toLong())
+        this.stream.limit(count)
     )
 }
 
@@ -71,7 +74,7 @@ fun <T> SequenceCore<T>.take(count: Int): SequenceCore<T> {
  */
 fun <T> SequenceCore<T>.drop(count: Int): SequenceCore<T> {
     return sequenceFromStream(
-        this.stream.skip(count.toLong())
+        this.stream.skip(count)
     )
 }
 
@@ -107,9 +110,9 @@ fun <T : Comparable<T>> SequenceCore<T>.sorted(): SequenceCore<T> {
  */
 fun <T, R : Comparable<R>> SequenceCore<T>.sortedBy(selector: (T) -> R): SequenceCore<T> {
     return sequenceFromStream(
-        this.stream.sorted(
-            Comparator.comparing { value -> selector(value) }
-        )
+        this.stream.sorted { left right ->
+            selector(left).compareTo(selector(right))
+        }
     )
 }
 
@@ -136,16 +139,14 @@ fun <T, R> SequenceCore<T>.fold(initial: R, operation: (R, T) -> R): R {
  * Kotlin `Sequence.reduce` と同等の集約操作。
  */
 fun <T> SequenceCore<T>.reduce(operation: (T, T) -> T): T {
-    val reduced = this.stream.reduce { left right ->
+    val reduced : T = this.stream.reduce { left right ->
         operation(
             left
             right
         )
     }
 
-    return reduced.orElseThrow {
-        IllegalArgumentException("Sequence reduce() on empty source")
-    }
+    return reduced
 }
 
 /**
@@ -159,10 +160,10 @@ fun <T> SequenceCore<T>.count(): Long {
  * Kotlin `Sequence.sum` 相当の数値集計。
  */
 fun SequenceCore<Number>.sum(): Number {
-    val elements = this.stream.toList()
+    val elements : List<Number> = this.stream.toList()
     var total = 0
     for (candidate in elements) {
-        total = total + candidate.value
+        total = total + candidate
     }
     return total
 }
@@ -179,7 +180,7 @@ fun <T> SequenceCore<T>.forEach(action: (T) -> Unit) {
  */
 fun <T, K> SequenceCore<T>.groupBy(keySelector: (T) -> K): Map<K, List<T>> {
     var result = LinkedHashMap<K, List<T>>()
-    val elements = this.stream.toList()
+    val elements : List<T> = this.stream.toList()
     for (element in elements) {
         val key = keySelector(element)
 
@@ -205,7 +206,7 @@ fun <T, K> SequenceCore<T>.groupBy(keySelector: (T) -> K): Map<K, List<T>> {
  */
 fun <T, K, V> SequenceCore<T>.associate(transform: (T) -> Map.Entry<K, V>): Map<K, V> {
     var result = LinkedHashMap<K, V>()
-    val elements = this.stream.toList()
+    val elements : List<T> = this.stream.toList()
     for (element in elements) {
         val entry = transform(element)
         result.put(
@@ -296,7 +297,7 @@ fun <T> Iterable<T>.count(): Long {
 /**
  * Kotlin `Iterable.sum` と同等の数値集計。
  */
-fun <T> Iterable<T>.sum(): Long {
+fun <Number> Iterable<Number>.sum(): Number {
     return sequenceFromIterable(this).sum()
 }
 
