@@ -3,8 +3,7 @@ package jv.collections
 import java.lang.Number
 import java.lang.IllegalArgumentException
 import java.util.*
-import java.util.stream.StreamSupport
-import java.util.stream.Stream
+import java.util.stream.*
 
 /**
  * SequenceCore は Java Stream を直接保持する最小限の遅延チェーンコンテナ。
@@ -120,7 +119,7 @@ fun <T, R : Comparable<R>> SequenceCore<T>.sortedBy(selector: (T) -> R): Sequenc
  * Kotlin `Sequence.toList` と同等の終端操作。
  */
 fun <T> SequenceCore<T>.toList(): List<T> {
-    return this.stream.toList()
+    return this.stream.collect(Collectors.toList())
 }
 
 /**
@@ -160,7 +159,7 @@ fun <T> SequenceCore<T>.count(): Long {
  * Kotlin `Sequence.sum` 相当の数値集計。
  */
 fun SequenceCore<Number>.sum(): Number {
-    val elements : List<Number> = this.stream.toList()
+    val elements : List<Number> = this.toList()
     var total = 0
     for (candidate in elements) {
         total = total + candidate
@@ -180,7 +179,7 @@ fun <T> SequenceCore<T>.forEach(action: (T) -> Unit) {
  */
 fun <T, K> SequenceCore<T>.groupBy(keySelector: (T) -> K): Map<K, List<T>> {
     var result = LinkedHashMap<K, List<T>>()
-    val elements : List<T> = this.stream.toList()
+    val elements : List<T> = this.toList()
     for (element in elements) {
         val key = keySelector(element)
 
@@ -206,7 +205,7 @@ fun <T, K> SequenceCore<T>.groupBy(keySelector: (T) -> K): Map<K, List<T>> {
  */
 fun <T, K, V> SequenceCore<T>.associate(transform: (T) -> Map.Entry<K, V>): Map<K, V> {
     var result = LinkedHashMap<K, V>()
-    val elements : List<T> = this.stream.toList()
+    val elements : List<T> = this.toList()
     for (element in elements) {
         val entry = transform(element)
         result.put(
