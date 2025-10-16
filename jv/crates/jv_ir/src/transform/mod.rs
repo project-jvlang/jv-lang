@@ -9,6 +9,7 @@ use crate::types::{
 use jv_ast::{
     Argument, BinaryOp, CallArgumentMetadata, CallArgumentStyle, CommentKind, ConcurrencyConstruct,
     Expression, Literal, Program, ResourceManagement, SequenceDelimiter, Span, Statement,
+    TypeAnnotation,
 };
 
 mod concurrency;
@@ -640,6 +641,7 @@ pub fn transform_expression(
         Expression::Call {
             function,
             args,
+            type_arguments,
             argument_metadata,
             span,
         } => {
@@ -653,7 +655,14 @@ pub fn transform_expression(
                 return Ok(sequence_expr);
             }
 
-            lower_call_expression(*function, args, argument_metadata, span, context)
+            lower_call_expression(
+                *function,
+                args,
+                type_arguments,
+                argument_metadata,
+                span,
+                context,
+            )
         }
         Expression::Lambda {
             parameters,
@@ -716,6 +725,7 @@ const SYSTEM_IN_METHODS: &[&str] = &[
 fn lower_call_expression(
     function: Expression,
     args: Vec<Argument>,
+    type_arguments: Vec<TypeAnnotation>,
     argument_metadata: CallArgumentMetadata,
     span: Span,
     context: &mut TransformContext,
@@ -753,13 +763,17 @@ fn lower_call_expression(
                 } else {
                     class_name.clone()
                 };
+                let generic_args = type_arguments
+                    .into_iter()
+                    .map(type_system::convert_type_annotation)
+                    .collect::<Result<Vec<_>, _>>()?;
                 return Ok(IrExpression::ObjectCreation {
                     class_name,
-                    generic_args: Vec::new(),
+                    generic_args: generic_args.clone(),
                     args: ir_args,
                     java_type: JavaType::Reference {
                         name: fqcn,
-                        generic_args: vec![],
+                        generic_args,
                     },
                     span,
                 });

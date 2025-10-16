@@ -486,6 +486,7 @@ fn test_concurrency_await() {
             dummy_span(),
         )),
         args: vec![],
+        type_arguments: Vec::new(),
         argument_metadata: CallArgumentMetadata::with_style(CallArgumentStyle::Comma),
         span: dummy_span(),
     };
@@ -505,6 +506,7 @@ fn test_resource_use() {
     let resource = Expression::Call {
         function: Box::new(Expression::Identifier("open".to_string(), dummy_span())),
         args: vec![],
+        type_arguments: Vec::new(),
         argument_metadata: CallArgumentMetadata::with_style(CallArgumentStyle::Comma),
         span: dummy_span(),
     };
@@ -528,6 +530,7 @@ fn test_resource_defer() {
     let body = Expression::Call {
         function: Box::new(Expression::Identifier("cleanup".to_string(), dummy_span())),
         args: vec![],
+        type_arguments: Vec::new(),
         argument_metadata: CallArgumentMetadata::with_style(CallArgumentStyle::Comma),
         span: dummy_span(),
     };

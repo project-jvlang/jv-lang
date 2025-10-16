@@ -164,6 +164,7 @@ impl SequenceWarningCollector {
             Expression::Call {
                 function,
                 args,
+                type_arguments: _,
                 argument_metadata,
                 span,
             } => {

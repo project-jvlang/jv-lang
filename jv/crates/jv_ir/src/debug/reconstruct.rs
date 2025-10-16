@@ -490,6 +490,7 @@ impl<'a> ReconstructionContext<'a> {
                 Expression::Call {
                     function: Box::new(function),
                     args,
+                    type_arguments: Vec::new(),
                     argument_metadata: CallArgumentMetadata::with_style(*argument_style),
                     span: span.clone(),
                 }

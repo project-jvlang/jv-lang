@@ -228,6 +228,7 @@ pub fn try_lower_sequence_call(
             Expression::Call {
                 function,
                 args,
+                type_arguments: _,
                 argument_metadata: _,
                 span,
             } => {

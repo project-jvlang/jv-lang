@@ -31,11 +31,8 @@ fn build_conversion_catalog() -> Arc<ConversionHelperCatalog> {
     );
     index.add_type(string_entry);
 
-    let mut list_entry = TypeEntry::new(
-        "java.util.List".to_string(),
-        "java.util".to_string(),
-        None,
-    );
+    let mut list_entry =
+        TypeEntry::new("java.util.List".to_string(), "java.util".to_string(), None);
     list_entry.instance_methods.insert(
         "stream".to_string(),
         JavaMethodSignature {
@@ -48,8 +45,11 @@ fn build_conversion_catalog() -> Arc<ConversionHelperCatalog> {
     );
     index.add_type(list_entry);
 
-    let stream_entry =
-        TypeEntry::new("java.util.stream.Stream".to_string(), "java.util.stream".to_string(), None);
+    let stream_entry = TypeEntry::new(
+        "java.util.stream.Stream".to_string(),
+        "java.util.stream".to_string(),
+        None,
+    );
     index.add_type(stream_entry);
 
     let catalog = ConversionCatalog::from_symbol_index(&index);
@@ -110,7 +110,11 @@ fn phase_four_conversion_pipeline_records_telemetry() {
         "collection transform helper should be recorded"
     );
 
-    let kinds: Vec<_> = telemetry.conversion_events.iter().map(|event| event.kind).collect();
+    let kinds: Vec<_> = telemetry
+        .conversion_events
+        .iter()
+        .map(|event| event.kind)
+        .collect();
     assert!(
         kinds.contains(&InferenceConversionKind::MethodInvocation),
         "method invocation conversion event should be recorded"

@@ -36,6 +36,8 @@ pub enum Expression {
     Call {
         function: Box<Expression>,
         args: Vec<Argument>,
+        #[serde(default)]
+        type_arguments: Vec<TypeAnnotation>,
         #[serde(default, alias = "argument_style")]
         argument_metadata: CallArgumentMetadata,
         span: Span,

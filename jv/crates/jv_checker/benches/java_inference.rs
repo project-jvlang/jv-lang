@@ -3,8 +3,8 @@ use std::time::Instant;
 
 use jv_build::metadata::{ConversionCatalog, JavaMethodSignature, SymbolIndex, TypeEntry};
 use jv_checker::inference::{
-    conversions::ConversionHelperCatalog, Constraint, ConstraintKind, ConstraintSet, ConstraintSolver,
-    PrimitiveType, TypeKind,
+    conversions::ConversionHelperCatalog, Constraint, ConstraintKind, ConstraintSet,
+    ConstraintSolver, PrimitiveType, TypeKind,
 };
 
 const BASELINE_MS: f64 = 80.0;
@@ -29,11 +29,8 @@ fn helper_catalog() -> Arc<ConversionHelperCatalog> {
     );
     index.add_type(integer_entry);
 
-    let mut list_entry = TypeEntry::new(
-        "java.util.List".to_string(),
-        "java.util".to_string(),
-        None,
-    );
+    let mut list_entry =
+        TypeEntry::new("java.util.List".to_string(), "java.util".to_string(), None);
     list_entry.instance_methods.insert(
         "stream".to_string(),
         JavaMethodSignature {
@@ -46,8 +43,11 @@ fn helper_catalog() -> Arc<ConversionHelperCatalog> {
     );
     index.add_type(list_entry);
 
-    let stream_entry =
-        TypeEntry::new("java.util.stream.Stream".to_string(), "java.util.stream".to_string(), None);
+    let stream_entry = TypeEntry::new(
+        "java.util.stream.Stream".to_string(),
+        "java.util.stream".to_string(),
+        None,
+    );
     index.add_type(stream_entry);
 
     let catalog = ConversionCatalog::from_symbol_index(&index);
