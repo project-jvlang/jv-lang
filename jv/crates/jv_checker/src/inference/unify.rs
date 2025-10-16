@@ -6,7 +6,8 @@
 
 use crate::inference::constraint::{Constraint, ConstraintKind, ConstraintSet};
 use crate::inference::conversions::{
-    AppliedConversion, ConversionMetadata, ConversionOutcome, ConversionRulesEngine,
+    AppliedConversion, ConversionHelperCatalog, ConversionMetadata, ConversionOutcome,
+    ConversionRulesEngine,
 };
 use crate::inference::types::{
     TypeBinding, TypeError, TypeId, TypeKind, TypeVariable, TypeVariableKind,
@@ -14,6 +15,7 @@ use crate::inference::types::{
 use jv_inference::ParallelInferenceConfig;
 use std::collections::HashMap;
 use std::fmt;
+use std::sync::Arc;
 
 /// 制約解決におけるエラー。
 #[derive(Debug, PartialEq)]
@@ -94,6 +96,7 @@ pub struct ConstraintSolver {
     substitutions: HashMap<TypeId, TypeKind>,
     parallel_config: ParallelInferenceConfig,
     conversions: Vec<AppliedConversion>,
+    conversion_catalog: Option<Arc<ConversionHelperCatalog>>,
 }
 
 impl Default for ConstraintSolver {
@@ -114,6 +117,7 @@ impl ConstraintSolver {
             substitutions: HashMap::new(),
             parallel_config: config.sanitized(),
             conversions: Vec::new(),
+            conversion_catalog: None,
         }
     }
 
@@ -155,6 +159,10 @@ impl ConstraintSolver {
         })
     }
 
+    pub fn set_conversion_catalog(&mut self, catalog: Option<Arc<ConversionHelperCatalog>>) {
+        self.conversion_catalog = catalog;
+    }
+
     fn process_constraint(&mut self, constraint: &Constraint) -> Result<(), SolveError> {
         match &constraint.kind {
             ConstraintKind::Equal(left, right) => {
@@ -189,7 +197,11 @@ impl ConstraintSolver {
         warned: bool,
         note: Option<String>,
     ) -> Result<(), SolveError> {
-        match ConversionRulesEngine::analyze(&from, &to) {
+        match ConversionRulesEngine::analyze_with_catalog(
+            &from,
+            &to,
+            self.conversion_catalog.as_deref(),
+        ) {
             ConversionOutcome::Identity => {
                 self.unify(from, to, note)?;
             }

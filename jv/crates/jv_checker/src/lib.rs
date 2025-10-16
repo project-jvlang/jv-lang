@@ -37,6 +37,7 @@ use jv_inference::types::{
     NullabilityFlag, TypeId as FactsTypeId, TypeKind as FactsTypeKind,
     TypeVariant as FactsTypeVariant,
 };
+use jv_pm::JavaTarget;
 
 #[derive(Error, Debug)]
 pub enum CheckError {
@@ -294,6 +295,9 @@ pub struct InferenceTelemetry {
     pub unboxing_conversions: usize,
     pub string_conversions: usize,
     pub nullable_guards_generated: usize,
+    pub method_invocation_conversions: usize,
+    pub conversion_catalog_hits: u64,
+    pub conversion_catalog_misses: u64,
 }
 
 impl Default for InferenceTelemetry {
@@ -323,6 +327,9 @@ impl Default for InferenceTelemetry {
             unboxing_conversions: 0,
             string_conversions: 0,
             nullable_guards_generated: 0,
+            method_invocation_conversions: 0,
+            conversion_catalog_hits: 0,
+            conversion_catalog_misses: 0,
         }
     }
 }
@@ -336,6 +343,7 @@ impl InferenceTelemetry {
                 ConversionKind::Boxing => self.boxing_conversions += 1,
                 ConversionKind::Unboxing => self.unboxing_conversions += 1,
                 ConversionKind::StringConversion => self.string_conversions += 1,
+                ConversionKind::MethodInvocation => self.method_invocation_conversions += 1,
                 ConversionKind::Identity => {}
             }
 
@@ -390,6 +398,10 @@ impl TypeChecker {
         let config = config.sanitized();
         self.parallel_config = config;
         self.engine.set_parallel_config(config);
+    }
+
+    pub fn set_java_target(&mut self, target: JavaTarget) {
+        self.engine.set_java_target(target);
     }
 
     /// Returns the current parallel inference configuration.

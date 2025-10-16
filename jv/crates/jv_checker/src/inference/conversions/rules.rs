@@ -1,6 +1,6 @@
 use super::{
-    ConversionKind, ConversionMetadata, ConversionOutcome, HelperSpec, NullableGuard,
-    NullableGuardReason,
+    ConversionHelperCatalog, ConversionKind, ConversionMetadata, ConversionOutcome, HelperSpec,
+    NullableGuard, NullableGuardReason,
 };
 use crate::inference::types::{PrimitiveType, TypeError, TypeKind};
 use crate::java::JavaBoxingTable;
@@ -12,6 +12,14 @@ pub struct ConversionRulesEngine;
 impl ConversionRulesEngine {
     /// `from` から `to` への変換可能性を評価し、必要なメタデータを返す。
     pub fn analyze(from: &TypeKind, to: &TypeKind) -> ConversionOutcome {
+        Self::analyze_with_catalog(from, to, None)
+    }
+
+    pub fn analyze_with_catalog(
+        from: &TypeKind,
+        to: &TypeKind,
+        catalog: Option<&ConversionHelperCatalog>,
+    ) -> ConversionOutcome {
         if matches!(from, TypeKind::Unknown) || matches!(to, TypeKind::Unknown) {
             return ConversionOutcome::Identity;
         }
@@ -26,27 +34,30 @@ impl ConversionRulesEngine {
 
         match (from, to) {
             (TypeKind::Optional(inner_from), TypeKind::Optional(inner_to)) => {
-                Self::analyze(inner_from, inner_to)
+                Self::analyze_with_catalog(inner_from, inner_to, catalog)
             }
-            (TypeKind::Optional(inner_from), target) => match Self::analyze(inner_from, target) {
-                ConversionOutcome::Identity => ConversionOutcome::Allowed(
-                    ConversionMetadata::new(ConversionKind::Identity)
-                        .with_nullable_guard(NullableGuard::new(NullableGuardReason::OptionalLift)),
-                ),
-                ConversionOutcome::Allowed(metadata) => {
-                    if metadata.nullable_guard.is_some() {
-                        ConversionOutcome::Allowed(metadata)
-                    } else {
-                        ConversionOutcome::Allowed(metadata.with_nullable_guard(
+            (TypeKind::Optional(inner_from), target) => {
+                match Self::analyze_with_catalog(inner_from, target, catalog) {
+                    ConversionOutcome::Identity => ConversionOutcome::Allowed(
+                        ConversionMetadata::new(ConversionKind::Identity).with_nullable_guard(
                             NullableGuard::new(NullableGuardReason::OptionalLift),
-                        ))
+                        ),
+                    ),
+                    ConversionOutcome::Allowed(metadata) => {
+                        if metadata.nullable_guard.is_some() {
+                            ConversionOutcome::Allowed(metadata)
+                        } else {
+                            ConversionOutcome::Allowed(metadata.with_nullable_guard(
+                                NullableGuard::new(NullableGuardReason::OptionalLift),
+                            ))
+                        }
                     }
+                    ConversionOutcome::Rejected(err) => ConversionOutcome::Rejected(err),
                 }
-                ConversionOutcome::Rejected(err) => ConversionOutcome::Rejected(err),
-            },
+            }
             (source, TypeKind::Optional(inner_to)) => {
                 // Optional<T> への流入。T を解決した上で Optional へ昇格する。
-                match Self::analyze(source, inner_to) {
+                match Self::analyze_with_catalog(source, inner_to, catalog) {
                     ConversionOutcome::Identity => ConversionOutcome::Allowed(
                         ConversionMetadata::new(ConversionKind::Identity),
                     ),
@@ -75,10 +86,20 @@ impl ConversionRulesEngine {
             (TypeKind::Reference(left), TypeKind::Reference(right)) if left == right => {
                 ConversionOutcome::Identity
             }
-            _ => ConversionOutcome::Rejected(TypeError::incompatible_conversion(
-                from.describe(),
-                to.describe(),
-            )),
+            _ => {
+                if let Some(lookup) = catalog {
+                    if let Some(helper) = lookup.find_helper(from, to) {
+                        return ConversionOutcome::Allowed(
+                            ConversionMetadata::new(ConversionKind::MethodInvocation)
+                                .with_helper(helper),
+                        );
+                    }
+                }
+                ConversionOutcome::Rejected(TypeError::incompatible_conversion(
+                    from.describe(),
+                    to.describe(),
+                ))
+            }
         }
     }
 

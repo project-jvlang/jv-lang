@@ -1,8 +1,11 @@
+use jv_build::metadata::{ConversionCatalog, JavaMethodSignature, SymbolIndex, TypeEntry};
 use jv_checker::inference::{
-    Constraint, ConstraintKind, ConstraintSet, ConstraintSolver, ConversionKind, ConversionOutcome,
-    ConversionRulesEngine, InferenceTelemetry, NullableGuardReason, PrimitiveType, TypeError,
-    TypeFactory, TypeKind,
+    Constraint, ConstraintKind, ConstraintSet, ConstraintSolver, ConversionHelperCatalog,
+    ConversionKind, ConversionOutcome, ConversionRulesEngine, InferenceTelemetry,
+    NullableGuardReason, PrimitiveType, TypeError, TypeFactory, TypeKind,
 };
+use jv_ir::types::JavaType;
+use std::sync::Arc;
 
 #[test]
 fn primitive_type_mappings() {
@@ -120,4 +123,48 @@ fn telemetry_counts_unboxing_and_guards() {
 
     assert_eq!(telemetry.unboxing_conversions, 1);
     assert_eq!(telemetry.nullable_guards_generated, 1);
+}
+
+fn helper_catalog() -> ConversionHelperCatalog {
+    let mut entry = TypeEntry::new(
+        "java.lang.String".to_string(),
+        "java.lang".to_string(),
+        None,
+    );
+    entry.static_methods.insert(
+        "valueOf".to_string(),
+        JavaMethodSignature {
+            parameters: vec![JavaType::Primitive("int".to_string())],
+            return_type: JavaType::Reference {
+                name: "java.lang.String".to_string(),
+                generic_args: Vec::new(),
+            },
+        },
+    );
+
+    let mut index = SymbolIndex::new(Some(25));
+    index.add_type(entry);
+    let catalog = ConversionCatalog::from_symbol_index(&index);
+    ConversionHelperCatalog::new(Arc::new(catalog))
+}
+
+#[test]
+fn conversion_rules_uses_catalog_for_method_invocation() {
+    let catalog = helper_catalog();
+    let outcome = ConversionRulesEngine::analyze_with_catalog(
+        &TypeKind::primitive(PrimitiveType::Int),
+        &TypeKind::reference("java.lang.String"),
+        Some(&catalog),
+    );
+
+    match outcome {
+        ConversionOutcome::Allowed(metadata) => {
+            assert_eq!(metadata.kind, ConversionKind::MethodInvocation);
+            let helper = metadata.helper.expect("helper metadata expected");
+            assert_eq!(helper.owner, "java.lang.String");
+            assert_eq!(helper.method, "valueOf");
+            assert!(helper.is_static);
+        }
+        other => panic!("expected method invocation conversion, got {other:?}"),
+    }
 }

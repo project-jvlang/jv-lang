@@ -686,6 +686,7 @@ pub mod pipeline {
         );
 
         let mut type_checker = TypeChecker::with_parallel_config(options.parallel_config);
+        type_checker.set_java_target(plan.build_config.target);
         if !resolved_imports.is_empty() {
             type_checker.set_imports(Arc::clone(&symbol_index), resolved_imports.clone());
         }

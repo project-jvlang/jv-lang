@@ -3,8 +3,10 @@
 //! 将来的に SymbolIndex 由来のヘルパー検出や Telemetry 連携を拡張するため、
 //! ここでは変換判定に必要な基礎的な型・構造体のみを定義する。
 
+mod catalog;
 mod rules;
 
+pub use catalog::ConversionHelperCatalog;
 pub use rules::ConversionRulesEngine;
 
 use crate::inference::types::{TypeError, TypeKind};
@@ -22,6 +24,8 @@ pub enum ConversionKind {
     Unboxing,
     /// 文字列変換（`toString` 相当）。
     StringConversion,
+    /// メソッド呼び出しによる変換。
+    MethodInvocation,
 }
 
 impl ConversionKind {
@@ -33,6 +37,7 @@ impl ConversionKind {
             ConversionKind::Boxing => "boxing",
             ConversionKind::Unboxing => "unboxing",
             ConversionKind::StringConversion => "string",
+            ConversionKind::MethodInvocation => "method",
         }
     }
 }

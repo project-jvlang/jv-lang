@@ -8,9 +8,14 @@
 mod builder;
 mod cache;
 mod classfile;
+mod conversion_catalog;
 mod index;
 
 pub use builder::{BuildContext, IndexError, SymbolIndexBuilder};
 pub use cache::{CacheError, CacheMetrics, CacheStoreStats, SymbolIndexCache};
 pub use classfile::{JavaMethodSignature, ModuleInfo, StaticMember, StaticMemberKind};
+pub use conversion_catalog::{
+    CatalogAccess, CatalogCacheKey, CatalogCacheStats, ConversionCatalog, ConversionCatalogCache,
+    HelperMethod,
+};
 pub use index::{ModuleEntry, PackageEntry, SymbolIndex, TypeEntry};
