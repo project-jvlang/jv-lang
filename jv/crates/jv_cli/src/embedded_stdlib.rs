@@ -1696,6 +1696,7 @@ mod tests {
             imports: Vec::new(),
             type_declarations: vec![class_decl],
             generic_metadata: BTreeMap::new(),
+            conversion_metadata: Vec::new(),
             span,
         };
 

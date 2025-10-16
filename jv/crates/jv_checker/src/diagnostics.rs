@@ -1,3 +1,5 @@
+pub mod messages;
+
 use crate::CheckError;
 use jv_ast::{types::RawTypeContinuation, Span};
 use jv_ir::{

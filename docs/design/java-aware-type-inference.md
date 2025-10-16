@@ -1412,92 +1412,6 @@ fn detects_int_value_unboxing() {
 
 ### 実装内容
 
-#### 4.1 推論テレメトリの拡張
-
-**ファイル**: `jv/crates/jv_inference/src/lib.rs`
-
-```rust
-/// 推論結果のテレメトリ（拡張版）
-#[derive(Debug, Clone, Default)]
-pub struct InferenceTelemetry {
-    pub constraints_emitted: usize,
-    pub bindings_resolved: usize,
-    pub inference_duration_ms: f64,
-
-    // 新規追加
-    pub conversions_applied: Vec<AppliedConversion>,
-    pub boxing_count: usize,
-    pub unboxing_count: usize,
-    pub widening_count: usize,
-}
-
-#[derive(Debug, Clone)]
-pub struct AppliedConversion {
-    pub from: String,
-    pub to: String,
-    pub kind: String,
-    pub method: Option<String>,
-    pub span: Option<Span>,
-}
-```
-
-#### 4.2 IR への変換情報の記録
-
-`IrProgram` に `conversion_metadata: Vec<ConversionMetadataEntry>` を追加し、各 IR ノードの `Span` に紐づく変換メタデータを蓄積する。`ConversionMetadata` には `from_type`／`to_type`／`ConversionKind`／`ConversionHelper`／`NullableGuard` を含め、後続フェーズがそのまま利用できるようシリアライズ可能な構造に整備する。
-
-**ファイル**: `jv/crates/jv_mapper/src/lib.rs`
-
-```rust
-use jv_inference::AppliedConversion;
-use jv_ir::types::ConversionMetadata;
-
-impl Mapper {
-    pub fn apply_conversions(
-        &mut self,
-        ir_program: &mut IrProgram,
-        conversions: &[AppliedConversion],
-    ) {
-        for conv in conversions {
-            // IR ノードに変換メタデータを付与
-            if let Some(node) = self.find_node_at_span(&conv.span) {
-                node.add_conversion_metadata(ConversionMetadata {
-                    from_type: conv.from.clone(),
-                    to_type: conv.to.clone(),
-                    conversion_method: conv.method.clone(),
-                });
-            }
-        }
-    }
-}
-```
-
-#### 4.3 コード生成への反映
-
-`JavaCodeGenerator` は `IrProgram::conversion_metadata` をハッシュマップへ読み込み、式レンダリング後に対応するメタデータを逐次取り出してラップ処理を適用する。ボクシングでは `Integer.valueOf(expr)`、アンボクシングでは `expr.intValue()` を生成し、`NullableGuard` が付与されている場合は `Objects.requireNonNull(expr)` を挿入する。変換を伴うケースを回帰テストとして `jv_codegen_java/tests/conversions.rs` に追加する。
-
-**ファイル**: `jv/crates/jv_codegen_java/src/generator/expressions.rs`
-
-```rust
-impl JavaCodeGenerator {
-    fn generate_expression_with_conversion(
-        &mut self,
-        expr: &IrExpression,
-    ) -> Result<String, CodeGenError> {
-        let base_expr = self.generate_expression(expr)?;
-
-        // 変換メタデータを確認
-        if let Some(metadata) = expr.conversion_metadata() {
-            return self.wrap_with_conversion(base_expr, metadata);
-        }
-
-        Ok(base_expr)
-    }
-
-    fn wrap_with_conversion(
-        &mut self,
-        expr: String,
-        metadata: &ConversionMetadata,
-    ) -> Result<String, CodeGenError> {
         match metadata.conversion_method.as_deref() {
             Some("Integer.valueOf") => {
                 Ok(format!("Integer.valueOf({})", expr))
@@ -1720,3 +1634,60 @@ fn generates_to_string_conversion() {
 5. ✅ Java仕様準拠の型互換性判定
 
 これにより、jv言語とJava 25の相互運用性が大幅に向上し、より自然で直感的な型推論が可能になります。
+#### 4.1 推論テレメトリの拡張
+
+**ファイル**: `jv/crates/jv_checker/src/lib.rs`
+
+```rust
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InferenceTelemetry {
+    pub constraints_emitted: usize,
+    pub bindings_resolved: usize,
+    pub inference_duration_ms: f64,
+    pub widening_conversions: usize,
+    pub boxing_conversions: usize,
+    pub unboxing_conversions: usize,
+    pub string_conversions: usize,
+    pub method_invocation_conversions: usize,
+    pub nullable_guards_generated: usize,
+    pub conversion_catalog_hits: u64,
+    pub conversion_catalog_misses: u64,
+    pub conversion_events: Vec<AppliedConversion>,
+    pub nullable_guards: Vec<NullableGuard>,
+    pub catalog_hits: Vec<HelperSpec>,
+    // 既存の統計カウンタは省略
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AppliedConversion {
+    pub from_type: TypeKind,
+    pub to_type: TypeKind,
+    pub kind: ConversionKind,
+    pub helper_method: Option<HelperSpec>,
+    pub nullable_guard: Option<NullableGuard>,
+    pub warned: bool,
+    pub source_span: Option<Span>,
+    pub java_span_hint: Option<String>,
+}
+```
+
+- `InferenceTelemetry::record_conversions` が制約ソルバの結果から上記カウンタとイベントを充填する。`conversion_events` は CLI/LSP で個別診断へ昇格するため、`TypeKind::describe` の出力が開発者向けに安定していることを保証する。
+- `catalog_hits` は `HelperSpec` をそのまま保持し、後段の Helper 推奨メッセージ生成に流用する。テレメトリへ新しい Helper 分類を追加する場合は `diagnostics/messages.rs` の表示フォーマットも同時に更新する。
+- `nullable_guards_generated` と `nullable_guards` は guard 挿入ポリシーの検証と CLI での統計表示に利用する。テレメトリを拡張する際は `conversion_summary_lines` に追加カウンタを組み込む。
+
+#### 4.2 変換イベントと SourceMap 連携
+
+**ファイル**: `jv/crates/jv_mapper/src/lib.rs`, `jv/crates/jv_checker/src/telemetry/report.rs`
+
+- `Mapper::apply_conversions` はコード生成が生成した `ConversionMetadata` を既存 SourceMap にマージしつつ、`ConversionMapping` の一覧を返す。返却値には IR Span / Java Span が含まれ、テレメトリと診断の両方で再利用可能。
+- `telemetry::report::attach_conversion_spans` は `ConversionMapping` を入力に `AppliedConversion` へ Span 情報を後付けする。これにより CLI/LSP での変換診断がソース位置と生成 Java 位置を併記できる。
+- SourceMap のバージョン更新時は `Mapper::apply_conversions` および `telemetry_output` テストで期待されるフィールド整合性を必ず確認する。
+
+#### 4.3 CLI/LSP 出力の同期
+
+**ファイル**: `jv/crates/jv_cli/src/commands/check.rs`, `jv/crates/jv_cli/tests/telemetry_output.rs`, `jv/crates/jv_checker/src/diagnostics/messages.rs`
+
+- `jv check` は推論成功後に 3 つのセクションを出力する。`Conversion telemetry`（集計カウンタ）、`Helper recommendations`（Helper 推奨メッセージ）、`Implicit conversion diagnostics`（`conversion_diagnostic` 由来の詳細）。
+- Helper 推奨メッセージは `catalog_hits` を Helper 名で集計し、`diagnostics::messages::helper_recommendation` が `java.lang.Integer#toString was applied implicitly once` のような文言を生成する。静的/インスタンス差異は `helper_label` の `::` / `#` で表記する。
+- `conversion_diagnostic_blocks` は同一種類の変換を一度だけ提示し、必要に応じて `learning_hints` へ「Implicit helper: <HelperName>」を付与する。新しい `ConversionKind` を追加した場合はここにも診断処理を追加する。
+- `jv_cli/tests/telemetry_output.rs` で CLI 出力のスモークテストを維持する。Helper 推奨メッセージや統計フォーマットの変更時はテスト更新とユーザドキュメントの同期を忘れないこと。
