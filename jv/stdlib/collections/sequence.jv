@@ -1,13 +1,7 @@
 package jv.collections
 
 import java.lang.IllegalArgumentException
-import java.util.ArrayList
-import java.util.Comparator
-import java.util.Iterator
-import java.util.LinkedHashMap
-import java.util.List
-import java.util.Map
-import java.util.stream.Stream
+import java.util.*
 
 /**
  * SequenceCore は Java Stream を直接保持する最小限の遅延チェーンコンテナ。
@@ -22,7 +16,7 @@ data SequenceCore<T>(stream: Stream<T>)
  */
 
 fun <T> sequenceFromIterable(source: Iterable<T>): SequenceCore<T> {
-    val stream: Stream<T> = java.util.stream.StreamSupport.stream(
+    val stream = StreamSupport.stream(
         source.spliterator()
         false
     )
@@ -50,7 +44,7 @@ fun <T> SequenceCore<T>.toStream(): Stream<T> {
  */
 fun <T, R> SequenceCore<T>.map(transform: (T) -> R): SequenceCore<R> {
     return sequenceFromStream(
-        this.toStream().map { value -> transform(value) }
+        this.stream.map { value -> transform(value) }
     )
 }
 
@@ -59,7 +53,7 @@ fun <T, R> SequenceCore<T>.map(transform: (T) -> R): SequenceCore<R> {
  */
 fun <T> SequenceCore<T>.filter(predicate: (T) -> Boolean): SequenceCore<T> {
     return sequenceFromStream(
-        this.toStream().filter { value -> predicate(value) }
+        this.stream.filter { value -> predicate(value) }
     )
 }
 
@@ -68,7 +62,7 @@ fun <T> SequenceCore<T>.filter(predicate: (T) -> Boolean): SequenceCore<T> {
  */
 fun <T> SequenceCore<T>.take(count: Int): SequenceCore<T> {
     return sequenceFromStream(
-        this.toStream().limit(count.toLong())
+        this.stream.limit(count.toLong())
     )
 }
 
@@ -77,7 +71,7 @@ fun <T> SequenceCore<T>.take(count: Int): SequenceCore<T> {
  */
 fun <T> SequenceCore<T>.drop(count: Int): SequenceCore<T> {
     return sequenceFromStream(
-        this.toStream().skip(count.toLong())
+        this.stream.skip(count.toLong())
     )
 }
 
@@ -86,8 +80,8 @@ fun <T> SequenceCore<T>.drop(count: Int): SequenceCore<T> {
  */
 fun <T, R> SequenceCore<T>.flatMap(transform: (T) -> Iterable<R>): SequenceCore<R> {
     return sequenceFromStream(
-        this.toStream().flatMap { value ->
-            java.util.stream.StreamSupport.stream(
+        this.stream.flatMap { value ->
+            StreamSupport.stream(
                 transform(value).spliterator()
                 false
             )
@@ -97,7 +91,7 @@ fun <T, R> SequenceCore<T>.flatMap(transform: (T) -> Iterable<R>): SequenceCore<
 
 fun <T, R> SequenceCore<T>.flatMap(transform: (T) -> SequenceCore<R>): SequenceCore<R> {
     return sequenceFromStream(
-        this.toStream().flatMap { value -> transform(value).toStream() }
+        this.stream.flatMap { value -> transform(value).toStream() }
     )
 }
 
@@ -105,7 +99,7 @@ fun <T, R> SequenceCore<T>.flatMap(transform: (T) -> SequenceCore<R>): SequenceC
  * Kotlin `Sequence.sorted` と同等のソート操作。
  */
 fun <T : Comparable<T>> SequenceCore<T>.sorted(): SequenceCore<T> {
-    return sequenceFromStream(this.toStream().sorted())
+    return sequenceFromStream(this.stream.sorted())
 }
 
 /**
@@ -113,7 +107,7 @@ fun <T : Comparable<T>> SequenceCore<T>.sorted(): SequenceCore<T> {
  */
 fun <T, R : Comparable<R>> SequenceCore<T>.sortedBy(selector: (T) -> R): SequenceCore<T> {
     return sequenceFromStream(
-        this.toStream().sorted(
+        this.stream.sorted(
             Comparator.comparing { value -> selector(value) }
         )
     )
@@ -123,14 +117,14 @@ fun <T, R : Comparable<R>> SequenceCore<T>.sortedBy(selector: (T) -> R): Sequenc
  * Kotlin `Sequence.toList` と同等の終端操作。
  */
 fun <T> SequenceCore<T>.toList(): List<T> {
-    return this.toStream().toList()
+    return this.stream.toList()
 }
 
 /**
  * Kotlin `Sequence.fold` と同等の集約操作。
  */
 fun <T, R> SequenceCore<T>.fold(initial: R, operation: (R, T) -> R): R {
-    return this.toStream().reduce(initial) { accumulator value ->
+    return this.stream.reduce(initial) { accumulator value ->
         operation(
             accumulator
             value
@@ -142,7 +136,7 @@ fun <T, R> SequenceCore<T>.fold(initial: R, operation: (R, T) -> R): R {
  * Kotlin `Sequence.reduce` と同等の集約操作。
  */
 fun <T> SequenceCore<T>.reduce(operation: (T, T) -> T): T {
-    val reduced = this.toStream().reduce { left right ->
+    val reduced = this.stream.reduce { left right ->
         operation(
             left
             right
@@ -158,17 +152,17 @@ fun <T> SequenceCore<T>.reduce(operation: (T, T) -> T): T {
  * Kotlin `Sequence.count` に対応する要素数集計。
  */
 fun <T> SequenceCore<T>.count(): Long {
-    return this.toStream().count()
+    return this.stream.count()
 }
 
 /**
  * Kotlin `Sequence.sum` 相当の数値集計。
  */
-fun SequenceCore<Number>.sum(): Long {
-    val elements = Sequence.toList(this)
-    var total: Long = 0
+fun SequenceCore<Number>.sum(): Number {
+    val elements = this.stream.toList()
+    var total = 0
     for (candidate in elements) {
-        total = total + candidate.longValue()
+        total = total + candidate.value
     }
     return total
 }
@@ -177,15 +171,15 @@ fun SequenceCore<Number>.sum(): Long {
  * Kotlin `Sequence.forEach` と同等の副作用操作。
  */
 fun <T> SequenceCore<T>.forEach(action: (T) -> Unit) {
-    this.toStream().forEach { value -> action(value) }
+    this.stream.forEach { value -> action(value) }
 }
 
 /**
  * Kotlin `Sequence.groupBy` と同等のキー集約操作。
  */
 fun <T, K> SequenceCore<T>.groupBy(keySelector: (T) -> K): Map<K, List<T>> {
-    val result: LinkedHashMap<K, List<T>> = LinkedHashMap()
-    val elements = Sequence.toList(this)
+    var result = LinkedHashMap<K, List<T>>()
+    val elements = this.stream.toList()
     for (element in elements) {
         val key = keySelector(element)
 
@@ -210,8 +204,8 @@ fun <T, K> SequenceCore<T>.groupBy(keySelector: (T) -> K): Map<K, List<T>> {
  * Kotlin `Sequence.associate` と同等のキー／値マップ生成。
  */
 fun <T, K, V> SequenceCore<T>.associate(transform: (T) -> Map.Entry<K, V>): Map<K, V> {
-    val result: LinkedHashMap<K, V> = LinkedHashMap()
-    val elements = Sequence.toList(this)
+    var result = LinkedHashMap<K, V>()
+    val elements = this.stream.toList()
     for (element in elements) {
         val entry = transform(element)
         result.put(
