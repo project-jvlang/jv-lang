@@ -105,7 +105,7 @@ fn type_facts_snapshot_contains_environment() {
         .and_then(Value::as_str)
         .expect("greeting binding exported");
     assert!(
-        greeting_entry.contains("Unknown"),
+        greeting_entry.contains("java.lang.String"),
         "unexpected environment entry: {greeting_entry}"
     );
     let pretty = facts.to_pretty_json().expect("serialize facts to json");

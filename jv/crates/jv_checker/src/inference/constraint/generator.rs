@@ -316,7 +316,10 @@ impl<'env, 'ext, 'imp> ConstraintGenerator<'env, 'ext, 'imp> {
             } => {
                 let cond_ty = self.infer_expression(condition);
                 self.push_constraint(
-                    ConstraintKind::Equal(cond_ty, TypeKind::primitive(PrimitiveType::Boolean)),
+                    ConstraintKind::Convertible {
+                        from: cond_ty,
+                        to: TypeKind::primitive(PrimitiveType::Boolean),
+                    },
                     Some("if condition requires boolean"),
                 );
                 let then_ty = self.infer_expression(then_branch);
@@ -397,10 +400,10 @@ impl<'env, 'ext, 'imp> ConstraintGenerator<'env, 'ext, 'imp> {
                     if let Some(guard_expr) = &arm.guard {
                         let guard_ty = self.infer_expression(guard_expr);
                         self.push_constraint(
-                            ConstraintKind::Equal(
-                                guard_ty,
-                                TypeKind::primitive(PrimitiveType::Boolean),
-                            ),
+                            ConstraintKind::Convertible {
+                                from: guard_ty,
+                                to: TypeKind::primitive(PrimitiveType::Boolean),
+                            },
                             Some("when guard must evaluate to boolean"),
                         );
                     }
@@ -646,11 +649,17 @@ impl<'env, 'ext, 'imp> ConstraintGenerator<'env, 'ext, 'imp> {
             And | Or => {
                 let expected = TypeKind::primitive(PrimitiveType::Boolean);
                 self.push_constraint(
-                    ConstraintKind::Equal(left_ty.clone(), expected.clone()),
+                    ConstraintKind::Convertible {
+                        from: left_ty.clone(),
+                        to: expected.clone(),
+                    },
                     Some("logical operations require boolean operands"),
                 );
                 self.push_constraint(
-                    ConstraintKind::Equal(right_ty.clone(), expected.clone()),
+                    ConstraintKind::Convertible {
+                        from: right_ty.clone(),
+                        to: expected.clone(),
+                    },
                     Some("logical operations require boolean operands"),
                 );
                 expected
@@ -695,7 +704,10 @@ impl<'env, 'ext, 'imp> ConstraintGenerator<'env, 'ext, 'imp> {
             Not => {
                 let expected = TypeKind::primitive(PrimitiveType::Boolean);
                 self.push_constraint(
-                    ConstraintKind::Equal(operand_ty, expected.clone()),
+                    ConstraintKind::Convertible {
+                        from: operand_ty,
+                        to: expected.clone(),
+                    },
                     Some("logical not requires boolean"),
                 );
                 expected

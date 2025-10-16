@@ -197,6 +197,9 @@ impl ConstraintSolver {
         warned: bool,
         note: Option<String>,
     ) -> Result<(), SolveError> {
+        let from = self.prune(from);
+        let to = self.prune(to);
+
         match ConversionRulesEngine::analyze_with_catalog(
             &from,
             &to,

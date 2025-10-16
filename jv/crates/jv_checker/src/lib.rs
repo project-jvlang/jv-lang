@@ -11,8 +11,8 @@ pub mod regex;
 pub mod telemetry;
 
 pub use inference::{
-    InferenceEngine, InferenceError, InferenceResult, NullabilityAnalyzer, TypeBinding,
-    TypeEnvironment, TypeId, TypeKind, TypeScheme,
+    InferenceEngine, InferenceError, InferenceResult, NullabilityAnalyzer, PrimitiveType,
+    TypeBinding, TypeEnvironment, TypeId, TypeKind, TypeScheme,
 };
 pub use java::{JavaBoxingTable, JavaNullabilityPolicy, JavaPrimitive};
 pub use jv_inference::ParallelInferenceConfig;
