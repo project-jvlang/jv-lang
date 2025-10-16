@@ -1,6 +1,6 @@
 //! 型推論で扱う型表現・型変数・束縛を定義する。
 
-use crate::java::{JavaNullabilityPolicy, JavaPrimitive};
+use crate::java::{JavaBoxingTable, JavaNullabilityPolicy, JavaPrimitive};
 use std::collections::HashSet;
 use std::fmt;
 use thiserror::Error;
@@ -143,6 +143,26 @@ impl TypeKind {
             }
         }
     }
+
+    /// ヒューマンリーダブルな型表現を返す。
+    pub fn describe(&self) -> String {
+        match self {
+            TypeKind::Primitive(p) => p.java_name().to_string(),
+            TypeKind::Boxed(p) => JavaBoxingTable::boxed_fqcn(*p).to_string(),
+            TypeKind::Reference(name) => name.clone(),
+            TypeKind::Optional(inner) => format!("{}?", inner.describe()),
+            TypeKind::Variable(id) => format!("{id}"),
+            TypeKind::Function(params, ret) => {
+                let params = params
+                    .iter()
+                    .map(TypeKind::describe)
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("fn({params}) -> {}", ret.describe())
+            }
+            TypeKind::Unknown => "unknown".to_string(),
+        }
+    }
 }
 
 /// 型関連のエラーを表現する。
@@ -150,6 +170,20 @@ impl TypeKind {
 pub enum TypeError {
     #[error("unknown primitive type `{identifier}`")]
     UnknownPrimitive { identifier: String },
+    #[error("nullability mismatch when converting `{from}` to `{to}`")]
+    NullabilityMismatch { from: String, to: String },
+    #[error("cannot convert `{from}` to `{to}`")]
+    IncompatibleConversion { from: String, to: String },
+}
+
+impl TypeError {
+    pub fn nullability_mismatch(from: String, to: String) -> Self {
+        Self::NullabilityMismatch { from, to }
+    }
+
+    pub fn incompatible_conversion(from: String, to: String) -> Self {
+        Self::IncompatibleConversion { from, to }
+    }
 }
 
 /// 型変数に関する現在の状態を示す。

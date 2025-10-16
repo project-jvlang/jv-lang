@@ -1,4 +1,8 @@
-use jv_checker::inference::{PrimitiveType, TypeError, TypeFactory, TypeKind};
+use jv_checker::inference::{
+    Constraint, ConstraintKind, ConstraintSet, ConstraintSolver, ConversionKind, ConversionOutcome,
+    ConversionRulesEngine, InferenceTelemetry, NullableGuardReason, PrimitiveType, TypeError,
+    TypeFactory, TypeKind,
+};
 
 #[test]
 fn primitive_type_mappings() {
@@ -45,4 +49,75 @@ fn primitive_type_mappings() {
         err,
         TypeError::UnknownPrimitive { identifier } if identifier == "intr"
     ));
+}
+
+#[test]
+fn conversion_rules_detects_widening() {
+    let outcome = ConversionRulesEngine::analyze(
+        &TypeKind::primitive(PrimitiveType::Int),
+        &TypeKind::primitive(PrimitiveType::Long),
+    );
+
+    match outcome {
+        ConversionOutcome::Allowed(metadata) => {
+            assert_eq!(metadata.kind, ConversionKind::WideningPrimitive);
+            assert!(metadata.nullable_guard.is_none());
+        }
+        other => panic!("expected widening conversion, got {other:?}"),
+    }
+}
+
+#[test]
+fn conversion_rules_optional_requires_guard() {
+    let source = TypeKind::optional(TypeKind::reference("java.lang.String"));
+    let target = TypeKind::reference("java.lang.String");
+    let outcome = ConversionRulesEngine::analyze(&source, &target);
+
+    match outcome {
+        ConversionOutcome::Allowed(metadata) => {
+            let guard = metadata
+                .nullable_guard
+                .expect("optional conversion should request guard");
+            assert_eq!(guard.reason, NullableGuardReason::OptionalLift);
+        }
+        other => panic!("expected optional guard metadata, got {other:?}"),
+    }
+}
+
+#[test]
+fn constraint_solver_records_boxing_conversion() {
+    let mut set = ConstraintSet::new();
+    set.push(Constraint::new(ConstraintKind::Convertible {
+        from: TypeKind::primitive(PrimitiveType::Int),
+        to: TypeKind::boxed(PrimitiveType::Int),
+    }));
+
+    let solver = ConstraintSolver::new();
+    let result = solver
+        .solve(set)
+        .expect("boxing conversion should be accepted");
+    assert_eq!(result.conversions.len(), 1);
+    let entry = &result.conversions[0];
+    assert_eq!(entry.metadata.kind, ConversionKind::Boxing);
+    assert!(!entry.warned);
+    assert!(entry.metadata.nullable_guard.is_none());
+}
+
+#[test]
+fn telemetry_counts_unboxing_and_guards() {
+    let mut set = ConstraintSet::new();
+    set.push(Constraint::new(ConstraintKind::Convertible {
+        from: TypeKind::boxed(PrimitiveType::Int),
+        to: TypeKind::primitive(PrimitiveType::Int),
+    }));
+
+    let solver = ConstraintSolver::new();
+    let result = solver
+        .solve(set)
+        .expect("unboxing conversion should be accepted");
+    let mut telemetry = InferenceTelemetry::default();
+    telemetry.record_conversions(&result.conversions);
+
+    assert_eq!(telemetry.unboxing_conversions, 1);
+    assert_eq!(telemetry.nullable_guards_generated, 1);
 }

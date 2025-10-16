@@ -10,7 +10,7 @@ use crate::inference::environment::{TypeEnvironment, TypeScheme};
 use crate::inference::imports::ImportRegistry;
 use crate::inference::prelude;
 use crate::inference::types::{TypeBinding, TypeId, TypeKind};
-use crate::inference::unify::{ConstraintSolver, SolveError};
+use crate::inference::unify::{ConstraintSolver, SolveError, SolveResult};
 use crate::InferenceTelemetry;
 use jv_ast::{Program, Statement};
 use jv_build::metadata::SymbolIndex;
@@ -159,17 +159,25 @@ impl InferenceEngine {
             environment.redefine_scheme(&name, scheme);
         }
 
-        self.bindings = solve_result.bindings;
+        let SolveResult {
+            bindings,
+            remaining: _,
+            conversions,
+        } = solve_result;
+
+        self.bindings = bindings;
         self.environment = environment;
         self.function_schemes = function_schemes;
         self.result_type = None;
         let duration_ms = inference_start.elapsed().as_secs_f64() * 1_000.0;
-        self.telemetry = InferenceTelemetry {
+        let mut telemetry = InferenceTelemetry {
             constraints_emitted: constraint_count,
             bindings_resolved: self.bindings.len(),
             inference_duration_ms: duration_ms,
             ..InferenceTelemetry::default()
         };
+        telemetry.record_conversions(&conversions);
+        self.telemetry = telemetry;
         Ok(())
     }
 

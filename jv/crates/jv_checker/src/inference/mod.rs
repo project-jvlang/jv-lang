@@ -4,6 +4,7 @@
 //! 提供し、将来的に `TypeChecker` から呼び出されるエントリーポイントをまとめる。
 
 pub mod constraint;
+pub mod conversions;
 pub mod engine;
 pub mod environment;
 pub mod extensions;
@@ -18,6 +19,10 @@ pub mod utils;
 
 pub use crate::java::{JavaBoxingTable, JavaNullabilityPolicy, JavaPrimitive};
 pub use constraint::{Constraint, ConstraintGenerator, ConstraintKind, ConstraintSet};
+pub use conversions::{
+    AppliedConversion, ConversionKind, ConversionMetadata, ConversionOutcome,
+    ConversionRulesEngine, HelperSpec, NullableGuard, NullableGuardReason,
+};
 pub use engine::{InferenceEngine, InferenceError, InferenceResult};
 pub use environment::{TypeEnvironment, TypeScheme};
 pub use iteration::LoopClassification;

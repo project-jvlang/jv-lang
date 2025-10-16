@@ -19,6 +19,7 @@ pub use regex::RegexAnalysis;
 
 use crate::imports::ResolvedImport;
 use binding::{resolve_bindings, BindingResolution, BindingUsageSummary, LateInitManifest};
+use inference::conversions::{AppliedConversion, ConversionKind};
 use jv_ast::{Program, Span};
 use jv_build::metadata::SymbolIndex;
 use null_safety::{JavaLoweringHint, NullSafetyCoordinator};
@@ -288,6 +289,11 @@ pub struct InferenceTelemetry {
     pub kind_cache_hit_rate: Option<f64>,
     pub const_evaluations: u64,
     pub type_level_cache_size: usize,
+    pub widening_conversions: usize,
+    pub boxing_conversions: usize,
+    pub unboxing_conversions: usize,
+    pub string_conversions: usize,
+    pub nullable_guards_generated: usize,
 }
 
 impl Default for InferenceTelemetry {
@@ -312,6 +318,30 @@ impl Default for InferenceTelemetry {
             kind_cache_hit_rate: None,
             const_evaluations: 0,
             type_level_cache_size: 0,
+            widening_conversions: 0,
+            boxing_conversions: 0,
+            unboxing_conversions: 0,
+            string_conversions: 0,
+            nullable_guards_generated: 0,
+        }
+    }
+}
+
+impl InferenceTelemetry {
+    /// 変換適用結果を集計し、Telemetry カウンタへ反映する。
+    pub fn record_conversions(&mut self, conversions: &[AppliedConversion]) {
+        for conversion in conversions {
+            match conversion.metadata.kind {
+                ConversionKind::WideningPrimitive => self.widening_conversions += 1,
+                ConversionKind::Boxing => self.boxing_conversions += 1,
+                ConversionKind::Unboxing => self.unboxing_conversions += 1,
+                ConversionKind::StringConversion => self.string_conversions += 1,
+                ConversionKind::Identity => {}
+            }
+
+            if conversion.metadata.nullable_guard.is_some() {
+                self.nullable_guards_generated += 1;
+            }
         }
     }
 }

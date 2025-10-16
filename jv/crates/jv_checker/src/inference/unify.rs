@@ -5,6 +5,9 @@
 //! 伝播させ、Null 安全と一致する解を導出する。
 
 use crate::inference::constraint::{Constraint, ConstraintKind, ConstraintSet};
+use crate::inference::conversions::{
+    AppliedConversion, ConversionMetadata, ConversionOutcome, ConversionRulesEngine,
+};
 use crate::inference::types::{
     TypeBinding, TypeError, TypeId, TypeKind, TypeVariable, TypeVariableKind,
 };
@@ -82,6 +85,7 @@ impl std::error::Error for SolveError {}
 pub struct SolveResult {
     pub bindings: Vec<TypeBinding>,
     pub remaining: ConstraintSet,
+    pub conversions: Vec<AppliedConversion>,
 }
 
 /// 単一化ソルバ本体。
@@ -89,6 +93,7 @@ pub struct SolveResult {
 pub struct ConstraintSolver {
     substitutions: HashMap<TypeId, TypeKind>,
     parallel_config: ParallelInferenceConfig,
+    conversions: Vec<AppliedConversion>,
 }
 
 impl Default for ConstraintSolver {
@@ -108,6 +113,7 @@ impl ConstraintSolver {
         Self {
             substitutions: HashMap::new(),
             parallel_config: config.sanitized(),
+            conversions: Vec::new(),
         }
     }
 
@@ -145,6 +151,7 @@ impl ConstraintSolver {
         Ok(SolveResult {
             bindings,
             remaining: constraints,
+            conversions: self.conversions,
         })
     }
 
@@ -156,6 +163,12 @@ impl ConstraintSolver {
             ConstraintKind::Assign(id, ty) => {
                 self.unify(TypeKind::Variable(*id), ty.clone(), constraint.note.clone())?;
             }
+            ConstraintKind::Convertible { from, to } => {
+                self.handle_convertible(from.clone(), to.clone(), false, constraint.note.clone())?;
+            }
+            ConstraintKind::ConvertibleWithWarning { from, to } => {
+                self.handle_convertible(from.clone(), to.clone(), true, constraint.note.clone())?;
+            }
             ConstraintKind::Placeholder(placeholder) => {
                 return Err(SolveError::Placeholder {
                     placeholder: *placeholder,
@@ -166,6 +179,72 @@ impl ConstraintSolver {
                 return Err(SolveError::TypeError(error.clone()));
             }
         }
+        Ok(())
+    }
+
+    fn handle_convertible(
+        &mut self,
+        from: TypeKind,
+        to: TypeKind,
+        warned: bool,
+        note: Option<String>,
+    ) -> Result<(), SolveError> {
+        match ConversionRulesEngine::analyze(&from, &to) {
+            ConversionOutcome::Identity => {
+                self.unify(from, to, note)?;
+            }
+            ConversionOutcome::Allowed(metadata) => {
+                self.register_conversion(from.clone(), to.clone(), metadata, warned);
+                self.bind_for_conversion(&from, &to, note)?;
+            }
+            ConversionOutcome::Rejected(error) => {
+                return Err(SolveError::TypeError(error));
+            }
+        }
+        Ok(())
+    }
+
+    fn register_conversion(
+        &mut self,
+        from: TypeKind,
+        to: TypeKind,
+        metadata: ConversionMetadata,
+        warned: bool,
+    ) {
+        self.conversions.push(AppliedConversion {
+            from,
+            to,
+            metadata,
+            warned,
+        });
+    }
+
+    fn bind_for_conversion(
+        &mut self,
+        from: &TypeKind,
+        to: &TypeKind,
+        note: Option<String>,
+    ) -> Result<(), SolveError> {
+        match from {
+            TypeKind::Variable(id) => {
+                self.bind_variable(*id, to.clone(), note.clone())?;
+            }
+            TypeKind::Optional(inner) => {
+                self.bind_for_conversion(inner, to, note.clone())?;
+            }
+            _ => {}
+        }
+
+        match to {
+            TypeKind::Variable(id) => {
+                self.bind_variable(*id, from.clone(), note)?;
+            }
+            TypeKind::Optional(inner) => {
+                self.bind_for_conversion(from, inner, None)?;
+            }
+            _ => {}
+        }
+
         Ok(())
     }
 

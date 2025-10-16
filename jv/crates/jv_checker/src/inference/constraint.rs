@@ -15,6 +15,10 @@ pub enum ConstraintKind {
     Equal(TypeKind, TypeKind),
     /// 型変数に対して特定の型を割り当てる命令。
     Assign(TypeId, TypeKind),
+    /// 暗黙変換で充足できる制約。
+    Convertible { from: TypeKind, to: TypeKind },
+    /// 警告付き暗黙変換。
+    ConvertibleWithWarning { from: TypeKind, to: TypeKind },
     /// まだ詳細が固まっていないプレースホルダ制約。
     Placeholder(&'static str),
     /// 即時に型エラーを報告する制約。

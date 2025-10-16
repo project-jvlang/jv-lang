@@ -4,6 +4,7 @@
 //! val/var 宣言や代表的な式から型整合性と null 許容性の制約を収集する。
 
 use crate::inference::constraint::{Constraint, ConstraintKind, ConstraintSet};
+use crate::inference::conversions::{ConversionOutcome, ConversionRulesEngine};
 use crate::inference::environment::{TypeEnvironment, TypeScheme};
 use crate::inference::extensions::ExtensionRegistry;
 use crate::inference::imports::ImportRegistry;
@@ -66,6 +67,18 @@ impl<'env, 'ext, 'imp> ConstraintGenerator<'env, 'ext, 'imp> {
         };
         self.constraints.push(constraint);
     }
+
+    fn push_assignability_constraint(&mut self, from: TypeKind, to: TypeKind, note: Option<&str>) {
+        match ConversionRulesEngine::analyze(&from, &to) {
+            ConversionOutcome::Identity => {
+                self.push_constraint(ConstraintKind::Equal(to, from), note);
+            }
+            ConversionOutcome::Allowed(_) => {
+                self.push_constraint(ConstraintKind::Convertible { from, to }, note);
+            }
+            ConversionOutcome::Rejected(error) => self.report_type_error(error),
+        }
+    }
     /// プログラム全体を走査して制約集合を構築する。
     pub fn generate(mut self, program: &Program) -> ConstraintSet {
         for stmt in &program.statements {
@@ -100,8 +113,9 @@ impl<'env, 'ext, 'imp> ConstraintGenerator<'env, 'ext, 'imp> {
             Statement::Assignment { target, value, .. } => {
                 let target_ty = self.infer_expression(target);
                 let value_ty = self.infer_expression(value);
-                self.push_constraint(
-                    ConstraintKind::Equal(target_ty, value_ty),
+                self.push_assignability_constraint(
+                    value_ty,
+                    target_ty,
                     Some("assignment target and value must align"),
                 );
             }
@@ -146,16 +160,18 @@ impl<'env, 'ext, 'imp> ConstraintGenerator<'env, 'ext, 'imp> {
 
                     if let Some(default_expr) = &param.default_value {
                         let default_ty = self.infer_expression(default_expr);
-                        self.push_constraint(
-                            ConstraintKind::Equal(param_ty.clone(), default_ty),
+                        self.push_assignability_constraint(
+                            default_ty,
+                            param_ty.clone(),
                             Some("parameter default must match declared type"),
                         );
                     }
                 }
 
                 let body_ty = self.infer_expression(body);
-                self.push_constraint(
-                    ConstraintKind::Equal(body_ty, return_ty.clone()),
+                self.push_assignability_constraint(
+                    body_ty,
+                    return_ty.clone(),
                     Some("function body must satisfy return type"),
                 );
 
@@ -239,8 +255,9 @@ impl<'env, 'ext, 'imp> ConstraintGenerator<'env, 'ext, 'imp> {
         }
 
         if let Some(init) = initializer_ty {
-            self.push_constraint(
-                ConstraintKind::Equal(symbol_ty.clone(), init.clone()),
+            self.push_assignability_constraint(
+                init.clone(),
+                symbol_ty.clone(),
                 Some("initializer must satisfy declaration"),
             );
             if matches!(representative, TypeKind::Unknown) {
@@ -768,6 +785,11 @@ impl<'env, 'ext, 'imp> ConstraintGenerator<'env, 'ext, 'imp> {
             ConstraintKind::Assign(id, ty) => {
                 *self.type_var_usage.entry(*id).or_default() += 1;
                 self.record_type_vars(ty);
+            }
+            ConstraintKind::Convertible { from, to }
+            | ConstraintKind::ConvertibleWithWarning { from, to } => {
+                self.record_type_vars(from);
+                self.record_type_vars(to);
             }
             ConstraintKind::Placeholder(_) | ConstraintKind::ReportError(_) => {}
         }
