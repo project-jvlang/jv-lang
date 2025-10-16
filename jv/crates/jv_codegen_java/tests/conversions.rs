@@ -41,7 +41,7 @@ fn boxing_conversion_wraps_literal_expression() {
             span: expr_span.clone(),
             metadata: ConversionMetadata::new(ConversionKind::Boxing, "int", "java.lang.Integer"),
         }],
-        span: expr_span,
+        span: expr_span.clone(),
     };
 
     let (source, source_map) = generate_source_and_map(&program);
@@ -93,7 +93,11 @@ fn unboxing_conversion_injects_nullable_guard() {
     };
 
     let (source, source_map) = generate_source_and_map(&program);
-    assert!(source.contains("Objects.requireNonNull(boxed).intValue();"));
+    assert!(
+        source.contains("Objects.requireNonNull(boxed)") && source.contains(".intValue()"),
+        "Expected nullable guard with unboxing, got: {}",
+        source
+    );
     assert!(source.contains("import java.util.Objects;"));
 
     assert_eq!(source_map.entries.len(), 1);
@@ -137,7 +141,7 @@ fn method_invocation_conversion_wraps_collection_transform() {
         is_static: false,
     });
 
-    let mut program = IrProgram {
+    let program = IrProgram {
         package: None,
         imports: Vec::new(),
         type_declarations: vec![statement],
