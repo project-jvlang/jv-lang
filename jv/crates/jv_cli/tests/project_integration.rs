@@ -1,5 +1,6 @@
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use jv_cli::pipeline::project::{
@@ -22,14 +23,33 @@ struct TempDirGuard {
     path: PathBuf,
 }
 
+fn workspace_temp_root() -> PathBuf {
+    static ROOT: OnceLock<PathBuf> = OnceLock::new();
+    ROOT.get_or_init(|| {
+        let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let base = manifest_dir
+            .ancestors()
+            .find_map(|ancestor| {
+                let candidate = ancestor.join("target");
+                candidate.exists().then_some(candidate)
+            })
+            .unwrap_or_else(|| manifest_dir.join("target"));
+        let temp_root = base.join("test-temp");
+        let _ = fs::remove_dir_all(&temp_root);
+        temp_root
+    })
+    .clone()
+}
+
 impl TempDirGuard {
     fn new(label: &str) -> std::io::Result<Self> {
         let timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_millis();
-        let path =
-            std::env::temp_dir().join(format!("jv-project-integration-{}-{}", label, timestamp));
+        let base = workspace_temp_root();
+        fs::create_dir_all(&base)?;
+        let path = base.join(format!("jv-project-integration-{}-{}", label, timestamp));
         fs::create_dir_all(&path)?;
         Ok(Self { path })
     }
@@ -41,7 +61,7 @@ impl TempDirGuard {
 
 impl Drop for TempDirGuard {
     fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.path);
+        // Keep build artifacts for post-test inspection.
     }
 }
 
