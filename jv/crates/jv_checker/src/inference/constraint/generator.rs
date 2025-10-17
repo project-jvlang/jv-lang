@@ -720,10 +720,26 @@ impl<'env, 'ext, 'imp> ConstraintGenerator<'env, 'ext, 'imp> {
         match literal {
             Literal::String(_) => TypeKind::reference("java.lang.String"),
             Literal::Number(n) => {
-                if n.contains('.') {
-                    TypeKind::primitive(PrimitiveType::Double)
-                } else {
-                    TypeKind::primitive(PrimitiveType::Int)
+                let lower = n.to_ascii_lowercase();
+                let suffix = lower
+                    .chars()
+                    .last()
+                    .filter(|ch| matches!(ch, 'f' | 'd' | 'l'));
+                let core = suffix
+                    .map(|_| &lower[..lower.len() - 1])
+                    .unwrap_or(lower.as_str());
+
+                match suffix {
+                    Some('f') => TypeKind::primitive(PrimitiveType::Float),
+                    Some('d') => TypeKind::primitive(PrimitiveType::Double),
+                    Some('l') => TypeKind::primitive(PrimitiveType::Long),
+                    _ => {
+                        if core.contains('.') || core.contains('e') {
+                            TypeKind::primitive(PrimitiveType::Double)
+                        } else {
+                            TypeKind::primitive(PrimitiveType::Int)
+                        }
+                    }
                 }
             }
             Literal::Boolean(_) => TypeKind::primitive(PrimitiveType::Boolean),

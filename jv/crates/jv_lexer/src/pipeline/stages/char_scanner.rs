@@ -308,6 +308,7 @@ impl CharScanner {
                     self.position.column,
                 ));
             }
+            self.consume_numeric_suffix(source)?;
             return Ok(self.take_slice(source, start, self.cursor));
         }
 
@@ -321,6 +322,7 @@ impl CharScanner {
                     self.position.column,
                 ));
             }
+            self.consume_numeric_suffix(source)?;
             return Ok(self.take_slice(source, start, self.cursor));
         }
 
@@ -334,6 +336,7 @@ impl CharScanner {
                     self.position.column,
                 ));
             }
+            self.consume_numeric_suffix(source)?;
             return Ok(self.take_slice(source, start, self.cursor));
         }
 
@@ -466,6 +469,11 @@ impl CharScanner {
             ));
         }
 
+        self.consume_numeric_suffix(source)?;
+        Ok(self.take_slice(source, start, self.cursor))
+    }
+
+    fn consume_numeric_suffix(&mut self, source: &str) -> Result<(), LexError> {
         if let Some(suffix) = self.peek_char_from(source) {
             if matches!(suffix, 'f' | 'F' | 'd' | 'D' | 'l' | 'L') {
                 let next_is_ident = self
@@ -477,8 +485,7 @@ impl CharScanner {
                 }
             }
         }
-
-        Ok(self.take_slice(source, start, self.cursor))
+        Ok(())
     }
 
     fn read_line_comment<'source>(

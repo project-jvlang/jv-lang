@@ -712,7 +712,10 @@ fn build_literal_expression(token: Token) -> Expression {
     let span = span_from_token(&token);
     match &token.token_type {
         TokenType::String(value) => build_string_literal(&token, value.clone(), span),
-        TokenType::Number(value) => Expression::Literal(Literal::Number(value.clone()), span),
+        TokenType::Number(value) => {
+            let rendered = rebuild_number_literal(&token, value);
+            Expression::Literal(Literal::Number(rendered), span)
+        }
         TokenType::Boolean(value) => Expression::Literal(Literal::Boolean(*value), span),
         TokenType::Null => Expression::Literal(Literal::Null, span),
         TokenType::RegexLiteral(_) => {
@@ -732,6 +735,21 @@ fn build_string_literal(token: &Token, value: String, span: Span) -> Expression 
     }
 
     Expression::Literal(Literal::String(value), span)
+}
+
+fn rebuild_number_literal(token: &Token, normalized: &str) -> String {
+    let mut rendered = normalized.to_string();
+    if let Some(suffix) = number_literal_suffix(token) {
+        rendered.push(suffix);
+    }
+    rendered
+}
+
+fn number_literal_suffix(token: &Token) -> Option<char> {
+    token.metadata.iter().find_map(|metadata| match metadata {
+        TokenMetadata::NumberLiteral(info) => info.suffix,
+        _ => None,
+    })
 }
 
 fn build_multiline_literal(

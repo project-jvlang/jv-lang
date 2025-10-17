@@ -212,12 +212,13 @@ impl Normalizer {
         token: RawToken<'source>,
     ) -> Result<NormalizedToken<'source>, LexError> {
         let lexeme = token.text;
+        let (core_lexeme, suffix) = Self::split_numeric_suffix(lexeme);
         let mut metadata = PreMetadata::default();
         let mut saw_comma = false;
         let mut saw_underscore = false;
 
-        let normalized = if Self::has_radix_prefix(lexeme) {
-            let (prefix, rest) = lexeme.split_at(2);
+        let normalized = if Self::has_radix_prefix(core_lexeme) {
+            let (prefix, rest) = core_lexeme.split_at(2);
             let mut normalized = String::with_capacity(rest.len() + 2);
             normalized.push_str(prefix);
             for ch in rest.chars() {
@@ -234,7 +235,7 @@ impl Normalizer {
             normalized
         } else {
             normalize_decimal_number(
-                lexeme,
+                core_lexeme,
                 token.span.end.line,
                 token.span.end.column,
                 &mut saw_comma,
@@ -254,6 +255,7 @@ impl Normalizer {
             .push(TokenMetadata::NumberLiteral(NumberLiteralMetadata {
                 grouping,
                 original_lexeme: lexeme.to_string(),
+                suffix,
             }));
 
         Ok(self.finalize_token(token, metadata, normalized))
@@ -608,6 +610,35 @@ impl Normalizer {
     }
 }
 
+impl Normalizer {
+    fn split_numeric_suffix(lexeme: &str) -> (&str, Option<char>) {
+        if lexeme.len() < 2 {
+            return (lexeme, None);
+        }
+
+        let mut chars = lexeme.chars();
+        let last = match chars.next_back() {
+            Some(ch) => ch,
+            None => return (lexeme, None),
+        };
+
+        let has_radix_prefix = Self::has_radix_prefix(lexeme);
+        let suffix = match last {
+            'f' | 'F' if !has_radix_prefix => Some(last),
+            'd' | 'D' if !has_radix_prefix => Some(last),
+            'l' | 'L' => Some(last),
+            _ => None,
+        };
+
+        if suffix.is_some() {
+            let cutoff = lexeme.len() - last.len_utf8();
+            (&lexeme[..cutoff], suffix)
+        } else {
+            (lexeme, None)
+        }
+    }
+}
+
 impl NormalizerStage for Normalizer {
     fn normalize<'source>(
         &mut self,
@@ -778,41 +809,35 @@ mod tests {
     }
 
     #[test]
-    fn normalize_number_strips_float_suffix() {
-        let mut normalizer = Normalizer::new();
-        let raw = make_raw_token(RawTokenKind::NumberCandidate, "0.0f");
-        let mut ctx = LexerContext::new("0.0f");
+    fn normalize_number_strips_numeric_suffixes() {
+        let cases = [
+            ("0.0f", "0.0", Some('f')),
+            ("0.0F", "0.0", Some('F')),
+            ("10d", "10", Some('d')),
+            ("10D", "10", Some('D')),
+            ("42l", "42", Some('l')),
+            ("42L", "42", Some('L')),
+            ("7.5", "7.5", None),
+            ("123", "123", None),
+        ];
 
-        let normalized = normalizer
-            .normalize(raw, &mut ctx)
-            .expect("number normalization with suffix");
+        for (lexeme, expected, suffix) in cases {
+            let mut normalizer = Normalizer::new();
+            let raw = make_raw_token(RawTokenKind::NumberCandidate, lexeme);
+            let mut ctx = LexerContext::new(lexeme);
 
-        assert_eq!(normalized.normalized_text, "0.0");
-        assert!(normalized
-            .metadata
-            .provisional_metadata
-            .iter()
-            .any(|meta| matches!(meta, TokenMetadata::NumberLiteral(info)
-                if info.original_lexeme == "0.0f")));
-    }
+            let normalized = normalizer
+                .normalize(raw, &mut ctx)
+                .unwrap_or_else(|_| panic!("number normalization failed for {}", lexeme));
 
-    #[test]
-    fn normalize_number_strips_long_suffix() {
-        let mut normalizer = Normalizer::new();
-        let raw = make_raw_token(RawTokenKind::NumberCandidate, "42L");
-        let mut ctx = LexerContext::new("42L");
-
-        let normalized = normalizer
-            .normalize(raw, &mut ctx)
-            .expect("number normalization with long suffix");
-
-        assert_eq!(normalized.normalized_text, "42");
-        assert!(normalized
-            .metadata
-            .provisional_metadata
-            .iter()
-            .any(|meta| matches!(meta, TokenMetadata::NumberLiteral(info)
-                if info.original_lexeme == "42L")));
+            assert_eq!(normalized.normalized_text, expected);
+            assert!(normalized
+                .metadata
+                .provisional_metadata
+                .iter()
+                .any(|meta| matches!(meta, TokenMetadata::NumberLiteral(info)
+                    if info.original_lexeme == lexeme && info.suffix == suffix)));
+        }
     }
 
     #[test]

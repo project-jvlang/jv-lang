@@ -142,74 +142,60 @@ fun <T> SequenceCore<T>.count(): Long {
 }
 
 /**
- * 任意の射影関数を介して数値を抽出し、同じ型で合計する汎用集約。
- */
-fun <T, R : Number> SequenceCore<T>.sumBy(transform: (T) -> R): R {
-    val elements : List<T> = this.toList()
-    when (elements.isEmpty()) {
-        true -> {
-            throw IllegalArgumentException("Sequence sumBy() on empty source")
-        }
-        else -> {}
-    }
-
-    val first : T = elements.get(0)
-    var total : R = transform(first)
-    val tail : List<T> = elements.subList(1 elements.size())
-    for (candidate in tail) {
-        val mapped : R = transform(candidate)
-        total = total + mapped
-    }
-
-    return total
-}
-
-private fun <T, R : Number> SequenceCore<T>.sumByOrDefault(
-    defaultValue: R,
-    transform: (T) -> R
-): R {
-    val elements : List<T> = this.toList()
-    when (elements.isEmpty()) {
-        true -> {
-            return defaultValue
-        }
-        else -> {}
-    }
-
-    var total : R = defaultValue
-    for (candidate in elements) {
-        val mapped : R = transform(candidate)
-        total = total + mapped
-    }
-
-    return total
-}
-
-/**
  * Kotlin `Sequence.sum` に対応する型別集約。
  */
 fun SequenceCore<Byte>.sum(): Int {
-    return this.sumByOrDefault(0) { candidate -> candidate.intValue() }
+    val elements : List<Byte> = this.toList()
+    var total = 0
+    for (candidate in elements) {
+        total = total + candidate.intValue()
+    }
+    return total
 }
 
 fun SequenceCore<Short>.sum(): Int {
-    return this.sumByOrDefault(0) { candidate -> candidate.intValue() }
+    val elements : List<Short> = this.toList()
+    var total = 0
+    for (candidate in elements) {
+        total = total + candidate.intValue()
+    }
+    return total
 }
 
 fun SequenceCore<Int>.sum(): Int {
-    return this.sumByOrDefault(0) { candidate -> candidate }
+    val elements : List<Int> = this.toList()
+    var total = 0
+    for (candidate in elements) {
+        total = total + candidate
+    }
+    return total
 }
 
 fun SequenceCore<Long>.sum(): Long {
-    return this.sumByOrDefault(0L) { candidate -> candidate }
+    val elements : List<Long> = this.toList()
+    var total = 0L
+    for (candidate in elements) {
+        total = total + candidate
+    }
+    return total
 }
 
 fun SequenceCore<Float>.sum(): Float {
-    return this.sumByOrDefault(0.0f) { candidate -> candidate }
+    val elements : List<Float> = this.toList()
+    var total = 0.0f
+    for (candidate in elements) {
+        total = total + candidate
+    }
+    return total
 }
 
 fun SequenceCore<Double>.sum(): Double {
-    return this.sumByOrDefault(0.0) { candidate -> candidate }
+    val elements : List<Double> = this.toList()
+    var total = 0.0
+    for (candidate in elements) {
+        total = total + candidate
+    }
+    return total
 }
 
 /**
@@ -341,35 +327,55 @@ fun <T> Iterable<T>.count(): Long {
 /**
  * 任意の射影関数を介して数値を抽出し、同じ型で合計する汎用集約。
  */
-fun <T, R : Number> Iterable<T>.sumBy(transform: (T) -> R): R {
-    return sequenceFromIterable(this).sumBy(transform)
-}
-
 /**
  * Kotlin `Iterable.sum` に対応する型別集約。
  */
 fun Iterable<Byte>.sum(): Int {
-    return sequenceFromIterable(this).sum()
+    var total = 0
+    for (candidate in this) {
+        total = total + candidate.intValue()
+    }
+    return total
 }
 
 fun Iterable<Short>.sum(): Int {
-    return sequenceFromIterable(this).sum()
+    var total = 0
+    for (candidate in this) {
+        total = total + candidate.intValue()
+    }
+    return total
 }
 
 fun Iterable<Int>.sum(): Int {
-    return sequenceFromIterable(this).sum()
+    var total = 0
+    for (candidate in this) {
+        total = total + candidate
+    }
+    return total
 }
 
 fun Iterable<Long>.sum(): Long {
-    return sequenceFromIterable(this).sum()
+    var total = 0L
+    for (candidate in this) {
+        total = total + candidate
+    }
+    return total
 }
 
 fun Iterable<Float>.sum(): Float {
-    return sequenceFromIterable(this).sum()
+    var total = 0.0f
+    for (candidate in this) {
+        total = total + candidate
+    }
+    return total
 }
 
 fun Iterable<Double>.sum(): Double {
-    return sequenceFromIterable(this).sum()
+    var total = 0.0
+    for (candidate in this) {
+        total = total + candidate
+    }
+    return total
 }
 
 /**

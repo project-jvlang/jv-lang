@@ -213,6 +213,8 @@ pub enum NumberGroupingKind {
 pub struct NumberLiteralMetadata {
     pub grouping: NumberGroupingKind,
     pub original_lexeme: String,
+    #[serde(default)]
+    pub suffix: Option<char>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
