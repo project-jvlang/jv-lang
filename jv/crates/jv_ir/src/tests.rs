@@ -4640,7 +4640,12 @@ mod tests {
             call_expr_one.clone(),
             call_expr_two.clone(),
         ];
-        let mut statements_second = vec![method_decl_one, method_decl_two, call_expr_one, call_expr_two];
+        let mut statements_second = vec![
+            method_decl_one,
+            method_decl_two,
+            call_expr_one,
+            call_expr_two,
+        ];
 
         apply_method_erasure(&mut statements_first, &context);
         apply_method_erasure(&mut statements_second, &context);
@@ -4691,7 +4696,13 @@ mod tests {
         );
         assert_eq!(call_first[0], decl_first[0]);
         assert_eq!(call_first[1], decl_first[1]);
-        assert_eq!(decl_first, decl_second, "rename must be deterministic across runs");
-        assert_eq!(call_first, call_second, "call rewriting must be deterministic");
+        assert_eq!(
+            decl_first, decl_second,
+            "rename must be deterministic across runs"
+        );
+        assert_eq!(
+            call_first, call_second,
+            "call rewriting must be deterministic"
+        );
     }
 }

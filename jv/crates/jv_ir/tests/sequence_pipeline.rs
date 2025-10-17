@@ -2,12 +2,13 @@ use jv_ast::{
     Argument, BinaryOp, CallArgumentStyle, Expression, Literal, Parameter, SequenceDelimiter, Span,
     StringPart,
 };
-use jv_ir::{
-    transform_expression, IrExpression, IrModifiers, IrParameter, IrStatement, JavaType,
-    SequenceSource, SequenceStage, SequenceTerminalEvaluation, SequenceTerminalKind, TransformContext,
-};
 use jv_ir::context::{RegisteredMethodCall, RegisteredMethodDeclaration};
 use jv_ir::naming::method_erasure::apply_method_erasure;
+use jv_ir::{
+    transform_expression, IrExpression, IrModifiers, IrParameter, IrStatement, JavaType,
+    SequenceSource, SequenceStage, SequenceTerminalEvaluation, SequenceTerminalKind,
+    TransformContext,
+};
 
 fn dummy_span() -> Span {
     Span::dummy()
@@ -915,7 +916,9 @@ fn sequence_flatmap_overloads_receive_stable_java_names() {
                 ..
             } => (
                 java_name.as_ref().expect("sequence call java name missing"),
-                resolved_target.as_ref().expect("sequence call target missing"),
+                resolved_target
+                    .as_ref()
+                    .expect("sequence call target missing"),
             ),
             other => panic!("unexpected expression variant: {other:?}"),
         },
@@ -924,8 +927,17 @@ fn sequence_flatmap_overloads_receive_stable_java_names() {
 
     assert_eq!(call_iter_name, &iter_name);
     assert_eq!(call_seq_name, &seq_name);
-    assert_eq!(call_iter_target.java_name.as_deref(), Some(iter_name.as_str()));
-    assert_eq!(call_seq_target.java_name.as_deref(), Some(seq_name.as_str()));
+    assert_eq!(
+        call_iter_target.java_name.as_deref(),
+        Some(iter_name.as_str())
+    );
+    assert_eq!(
+        call_seq_target.java_name.as_deref(),
+        Some(seq_name.as_str())
+    );
     assert_eq!(call_seq_target.owner.as_deref(), owner.as_deref());
-    assert_ne!(iter_name, seq_name, "flatMap overloads should be disambiguated");
+    assert_ne!(
+        iter_name, seq_name,
+        "flatMap overloads should be disambiguated"
+    );
 }
