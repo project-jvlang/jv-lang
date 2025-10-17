@@ -1,6 +1,7 @@
 use self::utils::{extract_java_type, ir_expression_span};
 use crate::context::TransformContext;
 use crate::error::TransformError;
+use crate::naming::method_erasure::apply_method_erasure;
 use crate::profiling::{PerfMetrics, TransformProfiler};
 use crate::sequence_pipeline;
 use crate::types::{
@@ -309,7 +310,8 @@ fn lower_program(
     drop(pool_guard);
     context.finish_lowering_session();
 
-    let type_declarations = attach_trailing_comments(ir_statements);
+    let mut type_declarations = attach_trailing_comments(ir_statements);
+    apply_method_erasure(&mut type_declarations, context);
 
     let ir_imports = if context.has_resolved_imports() {
         context

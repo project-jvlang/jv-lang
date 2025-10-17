@@ -1,5 +1,6 @@
 pub mod context;
 pub mod error;
+pub mod naming;
 pub mod profiling;
 pub mod sequence_pipeline;
 pub mod transform;

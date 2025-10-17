@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod tests {
-    use crate::context::SequenceStyleCache;
+    use crate::context::{RegisteredMethodCall, RegisteredMethodDeclaration, SequenceStyleCache};
     use crate::{
         convert_type_annotation, desugar_async_expression, desugar_await_expression,
         desugar_data_class, desugar_default_parameters, desugar_defer_expression,
@@ -9,10 +9,11 @@ mod tests {
         desugar_string_interpolation, desugar_top_level_function, desugar_use_expression,
         desugar_val_declaration, desugar_var_declaration, desugar_when_expression,
         generate_extension_class_name, generate_utility_class_name, infer_java_type,
-        transform_expression, transform_program, transform_program_with_context,
-        transform_program_with_context_profiled, transform_statement, CompletableFutureOp,
-        DataFormat, IrCaseLabel, IrDeconstructionComponent, IrDeconstructionPattern, IrExpression,
-        IrForEachKind, IrForLoopMetadata, IrImplicitWhenEnd, IrModifiers, IrNumericRangeLoop,
+        naming::method_erasure::apply_method_erasure, transform_expression, transform_program,
+        transform_program_with_context, transform_program_with_context_profiled,
+        transform_statement, CompletableFutureOp, DataFormat, IrCaseLabel,
+        IrDeconstructionComponent, IrDeconstructionPattern, IrExpression, IrForEachKind,
+        IrForLoopMetadata, IrImplicitWhenEnd, IrModifiers, IrNumericRangeLoop, IrParameter,
         IrResolvedMethodTarget, IrStatement, IrVisibility, JavaType, PipelineShape, SampleMode,
         SampleSourceKind, Schema, SequencePipeline, SequenceSource, SequenceStage,
         SequenceTerminal, SequenceTerminalEvaluation, SequenceTerminalKind, TransformContext,
@@ -4234,5 +4235,235 @@ mod tests {
             .collect();
 
         assert_eq!(rendered_comments, vec!["// keep".to_string()]);
+    }
+
+    #[test]
+    fn method_registry_assigns_unique_java_names() {
+        let mut context = TransformContext::new();
+        let owner = Some("jv.collections.SequenceExtensions".to_string());
+
+        let span_decl_one = Span::new(1, 1, 1, 10);
+        let span_decl_two = Span::new(2, 1, 2, 10);
+        let span_call_one = Span::new(10, 1, 10, 10);
+        let span_call_two = Span::new(11, 1, 11, 10);
+
+        let sequence_type = JavaType::Reference {
+            name: "jv.collections.Sequence".to_string(),
+            generic_args: vec![],
+        };
+        let iterable_type = JavaType::Reference {
+            name: "java.lang.Iterable".to_string(),
+            generic_args: vec![],
+        };
+
+        let function_seq = JavaType::Reference {
+            name: "java.util.function.Function".to_string(),
+            generic_args: vec![sequence_type.clone(), sequence_type.clone()],
+        };
+        let function_iter = JavaType::Reference {
+            name: "java.util.function.Function".to_string(),
+            generic_args: vec![sequence_type.clone(), iterable_type.clone()],
+        };
+
+        context
+            .method_declarations
+            .push(RegisteredMethodDeclaration {
+                owner: owner.clone(),
+                name: "flatMap".to_string(),
+                java_name: "flatMap".to_string(),
+                parameter_types: vec![function_seq.clone()],
+                return_type: sequence_type.clone(),
+                is_static: true,
+                span: span_decl_one.clone(),
+            });
+        context
+            .method_declarations
+            .push(RegisteredMethodDeclaration {
+                owner: owner.clone(),
+                name: "flatMap".to_string(),
+                java_name: "flatMap".to_string(),
+                parameter_types: vec![function_iter.clone()],
+                return_type: sequence_type.clone(),
+                is_static: true,
+                span: span_decl_two.clone(),
+            });
+
+        context.method_calls.push(RegisteredMethodCall {
+            owner: owner.clone(),
+            original_name: "flatMap".to_string(),
+            java_name: "flatMap".to_string(),
+            receiver_type: None,
+            argument_types: vec![function_seq.clone()],
+            return_type: sequence_type.clone(),
+            argument_style: CallArgumentStyle::Comma,
+            span: span_call_one.clone(),
+        });
+        context.method_calls.push(RegisteredMethodCall {
+            owner: owner.clone(),
+            original_name: "flatMap".to_string(),
+            java_name: "flatMap".to_string(),
+            receiver_type: None,
+            argument_types: vec![function_iter.clone()],
+            return_type: sequence_type.clone(),
+            argument_style: CallArgumentStyle::Comma,
+            span: span_call_two.clone(),
+        });
+
+        let static_modifiers = |is_static| IrModifiers {
+            is_static,
+            ..IrModifiers::default()
+        };
+
+        let method_decl_one = IrStatement::MethodDeclaration {
+            name: "flatMap".to_string(),
+            java_name: None,
+            type_parameters: vec![],
+            parameters: vec![IrParameter {
+                name: "mapper".to_string(),
+                java_type: function_seq.clone(),
+                modifiers: IrModifiers::default(),
+                span: span_decl_one.clone(),
+            }],
+            return_type: sequence_type.clone(),
+            body: None,
+            modifiers: static_modifiers(true),
+            throws: vec![],
+            span: span_decl_one.clone(),
+        };
+
+        let method_decl_two = IrStatement::MethodDeclaration {
+            name: "flatMap".to_string(),
+            java_name: None,
+            type_parameters: vec![],
+            parameters: vec![IrParameter {
+                name: "mapper".to_string(),
+                java_type: function_iter.clone(),
+                modifiers: IrModifiers::default(),
+                span: span_decl_two.clone(),
+            }],
+            return_type: sequence_type.clone(),
+            body: None,
+            modifiers: static_modifiers(true),
+            throws: vec![],
+            span: span_decl_two.clone(),
+        };
+
+        let call_expr_one = IrExpression::MethodCall {
+            receiver: None,
+            method_name: "flatMap".to_string(),
+            java_name: None,
+            resolved_target: None,
+            args: vec![IrExpression::Identifier {
+                name: "mapperSeq".to_string(),
+                java_type: function_seq.clone(),
+                span: span_call_one.clone(),
+            }],
+            argument_style: CallArgumentStyle::Comma,
+            java_type: sequence_type.clone(),
+            span: span_call_one.clone(),
+        };
+
+        let call_expr_two = IrExpression::MethodCall {
+            receiver: None,
+            method_name: "flatMap".to_string(),
+            java_name: None,
+            resolved_target: None,
+            args: vec![IrExpression::Identifier {
+                name: "mapperIter".to_string(),
+                java_type: function_iter.clone(),
+                span: span_call_two.clone(),
+            }],
+            argument_style: CallArgumentStyle::Comma,
+            java_type: sequence_type.clone(),
+            span: span_call_two.clone(),
+        };
+
+        let mut statements = vec![
+            method_decl_one,
+            method_decl_two,
+            IrStatement::Expression {
+                expr: call_expr_one,
+                span: span_call_one.clone(),
+            },
+            IrStatement::Expression {
+                expr: call_expr_two,
+                span: span_call_two.clone(),
+            },
+        ];
+
+        apply_method_erasure(&mut statements, &context);
+
+        let first_method_name = match &statements[0] {
+            IrStatement::MethodDeclaration { java_name, .. } => java_name
+                .as_ref()
+                .expect("expected java_name on first declaration")
+                .clone(),
+            other => panic!("unexpected statement variant: {other:?}"),
+        };
+        let second_method_name = match &statements[1] {
+            IrStatement::MethodDeclaration { java_name, .. } => java_name
+                .as_ref()
+                .expect("expected java_name on second declaration")
+                .clone(),
+            other => panic!("unexpected statement variant: {other:?}"),
+        };
+
+        assert_eq!(first_method_name, "flatMap");
+        assert!(
+            second_method_name.starts_with("flatMap$"),
+            "expected suffixed java name, got {second_method_name}"
+        );
+
+        let (call_one_name, call_one_target) = match &statements[2] {
+            IrStatement::Expression { expr, .. } => match expr {
+                IrExpression::MethodCall {
+                    java_name,
+                    resolved_target,
+                    ..
+                } => (
+                    java_name
+                        .as_ref()
+                        .expect("expected java_name on first call")
+                        .clone(),
+                    resolved_target.clone().expect("expected resolved target"),
+                ),
+                other => panic!("unexpected expression variant: {other:?}"),
+            },
+            other => panic!("unexpected statement variant: {other:?}"),
+        };
+
+        let (call_two_name, call_two_target) = match &statements[3] {
+            IrStatement::Expression { expr, .. } => match expr {
+                IrExpression::MethodCall {
+                    java_name,
+                    resolved_target,
+                    ..
+                } => (
+                    java_name
+                        .as_ref()
+                        .expect("expected java_name on second call")
+                        .clone(),
+                    resolved_target.clone().expect("expected resolved target"),
+                ),
+                other => panic!("unexpected expression variant: {other:?}"),
+            },
+            other => panic!("unexpected statement variant: {other:?}"),
+        };
+
+        assert_eq!(call_one_name, first_method_name);
+        assert_eq!(call_two_name, second_method_name);
+        assert_eq!(
+            call_one_target.erased_parameters,
+            vec!["java.util.function.Function".to_string()]
+        );
+        assert_eq!(
+            call_two_target.erased_parameters,
+            vec!["java.util.function.Function".to_string()]
+        );
+        assert_eq!(
+            call_two_target.java_name.as_deref(),
+            Some(second_method_name.as_str())
+        );
+        assert_eq!(call_two_target.owner, owner);
     }
 }
