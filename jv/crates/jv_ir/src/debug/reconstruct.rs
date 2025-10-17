@@ -301,6 +301,14 @@ impl<'a> ReconstructionContext<'a> {
                     span: span.clone(),
                 })
             }
+            IrStatement::Throw { expr, span } => {
+                let value = self.with_segment("expr", |ctx| ctx.convert_expression(expr))?;
+                self.record_success();
+                Ok(Statement::Throw {
+                    expr: value,
+                    span: span.clone(),
+                })
+            }
             IrStatement::Block { statements, span } => {
                 let block_expr =
                     self.with_segment("block", |ctx| ctx.convert_block(statements, span))?;

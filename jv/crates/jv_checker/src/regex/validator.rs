@@ -165,6 +165,9 @@ impl<'a> RegexValidationVisitor<'a> {
                     self.visit_expression(expr);
                 }
             }
+            Statement::Throw { expr, .. } => {
+                self.visit_expression(expr);
+            }
             Statement::Assignment { target, value, .. } => {
                 self.visit_expression(target);
                 self.visit_expression(value);

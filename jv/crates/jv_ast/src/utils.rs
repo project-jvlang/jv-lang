@@ -44,6 +44,7 @@ impl Statement {
             Statement::ExtensionFunction(ext) => &ext.span,
             Statement::Expression { span, .. } => span,
             Statement::Return { span, .. } => span,
+            Statement::Throw { span, .. } => span,
             Statement::Assignment { span, .. } => span,
             Statement::ForIn(for_in) => &for_in.span,
             Statement::Break(span) => span,

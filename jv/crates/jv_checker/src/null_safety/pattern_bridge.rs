@@ -103,6 +103,7 @@ impl PatternFactsBridge {
                 .as_ref()
                 .map(|expr| self.visit_expression(expr, service, context))
                 .unwrap_or_default(),
+            Statement::Throw { expr, .. } => self.visit_expression(expr, service, context),
             Statement::Assignment { target, value, .. } => {
                 let mut outcome = self.visit_expression(target, service, context);
                 outcome.merge(self.visit_expression(value, service, context));

@@ -115,6 +115,7 @@ fn promote_visibility(statement: &mut Statement) {
         }
         Statement::Expression { .. }
         | Statement::Return { .. }
+        | Statement::Throw { .. }
         | Statement::Assignment { .. }
         | Statement::ValDeclaration { .. }
         | Statement::VarDeclaration { .. }
@@ -208,6 +209,9 @@ fn rewrite_statement(statement: &mut Statement) {
             if let Some(expr) = value {
                 rewrite_expression(expr);
             }
+        }
+        Statement::Throw { expr, .. } => {
+            rewrite_expression(expr);
         }
         Statement::Assignment { target, value, .. } => {
             rewrite_expression(target);
@@ -566,6 +570,9 @@ impl<'a, 'b> ProgramUsageDetector<'a, 'b> {
                 if let Some(expr) = value {
                     self.visit_expression(expr);
                 }
+            }
+            Statement::Throw { expr, .. } => {
+                self.visit_expression(expr);
             }
             Statement::Assignment { target, value, .. } => {
                 self.visit_expression(target);

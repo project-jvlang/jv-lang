@@ -33,6 +33,7 @@ pub enum TokenType {
     While,
     Do,
     Return,
+    Throw,
     Break,
     Continue,
     True,

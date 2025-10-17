@@ -94,19 +94,24 @@ impl JavaCodeGenerator {
                 self.generate_expression(index)?
             )),
             IrExpression::Binary {
-                left, op, right, ..
+                left,
+                op,
+                right,
+                java_type,
+                ..
             } => {
                 if matches!(op, BinaryOp::Elvis) {
                     let left_expr = self.generate_expression(left)?;
                     let right_expr = self.generate_expression(right)?;
                     Ok(format!("({0} != null ? {0} : {1})", left_expr, right_expr))
                 } else {
-                    Ok(format!(
-                        "{} {} {}",
-                        self.generate_expression(left)?,
-                        self.generate_binary_op(op)?,
-                        self.generate_expression(right)?
-                    ))
+                    let operator = self.generate_binary_op(op)?;
+                    let left_expr = self.generate_expression(left)?;
+                    let right_expr = self.generate_expression(right)?;
+                    let (left_expr, right_expr) = self.coerce_numeric_operands(
+                        op, left, right, java_type, left_expr, right_expr,
+                    )?;
+                    Ok(format!("{} {} {}", left_expr, operator, right_expr))
                 }
             }
             IrExpression::Unary { op, operand, .. } => {
@@ -1080,7 +1085,7 @@ impl JavaCodeGenerator {
                 if sequence_stream_field || java_stream {
                     Ok((rendered, false))
                 } else if needs_sequence_core_conversion {
-                    Ok((format!("({}).toStream()", rendered), false))
+                    Ok((format!("({}).stream()", rendered), false))
                 } else {
                     Ok((format!("({}).stream()", rendered), false))
                 }
@@ -1126,7 +1131,7 @@ impl JavaCodeGenerator {
             .unwrap_or(false)
     }
 
-    fn expression_java_type(expr: &IrExpression) -> Option<&JavaType> {
+    pub(super) fn expression_java_type(expr: &IrExpression) -> Option<&JavaType> {
         match expr {
             IrExpression::Identifier { java_type, .. }
             | IrExpression::MethodCall { java_type, .. }
@@ -1492,6 +1497,71 @@ impl JavaCodeGenerator {
             rendered.push(self.generate_expression(arg)?);
         }
         Ok(rendered)
+    }
+
+    fn coerce_numeric_operands(
+        &self,
+        op: &BinaryOp,
+        left: &IrExpression,
+        right: &IrExpression,
+        result_type: &JavaType,
+        mut rendered_left: String,
+        mut rendered_right: String,
+    ) -> Result<(String, String), CodeGenError> {
+        let arithmetic = matches!(
+            op,
+            BinaryOp::Add
+                | BinaryOp::Subtract
+                | BinaryOp::Multiply
+                | BinaryOp::Divide
+                | BinaryOp::Modulo
+        );
+
+        if !arithmetic {
+            return Ok((rendered_left, rendered_right));
+        }
+
+        let target_primitive = match result_type {
+            JavaType::Primitive(name) => name.as_str(),
+            _ => return Ok((rendered_left, rendered_right)),
+        };
+
+        let Some(info) = primitive_info_by_primitive(target_primitive) else {
+            return Ok((rendered_left, rendered_right));
+        };
+
+        rendered_left =
+            self.ensure_numeric_operand(rendered_left, Self::expression_java_type(left), info)?;
+        rendered_right =
+            self.ensure_numeric_operand(rendered_right, Self::expression_java_type(right), info)?;
+
+        Ok((rendered_left, rendered_right))
+    }
+
+    fn ensure_numeric_operand(
+        &self,
+        rendered: String,
+        operand_type: Option<&JavaType>,
+        target_info: &PrimitiveConversionInfo,
+    ) -> Result<String, CodeGenError> {
+        match operand_type {
+            Some(JavaType::Primitive(_)) => Ok(rendered),
+            Some(JavaType::Reference { .. }) => Ok(format!(
+                "((Number) {}).{}()",
+                rendered, target_info.unboxing_method
+            )),
+            Some(JavaType::Wildcard { bound, .. }) => {
+                if let Some(inner) = bound.as_ref() {
+                    self.ensure_numeric_operand(rendered, Some(inner), target_info)
+                } else {
+                    Ok(format!(
+                        "((Number) {}).{}()",
+                        rendered, target_info.unboxing_method
+                    ))
+                }
+            }
+            _ => Ok(rendered),
+        }
     }
 
     fn render_whitespace_array(&mut self, values: &[IrExpression]) -> Result<String, CodeGenError> {

@@ -91,6 +91,9 @@ impl<'a> WhenUsageValidator<'a> {
                     self.visit_expression(expr, true);
                 }
             }
+            Statement::Throw { expr, .. } => {
+                self.visit_expression(expr, true);
+            }
             Statement::Assignment { target, value, .. } => {
                 self.visit_expression(target, true);
                 self.visit_expression(value, true);

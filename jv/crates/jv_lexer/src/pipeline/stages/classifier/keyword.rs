@@ -46,6 +46,7 @@ impl ClassificationModule for KeywordModule {
             "while" => Some(TokenType::While),
             "do" => Some(TokenType::Do),
             "return" => Some(TokenType::Return),
+            "throw" => Some(TokenType::Throw),
             "break" => Some(TokenType::Break),
             "continue" => Some(TokenType::Continue),
             "true" => Some(TokenType::Boolean(true)),

@@ -19,7 +19,8 @@ use super::support::{
     token_defer, token_do_keyword, token_dot, token_for, token_fun, token_greater, token_import,
     token_in_keyword, token_left_brace, token_left_paren, token_less, token_multiply,
     token_package, token_question, token_return, token_right_brace, token_right_paren, token_spawn,
-    token_use, token_val, token_var, token_where_keyword, token_while_keyword, type_annotation,
+    token_throw, token_use, token_val, token_var, token_where_keyword, token_while_keyword,
+    type_annotation,
 };
 
 fn attempt_statement_parser<P>(
@@ -52,6 +53,7 @@ pub(crate) fn statement_parser(
         let defer_stmt = defer_statement_parser(statement.clone());
         let spawn_stmt = spawn_statement_parser(statement.clone());
         let return_stmt = return_statement_parser(expr.clone());
+        let throw_stmt = throw_statement_parser(expr.clone());
         let for_in_stmt = for_in_statement_parser(statement.clone(), expr.clone());
         let legacy_loop = legacy_loop_parser();
         let expression_stmt = expression_statement_parser(expr);
@@ -72,6 +74,7 @@ pub(crate) fn statement_parser(
             spawn_stmt,
             for_in_stmt,
             return_stmt,
+            throw_stmt,
             legacy_loop,
             expression_stmt,
         ))
@@ -475,6 +478,15 @@ fn return_statement_parser(
                 .unwrap_or_else(|| span_from_token(&ret_token));
             Statement::Return { value, span }
         })
+}
+
+fn throw_statement_parser(
+    expr: impl ChumskyParser<Token, Expression, Error = Simple<Token>> + Clone,
+) -> impl ChumskyParser<Token, Statement, Error = Simple<Token>> + Clone {
+    token_throw().ignore_then(expr).map(|value| {
+        let span = expression_span(&value);
+        Statement::Throw { expr: value, span }
+    })
 }
 
 fn expression_statement_parser(

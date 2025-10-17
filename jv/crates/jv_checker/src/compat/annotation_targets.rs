@@ -258,6 +258,7 @@ fn validate_statement(statement: &Statement, errors: &mut Vec<CheckError>) {
         Statement::Comment(_)
         | Statement::Expression { .. }
         | Statement::Return { .. }
+        | Statement::Throw { .. }
         | Statement::Assignment { .. }
         | Statement::ForIn(_)
         | Statement::Break(_)

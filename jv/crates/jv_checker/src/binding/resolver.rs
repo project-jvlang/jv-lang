@@ -325,6 +325,10 @@ impl BindingResolver {
                 value: value.map(|expr| self.resolve_expression(expr)),
                 span,
             },
+            Statement::Throw { expr, span } => Statement::Throw {
+                expr: self.resolve_expression(expr),
+                span,
+            },
             Statement::ForIn(mut for_in) => {
                 for_in.iterable = self.resolve_expression(for_in.iterable);
                 self.enter_scope();

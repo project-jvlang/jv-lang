@@ -193,6 +193,12 @@ pub enum Statement {
         span: Span,
     },
 
+    // Throw statements
+    Throw {
+        expr: Expression,
+        span: Span,
+    },
+
     // Assignment statements
     Assignment {
         target: Expression, // Could be identifier or member access

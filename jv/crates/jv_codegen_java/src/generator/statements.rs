@@ -252,10 +252,11 @@ impl JavaCodeGenerator {
         iterable: &IrExpression,
         body: &IrStatement,
     ) -> Result<String, CodeGenError> {
+        let item_type = self.resolve_for_each_item_type(variable_type, iterable);
         let mut builder = self.builder();
         builder.push_line(&format!(
             "for ({} {} : {}) {{",
-            self.generate_type(variable_type)?,
+            self.generate_type(&item_type)?,
             variable,
             self.generate_expression(iterable)?
         ));
@@ -275,7 +276,8 @@ impl JavaCodeGenerator {
         body: &IrStatement,
     ) -> Result<String, CodeGenError> {
         let iterable_source = self.generate_expression(iterable)?;
-        let item_type = self.generate_type(variable_type)?;
+        let resolved_type = self.resolve_for_each_item_type(variable_type, iterable);
+        let item_type = self.generate_type(&resolved_type)?;
         let mut builder = self.builder();
         builder.push_line("{");
         builder.indent();
@@ -312,6 +314,56 @@ impl JavaCodeGenerator {
         builder.dedent();
         builder.push_line("}");
         Ok(builder.build())
+    }
+
+    fn resolve_for_each_item_type(
+        &self,
+        declared_type: &JavaType,
+        iterable: &IrExpression,
+    ) -> JavaType {
+        if !Self::is_java_lang_object_type(declared_type) {
+            return declared_type.clone();
+        }
+
+        if let Some(iterable_type) = Self::expression_java_type(iterable) {
+            if let Some(element) = Self::iterable_element_type(iterable_type) {
+                return element;
+            }
+        }
+
+        declared_type.clone()
+    }
+
+    fn iterable_element_type(java_type: &JavaType) -> Option<JavaType> {
+        match java_type {
+            JavaType::Reference { generic_args, .. } if !generic_args.is_empty() => {
+                Some(Self::normalize_iterable_element(generic_args[0].clone()))
+            }
+            JavaType::Array { element_type, .. } => Some(*element_type.clone()),
+            _ => None,
+        }
+    }
+
+    fn normalize_iterable_element(element: JavaType) -> JavaType {
+        match element {
+            JavaType::Wildcard {
+                bound: Some(bound), ..
+            } => (*bound).clone(),
+            JavaType::Wildcard { .. } => JavaType::Reference {
+                name: "java.lang.Object".to_string(),
+                generic_args: Vec::new(),
+            },
+            other => other,
+        }
+    }
+
+    fn is_java_lang_object_type(java_type: &JavaType) -> bool {
+        matches!(
+            java_type,
+            JavaType::Reference { name, generic_args }
+                if generic_args.is_empty()
+                    && (name == "java.lang.Object" || name == "Object")
+        )
     }
 
     fn generate_for_loop(

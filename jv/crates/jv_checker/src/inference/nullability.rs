@@ -140,6 +140,10 @@ impl NullabilityAnalyzer {
                     None
                 }
             }
+            Statement::Throw { expr, .. } => {
+                self.evaluate_expression(expr);
+                None
+            }
             Statement::ForIn(for_in) => {
                 self.evaluate_expression(&for_in.iterable);
                 self.enter_scope();

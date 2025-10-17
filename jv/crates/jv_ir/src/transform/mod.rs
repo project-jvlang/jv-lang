@@ -151,6 +151,13 @@ pub fn transform_statement(
                 span,
             }])
         }
+        Statement::Throw { expr, span } => {
+            let ir_expr = transform_expression(expr, context)?;
+            Ok(vec![IrStatement::Throw {
+                expr: ir_expr,
+                span,
+            }])
+        }
         Statement::FunctionDeclaration {
             name,
             parameters,

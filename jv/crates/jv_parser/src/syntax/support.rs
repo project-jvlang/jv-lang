@@ -73,6 +73,14 @@ pub(crate) fn token_return() -> impl ChumskyParser<Token, Token, Error = Simple<
     })
 }
 
+pub(crate) fn token_throw() -> impl ChumskyParser<Token, Token, Error = Simple<Token>> + Clone {
+    filter(|token: &Token| match &token.token_type {
+        TokenType::Throw => true,
+        TokenType::Identifier(name) => name == "throw",
+        _ => false,
+    })
+}
+
 pub(crate) fn token_use() -> impl ChumskyParser<Token, Token, Error = Simple<Token>> + Clone {
     keyword("use")
 }
@@ -385,6 +393,7 @@ pub(crate) fn statement_span(stmt: &Statement) -> Span {
         Statement::DataClassDeclaration { span, .. } => span.clone(),
         Statement::Expression { span, .. } => span.clone(),
         Statement::Return { span, .. } => span.clone(),
+        Statement::Throw { span, .. } => span.clone(),
         Statement::Assignment { span, .. } => span.clone(),
         Statement::ClassDeclaration { span, .. } => span.clone(),
         Statement::InterfaceDeclaration { span, .. } => span.clone(),
