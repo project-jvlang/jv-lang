@@ -111,6 +111,7 @@ fn call_method(receiver: Expression, method: &str, args: Vec<Argument>) -> Expre
             span: dummy_span(),
         }),
         args,
+        type_arguments: Vec::new(),
         argument_metadata: jv_ast::CallArgumentMetadata::default(),
         span: dummy_span(),
     }
@@ -129,6 +130,7 @@ fn map_pipeline(source: Expression) -> Expression {
             span: dummy_span(),
         }),
         args: vec![Argument::Positional(lambda_expr)],
+        type_arguments: Vec::new(),
         argument_metadata: jv_ast::CallArgumentMetadata::default(),
         span: dummy_span(),
     }
@@ -263,6 +265,7 @@ fn reduce_expression() -> Expression {
             span: dummy_span(),
         }),
         args: vec![Argument::Positional(reduce_lambda)],
+        type_arguments: Vec::new(),
         argument_metadata: jv_ast::CallArgumentMetadata::default(),
         span: dummy_span(),
     }
@@ -283,6 +286,7 @@ fn fold_expression() -> Expression {
             Argument::Positional(initial),
             Argument::Positional(fold_lambda),
         ],
+        type_arguments: Vec::new(),
         argument_metadata: jv_ast::CallArgumentMetadata::default(),
         span: dummy_span(),
     }
@@ -297,6 +301,7 @@ fn count_expression() -> Expression {
             span: dummy_span(),
         }),
         args: vec![],
+        type_arguments: Vec::new(),
         argument_metadata: jv_ast::CallArgumentMetadata::default(),
         span: dummy_span(),
     }

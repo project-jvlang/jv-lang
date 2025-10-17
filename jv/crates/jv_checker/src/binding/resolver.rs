@@ -448,6 +448,7 @@ impl BindingResolver {
             Expression::Call {
                 function,
                 args,
+                type_arguments,
                 argument_metadata,
                 span,
             } => Expression::Call {
@@ -456,6 +457,7 @@ impl BindingResolver {
                     .into_iter()
                     .map(|arg| self.resolve_argument(arg))
                     .collect(),
+                type_arguments,
                 argument_metadata,
                 span,
             },

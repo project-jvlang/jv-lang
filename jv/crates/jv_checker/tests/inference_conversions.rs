@@ -192,8 +192,7 @@ fn conversion_diagnostic_reports_boxing_event() {
 
 #[test]
 fn optional_reference_conversion_requests_guard() {
-    let source =
-        TypeKind::optional(TypeKind::reference("java.lang.String"));
+    let source = TypeKind::optional(TypeKind::reference("java.lang.String"));
     let target = TypeKind::reference("java.lang.String");
 
     let outcome = ConversionRulesEngine::analyze(&source, &target);

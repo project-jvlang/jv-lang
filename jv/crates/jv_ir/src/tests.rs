@@ -1374,6 +1374,7 @@ mod tests {
                     span: dummy_span(),
                 }),
                 args: vec![],
+                type_arguments: Vec::new(),
                 argument_metadata: CallArgumentMetadata::with_style(CallArgumentStyle::Comma),
                 span: dummy_span(),
             }),
@@ -1977,6 +1978,7 @@ mod tests {
                 Literal::String("World".to_string()),
                 dummy_span(),
             ))],
+            type_arguments: Vec::new(),
             argument_metadata: CallArgumentMetadata::default(),
             span: dummy_span(),
         };
@@ -2587,6 +2589,7 @@ mod tests {
                 "greeting".to_string(),
                 dummy_span(),
             ))],
+            type_arguments: Vec::new(),
             argument_metadata: CallArgumentMetadata::default(),
             span: dummy_span(),
         };
@@ -2644,6 +2647,7 @@ mod tests {
                 span: dummy_span(),
             }),
             args: Vec::new(),
+            type_arguments: Vec::new(),
             argument_metadata: CallArgumentMetadata::default(),
             span: dummy_span(),
         };
@@ -3032,6 +3036,7 @@ mod tests {
                         dummy_span(),
                     )),
                     args: vec![],
+                    type_arguments: Vec::new(),
                     argument_metadata: CallArgumentMetadata::with_style(CallArgumentStyle::Comma),
                     span: dummy_span(),
                 }),
@@ -3058,6 +3063,7 @@ mod tests {
                                         Literal::String("Hello".to_string()),
                                         dummy_span(),
                                     ))],
+                                    type_arguments: Vec::new(),
                                     argument_metadata: CallArgumentMetadata::with_style(
                                         CallArgumentStyle::Comma,
                                     ),
@@ -3076,6 +3082,7 @@ mod tests {
                                         span: dummy_span(),
                                     }),
                                     args: vec![],
+                                    type_arguments: Vec::new(),
                                     argument_metadata: CallArgumentMetadata::with_style(
                                         CallArgumentStyle::Comma,
                                     ),
@@ -3329,6 +3336,7 @@ mod tests {
                 span: dummy_span(),
             }),
             args: vec![Argument::Positional(lambda_expr)],
+            type_arguments: Vec::new(),
             argument_metadata: CallArgumentMetadata::default(),
             span: dummy_span(),
         };
@@ -3340,6 +3348,7 @@ mod tests {
                 span: dummy_span(),
             }),
             args: vec![],
+            type_arguments: Vec::new(),
             argument_metadata: CallArgumentMetadata::default(),
             span: dummy_span(),
         };

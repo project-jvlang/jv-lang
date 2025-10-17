@@ -423,6 +423,98 @@ include = ["src/**/*.jv"]
 }
 
 #[test]
+fn stdlib_flatmap_iterable_signature_is_generated_correctly() {
+    let temp_dir = TempDirGuard::new("sequence-flatmap-signature");
+    let root_path = temp_dir.path();
+    let manifest_path = root_path.join("jv.toml");
+
+    fs::write(
+        &manifest_path,
+        r#"[package]
+name = "flatmap-signature"
+version = "0.1.0"
+
+[package.dependencies]
+
+[project]
+entrypoint = "src/main.jv"
+
+[project.sources]
+include = ["src/**/*.jv"]
+
+[project.output]
+directory = "target"
+clean = false
+"#,
+    )
+    .expect("write manifest");
+
+    let src_dir = root_path.join("src");
+    fs::create_dir_all(&src_dir).expect("create src directory");
+    let entrypoint = src_dir.join("main.jv");
+    fs::write(
+        &entrypoint,
+        r#"fun main() {
+    val numbers = [1 2 3]
+    val expanded = numbers.flatMap { value -> [value value + 10] }
+    val result = expanded.toList()
+    println(result)
+}
+"#,
+    )
+    .expect("write source");
+
+    let project_root = pipeline::project::locator::ProjectRoot::new(
+        root_path.to_path_buf(),
+        manifest_path.clone(),
+    );
+    let settings =
+        pipeline::project::manifest::ManifestLoader::load(&manifest_path).expect("manifest loads");
+    let layout = pipeline::project::layout::ProjectLayout::from_settings(&project_root, &settings)
+        .expect("layout resolves");
+
+    let overrides = pipeline::CliOverrides {
+        entrypoint: Some(entrypoint.clone()),
+        output: Some(root_path.join("target")),
+        java_only: true,
+        check: false,
+        format: false,
+        target: None,
+        clean: false,
+        perf: false,
+        emit_types: false,
+        verbose: false,
+        emit_telemetry: false,
+        parallel_inference: false,
+        inference_workers: None,
+        constraint_batch: None,
+    };
+
+    let plan = pipeline::BuildOptionsFactory::compose(project_root, settings, layout, overrides)
+        .expect("plan composition succeeds");
+
+    pipeline::compile(&plan).expect("program should compile");
+
+    let sequence_java = plan.output_dir().join("jv/collections/Sequence.java");
+    let sequence_contents =
+        fs::read_to_string(&sequence_java).expect("Sequence.java should exist after compile");
+
+    let signature_line = sequence_contents
+        .lines()
+        .find(|line| line.contains("flatMap(Iterable<T> receiver"))
+        .expect("flatMap overload for Iterable should exist");
+
+    assert!(
+        signature_line.contains("java.util.function.Function"),
+        "flatMap signature should accept a java.util.function.Function: {signature_line}"
+    );
+    assert!(
+        signature_line.contains("Iterable<R>"),
+        "flatMap signature should reference Iterable<R> return type: {signature_line}"
+    );
+}
+
+#[test]
 fn compile_accepts_for_in_loops() {
     let temp_dir = TempDirGuard::new("compile-for-in");
     let root_path = temp_dir.path();

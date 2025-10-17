@@ -3,7 +3,7 @@ use chumsky::Parser as ChumskyParser;
 use jv_ast::{
     Argument, ArgumentElementKind, BinaryOp, CallArgumentIssue, CallArgumentMetadata,
     CallArgumentStyle, Expression, Literal, MultilineKind, MultilineStringLiteral, Parameter,
-    Pattern, SequenceDelimiter, Span, StringPart, UnaryOp, WhenArm,
+    Pattern, SequenceDelimiter, Span, StringPart, TypeAnnotation, UnaryOp, WhenArm,
 };
 use jv_lexer::{StringDelimiterKind, StringLiteralMetadata, Token, TokenMetadata, TokenType};
 
@@ -443,6 +443,7 @@ enum PostfixOp {
     Call {
         args: Vec<Argument>,
         metadata: CallArgumentMetadata,
+        type_arguments: Vec<TypeAnnotation>,
         span: Span,
     },
     Member {
@@ -489,18 +490,53 @@ fn postfix_expression_parser(
 fn call_suffix(
     expr: impl ChumskyParser<Token, Expression, Error = Simple<Token>> + Clone,
 ) -> impl ChumskyParser<Token, PostfixOp, Error = Simple<Token>> + Clone {
-    token_left_paren()
+    let arguments = argument_list(expr.clone());
+
+    let with_type_arguments = call_type_arguments()
+        .then(
+            token_left_paren()
+                .map(|token| span_from_token(&token))
+                .then(arguments.clone())
+                .then(token_right_paren().map(|token| span_from_token(&token))),
+        )
+        .map(
+            |(type_arguments, ((left_span, (args, metadata)), right_span))| {
+                let span = merge_spans(&left_span, &right_span);
+                PostfixOp::Call {
+                    args,
+                    metadata,
+                    type_arguments,
+                    span,
+                }
+            },
+        );
+
+    let without_type_arguments = token_left_paren()
         .map(|token| span_from_token(&token))
-        .then(argument_list(expr.clone()))
+        .then(arguments)
         .then(token_right_paren().map(|token| span_from_token(&token)))
         .map(|((left_span, (args, metadata)), right_span)| {
             let span = merge_spans(&left_span, &right_span);
             PostfixOp::Call {
                 args,
                 metadata,
+                type_arguments: Vec::new(),
                 span,
             }
-        })
+        });
+
+    choice((with_type_arguments, without_type_arguments))
+}
+
+fn call_type_arguments(
+) -> impl ChumskyParser<Token, Vec<TypeAnnotation>, Error = Simple<Token>> + Clone {
+    token_less()
+        .ignore_then(
+            type_annotation()
+                .separated_by(token_any_comma())
+                .allow_trailing(),
+        )
+        .then_ignore(token_greater())
 }
 
 fn call_argument_comma_error_message() -> String {
@@ -792,12 +828,14 @@ fn apply_postfix(base: Expression, op: PostfixOp) -> Expression {
         PostfixOp::Call {
             args,
             metadata,
+            type_arguments,
             span: suffix_span,
         } => {
             let span = merge_spans(&expression_span(&base), &suffix_span);
             Expression::Call {
                 function: Box::new(base),
                 args,
+                type_arguments,
                 argument_metadata: metadata,
                 span,
             }
@@ -853,6 +891,7 @@ fn apply_postfix(base: Expression, op: PostfixOp) -> Expression {
             Expression::Call {
                 function,
                 mut args,
+                type_arguments,
                 argument_metadata,
                 span,
             } => {
@@ -861,6 +900,7 @@ fn apply_postfix(base: Expression, op: PostfixOp) -> Expression {
                 Expression::Call {
                     function,
                     args,
+                    type_arguments,
                     argument_metadata,
                     span: new_span,
                 }
@@ -870,6 +910,7 @@ fn apply_postfix(base: Expression, op: PostfixOp) -> Expression {
                 Expression::Call {
                     function: Box::new(other),
                     args: vec![Argument::Positional(lambda)],
+                    type_arguments: Vec::new(),
                     argument_metadata: CallArgumentMetadata::with_style(CallArgumentStyle::Comma),
                     span,
                 }

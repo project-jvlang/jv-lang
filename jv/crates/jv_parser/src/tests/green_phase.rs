@@ -1710,6 +1710,54 @@ fn test_whitespace_call_mixed_types_metadata_issue() {
 }
 
 #[test]
+fn test_call_with_type_arguments_parses_generics() {
+    let program = parse_program("val grouped = LinkedHashMap<K, List<T>>()");
+    let statement = first_statement(&program);
+
+    match statement {
+        Statement::ValDeclaration { initializer, .. } => match initializer {
+            Expression::Call {
+                function,
+                type_arguments,
+                ..
+            } => {
+                match function.as_ref() {
+                    Expression::Identifier(name, _) => {
+                        assert_eq!(name, "LinkedHashMap");
+                    }
+                    other => panic!(
+                        "expected identifier call target for generic constructor, found {:?}",
+                        other
+                    ),
+                }
+
+                assert_eq!(type_arguments.len(), 2);
+                match &type_arguments[0] {
+                    TypeAnnotation::Simple(name) => assert_eq!(name, "K"),
+                    other => panic!("expected simple type argument, found {:?}", other),
+                }
+
+                match &type_arguments[1] {
+                    TypeAnnotation::Generic { name, type_args } => {
+                        assert_eq!(name, "List");
+                        assert_eq!(type_args.len(), 1);
+                        match &type_args[0] {
+                            TypeAnnotation::Simple(inner) => assert_eq!(inner, "T"),
+                            other => {
+                                panic!("expected inner simple type argument, found {:?}", other)
+                            }
+                        }
+                    }
+                    other => panic!("expected nested generic type argument, found {:?}", other),
+                }
+            }
+            other => panic!("expected call initializer, found {:?}", other),
+        },
+        other => panic!("expected val declaration, found {:?}", other),
+    }
+}
+
+#[test]
 fn test_whitespace_call_allows_thousand_separator_numbers() {
     let program = parse_program("val chart = plot(1,234 5)");
     let statement = first_statement(&program);

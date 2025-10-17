@@ -65,6 +65,7 @@ fn test_expression_call() {
     let expr = Expression::Call {
         function: Box::new(function),
         args: vec![arg],
+        type_arguments: Vec::new(),
         argument_metadata: CallArgumentMetadata::with_style(CallArgumentStyle::Comma),
         span: dummy_span(),
     };
@@ -296,6 +297,7 @@ fn test_expression_try() {
             dummy_span(),
         )),
         args: vec![],
+        type_arguments: Vec::new(),
         argument_metadata: CallArgumentMetadata::with_style(CallArgumentStyle::Comma),
         span: dummy_span(),
     };

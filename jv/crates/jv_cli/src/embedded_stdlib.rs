@@ -278,6 +278,7 @@ fn rewrite_expression(expression: &mut Expression) {
                 *expression = Expression::Call {
                     function: Box::new(function),
                     args: Vec::new(),
+                    type_arguments: Vec::new(),
                     argument_metadata: CallArgumentMetadata::default(),
                     span: span.clone(),
                 };
