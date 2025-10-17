@@ -41,18 +41,14 @@ fun <T> SequenceCore<T>.close() {
  * Kotlin `Sequence.map` と同等の変換操作。
  */
 fun <T, R> SequenceCore<T>.map(transform: (T) -> R): SequenceCore<R> {
-    return sequenceFromStream(
-        this.stream.map { value -> transform(value) }
-    )
+    return this.stream.map { value -> transform(value) }
 }
 
 /**
  * Kotlin `Sequence.filter` と同等のフィルタ操作。
  */
 fun <T> SequenceCore<T>.filter(predicate: (T) -> Boolean): SequenceCore<T> {
-    return sequenceFromStream(
-        this.stream.filter { value -> predicate(value) }
-    )
+    return this.stream.filter { value -> predicate(value) }
 }
 
 /**
@@ -77,45 +73,39 @@ fun <T> SequenceCore<T>.drop(count: Int): SequenceCore<T> {
  * Kotlin `Sequence.flatMap` と同等のフラット化操作。
  */
 fun <T, R> SequenceCore<T>.flatMap(transform: (T) -> Iterable<R>): SequenceCore<R> {
-    return sequenceFromStream(
-        this.stream.flatMap { value ->
-            StreamSupport.stream(
-                transform(value).spliterator()
-                false
-            )
-        }
-    )
+    return this.stream.flatMap { value ->
+        StreamSupport.stream(
+            transform(value).spliterator()
+            false
+        )
+    }
 }
 
-fun <T, R> SequenceCore<T>.flatMap(transform: (T) -> SequenceCore<R>): SequenceCore<R> {
-    return sequenceFromStream(
-        this.stream.flatMap { value -> transform(value).toStream() }
-    )
+fun <T, R> SequenceCore<T>.flatMap(transform: (T) -> Stream<R>): SequenceCore<R> {
+    return this.stream.flatMap(transform)
 }
 
 /**
  * Kotlin `Sequence.sorted` と同等のソート操作。
  */
 fun <T : Comparable<T>> SequenceCore<T>.sorted(): SequenceCore<T> {
-    return sequenceFromStream(this.stream.sorted())
+    return this.stream.sorted()
 }
 
 /**
  * Kotlin `Sequence.sortedBy` と同等のキー指定ソート。
  */
 fun <T, R : Comparable<R>> SequenceCore<T>.sortedBy(selector: (T) -> R): SequenceCore<T> {
-    return sequenceFromStream(
-        this.stream.sorted { left right ->
-            selector(left).compareTo(selector(right))
-        }
-    )
+    return this.stream.sorted { left right ->
+        selector(left).compareTo(selector(right))
+    }
 }
 
 /**
  * Kotlin `Sequence.toList` と同等の終端操作。
  */
 fun <T> SequenceCore<T>.toList(): List<T> {
-    return this.stream.collect(Collectors.toList())
+    return this.stream.toList()
 }
 
 /**
@@ -152,15 +142,74 @@ fun <T> SequenceCore<T>.count(): Long {
 }
 
 /**
- * Kotlin `Sequence.sum` 相当の数値集計。
+ * 任意の射影関数を介して数値を抽出し、同じ型で合計する汎用集約。
  */
-fun SequenceCore<Number>.sum(): Number {
-    val elements : List<Number> = this.toList()
-    var total = 0
-    for (candidate in elements) {
-        total = total + candidate
+fun <T, R : Number> SequenceCore<T>.sumBy(transform: (T) -> R): R {
+    val elements : List<T> = this.toList()
+    when (elements.isEmpty()) {
+        true -> {
+            throw IllegalArgumentException("Sequence sumBy() on empty source")
+        }
+        else -> {}
     }
+
+    val first : T = elements.get(0)
+    var total : R = transform(first)
+    val tail : List<T> = elements.subList(1 elements.size())
+    for (candidate in tail) {
+        val mapped : R = transform(candidate)
+        total = total + mapped
+    }
+
     return total
+}
+
+private fun <T, R : Number> SequenceCore<T>.sumByOrDefault(
+    defaultValue: R,
+    transform: (T) -> R
+): R {
+    val elements : List<T> = this.toList()
+    when (elements.isEmpty()) {
+        true -> {
+            return defaultValue
+        }
+        else -> {}
+    }
+
+    var total : R = defaultValue
+    for (candidate in elements) {
+        val mapped : R = transform(candidate)
+        total = total + mapped
+    }
+
+    return total
+}
+
+/**
+ * Kotlin `Sequence.sum` に対応する型別集約。
+ */
+fun SequenceCore<Byte>.sum(): Int {
+    return this.sumByOrDefault(0) { candidate -> candidate.intValue() }
+}
+
+fun SequenceCore<Short>.sum(): Int {
+    return this.sumByOrDefault(0) { candidate -> candidate.intValue() }
+}
+
+fun SequenceCore<Int>.sum(): Int {
+    return this.sumByOrDefault(0) { candidate -> candidate }
+}
+
+fun SequenceCore<Long>.sum(): Long {
+    return this.sumByOrDefault(0L) { candidate -> candidate }
+}
+
+fun SequenceCore<Float>.sum(): Float {
+    return this.sumByOrDefault(0.0f) { candidate -> candidate }
+}
+
+fun SequenceCore<Double>.sum(): Double {
+    return this.sumByOrDefault(0.0) { candidate -> candidate }
 }
 
 /**
@@ -247,7 +296,7 @@ fun <T, R> Iterable<T>.flatMap(transform: (T) -> Iterable<R>): SequenceCore<R> {
     return sequenceFromIterable(this).flatMap(transform)
 }
 
-fun <T, R> Iterable<T>.flatMap(transform: (T) -> SequenceCore<R>): SequenceCore<R> {
+fun <T, R> Iterable<T>.flatMap(transform: (T) -> Stream<R>): SequenceCore<R> {
     return sequenceFromIterable(this).flatMap(transform)
 }
 
@@ -261,7 +310,7 @@ fun <T : Comparable<T>> Iterable<T>.sorted(): SequenceCore<T> {
 /**
  * Kotlin `Iterable.sortedBy` に準拠したキー指定ソートの遅延チェーン。
  */
-fun <T, R : Comparable<R>> Iterable<T>.sortedBy(selector: (T) -> R): SequenceCore<T> {
+fun <T, R : Comparable<R>> Iterable<T>.sortedBy(selector: (T) -> R): SequenceCore<R> {
     return sequenceFromIterable(this).sortedBy(selector)
 }
 
@@ -290,9 +339,36 @@ fun <T> Iterable<T>.count(): Long {
 }
 
 /**
- * Kotlin `Iterable.sum` と同等の数値集計。
+ * 任意の射影関数を介して数値を抽出し、同じ型で合計する汎用集約。
  */
-fun <Number> Iterable<Number>.sum(): Number {
+fun <T, R : Number> Iterable<T>.sumBy(transform: (T) -> R): R {
+    return sequenceFromIterable(this).sumBy(transform)
+}
+
+/**
+ * Kotlin `Iterable.sum` に対応する型別集約。
+ */
+fun Iterable<Byte>.sum(): Int {
+    return sequenceFromIterable(this).sum()
+}
+
+fun Iterable<Short>.sum(): Int {
+    return sequenceFromIterable(this).sum()
+}
+
+fun Iterable<Int>.sum(): Int {
+    return sequenceFromIterable(this).sum()
+}
+
+fun Iterable<Long>.sum(): Long {
+    return sequenceFromIterable(this).sum()
+}
+
+fun Iterable<Float>.sum(): Float {
+    return sequenceFromIterable(this).sum()
+}
+
+fun Iterable<Double>.sum(): Double {
     return sequenceFromIterable(this).sum()
 }
 
