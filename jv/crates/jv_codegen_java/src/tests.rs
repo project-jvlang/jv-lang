@@ -1305,6 +1305,7 @@ fn snapshot_ir_program() {
           {
             "MethodDeclaration": {
               "name": "greet",
+              "java_name": null,
               "type_parameters": [],
               "parameters": [
                 {
@@ -1902,6 +1903,52 @@ public class UserSampleLoader {
 }
 "###
     );
+}
+
+#[test]
+fn numeric_variable_declarations_preserve_literal_suffixes() {
+    let mut generator = JavaCodeGenerator::new();
+    let span = dummy_span();
+
+    let cases = [
+        (
+            "totalLong",
+            JavaType::Primitive("long".to_string()),
+            "0L",
+            "long totalLong = 0L;",
+        ),
+        (
+            "totalFloat",
+            JavaType::Primitive("float".to_string()),
+            "0.0f",
+            "float totalFloat = 0.0f;",
+        ),
+        (
+            "totalDouble",
+            JavaType::Primitive("double".to_string()),
+            "0.0",
+            "double totalDouble = 0.0;",
+        ),
+    ];
+
+    for (name, java_type, literal, expected) in cases {
+        let statement = IrStatement::VariableDeclaration {
+            name: name.to_string(),
+            java_type: java_type.clone(),
+            initializer: Some(IrExpression::Literal(
+                Literal::Number(literal.to_string()),
+                span.clone(),
+            )),
+            is_final: false,
+            modifiers: IrModifiers::default(),
+            span: span.clone(),
+        };
+
+        let rendered = generator
+            .generate_statement(&statement)
+            .expect("generate variable declaration with numeric suffix");
+        assert_eq!(rendered, expected);
+    }
 }
 
 #[test]

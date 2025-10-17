@@ -179,7 +179,7 @@ pub(crate) fn ir_expression_span(expr: &IrExpression) -> Span {
 fn literal_to_java_type(literal: &Literal) -> JavaType {
     match literal {
         Literal::String(_) => JavaType::string(),
-        Literal::Number(_) => JavaType::Primitive("int".to_string()),
+        Literal::Number(value) => java_type_from_number_literal(value),
         Literal::Boolean(_) => JavaType::boolean(),
         Literal::Character(_) => JavaType::Primitive("char".to_string()),
         Literal::Null => JavaType::object(),
@@ -187,6 +187,30 @@ fn literal_to_java_type(literal: &Literal) -> JavaType {
             name: "java.util.regex.Pattern".to_string(),
             generic_args: Vec::new(),
         },
+    }
+}
+
+fn java_type_from_number_literal(value: &str) -> JavaType {
+    let lower = value.to_ascii_lowercase();
+    let suffix = lower
+        .chars()
+        .last()
+        .filter(|ch| matches!(ch, 'f' | 'd' | 'l'));
+    let core = suffix
+        .map(|_| &lower[..lower.len() - 1])
+        .unwrap_or(lower.as_str());
+
+    match suffix {
+        Some('f') => JavaType::Primitive("float".to_string()),
+        Some('d') => JavaType::Primitive("double".to_string()),
+        Some('l') => JavaType::Primitive("long".to_string()),
+        _ => {
+            if core.contains('.') || core.contains('e') {
+                JavaType::Primitive("double".to_string())
+            } else {
+                JavaType::Primitive("int".to_string())
+            }
+        }
     }
 }
 
