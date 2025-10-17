@@ -4466,4 +4466,232 @@ mod tests {
         );
         assert_eq!(call_two_target.owner, owner);
     }
+    #[test]
+    fn method_registry_is_general_purpose_for_arbitrary_owners() {
+        let mut context = TransformContext::new();
+        let owner = Some("com.example.Utility".to_string());
+
+        let span_decl_one = Span::new(5, 1, 5, 20);
+        let span_decl_two = Span::new(6, 1, 6, 20);
+        let span_call_one = Span::new(15, 1, 15, 20);
+        let span_call_two = Span::new(16, 1, 16, 20);
+
+        let optional_string = JavaType::Reference {
+            name: "java.util.Optional".to_string(),
+            generic_args: vec![JavaType::Reference {
+                name: "java.lang.String".to_string(),
+                generic_args: vec![],
+            }],
+        };
+        let optional_integer = JavaType::Reference {
+            name: "java.util.Optional".to_string(),
+            generic_args: vec![JavaType::Reference {
+                name: "java.lang.Integer".to_string(),
+                generic_args: vec![],
+            }],
+        };
+
+        context
+            .method_declarations
+            .push(RegisteredMethodDeclaration {
+                owner: owner.clone(),
+                name: "transform".to_string(),
+                java_name: "transform".to_string(),
+                parameter_types: vec![optional_string.clone()],
+                return_type: JavaType::Reference {
+                    name: "java.lang.String".to_string(),
+                    generic_args: vec![],
+                },
+                is_static: true,
+                span: span_decl_one.clone(),
+            });
+        context
+            .method_declarations
+            .push(RegisteredMethodDeclaration {
+                owner: owner.clone(),
+                name: "transform".to_string(),
+                java_name: "transform".to_string(),
+                parameter_types: vec![optional_integer.clone()],
+                return_type: JavaType::Reference {
+                    name: "java.lang.Integer".to_string(),
+                    generic_args: vec![],
+                },
+                is_static: true,
+                span: span_decl_two.clone(),
+            });
+
+        context.method_calls.push(RegisteredMethodCall {
+            owner: owner.clone(),
+            original_name: "transform".to_string(),
+            java_name: "transform".to_string(),
+            receiver_type: None,
+            argument_types: vec![optional_string.clone()],
+            return_type: JavaType::Reference {
+                name: "java.lang.String".to_string(),
+                generic_args: vec![],
+            },
+            argument_style: CallArgumentStyle::Comma,
+            span: span_call_one.clone(),
+        });
+        context.method_calls.push(RegisteredMethodCall {
+            owner: owner.clone(),
+            original_name: "transform".to_string(),
+            java_name: "transform".to_string(),
+            receiver_type: None,
+            argument_types: vec![optional_integer.clone()],
+            return_type: JavaType::Reference {
+                name: "java.lang.Integer".to_string(),
+                generic_args: vec![],
+            },
+            argument_style: CallArgumentStyle::Comma,
+            span: span_call_two.clone(),
+        });
+
+        let modifiers = |is_static| IrModifiers {
+            is_static,
+            ..IrModifiers::default()
+        };
+
+        let method_decl_one = IrStatement::MethodDeclaration {
+            name: "transform".to_string(),
+            java_name: None,
+            type_parameters: vec![],
+            parameters: vec![IrParameter {
+                name: "value".to_string(),
+                java_type: optional_string.clone(),
+                modifiers: IrModifiers::default(),
+                span: span_decl_one.clone(),
+            }],
+            return_type: JavaType::Reference {
+                name: "java.lang.String".to_string(),
+                generic_args: vec![],
+            },
+            body: None,
+            modifiers: modifiers(true),
+            throws: vec![],
+            span: span_decl_one.clone(),
+        };
+
+        let method_decl_two = IrStatement::MethodDeclaration {
+            name: "transform".to_string(),
+            java_name: None,
+            type_parameters: vec![],
+            parameters: vec![IrParameter {
+                name: "value".to_string(),
+                java_type: optional_integer.clone(),
+                modifiers: IrModifiers::default(),
+                span: span_decl_two.clone(),
+            }],
+            return_type: JavaType::Reference {
+                name: "java.lang.Integer".to_string(),
+                generic_args: vec![],
+            },
+            body: None,
+            modifiers: modifiers(true),
+            throws: vec![],
+            span: span_decl_two.clone(),
+        };
+
+        let call_expr_one = IrStatement::Expression {
+            expr: IrExpression::MethodCall {
+                receiver: None,
+                method_name: "transform".to_string(),
+                java_name: None,
+                resolved_target: None,
+                args: vec![IrExpression::Identifier {
+                    name: "stringValue".to_string(),
+                    java_type: optional_string.clone(),
+                    span: span_call_one.clone(),
+                }],
+                argument_style: CallArgumentStyle::Comma,
+                java_type: JavaType::Reference {
+                    name: "java.lang.String".to_string(),
+                    generic_args: vec![],
+                },
+                span: span_call_one.clone(),
+            },
+            span: span_call_one.clone(),
+        };
+
+        let call_expr_two = IrStatement::Expression {
+            expr: IrExpression::MethodCall {
+                receiver: None,
+                method_name: "transform".to_string(),
+                java_name: None,
+                resolved_target: None,
+                args: vec![IrExpression::Identifier {
+                    name: "intValue".to_string(),
+                    java_type: optional_integer.clone(),
+                    span: span_call_two.clone(),
+                }],
+                argument_style: CallArgumentStyle::Comma,
+                java_type: JavaType::Reference {
+                    name: "java.lang.Integer".to_string(),
+                    generic_args: vec![],
+                },
+                span: span_call_two.clone(),
+            },
+            span: span_call_two.clone(),
+        };
+
+        let mut statements_first = vec![
+            method_decl_one.clone(),
+            method_decl_two.clone(),
+            call_expr_one.clone(),
+            call_expr_two.clone(),
+        ];
+        let mut statements_second = vec![method_decl_one, method_decl_two, call_expr_one, call_expr_two];
+
+        apply_method_erasure(&mut statements_first, &context);
+        apply_method_erasure(&mut statements_second, &context);
+
+        let extract_names = |stmts: &[IrStatement]| {
+            let decl_names: Vec<String> = stmts
+                .iter()
+                .take(2)
+                .map(|stmt| match stmt {
+                    IrStatement::MethodDeclaration { java_name, .. } => java_name
+                        .as_ref()
+                        .expect("declaration should have java name")
+                        .clone(),
+                    other => panic!("unexpected statement variant: {other:?}"),
+                })
+                .collect();
+
+            let call_names: Vec<String> = stmts
+                .iter()
+                .skip(2)
+                .map(|stmt| match stmt {
+                    IrStatement::Expression { expr, .. } => match expr {
+                        IrExpression::MethodCall { java_name, .. } => java_name
+                            .as_ref()
+                            .expect("call should have java name")
+                            .clone(),
+                        other => panic!("unexpected expression variant: {other:?}"),
+                    },
+                    other => panic!("unexpected statement variant: {other:?}"),
+                })
+                .collect();
+
+            (decl_names, call_names)
+        };
+
+        let (decl_first, call_first) = extract_names(&statements_first);
+        let (decl_second, call_second) = extract_names(&statements_second);
+
+        assert_eq!(decl_first[0], "transform");
+        assert!(
+            decl_first[1].starts_with("transform$"),
+            "second overload should receive deterministic suffix, got {}",
+            decl_first[1]
+        );
+        assert_ne!(
+            decl_first[0], decl_first[1],
+            "overloads must diverge after erasure"
+        );
+        assert_eq!(call_first[0], decl_first[0]);
+        assert_eq!(call_first[1], decl_first[1]);
+        assert_eq!(decl_first, decl_second, "rename must be deterministic across runs");
+        assert_eq!(call_first, call_second, "call rewriting must be deterministic");
+    }
 }
