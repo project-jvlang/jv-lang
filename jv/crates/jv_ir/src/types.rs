@@ -66,6 +66,10 @@ pub enum IrExpression {
     MethodCall {
         receiver: Option<Box<IrExpression>>, // None for static calls
         method_name: String,
+        #[serde(default)]
+        java_name: Option<String>,
+        #[serde(default)]
+        resolved_target: Option<IrResolvedMethodTarget>,
         args: Vec<IrExpression>,
         argument_style: CallArgumentStyle,
         java_type: JavaType,
@@ -241,6 +245,23 @@ pub enum IrExpression {
         java_type: JavaType,
         span: Span,
     },
+}
+
+/// Metadata describing the resolved target for a method call after name mapping.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct IrResolvedMethodTarget {
+    /// Fully qualified owner class name once determined (e.g., `jv.collections.Sequence`).
+    #[serde(default)]
+    pub owner: Option<String>,
+    /// Original jv-level method name associated with the target.
+    #[serde(default)]
+    pub original_name: Option<String>,
+    /// Resolved Java-level method name after renaming (if any).
+    #[serde(default)]
+    pub java_name: Option<String>,
+    /// Erased JVM parameter descriptors used for collision detection.
+    #[serde(default)]
+    pub erased_parameters: Vec<String>,
 }
 
 /// Conversion metadata kinds mirrored from the inference engine.
@@ -751,6 +772,8 @@ pub enum IrStatement {
     // Method declarations
     MethodDeclaration {
         name: String,
+        #[serde(default)]
+        java_name: Option<String>,
         #[serde(default)]
         type_parameters: Vec<IrTypeParameter>,
         parameters: Vec<IrParameter>,

@@ -459,6 +459,8 @@ fn example1_program() -> IrProgram {
         IrExpression::MethodCall {
             receiver: Some(Box::new(ir_identifier("value", &string))),
             method_name: "length".to_string(),
+            java_name: None,
+            resolved_target: None,
             args: vec![],
             argument_style: CallArgumentStyle::Comma,
             java_type: int.clone(),
@@ -509,6 +511,7 @@ fn example1_program() -> IrProgram {
 
     let evaluate_method = IrStatement::MethodDeclaration {
         name: "evaluate".to_string(),
+        java_name: None,
         type_parameters: vec![],
         parameters: vec![IrParameter {
             name: "x".to_string(),
@@ -587,6 +590,7 @@ fn example2_program() -> IrProgram {
 
     let method = IrStatement::MethodDeclaration {
         name: "categorize".to_string(),
+        java_name: None,
         type_parameters: vec![],
         parameters: vec![IrParameter {
             name: "score".to_string(),
@@ -773,6 +777,7 @@ fn example5_program() -> IrProgram {
 
     let total_method = IrStatement::MethodDeclaration {
         name: "total".to_string(),
+        java_name: None,
         type_parameters: vec![],
         parameters: vec![IrParameter {
             name: "value".to_string(),

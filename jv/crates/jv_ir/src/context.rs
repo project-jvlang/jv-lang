@@ -3,10 +3,10 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use crate::types::{
-    DataFormat, IrImport, IrImportDetail, JavaType, MethodOverload, SampleMode, StaticMethodCall,
-    UtilityClass,
+    DataFormat, IrExpression, IrImport, IrImportDetail, IrResolvedMethodTarget, IrStatement,
+    JavaType, MethodOverload, SampleMode, StaticMethodCall, UtilityClass,
 };
-use jv_ast::Span;
+use jv_ast::{CallArgumentStyle, Span};
 use jv_support::arena::{
     PoolMetrics as TransformPoolMetrics, PoolSessionMetrics as TransformPoolSessionMetrics,
     TransformPools, TransformPoolsGuard,
@@ -25,6 +25,10 @@ pub struct TransformContext {
     pub utility_classes: Vec<UtilityClass>,
     /// Generated method overloads
     pub method_overloads: Vec<MethodOverload>,
+    /// Registered method declarations collected during lowering
+    pub method_declarations: Vec<RegisteredMethodDeclaration>,
+    /// Registered method call sites collected during lowering
+    pub method_calls: Vec<RegisteredMethodCall>,
     /// Extension function mappings
     pub extension_methods: HashMap<String, StaticMethodCall>,
     /// Current package
@@ -70,6 +74,8 @@ impl TransformContext {
             scope_stack: vec![HashMap::new()],
             utility_classes: Vec::new(),
             method_overloads: Vec::new(),
+            method_declarations: Vec::new(),
+            method_calls: Vec::new(),
             extension_methods: HashMap::new(),
             current_package: None,
             sample_options: SampleOptions::default(),
@@ -110,6 +116,88 @@ impl TransformContext {
 
     pub fn register_function_signature(&mut self, name: String, params: Vec<JavaType>) {
         self.function_signatures.insert(name, params);
+    }
+
+    /// Registers a lowered method declaration so that later passes can resolve Java naming.
+    pub fn bind_method_declaration(&mut self, method: &mut IrStatement, owner: Option<String>) {
+        if let IrStatement::MethodDeclaration {
+            name,
+            java_name,
+            parameters,
+            return_type,
+            modifiers,
+            span,
+            ..
+        } = method
+        {
+            let canonical_java_name = java_name.clone().unwrap_or_else(|| name.clone());
+
+            if java_name.is_none() {
+                *java_name = Some(canonical_java_name.clone());
+            }
+
+            self.method_declarations.push(RegisteredMethodDeclaration {
+                owner,
+                name: name.clone(),
+                java_name: canonical_java_name,
+                parameter_types: parameters
+                    .iter()
+                    .map(|param| param.java_type.clone())
+                    .collect(),
+                return_type: return_type.clone(),
+                is_static: modifiers.is_static,
+                span: span.clone(),
+            });
+        }
+    }
+
+    /// Registers a lowered method call expression for subsequent Java name resolution.
+    pub fn bind_method_call(
+        &mut self,
+        call: &mut IrExpression,
+        owner: Option<String>,
+        receiver_type: Option<JavaType>,
+        argument_types: Vec<JavaType>,
+    ) {
+        if let IrExpression::MethodCall {
+            method_name,
+            java_name,
+            resolved_target,
+            argument_style,
+            java_type,
+            span,
+            ..
+        } = call
+        {
+            let canonical_java_name = java_name.clone().unwrap_or_else(|| method_name.clone());
+
+            if java_name.is_none() {
+                *java_name = Some(canonical_java_name.clone());
+            }
+
+            let target = resolved_target.get_or_insert_with(IrResolvedMethodTarget::default);
+            if target.original_name.is_none() {
+                target.original_name = Some(method_name.clone());
+            }
+            if target.java_name.is_none() {
+                target.java_name = Some(canonical_java_name.clone());
+            }
+            if target.owner.is_none() {
+                target.owner = owner.clone();
+            }
+            target.erased_parameters.clear();
+
+            self.method_calls.push(RegisteredMethodCall {
+                owner,
+                original_name: method_name.clone(),
+                java_name: canonical_java_name,
+                receiver_type,
+                argument_types,
+                return_type: java_type.clone(),
+                argument_style: *argument_style,
+                span: span.clone(),
+            });
+        }
     }
 
     pub fn function_signature(&self, name: &str) -> Option<&[JavaType]> {
@@ -264,6 +352,8 @@ impl Clone for TransformContext {
             scope_stack: self.scope_stack.clone(),
             utility_classes: self.utility_classes.clone(),
             method_overloads: self.method_overloads.clone(),
+            method_declarations: self.method_declarations.clone(),
+            method_calls: self.method_calls.clone(),
             extension_methods: self.extension_methods.clone(),
             current_package: self.current_package.clone(),
             sample_options: self.sample_options.clone(),
@@ -285,6 +375,31 @@ impl Clone for TransformContext {
 pub struct WhenStrategyRecord {
     pub span: Span,
     pub description: String,
+}
+
+/// Metadata captured for each method declaration produced during lowering.
+#[derive(Debug, Clone)]
+pub struct RegisteredMethodDeclaration {
+    pub owner: Option<String>,
+    pub name: String,
+    pub java_name: String,
+    pub parameter_types: Vec<JavaType>,
+    pub return_type: JavaType,
+    pub is_static: bool,
+    pub span: Span,
+}
+
+/// Metadata captured for each method call expression produced during lowering.
+#[derive(Debug, Clone)]
+pub struct RegisteredMethodCall {
+    pub owner: Option<String>,
+    pub original_name: String,
+    pub java_name: String,
+    pub receiver_type: Option<JavaType>,
+    pub argument_types: Vec<JavaType>,
+    pub return_type: JavaType,
+    pub argument_style: CallArgumentStyle,
+    pub span: Span,
 }
 
 #[derive(Debug, Clone)]

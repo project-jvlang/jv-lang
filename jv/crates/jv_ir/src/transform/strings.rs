@@ -85,6 +85,8 @@ fn materialize_sequence_if_needed(expr: IrExpression) -> IrExpression {
         other if type_hint.as_ref().is_some_and(is_sequence_type) => IrExpression::MethodCall {
             receiver: Some(Box::new(other)),
             method_name: "toList".to_string(),
+            java_name: None,
+            resolved_target: None,
             args: Vec::new(),
             argument_style: CallArgumentStyle::Comma,
             java_type: JavaType::list(),

@@ -738,19 +738,25 @@ fn lower_call_expression(
             if let Some(receiver_kind) = resolve_implicit_system_method(&name) {
                 let receiver_expr = create_system_field_access(receiver_kind, fn_span);
                 let return_type = system_method_return_type(receiver_kind, &name);
-                return Ok(IrExpression::MethodCall {
+                let mut call = IrExpression::MethodCall {
                     receiver: Some(Box::new(receiver_expr)),
                     method_name: name,
+                    java_name: None,
+                    resolved_target: None,
                     args: ir_args,
                     argument_style,
                     java_type: return_type,
                     span,
-                });
+                };
+                register_call_metadata(context, &mut call, None);
+                return Ok(call);
             }
 
             if let Some(param_types) = context.function_signature(&name) {
                 if param_types.len() == ir_args.len() {
-                    ir_args = adjust_call_arguments_for_signature(ir_args, param_types);
+                    let param_types_vec: Vec<JavaType> = param_types.to_vec();
+                    ir_args =
+                        adjust_call_arguments_for_signature(ir_args, &param_types_vec, context);
                 }
             }
 
@@ -787,14 +793,18 @@ fn lower_call_expression(
                     java_type: java_type.clone(),
                     span: span.clone(),
                 };
-                return Ok(IrExpression::MethodCall {
+                let mut call = IrExpression::MethodCall {
                     receiver: Some(Box::new(receiver)),
                     method_name,
+                    java_name: None,
+                    resolved_target: None,
                     args: ir_args,
                     argument_style,
                     java_type: return_type,
                     span,
-                });
+                };
+                register_call_metadata(context, &mut call, None);
+                return Ok(call);
             }
 
             #[cfg(debug_assertions)]
@@ -805,14 +815,18 @@ fn lower_call_expression(
                 );
             }
 
-            Ok(IrExpression::MethodCall {
+            let mut call = IrExpression::MethodCall {
                 receiver: None,
                 method_name: name,
+                java_name: None,
+                resolved_target: None,
                 args: ir_args,
                 argument_style,
                 java_type,
                 span,
-            })
+            };
+            register_call_metadata(context, &mut call, None);
+            Ok(call)
         }
         Expression::MemberAccess {
             object,
@@ -823,37 +837,49 @@ fn lower_call_expression(
                 lower_system_receiver_expression((*object).clone())
             {
                 let return_type = system_method_return_type(receiver_kind, &property);
-                return Ok(IrExpression::MethodCall {
+                let mut call = IrExpression::MethodCall {
                     receiver: Some(Box::new(receiver_expr)),
                     method_name: property,
+                    java_name: None,
+                    resolved_target: None,
                     args: ir_args,
                     argument_style,
                     java_type: return_type,
                     span,
-                });
+                };
+                register_call_metadata(context, &mut call, None);
+                return Ok(call);
             }
 
             let receiver_expr = transform_expression(*object, context)?;
 
-            Ok(IrExpression::MethodCall {
+            let mut call = IrExpression::MethodCall {
                 receiver: Some(Box::new(receiver_expr)),
                 method_name: property,
+                java_name: None,
+                resolved_target: None,
                 args: ir_args,
                 argument_style,
                 java_type: JavaType::object(),
                 span,
-            })
+            };
+            register_call_metadata(context, &mut call, None);
+            Ok(call)
         }
         other => {
             let function_expr = transform_expression(other, context)?;
-            Ok(IrExpression::MethodCall {
+            let mut call = IrExpression::MethodCall {
                 receiver: Some(Box::new(function_expr)),
                 method_name: "call".to_string(),
+                java_name: None,
+                resolved_target: None,
                 args: ir_args,
                 argument_style,
                 java_type: JavaType::object(),
                 span,
-            })
+            };
+            register_call_metadata(context, &mut call, None);
+            Ok(call)
         }
     }
 }
@@ -876,6 +902,7 @@ fn lower_call_arguments(
 fn adjust_call_arguments_for_signature(
     args: Vec<IrExpression>,
     param_types: &[JavaType],
+    context: &mut TransformContext,
 ) -> Vec<IrExpression> {
     if args.len() != param_types.len() {
         return args;
@@ -883,21 +910,39 @@ fn adjust_call_arguments_for_signature(
 
     args.into_iter()
         .zip(param_types.iter())
-        .map(|(arg, param)| coerce_argument_for_parameter(arg, param))
+        .map(|(arg, param)| coerce_argument_for_parameter(arg, param, context))
         .collect()
 }
 
-fn coerce_argument_for_parameter(arg: IrExpression, param_type: &JavaType) -> IrExpression {
+fn coerce_argument_for_parameter(
+    arg: IrExpression,
+    param_type: &JavaType,
+    context: &mut TransformContext,
+) -> IrExpression {
     if !is_sequence_core_type(param_type) {
         return arg;
     }
 
     match extract_java_type(&arg) {
         Some(JavaType::Reference { name, .. }) if is_iterable_like(&name) => {
-            make_sequence_factory_call("sequenceFromIterable", arg, param_type.clone())
+            let mut call =
+                make_sequence_factory_call("sequenceFromIterable", arg, param_type.clone());
+            register_call_metadata(
+                context,
+                &mut call,
+                Some("jv.collections.Sequence".to_string()),
+            );
+            call
         }
         Some(JavaType::Reference { name, .. }) if is_stream_type(&name) => {
-            make_sequence_factory_call("sequenceFromStream", arg, param_type.clone())
+            let mut call =
+                make_sequence_factory_call("sequenceFromStream", arg, param_type.clone());
+            register_call_metadata(
+                context,
+                &mut call,
+                Some("jv.collections.Sequence".to_string()),
+            );
+            call
         }
         _ => arg,
     }
@@ -921,10 +966,27 @@ fn make_sequence_factory_call(
     IrExpression::MethodCall {
         receiver: Some(Box::new(factory_identifier)),
         method_name: method.to_string(),
+        java_name: None,
+        resolved_target: None,
         args: vec![argument],
         argument_style: CallArgumentStyle::Whitespace,
         java_type: result_type,
         span,
+    }
+}
+
+fn register_call_metadata(
+    context: &mut TransformContext,
+    call: &mut IrExpression,
+    owner: Option<String>,
+) {
+    if let IrExpression::MethodCall { receiver, args, .. } = call {
+        let receiver_type = receiver.as_ref().and_then(|expr| extract_java_type(expr));
+        let argument_types = args
+            .iter()
+            .map(|arg| extract_java_type(arg).unwrap_or_else(JavaType::object))
+            .collect();
+        context.bind_method_call(call, owner, receiver_type, argument_types);
     }
 }
 

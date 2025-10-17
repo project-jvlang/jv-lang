@@ -1,5 +1,6 @@
 use super::transform_expression;
 use super::type_system::convert_type_annotation;
+use super::utils::extract_java_type;
 use crate::context::TransformContext;
 use crate::error::TransformError;
 use crate::types::{IrExpression, IrStatement, JavaType, MethodOverload};
@@ -153,14 +154,25 @@ fn create_delegating_call(
         args.push(convert_expression_to_ir(default_expr.clone(), context)?);
     }
 
-    Ok(IrExpression::MethodCall {
+    let argument_types: Vec<JavaType> = args
+        .iter()
+        .map(|expr| extract_java_type(expr).unwrap_or_else(JavaType::object))
+        .collect();
+
+    let mut call = IrExpression::MethodCall {
         receiver: None, // Static call to overloaded method
         method_name: function_name.to_string(),
+        java_name: None,
+        resolved_target: None,
         args,
         argument_style: CallArgumentStyle::Comma,
         java_type: JavaType::object(), // Return type would be inferred
         span: Span::dummy(),
-    })
+    };
+
+    context.bind_method_call(&mut call, None, None, argument_types);
+
+    Ok(call)
 }
 
 fn convert_expression_to_ir(
@@ -241,6 +253,8 @@ pub fn desugar_named_arguments(
             Ok(IrExpression::MethodCall {
                 receiver: None, // Static function call
                 method_name: name,
+                java_name: None,
+                resolved_target: None,
                 args: final_args,
                 argument_style: CallArgumentStyle::Comma,
                 java_type: JavaType::object(), // Would be inferred from function signature
@@ -256,6 +270,8 @@ pub fn desugar_named_arguments(
             Ok(IrExpression::MethodCall {
                 receiver: Some(receiver),
                 method_name: field_name,
+                java_name: None,
+                resolved_target: None,
                 args: final_args,
                 argument_style: CallArgumentStyle::Comma,
                 java_type: JavaType::object(),
@@ -272,6 +288,8 @@ pub fn desugar_named_arguments(
             Ok(IrExpression::MethodCall {
                 receiver: None,
                 method_name: "call".to_string(), // Generic call method
+                java_name: None,
+                resolved_target: None,
                 args: all_args,
                 argument_style: CallArgumentStyle::Comma,
                 java_type: JavaType::object(),
@@ -385,8 +403,9 @@ pub fn desugar_top_level_function(
             let ir_body = body_ir_result?;
 
             // Create method declaration
-            Ok(IrStatement::MethodDeclaration {
+            let mut method = IrStatement::MethodDeclaration {
                 name,
+                java_name: None,
                 type_parameters: ir_type_parameters,
                 parameters: ir_parameters,
                 return_type: java_return_type,
@@ -394,7 +413,11 @@ pub fn desugar_top_level_function(
                 modifiers: ir_modifiers,
                 throws,
                 span,
-            })
+            };
+
+            context.bind_method_declaration(&mut method, None);
+
+            Ok(method)
         }
         _ => {
             // Return an error for non-function statements

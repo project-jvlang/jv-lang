@@ -50,6 +50,8 @@ pub(crate) fn sequence_factory_stream_source(name: &str) -> SequenceSource {
             span: dummy_span(),
         })),
         method_name: "sequenceFromIterable".to_string(),
+        java_name: None,
+        resolved_target: None,
         args: vec![identifier(name)],
         argument_style: CallArgumentStyle::Comma,
         java_type: JavaType::Reference {

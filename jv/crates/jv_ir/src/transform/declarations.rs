@@ -215,8 +215,9 @@ pub fn desugar_extension_function(
         None => JavaType::void(),
     };
 
-    Ok(IrStatement::MethodDeclaration {
+    let mut method = IrStatement::MethodDeclaration {
         name: function_name,
+        java_name: None,
         type_parameters: ir_type_parameters,
         parameters: ir_parameters,
         return_type: return_java_type,
@@ -224,7 +225,11 @@ pub fn desugar_extension_function(
         modifiers: method_modifiers,
         throws: Vec::new(),
         span: function_span,
-    })
+    };
+
+    context.bind_method_declaration(&mut method, None);
+
+    Ok(method)
 }
 
 pub fn desugar_data_class(
@@ -329,6 +334,8 @@ fn replace_this_ir_expression(
         IrExpression::MethodCall {
             receiver,
             method_name,
+            java_name,
+            resolved_target,
             args,
             argument_style,
             java_type,
@@ -342,6 +349,8 @@ fn replace_this_ir_expression(
                 ))
             }),
             method_name,
+            java_name,
+            resolved_target,
             args: args
                 .into_iter()
                 .map(|arg| replace_this_ir_expression(arg, replacement_name, replacement_type))

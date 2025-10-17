@@ -230,6 +230,8 @@ fn embed_users_field() -> IrStatement {
                 span: dummy_span(),
             })),
             method_name: "of".to_string(),
+            java_name: None,
+            resolved_target: None,
             args: vec![
                 user_sample_constructor("Alice", 28, "alice@example.com"),
                 user_sample_constructor("Bob", 31, "bob@example.com"),
@@ -284,6 +286,8 @@ fn load_path_of_call() -> IrExpression {
             span: dummy_span(),
         })),
         method_name: "of".to_string(),
+        java_name: None,
+        resolved_target: None,
         args: vec![IrExpression::Literal(
             Literal::String("/data/users.json".to_string()),
             dummy_span(),
@@ -302,6 +306,8 @@ fn load_read_string_call() -> IrExpression {
             span: dummy_span(),
         })),
         method_name: "readString".to_string(),
+        java_name: None,
+        resolved_target: None,
         args: vec![load_path_of_call()],
         argument_style: CallArgumentStyle::Comma,
         java_type: string_type(),
@@ -312,6 +318,7 @@ fn load_read_string_call() -> IrExpression {
 fn load_users_method() -> IrStatement {
     IrStatement::MethodDeclaration {
         name: "loadUsers".to_string(),
+        java_name: None,
         type_parameters: vec![],
         parameters: vec![],
         return_type: string_type(),
@@ -416,6 +423,7 @@ fn simple_method() -> IrStatement {
     };
     IrStatement::MethodDeclaration {
         name: "sayHello".to_string(),
+        java_name: None,
         type_parameters: vec![],
         parameters: vec![],
         return_type: string_type(),
@@ -539,6 +547,7 @@ fn snapshot_program() -> IrProgram {
 
     let method = IrStatement::MethodDeclaration {
         name: "greet".to_string(),
+        java_name: None,
         type_parameters: vec![],
         parameters: vec![IrParameter {
             name: "input".to_string(),
@@ -616,6 +625,7 @@ fn method_generation_renders_generic_type_parameters() {
 
     let method = IrStatement::MethodDeclaration {
         name: "sequenceFromIterable".to_string(),
+        java_name: None,
         type_parameters: vec![IrTypeParameter::new("T", span.clone())],
         parameters: vec![IrParameter {
             name: "source".to_string(),
@@ -687,6 +697,7 @@ fn record_extension_method_is_emitted_as_instance_method() {
 
     let extension_method = IrStatement::MethodDeclaration {
         name: "identity".to_string(),
+        java_name: None,
         type_parameters: vec![],
         parameters: vec![IrParameter {
             name: "receiver".to_string(),
@@ -784,6 +795,7 @@ fn class_extension_method_is_emitted_as_instance_method() {
 
     let extension_method = IrStatement::MethodDeclaration {
         name: "self".to_string(),
+        java_name: None,
         type_parameters: vec![],
         parameters: vec![IrParameter {
             name: "receiver".to_string(),
@@ -866,6 +878,7 @@ fn external_extension_method_remains_static_utility() {
 
     let method = IrStatement::MethodDeclaration {
         name: "size".to_string(),
+        java_name: None,
         type_parameters: vec![],
         parameters: vec![IrParameter {
             name: "receiver".to_string(),
@@ -1024,6 +1037,8 @@ fn whitespace_call_arguments_render_multiline_for_readability() {
     let expression = IrExpression::MethodCall {
         receiver: None,
         method_name: "plot".to_string(),
+        java_name: None,
+        resolved_target: None,
         args: vec![
             IrExpression::Literal(Literal::Number("1".to_string()), dummy_span()),
             IrExpression::Literal(Literal::Number("2".to_string()), dummy_span()),
@@ -1092,6 +1107,8 @@ fn script_statements_are_wrapped_in_generated_main() {
             span: dummy_span(),
         })),
         method_name: "println".to_string(),
+        java_name: None,
+        resolved_target: None,
         args: vec![IrExpression::Identifier {
             name: "greeting".to_string(),
             java_type: JavaType::string(),

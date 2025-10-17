@@ -427,6 +427,7 @@ impl JavaCodeGenerator {
 
                 let instance_method = IrStatement::MethodDeclaration {
                     name: name.clone(),
+                    java_name: None,
                     type_parameters: type_parameters.clone(),
                     parameters: instance_parameters,
                     return_type: return_type.clone(),
@@ -856,6 +857,8 @@ fn replace_receiver_expression(expr: IrExpression, receiver_type: &JavaType) -> 
         IrExpression::MethodCall {
             receiver,
             method_name,
+            java_name,
+            resolved_target,
             args,
             argument_style,
             java_type,
@@ -864,6 +867,8 @@ fn replace_receiver_expression(expr: IrExpression, receiver_type: &JavaType) -> 
             receiver: receiver
                 .map(|inner| Box::new(replace_receiver_expression(*inner, receiver_type))),
             method_name,
+            java_name,
+            resolved_target,
             args: args
                 .into_iter()
                 .map(|arg| replace_receiver_expression(arg, receiver_type))

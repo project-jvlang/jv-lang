@@ -13,10 +13,10 @@ mod tests {
         transform_program_with_context_profiled, transform_statement, CompletableFutureOp,
         DataFormat, IrCaseLabel, IrDeconstructionComponent, IrDeconstructionPattern, IrExpression,
         IrForEachKind, IrForLoopMetadata, IrImplicitWhenEnd, IrModifiers, IrNumericRangeLoop,
-        IrStatement, IrVisibility, JavaType, PipelineShape, SampleMode, SampleSourceKind, Schema,
-        SequencePipeline, SequenceSource, SequenceStage, SequenceTerminal,
-        SequenceTerminalEvaluation, SequenceTerminalKind, TransformContext, TransformError,
-        TransformPools, TransformProfiler, VirtualThreadOp,
+        IrResolvedMethodTarget, IrStatement, IrVisibility, JavaType, PipelineShape, SampleMode,
+        SampleSourceKind, Schema, SequencePipeline, SequenceSource, SequenceStage,
+        SequenceTerminal, SequenceTerminalEvaluation, SequenceTerminalKind, TransformContext,
+        TransformError, TransformPools, TransformProfiler, VirtualThreadOp,
     };
     use jv_ast::*;
     use jv_parser::Parser;
@@ -2441,6 +2441,8 @@ mod tests {
         let whitespace_call = IrExpression::MethodCall {
             receiver: None,
             method_name: "printAll".to_string(),
+            java_name: None,
+            resolved_target: None,
             args: vec![
                 IrExpression::Literal(Literal::Number("1".to_string()), dummy_span()),
                 IrExpression::Literal(Literal::Number("2".to_string()), dummy_span()),
@@ -3153,6 +3155,57 @@ mod tests {
         assert!(pattern_error.to_string().contains("Invalid pattern"));
     }
 
+    #[test]
+    fn method_declaration_serialization_roundtrip_keeps_java_name() {
+        let method = IrStatement::MethodDeclaration {
+            name: "flatMap".to_string(),
+            java_name: Some("flatMap".to_string()),
+            type_parameters: vec![],
+            parameters: vec![],
+            return_type: JavaType::void(),
+            body: None,
+            modifiers: IrModifiers::default(),
+            throws: vec![],
+            span: dummy_span(),
+        };
+
+        let json = serde_json::to_string(&method).expect("method should serialize");
+        let restored: IrStatement = serde_json::from_str(&json).expect("method should deserialize");
+
+        assert_eq!(restored, method);
+    }
+
+    #[test]
+    fn method_call_serialization_roundtrip_keeps_resolution() {
+        let call = IrExpression::MethodCall {
+            receiver: Some(Box::new(IrExpression::Identifier {
+                name: "sequence".to_string(),
+                java_type: JavaType::Reference {
+                    name: "jv.collections.Sequence".to_string(),
+                    generic_args: vec![],
+                },
+                span: dummy_span(),
+            })),
+            method_name: "flatMap".to_string(),
+            java_name: Some("flatMap".to_string()),
+            resolved_target: Some(IrResolvedMethodTarget {
+                owner: Some("jv.collections.Sequence".to_string()),
+                original_name: Some("flatMap".to_string()),
+                java_name: Some("flatMap".to_string()),
+                erased_parameters: vec!["java.util.function.Function".to_string()],
+            }),
+            args: vec![],
+            argument_style: CallArgumentStyle::Comma,
+            java_type: JavaType::void(),
+            span: dummy_span(),
+        };
+
+        let json = serde_json::to_string(&call).expect("call should serialize");
+        let restored: IrExpression = serde_json::from_str(&json).expect("call should deserialize");
+
+        assert_eq!(restored, call);
+    }
+
     // Integration test for IR node structure validation
     #[test]
     fn test_ir_node_structure_completeness() {
@@ -3186,6 +3239,8 @@ mod tests {
         let method_call = IrExpression::MethodCall {
             receiver: None,
             method_name: "staticMethod".to_string(),
+            java_name: None,
+            resolved_target: None,
             args: vec![],
             argument_style: CallArgumentStyle::Comma,
             java_type: JavaType::void(),
