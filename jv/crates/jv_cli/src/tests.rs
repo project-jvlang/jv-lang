@@ -539,8 +539,8 @@ clean = false
         .expect("expected renamed SequenceCore flatMap overload");
 
     assert!(
-        sequence_core_signature.contains("java.util.function.Function<T, SequenceCore<R>>"),
-        "SequenceCore overload should use renamed java name and Function<T, SequenceCore<R>>: {sequence_core_signature}"
+        sequence_core_signature.contains("java.util.function.Function<T, Stream<R>>"),
+        "SequenceCore overload should use renamed java name and Function<T, Stream<R>>: {sequence_core_signature}"
     );
 
     assert!(
@@ -560,8 +560,8 @@ clean = false
         .expect("SequenceCore should expose renamed flatMap overload");
 
     assert!(
-        sequence_core_hashed.contains("java.util.function.Function<T, SequenceCore<R>>"),
-        "SequenceCore renamed overload should retain Function<T, SequenceCore<R>>: {sequence_core_hashed}"
+        sequence_core_hashed.contains("java.util.function.Function<T, Stream<R>>"),
+        "SequenceCore renamed overload should retain Function<T, Stream<R>>: {sequence_core_hashed}"
     );
 }
 
