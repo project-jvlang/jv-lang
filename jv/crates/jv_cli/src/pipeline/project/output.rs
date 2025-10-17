@@ -17,7 +17,6 @@ pub struct PreparedOutput {
     plan: BuildPlan,
     base_dir: PathBuf,
     target_dir: PathBuf,
-    cleanup_on_drop: bool,
     clean_applied: bool,
 }
 
@@ -30,9 +29,8 @@ impl OutputManager {
         ensure_within_workspace(plan.root.root_dir(), &target_dir)?;
 
         let mut clean_applied = false;
-        let existed_before = target_dir.exists();
 
-        if plan.options.clean && existed_before {
+        if plan.options.clean && target_dir.exists() {
             fs::remove_dir_all(&target_dir)
                 .map_err(|error| io_diagnostic(&target_dir, "をクリーン", error))?;
             clean_applied = true;
@@ -42,13 +40,11 @@ impl OutputManager {
             .map_err(|error| io_diagnostic(&target_dir, "を作成", error))?;
 
         let updated_plan = plan.with_output_dir(target_dir.clone());
-        let cleanup_on_drop = plan.options.clean || !existed_before;
 
         Ok(PreparedOutput {
             plan: updated_plan,
             base_dir,
             target_dir,
-            cleanup_on_drop,
             clean_applied,
         })
     }
@@ -72,15 +68,8 @@ impl PreparedOutput {
     }
 
     pub fn mark_success(&mut self) {
-        self.cleanup_on_drop = false;
-    }
-}
-
-impl Drop for PreparedOutput {
-    fn drop(&mut self) {
-        if self.cleanup_on_drop {
-            let _ = fs::remove_dir_all(&self.target_dir);
-        }
+        // Outputs are preserved even when builds fail; method retained for API compatibility.
+        let _ = self;
     }
 }
 

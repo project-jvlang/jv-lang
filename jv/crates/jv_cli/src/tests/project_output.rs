@@ -83,7 +83,7 @@ fn output_manager_cleans_when_requested() {
 }
 
 #[test]
-fn output_manager_removes_outputs_on_failure() {
+fn output_manager_preserves_outputs_on_failure() {
     let temp_dir = TempDirGuard::new("output-failure");
     let plan = compose_plan(&temp_dir, false);
     let target_dir_path;
@@ -93,5 +93,8 @@ fn output_manager_removes_outputs_on_failure() {
         // drop without marking success
     }
 
-    assert!(!target_dir_path.exists());
+    assert!(
+        target_dir_path.exists(),
+        "target directory should remain to allow inspecting generated Java artifacts"
+    );
 }
