@@ -32,6 +32,7 @@ pub struct JavaCodeGenerator {
     config: JavaCodeGenConfig,
     targeting: TargetedJavaEmitter,
     variance_stack: Vec<HashMap<String, IrVariance>>,
+    type_parameter_stack: Vec<HashMap<String, IrTypeParameter>>,
     sequence_helper: Option<String>,
     generic_metadata: BTreeMap<String, IrGenericMetadata>,
     metadata_path: Vec<String>,
@@ -56,6 +57,7 @@ impl JavaCodeGenerator {
             config,
             targeting: TargetedJavaEmitter::new(target),
             variance_stack: Vec::new(),
+            type_parameter_stack: Vec::new(),
             sequence_helper: None,
             generic_metadata: BTreeMap::new(),
             metadata_path: Vec::new(),
@@ -366,14 +368,18 @@ impl JavaCodeGenerator {
         }
 
         let mut scope = HashMap::with_capacity(params.len());
+        let mut type_scope = HashMap::with_capacity(params.len());
         for param in params {
             scope.insert(param.name.clone(), param.variance);
+            type_scope.insert(param.name.clone(), param.clone());
         }
         self.variance_stack.push(scope);
+        self.type_parameter_stack.push(type_scope);
     }
 
     pub(super) fn truncate_variance_scopes(&mut self, len: usize) {
         self.variance_stack.truncate(len);
+        self.type_parameter_stack.truncate(len);
     }
 
     pub(super) fn ensure_sequence_helper(&mut self) {
@@ -402,6 +408,35 @@ impl JavaCodeGenerator {
 
     pub(super) fn variance_scope_len(&self) -> usize {
         self.variance_stack.len()
+    }
+
+    pub(super) fn filter_shadowed_type_parameters(
+        &self,
+        params: &[IrTypeParameter],
+    ) -> Vec<IrTypeParameter> {
+        params
+            .iter()
+            .filter(|param| !self.is_shadowed_type_parameter(param))
+            .cloned()
+            .collect()
+    }
+
+    fn is_shadowed_type_parameter(&self, param: &IrTypeParameter) -> bool {
+        for scope in self.type_parameter_stack.iter().rev() {
+            if let Some(existing) = scope.get(&param.name) {
+                if Self::equivalent_type_parameters(existing, param) {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    fn equivalent_type_parameters(a: &IrTypeParameter, b: &IrTypeParameter) -> bool {
+        a.bounds == b.bounds
+            && a.variance == b.variance
+            && a.permits == b.permits
+            && a.kind == b.kind
     }
 
     pub(super) fn lookup_variance(&self, name: &str) -> Option<IrVariance> {

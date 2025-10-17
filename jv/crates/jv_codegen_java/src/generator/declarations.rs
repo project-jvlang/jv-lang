@@ -325,7 +325,12 @@ impl JavaCodeGenerator {
             let metadata_depth = self.metadata_path.len();
             self.metadata_path.push(emitted_name.clone());
             let scope_len = self.variance_scope_len();
-            self.push_variance_scope(type_parameters);
+            let effective_type_parameters = if modifiers.is_static {
+                type_parameters.clone()
+            } else {
+                self.filter_shadowed_type_parameters(type_parameters)
+            };
+            self.push_variance_scope(&effective_type_parameters);
 
             let result = (|| -> Result<String, CodeGenError> {
                 let normalized_return_type = Self::normalize_void_like(return_type);
@@ -339,8 +344,8 @@ impl JavaCodeGenerator {
                     signature.push(' ');
                 }
 
-                if !type_parameters.is_empty() {
-                    let generics = self.render_type_parameters(type_parameters)?;
+                if !effective_type_parameters.is_empty() {
+                    let generics = self.render_type_parameters(&effective_type_parameters)?;
                     signature.push_str(&generics);
                     signature.push(' ');
                 }
