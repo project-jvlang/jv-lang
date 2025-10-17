@@ -30,6 +30,8 @@ impl JavaCodeGenerator {
             IrExpression::MethodCall {
                 receiver,
                 method_name,
+                java_name,
+                resolved_target,
                 args,
                 argument_style,
                 ..
@@ -41,13 +43,28 @@ impl JavaCodeGenerator {
                     }
                     invocation.push_str(&self.generate_expression(target)?);
                     invocation.push('.');
+                } else if let Some(owner) = resolved_target
+                    .as_ref()
+                    .and_then(|target| target.owner.as_deref())
+                {
+                    let owner_name = self.helper_owner_simple_name(owner);
+                    invocation.push_str(&owner_name);
+                    invocation.push('.');
                 } else if let Some(owner) = self.owner_for_unqualified_call(method_name) {
                     invocation.push_str(owner);
                     invocation.push('.');
                 }
-                invocation.push_str(method_name);
+                let effective_name = java_name
+                    .as_deref()
+                    .or_else(|| {
+                        resolved_target
+                            .as_ref()
+                            .and_then(|target| target.java_name.as_deref())
+                    })
+                    .unwrap_or(method_name);
+                invocation.push_str(effective_name);
                 invocation.push('(');
-                let rendered_args = if method_name == "println"
+                let rendered_args = if effective_name == "println"
                     && Self::is_system_out(receiver.as_deref())
                     && args.len() == 1
                     && matches!(args[0], IrExpression::Literal(Literal::Null, _))

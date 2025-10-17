@@ -311,6 +311,7 @@ impl JavaCodeGenerator {
     pub fn generate_method(&mut self, method: &IrStatement) -> Result<String, CodeGenError> {
         if let IrStatement::MethodDeclaration {
             name,
+            java_name,
             type_parameters,
             parameters,
             return_type,
@@ -320,8 +321,9 @@ impl JavaCodeGenerator {
             ..
         } = JavaCodeGenerator::base_statement(method)
         {
+            let emitted_name = java_name.clone().unwrap_or_else(|| name.clone());
             let metadata_depth = self.metadata_path.len();
-            self.metadata_path.push(name.clone());
+            self.metadata_path.push(emitted_name.clone());
             let scope_len = self.variance_scope_len();
             self.push_variance_scope(type_parameters);
 
@@ -345,7 +347,7 @@ impl JavaCodeGenerator {
 
                 signature.push_str(&self.generate_type(normalized_return_type.as_ref())?);
                 signature.push(' ');
-                signature.push_str(name);
+                signature.push_str(&emitted_name);
                 signature.push('(');
                 signature.push_str(&self.render_parameters(parameters)?);
                 signature.push(')');
@@ -398,6 +400,7 @@ impl JavaCodeGenerator {
             }
             IrStatement::MethodDeclaration {
                 name,
+                java_name,
                 type_parameters,
                 parameters,
                 return_type,
@@ -427,7 +430,7 @@ impl JavaCodeGenerator {
 
                 let instance_method = IrStatement::MethodDeclaration {
                     name: name.clone(),
-                    java_name: None,
+                    java_name: java_name.clone(),
                     type_parameters: type_parameters.clone(),
                     parameters: instance_parameters,
                     return_type: return_type.clone(),
