@@ -58,6 +58,12 @@ fn normalize_decimal_number(
                     }
                 }
             }
+            'f' | 'F' | 'd' | 'D' | 'l' | 'L' => {
+                if chars.peek().is_some() {
+                    return Err(LexError::UnexpectedChar(ch, line, column));
+                }
+                // Float suffix is ignored for normalization but tracked via original lexeme
+            }
             _ => {
                 normalized.push(ch);
                 seen_digit = true;
@@ -769,6 +775,44 @@ mod tests {
                 TokenMetadata::NumberLiteral(info)
                 if matches!(info.grouping, NumberGroupingKind::Mixed)
             )));
+    }
+
+    #[test]
+    fn normalize_number_strips_float_suffix() {
+        let mut normalizer = Normalizer::new();
+        let raw = make_raw_token(RawTokenKind::NumberCandidate, "0.0f");
+        let mut ctx = LexerContext::new("0.0f");
+
+        let normalized = normalizer
+            .normalize(raw, &mut ctx)
+            .expect("number normalization with suffix");
+
+        assert_eq!(normalized.normalized_text, "0.0");
+        assert!(normalized
+            .metadata
+            .provisional_metadata
+            .iter()
+            .any(|meta| matches!(meta, TokenMetadata::NumberLiteral(info)
+                if info.original_lexeme == "0.0f")));
+    }
+
+    #[test]
+    fn normalize_number_strips_long_suffix() {
+        let mut normalizer = Normalizer::new();
+        let raw = make_raw_token(RawTokenKind::NumberCandidate, "42L");
+        let mut ctx = LexerContext::new("42L");
+
+        let normalized = normalizer
+            .normalize(raw, &mut ctx)
+            .expect("number normalization with long suffix");
+
+        assert_eq!(normalized.normalized_text, "42");
+        assert!(normalized
+            .metadata
+            .provisional_metadata
+            .iter()
+            .any(|meta| matches!(meta, TokenMetadata::NumberLiteral(info)
+                if info.original_lexeme == "42L")));
     }
 
     #[test]

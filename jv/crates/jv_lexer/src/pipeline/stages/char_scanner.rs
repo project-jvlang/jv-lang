@@ -437,6 +437,7 @@ impl CharScanner {
                         break;
                     }
                 }
+                'f' | 'F' | 'd' | 'D' | 'l' | 'L' => break,
                 _ => break,
             }
         }
@@ -463,6 +464,18 @@ impl CharScanner {
                 self.position.line,
                 self.position.column,
             ));
+        }
+
+        if let Some(suffix) = self.peek_char_from(source) {
+            if matches!(suffix, 'f' | 'F' | 'd' | 'D' | 'l' | 'L') {
+                let next_is_ident = self
+                    .peek_char_offset(source, 1)
+                    .map(Self::is_identifier_continue)
+                    .unwrap_or(false);
+                if !next_is_ident {
+                    self.advance_char(suffix, source)?;
+                }
+            }
         }
 
         Ok(self.take_slice(source, start, self.cursor))
