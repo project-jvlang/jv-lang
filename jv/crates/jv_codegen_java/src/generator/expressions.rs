@@ -1,5 +1,5 @@
 use super::*;
-use jv_ast::Span;
+use jv_ast::{types::PrimitiveTypeName, Span};
 use jv_ir::PipelineShape;
 use jv_ir::{
     SequencePipeline, SequenceSource, SequenceStage, SequenceTerminal, SequenceTerminalKind,
@@ -1433,10 +1433,32 @@ impl JavaCodeGenerator {
                 ))
             }
             SequenceTerminalKind::Count => Ok(format!("{}.count()", chain)),
-            SequenceTerminalKind::Sum => Ok(format!(
-                "{}.mapToLong(value -> ((Number) value).longValue()).sum()",
-                chain
-            )),
+            SequenceTerminalKind::Sum => {
+                if let Some(hint) = terminal.specialization_hint.as_ref() {
+                    match hint.canonical {
+                        PrimitiveTypeName::Int => {
+                            let mapper = self.render_int_stream_mapper(terminal)?;
+                            Ok(format!("{chain}.mapToInt({mapper}).sum()"))
+                        }
+                        PrimitiveTypeName::Long => {
+                            let mapper = self.render_long_stream_mapper();
+                            Ok(format!("{chain}.mapToLong({mapper}).sum()"))
+                        }
+                        PrimitiveTypeName::Double | PrimitiveTypeName::Float => {
+                            let mapper = self.render_double_stream_mapper();
+                            Ok(format!("{chain}.mapToDouble({mapper}).sum()"))
+                        }
+                        _ => Ok(format!(
+                            "{chain}.mapToLong(value -> ((Number) value).longValue()).sum()"
+                        )),
+                    }
+                } else {
+                    Ok(format!(
+                        "{}.mapToLong(value -> ((Number) value).longValue()).sum()",
+                        chain
+                    ))
+                }
+            }
             SequenceTerminalKind::ForEach { action } => {
                 let action_expr = self.generate_expression(action)?;
                 Ok(format!("{}.forEach({})", chain, action_expr))
@@ -1757,6 +1779,27 @@ impl JavaCodeGenerator {
                 Self::escape_string(&regex.pattern)
             ),
         }
+    }
+}
+
+impl JavaCodeGenerator {
+    fn render_int_stream_mapper(
+        &mut self,
+        terminal: &SequenceTerminal,
+    ) -> Result<String, CodeGenError> {
+        if let Some(adapter) = terminal.canonical_adapter.as_ref() {
+            self.generate_expression(adapter)
+        } else {
+            Ok("(value) -> ((Number) value).intValue()".to_string())
+        }
+    }
+
+    fn render_long_stream_mapper(&self) -> String {
+        "value -> ((Number) value).longValue()".to_string()
+    }
+
+    fn render_double_stream_mapper(&self) -> String {
+        "value -> ((Number) value).doubleValue()".to_string()
     }
 }
 

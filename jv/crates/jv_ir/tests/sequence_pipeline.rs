@@ -604,11 +604,35 @@ fn int_family_specialization_injects_cast_adapter() {
             assert_eq!(param_names, &vec!["__jvIntFamilyValue".to_string()]);
 
             match body.as_ref() {
-                IrExpression::Cast { target_type, .. } => match target_type {
-                    JavaType::Primitive(name) => assert_eq!(name, "int"),
-                    other => panic!("expected int target type, found {:?}", other),
-                },
-                other => panic!("expected cast in adapter body, found {:?}", other),
+                IrExpression::MethodCall { method_name, .. } => {
+                    assert_eq!(method_name, "intValue");
+                }
+                IrExpression::Conditional {
+                    then_expr,
+                    else_expr,
+                    ..
+                } => {
+                    match then_expr.as_ref() {
+                        IrExpression::MethodCall { method_name, .. } => {
+                            assert_eq!(method_name, "charValue");
+                        }
+                        other => panic!(
+                            "expected charValue call in conditional branch, found {:?}",
+                            other
+                        ),
+                    }
+
+                    match else_expr.as_ref() {
+                        IrExpression::MethodCall { method_name, .. } => {
+                            assert_eq!(method_name, "intValue");
+                        }
+                        other => panic!(
+                            "expected intValue call in conditional branch, found {:?}",
+                            other
+                        ),
+                    }
+                }
+                other => panic!("unexpected adapter body {:?}", other),
             }
         }
         other => panic!("expected lambda adapter, found {:?}", other),

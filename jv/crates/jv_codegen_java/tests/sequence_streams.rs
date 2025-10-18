@@ -1,8 +1,10 @@
+use jv_ast::types::PrimitiveTypeName;
 use jv_ast::{BinaryOp, Literal, Span};
 use jv_codegen_java::{JavaCodeGenConfig, JavaCodeGenerator, JavaTarget};
 use jv_ir::{
-    IrExpression, JavaType, PipelineShape, SequencePipeline, SequenceSource, SequenceStage,
-    SequenceTerminal, SequenceTerminalEvaluation, SequenceTerminalKind,
+    IrExpression, JavaType, PipelineShape, PrimitiveSpecializationHint, SequencePipeline,
+    SequenceSource, SequenceStage, SequenceTerminal, SequenceTerminalEvaluation,
+    SequenceTerminalKind,
 };
 
 fn dummy_span() -> Span {
@@ -254,6 +256,7 @@ fn java25_sequence_list_literal_source_streams_from_list_of() {
         evaluation: SequenceTerminalEvaluation::Collector,
         requires_non_empty_source: false,
         specialization_hint: None,
+        canonical_adapter: None,
         span: dummy_span(),
     };
 
@@ -286,6 +289,7 @@ fn java25_sequence_renders_full_stage_chain() {
         evaluation: SequenceTerminalEvaluation::Collector,
         requires_non_empty_source: false,
         specialization_hint: None,
+        canonical_adapter: None,
         span: dummy_span(),
     };
 
@@ -362,6 +366,7 @@ fn java21_sequence_to_list_falls_back_to_collectors() {
         evaluation: SequenceTerminalEvaluation::Collector,
         requires_non_empty_source: false,
         specialization_hint: None,
+        canonical_adapter: None,
         span: dummy_span(),
     };
 
@@ -394,6 +399,7 @@ fn java21_sequence_list_literal_source_uses_arrays_stream_fallback() {
         evaluation: SequenceTerminalEvaluation::Collector,
         requires_non_empty_source: false,
         specialization_hint: None,
+        canonical_adapter: None,
         span: dummy_span(),
     };
 
@@ -426,6 +432,7 @@ fn java21_sequence_to_set_falls_back_to_collectors() {
         evaluation: SequenceTerminalEvaluation::Collector,
         requires_non_empty_source: false,
         specialization_hint: None,
+        canonical_adapter: None,
         span: dummy_span(),
     };
 
@@ -458,6 +465,7 @@ fn map_filter_pipeline_renders_expected_lambdas() {
         evaluation: SequenceTerminalEvaluation::Collector,
         requires_non_empty_source: false,
         specialization_hint: None,
+        canonical_adapter: None,
         span: dummy_span(),
     };
 
@@ -525,6 +533,7 @@ fn reduce_terminal_emits_illegal_argument_guard() {
         evaluation: SequenceTerminalEvaluation::Reducer,
         requires_non_empty_source: true,
         specialization_hint: None,
+        canonical_adapter: None,
         span: dummy_span(),
     };
 
@@ -552,6 +561,7 @@ fn autocloseable_stream_pipeline_wraps_with_try_resource() {
         evaluation: SequenceTerminalEvaluation::Aggregator,
         requires_non_empty_source: false,
         specialization_hint: None,
+        canonical_adapter: None,
         span: dummy_span(),
     };
 
@@ -580,6 +590,7 @@ fn string_format_arguments_materialize_sequences() {
         evaluation: SequenceTerminalEvaluation::Collector,
         requires_non_empty_source: false,
         specialization_hint: None,
+        canonical_adapter: None,
         span: dummy_span(),
     };
 
@@ -635,6 +646,7 @@ fn sum_terminal_emits_map_to_long_sum() {
         evaluation: SequenceTerminalEvaluation::Aggregator,
         requires_non_empty_source: false,
         specialization_hint: None,
+        canonical_adapter: None,
         span: dummy_span(),
     };
 
@@ -657,12 +669,54 @@ fn sum_terminal_emits_map_to_long_sum() {
 }
 
 #[test]
+fn sum_terminal_with_int_hint_uses_map_to_int() {
+    let mut pipeline = SequencePipeline {
+        source: collection_source("numbers"),
+        stages: Vec::new(),
+        terminal: Some(SequenceTerminal {
+            kind: SequenceTerminalKind::Sum,
+            evaluation: SequenceTerminalEvaluation::Aggregator,
+            requires_non_empty_source: false,
+            specialization_hint: Some(PrimitiveSpecializationHint {
+                type_param: "T".to_string(),
+                canonical: PrimitiveTypeName::Int,
+                aliases: vec![PrimitiveTypeName::Char, PrimitiveTypeName::Short],
+                span: dummy_span(),
+            }),
+            canonical_adapter: None,
+            span: dummy_span(),
+        }),
+        lazy: false,
+        span: dummy_span(),
+        shape: PipelineShape::default(),
+    };
+    pipeline.recompute_shape();
+    pipeline.apply_specialization_hint();
+
+    let expr = IrExpression::SequencePipeline {
+        pipeline,
+        java_type: JavaType::Primitive("int".to_string()),
+        span: dummy_span(),
+    };
+
+    let mut generator = JavaCodeGenerator::new();
+    let rendered = generator
+        .generate_expression(&expr)
+        .expect("specialized sum pipeline renders");
+
+    assert!(rendered.contains(".mapToInt("));
+    assert!(rendered.ends_with(".sum()"));
+    assert!(rendered.contains("Character"));
+}
+
+#[test]
 fn count_terminal_emits_stream_count_call() {
     let terminal = SequenceTerminal {
         kind: SequenceTerminalKind::Count,
         evaluation: SequenceTerminalEvaluation::Aggregator,
         requires_non_empty_source: false,
         specialization_hint: None,
+        canonical_adapter: None,
         span: dummy_span(),
     };
 

@@ -1,7 +1,8 @@
 use super::*;
-use jv_ast::types::Kind;
+use jv_ast::types::{Kind, PrimitiveTypeName};
 use jv_ir::{
     IrAnnotation, IrAnnotationArgument, IrAnnotationValue, IrGenericMetadata, IrTypeLevelValue,
+    PrimitiveReturnMetadata,
 };
 
 impl JavaCodeGenerator {
@@ -314,6 +315,7 @@ impl JavaCodeGenerator {
             java_name,
             type_parameters,
             parameters,
+            primitive_return,
             return_type,
             body,
             modifiers,
@@ -321,7 +323,13 @@ impl JavaCodeGenerator {
             ..
         } = JavaCodeGenerator::base_statement(method)
         {
-            let emitted_name = java_name.clone().unwrap_or_else(|| name.clone());
+            let emitted_name = if let Some(explicit) = java_name.clone() {
+                explicit
+            } else if let Some(metadata) = primitive_return.as_ref() {
+                Self::specialized_method_name(name, metadata)
+            } else {
+                name.clone()
+            };
             let metadata_depth = self.metadata_path.len();
             self.metadata_path.push(emitted_name.clone());
             let scope_len = self.variance_scope_len();
@@ -683,6 +691,20 @@ impl JavaCodeGenerator {
             rendered.push(entry);
         }
         Ok(rendered.join(", "))
+    }
+
+    fn specialized_method_name(base_name: &str, metadata: &PrimitiveReturnMetadata) -> String {
+        let suffix = match metadata.reference.primitive {
+            PrimitiveTypeName::Int => "IntVersion",
+            PrimitiveTypeName::Long => "LongVersion",
+            PrimitiveTypeName::Short => "ShortVersion",
+            PrimitiveTypeName::Byte => "ByteVersion",
+            PrimitiveTypeName::Float => "FloatVersion",
+            PrimitiveTypeName::Double => "DoubleVersion",
+            PrimitiveTypeName::Boolean => "BooleanVersion",
+            PrimitiveTypeName::Char => "CharVersion",
+        };
+        format!("{base_name}${suffix}")
     }
 
     fn write_method_body(

@@ -1,14 +1,17 @@
 use super::*;
 use insta::assert_snapshot;
-use jv_ast::{BinaryOp, CallArgumentStyle, Literal, SequenceDelimiter, Span};
+use jv_ast::{
+    types::{PrimitiveTypeName, PrimitiveTypeReference, PrimitiveTypeSource},
+    BinaryOp, CallArgumentStyle, Literal, SequenceDelimiter, Span,
+};
 use jv_ir::transform::transform_program_with_context;
 use jv_ir::TransformContext;
 use jv_ir::{
     DataFormat, IrCaseLabel, IrCommentKind, IrDeconstructionComponent, IrDeconstructionPattern,
     IrExpression, IrImplicitWhenEnd, IrModifiers, IrParameter, IrProgram, IrRecordComponent,
     IrSampleDeclaration, IrStatement, IrSwitchCase, IrTypeParameter, IrVisibility, JavaType,
-    MethodOverload, PrimitiveType, SampleMode, SampleRecordDescriptor, SampleRecordField,
-    SampleSourceKind, Schema,
+    MethodOverload, PrimitiveReturnMetadata, PrimitiveType, SampleMode, SampleRecordDescriptor,
+    SampleRecordField, SampleSourceKind, Schema,
 };
 use jv_parser::Parser;
 use serde_json::to_string_pretty;
@@ -557,6 +560,7 @@ fn snapshot_program() -> IrProgram {
             modifiers: IrModifiers::default(),
             span: dummy_span(),
         }],
+        primitive_return: None,
         return_type: string_type(),
         body: Some(method_body),
         modifiers: IrModifiers {
@@ -635,6 +639,7 @@ fn method_generation_renders_generic_type_parameters() {
             modifiers: IrModifiers::default(),
             span: span.clone(),
         }],
+        primitive_return: None,
         return_type: sequence_core_type.clone(),
         body: Some(IrExpression::Block {
             statements: vec![IrStatement::Return {
@@ -668,6 +673,47 @@ fn method_generation_renders_generic_type_parameters() {
 }
 
 #[test]
+fn primitive_return_methods_receive_specialized_names() {
+    let mut generator = JavaCodeGenerator::new();
+    let span = dummy_span();
+    let primitive_return = PrimitiveReturnMetadata {
+        reference: PrimitiveTypeReference {
+            primitive: PrimitiveTypeName::Int,
+            source: PrimitiveTypeSource::PrimitiveKeyword,
+            raw_path: Vec::new(),
+            span: span.clone(),
+        },
+    };
+
+    let method = IrStatement::MethodDeclaration {
+        name: "sum".to_string(),
+        java_name: None,
+        type_parameters: Vec::new(),
+        parameters: Vec::new(),
+        primitive_return: Some(primitive_return),
+        return_type: JavaType::Primitive("int".to_string()),
+        body: Some(IrExpression::Literal(
+            Literal::Number("0".to_string()),
+            span.clone(),
+        )),
+        modifiers: IrModifiers {
+            visibility: IrVisibility::Public,
+            is_static: true,
+            ..IrModifiers::default()
+        },
+        throws: Vec::new(),
+        span,
+    };
+
+    let code = generator
+        .generate_method(&method)
+        .expect("primitive return method should generate");
+
+    let first_line = code.lines().next().expect("method should have signature");
+    assert!(first_line.contains("sum$IntVersion"));
+}
+
+#[test]
 fn method_generation_renders_where_clause_bounds() {
     let mut generator = JavaCodeGenerator::new();
     let span = dummy_span();
@@ -692,6 +738,7 @@ fn method_generation_renders_where_clause_bounds() {
             modifiers: IrModifiers::default(),
             span: span.clone(),
         }],
+        primitive_return: None,
         return_type: type_ref.clone(),
         body: Some(IrExpression::Block {
             statements: vec![IrStatement::Return {
@@ -771,6 +818,7 @@ fn record_extension_method_is_emitted_as_instance_method() {
             modifiers: IrModifiers::default(),
             span: span.clone(),
         }],
+        primitive_return: None,
         return_type: record_type.clone(),
         body: Some(IrExpression::Block {
             statements: vec![IrStatement::Return {
@@ -869,6 +917,7 @@ fn class_extension_method_is_emitted_as_instance_method() {
             modifiers: IrModifiers::default(),
             span: span.clone(),
         }],
+        primitive_return: None,
         return_type: class_type.clone(),
         body: Some(IrExpression::Block {
             statements: vec![IrStatement::Return {
@@ -952,6 +1001,7 @@ fn external_extension_method_remains_static_utility() {
             modifiers: IrModifiers::default(),
             span: span.clone(),
         }],
+        primitive_return: None,
         return_type: JavaType::Primitive("int".to_string()),
         body: Some(IrExpression::Block {
             statements: vec![IrStatement::Return {
@@ -1402,6 +1452,7 @@ fn snapshot_ir_program() {
                   }
                 }
               ],
+              "primitive_return": null,
               "return_type": {
                 "Reference": {
                   "name": "String",
@@ -1681,6 +1732,7 @@ fn snapshot_ir_program() {
     "end_column": 0
   }
 }
+
 "###
     );
 }

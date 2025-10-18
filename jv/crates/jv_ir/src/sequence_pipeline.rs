@@ -3,7 +3,8 @@ use crate::error::TransformError;
 use crate::transform::transform_expression;
 use crate::types::{IrExpression, JavaType};
 use jv_ast::{
-    types::PrimitiveTypeName, Argument, CallArgumentMetadata, Expression, SequenceDelimiter, Span,
+    types::PrimitiveTypeName, Argument, CallArgumentMetadata, CallArgumentStyle, Expression,
+    SequenceDelimiter, Span,
 };
 use serde::{Deserialize, Serialize};
 use std::mem;
@@ -61,41 +62,93 @@ impl SequencePipeline {
 
         match hint.canonical {
             PrimitiveTypeName::Int => {
-                let needs_alias_promotion = hint.aliases.iter().any(|alias| {
-                    matches!(alias, PrimitiveTypeName::Char | PrimitiveTypeName::Short)
-                });
-
-                if needs_alias_promotion {
-                    let adapter = build_int_canonical_adapter(&hint.span);
-                    terminal.canonical_adapter = Some(Box::new(adapter));
-                }
+                let adapter = build_int_canonical_adapter(&hint.span, &hint.aliases);
+                terminal.canonical_adapter = Some(Box::new(adapter));
             }
             _ => {}
         }
     }
 }
 
-fn build_int_canonical_adapter(span: &Span) -> IrExpression {
+fn build_int_canonical_adapter(span: &Span, aliases: &[PrimitiveTypeName]) -> IrExpression {
     let param_name = "__jvIntFamilyValue".to_string();
     let lambda_param_types = vec![JavaType::object()];
 
-    let identifier = IrExpression::Identifier {
+    let identifier = || IrExpression::Identifier {
         name: param_name.clone(),
         java_type: JavaType::object(),
         span: span.clone(),
     };
 
-    let cast_expr = IrExpression::Cast {
-        expr: Box::new(identifier),
-        target_type: JavaType::int(),
+    let number_cast = |value: IrExpression| IrExpression::Cast {
+        expr: Box::new(value),
+        target_type: JavaType::Reference {
+            name: "java.lang.Number".to_string(),
+            generic_args: vec![],
+        },
         span: span.clone(),
+    };
+
+    let number_int_value = IrExpression::MethodCall {
+        receiver: Some(Box::new(number_cast(identifier()))),
+        method_name: "intValue".to_string(),
+        java_name: Some("intValue".to_string()),
+        resolved_target: None,
+        args: Vec::new(),
+        argument_style: CallArgumentStyle::Comma,
+        java_type: JavaType::int(),
+        span: span.clone(),
+    };
+
+    let body = if aliases
+        .iter()
+        .any(|alias| matches!(alias, PrimitiveTypeName::Char))
+    {
+        let char_cast = |value: IrExpression| IrExpression::Cast {
+            expr: Box::new(value),
+            target_type: JavaType::Reference {
+                name: "java.lang.Character".to_string(),
+                generic_args: vec![],
+            },
+            span: span.clone(),
+        };
+
+        let char_value = IrExpression::MethodCall {
+            receiver: Some(Box::new(char_cast(identifier()))),
+            method_name: "charValue".to_string(),
+            java_name: Some("charValue".to_string()),
+            resolved_target: None,
+            args: Vec::new(),
+            argument_style: CallArgumentStyle::Comma,
+            java_type: JavaType::Primitive("char".to_string()),
+            span: span.clone(),
+        };
+
+        let condition = IrExpression::InstanceOf {
+            expr: Box::new(identifier()),
+            target_type: JavaType::Reference {
+                name: "java.lang.Character".to_string(),
+                generic_args: vec![],
+            },
+            span: span.clone(),
+        };
+
+        IrExpression::Conditional {
+            condition: Box::new(condition),
+            then_expr: Box::new(char_value),
+            else_expr: Box::new(number_int_value),
+            java_type: JavaType::int(),
+            span: span.clone(),
+        }
+    } else {
+        number_int_value
     };
 
     IrExpression::Lambda {
         functional_interface: "java.util.function.ToIntFunction".to_string(),
         param_names: vec![param_name],
         param_types: lambda_param_types.clone(),
-        body: Box::new(cast_expr),
+        body: Box::new(body),
         java_type: JavaType::Functional {
             interface_name: "java.util.function.ToIntFunction".to_string(),
             param_types: lambda_param_types,
