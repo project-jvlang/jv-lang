@@ -2,9 +2,9 @@ use super::support::{first_statement, parse_program, parse_program_result};
 use crate::syntax::support::statement_span;
 use jv_ast::{
     Argument, ArgumentElementKind, BinaryOp, CallArgumentStyle, CommentKind, CommentVisibility,
-    ConcurrencyConstruct, Expression, JsonValue, Literal, LoopStrategy, Pattern, RegexLiteral,
-    ResourceManagement, SequenceDelimiter, Statement, StringPart, TypeAnnotation, ValBindingOrigin,
-    VarianceMarker, WherePredicate,
+    ConcurrencyConstruct, Expression, JsonValue, Literal, LoopStrategy, Pattern, PrimitiveTypeName,
+    PrimitiveTypeSource, RegexLiteral, ResourceManagement, SequenceDelimiter, Statement,
+    StringPart, TypeAnnotation, ValBindingOrigin, VarianceMarker, WherePredicate,
 };
 use jv_lexer::{Lexer, TokenType};
 
@@ -26,6 +26,47 @@ fn test_simple_val_declaration() {
             }
         }
         other => panic!("expected val declaration, found {:?}", other),
+    }
+}
+
+#[test]
+fn function_declaration_with_primitive_prefix_records_metadata() {
+    let program = parse_program(
+        r#"
+        fun int sum(values: SequenceCore<Int>) {
+            return 0
+        }
+    "#,
+    );
+    let statement = first_statement(&program);
+
+    match statement {
+        Statement::FunctionDeclaration {
+            name,
+            primitive_return,
+            return_type,
+            ..
+        } => {
+            assert_eq!(name, "sum");
+            assert!(
+                return_type.is_none(),
+                "primitive prefix should suppress colon-based return type"
+            );
+            let metadata = primitive_return
+                .as_ref()
+                .expect("primitive return metadata should be captured");
+            assert_eq!(metadata.reference.primitive, PrimitiveTypeName::Int);
+            assert_eq!(
+                metadata.reference.source,
+                PrimitiveTypeSource::PrimitiveKeyword
+            );
+            assert_eq!(
+                metadata.reference.raw_path,
+                vec!["int".to_string()],
+                "raw path should preserve original spelling"
+            );
+        }
+        other => panic!("expected function declaration, found {:?}", other),
     }
 }
 
@@ -199,6 +240,7 @@ fn test_function_declaration_signature_and_body() {
             name,
             parameters,
             return_type,
+            primitive_return,
             body,
             ..
         } => {
@@ -206,6 +248,10 @@ fn test_function_declaration_signature_and_body() {
             assert_eq!(parameters.len(), 2);
             assert_eq!(parameters[0].name, "a");
             assert_eq!(parameters[1].name, "b");
+            assert!(
+                primitive_return.is_none(),
+                "colon-based return type should not set primitive metadata"
+            );
 
             match return_type {
                 Some(TypeAnnotation::Simple(type_name)) => assert_eq!(type_name, "Int"),
@@ -265,6 +311,61 @@ fn test_function_generic_where_clause() {
                 }
                 other => panic!("expected trait bound predicate, found {:?}", other),
             }
+        }
+        other => panic!("expected function declaration, found {:?}", other),
+    }
+}
+
+#[test]
+fn where_clause_collects_primitive_bounds() {
+    let program = parse_program(
+        r#"
+        fun <T, U> specialize(value: T, other: U)
+            where T : int, U : java.lang.Integer {
+            return value
+        }
+    "#,
+    );
+    let statement = first_statement(&program);
+
+    match statement {
+        Statement::FunctionDeclaration { where_clause, .. } => {
+            let clause = where_clause
+                .as_ref()
+                .expect("where clause should be captured");
+            assert_eq!(clause.predicates.len(), 2);
+            assert_eq!(clause.primitive_bounds.len(), 2);
+
+            let int_bound = clause
+                .primitive_bounds
+                .iter()
+                .find(|bound| bound.type_param == "T")
+                .expect("int primitive bound present");
+            assert_eq!(int_bound.reference.primitive, PrimitiveTypeName::Int);
+            assert_eq!(
+                int_bound.reference.source,
+                PrimitiveTypeSource::PrimitiveKeyword
+            );
+            assert_eq!(int_bound.reference.raw_path, vec!["int".to_string()]);
+
+            let java_bound = clause
+                .primitive_bounds
+                .iter()
+                .find(|bound| bound.type_param == "U")
+                .expect("java.lang.Integer primitive bound present");
+            assert_eq!(java_bound.reference.primitive, PrimitiveTypeName::Int);
+            assert_eq!(
+                java_bound.reference.source,
+                PrimitiveTypeSource::QualifiedBoxedIdentifier
+            );
+            assert_eq!(
+                java_bound.reference.raw_path,
+                vec![
+                    "java".to_string(),
+                    "lang".to_string(),
+                    "Integer".to_string()
+                ]
+            );
         }
         other => panic!("expected function declaration, found {:?}", other),
     }

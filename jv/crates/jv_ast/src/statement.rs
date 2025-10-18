@@ -134,6 +134,8 @@ pub enum Statement {
         where_clause: Option<WhereClause>,
         parameters: Vec<Parameter>,
         return_type: Option<TypeAnnotation>,
+        #[serde(default)]
+        primitive_return: Option<PrimitiveReturnMetadata>,
         body: Box<Expression>,
         modifiers: Modifiers,
         span: Span,

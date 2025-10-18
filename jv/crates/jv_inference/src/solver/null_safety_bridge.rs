@@ -106,6 +106,7 @@ mod tests {
                 )))],
                 span: Span::dummy(),
             }],
+            primitive_bounds: Vec::new(),
             span: Span::dummy(),
         };
 

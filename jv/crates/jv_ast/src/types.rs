@@ -166,10 +166,66 @@ pub struct FunctionConstraintSignature {
     pub span: Span,
 }
 
+/// Canonical primitive families recognised by the compiler.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PrimitiveTypeName {
+    Int,
+    Long,
+    Short,
+    Byte,
+    Float,
+    Double,
+    Boolean,
+    Char,
+}
+
+/// Origin of a primitive reference in source code.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PrimitiveTypeSource {
+    PrimitiveKeyword,
+    BoxedIdentifier,
+    QualifiedBoxedIdentifier,
+}
+
+impl Default for PrimitiveTypeSource {
+    fn default() -> Self {
+        PrimitiveTypeSource::PrimitiveKeyword
+    }
+}
+
+/// Reference to a primitive family captured from source.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PrimitiveTypeReference {
+    pub primitive: PrimitiveTypeName,
+    #[serde(default)]
+    pub source: PrimitiveTypeSource,
+    #[serde(default)]
+    pub raw_path: Vec<String>,
+    pub span: Span,
+}
+
+/// Metadata describing the primitive return intent of a function.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PrimitiveReturnMetadata {
+    pub reference: PrimitiveTypeReference,
+}
+
+/// Primitive bound metadata surfaced from where clauses.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PrimitiveBound {
+    pub type_param: String,
+    pub reference: PrimitiveTypeReference,
+    #[serde(default)]
+    pub compatible_aliases: Vec<PrimitiveTypeReference>,
+    pub span: Span,
+}
+
 /// where句で指定される制約の集合。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct WhereClause {
     pub predicates: Vec<WherePredicate>,
+    #[serde(default)]
+    pub primitive_bounds: Vec<PrimitiveBound>,
     pub span: Span,
 }
 

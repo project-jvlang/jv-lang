@@ -1059,6 +1059,7 @@ fn where_constraints_flow_into_ir_bounds() {
             type_args: vec![TypeAnnotation::Simple("T".into())],
             span: span.clone(),
         }],
+        primitive_bounds: Vec::new(),
         span: span.clone(),
     };
 

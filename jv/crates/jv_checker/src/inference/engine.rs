@@ -314,6 +314,7 @@ mod tests {
             where_clause: None,
             parameters,
             return_type: return_annotation,
+            primitive_return: None,
             body: Box::new(body),
             modifiers: modifiers(),
             span: dummy_span(),

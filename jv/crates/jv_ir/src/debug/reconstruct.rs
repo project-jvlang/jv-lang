@@ -371,6 +371,7 @@ impl<'a> ReconstructionContext<'a> {
                     where_clause: None,
                     parameters: params,
                     return_type,
+                    primitive_return: None,
                     body: Box::new(body_expr),
                     modifiers,
                     span: span.clone(),

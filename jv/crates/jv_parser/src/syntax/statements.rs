@@ -4,9 +4,10 @@ use jv_ast::{
     Annotation, AnnotationArgument, AnnotationName, AnnotationValue, BinaryOp, CommentKind,
     CommentStatement, CommentVisibility, ConcurrencyConstruct, Expression, ExtensionFunction,
     ForInStatement, GenericParameter, GenericSignature, Literal, LoopBinding, LoopStrategy,
-    Modifiers, NumericRangeLoop, Parameter, QualifiedName, RawTypeContinuation, RawTypeDirective,
-    ResourceManagement, Span, Statement, TypeAnnotation, ValBindingOrigin, VarianceMarker,
-    Visibility, WhereClause, WherePredicate,
+    Modifiers, NumericRangeLoop, Parameter, PrimitiveBound, PrimitiveReturnMetadata,
+    PrimitiveTypeName, PrimitiveTypeReference, PrimitiveTypeSource, QualifiedName,
+    RawTypeContinuation, RawTypeDirective, ResourceManagement, Span, Statement, TypeAnnotation,
+    ValBindingOrigin, VarianceMarker, Visibility, WhereClause, WherePredicate,
 };
 use jv_lexer::{SourceCommentTrivia, Token, TokenTrivia, TokenType};
 
@@ -331,6 +332,7 @@ fn function_declaration_parser(
                     where_clause: signature.where_clause.clone(),
                     parameters: signature.parameters,
                     return_type: signature.return_type,
+                    primitive_return: signature.primitive_return.clone(),
                     body: Box::new(inner_body),
                     modifiers: modifiers.clone(),
                     span: span.clone(),
@@ -349,6 +351,7 @@ fn function_declaration_parser(
                     where_clause: signature.where_clause,
                     parameters: signature.parameters,
                     return_type: signature.return_type,
+                    primitive_return: signature.primitive_return,
                     body: Box::new(body_expr),
                     modifiers,
                     span,
@@ -613,19 +616,41 @@ fn function_signature(
     let receiver_and_name = receiver_type_parser()
         .then_ignore(token_dot())
         .then(identifier())
-        .map(|(receiver, name)| (Some(receiver), name))
-        .or(identifier().map(|name| (None, name)));
+        .map(|(receiver, name)| (Some(receiver), name, None))
+        .boxed();
+
+    let primitive_return_and_name = identifier_with_span()
+        .then(identifier())
+        .try_map(|((candidate, candidate_span), name), span| {
+            let segments = [candidate.clone()];
+            if let Some(reference) = primitive_reference_from_segments(&segments, &candidate_span) {
+                if matches!(reference.source, PrimitiveTypeSource::PrimitiveKeyword) {
+                    return Ok((None, name, Some(PrimitiveReturnMetadata { reference })));
+                }
+            }
+            Err(Simple::expected_input_found(span, Vec::new(), None))
+        })
+        .boxed();
+
+    let name_only = identifier().map(|name| (None, name, None)).boxed();
 
     type_parameter_list()
         .or_not()
-        .then(receiver_and_name)
+        .then(
+            receiver_and_name
+                .or(primitive_return_and_name)
+                .or(name_only),
+        )
         .then_ignore(token_left_paren())
         .then(parameter_list(expr.clone()))
         .then_ignore(token_right_paren())
         .then(type_annotation_clause())
         .then(where_clause_parser())
         .map(
-            |((((generics, (receiver, name)), parameters), return_type), where_clause)| {
+            |(
+                (((generics, (receiver, name, primitive_return)), parameters), return_type),
+                where_clause,
+            )| {
                 let (type_parameters, generic_signature) = match generics {
                     Some(generics) => {
                         let names: Vec<String> = generics
@@ -652,6 +677,7 @@ fn function_signature(
                     generic_signature,
                     parameters,
                     return_type,
+                    primitive_return,
                     where_clause,
                 }
             },
@@ -773,6 +799,151 @@ fn collect_raw_directives_from_trivia(trivia: &TokenTrivia) -> Vec<RawTypeDirect
         .collect()
 }
 
+fn primitive_reference_from_segments(
+    segments: &[String],
+    span: &Span,
+) -> Option<PrimitiveTypeReference> {
+    classify_primitive_segments(segments).map(|(primitive, source)| PrimitiveTypeReference {
+        primitive,
+        source,
+        raw_path: segments.to_vec(),
+        span: span.clone(),
+    })
+}
+
+fn classify_primitive_segments(
+    segments: &[String],
+) -> Option<(PrimitiveTypeName, PrimitiveTypeSource)> {
+    match segments.len() {
+        1 => match segments[0].as_str() {
+            "int" => Some((
+                PrimitiveTypeName::Int,
+                PrimitiveTypeSource::PrimitiveKeyword,
+            )),
+            "long" => Some((
+                PrimitiveTypeName::Long,
+                PrimitiveTypeSource::PrimitiveKeyword,
+            )),
+            "short" => Some((
+                PrimitiveTypeName::Short,
+                PrimitiveTypeSource::PrimitiveKeyword,
+            )),
+            "byte" => Some((
+                PrimitiveTypeName::Byte,
+                PrimitiveTypeSource::PrimitiveKeyword,
+            )),
+            "double" => Some((
+                PrimitiveTypeName::Double,
+                PrimitiveTypeSource::PrimitiveKeyword,
+            )),
+            "float" => Some((
+                PrimitiveTypeName::Float,
+                PrimitiveTypeSource::PrimitiveKeyword,
+            )),
+            "boolean" => Some((
+                PrimitiveTypeName::Boolean,
+                PrimitiveTypeSource::PrimitiveKeyword,
+            )),
+            "char" => Some((
+                PrimitiveTypeName::Char,
+                PrimitiveTypeSource::PrimitiveKeyword,
+            )),
+            "Integer" | "Int" => {
+                Some((PrimitiveTypeName::Int, PrimitiveTypeSource::BoxedIdentifier))
+            }
+            "Long" => Some((
+                PrimitiveTypeName::Long,
+                PrimitiveTypeSource::BoxedIdentifier,
+            )),
+            "Short" => Some((
+                PrimitiveTypeName::Short,
+                PrimitiveTypeSource::BoxedIdentifier,
+            )),
+            "Byte" => Some((
+                PrimitiveTypeName::Byte,
+                PrimitiveTypeSource::BoxedIdentifier,
+            )),
+            "Double" => Some((
+                PrimitiveTypeName::Double,
+                PrimitiveTypeSource::BoxedIdentifier,
+            )),
+            "Float" => Some((
+                PrimitiveTypeName::Float,
+                PrimitiveTypeSource::BoxedIdentifier,
+            )),
+            "Boolean" => Some((
+                PrimitiveTypeName::Boolean,
+                PrimitiveTypeSource::BoxedIdentifier,
+            )),
+            "Character" | "Char" => Some((
+                PrimitiveTypeName::Char,
+                PrimitiveTypeSource::BoxedIdentifier,
+            )),
+            _ => None,
+        },
+        3 if segments[0] == "java" && segments[1] == "lang" => match segments[2].as_str() {
+            "Integer" => Some((
+                PrimitiveTypeName::Int,
+                PrimitiveTypeSource::QualifiedBoxedIdentifier,
+            )),
+            "Long" => Some((
+                PrimitiveTypeName::Long,
+                PrimitiveTypeSource::QualifiedBoxedIdentifier,
+            )),
+            "Short" => Some((
+                PrimitiveTypeName::Short,
+                PrimitiveTypeSource::QualifiedBoxedIdentifier,
+            )),
+            "Byte" => Some((
+                PrimitiveTypeName::Byte,
+                PrimitiveTypeSource::QualifiedBoxedIdentifier,
+            )),
+            "Double" => Some((
+                PrimitiveTypeName::Double,
+                PrimitiveTypeSource::QualifiedBoxedIdentifier,
+            )),
+            "Float" => Some((
+                PrimitiveTypeName::Float,
+                PrimitiveTypeSource::QualifiedBoxedIdentifier,
+            )),
+            "Boolean" => Some((
+                PrimitiveTypeName::Boolean,
+                PrimitiveTypeSource::QualifiedBoxedIdentifier,
+            )),
+            "Character" => Some((
+                PrimitiveTypeName::Char,
+                PrimitiveTypeSource::QualifiedBoxedIdentifier,
+            )),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+fn collect_primitive_bounds(predicates: &[WherePredicate]) -> Vec<PrimitiveBound> {
+    predicates
+        .iter()
+        .filter_map(|predicate| match predicate {
+            WherePredicate::TraitBound {
+                type_param,
+                trait_name,
+                type_args,
+                span,
+            } if type_args.is_empty() => {
+                primitive_reference_from_segments(&trait_name.segments, &trait_name.span).map(
+                    |reference| PrimitiveBound {
+                        type_param: type_param.clone(),
+                        reference,
+                        compatible_aliases: Vec::new(),
+                        span: span.clone(),
+                    },
+                )
+            }
+            _ => None,
+        })
+        .collect()
+}
+
 fn raw_directive_from_comment(comment: &SourceCommentTrivia) -> Option<RawTypeDirective> {
     let content = normalize_comment_text(&comment.text);
     let trimmed = content.trim();
@@ -841,9 +1012,11 @@ fn where_clause_parser(
                 .map(|predicate| predicate.span().clone())
                 .map(|end_span| merge_spans(&where_span, &end_span))
                 .unwrap_or(where_span.clone());
+            let primitive_bounds = collect_primitive_bounds(&predicates);
 
             WhereClause {
                 predicates,
+                primitive_bounds,
                 span: clause_span,
             }
         })
@@ -1375,6 +1548,7 @@ struct FunctionSignature {
     generic_signature: Option<GenericSignature>,
     parameters: Vec<Parameter>,
     return_type: Option<TypeAnnotation>,
+    primitive_return: Option<PrimitiveReturnMetadata>,
     where_clause: Option<WhereClause>,
 }
 

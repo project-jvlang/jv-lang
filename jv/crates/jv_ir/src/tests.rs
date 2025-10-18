@@ -1368,6 +1368,7 @@ mod tests {
             where_clause: None,
             parameters: vec![],
             return_type: Some(TypeAnnotation::Simple("String".to_string())),
+            primitive_return: None,
             body: Box::new(Expression::Call {
                 function: Box::new(Expression::MemberAccess {
                     object: Box::new(Expression::This(dummy_span())),
@@ -1851,6 +1852,7 @@ mod tests {
                 span: dummy_span(),
             }],
             return_type: Some(TypeAnnotation::Simple("String".to_string())),
+            primitive_return: None,
             body: Box::new(Expression::Literal(
                 Literal::String("x.toString()".to_string()),
                 dummy_span(),
@@ -1900,6 +1902,7 @@ mod tests {
                 span: dummy_span(),
             }],
             return_type: Some(TypeAnnotation::Simple("T".to_string())),
+            primitive_return: None,
             body: Box::new(Expression::Identifier("value".to_string(), dummy_span())),
             modifiers: Modifiers::default(),
             span: dummy_span(),
@@ -2878,6 +2881,7 @@ mod tests {
             return_type: Some(TypeAnnotation::Nullable(Box::new(TypeAnnotation::Simple(
                 "T".to_string(),
             )))),
+            primitive_return: None,
             body: Box::new(Expression::If {
                 condition: Box::new(Expression::Binary {
                     left: Box::new(Expression::MemberAccess {

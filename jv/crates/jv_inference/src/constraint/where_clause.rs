@@ -242,6 +242,7 @@ mod tests {
                 type_args: vec![TypeAnnotation::Simple("T".into())],
                 span: Span::dummy(),
             }],
+            primitive_bounds: Vec::new(),
             span: Span::dummy(),
         };
         let params = map_with(&[("T", 1)]);
@@ -298,6 +299,7 @@ mod tests {
                 },
                 span: Span::dummy(),
             }],
+            primitive_bounds: Vec::new(),
             span: Span::dummy(),
         };
         let params = map_with(&[("T", 7)]);
@@ -342,6 +344,7 @@ mod tests {
                 },
                 span: Span::dummy(),
             }],
+            primitive_bounds: Vec::new(),
             span: Span::dummy(),
         };
         let params = map_with(&[("T", 11)]);
@@ -383,6 +386,7 @@ mod tests {
                 type_args: Vec::new(),
                 span: Span::dummy(),
             }],
+            primitive_bounds: Vec::new(),
             span: Span::dummy(),
         };
         let params: HashMap<String, TypeId> = HashMap::new();

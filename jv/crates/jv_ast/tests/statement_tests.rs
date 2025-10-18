@@ -56,6 +56,7 @@ fn test_statement_function_declaration() {
         where_clause: None,
         parameters: vec![param],
         return_type: Some(TypeAnnotation::Simple("Int".to_string())),
+        primitive_return: None,
         body: Box::new(Expression::Identifier("x".to_string(), dummy_span())),
         modifiers: Modifiers::default(),
         span: dummy_span(),
@@ -82,6 +83,7 @@ fn test_where_clause_trait_bound_predicate() {
             type_args: vec![TypeAnnotation::Simple("T".to_string())],
             span: predicate_span.clone(),
         }],
+        primitive_bounds: Vec::new(),
         span: clause_span.clone(),
     };
 
@@ -175,6 +177,7 @@ fn test_statement_interface_declaration() {
         where_clause: None,
         parameters: vec![],
         return_type: None,
+        primitive_return: None,
         body: Box::new(Expression::Literal(Literal::Null, dummy_span())),
         modifiers: Modifiers::default(),
         span: dummy_span(),
@@ -377,6 +380,7 @@ fn test_program() {
         where_clause: None,
         parameters: vec![],
         return_type: None,
+        primitive_return: None,
         body: Box::new(Expression::Block {
             statements: vec![],
             span: dummy_span(),
@@ -427,6 +431,7 @@ fn test_extension_function() {
         where_clause: None,
         parameters: vec![],
         return_type: Some(TypeAnnotation::Simple("String".to_string())),
+        primitive_return: None,
         body: Box::new(Expression::Literal(
             Literal::String("".to_string()),
             dummy_span(),

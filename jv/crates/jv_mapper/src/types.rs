@@ -241,6 +241,7 @@ mod tests {
                     span: predicate_span.clone(),
                 },
             ],
+            primitive_bounds: Vec::new(),
             span: predicate_span.clone(),
         };
 

@@ -207,6 +207,7 @@ fn check_program_populates_inference_snapshot() {
                     },
                 ],
                 return_type: None,
+                primitive_return: None,
                 body: Box::new(function_body),
                 modifiers: default_modifiers(),
                 span: span.clone(),
@@ -358,6 +359,7 @@ fn override_annotation_on_method_is_allowed() {
         where_clause: None,
         parameters: Vec::new(),
         return_type: None,
+        primitive_return: None,
         body: Box::new(Expression::Literal(
             Literal::Number("1".into()),
             span.clone(),

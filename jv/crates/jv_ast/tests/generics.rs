@@ -43,6 +43,7 @@ fn generic_parameter_records_variance_and_default() {
 fn signature_collects_raw_directives_and_where_clause() {
     let where_clause = WhereClause {
         predicates: Vec::new(),
+        primitive_bounds: Vec::new(),
         span: span(),
     };
 
