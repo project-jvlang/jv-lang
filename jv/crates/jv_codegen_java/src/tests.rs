@@ -10,8 +10,10 @@ use jv_ir::{
     DataFormat, IrCaseLabel, IrCommentKind, IrDeconstructionComponent, IrDeconstructionPattern,
     IrExpression, IrImplicitWhenEnd, IrModifiers, IrParameter, IrProgram, IrRecordComponent,
     IrSampleDeclaration, IrStatement, IrSwitchCase, IrTypeParameter, IrVisibility, JavaType,
-    MethodOverload, PrimitiveReturnMetadata, PrimitiveType, SampleMode, SampleRecordDescriptor,
-    SampleRecordField, SampleSourceKind, Schema,
+    MethodOverload, PipelineShape, PrimitiveReturnMetadata, PrimitiveSpecializationHint,
+    PrimitiveType, SampleMode, SampleRecordDescriptor, SampleRecordField, SampleSourceKind, Schema,
+    SequencePipeline, SequenceSource, SequenceTerminal, SequenceTerminalEvaluation,
+    SequenceTerminalKind,
 };
 use jv_parser::Parser;
 use serde_json::to_string_pretty;
@@ -976,6 +978,151 @@ fn class_extension_method_is_emitted_as_instance_method() {
         !class_java.contains("Greeter self(Greeter receiver)"),
         "receiver parameter must be removed from class-backed instance method signature"
     );
+}
+
+#[test]
+fn primitive_specialized_pipeline_renders_character_casts() {
+    let mut generator = JavaCodeGenerator::new();
+    let span = dummy_span();
+
+    let number_type = reference_type("java.lang.Number");
+    let list_of_numbers = list_type(number_type.clone());
+
+    let mut pipeline = SequencePipeline {
+        source: SequenceSource::Collection {
+            expr: Box::new(IrExpression::Identifier {
+                name: "values".to_string(),
+                java_type: list_of_numbers.clone(),
+                span: span.clone(),
+            }),
+            element_hint: None,
+        },
+        stages: Vec::new(),
+        terminal: Some(SequenceTerminal {
+            kind: SequenceTerminalKind::Sum,
+            evaluation: SequenceTerminalEvaluation::Aggregator,
+            requires_non_empty_source: false,
+            specialization_hint: Some(PrimitiveSpecializationHint {
+                type_param: "T".to_string(),
+                canonical: PrimitiveTypeName::Int,
+                aliases: vec![PrimitiveTypeName::Char, PrimitiveTypeName::Short],
+                span: span.clone(),
+            }),
+            canonical_adapter: None,
+            span: span.clone(),
+        }),
+        lazy: false,
+        span: span.clone(),
+        shape: PipelineShape::default(),
+    };
+    pipeline.recompute_shape();
+    pipeline.apply_specialization_hint();
+
+    let return_type = JavaType::int();
+
+    let method_body = IrExpression::Block {
+        statements: vec![IrStatement::Return {
+            value: Some(IrExpression::SequencePipeline {
+                pipeline,
+                java_type: return_type.clone(),
+                span: span.clone(),
+            }),
+            span: span.clone(),
+        }],
+        java_type: return_type.clone(),
+        span: span.clone(),
+    };
+
+    let mut method_modifiers = IrModifiers::default();
+    method_modifiers.visibility = IrVisibility::Public;
+    method_modifiers.is_static = true;
+
+    let method = IrStatement::MethodDeclaration {
+        name: "sumCharsAsInt".to_string(),
+        java_name: None,
+        type_parameters: vec![],
+        parameters: vec![IrParameter {
+            name: "values".to_string(),
+            java_type: list_of_numbers.clone(),
+            modifiers: IrModifiers::default(),
+            span: span.clone(),
+        }],
+        primitive_return: Some(PrimitiveReturnMetadata {
+            reference: PrimitiveTypeReference {
+                primitive: PrimitiveTypeName::Int,
+                source: PrimitiveTypeSource::PrimitiveKeyword,
+                raw_path: Vec::new(),
+                span: span.clone(),
+            },
+        }),
+        return_type: return_type.clone(),
+        body: Some(method_body),
+        modifiers: method_modifiers,
+        throws: vec![],
+        span: span.clone(),
+    };
+
+    let mut class_modifiers = IrModifiers::default();
+    class_modifiers.visibility = IrVisibility::Public;
+    class_modifiers.is_final = true;
+
+    let class = IrStatement::ClassDeclaration {
+        name: "PrimitiveAdapters".to_string(),
+        type_parameters: vec![],
+        superclass: None,
+        interfaces: vec![],
+        fields: vec![],
+        methods: vec![method],
+        nested_classes: vec![],
+        modifiers: class_modifiers,
+        span: span.clone(),
+    };
+
+    let program = IrProgram {
+        package: Some("demo.sequence".to_string()),
+        imports: vec![],
+        type_declarations: vec![class],
+        generic_metadata: Default::default(),
+        conversion_metadata: Vec::new(),
+        span,
+    };
+
+    let unit = generator
+        .generate_compilation_unit(&program)
+        .expect("primitive specialized pipeline should render");
+
+    assert_eq!(
+        unit.type_declarations.len(),
+        1,
+        "expected single class output"
+    );
+
+    let class_java = &unit.type_declarations[0];
+    assert!(
+        class_java.contains(".mapToInt("),
+        "specialized sum should utilize mapToInt"
+    );
+    assert!(
+        class_java.contains("(int) (java.lang.Character) __jvIntFamilyValue.charValue()"),
+        "Character aliases must be cast to int\n\nGenerated output:\n{class_java}"
+    );
+    assert!(
+        class_java.contains("instanceof java.lang.Character"),
+        "adapter should guard Character instances"
+    );
+    assert!(
+        class_java.contains("values).stream()"),
+        "sequence source should stream the input collection"
+    );
+    assert!(
+        class_java.contains("(java.lang.Number) __jvIntFamilyValue.intValue()"),
+        "non-alias branch should fall back to Number::intValue\n\nGenerated output:\n{class_java}"
+    );
+    assert!(
+        class_java.contains("sumCharsAsInt$IntVersion"),
+        "primitive return metadata should trigger Int specialization suffix\n\nGenerated output:\n{class_java}"
+    );
+
 }
 
 #[test]
