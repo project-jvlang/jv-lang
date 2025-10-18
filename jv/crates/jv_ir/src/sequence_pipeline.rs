@@ -133,9 +133,15 @@ fn build_int_canonical_adapter(span: &Span, aliases: &[PrimitiveTypeName]) -> Ir
             span: span.clone(),
         };
 
+        let char_value_cast = IrExpression::Cast {
+            expr: Box::new(char_value),
+            target_type: JavaType::int(),
+            span: span.clone(),
+        };
+
         IrExpression::Conditional {
             condition: Box::new(condition),
-            then_expr: Box::new(char_value),
+            then_expr: Box::new(char_value_cast),
             else_expr: Box::new(number_int_value),
             java_type: JavaType::int(),
             span: span.clone(),

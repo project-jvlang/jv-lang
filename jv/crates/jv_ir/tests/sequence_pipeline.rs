@@ -613,11 +613,22 @@ fn int_family_specialization_injects_cast_adapter() {
                     ..
                 } => {
                     match then_expr.as_ref() {
-                        IrExpression::MethodCall { method_name, .. } => {
-                            assert_eq!(method_name, "charValue");
+                        IrExpression::Cast {
+                            expr, target_type, ..
+                        } => {
+                            assert_eq!(target_type, &JavaType::int());
+                            match expr.as_ref() {
+                                IrExpression::MethodCall { method_name, .. } => {
+                                    assert_eq!(method_name, "charValue");
+                                }
+                                other => panic!(
+                                    "expected charValue call inside cast branch, found {:?}",
+                                    other
+                                ),
+                            }
                         }
                         other => panic!(
-                            "expected charValue call in conditional branch, found {:?}",
+                            "expected cast wrapping charValue in conditional branch, found {:?}",
                             other
                         ),
                     }

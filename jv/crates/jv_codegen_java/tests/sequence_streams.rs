@@ -707,6 +707,14 @@ fn sum_terminal_with_int_hint_uses_map_to_int() {
     assert!(rendered.contains(".mapToInt("));
     assert!(rendered.ends_with(".sum()"));
     assert!(rendered.contains("Character"));
+    assert!(
+        rendered.contains("(int) ((java.lang.Character)"),
+        "lambda should cast Character aliases to int"
+    );
+    assert!(
+        rendered.contains("instanceof java.lang.Character"),
+        "lambda should guard Character instances"
+    );
 }
 
 #[test]
