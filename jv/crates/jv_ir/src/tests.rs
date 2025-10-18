@@ -1941,6 +1941,49 @@ mod tests {
     }
 
     #[test]
+    fn desugar_top_level_function_preserves_primitive_return_metadata() {
+        let mut context = test_context();
+
+        let primitive_return = PrimitiveReturnMetadata {
+            reference: PrimitiveTypeReference {
+                primitive: PrimitiveTypeName::Int,
+                source: PrimitiveTypeSource::PrimitiveKeyword,
+                raw_path: Vec::new(),
+                span: dummy_span(),
+            },
+        };
+
+        let function = Statement::FunctionDeclaration {
+            name: "sumValues".to_string(),
+            type_parameters: Vec::new(),
+            generic_signature: None,
+            where_clause: None,
+            parameters: Vec::new(),
+            return_type: None,
+            primitive_return: Some(primitive_return.clone()),
+            body: Box::new(Expression::Literal(
+                Literal::Number("0".to_string()),
+                dummy_span(),
+            )),
+            modifiers: Modifiers::default(),
+            span: dummy_span(),
+        };
+
+        let result = desugar_top_level_function(function, &mut context)
+            .expect("primitive metadata should survive lowering");
+
+        match result {
+            IrStatement::MethodDeclaration {
+                primitive_return: actual,
+                ..
+            } => {
+                assert_eq!(actual, Some(primitive_return));
+            }
+            other => panic!("Expected method declaration, got {:?}", other),
+        }
+    }
+
+    #[test]
     fn test_transform_statement_preserves_return() {
         let mut context = test_context();
 
@@ -3167,6 +3210,7 @@ mod tests {
             java_name: Some("flatMap".to_string()),
             type_parameters: vec![],
             parameters: vec![],
+            primitive_return: None,
             return_type: JavaType::void(),
             body: None,
             modifiers: IrModifiers::default(),
@@ -3283,6 +3327,7 @@ mod tests {
                 kind: SequenceTerminalKind::ToList,
                 evaluation: SequenceTerminalEvaluation::Collector,
                 requires_non_empty_source: false,
+                specialization_hint: None,
                 span: dummy_span(),
             }),
             lazy: false,
@@ -3469,6 +3514,7 @@ mod tests {
             kind: SequenceTerminalKind::ToList,
             evaluation: SequenceTerminalEvaluation::Collector,
             requires_non_empty_source: false,
+            specialization_hint: None,
             span: dummy_span(),
         };
 
@@ -4278,6 +4324,7 @@ mod tests {
                 parameter_types: vec![function_seq.clone()],
                 return_type: sequence_type.clone(),
                 is_static: true,
+                primitive_return: None,
                 span: span_decl_one.clone(),
             });
         context
@@ -4289,6 +4336,7 @@ mod tests {
                 parameter_types: vec![function_iter.clone()],
                 return_type: sequence_type.clone(),
                 is_static: true,
+                primitive_return: None,
                 span: span_decl_two.clone(),
             });
 
@@ -4328,6 +4376,7 @@ mod tests {
                 modifiers: IrModifiers::default(),
                 span: span_decl_one.clone(),
             }],
+            primitive_return: None,
             return_type: sequence_type.clone(),
             body: None,
             modifiers: static_modifiers(true),
@@ -4345,6 +4394,7 @@ mod tests {
                 modifiers: IrModifiers::default(),
                 span: span_decl_two.clone(),
             }],
+            primitive_return: None,
             return_type: sequence_type.clone(),
             body: None,
             modifiers: static_modifiers(true),
@@ -4507,6 +4557,7 @@ mod tests {
                     generic_args: vec![],
                 },
                 is_static: true,
+                primitive_return: None,
                 span: span_decl_one.clone(),
             });
         context
@@ -4521,6 +4572,7 @@ mod tests {
                     generic_args: vec![],
                 },
                 is_static: true,
+                primitive_return: None,
                 span: span_decl_two.clone(),
             });
 
@@ -4566,6 +4618,7 @@ mod tests {
                 modifiers: IrModifiers::default(),
                 span: span_decl_one.clone(),
             }],
+            primitive_return: None,
             return_type: JavaType::Reference {
                 name: "java.lang.String".to_string(),
                 generic_args: vec![],
@@ -4586,6 +4639,7 @@ mod tests {
                 modifiers: IrModifiers::default(),
                 span: span_decl_two.clone(),
             }],
+            primitive_return: None,
             return_type: JavaType::Reference {
                 name: "java.lang.Integer".to_string(),
                 generic_args: vec![],

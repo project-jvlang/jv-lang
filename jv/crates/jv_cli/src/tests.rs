@@ -2,16 +2,20 @@ use super::*;
 use crate::commands::explain;
 use crate::pipeline::compute_script_main_class;
 
-use crate::pipeline::generics::apply_type_facts;
-use jv_ast::types::Kind;
+use crate::pipeline::generics::{apply_type_facts, find_primitive_specialization_hint};
+use jv_ast::types::{Kind, PrimitiveTypeName};
 use jv_inference::constraint::{ConstraintGraph, ConstraintSolution, WhereConstraintResolver};
-use jv_inference::service::{TypeFactsBuilder, TypeLevelValue, TypeScheme};
+use jv_inference::service::{TypeFacts, TypeFactsBuilder, TypeLevelValue, TypeScheme};
 use jv_inference::solver::Variance;
 use jv_inference::types::{
-    BoundConstraint, BoundPredicate, GenericBounds, SymbolId, TypeId, TypeKind, TypeVariant,
+    BoundConstraint, BoundPredicate, GenericBounds, PrimitiveBoundConstraint, SymbolId, TypeId,
+    TypeKind, TypeVariant,
 };
 use jv_ir::{
-    IrModifiers, IrProgram, IrStatement, IrTypeLevelValue, IrTypeParameter, IrVariance, JavaType,
+    IrExpression, IrModifiers, IrParameter, IrProgram, IrStatement, IrTypeLevelValue,
+    IrTypeParameter, IrVariance, JavaType, PipelineShape, PrimitiveSpecializationHint,
+    SequencePipeline, SequenceSource, SequenceTerminal, SequenceTerminalEvaluation,
+    SequenceTerminalKind,
 };
 use std::collections::HashMap;
 
@@ -1022,6 +1026,184 @@ fn apply_type_facts_records_metadata_without_generics() {
         Some(IrTypeLevelValue::String(value)) => assert_eq!(value, "Constants"),
         other => panic!("unexpected descriptor metadata: {other:?}"),
     }
+}
+
+#[test]
+fn apply_type_facts_sets_sequence_specialization_hint() {
+    let span = dummy_span();
+    let type_param_span = span.clone();
+
+    let mut pipeline = SequencePipeline {
+        source: SequenceSource::Collection {
+            expr: Box::new(IrExpression::Identifier {
+                name: "values".to_string(),
+                java_type: JavaType::Reference {
+                    name: "jv.collections.Sequence".to_string(),
+                    generic_args: Vec::new(),
+                },
+                span: span.clone(),
+            }),
+            element_hint: None,
+        },
+        stages: Vec::new(),
+        terminal: Some(SequenceTerminal {
+            kind: SequenceTerminalKind::Sum,
+            evaluation: SequenceTerminalEvaluation::Aggregator,
+            requires_non_empty_source: false,
+            specialization_hint: None,
+            span: span.clone(),
+        }),
+        lazy: false,
+        span: span.clone(),
+        shape: PipelineShape::default(),
+    };
+    pipeline.recompute_shape();
+
+    let method_body = IrExpression::SequencePipeline {
+        pipeline,
+        java_type: JavaType::Primitive("int".to_string()),
+        span: span.clone(),
+    };
+
+    let method_span = span.clone();
+    let method = IrStatement::MethodDeclaration {
+        name: "sum".to_string(),
+        java_name: None,
+        type_parameters: vec![IrTypeParameter::new("T", type_param_span)],
+        parameters: vec![IrParameter {
+            name: "values".to_string(),
+            java_type: JavaType::Reference {
+                name: "jv.collections.Sequence".to_string(),
+                generic_args: Vec::new(),
+            },
+            modifiers: IrModifiers::default(),
+            span: method_span.clone(),
+        }],
+        primitive_return: None,
+        return_type: JavaType::Primitive("int".to_string()),
+        body: Some(method_body),
+        modifiers: IrModifiers::default(),
+        throws: Vec::new(),
+        span: method_span,
+    };
+
+    let class = IrStatement::ClassDeclaration {
+        name: "Example".to_string(),
+        type_parameters: Vec::new(),
+        superclass: None,
+        interfaces: Vec::new(),
+        fields: Vec::new(),
+        methods: vec![method],
+        nested_classes: Vec::new(),
+        modifiers: IrModifiers::default(),
+        span: span.clone(),
+    };
+
+    let mut program = IrProgram {
+        package: Some("example".to_string()),
+        imports: Vec::new(),
+        type_declarations: vec![class],
+        generic_metadata: Default::default(),
+        conversion_metadata: Vec::new(),
+        span,
+    };
+
+    let type_id = TypeId::new(11);
+    let primitive_constraint = PrimitiveBoundConstraint::new(PrimitiveTypeName::Int, Vec::new());
+    let bounds = GenericBounds::new(vec![BoundConstraint::new(
+        type_id,
+        BoundPredicate::Primitive(primitive_constraint.clone()),
+    )]);
+    let mut scheme_bounds = HashMap::new();
+    scheme_bounds.insert(type_id, bounds.clone());
+    let scheme = TypeScheme::with_bounds(vec![type_id], TypeKind::default(), scheme_bounds);
+
+    let mut builder = TypeFactsBuilder::new();
+    builder.add_scheme("example::Example::sum", scheme.clone());
+    builder.add_scheme("Example::sum", scheme.clone());
+    builder.add_scheme("Example.sum", scheme.clone());
+    builder.add_scheme("Example$sum", scheme.clone());
+    builder.add_scheme("example.Example.sum", scheme.clone());
+    builder.add_scheme("example$Example$sum", scheme.clone());
+    builder.add_scheme("sum", scheme);
+    builder.record_bounds(type_id, bounds);
+
+    let facts = builder.build();
+    assert!(
+        TypeFacts::scheme_for(&facts, "sum").is_some(),
+        "expected scheme for method symbol"
+    );
+    let scheme = TypeFacts::scheme_for(&facts, "sum").unwrap();
+    let generics = scheme.generics();
+    let mut primitive_bound_present = false;
+    for type_id in generics {
+        if let Some(bounds) = scheme.bounds_for(*type_id) {
+            if bounds
+                .constraints()
+                .iter()
+                .any(|constraint| matches!(constraint.predicate, BoundPredicate::Primitive(_)))
+            {
+                primitive_bound_present = true;
+                break;
+            }
+        }
+    }
+    assert!(
+        primitive_bound_present,
+        "expected primitive bound in scheme"
+    );
+    let manual_hint = find_primitive_specialization_hint(
+        Some("example"),
+        &["Example".to_string(), "sum".to_string()],
+        &[IrTypeParameter::new("T", jv_ast::Span::dummy())],
+        &facts,
+    );
+    assert!(manual_hint.is_some(), "expected manual primitive hint");
+
+    apply_type_facts(&mut program, &facts);
+
+    let IrStatement::ClassDeclaration { methods, .. } = &program.type_declarations[0] else {
+        panic!("expected class declaration");
+    };
+    let IrStatement::MethodDeclaration {
+        body: Some(body),
+        type_parameters: method_params,
+        ..
+    } = &methods[0]
+    else {
+        panic!("expected method body");
+    };
+    let post_hint = find_primitive_specialization_hint(
+        Some("example"),
+        &["Example".to_string(), "sum".to_string()],
+        method_params.as_slice(),
+        &facts,
+    );
+    assert!(
+        post_hint.is_some(),
+        "expected primitive hint after enrichment"
+    );
+    let IrExpression::SequencePipeline { pipeline, .. } = body else {
+        panic!("expected sequence pipeline body");
+    };
+    let terminal = pipeline
+        .terminal
+        .as_ref()
+        .expect("sequence terminal should exist");
+    let hint = terminal
+        .specialization_hint
+        .as_ref()
+        .expect("primitive specialization hint should be attached");
+
+    assert_eq!(
+        hint,
+        &PrimitiveSpecializationHint {
+            type_param: "T".to_string(),
+            canonical: PrimitiveTypeName::Int,
+            aliases: Vec::new(),
+            span: jv_ast::Span::default(),
+        }
+    );
 }
 
 #[test]

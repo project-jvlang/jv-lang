@@ -321,6 +321,7 @@ fn load_users_method() -> IrStatement {
         java_name: None,
         type_parameters: vec![],
         parameters: vec![],
+        primitive_return: None,
         return_type: string_type(),
         body: Some(IrExpression::Block {
             statements: vec![IrStatement::Return {
@@ -426,6 +427,7 @@ fn simple_method() -> IrStatement {
         java_name: None,
         type_parameters: vec![],
         parameters: vec![],
+        primitive_return: None,
         return_type: string_type(),
         body: Some(body),
         modifiers: IrModifiers {

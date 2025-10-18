@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use crate::types::{
     DataFormat, IrExpression, IrImport, IrImportDetail, IrResolvedMethodTarget, IrStatement,
-    JavaType, MethodOverload, SampleMode, StaticMethodCall, UtilityClass,
+    JavaType, MethodOverload, PrimitiveReturnMetadata, SampleMode, StaticMethodCall, UtilityClass,
 };
 use jv_ast::{CallArgumentStyle, Span};
 use jv_support::arena::{
@@ -124,6 +124,7 @@ impl TransformContext {
             name,
             java_name,
             parameters,
+            primitive_return,
             return_type,
             modifiers,
             span,
@@ -146,6 +147,7 @@ impl TransformContext {
                     .collect(),
                 return_type: return_type.clone(),
                 is_static: modifiers.is_static,
+                primitive_return: primitive_return.clone(),
                 span: span.clone(),
             });
         }
@@ -386,6 +388,7 @@ pub struct RegisteredMethodDeclaration {
     pub parameter_types: Vec<JavaType>,
     pub return_type: JavaType,
     pub is_static: bool,
+    pub primitive_return: Option<PrimitiveReturnMetadata>,
     pub span: Span,
 }
 

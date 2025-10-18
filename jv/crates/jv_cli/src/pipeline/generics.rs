@@ -1,11 +1,13 @@
 use std::collections::HashSet;
 
+use jv_ast::{Span, types::PrimitiveTypeName};
 use jv_inference::service::{TypeFacts, TypeFactsSnapshot, TypeLevelValue};
 use jv_inference::solver::Variance;
 use jv_inference::types::{BoundPredicate, GenericBounds, SymbolId, TypeId, TypeKind, TypeVariant};
 use jv_ir::{
-    GenericMetadataMap, IrGenericMetadata, IrModifiers, IrProgram, IrStatement, IrTypeLevelValue,
-    IrTypeParameter, IrVariance, JavaType,
+    GenericMetadataMap, IrExpression, IrGenericMetadata, IrModifiers, IrProgram, IrStatement,
+    IrTypeLevelValue, IrTypeParameter, IrVariance, JavaType, PrimitiveSpecializationHint,
+    SequencePipeline, SequenceSource, SequenceStage,
 };
 
 /// Enriches the generated IR program with generic metadata sourced from type inference facts.
@@ -34,14 +36,8 @@ fn apply_to_statement(
             name,
             type_parameters,
             modifiers,
+            methods,
             nested_classes,
-            ..
-        }
-        | IrStatement::InterfaceDeclaration {
-            name,
-            type_parameters,
-            modifiers,
-            nested_types: nested_classes,
             ..
         } => {
             path.push(name.clone());
@@ -53,7 +49,39 @@ fn apply_to_statement(
                 facts,
                 metadata,
             );
+            for method in methods.iter_mut() {
+                apply_to_statement(method, facts, package, metadata, path);
+            }
             for nested in nested_classes {
+                apply_to_statement(nested, facts, package, metadata, path);
+            }
+            path.pop();
+        }
+        IrStatement::InterfaceDeclaration {
+            name,
+            type_parameters,
+            modifiers,
+            methods,
+            default_methods,
+            nested_types,
+            ..
+        } => {
+            path.push(name.clone());
+            enrich_type_parameters(
+                package,
+                path.as_slice(),
+                type_parameters,
+                modifiers,
+                facts,
+                metadata,
+            );
+            for method in methods.iter_mut() {
+                apply_to_statement(method, facts, package, metadata, path);
+            }
+            for method in default_methods.iter_mut() {
+                apply_to_statement(method, facts, package, metadata, path);
+            }
+            for nested in nested_types {
                 apply_to_statement(nested, facts, package, metadata, path);
             }
             path.pop();
@@ -62,6 +90,7 @@ fn apply_to_statement(
             name,
             type_parameters,
             modifiers,
+            methods,
             ..
         } => {
             path.push(name.clone());
@@ -73,26 +102,44 @@ fn apply_to_statement(
                 facts,
                 metadata,
             );
+            for method in methods.iter_mut() {
+                apply_to_statement(method, facts, package, metadata, path);
+            }
             path.pop();
         }
         IrStatement::MethodDeclaration {
             name,
             type_parameters,
             modifiers,
+            body,
             ..
         } => {
-            if type_parameters.is_empty() {
-                return;
-            }
             path.push(name.clone());
-            enrich_type_parameters(
-                package,
-                path.as_slice(),
-                type_parameters,
-                modifiers,
-                facts,
-                metadata,
-            );
+
+            let primitive_hint = {
+                let params_view = type_parameters.as_slice();
+                find_primitive_specialization_hint(package, path.as_slice(), params_view, facts)
+            };
+
+            if let (Some(expr), Some(hint)) = (body.as_mut(), primitive_hint.as_ref()) {
+                apply_hint_to_expression(expr, hint);
+            }
+
+            if !type_parameters.is_empty() {
+                enrich_type_parameters(
+                    package,
+                    path.as_slice(),
+                    type_parameters,
+                    modifiers,
+                    facts,
+                    metadata,
+                );
+            }
+
+            if let (Some(expr), Some(hint)) = (body.as_mut(), primitive_hint.as_ref()) {
+                apply_hint_to_expression(expr, hint);
+            }
+
             path.pop();
         }
         _ => {}
@@ -184,6 +231,377 @@ fn enrich_type_parameters(
     {
         let key = metadata_key(package, path);
         metadata.insert(key, metadata_entry);
+    }
+}
+
+pub(crate) fn find_primitive_specialization_hint(
+    package: Option<&str>,
+    path: &[String],
+    type_parameters: &[IrTypeParameter],
+    facts: &TypeFactsSnapshot,
+) -> Option<PrimitiveSpecializationHint> {
+    if type_parameters.is_empty() {
+        return None;
+    }
+
+    let (scheme, generics, _) = find_scheme(facts, package, path)?;
+
+    for (param, type_id) in type_parameters.iter().zip(generics.iter()) {
+        let bounds = scheme
+            .bounds_for(*type_id)
+            .or_else(|| facts.recorded_bounds(*type_id));
+
+        let Some(bounds) = bounds else {
+            continue;
+        };
+
+        for constraint in bounds.constraints() {
+            if constraint.type_param != *type_id {
+                continue;
+            }
+
+            if let BoundPredicate::Primitive(bound) = &constraint.predicate {
+                let aliases = bound.alias_families().iter().copied().collect();
+                return Some(PrimitiveSpecializationHint {
+                    type_param: param.name.clone(),
+                    canonical: bound.canonical(),
+                    aliases,
+                    span: Span::default(),
+                });
+            }
+        }
+    }
+
+    None
+}
+
+fn apply_hint_to_statement(statement: &mut IrStatement, hint: &PrimitiveSpecializationHint) {
+    match statement {
+        IrStatement::Expression { expr, .. } => apply_hint_to_expression(expr, hint),
+        IrStatement::Return { value: Some(expr), .. } => apply_hint_to_expression(expr, hint),
+        IrStatement::VariableDeclaration { initializer, .. } => {
+            if let Some(expr) = initializer.as_mut() {
+                apply_hint_to_expression(expr, hint);
+            }
+        }
+        IrStatement::If {
+            condition,
+            then_stmt,
+            else_stmt,
+            ..
+        } => {
+            apply_hint_to_expression(condition, hint);
+            apply_hint_to_statement(then_stmt, hint);
+            if let Some(else_branch) = else_stmt.as_mut() {
+                apply_hint_to_statement(else_branch, hint);
+            }
+        }
+        IrStatement::While { condition, body, .. } => {
+            apply_hint_to_expression(condition, hint);
+            apply_hint_to_statement(body, hint);
+        }
+        IrStatement::ForEach { iterable, body, .. } => {
+            apply_hint_to_expression(iterable, hint);
+            apply_hint_to_statement(body, hint);
+        }
+        IrStatement::For {
+            init,
+            condition,
+            update,
+            body,
+            ..
+        } => {
+            if let Some(initializer) = init.as_mut() {
+                apply_hint_to_statement(initializer, hint);
+            }
+            if let Some(cond) = condition.as_mut() {
+                apply_hint_to_expression(cond, hint);
+            }
+            if let Some(update_expr) = update.as_mut() {
+                apply_hint_to_expression(update_expr, hint);
+            }
+            apply_hint_to_statement(body, hint);
+        }
+        IrStatement::Switch {
+            discriminant,
+            cases,
+            ..
+        } => {
+            apply_hint_to_expression(discriminant, hint);
+            for case in cases.iter_mut() {
+                apply_hint_to_case(case, hint);
+            }
+        }
+        IrStatement::Try {
+            body,
+            catch_clauses,
+            finally_block,
+            ..
+        } => {
+            apply_hint_to_statement(body, hint);
+            for clause in catch_clauses.iter_mut() {
+                apply_hint_to_statement(&mut clause.body, hint);
+            }
+            if let Some(finally_stmt) = finally_block.as_mut() {
+                apply_hint_to_statement(finally_stmt, hint);
+            }
+        }
+        IrStatement::TryWithResources {
+            resources,
+            body,
+            catch_clauses,
+            finally_block,
+            ..
+        } => {
+            for resource in resources.iter_mut() {
+                apply_hint_to_expression(&mut resource.initializer, hint);
+            }
+            apply_hint_to_statement(body, hint);
+            for clause in catch_clauses.iter_mut() {
+                apply_hint_to_statement(&mut clause.body, hint);
+            }
+            if let Some(finally_stmt) = finally_block.as_mut() {
+                apply_hint_to_statement(finally_stmt, hint);
+            }
+        }
+        IrStatement::Throw { expr, .. } => apply_hint_to_expression(expr, hint),
+        IrStatement::Commented { statement, .. } => apply_hint_to_statement(statement, hint),
+        _ => {}
+    }
+}
+
+fn apply_hint_to_case(case: &mut jv_ir::types::IrSwitchCase, hint: &PrimitiveSpecializationHint) {
+    for label in case.labels.iter_mut() {
+        apply_hint_to_case_label(label, hint);
+    }
+    if let Some(guard) = case.guard.as_mut() {
+        apply_hint_to_expression(guard, hint);
+    }
+    apply_hint_to_expression(&mut case.body, hint);
+}
+
+fn apply_hint_to_case_label(label: &mut jv_ir::types::IrCaseLabel, hint: &PrimitiveSpecializationHint) {
+    use jv_ir::types::IrCaseLabel;
+    match label {
+        IrCaseLabel::Range { lower, upper, .. } => {
+            apply_hint_to_expression(lower, hint);
+            apply_hint_to_expression(upper, hint);
+        }
+        IrCaseLabel::TypePattern { deconstruction, .. } => {
+            if let Some(pattern) = deconstruction.as_mut() {
+                apply_hint_to_deconstruction_pattern(pattern, hint);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn apply_hint_to_deconstruction_pattern(
+    pattern: &mut jv_ir::types::IrDeconstructionPattern,
+    hint: &PrimitiveSpecializationHint,
+) {
+    use jv_ir::types::IrDeconstructionComponent;
+    for component in pattern.components.iter_mut() {
+        if let IrDeconstructionComponent::Type { pattern: Some(inner), .. } = component {
+            apply_hint_to_deconstruction_pattern(inner, hint);
+        }
+    }
+}
+
+fn apply_hint_to_expression(expr: &mut IrExpression, hint: &PrimitiveSpecializationHint) {
+    match expr {
+        IrExpression::SequencePipeline { pipeline, .. } => {
+            if let Some(terminal) = pipeline.terminal.as_mut() {
+                if terminal.specialization_hint.is_none() {
+                    terminal.specialization_hint = Some(hint.clone());
+                }
+            }
+            apply_hint_to_sequence_pipeline(pipeline, hint);
+        }
+        IrExpression::Block { statements, .. } => {
+            for statement in statements.iter_mut() {
+                apply_hint_to_statement(statement, hint);
+            }
+        }
+        IrExpression::Lambda { body, .. } => apply_hint_to_expression(body, hint),
+        IrExpression::MethodCall { receiver, args, .. } => {
+            if let Some(receiver) = receiver.as_mut() {
+                apply_hint_to_expression(receiver, hint);
+            }
+            for arg in args.iter_mut() {
+                apply_hint_to_expression(arg, hint);
+            }
+        }
+        IrExpression::FieldAccess { receiver, .. } => apply_hint_to_expression(receiver, hint),
+        IrExpression::ArrayAccess { array, index, .. } => {
+            apply_hint_to_expression(array, hint);
+            apply_hint_to_expression(index, hint);
+        }
+        IrExpression::Binary { left, right, .. } => {
+            apply_hint_to_expression(left, hint);
+            apply_hint_to_expression(right, hint);
+        }
+        IrExpression::Unary { operand, .. } => apply_hint_to_expression(operand, hint),
+        IrExpression::Assignment { target, value, .. } => {
+            apply_hint_to_expression(target, hint);
+            apply_hint_to_expression(value, hint);
+        }
+        IrExpression::Conditional {
+            condition,
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            apply_hint_to_expression(condition, hint);
+            apply_hint_to_expression(then_expr, hint);
+            apply_hint_to_expression(else_expr, hint);
+        }
+        IrExpression::ArrayCreation {
+            dimensions,
+            initializer,
+            ..
+        } => {
+            for dimension in dimensions.iter_mut() {
+                if let Some(expr) = dimension.as_mut() {
+                    apply_hint_to_expression(expr, hint);
+                }
+            }
+            if let Some(elements) = initializer.as_mut() {
+                for element in elements.iter_mut() {
+                    apply_hint_to_expression(element, hint);
+                }
+            }
+        }
+        IrExpression::ObjectCreation { args, .. } => {
+            for arg in args.iter_mut() {
+                apply_hint_to_expression(arg, hint);
+            }
+        }
+        IrExpression::Switch { discriminant, cases, .. } => {
+            apply_hint_to_expression(discriminant, hint);
+            for case in cases.iter_mut() {
+                apply_hint_to_case(case, hint);
+            }
+        }
+        IrExpression::Cast { expr: inner, .. } => apply_hint_to_expression(inner, hint),
+        IrExpression::InstanceOf { expr: inner, .. } => apply_hint_to_expression(inner, hint),
+        IrExpression::NullSafeOperation {
+            expr: inner,
+            operation,
+            default_value,
+            ..
+        } => {
+            apply_hint_to_expression(inner, hint);
+            apply_hint_to_expression(operation, hint);
+            if let Some(default_expr) = default_value.as_mut() {
+                apply_hint_to_expression(default_expr, hint);
+            }
+        }
+        IrExpression::StringFormat { args, .. } => {
+            for arg in args.iter_mut() {
+                apply_hint_to_expression(arg, hint);
+            }
+        }
+        IrExpression::CompletableFuture { args, .. }
+        | IrExpression::VirtualThread { args, .. } => {
+            for arg in args.iter_mut() {
+                apply_hint_to_expression(arg, hint);
+            }
+        }
+        IrExpression::TryWithResources {
+            resources,
+            body,
+            ..
+        } => {
+            for resource in resources.iter_mut() {
+                apply_hint_to_expression(&mut resource.initializer, hint);
+            }
+            apply_hint_to_expression(body, hint);
+        }
+        IrExpression::RegexPattern { .. }
+        | IrExpression::Literal(..)
+        | IrExpression::Identifier { .. }
+        | IrExpression::This { .. }
+        | IrExpression::Super { .. } => {}
+    }
+}
+
+fn apply_hint_to_sequence_pipeline(
+    pipeline: &mut SequencePipeline,
+    hint: &PrimitiveSpecializationHint,
+) {
+    apply_hint_to_sequence_source(&mut pipeline.source, hint);
+
+    for stage in pipeline.stages.iter_mut() {
+        apply_hint_to_sequence_stage(stage, hint);
+    }
+
+    if let Some(terminal) = pipeline.terminal.as_mut() {
+        apply_hint_to_sequence_terminal(terminal, hint);
+    }
+}
+
+fn apply_hint_to_sequence_source(
+    source: &mut SequenceSource,
+    hint: &PrimitiveSpecializationHint,
+) {
+    match source {
+        SequenceSource::Collection { expr, .. }
+        | SequenceSource::Array { expr, .. }
+        | SequenceSource::JavaStream { expr, .. } => {
+            apply_hint_to_expression(expr, hint);
+        }
+        SequenceSource::ListLiteral { elements, .. } => {
+            for element in elements.iter_mut() {
+                apply_hint_to_expression(element, hint);
+            }
+        }
+    }
+}
+
+fn apply_hint_to_sequence_stage(
+    stage: &mut SequenceStage,
+    hint: &PrimitiveSpecializationHint,
+) {
+    match stage {
+        SequenceStage::Map { lambda, .. }
+        | SequenceStage::FlatMap { lambda, .. } => apply_hint_to_expression(lambda, hint),
+        SequenceStage::Filter { predicate, .. } => apply_hint_to_expression(predicate, hint),
+        SequenceStage::Take { count, .. }
+        | SequenceStage::Drop { count, .. } => apply_hint_to_expression(count, hint),
+        SequenceStage::Sorted { comparator, .. } => {
+            if let Some(comparator) = comparator.as_mut() {
+                apply_hint_to_expression(comparator, hint);
+            }
+        }
+    }
+}
+
+fn apply_hint_to_sequence_terminal(
+    terminal: &mut jv_ir::sequence_pipeline::SequenceTerminal,
+    hint: &PrimitiveSpecializationHint,
+) {
+    use jv_ir::sequence_pipeline::SequenceTerminalKind;
+
+    match &mut terminal.kind {
+        SequenceTerminalKind::Fold { initial, accumulator } => {
+            apply_hint_to_expression(initial, hint);
+            apply_hint_to_expression(accumulator, hint);
+        }
+        SequenceTerminalKind::Reduce { accumulator } => {
+            apply_hint_to_expression(accumulator, hint);
+        }
+        SequenceTerminalKind::GroupBy { key_selector } => {
+            apply_hint_to_expression(key_selector, hint);
+        }
+        SequenceTerminalKind::Associate { pair_selector } => {
+            apply_hint_to_expression(pair_selector, hint);
+        }
+        SequenceTerminalKind::ForEach { action } => apply_hint_to_expression(action, hint),
+        SequenceTerminalKind::ToList
+        | SequenceTerminalKind::ToSet
+        | SequenceTerminalKind::Count
+        | SequenceTerminalKind::Sum => {}
     }
 }
 
@@ -281,6 +699,19 @@ fn java_types_from_predicate(predicate: &BoundPredicate) -> Vec<JavaType> {
             name: to_java_name(&capability.name),
             generic_args: Vec::new(),
         }],
+        BoundPredicate::Primitive(bound) => vec![JavaType::Primitive(
+            match bound.canonical() {
+                PrimitiveTypeName::Int => "int",
+                PrimitiveTypeName::Long => "long",
+                PrimitiveTypeName::Short => "short",
+                PrimitiveTypeName::Byte => "byte",
+                PrimitiveTypeName::Float => "float",
+                PrimitiveTypeName::Double => "double",
+                PrimitiveTypeName::Boolean => "boolean",
+                PrimitiveTypeName::Char => "char",
+            }
+            .to_string(),
+        )],
         BoundPredicate::FunctionSignature(_) => Vec::new(),
         BoundPredicate::WhereClause(predicates) => predicates
             .iter()

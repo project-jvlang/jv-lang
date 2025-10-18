@@ -63,6 +63,7 @@ fn materialize_sequence_if_needed(expr: IrExpression) -> IrExpression {
                 kind: SequenceTerminalKind::ToList,
                 evaluation: SequenceTerminalEvaluation::Collector,
                 requires_non_empty_source: false,
+                specialization_hint: None,
                 span: span.clone(),
             });
             pipeline.lazy = false;

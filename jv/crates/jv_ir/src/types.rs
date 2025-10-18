@@ -1,6 +1,18 @@
 // jv_ir - Intermediate representation for desugaring jv language constructs
 use crate::sequence_pipeline::SequencePipeline;
 use jv_ast::*;
+
+pub use jv_ast::types::PrimitiveReturnMetadata;
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PrimitiveSpecializationHint {
+    pub type_param: String,
+    pub canonical: PrimitiveTypeName,
+    #[serde(default)]
+    pub aliases: Vec<PrimitiveTypeName>,
+    #[serde(default)]
+    pub span: Span,
+}
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
@@ -777,6 +789,8 @@ pub enum IrStatement {
         #[serde(default)]
         type_parameters: Vec<IrTypeParameter>,
         parameters: Vec<IrParameter>,
+        #[serde(default)]
+        primitive_return: Option<PrimitiveReturnMetadata>,
         return_type: JavaType,
         body: Option<IrExpression>, // None for abstract methods
         modifiers: IrModifiers,

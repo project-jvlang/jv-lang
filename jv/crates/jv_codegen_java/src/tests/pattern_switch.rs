@@ -112,6 +112,7 @@ fn example1_program() -> IrProgram {
             modifiers: IrModifiers::default(),
             span: dummy_span(),
         }],
+        primitive_return: None,
         return_type: int_type(),
         body: Some(method_body),
         modifiers: IrModifiers {
@@ -250,6 +251,7 @@ fn example2_program() -> IrProgram {
             modifiers: IrModifiers::default(),
             span: dummy_span(),
         }],
+        primitive_return: None,
         return_type: string_type(),
         body: Some(method_body),
         modifiers: IrModifiers {
@@ -392,6 +394,7 @@ fn example5_program() -> IrProgram {
             modifiers: IrModifiers::default(),
             span: dummy_span(),
         }],
+        primitive_return: None,
         return_type: int.clone(),
         body: Some(IrExpression::Block {
             statements: vec![return_stmt],

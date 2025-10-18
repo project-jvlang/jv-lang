@@ -105,6 +105,8 @@ pub struct SequenceTerminal {
     pub evaluation: SequenceTerminalEvaluation,
     /// Whether the terminal requires a non-empty source for safe evaluation.
     pub requires_non_empty_source: bool,
+    #[serde(default)]
+    pub specialization_hint: Option<crate::types::PrimitiveSpecializationHint>,
     pub span: Span,
 }
 
@@ -119,6 +121,7 @@ impl SequenceTerminal {
             kind,
             evaluation,
             requires_non_empty_source,
+            specialization_hint: None,
             span,
         }
     }

@@ -131,6 +131,7 @@ fn build_switch_program(
             modifiers: IrModifiers::default(),
             span: dummy_span(),
         }],
+        primitive_return: None,
         return_type,
         body: Some(method_body),
         modifiers: IrModifiers {

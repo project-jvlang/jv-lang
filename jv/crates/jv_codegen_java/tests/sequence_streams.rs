@@ -223,6 +223,7 @@ fn java25_sequence_to_list_uses_stream_to_list() {
         kind: SequenceTerminalKind::ToList,
         evaluation: SequenceTerminalEvaluation::Collector,
         requires_non_empty_source: false,
+        specialization_hint: None,
         span: dummy_span(),
     };
 
@@ -251,6 +252,7 @@ fn java25_sequence_list_literal_source_streams_from_list_of() {
         kind: SequenceTerminalKind::ToList,
         evaluation: SequenceTerminalEvaluation::Collector,
         requires_non_empty_source: false,
+        specialization_hint: None,
         span: dummy_span(),
     };
 
@@ -282,6 +284,7 @@ fn java25_sequence_renders_full_stage_chain() {
         kind: SequenceTerminalKind::ToList,
         evaluation: SequenceTerminalEvaluation::Collector,
         requires_non_empty_source: false,
+        specialization_hint: None,
         span: dummy_span(),
     };
 
@@ -357,6 +360,7 @@ fn java21_sequence_to_list_falls_back_to_collectors() {
         kind: SequenceTerminalKind::ToList,
         evaluation: SequenceTerminalEvaluation::Collector,
         requires_non_empty_source: false,
+        specialization_hint: None,
         span: dummy_span(),
     };
 
@@ -388,6 +392,7 @@ fn java21_sequence_list_literal_source_uses_arrays_stream_fallback() {
         kind: SequenceTerminalKind::ToList,
         evaluation: SequenceTerminalEvaluation::Collector,
         requires_non_empty_source: false,
+        specialization_hint: None,
         span: dummy_span(),
     };
 
@@ -419,6 +424,7 @@ fn java21_sequence_to_set_falls_back_to_collectors() {
         kind: SequenceTerminalKind::ToSet,
         evaluation: SequenceTerminalEvaluation::Collector,
         requires_non_empty_source: false,
+        specialization_hint: None,
         span: dummy_span(),
     };
 
@@ -450,6 +456,7 @@ fn map_filter_pipeline_renders_expected_lambdas() {
         kind: SequenceTerminalKind::ToList,
         evaluation: SequenceTerminalEvaluation::Collector,
         requires_non_empty_source: false,
+        specialization_hint: None,
         span: dummy_span(),
     };
 
@@ -516,6 +523,7 @@ fn reduce_terminal_emits_illegal_argument_guard() {
         },
         evaluation: SequenceTerminalEvaluation::Reducer,
         requires_non_empty_source: true,
+        specialization_hint: None,
         span: dummy_span(),
     };
 
@@ -542,6 +550,7 @@ fn autocloseable_stream_pipeline_wraps_with_try_resource() {
         kind: SequenceTerminalKind::Count,
         evaluation: SequenceTerminalEvaluation::Aggregator,
         requires_non_empty_source: false,
+        specialization_hint: None,
         span: dummy_span(),
     };
 
@@ -569,6 +578,7 @@ fn string_format_arguments_materialize_sequences() {
         kind: SequenceTerminalKind::ToList,
         evaluation: SequenceTerminalEvaluation::Collector,
         requires_non_empty_source: false,
+        specialization_hint: None,
         span: dummy_span(),
     };
 
@@ -623,6 +633,7 @@ fn sum_terminal_emits_map_to_long_sum() {
         kind: SequenceTerminalKind::Sum,
         evaluation: SequenceTerminalEvaluation::Aggregator,
         requires_non_empty_source: false,
+        specialization_hint: None,
         span: dummy_span(),
     };
 
@@ -650,6 +661,7 @@ fn count_terminal_emits_stream_count_call() {
         kind: SequenceTerminalKind::Count,
         evaluation: SequenceTerminalEvaluation::Aggregator,
         requires_non_empty_source: false,
+        specialization_hint: None,
         span: dummy_span(),
     };
 
