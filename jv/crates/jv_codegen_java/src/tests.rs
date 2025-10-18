@@ -666,6 +666,70 @@ fn method_generation_renders_generic_type_parameters() {
 }
 
 #[test]
+fn method_generation_renders_where_clause_bounds() {
+    let mut generator = JavaCodeGenerator::new();
+    let span = dummy_span();
+    let mut type_param = IrTypeParameter::new("T", span.clone());
+    type_param.bounds.push(JavaType::Reference {
+        name: "Number".to_string(),
+        generic_args: vec![],
+    });
+
+    let type_ref = JavaType::Reference {
+        name: "T".to_string(),
+        generic_args: vec![],
+    };
+
+    let method = IrStatement::MethodDeclaration {
+        name: "identity".to_string(),
+        java_name: None,
+        type_parameters: vec![type_param],
+        parameters: vec![IrParameter {
+            name: "value".to_string(),
+            java_type: type_ref.clone(),
+            modifiers: IrModifiers::default(),
+            span: span.clone(),
+        }],
+        return_type: type_ref.clone(),
+        body: Some(IrExpression::Block {
+            statements: vec![IrStatement::Return {
+                value: Some(IrExpression::Identifier {
+                    name: "value".to_string(),
+                    java_type: type_ref.clone(),
+                    span: span.clone(),
+                }),
+                span: span.clone(),
+            }],
+            java_type: type_ref,
+            span: span.clone(),
+        }),
+        modifiers: IrModifiers {
+            visibility: IrVisibility::Public,
+            ..IrModifiers::default()
+        },
+        throws: vec![],
+        span,
+    };
+
+    let code = generator
+        .generate_method(&method)
+        .expect("where clause bounds should emit extends clause");
+
+    let first_line = code
+        .lines()
+        .next()
+        .expect("method should have a signature line");
+    assert!(
+        first_line.contains("<T extends Number>"),
+        "expected extends clause in signature, got: {first_line}"
+    );
+    assert!(
+        first_line.contains("T identity(T value)"),
+        "expected method signature with generic return/parameter, got: {first_line}"
+    );
+}
+
+#[test]
 fn record_extension_method_is_emitted_as_instance_method() {
     let mut generator = JavaCodeGenerator::new();
     let span = dummy_span();
