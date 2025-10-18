@@ -1051,6 +1051,7 @@ fn apply_type_facts_sets_sequence_specialization_hint() {
             evaluation: SequenceTerminalEvaluation::Aggregator,
             requires_non_empty_source: false,
             specialization_hint: None,
+            canonical_adapter: None,
             span: span.clone(),
         }),
         lazy: false,

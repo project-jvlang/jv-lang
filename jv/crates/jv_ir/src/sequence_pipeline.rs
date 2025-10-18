@@ -2,7 +2,9 @@ use crate::context::TransformContext;
 use crate::error::TransformError;
 use crate::transform::transform_expression;
 use crate::types::{IrExpression, JavaType};
-use jv_ast::{Argument, CallArgumentMetadata, Expression, SequenceDelimiter, Span};
+use jv_ast::{
+    types::PrimitiveTypeName, Argument, CallArgumentMetadata, Expression, SequenceDelimiter, Span,
+};
 use serde::{Deserialize, Serialize};
 use std::mem;
 
@@ -42,6 +44,64 @@ pub struct SequencePipeline {
 impl SequencePipeline {
     pub fn recompute_shape(&mut self) {
         self.shape = PipelineShape::classify(&self.source, &self.stages, self.terminal.as_ref());
+    }
+
+    pub fn apply_specialization_hint(&mut self) {
+        let Some(terminal) = self.terminal.as_mut() else {
+            return;
+        };
+
+        let Some(hint) = terminal.specialization_hint.as_ref() else {
+            return;
+        };
+
+        if terminal.canonical_adapter.is_some() {
+            return;
+        }
+
+        match hint.canonical {
+            PrimitiveTypeName::Int => {
+                let needs_alias_promotion = hint.aliases.iter().any(|alias| {
+                    matches!(alias, PrimitiveTypeName::Char | PrimitiveTypeName::Short)
+                });
+
+                if needs_alias_promotion {
+                    let adapter = build_int_canonical_adapter(&hint.span);
+                    terminal.canonical_adapter = Some(Box::new(adapter));
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn build_int_canonical_adapter(span: &Span) -> IrExpression {
+    let param_name = "__jvIntFamilyValue".to_string();
+    let lambda_param_types = vec![JavaType::object()];
+
+    let identifier = IrExpression::Identifier {
+        name: param_name.clone(),
+        java_type: JavaType::object(),
+        span: span.clone(),
+    };
+
+    let cast_expr = IrExpression::Cast {
+        expr: Box::new(identifier),
+        target_type: JavaType::int(),
+        span: span.clone(),
+    };
+
+    IrExpression::Lambda {
+        functional_interface: "java.util.function.ToIntFunction".to_string(),
+        param_names: vec![param_name],
+        param_types: lambda_param_types.clone(),
+        body: Box::new(cast_expr),
+        java_type: JavaType::Functional {
+            interface_name: "java.util.function.ToIntFunction".to_string(),
+            param_types: lambda_param_types,
+            return_type: Box::new(JavaType::int()),
+        },
+        span: span.clone(),
     }
 }
 
@@ -107,6 +167,8 @@ pub struct SequenceTerminal {
     pub requires_non_empty_source: bool,
     #[serde(default)]
     pub specialization_hint: Option<crate::types::PrimitiveSpecializationHint>,
+    #[serde(default)]
+    pub canonical_adapter: Option<Box<IrExpression>>,
     pub span: Span,
 }
 
@@ -122,6 +184,7 @@ impl SequenceTerminal {
             evaluation,
             requires_non_empty_source,
             specialization_hint: None,
+            canonical_adapter: None,
             span,
         }
     }

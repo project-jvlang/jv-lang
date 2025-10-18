@@ -1,3 +1,4 @@
+use jv_ast::types::PrimitiveTypeName;
 use jv_ast::{
     Argument, BinaryOp, CallArgumentStyle, Expression, Literal, Parameter, SequenceDelimiter, Span,
     StringPart,
@@ -6,8 +7,8 @@ use jv_ir::context::{RegisteredMethodCall, RegisteredMethodDeclaration};
 use jv_ir::naming::method_erasure::apply_method_erasure;
 use jv_ir::{
     transform_expression, IrExpression, IrModifiers, IrParameter, IrStatement, JavaType,
-    SequenceSource, SequenceStage, SequenceTerminalEvaluation, SequenceTerminalKind,
-    TransformContext,
+    PipelineShape, PrimitiveSpecializationHint, SequencePipeline, SequenceSource, SequenceStage,
+    SequenceTerminal, SequenceTerminalEvaluation, SequenceTerminalKind, TransformContext,
 };
 
 fn dummy_span() -> Span {
@@ -546,6 +547,75 @@ fn sum_terminal_uses_aggregator_evaluation() {
 }
 
 #[test]
+fn int_family_specialization_injects_cast_adapter() {
+    let span = dummy_span();
+
+    let mut pipeline = SequencePipeline {
+        source: SequenceSource::Collection {
+            expr: Box::new(IrExpression::Identifier {
+                name: "values".to_string(),
+                java_type: JavaType::object(),
+                span: span.clone(),
+            }),
+            element_hint: None,
+        },
+        stages: Vec::new(),
+        terminal: Some(SequenceTerminal {
+            kind: SequenceTerminalKind::Sum,
+            evaluation: SequenceTerminalEvaluation::Aggregator,
+            requires_non_empty_source: false,
+            specialization_hint: None,
+            canonical_adapter: None,
+            span: span.clone(),
+        }),
+        lazy: false,
+        span: span.clone(),
+        shape: PipelineShape::default(),
+    };
+
+    if let Some(terminal) = pipeline.terminal.as_mut() {
+        terminal.specialization_hint = Some(PrimitiveSpecializationHint {
+            type_param: "T".to_string(),
+            canonical: PrimitiveTypeName::Int,
+            aliases: vec![PrimitiveTypeName::Char, PrimitiveTypeName::Short],
+            span: span.clone(),
+        });
+    } else {
+        panic!("pipeline should have a terminal");
+    }
+
+    pipeline.apply_specialization_hint();
+
+    let terminal = pipeline
+        .terminal
+        .as_ref()
+        .expect("pipeline retains terminal after specialization");
+
+    let adapter = terminal
+        .canonical_adapter
+        .as_ref()
+        .expect("expected canonical adapter for int family")
+        .as_ref();
+
+    match adapter {
+        IrExpression::Lambda {
+            param_names, body, ..
+        } => {
+            assert_eq!(param_names, &vec!["__jvIntFamilyValue".to_string()]);
+
+            match body.as_ref() {
+                IrExpression::Cast { target_type, .. } => match target_type {
+                    JavaType::Primitive(name) => assert_eq!(name, "int"),
+                    other => panic!("expected int target type, found {:?}", other),
+                },
+                other => panic!("expected cast in adapter body, found {:?}", other),
+            }
+        }
+        other => panic!("expected lambda adapter, found {:?}", other),
+    }
+}
+
+#[test]
 fn whitespace_list_literal_becomes_list_sequence_source() {
     let mut context = TransformContext::new();
 
@@ -762,6 +832,7 @@ fn sequence_flatmap_overloads_receive_stable_java_names() {
             parameter_types: vec![function_iter.clone()],
             return_type: sequence_type.clone(),
             is_static: true,
+            primitive_return: None,
             span: span_decl_iter.clone(),
         });
     context
@@ -773,6 +844,7 @@ fn sequence_flatmap_overloads_receive_stable_java_names() {
             parameter_types: vec![function_seq.clone()],
             return_type: sequence_type.clone(),
             is_static: true,
+            primitive_return: None,
             span: span_decl_seq.clone(),
         });
 

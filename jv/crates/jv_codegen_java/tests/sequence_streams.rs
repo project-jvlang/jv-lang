@@ -224,6 +224,7 @@ fn java25_sequence_to_list_uses_stream_to_list() {
         evaluation: SequenceTerminalEvaluation::Collector,
         requires_non_empty_source: false,
         specialization_hint: None,
+        canonical_adapter: None,
         span: dummy_span(),
     };
 

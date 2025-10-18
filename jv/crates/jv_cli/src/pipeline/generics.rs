@@ -416,6 +416,7 @@ fn apply_hint_to_expression(expr: &mut IrExpression, hint: &PrimitiveSpecializat
                     terminal.specialization_hint = Some(hint.clone());
                 }
             }
+            pipeline.apply_specialization_hint();
             apply_hint_to_sequence_pipeline(pipeline, hint);
         }
         IrExpression::Block { statements, .. } => {

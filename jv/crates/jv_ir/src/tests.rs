@@ -3328,6 +3328,7 @@ mod tests {
                 evaluation: SequenceTerminalEvaluation::Collector,
                 requires_non_empty_source: false,
                 specialization_hint: None,
+                canonical_adapter: None,
                 span: dummy_span(),
             }),
             lazy: false,
@@ -3515,6 +3516,7 @@ mod tests {
             evaluation: SequenceTerminalEvaluation::Collector,
             requires_non_empty_source: false,
             specialization_hint: None,
+            canonical_adapter: None,
             span: dummy_span(),
         };
 

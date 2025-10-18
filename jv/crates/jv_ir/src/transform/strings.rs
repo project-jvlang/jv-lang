@@ -64,6 +64,7 @@ fn materialize_sequence_if_needed(expr: IrExpression) -> IrExpression {
                 evaluation: SequenceTerminalEvaluation::Collector,
                 requires_non_empty_source: false,
                 specialization_hint: None,
+                canonical_adapter: None,
                 span: span.clone(),
             });
             pipeline.lazy = false;

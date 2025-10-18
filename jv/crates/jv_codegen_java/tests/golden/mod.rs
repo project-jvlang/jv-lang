@@ -126,6 +126,7 @@ pub(crate) fn reduce_terminal() -> SequenceTerminal {
         evaluation: SequenceTerminalEvaluation::Reducer,
         requires_non_empty_source: true,
         specialization_hint: None,
+        canonical_adapter: None,
         span: dummy_span(),
     }
 }
@@ -136,6 +137,7 @@ pub(crate) fn to_list_terminal() -> SequenceTerminal {
         evaluation: SequenceTerminalEvaluation::Collector,
         requires_non_empty_source: false,
         specialization_hint: None,
+        canonical_adapter: None,
         span: dummy_span(),
     }
 }
