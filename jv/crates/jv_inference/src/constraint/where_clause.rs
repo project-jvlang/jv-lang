@@ -3,12 +3,14 @@ use crate::constraint::GenericConstraintKind;
 use crate::solver::variance::VariancePosition;
 use crate::types::{
     BoundPredicate, BoundTypeReference, CapabilityBound, CapabilityHints, FunctionSignatureBound,
-    SymbolId, TraitBound, TypeId,
+    PrimitiveBoundConstraint, PrimitiveBoundMetadata, PrimitiveTypeName, PrimitiveTypeNameExt,
+    PrimitiveTypeReference, SymbolId, TraitBound, TypeId,
 };
 use jv_ast::types::{
     CapabilityHints as AstCapabilityHints, FunctionConstraintSignature, TypeAnnotation,
     WhereClause, WherePredicate,
 };
+use jv_ast::Span;
 use std::cmp::Ordering;
 use std::collections::HashMap;
 
@@ -33,6 +35,7 @@ impl<'a> WhereConstraintResolver<'a> {
         for predicate in &clause.predicates {
             self.resolve_predicate(predicate, &mut constraints);
         }
+        self.resolve_primitive_bounds(&clause.primitive_bounds, &mut constraints);
         constraints
     }
 
@@ -191,6 +194,105 @@ impl<'a> WhereConstraintResolver<'a> {
             inline_only: hints.inline_only,
         }
     }
+
+    fn resolve_primitive_bounds(
+        &self,
+        bounds: &[PrimitiveBoundMetadata],
+        constraints: &mut Vec<GenericConstraint>,
+    ) {
+        if bounds.is_empty() {
+            return;
+        }
+
+        let mut grouped: HashMap<TypeId, Vec<PrimitiveAccumulator>> = HashMap::new();
+
+        for bound in bounds {
+            let Some(&parameter) = self.type_parameters.get(&bound.type_param) else {
+                continue;
+            };
+
+            let family_list = grouped.entry(parameter).or_insert_with(Vec::new);
+
+            let canonical = bound.reference.primitive.canonical_family();
+            match family_list
+                .iter_mut()
+                .find(|accumulator| accumulator.canonical == canonical)
+            {
+                Some(accumulator) => accumulator.record_reference(&bound.reference),
+                None => {
+                    let mut accumulator = PrimitiveAccumulator::new(canonical, bound.span.clone());
+                    accumulator.record_reference(&bound.reference);
+                    family_list.push(accumulator);
+                }
+            }
+
+            for alias in &bound.compatible_aliases {
+                let alias_canonical = alias.primitive.canonical_family();
+                match family_list
+                    .iter_mut()
+                    .find(|accumulator| accumulator.canonical == alias_canonical)
+                {
+                    Some(accumulator) => accumulator.record_reference(alias),
+                    None => {
+                        let mut accumulator =
+                            PrimitiveAccumulator::new(alias_canonical, alias.span.clone());
+                        accumulator.record_reference(alias);
+                        family_list.push(accumulator);
+                    }
+                }
+            }
+        }
+
+        for (parameter, mut families) in grouped {
+            families.sort_by_key(|accumulator| accumulator.canonical as u8);
+            for accumulator in families {
+                let (predicate, span) = accumulator.into_parts();
+                constraints.push(GenericConstraint::new(
+                    GenericConstraintKind::BoundRequirement {
+                        owner: self.owner.clone(),
+                        parameter,
+                        predicate: BoundPredicate::Primitive(predicate),
+                    },
+                    span,
+                ));
+            }
+        }
+    }
+}
+
+struct PrimitiveAccumulator {
+    canonical: PrimitiveTypeName,
+    aliases: Vec<PrimitiveTypeName>,
+    span: Span,
+}
+
+impl PrimitiveAccumulator {
+    fn new(canonical: PrimitiveTypeName, span: Span) -> Self {
+        Self {
+            canonical,
+            aliases: Vec::new(),
+            span,
+        }
+    }
+
+    fn record_reference(&mut self, reference: &PrimitiveTypeReference) {
+        self.add_alias(reference.primitive);
+    }
+
+    fn add_alias(&mut self, alias: PrimitiveTypeName) {
+        if alias != self.canonical && !self.aliases.contains(&alias) {
+            self.aliases.push(alias);
+        }
+    }
+
+    fn into_parts(self) -> (PrimitiveBoundConstraint, Span) {
+        let PrimitiveAccumulator {
+            canonical,
+            aliases,
+            span,
+        } = self;
+        (PrimitiveBoundConstraint::new(canonical, aliases), span)
+    }
 }
 
 fn dedup_variance_records(records: &mut Vec<(TypeId, VariancePosition)>) {
@@ -217,7 +319,8 @@ mod tests {
     use crate::constraint::generic::GenericConstraintKind;
     use crate::types::BoundPredicate;
     use jv_ast::types::{
-        CapabilityHints as AstCapabilityHints, CapabilityRequirement, QualifiedName,
+        CapabilityHints as AstCapabilityHints, CapabilityRequirement, PrimitiveBound,
+        PrimitiveTypeName, PrimitiveTypeReference, PrimitiveTypeSource, QualifiedName,
     };
     use jv_ast::Span;
     use std::collections::HashMap;
@@ -231,6 +334,15 @@ mod tests {
             .iter()
             .map(|(name, id)| ((*name).to_string(), TypeId::new(*id)))
             .collect()
+    }
+
+    fn primitive_reference(name: PrimitiveTypeName) -> PrimitiveTypeReference {
+        PrimitiveTypeReference {
+            primitive: name,
+            source: PrimitiveTypeSource::PrimitiveKeyword,
+            raw_path: Vec::new(),
+            span: Span::dummy(),
+        }
     }
 
     #[test]
@@ -392,5 +504,50 @@ mod tests {
         let params: HashMap<String, TypeId> = HashMap::new();
         let resolver = WhereConstraintResolver::new(symbol(), &params);
         assert!(resolver.from_clause(&clause).is_empty());
+    }
+
+    #[test]
+    fn primitive_bounds_are_canonicalized_and_grouped() {
+        let clause = WhereClause {
+            predicates: Vec::new(),
+            primitive_bounds: vec![
+                PrimitiveBound {
+                    type_param: "T".into(),
+                    reference: primitive_reference(PrimitiveTypeName::Char),
+                    compatible_aliases: Vec::new(),
+                    span: Span::dummy(),
+                },
+                PrimitiveBound {
+                    type_param: "T".into(),
+                    reference: primitive_reference(PrimitiveTypeName::Short),
+                    compatible_aliases: Vec::new(),
+                    span: Span::dummy(),
+                },
+            ],
+            span: Span::dummy(),
+        };
+        let params = map_with(&[("T", 42)]);
+        let resolver = WhereConstraintResolver::new(symbol(), &params);
+        let constraints = resolver.from_clause(&clause);
+
+        assert_eq!(constraints.len(), 1);
+        match &constraints[0].kind {
+            GenericConstraintKind::BoundRequirement {
+                parameter,
+                predicate,
+                ..
+            } => {
+                assert_eq!(*parameter, TypeId::new(42));
+                let BoundPredicate::Primitive(bound) = predicate else {
+                    panic!("expected primitive predicate: {predicate:?}");
+                };
+                assert_eq!(bound.canonical(), PrimitiveTypeName::Int);
+                let aliases = bound.alias_families();
+                assert_eq!(aliases.len(), 2);
+                assert!(aliases.contains(&PrimitiveTypeName::Char));
+                assert!(aliases.contains(&PrimitiveTypeName::Short));
+            }
+            other => panic!("unexpected constraint: {other:?}"),
+        }
     }
 }

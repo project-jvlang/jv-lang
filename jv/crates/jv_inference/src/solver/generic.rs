@@ -6,8 +6,8 @@ use crate::constraint::{
 };
 use crate::environment::CapabilityEnvironment;
 use crate::types::{
-    BoundPredicate, CapabilityBound, CapabilitySolution, GenericSignature, SymbolId, TypeId,
-    TypeKind, TypeVariant,
+    BoundPredicate, CapabilityBound, CapabilitySolution, GenericSignature,
+    PrimitiveBoundConstraint, SymbolId, TypeId, TypeKind, TypeVariant,
 };
 use jv_ast::types::Kind;
 use jv_ast::Span;
@@ -314,9 +314,29 @@ pub struct BoundSatisfactionChecker;
 
 impl BoundSatisfactionChecker {
     pub fn evaluate(candidate: &TypeKind, predicate: &BoundPredicate) -> bool {
-        candidate
-            .bounds()
-            .map(|bounds| bounds.contains_predicate(predicate))
-            .unwrap_or(false)
+        match predicate {
+            BoundPredicate::Primitive(bound) => Self::satisfies_primitive(candidate, bound),
+            _ => candidate
+                .bounds()
+                .map(|bounds| bounds.contains_predicate(predicate))
+                .unwrap_or(false),
+        }
+    }
+
+    fn satisfies_primitive(candidate: &TypeKind, bound: &PrimitiveBoundConstraint) -> bool {
+        if let Some(bounds) = candidate.bounds() {
+            if bounds.contains_predicate(&BoundPredicate::Primitive(bound.clone())) {
+                return true;
+            }
+        }
+
+        match candidate.variant() {
+            TypeVariant::Primitive(name) => bound.accepts_label(name),
+            TypeVariant::Optional(inner) => Self::satisfies_primitive(inner, bound),
+            TypeVariant::Union { arms } => {
+                arms.iter().all(|arm| Self::satisfies_primitive(arm, bound))
+            }
+            _ => false,
+        }
     }
 }

@@ -60,7 +60,11 @@ fn lower_where_clause(clause: &AstWhereClause) -> GenericWhereClause {
         .iter()
         .map(lower_where_predicate)
         .collect::<Vec<_>>();
-    GenericWhereClause::new(predicates, clause.span.clone())
+    GenericWhereClause::new(
+        predicates,
+        clause.primitive_bounds.clone(),
+        clause.span.clone(),
+    )
 }
 
 fn lower_where_predicate(predicate: &AstWherePredicate) -> GenericWherePredicate {

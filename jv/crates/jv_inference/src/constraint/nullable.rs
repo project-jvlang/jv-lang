@@ -17,6 +17,7 @@ pub fn predicate_requires_nullable(predicate: &BoundPredicate, parameter: TypeId
         BoundPredicate::FunctionSignature(signature) => {
             function_signature_introduces_nullable(signature, parameter)
         }
+        BoundPredicate::Primitive(_) => false,
         BoundPredicate::WhereClause(predicates) => predicates
             .iter()
             .any(|inner| predicate_requires_nullable(inner, parameter)),
@@ -114,6 +115,7 @@ fn collect(predicate: &BoundPredicate, set: &mut HashSet<TypeId>) {
                 collect_from_reference(reference, set);
             }
         }
+        BoundPredicate::Primitive(_) => {}
         BoundPredicate::WhereClause(predicates) => {
             for predicate in predicates {
                 collect(predicate, set);

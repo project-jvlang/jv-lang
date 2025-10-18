@@ -11,7 +11,40 @@ use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::fmt;
 use std::sync::atomic::{AtomicU32, Ordering};
 
-pub use jv_ast::types::{RawTypeContinuation, RawTypeDirective};
+pub use jv_ast::types::{
+    PrimitiveBound as PrimitiveBoundMetadata, PrimitiveTypeName, PrimitiveTypeReference,
+    RawTypeContinuation, RawTypeDirective,
+};
+
+/// Utility helpers for working with primitive type metadata.
+pub trait PrimitiveTypeNameExt {
+    /// Returns the canonical primitive family for the provided primitive.
+    fn canonical_family(self) -> PrimitiveTypeName;
+    /// Returns the human-readable label used within the inference engine.
+    fn type_label(self) -> &'static str;
+}
+
+impl PrimitiveTypeNameExt for PrimitiveTypeName {
+    fn canonical_family(self) -> PrimitiveTypeName {
+        match self {
+            PrimitiveTypeName::Char | PrimitiveTypeName::Short => PrimitiveTypeName::Int,
+            other => other,
+        }
+    }
+
+    fn type_label(self) -> &'static str {
+        match self {
+            PrimitiveTypeName::Int => "Int",
+            PrimitiveTypeName::Long => "Long",
+            PrimitiveTypeName::Short => "Short",
+            PrimitiveTypeName::Byte => "Byte",
+            PrimitiveTypeName::Float => "Float",
+            PrimitiveTypeName::Double => "Double",
+            PrimitiveTypeName::Boolean => "Boolean",
+            PrimitiveTypeName::Char => "Char",
+        }
+    }
+}
 
 /// Global counter used to mint fresh [`TypeId`] values.
 static NEXT_TYPE_ID: AtomicU32 = AtomicU32::new(1);
@@ -176,6 +209,7 @@ pub enum BoundPredicate {
     Interface(String),
     Capability(CapabilityBound),
     FunctionSignature(FunctionSignatureBound),
+    Primitive(PrimitiveBoundConstraint),
     WhereClause(Vec<BoundPredicate>),
 }
 
@@ -186,6 +220,7 @@ impl BoundPredicate {
             BoundPredicate::Interface(name) => name.clone(),
             BoundPredicate::Capability(bound) => bound.key(),
             BoundPredicate::FunctionSignature(signature) => signature.key(),
+            BoundPredicate::Primitive(bound) => bound.key(),
             BoundPredicate::WhereClause(predicates) => {
                 let inner: Vec<String> = predicates.iter().map(|p| p.key()).collect();
                 format!("where({})", inner.join("&"))
@@ -200,6 +235,7 @@ impl BoundPredicate {
             BoundPredicate::Interface(name) => format!("interface {name}"),
             BoundPredicate::Capability(bound) => bound.describe(),
             BoundPredicate::FunctionSignature(signature) => signature.describe(),
+            BoundPredicate::Primitive(bound) => bound.describe(),
             BoundPredicate::WhereClause(predicates) => {
                 let inner: Vec<String> = predicates.iter().map(|p| p.describe()).collect();
                 inner.join(" & ")
@@ -401,6 +437,91 @@ impl FunctionSignatureBound {
     }
 }
 
+/// Canonicalized primitive bound information surfaced from where clauses.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PrimitiveBoundConstraint {
+    canonical: PrimitiveTypeName,
+    aliases: Vec<PrimitiveTypeName>,
+}
+
+impl PrimitiveBoundConstraint {
+    /// Constructs a new constraint with the provided canonical family and alias list.
+    pub fn new(canonical: PrimitiveTypeName, aliases: Vec<PrimitiveTypeName>) -> Self {
+        let mut unique = Vec::new();
+        for alias in aliases {
+            if alias != canonical && !unique.contains(&alias) {
+                unique.push(alias);
+            }
+        }
+        unique.sort_by_key(|alias| alias.type_label());
+        Self {
+            canonical,
+            aliases: unique,
+        }
+    }
+
+    /// Returns the canonical primitive family.
+    pub fn canonical(&self) -> PrimitiveTypeName {
+        self.canonical
+    }
+
+    /// Returns the list of alias families in deterministic order.
+    pub fn alias_families(&self) -> &[PrimitiveTypeName] {
+        &self.aliases
+    }
+
+    /// Provides the full set of permitted primitive families (canonical + aliases).
+    pub fn allowed_families(&self) -> impl Iterator<Item = PrimitiveTypeName> + '_ {
+        std::iter::once(self.canonical).chain(self.aliases.iter().copied())
+    }
+
+    /// Indicates whether the provided type label (e.g. "Int") satisfies the constraint.
+    pub fn accepts_label(&self, label: &str) -> bool {
+        self.allowed_labels().any(|candidate| candidate == label)
+    }
+
+    fn allowed_labels(&self) -> impl Iterator<Item = &'static str> + '_ {
+        self.allowed_families()
+            .map(PrimitiveTypeNameExt::type_label)
+    }
+
+    fn key(&self) -> String {
+        let mut alias_labels: Vec<&'static str> = self
+            .aliases
+            .iter()
+            .copied()
+            .map(PrimitiveTypeNameExt::type_label)
+            .collect();
+        alias_labels.sort_unstable();
+        if alias_labels.is_empty() {
+            format!("primitive:{}", self.canonical.type_label())
+        } else {
+            format!(
+                "primitive:{}[{}]",
+                self.canonical.type_label(),
+                alias_labels.join("|")
+            )
+        }
+    }
+
+    fn describe(&self) -> String {
+        if self.aliases.is_empty() {
+            format!("primitive {}", self.canonical.type_label())
+        } else {
+            let alias_names = self
+                .aliases
+                .iter()
+                .map(|alias| alias.type_label())
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!(
+                "primitive {} (aliases: {alias_names})",
+                self.canonical.type_label()
+            )
+        }
+    }
+}
+
 /// Type reference captured while translating predicates.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BoundTypeReference {
@@ -555,16 +676,29 @@ impl GenericWherePredicate {
 #[derive(Debug, Clone, PartialEq)]
 pub struct GenericWhereClause {
     pub predicates: Vec<GenericWherePredicate>,
+    pub primitive_bounds: Vec<PrimitiveBoundMetadata>,
     pub span: Span,
 }
 
 impl GenericWhereClause {
-    pub fn new(predicates: Vec<GenericWherePredicate>, span: Span) -> Self {
-        Self { predicates, span }
+    pub fn new(
+        predicates: Vec<GenericWherePredicate>,
+        primitive_bounds: Vec<PrimitiveBoundMetadata>,
+        span: Span,
+    ) -> Self {
+        Self {
+            predicates,
+            primitive_bounds,
+            span,
+        }
     }
 
     pub fn is_empty(&self) -> bool {
-        self.predicates.is_empty()
+        self.predicates.is_empty() && self.primitive_bounds.is_empty()
+    }
+
+    pub fn primitive_bounds(&self) -> &[PrimitiveBoundMetadata] {
+        &self.primitive_bounds
     }
 }
 

@@ -1,8 +1,8 @@
 use crate::constraint::{GenericConstraint, GenericConstraintKind};
 use crate::solver::{GenericSolver, GenericSolverDiagnostic};
 use crate::types::{
-    BoundConstraint, BoundPredicate, GenericBounds, SymbolId, TraitBound, TypeId, TypeKind,
-    TypeVariant,
+    BoundConstraint, BoundPredicate, GenericBounds, PrimitiveBoundConstraint, PrimitiveTypeName,
+    SymbolId, TraitBound, TypeId, TypeKind, TypeVariant,
 };
 use jv_ast::Span;
 
@@ -90,4 +90,80 @@ fn accepts_argument_when_bound_present() {
 
     let solution = GenericSolver::resolve(&constraints);
     assert!(solution.diagnostics().is_empty());
+}
+
+#[test]
+fn primitive_bound_accepts_canonical_and_alias_variants() {
+    let symbol = SymbolId::from("pkg::Prim");
+    let param = TypeId::new(10);
+    let predicate = BoundPredicate::Primitive(PrimitiveBoundConstraint::new(
+        PrimitiveTypeName::Int,
+        vec![PrimitiveTypeName::Char, PrimitiveTypeName::Short],
+    ));
+
+    // Char alias should satisfy the bound.
+    let mut constraints = Vec::new();
+    constraints.push(constraint(GenericConstraintKind::TypeArgument {
+        callee: symbol.clone(),
+        parameter: param,
+        argument: TypeKind::new(TypeVariant::Primitive("Char")),
+        argument_index: 0,
+    }));
+    constraints.push(constraint(GenericConstraintKind::BoundRequirement {
+        owner: symbol.clone(),
+        parameter: param,
+        predicate: predicate.clone(),
+    }));
+    let solution = GenericSolver::resolve(&constraints);
+    assert!(solution.diagnostics().is_empty());
+
+    // Optional Int should also satisfy the bound.
+    let mut optional_constraints = Vec::new();
+    optional_constraints.push(constraint(GenericConstraintKind::TypeArgument {
+        callee: symbol.clone(),
+        parameter: param,
+        argument: TypeKind::optional(TypeKind::new(TypeVariant::Primitive("Int"))),
+        argument_index: 0,
+    }));
+    optional_constraints.push(constraint(GenericConstraintKind::BoundRequirement {
+        owner: symbol,
+        parameter: param,
+        predicate,
+    }));
+    let optional_solution = GenericSolver::resolve(&optional_constraints);
+    assert!(optional_solution.diagnostics().is_empty());
+}
+
+#[test]
+fn primitive_bound_reports_violation_for_unrelated_type() {
+    let symbol = SymbolId::from("pkg::Prim");
+    let param = TypeId::new(11);
+    let mut constraints = Vec::new();
+    constraints.push(constraint(GenericConstraintKind::TypeArgument {
+        callee: symbol.clone(),
+        parameter: param,
+        argument: TypeKind::new(TypeVariant::Primitive("Double")),
+        argument_index: 0,
+    }));
+    constraints.push(constraint(GenericConstraintKind::BoundRequirement {
+        owner: symbol.clone(),
+        parameter: param,
+        predicate: BoundPredicate::Primitive(PrimitiveBoundConstraint::new(
+            PrimitiveTypeName::Int,
+            vec![PrimitiveTypeName::Char],
+        )),
+    }));
+
+    let solution = GenericSolver::resolve(&constraints);
+    assert_eq!(solution.diagnostics().len(), 1);
+    match &solution.diagnostics()[0] {
+        GenericSolverDiagnostic::BoundViolation { predicate, .. } => match predicate {
+            BoundPredicate::Primitive(bound) => {
+                assert_eq!(bound.canonical(), PrimitiveTypeName::Int);
+                assert_eq!(bound.alias_families(), &[PrimitiveTypeName::Char]);
+            }
+            other => panic!("expected primitive predicate, got {other:?}"),
+        },
+        other => panic!("expected bound violation, got {other:?}"),
+    }
 }
