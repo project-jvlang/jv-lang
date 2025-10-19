@@ -3,147 +3,80 @@ package jv.collections
 import java.util.*
 import java.util.stream.*
 
-/**
- * SequenceCore は Java Stream を直接保持する最小限の遅延チェーンコンテナ。
- */
-data SequenceCore<T>(stream: Stream<T>)
-
-/**
- * SequenceCore を生成するためのトップレベルファクトリ。
- *
- * stdlib 内部で Iterable/Stream から遅延チェーンを開始する用途に限定し、
- * Zero runtime 原則に従って JDK Stream 以外の補助ランタイムを導入しないことを明記する。
- */
-
-fun <T> sequenceFromIterable(source: Iterable<T>): SequenceCore<T> {
-    val stream : Stream<T> = StreamSupport.stream(
-        source.spliterator()
+fun <T> Iterable<T>.toStream(): Stream<T> {
+    return StreamSupport.stream(
+        this.spliterator()
         false
     )
-    return SequenceCore(stream)
 }
 
-fun <T> sequenceFromStream(stream: Stream<T>): SequenceCore<T> {
-    return SequenceCore(stream)
+fun <T, R> Stream<T>.map(transform: (T) -> R): Stream<R> {
+    return this.map { value -> transform(value) }
 }
 
-fun <T> SequenceCore<T>.iterator(): Iterator<T> {
-    return this.stream.iterator()
+fun <T> Stream<T>.filter(predicate: (T) -> Boolean): Stream<T> {
+    return this.filter { value -> predicate(value) }
 }
 
-fun <T> SequenceCore<T>.close() {
-    this.stream.close()
+fun <T> Stream<T>.take(count: Int): Stream<T> {
+    return this.limit(count.toLong())
 }
 
-/**
- * Kotlin `Sequence.map` と同等の変換操作。
- */
-fun <T, R> SequenceCore<T>.map(transform: (T) -> R): SequenceCore<R> {
-    return this.stream.map { value -> transform(value) }
+fun <T> Stream<T>.drop(count: Int): Stream<T> {
+    return this.skip(count.toLong())
 }
 
-/**
- * Kotlin `Sequence.filter` と同等のフィルタ操作。
- */
-fun <T> SequenceCore<T>.filter(predicate: (T) -> Boolean): SequenceCore<T> {
-    return this.stream.filter { value -> predicate(value) }
+fun <T, R> Stream<T>.flatMapIterable(transform: (T) -> Iterable<R>): Stream<R> {
+    return this.flatMap { value -> transform(value).toStream() }
 }
 
-/**
- * Kotlin `Sequence.take` と同等の範囲制御操作。
- */
-fun <T> SequenceCore<T>.take(count: Int): SequenceCore<T> {
-    return sequenceFromStream(
-        this.stream.limit(count)
-    )
+fun <T, R> Stream<T>.flatMapStream(transform: (T) -> Stream<R>): Stream<R> {
+    return this.flatMap { value -> transform(value) }
 }
 
-/**
- * Kotlin `Sequence.drop` と同等のスキップ操作。
- */
-fun <T> SequenceCore<T>.drop(count: Int): SequenceCore<T> {
-    return sequenceFromStream(
-        this.stream.skip(count)
-    )
+fun <T, R : Comparable<R>> Stream<T>.sortedBy(selector: (T) -> R): Stream<T> {
+    return this.sorted { left right -> selector(left).compareTo(selector(right)) }
 }
 
-/**
- * Kotlin `Sequence.flatMap` と同等のフラット化操作。
- */
-fun <T, R> SequenceCore<T>.flatMap(transform: (T) -> Iterable<R>): SequenceCore<R> {
-    return this.stream.flatMap { value ->
-        StreamSupport.stream(
-            transform(value).spliterator()
-            false
-        )
-    }
+fun <T> Stream<T>.toListStream(): List<T> {
+    return this.collect(Collectors.toList())
 }
 
-fun <T, R> SequenceCore<T>.flatMap(transform: (T) -> Stream<R>): SequenceCore<R> {
-    return this.stream.flatMap(transform)
-}
-
-/**
- * Kotlin `Sequence.sorted` と同等のソート操作。
- */
-fun <T : Comparable<T>> SequenceCore<T>.sorted(): SequenceCore<T> {
-    return this.stream.sorted()
-}
-
-/**
- * Kotlin `Sequence.sortedBy` と同等のキー指定ソート。
- */
-fun <T, R : Comparable<R>> SequenceCore<T>.sortedBy(selector: (T) -> R): SequenceCore<T> {
-    return this.stream.sorted { left right ->
-        selector(left).compareTo(selector(right))
-    }
-}
-
-/**
- * Kotlin `Sequence.toList` と同等の終端操作。
- */
-fun <T> SequenceCore<T>.toList(): List<T> {
-    return this.stream.toList()
-}
-
-/**
- * Kotlin `Sequence.fold` と同等の集約操作。
- */
-fun <T, R> SequenceCore<T>.fold(initial: R, operation: (R, T) -> R): R {
-    return this.stream.reduce(initial) { accumulator value ->
-        operation(
+fun <T, R> Stream<T>.fold(initial: R, operation: (R, T) -> R): R {
+    var accumulator = initial
+    this.forEach { value ->
+        accumulator = operation(
             accumulator
             value
         )
     }
+    return accumulator
 }
 
-/**
- * Kotlin `Sequence.reduce` と同等の集約操作。
- */
-fun <T> SequenceCore<T>.reduce(operation: (T, T) -> T): T {
-    val reduced : T = this.stream.reduce { left right ->
+fun <T> Stream<T>.reduce(operation: (T, T) -> T): T {
+    val reduced = this.reduce { left right ->
         operation(
             left
             right
         )
     }
 
-    return reduced
+    when (reduced.isPresent) {
+        true -> {
+            return reduced.get()
+        }
+        else -> {
+            throw IllegalArgumentException("Stream reduce() on empty source")
+        }
+    }
 }
 
-/**
- * Kotlin `Sequence.count` に対応する要素数集計。
- */
-fun <T> SequenceCore<T>.count(): Long {
-    return this.stream.count()
+fun <T> Stream<T>.countElements(): Long {
+    return this.count()
 }
 
-/**
- * Kotlin `Sequence.sum` に対応する型別集約。
- */
-fun SequenceCore<Byte>.sum(): Int {
-    val elements : List<Byte> = this.toList()
+fun Stream<Byte>.sum(): Int {
+    val elements : List<Byte> = this.toListStream()
     var total = 0
     for (candidate in elements) {
         total = total + candidate.intValue()
@@ -151,8 +84,8 @@ fun SequenceCore<Byte>.sum(): Int {
     return total
 }
 
-fun SequenceCore<Short>.sum(): Int {
-    val elements : List<Short> = this.toList()
+fun Stream<Short>.sum(): Int {
+    val elements : List<Short> = this.toListStream()
     var total = 0
     for (candidate in elements) {
         total = total + candidate.intValue()
@@ -160,8 +93,8 @@ fun SequenceCore<Short>.sum(): Int {
     return total
 }
 
-fun SequenceCore<Int>.sum(): Int {
-    val elements : List<Int> = this.toList()
+fun Stream<Int>.sum(): Int {
+    val elements : List<Int> = this.toListStream()
     var total = 0
     for (candidate in elements) {
         total = total + candidate
@@ -169,8 +102,8 @@ fun SequenceCore<Int>.sum(): Int {
     return total
 }
 
-fun SequenceCore<Long>.sum(): Long {
-    val elements : List<Long> = this.toList()
+fun Stream<Long>.sum(): Long {
+    val elements : List<Long> = this.toListStream()
     var total = 0L
     for (candidate in elements) {
         total = total + candidate
@@ -178,8 +111,8 @@ fun SequenceCore<Long>.sum(): Long {
     return total
 }
 
-fun SequenceCore<Float>.sum(): Float {
-    val elements : List<Float> = this.toList()
+fun Stream<Float>.sum(): Float {
+    val elements : List<Float> = this.toListStream()
     var total = 0.0f
     for (candidate in elements) {
         total = total + candidate
@@ -187,8 +120,8 @@ fun SequenceCore<Float>.sum(): Float {
     return total
 }
 
-fun SequenceCore<Double>.sum(): Double {
-    val elements : List<Double> = this.toList()
+fun Stream<Double>.sum(): Double {
+    val elements : List<Double> = this.toListStream()
     var total = 0.0
     for (candidate in elements) {
         total = total + candidate
@@ -197,26 +130,23 @@ fun SequenceCore<Double>.sum(): Double {
 }
 
 /**
- * Primitive-specialized terminal adapters for raw JDK streams used by SequenceCore bridging.
- *
- * The generic constraints rely on primitive bounds so that `Stream<Int>` as well as
- * alias families (`Stream<Char>`, `Stream<Short>`, etc.) share the same UX.
+ * Primitive-specialized terminal adapters for raw JDK streams.
  */
-fun <T> Stream<T>.sum(): Int
+fun <T> Stream<T>.sumIntFamily(): Int
     where T : int, T : char, T : short {
     return this
         .mapToInt { candidate -> normalizeIntFamilyValue(candidate) }
         .sum()
 }
 
-fun <T> Stream<T>.sum(): Long
+fun <T> Stream<T>.sumLongFamily(): Long
     where T : long {
     return this
         .mapToLong { candidate -> candidate }
         .sum()
 }
 
-fun <T> Stream<T>.sum(): Float
+fun <T> Stream<T>.sumFloatFamily(): Float
     where T : float {
     val identity = 0.0f
     val accumulated = this.reduce(
@@ -226,7 +156,7 @@ fun <T> Stream<T>.sum(): Float
     return accumulated
 }
 
-fun <T> Stream<T>.sum(): Double
+fun <T> Stream<T>.sumDoubleFamily(): Double
     where T : double {
     val identity = 0.0
     val accumulated = this.reduce(
@@ -236,35 +166,83 @@ fun <T> Stream<T>.sum(): Double
     return accumulated
 }
 
-/**
- * Normalizes alias primitives (char/short) into the canonical int domain for stream adapters.
- */
-private fun <T> normalizeIntFamilyValue(value: T): Int
-    where T : int, T : char, T : short {
-    when (value is Character) {
-        true -> {
-            val character = value as Character
-            val raw = character.charValue()
-            return raw + 0
-        }
-        else -> {
-            val number = value as Number
-            return number.intValue()
-        }
-    }
+fun <T, R> Iterable<T>.map(transform: (T) -> R): Stream<R> {
+    return this.toStream().map { value -> transform(value) }
 }
 
-/**
- * Kotlin `Sequence.forEach` と同等の副作用操作。
- */
-fun <T> SequenceCore<T>.forEach(action: (T) -> Unit) {
-    this.stream.forEach { value -> action(value) }
+fun <T> Iterable<T>.filter(predicate: (T) -> Boolean): Stream<T> {
+    return this.toStream().filter { value -> predicate(value) }
 }
 
-/**
- * Kotlin `Sequence.groupBy` と同等のキー集約操作。
- */
-fun <T, K> SequenceCore<T>.groupBy(keySelector: (T) -> K): Map<K, List<T>> {
+fun <T> Iterable<T>.take(count: Int): Stream<T> {
+    return this.toStream().limit(count.toLong())
+}
+
+fun <T> Iterable<T>.drop(count: Int): Stream<T> {
+    return this.toStream().skip(count.toLong())
+}
+
+fun <T, R> Iterable<T>.flatMapIterable(transform: (T) -> Iterable<R>): Stream<R> {
+    return this.toStream().flatMap { value -> transform(value).toStream() }
+}
+
+fun <T, R> Iterable<T>.flatMapStream(transform: (T) -> Stream<R>): Stream<R> {
+    return this.toStream().flatMap { value -> transform(value) }
+}
+
+fun <T : Comparable<T>> Iterable<T>.sorted(): Stream<T> {
+    return this.toStream().sorted()
+}
+
+fun <T, R : Comparable<R>> Iterable<T>.sortedBy(selector: (T) -> R): Stream<T> {
+    return this.toStream().sorted { left right -> selector(left).compareTo(selector(right)) }
+}
+
+fun <T> Iterable<T>.toList(): List<T> {
+    return this.toStream().toListStream()
+}
+
+fun <T, R> Iterable<T>.fold(initial: R, operation: (R, T) -> R): R {
+    return this.toStream().fold(initial, operation)
+}
+
+fun <T> Iterable<T>.reduce(operation: (T, T) -> T): T {
+    return this.toStream().reduce(operation)
+}
+
+fun <T> Iterable<T>.countElements(): Long {
+    return this.toStream().count()
+}
+
+fun Iterable<Byte>.sum(): Int {
+    return this.toStream().sum()
+}
+
+fun Iterable<Short>.sum(): Int {
+    return this.toStream().sum()
+}
+
+fun Iterable<Int>.sum(): Int {
+    return this.toStream().sum()
+}
+
+fun Iterable<Long>.sum(): Long {
+    return this.toStream().sum()
+}
+
+fun Iterable<Float>.sum(): Float {
+    return this.toStream().sum()
+}
+
+fun Iterable<Double>.sum(): Double {
+    return this.toStream().sum()
+}
+
+fun <T> Iterable<T>.forEach(action: (T) -> Unit) {
+    this.toStream().forEach { value -> action(value) }
+}
+
+fun <T, K> Iterable<T>.groupBy(keySelector: (T) -> K): Map<K, List<T>> {
     var result = LinkedHashMap<K, List<T>>()
     val elements : List<T> = this.toList()
     for (element in elements) {
@@ -287,10 +265,7 @@ fun <T, K> SequenceCore<T>.groupBy(keySelector: (T) -> K): Map<K, List<T>> {
     return result
 }
 
-/**
- * Kotlin `Sequence.associate` と同等のキー／値マップ生成。
- */
-fun <T, K, V> SequenceCore<T>.associate(transform: (T) -> Map.Entry<K, V>): Map<K, V> {
+fun <T, K, V> Iterable<T>.associate(transform: (T) -> Map.Entry<K, V>): Map<K, V> {
     var result = LinkedHashMap<K, V>()
     val elements : List<T> = this.toList()
     for (element in elements) {
@@ -303,154 +278,17 @@ fun <T, K, V> SequenceCore<T>.associate(transform: (T) -> Map.Entry<K, V>): Map<
     return result
 }
 
-/**
- * コレクションから Kotlin `Sequence.map` 相当の遅延チェーンを開始する拡張。
- */
-fun <T, R> Iterable<T>.map(transform: (T) -> R): SequenceCore<R> {
-    return sequenceFromIterable(this).map(transform)
-}
-
-/**
- * コレクションから Kotlin `Sequence.filter` 相当の遅延チェーンを開始する拡張。
- */
-fun <T> Iterable<T>.filter(predicate: (T) -> Boolean): SequenceCore<T> {
-    return sequenceFromIterable(this).filter(predicate)
-}
-
-/**
- * コレクションから Kotlin `Sequence.take` 相当の遅延チェーンを開始する拡張。
- */
-fun <T> Iterable<T>.take(count: Int): SequenceCore<T> {
-    return sequenceFromIterable(this).take(count)
-}
-
-/**
- * コレクションから Kotlin `Sequence.drop` 相当の遅延チェーンを開始する拡張。
- */
-fun <T> Iterable<T>.drop(count: Int): SequenceCore<T> {
-    return sequenceFromIterable(this).drop(count)
-}
-
-/**
- * コレクションから Kotlin `Sequence.flatMap` 相当の遅延チェーンを開始する拡張。
- */
-fun <T, R> Iterable<T>.flatMap(transform: (T) -> Iterable<R>): SequenceCore<R> {
-    return sequenceFromIterable(this).flatMap(transform)
-}
-
-fun <T, R> Iterable<T>.flatMap(transform: (T) -> Stream<R>): SequenceCore<R> {
-    return sequenceFromIterable(this).flatMap(transform)
-}
-
-/**
- * Kotlin `Iterable.sorted` に準拠した遅延ソート開始。
- */
-fun <T : Comparable<T>> Iterable<T>.sorted(): SequenceCore<T> {
-    return sequenceFromIterable(this).sorted()
-}
-
-/**
- * Kotlin `Iterable.sortedBy` に準拠したキー指定ソートの遅延チェーン。
- */
-fun <T, R : Comparable<R>> Iterable<T>.sortedBy(selector: (T) -> R): SequenceCore<R> {
-    return sequenceFromIterable(this).sortedBy(selector)
-}
-
-/**
- * Kotlin `Iterable.fold` と同等の集約操作。
- */
-fun <T, R> Iterable<T>.fold(initial: R, operation: (R, T) -> R): R {
-    return sequenceFromIterable(this).fold(
-        initial
-        operation
-    )
-}
-
-/**
- * Kotlin `Iterable.reduce` と同等の集約操作。
- */
-fun <T> Iterable<T>.reduce(operation: (T, T) -> T): T {
-    return sequenceFromIterable(this).reduce(operation)
-}
-
-/**
- * Kotlin `Iterable.count` と同等の要素数集計。
- */
-fun <T> Iterable<T>.count(): Long {
-    return sequenceFromIterable(this).count()
-}
-
-/**
- * 任意の射影関数を介して数値を抽出し、同じ型で合計する汎用集約。
- */
-/**
- * Kotlin `Iterable.sum` に対応する型別集約。
- */
-fun Iterable<Byte>.sum(): Int {
-    var total = 0
-    for (candidate in this) {
-        total = total + candidate.intValue()
+private fun <T> normalizeIntFamilyValue(value: T): Int
+    where T : int, T : char, T : short {
+    when (value is Character) {
+        true -> {
+            val character = value as Character
+            val raw = character.charValue()
+            return raw + 0
+        }
+        else -> {
+            val number = value as Number
+            return number.intValue()
+        }
     }
-    return total
-}
-
-fun Iterable<Short>.sum(): Int {
-    var total = 0
-    for (candidate in this) {
-        total = total + candidate.intValue()
-    }
-    return total
-}
-
-fun Iterable<Int>.sum(): Int {
-    var total = 0
-    for (candidate in this) {
-        total = total + candidate
-    }
-    return total
-}
-
-fun Iterable<Long>.sum(): Long {
-    var total = 0L
-    for (candidate in this) {
-        total = total + candidate
-    }
-    return total
-}
-
-fun Iterable<Float>.sum(): Float {
-    var total = 0.0f
-    for (candidate in this) {
-        total = total + candidate
-    }
-    return total
-}
-
-fun Iterable<Double>.sum(): Double {
-    var total = 0.0
-    for (candidate in this) {
-        total = total + candidate
-    }
-    return total
-}
-
-/**
- * Kotlin `Iterable.forEach` と同等の副作用操作。
- */
-fun <T> Iterable<T>.forEach(action: (T) -> Unit) {
-    sequenceFromIterable(this).forEach(action)
-}
-
-/**
- * Kotlin `Iterable.groupBy` と同等のマップ生成。
- */
-fun <T, K> Iterable<T>.groupBy(keySelector: (T) -> K): Map<K, List<T>> {
-    return sequenceFromIterable(this).groupBy(keySelector)
-}
-
-/**
- * Kotlin `Iterable.associate` と同等のキー／値マップ生成。
- */
-fun <T, K, V> Iterable<T>.associate(transform: (T) -> Map.Entry<K, V>): Map<K, V> {
-    return sequenceFromIterable(this).associate(transform)
 }
