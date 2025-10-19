@@ -4,6 +4,9 @@ use super::type_system::{convert_type_annotation, infer_java_type};
 use super::utils::{convert_modifiers, extract_java_type};
 use crate::context::TransformContext;
 use crate::error::TransformError;
+use crate::sequence_pipeline::{
+    SequencePipeline, SequenceSource, SequenceStage, SequenceTerminal, SequenceTerminalKind,
+};
 use crate::types::{
     IrExpression, IrModifiers, IrParameter, IrRecordComponent, IrResource, IrStatement,
     IrSwitchCase, IrTypeParameter, JavaType,
@@ -205,18 +208,32 @@ pub fn desugar_extension_function(
         });
     }
 
+    let return_java_type = match function_return_type {
+        Some(annotation) => convert_type_annotation(annotation)?,
+        None => JavaType::void(),
+    };
+
+    let parameter_types_for_registry = ir_parameters
+        .iter()
+        .map(|param| param.java_type.clone())
+        .collect::<Vec<_>>();
+
+    context.register_extension_method(
+        function_name.clone(),
+        receiver_java_type.clone(),
+        parameter_types_for_registry,
+        return_java_type.clone(),
+    );
+
+    context.push_extension_scope(function_name.clone(), receiver_java_type.clone());
     let body_ir_result = transform_expression(*function_body, context);
+    context.pop_extension_scope();
     context.exit_scope();
     let body_ir = body_ir_result?;
     let body_ir = replace_this_ir_expression(body_ir, &receiver_param_name, &receiver_java_type);
 
     let mut method_modifiers = convert_modifiers(&function_modifiers);
     method_modifiers.is_static = true;
-
-    let return_java_type = match function_return_type {
-        Some(annotation) => convert_type_annotation(annotation)?,
-        None => JavaType::void(),
-    };
 
     let mut method = IrStatement::MethodDeclaration {
         name: function_name,
@@ -699,6 +716,246 @@ fn replace_this_ir_expression(
             )),
             java_type,
             span,
+        },
+        IrExpression::SequencePipeline {
+            pipeline,
+            java_type,
+            span,
+        } => IrExpression::SequencePipeline {
+            pipeline: replace_this_in_sequence_pipeline(
+                pipeline,
+                replacement_name,
+                replacement_type,
+            ),
+            java_type,
+            span,
+        },
+        other => other,
+    }
+}
+
+fn replace_this_in_sequence_pipeline(
+    mut pipeline: SequencePipeline,
+    replacement_name: &str,
+    replacement_type: &JavaType,
+) -> SequencePipeline {
+    pipeline.source =
+        replace_this_in_sequence_source(pipeline.source, replacement_name, replacement_type);
+    pipeline.stages = pipeline
+        .stages
+        .into_iter()
+        .map(|stage| replace_this_in_sequence_stage(stage, replacement_name, replacement_type))
+        .collect();
+    pipeline.terminal = pipeline.terminal.map(|terminal| {
+        replace_this_in_sequence_terminal(terminal, replacement_name, replacement_type)
+    });
+    pipeline
+}
+
+fn replace_this_in_sequence_source(
+    source: SequenceSource,
+    replacement_name: &str,
+    replacement_type: &JavaType,
+) -> SequenceSource {
+    match source {
+        SequenceSource::Collection { expr, element_hint } => SequenceSource::Collection {
+            expr: Box::new(replace_this_ir_expression(
+                *expr,
+                replacement_name,
+                replacement_type,
+            )),
+            element_hint,
+        },
+        SequenceSource::Array {
+            expr,
+            element_hint,
+            dimensions,
+        } => SequenceSource::Array {
+            expr: Box::new(replace_this_ir_expression(
+                *expr,
+                replacement_name,
+                replacement_type,
+            )),
+            element_hint,
+            dimensions,
+        },
+        SequenceSource::ListLiteral {
+            elements,
+            element_hint,
+            span,
+        } => SequenceSource::ListLiteral {
+            elements: elements
+                .into_iter()
+                .map(|expr| replace_this_ir_expression(expr, replacement_name, replacement_type))
+                .collect(),
+            element_hint,
+            span,
+        },
+        SequenceSource::JavaStream {
+            expr,
+            element_hint,
+            auto_close,
+        } => SequenceSource::JavaStream {
+            expr: Box::new(replace_this_ir_expression(
+                *expr,
+                replacement_name,
+                replacement_type,
+            )),
+            element_hint,
+            auto_close,
+        },
+    }
+}
+
+fn replace_this_in_sequence_stage(
+    stage: SequenceStage,
+    replacement_name: &str,
+    replacement_type: &JavaType,
+) -> SequenceStage {
+    match stage {
+        SequenceStage::Map {
+            lambda,
+            result_hint,
+            span,
+        } => SequenceStage::Map {
+            lambda: Box::new(replace_this_ir_expression(
+                *lambda,
+                replacement_name,
+                replacement_type,
+            )),
+            result_hint,
+            span,
+        },
+        SequenceStage::Filter { predicate, span } => SequenceStage::Filter {
+            predicate: Box::new(replace_this_ir_expression(
+                *predicate,
+                replacement_name,
+                replacement_type,
+            )),
+            span,
+        },
+        SequenceStage::FlatMap {
+            lambda,
+            element_hint,
+            flatten_depth,
+            span,
+        } => SequenceStage::FlatMap {
+            lambda: Box::new(replace_this_ir_expression(
+                *lambda,
+                replacement_name,
+                replacement_type,
+            )),
+            element_hint,
+            flatten_depth,
+            span,
+        },
+        SequenceStage::Take { count, span } => SequenceStage::Take {
+            count: Box::new(replace_this_ir_expression(
+                *count,
+                replacement_name,
+                replacement_type,
+            )),
+            span,
+        },
+        SequenceStage::Drop { count, span } => SequenceStage::Drop {
+            count: Box::new(replace_this_ir_expression(
+                *count,
+                replacement_name,
+                replacement_type,
+            )),
+            span,
+        },
+        SequenceStage::Sorted { comparator, span } => SequenceStage::Sorted {
+            comparator: comparator.map(|expr| {
+                Box::new(replace_this_ir_expression(
+                    *expr,
+                    replacement_name,
+                    replacement_type,
+                ))
+            }),
+            span,
+        },
+    }
+}
+
+fn replace_this_in_sequence_terminal(
+    terminal: SequenceTerminal,
+    replacement_name: &str,
+    replacement_type: &JavaType,
+) -> SequenceTerminal {
+    let SequenceTerminal {
+        kind,
+        evaluation,
+        requires_non_empty_source,
+        specialization_hint,
+        canonical_adapter,
+        span,
+    } = terminal;
+
+    SequenceTerminal {
+        kind: replace_this_in_sequence_terminal_kind(kind, replacement_name, replacement_type),
+        evaluation,
+        requires_non_empty_source,
+        specialization_hint,
+        canonical_adapter: canonical_adapter.map(|expr| {
+            Box::new(replace_this_ir_expression(
+                *expr,
+                replacement_name,
+                replacement_type,
+            ))
+        }),
+        span,
+    }
+}
+
+fn replace_this_in_sequence_terminal_kind(
+    kind: SequenceTerminalKind,
+    replacement_name: &str,
+    replacement_type: &JavaType,
+) -> SequenceTerminalKind {
+    match kind {
+        SequenceTerminalKind::Fold {
+            initial,
+            accumulator,
+        } => SequenceTerminalKind::Fold {
+            initial: Box::new(replace_this_ir_expression(
+                *initial,
+                replacement_name,
+                replacement_type,
+            )),
+            accumulator: Box::new(replace_this_ir_expression(
+                *accumulator,
+                replacement_name,
+                replacement_type,
+            )),
+        },
+        SequenceTerminalKind::Reduce { accumulator } => SequenceTerminalKind::Reduce {
+            accumulator: Box::new(replace_this_ir_expression(
+                *accumulator,
+                replacement_name,
+                replacement_type,
+            )),
+        },
+        SequenceTerminalKind::GroupBy { key_selector } => SequenceTerminalKind::GroupBy {
+            key_selector: Box::new(replace_this_ir_expression(
+                *key_selector,
+                replacement_name,
+                replacement_type,
+            )),
+        },
+        SequenceTerminalKind::Associate { pair_selector } => SequenceTerminalKind::Associate {
+            pair_selector: Box::new(replace_this_ir_expression(
+                *pair_selector,
+                replacement_name,
+                replacement_type,
+            )),
+        },
+        SequenceTerminalKind::ForEach { action } => SequenceTerminalKind::ForEach {
+            action: Box::new(replace_this_ir_expression(
+                *action,
+                replacement_name,
+                replacement_type,
+            )),
         },
         other => other,
     }

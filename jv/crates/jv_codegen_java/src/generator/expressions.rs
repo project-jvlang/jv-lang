@@ -937,6 +937,12 @@ impl JavaCodeGenerator {
         result_type: &JavaType,
         span: &Span,
     ) -> Result<String, CodeGenError> {
+        if let JavaType::Reference { name, .. } = result_type {
+            if name == "java.util.stream.Stream" {
+                return Ok(stream_expr);
+            }
+        }
+
         match result_type {
             JavaType::Reference { name, .. } if name == "jv.collections.SequenceCore" => {}
             _ => {

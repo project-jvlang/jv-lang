@@ -82,6 +82,49 @@ fn flat_map_stage() -> SequenceStage {
     }
 }
 
+fn flat_map_list_of_stage() -> SequenceStage {
+    let body = IrExpression::MethodCall {
+        receiver: Some(Box::new(IrExpression::Identifier {
+            name: "List".to_string(),
+            java_type: JavaType::Reference {
+                name: "java.util.List".to_string(),
+                generic_args: vec![],
+            },
+            span: dummy_span(),
+        })),
+        method_name: "of".to_string(),
+        java_name: None,
+        resolved_target: None,
+        args: vec![IrExpression::Identifier {
+            name: "value".to_string(),
+            java_type: JavaType::object(),
+            span: dummy_span(),
+        }],
+        argument_style: jv_ast::CallArgumentStyle::Comma,
+        java_type: JavaType::Reference {
+            name: "java.util.List".to_string(),
+            generic_args: vec![JavaType::object()],
+        },
+        span: dummy_span(),
+    };
+
+    let lambda = IrExpression::Lambda {
+        functional_interface: "java.util.function.Function".to_string(),
+        param_names: vec!["value".to_string()],
+        param_types: vec![JavaType::object()],
+        body: Box::new(body),
+        java_type: JavaType::object(),
+        span: dummy_span(),
+    };
+
+    SequenceStage::FlatMap {
+        lambda: Box::new(lambda),
+        element_hint: None,
+        flatten_depth: 1,
+        span: dummy_span(),
+    }
+}
+
 fn number_literal(value: &str) -> IrExpression {
     IrExpression::Literal(Literal::Number(value.to_string()), dummy_span())
 }
@@ -279,6 +322,39 @@ fn java25_sequence_list_literal_source_streams_from_list_of() {
     assert_eq!(
         rendered,
         "(List.of(1, 2, 3)).stream().map((x) -> x).toList()",
+    );
+}
+
+#[test]
+fn java25_sequence_flat_map_wraps_iterable_results_into_stream() {
+    let terminal = SequenceTerminal {
+        kind: SequenceTerminalKind::ToList,
+        evaluation: SequenceTerminalEvaluation::Collector,
+        requires_non_empty_source: false,
+        specialization_hint: None,
+        canonical_adapter: None,
+        span: dummy_span(),
+    };
+
+    let expr = build_pipeline(
+        collection_source("numbers"),
+        vec![flat_map_list_of_stage()],
+        terminal,
+        JavaType::Reference {
+            name: "java.util.List".to_string(),
+            generic_args: vec![],
+        },
+    );
+
+    let mut generator =
+        JavaCodeGenerator::with_config(JavaCodeGenConfig::for_target(JavaTarget::Java25));
+    let rendered = generator
+        .generate_expression(&expr)
+        .expect("flatMap pipeline should render for Java 25");
+
+    assert!(
+        rendered.contains("Sequence.toStream(List.of(value))"),
+        "expected Sequence.toStream wrapper in flatMap lambda, got {rendered}"
     );
 }
 
@@ -708,8 +784,9 @@ fn sum_terminal_with_int_hint_uses_map_to_int() {
     assert!(rendered.ends_with(".sum()"));
     assert!(rendered.contains("Character"));
     assert!(
-        rendered.contains("(int) ((java.lang.Character)"),
-        "lambda should cast Character aliases to int"
+        rendered.contains("(int) (java.lang.Character)"),
+        "lambda should cast Character aliases to int. Rendered expression: {}",
+        rendered
     );
     assert!(
         rendered.contains("instanceof java.lang.Character"),

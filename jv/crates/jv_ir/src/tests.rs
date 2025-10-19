@@ -1409,6 +1409,102 @@ mod tests {
         }
     }
 
+    #[test]
+    fn test_extension_call_on_receiver_normalized_to_static_sequence_call() {
+        let mut context = test_context();
+
+        // Register a simple Iterable.toStream extension.
+        let to_stream_decl = Statement::FunctionDeclaration {
+            name: "toStream".to_string(),
+            type_parameters: Vec::new(),
+            generic_signature: None,
+            where_clause: None,
+            parameters: vec![],
+            return_type: Some(TypeAnnotation::Simple("java.lang.Iterable".to_string())),
+            primitive_return: None,
+            body: Box::new(Expression::This(dummy_span())),
+            modifiers: Modifiers::default(),
+            span: dummy_span(),
+        };
+
+        let iterable_type = TypeAnnotation::Simple("java.lang.Iterable".to_string());
+        desugar_extension_function(
+            iterable_type.clone(),
+            Box::new(to_stream_decl),
+            dummy_span(),
+            &mut context,
+        )
+        .expect("toStream extension should desugar");
+
+        // Extension that invokes receiver.toStream() should be rewritten to a static call.
+        let call_to_stream = Expression::Call {
+            function: Box::new(Expression::MemberAccess {
+                object: Box::new(Expression::This(dummy_span())),
+                property: "toStream".to_string(),
+                span: dummy_span(),
+            }),
+            args: Vec::new(),
+            type_arguments: Vec::new(),
+            argument_metadata: CallArgumentMetadata::with_style(CallArgumentStyle::Whitespace),
+            span: dummy_span(),
+        };
+
+        let wrapper_decl = Statement::FunctionDeclaration {
+            name: "wrap".to_string(),
+            type_parameters: Vec::new(),
+            generic_signature: None,
+            where_clause: None,
+            parameters: vec![],
+            return_type: Some(TypeAnnotation::Simple(
+                "java.util.stream.Stream".to_string(),
+            )),
+            primitive_return: None,
+            body: Box::new(call_to_stream),
+            modifiers: Modifiers::default(),
+            span: dummy_span(),
+        };
+
+        let result = desugar_extension_function(
+            iterable_type,
+            Box::new(wrapper_decl),
+            dummy_span(),
+            &mut context,
+        )
+        .expect("extension wrapper should desugar");
+
+        match result {
+            IrStatement::MethodDeclaration { body, .. } => {
+                let body = body.expect("extension method should have a body");
+                match body {
+                    IrExpression::MethodCall {
+                        receiver,
+                        method_name,
+                        args,
+                        ..
+                    } => {
+                        assert!(
+                            receiver.is_none(),
+                            "extension invocation should be converted to static call"
+                        );
+                        assert_eq!(method_name, "toStream");
+                        assert_eq!(args.len(), 1);
+                        match &args[0] {
+                            IrExpression::Identifier { name, .. } => {
+                                assert_eq!(name, "receiver");
+                            }
+                            other => panic!(
+                                "expected receiver identifier as first argument, got {:?}",
+                                other
+                            ),
+                        }
+                    }
+                    other => panic!("expected method call body, got {:?}", other),
+                }
+            }
+            other => panic!("expected method declaration, got {:?}", other),
+        }
+    }
+
     // Test for string interpolation desugaring
     #[test]
     fn test_desugar_string_interpolation_to_format_expression() {

@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use crate::types::{
     DataFormat, IrExpression, IrImport, IrImportDetail, IrResolvedMethodTarget, IrStatement,
-    JavaType, MethodOverload, PrimitiveReturnMetadata, SampleMode, StaticMethodCall, UtilityClass,
+    JavaType, MethodOverload, PrimitiveReturnMetadata, SampleMode, UtilityClass,
 };
 use jv_ast::{CallArgumentStyle, Span};
 use jv_support::arena::{
@@ -29,8 +29,10 @@ pub struct TransformContext {
     pub method_declarations: Vec<RegisteredMethodDeclaration>,
     /// Registered method call sites collected during lowering
     pub method_calls: Vec<RegisteredMethodCall>,
-    /// Extension function mappings
-    pub extension_methods: HashMap<String, StaticMethodCall>,
+    /// Registered extension function metadata keyed by function name.
+    pub extension_registry: HashMap<String, Vec<ExtensionMetadata>>,
+    /// Stack tracking the extension function currently being lowered (if any).
+    extension_scope_stack: Vec<ExtensionScope>,
     /// Current package
     pub current_package: Option<String>,
     /// Options controlling @Sample transformation behaviour
@@ -76,7 +78,8 @@ impl TransformContext {
             method_overloads: Vec::new(),
             method_declarations: Vec::new(),
             method_calls: Vec::new(),
-            extension_methods: HashMap::new(),
+            extension_registry: HashMap::new(),
+            extension_scope_stack: Vec::new(),
             current_package: None,
             sample_options: SampleOptions::default(),
             sequence_style_cache: SequenceStyleCache::with_capacity(),
@@ -199,6 +202,133 @@ impl TransformContext {
                 argument_style: *argument_style,
                 span: span.clone(),
             });
+        }
+    }
+
+    pub fn register_extension_method(
+        &mut self,
+        method_name: String,
+        receiver_type: JavaType,
+        parameter_types: Vec<JavaType>,
+        return_type: JavaType,
+    ) {
+        if let Some(receiver_canonical) = Self::canonical_type_name(&receiver_type) {
+            let metadata = ExtensionMetadata {
+                receiver_canonical,
+                parameter_types,
+                return_type,
+            };
+            self.extension_registry
+                .entry(method_name)
+                .or_default()
+                .push(metadata);
+        }
+    }
+
+    pub fn lookup_extension_method(
+        &self,
+        method_name: &str,
+        receiver_type: &JavaType,
+        argument_count: usize,
+    ) -> Option<&ExtensionMetadata> {
+        let actual = Self::canonical_type_name(receiver_type)?;
+        let candidates = self.extension_registry.get(method_name)?;
+
+        let mut fallback = None;
+        for candidate in candidates {
+            if candidate.parameter_types.len() != argument_count + 1 {
+                continue;
+            }
+            if candidate.receiver_canonical == actual {
+                return Some(candidate);
+            }
+            if fallback.is_none()
+                && Self::receiver_type_assignable(&actual, &candidate.receiver_canonical)
+            {
+                fallback = Some(candidate);
+            }
+        }
+        fallback
+    }
+
+    pub fn push_extension_scope(&mut self, method_name: String, receiver_type: JavaType) {
+        if let Some(receiver_canonical) = Self::canonical_type_name(&receiver_type) {
+            self.extension_scope_stack.push(ExtensionScope {
+                method_name,
+                receiver_canonical,
+            });
+        }
+    }
+
+    pub fn pop_extension_scope(&mut self) {
+        self.extension_scope_stack.pop();
+    }
+
+    pub fn current_extension_scope(&self) -> Option<&ExtensionScope> {
+        self.extension_scope_stack.last()
+    }
+
+    pub fn is_current_extension_scope(&self, method_name: &str, receiver_type: &JavaType) -> bool {
+        match self.current_extension_scope() {
+            Some(scope) => {
+                if let Some(actual) = Self::canonical_type_name(receiver_type) {
+                    scope.method_name == method_name && scope.receiver_canonical == actual
+                } else {
+                    false
+                }
+            }
+            None => false,
+        }
+    }
+
+    fn canonical_type_name(java_type: &JavaType) -> Option<String> {
+        match java_type {
+            JavaType::Reference { name, .. } => Some(name.clone()),
+            JavaType::Primitive(name) => Some(name.clone()),
+            JavaType::Array {
+                element_type,
+                dimensions,
+            } => Self::canonical_type_name(element_type).map(|base| {
+                let mut result = base;
+                for _ in 0..*dimensions {
+                    result.push_str("[]");
+                }
+                result
+            }),
+            JavaType::Functional { interface_name, .. } => Some(interface_name.clone()),
+            JavaType::Void => Some("void".to_string()),
+            JavaType::Wildcard { .. } => None,
+        }
+    }
+
+    fn receiver_type_assignable(actual: &str, expected: &str) -> bool {
+        if actual == expected {
+            return true;
+        }
+
+        match expected {
+            "java.lang.Iterable" => matches!(
+                actual,
+                "java.util.Collection"
+                    | "java.util.List"
+                    | "java.util.Set"
+                    | "java.util.Deque"
+                    | "java.util.Queue"
+                    | "java.util.LinkedList"
+                    | "java.util.ArrayDeque"
+                    | "java.util.ArrayList"
+            ),
+            "java.util.Collection" => matches!(
+                actual,
+                "java.util.List"
+                    | "java.util.Set"
+                    | "java.util.Deque"
+                    | "java.util.Queue"
+                    | "java.util.LinkedList"
+                    | "java.util.ArrayDeque"
+                    | "java.util.ArrayList"
+            ),
+            _ => false,
         }
     }
 
@@ -356,7 +486,8 @@ impl Clone for TransformContext {
             method_overloads: self.method_overloads.clone(),
             method_declarations: self.method_declarations.clone(),
             method_calls: self.method_calls.clone(),
-            extension_methods: self.extension_methods.clone(),
+            extension_registry: self.extension_registry.clone(),
+            extension_scope_stack: self.extension_scope_stack.clone(),
             current_package: self.current_package.clone(),
             sample_options: self.sample_options.clone(),
             sequence_style_cache: self.sequence_style_cache.clone(),
@@ -377,6 +508,19 @@ impl Clone for TransformContext {
 pub struct WhenStrategyRecord {
     pub span: Span,
     pub description: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct ExtensionMetadata {
+    pub receiver_canonical: String,
+    pub parameter_types: Vec<JavaType>,
+    pub return_type: JavaType,
+}
+
+#[derive(Debug, Clone)]
+pub struct ExtensionScope {
+    pub method_name: String,
+    pub receiver_canonical: String,
 }
 
 /// Metadata captured for each method declaration produced during lowering.

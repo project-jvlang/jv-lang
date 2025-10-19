@@ -864,6 +864,18 @@ fn lower_call_expression(
 
             let receiver_expr = transform_expression(*object, context)?;
 
+            if let Some(mut call) = promote_extension_call_if_applicable(
+                &receiver_expr,
+                &property,
+                &ir_args,
+                argument_style,
+                &span,
+                context,
+            ) {
+                register_call_metadata(context, &mut call, None);
+                return Ok(call);
+            }
+
             let mut call = IrExpression::MethodCall {
                 receiver: Some(Box::new(receiver_expr)),
                 method_name: property,
@@ -984,6 +996,38 @@ fn make_sequence_factory_call(
         java_type: result_type,
         span,
     }
+}
+
+fn promote_extension_call_if_applicable(
+    receiver_expr: &IrExpression,
+    method_name: &str,
+    args: &[IrExpression],
+    argument_style: CallArgumentStyle,
+    span: &Span,
+    context: &TransformContext,
+) -> Option<IrExpression> {
+    let receiver_type = extract_java_type(receiver_expr)?;
+
+    if context.is_current_extension_scope(method_name, &receiver_type) {
+        return None;
+    }
+
+    let metadata = context.lookup_extension_method(method_name, &receiver_type, args.len())?;
+
+    let mut promoted_args = Vec::with_capacity(args.len() + 1);
+    promoted_args.push(receiver_expr.clone());
+    promoted_args.extend(args.iter().cloned());
+
+    Some(IrExpression::MethodCall {
+        receiver: None,
+        method_name: method_name.to_string(),
+        java_name: None,
+        resolved_target: None,
+        args: promoted_args,
+        argument_style,
+        java_type: metadata.return_type.clone(),
+        span: span.clone(),
+    })
 }
 
 fn register_call_metadata(
