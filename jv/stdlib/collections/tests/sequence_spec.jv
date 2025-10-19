@@ -244,3 +244,27 @@ fun validatePhase5ForEachSideEffects() {
         throw IllegalStateException("forEach expected total 30 but was ${total}")
     }
 }
+
+fun validatePrimitiveStreamSumSpecialization() {
+    charValues = [
+        java.lang.Character.valueOf('A')
+        java.lang.Character.valueOf('B')
+        java.lang.Character.valueOf('C')
+    ]
+
+    charSum = charValues.stream().sum()
+    if (charSum != (65 + 66 + 67)) {
+        throw IllegalStateException("stream.sum expected 198 for Character aliases but was ${charSum}")
+    }
+
+    shortValues = [
+        java.lang.Short.valueOf("5")
+        java.lang.Short.valueOf("7")
+        java.lang.Short.valueOf("9")
+    ]
+
+    shortSum = shortValues.stream().sum()
+    if (shortSum != 21) {
+        throw IllegalStateException("stream.sum expected 21 for Short aliases but was ${shortSum}")
+    }
+}
