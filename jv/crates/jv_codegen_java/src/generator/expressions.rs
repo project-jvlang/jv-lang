@@ -919,6 +919,12 @@ impl JavaCodeGenerator {
     }
 
     fn sequence_pipeline_requires_helper(&self, pipeline: &SequencePipeline) -> bool {
+        if matches!(pipeline.source, SequenceSource::JavaStream { .. })
+            && pipeline.terminal.is_none()
+        {
+            return false;
+        }
+
         match &pipeline.shape {
             PipelineShape::MultiStage {
                 stages,
@@ -937,10 +943,8 @@ impl JavaCodeGenerator {
         result_type: &JavaType,
         span: &Span,
     ) -> Result<String, CodeGenError> {
-        if let JavaType::Reference { name, .. } = result_type {
-            if name == "java.util.stream.Stream" {
-                return Ok(stream_expr);
-            }
+        if Self::is_java_stream_type(result_type) {
+            return Ok(stream_expr);
         }
 
         match result_type {
@@ -1148,47 +1152,54 @@ impl JavaCodeGenerator {
                 span,
             } => {
                 let body_expr = body.as_ref();
-                if Self::is_java_stream_expression(body_expr) {
+                let body_type = Self::expression_java_type(body_expr);
+
+                if body_type.is_some_and(Self::is_java_stream_type) {
                     return lambda.clone();
                 }
 
-                if let Some(JavaType::Reference { name, .. }) =
-                    Self::expression_java_type(body_expr)
-                {
-                    if Self::is_java_iterable_type(name) {
-                        let body_span = body_expr.span();
-                        let sequence_identifier = IrExpression::Identifier {
-                            name: "Sequence".to_string(),
-                            java_type: JavaType::Reference {
-                                name: "jv.collections.Sequence".to_string(),
-                                generic_args: Vec::new(),
-                            },
-                            span: body_span.clone(),
-                        };
+                let mut wrap_with_sequence = false;
+                if let Some(JavaType::Reference { name, .. }) = body_type {
+                    wrap_with_sequence = Self::is_java_iterable_type(name);
+                }
 
-                        let to_stream_call = IrExpression::MethodCall {
-                            receiver: Some(Box::new(sequence_identifier)),
-                            method_name: "toStream".to_string(),
-                            java_name: None,
-                            resolved_target: None,
-                            args: vec![*body.clone()],
-                            argument_style: CallArgumentStyle::Whitespace,
-                            java_type: JavaType::Reference {
-                                name: "java.util.stream.Stream".to_string(),
-                                generic_args: vec![JavaType::object()],
-                            },
-                            span: body_span.clone(),
-                        };
+                if !wrap_with_sequence && self.expression_is_iterable_like(body_expr) {
+                    wrap_with_sequence = true;
+                }
 
-                        return IrExpression::Lambda {
-                            functional_interface: functional_interface.clone(),
-                            param_names: param_names.clone(),
-                            param_types: param_types.clone(),
-                            body: Box::new(to_stream_call),
-                            java_type: java_type.clone(),
-                            span: span.clone(),
-                        };
-                    }
+                if wrap_with_sequence {
+                    let body_span = body_expr.span();
+                    let sequence_identifier = IrExpression::Identifier {
+                        name: "Sequence".to_string(),
+                        java_type: JavaType::Reference {
+                            name: "jv.collections.Sequence".to_string(),
+                            generic_args: Vec::new(),
+                        },
+                        span: body_span.clone(),
+                    };
+
+                    let to_stream_call = IrExpression::MethodCall {
+                        receiver: Some(Box::new(sequence_identifier)),
+                        method_name: "toStream".to_string(),
+                        java_name: None,
+                        resolved_target: None,
+                        args: vec![*body.clone()],
+                        argument_style: CallArgumentStyle::Whitespace,
+                        java_type: JavaType::Reference {
+                            name: "java.util.stream.Stream".to_string(),
+                            generic_args: vec![JavaType::object()],
+                        },
+                        span: body_span.clone(),
+                    };
+
+                    return IrExpression::Lambda {
+                        functional_interface: functional_interface.clone(),
+                        param_names: param_names.clone(),
+                        param_types: param_types.clone(),
+                        body: Box::new(to_stream_call),
+                        java_type: java_type.clone(),
+                        span: span.clone(),
+                    };
                 }
 
                 lambda.clone()
@@ -1206,6 +1217,80 @@ impl JavaCodeGenerator {
                 | "java.util.Set"
                 | "java.util.Queue"
                 | "java.util.Deque"
+        )
+    }
+
+    fn expression_is_iterable_like(&self, expr: &IrExpression) -> bool {
+        match expr {
+            IrExpression::MethodCall {
+                receiver,
+                resolved_target,
+                ..
+            } => {
+                if let Some(target) = resolved_target {
+                    if let Some(owner) = target.owner.as_deref() {
+                        if Self::is_java_iterable_type(owner)
+                            || matches!(
+                                owner,
+                                "java.util.List"
+                                    | "java.util.Set"
+                                    | "java.util.Collection"
+                                    | "java.lang.Iterable"
+                            )
+                        {
+                            return true;
+                        }
+                    }
+                }
+
+                if let Some(receiver_expr) = receiver {
+                    if let Some(JavaType::Reference { name, .. }) =
+                        Self::expression_java_type(receiver_expr)
+                    {
+                        if Self::is_java_iterable_type(name) {
+                            return true;
+                        }
+                    }
+
+                    if let IrExpression::Identifier { name, .. } = receiver_expr.as_ref() {
+                        if Self::is_iterable_identifier(name) {
+                            return true;
+                        }
+                    }
+                }
+
+                false
+            }
+            IrExpression::Identifier {
+                name, java_type, ..
+            } => {
+                if let JavaType::Reference {
+                    name: type_name, ..
+                } = java_type
+                {
+                    if Self::is_java_iterable_type(type_name) {
+                        return true;
+                    }
+                }
+
+                Self::is_iterable_identifier(name)
+            }
+            _ => false,
+        }
+    }
+
+    fn is_iterable_identifier(name: &str) -> bool {
+        matches!(
+            name,
+            "List"
+                | "Set"
+                | "Collection"
+                | "Iterable"
+                | "Collections"
+                | "java.util.List"
+                | "java.util.Set"
+                | "java.util.Collection"
+                | "java.lang.Iterable"
         )
     }
 

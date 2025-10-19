@@ -19,11 +19,11 @@ fun <T> Stream<T>.filter(predicate: (T) -> Boolean): Stream<T> {
 }
 
 fun <T> Stream<T>.take(count: Int): Stream<T> {
-    return this.limit(count.toLong())
+    return this.limit(count)
 }
 
 fun <T> Stream<T>.drop(count: Int): Stream<T> {
-    return this.skip(count.toLong())
+    return this.skip(count)
 }
 
 fun <T, R> Stream<T>.flatMapIterable(transform: (T) -> Iterable<R>): Stream<R> {
@@ -54,14 +54,14 @@ fun <T, R> Stream<T>.fold(initial: R, operation: (R, T) -> R): R {
 }
 
 fun <T> Stream<T>.reduce(operation: (T, T) -> T): T {
-    val reduced = this.reduce { left right ->
+    val reduced : Optional<T> = this.reduce { left right ->
         operation(
             left
             right
         )
     }
 
-    when (reduced.isPresent) {
+    when (reduced.isPresent()) {
         true -> {
             return reduced.get()
         }
@@ -148,22 +148,18 @@ fun <T> Stream<T>.sumLongFamily(): Long
 
 fun <T> Stream<T>.sumFloatFamily(): Float
     where T : float {
-    val identity = 0.0f
-    val accumulated = this.reduce(
-        identity
+    return this.reduce(
+        0.0f
         { running value -> running + value }
     )
-    return accumulated
 }
 
 fun <T> Stream<T>.sumDoubleFamily(): Double
     where T : double {
-    val identity = 0.0
-    val accumulated = this.reduce(
-        identity
+    return this.reduce(
+        0.0
         { running value -> running + value }
     )
-    return accumulated
 }
 
 fun <T, R> Iterable<T>.map(transform: (T) -> R): Stream<R> {
@@ -175,11 +171,11 @@ fun <T> Iterable<T>.filter(predicate: (T) -> Boolean): Stream<T> {
 }
 
 fun <T> Iterable<T>.take(count: Int): Stream<T> {
-    return this.toStream().limit(count.toLong())
+    return this.toStream().limit(count)
 }
 
 fun <T> Iterable<T>.drop(count: Int): Stream<T> {
-    return this.toStream().skip(count.toLong())
+    return this.toStream().skip(count)
 }
 
 fun <T, R> Iterable<T>.flatMapIterable(transform: (T) -> Iterable<R>): Stream<R> {
@@ -246,23 +242,12 @@ fun <T> Iterable<T>.forEach(action: (T) -> Unit) {
 }
 
 fun <T, K> Iterable<T>.groupBy(keySelector: (T) -> K): Map<K, List<T>> {
-    var result = LinkedHashMap<K, List<T>>()
+    val result = LinkedHashMap<K, List<T>>()
     val elements : List<T> = this.toList()
     for (element in elements) {
         val key = keySelector(element)
 
-        var bucket = result.get(key)
-        when (bucket == null) {
-            true -> {
-                bucket = ArrayList()
-                result.put(
-                    key
-                    bucket
-                )
-            }
-            else -> {}
-        }
-
+        val bucket = result.computeIfAbsent(key) { _ -> ArrayList<T>() }
         bucket.add(element)
     }
     return result
@@ -283,15 +268,5 @@ fun <T, K, V> Iterable<T>.associate(transform: (T) -> Map.Entry<K, V>): Map<K, V
 
 private fun <T> normalizeIntFamilyValue(value: T): Int
     where T : int, T : char, T : short {
-    when (value is Character) {
-        true -> {
-            val character = value as Character
-            val raw = character.charValue()
-            return raw + 0
-        }
-        else -> {
-            val number = value as Number
-            return number.intValue()
-        }
-    }
+    return value.hashCode()
 }

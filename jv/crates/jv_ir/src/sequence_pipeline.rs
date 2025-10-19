@@ -1,6 +1,6 @@
 use crate::context::TransformContext;
 use crate::error::TransformError;
-use crate::transform::transform_expression;
+use crate::transform::{extract_java_type, transform_expression};
 use crate::types::{IrExpression, JavaType};
 use jv_ast::{
     types::PrimitiveTypeName, Argument, CallArgumentMetadata, CallArgumentStyle, Expression,
@@ -412,7 +412,11 @@ pub fn try_lower_sequence_call(
 
     pipeline.recompute_shape();
 
-    let java_type = determine_java_type(pipeline.terminal.as_ref());
+    if is_disallowed_sequence_source(&pipeline.source) {
+        return Ok(None);
+    }
+
+    let java_type = determine_java_type(&pipeline);
 
     Ok(Some(IrExpression::SequencePipeline {
         pipeline,
@@ -444,11 +448,71 @@ fn lower_sequence_source(
         }
         other => {
             let source_ir = transform_expression(other, context)?;
+            let inferred_type = extract_java_type(&source_ir);
+
+            if inferred_type
+                .as_ref()
+                .is_some_and(|ty| is_java_stream_type(ty))
+            {
+                let element_hint = inferred_type.as_ref().and_then(stream_element_hint);
+
+                return Ok(SequenceSource::JavaStream {
+                    expr: Box::new(source_ir),
+                    element_hint,
+                    auto_close: false,
+                });
+            }
+
             Ok(SequenceSource::Collection {
                 expr: Box::new(source_ir),
                 element_hint: None,
             })
         }
+    }
+}
+
+fn is_java_stream_type(java_type: &JavaType) -> bool {
+    match java_type {
+        JavaType::Reference { name, .. } => is_java_stream_name(name),
+        _ => false,
+    }
+}
+
+fn stream_element_hint(java_type: &JavaType) -> Option<JavaType> {
+    match java_type {
+        JavaType::Reference { name, generic_args } if is_java_stream_name(name) => {
+            generic_args.first().cloned()
+        }
+        _ => None,
+    }
+}
+
+fn default_java_stream_type() -> JavaType {
+    JavaType::Reference {
+        name: "java.util.stream.Stream".to_string(),
+        generic_args: vec![JavaType::object()],
+    }
+}
+
+fn is_java_stream_name(name: &str) -> bool {
+    matches!(name, "java.util.stream.Stream" | "Stream")
+}
+
+fn is_disallowed_sequence_source(source: &SequenceSource) -> bool {
+    match source {
+        SequenceSource::Collection { expr, .. } => {
+            extract_java_type(expr.as_ref()).map_or(false, is_disallowed_sequence_source_type)
+        }
+        _ => false,
+    }
+}
+
+fn is_disallowed_sequence_source_type(java_type: JavaType) -> bool {
+    match java_type {
+        JavaType::Reference { name, .. } => {
+            matches!(name.as_str(), "java.util.stream.Collectors" | "Collectors")
+        }
+        _ => false,
     }
 }
 
@@ -688,26 +752,35 @@ fn build_terminal(
     }
 }
 
-fn determine_java_type(terminal: Option<&SequenceTerminal>) -> JavaType {
-    match terminal.map(|t| &t.kind) {
-        Some(SequenceTerminalKind::ToList) => JavaType::list(),
-        Some(SequenceTerminalKind::ToSet) => JavaType::Reference {
-            name: "java.util.Set".to_string(),
-            generic_args: vec![],
-        },
-        Some(SequenceTerminalKind::Fold { .. }) | Some(SequenceTerminalKind::Reduce { .. }) => {
-            JavaType::object()
-        }
-        Some(SequenceTerminalKind::GroupBy { .. })
-        | Some(SequenceTerminalKind::Associate { .. }) => JavaType::Reference {
-            name: "java.util.Map".to_string(),
-            generic_args: vec![],
-        },
-        Some(SequenceTerminalKind::Count) | Some(SequenceTerminalKind::Sum) => {
-            JavaType::Primitive("long".to_string())
-        }
-        Some(SequenceTerminalKind::ForEach { .. }) => JavaType::void(),
-        None => JavaType::sequence(),
+fn determine_java_type(pipeline: &SequencePipeline) -> JavaType {
+    if let Some(terminal) = pipeline.terminal.as_ref() {
+        return match &terminal.kind {
+            SequenceTerminalKind::ToList => JavaType::list(),
+            SequenceTerminalKind::ToSet => JavaType::Reference {
+                name: "java.util.Set".to_string(),
+                generic_args: vec![],
+            },
+            SequenceTerminalKind::Fold { .. } | SequenceTerminalKind::Reduce { .. } => {
+                JavaType::object()
+            }
+            SequenceTerminalKind::GroupBy { .. } | SequenceTerminalKind::Associate { .. } => {
+                JavaType::Reference {
+                    name: "java.util.Map".to_string(),
+                    generic_args: vec![],
+                }
+            }
+            SequenceTerminalKind::Count | SequenceTerminalKind::Sum => {
+                JavaType::Primitive("long".to_string())
+            }
+            SequenceTerminalKind::ForEach { .. } => JavaType::void(),
+        };
+    }
+
+    match &pipeline.source {
+        SequenceSource::JavaStream { expr, .. } => extract_java_type(expr.as_ref())
+            .filter(|ty| is_java_stream_type(ty))
+            .unwrap_or_else(default_java_stream_type),
+        _ => JavaType::sequence(),
     }
 }
 
