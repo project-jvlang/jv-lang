@@ -393,15 +393,7 @@ fn java25_sequence_renders_full_stage_chain() {
         .generate_expression(&expr)
         .expect("complex sequence chain renders for Java 25");
 
-    let expected = concat!(
-        "new Object() {\n",
-        "    java.util.List run() {\n",
-        "        try (var __jvSequence = new JvSequence<>((numbers).stream().map((x) -> x).filter((x) -> true).flatMap((x) -> x).limit(3).skip(1).sorted().sorted(VALUE_COMPARATOR))) {\n",
-        "            return __jvSequence.toStream().toList();\n",
-        "        }\n",
-        "    }\n",
-        "}.run()\n",
-    );
+    let expected = "(numbers).stream().map((x) -> x).filter((x) -> true).flatMap((x) -> x).limit(3).skip(1).sorted().sorted(VALUE_COMPARATOR).toList()";
     assert_eq!(rendered, expected);
 }
 
@@ -569,8 +561,12 @@ fn map_filter_pipeline_renders_expected_lambdas() {
         "expected Java 25 pipeline to include even filter lambda, got: {rendered25}"
     );
     assert!(
-        rendered25.contains("__jvSequence"),
-        "expected Java 25 pipeline to materialize helper sequence, got: {rendered25}"
+        rendered25.contains(".toList()"),
+        "expected Java 25 pipeline to collect to list, got: {rendered25}"
+    );
+    assert!(
+        !rendered25.contains("JvSequence"),
+        "expected Java 25 pipeline to avoid helper sequence, got: {rendered25}"
     );
 
     let expr_java21 = build_pipeline(
@@ -655,8 +651,8 @@ fn autocloseable_stream_pipeline_wraps_with_try_resource() {
 
     assert!(rendered.starts_with("new Object()"));
     assert!(rendered.contains("try (var __jvStream = resourceStream)"));
-    assert!(rendered.contains("try (var __jvSequence = new JvSequence<>(__jvStream))"));
-    assert!(rendered.contains("return __jvSequence.toStream().count();"));
+    assert!(!rendered.contains("JvSequence"));
+    assert!(rendered.contains("return __jvStream.count();"));
 }
 
 #[test]
