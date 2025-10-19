@@ -1,7 +1,7 @@
 use crate::context::TransformContext;
 use crate::error::TransformError;
 use crate::transform::{extract_java_type, transform_expression};
-use crate::types::{IrExpression, JavaType};
+use crate::types::{IrExpression, IrResolvedMethodTarget, JavaType};
 use jv_ast::{
     types::PrimitiveTypeName, Argument, CallArgumentMetadata, CallArgumentStyle, Expression,
     SequenceDelimiter, Span,
@@ -719,8 +719,10 @@ fn infer_iterable_like_type(expr: &IrExpression) -> Option<JavaType> {
             }
         }
         IrExpression::MethodCall {
+            method_name,
             resolved_target,
             receiver,
+            args,
             java_type,
             ..
         } => {
@@ -728,15 +730,14 @@ fn infer_iterable_like_type(expr: &IrExpression) -> Option<JavaType> {
                 return Some(java_type.clone());
             }
 
-            if let Some(target) = resolved_target {
-                if let Some(owner) = target.owner.as_deref() {
-                    if is_iterable_like_name(owner) {
-                        return Some(JavaType::Reference {
-                            name: owner.to_string(),
-                            generic_args: Vec::new(),
-                        });
-                    }
-                }
+            if let Some(hint) = infer_iterable_like_from_method_call(
+                method_name,
+                resolved_target.as_ref(),
+                receiver.as_deref(),
+                args.as_slice(),
+                java_type,
+            ) {
+                return Some(hint);
             }
 
             receiver
@@ -792,10 +793,164 @@ fn infer_iterable_like_type(expr: &IrExpression) -> Option<JavaType> {
     }
 }
 
+fn infer_iterable_like_from_method_call(
+    method_name: &str,
+    resolved_target: Option<&IrResolvedMethodTarget>,
+    receiver: Option<&IrExpression>,
+    args: &[IrExpression],
+    java_type: &JavaType,
+) -> Option<JavaType> {
+    if !returns_object_like(java_type) {
+        return None;
+    }
+
+    if let Some(target) = resolved_target {
+        if let Some(owner) = target.owner.as_deref() {
+            if is_iterable_like_name(owner) && is_iterable_factory_method(owner, method_name) {
+                return Some(build_iterable_type_hint(owner, java_type, args));
+            }
+        }
+    }
+
+    if let Some(receiver_expr) = receiver {
+        if let Some(receiver_type) = extract_java_type(receiver_expr) {
+            if is_iterable_like_java_type(&receiver_type) {
+                if let Some(owner) = iterable_type_name(&receiver_type) {
+                    if is_iterable_factory_method(owner, method_name) {
+                        return Some(build_iterable_type_hint(owner, java_type, args));
+                    }
+                }
+            }
+        }
+    }
+
+    None
+}
+
+fn iterable_type_name(java_type: &JavaType) -> Option<&str> {
+    match java_type {
+        JavaType::Reference { name, .. } => Some(name.as_str()),
+        _ => None,
+    }
+}
+
+fn returns_object_like(java_type: &JavaType) -> bool {
+    matches!(
+        java_type,
+        JavaType::Reference { name, .. }
+            if name == "java.lang.Object" || name == "Object"
+    )
+}
+
+fn is_iterable_factory_method(owner: &str, method_name: &str) -> bool {
+    match method_name {
+        "of" | "copyOf" => true,
+        "from" | "fromIterable" | "fromSequence" | "fromStream" => is_sequence_owner(owner),
+        _ => false,
+    }
+}
+
+fn is_sequence_owner(name: &str) -> bool {
+    let simple = name.rsplit('.').next().unwrap_or(name);
+    matches!(simple, "Sequence" | "SequenceCore")
+}
+
+fn build_iterable_type_hint(owner: &str, java_type: &JavaType, args: &[IrExpression]) -> JavaType {
+    if let JavaType::Reference {
+        generic_args: existing,
+        ..
+    } = java_type
+    {
+        if !existing.is_empty() {
+            return JavaType::Reference {
+                name: owner.to_string(),
+                generic_args: existing.clone(),
+            };
+        }
+    }
+
+    let element_type = args
+        .iter()
+        .find_map(|arg| extract_java_type(arg))
+        .map(|ty| boxed_type(&ty))
+        .unwrap_or_else(JavaType::object);
+
+    JavaType::Reference {
+        name: owner.to_string(),
+        generic_args: vec![element_type],
+    }
+}
+
 fn is_iterable_like_java_type(java_type: &JavaType) -> bool {
     match java_type {
         JavaType::Reference { name, .. } => is_iterable_like_name(name),
         _ => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use jv_ast::CallArgumentStyle;
+    use jv_ast::Span;
+
+    fn dummy_span() -> Span {
+        Span::dummy()
+    }
+
+    fn lambda_returning_factory(owner: &str) -> IrExpression {
+        IrExpression::Lambda {
+            functional_interface: "java.util.function.Function".to_string(),
+            param_names: vec!["value".to_string()],
+            param_types: vec![JavaType::object()],
+            body: Box::new(IrExpression::MethodCall {
+                receiver: None,
+                method_name: "of".to_string(),
+                java_name: None,
+                resolved_target: Some(IrResolvedMethodTarget {
+                    owner: Some(owner.to_string()),
+                    original_name: Some("of".to_string()),
+                    java_name: Some("of".to_string()),
+                    erased_parameters: vec!["Ljava/lang/Object;".to_string()],
+                }),
+                args: vec![IrExpression::Identifier {
+                    name: "value".to_string(),
+                    java_type: JavaType::object(),
+                    span: dummy_span(),
+                }],
+                argument_style: CallArgumentStyle::Comma,
+                java_type: JavaType::object(),
+                span: dummy_span(),
+            }),
+            java_type: JavaType::object(),
+            span: dummy_span(),
+        }
+    }
+
+    #[test]
+    fn flat_map_hint_infers_list_of_factory() {
+        let lambda = lambda_returning_factory("java.util.List");
+        let hint = infer_flat_map_element_hint(&lambda);
+        assert_eq!(
+            hint,
+            Some(JavaType::Reference {
+                name: "java.util.List".to_string(),
+                generic_args: vec![JavaType::object()],
+            })
+        );
+    }
+
+    #[test]
+    fn flat_map_hint_infers_set_of_factory() {
+        let lambda = lambda_returning_factory("java.util.Set");
+        let hint = infer_flat_map_element_hint(&lambda);
+        assert_eq!(
+            hint,
+            Some(JavaType::Reference {
+                name: "java.util.Set".to_string(),
+                generic_args: vec![JavaType::object()],
+            })
+        );
     }
 }
 

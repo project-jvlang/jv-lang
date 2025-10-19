@@ -1162,7 +1162,11 @@ impl JavaCodeGenerator {
                     return lambda.clone();
                 }
 
-                if self.lambda_body_requires_sequence_stream(body_expr, element_hint) {
+                let inferred_hint = element_hint
+                    .cloned()
+                    .or_else(|| Self::infer_iterable_hint_from_expression(body_expr));
+
+                if self.lambda_body_requires_sequence_stream(body_expr, inferred_hint.as_ref()) {
                     let body_span = body_expr.span();
                     let sequence_identifier = IrExpression::Identifier {
                         name: "Sequence".to_string(),
@@ -1266,6 +1270,90 @@ impl JavaCodeGenerator {
             }
             _ => false,
         }
+    }
+
+    fn infer_iterable_hint_from_expression(expr: &IrExpression) -> Option<JavaType> {
+        if let Some(java_type) = Self::expression_java_type(expr) {
+            if Self::is_java_iterable_type_from_type(java_type) {
+                return Some(java_type.clone());
+            }
+        }
+
+        match expr {
+            IrExpression::MethodCall {
+                method_name,
+                resolved_target,
+                receiver,
+                java_type,
+                ..
+            } => {
+                if !Self::returns_object_like(java_type) {
+                    return None;
+                }
+
+                if let Some(target) = resolved_target {
+                    if let Some(owner) = target.owner.as_deref() {
+                        if Self::is_java_iterable_type(owner)
+                            && Self::is_iterable_factory_method(owner, method_name)
+                        {
+                            return Some(Self::iterable_hint_from_owner(owner));
+                        }
+                    }
+                }
+
+                if let Some(recv_expr) = receiver {
+                    if let Some(recv_type) = Self::expression_java_type(recv_expr) {
+                        if Self::is_java_iterable_type_from_type(recv_type) {
+                            if let Some(owner) = Self::iterable_type_name(recv_type) {
+                                if Self::is_iterable_factory_method(owner, method_name) {
+                                    return Some(Self::iterable_hint_from_owner(owner));
+                                }
+                            }
+                        }
+                    }
+                }
+
+                None
+            }
+            _ => None,
+        }
+    }
+
+    fn iterable_hint_from_owner(owner: &str) -> JavaType {
+        JavaType::Reference {
+            name: owner.to_string(),
+            generic_args: Vec::new(),
+        }
+    }
+
+    fn iterable_type_name(java_type: &JavaType) -> Option<&str> {
+        match java_type {
+            JavaType::Reference { name, .. } => Some(name.as_str()),
+            _ => None,
+        }
+    }
+
+    fn is_iterable_factory_method(owner: &str, method_name: &str) -> bool {
+        match method_name {
+            "of" | "copyOf" => true,
+            "from" | "fromIterable" | "fromSequence" | "fromStream" => {
+                Self::is_sequence_owner(owner)
+            }
+            _ => false,
+        }
+    }
+
+    fn is_sequence_owner(name: &str) -> bool {
+        let simple = name.rsplit('.').next().unwrap_or(name);
+        matches!(simple, "Sequence" | "SequenceCore")
+    }
+
+    fn returns_object_like(java_type: &JavaType) -> bool {
+        matches!(
+            java_type,
+            JavaType::Reference { name, .. }
+                if name == "java.lang.Object" || name == "Object"
+        )
     }
 
     fn is_java_iterable_type_from_type(java_type: &JavaType) -> bool {

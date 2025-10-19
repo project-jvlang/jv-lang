@@ -88,24 +88,22 @@ fn flat_map_list_of_stage() -> SequenceStage {
         generic_args: vec![JavaType::object()],
     };
     let body = IrExpression::MethodCall {
-        receiver: Some(Box::new(IrExpression::Identifier {
-            name: "List".to_string(),
-            java_type: JavaType::Reference {
-                name: "java.util.List".to_string(),
-                generic_args: vec![],
-            },
-            span: dummy_span(),
-        })),
+        receiver: None,
         method_name: "of".to_string(),
         java_name: None,
-        resolved_target: None,
+        resolved_target: Some(IrResolvedMethodTarget {
+            owner: Some("java.util.List".to_string()),
+            original_name: Some("of".to_string()),
+            java_name: Some("of".to_string()),
+            erased_parameters: vec!["Ljava/lang/Object;".to_string()],
+        }),
         args: vec![IrExpression::Identifier {
             name: "value".to_string(),
             java_type: JavaType::object(),
             span: dummy_span(),
         }],
         argument_style: jv_ast::CallArgumentStyle::Comma,
-        java_type: list_type.clone(),
+        java_type: JavaType::object(),
         span: dummy_span(),
     };
 
@@ -126,17 +124,9 @@ fn flat_map_list_of_stage() -> SequenceStage {
     }
 }
 
-fn flat_map_set_of_stage_with_object_type() -> SequenceStage {
-    let set_type = JavaType::Reference {
-        name: "java.util.Set".to_string(),
-        generic_args: vec![JavaType::object()],
-    };
+fn flat_map_set_of_stage_without_hint() -> SequenceStage {
     let body = IrExpression::MethodCall {
-        receiver: Some(Box::new(IrExpression::Identifier {
-            name: "Set".to_string(),
-            java_type: set_type.clone(),
-            span: dummy_span(),
-        })),
+        receiver: None,
         method_name: "of".to_string(),
         java_name: None,
         resolved_target: Some(IrResolvedMethodTarget {
@@ -166,7 +156,7 @@ fn flat_map_set_of_stage_with_object_type() -> SequenceStage {
 
     SequenceStage::FlatMap {
         lambda: Box::new(lambda),
-        element_hint: Some(set_type),
+        element_hint: None,
         flatten_depth: 1,
         span: dummy_span(),
     }
@@ -415,7 +405,7 @@ fn java25_sequence_flat_map_wraps_iterable_results_into_stream() {
 }
 
 #[test]
-fn java25_sequence_flat_map_uses_hint_and_resolved_owner_for_set_of() {
+fn java25_sequence_flat_map_uses_resolved_owner_fallback_for_set_of() {
     let terminal = SequenceTerminal {
         kind: SequenceTerminalKind::ToList,
         evaluation: SequenceTerminalEvaluation::Collector,
@@ -427,7 +417,7 @@ fn java25_sequence_flat_map_uses_hint_and_resolved_owner_for_set_of() {
 
     let expr = build_pipeline(
         collection_source("numbers"),
-        vec![flat_map_set_of_stage_with_object_type()],
+        vec![flat_map_set_of_stage_without_hint()],
         terminal,
         JavaType::Reference {
             name: "java.util.List".to_string(),

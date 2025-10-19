@@ -345,7 +345,10 @@ fn reduce_terminal_requires_non_empty_source() {
     assert!(terminal.requires_non_empty_source);
     let expected_optional = JavaType::Reference {
         name: "java.util.Optional".to_string(),
-        generic_args: vec![JavaType::object()],
+        generic_args: vec![JavaType::Reference {
+            name: "Integer".to_string(),
+            generic_args: vec![],
+        }],
     };
     assert_eq!(java_type, expected_optional);
 }
