@@ -682,7 +682,7 @@ fn reduce_terminal_returns_optional_without_guard() {
             accumulator: Box::new(reducer_lambda()),
         },
         evaluation: SequenceTerminalEvaluation::Reducer,
-        requires_non_empty_source: true,
+        requires_non_empty_source: false,
         specialization_hint: None,
         canonical_adapter: None,
         span: dummy_span(),

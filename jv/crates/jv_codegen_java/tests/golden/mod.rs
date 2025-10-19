@@ -124,7 +124,7 @@ pub(crate) fn reduce_terminal() -> SequenceTerminal {
             accumulator: Box::new(reduce_lambda()),
         },
         evaluation: SequenceTerminalEvaluation::Reducer,
-        requires_non_empty_source: true,
+        requires_non_empty_source: false,
         specialization_hint: None,
         canonical_adapter: None,
         span: dummy_span(),

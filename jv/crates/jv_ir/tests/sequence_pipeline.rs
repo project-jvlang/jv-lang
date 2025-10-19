@@ -320,7 +320,7 @@ fn count_expression() -> Expression {
 }
 
 #[test]
-fn reduce_terminal_requires_non_empty_source() {
+fn reduce_terminal_allows_empty_source() {
     let mut context = TransformContext::new();
     register_numbers(&mut context);
     let ir = transform_expression(reduce_expression(), &mut context)
@@ -342,7 +342,10 @@ fn reduce_terminal_requires_non_empty_source() {
         .expect("reduce pipeline should have terminal");
     assert!(matches!(terminal.kind, SequenceTerminalKind::Reduce { .. }));
     assert_eq!(terminal.evaluation, SequenceTerminalEvaluation::Reducer);
-    assert!(terminal.requires_non_empty_source);
+    assert!(
+        !terminal.requires_non_empty_source,
+        "reduce should tolerate empty sources and surface Optional"
+    );
     let expected_optional = JavaType::Reference {
         name: "java.util.Optional".to_string(),
         generic_args: vec![JavaType::Reference {

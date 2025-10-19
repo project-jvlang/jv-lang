@@ -670,14 +670,71 @@ fn infer_map_result_hint(lambda: &IrExpression) -> Option<JavaType> {
 
 fn ensure_long_count_expression(expr: IrExpression) -> IrExpression {
     let span = expr.span();
-    match extract_java_type(&expr) {
-        Some(JavaType::Primitive(name)) if name == "int" => IrExpression::Cast {
-            expr: Box::new(expr),
-            target_type: JavaType::Primitive("long".to_string()),
-            span,
+    let java_type = extract_java_type(&expr);
+
+    match java_type {
+        Some(JavaType::Primitive(name)) => match name.as_str() {
+            "long" => expr,
+            "int" | "short" | "byte" | "char" => build_long_cast(expr, span),
+            _ => expr,
         },
+        Some(JavaType::Reference { name, .. }) if is_number_like_type(&name) => {
+            build_number_long_value(expr, span)
+        }
+        Some(JavaType::Reference { name, .. }) if name == "java.lang.Character" => {
+            build_character_long_value(expr, span)
+        }
         _ => expr,
     }
+}
+
+fn build_long_cast(expr: IrExpression, span: Span) -> IrExpression {
+    IrExpression::Cast {
+        expr: Box::new(expr),
+        target_type: JavaType::Primitive("long".to_string()),
+        span,
+    }
+}
+
+fn build_number_long_value(expr: IrExpression, span: Span) -> IrExpression {
+    IrExpression::MethodCall {
+        receiver: Some(Box::new(expr)),
+        method_name: "longValue".to_string(),
+        java_name: Some("longValue".to_string()),
+        resolved_target: None,
+        args: Vec::new(),
+        argument_style: CallArgumentStyle::Comma,
+        java_type: JavaType::Primitive("long".to_string()),
+        span,
+    }
+}
+
+fn build_character_long_value(expr: IrExpression, span: Span) -> IrExpression {
+    let char_value = IrExpression::MethodCall {
+        receiver: Some(Box::new(expr)),
+        method_name: "charValue".to_string(),
+        java_name: Some("charValue".to_string()),
+        resolved_target: None,
+        args: Vec::new(),
+        argument_style: CallArgumentStyle::Comma,
+        java_type: JavaType::Primitive("char".to_string()),
+        span: span.clone(),
+    };
+
+    build_long_cast(char_value, span)
+}
+
+fn is_number_like_type(name: &str) -> bool {
+    matches!(
+        name,
+        "java.lang.Number"
+            | "java.lang.Byte"
+            | "java.lang.Short"
+            | "java.lang.Integer"
+            | "java.lang.Long"
+            | "java.lang.Float"
+            | "java.lang.Double"
+    )
 }
 
 fn infer_iterable_like_type(expr: &IrExpression) -> Option<JavaType> {
@@ -1142,7 +1199,7 @@ fn build_terminal(
                     accumulator: Box::new(accumulator_ir),
                 },
                 SequenceTerminalEvaluation::Reducer,
-                true,
+                false,
                 segment.span.clone(),
             ))
         }

@@ -19,11 +19,11 @@ fun <T> Stream<T>.filter(predicate: (T) -> Boolean): Stream<T> {
 }
 
 fun <T> Stream<T>.take(count: Int): Stream<T> {
-    return this.limit(count + 0L)
+    return this.limit(count)
 }
 
 fun <T> Stream<T>.drop(count: Int): Stream<T> {
-    return this.skip(count + 0L)
+    return this.skip(count)
 }
 
 fun <T, R> Stream<T>.flatMapIterable(transform: (T) -> Iterable<R>): Stream<R> {
@@ -57,14 +57,13 @@ fun <T, R> Stream<T>.fold(initial: R, operation: (R, T) -> R): R {
     return accumulator
 }
 
-fun <T> Stream<T>.reduce(operation: (T, T) -> T): T {
-    val reduced = this.reduce { left right ->
+fun <T> Stream<T>.reduce(operation: (T, T) -> T): Optional<T> {
+    return this.reduce { left right ->
         operation(
             left
             right
         )
     }
-    return reduced.orElseThrow { IllegalArgumentException("Stream reduce() on empty source") }
 }
 
 fun <T> Stream<T>.countElements(): Long {
@@ -171,11 +170,11 @@ fun <T> Iterable<T>.filter(predicate: (T) -> Boolean): Stream<T> {
 }
 
 fun <T> Iterable<T>.take(count: Int): Stream<T> {
-    return this.toStream().limit(count + 0L)
+    return this.toStream().limit(count)
 }
 
 fun <T> Iterable<T>.drop(count: Int): Stream<T> {
-    return this.toStream().skip(count + 0L)
+    return this.toStream().skip(count)
 }
 
 fun <T, R> Iterable<T>.flatMapIterable(transform: (T) -> Iterable<R>): Stream<R> {
@@ -209,7 +208,7 @@ fun <T, R> Iterable<T>.fold(initial: R, operation: (R, T) -> R): R {
     )
 }
 
-fun <T> Iterable<T>.reduce(operation: (T, T) -> T): T {
+fun <T> Iterable<T>.reduce(operation: (T, T) -> T): Optional<T> {
     return this.toStream().reduce(operation)
 }
 
