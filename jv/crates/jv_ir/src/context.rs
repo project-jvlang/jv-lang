@@ -164,7 +164,9 @@ impl TransformContext {
         receiver_type: Option<JavaType>,
         argument_types: Vec<JavaType>,
     ) {
+        let mut argument_types = argument_types;
         if let IrExpression::MethodCall {
+            args,
             method_name,
             java_name,
             resolved_target,
@@ -178,6 +180,14 @@ impl TransformContext {
                 if let Some(inferred) = infer_map_method_return_type(method_name, receiver) {
                     *java_type = inferred;
                 }
+
+                complete_map_method_call(
+                    method_name,
+                    args,
+                    &mut argument_types,
+                    receiver,
+                    java_type,
+                );
             }
 
             let canonical_java_name = java_name.clone().unwrap_or_else(|| method_name.clone());
@@ -486,6 +496,68 @@ fn infer_map_method_return_type(method_name: &str, receiver: &JavaType) -> Optio
     }
 }
 
+fn complete_map_method_call(
+    method_name: &str,
+    args: &mut [IrExpression],
+    argument_types: &mut Vec<JavaType>,
+    receiver: &JavaType,
+    return_type: &mut JavaType,
+) {
+    let Some((key_type, value_type)) = map_key_value_types(receiver) else {
+        return;
+    };
+
+    match method_name {
+        "get" | "containsKey" => {
+            ensure_argument_type(args, argument_types, 0, &key_type);
+        }
+        "containsValue" => {
+            ensure_argument_type(args, argument_types, 0, &value_type);
+        }
+        "put" | "putIfAbsent" => {
+            ensure_argument_type(args, argument_types, 0, &key_type);
+            ensure_argument_type(args, argument_types, 1, &value_type);
+        }
+        "remove" => {
+            ensure_argument_type(args, argument_types, 0, &key_type);
+            if args.len() > 1 {
+                ensure_argument_type(args, argument_types, 1, &value_type);
+            }
+        }
+        "computeIfAbsent" => {
+            ensure_argument_type(args, argument_types, 0, &key_type);
+            ensure_unary_lambda_argument(args, argument_types, 1, &key_type, &value_type);
+            *return_type = value_type;
+        }
+        "compute" | "computeIfPresent" => {
+            ensure_argument_type(args, argument_types, 0, &key_type);
+            ensure_bifunction_lambda_argument(
+                args,
+                argument_types,
+                1,
+                &key_type,
+                &value_type,
+                &value_type,
+            );
+            *return_type = value_type;
+        }
+        "merge" => {
+            ensure_argument_type(args, argument_types, 0, &key_type);
+            ensure_argument_type(args, argument_types, 1, &value_type);
+            ensure_bifunction_lambda_argument(
+                args,
+                argument_types,
+                2,
+                &value_type,
+                &value_type,
+                &value_type,
+            );
+            *return_type = value_type;
+        }
+        _ => {}
+    }
+}
+
 fn is_map_type(java_type: &JavaType) -> bool {
     match java_type {
         JavaType::Reference { name, .. } => {
@@ -509,6 +581,154 @@ fn map_value_type(java_type: &JavaType) -> Option<JavaType> {
     match java_type {
         JavaType::Reference { generic_args, .. } => generic_args.get(1).cloned(),
         _ => None,
+    }
+}
+
+fn map_key_value_types(java_type: &JavaType) -> Option<(JavaType, JavaType)> {
+    match java_type {
+        JavaType::Reference { generic_args, .. } if generic_args.len() >= 2 => {
+            Some((generic_args[0].clone(), generic_args[1].clone()))
+        }
+        _ => None,
+    }
+}
+
+fn ensure_argument_type(
+    args: &mut [IrExpression],
+    argument_types: &mut Vec<JavaType>,
+    index: usize,
+    expected: &JavaType,
+) {
+    if index >= args.len() || index >= argument_types.len() {
+        return;
+    }
+
+    if argument_types[index] != *expected {
+        argument_types[index] = expected.clone();
+    }
+
+    set_expression_type(&mut args[index], expected.clone());
+}
+
+fn ensure_unary_lambda_argument(
+    args: &mut [IrExpression],
+    argument_types: &mut Vec<JavaType>,
+    index: usize,
+    param_type: &JavaType,
+    return_type: &JavaType,
+) {
+    if index >= args.len() || index >= argument_types.len() {
+        return;
+    }
+
+    if let IrExpression::Lambda {
+        functional_interface,
+        param_types,
+        java_type,
+        ..
+    } = &mut args[index]
+    {
+        if param_types.len() != 1 || param_types[0] != *param_type {
+            param_types.clear();
+            param_types.push(param_type.clone());
+        }
+
+        let functional_type = JavaType::Functional {
+            interface_name: functional_interface.clone(),
+            param_types: vec![param_type.clone()],
+            return_type: Box::new(return_type.clone()),
+        };
+
+        if *java_type != functional_type {
+            *java_type = functional_type.clone();
+        }
+
+        if argument_types[index] != functional_type {
+            argument_types[index] = functional_type;
+        }
+    } else {
+        ensure_argument_type(args, argument_types, index, return_type);
+    }
+}
+
+fn ensure_bifunction_lambda_argument(
+    args: &mut [IrExpression],
+    argument_types: &mut Vec<JavaType>,
+    index: usize,
+    first_param: &JavaType,
+    second_param: &JavaType,
+    return_type: &JavaType,
+) {
+    if index >= args.len() || index >= argument_types.len() {
+        return;
+    }
+
+    if let IrExpression::Lambda {
+        functional_interface,
+        param_types,
+        java_type,
+        ..
+    } = &mut args[index]
+    {
+        let expected_params = [first_param.clone(), second_param.clone()];
+
+        if param_types.len() != expected_params.len()
+            || param_types[0] != expected_params[0]
+            || param_types[1] != expected_params[1]
+        {
+            param_types.clear();
+            param_types.extend(expected_params.into_iter());
+        }
+
+        let functional_type = JavaType::Functional {
+            interface_name: functional_interface.clone(),
+            param_types: vec![first_param.clone(), second_param.clone()],
+            return_type: Box::new(return_type.clone()),
+        };
+
+        if *java_type != functional_type {
+            *java_type = functional_type.clone();
+        }
+
+        if argument_types[index] != functional_type {
+            argument_types[index] = functional_type;
+        }
+    } else {
+        ensure_argument_type(args, argument_types, index, return_type);
+    }
+}
+
+fn set_expression_type(expr: &mut IrExpression, java_type: JavaType) {
+    match expr {
+        IrExpression::Identifier { java_type: ty, .. }
+        | IrExpression::MethodCall { java_type: ty, .. }
+        | IrExpression::FieldAccess { java_type: ty, .. }
+        | IrExpression::ArrayAccess { java_type: ty, .. }
+        | IrExpression::Binary { java_type: ty, .. }
+        | IrExpression::Unary { java_type: ty, .. }
+        | IrExpression::Assignment { java_type: ty, .. }
+        | IrExpression::Conditional { java_type: ty, .. }
+        | IrExpression::Block { java_type: ty, .. }
+        | IrExpression::ObjectCreation { java_type: ty, .. }
+        | IrExpression::SequencePipeline { java_type: ty, .. }
+        | IrExpression::Switch { java_type: ty, .. }
+        | IrExpression::NullSafeOperation { java_type: ty, .. }
+        | IrExpression::CompletableFuture { java_type: ty, .. }
+        | IrExpression::VirtualThread { java_type: ty, .. }
+        | IrExpression::TryWithResources { java_type: ty, .. }
+        | IrExpression::This { java_type: ty, .. }
+        | IrExpression::Super { java_type: ty, .. } => {
+            *ty = java_type;
+        }
+        IrExpression::Cast { target_type, .. } => {
+            *target_type = java_type;
+        }
+        IrExpression::Lambda { .. }
+        | IrExpression::Literal(_, _)
+        | IrExpression::RegexPattern { .. }
+        | IrExpression::ArrayCreation { .. }
+        | IrExpression::StringFormat { .. }
+        | IrExpression::InstanceOf { .. } => {}
     }
 }
 

@@ -249,17 +249,12 @@ fun <T, K> Iterable<T>.groupBy(keySelector: (T) -> K): Map<K, List<T>> {
     val elements : List<T> = this.toList()
     for (element in elements) {
         val key = keySelector(element)
-        var bucket = result.get(key)
-        when (bucket == null) {
-            true -> {
-                bucket = ArrayList<T>()
-                result.put(
-                    key
-                    bucket
-                )
+        val bucket = result.computeIfAbsent(
+            key
+            { ignored ->
+                ArrayList<T>()
             }
-            else -> {}
-        }
+        )
         bucket.add(element)
     }
     return result

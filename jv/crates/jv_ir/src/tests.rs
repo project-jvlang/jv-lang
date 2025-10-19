@@ -243,17 +243,97 @@ mod tests {
             .expect("computeIfAbsent call should lower");
 
         match ir {
-            IrExpression::MethodCall { java_type, .. } => {
-                let expected = JavaType::Reference {
+            IrExpression::MethodCall {
+                args, java_type, ..
+            } => {
+                let list_of_string = JavaType::Reference {
                     name: "java.util.List".to_string(),
                     generic_args: vec![JavaType::Reference {
                         name: "String".to_string(),
                         generic_args: vec![],
                     }],
                 };
-                assert_eq!(java_type, expected);
+                assert_eq!(java_type, list_of_string);
+
+                assert_eq!(args.len(), 2);
+
+                match &args[0] {
+                    IrExpression::Identifier { java_type, .. } => {
+                        let string_type = JavaType::Reference {
+                            name: "String".to_string(),
+                            generic_args: vec![],
+                        };
+                        assert_eq!(*java_type, string_type);
+                    }
+                    other => panic!("expected identifier for key argument, got {:?}", other),
+                }
+
+                match &args[1] {
+                    IrExpression::Lambda {
+                        functional_interface,
+                        param_types,
+                        java_type,
+                        ..
+                    } => {
+                        assert_eq!(functional_interface, "java.util.function.Function");
+                        let string_type = JavaType::Reference {
+                            name: "String".to_string(),
+                            generic_args: vec![],
+                        };
+                        assert_eq!(param_types, &vec![string_type.clone()]);
+
+                        match java_type {
+                            JavaType::Functional {
+                                interface_name,
+                                param_types: params,
+                                return_type,
+                            } => {
+                                assert_eq!(interface_name, "java.util.function.Function");
+                                assert_eq!(params, &vec![string_type.clone()]);
+                                assert_eq!(**return_type, list_of_string);
+                            }
+                            other => panic!("expected functional type for lambda, got {:?}", other),
+                        }
+                    }
+                    other => panic!(
+                        "expected lambda argument for computeIfAbsent, got {:?}",
+                        other
+                    ),
+                }
             }
             other => panic!("expected method call IR, got {:?}", other),
+        }
+
+        assert_eq!(context.method_calls.len(), 1);
+        let record = &context.method_calls[0];
+        assert_eq!(record.argument_types.len(), 2);
+
+        let string_type = JavaType::Reference {
+            name: "String".to_string(),
+            generic_args: vec![],
+        };
+        assert_eq!(record.argument_types[0], string_type);
+
+        match &record.argument_types[1] {
+            JavaType::Functional {
+                interface_name,
+                param_types,
+                return_type,
+            } => {
+                assert_eq!(interface_name, "java.util.function.Function");
+                assert_eq!(param_types, &vec![string_type.clone()]);
+                assert_eq!(
+                    **return_type,
+                    JavaType::Reference {
+                        name: "java.util.List".to_string(),
+                        generic_args: vec![string_type],
+                    }
+                );
+            }
+            other => panic!(
+                "expected functional type recorded for lambda, got {:?}",
+                other
+            ),
         }
     }
 
