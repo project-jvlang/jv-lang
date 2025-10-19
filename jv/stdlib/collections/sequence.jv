@@ -218,27 +218,27 @@ fun <T> Iterable<T>.countElements(): Long {
 }
 
 fun Iterable<Byte>.sum(): Int {
-    return this.toStream().sum()
+    return Sequence.sumIntFamily(Sequence.toStream(this))
 }
 
 fun Iterable<Short>.sum(): Int {
-    return this.toStream().sum()
+    return Sequence.sumIntFamily(Sequence.toStream(this))
 }
 
 fun Iterable<Int>.sum(): Int {
-    return this.toStream().sum()
+    return Sequence.sumIntFamily(Sequence.toStream(this))
 }
 
 fun Iterable<Long>.sum(): Long {
-    return this.toStream().sum()
+    return Sequence.sumLongFamily(Sequence.toStream(this))
 }
 
 fun Iterable<Float>.sum(): Float {
-    return this.toStream().sum()
+    return Sequence.sumFloatFamily(Sequence.toStream(this))
 }
 
 fun Iterable<Double>.sum(): Double {
-    return this.toStream().sum()
+    return Sequence.sumDoubleFamily(Sequence.toStream(this))
 }
 
 fun <T> Iterable<T>.forEach(action: (T) -> Unit) {

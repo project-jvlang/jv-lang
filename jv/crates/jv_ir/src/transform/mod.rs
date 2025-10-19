@@ -1,4 +1,3 @@
-use self::utils::{extract_java_type, ir_expression_span};
 use crate::context::TransformContext;
 use crate::error::TransformError;
 use crate::naming::method_erasure::apply_method_erasure;
@@ -26,6 +25,7 @@ mod type_system;
 mod utils;
 mod when_lowering_planner;
 
+pub(crate) use self::utils::{extract_java_type, ir_expression_span};
 pub use crate::types::{
     DataFormat, IrSampleDeclaration, PrimitiveType, SampleFetchError, SampleFetchRequest,
     SampleFetchResult, SampleMode, SampleRecordDescriptor, SampleRecordField, SampleSourceKind,
