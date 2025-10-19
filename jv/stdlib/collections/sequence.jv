@@ -241,14 +241,15 @@ fun <T> Stream<T>.sum(): Double
  */
 private fun <T> normalizeIntFamilyValue(value: T): Int
     where T : int, T : char, T : short {
-    return when (value) {
-        is Character -> {
-            val raw = value.charValue()
-            raw + 0
+    when (value is Character) {
+        true -> {
+            val character = value as Character
+            val raw = character.charValue()
+            return raw + 0
         }
         else -> {
             val number = value as Number
-            number.intValue()
+            return number.intValue()
         }
     }
 }

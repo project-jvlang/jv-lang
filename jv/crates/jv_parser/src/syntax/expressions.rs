@@ -415,6 +415,7 @@ fn literal_parser() -> impl ChumskyParser<Token, Expression, Error = Simple<Toke
     filter_map(|span, token: Token| match &token.token_type {
         TokenType::String(_)
         | TokenType::Number(_)
+        | TokenType::Character(_)
         | TokenType::Boolean(_)
         | TokenType::Null
         | TokenType::RegexLiteral(_) => Ok(token),
@@ -716,6 +717,7 @@ fn build_literal_expression(token: Token) -> Expression {
             let rendered = rebuild_number_literal(&token, value);
             Expression::Literal(Literal::Number(rendered), span)
         }
+        TokenType::Character(value) => Expression::Literal(Literal::Character(*value), span),
         TokenType::Boolean(value) => Expression::Literal(Literal::Boolean(*value), span),
         TokenType::Null => Expression::Literal(Literal::Null, span),
         TokenType::RegexLiteral(_) => {

@@ -819,7 +819,8 @@ fn test_edge_cases_and_errors() {
         ("//", true),           // Just comment
         ("/* */", true),        // Just block comment
         ("\"\"", true),         // Empty string literal
-        ("''", false),          // Single quotes not supported
+        ("'A'", true),          // Character literal
+        ("''", false),          // Empty character literal should fail
         ("123.456.789", false), // Invalid number
         ("@invalid", true),     // Annotation tokens should be supported
     ];
@@ -838,6 +839,23 @@ fn test_edge_cases_and_errors() {
             );
         }
     }
+}
+
+#[test]
+fn test_character_literal_tokenization() {
+    let mut lexer = Lexer::new("'A'".to_string());
+    let tokens = lexer.tokenize().expect("character literal should tokenize");
+    assert!(
+        matches!(
+            tokens.first().map(|t| &t.token_type),
+            Some(TokenType::Character('A'))
+        ),
+        "unexpected token sequence: {:?}",
+        tokens
+            .iter()
+            .map(|t| t.token_type.clone())
+            .collect::<Vec<_>>()
+    );
 }
 
 #[test]

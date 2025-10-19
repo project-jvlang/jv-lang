@@ -475,7 +475,7 @@ impl CharScanner {
 
     fn consume_numeric_suffix(&mut self, source: &str) -> Result<(), LexError> {
         if let Some(suffix) = self.peek_char_from(source) {
-            if matches!(suffix, 'f' | 'F' | 'd' | 'D' | 'l' | 'L') {
+            if matches!(suffix, 'f' | 'F' | 'd' | 'D' | 'l' | 'L' | 's' | 'S') {
                 let next_is_ident = self
                     .peek_char_offset(source, 1)
                     .map(Self::is_identifier_continue)
@@ -718,10 +718,6 @@ impl CharScanner {
         let start_column = self.position.column;
         let remaining = self.remaining(source);
 
-        if remaining.starts_with('\'') {
-            return Err(LexError::UnexpectedChar('\'', start_line, start_column));
-        }
-
         let (opening, closing, is_raw) = if remaining.starts_with("```") {
             ("```", "```", true)
         } else if remaining.starts_with("\"\"\"") {
@@ -769,6 +765,7 @@ impl CharScanner {
             token,
             TokenType::Identifier(_)
                 | TokenType::Number(_)
+                | TokenType::Character(_)
                 | TokenType::String(_)
                 | TokenType::StringInterpolation(_)
                 | TokenType::StringEnd

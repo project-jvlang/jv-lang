@@ -447,6 +447,94 @@ include = ["src/**/*.jv"]
 }
 
 #[test]
+fn primitive_int_family_sum_pipeline_executes_via_cli() {
+    let _guard = current_dir_lock().lock().unwrap();
+    let temp_dir = TempDirGuard::new("primitive-sum-specialization");
+    let project_root_path = temp_dir.path();
+    let manifest_path = project_root_path.join("jv.toml");
+    fs::write(
+        &manifest_path,
+        r#"[package]
+name = "primitive-sum"
+version = "0.1.0"
+
+[package.dependencies]
+
+[project]
+entrypoint = "src/main.jv"
+
+[project.sources]
+include = ["src/**/*.jv"]
+"#,
+    )
+    .expect("write manifest");
+
+    let src_dir = project_root_path.join("src");
+    fs::create_dir_all(&src_dir).expect("create src directory");
+    let entrypoint_path = src_dir.join("main.jv");
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../tests/fixtures/sequence/primitive_sum_specialization.jv");
+    fs::copy(&fixture, &entrypoint_path).expect("copy fixture source");
+
+    for target in [JavaTarget::Java25, JavaTarget::Java21] {
+        let project_root = pipeline::project::locator::ProjectRoot::new(
+            project_root_path.to_path_buf(),
+            manifest_path.clone(),
+        );
+        let settings = pipeline::project::manifest::ManifestLoader::load(&manifest_path)
+            .expect("manifest loads");
+        let layout =
+            pipeline::project::layout::ProjectLayout::from_settings(&project_root, &settings)
+                .expect("layout resolves");
+
+        let output_dir = project_root_path.join(format!("target-{}", target.as_str()));
+
+        let overrides = pipeline::CliOverrides {
+            entrypoint: Some(entrypoint_path.clone()),
+            output: Some(output_dir.clone()),
+            java_only: true,
+            check: false,
+            format: false,
+            target: Some(target),
+            clean: false,
+            perf: false,
+            emit_types: false,
+            verbose: false,
+            emit_telemetry: false,
+            parallel_inference: false,
+            inference_workers: None,
+            constraint_batch: None,
+        };
+
+        let plan =
+            pipeline::BuildOptionsFactory::compose(project_root, settings, layout, overrides)
+                .expect("plan composition succeeds");
+
+        let artifacts =
+            pipeline::compile(&plan).expect("primitive specialization fixture should compile");
+
+        let mut java_source = String::new();
+        for file in &artifacts.java_files {
+            let content = fs::read_to_string(file).expect("read generated java source");
+            java_source.push_str(&content);
+        }
+
+        assert!(
+            java_source.contains(".mapToInt("),
+            "expected mapToInt specialization for target {} in generated Java:\n{}",
+            target.as_str(),
+            java_source
+        );
+        assert!(
+            java_source.contains("charValue()"),
+            "expected Character handling branch in canonical adapter for target {}:\n{}",
+            target.as_str(),
+            java_source
+        );
+    }
+}
+
+#[test]
 fn stdlib_flatmap_iterable_signature_is_generated_correctly() {
     let temp_dir = TempDirGuard::new("sequence-flatmap-signature");
     let root_path = temp_dir.path();

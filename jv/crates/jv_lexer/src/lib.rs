@@ -14,6 +14,7 @@ pub enum TokenType {
     String(String),
     StringInterpolation(String), // "${...}" content
     Number(String),              // Store as string to avoid f64 Eq issues, parse later
+    Character(char),
     Identifier(String),
     Boolean(bool),
     RegexLiteral(String),
@@ -172,11 +173,12 @@ pub enum StringDelimiterKind {
     DoubleQuote,
     TripleQuote,
     BacktickBlock,
+    SingleQuote,
 }
 
 impl StringDelimiterKind {
     fn allows_interpolation(self) -> bool {
-        true
+        !matches!(self, StringDelimiterKind::SingleQuote)
     }
 
     fn normalize_indentation(self) -> bool {

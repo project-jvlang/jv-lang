@@ -3,7 +3,7 @@ use crate::{
         context::LexerContext,
         types::{EmissionPlan, NormalizedToken, RawTokenKind},
     },
-    LexError, TokenMetadata, TokenType,
+    LexError, StringDelimiterKind, TokenMetadata, TokenType,
 };
 
 use super::{ClassificationModule, ClassificationState};
@@ -37,6 +37,24 @@ impl ClassificationModule for StringInterpolationModule {
             .any(|meta| matches!(meta, TokenMetadata::StringLiteral(_)));
 
         if !has_literal_meta {
+            return Ok(());
+        }
+
+        let delimiter_kind = state.metadata().iter().find_map(|meta| {
+            if let TokenMetadata::StringLiteral(data) = meta {
+                Some(data.delimiter)
+            } else {
+                None
+            }
+        });
+
+        if matches!(delimiter_kind, Some(StringDelimiterKind::SingleQuote)) {
+            let mut chars = token.normalized_text.chars();
+            if let (Some(ch), None) = (chars.next(), chars.next()) {
+                state.set_token_type(TokenType::Character(ch));
+            } else {
+                state.set_token_type(TokenType::Invalid(token.raw.text.to_string()));
+            }
             return Ok(());
         }
 

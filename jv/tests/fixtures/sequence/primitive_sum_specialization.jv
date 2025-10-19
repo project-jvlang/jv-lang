@@ -1,0 +1,19 @@
+import jv.collections.*
+
+fun main(): Unit {
+    val characters = ['A' 'B' 'C']
+
+    val charSum = Sequence.sum(characters.stream())
+    println(charSum)
+
+    val shorts = [5s 7s 9s]
+
+    val shortSum = Sequence.sum(shorts.stream())
+    println(shortSum)
+
+    val numbers = [10 20 30]
+    val intSum = numbers
+        .map { value -> value }
+        .sum()
+    println(intSum)
+}

@@ -24,6 +24,7 @@ pub(crate) fn when_pattern_parser(
                 token.token_type,
                 TokenType::String(_)
                     | TokenType::Number(_)
+                    | TokenType::Character(_)
                     | TokenType::Boolean(_)
                     | TokenType::Null
                     | TokenType::RegexLiteral(_)
@@ -34,6 +35,9 @@ pub(crate) fn when_pattern_parser(
             match token.token_type {
                 TokenType::String(value) => Pattern::Literal(Literal::String(value), token_span),
                 TokenType::Number(value) => Pattern::Literal(Literal::Number(value), token_span),
+                TokenType::Character(value) => {
+                    Pattern::Literal(Literal::Character(value), token_span)
+                }
                 TokenType::Boolean(value) => Pattern::Literal(Literal::Boolean(value), token_span),
                 TokenType::Null => Pattern::Literal(Literal::Null, token_span),
                 TokenType::RegexLiteral(_) => {

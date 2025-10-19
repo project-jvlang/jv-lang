@@ -1122,7 +1122,6 @@ fn primitive_specialized_pipeline_renders_character_casts() {
         class_java.contains("sumCharsAsInt$IntVersion"),
         "primitive return metadata should trigger Int specialization suffix\n\nGenerated output:\n{class_java}"
     );
-
 }
 
 #[test]

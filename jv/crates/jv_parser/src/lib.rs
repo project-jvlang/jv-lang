@@ -192,6 +192,7 @@ fn allows_call_suffix(token_type: &TokenType) -> bool {
         token_type,
         TokenType::Identifier(_)
             | TokenType::Number(_)
+            | TokenType::Character(_)
             | TokenType::String(_)
             | TokenType::StringInterpolation(_)
             | TokenType::Boolean(_)

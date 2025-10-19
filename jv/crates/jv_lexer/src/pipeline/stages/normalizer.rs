@@ -298,7 +298,15 @@ impl Normalizer {
             .provisional_metadata
             .push(TokenMetadata::StringLiteral(string_metadata));
 
-        if let Some(segments) = self.collect_interpolation_segments(inner, &token.span)? {
+        if matches!(delimiter_kind, StringDelimiterKind::SingleQuote) {
+            if normalized.chars().count() != 1 {
+                return Err(LexError::UnexpectedChar(
+                    '\'',
+                    token.span.start.line,
+                    token.span.start.column,
+                ));
+            }
+        } else if let Some(segments) = self.collect_interpolation_segments(inner, &token.span)? {
             metadata
                 .provisional_metadata
                 .push(TokenMetadata::StringInterpolation { segments });
@@ -470,7 +478,7 @@ impl Normalizer {
         } else if lexeme.starts_with("\"") {
             (StringDelimiterKind::DoubleQuote, 1)
         } else if lexeme.starts_with("'") {
-            (StringDelimiterKind::DoubleQuote, 1)
+            (StringDelimiterKind::SingleQuote, 1)
         } else {
             (StringDelimiterKind::DoubleQuote, 0)
         }
@@ -627,6 +635,7 @@ impl Normalizer {
             'f' | 'F' if !has_radix_prefix => Some(last),
             'd' | 'D' if !has_radix_prefix => Some(last),
             'l' | 'L' => Some(last),
+            's' | 'S' if !has_radix_prefix => Some(last),
             _ => None,
         };
 
@@ -663,7 +672,10 @@ impl NormalizerStage for Normalizer {
                 Ok(self.finalize_token(token, PreMetadata::default(), normalized_text))
             }
             RawTokenKind::Symbol => {
-                if token.text.starts_with('"') || token.text.starts_with("```") {
+                if token.text.starts_with('"')
+                    || token.text.starts_with("```")
+                    || token.text.starts_with('\'')
+                {
                     self.normalize_string(token)
                 } else {
                     self.normalize_symbol(token, ctx)
@@ -817,6 +829,8 @@ mod tests {
             ("10D", "10", Some('D')),
             ("42l", "42", Some('l')),
             ("42L", "42", Some('L')),
+            ("5s", "5", Some('s')),
+            ("5S", "5", Some('S')),
             ("7.5", "7.5", None),
             ("123", "123", None),
         ];

@@ -4,6 +4,7 @@
 - Kotlin互換のコレクション拡張関数（`map`/`filter`/`flatMap`/`reduce`/`fold`/`associate`/`groupBy`/`sorted`/`take`/`drop` など）を jv 標準ライブラリ `stdlib/collections/sequence.jv` に追加しました。
 - `asSequence()` 呼び出しは不要で、`Iterable` や空白区切り配列 `[1 2 3]` に対して変換操作を記述すると暗黙的に遅延 Sequence パイプラインが構築されます。
 - 終端操作（`toList`/`toSet`/`count`/`sum`/`forEach` など）を呼ぶまで評価は遅延され、実行時には Java 25 `Stream` API または逐次 `for` ループへデシュガリングされます。
+- `Stream<T>.sum()` はプリミティブ境界 (`where T : int, T : char, T : short`) を解釈し、`char`/`short` を `int` 系へ正規化する補助ラムダを自動合成します。
 - Java 21 互換出力では `Collectors` ベースのフォールバックを自動生成し、ゼロランタイム依存を維持します。
 
 ## クイックスタート
@@ -45,7 +46,7 @@ catalog = products
 | `groupBy { ... }` | `groupBy { item -> item.category }` | `.collect(Collectors.groupingBy(...))` | 同左 | 値は `List` で収集 |
 | `associate { k to v }` | `associate { entry -> entry.id to entry }` | `.collect(Collectors.toMap(...))` | 同左 | キー重複は後勝ち |
 | `count()` | `count()` | `.count()` | `.count()` | long を返す |
-| `sum()` | `sum()` | `mapToDouble(...).sum()` など | 同左 | 数値型ごとに最適化 |
+| `sum()` | `sum()` | `mapToInt(...).sum()` / `mapToLong(...).sum()` / `mapToDouble(...).sum()` | 同左 | `char`/`short` は `int` 系へ正規化し、`Character` 判定ガードを自動生成 |
 | `forEach { ... }` | `forEach { value -> println(value) }` | `.forEach(value -> println(value))` | 同左 | 終端副作用操作 |
 
 ## 評価モデルと型遷移
@@ -53,6 +54,11 @@ catalog = products
 - 終端操作を呼ぶと即時評価に切り替わり、`List`/`Set`/`Map` などの不変コレクションが生成されます。
 - 空配列リテラルや JSON 配列 (`json.nodes`) からのチェーンも同じ規約で動作します。
 - `Sequence` から `Stream` へ、また `Stream` から `Sequence` へのブリッジを行う際は単一評価ポリシーを守り、`Stream` を二度使わないでください。
+
+### プリミティブ sum の正規化
+- `Stream<T>.sum()` は `where T : int, T : char, T : short` を満たす場合にカノニカル型として `int` を採用し、`char`/`short` などの互換プリミティブをボクシング／アンボクシングなしで扱います。
+- 生成 Java では `mapToInt(value -> ...)` が使用され、`Character` インスタンスを検出した場合のみ `charValue()` → `int` 変換を行い、その他は `Number.intValue()` へフォールバックします。
+- これにより `Stream<Character>.sum()` と `Stream<Int>.sum()` が同一の呼び心地で利用でき、Sequence パイプラインから得られたヒントも同じ最適化に接続されます。
 
 ## Java 25 / Java 21 フォールバック
 | 操作 | Java 25 出力 | Java 21 フォールバック | 備考 |
