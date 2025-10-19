@@ -1,8 +1,5 @@
 package jv.collections
 
-import java.lang.Double
-import java.lang.IllegalArgumentException
-import java.lang.Number
 import java.util.*
 import java.util.stream.*
 
@@ -201,42 +198,42 @@ fun SequenceCore<Double>.sum(): Double {
 
 /**
  * Primitive-specialized terminal adapters for raw JDK streams used by SequenceCore bridging.
+ *
+ * The generic constraints rely on primitive bounds so that `Stream<Int>` as well as
+ * alias families (`Stream<Char>`, `Stream<Short>`, etc.) share the same UX.
  */
-fun Stream<Byte>.sum(): Int {
-    return this
-        .mapToInt { candidate -> candidate.intValue() }
-        .sum()
-}
-
-fun Stream<Short>.sum(): Int {
-    return this
-        .mapToInt { candidate -> candidate.intValue() }
-        .sum()
-}
-
-fun Stream<Int>.sum(): Int {
+fun <T> Stream<T>.sum(): Int
+    where T : int, T : char, T : short {
     return this
         .mapToInt { candidate -> candidate }
         .sum()
 }
 
-fun Stream<Long>.sum(): Long {
+fun <T> Stream<T>.sum(): Long
+    where T : long {
     return this
         .mapToLong { candidate -> candidate }
         .sum()
 }
 
-fun Stream<Float>.sum(): Float {
-    val total = this
-        .mapToDouble { candidate -> candidate }
-        .sum()
-    return Double.valueOf(total).floatValue()
+fun <T> Stream<T>.sum(): Float
+    where T : float {
+    val identity = 0.0f
+    val accumulated = this.reduce(
+        identity
+        { running value -> running + value }
+    )
+    return accumulated
 }
 
-fun Stream<Double>.sum(): Double {
-    return this
-        .mapToDouble { candidate -> candidate }
-        .sum()
+fun <T> Stream<T>.sum(): Double
+    where T : double {
+    val identity = 0.0
+    val accumulated = this.reduce(
+        identity
+        { running value -> running + value }
+    )
+    return accumulated
 }
 
 /**
