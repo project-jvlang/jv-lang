@@ -18,6 +18,6 @@ fun main(): Unit {
     println(intSum)
 
     val longs = [100L 200L 300L]
-    val longSum = longs.stream().sumLongFamily()
+    val longSum = longs.sum()
     println(longSum)
 }
