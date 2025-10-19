@@ -3,12 +3,12 @@ import jv.collections.*
 fun main(): Unit {
     val characters = ['A' 'B' 'C']
 
-    val charSum = characters.stream().sumIntFamily()
+    val charSum = characters.sum()
     println(charSum)
 
     val shorts = [5s 7s 9s]
 
-    val shortSum = shorts.stream().sumIntFamily()
+    val shortSum = shorts.sum()
     println(shortSum)
 
     val numbers = [10 20 30]
