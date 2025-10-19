@@ -252,9 +252,9 @@ fun validatePrimitiveStreamSumSpecialization() {
         java.lang.Character.valueOf('C')
     ]
 
-    charSum = charValues.stream().sum()
+    charSum = charValues.stream().sumIntFamily()
     if (charSum != (65 + 66 + 67)) {
-        throw IllegalStateException("stream.sum expected 198 for Character aliases but was ${charSum}")
+        throw IllegalStateException("sumIntFamily expected 198 for Character aliases but was ${charSum}")
     }
 
     shortValues = [
@@ -263,8 +263,32 @@ fun validatePrimitiveStreamSumSpecialization() {
         java.lang.Short.valueOf("9")
     ]
 
-    shortSum = shortValues.stream().sum()
+    shortSum = shortValues.stream().sumIntFamily()
     if (shortSum != 21) {
-        throw IllegalStateException("stream.sum expected 21 for Short aliases but was ${shortSum}")
+        throw IllegalStateException("sumIntFamily expected 21 for Short aliases but was ${shortSum}")
+    }
+
+    intValues = [10 20 30]
+    intSum = intValues.stream().sumIntFamily()
+    if (intSum != 60) {
+        throw IllegalStateException("sumIntFamily expected 60 for Integer aliases but was ${intSum}")
+    }
+
+    longValues = [100L 200L 300L]
+    longSum = longValues.stream().sumLongFamily()
+    if (longSum != 600L) {
+        throw IllegalStateException("sumLongFamily expected 600L but was ${longSum}")
+    }
+
+    floatValues = [1.5f 2.5f 3.0f]
+    floatSum = floatValues.stream().sumFloatFamily()
+    if (floatSum != 7.0f) {
+        throw IllegalStateException("sumFloatFamily expected 7.0f but was ${floatSum}")
+    }
+
+    doubleValues = [1.25 2.75 3.0]
+    doubleSum = doubleValues.stream().sumDoubleFamily()
+    if (doubleSum != 7.0) {
+        throw IllegalStateException("sumDoubleFamily expected 7.0 but was ${doubleSum}")
     }
 }

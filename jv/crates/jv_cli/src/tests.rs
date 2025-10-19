@@ -526,8 +526,20 @@ include = ["src/**/*.jv"]
             java_source
         );
         assert!(
+            java_source.contains(".mapToLong("),
+            "expected mapToLong specialization for target {} in generated Java:\n{}",
+            target.as_str(),
+            java_source
+        );
+        assert!(
             java_source.contains("charValue()"),
             "expected Character handling branch in canonical adapter for target {}:\n{}",
+            target.as_str(),
+            java_source
+        );
+        assert!(
+            java_source.contains("normalizeIntFamilyValue"),
+            "expected normalizeIntFamilyValue helper to appear for target {}:\n{}",
             target.as_str(),
             java_source
         );
