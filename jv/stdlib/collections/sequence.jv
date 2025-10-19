@@ -36,9 +36,7 @@ fun <T, R> Stream<T>.flatMapStream(transform: (T) -> Stream<R>): Stream<R> {
 
 fun <T, R : Comparable<R>> Stream<T>.sortedBy(selector: (T) -> R): Stream<T> {
     return this.sorted { left right ->
-        val leftKey : R = selector(left)
-        val rightKey : R = selector(right)
-        leftKey.compareTo(rightKey)
+        selector(left).compareTo(selector(right))
     }
 }
 
@@ -98,28 +96,28 @@ fun Stream<Int>.sum(): Int {
 }
 
 fun Stream<Long>.sum(): Long {
-    val elements : List<Long> = this.toListStream()
+    val elements: List<Long> = this.toListStream()
     var total = 0L
     for (candidate in elements) {
-        total = total + candidate
+        total = total + candidate.longValue()
     }
     return total
 }
 
 fun Stream<Float>.sum(): Float {
-    val elements : List<Float> = this.toListStream()
+    val elements: List<Float> = this.toListStream()
     var total = 0.0f
     for (candidate in elements) {
-        total = total + candidate
+        total = total + candidate.floatValue()
     }
     return total
 }
 
 fun Stream<Double>.sum(): Double {
-    val elements : List<Double> = this.toListStream()
+    val elements: List<Double> = this.toListStream()
     var total = 0.0
     for (candidate in elements) {
-        total = total + candidate
+        total = total + candidate.doubleValue()
     }
     return total
 }
@@ -137,26 +135,28 @@ fun <T> Stream<T>.sumIntFamily(): Int
 fun <T> Stream<T>.sumLongFamily(): Long
     where T : long {
     return this
-        .mapToLong { candidate -> candidate.longValue() }
+        .mapToLong { candidate -> (candidate as Number).longValue() }
         .sum()
 }
 
 fun <T> Stream<T>.sumFloatFamily(): Float
     where T : float {
-    val elements : List<T> = this.toListStream()
+    val elements: List<T> = this.toListStream()
     var total = 0.0f
     for (candidate in elements) {
-        total = total + candidate
+        val numeric = candidate as Number
+        total = total + numeric.floatValue()
     }
     return total
 }
 
 fun <T> Stream<T>.sumDoubleFamily(): Double
     where T : double {
-    val elements : List<T> = this.toListStream()
+    val elements: List<T> = this.toListStream()
     var total = 0.0
     for (candidate in elements) {
-        total = total + candidate
+        val numeric = candidate as Number
+        total = total + numeric.doubleValue()
     }
     return total
 }
@@ -191,9 +191,7 @@ fun <T : Comparable<T>> Iterable<T>.sorted(): Stream<T> {
 
 fun <T, R : Comparable<R>> Iterable<T>.sortedBy(selector: (T) -> R): Stream<T> {
     return this.toStream().sorted { left right ->
-        val leftKey : R = selector(left)
-        val rightKey : R = selector(right)
-        leftKey.compareTo(rightKey)
+        selector(left).compareTo(selector(right))
     }
 }
 
@@ -245,30 +243,20 @@ fun <T> Iterable<T>.forEach(action: (T) -> Unit) {
 }
 
 fun <T, K> Iterable<T>.groupBy(keySelector: (T) -> K): Map<K, List<T>> {
-    var result = LinkedHashMap<K, List<T>>()
-    val elements : List<T> = this.toList()
-    for (element in elements) {
+    val result = LinkedHashMap<K, List<T>>()
+    for (element in this) {
         val key = keySelector(element)
-        val bucket = result.computeIfAbsent(
-            key
-            { ignored ->
-                ArrayList<T>()
-            }
-        )
+        val bucket = result.computeIfAbsent(key) { ArrayList<T>() }
         bucket.add(element)
     }
     return result
 }
 
 fun <T, K, V> Iterable<T>.associate(transform: (T) -> Map.Entry<K, V>): Map<K, V> {
-    var result = LinkedHashMap<K, V>()
-    val elements : List<T> = this.toList()
-    for (element in elements) {
+    val result = LinkedHashMap<K, V>()
+    for (element in this) {
         val entry = transform(element)
-        result.put(
-            entry.getKey()
-            entry.getValue()
-        )
+        result.put(entry.getKey(), entry.getValue())
     }
     return result
 }
@@ -278,7 +266,7 @@ private fun <T> normalizeIntFamilyValue(value: T): Int
     when (value is Character) {
         true -> {
             val character = value as Character
-            val raw = character.charValue()
+            val raw: Char = character.charValue()
             return raw + 0
         }
         else -> {
