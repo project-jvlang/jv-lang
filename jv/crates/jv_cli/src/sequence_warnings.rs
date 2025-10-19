@@ -199,6 +199,7 @@ impl SequenceWarningCollector {
                 self.visit_expression(object);
                 self.visit_expression(index);
             }
+            Expression::TypeCast { expr, .. } => self.visit_expression(expr),
             Expression::StringInterpolation { parts, .. } => {
                 for part in parts {
                     if let jv_ast::StringPart::Expression(expr) = part {

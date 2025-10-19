@@ -509,6 +509,15 @@ pub fn transform_expression(
             index,
             span,
         } => desugar_null_safe_index_access(object, index, span, context),
+        Expression::TypeCast { expr, target, span } => {
+            let lowered = transform_expression(*expr, context)?;
+            let target_type = convert_type_annotation(target)?;
+            Ok(IrExpression::Cast {
+                expr: Box::new(lowered),
+                target_type,
+                span,
+            })
+        }
         Expression::StringInterpolation { parts, span } => {
             desugar_string_interpolation(parts, span, context)
         }

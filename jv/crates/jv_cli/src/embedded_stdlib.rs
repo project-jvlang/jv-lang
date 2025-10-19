@@ -294,6 +294,7 @@ fn rewrite_expression(expression: &mut Expression) {
             rewrite_expression(object.as_mut());
             rewrite_expression(index.as_mut());
         }
+        Expression::TypeCast { expr, .. } => rewrite_expression(expr.as_mut()),
         Expression::StringInterpolation { parts, .. } => {
             for part in parts {
                 if let StringPart::Expression(expr) = part {
@@ -668,6 +669,7 @@ impl<'a, 'b> ProgramUsageDetector<'a, 'b> {
                 self.visit_expression(object);
                 self.visit_expression(index);
             }
+            Expression::TypeCast { expr, .. } => self.visit_expression(expr),
             Expression::StringInterpolation { parts, .. } => {
                 for part in parts {
                     if let StringPart::Expression(expr) = part {

@@ -307,6 +307,10 @@ impl<'env, 'ext, 'imp> ConstraintGenerator<'env, 'ext, 'imp> {
                 );
                 result_ty
             }
+            Expression::TypeCast { expr, target, .. } => {
+                let _ = self.infer_expression(expr);
+                self.type_from_annotation(target)
+            }
             Expression::Block { statements, .. } => self.infer_block(statements),
             Expression::If {
                 condition,

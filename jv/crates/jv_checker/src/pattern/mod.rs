@@ -220,6 +220,7 @@ pub(crate) fn expression_span(expression: &Expression) -> Option<&Span> {
         | Expression::NullSafeMemberAccess { span, .. }
         | Expression::IndexAccess { span, .. }
         | Expression::NullSafeIndexAccess { span, .. }
+        | Expression::TypeCast { span, .. }
         | Expression::StringInterpolation { span, .. }
         | Expression::When { span, .. }
         | Expression::If { span, .. }

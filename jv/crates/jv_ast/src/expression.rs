@@ -71,6 +71,13 @@ pub enum Expression {
         span: Span,
     },
 
+    // Explicit type casts: expr as TargetType
+    TypeCast {
+        expr: Box<Expression>,
+        target: TypeAnnotation,
+        span: Span,
+    },
+
     // String interpolation
     StringInterpolation {
         parts: Vec<StringPart>,

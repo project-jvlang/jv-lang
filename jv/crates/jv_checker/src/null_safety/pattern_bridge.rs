@@ -200,6 +200,7 @@ impl PatternFactsBridge {
                 outcome.merge(self.visit_expression(index, service, context));
                 outcome
             }
+            Expression::TypeCast { expr, .. } => self.visit_expression(expr, service, context),
             Expression::Array { elements, .. } => {
                 let mut outcome = BridgeOutcome::default();
                 for element in elements {

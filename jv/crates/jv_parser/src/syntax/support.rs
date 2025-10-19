@@ -39,6 +39,13 @@ pub(crate) fn token_is() -> impl ChumskyParser<Token, Token, Error = Simple<Toke
     })
 }
 
+pub(crate) fn token_as() -> impl ChumskyParser<Token, Token, Error = Simple<Token>> + Clone {
+    filter(|token: &Token| {
+        matches!(&token.token_type, TokenType::Identifier(name) if name == "as")
+            && token.leading_trivia.newlines == 0
+    })
+}
+
 pub(crate) fn token_while_keyword(
 ) -> impl ChumskyParser<Token, Token, Error = Simple<Token>> + Clone {
     filter(|token: &Token| matches!(token.token_type, TokenType::While))
@@ -376,6 +383,7 @@ pub(crate) fn expression_span(expr: &Expression) -> Span {
         Expression::If { span, .. } => span.clone(),
         Expression::IndexAccess { span, .. } => span.clone(),
         Expression::NullSafeIndexAccess { span, .. } => span.clone(),
+        Expression::TypeCast { span, .. } => span.clone(),
         Expression::Block { span, .. } => span.clone(),
         Expression::Array { span, .. } => span.clone(),
         Expression::Lambda { span, .. } => span.clone(),

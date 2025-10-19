@@ -148,6 +148,7 @@ impl<'a> WhenUsageValidator<'a> {
                 self.visit_expression(object, true);
                 self.visit_expression(index, true);
             }
+            Expression::TypeCast { expr, .. } => self.visit_expression(expr, true),
             Expression::StringInterpolation { parts, .. } => {
                 for part in parts {
                     if let StringPart::Expression(expr) = part {

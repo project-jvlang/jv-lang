@@ -179,6 +179,82 @@ fn boolean_literal(value: bool) -> IrExpression {
     IrExpression::Literal(Literal::Boolean(value), dummy_span())
 }
 
+#[test]
+fn cast_expression_renders_reference_cast_short_name() {
+    let cast = IrExpression::Cast {
+        expr: Box::new(identifier("value")),
+        target_type: JavaType::Reference {
+            name: "Character".to_string(),
+            generic_args: Vec::new(),
+        },
+        span: dummy_span(),
+    };
+
+    let mut generator = JavaCodeGenerator::new();
+    let rendered = generator
+        .generate_expression(&cast)
+        .expect("cast expression renders");
+
+    assert_eq!(rendered, "(Character) value");
+}
+
+#[test]
+fn cast_expression_renders_reference_cast_fully_qualified() {
+    let cast = IrExpression::Cast {
+        expr: Box::new(identifier("value")),
+        target_type: JavaType::Reference {
+            name: "java.lang.Character".to_string(),
+            generic_args: Vec::new(),
+        },
+        span: dummy_span(),
+    };
+
+    let mut generator = JavaCodeGenerator::new();
+    let rendered = generator
+        .generate_expression(&cast)
+        .expect("cast expression renders");
+
+    assert_eq!(rendered, "(java.lang.Character) value");
+}
+
+#[test]
+fn cast_expression_renders_number_cast_short_name() {
+    let cast = IrExpression::Cast {
+        expr: Box::new(identifier("value")),
+        target_type: JavaType::Reference {
+            name: "Number".to_string(),
+            generic_args: Vec::new(),
+        },
+        span: dummy_span(),
+    };
+
+    let mut generator = JavaCodeGenerator::new();
+    let rendered = generator
+        .generate_expression(&cast)
+        .expect("cast expression renders");
+
+    assert_eq!(rendered, "(Number) value");
+}
+
+#[test]
+fn cast_expression_renders_number_cast_fully_qualified() {
+    let cast = IrExpression::Cast {
+        expr: Box::new(identifier("value")),
+        target_type: JavaType::Reference {
+            name: "java.lang.Number".to_string(),
+            generic_args: Vec::new(),
+        },
+        span: dummy_span(),
+    };
+
+    let mut generator = JavaCodeGenerator::new();
+    let rendered = generator
+        .generate_expression(&cast)
+        .expect("cast expression renders");
+
+    assert_eq!(rendered, "(java.lang.Number) value");
+}
+
 fn take_stage(value: &str) -> SequenceStage {
     SequenceStage::Take {
         count: Box::new(cast_to_long(number_literal(value))),
@@ -861,6 +937,11 @@ fn sum_terminal_with_int_hint_uses_map_to_int() {
     assert!(rendered.ends_with(".sum()"));
     assert!(rendered.contains("Character"));
     assert!(
+        rendered.contains("(java.lang.Character) __jvIntFamilyValue"),
+        "lambda should cast Character aliases explicitly. Rendered expression: {}",
+        rendered
+    );
+    assert!(
         rendered.contains("(int) (java.lang.Character)"),
         "lambda should cast Character aliases to int. Rendered expression: {}",
         rendered
@@ -872,6 +953,11 @@ fn sum_terminal_with_int_hint_uses_map_to_int() {
     assert!(
         rendered.contains(".intValue()"),
         "lambda should fall back to Number::intValue for non-Character aliases"
+    );
+    assert!(
+        rendered.contains("(java.lang.Number) __jvIntFamilyValue"),
+        "lambda should cast remaining aliases to Number. Rendered expression: {}",
+        rendered
     );
 }
 

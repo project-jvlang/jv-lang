@@ -290,6 +290,7 @@ impl NullabilityAnalyzer {
                 self.evaluate_expression(index);
                 Nullability::Optional
             }
+            Expression::TypeCast { expr, .. } => self.evaluate_expression(expr),
             Expression::StringInterpolation { parts, .. } => {
                 for part in parts {
                     if let jv_ast::expression::StringPart::Expression(expr) = part {

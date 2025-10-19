@@ -255,6 +255,7 @@ impl<'a> RegexValidationVisitor<'a> {
                 self.visit_expression(object);
                 self.visit_expression(index);
             }
+            Expression::TypeCast { expr, .. } => self.visit_expression(expr),
             Expression::StringInterpolation { parts, .. } => {
                 for part in parts {
                     if let StringPart::Expression(expr) = part {

@@ -2908,6 +2908,114 @@ mod tests {
     }
 
     #[test]
+    fn casts_in_normalize_int_family_value_preserve_ir_cast_nodes() {
+        let source = r#"
+fun sample(value: Any): Int {
+    val character = value as Character
+    val number = value as Number
+    return 0
+}
+"#;
+
+        let program = Parser::parse(source).expect("sample snippet parses");
+        let mut context = TransformContext::new();
+        let ir_program = transform_program_with_context(program, &mut context)
+            .expect("sample lowering succeeds");
+
+        let method_body = ir_program
+            .type_declarations
+            .iter()
+            .find_map(|decl| {
+                if let IrStatement::MethodDeclaration {
+                    name,
+                    body: Some(body),
+                    ..
+                } = decl
+                {
+                    if name == "sample" {
+                        return Some(body);
+                    }
+                }
+                None
+            })
+            .expect("sample method present in IR");
+
+        let statements = match method_body {
+            IrExpression::Block { statements, .. } => statements,
+            other => panic!("expected block body, found {:?}", other),
+        };
+
+        let mut saw_character_cast = false;
+        let mut saw_number_cast = false;
+
+        for statement in statements {
+            if let IrStatement::VariableDeclaration {
+                name,
+                java_type,
+                initializer,
+                ..
+            } = statement
+            {
+                match name.as_str() {
+                    "character" => {
+                        let expected_type = JavaType::Reference {
+                            name: "Character".to_string(),
+                            generic_args: Vec::new(),
+                        };
+                        assert_eq!(java_type, &expected_type);
+                        let Some(IrExpression::Cast {
+                            expr, target_type, ..
+                        }) = initializer
+                        else {
+                            panic!("character initializer should be a cast")
+                        };
+                        assert_eq!(target_type, &expected_type);
+                        match expr.as_ref() {
+                            IrExpression::Identifier { name, .. } => {
+                                assert_eq!(name, "value", "cast should wrap original identifier")
+                            }
+                            other => {
+                                panic!("expected cast operand to be identifier, found {:?}", other)
+                            }
+                        }
+                        saw_character_cast = true;
+                    }
+                    "number" => {
+                        let expected_type = JavaType::Reference {
+                            name: "Number".to_string(),
+                            generic_args: Vec::new(),
+                        };
+                        assert_eq!(java_type, &expected_type);
+                        let Some(IrExpression::Cast {
+                            expr, target_type, ..
+                        }) = initializer
+                        else {
+                            panic!("number initializer should be a cast")
+                        };
+                        assert_eq!(target_type, &expected_type);
+                        match expr.as_ref() {
+                            IrExpression::Identifier { name, .. } => {
+                                assert_eq!(name, "value", "cast should wrap original identifier")
+                            }
+                            other => {
+                                panic!("expected cast operand to be identifier, found {:?}", other)
+                            }
+                        }
+                        saw_number_cast = true;
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        assert!(
+            saw_character_cast,
+            "character declaration should include cast"
+        );
+        assert!(saw_number_cast, "number declaration should include cast");
+    }
+
+    #[test]
     fn test_transform_statement_handles_val_declaration() {
         let mut context = test_context();
 

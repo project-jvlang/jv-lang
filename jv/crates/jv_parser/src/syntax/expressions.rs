@@ -12,8 +12,8 @@ use super::patterns::{self, pattern_span};
 use super::support::{
     expression_span, identifier, identifier_with_span, keyword, merge_spans,
     regex_literal_from_token, span_from_token, statement_span, token_and, token_any_comma,
-    token_arrow, token_assign, token_colon, token_comma, token_divide, token_dot, token_else,
-    token_elvis, token_equal, token_greater, token_greater_equal, token_if, token_is,
+    token_arrow, token_as, token_assign, token_colon, token_comma, token_divide, token_dot,
+    token_else, token_elvis, token_equal, token_greater, token_greater_equal, token_if, token_is,
     token_layout_comma, token_left_brace, token_left_bracket, token_left_paren, token_less,
     token_less_equal, token_minus, token_modulo, token_multiply, token_not, token_not_equal,
     token_null_safe, token_or, token_plus, token_question, token_range_exclusive,
@@ -49,7 +49,8 @@ where
         .boxed();
 
         let postfix = postfix_expression_parser(statement_parser.clone(), primary, expr.clone());
-        let unary = unary_expression_parser(postfix.clone());
+        let cast = cast_expression_parser(postfix.clone());
+        let unary = unary_expression_parser(cast.clone());
         let multiplicative = multiplicative_expression_parser(unary.clone());
         let additive = additive_expression_parser(multiplicative.clone());
         let range = range_expression_parser(additive.clone());
@@ -525,6 +526,31 @@ fn postfix_expression_parser(
             .repeated(),
         )
         .foldl(|base, op| apply_postfix(base, op))
+}
+
+fn cast_expression_parser(
+    operand: impl ChumskyParser<Token, Expression, Error = Simple<Token>> + Clone,
+) -> impl ChumskyParser<Token, Expression, Error = Simple<Token>> + Clone {
+    operand
+        .clone()
+        .then(
+            token_as()
+                .map(|token| span_from_token(&token))
+                .then(type_annotation())
+                .map(|(as_span, ty)| (ty, as_span))
+                .repeated(),
+        )
+        .map(|(base, casts)| {
+            casts.into_iter().fold(base, |expr, (target, target_span)| {
+                let expr_span = expression_span(&expr);
+                let span = merge_spans(&expr_span, &target_span);
+                Expression::TypeCast {
+                    expr: Box::new(expr),
+                    target,
+                    span,
+                }
+            })
+        })
 }
 
 fn call_suffix(

@@ -485,6 +485,11 @@ impl BindingResolver {
                 property,
                 span,
             },
+            Expression::TypeCast { expr, target, span } => Expression::TypeCast {
+                expr: Box::new(self.resolve_expression(*expr)),
+                target,
+                span,
+            },
             Expression::IndexAccess {
                 object,
                 index,

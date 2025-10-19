@@ -879,6 +879,7 @@ fn classify_expression(
                 OperatorSemantics::null_safe_index_access(object_info.into_operand(), span.clone());
             ExpressionInfo::new(apply_operator_outcome(builder, outcome))
         }
+        Expression::TypeCast { expr, .. } => classify_expression(builder, expr),
         Expression::Binary {
             left,
             op,

@@ -1351,6 +1351,7 @@ fn expression_span(expr: &Expression) -> Span {
         | Expression::NullSafeMemberAccess { span, .. }
         | Expression::IndexAccess { span, .. }
         | Expression::NullSafeIndexAccess { span, .. }
+        | Expression::TypeCast { span, .. }
         | Expression::StringInterpolation { span, .. }
         | Expression::Array { span, .. }
         | Expression::Lambda { span, .. }
