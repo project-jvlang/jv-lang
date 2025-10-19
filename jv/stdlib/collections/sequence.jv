@@ -203,7 +203,10 @@ fun <T> Iterable<T>.toList(): List<T> {
 }
 
 fun <T, R> Iterable<T>.fold(initial: R, operation: (R, T) -> R): R {
-    return this.toStream().fold(initial, operation)
+    return this.toStream().fold(
+        initial
+        operation
+    )
 }
 
 fun <T> Iterable<T>.reduce(operation: (T, T) -> T): T {

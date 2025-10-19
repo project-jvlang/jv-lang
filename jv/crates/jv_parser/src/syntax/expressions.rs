@@ -3,7 +3,7 @@ use chumsky::Parser as ChumskyParser;
 use jv_ast::{
     Argument, ArgumentElementKind, BinaryOp, CallArgumentIssue, CallArgumentMetadata,
     CallArgumentStyle, Expression, Literal, MultilineKind, MultilineStringLiteral, Parameter,
-    Pattern, SequenceDelimiter, Span, StringPart, TypeAnnotation, UnaryOp, WhenArm,
+    Pattern, SequenceDelimiter, Span, Statement, StringPart, TypeAnnotation, UnaryOp, WhenArm,
 };
 use jv_lexer::{StringDelimiterKind, StringLiteralMetadata, Token, TokenMetadata, TokenType};
 
@@ -11,30 +11,33 @@ use super::json::json_expression_parser;
 use super::patterns::{self, pattern_span};
 use super::support::{
     expression_span, identifier, identifier_with_span, keyword, merge_spans,
-    regex_literal_from_token, span_from_token, token_and, token_any_comma, token_arrow,
-    token_assign, token_colon, token_comma, token_divide, token_dot, token_else, token_elvis,
-    token_equal, token_greater, token_greater_equal, token_if, token_is, token_layout_comma,
-    token_left_brace, token_left_bracket, token_left_paren, token_less, token_less_equal,
-    token_minus, token_modulo, token_multiply, token_not, token_not_equal, token_null_safe,
-    token_or, token_plus, token_question, token_range_exclusive, token_range_inclusive,
-    token_right_brace, token_right_bracket, token_right_paren, token_string_end, token_string_mid,
-    token_string_start, token_when, type_annotation,
+    regex_literal_from_token, span_from_token, statement_span, token_and, token_any_comma,
+    token_arrow, token_assign, token_colon, token_comma, token_divide, token_dot, token_else,
+    token_elvis, token_equal, token_greater, token_greater_equal, token_if, token_is,
+    token_layout_comma, token_left_brace, token_left_bracket, token_left_paren, token_less,
+    token_less_equal, token_minus, token_modulo, token_multiply, token_not, token_not_equal,
+    token_null_safe, token_or, token_plus, token_question, token_range_exclusive,
+    token_range_inclusive, token_right_brace, token_right_bracket, token_right_paren,
+    token_string_end, token_string_mid, token_string_start, token_when, type_annotation,
 };
 
-pub(crate) fn expression_parser<B>(
+pub(crate) fn expression_parser<B, S>(
     block: B,
+    statement: S,
 ) -> impl ChumskyParser<Token, Expression, Error = Simple<Token>> + Clone
 where
     B: ChumskyParser<Token, Expression, Error = Simple<Token>> + Clone + 'static,
+    S: ChumskyParser<Token, Statement, Error = Simple<Token>> + Clone + 'static,
 {
     recursive(move |expr| {
         let block_expr = block.clone();
+        let statement_parser = statement.clone();
         let primary = choice((
             block_expr,
             json_expression_parser(),
             when_expression_parser(expr.clone()),
             forbidden_if_expression_parser(),
-            lambda_literal_parser(expr.clone()),
+            lambda_literal_parser(statement_parser.clone()),
             array_literal_parser(expr.clone()),
             string_interpolation_parser(expr.clone()),
             parenthesized_expression_parser(expr.clone()),
@@ -45,7 +48,7 @@ where
         ))
         .boxed();
 
-        let postfix = postfix_expression_parser(primary, expr.clone());
+        let postfix = postfix_expression_parser(statement_parser.clone(), primary, expr.clone());
         let unary = unary_expression_parser(postfix.clone());
         let multiplicative = multiplicative_expression_parser(unary.clone());
         let additive = additive_expression_parser(multiplicative.clone());
@@ -214,14 +217,14 @@ fn forbidden_if_expression_parser(
 }
 
 fn lambda_literal_parser(
-    expr: impl ChumskyParser<Token, Expression, Error = Simple<Token>> + Clone,
+    statement: impl ChumskyParser<Token, Statement, Error = Simple<Token>> + Clone + 'static,
 ) -> impl ChumskyParser<Token, Expression, Error = Simple<Token>> + Clone {
     token_left_brace()
         .map(|token| span_from_token(&token))
         .then(
             lambda_parameter_clause()
                 .then_ignore(token_arrow())
-                .then(expr.clone()),
+                .then(lambda_body_parser(statement)),
         )
         .then(token_right_brace().map(|token| span_from_token(&token)))
         .map(|((left_span, (parameters, body)), right_span)| {
@@ -272,6 +275,41 @@ fn lambda_parameter_clause(
     let bare = parameter.repeated().at_least(1);
 
     choice((parenthesized, bare))
+}
+
+fn lambda_body_parser(
+    statement: impl ChumskyParser<Token, Statement, Error = Simple<Token>> + Clone + 'static,
+) -> impl ChumskyParser<Token, Expression, Error = Simple<Token>> + Clone {
+    statement
+        .repeated()
+        .at_least(1)
+        .map(|mut statements| {
+            if statements.len() == 1 {
+                match statements.pop().unwrap() {
+                    Statement::Expression { expr, .. } => expr,
+                    statement => {
+                        let span = statement_span(&statement);
+                        Expression::Block {
+                            statements: vec![statement],
+                            span,
+                        }
+                    }
+                }
+            } else {
+                let span = statements
+                    .first()
+                    .zip(statements.last())
+                    .map(|(first, last)| {
+                        let start = statement_span(first);
+                        let end = statement_span(last);
+                        merge_spans(&start, &end)
+                    })
+                    .unwrap_or_else(Span::dummy);
+
+                Expression::Block { statements, span }
+            }
+        })
+        .boxed()
 }
 
 fn array_literal_parser(
@@ -470,8 +508,9 @@ enum PostfixOp {
 }
 
 fn postfix_expression_parser(
-    primary: impl ChumskyParser<Token, Expression, Error = Simple<Token>> + Clone,
-    expr: impl ChumskyParser<Token, Expression, Error = Simple<Token>> + Clone,
+    statement: impl ChumskyParser<Token, Statement, Error = Simple<Token>> + Clone + 'static,
+    primary: impl ChumskyParser<Token, Expression, Error = Simple<Token>> + Clone + 'static,
+    expr: impl ChumskyParser<Token, Expression, Error = Simple<Token>> + Clone + 'static,
 ) -> impl ChumskyParser<Token, Expression, Error = Simple<Token>> + Clone {
     primary
         .then(
@@ -481,7 +520,7 @@ fn postfix_expression_parser(
                 member_suffix(),
                 null_safe_index_suffix(expr.clone()),
                 index_suffix(expr.clone()),
-                trailing_lambda_suffix(expr),
+                trailing_lambda_suffix(statement),
             ))
             .repeated(),
         )
@@ -835,9 +874,9 @@ fn null_safe_index_suffix(
 }
 
 fn trailing_lambda_suffix(
-    expr: impl ChumskyParser<Token, Expression, Error = Simple<Token>> + Clone,
+    statement: impl ChumskyParser<Token, Statement, Error = Simple<Token>> + Clone + 'static,
 ) -> impl ChumskyParser<Token, PostfixOp, Error = Simple<Token>> + Clone {
-    lambda_literal_parser(expr).map(|lambda| {
+    lambda_literal_parser(statement).map(|lambda| {
         let span = expression_span(&lambda);
         PostfixOp::TrailingLambda { lambda, span }
     })

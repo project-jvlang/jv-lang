@@ -1,5 +1,6 @@
 use super::support::{first_statement, parse_program, parse_program_result};
 use crate::syntax::support::statement_span;
+use crate::Parser;
 use jv_ast::{
     Argument, ArgumentElementKind, BinaryOp, CallArgumentStyle, CommentKind, CommentVisibility,
     ConcurrencyConstruct, Expression, JsonValue, Literal, LoopStrategy, Pattern, PrimitiveTypeName,
@@ -369,6 +370,22 @@ fn where_clause_collects_primitive_bounds() {
         }
         other => panic!("expected function declaration, found {:?}", other),
     }
+}
+
+#[test]
+fn lambda_with_assignment_statement_body_parses() {
+    let source = r#"
+        fun demo(values: Stream<Int>) {
+            var accumulator = 0
+            values.forEach { value ->
+                accumulator = value
+            }
+        }
+    "#;
+
+    Parser::parse(source).unwrap_or_else(|err| {
+        panic!("failed to parse lambda with assignment body: {:?}", err);
+    });
 }
 
 #[test]

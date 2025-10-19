@@ -36,7 +36,10 @@ where
 pub(crate) fn statement_parser(
 ) -> impl ChumskyParser<Token, Statement, Error = Simple<Token>> + Clone {
     recursive(|statement| {
-        let expr = expressions::expression_parser(expression_level_block_parser(statement.clone()));
+        let expr = expressions::expression_parser(
+            expression_level_block_parser(statement.clone()),
+            statement.clone(),
+        );
 
         let comment_stmt = comment_statement_parser();
         let package_stmt = attempt_statement_parser(package_declaration_parser());
