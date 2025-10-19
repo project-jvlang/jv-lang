@@ -584,9 +584,10 @@ fn build_stage(
         StageKind::Map => {
             let lambda = expect_single_positional(&segment.args)?;
             let lambda_ir = transform_expression(lambda, context)?;
+            let result_hint = infer_map_result_hint(&lambda_ir);
             Ok(SequenceStage::Map {
                 lambda: Box::new(lambda_ir),
-                result_hint: None,
+                result_hint,
                 span: segment.span.clone(),
             })
         }
@@ -601,9 +602,10 @@ fn build_stage(
         StageKind::FlatMap => {
             let lambda = expect_single_positional(&segment.args)?;
             let lambda_ir = transform_expression(lambda, context)?;
+            let element_hint = infer_flat_map_element_hint(&lambda_ir);
             Ok(SequenceStage::FlatMap {
                 lambda: Box::new(lambda_ir),
-                element_hint: None,
+                element_hint,
                 flatten_depth: 1,
                 span: segment.span.clone(),
             })
@@ -611,6 +613,7 @@ fn build_stage(
         StageKind::Take => {
             let count = expect_single_positional(&segment.args)?;
             let count_ir = transform_expression(count, context)?;
+            let count_ir = ensure_long_count_expression(count_ir);
             Ok(SequenceStage::Take {
                 count: Box::new(count_ir),
                 span: segment.span.clone(),
@@ -619,6 +622,7 @@ fn build_stage(
         StageKind::Drop => {
             let count = expect_single_positional(&segment.args)?;
             let count_ir = transform_expression(count, context)?;
+            let count_ir = ensure_long_count_expression(count_ir);
             Ok(SequenceStage::Drop {
                 count: Box::new(count_ir),
                 span: segment.span.clone(),
@@ -647,6 +651,299 @@ fn build_stage(
                 span: segment.span.clone(),
             })
         }
+    }
+}
+
+fn infer_flat_map_element_hint(lambda: &IrExpression) -> Option<JavaType> {
+    match lambda {
+        IrExpression::Lambda { body, .. } => infer_iterable_like_type(body.as_ref()),
+        _ => None,
+    }
+}
+
+fn infer_map_result_hint(lambda: &IrExpression) -> Option<JavaType> {
+    match lambda {
+        IrExpression::Lambda { body, .. } => extract_java_type(body.as_ref()),
+        _ => None,
+    }
+}
+
+fn ensure_long_count_expression(expr: IrExpression) -> IrExpression {
+    let span = expr.span();
+    match extract_java_type(&expr) {
+        Some(JavaType::Primitive(name)) if name == "int" => IrExpression::Cast {
+            expr: Box::new(expr),
+            target_type: JavaType::Primitive("long".to_string()),
+            span,
+        },
+        _ => expr,
+    }
+}
+
+fn infer_iterable_like_type(expr: &IrExpression) -> Option<JavaType> {
+    if let Some(java_type) = extract_java_type(expr) {
+        if is_iterable_like_java_type(&java_type) {
+            return Some(java_type);
+        }
+    }
+
+    match expr {
+        IrExpression::Conditional {
+            then_expr,
+            else_expr,
+            java_type,
+            ..
+        } => {
+            if is_iterable_like_java_type(java_type) {
+                return Some(java_type.clone());
+            }
+
+            let then_hint = infer_iterable_like_type(then_expr);
+            let else_hint = infer_iterable_like_type(else_expr);
+            match (then_hint, else_hint) {
+                (Some(hint), Some(other)) if hint == other => Some(hint),
+                (Some(hint), None) => Some(hint),
+                (None, Some(hint)) => Some(hint),
+                _ => None,
+            }
+        }
+        IrExpression::Block { java_type, .. }
+        | IrExpression::Cast {
+            target_type: java_type,
+            ..
+        } => {
+            if is_iterable_like_java_type(java_type) {
+                Some(java_type.clone())
+            } else {
+                None
+            }
+        }
+        IrExpression::MethodCall {
+            resolved_target,
+            receiver,
+            java_type,
+            ..
+        } => {
+            if is_iterable_like_java_type(java_type) {
+                return Some(java_type.clone());
+            }
+
+            if let Some(target) = resolved_target {
+                if let Some(owner) = target.owner.as_deref() {
+                    if is_iterable_like_name(owner) {
+                        return Some(JavaType::Reference {
+                            name: owner.to_string(),
+                            generic_args: Vec::new(),
+                        });
+                    }
+                }
+            }
+
+            receiver
+                .as_deref()
+                .and_then(|recv| extract_java_type(recv))
+                .filter(is_iterable_like_java_type)
+        }
+        IrExpression::ObjectCreation {
+            class_name,
+            generic_args,
+            ..
+        } => {
+            if is_iterable_like_name(class_name) {
+                Some(JavaType::Reference {
+                    name: class_name.clone(),
+                    generic_args: generic_args.clone(),
+                })
+            } else {
+                None
+            }
+        }
+        IrExpression::ArrayCreation {
+            element_type,
+            delimiter,
+            ..
+        } => {
+            if *delimiter == SequenceDelimiter::Whitespace {
+                Some(JavaType::Reference {
+                    name: "java.util.List".to_string(),
+                    generic_args: vec![element_type.clone()],
+                })
+            } else {
+                None
+            }
+        }
+        IrExpression::Identifier { java_type, .. }
+        | IrExpression::FieldAccess { java_type, .. }
+        | IrExpression::ArrayAccess { java_type, .. }
+        | IrExpression::Assignment { java_type, .. }
+        | IrExpression::Switch { java_type, .. }
+        | IrExpression::NullSafeOperation { java_type, .. }
+        | IrExpression::SequencePipeline { java_type, .. }
+        | IrExpression::TryWithResources { java_type, .. }
+        | IrExpression::CompletableFuture { java_type, .. }
+        | IrExpression::VirtualThread { java_type, .. } => {
+            if is_iterable_like_java_type(java_type) {
+                Some(java_type.clone())
+            } else {
+                None
+            }
+        }
+        _ => None,
+    }
+}
+
+fn is_iterable_like_java_type(java_type: &JavaType) -> bool {
+    match java_type {
+        JavaType::Reference { name, .. } => is_iterable_like_name(name),
+        _ => false,
+    }
+}
+
+fn is_iterable_like_name(name: &str) -> bool {
+    let simple = name.rsplit('.').next().unwrap_or(name);
+    matches!(
+        simple,
+        "Iterable"
+            | "Collection"
+            | "List"
+            | "Set"
+            | "Queue"
+            | "Deque"
+            | "ArrayList"
+            | "LinkedList"
+            | "LinkedHashSet"
+            | "HashSet"
+            | "Sequence"
+            | "SequenceCore"
+    ) || matches!(
+        name,
+        "java.lang.Iterable"
+            | "java.util.Collection"
+            | "java.util.List"
+            | "java.util.Set"
+            | "java.util.Queue"
+            | "java.util.Deque"
+            | "java.util.ArrayList"
+            | "java.util.LinkedList"
+            | "java.util.LinkedHashSet"
+            | "java.util.HashSet"
+            | "jv.collections.Sequence"
+            | "jv.collections.SequenceCore"
+    )
+}
+
+fn infer_pipeline_element_type(pipeline: &SequencePipeline) -> Option<JavaType> {
+    let mut current = source_element_type(&pipeline.source);
+
+    for stage in &pipeline.stages {
+        match stage {
+            SequenceStage::Map {
+                lambda,
+                result_hint,
+                ..
+            } => {
+                if let Some(hint) = result_hint {
+                    current = Some(hint.clone());
+                } else if let Some(hint) = infer_map_result_hint(lambda) {
+                    current = Some(hint);
+                }
+            }
+            SequenceStage::FlatMap {
+                lambda,
+                element_hint,
+                ..
+            } => {
+                let container = element_hint
+                    .as_ref()
+                    .cloned()
+                    .or_else(|| infer_iterable_like_type(lambda));
+
+                if let Some(container_type) = container {
+                    if let Some(inner) = extract_iterable_element_type(&container_type) {
+                        current = Some(inner);
+                    } else {
+                        current = Some(JavaType::object());
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    current
+}
+
+fn source_element_type(source: &SequenceSource) -> Option<JavaType> {
+    match source {
+        SequenceSource::Collection { expr, element_hint } => element_hint.clone().or_else(|| {
+            extract_java_type(expr.as_ref()).and_then(|ty| match ty {
+                JavaType::Reference { generic_args, .. } if !generic_args.is_empty() => {
+                    Some(generic_args[0].clone())
+                }
+                JavaType::Array { element_type, .. } => Some(*element_type.clone()),
+                _ => None,
+            })
+        }),
+        SequenceSource::Array {
+            expr, element_hint, ..
+        } => element_hint.clone().or_else(|| {
+            extract_java_type(expr.as_ref()).and_then(|ty| match ty {
+                JavaType::Array { element_type, .. } => Some(*element_type.clone()),
+                _ => None,
+            })
+        }),
+        SequenceSource::ListLiteral {
+            elements,
+            element_hint,
+            ..
+        } => {
+            if let Some(hint) = element_hint {
+                Some(hint.clone())
+            } else {
+                elements.first().and_then(|expr| extract_java_type(expr))
+            }
+        }
+        SequenceSource::JavaStream { element_hint, .. } => element_hint.clone(),
+    }
+}
+
+fn extract_iterable_element_type(java_type: &JavaType) -> Option<JavaType> {
+    match java_type {
+        JavaType::Reference { generic_args, .. } => generic_args.first().cloned(),
+        JavaType::Array { element_type, .. } => Some(*element_type.clone()),
+        _ => None,
+    }
+}
+
+fn boxed_type(java_type: &JavaType) -> JavaType {
+    match java_type {
+        JavaType::Primitive(name) => {
+            let boxed = match name.as_str() {
+                "int" => "Integer",
+                "boolean" => "Boolean",
+                "char" => "Character",
+                "double" => "Double",
+                "float" => "Float",
+                "long" => "Long",
+                "byte" => "Byte",
+                "short" => "Short",
+                _ => "Object",
+            };
+
+            JavaType::Reference {
+                name: boxed.to_string(),
+                generic_args: Vec::new(),
+            }
+        }
+        JavaType::Void => JavaType::object(),
+        _ => java_type.clone(),
+    }
+}
+
+fn java_optional_type(inner: JavaType) -> JavaType {
+    JavaType::Reference {
+        name: "java.util.Optional".to_string(),
+        generic_args: vec![inner],
     }
 }
 
@@ -760,8 +1057,12 @@ fn determine_java_type(pipeline: &SequencePipeline) -> JavaType {
                 name: "java.util.Set".to_string(),
                 generic_args: vec![],
             },
-            SequenceTerminalKind::Fold { .. } | SequenceTerminalKind::Reduce { .. } => {
-                JavaType::object()
+            SequenceTerminalKind::Fold { .. } => JavaType::object(),
+            SequenceTerminalKind::Reduce { .. } => {
+                let element_type = infer_pipeline_element_type(pipeline)
+                    .map(|ty| boxed_type(&ty))
+                    .unwrap_or_else(JavaType::object);
+                java_optional_type(element_type)
             }
             SequenceTerminalKind::GroupBy { .. } | SequenceTerminalKind::Associate { .. } => {
                 JavaType::Reference {

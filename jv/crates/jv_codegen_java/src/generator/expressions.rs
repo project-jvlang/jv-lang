@@ -1143,7 +1143,11 @@ impl JavaCodeGenerator {
             .unwrap_or(false)
     }
 
-    fn adapt_flat_map_lambda(&self, lambda: &IrExpression) -> IrExpression {
+    fn adapt_flat_map_lambda(
+        &self,
+        lambda: &IrExpression,
+        element_hint: Option<&JavaType>,
+    ) -> IrExpression {
         match lambda {
             IrExpression::Lambda {
                 functional_interface,
@@ -1158,43 +1162,39 @@ impl JavaCodeGenerator {
                     return lambda.clone();
                 }
 
-                if let Some(JavaType::Reference { name, .. }) =
-                    Self::expression_java_type(body_expr)
-                {
-                    if Self::is_java_iterable_type(name) {
-                        let body_span = body_expr.span();
-                        let sequence_identifier = IrExpression::Identifier {
-                            name: "Sequence".to_string(),
-                            java_type: JavaType::Reference {
-                                name: "jv.collections.Sequence".to_string(),
-                                generic_args: Vec::new(),
-                            },
-                            span: body_span.clone(),
-                        };
+                if self.lambda_body_requires_sequence_stream(body_expr, element_hint) {
+                    let body_span = body_expr.span();
+                    let sequence_identifier = IrExpression::Identifier {
+                        name: "Sequence".to_string(),
+                        java_type: JavaType::Reference {
+                            name: "jv.collections.Sequence".to_string(),
+                            generic_args: Vec::new(),
+                        },
+                        span: body_span.clone(),
+                    };
 
-                        let to_stream_call = IrExpression::MethodCall {
-                            receiver: Some(Box::new(sequence_identifier)),
-                            method_name: "toStream".to_string(),
-                            java_name: None,
-                            resolved_target: None,
-                            args: vec![*body.clone()],
-                            argument_style: CallArgumentStyle::Whitespace,
-                            java_type: JavaType::Reference {
-                                name: "java.util.stream.Stream".to_string(),
-                                generic_args: vec![JavaType::object()],
-                            },
-                            span: body_span.clone(),
-                        };
+                    let to_stream_call = IrExpression::MethodCall {
+                        receiver: Some(Box::new(sequence_identifier)),
+                        method_name: "toStream".to_string(),
+                        java_name: None,
+                        resolved_target: None,
+                        args: vec![*body.clone()],
+                        argument_style: CallArgumentStyle::Whitespace,
+                        java_type: JavaType::Reference {
+                            name: "java.util.stream.Stream".to_string(),
+                            generic_args: vec![JavaType::object()],
+                        },
+                        span: body_span.clone(),
+                    };
 
-                        return IrExpression::Lambda {
-                            functional_interface: functional_interface.clone(),
-                            param_names: param_names.clone(),
-                            param_types: param_types.clone(),
-                            body: Box::new(to_stream_call),
-                            java_type: java_type.clone(),
-                            span: span.clone(),
-                        };
-                    }
+                    return IrExpression::Lambda {
+                        functional_interface: functional_interface.clone(),
+                        param_names: param_names.clone(),
+                        param_types: param_types.clone(),
+                        body: Box::new(to_stream_call),
+                        java_type: java_type.clone(),
+                        span: span.clone(),
+                    };
                 }
 
                 lambda.clone()
@@ -1203,8 +1203,95 @@ impl JavaCodeGenerator {
         }
     }
 
+    fn lambda_body_requires_sequence_stream(
+        &self,
+        body: &IrExpression,
+        element_hint: Option<&JavaType>,
+    ) -> bool {
+        if Self::is_java_stream_expression(body) {
+            return false;
+        }
+
+        if element_hint
+            .map(Self::is_java_iterable_type_from_type)
+            .unwrap_or(false)
+        {
+            return true;
+        }
+
+        if Self::expression_java_type(body)
+            .map(Self::is_java_iterable_type_from_type)
+            .unwrap_or(false)
+        {
+            return true;
+        }
+
+        match body {
+            IrExpression::MethodCall {
+                resolved_target,
+                receiver,
+                ..
+            } => {
+                if resolved_target
+                    .as_ref()
+                    .and_then(|target| target.owner.as_deref())
+                    .map_or(false, Self::is_java_iterable_type)
+                {
+                    return true;
+                }
+
+                receiver
+                    .as_deref()
+                    .and_then(Self::expression_java_type)
+                    .map(Self::is_java_iterable_type_from_type)
+                    .unwrap_or(false)
+            }
+            IrExpression::ArrayCreation { .. } => true,
+            IrExpression::ObjectCreation { class_name, .. } => {
+                Self::is_java_iterable_type(class_name)
+            }
+            IrExpression::Identifier { java_type, .. }
+            | IrExpression::FieldAccess { java_type, .. }
+            | IrExpression::ArrayAccess { java_type, .. }
+            | IrExpression::Assignment { java_type, .. }
+            | IrExpression::Block { java_type, .. }
+            | IrExpression::Conditional { java_type, .. }
+            | IrExpression::SequencePipeline { java_type, .. }
+            | IrExpression::Switch { java_type, .. }
+            | IrExpression::NullSafeOperation { java_type, .. }
+            | IrExpression::TryWithResources { java_type, .. }
+            | IrExpression::CompletableFuture { java_type, .. }
+            | IrExpression::VirtualThread { java_type, .. } => {
+                Self::is_java_iterable_type_from_type(java_type)
+            }
+            _ => false,
+        }
+    }
+
+    fn is_java_iterable_type_from_type(java_type: &JavaType) -> bool {
+        match java_type {
+            JavaType::Reference { name, .. } => Self::is_java_iterable_type(name),
+            _ => false,
+        }
+    }
+
     fn is_java_iterable_type(name: &str) -> bool {
+        let simple = name.rsplit('.').next().unwrap_or(name);
         matches!(
+            simple,
+            "Iterable"
+                | "Collection"
+                | "List"
+                | "Set"
+                | "Queue"
+                | "Deque"
+                | "ArrayList"
+                | "LinkedList"
+                | "LinkedHashSet"
+                | "HashSet"
+                | "Sequence"
+                | "SequenceCore"
+        ) || matches!(
             name,
             "java.lang.Iterable"
                 | "java.util.Collection"
@@ -1212,6 +1299,12 @@ impl JavaCodeGenerator {
                 | "java.util.Set"
                 | "java.util.Queue"
                 | "java.util.Deque"
+                | "java.util.ArrayList"
+                | "java.util.LinkedList"
+                | "java.util.LinkedHashSet"
+                | "java.util.HashSet"
+                | "jv.collections.Sequence"
+                | "jv.collections.SequenceCore"
         )
     }
 
@@ -1360,8 +1453,12 @@ impl JavaCodeGenerator {
                 let rendered = self.generate_expression(predicate)?;
                 Ok(format!(".filter({})", rendered))
             }
-            SequenceStage::FlatMap { lambda, .. } => {
-                let adapted_lambda = self.adapt_flat_map_lambda(lambda);
+            SequenceStage::FlatMap {
+                lambda,
+                element_hint,
+                ..
+            } => {
+                let adapted_lambda = self.adapt_flat_map_lambda(lambda, element_hint.as_ref());
                 let rendered = self.generate_expression(&adapted_lambda)?;
                 Ok(format!(".flatMap({})", rendered))
             }
@@ -1490,14 +1587,7 @@ impl JavaCodeGenerator {
             }
             SequenceTerminalKind::Reduce { accumulator } => {
                 let accumulator_expr = self.generate_expression(accumulator)?;
-                let mut rendered = format!("{}.reduce({})", chain, accumulator_expr);
-                if terminal.requires_non_empty_source {
-                    self.add_import("java.lang.IllegalArgumentException");
-                    rendered.push_str(
-                        ".orElseThrow(() -> new IllegalArgumentException(\"Sequence reduce() on empty source\"))",
-                    );
-                }
-                Ok(rendered)
+                Ok(format!("{}.reduce({})", chain, accumulator_expr))
             }
             SequenceTerminalKind::GroupBy { key_selector } => {
                 let selector_expr = self.generate_expression(key_selector)?;

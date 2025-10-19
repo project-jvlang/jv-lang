@@ -110,6 +110,154 @@ mod tests {
     }
 
     #[test]
+    fn map_get_infers_value_type_from_map_generics() {
+        let mut context = TransformContext::new();
+        context.add_variable(
+            "result".to_string(),
+            JavaType::Reference {
+                name: "java.util.LinkedHashMap".to_string(),
+                generic_args: vec![
+                    JavaType::Reference {
+                        name: "String".to_string(),
+                        generic_args: vec![],
+                    },
+                    JavaType::Reference {
+                        name: "java.util.List".to_string(),
+                        generic_args: vec![JavaType::Reference {
+                            name: "String".to_string(),
+                            generic_args: vec![],
+                        }],
+                    },
+                ],
+            },
+        );
+        context.add_variable(
+            "key".to_string(),
+            JavaType::Reference {
+                name: "String".to_string(),
+                generic_args: vec![],
+            },
+        );
+
+        let call_expression = Expression::Call {
+            function: Box::new(Expression::MemberAccess {
+                object: Box::new(Expression::Identifier("result".to_string(), dummy_span())),
+                property: "get".to_string(),
+                span: dummy_span(),
+            }),
+            args: vec![Argument::Positional(Expression::Identifier(
+                "key".to_string(),
+                dummy_span(),
+            ))],
+            type_arguments: Vec::new(),
+            argument_metadata: CallArgumentMetadata::default(),
+            span: dummy_span(),
+        };
+
+        let ir =
+            transform_expression(call_expression, &mut context).expect("map get call should lower");
+
+        match ir {
+            IrExpression::MethodCall { java_type, .. } => {
+                let expected = JavaType::Reference {
+                    name: "java.util.List".to_string(),
+                    generic_args: vec![JavaType::Reference {
+                        name: "String".to_string(),
+                        generic_args: vec![],
+                    }],
+                };
+                assert_eq!(java_type, expected);
+            }
+            other => panic!("expected method call IR, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn map_compute_if_absent_preserves_value_type() {
+        let mut context = TransformContext::new();
+        context.add_variable(
+            "result".to_string(),
+            JavaType::Reference {
+                name: "java.util.LinkedHashMap".to_string(),
+                generic_args: vec![
+                    JavaType::Reference {
+                        name: "String".to_string(),
+                        generic_args: vec![],
+                    },
+                    JavaType::Reference {
+                        name: "java.util.List".to_string(),
+                        generic_args: vec![JavaType::Reference {
+                            name: "String".to_string(),
+                            generic_args: vec![],
+                        }],
+                    },
+                ],
+            },
+        );
+        context.add_variable(
+            "key".to_string(),
+            JavaType::Reference {
+                name: "String".to_string(),
+                generic_args: vec![],
+            },
+        );
+
+        let lambda_param = Parameter {
+            name: "ignored".to_string(),
+            type_annotation: None,
+            default_value: None,
+            span: dummy_span(),
+        };
+        let lambda_body = Expression::Call {
+            function: Box::new(Expression::Identifier(
+                "ArrayList".to_string(),
+                dummy_span(),
+            )),
+            args: vec![],
+            type_arguments: vec![TypeAnnotation::Simple("String".to_string())],
+            argument_metadata: CallArgumentMetadata::default(),
+            span: dummy_span(),
+        };
+        let lambda = Expression::Lambda {
+            parameters: vec![lambda_param],
+            body: Box::new(lambda_body),
+            span: dummy_span(),
+        };
+
+        let call_expression = Expression::Call {
+            function: Box::new(Expression::MemberAccess {
+                object: Box::new(Expression::Identifier("result".to_string(), dummy_span())),
+                property: "computeIfAbsent".to_string(),
+                span: dummy_span(),
+            }),
+            args: vec![
+                Argument::Positional(Expression::Identifier("key".to_string(), dummy_span())),
+                Argument::Positional(lambda),
+            ],
+            type_arguments: Vec::new(),
+            argument_metadata: CallArgumentMetadata::default(),
+            span: dummy_span(),
+        };
+
+        let ir = transform_expression(call_expression, &mut context)
+            .expect("computeIfAbsent call should lower");
+
+        match ir {
+            IrExpression::MethodCall { java_type, .. } => {
+                let expected = JavaType::Reference {
+                    name: "java.util.List".to_string(),
+                    generic_args: vec![JavaType::Reference {
+                        name: "String".to_string(),
+                        generic_args: vec![],
+                    }],
+                };
+                assert_eq!(java_type, expected);
+            }
+            other => panic!("expected method call IR, got {:?}", other),
+        }
+    }
+
+    #[test]
     fn transform_literal_regex_variant_also_creates_regex_pattern() {
         let span = dummy_span();
         let literal = RegexLiteral {

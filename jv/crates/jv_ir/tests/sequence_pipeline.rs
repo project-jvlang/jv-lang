@@ -276,6 +276,13 @@ fn reduce_expression() -> Expression {
     }
 }
 
+fn reduce_literal_expression() -> Expression {
+    let source = array_literal(vec![number_literal("1"), number_literal("2")]);
+    let reduce_lambda_body = add(identifier("acc"), identifier("value"));
+    let reduce_lambda = lambda(&["acc", "value"], reduce_lambda_body);
+    call_method(source, "reduce", vec![Argument::Positional(reduce_lambda)])
+}
+
 fn fold_expression() -> Expression {
     let map_call = map_pipeline(identifier("numbers"));
     let fold_lambda_body = add(identifier("acc"), identifier("value"));
@@ -336,7 +343,33 @@ fn reduce_terminal_requires_non_empty_source() {
     assert!(matches!(terminal.kind, SequenceTerminalKind::Reduce { .. }));
     assert_eq!(terminal.evaluation, SequenceTerminalEvaluation::Reducer);
     assert!(terminal.requires_non_empty_source);
-    assert_eq!(java_type, JavaType::object());
+    let expected_optional = JavaType::Reference {
+        name: "java.util.Optional".to_string(),
+        generic_args: vec![JavaType::object()],
+    };
+    assert_eq!(java_type, expected_optional);
+}
+
+#[test]
+fn reduce_list_literal_infers_optional_integer() {
+    let mut context = TransformContext::new();
+    let ir = transform_expression(reduce_literal_expression(), &mut context)
+        .expect("list literal reduce pipeline transforms");
+
+    let java_type = match ir {
+        IrExpression::SequencePipeline { java_type, .. } => java_type,
+        other => panic!("expected sequence pipeline, got {:?}", other),
+    };
+
+    let expected_optional = JavaType::Reference {
+        name: "java.util.Optional".to_string(),
+        generic_args: vec![JavaType::Reference {
+            name: "Integer".to_string(),
+            generic_args: vec![],
+        }],
+    };
+
+    assert_eq!(java_type, expected_optional);
 }
 
 #[test]

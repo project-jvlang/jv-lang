@@ -2,8 +2,8 @@ use jv_ast::types::PrimitiveTypeName;
 use jv_ast::{BinaryOp, Literal, Span};
 use jv_codegen_java::{JavaCodeGenConfig, JavaCodeGenerator, JavaTarget};
 use jv_ir::{
-    IrExpression, JavaType, PipelineShape, PrimitiveSpecializationHint, SequencePipeline,
-    SequenceSource, SequenceStage, SequenceTerminal, SequenceTerminalEvaluation,
+    IrExpression, IrResolvedMethodTarget, JavaType, PipelineShape, PrimitiveSpecializationHint,
+    SequencePipeline, SequenceSource, SequenceStage, SequenceTerminal, SequenceTerminalEvaluation,
     SequenceTerminalKind,
 };
 
@@ -83,6 +83,10 @@ fn flat_map_stage() -> SequenceStage {
 }
 
 fn flat_map_list_of_stage() -> SequenceStage {
+    let list_type = JavaType::Reference {
+        name: "java.util.List".to_string(),
+        generic_args: vec![JavaType::object()],
+    };
     let body = IrExpression::MethodCall {
         receiver: Some(Box::new(IrExpression::Identifier {
             name: "List".to_string(),
@@ -101,10 +105,7 @@ fn flat_map_list_of_stage() -> SequenceStage {
             span: dummy_span(),
         }],
         argument_style: jv_ast::CallArgumentStyle::Comma,
-        java_type: JavaType::Reference {
-            name: "java.util.List".to_string(),
-            generic_args: vec![JavaType::object()],
-        },
+        java_type: list_type.clone(),
         span: dummy_span(),
     };
 
@@ -119,7 +120,53 @@ fn flat_map_list_of_stage() -> SequenceStage {
 
     SequenceStage::FlatMap {
         lambda: Box::new(lambda),
-        element_hint: None,
+        element_hint: Some(list_type),
+        flatten_depth: 1,
+        span: dummy_span(),
+    }
+}
+
+fn flat_map_set_of_stage_with_object_type() -> SequenceStage {
+    let set_type = JavaType::Reference {
+        name: "java.util.Set".to_string(),
+        generic_args: vec![JavaType::object()],
+    };
+    let body = IrExpression::MethodCall {
+        receiver: Some(Box::new(IrExpression::Identifier {
+            name: "Set".to_string(),
+            java_type: set_type.clone(),
+            span: dummy_span(),
+        })),
+        method_name: "of".to_string(),
+        java_name: None,
+        resolved_target: Some(IrResolvedMethodTarget {
+            owner: Some("java.util.Set".to_string()),
+            original_name: Some("of".to_string()),
+            java_name: Some("of".to_string()),
+            erased_parameters: vec!["Ljava/lang/Object;".to_string()],
+        }),
+        args: vec![IrExpression::Identifier {
+            name: "value".to_string(),
+            java_type: JavaType::object(),
+            span: dummy_span(),
+        }],
+        argument_style: jv_ast::CallArgumentStyle::Comma,
+        java_type: JavaType::object(),
+        span: dummy_span(),
+    };
+
+    let lambda = IrExpression::Lambda {
+        functional_interface: "java.util.function.Function".to_string(),
+        param_names: vec!["value".to_string()],
+        param_types: vec![JavaType::object()],
+        body: Box::new(body),
+        java_type: JavaType::object(),
+        span: dummy_span(),
+    };
+
+    SequenceStage::FlatMap {
+        lambda: Box::new(lambda),
+        element_hint: Some(set_type),
         flatten_depth: 1,
         span: dummy_span(),
     }
@@ -129,20 +176,29 @@ fn number_literal(value: &str) -> IrExpression {
     IrExpression::Literal(Literal::Number(value.to_string()), dummy_span())
 }
 
+fn cast_to_long(expr: IrExpression) -> IrExpression {
+    let span = expr.span();
+    IrExpression::Cast {
+        expr: Box::new(expr),
+        target_type: JavaType::Primitive("long".to_string()),
+        span,
+    }
+}
+
 fn boolean_literal(value: bool) -> IrExpression {
     IrExpression::Literal(Literal::Boolean(value), dummy_span())
 }
 
 fn take_stage(value: &str) -> SequenceStage {
     SequenceStage::Take {
-        count: Box::new(number_literal(value)),
+        count: Box::new(cast_to_long(number_literal(value))),
         span: dummy_span(),
     }
 }
 
 fn drop_stage(value: &str) -> SequenceStage {
     SequenceStage::Drop {
-        count: Box::new(number_literal(value)),
+        count: Box::new(cast_to_long(number_literal(value))),
         span: dummy_span(),
     }
 }
@@ -359,6 +415,39 @@ fn java25_sequence_flat_map_wraps_iterable_results_into_stream() {
 }
 
 #[test]
+fn java25_sequence_flat_map_uses_hint_and_resolved_owner_for_set_of() {
+    let terminal = SequenceTerminal {
+        kind: SequenceTerminalKind::ToList,
+        evaluation: SequenceTerminalEvaluation::Collector,
+        requires_non_empty_source: false,
+        specialization_hint: None,
+        canonical_adapter: None,
+        span: dummy_span(),
+    };
+
+    let expr = build_pipeline(
+        collection_source("numbers"),
+        vec![flat_map_set_of_stage_with_object_type()],
+        terminal,
+        JavaType::Reference {
+            name: "java.util.List".to_string(),
+            generic_args: vec![],
+        },
+    );
+
+    let mut generator =
+        JavaCodeGenerator::with_config(JavaCodeGenConfig::for_target(JavaTarget::Java25));
+    let rendered = generator
+        .generate_expression(&expr)
+        .expect("flatMap pipeline with Set.of should render for Java 25");
+
+    assert!(
+        rendered.contains("Sequence.toStream(Set.of(value))"),
+        "expected Sequence.toStream wrapper to use resolved owner fallback, got {rendered}"
+    );
+}
+
+#[test]
 fn java25_sequence_renders_full_stage_chain() {
     let terminal = SequenceTerminal {
         kind: SequenceTerminalKind::ToList,
@@ -393,7 +482,7 @@ fn java25_sequence_renders_full_stage_chain() {
         .generate_expression(&expr)
         .expect("complex sequence chain renders for Java 25");
 
-    let expected = "(numbers).stream().map((x) -> x).filter((x) -> true).flatMap((x) -> x).limit(3).skip(1).sorted().sorted(VALUE_COMPARATOR).toList()";
+    let expected = "(numbers).stream().map((x) -> x).filter((x) -> true).flatMap((x) -> x).limit((long) 3).skip((long) 1).sorted().sorted(VALUE_COMPARATOR).toList()";
     assert_eq!(rendered, expected);
 }
 
@@ -597,7 +686,7 @@ fn map_filter_pipeline_renders_expected_lambdas() {
 }
 
 #[test]
-fn reduce_terminal_emits_illegal_argument_guard() {
+fn reduce_terminal_returns_optional_without_guard() {
     let terminal = SequenceTerminal {
         kind: SequenceTerminalKind::Reduce {
             accumulator: Box::new(reducer_lambda()),
@@ -613,7 +702,10 @@ fn reduce_terminal_emits_illegal_argument_guard() {
         collection_source("numbers"),
         vec![],
         terminal,
-        JavaType::object(),
+        JavaType::Reference {
+            name: "java.util.Optional".to_string(),
+            generic_args: vec![JavaType::object()],
+        },
     );
 
     let mut generator = JavaCodeGenerator::new();
@@ -621,9 +713,8 @@ fn reduce_terminal_emits_illegal_argument_guard() {
         .generate_expression(&expr)
         .expect("reduce pipeline should render");
 
-    assert!(rendered.contains(
-        ".orElseThrow(() -> new IllegalArgumentException(\"Sequence reduce() on empty source\"))"
-    ));
+    assert!(rendered.contains(".reduce("));
+    assert!(!rendered.contains("orElseThrow"));
 }
 
 #[test]
@@ -787,6 +878,10 @@ fn sum_terminal_with_int_hint_uses_map_to_int() {
     assert!(
         rendered.contains("instanceof java.lang.Character"),
         "lambda should guard Character instances"
+    );
+    assert!(
+        rendered.contains(".intValue()"),
+        "lambda should fall back to Number::intValue for non-Character aliases"
     );
 }
 

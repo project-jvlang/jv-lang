@@ -174,6 +174,12 @@ impl TransformContext {
             ..
         } = call
         {
+            if let Some(receiver) = receiver_type.as_ref() {
+                if let Some(inferred) = infer_map_method_return_type(method_name, receiver) {
+                    *java_type = inferred;
+                }
+            }
+
             let canonical_java_name = java_name.clone().unwrap_or_else(|| method_name.clone());
 
             if java_name.is_none() {
@@ -466,6 +472,43 @@ impl TransformContext {
     /// Consumes and returns the recorded lowering strategies.
     pub fn take_when_strategies(&mut self) -> Vec<WhenStrategyRecord> {
         std::mem::take(&mut self.when_strategies)
+    }
+}
+
+fn infer_map_method_return_type(method_name: &str, receiver: &JavaType) -> Option<JavaType> {
+    match method_name {
+        "get" | "computeIfAbsent" | "computeIfPresent" | "compute" | "put" | "remove"
+            if is_map_type(receiver) =>
+        {
+            map_value_type(receiver)
+        }
+        _ => None,
+    }
+}
+
+fn is_map_type(java_type: &JavaType) -> bool {
+    match java_type {
+        JavaType::Reference { name, .. } => {
+            let simple = name.rsplit('.').next().unwrap_or(name);
+            matches!(
+                simple,
+                "Map" | "HashMap" | "LinkedHashMap" | "ConcurrentHashMap"
+            ) || matches!(
+                name.as_str(),
+                "java.util.Map"
+                    | "java.util.HashMap"
+                    | "java.util.LinkedHashMap"
+                    | "java.util.concurrent.ConcurrentHashMap"
+            )
+        }
+        _ => false,
+    }
+}
+
+fn map_value_type(java_type: &JavaType) -> Option<JavaType> {
+    match java_type {
+        JavaType::Reference { generic_args, .. } => generic_args.get(1).cloned(),
+        _ => None,
     }
 }
 

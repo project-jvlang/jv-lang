@@ -19,11 +19,11 @@ fun <T> Stream<T>.filter(predicate: (T) -> Boolean): Stream<T> {
 }
 
 fun <T> Stream<T>.take(count: Int): Stream<T> {
-    return this.limit(count.toLong())
+    return this.limit(count + 0L)
 }
 
 fun <T> Stream<T>.drop(count: Int): Stream<T> {
-    return this.skip(count.toLong())
+    return this.skip(count + 0L)
 }
 
 fun <T, R> Stream<T>.flatMapIterable(transform: (T) -> Iterable<R>): Stream<R> {
@@ -35,7 +35,11 @@ fun <T, R> Stream<T>.flatMapStream(transform: (T) -> Stream<R>): Stream<R> {
 }
 
 fun <T, R : Comparable<R>> Stream<T>.sortedBy(selector: (T) -> R): Stream<T> {
-    return this.sorted { left right -> selector(left).compareTo(selector(right)) }
+    return this.sorted { left right ->
+        val leftKey : R = selector(left)
+        val rightKey : R = selector(right)
+        leftKey.compareTo(rightKey)
+    }
 }
 
 fun <T> Stream<T>.toListStream(): List<T> {
@@ -60,15 +64,7 @@ fun <T> Stream<T>.reduce(operation: (T, T) -> T): T {
             right
         )
     }
-
-    when (reduced.isPresent) {
-        true -> {
-            return reduced.get()
-        }
-        else -> {
-            throw IllegalArgumentException("Stream reduce() on empty source")
-        }
-    }
+    return reduced.orElseThrow { IllegalArgumentException("Stream reduce() on empty source") }
 }
 
 fun <T> Stream<T>.countElements(): Long {
@@ -142,28 +138,28 @@ fun <T> Stream<T>.sumIntFamily(): Int
 fun <T> Stream<T>.sumLongFamily(): Long
     where T : long {
     return this
-        .mapToLong { candidate -> candidate }
+        .mapToLong { candidate -> candidate.longValue() }
         .sum()
 }
 
 fun <T> Stream<T>.sumFloatFamily(): Float
     where T : float {
-    val identity = 0.0f
-    val accumulated = this.reduce(
-        identity
-        { running value -> running + value }
-    )
-    return accumulated
+    val elements : List<T> = this.toListStream()
+    var total = 0.0f
+    for (candidate in elements) {
+        total = total + candidate
+    }
+    return total
 }
 
 fun <T> Stream<T>.sumDoubleFamily(): Double
     where T : double {
-    val identity = 0.0
-    val accumulated = this.reduce(
-        identity
-        { running value -> running + value }
-    )
-    return accumulated
+    val elements : List<T> = this.toListStream()
+    var total = 0.0
+    for (candidate in elements) {
+        total = total + candidate
+    }
+    return total
 }
 
 fun <T, R> Iterable<T>.map(transform: (T) -> R): Stream<R> {
@@ -175,11 +171,11 @@ fun <T> Iterable<T>.filter(predicate: (T) -> Boolean): Stream<T> {
 }
 
 fun <T> Iterable<T>.take(count: Int): Stream<T> {
-    return this.toStream().limit(count.toLong())
+    return this.toStream().limit(count + 0L)
 }
 
 fun <T> Iterable<T>.drop(count: Int): Stream<T> {
-    return this.toStream().skip(count.toLong())
+    return this.toStream().skip(count + 0L)
 }
 
 fun <T, R> Iterable<T>.flatMapIterable(transform: (T) -> Iterable<R>): Stream<R> {
@@ -195,7 +191,11 @@ fun <T : Comparable<T>> Iterable<T>.sorted(): Stream<T> {
 }
 
 fun <T, R : Comparable<R>> Iterable<T>.sortedBy(selector: (T) -> R): Stream<T> {
-    return this.toStream().sorted { left right -> selector(left).compareTo(selector(right)) }
+    return this.toStream().sorted { left right ->
+        val leftKey : R = selector(left)
+        val rightKey : R = selector(right)
+        leftKey.compareTo(rightKey)
+    }
 }
 
 fun <T> Iterable<T>.toList(): List<T> {
@@ -250,11 +250,10 @@ fun <T, K> Iterable<T>.groupBy(keySelector: (T) -> K): Map<K, List<T>> {
     val elements : List<T> = this.toList()
     for (element in elements) {
         val key = keySelector(element)
-
         var bucket = result.get(key)
         when (bucket == null) {
             true -> {
-                bucket = ArrayList()
+                bucket = ArrayList<T>()
                 result.put(
                     key
                     bucket
@@ -262,7 +261,6 @@ fun <T, K> Iterable<T>.groupBy(keySelector: (T) -> K): Map<K, List<T>> {
             }
             else -> {}
         }
-
         bucket.add(element)
     }
     return result
