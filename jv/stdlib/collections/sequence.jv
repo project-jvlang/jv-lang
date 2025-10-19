@@ -1,7 +1,8 @@
 package jv.collections
 
-import java.lang.Number
+import java.lang.Double
 import java.lang.IllegalArgumentException
+import java.lang.Number
 import java.util.*
 import java.util.stream.*
 
@@ -145,57 +146,67 @@ fun <T> SequenceCore<T>.count(): Long {
  * Kotlin `Sequence.sum` に対応する型別集約。
  */
 fun SequenceCore<Byte>.sum(): Int {
-    val elements : List<Byte> = this.toList()
-    var total = 0
-    for (candidate in elements) {
-        total = total + candidate.intValue()
-    }
-    return total
+    return this.stream.sum()
 }
 
 fun SequenceCore<Short>.sum(): Int {
-    val elements : List<Short> = this.toList()
-    var total = 0
-    for (candidate in elements) {
-        total = total + candidate.intValue()
-    }
-    return total
+    return this.stream.sum()
 }
 
 fun SequenceCore<Int>.sum(): Int {
-    val elements : List<Int> = this.toList()
-    var total = 0
-    for (candidate in elements) {
-        total = total + candidate
-    }
-    return total
+    return this.stream.sum()
 }
 
 fun SequenceCore<Long>.sum(): Long {
-    val elements : List<Long> = this.toList()
-    var total = 0L
-    for (candidate in elements) {
-        total = total + candidate
-    }
-    return total
+    return this.stream.sum()
 }
 
 fun SequenceCore<Float>.sum(): Float {
-    val elements : List<Float> = this.toList()
-    var total = 0.0f
-    for (candidate in elements) {
-        total = total + candidate
-    }
-    return total
+    return this.stream.sum()
 }
 
 fun SequenceCore<Double>.sum(): Double {
-    val elements : List<Double> = this.toList()
-    var total = 0.0
-    for (candidate in elements) {
-        total = total + candidate
-    }
-    return total
+    return this.stream.sum()
+}
+
+/**
+ * Primitive-specialized terminal adapters for raw JDK streams used by SequenceCore bridging.
+ */
+fun Stream<Byte>.sum(): Int {
+    return this
+        .mapToInt { candidate -> candidate.intValue() }
+        .sum()
+}
+
+fun Stream<Short>.sum(): Int {
+    return this
+        .mapToInt { candidate -> candidate.intValue() }
+        .sum()
+}
+
+fun Stream<Int>.sum(): Int {
+    return this
+        .mapToInt { candidate -> candidate }
+        .sum()
+}
+
+fun Stream<Long>.sum(): Long {
+    return this
+        .mapToLong { candidate -> candidate }
+        .sum()
+}
+
+fun Stream<Float>.sum(): Float {
+    val total = this
+        .mapToDouble { candidate -> candidate }
+        .sum()
+    return Double.valueOf(total).floatValue()
+}
+
+fun Stream<Double>.sum(): Double {
+    return this
+        .mapToDouble { candidate -> candidate }
+        .sum()
 }
 
 /**
@@ -331,51 +342,27 @@ fun <T> Iterable<T>.count(): Long {
  * Kotlin `Iterable.sum` に対応する型別集約。
  */
 fun Iterable<Byte>.sum(): Int {
-    var total = 0
-    for (candidate in this) {
-        total = total + candidate.intValue()
-    }
-    return total
+    return sequenceFromIterable(this).sum()
 }
 
 fun Iterable<Short>.sum(): Int {
-    var total = 0
-    for (candidate in this) {
-        total = total + candidate.intValue()
-    }
-    return total
+    return sequenceFromIterable(this).sum()
 }
 
 fun Iterable<Int>.sum(): Int {
-    var total = 0
-    for (candidate in this) {
-        total = total + candidate
-    }
-    return total
+    return sequenceFromIterable(this).sum()
 }
 
 fun Iterable<Long>.sum(): Long {
-    var total = 0L
-    for (candidate in this) {
-        total = total + candidate
-    }
-    return total
+    return sequenceFromIterable(this).sum()
 }
 
 fun Iterable<Float>.sum(): Float {
-    var total = 0.0f
-    for (candidate in this) {
-        total = total + candidate
-    }
-    return total
+    return sequenceFromIterable(this).sum()
 }
 
 fun Iterable<Double>.sum(): Double {
-    var total = 0.0
-    for (candidate in this) {
-        total = total + candidate
-    }
-    return total
+    return sequenceFromIterable(this).sum()
 }
 
 /**
