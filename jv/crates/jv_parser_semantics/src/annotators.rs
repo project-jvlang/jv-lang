@@ -1,7 +1,5 @@
-use jv_ast::{types::PrimitiveReturnMetadata, GenericSignature, Program, Statement};
+use jv_ast::{types::PrimitiveReturnMetadata, GenericSignature, Program, Span, Statement};
 use jv_lexer::{Token, TokenType};
-
-use crate::syntax::support::{merge_spans, span_from_token};
 
 use super::{
     metadata::{collect_raw_directives_from_trivia, primitive_reference_from_segments},
@@ -174,9 +172,9 @@ fn collect_prefix_segments(tokens: &[&Token]) -> Option<Vec<String>> {
 fn primitive_prefix_span(tokens: &[&Token]) -> Option<jv_ast::Span> {
     let first = tokens.first()?;
     let last = tokens.last()?;
-    let start = span_from_token(first);
-    let end = span_from_token(last);
-    Some(merge_spans(&start, &end))
+    let start = Span::from_token_lexeme(first.line, first.column, &first.lexeme);
+    let end = Span::from_token_lexeme(last.line, last.column, &last.lexeme);
+    Some(start.merge(&end))
 }
 
 fn tokens_within_span<'a>(tokens: &'a [Token], span: &jv_ast::Span) -> Vec<&'a Token> {

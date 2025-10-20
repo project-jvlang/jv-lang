@@ -6,8 +6,8 @@ use jv_ast::{
 };
 use jv_lexer::{StringDelimiterKind, StringLiteralMetadata, Token, TokenMetadata, TokenType};
 
-use crate::syntax::patterns::{self, pattern_span};
-use crate::syntax::support::{
+use crate::patterns::{self, pattern_span};
+use crate::support::{
     expression_span, identifier, identifier_with_span, keyword, merge_spans,
     regex_literal_from_token, span_from_token, statement_span, token_any_comma, token_arrow,
     token_colon, token_comma, token_else, token_if, token_layout_comma, token_left_brace,

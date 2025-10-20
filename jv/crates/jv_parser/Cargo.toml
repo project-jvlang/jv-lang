@@ -8,6 +8,10 @@ license.workspace = true
 chumsky.workspace = true
 jv_lexer.workspace = true
 jv_ast.workspace = true
+jv_parser_syntax.workspace = true
+jv_parser_preprocess.workspace = true
+jv_parser_semantics.workspace = true
+jv_parser_frontend.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]

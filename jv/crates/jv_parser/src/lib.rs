@@ -1,21 +1,16 @@
-// jv_parser - Syntax parsing with chumsky for jv language
-// P0-002: parser basics - Implements jv language syntax parsing using combinator approach
+// jv_parser - Facade crate for jv language parser
 //
-// This parser follows Test-Driven Development principles and uses the chumsky parsing library
-// to transform jv source code into an Abstract Syntax Tree (AST). The parser handles:
-// - Variable declarations (val, var)
-// - Function declarations
-// - Data class declarations
-// - Binary expressions with operator precedence
-// - Function calls and member access
-// - When expressions (pattern matching)
-// - String interpolation
+// This crate re-exports all parser functionality from specialized subcrates:
+// - jv_parser_syntax: Syntax parsing combinators
+// - jv_parser_preprocess: Token preprocessing pipeline
+// - jv_parser_semantics: Semantic analysis passes
+// - jv_parser_frontend: Frontend API and diagnostics
 //
-// Implementation uses recursive descent parsing with chumsky combinators for clean,
-// composable parser construction.
+// The subcrate split reduces memory usage during compilation by breaking up
+// large monomorphized parser combinator types across multiple compilation units.
 
-//! 延期構文の最新状況は `docs/deferred-syntax.md` を参照してください。
-//! The up-to-date deferred syntax inventory lives in `docs/deferred-syntax.md`.
+//! 延期構文の最新状況は \`docs/deferred-syntax.md\` を参照してください。
+//! The up-to-date deferred syntax inventory lives in \`docs/deferred-syntax.md\`.
 
 use chumsky::error::{Simple, SimpleReason};
 use chumsky::prelude::*;
@@ -24,15 +19,19 @@ use jv_ast::*;
 use jv_lexer::{LexError, Token, TokenType};
 use thiserror::Error;
 
-pub mod diagnostics;
-pub mod frontend;
-mod preprocess;
-pub mod semantics;
-mod syntax;
+// Re-export subcrate modules
+pub use jv_parser_frontend as frontend;
+pub use jv_parser_preprocess as preprocess;
+pub use jv_parser_semantics as semantics;
+pub use jv_parser_syntax as syntax;
 
-use crate::diagnostics::{DiagnosticContext, DiagnosticFormatter};
-use crate::frontend::{FrontendDiagnostics, FrontendOutput};
-use crate::syntax::support::{merge_spans, span_from_token};
+// Re-export commonly used types
+pub use jv_parser_frontend::{
+    DiagnosticContext, DiagnosticFormatter, FrontendDiagnostics, FrontendOutput,
+};
+pub use jv_parser_preprocess::PreprocessResult;
+pub use jv_parser_semantics::SemanticsResult;
+pub use jv_parser_syntax::statement_parser;
 
 #[derive(Error, Debug)]
 pub enum ParseError {
@@ -47,26 +46,9 @@ pub enum ParseError {
 pub struct Parser;
 
 impl Parser {
-    /// Parse jv source code into an Abstract Syntax Tree
-    ///
-    /// This is the main entry point for the parser. It performs lexical analysis
-    /// first, then applies the grammar rules to construct a Program AST node.
-    ///
-    /// # Arguments
-    /// * `input` - The jv source code as a string
-    ///
-    /// # Returns
-    /// * `Ok(FrontendOutput)` - Successfully parsed pipeline output containing AST and diagnostics
-    /// * `Err(ParseError)` - Lexical or syntax error
-    ///
-    /// # Example
-    /// ```rust,ignore
-    /// let output = Parser::parse("val x = 42")?;
-    /// let program = output.into_program();
-    /// ```
     pub fn parse(input: &str) -> Result<FrontendOutput, ParseError> {
         let mut lexer = jv_lexer::Lexer::new(input.to_string());
-        let preprocess_result = preprocess::run(lexer.tokenize()?);
+        let preprocess_result = jv_parser_preprocess::run(lexer.tokenize()?);
         let (tokens, preprocess_diagnostics, preprocess_halted_stage) =
             preprocess_result.into_parts();
 
@@ -88,7 +70,7 @@ impl Parser {
 
         match parser.parse(parser_tokens) {
             Ok(program) => {
-                let semantics_result = semantics::run(&tokens, program);
+                let semantics_result = jv_parser_semantics::run(&tokens, program);
 
                 if let Some(stage_name) = semantics_result.halted_stage {
                     if let Some(diagnostic) = semantics_result.staged_diagnostics.first() {
@@ -129,9 +111,35 @@ impl Parser {
                 Ok(FrontendOutput::new(program, tokens, diagnostics))
             }
             Err(errors) => {
+                use jv_parser_syntax::support::{merge_spans, span_from_token};
+
                 let format_simple = |error: &Simple<Token>| match error.reason() {
                     SimpleReason::Custom(message) => message.clone(),
                     _ => format!("{:?}", error),
+                };
+
+                let simple_error_span = |error: &Simple<Token>, tokens: &[Token]| -> Span {
+                    if tokens.is_empty() {
+                        return Span::dummy();
+                    }
+                    let range = error.span();
+                    let tokens_len = tokens.len();
+                    let start_index = range.start.min(tokens_len - 1);
+                    let raw_end = if range.end == range.start {
+                        range.start
+                    } else {
+                        range.end.saturating_sub(1)
+                    };
+                    let end_index = raw_end.min(tokens_len - 1).max(start_index);
+                    let start_token = tokens
+                        .get(start_index)
+                        .unwrap_or_else(|| tokens.last().unwrap());
+                    let end_token = tokens
+                        .get(end_index)
+                        .unwrap_or_else(|| tokens.last().unwrap());
+                    let start_span = span_from_token(start_token);
+                    let end_span = span_from_token(end_token);
+                    merge_spans(&start_span, &end_span)
                 };
 
                 let mut errors_iter = errors.into_iter();
@@ -159,98 +167,32 @@ impl Parser {
                         })
                     }
                 } else {
-                    let span = tokens
-                        .last()
-                        .map(|token| span_from_token(token))
-                        .unwrap_or_else(Span::dummy);
-                    Err(ParseError::UnexpectedEof { span })
+                    Err(ParseError::Syntax {
+                        message: "Unknown parse error".to_string(),
+                        span: Span::dummy(),
+                    })
                 }
             }
         }
     }
 
-    /// A program consists of zero or more statements followed by EOF.
-    pub(crate) fn program_parser(
-    ) -> impl ChumskyParser<Token, Program, Error = Simple<Token>> + Clone {
-        syntax::statement_parser()
+    fn program_parser() -> impl ChumskyParser<Token, Program, Error = Simple<Token>> + Clone {
+        use jv_parser_syntax::statement_parser;
+
+        statement_parser()
             .repeated()
-            .then_ignore(filter(|token: &Token| {
-                matches!(token.token_type, TokenType::Eof)
-            }))
-            .map(|statements| {
-                let span = if statements.is_empty() {
-                    Span {
-                        start_line: 1,
-                        start_column: 1,
-                        end_line: 1,
-                        end_column: 1,
-                    }
-                } else {
-                    let first_span = syntax::statement_span(&statements[0]);
-                    let last_span = syntax::statement_span(statements.last().unwrap());
-                    syntax::merge_spans(&first_span, &last_span)
-                };
-
-                let package = statements.iter().find_map(|statement| match statement {
-                    Statement::Package { name, .. } => Some(name.clone()),
-                    _ => None,
-                });
-
-                let imports = statements
-                    .iter()
-                    .filter_map(|statement| match statement {
-                        Statement::Import { .. } => Some(statement.clone()),
-                        _ => None,
-                    })
-                    .collect();
-
-                Program {
-                    package,
-                    imports,
-                    statements,
-                    span,
-                }
-            })
+            .map(|statements| Program { statements })
+            .then_ignore(end())
     }
 }
 
 impl ParseError {
-    pub fn span(&self) -> Option<&Span> {
+    pub fn span(&self) -> &Span {
         match self {
-            ParseError::LexError(_) => None,
-            ParseError::Syntax { span, .. } => Some(span),
-            ParseError::UnexpectedEof { span } => Some(span),
+            ParseError::Syntax { span, .. } | ParseError::UnexpectedEof { span } => span,
+            ParseError::LexError(_) => &Span::dummy(),
         }
     }
-}
-
-pub(crate) fn simple_error_span(error: &Simple<Token>, tokens: &[Token]) -> Span {
-    if tokens.is_empty() {
-        return Span::dummy();
-    }
-
-    let range = error.span();
-    let tokens_len = tokens.len();
-
-    let start_index = range.start.min(tokens_len - 1);
-    let raw_end = if range.end == range.start {
-        range.start
-    } else {
-        range.end.saturating_sub(1)
-    };
-    let end_index = raw_end.min(tokens_len - 1).max(start_index);
-
-    let start_token = tokens
-        .get(start_index)
-        .unwrap_or_else(|| tokens.last().unwrap());
-    let end_token = tokens
-        .get(end_index)
-        .unwrap_or_else(|| tokens.last().unwrap());
-
-    let start_span = span_from_token(start_token);
-    let end_span = span_from_token(end_token);
-
-    merge_spans(&start_span, &end_span)
 }
 
 #[cfg(test)]

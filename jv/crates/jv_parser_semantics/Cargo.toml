@@ -1,0 +1,13 @@
+[package]
+name = "jv_parser_semantics"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+jv_lexer.workspace = true
+jv_ast.workspace = true
+thiserror.workspace = true
+
+[lib]
+crate-type = ["rlib"]

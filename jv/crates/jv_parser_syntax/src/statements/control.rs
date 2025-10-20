@@ -8,7 +8,7 @@ use jv_ast::{
 use jv_lexer::{Token, TokenType};
 
 use super::signatures::type_annotation_clause;
-use crate::syntax::support::{
+use crate::support::{
     block_expression_parser, expression_span, identifier, identifier_with_span, merge_spans,
     span_from_token, token_assign, token_defer, token_do_keyword, token_dot, token_for,
     token_in_keyword, token_left_paren, token_return, token_right_paren, token_spawn, token_throw,

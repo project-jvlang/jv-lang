@@ -2254,6 +2254,7 @@ fn test_multiple_statements_variants(input: &str) -> usize {
     program.statements.len()
 }
 
+// NOTE: ベースライン計測手順は `.spec-workflow/specs/jv-parser-reactive-pipeline/metrics.md` を参照。
 #[test]
 #[ignore = "performance benchmark"]
 fn test_parse_large_file() {

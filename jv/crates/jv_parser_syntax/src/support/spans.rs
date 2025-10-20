@@ -1,22 +1,12 @@
 use jv_ast::{ConcurrencyConstruct, Expression, ResourceManagement, Span, Statement};
 use jv_lexer::Token;
 
-pub(crate) fn span_from_token(token: &Token) -> Span {
-    Span {
-        start_line: token.line,
-        start_column: token.column,
-        end_line: token.line,
-        end_column: token.column + token.lexeme.len(),
-    }
+pub fn span_from_token(token: &Token) -> Span {
+    Span::from_token_lexeme(token.line, token.column, &token.lexeme)
 }
 
-pub(crate) fn merge_spans(start: &Span, end: &Span) -> Span {
-    Span {
-        start_line: start.start_line,
-        start_column: start.start_column,
-        end_line: end.end_line,
-        end_column: end.end_column,
-    }
+pub fn merge_spans(start: &Span, end: &Span) -> Span {
+    start.merge(end)
 }
 
 pub(crate) fn expression_span(expr: &Expression) -> Span {

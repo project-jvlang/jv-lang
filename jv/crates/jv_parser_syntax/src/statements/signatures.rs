@@ -9,9 +9,9 @@ use jv_ast::{
 };
 use jv_lexer::{Token, TokenType};
 
-use crate::semantics::{collect_raw_directives_from_token, primitive_reference_from_segments};
-use crate::syntax::parameters::parameter_list;
-use crate::syntax::support::{
+use jv_parser_semantics::{collect_raw_directives_from_token, primitive_reference_from_segments};
+use crate::parameters::parameter_list;
+use crate::support::{
     identifier, identifier_with_span, keyword as support_keyword, merge_spans,
     qualified_name_with_span, span_from_token, token_any_comma, token_assign, token_at,
     token_class, token_colon, token_dot, token_greater, token_left_brace, token_left_paren,

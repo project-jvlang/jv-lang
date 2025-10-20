@@ -1,3 +1,6 @@
+// jv_parser_preprocess - Preprocessing pipeline for jv language
+// Extracted from jv_parser for memory-efficient compilation
+
 mod call;
 mod comments;
 mod json;
@@ -20,10 +23,6 @@ use jv_lexer::Token;
 #[allow(dead_code)]
 pub fn preprocess_tokens(tokens: Vec<Token>) -> Vec<Token> {
     let result = run(tokens);
-    let _ = result.tokens();
-    let _ = result.diagnostics();
-    let _ = result.halted_stage();
-    let _ = result.is_success();
     let (tokens, _, _) = result.into_parts();
     tokens
 }
@@ -41,33 +40,4 @@ fn default_pipeline() -> ProcessingPipeline {
         .with_stage(comments::CommentsStage::new(Rc::clone(&shared_state)))
         .with_stage(layout::LayoutStage::new(shared_state))
         .build()
-}
-
-#[allow(dead_code)]
-fn _preprocess_api_sanity_check(
-    stage: &dyn PreprocessStage,
-    context: &mut StageContext<'_>,
-) -> StageStatus {
-    let status = stage.run(context);
-    if matches!(status, StageStatus::Halt) {
-        let diagnostic = PreprocessDiagnostic::new(stage.name(), String::new(), None);
-        context.push_diagnostic(diagnostic.clone());
-
-        // accessor usage to keep API validated during compilation
-        let _ = diagnostic.stage();
-        let _ = diagnostic.message();
-        let _ = diagnostic.span();
-    }
-
-    {
-        let _ = context.tokens();
-    }
-    {
-        let _ = context.diagnostics();
-    }
-    let _ = context.tokens_mut();
-    let _ = context.diagnostics_mut();
-    let _ = StageStatus::Halt;
-
-    status
 }

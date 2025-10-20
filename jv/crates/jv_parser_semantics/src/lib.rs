@@ -1,3 +1,6 @@
+// jv_parser_semantics - Semantic analysis module for jv language
+// Extracted from jv_parser for memory-efficient compilation
+
 mod annotators;
 mod metadata;
 

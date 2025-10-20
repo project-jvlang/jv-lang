@@ -1,10 +1,38 @@
 use chumsky::error::{Simple, SimpleReason};
 use jv_ast::Span;
 use jv_lexer::Token;
+use jv_parser_preprocess::PreprocessDiagnostic;
+use jv_parser_semantics::SemanticsDiagnostic;
+use jv_parser_syntax::support::{merge_spans, span_from_token};
 
-use crate::preprocess::PreprocessDiagnostic;
-use crate::semantics::SemanticsDiagnostic;
-use crate::simple_error_span;
+fn simple_error_span(error: &Simple<Token>, tokens: &[Token]) -> Span {
+    if tokens.is_empty() {
+        return Span::dummy();
+    }
+
+    let range = error.span();
+    let tokens_len = tokens.len();
+
+    let start_index = range.start.min(tokens_len - 1);
+    let raw_end = if range.end == range.start {
+        range.start
+    } else {
+        range.end.saturating_sub(1)
+    };
+    let end_index = raw_end.min(tokens_len - 1).max(start_index);
+
+    let start_token = tokens
+        .get(start_index)
+        .unwrap_or_else(|| tokens.last().unwrap());
+    let end_token = tokens
+        .get(end_index)
+        .unwrap_or_else(|| tokens.last().unwrap());
+
+    let start_span = span_from_token(start_token);
+    let end_span = span_from_token(end_token);
+
+    merge_spans(&start_span, &end_span)
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DiagnosticSeverity {

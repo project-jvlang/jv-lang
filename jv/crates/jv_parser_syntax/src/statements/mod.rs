@@ -11,7 +11,7 @@ mod control;
 mod declarations;
 mod signatures;
 
-pub(crate) fn statement_parser(
+pub fn statement_parser(
 ) -> impl ChumskyParser<Token, Statement, Error = Simple<Token>> + Clone {
     recursive(|statement| {
         let expr = expressions::expression_parser(

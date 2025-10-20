@@ -4,6 +4,10 @@ members = [
     "crates/jv_support",
     "crates/jv_lexer",
     "crates/jv_parser",
+    "crates/jv_parser_syntax",
+    "crates/jv_parser_preprocess",
+    "crates/jv_parser_semantics",
+    "crates/jv_parser_frontend",
     "crates/jv_ast",
     "crates/jv_ir",
     "crates/jv_inference",
@@ -59,6 +63,10 @@ once_cell = "1.20"
 # Internal crates
 jv_lexer = { path = "crates/jv_lexer" }
 jv_parser = { path = "crates/jv_parser" }
+jv_parser_syntax = { path = "crates/jv_parser_syntax" }
+jv_parser_preprocess = { path = "crates/jv_parser_preprocess" }
+jv_parser_semantics = { path = "crates/jv_parser_semantics" }
+jv_parser_frontend = { path = "crates/jv_parser_frontend" }
 jv_ast = { path = "crates/jv_ast" }
 jv_ir = { path = "crates/jv_ir" }
 jv_inference = { path = "crates/jv_inference" }
@@ -115,6 +123,10 @@ debug = 0
 codegen-units = 256
 # Enable overflow checks even in dev mode
 overflow-checks = true
+
+# Split jv_parser_syntax into more codegen units to reduce memory
+[profile.dev.package.jv_parser_syntax]
+codegen-units = 64
 
 # Don't optimize build dependencies to save memory
 [profile.dev.build-override]
