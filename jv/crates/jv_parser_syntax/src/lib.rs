@@ -1,12 +1,9 @@
-// jv_parser_syntax - Syntax parsing module for jv language
-// Extracted from jv_parser for memory-efficient compilation
+// jv_parser_syntax - Syntax parsing facade for jv language
+// This crate re-exports specialized syntax parsing crates to keep compile units small.
 
-pub mod expressions;
-pub mod json;
-pub mod parameters;
-pub mod patterns;
-pub mod statements;
-pub mod support;
-
-// Re-export commonly used items
-pub use statements::statement_parser;
+pub use jv_parser_syntax_expressions::{
+    expression_parser, expressions, json, json_expression_parser, patterns,
+};
+pub use jv_parser_syntax_statements::{parameters, statement_parser, statements};
+pub use jv_parser_syntax_support as support;
+pub use jv_parser_syntax_support::{merge_spans, span_from_token};

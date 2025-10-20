@@ -7,7 +7,7 @@ use jv_ast::{
 use jv_lexer::Token;
 
 use super::primary::lambda_literal_parser;
-use crate::support::{
+use jv_parser_syntax_support::{
     expression_span, identifier_with_span, merge_spans, span_from_token, token_any_comma, token_as,
     token_assign, token_comma, token_dot, token_greater, token_left_bracket, token_left_paren,
     token_less, token_null_safe, token_question, token_right_bracket, token_right_paren,

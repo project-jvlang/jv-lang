@@ -12,7 +12,7 @@ use super::signatures::{
     type_annotation_clause, type_parameter_list,
 };
 use crate::parameters::parameter_list;
-use crate::support::{
+use jv_parser_syntax_support::{
     block_expression_parser, expression_span, identifier, identifier_with_span,
     keyword as support_keyword, merge_spans, qualified_name_with_span, span_from_token,
     token_assign, token_class, token_colon, token_data, token_dot, token_fun, token_import,

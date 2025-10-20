@@ -9,12 +9,12 @@ use jv_lexer::{
     TokenType,
 };
 
-use super::support::{
+use jv_parser_syntax_support::{
     merge_spans, span_from_token, token_colon, token_comma, token_left_brace, token_left_bracket,
     token_right_brace, token_right_bracket,
 };
 
-pub(crate) fn json_expression_parser(
+pub fn json_expression_parser(
 ) -> impl ChumskyParser<Token, Expression, Error = Simple<Token>> + Clone {
     let value = json_value_parser();
     let object = root_json_object(value.clone());

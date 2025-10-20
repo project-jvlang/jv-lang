@@ -3,14 +3,14 @@ use chumsky::Parser as ChumskyParser;
 use jv_ast::{BinaryOp, Expression, Literal, Pattern, Span};
 use jv_lexer::{Token, TokenType};
 
-use super::support::{
+use jv_parser_syntax_support::{
     expression_span, identifier_with_span, keyword, merge_spans, regex_literal_from_token,
     span_from_token, token_and, token_any_comma, token_in_keyword, token_left_paren,
     token_right_paren,
 };
 
 /// Parser for patterns used in `when` expressions.
-pub(crate) fn when_pattern_parser(
+pub fn when_pattern_parser(
     expr: impl ChumskyParser<Token, Expression, Error = Simple<Token>> + Clone + 'static,
 ) -> impl ChumskyParser<Token, Pattern, Error = Simple<Token>> + Clone {
     recursive(move |pattern| {
@@ -151,7 +151,7 @@ pub(crate) fn when_pattern_parser(
     })
 }
 
-pub(crate) fn pattern_span(pattern: &Pattern) -> Span {
+pub fn pattern_span(pattern: &Pattern) -> Span {
     match pattern {
         Pattern::Literal(_, span)
         | Pattern::Identifier(_, span)

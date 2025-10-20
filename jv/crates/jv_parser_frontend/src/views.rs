@@ -1,4 +1,9 @@
 use jv_ast::{Program, Span, Statement};
+use jv_lexer::Token;
+use jv_parser_preprocess::PreprocessDiagnostic;
+use jv_parser_semantics::SemanticsDiagnostic;
+
+use crate::formatter::Diagnostic;
 
 /// `Program` の読み取り専用ビュー。
 ///
@@ -31,5 +36,103 @@ impl<'a> ProgramView<'a> {
     /// プログラム全体のスパンを取得する。
     pub fn span(&self) -> &'a Span {
         &self.program.span
+    }
+}
+
+/// フロントエンド診断の集約結果。
+#[derive(Debug, Clone)]
+pub struct FrontendDiagnostics {
+    final_diagnostics: Vec<Diagnostic>,
+    preprocess_diagnostics: Vec<PreprocessDiagnostic>,
+    preprocess_halted_stage: Option<&'static str>,
+    semantics_diagnostics: Vec<SemanticsDiagnostic>,
+    semantics_halted_stage: Option<&'static str>,
+}
+
+impl FrontendDiagnostics {
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        final_diagnostics: Vec<Diagnostic>,
+        preprocess_diagnostics: Vec<PreprocessDiagnostic>,
+        preprocess_halted_stage: Option<&'static str>,
+        semantics_diagnostics: Vec<SemanticsDiagnostic>,
+        semantics_halted_stage: Option<&'static str>,
+    ) -> Self {
+        Self {
+            final_diagnostics,
+            preprocess_diagnostics,
+            preprocess_halted_stage,
+            semantics_diagnostics,
+            semantics_halted_stage,
+        }
+    }
+
+    pub fn final_diagnostics(&self) -> &[Diagnostic] {
+        &self.final_diagnostics
+    }
+
+    pub fn preprocess_diagnostics(&self) -> &[PreprocessDiagnostic] {
+        &self.preprocess_diagnostics
+    }
+
+    pub fn preprocess_halted_stage(&self) -> Option<&'static str> {
+        self.preprocess_halted_stage
+    }
+
+    pub fn semantics_diagnostics(&self) -> &[SemanticsDiagnostic] {
+        &self.semantics_diagnostics
+    }
+
+    pub fn semantics_halted_stage(&self) -> Option<&'static str> {
+        self.semantics_halted_stage
+    }
+}
+
+/// パーサ全体の出力を保持する構造体。
+#[derive(Debug, Clone)]
+pub struct FrontendOutput {
+    program: Program,
+    tokens: Vec<Token>,
+    diagnostics: FrontendDiagnostics,
+}
+
+impl FrontendOutput {
+    pub fn new(program: Program, tokens: Vec<Token>, diagnostics: FrontendDiagnostics) -> Self {
+        Self {
+            program,
+            tokens,
+            diagnostics,
+        }
+    }
+
+    pub fn program(&self) -> ProgramView<'_> {
+        ProgramView::new(&self.program)
+    }
+
+    pub fn tokens(&self) -> &[Token] {
+        &self.tokens
+    }
+
+    pub fn diagnostics(&self) -> &FrontendDiagnostics {
+        &self.diagnostics
+    }
+
+    pub fn into_parts(self) -> (Program, Vec<Token>, FrontendDiagnostics) {
+        (self.program, self.tokens, self.diagnostics)
+    }
+
+    pub fn into_program(self) -> Program {
+        let (program, _, _) = self.into_parts();
+        program
+    }
+
+    pub fn into_tokens(self) -> Vec<Token> {
+        let (_, tokens, _) = self.into_parts();
+        tokens
+    }
+
+    pub fn into_diagnostics(self) -> FrontendDiagnostics {
+        let (_, _, diagnostics) = self.into_parts();
+        diagnostics
     }
 }

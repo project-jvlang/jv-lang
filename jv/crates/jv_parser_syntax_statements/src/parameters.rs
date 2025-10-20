@@ -3,12 +3,12 @@ use chumsky::Parser as ChumskyParser;
 use jv_ast::{Expression, Parameter};
 use jv_lexer::Token;
 
-use super::support::{
+use jv_parser_syntax_support::{
     identifier_with_span, token_any_comma, token_assign, token_colon, token_val, token_var,
     type_annotation,
 };
 
-pub(crate) fn parameter_list(
+pub fn parameter_list(
     expr: impl ChumskyParser<Token, Expression, Error = Simple<Token>> + Clone,
 ) -> impl ChumskyParser<Token, Vec<Parameter>, Error = Simple<Token>> + Clone {
     parameter(expr)
@@ -17,7 +17,7 @@ pub(crate) fn parameter_list(
         .collect()
 }
 
-pub(crate) fn parameter(
+pub fn parameter(
     expr: impl ChumskyParser<Token, Expression, Error = Simple<Token>> + Clone,
 ) -> impl ChumskyParser<Token, Parameter, Error = Simple<Token>> + Clone {
     token_val()

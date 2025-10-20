@@ -9,7 +9,7 @@ use super::tokens::{
     token_left_paren, token_less, token_question, token_right_brace, token_right_paren,
 };
 
-pub(crate) fn block_expression_parser(
+pub fn block_expression_parser(
     statement: impl ChumskyParser<Token, Statement, Error = Simple<Token>> + Clone,
 ) -> impl ChumskyParser<Token, Expression, Error = Simple<Token>> + Clone {
     token_left_brace()
@@ -22,13 +22,13 @@ pub(crate) fn block_expression_parser(
         })
 }
 
-pub(crate) fn expression_level_block_parser(
+pub fn expression_level_block_parser(
     statement: impl ChumskyParser<Token, Statement, Error = Simple<Token>> + Clone + 'static,
 ) -> impl ChumskyParser<Token, Expression, Error = Simple<Token>> + Clone {
     block_expression_parser(statement).boxed()
 }
 
-pub(crate) fn regex_literal_from_token(token: &Token, span: Span) -> RegexLiteral {
+pub fn regex_literal_from_token(token: &Token, span: Span) -> RegexLiteral {
     let normalized = match &token.token_type {
         TokenType::RegexLiteral(value) => value.clone(),
         _ => token.lexeme.clone(),
@@ -53,8 +53,8 @@ pub(crate) fn regex_literal_from_token(token: &Token, span: Span) -> RegexLitera
     }
 }
 
-pub(crate) fn type_annotation(
-) -> impl ChumskyParser<Token, TypeAnnotation, Error = Simple<Token>> + Clone {
+pub fn type_annotation() -> impl ChumskyParser<Token, TypeAnnotation, Error = Simple<Token>> + Clone
+{
     recursive(|annotation| {
         let qualified = qualified_name_with_span();
 

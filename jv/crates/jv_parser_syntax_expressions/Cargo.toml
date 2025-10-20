@@ -1,12 +1,13 @@
 [package]
-name = "jv_parser_syntax"
+name = "jv_parser_syntax_expressions"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
 [dependencies]
-jv_parser_syntax_expressions.workspace = true
-jv_parser_syntax_statements.workspace = true
+chumsky.workspace = true
+jv_ast.workspace = true
+jv_lexer.workspace = true
 jv_parser_syntax_support.workspace = true
 
 [lib]

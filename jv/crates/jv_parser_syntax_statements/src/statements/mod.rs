@@ -4,17 +4,16 @@ use chumsky::Parser as ChumskyParser;
 use jv_ast::Statement;
 use jv_lexer::Token;
 
-use super::expressions;
-use super::support::expression_level_block_parser;
+use jv_parser_syntax_expressions::expression_parser;
+use jv_parser_syntax_support::expression_level_block_parser;
 
 mod control;
 mod declarations;
 mod signatures;
 
-pub fn statement_parser(
-) -> impl ChumskyParser<Token, Statement, Error = Simple<Token>> + Clone {
+pub fn statement_parser() -> impl ChumskyParser<Token, Statement, Error = Simple<Token>> + Clone {
     recursive(|statement| {
-        let expr = expressions::expression_parser(
+        let expr = expression_parser(
             expression_level_block_parser(statement.clone()),
             statement.clone(),
         );

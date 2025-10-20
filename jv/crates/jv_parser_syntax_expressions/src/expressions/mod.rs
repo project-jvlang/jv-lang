@@ -4,13 +4,13 @@ use chumsky::Parser as ChumskyParser;
 use jv_ast::{Expression, Statement};
 use jv_lexer::Token;
 
-use super::json::json_expression_parser;
+use crate::json::json_expression_parser;
 
 mod operators;
 mod postfix;
 mod primary;
 
-pub(crate) fn expression_parser<B, S>(
+pub fn expression_parser<B, S>(
     block: B,
     statement: S,
 ) -> impl ChumskyParser<Token, Expression, Error = Simple<Token>> + Clone

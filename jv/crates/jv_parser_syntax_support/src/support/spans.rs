@@ -9,7 +9,7 @@ pub fn merge_spans(start: &Span, end: &Span) -> Span {
     start.merge(end)
 }
 
-pub(crate) fn expression_span(expr: &Expression) -> Span {
+pub fn expression_span(expr: &Expression) -> Span {
     match expr {
         Expression::Literal(_, span) => span.clone(),
         Expression::RegexLiteral(literal) => literal.span.clone(),
@@ -36,7 +36,7 @@ pub(crate) fn expression_span(expr: &Expression) -> Span {
     }
 }
 
-pub(crate) fn statement_span(stmt: &Statement) -> Span {
+pub fn statement_span(stmt: &Statement) -> Span {
     match stmt {
         Statement::ValDeclaration { span, .. } => span.clone(),
         Statement::VarDeclaration { span, .. } => span.clone(),

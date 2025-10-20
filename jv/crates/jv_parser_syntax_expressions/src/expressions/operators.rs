@@ -3,7 +3,7 @@ use chumsky::Parser as ChumskyParser;
 use jv_ast::{BinaryOp, Expression, UnaryOp};
 use jv_lexer::Token;
 
-use crate::support::{
+use jv_parser_syntax_support::{
     expression_span, merge_spans, token_and, token_divide, token_elvis, token_equal, token_greater,
     token_greater_equal, token_is, token_less, token_less_equal, token_minus, token_modulo,
     token_multiply, token_not, token_not_equal, token_or, token_plus, token_range_exclusive,

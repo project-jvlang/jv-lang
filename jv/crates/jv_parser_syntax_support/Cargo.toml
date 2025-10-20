@@ -1,0 +1,13 @@
+[package]
+name = "jv_parser_syntax_support"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+chumsky.workspace = true
+jv_ast.workspace = true
+jv_lexer.workspace = true
+
+[lib]
+crate-type = ["rlib"]

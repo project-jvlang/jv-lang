@@ -181,19 +181,59 @@ impl Parser {
 
         statement_parser()
             .repeated()
-            .map(|statements| Program { statements })
+            .map(Self::assemble_program)
             .then_ignore(end())
     }
 }
 
 impl ParseError {
-    pub fn span(&self) -> &Span {
+    pub fn span(&self) -> Span {
         match self {
-            ParseError::Syntax { span, .. } | ParseError::UnexpectedEof { span } => span,
-            ParseError::LexError(_) => &Span::dummy(),
+            ParseError::Syntax { span, .. } | ParseError::UnexpectedEof { span } => span.clone(),
+            ParseError::LexError(_) => Span::dummy(),
         }
     }
 }
 
 #[cfg(test)]
 mod tests;
+
+impl Parser {
+    fn assemble_program(statements: Vec<Statement>) -> Program {
+        use jv_parser_syntax::support::statement_span;
+
+        let package = statements.iter().find_map(|statement| {
+            if let Statement::Package { name, .. } = statement {
+                Some(name.clone())
+            } else {
+                None
+            }
+        });
+
+        let imports = statements
+            .iter()
+            .filter_map(|statement| match statement {
+                Statement::Import { .. } => Some(statement.clone()),
+                _ => None,
+            })
+            .collect();
+
+        let span = statements
+            .first()
+            .and_then(|first| {
+                statements.last().map(|last| {
+                    let start = statement_span(first);
+                    let end = statement_span(last);
+                    jv_parser_syntax::merge_spans(&start, &end)
+                })
+            })
+            .unwrap_or_else(Span::dummy);
+
+        Program {
+            package,
+            imports,
+            statements,
+            span,
+        }
+    }
+}
