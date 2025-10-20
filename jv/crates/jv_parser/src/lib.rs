@@ -25,6 +25,7 @@ use jv_lexer::{LexError, Token, TokenType};
 use thiserror::Error;
 
 mod preprocess;
+pub mod semantics;
 mod syntax;
 
 use crate::syntax::support::{merge_spans, span_from_token};
