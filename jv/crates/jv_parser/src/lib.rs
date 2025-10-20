@@ -24,6 +24,7 @@ use jv_ast::*;
 use jv_lexer::{LexError, Token, TokenType};
 use thiserror::Error;
 
+pub mod diagnostics;
 mod preprocess;
 pub mod semantics;
 mod syntax;
@@ -125,7 +126,8 @@ impl Parser {
     }
 
     /// A program consists of zero or more statements followed by EOF.
-    fn program_parser() -> impl ChumskyParser<Token, Program, Error = Simple<Token>> + Clone {
+    pub(crate) fn program_parser(
+    ) -> impl ChumskyParser<Token, Program, Error = Simple<Token>> + Clone {
         syntax::statement_parser()
             .repeated()
             .then_ignore(filter(|token: &Token| {
@@ -178,7 +180,7 @@ impl ParseError {
     }
 }
 
-fn simple_error_span(error: &Simple<Token>, tokens: &[Token]) -> Span {
+pub(crate) fn simple_error_span(error: &Simple<Token>, tokens: &[Token]) -> Span {
     if tokens.is_empty() {
         return Span::dummy();
     }

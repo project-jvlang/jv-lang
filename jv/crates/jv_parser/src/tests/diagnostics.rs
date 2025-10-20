@@ -1,4 +1,12 @@
+use crate::diagnostics::{
+    DiagnosticContext, DiagnosticFormatter, DiagnosticSeverity, DiagnosticSource,
+};
+use crate::preprocess::PreprocessDiagnostic;
+use crate::semantics::SemanticsDiagnostic;
 use crate::{ParseError, Parser};
+use chumsky::Parser as ChumskyParser;
+use jv_ast::Span;
+use jv_lexer::Lexer;
 
 #[test]
 fn parse_error_reports_span_for_unexpected_token() {
@@ -147,4 +155,118 @@ fn legacy_if_expression_reports_jv3103() {
         }
         other => panic!("expected syntax error for if expression, got {:?}", other),
     }
+}
+
+#[test]
+fn diagnostic_formatter_converts_parser_errors() {
+    let mut lexer = Lexer::new("val numbers = [1, 2 3]".to_string());
+    let preprocess = crate::preprocess::run(lexer.tokenize().expect("lexing should succeed"));
+    let (tokens, preprocess_diagnostics, preprocess_halted) = preprocess.into_parts();
+
+    let parser = Parser::program_parser();
+    let parser_errors = parser
+        .parse(tokens.clone())
+        .expect_err("expected parser diagnostics for mixed separators");
+
+    let formatter = DiagnosticFormatter::default();
+    let context = DiagnosticContext::new(
+        &tokens,
+        &parser_errors,
+        &preprocess_diagnostics,
+        preprocess_halted,
+        &[],
+        None,
+    );
+    let diagnostics = formatter.format(context);
+
+    let syntax_diagnostic = diagnostics
+        .iter()
+        .find(|diagnostic| matches!(diagnostic.source(), DiagnosticSource::Parser))
+        .expect("parser diagnostics should be present");
+
+    assert_eq!(syntax_diagnostic.severity(), DiagnosticSeverity::Error);
+    assert!(
+        syntax_diagnostic
+            .code()
+            .map(|code| code == "JV2101")
+            .unwrap_or(false),
+        "expected JV2101 code, got {:?}",
+        syntax_diagnostic.code()
+    );
+    assert!(
+        syntax_diagnostic.message().contains("JV2101"),
+        "expected message to include JV2101: {}",
+        syntax_diagnostic.message()
+    );
+}
+
+#[test]
+fn diagnostic_formatter_marks_preprocess_warning_without_span() {
+    let tokens = Vec::new();
+    let parser_errors = Vec::new();
+    let preprocess_diagnostics = vec![PreprocessDiagnostic::new(
+        "stage0-json",
+        "JV0000: JSON detection hint",
+        None,
+    )];
+    let formatter = DiagnosticFormatter::default();
+    let context = DiagnosticContext::new(
+        &tokens,
+        &parser_errors,
+        &preprocess_diagnostics,
+        None,
+        &[],
+        None,
+    );
+    let diagnostics = formatter.format(context);
+
+    let diagnostic = diagnostics
+        .iter()
+        .find(|candidate| {
+            matches!(
+                candidate.source(),
+                DiagnosticSource::Preprocess("stage0-json")
+            )
+        })
+        .expect("preprocess diagnostic should be included");
+
+    assert_eq!(diagnostic.severity(), DiagnosticSeverity::Warning);
+    assert_eq!(diagnostic.code(), Some("JV0000"));
+    assert!(diagnostic.span().is_none());
+}
+
+#[test]
+fn diagnostic_formatter_promotes_halted_semantics_to_error() {
+    let tokens = Vec::new();
+    let parser_errors = Vec::new();
+    let preprocess_diagnostics = Vec::new();
+    let semantics_diagnostics = vec![SemanticsDiagnostic::new(
+        "stage2-metadata",
+        "JV5000: Missing metadata for directive",
+        Some(Span::new(1, 1, 1, 5)),
+    )];
+    let formatter = DiagnosticFormatter::default();
+    let context = DiagnosticContext::new(
+        &tokens,
+        &parser_errors,
+        &preprocess_diagnostics,
+        None,
+        &semantics_diagnostics,
+        Some("stage2-metadata"),
+    );
+    let diagnostics = formatter.format(context);
+
+    let diagnostic = diagnostics
+        .iter()
+        .find(|candidate| {
+            matches!(
+                candidate.source(),
+                DiagnosticSource::Semantics("stage2-metadata")
+            )
+        })
+        .expect("semantics diagnostic should be included");
+
+    assert_eq!(diagnostic.severity(), DiagnosticSeverity::Error);
+    assert_eq!(diagnostic.code(), Some("JV5000"));
+    assert!(diagnostic.span().is_some());
 }
