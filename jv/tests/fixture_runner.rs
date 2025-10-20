@@ -120,8 +120,8 @@ fn collect_fixture_diagnostic(
     let source = fs::read_to_string(source_path)
         .with_context(|| format!("read fixture source {}", source_path.display()))?;
 
-    let program = match JvParser::parse(&source) {
-        Ok(program) => program,
+    let output = match JvParser::parse(&source) {
+        Ok(output) => output,
         Err(error) => {
             if let Some(diagnostic) = from_parse_error(&error) {
                 let diagnostic = diagnostic.with_strategy(DiagnosticStrategy::Deferred);
@@ -130,6 +130,7 @@ fn collect_fixture_diagnostic(
             anyhow::bail!("parser error without diagnostic code: {error:?}");
         }
     };
+    let program = output.into_program();
 
     let mut checker = TypeChecker::new();
     match checker.check_program(&program) {

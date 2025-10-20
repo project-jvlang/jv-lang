@@ -8,7 +8,9 @@ use jv_parser::Parser;
 use serde_json::Value;
 
 fn parse_program(source: &str) -> jv_ast::Program {
-    Parser::parse(source).expect("source snippet should be valid")
+    Parser::parse(source)
+        .expect("source snippet should be valid")
+        .into_program()
 }
 
 #[test]

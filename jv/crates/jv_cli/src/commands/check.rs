@@ -28,8 +28,8 @@ pub fn run(input: &str) -> Result<()> {
     let source =
         fs::read_to_string(input).with_context(|| format!("Failed to read file: {}", input))?;
 
-    let program = match JvParser::parse(&source) {
-        Ok(program) => program,
+    let frontend_output = match JvParser::parse(&source) {
+        Ok(output) => output,
         Err(error) => {
             if let Some(diagnostic) = from_parse_error(&error) {
                 return Err(tooling_failure(
@@ -40,6 +40,7 @@ pub fn run(input: &str) -> Result<()> {
             return Err(anyhow::anyhow!("Parser error: {:?}", error));
         }
     };
+    let program = frontend_output.into_program();
 
     let mut type_checker = TypeChecker::new();
     match type_checker.check_program(&program) {

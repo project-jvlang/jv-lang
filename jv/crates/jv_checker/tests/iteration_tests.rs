@@ -2,7 +2,9 @@ use jv_checker::{CheckError, TypeChecker};
 use jv_parser::Parser;
 
 fn parse_program(source: &str) -> jv_ast::Program {
-    Parser::parse(source).expect("source snippet should parse")
+    Parser::parse(source)
+        .expect("source snippet should parse")
+        .into_program()
 }
 
 #[test]

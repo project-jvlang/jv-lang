@@ -23,7 +23,7 @@ const SOURCE: &str = r#"
 fn bench_basic_syntax_sugar(c: &mut Criterion) {
     c.bench_function("basic_syntax_sugar_pipeline", |b| {
         b.iter(|| {
-            let program = Parser::parse(SOURCE).expect("source parses");
+            let program = Parser::parse(SOURCE).expect("source parses").into_program();
             let mut context = TransformContext::new();
             transform_program_with_context(program, &mut context).expect("lowering succeeds");
         });

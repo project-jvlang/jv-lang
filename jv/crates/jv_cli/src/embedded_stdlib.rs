@@ -1018,13 +1018,14 @@ fn visit_stdlib(
         }
 
         let source = fs::read_to_string(&path)?;
-        let mut program = JvParser::parse(&source).map_err(|error| {
+        let frontend_output = JvParser::parse(&source).map_err(|error| {
             anyhow!(
                 "Failed to parse embedded stdlib module {}: {:?}",
                 path.display(),
                 error
             )
         })?;
+        let mut program = frontend_output.into_program();
         promote_stdlib_visibility(&mut program);
         #[cfg(feature = "dump-sequence-ast")]
         if path.ends_with("sequence.jv") {
@@ -1178,8 +1179,8 @@ fn compile_module(
     parallel_config: ParallelInferenceConfig,
     symbol_index: &Arc<SymbolIndex>,
 ) -> Result<StdlibModuleArtifacts> {
-    let mut program = match JvParser::parse(&module.source) {
-        Ok(program) => program,
+    let frontend_output = match JvParser::parse(&module.source) {
+        Ok(output) => output,
         Err(error) => {
             if let Some(diagnostic) = from_parse_error(&error) {
                 return Err(tooling_failure(
@@ -1190,6 +1191,7 @@ fn compile_module(
             return Err(anyhow!("Parser error: {:?}", error));
         }
     };
+    let mut program = frontend_output.into_program();
 
     promote_stdlib_visibility(&mut program);
     let mut type_checker = TypeChecker::with_parallel_config(parallel_config);

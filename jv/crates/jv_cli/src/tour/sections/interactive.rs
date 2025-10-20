@@ -225,16 +225,17 @@ impl SessionState {
         }
 
         writeln!(writer, "\n🧪 構文チェックを実行中...")?;
-        let program = match Parser::parse(&source) {
-            Ok(program) => {
+        let frontend_output = match Parser::parse(&source) {
+            Ok(output) => {
                 writeln!(writer, "✅ 構文チェックOK")?;
-                program
+                output
             }
             Err(err) => {
                 self.print_parse_error(writer, err, &source)?;
                 return Ok(());
             }
         };
+        let program = frontend_output.into_program();
 
         let mut checker = TypeChecker::new();
         if let Err(errors) = checker.check_program(&program) {

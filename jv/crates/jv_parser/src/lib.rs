@@ -25,10 +25,13 @@ use jv_lexer::{LexError, Token, TokenType};
 use thiserror::Error;
 
 pub mod diagnostics;
+pub mod frontend;
 mod preprocess;
 pub mod semantics;
 mod syntax;
 
+use crate::diagnostics::{DiagnosticContext, DiagnosticFormatter};
+use crate::frontend::{FrontendDiagnostics, FrontendOutput};
 use crate::syntax::support::{merge_spans, span_from_token};
 
 #[derive(Error, Debug)]
@@ -53,20 +56,22 @@ impl Parser {
     /// * `input` - The jv source code as a string
     ///
     /// # Returns
-    /// * `Ok(Program)` - Successfully parsed AST
+    /// * `Ok(FrontendOutput)` - Successfully parsed pipeline output containing AST and diagnostics
     /// * `Err(ParseError)` - Lexical or syntax error
     ///
     /// # Example
     /// ```rust,ignore
-    /// let result = Parser::parse("val x = 42");
+    /// let output = Parser::parse("val x = 42")?;
+    /// let program = output.into_program();
     /// ```
-    pub fn parse(input: &str) -> Result<Program, ParseError> {
+    pub fn parse(input: &str) -> Result<FrontendOutput, ParseError> {
         let mut lexer = jv_lexer::Lexer::new(input.to_string());
         let preprocess_result = preprocess::run(lexer.tokenize()?);
-        let (tokens, diagnostics, halted_stage) = preprocess_result.into_parts();
+        let (tokens, preprocess_diagnostics, preprocess_halted_stage) =
+            preprocess_result.into_parts();
 
-        if let Some(stage_name) = halted_stage {
-            if let Some(diagnostic) = diagnostics.first() {
+        if let Some(stage_name) = preprocess_halted_stage {
+            if let Some(diagnostic) = preprocess_diagnostics.first() {
                 let span = diagnostic.span().cloned().unwrap_or_else(Span::dummy);
                 let message = format!("[{}] {}", stage_name, diagnostic.message());
                 return Err(ParseError::Syntax { message, span });
@@ -79,11 +84,50 @@ impl Parser {
         }
 
         let parser_tokens = tokens.clone();
-
         let parser = Self::program_parser();
 
         match parser.parse(parser_tokens) {
-            Ok(program) => Ok(program),
+            Ok(program) => {
+                let semantics_result = semantics::run(&tokens, program);
+
+                if let Some(stage_name) = semantics_result.halted_stage {
+                    if let Some(diagnostic) = semantics_result.staged_diagnostics.first() {
+                        let span = diagnostic.span().cloned().unwrap_or_else(Span::dummy);
+                        let message = format!("[{}] {}", stage_name, diagnostic.message());
+                        return Err(ParseError::Syntax { message, span });
+                    } else {
+                        return Err(ParseError::Syntax {
+                            message: format!("Stage 2 semantics halted at {}", stage_name),
+                            span: Span::dummy(),
+                        });
+                    }
+                }
+
+                let semantics_halted_stage = semantics_result.halted_stage;
+                let semantics_diagnostics = semantics_result.staged_diagnostics;
+                let program = semantics_result.program;
+
+                let formatter = DiagnosticFormatter::default();
+                let context = DiagnosticContext::new(
+                    &tokens,
+                    &[],
+                    &preprocess_diagnostics,
+                    preprocess_halted_stage,
+                    &semantics_diagnostics,
+                    semantics_halted_stage,
+                );
+                let final_diagnostics = formatter.format(context);
+
+                let diagnostics = FrontendDiagnostics::new(
+                    final_diagnostics,
+                    preprocess_diagnostics,
+                    preprocess_halted_stage,
+                    semantics_diagnostics,
+                    semantics_halted_stage,
+                );
+
+                Ok(FrontendOutput::new(program, tokens, diagnostics))
+            }
             Err(errors) => {
                 let format_simple = |error: &Simple<Token>| match error.reason() {
                     SimpleReason::Custom(message) => message.clone(),

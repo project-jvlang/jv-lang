@@ -1967,7 +1967,9 @@ fn inline_json_sample_generates_payload_records() {
         }
     "#;
 
-    let program = Parser::parse(source).expect("inline JSON snippet parses");
+    let program = Parser::parse(source)
+        .expect("inline JSON snippet parses")
+        .into_program();
     let mut context = TransformContext::new();
     let ir = transform_program_with_context(program, &mut context).expect("lowering succeeds");
 

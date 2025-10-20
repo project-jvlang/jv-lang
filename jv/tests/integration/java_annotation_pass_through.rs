@@ -4,7 +4,9 @@ use jv_ir::TransformContext;
 use jv_parser::Parser;
 
 fn parse_and_lower(source: &str) -> jv_ir::types::IrProgram {
-    let program = Parser::parse(source).expect("fixture parses");
+    let program = Parser::parse(source)
+        .expect("fixture parses")
+        .into_program();
     let mut context = TransformContext::new();
     transform_program_with_context(program, &mut context).expect("lowering succeeds")
 }

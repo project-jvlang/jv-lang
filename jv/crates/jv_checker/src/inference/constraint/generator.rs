@@ -1069,7 +1069,8 @@ val result = when (maybe) {
 }
 "#,
         )
-        .expect("program should parse");
+        .expect("program should parse")
+        .into_program();
 
         let mut env = TypeEnvironment::new();
         let extensions = ExtensionRegistry::new();

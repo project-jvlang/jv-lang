@@ -364,8 +364,8 @@ fn repl() -> Result<()> {
         }
 
         match JvParser::parse(line) {
-            Ok(program) => {
-                let stmt_count = program.statements.len();
+            Ok(output) => {
+                let stmt_count = output.program_view().statements().len();
                 println!("Parsed ✓ (statements: {})", stmt_count);
             }
             Err(e) => {
@@ -469,8 +469,8 @@ fn format_jv_files(files: Vec<String>) -> Result<()> {
 
         if file.ends_with(".jv") {
             match JvParser::parse(&source) {
-                Ok(program) => {
-                    if let Err(error) = transform_program(program) {
+                Ok(output) => {
+                    if let Err(error) = transform_program(output.into_program()) {
                         if let Some(diagnostic) = from_transform_error(&error) {
                             println!(
                                 "{}",

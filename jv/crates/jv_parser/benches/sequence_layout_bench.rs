@@ -21,7 +21,9 @@ fn first_whitespace_array_span(program: &Program) -> Option<Span> {
 }
 
 fn parse_and_transform(source: &str) -> usize {
-    let program = Parser::parse(source).expect("parser should accept whitespace sequences");
+    let program = Parser::parse(source)
+        .expect("parser should accept whitespace sequences")
+        .into_program();
     let span = first_whitespace_array_span(&program);
     let mut context = TransformContext::new();
     let _ir = transform_program_with_context(program, &mut context)

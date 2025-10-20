@@ -7,7 +7,9 @@ use jv_ir::{context::TransformContext, transform::desugar_when_expression, types
 use jv_parser::Parser;
 
 fn parse_when_expression(source: &str) -> Expression {
-    let program = Parser::parse(source).expect("snippet should parse");
+    let program = Parser::parse(source)
+        .expect("snippet should parse")
+        .into_program();
     let statement = program
         .statements
         .first()

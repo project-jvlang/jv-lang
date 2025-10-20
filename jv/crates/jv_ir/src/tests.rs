@@ -31,7 +31,9 @@ mod tests {
     }
 
     fn parse_when_expression(source: &str) -> Expression {
-        let program = Parser::parse(source).expect("snippet should parse");
+        let program = Parser::parse(source)
+            .expect("snippet should parse")
+            .into_program();
         for statement in program.statements {
             match statement {
                 Statement::ValDeclaration { initializer, .. } => {
@@ -596,7 +598,9 @@ mod tests {
             }
         "#;
 
-        let program = Parser::parse(source).expect("parse inline json payload");
+        let program = Parser::parse(source)
+            .expect("parse inline json payload")
+            .into_program();
         let mut context = TransformContext::new();
         let ir_program =
             transform_program_with_context(program, &mut context).expect("lower inline json");
@@ -2917,7 +2921,9 @@ fun sample(value: Any): Int {
 }
 "#;
 
-        let program = Parser::parse(source).expect("sample snippet parses");
+        let program = Parser::parse(source)
+            .expect("sample snippet parses")
+            .into_program();
         let mut context = TransformContext::new();
         let ir_program = transform_program_with_context(program, &mut context)
             .expect("sample lowering succeeds");

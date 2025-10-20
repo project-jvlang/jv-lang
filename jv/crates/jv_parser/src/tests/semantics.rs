@@ -11,7 +11,9 @@ fn preprocess_tokens(source: &str) -> Vec<jv_lexer::Token> {
 }
 
 fn parse_program(source: &str) -> Program {
-    Parser::parse(source).expect("parsing should succeed")
+    Parser::parse(source)
+        .expect("parsing should succeed")
+        .into_program()
 }
 
 fn clear_primitive_metadata(program: &mut Program) {

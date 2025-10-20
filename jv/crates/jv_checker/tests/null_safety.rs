@@ -6,7 +6,9 @@ use serde_json::Value;
 use test_case::test_case;
 
 fn parse_program(source: &str) -> jv_ast::Program {
-    Parser::parse(source).expect("source snippet should parse")
+    Parser::parse(source)
+        .expect("source snippet should parse")
+        .into_program()
 }
 
 fn collect_null_safety_messages(errors: &[CheckError]) -> Vec<String> {

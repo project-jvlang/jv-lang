@@ -48,7 +48,9 @@ fn perf_phase1() {
 
     for iteration in 0..ITERATIONS {
         let parse_start = Instant::now();
-        let program = Parser::parse(&source).expect("fixture should parse");
+        let program = Parser::parse(&source)
+            .expect("fixture should parse")
+            .into_program();
         let parse_ms = duration_to_millis(parse_start.elapsed());
 
         let (_ir, metrics) =

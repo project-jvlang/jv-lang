@@ -542,11 +542,12 @@ impl JvLanguageServer {
         &self,
         content: &str,
     ) -> Result<Vec<IrImport>, ImportPlanError> {
-        let program = JvParser::parse(content).map_err(|error| {
+        let frontend_output = JvParser::parse(content).map_err(|error| {
             from_parse_error(&error)
                 .map(|diagnostic| ImportPlanError::new(diagnostic.message))
                 .unwrap_or_else(|| ImportPlanError::new(format!("Parser error: {error}")))
         })?;
+        let program = frontend_output.into_program();
 
         let build_config = BuildConfig::default();
         let symbol_context = SymbolBuildContext::from_config(&build_config);
@@ -605,8 +606,8 @@ impl JvLanguageServer {
             return Vec::new();
         };
 
-        let program = match JvParser::parse(content) {
-            Ok(program) => program,
+        let frontend_output = match JvParser::parse(content) {
+            Ok(output) => output,
             Err(error) => {
                 self.type_facts.remove(uri);
                 self.regex_metadata.remove(uri);
@@ -621,6 +622,8 @@ impl JvLanguageServer {
                 };
             }
         };
+
+        let program = frontend_output.into_program();
 
         let mut diagnostics = Vec::new();
         let mut type_facts_snapshot: Option<TypeFactsSnapshot> = None;

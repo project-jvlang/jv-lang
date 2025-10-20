@@ -733,7 +733,8 @@ label = when (maybe) {
 }
 "#,
     )
-    .expect("when sample should parse");
+    .expect("when sample should parse")
+    .into_program();
 
     let mut checker = TypeChecker::new();
     checker
@@ -886,7 +887,8 @@ label = when (maybe) {
 label
 "#,
     )
-    .expect("debug snippet should parse");
+    .expect("debug snippet should parse")
+    .into_program();
 
     let mut checker = TypeChecker::new();
     checker

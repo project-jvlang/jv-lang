@@ -606,8 +606,8 @@ pub mod pipeline {
             .with_context(|| format!("Failed to read file: {}", entrypoint.display()))?;
 
         let parse_start = Instant::now();
-        let mut program = match JvParser::parse(&source) {
-            Ok(program) => program,
+        let frontend_output = match JvParser::parse(&source) {
+            Ok(output) => output,
             Err(error) => {
                 if let Some(diagnostic) = from_parse_error(&error) {
                     return Err(tooling_failure(
@@ -618,6 +618,7 @@ pub mod pipeline {
                 return Err(anyhow!("Parser error: {:?}", error));
             }
         };
+        let mut program = frontend_output.into_program();
 
         embedded_stdlib::rewrite_collection_property_access(&mut program);
         let parse_duration = parse_start.elapsed();

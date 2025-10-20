@@ -411,7 +411,9 @@ mod tests {
     use jv_parser::Parser as JvParser;
 
     fn parse(source: &str) -> Program {
-        JvParser::parse(source).expect("source should parse for sequence warnings")
+        JvParser::parse(source)
+            .expect("source should parse for sequence warnings")
+            .into_program()
     }
 
     #[test]

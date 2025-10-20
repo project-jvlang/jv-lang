@@ -28,7 +28,9 @@ fun main() {
 
     let start = Instant::now();
 
-    let program = Parser::parse(source).expect("loop sample should parse");
+    let program = Parser::parse(source)
+        .expect("loop sample should parse")
+        .into_program();
 
     let ir = transform_program(program).expect("loop sample should lower to IR");
 

@@ -8,13 +8,15 @@ pub(crate) mod helpers {
     /// Parse the provided source code and return the resulting AST program.
     /// Panics with a descriptive message when parsing fails.
     pub(crate) fn parse_program(input: &str) -> Program {
-        Parser::parse(input).unwrap_or_else(|err| panic!("failed to parse `{}`: {:?}", input, err))
+        Parser::parse(input)
+            .unwrap_or_else(|err| panic!("failed to parse `{}`: {:?}", input, err))
+            .into_program()
     }
 
     /// Parse the provided source code and return the raw parser result.
     /// Useful for negative tests that expect an error.
     pub(crate) fn parse_program_result(input: &str) -> Result<Program, ParseError> {
-        Parser::parse(input)
+        Parser::parse(input).map(|output| output.into_program())
     }
 
     /// Borrow the first statement from a program, panicking if none exist.
