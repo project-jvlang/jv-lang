@@ -1,10 +1,10 @@
+use chumsky::error::Simple;
 use chumsky::prelude::*;
 use chumsky::Parser as ChumskyParser;
-use jv_ast::{
-    ConcurrencyConstruct, Expression, RegexLiteral, ResourceManagement, Span, Statement,
-    TypeAnnotation,
-};
-use jv_lexer::{Token, TokenMetadata, TokenType};
+use jv_ast::Span;
+use jv_lexer::{Token, TokenType};
+
+use super::spans::{merge_spans, span_from_token};
 
 pub(crate) fn token_val() -> impl ChumskyParser<Token, Token, Error = Simple<Token>> + Clone {
     filter(|token: &Token| matches!(token.token_type, TokenType::Val))
@@ -130,25 +130,6 @@ pub(crate) fn token_left_brace() -> impl ChumskyParser<Token, Token, Error = Sim
 pub(crate) fn token_right_brace() -> impl ChumskyParser<Token, Token, Error = Simple<Token>> + Clone
 {
     filter(|token: &Token| matches!(token.token_type, TokenType::RightBrace))
-}
-
-pub(crate) fn block_expression_parser(
-    statement: impl ChumskyParser<Token, Statement, Error = Simple<Token>> + Clone,
-) -> impl ChumskyParser<Token, Expression, Error = Simple<Token>> + Clone {
-    token_left_brace()
-        .map(|token| span_from_token(&token))
-        .then(statement.repeated())
-        .then(token_right_brace().map(|token| span_from_token(&token)))
-        .map(|((left_span, statements), right_span)| {
-            let span = merge_spans(&left_span, &right_span);
-            Expression::Block { statements, span }
-        })
-}
-
-pub(crate) fn expression_level_block_parser(
-    statement: impl ChumskyParser<Token, Statement, Error = Simple<Token>> + Clone + 'static,
-) -> impl ChumskyParser<Token, Expression, Error = Simple<Token>> + Clone {
-    block_expression_parser(statement).boxed()
 }
 
 pub(crate) fn token_comma() -> impl ChumskyParser<Token, Token, Error = Simple<Token>> + Clone {
@@ -323,163 +304,11 @@ pub(crate) fn qualified_name_with_span(
         })
 }
 
-pub(crate) fn span_from_token(token: &Token) -> Span {
-    Span {
-        start_line: token.line,
-        start_column: token.column,
-        end_line: token.line,
-        end_column: token.column + token.lexeme.len(),
-    }
-}
-
-pub(crate) fn regex_literal_from_token(token: &Token, span: Span) -> RegexLiteral {
-    let normalized = match &token.token_type {
-        TokenType::RegexLiteral(value) => value.clone(),
-        _ => token.lexeme.clone(),
-    };
-
-    let (raw, pattern) = token
-        .metadata
-        .iter()
-        .find_map(|metadata| match metadata {
-            TokenMetadata::RegexLiteral { raw, pattern } => Some((raw.clone(), pattern.clone())),
-            _ => None,
-        })
-        .unwrap_or_else(|| (format!("/{normalized}/"), normalized.clone()));
-
-    let mut computed_span = span;
-    computed_span.end_column = computed_span.start_column + raw.chars().count();
-
-    RegexLiteral {
-        pattern,
-        raw,
-        span: computed_span,
-    }
-}
-
-pub(crate) fn merge_spans(start: &Span, end: &Span) -> Span {
-    Span {
-        start_line: start.start_line,
-        start_column: start.start_column,
-        end_line: end.end_line,
-        end_column: end.end_column,
-    }
-}
-
-pub(crate) fn expression_span(expr: &Expression) -> Span {
-    match expr {
-        Expression::Literal(_, span) => span.clone(),
-        Expression::RegexLiteral(literal) => literal.span.clone(),
-        Expression::Identifier(_, span) => span.clone(),
-        Expression::Binary { span, .. } => span.clone(),
-        Expression::Unary { span, .. } => span.clone(),
-        Expression::Call { span, .. } => span.clone(),
-        Expression::MemberAccess { span, .. } => span.clone(),
-        Expression::NullSafeMemberAccess { span, .. } => span.clone(),
-        Expression::StringInterpolation { span, .. } => span.clone(),
-        Expression::MultilineString(literal) => literal.span.clone(),
-        Expression::JsonLiteral(literal) => literal.span.clone(),
-        Expression::When { span, .. } => span.clone(),
-        Expression::If { span, .. } => span.clone(),
-        Expression::IndexAccess { span, .. } => span.clone(),
-        Expression::NullSafeIndexAccess { span, .. } => span.clone(),
-        Expression::TypeCast { span, .. } => span.clone(),
-        Expression::Block { span, .. } => span.clone(),
-        Expression::Array { span, .. } => span.clone(),
-        Expression::Lambda { span, .. } => span.clone(),
-        Expression::Try { span, .. } => span.clone(),
-        Expression::This(span) => span.clone(),
-        Expression::Super(span) => span.clone(),
-    }
-}
-
-pub(crate) fn statement_span(stmt: &Statement) -> Span {
-    match stmt {
-        Statement::ValDeclaration { span, .. } => span.clone(),
-        Statement::VarDeclaration { span, .. } => span.clone(),
-        Statement::FunctionDeclaration { span, .. } => span.clone(),
-        Statement::DataClassDeclaration { span, .. } => span.clone(),
-        Statement::Expression { span, .. } => span.clone(),
-        Statement::Return { span, .. } => span.clone(),
-        Statement::Throw { span, .. } => span.clone(),
-        Statement::Assignment { span, .. } => span.clone(),
-        Statement::ClassDeclaration { span, .. } => span.clone(),
-        Statement::InterfaceDeclaration { span, .. } => span.clone(),
-        Statement::ExtensionFunction(ef) => ef.span.clone(),
-        Statement::Import { span, .. } => span.clone(),
-        Statement::ForIn(for_in) => for_in.span.clone(),
-        Statement::Break(span) => span.clone(),
-        Statement::Continue(span) => span.clone(),
-        Statement::Package { span, .. } => span.clone(),
-        Statement::Comment(comment) => comment.span.clone(),
-        Statement::Concurrency(cc) => match cc {
-            ConcurrencyConstruct::Spawn { span, .. } => span.clone(),
-            ConcurrencyConstruct::Async { span, .. } => span.clone(),
-            ConcurrencyConstruct::Await { span, .. } => span.clone(),
-        },
-        Statement::ResourceManagement(rm) => match rm {
-            ResourceManagement::Use { span, .. } => span.clone(),
-            ResourceManagement::Defer { span, .. } => span.clone(),
-        },
-    }
-}
-
 pub(crate) fn keyword(
     expected: &'static str,
 ) -> impl ChumskyParser<Token, Token, Error = Simple<Token>> + Clone {
     filter(move |token: &Token| match &token.token_type {
         TokenType::Identifier(name) => name == expected,
         _ => false,
-    })
-}
-
-pub(crate) fn type_annotation(
-) -> impl ChumskyParser<Token, TypeAnnotation, Error = Simple<Token>> + Clone {
-    recursive(|annotation| {
-        let qualified = qualified_name_with_span();
-
-        let function = annotation
-            .clone()
-            .separated_by(token_any_comma())
-            .allow_trailing()
-            .delimited_by(token_left_paren(), token_right_paren())
-            .then_ignore(token_arrow())
-            .then(annotation.clone())
-            .map(|(params, return_type)| TypeAnnotation::Function {
-                params,
-                return_type: Box::new(return_type),
-            });
-
-        let type_arguments = annotation
-            .clone()
-            .separated_by(token_any_comma())
-            .allow_trailing()
-            .delimited_by(token_less(), token_greater())
-            .or_not();
-
-        let base = qualified
-            .map(|(segments, span)| (segments.join("."), span))
-            .then(type_arguments)
-            .map(|((name, _span), args)| {
-                if let Some(arguments) = args {
-                    TypeAnnotation::Generic {
-                        name,
-                        type_args: arguments,
-                    }
-                } else {
-                    TypeAnnotation::Simple(name)
-                }
-            });
-
-        function
-            .or(base)
-            .then(token_question().or_not())
-            .map(|(ty, nullable)| {
-                if nullable.is_some() {
-                    TypeAnnotation::Nullable(Box::new(ty))
-                } else {
-                    ty
-                }
-            })
     })
 }
