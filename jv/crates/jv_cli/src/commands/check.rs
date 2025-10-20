@@ -5,8 +5,8 @@ use std::path::Path;
 
 use jv_checker::diagnostics::messages::{helper_label, helper_recommendation};
 use jv_checker::diagnostics::{
-    collect_raw_type_diagnostics, from_check_error, from_parse_error, from_transform_error,
-    DiagnosticStrategy,
+    collect_raw_type_diagnostics, from_check_error, from_frontend_diagnostics, from_parse_error,
+    from_transform_error, DiagnosticSeverity, DiagnosticStrategy,
 };
 use jv_checker::inference::conversions::HelperSpec;
 use jv_checker::inference::diagnostics::conversion_diagnostic;
@@ -40,6 +40,27 @@ pub fn run(input: &str) -> Result<()> {
             return Err(anyhow::anyhow!("Parser error: {:?}", error));
         }
     };
+    let frontend_diagnostics = from_frontend_diagnostics(frontend_output.diagnostics().finalized());
+    if !frontend_diagnostics.is_empty() {
+        println!("Frontend diagnostics:");
+        for diagnostic in &frontend_diagnostics {
+            println!(
+                "{}",
+                format_tooling_diagnostic(Path::new(input), diagnostic)
+            );
+        }
+        if let Some(error_diag) = frontend_diagnostics
+            .iter()
+            .find(|diag| diag.severity == DiagnosticSeverity::Error)
+        {
+            return Err(tooling_failure(
+                Path::new(input),
+                error_diag
+                    .clone()
+                    .with_strategy(DiagnosticStrategy::Deferred),
+            ));
+        }
+    }
     let program = frontend_output.into_program();
 
     let mut type_checker = TypeChecker::new();

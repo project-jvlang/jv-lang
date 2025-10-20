@@ -6,7 +6,10 @@ use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
-use jv_checker::diagnostics::{from_parse_error, from_transform_error};
+use jv_checker::diagnostics::{
+    from_frontend_diagnostics, from_parse_error, from_transform_error, DiagnosticSeverity,
+    DiagnosticStrategy,
+};
 use jv_fmt::JavaFormatter;
 use jv_ir::transform_program;
 use jv_parser::Parser as JvParser;
@@ -469,8 +472,26 @@ fn format_jv_files(files: Vec<String>) -> Result<()> {
 
         if file.ends_with(".jv") {
             match JvParser::parse(&source) {
-                Ok(output) => {
-                    if let Err(error) = transform_program(output.into_program()) {
+                Ok(frontend_output) => {
+                    let frontend_diagnostics =
+                        from_frontend_diagnostics(frontend_output.diagnostics().finalized());
+                    let mut should_skip = false;
+                    for diagnostic in frontend_diagnostics {
+                        let rendered = diagnostic
+                            .clone()
+                            .with_strategy(DiagnosticStrategy::Deferred);
+                        println!(
+                            "{}",
+                            jv_cli::format_tooling_diagnostic(Path::new(file), &rendered)
+                        );
+                        if diagnostic.severity == DiagnosticSeverity::Error {
+                            should_skip = true;
+                        }
+                    }
+                    if should_skip {
+                        continue;
+                    }
+                    if let Err(error) = transform_program(frontend_output.into_program()) {
                         if let Some(diagnostic) = from_transform_error(&error) {
                             println!(
                                 "{}",

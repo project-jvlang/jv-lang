@@ -8,8 +8,8 @@ use std::fs;
 use std::path::Path;
 
 use jv_checker::diagnostics::{
-    from_check_error, from_parse_error, from_transform_error, DiagnosticStrategy,
-    EnhancedDiagnostic,
+    from_check_error, from_frontend_diagnostics, from_parse_error, from_transform_error,
+    DiagnosticSeverity, DiagnosticStrategy, EnhancedDiagnostic,
 };
 use jv_pm::JavaTarget;
 
@@ -618,6 +618,27 @@ pub mod pipeline {
                 return Err(anyhow!("Parser error: {:?}", error));
             }
         };
+        let frontend_diagnostics =
+            from_frontend_diagnostics(frontend_output.diagnostics().finalized());
+        if !frontend_diagnostics.is_empty() {
+            for diagnostic in &frontend_diagnostics {
+                let rendered = diagnostic
+                    .clone()
+                    .with_strategy(DiagnosticStrategy::Deferred);
+                warnings.push(format_tooling_diagnostic(entrypoint, &rendered));
+            }
+            if let Some(error_diag) = frontend_diagnostics
+                .iter()
+                .find(|diag| diag.severity == DiagnosticSeverity::Error)
+            {
+                return Err(tooling_failure(
+                    entrypoint,
+                    error_diag
+                        .clone()
+                        .with_strategy(DiagnosticStrategy::Deferred),
+                ));
+            }
+        }
         let mut program = frontend_output.into_program();
 
         embedded_stdlib::rewrite_collection_property_access(&mut program);

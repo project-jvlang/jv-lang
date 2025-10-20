@@ -6,6 +6,9 @@ use jv_ir::{
     error::TransformError,
     types::{IrProgram, IrStatement},
 };
+use jv_parser::diagnostics::{
+    Diagnostic as FrontendDiagnostic, DiagnosticSeverity as FrontendSeverity,
+};
 use jv_parser::ParseError;
 
 /// Severity level used when surfacing diagnostics to users.
@@ -321,6 +324,51 @@ const DIAGNOSTICS: &[DiagnosticDescriptor] = &[
         severity: DiagnosticSeverity::Error,
     },
 ];
+
+const FRONTEND_GENERIC_DESCRIPTOR: DiagnosticDescriptor = DiagnosticDescriptor {
+    code: "JVF000",
+    title: "Frontend diagnostic / フロントエンド診断",
+    help: "パーサーフロントエンドから報告された診断です。メッセージの詳細を確認してください。",
+    severity: DiagnosticSeverity::Warning,
+};
+
+pub fn from_frontend_diagnostics(diagnostics: &[FrontendDiagnostic]) -> Vec<EnhancedDiagnostic> {
+    diagnostics
+        .iter()
+        .map(frontend_diagnostic_to_tooling)
+        .collect()
+}
+
+fn frontend_diagnostic_to_tooling(diagnostic: &FrontendDiagnostic) -> EnhancedDiagnostic {
+    let message = diagnostic.message().to_string();
+    let span = diagnostic.span().cloned();
+    let severity = map_frontend_severity(diagnostic.severity());
+
+    if let Some(code) = diagnostic.code() {
+        if let Some(descriptor) = descriptor(code) {
+            let mut tooling = EnhancedDiagnostic::new(descriptor, message, span);
+            tooling.severity = severity;
+            return tooling;
+        }
+    }
+
+    let fallback_message = if let Some(code) = diagnostic.code() {
+        format!("{code}: {message}")
+    } else {
+        message
+    };
+    let mut tooling = EnhancedDiagnostic::new(&FRONTEND_GENERIC_DESCRIPTOR, fallback_message, span);
+    tooling.severity = severity;
+    tooling
+}
+
+fn map_frontend_severity(severity: FrontendSeverity) -> DiagnosticSeverity {
+    match severity {
+        FrontendSeverity::Error => DiagnosticSeverity::Error,
+        FrontendSeverity::Warning => DiagnosticSeverity::Warning,
+        FrontendSeverity::Information => DiagnosticSeverity::Information,
+    }
+}
 
 /// 診断コードに対応するディスクリプタを取得します。
 pub fn lookup(code: &str) -> Option<&'static DiagnosticDescriptor> {

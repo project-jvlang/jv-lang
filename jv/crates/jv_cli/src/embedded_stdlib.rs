@@ -11,7 +11,8 @@ use jv_ast::{
 };
 use jv_build::{metadata::SymbolIndex, JavaTarget};
 use jv_checker::diagnostics::{
-    from_check_error, from_parse_error, from_transform_error, DiagnosticStrategy,
+    from_check_error, from_frontend_diagnostics, from_parse_error, from_transform_error,
+    DiagnosticSeverity, DiagnosticStrategy,
 };
 use jv_checker::imports::resolution::{ResolvedImport, ResolvedImportKind};
 use jv_checker::{ParallelInferenceConfig, TypeChecker};
@@ -26,6 +27,7 @@ use serde::Serialize;
 
 use crate::pipeline::generics::apply_type_facts;
 use crate::tooling_failure;
+use tracing::warn;
 
 const STDLIB_ROOT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../stdlib");
 
@@ -1025,6 +1027,29 @@ fn visit_stdlib(
                 error
             )
         })?;
+        let frontend_diagnostics =
+            from_frontend_diagnostics(frontend_output.diagnostics().finalized());
+        if let Some(error_diag) = frontend_diagnostics
+            .iter()
+            .find(|diag| diag.severity == DiagnosticSeverity::Error)
+        {
+            let rendered = error_diag
+                .clone()
+                .with_strategy(DiagnosticStrategy::Deferred);
+            return Err(anyhow!(
+                "{}",
+                crate::format_tooling_diagnostic(&path, &rendered)
+            ));
+        }
+        for diagnostic in frontend_diagnostics {
+            let rendered = diagnostic
+                .clone()
+                .with_strategy(DiagnosticStrategy::Deferred);
+            warn!(
+                target: "jv::stdlib",
+                "{}", crate::format_tooling_diagnostic(&path, &rendered)
+            );
+        }
         let mut program = frontend_output.into_program();
         promote_stdlib_visibility(&mut program);
         #[cfg(feature = "dump-sequence-ast")]
@@ -1191,6 +1216,25 @@ fn compile_module(
             return Err(anyhow!("Parser error: {:?}", error));
         }
     };
+    let frontend_diagnostics = from_frontend_diagnostics(frontend_output.diagnostics().finalized());
+    if let Some(error_diag) = frontend_diagnostics
+        .iter()
+        .find(|diag| diag.severity == DiagnosticSeverity::Error)
+    {
+        let rendered = error_diag
+            .clone()
+            .with_strategy(DiagnosticStrategy::Deferred);
+        return Err(tooling_failure(module.path.as_path(), rendered));
+    }
+    for diagnostic in frontend_diagnostics {
+        let rendered = diagnostic
+            .clone()
+            .with_strategy(DiagnosticStrategy::Deferred);
+        warn!(
+            target: "jv::stdlib",
+            "{}", crate::format_tooling_diagnostic(&module.path, &rendered)
+        );
+    }
     let mut program = frontend_output.into_program();
 
     promote_stdlib_visibility(&mut program);

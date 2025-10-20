@@ -12,8 +12,9 @@ use jv_build::metadata::{
 };
 use jv_build::BuildConfig;
 use jv_checker::diagnostics::{
-    collect_raw_type_diagnostics, from_check_error, from_parse_error, from_transform_error,
-    DiagnosticStrategy, EnhancedDiagnostic,
+    collect_raw_type_diagnostics, from_check_error, from_frontend_diagnostics, from_parse_error,
+    from_transform_error, DiagnosticSeverity as ToolingSeverity, DiagnosticStrategy,
+    EnhancedDiagnostic,
 };
 use jv_checker::imports::{
     diagnostics as import_diagnostics, ImportResolutionService, ResolvedImport, ResolvedImportKind,
@@ -547,6 +548,14 @@ impl JvLanguageServer {
                 .map(|diagnostic| ImportPlanError::new(diagnostic.message))
                 .unwrap_or_else(|| ImportPlanError::new(format!("Parser error: {error}")))
         })?;
+        let frontend_diagnostics =
+            from_frontend_diagnostics(frontend_output.diagnostics().finalized());
+        if let Some(error_diag) = frontend_diagnostics
+            .iter()
+            .find(|diag| diag.severity == ToolingSeverity::Error)
+        {
+            return Err(ImportPlanError::new(error_diag.message.clone()));
+        }
         let program = frontend_output.into_program();
 
         let build_config = BuildConfig::default();
@@ -623,11 +632,32 @@ impl JvLanguageServer {
             }
         };
 
-        let program = frontend_output.into_program();
-
         let mut diagnostics = Vec::new();
         let mut type_facts_snapshot: Option<TypeFactsSnapshot> = None;
         let mut regex_analyses: Vec<RegexAnalysis> = Vec::new();
+
+        let frontend_diagnostics =
+            from_frontend_diagnostics(frontend_output.diagnostics().finalized());
+        for diagnostic in &frontend_diagnostics {
+            diagnostics.push(tooling_diagnostic_to_lsp(
+                uri,
+                diagnostic
+                    .clone()
+                    .with_strategy(DiagnosticStrategy::Interactive),
+            ));
+        }
+        if frontend_diagnostics
+            .iter()
+            .any(|diag| diag.severity == ToolingSeverity::Error)
+        {
+            self.type_facts.remove(uri);
+            self.regex_metadata.remove(uri);
+            self.programs.remove(uri);
+            self.generics.remove(uri);
+            return diagnostics;
+        }
+
+        let program = frontend_output.into_program();
 
         self.programs.insert(uri.to_string(), program.clone());
         self.generics.insert(
