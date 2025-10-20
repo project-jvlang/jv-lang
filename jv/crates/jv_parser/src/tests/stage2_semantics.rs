@@ -171,3 +171,26 @@ fn generic_directive_pass_collects_comment_directives() {
         other => panic!("expected function declaration, found {:?}", other),
     }
 }
+
+#[test]
+fn default_pipeline_runs_all_passes_without_diagnostics() {
+    let source = r#"
+        fun int id(value: Int) {
+            return value
+        }
+    "#;
+
+    let tokens = preprocess_tokens(source);
+    let program = parse_program(source);
+
+    let result = SemanticsPipeline::default().run(&tokens, program);
+    assert!(
+        result.staged_diagnostics.is_empty(),
+        "expected no staged diagnostics but found {:?}",
+        result.staged_diagnostics
+    );
+    assert!(
+        result.halted_stage.is_none(),
+        "default pipeline should not halt on a well-formed program"
+    );
+}
