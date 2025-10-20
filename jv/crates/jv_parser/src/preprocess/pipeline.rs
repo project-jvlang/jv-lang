@@ -77,6 +77,7 @@ pub struct PreprocessResult {
     halted_stage: Option<&'static str>,
 }
 
+#[allow(dead_code)]
 impl PreprocessResult {
     /// 前処理後のトークン列を借用で取得する。
     pub fn tokens(&self) -> &Vec<Token> {

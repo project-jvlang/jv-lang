@@ -60,11 +60,27 @@ impl Parser {
     /// ```
     pub fn parse(input: &str) -> Result<Program, ParseError> {
         let mut lexer = jv_lexer::Lexer::new(input.to_string());
-        let tokens = preprocess::preprocess_tokens(lexer.tokenize()?);
+        let preprocess_result = preprocess::run(lexer.tokenize()?);
+        let (tokens, diagnostics, halted_stage) = preprocess_result.into_parts();
+
+        if let Some(stage_name) = halted_stage {
+            if let Some(diagnostic) = diagnostics.first() {
+                let span = diagnostic.span().cloned().unwrap_or_else(Span::dummy);
+                let message = format!("[{}] {}", stage_name, diagnostic.message());
+                return Err(ParseError::Syntax { message, span });
+            } else {
+                return Err(ParseError::Syntax {
+                    message: format!("Stage 0 preprocessing halted at {}", stage_name),
+                    span: Span::dummy(),
+                });
+            }
+        }
+
+        let parser_tokens = tokens.clone();
 
         let parser = Self::program_parser();
 
-        match parser.parse(tokens.clone()) {
+        match parser.parse(parser_tokens) {
             Ok(program) => Ok(program),
             Err(errors) => {
                 let format_simple = |error: &Simple<Token>| match error.reason() {

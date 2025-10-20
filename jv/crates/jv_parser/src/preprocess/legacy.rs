@@ -486,6 +486,7 @@ fn make_layout_comma_token(reference: &Token) -> Token {
 #[cfg(test)]
 mod tests {
     use super::run_legacy_preprocess;
+    use crate::preprocess;
 
     fn tokenize(source: &str) -> Vec<jv_lexer::Token> {
         let mut lexer = jv_lexer::Lexer::new(source.to_string());
@@ -501,8 +502,11 @@ mod tests {
 
     #[test]
     fn json_object_metadata_preserved() {
-        let tokens = run_legacy_preprocess(tokenize("{\"key\": 1}"));
-        let first = tokens
+        let source = "{\"key\": 1}";
+        let legacy = run_legacy_preprocess(tokenize(source));
+        let (modern, _, _) = preprocess::run(tokenize(source)).into_parts();
+        assert_eq!(modern, legacy);
+        let first = modern
             .first()
             .expect("token stream should contain left brace");
         assert!(matches!(
@@ -513,8 +517,11 @@ mod tests {
 
     #[test]
     fn block_expression_metadata_removed() {
-        let tokens = run_legacy_preprocess(tokenize("{ val x = 1 }"));
-        let first = tokens
+        let source = "{ val x = 1 }";
+        let legacy = run_legacy_preprocess(tokenize(source));
+        let (modern, _, _) = preprocess::run(tokenize(source)).into_parts();
+        assert_eq!(modern, legacy);
+        let first = modern
             .first()
             .expect("token stream should contain left brace");
         assert!(json_confidence(first).is_none());
@@ -522,8 +529,11 @@ mod tests {
 
     #[test]
     fn json_array_of_strings_detected() {
-        let tokens = run_legacy_preprocess(tokenize("[\"a\", \"b\"]"));
-        let first = tokens
+        let source = "[\"a\", \"b\"]";
+        let legacy = run_legacy_preprocess(tokenize(source));
+        let (modern, _, _) = preprocess::run(tokenize(source)).into_parts();
+        assert_eq!(modern, legacy);
+        let first = modern
             .first()
             .expect("token stream should contain left bracket");
         assert!(matches!(
@@ -534,8 +544,11 @@ mod tests {
 
     #[test]
     fn jv_array_of_numbers_not_flagged_as_json() {
-        let tokens = run_legacy_preprocess(tokenize("[1, 2, 3]"));
-        let first = tokens
+        let source = "[1, 2, 3]";
+        let legacy = run_legacy_preprocess(tokenize(source));
+        let (modern, _, _) = preprocess::run(tokenize(source)).into_parts();
+        assert_eq!(modern, legacy);
+        let first = modern
             .first()
             .expect("token stream should contain left bracket");
         assert!(json_confidence(first).is_none());
