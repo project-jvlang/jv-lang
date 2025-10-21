@@ -12,9 +12,16 @@
 use jv_lexer::Token;
 use rowan::{GreenNode, GreenNodeBuilder, Language};
 
+/// Rowan ベースのイベントパーサ機能。
+pub mod parser;
+/// Rowan 構文種別定義。
 pub mod syntax;
 
+pub use parser::{parse, DiagnosticSeverity, ParseEvent, ParseOutput, ParserDiagnostic, TokenSpan};
 pub use syntax::{SyntaxKind, TokenKind};
+
+#[cfg(test)]
+mod tests;
 
 /// Rowan 上で jv 構文木を識別するための言語マーカー。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]

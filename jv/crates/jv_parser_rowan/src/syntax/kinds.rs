@@ -1,6 +1,8 @@
+use core::mem;
+
 use jv_lexer::{Token, TokenType};
 
-/// Rowan 構文木で使用するノード・トークン種別。
+/// Rowan 構文木で使用するノードおよびトークン種別。
 #[repr(u16)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum SyntaxKind {
@@ -36,6 +38,52 @@ pub enum SyntaxKind {
     QualifiedNameSegment,
     /// エラーノード。
     Error,
+    /// 関数宣言。
+    FunctionDeclaration,
+    /// 関数パラメータリスト。
+    FunctionParameterList,
+    /// 関数パラメータ。
+    FunctionParameter,
+    /// 関数戻り値型注釈。
+    FunctionReturnType,
+    /// クラス宣言。
+    ClassDeclaration,
+    /// クラスボディ。
+    ClassBody,
+    /// ブロック文。
+    Block,
+    /// ブロック内部のステートメント列。
+    StatementList,
+    /// if 文。
+    IfStatement,
+    /// else 節。
+    ElseClause,
+    /// when 文。
+    WhenStatement,
+    /// when の分岐。
+    WhenBranch,
+    /// for 文。
+    ForStatement,
+    /// while 文。
+    WhileStatement,
+    /// do-while 文。
+    DoWhileStatement,
+    /// return 文。
+    ReturnStatement,
+    /// throw 文。
+    ThrowStatement,
+    /// break 文。
+    BreakStatement,
+    /// continue 文。
+    ContinueStatement,
+    /// パラメータ修飾子リスト。
+    ParameterModifierList,
+    /// パラメータ修飾子。
+    ParameterModifier,
+    /// ステートメントレベルのアノテーション。
+    Annotation,
+    /// ブロック内のエラーノード。
+    BlockError,
     /// `package` キーワード。
     PackageKw,
     /// `import` キーワード。
@@ -46,6 +94,40 @@ pub enum SyntaxKind {
     VarKw,
     /// `null` キーワード。
     NullKw,
+    /// `fun` キーワード。
+    FunKw,
+    /// `class` キーワード。
+    ClassKw,
+    /// `data` キーワード。
+    DataKw,
+    /// `when` キーワード。
+    WhenKw,
+    /// `where` キーワード。
+    WhereKw,
+    /// `if` キーワード。
+    IfKw,
+    /// `else` キーワード。
+    ElseKw,
+    /// `for` キーワード。
+    ForKw,
+    /// `in` キーワード。
+    InKw,
+    /// `while` キーワード。
+    WhileKw,
+    /// `do` キーワード。
+    DoKw,
+    /// `return` キーワード。
+    ReturnKw,
+    /// `throw` キーワード。
+    ThrowKw,
+    /// `break` キーワード。
+    BreakKw,
+    /// `continue` キーワード。
+    ContinueKw,
+    /// `true` キーワード。
+    TrueKw,
+    /// `false` キーワード。
+    FalseKw,
     /// 真偽値リテラル。
     BooleanLiteral,
     /// 数値リテラル。
@@ -54,6 +136,8 @@ pub enum SyntaxKind {
     StringLiteral,
     /// 正規表現リテラル。
     RegexLiteral,
+    /// 文字リテラル。
+    CharacterLiteral,
     /// 識別子。
     Identifier,
     /// コロン。
@@ -84,6 +168,54 @@ pub enum SyntaxKind {
     Question,
     /// アットマーク。
     At,
+    /// `->` 演算子。
+    Arrow,
+    /// `=>` 演算子。
+    FatArrow,
+    /// `::` 演算子。
+    DoubleColon,
+    /// `?.` 演算子。
+    NullSafe,
+    /// `?:` 演算子。
+    Elvis,
+    /// `..` 演算子。
+    RangeExclusive,
+    /// `..=` 演算子。
+    RangeInclusive,
+    /// 加算演算子。
+    Plus,
+    /// 減算演算子。
+    Minus,
+    /// 乗算演算子。
+    Star,
+    /// 除算演算子。
+    Slash,
+    /// 剰余演算子。
+    Percent,
+    /// 等価演算子。
+    EqualEqual,
+    /// 不等価演算子。
+    NotEqual,
+    /// 小なり演算子。
+    Less,
+    /// 以下演算子。
+    LessEqual,
+    /// 大なり演算子。
+    Greater,
+    /// 以上演算子。
+    GreaterEqual,
+    /// 論理積演算子。
+    AndAnd,
+    /// 論理和演算子。
+    OrOr,
+    /// 否定演算子。
+    Bang,
+    /// 文字列補間開始。
+    StringStart,
+    /// 文字列補間中間。
+    StringMid,
+    /// 文字列補間終了。
+    StringEnd,
     /// ホワイトスペース。
     Whitespace,
     /// 改行。
@@ -105,93 +237,18 @@ impl SyntaxKind {
     }
 
     /// `u16` から安全に変換する。
-    pub const fn from_u16(raw: u16) -> Self {
-        match raw {
-            x if x == SyntaxKind::Unknown as u16 => SyntaxKind::Unknown,
-            x if x == SyntaxKind::Root as u16 => SyntaxKind::Root,
-            x if x == SyntaxKind::PackageDeclaration as u16 => SyntaxKind::PackageDeclaration,
-            x if x == SyntaxKind::PackageName as u16 => SyntaxKind::PackageName,
-            x if x == SyntaxKind::ImportDeclaration as u16 => SyntaxKind::ImportDeclaration,
-            x if x == SyntaxKind::ImportPath as u16 => SyntaxKind::ImportPath,
-            x if x == SyntaxKind::ImportAlias as u16 => SyntaxKind::ImportAlias,
-            x if x == SyntaxKind::ValDeclaration as u16 => SyntaxKind::ValDeclaration,
-            x if x == SyntaxKind::VarDeclaration as u16 => SyntaxKind::VarDeclaration,
-            x if x == SyntaxKind::BindingPattern as u16 => SyntaxKind::BindingPattern,
-            x if x == SyntaxKind::TypeAnnotation as u16 => SyntaxKind::TypeAnnotation,
-            x if x == SyntaxKind::InitializerClause as u16 => SyntaxKind::InitializerClause,
-            x if x == SyntaxKind::Expression as u16 => SyntaxKind::Expression,
-            x if x == SyntaxKind::QualifiedName as u16 => SyntaxKind::QualifiedName,
-            x if x == SyntaxKind::QualifiedNameSegment as u16 => SyntaxKind::QualifiedNameSegment,
-            x if x == SyntaxKind::Error as u16 => SyntaxKind::Error,
-            x if x == SyntaxKind::PackageKw as u16 => SyntaxKind::PackageKw,
-            x if x == SyntaxKind::ImportKw as u16 => SyntaxKind::ImportKw,
-            x if x == SyntaxKind::ValKw as u16 => SyntaxKind::ValKw,
-            x if x == SyntaxKind::VarKw as u16 => SyntaxKind::VarKw,
-            x if x == SyntaxKind::NullKw as u16 => SyntaxKind::NullKw,
-            x if x == SyntaxKind::BooleanLiteral as u16 => SyntaxKind::BooleanLiteral,
-            x if x == SyntaxKind::NumberLiteral as u16 => SyntaxKind::NumberLiteral,
-            x if x == SyntaxKind::StringLiteral as u16 => SyntaxKind::StringLiteral,
-            x if x == SyntaxKind::RegexLiteral as u16 => SyntaxKind::RegexLiteral,
-            x if x == SyntaxKind::Identifier as u16 => SyntaxKind::Identifier,
-            x if x == SyntaxKind::Colon as u16 => SyntaxKind::Colon,
-            x if x == SyntaxKind::Semicolon as u16 => SyntaxKind::Semicolon,
-            x if x == SyntaxKind::Assign as u16 => SyntaxKind::Assign,
-            x if x == SyntaxKind::Dot as u16 => SyntaxKind::Dot,
-            x if x == SyntaxKind::Comma as u16 => SyntaxKind::Comma,
-            x if x == SyntaxKind::LayoutComma as u16 => SyntaxKind::LayoutComma,
-            x if x == SyntaxKind::LeftParen as u16 => SyntaxKind::LeftParen,
-            x if x == SyntaxKind::RightParen as u16 => SyntaxKind::RightParen,
-            x if x == SyntaxKind::LeftBrace as u16 => SyntaxKind::LeftBrace,
-            x if x == SyntaxKind::RightBrace as u16 => SyntaxKind::RightBrace,
-            x if x == SyntaxKind::LeftBracket as u16 => SyntaxKind::LeftBracket,
-            x if x == SyntaxKind::RightBracket as u16 => SyntaxKind::RightBracket,
-            x if x == SyntaxKind::Question as u16 => SyntaxKind::Question,
-            x if x == SyntaxKind::At as u16 => SyntaxKind::At,
-            x if x == SyntaxKind::Whitespace as u16 => SyntaxKind::Whitespace,
-            x if x == SyntaxKind::Newline as u16 => SyntaxKind::Newline,
-            x if x == SyntaxKind::LineComment as u16 => SyntaxKind::LineComment,
-            x if x == SyntaxKind::BlockComment as u16 => SyntaxKind::BlockComment,
-            x if x == SyntaxKind::DocComment as u16 => SyntaxKind::DocComment,
-            x if x == SyntaxKind::Eof as u16 => SyntaxKind::Eof,
-            _ => SyntaxKind::Unknown,
+    pub fn from_u16(raw: u16) -> Self {
+        if raw <= SyntaxKind::Eof as u16 {
+            // SAFETY: すべての列挙子は `repr(u16)` で連続しており、有効範囲内のみを transmute する。
+            unsafe { mem::transmute::<u16, SyntaxKind>(raw) }
+        } else {
+            SyntaxKind::Unknown
         }
     }
 
     /// トークンかどうかを判定する。
     pub const fn is_token(self) -> bool {
-        matches!(
-            self,
-            SyntaxKind::PackageKw
-                | SyntaxKind::ImportKw
-                | SyntaxKind::ValKw
-                | SyntaxKind::VarKw
-                | SyntaxKind::NullKw
-                | SyntaxKind::BooleanLiteral
-                | SyntaxKind::NumberLiteral
-                | SyntaxKind::StringLiteral
-                | SyntaxKind::RegexLiteral
-                | SyntaxKind::Identifier
-                | SyntaxKind::Colon
-                | SyntaxKind::Semicolon
-                | SyntaxKind::Assign
-                | SyntaxKind::Dot
-                | SyntaxKind::Comma
-                | SyntaxKind::LayoutComma
-                | SyntaxKind::LeftParen
-                | SyntaxKind::RightParen
-                | SyntaxKind::LeftBrace
-                | SyntaxKind::RightBrace
-                | SyntaxKind::LeftBracket
-                | SyntaxKind::RightBracket
-                | SyntaxKind::Question
-                | SyntaxKind::At
-                | SyntaxKind::Whitespace
-                | SyntaxKind::Newline
-                | SyntaxKind::LineComment
-                | SyntaxKind::BlockComment
-                | SyntaxKind::DocComment
-                | SyntaxKind::Eof
-        )
+        (self as u16) >= SyntaxKind::PackageKw as u16
     }
 }
 
@@ -216,6 +273,40 @@ pub enum TokenKind {
     VarKw,
     /// `null` キーワード。
     NullKw,
+    /// `fun` キーワード。
+    FunKw,
+    /// `class` キーワード。
+    ClassKw,
+    /// `data` キーワード。
+    DataKw,
+    /// `when` キーワード。
+    WhenKw,
+    /// `where` キーワード。
+    WhereKw,
+    /// `if` キーワード。
+    IfKw,
+    /// `else` キーワード。
+    ElseKw,
+    /// `for` キーワード。
+    ForKw,
+    /// `in` キーワード。
+    InKw,
+    /// `while` キーワード。
+    WhileKw,
+    /// `do` キーワード。
+    DoKw,
+    /// `return` キーワード。
+    ReturnKw,
+    /// `throw` キーワード。
+    ThrowKw,
+    /// `break` キーワード。
+    BreakKw,
+    /// `continue` キーワード。
+    ContinueKw,
+    /// `true` キーワード。
+    TrueKw,
+    /// `false` キーワード。
+    FalseKw,
     /// 真偽値リテラル。
     BooleanLiteral,
     /// 数値リテラル。
@@ -224,6 +315,8 @@ pub enum TokenKind {
     StringLiteral,
     /// 正規表現リテラル。
     RegexLiteral,
+    /// 文字リテラル。
+    CharacterLiteral,
     /// 識別子。
     Identifier,
     /// コロン。
@@ -254,6 +347,54 @@ pub enum TokenKind {
     Question,
     /// アットマーク。
     At,
+    /// `->` 演算子。
+    Arrow,
+    /// `=>` 演算子。
+    FatArrow,
+    /// `::` 演算子。
+    DoubleColon,
+    /// `?.` 演算子。
+    NullSafe,
+    /// `?:` 演算子。
+    Elvis,
+    /// `..` 演算子。
+    RangeExclusive,
+    /// `..=` 演算子。
+    RangeInclusive,
+    /// 加算演算子。
+    Plus,
+    /// 減算演算子。
+    Minus,
+    /// 乗算演算子。
+    Star,
+    /// 除算演算子。
+    Slash,
+    /// 剰余演算子。
+    Percent,
+    /// 等価演算子。
+    EqualEqual,
+    /// 不等価演算子。
+    NotEqual,
+    /// 小なり演算子。
+    Less,
+    /// 以下演算子。
+    LessEqual,
+    /// 大なり演算子。
+    Greater,
+    /// 以上演算子。
+    GreaterEqual,
+    /// 論理積演算子。
+    AndAnd,
+    /// 論理和演算子。
+    OrOr,
+    /// 否定演算子。
+    Bang,
+    /// 文字列補間開始。
+    StringStart,
+    /// 文字列補間中間。
+    StringMid,
+    /// 文字列補間終了。
+    StringEnd,
     /// ホワイトスペース。
     Whitespace,
     /// 改行。
@@ -278,10 +419,28 @@ impl TokenKind {
             TokenKind::ValKw => SyntaxKind::ValKw,
             TokenKind::VarKw => SyntaxKind::VarKw,
             TokenKind::NullKw => SyntaxKind::NullKw,
+            TokenKind::FunKw => SyntaxKind::FunKw,
+            TokenKind::ClassKw => SyntaxKind::ClassKw,
+            TokenKind::DataKw => SyntaxKind::DataKw,
+            TokenKind::WhenKw => SyntaxKind::WhenKw,
+            TokenKind::WhereKw => SyntaxKind::WhereKw,
+            TokenKind::IfKw => SyntaxKind::IfKw,
+            TokenKind::ElseKw => SyntaxKind::ElseKw,
+            TokenKind::ForKw => SyntaxKind::ForKw,
+            TokenKind::InKw => SyntaxKind::InKw,
+            TokenKind::WhileKw => SyntaxKind::WhileKw,
+            TokenKind::DoKw => SyntaxKind::DoKw,
+            TokenKind::ReturnKw => SyntaxKind::ReturnKw,
+            TokenKind::ThrowKw => SyntaxKind::ThrowKw,
+            TokenKind::BreakKw => SyntaxKind::BreakKw,
+            TokenKind::ContinueKw => SyntaxKind::ContinueKw,
+            TokenKind::TrueKw => SyntaxKind::TrueKw,
+            TokenKind::FalseKw => SyntaxKind::FalseKw,
             TokenKind::BooleanLiteral => SyntaxKind::BooleanLiteral,
             TokenKind::NumberLiteral => SyntaxKind::NumberLiteral,
             TokenKind::StringLiteral => SyntaxKind::StringLiteral,
             TokenKind::RegexLiteral => SyntaxKind::RegexLiteral,
+            TokenKind::CharacterLiteral => SyntaxKind::CharacterLiteral,
             TokenKind::Identifier => SyntaxKind::Identifier,
             TokenKind::Colon => SyntaxKind::Colon,
             TokenKind::Semicolon => SyntaxKind::Semicolon,
@@ -297,6 +456,30 @@ impl TokenKind {
             TokenKind::RightBracket => SyntaxKind::RightBracket,
             TokenKind::Question => SyntaxKind::Question,
             TokenKind::At => SyntaxKind::At,
+            TokenKind::Arrow => SyntaxKind::Arrow,
+            TokenKind::FatArrow => SyntaxKind::FatArrow,
+            TokenKind::DoubleColon => SyntaxKind::DoubleColon,
+            TokenKind::NullSafe => SyntaxKind::NullSafe,
+            TokenKind::Elvis => SyntaxKind::Elvis,
+            TokenKind::RangeExclusive => SyntaxKind::RangeExclusive,
+            TokenKind::RangeInclusive => SyntaxKind::RangeInclusive,
+            TokenKind::Plus => SyntaxKind::Plus,
+            TokenKind::Minus => SyntaxKind::Minus,
+            TokenKind::Star => SyntaxKind::Star,
+            TokenKind::Slash => SyntaxKind::Slash,
+            TokenKind::Percent => SyntaxKind::Percent,
+            TokenKind::EqualEqual => SyntaxKind::EqualEqual,
+            TokenKind::NotEqual => SyntaxKind::NotEqual,
+            TokenKind::Less => SyntaxKind::Less,
+            TokenKind::LessEqual => SyntaxKind::LessEqual,
+            TokenKind::Greater => SyntaxKind::Greater,
+            TokenKind::GreaterEqual => SyntaxKind::GreaterEqual,
+            TokenKind::AndAnd => SyntaxKind::AndAnd,
+            TokenKind::OrOr => SyntaxKind::OrOr,
+            TokenKind::Bang => SyntaxKind::Bang,
+            TokenKind::StringStart => SyntaxKind::StringStart,
+            TokenKind::StringMid => SyntaxKind::StringMid,
+            TokenKind::StringEnd => SyntaxKind::StringEnd,
             TokenKind::Whitespace => SyntaxKind::Whitespace,
             TokenKind::Newline => SyntaxKind::Newline,
             TokenKind::LineComment => SyntaxKind::LineComment,
@@ -319,10 +502,28 @@ impl TokenKind {
             TokenType::Val => TokenKind::ValKw,
             TokenType::Var => TokenKind::VarKw,
             TokenType::Null => TokenKind::NullKw,
+            TokenType::Fun => TokenKind::FunKw,
+            TokenType::Class => TokenKind::ClassKw,
+            TokenType::Data => TokenKind::DataKw,
+            TokenType::When => TokenKind::WhenKw,
+            TokenType::Where => TokenKind::WhereKw,
+            TokenType::If => TokenKind::IfKw,
+            TokenType::Else => TokenKind::ElseKw,
+            TokenType::For => TokenKind::ForKw,
+            TokenType::In => TokenKind::InKw,
+            TokenType::While => TokenKind::WhileKw,
+            TokenType::Do => TokenKind::DoKw,
+            TokenType::Return => TokenKind::ReturnKw,
+            TokenType::Throw => TokenKind::ThrowKw,
+            TokenType::Break => TokenKind::BreakKw,
+            TokenType::Continue => TokenKind::ContinueKw,
+            TokenType::True => TokenKind::TrueKw,
+            TokenType::False => TokenKind::FalseKw,
             TokenType::Boolean(_) => TokenKind::BooleanLiteral,
             TokenType::Number(_) => TokenKind::NumberLiteral,
             TokenType::String(_) | TokenType::StringInterpolation(_) => TokenKind::StringLiteral,
             TokenType::RegexLiteral(_) => TokenKind::RegexLiteral,
+            TokenType::Character(_) => TokenKind::CharacterLiteral,
             TokenType::Identifier(_) => TokenKind::Identifier,
             TokenType::Colon => TokenKind::Colon,
             TokenType::Semicolon => TokenKind::Semicolon,
@@ -338,14 +539,50 @@ impl TokenKind {
             TokenType::RightBracket => TokenKind::RightBracket,
             TokenType::Question => TokenKind::Question,
             TokenType::At => TokenKind::At,
+            TokenType::Arrow => TokenKind::Arrow,
+            TokenType::FatArrow => TokenKind::FatArrow,
+            TokenType::DoubleColon => TokenKind::DoubleColon,
+            TokenType::NullSafe => TokenKind::NullSafe,
+            TokenType::Elvis => TokenKind::Elvis,
+            TokenType::RangeExclusive => TokenKind::RangeExclusive,
+            TokenType::RangeInclusive => TokenKind::RangeInclusive,
+            TokenType::Plus => TokenKind::Plus,
+            TokenType::Minus => TokenKind::Minus,
+            TokenType::Multiply => TokenKind::Star,
+            TokenType::Divide => TokenKind::Slash,
+            TokenType::Modulo => TokenKind::Percent,
+            TokenType::Equal => TokenKind::EqualEqual,
+            TokenType::NotEqual => TokenKind::NotEqual,
+            TokenType::Less => TokenKind::Less,
+            TokenType::LessEqual => TokenKind::LessEqual,
+            TokenType::Greater => TokenKind::Greater,
+            TokenType::GreaterEqual => TokenKind::GreaterEqual,
+            TokenType::And => TokenKind::AndAnd,
+            TokenType::Or => TokenKind::OrOr,
+            TokenType::Not => TokenKind::Bang,
+            TokenType::StringStart => TokenKind::StringStart,
+            TokenType::StringMid => TokenKind::StringMid,
+            TokenType::StringEnd => TokenKind::StringEnd,
             TokenType::Whitespace(_) => TokenKind::Whitespace,
             TokenType::Newline => TokenKind::Newline,
             TokenType::LineComment(_) => TokenKind::LineComment,
             TokenType::BlockComment(_) => TokenKind::BlockComment,
             TokenType::JavaDocComment(_) => TokenKind::DocComment,
             TokenType::Eof => TokenKind::Eof,
-            _ => TokenKind::Unknown,
+            TokenType::Invalid(_) => TokenKind::Unknown,
         }
+    }
+
+    /// トークンがトリビア（空白・コメント等）か判定する。
+    pub const fn is_trivia(self) -> bool {
+        matches!(
+            self,
+            TokenKind::Whitespace
+                | TokenKind::Newline
+                | TokenKind::LineComment
+                | TokenKind::BlockComment
+                | TokenKind::DocComment
+        )
     }
 }
 
