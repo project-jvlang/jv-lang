@@ -18,8 +18,12 @@ pub enum SyntaxKind {
     ImportDeclaration,
     /// import のパス。
     ImportPath,
+    /// import 宣言末尾の付加情報（ワイルドカードや別名）。
+    ImportClause,
     /// import の `as` 句（将来拡張用）。
     ImportAlias,
+    /// import のワイルドカード指定。
+    ImportWildcard,
     /// `val` 宣言。
     ValDeclaration,
     /// `var` 宣言。
@@ -30,6 +34,18 @@ pub enum SyntaxKind {
     TypeAnnotation,
     /// 初期化子。
     InitializerClause,
+    /// アノテーションの並び。
+    AnnotationList,
+    /// 単一のアノテーション。
+    Annotation,
+    /// アノテーションの引数リスト。
+    AnnotationArgumentList,
+    /// アノテーション引数。
+    AnnotationArgument,
+    /// ステートメントレベル修飾子のリスト。
+    ModifierList,
+    /// 単一の修飾子。
+    Modifier,
     /// 一般的な式プレースホルダー。
     Expression,
     /// 修飾名。
@@ -40,12 +56,20 @@ pub enum SyntaxKind {
     Error,
     /// 関数宣言。
     FunctionDeclaration,
+    /// 型パラメータリスト。
+    TypeParameterList,
+    /// 単一の型パラメータ。
+    TypeParameter,
     /// 関数パラメータリスト。
     FunctionParameterList,
     /// 関数パラメータ。
     FunctionParameter,
     /// 関数戻り値型注釈。
     FunctionReturnType,
+    /// `where` 句。
+    WhereClause,
+    /// `where` 句の述語。
+    WherePredicate,
     /// クラス宣言。
     ClassDeclaration,
     /// クラスボディ。
@@ -80,8 +104,6 @@ pub enum SyntaxKind {
     ParameterModifierList,
     /// パラメータ修飾子。
     ParameterModifier,
-    /// ステートメントレベルのアノテーション。
-    Annotation,
     /// ブロック内のエラーノード。
     BlockError,
     /// `package` キーワード。
