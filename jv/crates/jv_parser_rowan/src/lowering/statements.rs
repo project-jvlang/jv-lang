@@ -98,7 +98,7 @@ pub fn lower_program(root: &JvSyntaxNode, tokens: &[Token]) -> LoweringResult {
             continue;
         }
 
-        match lower_single_statement(&context, &child) {
+        match lower_single_statement(&context, &child, &mut diagnostics) {
             Ok(statement) => statements.push(statement),
             Err(diagnostic) => diagnostics.push(diagnostic),
         }
@@ -135,6 +135,7 @@ fn is_top_level_statement(kind: SyntaxKind) -> bool {
 fn lower_single_statement(
     context: &LoweringContext<'_>,
     node: &JvSyntaxNode,
+    diagnostics: &mut Vec<LoweringDiagnostic>,
 ) -> Result<Statement, LoweringDiagnostic> {
     if context.tokens_for(node).is_empty() {
         return Err(LoweringDiagnostic::new(
@@ -150,20 +151,20 @@ fn lower_single_statement(
     match node.kind() {
         SyntaxKind::PackageDeclaration => lower_package(context, node),
         SyntaxKind::ImportDeclaration => lower_import(context, node),
-        SyntaxKind::ValDeclaration => lower_value(context, node, true),
-        SyntaxKind::VarDeclaration => lower_value(context, node, false),
-        SyntaxKind::FunctionDeclaration => lower_function(context, node),
-        SyntaxKind::ClassDeclaration => lower_class(context, node),
-        SyntaxKind::ForStatement => lower_for(context, node),
-        SyntaxKind::ReturnStatement => lower_return(context, node),
-        SyntaxKind::ThrowStatement => lower_throw(context, node),
+        SyntaxKind::ValDeclaration => lower_value(context, node, true, diagnostics),
+        SyntaxKind::VarDeclaration => lower_value(context, node, false, diagnostics),
+        SyntaxKind::FunctionDeclaration => lower_function(context, node, diagnostics),
+        SyntaxKind::ClassDeclaration => lower_class(context, node, diagnostics),
+        SyntaxKind::ForStatement => lower_for(context, node, diagnostics),
+        SyntaxKind::ReturnStatement => lower_return(context, node, diagnostics),
+        SyntaxKind::ThrowStatement => lower_throw(context, node, diagnostics),
         SyntaxKind::BreakStatement => lower_break(context, node),
         SyntaxKind::ContinueStatement => lower_continue(context, node),
         SyntaxKind::IfStatement
         | SyntaxKind::WhenStatement
         | SyntaxKind::WhileStatement
         | SyntaxKind::DoWhileStatement
-        | SyntaxKind::Expression => lower_expression_statement(context, node),
+        | SyntaxKind::Expression => lower_expression_statement(context, node, diagnostics),
         kind => Err(LoweringDiagnostic::new(
             LoweringDiagnosticSeverity::Error,
             format!(
@@ -261,6 +262,7 @@ fn lower_value(
     context: &LoweringContext<'_>,
     node: &JvSyntaxNode,
     is_val: bool,
+    diagnostics: &mut Vec<LoweringDiagnostic>,
 ) -> Result<Statement, LoweringDiagnostic> {
     let binding = child_node(node, SyntaxKind::BindingPattern).ok_or_else(|| {
         missing_child_diagnostic(context, node, "バインディング", SyntaxKind::BindingPattern)
@@ -294,7 +296,7 @@ fn lower_value(
 
     let initializer = match initializer_clause {
         Some(clause) => match child_node(&clause, SyntaxKind::Expression) {
-            Some(expr_node) => Some(lower_expression_shallow(context, &expr_node)?),
+            Some(expr_node) => Some(lower_expression_shallow(context, &expr_node, diagnostics)?),
             None => {
                 return Err(LoweringDiagnostic::new(
                     LoweringDiagnosticSeverity::Error,
@@ -361,6 +363,7 @@ fn simple_type_from_expression(
 fn lower_expression_shallow(
     context: &LoweringContext<'_>,
     node: &JvSyntaxNode,
+    diagnostics: &mut Vec<LoweringDiagnostic>,
 ) -> Result<Expression, LoweringDiagnostic> {
     let tokens = context.tokens_for(node);
     if tokens.is_empty() {
@@ -387,6 +390,14 @@ fn lower_expression_shallow(
         };
         return Ok(expr);
     }
+
+    push_diagnostic(
+        diagnostics,
+        LoweringDiagnosticSeverity::Warning,
+        "式ローワリングは暫定サポートのためテキストをそのまま識別子として扱います",
+        context,
+        node,
+    );
 
     Ok(Expression::Identifier(join_tokens(&tokens), span))
 }
@@ -444,9 +455,27 @@ fn join_tokens(tokens: &[&Token]) -> String {
         .collect::<String>()
 }
 
+fn push_diagnostic(
+    diagnostics: &mut Vec<LoweringDiagnostic>,
+    severity: LoweringDiagnosticSeverity,
+    message: impl Into<String>,
+    context: &LoweringContext<'_>,
+    node: &JvSyntaxNode,
+) {
+    diagnostics.push(LoweringDiagnostic::new(
+        severity,
+        message,
+        context.span_for(node),
+        node.kind(),
+        first_identifier_text(node),
+        collect_annotation_texts(node),
+    ));
+}
+
 fn lower_function(
     context: &LoweringContext<'_>,
     node: &JvSyntaxNode,
+    diagnostics: &mut Vec<LoweringDiagnostic>,
 ) -> Result<Statement, LoweringDiagnostic> {
     let tokens = context.tokens_for(node);
     let span = context.span_for(node).unwrap_or_else(Span::dummy);
@@ -463,7 +492,7 @@ fn lower_function(
     })?;
 
     let (parameters, _) = child_node(node, SyntaxKind::FunctionParameterList)
-        .map(|list| lower_parameters(context, &list))
+        .map(|list| lower_parameters(context, &list, diagnostics))
         .unwrap_or_default();
 
     let return_type = child_node(node, SyntaxKind::FunctionReturnType)
@@ -479,7 +508,7 @@ fn lower_function(
     } else {
         node.children()
             .find(|child| child.kind() == SyntaxKind::Expression)
-            .map(|expr| lower_expression_shallow(context, &expr))
+            .map(|expr| lower_expression_shallow(context, &expr, diagnostics))
             .transpose()?
             .unwrap_or_else(|| Expression::Identifier(name.clone(), fallback_span))
     };
@@ -501,6 +530,7 @@ fn lower_function(
 fn lower_class(
     context: &LoweringContext<'_>,
     node: &JvSyntaxNode,
+    diagnostics: &mut Vec<LoweringDiagnostic>,
 ) -> Result<Statement, LoweringDiagnostic> {
     let tokens = context.tokens_for(node);
     let span = context.span_for(node).unwrap_or_else(Span::dummy);
@@ -517,11 +547,12 @@ fn lower_class(
     })?;
 
     let (constructor_params, has_mutable) = child_node(node, SyntaxKind::FunctionParameterList)
-        .map(|list| lower_parameters(context, &list))
+        .map(|list| lower_parameters(context, &list, diagnostics))
         .unwrap_or_default();
 
     let (properties, methods) = child_node(node, SyntaxKind::ClassBody)
-        .map(|body| lower_class_members(context, &body))
+        .map(|body| lower_class_members(context, &body, diagnostics))
+        .transpose()?
         .unwrap_or_default();
 
     let modifiers = Modifiers::default();
@@ -558,62 +589,126 @@ fn lower_class(
 fn lower_class_members(
     context: &LoweringContext<'_>,
     body: &JvSyntaxNode,
-) -> (Vec<Property>, Vec<Box<Statement>>) {
+    diagnostics: &mut Vec<LoweringDiagnostic>,
+) -> Result<(Vec<Property>, Vec<Box<Statement>>), LoweringDiagnostic> {
     let mut properties = Vec::new();
     let mut methods = Vec::new();
 
-    for child in body.descendants() {
+    for child in body.children() {
         if child.kind().is_token() {
             continue;
         }
-
-        match child.kind() {
-            SyntaxKind::ValDeclaration => {
-                if let Some(property) = lower_property(context, &child, true) {
-                    properties.push(property);
-                }
-            }
-            SyntaxKind::VarDeclaration => {
-                if let Some(property) = lower_property(context, &child, false) {
-                    properties.push(property);
-                }
-            }
-            SyntaxKind::FunctionDeclaration => {
-                if let Ok(statement) = lower_function(context, &child) {
-                    methods.push(Box::new(statement));
-                }
-            }
-            _ => {}
-        }
+        process_class_member(
+            context,
+            &child,
+            diagnostics,
+            &mut properties,
+            &mut methods,
+        )?;
     }
 
-    (properties, methods)
+    Ok((properties, methods))
+}
+
+fn process_class_member(
+    context: &LoweringContext<'_>,
+    member: &JvSyntaxNode,
+    diagnostics: &mut Vec<LoweringDiagnostic>,
+    properties: &mut Vec<Property>,
+    methods: &mut Vec<Box<Statement>>,
+) -> Result<(), LoweringDiagnostic> {
+    match member.kind() {
+        SyntaxKind::ValDeclaration => {
+            if let Some(property) = lower_property(context, member, true, diagnostics)? {
+                properties.push(property);
+            }
+        }
+        SyntaxKind::VarDeclaration => {
+            if let Some(property) = lower_property(context, member, false, diagnostics)? {
+                properties.push(property);
+            }
+        }
+        SyntaxKind::FunctionDeclaration => {
+            let statement = lower_function(context, member, diagnostics)?;
+            methods.push(Box::new(statement));
+        }
+        SyntaxKind::StatementList => {
+            for stmt in member.children() {
+                if stmt.kind().is_token() {
+                    continue;
+                }
+                process_class_member(context, &stmt, diagnostics, properties, methods)?;
+            }
+        }
+        other => {
+            push_diagnostic(
+                diagnostics,
+                LoweringDiagnosticSeverity::Warning,
+                format!(
+                    "クラス内で未対応のノード {:?} を検出したためスキップしました",
+                    other
+                ),
+                context,
+                member,
+            );
+        }
+    }
+    Ok(())
 }
 
 fn lower_property(
     context: &LoweringContext<'_>,
     node: &JvSyntaxNode,
     is_val: bool,
-) -> Option<Property> {
-    let binding = child_node(node, SyntaxKind::BindingPattern)?;
+    diagnostics: &mut Vec<LoweringDiagnostic>,
+) -> Result<Option<Property>, LoweringDiagnostic> {
+    let binding = match child_node(node, SyntaxKind::BindingPattern) {
+        Some(binding) => binding,
+        None => {
+            push_diagnostic(
+                diagnostics,
+                LoweringDiagnosticSeverity::Error,
+                "プロパティのバインディングが見つかりません",
+                context,
+                node,
+            );
+            return Ok(None);
+        }
+    };
+
     let span = context.span_for(node).unwrap_or_else(Span::dummy);
-    let name = context
+    let name = match context
         .tokens_for(&binding)
         .into_iter()
         .find_map(|token| match &token.token_type {
             TokenType::Identifier(text) => Some(text.clone()),
             _ => None,
-        })?;
+        }) {
+        Some(name) => name,
+        None => {
+            push_diagnostic(
+                diagnostics,
+                LoweringDiagnosticSeverity::Error,
+                "プロパティ名を特定できませんでした",
+                context,
+                &binding,
+            );
+            return Ok(None);
+        }
+    };
 
     let type_annotation = child_node(node, SyntaxKind::TypeAnnotation)
         .and_then(|type_node| child_node(&type_node, SyntaxKind::Expression))
         .and_then(|expr| simple_type_from_expression(context, &expr));
 
-    let initializer = child_node(node, SyntaxKind::InitializerClause)
+    let initializer = match child_node(node, SyntaxKind::InitializerClause)
         .and_then(|clause| child_node(&clause, SyntaxKind::Expression))
-        .and_then(|expr| lower_expression_shallow(context, &expr).ok());
+    {
+        Some(expr) => Some(lower_expression_shallow(context, &expr, diagnostics)?),
+        None => None,
+    };
 
-    Some(Property {
+    Ok(Some(Property {
         name,
         type_annotation,
         initializer,
@@ -622,12 +717,13 @@ fn lower_property(
         getter: None,
         setter: None,
         span,
-    })
+    }))
 }
 
 fn lower_for(
     context: &LoweringContext<'_>,
     node: &JvSyntaxNode,
+    diagnostics: &mut Vec<LoweringDiagnostic>,
 ) -> Result<Statement, LoweringDiagnostic> {
     let binding_node = child_node(node, SyntaxKind::BindingPattern).ok_or_else(|| {
         missing_child_diagnostic(
@@ -660,7 +756,7 @@ fn lower_for(
     let iterable_expr = node
         .children()
         .find(|child| child.kind() == SyntaxKind::Expression)
-        .map(|expr| lower_expression_shallow(context, &expr))
+        .map(|expr| lower_expression_shallow(context, &expr, diagnostics))
         .transpose()?
         .ok_or_else(|| {
             LoweringDiagnostic::new(
@@ -682,7 +778,19 @@ fn lower_for(
             statements: Vec::new(),
             span: context.span_for(&block).unwrap_or_else(Span::dummy),
         })
-        .unwrap_or_else(|| Expression::Identifier("{}".to_string(), body_span));
+        .unwrap_or_else(|| {
+            push_diagnostic(
+                diagnostics,
+                LoweringDiagnosticSeverity::Warning,
+                "for 文の本体ブロックが存在しないため空ブロックとして処理します",
+                context,
+                node,
+            );
+            Expression::Block {
+                statements: Vec::new(),
+                span: body_span,
+            }
+        });
 
     Ok(Statement::ForIn(ForInStatement {
         binding: loop_binding,
@@ -696,9 +804,10 @@ fn lower_for(
 fn lower_return(
     context: &LoweringContext<'_>,
     node: &JvSyntaxNode,
+    diagnostics: &mut Vec<LoweringDiagnostic>,
 ) -> Result<Statement, LoweringDiagnostic> {
     let value = child_node(node, SyntaxKind::Expression)
-        .map(|expr| lower_expression_shallow(context, &expr))
+        .map(|expr| lower_expression_shallow(context, &expr, diagnostics))
         .transpose()?;
 
     Ok(Statement::Return {
@@ -710,12 +819,13 @@ fn lower_return(
 fn lower_throw(
     context: &LoweringContext<'_>,
     node: &JvSyntaxNode,
+    diagnostics: &mut Vec<LoweringDiagnostic>,
 ) -> Result<Statement, LoweringDiagnostic> {
     let expr_node = child_node(node, SyntaxKind::Expression).ok_or_else(|| {
         missing_child_diagnostic(context, node, "throw 文には式が必要です", SyntaxKind::Expression)
     })?;
 
-    let expr = lower_expression_shallow(context, &expr_node)?;
+    let expr = lower_expression_shallow(context, &expr_node, diagnostics)?;
     Ok(Statement::Throw {
         expr,
         span: context.span_for(node).unwrap_or_else(Span::dummy),
@@ -743,8 +853,9 @@ fn lower_continue(
 fn lower_expression_statement(
     context: &LoweringContext<'_>,
     node: &JvSyntaxNode,
+    diagnostics: &mut Vec<LoweringDiagnostic>,
 ) -> Result<Statement, LoweringDiagnostic> {
-    let expr = lower_expression_shallow(context, node)?;
+    let expr = lower_expression_shallow(context, node, diagnostics)?;
     Ok(Statement::Expression {
         expr,
         span: context.span_for(node).unwrap_or_else(Span::dummy),
@@ -758,7 +869,11 @@ fn extract_identifier(tokens: &[&Token]) -> Option<String> {
     })
 }
 
-fn lower_parameters(context: &LoweringContext<'_>, list: &JvSyntaxNode) -> (Vec<Parameter>, bool) {
+fn lower_parameters(
+    context: &LoweringContext<'_>,
+    list: &JvSyntaxNode,
+    diagnostics: &mut Vec<LoweringDiagnostic>,
+) -> (Vec<Parameter>, bool) {
     let mut params = Vec::new();
     let mut has_mutable = false;
 
@@ -775,14 +890,29 @@ fn lower_parameters(context: &LoweringContext<'_>, list: &JvSyntaxNode) -> (Vec<
             has_mutable = true;
         }
 
-        let name = child_node(&child, SyntaxKind::BindingPattern)
+        let binding = child_node(&child, SyntaxKind::BindingPattern);
+        let name = binding
+            .as_ref()
             .and_then(|binding| {
                 context.tokens_for(&binding).into_iter().find_map(|token| match &token.token_type {
                     TokenType::Identifier(text) => Some(text.clone()),
                     _ => None,
                 })
             })
-            .unwrap_or_default();
+            .unwrap_or_else(|| {
+                push_diagnostic(
+                    diagnostics,
+                    LoweringDiagnosticSeverity::Error,
+                    "パラメータ名を特定できませんでした",
+                    context,
+                    &child,
+                );
+                String::new()
+            });
+
+        if name.is_empty() {
+            continue;
+        }
 
         let type_annotation = child_node(&child, SyntaxKind::TypeAnnotation)
             .and_then(|type_node| child_node(&type_node, SyntaxKind::Expression))
