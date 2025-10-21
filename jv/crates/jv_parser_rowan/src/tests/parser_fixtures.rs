@@ -82,3 +82,91 @@ fn recovers_from_invalid_val() {
     });
     assert!(has_error_node, "expected error node in event stream");
 }
+
+#[test]
+fn parses_deeply_nested_constructs() {
+    let source = r#"
+        package deep.example.core
+        import foo.bar.*
+        import util.logger
+
+        val threshold: Int = 10
+
+        class Complex {
+            fun process(items: List<Int>) {
+                for (item in items) {
+                    when (item) {
+                        0 -> continue
+                        else -> {
+                            var flag = false
+                            do {
+                                val sentinel = threshold
+                            } while (flag)
+
+                            if (flag) {
+                                throw IllegalStateException()
+                            }
+                        }
+                    }
+                }
+
+                while (true) {
+                    break
+                }
+
+                return
+            }
+
+            class Nested {
+                fun excite() {
+                    val message = "ready"
+                }
+            }
+        }
+    "#;
+
+    let tokens = lex(source);
+    let output = parse(&tokens);
+
+    assert!(
+        output.diagnostics.is_empty(),
+        "expected no diagnostics, got {:?}",
+        output.diagnostics
+    );
+    assert!(
+        !output.recovered,
+        "expected parser to avoid recovery for complex constructs"
+    );
+
+    let started: Vec<SyntaxKind> = output
+        .events
+        .iter()
+        .filter_map(|event| match event {
+            ParseEvent::StartNode { kind } => Some(*kind),
+            _ => None,
+        })
+        .collect();
+
+    for expected in [
+        SyntaxKind::PackageDeclaration,
+        SyntaxKind::ImportDeclaration,
+        SyntaxKind::ValDeclaration,
+        SyntaxKind::ClassDeclaration,
+        SyntaxKind::FunctionDeclaration,
+        SyntaxKind::ForStatement,
+        SyntaxKind::WhenStatement,
+        SyntaxKind::DoWhileStatement,
+        SyntaxKind::IfStatement,
+        SyntaxKind::WhileStatement,
+        SyntaxKind::ReturnStatement,
+        SyntaxKind::ThrowStatement,
+        SyntaxKind::BreakStatement,
+        SyntaxKind::ContinueStatement,
+    ] {
+        assert!(
+            started.contains(&expected),
+            "expected {:?} node in complex program",
+            expected
+        );
+    }
+}

@@ -36,6 +36,8 @@ impl StatementStrategy for ImportStrategy {
                 ctx.bump_raw(); // dot
                 ctx.bump_raw(); // star
             }
+        } else if ctx.peek_significant_kind() == Some(TokenKind::Star) {
+            ctx.bump_raw();
         }
 
         ctx.finish_node();
