@@ -49,7 +49,10 @@ impl<'a> TokenStore<'a> {
 }
 
 /// ノード配下のトークンを抽出し、辞書順で返す。
-fn collect_tokens<'store, 'token>(node: &JvSyntaxNode, store: &'store TokenStore<'token>) -> Vec<&'token Token> {
+fn collect_tokens<'store, 'token>(
+    node: &JvSyntaxNode,
+    store: &'store TokenStore<'token>,
+) -> Vec<&'token Token> {
     let mut collected = Vec::new();
     for element in node.descendants_with_tokens() {
         if let SyntaxElement::Token(token) = element {

@@ -328,7 +328,10 @@ fn trait_bound_predicate(
 
 pub(super) fn type_annotation_clause(
 ) -> impl ChumskyParser<Token, Option<TypeAnnotation>, Error = Simple<Token>> + Clone {
-    token_colon().ignore_then(type_annotation()).or_not().boxed()
+    token_colon()
+        .ignore_then(type_annotation())
+        .or_not()
+        .boxed()
 }
 
 pub(super) fn modifiers_parser(
@@ -449,7 +452,9 @@ fn annotation_parser() -> impl ChumskyParser<Token, Annotation, Error = Simple<T
 }
 
 fn annotation_argument_list(
-    value_parser: impl ChumskyParser<Token, (AnnotationValue, Span), Error = Simple<Token>> + Clone + 'static,
+    value_parser: impl ChumskyParser<Token, (AnnotationValue, Span), Error = Simple<Token>>
+        + Clone
+        + 'static,
 ) -> impl ChumskyParser<Token, (Vec<AnnotationArgument>, Span), Error = Simple<Token>> + Clone {
     token_left_paren()
         .map(|token| span_from_token(&token))
@@ -464,7 +469,9 @@ fn annotation_argument_list(
 }
 
 fn annotation_argument(
-    value_parser: impl ChumskyParser<Token, (AnnotationValue, Span), Error = Simple<Token>> + Clone + 'static,
+    value_parser: impl ChumskyParser<Token, (AnnotationValue, Span), Error = Simple<Token>>
+        + Clone
+        + 'static,
 ) -> impl ChumskyParser<Token, AnnotationArgument, Error = Simple<Token>> + Clone {
     let positional = value_parser
         .clone()

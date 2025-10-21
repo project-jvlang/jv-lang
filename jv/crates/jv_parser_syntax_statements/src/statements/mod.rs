@@ -20,8 +20,7 @@ pub fn statement_parser() -> impl ChumskyParser<Token, Statement, Error = Simple
         let comment_stmt = declarations::comment_statement_parser().boxed();
         let package_stmt =
             attempt_statement_parser(declarations::package_declaration_parser()).boxed();
-        let import_stmt =
-            attempt_statement_parser(declarations::import_statement_parser()).boxed();
+        let import_stmt = attempt_statement_parser(declarations::import_statement_parser()).boxed();
         let val_decl =
             attempt_statement_parser(declarations::val_declaration_parser(expr.clone())).boxed();
         let implicit_typed_val_decl = attempt_statement_parser(
@@ -31,18 +30,17 @@ pub fn statement_parser() -> impl ChumskyParser<Token, Statement, Error = Simple
         let var_decl =
             attempt_statement_parser(declarations::var_declaration_parser(expr.clone())).boxed();
         let assignment = control::assignment_statement_parser(expr.clone()).boxed();
-        let function_decl = declarations::function_declaration_parser(
-            statement_parser.clone(),
-            expr.clone(),
-        )
-        .boxed();
+        let function_decl =
+            declarations::function_declaration_parser(statement_parser.clone(), expr.clone())
+                .boxed();
         let class_decl = attempt_statement_parser(declarations::class_declaration_parser(
             statement_parser.clone(),
             expr.clone(),
         ))
         .boxed();
         let data_class_decl = declarations::data_class_declaration_parser(expr.clone()).boxed();
-        let use_stmt = control::use_statement_parser(statement_parser.clone(), expr.clone()).boxed();
+        let use_stmt =
+            control::use_statement_parser(statement_parser.clone(), expr.clone()).boxed();
         let defer_stmt = control::defer_statement_parser(statement_parser.clone()).boxed();
         let spawn_stmt = control::spawn_statement_parser(statement_parser.clone()).boxed();
         let return_stmt = control::return_statement_parser(expr.clone()).boxed();
