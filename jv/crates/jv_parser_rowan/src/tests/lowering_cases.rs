@@ -174,9 +174,17 @@ fn for_tokens() -> (SyntaxNode<JvLanguage>, Vec<Token>) {
     let mut tokens = Vec::new();
     tokens.push(make_token(&mut column, TokenType::For, "for"));
     tokens.push(make_token(&mut column, TokenType::LeftParen, "("));
-    tokens.push(make_token(&mut column, TokenType::Identifier("item".into()), "item"));
+    tokens.push(make_token(
+        &mut column,
+        TokenType::Identifier("item".into()),
+        "item",
+    ));
     tokens.push(make_token(&mut column, TokenType::In, "in"));
-    tokens.push(make_token(&mut column, TokenType::Identifier("items".into()), "items"));
+    tokens.push(make_token(
+        &mut column,
+        TokenType::Identifier("items".into()),
+        "items",
+    ));
     tokens.push(make_token(&mut column, TokenType::RightParen, ")"));
     tokens.push(make_token(&mut column, TokenType::LeftBrace, "{"));
     tokens.push(make_token(&mut column, TokenType::RightBrace, "}"));
@@ -392,10 +400,7 @@ fn lowering_table_driven_cases() {
                         assert_eq!(name, "answer");
                         assert_eq!(origin, &ValBindingOrigin::ExplicitKeyword);
                         assert_eq!(modifiers, &Modifiers::default());
-                        assert_eq!(
-                            type_annotation,
-                            &Some(TypeAnnotation::Simple("Int".into()))
-                        );
+                        assert_eq!(type_annotation, &Some(TypeAnnotation::Simple("Int".into())));
                         match initializer {
                             Expression::Literal(Literal::Number(value), _) => {
                                 assert_eq!(value, "42")
@@ -436,7 +441,9 @@ fn lowering_table_driven_cases() {
                     .first()
                     .expect("expected function statement")
                 {
-                    Statement::FunctionDeclaration { name, parameters, .. } => {
+                    Statement::FunctionDeclaration {
+                        name, parameters, ..
+                    } => {
                         assert_eq!(name, "greet");
                         assert!(parameters.is_empty());
                     }
@@ -464,9 +471,7 @@ fn lowering_table_driven_cases() {
                     .find(|diag| diag.severity == LoweringDiagnosticSeverity::Warning)
                     .expect("expected warning diagnostic for missing block");
                 assert!(
-                    warning
-                        .message
-                        .contains("空ブロックとして処理します"),
+                    warning.message.contains("空ブロックとして処理します"),
                     "unexpected warning message: {}",
                     warning.message
                 );
@@ -475,11 +480,7 @@ fn lowering_table_driven_cases() {
         LoweringCase {
             build: complex_expression_tokens,
             verify: Box::new(|result| {
-                match result
-                    .statements
-                    .first()
-                    .expect("expected val statement")
-                {
+                match result.statements.first().expect("expected val statement") {
                     Statement::ValDeclaration { initializer, .. } => match initializer {
                         Expression::Identifier(text, _) => assert_eq!(text, "foo+bar"),
                         other => panic!("expected identifier fallback, got {:?}", other),
@@ -501,12 +502,12 @@ fn lowering_table_driven_cases() {
         LoweringCase {
             build: class_with_when_tokens,
             verify: Box::new(|result| {
-                match result
-                    .statements
-                    .first()
-                    .expect("expected class statement")
-                {
-                    Statement::ClassDeclaration { properties, methods, .. } => {
+                match result.statements.first().expect("expected class statement") {
+                    Statement::ClassDeclaration {
+                        properties,
+                        methods,
+                        ..
+                    } => {
                         assert!(properties.is_empty());
                         assert!(methods.is_empty());
                     }
@@ -518,9 +519,7 @@ fn lowering_table_driven_cases() {
                     .find(|diag| diag.severity == LoweringDiagnosticSeverity::Warning)
                     .expect("expected warning for unsupported class member");
                 assert!(
-                    warning
-                        .message
-                        .contains("未対応のノード"),
+                    warning.message.contains("未対応のノード"),
                     "unexpected warning message: {}",
                     warning.message
                 );

@@ -1,0 +1,25 @@
+description = "Pattern example 2 should emit two functions with return and expression bodies"
+source = "jv/tests/fixtures/pattern/example2.jv"
+
+[expect]
+statement_count = 2
+
+[expect.parser_diagnostics]
+allowed = true
+max = 1
+
+[[expect.statements]]
+index = 0
+kind = "function_declaration"
+name = "categorize"
+
+  [expect.statements.span]
+  start_line = 1
+
+[[expect.statements]]
+index = 1
+kind = "function_declaration"
+name = "main"
+
+  [expect.statements.span]
+  start_line = 10

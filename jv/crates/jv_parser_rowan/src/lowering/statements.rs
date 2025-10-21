@@ -81,27 +81,14 @@ pub fn lower_program(root: &JvSyntaxNode, tokens: &[Token]) -> LoweringResult {
             continue;
         }
 
-        if matches!(child.kind(), SyntaxKind::Error | SyntaxKind::BlockError) {
-            let diagnostic = LoweringDiagnostic::new(
-                LoweringDiagnosticSeverity::Error,
-                "Rowanパーサでエラーノードが生成されました",
-                context.span_for(&child),
-                child.kind(),
-                first_identifier_text(&child),
-                collect_annotation_texts(&child),
-            );
-            diagnostics.push(diagnostic);
+        if child.kind() == SyntaxKind::StatementList {
+            for statement_node in child.children() {
+                process_candidate(&context, statement_node, &mut statements, &mut diagnostics);
+            }
             continue;
         }
 
-        if !is_top_level_statement(child.kind()) {
-            continue;
-        }
-
-        match lower_single_statement(&context, &child, &mut diagnostics) {
-            Ok(statement) => statements.push(statement),
-            Err(diagnostic) => diagnostics.push(diagnostic),
-        }
+        process_candidate(&context, child, &mut statements, &mut diagnostics);
     }
 
     LoweringResult {
@@ -130,6 +117,39 @@ fn is_top_level_statement(kind: SyntaxKind) -> bool {
             | SyntaxKind::ContinueStatement
             | SyntaxKind::Expression
     )
+}
+
+fn process_candidate(
+    context: &LoweringContext<'_>,
+    node: JvSyntaxNode,
+    statements: &mut Vec<Statement>,
+    diagnostics: &mut Vec<LoweringDiagnostic>,
+) {
+    if node.kind().is_token() {
+        return;
+    }
+
+    if matches!(node.kind(), SyntaxKind::Error | SyntaxKind::BlockError) {
+        let diagnostic = LoweringDiagnostic::new(
+            LoweringDiagnosticSeverity::Error,
+            "Rowanパーサでエラーノードが生成されました",
+            context.span_for(&node),
+            node.kind(),
+            first_identifier_text(&node),
+            collect_annotation_texts(&node),
+        );
+        diagnostics.push(diagnostic);
+        return;
+    }
+
+    if !is_top_level_statement(node.kind()) {
+        return;
+    }
+
+    match lower_single_statement(context, &node, diagnostics) {
+        Ok(statement) => statements.push(statement),
+        Err(diagnostic) => diagnostics.push(diagnostic),
+    }
 }
 
 fn lower_single_statement(
@@ -598,13 +618,7 @@ fn lower_class_members(
         if child.kind().is_token() {
             continue;
         }
-        process_class_member(
-            context,
-            &child,
-            diagnostics,
-            &mut properties,
-            &mut methods,
-        )?;
+        process_class_member(context, &child, diagnostics, &mut properties, &mut methods)?;
     }
 
     Ok((properties, methods))
@@ -677,25 +691,26 @@ fn lower_property(
     };
 
     let span = context.span_for(node).unwrap_or_else(Span::dummy);
-    let name = match context
-        .tokens_for(&binding)
-        .into_iter()
-        .find_map(|token| match &token.token_type {
-            TokenType::Identifier(text) => Some(text.clone()),
-            _ => None,
-        }) {
-        Some(name) => name,
-        None => {
-            push_diagnostic(
-                diagnostics,
-                LoweringDiagnosticSeverity::Error,
-                "プロパティ名を特定できませんでした",
-                context,
-                &binding,
-            );
-            return Ok(None);
-        }
-    };
+    let name =
+        match context
+            .tokens_for(&binding)
+            .into_iter()
+            .find_map(|token| match &token.token_type {
+                TokenType::Identifier(text) => Some(text.clone()),
+                _ => None,
+            }) {
+            Some(name) => name,
+            None => {
+                push_diagnostic(
+                    diagnostics,
+                    LoweringDiagnosticSeverity::Error,
+                    "プロパティ名を特定できませんでした",
+                    context,
+                    &binding,
+                );
+                return Ok(None);
+            }
+        };
 
     let type_annotation = child_node(node, SyntaxKind::TypeAnnotation)
         .and_then(|type_node| child_node(&type_node, SyntaxKind::Expression))
@@ -822,7 +837,12 @@ fn lower_throw(
     diagnostics: &mut Vec<LoweringDiagnostic>,
 ) -> Result<Statement, LoweringDiagnostic> {
     let expr_node = child_node(node, SyntaxKind::Expression).ok_or_else(|| {
-        missing_child_diagnostic(context, node, "throw 文には式が必要です", SyntaxKind::Expression)
+        missing_child_diagnostic(
+            context,
+            node,
+            "throw 文には式が必要です",
+            SyntaxKind::Expression,
+        )
     })?;
 
     let expr = lower_expression_shallow(context, &expr_node, diagnostics)?;
@@ -894,10 +914,13 @@ fn lower_parameters(
         let name = binding
             .as_ref()
             .and_then(|binding| {
-                context.tokens_for(&binding).into_iter().find_map(|token| match &token.token_type {
-                    TokenType::Identifier(text) => Some(text.clone()),
-                    _ => None,
-                })
+                context
+                    .tokens_for(&binding)
+                    .into_iter()
+                    .find_map(|token| match &token.token_type {
+                        TokenType::Identifier(text) => Some(text.clone()),
+                        _ => None,
+                    })
             })
             .unwrap_or_else(|| {
                 push_diagnostic(

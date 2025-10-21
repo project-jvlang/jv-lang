@@ -1,0 +1,13 @@
+description = "Variable declaration fixture preserves comment and assignments inside the function body"
+source = "jv/tests/fixtures/02-variables.jv"
+
+[expect]
+statement_count = 1
+
+[[expect.statements]]
+index = 0
+kind = "function_declaration"
+name = "main"
+
+  [expect.statements.span]
+  start_line = 1

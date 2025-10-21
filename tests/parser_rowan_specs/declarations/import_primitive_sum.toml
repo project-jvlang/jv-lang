@@ -1,0 +1,21 @@
+description = "Primitive sum specialization fixture should keep import and main ordering"
+source = "jv/tests/fixtures/sequence/primitive_sum_specialization.jv"
+
+[expect]
+statement_count = 2
+
+[[expect.statements]]
+index = 0
+kind = "import"
+name = "jv.collections"
+
+  [expect.statements.span]
+  start_line = 1
+
+[[expect.statements]]
+index = 1
+kind = "function_declaration"
+name = "main"
+
+  [expect.statements.span]
+  start_line = 3

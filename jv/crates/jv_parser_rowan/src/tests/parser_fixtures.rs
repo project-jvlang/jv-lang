@@ -230,14 +230,21 @@ fn build_tree_from_events_handles_deep_nesting() {
 
     let tokens = lex(source);
     let output = parse(&tokens);
-    assert!(output.diagnostics.is_empty(), "unexpected diagnostics: {:?}", output.diagnostics);
+    assert!(
+        output.diagnostics.is_empty(),
+        "unexpected diagnostics: {:?}",
+        output.diagnostics
+    );
 
-    let tree: SyntaxNode<JvLanguage> = SyntaxNode::new_root(ParseBuilder::build_from_events(&output.events, &tokens));
+    let tree: SyntaxNode<JvLanguage> =
+        SyntaxNode::new_root(ParseBuilder::build_from_events(&output.events, &tokens));
 
     assert_eq!(tree.kind(), SyntaxKind::Root, "root node kind mismatch");
 
     // Root should contain at least one StatementList node.
-    assert!(tree.descendants().any(|node| node.kind() == SyntaxKind::StatementList));
+    assert!(tree
+        .descendants()
+        .any(|node| node.kind() == SyntaxKind::StatementList));
 
     // Verify nested control flow constructs remain beneath the function declaration.
     let when_node = tree
@@ -277,17 +284,19 @@ fn build_tree_from_events_handles_deep_nesting() {
 
 #[test]
 fn build_tree_from_events_preserves_error_nodes() {
-    let tokens = lex(
-        r#"
+    let tokens = lex(r#"
         val = 0
         return
-    "#,
-    );
+    "#);
 
     let output = parse(&tokens);
-    assert!(output.recovered, "parser should have marked recovery for invalid input");
+    assert!(
+        output.recovered,
+        "parser should have marked recovery for invalid input"
+    );
 
-    let tree: SyntaxNode<JvLanguage> = SyntaxNode::new_root(ParseBuilder::build_from_events(&output.events, &tokens));
+    let tree: SyntaxNode<JvLanguage> =
+        SyntaxNode::new_root(ParseBuilder::build_from_events(&output.events, &tokens));
     assert!(
         tree.descendants()
             .any(|node| matches!(node.kind(), SyntaxKind::Error | SyntaxKind::BlockError)),
@@ -345,7 +354,11 @@ fn nested_when_branch_emits_expected_event_sequence() {
     assert!(
         contains_subsequence(
             &start_sequence,
-            &[SyntaxKind::FunctionDeclaration, SyntaxKind::WhenStatement, SyntaxKind::ThrowStatement]
+            &[
+                SyntaxKind::FunctionDeclaration,
+                SyntaxKind::WhenStatement,
+                SyntaxKind::ThrowStatement
+            ]
         ),
         "expected throw branch subsequence in {:?}",
         start_sequence
@@ -444,11 +457,7 @@ fn type_annotation_preserves_optional_generic_tokens() {
     for annotation in [first, second] {
         let token_kinds: Vec<SyntaxKind> = annotation
             .descendants_with_tokens()
-            .filter_map(|element| {
-                element
-                    .into_token()
-                    .map(|token| token.kind())
-            })
+            .filter_map(|element| element.into_token().map(|token| token.kind()))
             .filter(|kind| !matches!(kind, SyntaxKind::Whitespace | SyntaxKind::Newline))
             .collect();
 
@@ -564,10 +573,9 @@ fn function_without_body_recovers_and_continues() {
     );
 
     assert!(
-        output
-            .events
-            .iter()
-            .any(|event| matches!(event, ParseEvent::StartNode { kind } if *kind == SyntaxKind::Error)),
+        output.events.iter().any(
+            |event| matches!(event, ParseEvent::StartNode { kind } if *kind == SyntaxKind::Error)
+        ),
         "expected error node to be emitted for missing function body"
     );
 }
@@ -634,10 +642,9 @@ fn data_class_constructor_recovers_from_missing_parameter() {
         "parser should recover from missing constructor parameter identifier"
     );
     assert!(
-        output
-            .diagnostics
-            .iter()
-            .any(|diag| diag.message.contains("コンストラクタパラメータ名が必要です")),
+        output.diagnostics.iter().any(|diag| diag
+            .message
+            .contains("コンストラクタパラメータ名が必要です")),
         "expected diagnostic about missing constructor parameter name, got {:?}",
         output.diagnostics
     );
@@ -653,10 +660,9 @@ fn data_class_constructor_recovers_from_missing_parameter() {
     );
 
     assert!(
-        output
-            .events
-            .iter()
-            .any(|event| matches!(event, ParseEvent::StartNode { kind } if *kind == SyntaxKind::Error)),
+        output.events.iter().any(
+            |event| matches!(event, ParseEvent::StartNode { kind } if *kind == SyntaxKind::Error)
+        ),
         "expected error node when constructor parameter is missing"
     );
 }

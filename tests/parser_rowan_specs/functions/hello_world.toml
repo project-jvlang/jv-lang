@@ -1,0 +1,17 @@
+description = "Hello world function lowers to a single function declaration with expression body"
+source = "jv/tests/fixtures/hello_world.jv"
+
+[expect]
+statement_count = 1
+
+[expect.parser_diagnostics]
+allowed = true
+max = 1
+
+[[expect.statements]]
+index = 0
+kind = "function_declaration"
+name = "main"
+
+  [expect.statements.span]
+  start_line = 1

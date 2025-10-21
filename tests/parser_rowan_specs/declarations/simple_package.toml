@@ -1,0 +1,25 @@
+description = "Existing simple package fixture should map to package + function statements"
+source = "jv/tests/fixtures/package/simple_package.jv"
+
+[expect]
+statement_count = 2
+
+[expect.parser_diagnostics]
+allowed = true
+max = 1
+
+[[expect.statements]]
+index = 0
+kind = "package"
+name = "com.example.app"
+
+  [expect.statements.span]
+  start_line = 1
+
+[[expect.statements]]
+index = 1
+kind = "function_declaration"
+name = "main"
+
+  [expect.statements.span]
+  start_line = 3

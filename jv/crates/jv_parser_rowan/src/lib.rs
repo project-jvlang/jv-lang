@@ -12,11 +12,11 @@
 #![warn(missing_docs)]
 
 #[cfg(feature = "rowan-parser")]
+use crate::parser::ParseEvent as ParserEvent;
+#[cfg(feature = "rowan-parser")]
 use jv_lexer::Token;
 #[cfg(feature = "rowan-parser")]
 use rowan::{GreenNode, GreenNodeBuilder, Language};
-#[cfg(feature = "rowan-parser")]
-use crate::parser::ParseEvent as ParserEvent;
 
 #[cfg(feature = "rowan-parser")]
 /// Rowanノードからjv_astへのローワリング層。
@@ -27,6 +27,9 @@ pub mod parser;
 #[cfg(feature = "rowan-parser")]
 /// Rowan 構文種別定義。
 pub mod syntax;
+#[cfg(feature = "rowan-parser")]
+/// Rowan AST 検証ハーネス。
+pub mod verification;
 
 #[cfg(feature = "rowan-parser")]
 pub use parser::{parse, DiagnosticSeverity, ParseEvent, ParseOutput, ParserDiagnostic, TokenSpan};

@@ -700,9 +700,7 @@ mod tests {
 
     #[test]
     fn grammar_nodes_have_matching_syntax_kinds() {
-        let grammar: Grammar = STATEMENT_GRAMMAR
-            .parse()
-            .expect("statement grammar parses");
+        let grammar: Grammar = STATEMENT_GRAMMAR.parse().expect("statement grammar parses");
 
         let mapping: HashMap<&str, SyntaxKind> = NODE_KIND_MAP.iter().copied().collect();
 
@@ -721,8 +719,10 @@ mod tests {
         );
 
         let defined: BTreeSet<&str> = mapping.keys().copied().collect();
-        let actual: BTreeSet<String> =
-            grammar.iter().map(|node| grammar[node].name.clone()).collect();
+        let actual: BTreeSet<String> = grammar
+            .iter()
+            .map(|node| grammar[node].name.clone())
+            .collect();
 
         for name in defined {
             assert!(

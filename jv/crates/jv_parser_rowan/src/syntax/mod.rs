@@ -157,12 +157,7 @@ mod tests {
         Atom,
     }
 
-    fn write_rule(
-        grammar: &Grammar,
-        rule: &Rule,
-        out: &mut String,
-        parent_prec: Precedence,
-    ) {
+    fn write_rule(grammar: &Grammar, rule: &Rule, out: &mut String, parent_prec: Precedence) {
         let current_prec = precedence(rule);
         let needs_paren = current_prec < parent_prec;
         if needs_paren {
