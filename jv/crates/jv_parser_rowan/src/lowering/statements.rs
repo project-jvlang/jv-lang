@@ -2,9 +2,10 @@ use super::helpers::{
     collect_annotation_texts, first_identifier_text, JvSyntaxNode, LoweringContext,
 };
 use crate::syntax::SyntaxKind;
-use jv_ast::statement::ValBindingOrigin;
+use jv_ast::expression::Parameter;
+use jv_ast::statement::{ForInStatement, LoopBinding, LoopStrategy, Property, ValBindingOrigin};
 use jv_ast::types::{Literal, Modifiers, TypeAnnotation};
-use jv_ast::{Expression, Statement};
+use jv_ast::{Expression, Span, Statement};
 use jv_lexer::{Token, TokenType};
 
 /// ローワリング結果。
@@ -151,6 +152,18 @@ fn lower_single_statement(
         SyntaxKind::ImportDeclaration => lower_import(context, node),
         SyntaxKind::ValDeclaration => lower_value(context, node, true),
         SyntaxKind::VarDeclaration => lower_value(context, node, false),
+        SyntaxKind::FunctionDeclaration => lower_function(context, node),
+        SyntaxKind::ClassDeclaration => lower_class(context, node),
+        SyntaxKind::ForStatement => lower_for(context, node),
+        SyntaxKind::ReturnStatement => lower_return(context, node),
+        SyntaxKind::ThrowStatement => lower_throw(context, node),
+        SyntaxKind::BreakStatement => lower_break(context, node),
+        SyntaxKind::ContinueStatement => lower_continue(context, node),
+        SyntaxKind::IfStatement
+        | SyntaxKind::WhenStatement
+        | SyntaxKind::WhileStatement
+        | SyntaxKind::DoWhileStatement
+        | SyntaxKind::Expression => lower_expression_statement(context, node),
         kind => Err(LoweringDiagnostic::new(
             LoweringDiagnosticSeverity::Error,
             format!(
@@ -429,4 +442,361 @@ fn join_tokens(tokens: &[&Token]) -> String {
         .iter()
         .map(|token| token.lexeme.as_str())
         .collect::<String>()
+}
+
+fn lower_function(
+    context: &LoweringContext<'_>,
+    node: &JvSyntaxNode,
+) -> Result<Statement, LoweringDiagnostic> {
+    let tokens = context.tokens_for(node);
+    let span = context.span_for(node).unwrap_or_else(Span::dummy);
+
+    let name = extract_identifier(&tokens).ok_or_else(|| {
+        LoweringDiagnostic::new(
+            LoweringDiagnosticSeverity::Error,
+            "関数名を特定できませんでした",
+            context.span_for(node),
+            node.kind(),
+            first_identifier_text(node),
+            collect_annotation_texts(node),
+        )
+    })?;
+
+    let (parameters, _) = child_node(node, SyntaxKind::FunctionParameterList)
+        .map(|list| lower_parameters(context, &list))
+        .unwrap_or_default();
+
+    let return_type = child_node(node, SyntaxKind::FunctionReturnType)
+        .and_then(|ret| child_node(&ret, SyntaxKind::Expression))
+        .and_then(|expr| simple_type_from_expression(context, &expr));
+
+    let fallback_span = span.clone();
+    let body = if let Some(block) = child_node(node, SyntaxKind::Block) {
+        Expression::Block {
+            statements: Vec::new(),
+            span: context.span_for(&block).unwrap_or_else(Span::dummy),
+        }
+    } else {
+        node.children()
+            .find(|child| child.kind() == SyntaxKind::Expression)
+            .map(|expr| lower_expression_shallow(context, &expr))
+            .transpose()?
+            .unwrap_or_else(|| Expression::Identifier(name.clone(), fallback_span))
+    };
+
+    Ok(Statement::FunctionDeclaration {
+        name,
+        type_parameters: Vec::new(),
+        generic_signature: None,
+        where_clause: None,
+        parameters,
+        return_type,
+        primitive_return: None,
+        body: Box::new(body),
+        modifiers: Modifiers::default(),
+        span,
+    })
+}
+
+fn lower_class(
+    context: &LoweringContext<'_>,
+    node: &JvSyntaxNode,
+) -> Result<Statement, LoweringDiagnostic> {
+    let tokens = context.tokens_for(node);
+    let span = context.span_for(node).unwrap_or_else(Span::dummy);
+
+    let name = extract_identifier(&tokens).ok_or_else(|| {
+        LoweringDiagnostic::new(
+            LoweringDiagnosticSeverity::Error,
+            "クラス名を特定できませんでした",
+            context.span_for(node),
+            node.kind(),
+            first_identifier_text(node),
+            collect_annotation_texts(node),
+        )
+    })?;
+
+    let (constructor_params, has_mutable) = child_node(node, SyntaxKind::FunctionParameterList)
+        .map(|list| lower_parameters(context, &list))
+        .unwrap_or_default();
+
+    let (properties, methods) = child_node(node, SyntaxKind::ClassBody)
+        .map(|body| lower_class_members(context, &body))
+        .unwrap_or_default();
+
+    let modifiers = Modifiers::default();
+
+    let is_data = tokens
+        .iter()
+        .any(|token| matches!(token.token_type, TokenType::Data));
+
+    if is_data {
+        return Ok(Statement::DataClassDeclaration {
+            name,
+            parameters: constructor_params,
+            type_parameters: Vec::new(),
+            generic_signature: None,
+            is_mutable: has_mutable,
+            modifiers,
+            span,
+        });
+    }
+
+    Ok(Statement::ClassDeclaration {
+        name,
+        type_parameters: Vec::new(),
+        generic_signature: None,
+        superclass: None,
+        interfaces: Vec::new(),
+        properties,
+        methods,
+        modifiers,
+        span,
+    })
+}
+
+fn lower_class_members(
+    context: &LoweringContext<'_>,
+    body: &JvSyntaxNode,
+) -> (Vec<Property>, Vec<Box<Statement>>) {
+    let mut properties = Vec::new();
+    let mut methods = Vec::new();
+
+    for child in body.descendants() {
+        if child.kind().is_token() {
+            continue;
+        }
+
+        match child.kind() {
+            SyntaxKind::ValDeclaration => {
+                if let Some(property) = lower_property(context, &child, true) {
+                    properties.push(property);
+                }
+            }
+            SyntaxKind::VarDeclaration => {
+                if let Some(property) = lower_property(context, &child, false) {
+                    properties.push(property);
+                }
+            }
+            SyntaxKind::FunctionDeclaration => {
+                if let Ok(statement) = lower_function(context, &child) {
+                    methods.push(Box::new(statement));
+                }
+            }
+            _ => {}
+        }
+    }
+
+    (properties, methods)
+}
+
+fn lower_property(
+    context: &LoweringContext<'_>,
+    node: &JvSyntaxNode,
+    is_val: bool,
+) -> Option<Property> {
+    let binding = child_node(node, SyntaxKind::BindingPattern)?;
+    let span = context.span_for(node).unwrap_or_else(Span::dummy);
+    let name = context
+        .tokens_for(&binding)
+        .into_iter()
+        .find_map(|token| match &token.token_type {
+            TokenType::Identifier(text) => Some(text.clone()),
+            _ => None,
+        })?;
+
+    let type_annotation = child_node(node, SyntaxKind::TypeAnnotation)
+        .and_then(|type_node| child_node(&type_node, SyntaxKind::Expression))
+        .and_then(|expr| simple_type_from_expression(context, &expr));
+
+    let initializer = child_node(node, SyntaxKind::InitializerClause)
+        .and_then(|clause| child_node(&clause, SyntaxKind::Expression))
+        .and_then(|expr| lower_expression_shallow(context, &expr).ok());
+
+    Some(Property {
+        name,
+        type_annotation,
+        initializer,
+        is_mutable: !is_val,
+        modifiers: Modifiers::default(),
+        getter: None,
+        setter: None,
+        span,
+    })
+}
+
+fn lower_for(
+    context: &LoweringContext<'_>,
+    node: &JvSyntaxNode,
+) -> Result<Statement, LoweringDiagnostic> {
+    let binding_node = child_node(node, SyntaxKind::BindingPattern).ok_or_else(|| {
+        missing_child_diagnostic(
+            context,
+            node,
+            "for 文にはバインディングが必要です",
+            SyntaxKind::BindingPattern,
+        )
+    })?;
+
+    let binding_tokens = context.tokens_for(&binding_node);
+    let binding_name = extract_identifier(&binding_tokens).ok_or_else(|| {
+        LoweringDiagnostic::new(
+            LoweringDiagnosticSeverity::Error,
+            "for 文のバインディング識別子が見つかりません",
+            context.span_for(&binding_node),
+            binding_node.kind(),
+            first_identifier_text(&binding_node),
+            collect_annotation_texts(&binding_node),
+        )
+    })?;
+
+    let binding_span = context.span_for(&binding_node).unwrap_or_else(Span::dummy);
+    let loop_binding = LoopBinding {
+        name: binding_name,
+        type_annotation: None,
+        span: binding_span,
+    };
+
+    let iterable_expr = node
+        .children()
+        .find(|child| child.kind() == SyntaxKind::Expression)
+        .map(|expr| lower_expression_shallow(context, &expr))
+        .transpose()?
+        .ok_or_else(|| {
+            LoweringDiagnostic::new(
+                LoweringDiagnosticSeverity::Error,
+                "for 文のイテレータ式が見つかりません",
+                context.span_for(node),
+                node.kind(),
+                first_identifier_text(node),
+                collect_annotation_texts(node),
+            )
+        })?;
+
+    let body_span = child_node(node, SyntaxKind::Block)
+        .and_then(|block| context.span_for(&block))
+        .unwrap_or_else(|| context.span_for(node).unwrap_or_else(Span::dummy));
+
+    let body = child_node(node, SyntaxKind::Block)
+        .map(|block| Expression::Block {
+            statements: Vec::new(),
+            span: context.span_for(&block).unwrap_or_else(Span::dummy),
+        })
+        .unwrap_or_else(|| Expression::Identifier("{}".to_string(), body_span));
+
+    Ok(Statement::ForIn(ForInStatement {
+        binding: loop_binding,
+        iterable: iterable_expr,
+        strategy: LoopStrategy::Iterable,
+        body: Box::new(body),
+        span: context.span_for(node).unwrap_or_else(Span::dummy),
+    }))
+}
+
+fn lower_return(
+    context: &LoweringContext<'_>,
+    node: &JvSyntaxNode,
+) -> Result<Statement, LoweringDiagnostic> {
+    let value = child_node(node, SyntaxKind::Expression)
+        .map(|expr| lower_expression_shallow(context, &expr))
+        .transpose()?;
+
+    Ok(Statement::Return {
+        value,
+        span: context.span_for(node).unwrap_or_else(Span::dummy),
+    })
+}
+
+fn lower_throw(
+    context: &LoweringContext<'_>,
+    node: &JvSyntaxNode,
+) -> Result<Statement, LoweringDiagnostic> {
+    let expr_node = child_node(node, SyntaxKind::Expression).ok_or_else(|| {
+        missing_child_diagnostic(context, node, "throw 文には式が必要です", SyntaxKind::Expression)
+    })?;
+
+    let expr = lower_expression_shallow(context, &expr_node)?;
+    Ok(Statement::Throw {
+        expr,
+        span: context.span_for(node).unwrap_or_else(Span::dummy),
+    })
+}
+
+fn lower_break(
+    context: &LoweringContext<'_>,
+    node: &JvSyntaxNode,
+) -> Result<Statement, LoweringDiagnostic> {
+    Ok(Statement::Break(
+        context.span_for(node).unwrap_or_else(Span::dummy),
+    ))
+}
+
+fn lower_continue(
+    context: &LoweringContext<'_>,
+    node: &JvSyntaxNode,
+) -> Result<Statement, LoweringDiagnostic> {
+    Ok(Statement::Continue(
+        context.span_for(node).unwrap_or_else(Span::dummy),
+    ))
+}
+
+fn lower_expression_statement(
+    context: &LoweringContext<'_>,
+    node: &JvSyntaxNode,
+) -> Result<Statement, LoweringDiagnostic> {
+    let expr = lower_expression_shallow(context, node)?;
+    Ok(Statement::Expression {
+        expr,
+        span: context.span_for(node).unwrap_or_else(Span::dummy),
+    })
+}
+
+fn extract_identifier(tokens: &[&Token]) -> Option<String> {
+    tokens.iter().find_map(|token| match &token.token_type {
+        TokenType::Identifier(text) => Some(text.clone()),
+        _ => None,
+    })
+}
+
+fn lower_parameters(context: &LoweringContext<'_>, list: &JvSyntaxNode) -> (Vec<Parameter>, bool) {
+    let mut params = Vec::new();
+    let mut has_mutable = false;
+
+    for child in list.children() {
+        if child.kind() != SyntaxKind::FunctionParameter {
+            continue;
+        }
+
+        let tokens = context.tokens_for(&child);
+        if tokens
+            .iter()
+            .any(|token| matches!(token.token_type, TokenType::Var))
+        {
+            has_mutable = true;
+        }
+
+        let name = child_node(&child, SyntaxKind::BindingPattern)
+            .and_then(|binding| {
+                context.tokens_for(&binding).into_iter().find_map(|token| match &token.token_type {
+                    TokenType::Identifier(text) => Some(text.clone()),
+                    _ => None,
+                })
+            })
+            .unwrap_or_default();
+
+        let type_annotation = child_node(&child, SyntaxKind::TypeAnnotation)
+            .and_then(|type_node| child_node(&type_node, SyntaxKind::Expression))
+            .and_then(|expr| simple_type_from_expression(context, &expr));
+
+        let span = context.span_for(&child).unwrap_or_else(Span::dummy);
+
+        params.push(Parameter {
+            name,
+            type_annotation,
+            default_value: None,
+            span,
+        });
+    }
+
+    (params, has_mutable)
 }
