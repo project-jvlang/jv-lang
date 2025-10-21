@@ -1,0 +1,16 @@
+[package]
+name = "jv_parser_rowan"
+version = "0.1.0"
+edition = "2021"
+authors = ["jv Language Team"]
+license = "MIT OR Apache-2.0"
+description = "Rowan-based statement parser foundation for the jv language"
+publish = false
+
+[features]
+default = ["rowan-parser"]
+rowan-parser = []
+
+[dependencies]
+rowan = { version = "0.15" }
+jv_lexer = { path = "../jv_lexer" }
