@@ -23,8 +23,16 @@ impl StatementStrategy for ClassStrategy {
         ctx.consume_trivia();
         ctx.start_node(SyntaxKind::ClassDeclaration);
 
-        if !ctx.bump_if(TokenKind::ClassKw) {
-            ctx.bump_expected(TokenKind::DataKw, "`class` もしくは `data` が必要です");
+        let mut saw_keyword = false;
+        if ctx.bump_if(TokenKind::ClassKw) {
+            saw_keyword = true;
+        } else if ctx.bump_if(TokenKind::DataKw) {
+            saw_keyword = true;
+            let _ = ctx.bump_if(TokenKind::ClassKw);
+        }
+
+        if !saw_keyword {
+            ctx.bump_expected(TokenKind::ClassKw, "`class` もしくは `data` が必要です");
         }
 
         if !ctx.bump_expected(TokenKind::Identifier, "クラス名が必要です") {
@@ -36,7 +44,7 @@ impl StatementStrategy for ClassStrategy {
         parse_primary_constructor(ctx);
 
         if !ctx.parse_class_body() {
-            ctx.consume_trivia();
+            ctx.recover_statement("クラスボディが必要です", start);
         }
 
         ctx.finish_node();
@@ -62,7 +70,11 @@ fn parse_primary_constructor(ctx: &mut ParserContext<'_>) {
 
         let param_start = ctx.position();
         ctx.start_node(SyntaxKind::FunctionParameter);
-        ctx.parse_binding_pattern();
+        if !ctx.parse_binding_pattern() {
+            ctx.recover_statement("コンストラクタパラメータ名が必要です", param_start);
+            ctx.finish_node();
+            break;
+        }
         ctx.parse_optional_type_annotation();
         ctx.finish_node();
 

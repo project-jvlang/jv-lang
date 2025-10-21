@@ -83,6 +83,19 @@ fn recovers_from_invalid_val() {
         _ => false,
     });
     assert!(has_error_node, "expected error node in event stream");
+
+    let started: Vec<SyntaxKind> = output
+        .events
+        .iter()
+        .filter_map(|event| match event {
+            ParseEvent::StartNode { kind } => Some(*kind),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        started.contains(&SyntaxKind::ReturnStatement),
+        "parser should resume and emit the return statement after recovery"
+    );
 }
 
 #[test]
@@ -280,4 +293,398 @@ fn build_tree_from_events_preserves_error_nodes() {
             .any(|node| matches!(node.kind(), SyntaxKind::Error | SyntaxKind::BlockError)),
         "expected error nodes to be present in the constructed tree"
     );
+}
+
+#[test]
+fn nested_when_branch_emits_expected_event_sequence() {
+    let source = r#"
+        fun evaluate(flag: Boolean, items: List<Int>) {
+            when (flag) {
+                true -> for (item in items) {
+                    when (item) {
+                        0 -> return
+                        else -> {
+                            do {
+                                val snapshot: List<List<String?>> = collect()
+                            } while (false)
+                        }
+                    }
+                }
+                else -> throw IllegalStateException()
+            }
+        }
+    "#;
+
+    let tokens = lex(source);
+    let output = parse(&tokens);
+
+    assert!(
+        output.diagnostics.is_empty(),
+        "unexpected diagnostics: {:?}",
+        output.diagnostics
+    );
+
+    let start_sequence = start_node_sequence(&output.events);
+
+    assert!(
+        contains_subsequence(
+            &start_sequence,
+            &[
+                SyntaxKind::WhenStatement,
+                SyntaxKind::WhenBranch,
+                SyntaxKind::ForStatement,
+                SyntaxKind::WhenStatement,
+                SyntaxKind::WhenBranch,
+                SyntaxKind::DoWhileStatement
+            ]
+        ),
+        "expected nested when branch subsequence in {:?}",
+        start_sequence
+    );
+
+    assert!(
+        contains_subsequence(
+            &start_sequence,
+            &[SyntaxKind::FunctionDeclaration, SyntaxKind::WhenStatement, SyntaxKind::ThrowStatement]
+        ),
+        "expected throw branch subsequence in {:?}",
+        start_sequence
+    );
+}
+
+#[test]
+fn missing_branch_closing_brace_recovers_with_block_error() {
+    let source = r#"
+        fun example(value: Int) {
+            when (value) {
+                else -> {
+                    if (value > 0) {
+                        return
+                    }
+                // missing brace on purpose
+            }
+            return
+        }
+    "#;
+
+    let tokens = lex(source);
+    let output = parse(&tokens);
+
+    assert!(
+        output.recovered,
+        "parser should mark recovery when branch brace is missing"
+    );
+
+    assert!(
+        output
+            .diagnostics
+            .iter()
+            .any(|diag| diag.message.contains("'}' が必要です")),
+        "expected diagnostics about missing closing brace, got {:?}",
+        output.diagnostics
+    );
+
+    let has_block_error = output.events.iter().any(|event| match event {
+        ParseEvent::StartNode { kind } => *kind == SyntaxKind::BlockError,
+        _ => false,
+    });
+    assert!(has_block_error, "expected BlockError node to be emitted");
+
+    let tree: SyntaxNode<JvLanguage> =
+        SyntaxNode::new_root(ParseBuilder::build_from_events(&output.events, &tokens));
+    let block_error = tree
+        .descendants()
+        .find(|node| node.kind() == SyntaxKind::BlockError)
+        .expect("expected BlockError node in syntax tree");
+    let mut ancestor_kinds: Vec<SyntaxKind> =
+        block_error.ancestors().map(|node| node.kind()).collect();
+    ancestor_kinds.retain(|kind| !matches!(kind, SyntaxKind::BlockError));
+    assert!(
+        ancestor_kinds.contains(&SyntaxKind::Block),
+        "BlockError should be emitted inside a block, got ancestry {:?}",
+        ancestor_kinds
+    );
+    assert!(
+        ancestor_kinds.contains(&SyntaxKind::FunctionDeclaration),
+        "BlockError should remain scoped to the surrounding function, got ancestry {:?}",
+        ancestor_kinds
+    );
+}
+
+#[test]
+fn type_annotation_preserves_optional_generic_tokens() {
+    let source = r#"
+        val cache: List<List<String?>> = rebuild()
+        var current: List<String?> = mutate(cache)
+    "#;
+
+    let tokens = lex(source);
+    let output = parse(&tokens);
+
+    assert!(
+        output.diagnostics.is_empty(),
+        "unexpected diagnostics: {:?}",
+        output.diagnostics
+    );
+
+    let tree: SyntaxNode<JvLanguage> =
+        SyntaxNode::new_root(ParseBuilder::build_from_events(&output.events, &tokens));
+
+    let mut annotations = tree
+        .descendants()
+        .filter(|node| node.kind() == SyntaxKind::TypeAnnotation);
+
+    let first = annotations
+        .next()
+        .expect("expected first type annotation to be present");
+    let second = annotations
+        .next()
+        .expect("expected second type annotation to be present");
+
+    for annotation in [first, second] {
+        let token_kinds: Vec<SyntaxKind> = annotation
+            .descendants_with_tokens()
+            .filter_map(|element| {
+                element
+                    .into_token()
+                    .map(|token| token.kind())
+            })
+            .filter(|kind| !matches!(kind, SyntaxKind::Whitespace | SyntaxKind::Newline))
+            .collect();
+
+        assert_eq!(
+            token_kinds.first().copied(),
+            Some(SyntaxKind::Colon),
+            "type annotation should start with colon token, got {:?}",
+            token_kinds
+        );
+        assert!(
+            token_kinds.iter().any(|kind| *kind == SyntaxKind::Less),
+            "expected '<' token inside annotation {:?}",
+            annotation
+        );
+        assert!(
+            token_kinds.iter().any(|kind| *kind == SyntaxKind::Greater),
+            "expected '>' token inside annotation {:?}",
+            annotation
+        );
+        assert!(
+            token_kinds.iter().any(|kind| *kind == SyntaxKind::Question),
+            "expected '?' token inside annotation {:?}",
+            annotation
+        );
+    }
+}
+
+#[test]
+fn root_wraps_statements_in_statement_list() {
+    let source = r#"
+        package demo.example
+        import foo.bar
+
+        fun ready() {}
+    "#;
+
+    let tokens = lex(source);
+    let output = parse(&tokens);
+    assert!(
+        output.diagnostics.is_empty(),
+        "unexpected diagnostics while parsing top-level statements: {:?}",
+        output.diagnostics
+    );
+
+    let tree: SyntaxNode<JvLanguage> =
+        SyntaxNode::new_root(ParseBuilder::build_from_events(&output.events, &tokens));
+
+    let mut root_children = tree.children();
+    let statement_list = root_children
+        .next()
+        .expect("root should have at least one child node");
+    assert_eq!(
+        statement_list.kind(),
+        SyntaxKind::StatementList,
+        "root should wrap statements in a StatementList node"
+    );
+    assert!(
+        root_children.next().is_none(),
+        "root should contain only a single StatementList node"
+    );
+
+    assert!(
+        statement_list
+            .children()
+            .any(|node| node.kind() == SyntaxKind::PackageDeclaration),
+        "statement list should include the package declaration node"
+    );
+    assert!(
+        statement_list
+            .children()
+            .any(|node| node.kind() == SyntaxKind::ImportDeclaration),
+        "statement list should include the import declaration node"
+    );
+    assert!(
+        statement_list
+            .children()
+            .any(|node| node.kind() == SyntaxKind::FunctionDeclaration),
+        "statement list should include the function declaration node"
+    );
+}
+
+#[test]
+fn function_without_body_recovers_and_continues() {
+    let source = r#"
+        fun broken(name: String)
+        val fallback = 42
+    "#;
+
+    let tokens = lex(source);
+    let output = parse(&tokens);
+
+    assert!(
+        output.recovered,
+        "parser should mark recovery when function body is missing"
+    );
+    assert!(
+        output
+            .diagnostics
+            .iter()
+            .any(|diag| diag.message.contains("関数本体が必要です")),
+        "expected diagnostic about missing function body, got {:?}",
+        output.diagnostics
+    );
+
+    let started = start_node_sequence(&output.events);
+    assert!(
+        contains_subsequence(
+            &started,
+            &[SyntaxKind::FunctionDeclaration, SyntaxKind::ValDeclaration]
+        ),
+        "expected function declaration followed by val declaration in {:?}",
+        started
+    );
+
+    assert!(
+        output
+            .events
+            .iter()
+            .any(|event| matches!(event, ParseEvent::StartNode { kind } if *kind == SyntaxKind::Error)),
+        "expected error node to be emitted for missing function body"
+    );
+}
+
+#[test]
+fn class_missing_closing_brace_emits_block_error() {
+    let source = r#"
+        class Incomplete {
+            fun value() {
+                return
+            }
+            fun other() => 1
+
+        val after = 1
+    "#;
+
+    let tokens = lex(source);
+    let output = parse(&tokens);
+
+    assert!(
+        output.recovered,
+        "parser should recover when class closing brace is missing"
+    );
+    assert!(
+        output
+            .diagnostics
+            .iter()
+            .any(|diag| diag.message.contains("'}' が必要です")),
+        "expected diagnostic about missing closing brace, got {:?}",
+        output.diagnostics
+    );
+
+    let started = start_node_sequence(&output.events);
+    assert!(
+        contains_subsequence(
+            &started,
+            &[SyntaxKind::ClassDeclaration, SyntaxKind::ValDeclaration]
+        ),
+        "expected class declaration followed by val declaration in {:?}",
+        started
+    );
+
+    assert!(
+        output
+            .events
+            .iter()
+            .any(|event| matches!(event, ParseEvent::StartNode { kind } if *kind == SyntaxKind::BlockError)),
+        "expected BlockError node for unclosed class body"
+    );
+}
+
+#[test]
+fn data_class_constructor_recovers_from_missing_parameter() {
+    let source = r#"
+        data class Person(: String) {}
+        val done = true
+    "#;
+
+    let tokens = lex(source);
+    let output = parse(&tokens);
+
+    assert!(
+        output.recovered,
+        "parser should recover from missing constructor parameter identifier"
+    );
+    assert!(
+        output
+            .diagnostics
+            .iter()
+            .any(|diag| diag.message.contains("コンストラクタパラメータ名が必要です")),
+        "expected diagnostic about missing constructor parameter name, got {:?}",
+        output.diagnostics
+    );
+
+    let started = start_node_sequence(&output.events);
+    assert!(
+        contains_subsequence(
+            &started,
+            &[SyntaxKind::ClassDeclaration, SyntaxKind::ValDeclaration]
+        ),
+        "expected class declaration followed by val declaration in {:?}",
+        started
+    );
+
+    assert!(
+        output
+            .events
+            .iter()
+            .any(|event| matches!(event, ParseEvent::StartNode { kind } if *kind == SyntaxKind::Error)),
+        "expected error node when constructor parameter is missing"
+    );
+}
+
+fn start_node_sequence(events: &[ParseEvent]) -> Vec<SyntaxKind> {
+    events
+        .iter()
+        .filter_map(|event| match event {
+            ParseEvent::StartNode { kind } => Some(*kind),
+            _ => None,
+        })
+        .collect()
+}
+
+fn contains_subsequence(haystack: &[SyntaxKind], needle: &[SyntaxKind]) -> bool {
+    if needle.is_empty() {
+        return true;
+    }
+
+    let mut idx = 0usize;
+    for kind in haystack {
+        if *kind == needle[idx] {
+            idx += 1;
+            if idx == needle.len() {
+                return true;
+            }
+        }
+    }
+
+    false
 }

@@ -55,7 +55,9 @@ impl<'tokens> ParserContext<'tokens> {
     /// ルートノードの解析を実行する。
     pub(crate) fn parse(mut self) -> ParseOutput {
         self.start_node(SyntaxKind::Root);
+        self.start_node(SyntaxKind::StatementList);
         self.parse_statement_list(None);
+        self.finish_node(); // StatementList
         self.finish_node();
 
         // 残余のトリビアや EOF を取り込む。
@@ -454,11 +456,17 @@ impl<'tokens> ParserContext<'tokens> {
         };
 
         self.start_node(error_kind);
+        let initial_cursor = self.cursor;
 
-        let mut consumed = false;
         while let Some(token) = self.current_token() {
             let kind = TokenKind::from_token(token);
-            if SYNC_TOKENS.contains(&kind) && consumed {
+            if SYNC_TOKENS.contains(&kind) {
+                match kind {
+                    TokenKind::Newline | TokenKind::Semicolon => {
+                        self.bump_raw();
+                    }
+                    _ => {}
+                }
                 break;
             }
 
@@ -468,14 +476,26 @@ impl<'tokens> ParserContext<'tokens> {
             }
 
             self.bump_raw();
-            consumed = true;
-
-            if SYNC_TOKENS.contains(&kind) {
-                break;
-            }
         }
 
         self.finish_node();
+        if self.cursor == initial_cursor {
+            if let Some(token) = self.current_token() {
+                let kind = TokenKind::from_token(token);
+                if matches!(
+                    kind,
+                    TokenKind::RightBrace
+                        | TokenKind::RightParen
+                        | TokenKind::RightBracket
+                        | TokenKind::Comma
+                        | TokenKind::Semicolon
+                        | TokenKind::Newline
+                        | TokenKind::Eof
+                ) {
+                    self.bump_raw();
+                }
+            }
+        }
         let end = self.cursor.max(start);
         let span = self.make_span(start, end);
         self.push_error_event(&message, span);
