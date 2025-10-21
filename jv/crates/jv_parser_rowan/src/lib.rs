@@ -12,6 +12,8 @@
 use jv_lexer::Token;
 use rowan::{GreenNode, GreenNodeBuilder, Language};
 
+/// Rowanノードからjv_astへのローワリング層。
+pub mod lowering;
 /// Rowan ベースのイベントパーサ機能。
 pub mod parser;
 /// Rowan 構文種別定義。
