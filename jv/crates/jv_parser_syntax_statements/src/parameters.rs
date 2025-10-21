@@ -9,16 +9,17 @@ use jv_parser_syntax_support::{
 };
 
 pub fn parameter_list(
-    expr: impl ChumskyParser<Token, Expression, Error = Simple<Token>> + Clone,
+    expr: impl ChumskyParser<Token, Expression, Error = Simple<Token>> + Clone + 'static,
 ) -> impl ChumskyParser<Token, Vec<Parameter>, Error = Simple<Token>> + Clone {
     parameter(expr)
         .separated_by(token_any_comma())
         .allow_trailing()
         .collect()
+        .boxed()
 }
 
 pub fn parameter(
-    expr: impl ChumskyParser<Token, Expression, Error = Simple<Token>> + Clone,
+    expr: impl ChumskyParser<Token, Expression, Error = Simple<Token>> + Clone + 'static,
 ) -> impl ChumskyParser<Token, Parameter, Error = Simple<Token>> + Clone {
     token_val()
         .or(token_var())
@@ -34,4 +35,5 @@ pub fn parameter(
                 span,
             },
         )
+        .boxed()
 }

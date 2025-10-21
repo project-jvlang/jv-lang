@@ -32,14 +32,15 @@ pub(super) fn assignment_statement_parser(
 }
 
 pub(super) fn use_statement_parser(
-    statement: impl ChumskyParser<Token, Statement, Error = Simple<Token>> + Clone,
-    expr: impl ChumskyParser<Token, Expression, Error = Simple<Token>> + Clone,
+    statement: impl ChumskyParser<Token, Statement, Error = Simple<Token>> + Clone + 'static,
+    expr: impl ChumskyParser<Token, Expression, Error = Simple<Token>> + Clone + 'static,
 ) -> impl ChumskyParser<Token, Statement, Error = Simple<Token>> + Clone {
     token_use()
         .ignore_then(token_left_paren())
         .ignore_then(expr)
         .then_ignore(token_right_paren())
         .then(block_expression_parser(statement.clone()))
+        .boxed()
         .map(|(resource, body)| {
             let span = merge_spans(&expression_span(&resource), &expression_span(&body));
             Statement::ResourceManagement(ResourceManagement::Use {
@@ -51,10 +52,11 @@ pub(super) fn use_statement_parser(
 }
 
 pub(super) fn defer_statement_parser(
-    statement: impl ChumskyParser<Token, Statement, Error = Simple<Token>> + Clone,
+    statement: impl ChumskyParser<Token, Statement, Error = Simple<Token>> + Clone + 'static,
 ) -> impl ChumskyParser<Token, Statement, Error = Simple<Token>> + Clone {
     token_defer()
         .ignore_then(block_expression_parser(statement.clone()))
+        .boxed()
         .map(|body| {
             Statement::ResourceManagement(ResourceManagement::Defer {
                 body: Box::new(body.clone()),
@@ -64,10 +66,11 @@ pub(super) fn defer_statement_parser(
 }
 
 pub(super) fn spawn_statement_parser(
-    statement: impl ChumskyParser<Token, Statement, Error = Simple<Token>> + Clone,
+    statement: impl ChumskyParser<Token, Statement, Error = Simple<Token>> + Clone + 'static,
 ) -> impl ChumskyParser<Token, Statement, Error = Simple<Token>> + Clone {
     token_spawn()
         .ignore_then(block_expression_parser(statement.clone()))
+        .boxed()
         .map(|body| {
             Statement::Concurrency(ConcurrencyConstruct::Spawn {
                 body: Box::new(body.clone()),
@@ -167,8 +170,8 @@ fn infer_loop_strategy(iterable: &Expression) -> LoopStrategy {
 }
 
 pub(super) fn for_in_statement_parser(
-    statement: impl ChumskyParser<Token, Statement, Error = Simple<Token>> + Clone,
-    expr: impl ChumskyParser<Token, Expression, Error = Simple<Token>> + Clone,
+    statement: impl ChumskyParser<Token, Statement, Error = Simple<Token>> + Clone + 'static,
+    expr: impl ChumskyParser<Token, Expression, Error = Simple<Token>> + Clone + 'static,
 ) -> impl ChumskyParser<Token, Statement, Error = Simple<Token>> + Clone {
     token_for()
         .map(|token| span_from_token(&token))
@@ -180,6 +183,7 @@ pub(super) fn for_in_statement_parser(
                 .then_ignore(token_right_paren()),
         )
         .then(block_expression_parser(statement.clone()))
+        .boxed()
         .map(|((for_span, (binding, iterable)), body)| {
             let strategy = infer_loop_strategy(&iterable);
             let body_span = expression_span(&body);

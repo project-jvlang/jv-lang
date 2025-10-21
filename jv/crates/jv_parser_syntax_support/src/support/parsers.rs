@@ -10,7 +10,7 @@ use super::tokens::{
 };
 
 pub fn block_expression_parser(
-    statement: impl ChumskyParser<Token, Statement, Error = Simple<Token>> + Clone,
+    statement: impl ChumskyParser<Token, Statement, Error = Simple<Token>> + Clone + 'static,
 ) -> impl ChumskyParser<Token, Expression, Error = Simple<Token>> + Clone {
     token_left_brace()
         .map(|token| span_from_token(&token))
@@ -20,12 +20,13 @@ pub fn block_expression_parser(
             let span = merge_spans(&left_span, &right_span);
             Expression::Block { statements, span }
         })
+        .boxed()
 }
 
 pub fn expression_level_block_parser(
     statement: impl ChumskyParser<Token, Statement, Error = Simple<Token>> + Clone + 'static,
 ) -> impl ChumskyParser<Token, Expression, Error = Simple<Token>> + Clone {
-    block_expression_parser(statement).boxed()
+    block_expression_parser(statement)
 }
 
 pub fn regex_literal_from_token(token: &Token, span: Span) -> RegexLiteral {

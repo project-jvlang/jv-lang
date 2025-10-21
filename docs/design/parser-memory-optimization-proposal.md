@@ -332,6 +332,10 @@ pub fn statement_parser() -> impl ChumskyParser<Token, Statement, Error = Simple
 実行時速度: わずかな遅延 (5-10%)
 ```
 
+> Phase1 実施メモ (2025-10-21): `cargo check -p jv_parser_syntax_statements` を現行構成で実行し、約0.32秒で成功（ピークRSS計測は今後のタスクで実施予定）。
+> Phase1 計測メモ (2025-10-21 2nd run): `env CARGO_BUILD_JOBS=1 timeout 1800 cargo rustc -p jv_parser_syntax_statements -- -Z time-passes` を実行し、`partition_and_assert_distinct_symbols` で RSS ≈ 3.96GB、`LLVM_passes` 区間終了時点で ≈ 2.10GB まで低下したが、最終的に SIGKILL (OOM) により中断。ログは `/tmp/jv-time-passes.log` に保存済み（Phase1 適用前ピーク ≈ 7.8GB → 現状 ≈ 3.9GB）。
+> Phase1 計測メモ (2025-10-21 3rd/4th run): `/usr/bin/time -v env CARGO_BUILD_JOBS=1 cargo rustc -p jv_parser_syntax_statements -- -Z time-passes` の実行で、経過 8分40秒→9分23秒・最大RSS ≈ 23.6GB を記録。`partition_and_assert_distinct_symbols` で RSS ≈ 3.96GB に達した後、`generate_crate_metadata`→`LLVM_passes` を経て最終的に SIGKILL（OOM）が発生。ログは `/tmp/jv-time-passes.log` に更新保存。
+
 **リスク**: ほぼゼロ（Chumskyの標準機能）
 **最重要**: ビルドが成功するようになる
 

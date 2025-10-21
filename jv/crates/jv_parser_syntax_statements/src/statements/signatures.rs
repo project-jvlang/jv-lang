@@ -30,6 +30,7 @@ fn optional_type_arguments(
         .then_ignore(token_greater())
         .or_not()
         .map(|args| args.unwrap_or_default())
+        .boxed()
 }
 
 fn receiver_type_parser() -> impl ChumskyParser<Token, TypeAnnotation, Error = Simple<Token>> + Clone
@@ -53,7 +54,7 @@ fn receiver_type_parser() -> impl ChumskyParser<Token, TypeAnnotation, Error = S
 }
 
 pub(super) fn function_signature(
-    expr: impl ChumskyParser<Token, Expression, Error = Simple<Token>> + Clone,
+    expr: impl ChumskyParser<Token, Expression, Error = Simple<Token>> + Clone + 'static,
 ) -> impl ChumskyParser<Token, FunctionSignature, Error = Simple<Token>> + Clone {
     let receiver_and_name = receiver_type_parser()
         .then_ignore(token_dot())
@@ -76,7 +77,12 @@ pub(super) fn function_signature(
 
     let name_only = identifier().map(|name| (None, name, None)).boxed();
 
-    type_parameter_list()
+    let generics_parser = type_parameter_list().boxed();
+    let parameters_parser = parameter_list(expr.clone()).boxed();
+    let annotation_clause = type_annotation_clause().boxed();
+    let where_clause = where_clause_parser().boxed();
+
+    generics_parser
         .or_not()
         .then(
             receiver_and_name
@@ -84,10 +90,10 @@ pub(super) fn function_signature(
                 .or(name_only),
         )
         .then_ignore(token_left_paren())
-        .then(parameter_list(expr.clone()))
+        .then(parameters_parser)
         .then_ignore(token_right_paren())
-        .then(type_annotation_clause())
-        .then(where_clause_parser())
+        .then(annotation_clause)
+        .then(where_clause)
         .map(
             |(
                 (((generics, (receiver, name, primitive_return)), parameters), return_type),
@@ -124,6 +130,7 @@ pub(super) fn function_signature(
                 }
             },
         )
+        .boxed()
 }
 
 pub(super) fn type_parameter_list(
@@ -152,6 +159,7 @@ pub(super) fn type_parameter_list(
                 }
             },
         )
+        .boxed()
 }
 
 pub(super) fn extract_type_parameters_and_signature(
@@ -206,6 +214,7 @@ fn generic_parameter() -> impl ChumskyParser<Token, GenericParameter, Error = Si
                 span: name_span,
             },
         )
+        .boxed()
 }
 
 fn variance_marker(
@@ -216,6 +225,7 @@ fn variance_marker(
         _ => Err(Simple::expected_input_found(span, Vec::new(), Some(token))),
     })
     .or_not()
+    .boxed()
 }
 
 fn collect_primitive_bounds(predicates: &[WherePredicate]) -> Vec<PrimitiveBound> {
@@ -267,6 +277,7 @@ fn where_clause_parser(
             }
         })
         .or_not()
+        .boxed()
 }
 
 fn where_predicate_parser(
@@ -285,6 +296,7 @@ fn where_predicate_parser(
                 }
             },
         )
+        .boxed()
 }
 
 fn trait_bound_predicate(
@@ -311,11 +323,12 @@ fn trait_bound_predicate(
                 (name, Vec::new(), name_span)
             }
         })
+        .boxed()
 }
 
 pub(super) fn type_annotation_clause(
 ) -> impl ChumskyParser<Token, Option<TypeAnnotation>, Error = Simple<Token>> + Clone {
-    token_colon().ignore_then(type_annotation()).or_not()
+    token_colon().ignore_then(type_annotation()).or_not().boxed()
 }
 
 pub(super) fn modifiers_parser(
@@ -338,6 +351,7 @@ pub(super) fn modifiers_parser(
             }
             modifiers
         })
+        .boxed()
 }
 
 fn annotation_parser() -> impl ChumskyParser<Token, Annotation, Error = Simple<Token>> + Clone {
@@ -412,7 +426,7 @@ fn annotation_parser() -> impl ChumskyParser<Token, Annotation, Error = Simple<T
                     (AnnotationValue::Array(elements), span)
                 });
 
-            choice((literal, array, nested, enum_or_class.clone()))
+            choice((literal, array, nested, enum_or_class.clone())).boxed()
         });
 
         token_at()
@@ -429,11 +443,13 @@ fn annotation_parser() -> impl ChumskyParser<Token, Annotation, Error = Simple<T
                     span,
                 }
             })
+            .boxed()
     })
+    .boxed()
 }
 
 fn annotation_argument_list(
-    value_parser: impl ChumskyParser<Token, (AnnotationValue, Span), Error = Simple<Token>> + Clone,
+    value_parser: impl ChumskyParser<Token, (AnnotationValue, Span), Error = Simple<Token>> + Clone + 'static,
 ) -> impl ChumskyParser<Token, (Vec<AnnotationArgument>, Span), Error = Simple<Token>> + Clone {
     token_left_paren()
         .map(|token| span_from_token(&token))
@@ -444,10 +460,11 @@ fn annotation_argument_list(
         )
         .then(token_right_paren().map(|token| span_from_token(&token)))
         .map(|((_left_span, arguments), right_span)| (arguments, right_span))
+        .boxed()
 }
 
 fn annotation_argument(
-    value_parser: impl ChumskyParser<Token, (AnnotationValue, Span), Error = Simple<Token>> + Clone,
+    value_parser: impl ChumskyParser<Token, (AnnotationValue, Span), Error = Simple<Token>> + Clone + 'static,
 ) -> impl ChumskyParser<Token, AnnotationArgument, Error = Simple<Token>> + Clone {
     let positional = value_parser
         .clone()
@@ -461,7 +478,7 @@ fn annotation_argument(
             AnnotationArgument::Named { name, value, span }
         });
 
-    choice((named, positional))
+    choice((named, positional)).boxed()
 }
 
 #[cfg(test)]
@@ -779,6 +796,7 @@ fn modifier_keyword() -> impl ChumskyParser<Token, ModifierToken, Error = Simple
             .map(|_| ModifierToken::Override),
         support_keyword("open").to(()).map(|_| ModifierToken::Open),
     ))
+    .boxed()
 }
 
 pub(super) struct ParsedGenerics {

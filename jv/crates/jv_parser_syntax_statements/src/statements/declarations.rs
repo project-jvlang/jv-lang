@@ -197,8 +197,8 @@ pub(super) fn var_declaration_parser(
 }
 
 pub(super) fn function_declaration_parser(
-    statement: impl ChumskyParser<Token, Statement, Error = Simple<Token>> + Clone,
-    expr: impl ChumskyParser<Token, Expression, Error = Simple<Token>> + Clone,
+    statement: impl ChumskyParser<Token, Statement, Error = Simple<Token>> + Clone + 'static,
+    expr: impl ChumskyParser<Token, Expression, Error = Simple<Token>> + Clone + 'static,
 ) -> impl ChumskyParser<Token, Statement, Error = Simple<Token>> + Clone {
     modifiers_parser()
         .then_ignore(token_fun())
@@ -246,10 +246,11 @@ pub(super) fn function_declaration_parser(
                 }
             }
         })
+        .boxed()
 }
 
 pub(super) fn data_class_declaration_parser(
-    expr: impl ChumskyParser<Token, Expression, Error = Simple<Token>> + Clone,
+    expr: impl ChumskyParser<Token, Expression, Error = Simple<Token>> + Clone + 'static,
 ) -> impl ChumskyParser<Token, Statement, Error = Simple<Token>> + Clone {
     modifiers_parser()
         .then_ignore(token_data())
@@ -272,14 +273,16 @@ pub(super) fn data_class_declaration_parser(
                 span: Span::dummy(),
             }
         })
+        .boxed()
 }
 
 pub(super) fn class_declaration_parser(
-    statement: impl ChumskyParser<Token, Statement, Error = Simple<Token>> + Clone,
-    expr: impl ChumskyParser<Token, Expression, Error = Simple<Token>> + Clone,
+    statement: impl ChumskyParser<Token, Statement, Error = Simple<Token>> + Clone + 'static,
+    expr: impl ChumskyParser<Token, Expression, Error = Simple<Token>> + Clone + 'static,
 ) -> impl ChumskyParser<Token, Statement, Error = Simple<Token>> + Clone {
-    let member_parser =
-        comment_statement_parser().or(function_declaration_parser(statement.clone(), expr.clone()));
+    let member_parser = comment_statement_parser()
+        .or(function_declaration_parser(statement.clone(), expr.clone()))
+        .boxed();
 
     modifiers_parser()
         .then_ignore(token_class())
@@ -310,11 +313,14 @@ pub(super) fn class_declaration_parser(
                 span: Span::dummy(),
             }
         })
+        .boxed()
 }
 
 fn function_body(
-    statement: impl ChumskyParser<Token, Statement, Error = Simple<Token>> + Clone,
-    expr: impl ChumskyParser<Token, Expression, Error = Simple<Token>> + Clone,
+    statement: impl ChumskyParser<Token, Statement, Error = Simple<Token>> + Clone + 'static,
+    expr: impl ChumskyParser<Token, Expression, Error = Simple<Token>> + Clone + 'static,
 ) -> impl ChumskyParser<Token, Expression, Error = Simple<Token>> + Clone {
-    block_expression_parser(statement.clone()).or(token_assign().ignore_then(expr))
+    block_expression_parser(statement.clone())
+        .or(token_assign().ignore_then(expr))
+        .boxed()
 }

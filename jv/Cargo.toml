@@ -91,8 +91,8 @@ jv_support = { path = "crates/jv_support" }
 debug = 0
 # No optimization to reduce memory usage
 opt-level = 0
-# Reduce codegen units to save memory (increase slightly for parser)
-codegen-units = 4
+# Increase codegen units to lower per-unit memory consumption
+codegen-units = 256
 # Disable LTO in dev to save memory
 lto = false
 # Disable incremental compilation to save memory
@@ -138,7 +138,8 @@ codegen-units = 64
 codegen-units = 64
 
 [profile.dev.package.jv_parser_syntax_statements]
-codegen-units = 64
+opt-level = 0
+codegen-units = 256
 
 [profile.dev.package.jv_parser_syntax_support]
 codegen-units = 32
