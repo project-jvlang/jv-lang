@@ -77,6 +77,14 @@ Java 固有のロジックを `jv_checker::java` モジュールへ集約し、�
 
 この分離により、将来的な Java 仕様変更や JVM バージョン追加時には `jv_checker::java` を中心に更新すればよく、推論アルゴリズムの汎用性と保守性が向上する。
 
+## Rowanリファレンスローワリングとの連携
+
+Rowan ベースのステートメントローワリング（`jv_parser_rowan::lowering::lower_program`）は、型注釈ノードを `TypeAnnotation::Simple` として `jv_ast` に搬送する。Task 3.5 時点では式ローワラーが未完成のため、Rowan の `Expression` から得たトークン列を文字列化してヒントとして渡す実装になっている。
+
+- `simple_type_from_expression` が `TypeAnnotation::Simple` を生成する際、テキストがそのまま `TypeKind` 解析の起点になる。Phase 1 で導入したプリミティブ／ボックス型判定は、このテキストを `PrimitiveType::from_str` で解釈する前提で設計する。
+- Null 許容と generics は未展開だが、Rowan 側で `?` や `<T>` といったトークンが線形に渡されるため、`TypeAnnotation` の再帰構造を活かして段階的に対応できる。
+- Rowan ローワリングは `LoweringDiagnostic` に型注釈欠落や未対応構文を記録する。型推論層ではこれら診断を補助情報として受け取り、推論不能ケースにおけるユーザーフィードバックを強化する計画である。
+
 ## Phase 1: 型表現の拡張
 
 ### 目的
