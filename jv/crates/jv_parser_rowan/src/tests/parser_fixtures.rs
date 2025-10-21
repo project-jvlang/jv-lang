@@ -334,10 +334,15 @@ fn nested_when_branch_emits_expected_event_sequence() {
     );
 
     let start_sequence = start_node_sequence(&output.events);
+    let filtered_sequence: Vec<SyntaxKind> = start_sequence
+        .iter()
+        .copied()
+        .filter(|kind| *kind != SyntaxKind::Expression)
+        .collect();
 
     assert!(
         contains_subsequence(
-            &start_sequence,
+            &filtered_sequence,
             &[
                 SyntaxKind::WhenStatement,
                 SyntaxKind::WhenBranch,
@@ -353,7 +358,7 @@ fn nested_when_branch_emits_expected_event_sequence() {
 
     assert!(
         contains_subsequence(
-            &start_sequence,
+            &filtered_sequence,
             &[
                 SyntaxKind::FunctionDeclaration,
                 SyntaxKind::WhenStatement,
@@ -361,7 +366,82 @@ fn nested_when_branch_emits_expected_event_sequence() {
             ]
         ),
         "expected throw branch subsequence in {:?}",
-        start_sequence
+        filtered_sequence
+    );
+}
+
+#[test]
+fn return_and_throw_when_expressions_are_parsed_as_single_expressions() {
+    let source = r#"
+        fun dispatch(value: Int): Int {
+            return when (value) {
+                0 -> 0
+                1 -> value + 1
+                else -> {
+                    val doubled = value * 2
+                    doubled
+                }
+            }
+        }
+
+        fun escalate(code: Int) {
+            throw when (code) {
+                0 -> IllegalStateException()
+                1 -> IllegalArgumentException("bad code")
+                else -> when (code % 2) {
+                    0 -> RuntimeException("even")
+                    else -> RuntimeException("odd")
+                }
+            }
+        }
+    "#;
+
+    let tokens = lex(source);
+    let output = parse(&tokens);
+
+    assert!(
+        output.diagnostics.is_empty(),
+        "unexpected diagnostics while parsing return/throw when sample: {:?}",
+        output.diagnostics
+    );
+    assert!(
+        !output.recovered,
+        "parser should not need recovery for return/throw when sample"
+    );
+
+    let tree: SyntaxNode<JvLanguage> =
+        SyntaxNode::new_root(ParseBuilder::build_from_events(&output.events, &tokens));
+
+    let return_contains_when = tree
+        .descendants()
+        .filter(|node| node.kind() == SyntaxKind::ReturnStatement)
+        .any(|node| {
+            node.descendants_with_tokens().any(|element| {
+                element
+                    .into_token()
+                    .map(|token| token.kind() == SyntaxKind::WhenKw)
+                    .unwrap_or(false)
+            })
+        });
+    assert!(
+        return_contains_when,
+        "expected return statement to include a when expression"
+    );
+
+    let throw_contains_when = tree
+        .descendants()
+        .filter(|node| node.kind() == SyntaxKind::ThrowStatement)
+        .any(|node| {
+            node.descendants_with_tokens().any(|element| {
+                element
+                    .into_token()
+                    .map(|token| token.kind() == SyntaxKind::WhenKw)
+                    .unwrap_or(false)
+            })
+        });
+    assert!(
+        throw_contains_when,
+        "expected throw statement to include a when expression"
     );
 }
 

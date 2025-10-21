@@ -1,5 +1,6 @@
 mod class;
 mod control;
+mod expression;
 mod function;
 mod import;
 mod package;
@@ -34,4 +35,5 @@ static STRATEGIES: &[StrategyRef] = &[
     &function::FUNCTION_STRATEGY,
     &class::CLASS_STRATEGY,
     &control::CONTROL_STRATEGY,
+    &expression::EXPRESSION_STRATEGY,
 ];

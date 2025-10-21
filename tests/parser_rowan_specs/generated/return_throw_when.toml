@@ -1,0 +1,32 @@
+description = "Return/throw when expressions lower without recovery"
+source = "tests/parser_rowan_specs/generated/sources/return_throw_when.jv"
+
+[expect]
+statement_count = 3
+
+[expect.parser_diagnostics]
+allowed = false
+
+[[expect.statements]]
+index = 0
+kind = "package"
+name = "bench.return_when"
+
+  [expect.statements.span]
+  start_line = 1
+
+[[expect.statements]]
+index = 1
+kind = "function_declaration"
+name = "evaluate"
+
+  [expect.statements.span]
+  start_line = 3
+
+[[expect.statements]]
+index = 2
+kind = "function_declaration"
+name = "escalate"
+
+  [expect.statements.span]
+  start_line = 14

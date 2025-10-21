@@ -17,7 +17,6 @@ const SYNC_TOKENS: &[TokenKind] = &[
     TokenKind::ClassKw,
     TokenKind::DataKw,
     TokenKind::IfKw,
-    TokenKind::ElseKw,
     TokenKind::WhenKw,
     TokenKind::ForKw,
     TokenKind::WhileKw,
@@ -29,6 +28,57 @@ const SYNC_TOKENS: &[TokenKind] = &[
     TokenKind::Eof,
 ];
 
+#[derive(Default)]
+struct WhenBlockState {
+    brace_depth: usize,
+}
+
+#[derive(Default)]
+struct ExpressionState {
+    pending_when: bool,
+    when_blocks: Vec<WhenBlockState>,
+}
+
+impl ExpressionState {
+    fn register_when(&mut self) {
+        self.pending_when = true;
+    }
+
+    fn start_when_block(&mut self) {
+        self.pending_when = false;
+        self.when_blocks.push(WhenBlockState { brace_depth: 1 });
+    }
+
+    fn has_pending_when(&self) -> bool {
+        self.pending_when
+    }
+
+    fn on_left_brace(&mut self) {
+        if let Some(block) = self.when_blocks.last_mut() {
+            block.brace_depth = block.brace_depth.saturating_add(1);
+        }
+    }
+
+    fn on_right_brace(&mut self) {
+        if let Some(block) = self.when_blocks.last_mut() {
+            if block.brace_depth <= 1 {
+                self.when_blocks.pop();
+            } else {
+                block.brace_depth -= 1;
+            }
+        }
+    }
+
+    fn is_in_when_context(&self) -> bool {
+        self.pending_when || !self.when_blocks.is_empty()
+    }
+
+    fn reset(&mut self) {
+        self.pending_when = false;
+        self.when_blocks.clear();
+    }
+}
+
 /// パーサ内部状態。
 pub(crate) struct ParserContext<'tokens> {
     pub(crate) tokens: &'tokens [Token],
@@ -37,6 +87,7 @@ pub(crate) struct ParserContext<'tokens> {
     diagnostics: Vec<ParserDiagnostic>,
     recovered: bool,
     block_depth: usize,
+    expression_states: Vec<ExpressionState>,
 }
 
 impl<'tokens> ParserContext<'tokens> {
@@ -49,6 +100,7 @@ impl<'tokens> ParserContext<'tokens> {
             diagnostics: Vec::new(),
             recovered: false,
             block_depth: 0,
+            expression_states: Vec::new(),
         }
     }
 
@@ -292,6 +344,7 @@ impl<'tokens> ParserContext<'tokens> {
         terminators: &[TokenKind],
         respect_statement_boundaries: bool,
     ) -> bool {
+        self.expression_states.push(ExpressionState::default());
         self.consume_trivia();
         let start = self.cursor;
         self.start_node(SyntaxKind::Expression);
@@ -309,8 +362,38 @@ impl<'tokens> ParserContext<'tokens> {
             if at_top_level && terminators.contains(&kind) {
                 break;
             }
-            if respect_statement_boundaries && at_top_level && SYNC_TOKENS.contains(&kind) {
+            let mut should_break_on_sync = false;
+            if respect_statement_boundaries && at_top_level {
+                if kind == TokenKind::WhenKw {
+                    if let Some(state) = self.expression_states.last_mut() {
+                        state.register_when();
+                    }
+                } else if kind == TokenKind::ElseKw {
+                    let inside_when = self
+                        .expression_states
+                        .last()
+                        .map(ExpressionState::is_in_when_context)
+                        .unwrap_or(false);
+                    if !inside_when {
+                        should_break_on_sync = true;
+                    }
+                } else if SYNC_TOKENS.contains(&kind) {
+                    should_break_on_sync = true;
+                }
+            }
+
+            if should_break_on_sync {
                 break;
+            }
+
+            let mut started_when_block = false;
+            if respect_statement_boundaries && at_top_level && kind == TokenKind::LeftBrace {
+                if let Some(state) = self.expression_states.last_mut() {
+                    if state.has_pending_when() {
+                        state.start_when_block();
+                        started_when_block = true;
+                    }
+                }
             }
 
             match kind {
@@ -324,9 +407,19 @@ impl<'tokens> ParserContext<'tokens> {
                 TokenKind::LeftBrace => depth_brace += 1,
                 TokenKind::RightBrace => {
                     if depth_brace == 0 {
+                        if respect_statement_boundaries {
+                            if let Some(state) = self.expression_states.last_mut() {
+                                state.on_right_brace();
+                            }
+                        }
                         break;
                     }
                     depth_brace -= 1;
+                    if respect_statement_boundaries {
+                        if let Some(state) = self.expression_states.last_mut() {
+                            state.on_right_brace();
+                        }
+                    }
                 }
                 TokenKind::LeftBracket => depth_bracket += 1,
                 TokenKind::RightBracket => {
@@ -338,12 +431,25 @@ impl<'tokens> ParserContext<'tokens> {
                 _ => {}
             }
 
+            if respect_statement_boundaries && kind == TokenKind::LeftBrace && !started_when_block {
+                if let Some(state) = self.expression_states.last_mut() {
+                    state.on_left_brace();
+                }
+            }
+
             self.bump_raw();
         }
 
         let consumed = self.cursor > start;
         self.finish_node();
+        self.expression_states.pop();
         consumed
+    }
+
+    fn reset_active_expression_state(&mut self) {
+        if let Some(state) = self.expression_states.last_mut() {
+            state.reset();
+        }
     }
 
     /// トリビアを消費する。
@@ -449,6 +555,7 @@ impl<'tokens> ParserContext<'tokens> {
     pub(crate) fn recover_statement(&mut self, message: impl Into<String>, start: usize) {
         let message = message.into();
         self.recovered = true;
+        self.reset_active_expression_state();
         let error_kind = if self.block_depth > 0 {
             SyntaxKind::BlockError
         } else {

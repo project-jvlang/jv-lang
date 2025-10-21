@@ -1,0 +1,23 @@
+package bench.return_when
+
+fun evaluate(value: Int): Int {
+    return when (value) {
+        0 -> 0
+        1 -> value + 1
+        else -> {
+            val adjusted = value * 2
+            adjusted
+        }
+    }
+}
+
+fun escalate(code: Int) {
+    throw when (code) {
+        0 -> IllegalStateException()
+        1 -> IllegalArgumentException("bad code")
+        else -> when (code % 2) {
+            0 -> RuntimeException("even")
+            else -> RuntimeException("odd")
+        }
+    }
+}

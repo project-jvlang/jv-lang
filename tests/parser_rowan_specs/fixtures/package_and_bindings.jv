@@ -1,0 +1,6 @@
+package fixtures.sample
+
+import fixtures.runtime.Configuration
+
+val endpoint: String = "https://api.example.com"
+var retries: Int = 3
