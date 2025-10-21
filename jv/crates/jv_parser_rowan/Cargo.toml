@@ -16,3 +16,6 @@ rowan = { version = "0.15" }
 jv_lexer = { path = "../jv_lexer" }
 jv_ast = { path = "../jv_ast" }
 jv_parser_syntax_support = { path = "../jv_parser_syntax_support" }
+
+[dev-dependencies]
+ungrammar = "1.16.1"

@@ -608,6 +608,132 @@ impl TokenKind {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::syntax::STATEMENT_GRAMMAR;
+    use std::collections::{BTreeSet, HashMap};
+    use ungrammar::Grammar;
+
+    const NODE_KIND_MAP: &[(&str, SyntaxKind)] = &[
+        ("Root", SyntaxKind::Root),
+        ("PackageDeclaration", SyntaxKind::PackageDeclaration),
+        ("PackageName", SyntaxKind::PackageName),
+        ("ImportDeclaration", SyntaxKind::ImportDeclaration),
+        ("ImportPath", SyntaxKind::ImportPath),
+        ("ImportClause", SyntaxKind::ImportClause),
+        ("ImportWildcard", SyntaxKind::ImportWildcard),
+        ("StatementList", SyntaxKind::StatementList),
+        ("ValDeclaration", SyntaxKind::ValDeclaration),
+        ("VarDeclaration", SyntaxKind::VarDeclaration),
+        ("BindingPattern", SyntaxKind::BindingPattern),
+        ("TypeAnnotation", SyntaxKind::TypeAnnotation),
+        ("InitializerClause", SyntaxKind::InitializerClause),
+        ("AnnotationList", SyntaxKind::AnnotationList),
+        ("Annotation", SyntaxKind::Annotation),
+        ("AnnotationArgumentList", SyntaxKind::AnnotationArgumentList),
+        ("AnnotationArgument", SyntaxKind::AnnotationArgument),
+        ("ModifierList", SyntaxKind::ModifierList),
+        ("Modifier", SyntaxKind::Modifier),
+        ("FunctionDeclaration", SyntaxKind::FunctionDeclaration),
+        ("FunctionParameterList", SyntaxKind::FunctionParameterList),
+        ("FunctionParameter", SyntaxKind::FunctionParameter),
+        ("ParameterModifierList", SyntaxKind::ParameterModifierList),
+        ("ParameterModifier", SyntaxKind::ParameterModifier),
+        ("FunctionReturnType", SyntaxKind::FunctionReturnType),
+        ("TypeParameterList", SyntaxKind::TypeParameterList),
+        ("TypeParameter", SyntaxKind::TypeParameter),
+        ("WhereClause", SyntaxKind::WhereClause),
+        ("WherePredicate", SyntaxKind::WherePredicate),
+        ("ClassDeclaration", SyntaxKind::ClassDeclaration),
+        ("ClassBody", SyntaxKind::ClassBody),
+        ("Block", SyntaxKind::Block),
+        ("IfStatement", SyntaxKind::IfStatement),
+        ("ElseClause", SyntaxKind::ElseClause),
+        ("WhenStatement", SyntaxKind::WhenStatement),
+        ("WhenBranch", SyntaxKind::WhenBranch),
+        ("ForStatement", SyntaxKind::ForStatement),
+        ("WhileStatement", SyntaxKind::WhileStatement),
+        ("DoWhileStatement", SyntaxKind::DoWhileStatement),
+        ("ReturnStatement", SyntaxKind::ReturnStatement),
+        ("ThrowStatement", SyntaxKind::ThrowStatement),
+        ("BreakStatement", SyntaxKind::BreakStatement),
+        ("ContinueStatement", SyntaxKind::ContinueStatement),
+        ("QualifiedName", SyntaxKind::QualifiedName),
+        ("QualifiedNameSegment", SyntaxKind::QualifiedNameSegment),
+        ("Expression", SyntaxKind::Expression),
+        ("PackageKw", SyntaxKind::PackageKw),
+        ("ImportKw", SyntaxKind::ImportKw),
+        ("ValKw", SyntaxKind::ValKw),
+        ("VarKw", SyntaxKind::VarKw),
+        ("FunKw", SyntaxKind::FunKw),
+        ("ClassKw", SyntaxKind::ClassKw),
+        ("DataKw", SyntaxKind::DataKw),
+        ("ReturnKw", SyntaxKind::ReturnKw),
+        ("ThrowKw", SyntaxKind::ThrowKw),
+        ("BreakKw", SyntaxKind::BreakKw),
+        ("ContinueKw", SyntaxKind::ContinueKw),
+        ("IfKw", SyntaxKind::IfKw),
+        ("ElseKw", SyntaxKind::ElseKw),
+        ("WhenKw", SyntaxKind::WhenKw),
+        ("ForKw", SyntaxKind::ForKw),
+        ("InKw", SyntaxKind::InKw),
+        ("WhileKw", SyntaxKind::WhileKw),
+        ("DoKw", SyntaxKind::DoKw),
+        ("WhereKw", SyntaxKind::WhereKw),
+        ("At", SyntaxKind::At),
+        ("Dot", SyntaxKind::Dot),
+        ("Star", SyntaxKind::Star),
+        ("Assign", SyntaxKind::Assign),
+        ("Colon", SyntaxKind::Colon),
+        ("Comma", SyntaxKind::Comma),
+        ("LeftParen", SyntaxKind::LeftParen),
+        ("RightParen", SyntaxKind::RightParen),
+        ("LeftBrace", SyntaxKind::LeftBrace),
+        ("RightBrace", SyntaxKind::RightBrace),
+        ("Less", SyntaxKind::Less),
+        ("Greater", SyntaxKind::Greater),
+        ("FatArrow", SyntaxKind::FatArrow),
+        ("Identifier", SyntaxKind::Identifier),
+        ("ExpressionToken", SyntaxKind::Expression),
+    ];
+
+    #[test]
+    fn grammar_nodes_have_matching_syntax_kinds() {
+        let grammar: Grammar = STATEMENT_GRAMMAR
+            .parse()
+            .expect("statement grammar parses");
+
+        let mapping: HashMap<&str, SyntaxKind> = NODE_KIND_MAP.iter().copied().collect();
+
+        let mut missing = Vec::new();
+        for node in grammar.iter() {
+            let name = &grammar[node].name;
+            if !mapping.contains_key(name.as_str()) {
+                missing.push(name.clone());
+            }
+        }
+
+        assert!(
+            missing.is_empty(),
+            "SyntaxKind mapping missing entries for grammar nodes: {:?}",
+            missing
+        );
+
+        let defined: BTreeSet<&str> = mapping.keys().copied().collect();
+        let actual: BTreeSet<String> =
+            grammar.iter().map(|node| grammar[node].name.clone()).collect();
+
+        for name in defined {
+            assert!(
+                actual.contains(name),
+                "Mapping contains `{}` which is absent from grammar",
+                name
+            );
+        }
+    }
+}
+
 impl From<TokenKind> for SyntaxKind {
     fn from(kind: TokenKind) -> Self {
         kind.to_syntax()
