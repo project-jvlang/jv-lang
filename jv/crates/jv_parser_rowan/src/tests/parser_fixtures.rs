@@ -304,6 +304,56 @@ fn build_tree_from_events_handles_deep_nesting() {
 }
 
 #[test]
+fn parses_destructuring_and_expression_body() {
+    let source = r#"
+        val [first second] = point
+        var (left right) = pair
+        [name age] = user
+        fun greet(name: String): String = "Hello, ${name}!"
+    "#;
+
+    let tokens = lex(source);
+    let output = parse(&tokens);
+
+    assert!(
+        output.diagnostics.is_empty(),
+        "expected no diagnostics, got {:?}",
+        output.diagnostics
+    );
+
+    let mut seen_list_pattern = false;
+    let mut seen_tuple_pattern = false;
+    let mut seen_expression_body = false;
+
+    for event in &output.events {
+        if let ParseEvent::StartNode { kind } = event {
+            match kind {
+                SyntaxKind::BindingListPattern => seen_list_pattern = true,
+                SyntaxKind::BindingTuplePattern => seen_tuple_pattern = true,
+                SyntaxKind::FunctionDeclaration => seen_expression_body = true,
+                _ => {}
+            }
+        }
+    }
+
+    assert!(seen_list_pattern, "expected destructuring list pattern");
+    assert!(seen_tuple_pattern, "expected tuple pattern");
+    assert!(
+        seen_expression_body,
+        "expected function declaration with expression body"
+    );
+
+    // Recordパターンはサポート外でエラーとなることを確認する。
+    let record_source = r#"val {name: first age: second} = user"#;
+    let record_tokens = lex(record_source);
+    let record_output = parse(&record_tokens);
+    assert!(
+        !record_output.diagnostics.is_empty(),
+        "expected diagnostics for record pattern"
+    );
+}
+
+#[test]
 fn build_tree_from_events_preserves_error_nodes() {
     let tokens = lex(r#"
         val = 0

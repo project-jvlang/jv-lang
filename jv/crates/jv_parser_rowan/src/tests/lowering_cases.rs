@@ -360,6 +360,63 @@ fn assignment_member_rhs_tokens() -> (SyntaxNode<JvLanguage>, Vec<Token>) {
     (node, tokens)
 }
 
+fn destructuring_assignment_tokens() -> (SyntaxNode<JvLanguage>, Vec<Token>) {
+    let mut column = 0usize;
+    let mut tokens = Vec::new();
+    tokens.push(make_token(&mut column, TokenType::LeftBracket, "["));
+    tokens.push(make_token(
+        &mut column,
+        TokenType::Identifier("first".to_string()),
+        "first",
+    ));
+    tokens.push(make_token(&mut column, TokenType::LayoutComma, ","));
+    tokens.push(make_token(
+        &mut column,
+        TokenType::Identifier("second".to_string()),
+        "second",
+    ));
+    tokens.push(make_token(&mut column, TokenType::RightBracket, "]"));
+    tokens.push(make_token(&mut column, TokenType::Assign, "="));
+    tokens.push(make_token(
+        &mut column,
+        TokenType::Identifier("point".to_string()),
+        "point",
+    ));
+    tokens.push(make_token(&mut column, TokenType::Eof, ""));
+
+    let node = build_tree(&tokens, |builder, tokens| {
+        builder.start_node(SyntaxKind::AssignmentStatement);
+        builder.start_node(SyntaxKind::AssignmentTarget);
+        builder.start_node(SyntaxKind::BindingPattern);
+        builder.start_node(SyntaxKind::BindingListPattern);
+        builder.push_token(&tokens[0]);
+
+        builder.start_node(SyntaxKind::BindingPattern);
+        builder.push_token(&tokens[1]);
+        builder.finish_node();
+
+        builder.push_token(&tokens[2]);
+
+        builder.start_node(SyntaxKind::BindingPattern);
+        builder.push_token(&tokens[3]);
+        builder.finish_node();
+
+        builder.push_token(&tokens[4]);
+        builder.finish_node(); // BindingListPattern
+        builder.finish_node(); // BindingPattern
+        builder.finish_node(); // AssignmentTarget
+
+        builder.push_token(&tokens[5]);
+        builder.start_node(SyntaxKind::Expression);
+        builder.push_token(&tokens[6]);
+        builder.finish_node();
+        builder.finish_node();
+        builder.push_token(&tokens[7]);
+    });
+
+    (node, tokens)
+}
+
 fn use_statement_tokens() -> (SyntaxNode<JvLanguage>, Vec<Token>) {
     let mut column = 0usize;
     let mut tokens = Vec::new();
@@ -867,6 +924,32 @@ fn lowering_table_driven_cases() {
                     },
                     other => panic!("expected assignment statement, got {:?}", other),
                 }
+            }),
+        },
+        LoweringCase {
+            build: destructuring_assignment_tokens,
+            verify: Box::new(|result| {
+                assert!(
+                    result.statements.is_empty(),
+                    "expected no lowered statements for unsupported destructuring, got {:?}",
+                    result.statements
+                );
+                let diagnostic = result
+                    .diagnostics
+                    .first()
+                    .expect("expected diagnostic for destructuring assignment");
+                assert_eq!(
+                    diagnostic.severity,
+                    LoweringDiagnosticSeverity::Error,
+                    "expected error diagnostic"
+                );
+                assert!(
+                    diagnostic
+                        .message
+                        .contains("代入ターゲットは識別子で始まる必要があります"),
+                    "unexpected diagnostic message: {}",
+                    diagnostic.message
+                );
             }),
         },
         LoweringCase {

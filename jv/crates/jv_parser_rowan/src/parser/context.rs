@@ -256,10 +256,112 @@ impl<'tokens> ParserContext<'tokens> {
 
     /// バインディングパターンを解析する。
     pub(crate) fn parse_binding_pattern(&mut self) -> bool {
+        self.consume_trivia();
+        let Some(lookahead) = self.peek_significant_kind() else {
+            return false;
+        };
+
+        if !matches!(
+            lookahead,
+            TokenKind::Identifier | TokenKind::LeftBracket | TokenKind::LeftParen
+        ) {
+            return false;
+        }
+
         self.start_node(SyntaxKind::BindingPattern);
-        let ok = self.bump_expected(TokenKind::Identifier, "識別子が必要です");
+        let ok = match lookahead {
+            TokenKind::Identifier => {
+                self.bump_raw();
+                true
+            }
+            TokenKind::LeftBracket => self.parse_binding_list_pattern(),
+            TokenKind::LeftParen => self.parse_binding_tuple_pattern(),
+            _ => false,
+        };
         self.finish_node();
         ok
+    }
+
+    fn parse_binding_list_pattern(&mut self) -> bool {
+        self.start_node(SyntaxKind::BindingListPattern);
+        self.bump_raw(); // '['
+
+        loop {
+            self.consume_trivia();
+            match self.peek_significant_kind() {
+                Some(TokenKind::RightBracket) => {
+                    self.bump_raw();
+                    break;
+                }
+                Some(TokenKind::Eof) | None => {
+                    self.finish_node();
+                    return false;
+                }
+                _ => {}
+            }
+
+            if !self.parse_binding_pattern() {
+                self.finish_node();
+                return false;
+            }
+
+            self.consume_trivia();
+            match self.peek_significant_kind() {
+                Some(TokenKind::Comma) | Some(TokenKind::LayoutComma) => {
+                    self.bump_raw();
+                }
+                Some(TokenKind::RightBracket) => {}
+                Some(TokenKind::Eof) | None => {
+                    self.finish_node();
+                    return false;
+                }
+                _ => {}
+            }
+        }
+
+        self.finish_node();
+        true
+    }
+
+    fn parse_binding_tuple_pattern(&mut self) -> bool {
+        self.start_node(SyntaxKind::BindingTuplePattern);
+        self.bump_raw(); // '('
+
+        loop {
+            self.consume_trivia();
+            match self.peek_significant_kind() {
+                Some(TokenKind::RightParen) => {
+                    self.bump_raw();
+                    break;
+                }
+                Some(TokenKind::Eof) | None => {
+                    self.finish_node();
+                    return false;
+                }
+                _ => {}
+            }
+
+            if !self.parse_binding_pattern() {
+                self.finish_node();
+                return false;
+            }
+
+            self.consume_trivia();
+            match self.peek_significant_kind() {
+                Some(TokenKind::Comma) | Some(TokenKind::LayoutComma) => {
+                    self.bump_raw();
+                }
+                Some(TokenKind::RightParen) => {}
+                Some(TokenKind::Eof) | None => {
+                    self.finish_node();
+                    return false;
+                }
+                _ => {}
+            }
+        }
+
+        self.finish_node();
+        true
     }
 
     /// 型注釈を解析する。

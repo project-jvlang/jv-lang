@@ -14,27 +14,13 @@ impl StatementStrategy for AssignmentStrategy {
     }
 
     fn matches(&self, ctx: &ParserContext<'_>, lookahead: TokenKind) -> bool {
-        if lookahead != TokenKind::Identifier {
-            return false;
-        }
-
-        let mut offset = 1usize;
-        while let Some((_, kind)) = ctx.peek_significant_kind_n(offset) {
-            match kind {
-                TokenKind::Assign => return true,
-                TokenKind::Dot => {
-                    if let Some((_, next)) = ctx.peek_significant_kind_n(offset + 1) {
-                        if next == TokenKind::Identifier {
-                            offset += 2;
-                            continue;
-                        }
-                    }
-                    return false;
-                }
-                _ => return false,
+        match lookahead {
+            TokenKind::Identifier => self.matches_identifier_target(ctx),
+            TokenKind::LeftBracket | TokenKind::LeftParen => {
+                self.matches_pattern_target(ctx, lookahead)
             }
+            _ => false,
         }
-        false
     }
 
     fn parse(&self, ctx: &mut ParserContext<'_>) -> bool {
@@ -76,25 +62,121 @@ impl StatementStrategy for AssignmentStrategy {
 
 fn parse_assignment_target(ctx: &mut ParserContext<'_>) -> bool {
     ctx.consume_trivia();
-    if ctx.peek_significant_kind() != Some(TokenKind::Identifier) {
-        return false;
-    }
-    ctx.bump_raw();
+    match ctx.peek_significant_kind() {
+        Some(TokenKind::Identifier) => {
+            if ctx.peek_significant_kind_n(1).map(|(_, kind)| kind) == Some(TokenKind::Dot) {
+                ctx.bump_raw();
+                loop {
+                    ctx.consume_trivia();
+                    if ctx.peek_significant_kind() != Some(TokenKind::Dot) {
+                        break;
+                    }
 
-    loop {
-        ctx.consume_trivia();
-        if ctx.peek_significant_kind() != Some(TokenKind::Dot) {
-            break;
+                    if ctx.peek_significant_kind_n(1).map(|(_, kind)| kind)
+                        != Some(TokenKind::Identifier)
+                    {
+                        return false;
+                    }
+
+                    ctx.bump_raw(); // '.'
+                    ctx.consume_trivia();
+                    ctx.bump_raw(); // identifier
+                }
+                true
+            } else {
+                ctx.parse_binding_pattern()
+            }
         }
+        Some(TokenKind::LeftBracket) | Some(TokenKind::LeftParen) => ctx.parse_binding_pattern(),
+        _ => false,
+    }
+}
 
-        if ctx.peek_significant_kind_n(1).map(|(_, kind)| kind) != Some(TokenKind::Identifier) {
+impl AssignmentStrategy {
+    fn matches_identifier_target(&self, ctx: &ParserContext<'_>) -> bool {
+        let mut offset = 1usize;
+        while let Some((_, kind)) = ctx.peek_significant_kind_n(offset) {
+            match kind {
+                TokenKind::Assign => return true,
+                TokenKind::Dot => {
+                    if let Some((_, next)) = ctx.peek_significant_kind_n(offset + 1) {
+                        if next == TokenKind::Identifier {
+                            offset += 2;
+                            continue;
+                        }
+                    }
+                    return false;
+                }
+                TokenKind::Semicolon
+                | TokenKind::Newline
+                | TokenKind::RightBrace
+                | TokenKind::Eof => return false,
+                _ => return false,
+            }
+        }
+        false
+    }
+
+    fn matches_pattern_target(&self, ctx: &ParserContext<'_>, opening: TokenKind) -> bool {
+        let Some(initial_closer) = closing_delimiter(opening) else {
             return false;
+        };
+
+        let mut offset = 1usize;
+        let mut stack = vec![initial_closer];
+
+        while let Some((_, kind)) = ctx.peek_significant_kind_n(offset) {
+            if let Some(expected) = stack.last() {
+                if kind == *expected {
+                    stack.pop();
+                    offset += 1;
+                    if stack.is_empty() {
+                        break;
+                    }
+                    continue;
+                }
+            }
+
+            match kind {
+                TokenKind::LeftBracket => stack.push(TokenKind::RightBracket),
+                TokenKind::LeftParen => stack.push(TokenKind::RightParen),
+                TokenKind::Assign if stack.is_empty() => return true,
+                TokenKind::Semicolon | TokenKind::Newline | TokenKind::RightBrace
+                    if stack.is_empty() =>
+                {
+                    return false;
+                }
+                _ => {}
+            }
+
+            offset += 1;
         }
 
-        ctx.bump_raw(); // '.'
-        ctx.consume_trivia();
-        ctx.bump_raw(); // identifier
-    }
+        if stack.is_empty() {
+            while let Some((_, kind)) = ctx.peek_significant_kind_n(offset) {
+                match kind {
+                    TokenKind::Assign => return true,
+                    TokenKind::Semicolon | TokenKind::Newline | TokenKind::RightBrace => {
+                        return false
+                    }
+                    TokenKind::Comma | TokenKind::LayoutComma => {
+                        offset += 1;
+                    }
+                    _ => {
+                        offset += 1;
+                    }
+                }
+            }
+        }
 
-    true
+        false
+    }
+}
+
+fn closing_delimiter(opening: TokenKind) -> Option<TokenKind> {
+    match opening {
+        TokenKind::LeftBracket => Some(TokenKind::RightBracket),
+        TokenKind::LeftParen => Some(TokenKind::RightParen),
+        _ => None,
+    }
 }

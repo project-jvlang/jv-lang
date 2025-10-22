@@ -30,6 +30,10 @@ pub enum SyntaxKind {
     VarDeclaration,
     /// バインディングパターン。
     BindingPattern,
+    /// リスト形式のバインディングパターン。
+    BindingListPattern,
+    /// タプル形式のバインディングパターン。
+    BindingTuplePattern,
     /// 型注釈。
     TypeAnnotation,
     /// 初期化子。
@@ -665,6 +669,8 @@ mod tests {
         ("ValDeclaration", SyntaxKind::ValDeclaration),
         ("VarDeclaration", SyntaxKind::VarDeclaration),
         ("BindingPattern", SyntaxKind::BindingPattern),
+        ("BindingListPattern", SyntaxKind::BindingListPattern),
+        ("BindingTuplePattern", SyntaxKind::BindingTuplePattern),
         ("TypeAnnotation", SyntaxKind::TypeAnnotation),
         ("InitializerClause", SyntaxKind::InitializerClause),
         ("AnnotationList", SyntaxKind::AnnotationList),
@@ -727,6 +733,7 @@ mod tests {
         ("Assign", SyntaxKind::Assign),
         ("Colon", SyntaxKind::Colon),
         ("Comma", SyntaxKind::Comma),
+        ("LayoutComma", SyntaxKind::LayoutComma),
         ("LeftParen", SyntaxKind::LeftParen),
         ("RightParen", SyntaxKind::RightParen),
         ("LeftBrace", SyntaxKind::LeftBrace),

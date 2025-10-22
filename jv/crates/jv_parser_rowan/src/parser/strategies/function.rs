@@ -36,7 +36,16 @@ impl StatementStrategy for FunctionStrategy {
 
         parse_return_type(ctx);
 
-        if ctx.bump_if(TokenKind::Arrow) {
+        if ctx.bump_if(TokenKind::Assign) {
+            ctx.parse_expression_until(
+                &[
+                    TokenKind::Semicolon,
+                    TokenKind::Newline,
+                    TokenKind::RightBrace,
+                ],
+                true,
+            );
+        } else if ctx.bump_if(TokenKind::Arrow) {
             ctx.parse_expression_until(
                 &[
                     TokenKind::Semicolon,
@@ -136,6 +145,7 @@ fn parse_return_type(ctx: &mut ParserContext<'_>) {
     ctx.bump_raw(); // :
     ctx.parse_expression_until(
         &[
+            TokenKind::Assign,
             TokenKind::Arrow,
             TokenKind::LeftBrace,
             TokenKind::Semicolon,
