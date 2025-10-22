@@ -770,6 +770,31 @@ fn function_without_body_recovers_and_continues() {
 }
 
 #[test]
+fn function_arrow_body_emits_diagnostic() {
+    let source = r#"fun compute(x: Int): Int -> x + 1"#;
+
+    let tokens = lex(source);
+    let output = parse(&tokens);
+
+    assert!(
+        output
+            .diagnostics
+            .iter()
+            .any(|diag| diag.message.contains("`->` 構文は廃止されました")),
+        "expected diagnostic about deprecated arrow syntax, got {:?}",
+        output.diagnostics
+    );
+
+    let started = start_node_sequence(&output.events);
+    assert!(
+        started
+            .iter()
+            .any(|kind| *kind == SyntaxKind::FunctionDeclaration),
+        "expected function declaration to still be produced"
+    );
+}
+
+#[test]
 fn class_missing_closing_brace_emits_block_error() {
     let source = r#"
         class Incomplete {

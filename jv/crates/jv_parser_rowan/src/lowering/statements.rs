@@ -3184,6 +3184,75 @@ fn lower_function(
     let tokens = context.tokens_for(node);
     let span = context.span_for(node).unwrap_or_else(Span::dummy);
 
+    let return_type_token_ptrs: Vec<*const Token> = child_node(node, SyntaxKind::FunctionReturnType)
+        .map(|ret| {
+            context
+                .tokens_for(&ret)
+                .into_iter()
+                .map(|token| token as *const Token)
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let mut deprecated_arrow_index: Option<usize> = None;
+    let mut depth_paren = 0usize;
+    let mut depth_brace = 0usize;
+    let mut depth_bracket = 0usize;
+
+    for (idx, token) in tokens.iter().enumerate() {
+        let token = *token;
+        match token.token_type {
+            TokenType::LeftParen => depth_paren = depth_paren.saturating_add(1),
+            TokenType::RightParen => {
+                if depth_paren > 0 {
+                    depth_paren -= 1;
+                }
+            }
+            TokenType::LeftBrace => {
+                if depth_paren == 0 && depth_brace == 0 && depth_bracket == 0 {
+                    break;
+                }
+                depth_brace = depth_brace.saturating_add(1);
+            }
+            TokenType::RightBrace => {
+                if depth_brace > 0 {
+                    depth_brace -= 1;
+                }
+            }
+            TokenType::LeftBracket => depth_bracket = depth_bracket.saturating_add(1),
+            TokenType::RightBracket => {
+                if depth_bracket > 0 {
+                    depth_bracket -= 1;
+                }
+            }
+            TokenType::Assign => break,
+            TokenType::Arrow => {
+                let ptr = token as *const Token;
+                let belongs_to_return_type = return_type_token_ptrs
+                    .iter()
+                    .any(|&ret_ptr| ret_ptr == ptr);
+                if depth_paren == 0 && depth_brace == 0 && depth_bracket == 0 && !belongs_to_return_type {
+                    deprecated_arrow_index = Some(idx);
+                    break;
+                }
+            }
+            TokenType::Eof => break,
+            _ => {}
+        }
+    }
+
+    if let Some(idx) = deprecated_arrow_index {
+        let arrow_span = Some(span_from_token(tokens[idx]));
+        diagnostics.push(LoweringDiagnostic::new(
+            LoweringDiagnosticSeverity::Error,
+            "関数宣言では `->` 式ボディはサポートされません。`=` を使用してください",
+            arrow_span,
+            node.kind(),
+            first_identifier_text(node),
+            collect_annotation_texts(node),
+        ));
+    }
+
     let name = extract_identifier(&tokens).ok_or_else(|| {
         LoweringDiagnostic::new(
             LoweringDiagnosticSeverity::Error,

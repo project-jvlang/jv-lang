@@ -45,17 +45,27 @@ impl StatementStrategy for FunctionStrategy {
                 ],
                 true,
             );
-        } else if ctx.bump_if(TokenKind::Arrow) {
-            ctx.parse_expression_until(
-                &[
-                    TokenKind::Semicolon,
-                    TokenKind::Newline,
-                    TokenKind::RightBrace,
-                ],
-                true,
-            );
-        } else if !ctx.parse_block() {
-            ctx.recover_statement("関数本体が必要です", start);
+        } else {
+            ctx.consume_trivia();
+            if ctx.peek_significant_kind() == Some(TokenKind::Arrow) {
+                let arrow_start = ctx.position();
+                ctx.bump_raw();
+                ctx.report_error(
+                    "関数宣言での `->` 構文は廃止されました。`fun name(...) = expr` を使用してください",
+                    arrow_start,
+                    ctx.position(),
+                );
+                ctx.parse_expression_until(
+                    &[
+                        TokenKind::Semicolon,
+                        TokenKind::Newline,
+                        TokenKind::RightBrace,
+                    ],
+                    true,
+                );
+            } else if !ctx.parse_block() {
+                ctx.recover_statement("関数本体が必要です", start);
+            }
         }
 
         ctx.finish_node();

@@ -237,6 +237,56 @@ fn function_tokens() -> (SyntaxNode<JvLanguage>, Vec<Token>) {
     (node, tokens)
 }
 
+fn deprecated_arrow_function_tokens() -> (SyntaxNode<JvLanguage>, Vec<Token>) {
+    let mut column = 0usize;
+    let mut tokens = Vec::new();
+    tokens.push(make_token(&mut column, TokenType::Fun, "fun"));
+    tokens.push(make_token(
+        &mut column,
+        TokenType::Identifier("legacy".to_string()),
+        "legacy",
+    ));
+    tokens.push(make_token(&mut column, TokenType::LeftParen, "("));
+    tokens.push(make_token(&mut column, TokenType::RightParen, ")"));
+    tokens.push(make_token(&mut column, TokenType::Colon, ":"));
+    tokens.push(make_token(
+        &mut column,
+        TokenType::Identifier("Int".to_string()),
+        "Int",
+    ));
+    tokens.push(make_token(&mut column, TokenType::Arrow, "->"));
+    tokens.push(make_token(
+        &mut column,
+        TokenType::Number("1".to_string()),
+        "1",
+    ));
+    tokens.push(make_token(&mut column, TokenType::Eof, ""));
+
+    let node = build_tree(&tokens, |builder, tokens| {
+        builder.start_node(SyntaxKind::FunctionDeclaration);
+        builder.push_token(&tokens[0]);
+        builder.push_token(&tokens[1]);
+        builder.start_node(SyntaxKind::FunctionParameterList);
+        builder.push_token(&tokens[2]);
+        builder.push_token(&tokens[3]);
+        builder.finish_node();
+        builder.start_node(SyntaxKind::FunctionReturnType);
+        builder.push_token(&tokens[4]);
+        builder.start_node(SyntaxKind::Expression);
+        builder.push_token(&tokens[5]);
+        builder.finish_node();
+        builder.finish_node();
+        builder.push_token(&tokens[6]);
+        builder.start_node(SyntaxKind::Expression);
+        builder.push_token(&tokens[7]);
+        builder.finish_node();
+        builder.finish_node();
+        builder.push_token(&tokens[8]);
+    });
+
+    (node, tokens)
+}
+
 fn for_tokens() -> (SyntaxNode<JvLanguage>, Vec<Token>) {
     let mut column = 0usize;
     let mut tokens = Vec::new();
@@ -890,6 +940,30 @@ fn lowering_table_driven_cases() {
                     }
                     other => panic!("expected function declaration, got {:?}", other),
                 }
+            }),
+        },
+        LoweringCase {
+            build: deprecated_arrow_function_tokens,
+            verify: Box::new(|result| {
+                assert_eq!(
+                    result.diagnostics.len(),
+                    1,
+                    "expected a diagnostic for deprecated arrow syntax"
+                );
+                let diagnostic = &result.diagnostics[0];
+                assert_eq!(diagnostic.severity, LoweringDiagnosticSeverity::Error);
+                assert!(
+                    diagnostic
+                        .message
+                        .contains("`->` 式ボディはサポートされません"),
+                    "unexpected diagnostic message: {}",
+                    diagnostic.message
+                );
+                assert_eq!(
+                    result.statements.len(),
+                    1,
+                    "function should still be lowered for recovery"
+                );
             }),
         },
         LoweringCase {

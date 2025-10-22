@@ -1,0 +1,21 @@
+description = "Deprecated arrow function syntax emits a parser diagnostic"
+source = "../fixtures/deprecated_arrow_body.jv"
+
+[expect]
+statement_count = 1
+
+[expect.parser_diagnostics]
+allowed = true
+max = 1
+
+[expect.lowering_diagnostics]
+allowed = true
+max = 1
+
+[[expect.statements]]
+index = 0
+kind = "function_declaration"
+name = "legacy"
+
+  [expect.statements.span]
+  start_line = 1

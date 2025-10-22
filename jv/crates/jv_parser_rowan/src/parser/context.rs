@@ -764,6 +764,23 @@ impl<'tokens> ParserContext<'tokens> {
         ));
     }
 
+    /// 現在位置付近で診断を報告する。
+    pub(crate) fn report_error(
+        &mut self,
+        message: impl Into<String>,
+        start: usize,
+        end: usize,
+    ) {
+        let message = message.into();
+        let span = self.make_span(start, end);
+        self.push_error_event(&message, span);
+        self.push_diagnostic(ParserDiagnostic::new(
+            message,
+            DiagnosticSeverity::Error,
+            span,
+        ));
+    }
+
     fn push_error_event(&mut self, message: &str, span: TokenSpan) {
         self.events.push(ParseEvent::Error {
             message: message.to_string(),
