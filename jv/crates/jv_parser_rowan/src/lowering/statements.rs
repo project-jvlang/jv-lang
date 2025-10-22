@@ -8,6 +8,7 @@ use jv_ast::statement::{ForInStatement, LoopBinding, LoopStrategy, Property, Val
 use jv_ast::types::{Literal, Modifiers, TypeAnnotation};
 use jv_ast::{Expression, Span, Statement};
 use jv_lexer::{Token, TokenType};
+use jv_parser_syntax_support::support::spans::{expression_span, merge_spans, span_from_token};
 
 /// ローワリング結果。
 #[derive(Debug)]
@@ -124,6 +125,7 @@ fn is_top_level_statement(kind: SyntaxKind) -> bool {
             | SyntaxKind::ThrowStatement
             | SyntaxKind::BreakStatement
             | SyntaxKind::ContinueStatement
+            | SyntaxKind::AssignmentStatement
             | SyntaxKind::Expression
     )
 }
@@ -181,6 +183,7 @@ fn lower_single_statement(
         SyntaxKind::PackageDeclaration => lower_package(context, node),
         SyntaxKind::ImportDeclaration => lower_import(context, node),
         SyntaxKind::CommentStatement => lower_comment(context, node),
+        SyntaxKind::AssignmentStatement => lower_assignment(context, node, diagnostics),
         SyntaxKind::ValDeclaration => lower_value(context, node, true, diagnostics),
         SyntaxKind::VarDeclaration => lower_value(context, node, false, diagnostics),
         SyntaxKind::FunctionDeclaration => lower_function(context, node, diagnostics),
@@ -356,6 +359,144 @@ fn render_line_comment(raw: &str) -> String {
 fn is_jv_only_line_comment(raw: &str) -> bool {
     let trimmed = raw.trim_start();
     trimmed.starts_with("///") || trimmed.starts_with("//*") || raw.contains("*//")
+}
+
+fn lower_assignment(
+    context: &LoweringContext<'_>,
+    node: &JvSyntaxNode,
+    diagnostics: &mut Vec<LoweringDiagnostic>,
+) -> Result<Statement, LoweringDiagnostic> {
+    let target_node = child_node(node, SyntaxKind::AssignmentTarget).ok_or_else(|| {
+        missing_child_diagnostic(
+            context,
+            node,
+            "代入ターゲットを解析できませんでした",
+            SyntaxKind::AssignmentTarget,
+        )
+    })?;
+
+    let target = lower_assignment_target(context, &target_node)?;
+
+    let value_node = node
+        .children()
+        .find(|child| child.kind() == SyntaxKind::Expression)
+        .ok_or_else(|| {
+            missing_child_diagnostic(
+                context,
+                node,
+                "代入式の右辺が見つかりません",
+                SyntaxKind::Expression,
+            )
+        })?;
+
+    let value = lower_expression_shallow(context, &value_node, diagnostics)?;
+    let span = context.span_for(node).unwrap_or_else(Span::dummy);
+
+    Ok(Statement::Assignment {
+        target,
+        value,
+        span,
+    })
+}
+
+fn lower_assignment_target(
+    context: &LoweringContext<'_>,
+    node: &JvSyntaxNode,
+) -> Result<Expression, LoweringDiagnostic> {
+    let tokens = context
+        .tokens_for(node)
+        .into_iter()
+        .filter(|token| !is_trivia_token(token))
+        .collect::<Vec<_>>();
+
+    let mut iter = tokens.into_iter();
+    let first = iter.next().ok_or_else(|| {
+        LoweringDiagnostic::new(
+            LoweringDiagnosticSeverity::Error,
+            "代入ターゲットが空です",
+            context.span_for(node),
+            node.kind(),
+            None,
+            Vec::new(),
+        )
+    })?;
+
+    let (base_name, base_span) = match &first.token_type {
+        TokenType::Identifier(text) => (text.clone(), span_from_token(first)),
+        other => {
+            return Err(LoweringDiagnostic::new(
+                LoweringDiagnosticSeverity::Error,
+                format!(
+                    "代入ターゲットは識別子で始まる必要がありますが {:?} が見つかりました",
+                    other
+                ),
+                context.span_for(node),
+                node.kind(),
+                None,
+                Vec::new(),
+            ))
+        }
+    };
+
+    let mut expr = Expression::Identifier(base_name, base_span.clone());
+
+    while let Some(token) = iter.next() {
+        match &token.token_type {
+            TokenType::Dot => {
+                let property_token = iter.next().ok_or_else(|| {
+                    LoweringDiagnostic::new(
+                        LoweringDiagnosticSeverity::Error,
+                        "`.` の後には識別子が必要です",
+                        context.span_for(node),
+                        node.kind(),
+                        None,
+                        Vec::new(),
+                    )
+                })?;
+
+                let property_name = match &property_token.token_type {
+                    TokenType::Identifier(name) => name.clone(),
+                    other => {
+                        return Err(LoweringDiagnostic::new(
+                            LoweringDiagnosticSeverity::Error,
+                            format!(
+                                "`.` の後には識別子が必要ですが {:?} が見つかりました",
+                                other
+                            ),
+                            context.span_for(node),
+                            node.kind(),
+                            None,
+                            Vec::new(),
+                        ))
+                    }
+                };
+
+                let previous_span = expression_span(&expr);
+                let property_span = span_from_token(property_token);
+                let span = merge_spans(&previous_span, &property_span);
+                expr = Expression::MemberAccess {
+                    object: Box::new(expr),
+                    property: property_name,
+                    span,
+                };
+            }
+            other => {
+                return Err(LoweringDiagnostic::new(
+                    LoweringDiagnosticSeverity::Error,
+                    format!(
+                        "代入ターゲットで想定外のトークン {:?} を検出しました",
+                        other
+                    ),
+                    context.span_for(node),
+                    node.kind(),
+                    None,
+                    Vec::new(),
+                ))
+            }
+        }
+    }
+
+    Ok(expr)
 }
 
 fn lower_value(

@@ -149,7 +149,9 @@ fn function_block_statements_are_lowered() {
         vec![
             StatementKindKey::Comment,
             StatementKindKey::ValDeclaration,
-            StatementKindKey::VarDeclaration
+            StatementKindKey::VarDeclaration,
+            StatementKindKey::Assignment,
+            StatementKindKey::Expression
         ],
         "block statements lowered with expected kinds"
     );

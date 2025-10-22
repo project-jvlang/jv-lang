@@ -252,6 +252,46 @@ fn comment_tokens() -> (SyntaxNode<JvLanguage>, Vec<Token>) {
     (node, tokens)
 }
 
+fn assignment_tokens() -> (SyntaxNode<JvLanguage>, Vec<Token>) {
+    let mut column = 0usize;
+    let mut tokens = Vec::new();
+    tokens.push(make_token(
+        &mut column,
+        TokenType::Identifier("user".to_string()),
+        "user",
+    ));
+    tokens.push(make_token(&mut column, TokenType::Dot, "."));
+    tokens.push(make_token(
+        &mut column,
+        TokenType::Identifier("name".to_string()),
+        "name",
+    ));
+    tokens.push(make_token(&mut column, TokenType::Assign, "="));
+    tokens.push(make_token(
+        &mut column,
+        TokenType::Identifier("value".to_string()),
+        "value",
+    ));
+    tokens.push(make_token(&mut column, TokenType::Eof, ""));
+
+    let node = build_tree(&tokens, |builder, tokens| {
+        builder.start_node(SyntaxKind::AssignmentStatement);
+        builder.start_node(SyntaxKind::AssignmentTarget);
+        builder.push_token(&tokens[0]);
+        builder.push_token(&tokens[1]);
+        builder.push_token(&tokens[2]);
+        builder.finish_node();
+        builder.push_token(&tokens[3]);
+        builder.start_node(SyntaxKind::Expression);
+        builder.push_token(&tokens[4]);
+        builder.finish_node();
+        builder.finish_node();
+        builder.push_token(&tokens[5]);
+    });
+
+    (node, tokens)
+}
+
 fn return_tokens() -> (SyntaxNode<JvLanguage>, Vec<Token>) {
     let mut column = 0usize;
     let mut tokens = Vec::new();
@@ -585,6 +625,44 @@ fn lowering_table_driven_cases() {
                         }
                     }
                     other => panic!("expected return statement, got {:?}", other),
+                }
+            }),
+        },
+        LoweringCase {
+            build: assignment_tokens,
+            verify: Box::new(|result| {
+                assert!(
+                    result.diagnostics.is_empty(),
+                    "unexpected diagnostics: {:?}",
+                    result.diagnostics
+                );
+                let statement = result
+                    .statements
+                    .first()
+                    .expect("expected assignment statement");
+                match statement {
+                    Statement::Assignment { target, value, .. } => {
+                        match target {
+                            Expression::MemberAccess {
+                                object, property, ..
+                            } => {
+                                assert_eq!(property, "name");
+                                match object.as_ref() {
+                                    Expression::Identifier(name, _) => assert_eq!(name, "user"),
+                                    other => panic!(
+                                        "expected identifier object for member access, got {:?}",
+                                        other
+                                    ),
+                                }
+                            }
+                            other => panic!("expected member access target, got {:?}", other),
+                        }
+                        match value {
+                            Expression::Identifier(name, _) => assert_eq!(name, "value"),
+                            other => panic!("expected identifier rhs, got {:?}", other),
+                        }
+                    }
+                    other => panic!("expected assignment statement, got {:?}", other),
                 }
             }),
         },

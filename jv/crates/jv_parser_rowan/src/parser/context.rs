@@ -306,6 +306,7 @@ impl<'tokens> ParserContext<'tokens> {
             ],
             true,
         );
+        self.consume_trivia();
         self.finish_node();
         true
     }
@@ -356,6 +357,7 @@ impl<'tokens> ParserContext<'tokens> {
         let mut depth_paren = 0usize;
         let mut depth_brace = 0usize;
         let mut depth_bracket = 0usize;
+        let mut last_line: Option<usize> = None;
 
         while let Some(token) = self.current_token() {
             let kind = TokenKind::from_token(token);
@@ -368,6 +370,11 @@ impl<'tokens> ParserContext<'tokens> {
             }
             let mut should_break_on_sync = false;
             if respect_statement_boundaries && at_top_level {
+                if let Some(prev_line) = last_line {
+                    if token.line > prev_line {
+                        should_break_on_sync = true;
+                    }
+                }
                 if kind == TokenKind::WhenKw {
                     if let Some(state) = self.expression_states.last_mut() {
                         state.register_when();
@@ -381,6 +388,11 @@ impl<'tokens> ParserContext<'tokens> {
                     if !inside_when {
                         should_break_on_sync = true;
                     }
+                } else if matches!(
+                    kind,
+                    TokenKind::LineComment | TokenKind::BlockComment | TokenKind::DocComment
+                ) {
+                    should_break_on_sync = true;
                 } else if SYNC_TOKENS.contains(&kind) {
                     should_break_on_sync = true;
                 }
@@ -442,6 +454,7 @@ impl<'tokens> ParserContext<'tokens> {
             }
 
             self.bump_raw();
+            last_line = Some(token.line);
         }
 
         let consumed = self.cursor > start;

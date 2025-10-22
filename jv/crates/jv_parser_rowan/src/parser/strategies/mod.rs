@@ -1,3 +1,4 @@
+mod assignment;
 mod class;
 mod control;
 mod expression;
@@ -35,5 +36,6 @@ static STRATEGIES: &[StrategyRef] = &[
     &function::FUNCTION_STRATEGY,
     &class::CLASS_STRATEGY,
     &control::CONTROL_STRATEGY,
+    &assignment::ASSIGNMENT_STRATEGY,
     &expression::EXPRESSION_STRATEGY,
 ];
