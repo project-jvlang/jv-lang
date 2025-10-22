@@ -403,7 +403,7 @@ fn lower_expression_shallow(
     node: &JvSyntaxNode,
     diagnostics: &mut Vec<LoweringDiagnostic>,
 ) -> Result<Expression, LoweringDiagnostic> {
-    let tokens = context.tokens_for(node);
+    let mut tokens = context.tokens_for(node);
     if tokens.is_empty() {
         return Err(LoweringDiagnostic::new(
             LoweringDiagnosticSeverity::Error,
@@ -415,9 +415,33 @@ fn lower_expression_shallow(
         ));
     }
 
+    if let Some(comment_pos) = tokens
+        .iter()
+        .position(|token| matches!(token.token_type, TokenType::LineComment(_)))
+    {
+        tokens.truncate(comment_pos);
+    }
+
+    let meaningful_tokens: Vec<&Token> = tokens
+        .iter()
+        .copied()
+        .filter(|token| !is_trivia_token(token))
+        .collect();
+
+    if meaningful_tokens.is_empty() {
+        return Err(LoweringDiagnostic::new(
+            LoweringDiagnosticSeverity::Error,
+            "式が解析対象のトークンを含みません",
+            context.span_for(node),
+            node.kind(),
+            first_identifier_text(node),
+            collect_annotation_texts(node),
+        ));
+    }
+
     let span = context.span_for(node).unwrap_or_else(jv_ast::Span::dummy);
-    if tokens.len() == 1 {
-        let token = tokens[0];
+    if meaningful_tokens.len() == 1 {
+        let token = meaningful_tokens[0];
         let expr = match &token.token_type {
             TokenType::Number(value) => Expression::Literal(Literal::Number(value.clone()), span),
             TokenType::Boolean(value) => Expression::Literal(Literal::Boolean(*value), span),
@@ -437,7 +461,10 @@ fn lower_expression_shallow(
         node,
     );
 
-    Ok(Expression::Identifier(join_tokens(&tokens), span))
+    Ok(Expression::Identifier(
+        join_tokens(&meaningful_tokens),
+        span,
+    ))
 }
 
 fn qualified_name_segments(
@@ -491,6 +518,17 @@ fn join_tokens(tokens: &[&Token]) -> String {
         .iter()
         .map(|token| token.lexeme.as_str())
         .collect::<String>()
+}
+
+fn is_trivia_token(token: &Token) -> bool {
+    matches!(
+        token.token_type,
+        TokenType::Whitespace(_)
+            | TokenType::Newline
+            | TokenType::LineComment(_)
+            | TokenType::BlockComment(_)
+            | TokenType::JavaDocComment(_)
+    )
 }
 
 fn push_diagnostic(

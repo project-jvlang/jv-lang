@@ -82,6 +82,16 @@ fn harness_fixture_parses_successfully() {
         "expected no lowering errors, got {:?}",
         lowering.diagnostics
     );
+    let warning_count = lowering
+        .diagnostics
+        .iter()
+        .filter(|diag| diag.severity == LoweringDiagnosticSeverity::Warning)
+        .count();
+    assert_eq!(
+        warning_count, 0,
+        "expected no lowering warnings, got {:?}",
+        lowering.diagnostics
+    );
 
     assert_eq!(
         lowering.statements.len(),
