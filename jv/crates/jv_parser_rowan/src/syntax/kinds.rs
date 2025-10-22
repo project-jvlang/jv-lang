@@ -84,20 +84,12 @@ pub enum SyntaxKind {
     AssignmentTarget,
     /// コメントステートメント。
     CommentStatement,
-    /// if 文。
-    IfStatement,
-    /// else 節。
-    ElseClause,
     /// when 文。
     WhenStatement,
     /// when の分岐。
     WhenBranch,
     /// for 文。
     ForStatement,
-    /// while 文。
-    WhileStatement,
-    /// do-while 文。
-    DoWhileStatement,
     /// return 文。
     ReturnStatement,
     /// throw 文。
@@ -694,13 +686,9 @@ mod tests {
         ("ClassDeclaration", SyntaxKind::ClassDeclaration),
         ("ClassBody", SyntaxKind::ClassBody),
         ("Block", SyntaxKind::Block),
-        ("IfStatement", SyntaxKind::IfStatement),
-        ("ElseClause", SyntaxKind::ElseClause),
         ("WhenStatement", SyntaxKind::WhenStatement),
         ("WhenBranch", SyntaxKind::WhenBranch),
         ("ForStatement", SyntaxKind::ForStatement),
-        ("WhileStatement", SyntaxKind::WhileStatement),
-        ("DoWhileStatement", SyntaxKind::DoWhileStatement),
         ("ReturnStatement", SyntaxKind::ReturnStatement),
         ("ThrowStatement", SyntaxKind::ThrowStatement),
         ("BreakStatement", SyntaxKind::BreakStatement),
@@ -725,13 +713,10 @@ mod tests {
         ("UseKw", SyntaxKind::UseKw),
         ("DeferKw", SyntaxKind::DeferKw),
         ("SpawnKw", SyntaxKind::SpawnKw),
-        ("IfKw", SyntaxKind::IfKw),
         ("ElseKw", SyntaxKind::ElseKw),
         ("WhenKw", SyntaxKind::WhenKw),
         ("ForKw", SyntaxKind::ForKw),
         ("InKw", SyntaxKind::InKw),
-        ("WhileKw", SyntaxKind::WhileKw),
-        ("DoKw", SyntaxKind::DoKw),
         ("WhereKw", SyntaxKind::WhereKw),
         ("LineComment", SyntaxKind::LineComment),
         ("BlockComment", SyntaxKind::BlockComment),

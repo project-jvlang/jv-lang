@@ -10,6 +10,6 @@ fun evaluate(value: Any): Int {
 }
 
 fun main() {
-    val payload: Any = Wrapper("Alpha", 10)
+    val payload: Any = Wrapper("Alpha" 10)
     println(evaluate(payload))
 }

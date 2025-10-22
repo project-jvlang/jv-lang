@@ -3,12 +3,12 @@ data class Span(val range: Range, val bias: Int)
 
 fun spread(span: Span): Int {
     return when (span) {
-        Span(Range(start, end), bias) -> end - start + bias
+        Span(Range(start end) bias) -> end - start + bias
         else -> bias
     }
 }
 
 fun main() {
-    val input = Span(Range(2, 9), 3)
+    val input = Span(Range(2 9) 3)
     println(spread(input))
 }

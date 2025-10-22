@@ -10,6 +10,6 @@ fun compute(value: Any): Int {
 }
 
 fun main() {
-    val payload: Any = Box(12, "boom!")
+    val payload: Any = Box(12 "boom!")
     println(compute(payload))
 }

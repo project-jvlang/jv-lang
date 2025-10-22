@@ -46,9 +46,8 @@ fun <T> CollectionWrapper<T>.isEmpty(): Boolean {
  */
 fun <T, R> List<T>.mapToWrapper(transform: (T) -> R): CollectionWrapper<R> {
     val result: ArrayList<R> = ArrayList()
-    val iterator = this.iterator()
-    while (iterator.hasNext()) {
-        result.add(transform(iterator.next()))
+    for (item in this) {
+        result.add(transform(item))
     }
     return CollectionWrapper(result)
 }

@@ -10,6 +10,6 @@ fun aggregate(value: Any): Int {
 }
 
 fun main() {
-    val payload: Any = Payload(4, 9)
+    val payload: Any = Payload(4 9)
     println(aggregate(payload))
 }

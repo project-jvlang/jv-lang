@@ -8,5 +8,5 @@ fun decide(a: Boolean, b: Boolean): String {
 }
 
 fun main() {
-    println(decide(true, false))
+    println(decide(true false))
 }

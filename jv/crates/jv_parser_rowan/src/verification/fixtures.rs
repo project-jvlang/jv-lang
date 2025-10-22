@@ -206,6 +206,5 @@ pub enum StatementKindKey {
     ValDeclaration,
     VarDeclaration,
     WhenStatement,
-    IfStatement,
     Unknown,
 }

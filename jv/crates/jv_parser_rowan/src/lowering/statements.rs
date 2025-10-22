@@ -119,11 +119,8 @@ fn is_top_level_statement(kind: SyntaxKind) -> bool {
             | SyntaxKind::VarDeclaration
             | SyntaxKind::FunctionDeclaration
             | SyntaxKind::ClassDeclaration
-            | SyntaxKind::IfStatement
             | SyntaxKind::WhenStatement
             | SyntaxKind::ForStatement
-            | SyntaxKind::WhileStatement
-            | SyntaxKind::DoWhileStatement
             | SyntaxKind::ReturnStatement
             | SyntaxKind::ThrowStatement
             | SyntaxKind::BreakStatement
@@ -202,11 +199,9 @@ fn lower_single_statement(
         SyntaxKind::UseStatement => lower_use(context, node, diagnostics),
         SyntaxKind::DeferStatement => lower_defer(context, node, diagnostics),
         SyntaxKind::SpawnStatement => lower_spawn(context, node, diagnostics),
-        SyntaxKind::IfStatement
-        | SyntaxKind::WhenStatement
-        | SyntaxKind::WhileStatement
-        | SyntaxKind::DoWhileStatement
-        | SyntaxKind::Expression => lower_expression_statement(context, node, diagnostics),
+        SyntaxKind::WhenStatement | SyntaxKind::Expression => {
+            lower_expression_statement(context, node, diagnostics)
+        }
         kind => Err(LoweringDiagnostic::new(
             LoweringDiagnosticSeverity::Error,
             format!(

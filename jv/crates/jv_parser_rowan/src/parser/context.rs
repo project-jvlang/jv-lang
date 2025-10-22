@@ -16,11 +16,8 @@ const SYNC_TOKENS: &[TokenKind] = &[
     TokenKind::FunKw,
     TokenKind::ClassKw,
     TokenKind::DataKw,
-    TokenKind::IfKw,
     TokenKind::WhenKw,
     TokenKind::ForKw,
-    TokenKind::WhileKw,
-    TokenKind::DoKw,
     TokenKind::ReturnKw,
     TokenKind::ThrowKw,
     TokenKind::BreakKw,
@@ -377,6 +374,9 @@ impl<'tokens> ParserContext<'tokens> {
                     if token.line > prev_line {
                         should_break_on_sync = true;
                     }
+                }
+                if kind == TokenKind::Comma {
+                    should_break_on_sync = true;
                 }
                 if kind == TokenKind::WhenKw {
                     if let Some(state) = self.expression_states.last_mut() {

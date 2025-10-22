@@ -3,12 +3,12 @@ data class Tree(val node: Node, val bonus: Int)
 
 fun sum(tree: Tree): Int {
     return when (tree) {
-        Tree(Node(left, right), bonus) -> left + right + bonus
+        Tree(Node(left right) bonus) -> left + right + bonus
         else -> bonus
     }
 }
 
 fun main() {
-    val input = Tree(Node(6, 7), 5)
+    val input = Tree(Node(6 7) 5)
     println(sum(input))
 }

@@ -18,16 +18,20 @@ fn parses_core_statements() {
 
         val answer: Int = 42
 
-        fun greet(name: String) {
-            if (name == null) {
-                return
-            } else if (name == "admin") {
-                break
-            }
+        fun greet(names: List<String>) {
+            for (name in names) {
+                when (name) {
+                    "guest" -> continue
+                    "admin" -> return
+                    else -> {
+                        throw IllegalStateException()
+                    }
+                }
 
-            when (name) {
-                "guest" -> return
-                else -> throw IllegalStateException()
+                when (name.length) {
+                    0 -> break
+                    else -> {}
+                }
             }
         }
     "#;
@@ -53,8 +57,12 @@ fn parses_core_statements() {
     assert!(started.contains(&SyntaxKind::ImportDeclaration));
     assert!(started.contains(&SyntaxKind::ValDeclaration));
     assert!(started.contains(&SyntaxKind::FunctionDeclaration));
-    assert!(started.contains(&SyntaxKind::IfStatement));
+    assert!(started.contains(&SyntaxKind::ForStatement));
     assert!(started.contains(&SyntaxKind::WhenStatement));
+    assert!(started.contains(&SyntaxKind::BreakStatement));
+    assert!(started.contains(&SyntaxKind::ContinueStatement));
+    assert!(started.contains(&SyntaxKind::ReturnStatement));
+    assert!(started.contains(&SyntaxKind::ThrowStatement));
 }
 
 #[test]
@@ -110,23 +118,26 @@ fn parses_deeply_nested_constructs() {
         class Complex {
             fun process(items: List<Int>) {
                 for (item in items) {
-                    when (item) {
+                    when (item % 3) {
                         0 -> continue
+                        1 -> {
+                            var attempts = 0
+                            for (candidate in items) {
+                                attempts = attempts + candidate
+                                when (attempts) {
+                                    5 -> break
+                                    else -> {}
+                                }
+                            }
+                        }
                         else -> {
-                            var flag = false
-                            do {
-                                val sentinel = threshold
-                            } while (flag)
-
-                            if (flag) {
-                                throw IllegalStateException()
+                            val doubled = item * 2
+                            when (doubled) {
+                                10 -> return
+                                else -> throw IllegalArgumentException("invalid")
                             }
                         }
                     }
-                }
-
-                while (true) {
-                    break
                 }
 
                 return
@@ -170,9 +181,6 @@ fn parses_deeply_nested_constructs() {
         SyntaxKind::FunctionDeclaration,
         SyntaxKind::ForStatement,
         SyntaxKind::WhenStatement,
-        SyntaxKind::DoWhileStatement,
-        SyntaxKind::IfStatement,
-        SyntaxKind::WhileStatement,
         SyntaxKind::ReturnStatement,
         SyntaxKind::ThrowStatement,
         SyntaxKind::BreakStatement,
@@ -198,23 +206,26 @@ fn build_tree_from_events_handles_deep_nesting() {
         class Complex {
             fun process(items: List<Int>) {
                 for (item in items) {
-                    when (item) {
+                    when (item % 3) {
                         0 -> continue
+                        1 -> {
+                            var attempts = 0
+                            for (candidate in items) {
+                                attempts = attempts + candidate
+                                when (attempts) {
+                                    5 -> break
+                                    else -> {}
+                                }
+                            }
+                        }
                         else -> {
-                            var flag = false
-                            do {
-                                val sentinel = threshold
-                            } while (flag)
-
-                            if (flag) {
-                                throw IllegalStateException()
+                            val doubled = item * 2
+                            when (doubled) {
+                                10 -> return
+                                else -> throw IllegalArgumentException("invalid")
                             }
                         }
                     }
-                }
-
-                while (true) {
-                    break
                 }
 
                 return
@@ -258,15 +269,25 @@ fn build_tree_from_events_handles_deep_nesting() {
         "when statement should be nested within a function declaration"
     );
 
-    let do_while_node = tree
-        .descendants()
-        .find(|node| node.kind() == SyntaxKind::DoWhileStatement)
-        .expect("expected do-while statement in nested sample");
     assert!(
-        do_while_node
-            .ancestors()
-            .any(|ancestor| ancestor.kind() == SyntaxKind::FunctionDeclaration),
-        "do-while statement should be nested within a function declaration"
+        tree.descendants().any(|node| {
+            node.kind() == SyntaxKind::ForStatement
+                && node
+                    .ancestors()
+                    .skip(1)
+                    .any(|ancestor| ancestor.kind() == SyntaxKind::ForStatement)
+        }),
+        "expected to find a nested for statement within another for loop"
+    );
+
+    assert!(
+        tree.descendants().any(|node| {
+            node.kind() == SyntaxKind::ThrowStatement
+                && node
+                    .ancestors()
+                    .any(|ancestor| ancestor.kind() == SyntaxKind::FunctionDeclaration)
+        }),
+        "expected throw statement within function declaration"
     );
 
     // Ensure class nesting is preserved (inner class inside outer class body).
@@ -313,9 +334,13 @@ fn nested_when_branch_emits_expected_event_sequence() {
                     when (item) {
                         0 -> return
                         else -> {
-                            do {
-                                val snapshot: List<List<String?>> = collect()
-                            } while (false)
+                            for (candidate in items) {
+                                val snapshot = candidate * 2
+                                when (snapshot) {
+                                    0 -> break
+                                    else -> {}
+                                }
+                            }
                         }
                     }
                 }
@@ -349,7 +374,7 @@ fn nested_when_branch_emits_expected_event_sequence() {
                 SyntaxKind::ForStatement,
                 SyntaxKind::WhenStatement,
                 SyntaxKind::WhenBranch,
-                SyntaxKind::DoWhileStatement
+                SyntaxKind::ForStatement
             ]
         ),
         "expected nested when branch subsequence in {:?}",
@@ -451,8 +476,9 @@ fn missing_branch_closing_brace_recovers_with_block_error() {
         fun example(value: Int) {
             when (value) {
                 else -> {
-                    if (value > 0) {
-                        return
+                    when (value % 2) {
+                        0 -> return
+                        else -> {}
                     }
                 // missing brace on purpose
             }
@@ -501,6 +527,39 @@ fn missing_branch_closing_brace_recovers_with_block_error() {
         ancestor_kinds.contains(&SyntaxKind::FunctionDeclaration),
         "BlockError should remain scoped to the surrounding function, got ancestry {:?}",
         ancestor_kinds
+    );
+}
+
+#[test]
+fn unsupported_if_statement_reports_error() {
+    let source = r#"
+        fun demo() {
+            if (true) {
+                return
+            }
+        }
+    "#;
+
+    let tokens = lex(source);
+    let output = parse(&tokens);
+
+    assert!(
+        output
+            .diagnostics
+            .iter()
+            .any(|diag| diag.message.contains("`if`")),
+        "expected diagnostic about unsupported if statement, got {:?}",
+        output.diagnostics
+    );
+
+    assert!(
+        output.events.iter().any(|event| match event {
+            ParseEvent::StartNode { kind } => {
+                matches!(kind, SyntaxKind::Error | SyntaxKind::BlockError)
+            }
+            _ => false,
+        }),
+        "expected error or block error node emitted for unsupported if statement"
     );
 }
 

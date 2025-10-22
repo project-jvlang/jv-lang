@@ -10,6 +10,6 @@ fun score(value: Any): Int {
 }
 
 fun main() {
-    val payload: Any = RangeWrapper(2, 9)
+    val payload: Any = RangeWrapper(2 9)
     println(score(payload))
 }

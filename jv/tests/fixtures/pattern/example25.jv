@@ -3,12 +3,12 @@ data class Holder(val pair: Pair3, val extra: Int)
 
 fun delta(holder: Holder): Int {
     return when (holder) {
-        Holder(Pair3(first, second), extra) -> first - second + extra
+        Holder(Pair3(first second) extra) -> first - second + extra
         else -> extra
     }
 }
 
 fun main() {
-    val input = Holder(Pair3(10, 3), 4)
+    val input = Holder(Pair3(10 3) 4)
     println(delta(input))
 }
