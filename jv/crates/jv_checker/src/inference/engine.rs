@@ -328,12 +328,14 @@ mod tests {
                 name: "lhs".into(),
                 type_annotation: Some(TypeAnnotation::Simple("Int".into())),
                 default_value: None,
+                modifiers: ParameterModifiers::default(),
                 span: dummy_span(),
             },
             Parameter {
                 name: "rhs".into(),
                 type_annotation: Some(TypeAnnotation::Simple("Int".into())),
                 default_value: None,
+                modifiers: ParameterModifiers::default(),
                 span: dummy_span(),
             },
         ];
@@ -383,6 +385,7 @@ mod tests {
             name: "value".into(),
             type_annotation: None,
             default_value: None,
+            modifiers: ParameterModifiers::default(),
             span: dummy_span(),
         }];
         let body = Expression::Identifier("value".into(), dummy_span());
@@ -424,6 +427,7 @@ mod tests {
                 Literal::String("hello".into()),
                 dummy_span(),
             )),
+            modifiers: ParameterModifiers::default(),
             span: dummy_span(),
         }];
         let body = Expression::Identifier("message".into(), dummy_span());
@@ -460,6 +464,7 @@ mod tests {
             name: "x".into(),
             type_annotation: None,
             default_value: None,
+            modifiers: ParameterModifiers::default(),
             span: dummy_span(),
         }];
         // return 文を持たない関数: 型が Unknown のまま残る

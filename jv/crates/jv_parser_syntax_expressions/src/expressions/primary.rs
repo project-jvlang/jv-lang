@@ -1,8 +1,8 @@
 use chumsky::prelude::*;
 use chumsky::Parser as ChumskyParser;
 use jv_ast::{
-    Expression, Literal, MultilineKind, MultilineStringLiteral, Parameter, Pattern,
-    SequenceDelimiter, Span, Statement, StringPart, WhenArm,
+    Expression, Literal, MultilineKind, MultilineStringLiteral, Parameter, ParameterModifiers,
+    Pattern, SequenceDelimiter, Span, Statement, StringPart, WhenArm,
 };
 use jv_lexer::{StringDelimiterKind, StringLiteralMetadata, Token, TokenMetadata, TokenType};
 
@@ -199,6 +199,7 @@ fn lambda_parameter_clause(
             name,
             type_annotation,
             default_value: None,
+            modifiers: ParameterModifiers::default(),
             span: Span::default(),
         });
 

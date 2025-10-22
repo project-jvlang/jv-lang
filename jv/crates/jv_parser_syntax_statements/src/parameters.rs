@@ -1,6 +1,6 @@
 use chumsky::prelude::*;
 use chumsky::Parser as ChumskyParser;
-use jv_ast::{Expression, Parameter};
+use jv_ast::{Expression, Parameter, ParameterModifiers, ParameterProperty};
 use jv_lexer::Token;
 
 use jv_parser_syntax_support::{
@@ -22,17 +22,34 @@ pub fn parameter(
     expr: impl ChumskyParser<Token, Expression, Error = Simple<Token>> + Clone + 'static,
 ) -> impl ChumskyParser<Token, Parameter, Error = Simple<Token>> + Clone {
     token_val()
-        .or(token_var())
+        .map(|_| ParameterProperty::Val)
+        .or(token_var().map(|_| ParameterProperty::Var))
         .repeated()
-        .ignore_then(identifier_with_span())
+        .then(identifier_with_span())
         .then(token_colon().ignore_then(type_annotation()).or_not())
         .then(token_assign().ignore_then(expr).or_not())
         .map(
-            |(((name, span), type_annotation), default_value)| Parameter {
-                name,
-                type_annotation,
-                default_value,
-                span,
+            |(((properties, (name, span)), type_annotation), default_value)| {
+                let mut modifiers = ParameterModifiers::default();
+                if properties
+                    .iter()
+                    .any(|property| matches!(property, ParameterProperty::Var))
+                {
+                    modifiers.property = ParameterProperty::Var;
+                } else if properties
+                    .iter()
+                    .any(|property| matches!(property, ParameterProperty::Val))
+                {
+                    modifiers.property = ParameterProperty::Val;
+                }
+
+                Parameter {
+                    name,
+                    type_annotation,
+                    default_value,
+                    modifiers,
+                    span,
+                }
             },
         )
         .boxed()

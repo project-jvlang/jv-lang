@@ -6,7 +6,7 @@ use jv_ir::{
     error::TransformError,
     types::{IrProgram, IrStatement},
 };
-use jv_parser::diagnostics::{
+use jv_parser::frontend::{
     Diagnostic as FrontendDiagnostic, DiagnosticSeverity as FrontendSeverity,
 };
 use jv_parser::ParseError;

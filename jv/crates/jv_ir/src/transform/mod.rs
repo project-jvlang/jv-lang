@@ -119,6 +119,7 @@ pub fn transform_statement(
             modifiers,
             origin,
             span,
+            ..
         } => Ok(vec![desugar_val_declaration(
             name,
             type_annotation,
@@ -134,6 +135,7 @@ pub fn transform_statement(
             initializer,
             modifiers,
             span,
+            ..
         } => Ok(vec![desugar_var_declaration(
             name,
             type_annotation,
@@ -222,6 +224,7 @@ pub fn transform_statement(
             target,
             value,
             span,
+            ..
         } => {
             let ir_target = transform_expression(target, context)?;
             let java_type = extract_java_type(&ir_target).ok_or_else(|| {

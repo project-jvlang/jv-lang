@@ -298,12 +298,52 @@ pub enum ImplicitWhenEnd {
     Unit { span: Span },
 }
 
+/// Parameter property binding (e.g. primary constructor `val`/`var`).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub enum ParameterProperty {
+    /// No property binding; parameter is local to the callable.
+    None,
+    /// `val` parameter; exposes a read-only property.
+    Val,
+    /// `var` parameter; exposes a mutable property.
+    Var,
+}
+
+impl Default for ParameterProperty {
+    fn default() -> Self {
+        Self::None
+    }
+}
+
+/// Modifier flags attached to a function or lambda parameter.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ParameterModifiers {
+    #[serde(default)]
+    pub property: ParameterProperty,
+    #[serde(default)]
+    pub is_mut: bool,
+    #[serde(default)]
+    pub is_ref: bool,
+}
+
+impl Default for ParameterModifiers {
+    fn default() -> Self {
+        Self {
+            property: ParameterProperty::None,
+            is_mut: false,
+            is_ref: false,
+        }
+    }
+}
+
 /// Function parameters with default values and named parameter support
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Parameter {
     pub name: String,
     pub type_annotation: Option<TypeAnnotation>,
     pub default_value: Option<Expression>,
+    #[serde(default)]
+    pub modifiers: ParameterModifiers,
     pub span: Span,
 }
 

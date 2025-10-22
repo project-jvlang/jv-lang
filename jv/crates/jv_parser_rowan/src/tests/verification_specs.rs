@@ -5,6 +5,7 @@ use crate::parser::parse as parse_tokens;
 use crate::verification::{self, HarnessReport, StatementKindKey};
 use crate::{JvLanguage, ParseBuilder};
 use jv_lexer::{Lexer, TokenType};
+use jv_ast::expression::ParameterProperty;
 use rowan::SyntaxNode;
 
 #[test]
@@ -200,4 +201,70 @@ fn comment_fixture_emits_comment_statements() {
         "expected package + three comments + val statement order, got {:?}",
         kinds
     );
+}
+
+#[test]
+fn function_parameters_preserve_modifiers() {
+    let source = r#"
+        package demo
+
+        fun modifiers(val name: String, var age: Int, ref mut handle: Handle) = name
+    "#;
+
+    let tokens = Lexer::new(source.to_string())
+        .tokenize()
+        .expect("lexing parameter modifier sample");
+
+    let parse_output = parse_tokens(&tokens);
+    assert!(
+        parse_output.diagnostics.is_empty(),
+        "expected no parser diagnostics, got {:?}",
+        parse_output.diagnostics
+    );
+
+    let green = ParseBuilder::build_from_events(&parse_output.events, &tokens);
+    let syntax: SyntaxNode<JvLanguage> = SyntaxNode::new_root(green);
+    let lowering = lower_program(&syntax, &tokens);
+
+    assert!(
+        lowering
+            .diagnostics
+            .iter()
+            .all(|diag| diag.severity != LoweringDiagnosticSeverity::Error),
+        "expected no lowering errors, got {:?}",
+        lowering.diagnostics
+    );
+
+    let function = lowering
+        .statements
+        .iter()
+        .find_map(|statement| match statement {
+            jv_ast::Statement::FunctionDeclaration { name, parameters, .. }
+                if name == "modifiers" =>
+            {
+                Some(parameters)
+            }
+            _ => None,
+        })
+        .expect("function declaration to be lowered");
+
+    assert_eq!(function.len(), 3, "expected three parameters");
+
+    let first = &function[0];
+    assert_eq!(first.name, "name");
+    assert_eq!(first.modifiers.property, ParameterProperty::Val);
+    assert!(!first.modifiers.is_mut);
+    assert!(!first.modifiers.is_ref);
+
+    let second = &function[1];
+    assert_eq!(second.name, "age");
+    assert_eq!(second.modifiers.property, ParameterProperty::Var);
+    assert!(!second.modifiers.is_mut);
+    assert!(!second.modifiers.is_ref);
+
+    let third = &function[2];
+    assert_eq!(third.name, "handle");
+    assert_eq!(third.modifiers.property, ParameterProperty::None);
+    assert!(third.modifiers.is_ref);
+    assert!(third.modifiers.is_mut);
 }

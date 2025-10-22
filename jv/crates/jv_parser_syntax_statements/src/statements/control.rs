@@ -135,11 +135,14 @@ fn assignment_target_parser() -> impl ChumskyParser<Token, Expression, Error = S
 fn loop_binding_parser() -> impl ChumskyParser<Token, LoopBinding, Error = Simple<Token>> + Clone {
     identifier_with_span()
         .then(type_annotation_clause())
-        .map(|((name, span), type_annotation)| LoopBinding {
-            name,
-            pattern: Some(BindingPatternKind::identifier(name.clone(), span.clone())),
-            type_annotation,
-            span,
+        .map(|((name, span), type_annotation)| {
+            let pattern = BindingPatternKind::identifier(name.clone(), span.clone());
+            LoopBinding {
+                name,
+                pattern: Some(pattern),
+                type_annotation,
+                span,
+            }
         })
 }
 

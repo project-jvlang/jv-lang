@@ -4,7 +4,8 @@ use super::helpers::{
 use crate::syntax::SyntaxKind;
 use jv_ast::comments::{CommentKind, CommentStatement, CommentVisibility};
 use jv_ast::expression::{
-    Argument, CallArgumentMetadata, CallArgumentStyle, Parameter, StringPart, WhenArm,
+    Argument, CallArgumentMetadata, CallArgumentStyle, Parameter, ParameterModifiers,
+    ParameterProperty, StringPart, WhenArm,
 };
 use jv_ast::json::{
     JsonComment, JsonCommentKind, JsonEntry, JsonLiteral, JsonValue, NumberGrouping,
@@ -2161,6 +2162,7 @@ mod expression_parser {
                             name: name.clone(),
                             type_annotation: None,
                             default_value: None,
+                            modifiers: ParameterModifiers::default(),
                             span,
                         }])
                     }
@@ -2247,6 +2249,7 @@ mod expression_parser {
                 name,
                 type_annotation,
                 default_value: None,
+                modifiers: ParameterModifiers::default(),
                 span,
             })
         }
@@ -3515,6 +3518,104 @@ fn extract_identifier(tokens: &[&Token]) -> Option<String> {
     })
 }
 
+fn lower_parameter_modifiers(
+    context: &LoweringContext<'_>,
+    parameter: &JvSyntaxNode,
+    diagnostics: &mut Vec<LoweringDiagnostic>,
+) -> ParameterModifiers {
+    let mut modifiers = ParameterModifiers::default();
+    let mut property_seen: Option<ParameterProperty> = None;
+
+    let Some(list) = child_node(parameter, SyntaxKind::ParameterModifierList) else {
+        return modifiers;
+    };
+
+    for modifier in list
+        .children()
+        .filter(|child| child.kind() == SyntaxKind::ParameterModifier)
+    {
+        let tokens = context.tokens_for(&modifier);
+        let Some(token) = tokens
+            .iter()
+            .copied()
+            .find(|token| !is_trivia_token(token))
+        else {
+            continue;
+        };
+
+        match &token.token_type {
+            TokenType::Val => {
+                let new_property = ParameterProperty::Val;
+                if let Some(previous) = property_seen {
+                    let message = if previous == new_property {
+                        "`val` 修飾子が重複しています"
+                    } else {
+                        "`val` と `var` を同時に指定することはできません"
+                    };
+                    push_diagnostic(
+                        diagnostics,
+                        LoweringDiagnosticSeverity::Error,
+                        message,
+                        context,
+                        &modifier,
+                    );
+                }
+                modifiers.property = new_property;
+                property_seen = Some(new_property);
+            }
+            TokenType::Var => {
+                let new_property = ParameterProperty::Var;
+                if let Some(previous) = property_seen {
+                    let message = if previous == new_property {
+                        "`var` 修飾子が重複しています"
+                    } else {
+                        "`val` と `var` を同時に指定することはできません"
+                    };
+                    push_diagnostic(
+                        diagnostics,
+                        LoweringDiagnosticSeverity::Error,
+                        message,
+                        context,
+                        &modifier,
+                    );
+                }
+                modifiers.property = new_property;
+                property_seen = Some(new_property);
+            }
+            TokenType::Identifier(name) => match name.as_str() {
+                "mut" => modifiers.is_mut = true,
+                "ref" => modifiers.is_ref = true,
+                other => {
+                    push_diagnostic(
+                        diagnostics,
+                        LoweringDiagnosticSeverity::Error,
+                        format!(
+                            "未対応のパラメータ修飾子 `{}` を検出しました",
+                            other
+                        ),
+                        context,
+                        &modifier,
+                    );
+                }
+            },
+            _ => {
+                push_diagnostic(
+                    diagnostics,
+                    LoweringDiagnosticSeverity::Error,
+                    format!(
+                        "未対応のパラメータ修飾子 `{}` を検出しました",
+                        token.lexeme
+                    ),
+                    context,
+                    &modifier,
+                );
+            }
+        }
+    }
+
+    modifiers
+}
+
 fn lower_parameters(
     context: &LoweringContext<'_>,
     list: &JvSyntaxNode,
@@ -3528,11 +3629,8 @@ fn lower_parameters(
             continue;
         }
 
-        let tokens = context.tokens_for(&child);
-        if tokens
-            .iter()
-            .any(|token| matches!(token.token_type, TokenType::Var))
-        {
+        let modifiers = lower_parameter_modifiers(context, &child, diagnostics);
+        if matches!(modifiers.property, ParameterProperty::Var) {
             has_mutable = true;
         }
 
@@ -3573,6 +3671,7 @@ fn lower_parameters(
             name,
             type_annotation,
             default_value: None,
+            modifiers,
             span,
         });
     }

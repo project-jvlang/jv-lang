@@ -118,20 +118,39 @@ fn parse_parameter_list(ctx: &mut ParserContext<'_>) -> bool {
 
 fn parse_parameter_modifier(ctx: &mut ParserContext<'_>) {
     ctx.consume_trivia();
-    let modifier = match ctx.peek_significant_kind() {
-        Some(TokenKind::ValKw) | Some(TokenKind::VarKw) => ctx.peek_significant_kind(),
-        _ => None,
-    };
+    let mut consumed_any = false;
 
-    if let Some(kind) = modifier {
-        ctx.start_node(SyntaxKind::ParameterModifierList);
-        ctx.start_node(SyntaxKind::ParameterModifier);
-        ctx.bump_raw(); // val/var
-        ctx.finish_node();
-        ctx.finish_node();
-        if kind == TokenKind::VarKw {
-            // `var` パラメータは追加で `var` 以外の修飾も受け付けない。
+    loop {
+        ctx.consume_trivia();
+        let Some((index, kind)) = ctx.peek_significant_kind_n(0) else {
+            break;
+        };
+
+        let token = &ctx.tokens[index];
+        let recognized = match kind {
+            TokenKind::ValKw | TokenKind::VarKw => true,
+            TokenKind::Identifier => {
+                matches!(token.lexeme.as_str(), "mut" | "ref")
+            }
+            _ => false,
+        };
+
+        if !recognized {
+            break;
         }
+
+        if !consumed_any {
+            ctx.start_node(SyntaxKind::ParameterModifierList);
+            consumed_any = true;
+        }
+
+        ctx.start_node(SyntaxKind::ParameterModifier);
+        ctx.bump_raw();
+        ctx.finish_node();
+    }
+
+    if consumed_any {
+        ctx.finish_node();
     }
 }
 

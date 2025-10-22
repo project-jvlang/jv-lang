@@ -49,6 +49,7 @@ fn test_statement_function_declaration() {
         name: "x".to_string(),
         type_annotation: Some(TypeAnnotation::Simple("Int".to_string())),
         default_value: None,
+        modifiers: ParameterModifiers::default(),
         span: dummy_span(),
     };
     let stmt = Statement::FunctionDeclaration {
@@ -148,6 +149,7 @@ fn test_statement_data_class_declaration() {
         name: "value".to_string(),
         type_annotation: Some(TypeAnnotation::Simple("Int".to_string())),
         default_value: None,
+        modifiers: ParameterModifiers::default(),
         span: dummy_span(),
     };
     let stmt = Statement::DataClassDeclaration {

@@ -142,9 +142,10 @@ pub(super) fn val_declaration_parser(
         .map(
             |(((modifiers, (name, binding_span)), type_annotation), initializer)| {
                 let span = expression_span(&initializer);
+                let binding = BindingPatternKind::identifier(name.clone(), binding_span);
                 Statement::ValDeclaration {
                     name,
-                    binding: Some(BindingPatternKind::identifier(name.clone(), binding_span)),
+                    binding: Some(binding),
                     type_annotation,
                     initializer,
                     modifiers,
@@ -166,9 +167,10 @@ pub(super) fn implicit_typed_val_declaration_parser(
         .map(
             |(((modifiers, (name, binding_span)), type_annotation), initializer)| {
                 let span = expression_span(&initializer);
+                let binding = BindingPatternKind::identifier(name.clone(), binding_span);
                 Statement::ValDeclaration {
                     name,
-                    binding: Some(BindingPatternKind::identifier(name.clone(), binding_span)),
+                    binding: Some(binding),
                     type_annotation: Some(type_annotation),
                     initializer,
                     modifiers,
@@ -193,9 +195,10 @@ pub(super) fn var_declaration_parser(
                     .as_ref()
                     .map(expression_span)
                     .unwrap_or_else(Span::dummy);
+                let binding = BindingPatternKind::identifier(name.clone(), binding_span);
                 Statement::VarDeclaration {
                     name,
-                    binding: Some(BindingPatternKind::identifier(name.clone(), binding_span)),
+                    binding: Some(binding),
                     type_annotation,
                     initializer,
                     modifiers,

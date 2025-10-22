@@ -201,6 +201,7 @@ impl<'g, 'ctx, 'facts> FlowGraphBuilder<'g, 'ctx, 'facts> {
                 target,
                 value,
                 span,
+                binding_pattern: _,
             } => {
                 if let Some(identifier) = extract_assignment_target(target) {
                     let value_state = classify_expression(self, value).state;
@@ -1208,6 +1209,7 @@ mod tests {
                 name: "error".into(),
                 type_annotation: None,
                 default_value: None,
+                modifiers: jv_ast::ParameterModifiers::default(),
                 span: span.clone(),
             }),
             body: Box::new(Expression::Block {

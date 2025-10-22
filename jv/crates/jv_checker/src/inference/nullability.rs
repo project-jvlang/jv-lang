@@ -116,6 +116,7 @@ impl NullabilityAnalyzer {
                 target,
                 value,
                 span,
+                binding_pattern: _,
             } => {
                 let target_name = self.assignment_target_name(target);
                 let target_null = target_name

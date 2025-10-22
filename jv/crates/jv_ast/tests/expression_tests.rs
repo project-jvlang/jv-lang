@@ -267,6 +267,7 @@ fn test_expression_lambda() {
         name: "x".to_string(),
         type_annotation: Some(TypeAnnotation::Simple("Int".to_string())),
         default_value: None,
+        modifiers: ParameterModifiers::default(),
         span: dummy_span(),
     };
     let body = Expression::Binary {
@@ -306,6 +307,7 @@ fn test_expression_try() {
             name: "error".to_string(),
             type_annotation: None,
             default_value: None,
+            modifiers: ParameterModifiers::default(),
             span: dummy_span(),
         }),
         body: Box::new(Expression::Identifier("handled".to_string(), dummy_span())),
@@ -441,6 +443,7 @@ fn test_parameter_simple() {
         name: "x".to_string(),
         type_annotation: Some(TypeAnnotation::Simple("Int".to_string())),
         default_value: None,
+        modifiers: ParameterModifiers::default(),
         span: dummy_span(),
     };
     assert_eq!(param.name, "x");
@@ -455,6 +458,7 @@ fn test_parameter_with_default() {
         name: "y".to_string(),
         type_annotation: Some(TypeAnnotation::Simple("Int".to_string())),
         default_value: Some(default_expr),
+        modifiers: ParameterModifiers::default(),
         span: dummy_span(),
     };
     assert_eq!(param.name, "y");

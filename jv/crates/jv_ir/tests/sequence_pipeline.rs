@@ -36,6 +36,7 @@ fn lambda(params: &[&str], body: Expression) -> Expression {
             name: (*name).to_string(),
             type_annotation: None,
             default_value: None,
+            modifiers: ParameterModifiers::default(),
             span: dummy_span(),
         })
         .collect();

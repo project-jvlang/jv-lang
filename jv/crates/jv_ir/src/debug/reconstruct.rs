@@ -275,6 +275,7 @@ impl<'a> ReconstructionContext<'a> {
                 } else {
                     Ok(Statement::VarDeclaration {
                         name: name.clone(),
+                        binding: None,
                         type_annotation,
                         initializer: initializer_expr,
                         modifiers,
@@ -671,6 +672,7 @@ impl<'a> ReconstructionContext<'a> {
             name: param.name.clone(),
             type_annotation,
             default_value: None,
+            modifiers: jv_ast::ParameterModifiers::default(),
             span: param.span.clone(),
         })
     }

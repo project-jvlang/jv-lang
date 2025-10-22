@@ -134,6 +134,7 @@ impl BindingResolver {
         match statement {
             Statement::ValDeclaration {
                 name,
+                binding,
                 type_annotation,
                 initializer,
                 modifiers,
@@ -145,6 +146,7 @@ impl BindingResolver {
                 self.record_late_init_seed(name.clone(), origin, true, &modifiers);
                 Statement::ValDeclaration {
                     name,
+                    binding,
                     type_annotation,
                     initializer,
                     modifiers,
@@ -154,6 +156,7 @@ impl BindingResolver {
             }
             Statement::VarDeclaration {
                 name,
+                binding,
                 type_annotation,
                 initializer,
                 modifiers,
@@ -175,6 +178,7 @@ impl BindingResolver {
                 );
                 Statement::VarDeclaration {
                     name,
+                    binding,
                     type_annotation,
                     initializer,
                     modifiers,
@@ -185,6 +189,7 @@ impl BindingResolver {
                 target,
                 value,
                 span,
+                binding_pattern: _,
             } => self.resolve_assignment(target, value, span),
             Statement::Expression { expr, span } => Statement::Expression {
                 expr: self.resolve_expression(expr),
@@ -416,6 +421,7 @@ impl BindingResolver {
                             self.record_late_init_seed(name.clone(), origin, true, &modifiers);
                             Statement::ValDeclaration {
                                 name,
+                                binding: None,
                                 type_annotation: None,
                                 initializer: value,
                                 modifiers,
@@ -433,6 +439,7 @@ impl BindingResolver {
                     target,
                     value,
                     span,
+                    binding_pattern: None,
                 }
             }
         }
