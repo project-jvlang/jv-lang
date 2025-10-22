@@ -131,6 +131,54 @@ fn sample_package_val() -> (SyntaxNode<JvLanguage>, Vec<Token>) {
     (node, tokens)
 }
 
+fn invalid_type_annotation_tokens() -> (SyntaxNode<JvLanguage>, Vec<Token>) {
+    let mut column = 0usize;
+    let mut tokens = Vec::new();
+    tokens.push(make_token(&mut column, TokenType::Val, "val"));
+    tokens.push(make_token(
+        &mut column,
+        TokenType::Identifier("answer".to_string()),
+        "answer",
+    ));
+    tokens.push(make_token(&mut column, TokenType::Colon, ":"));
+    tokens.push(make_token(
+        &mut column,
+        TokenType::Number("123".to_string()),
+        "123",
+    ));
+    tokens.push(make_token(&mut column, TokenType::Assign, "="));
+    tokens.push(make_token(
+        &mut column,
+        TokenType::Number("42".to_string()),
+        "42",
+    ));
+    tokens.push(make_token(&mut column, TokenType::Eof, ""));
+
+    let node = build_tree(&tokens, |builder, tokens| {
+        builder.start_node(SyntaxKind::ValDeclaration);
+        builder.push_token(&tokens[0]);
+        builder.start_node(SyntaxKind::BindingPattern);
+        builder.push_token(&tokens[1]);
+        builder.finish_node();
+        builder.start_node(SyntaxKind::TypeAnnotation);
+        builder.push_token(&tokens[2]);
+        builder.start_node(SyntaxKind::Expression);
+        builder.push_token(&tokens[3]);
+        builder.finish_node();
+        builder.finish_node();
+        builder.start_node(SyntaxKind::InitializerClause);
+        builder.push_token(&tokens[4]);
+        builder.start_node(SyntaxKind::Expression);
+        builder.push_token(&tokens[5]);
+        builder.finish_node();
+        builder.finish_node();
+        builder.finish_node();
+        builder.push_token(&tokens[6]);
+    });
+
+    (node, tokens)
+}
+
 fn error_val_tokens() -> (SyntaxNode<JvLanguage>, Vec<Token>) {
     let mut column = 0usize;
     let mut tokens = Vec::new();
@@ -771,6 +819,35 @@ fn lowering_table_driven_cases() {
                             }
                             other => panic!("expected numeric literal, got {:?}", other),
                         }
+                    }
+                    other => panic!("expected val declaration, got {:?}", other),
+                }
+            }),
+        },
+        LoweringCase {
+            build: invalid_type_annotation_tokens,
+            verify: Box::new(|result| {
+                assert_eq!(result.statements.len(), 1, "expected single statement");
+                assert_eq!(
+                    result.diagnostics.len(),
+                    1,
+                    "expected a diagnostic for invalid type annotation"
+                );
+                let diagnostic = &result.diagnostics[0];
+                assert_eq!(diagnostic.severity, LoweringDiagnosticSeverity::Error);
+                assert!(
+                    diagnostic.message.contains("想定外") || diagnostic.message.contains("型注釈"),
+                    "unexpected diagnostic message: {}",
+                    diagnostic.message
+                );
+                match &result.statements[0] {
+                    Statement::ValDeclaration {
+                        type_annotation, ..
+                    } => {
+                        assert!(
+                            type_annotation.is_none(),
+                            "type annotation should be dropped on failure"
+                        );
                     }
                     other => panic!("expected val declaration, got {:?}", other),
                 }

@@ -26,6 +26,7 @@ use jv_parser_syntax_support::support::{
     parsers::regex_literal_from_token,
     spans::{expression_span, merge_spans, span_from_token},
 };
+use jv_type_inference_java::lower_type_annotation_from_tokens;
 
 /// ローワリング結果。
 #[derive(Debug)]
@@ -613,7 +614,7 @@ fn lower_value(
     context: &LoweringContext<'_>,
     node: &JvSyntaxNode,
     is_val: bool,
-    _diagnostics: &mut Vec<LoweringDiagnostic>,
+    diagnostics: &mut Vec<LoweringDiagnostic>,
 ) -> Result<Statement, LoweringDiagnostic> {
     let binding = child_node(node, SyntaxKind::BindingPattern).ok_or_else(|| {
         missing_child_diagnostic(context, node, "バインディング", SyntaxKind::BindingPattern)
@@ -625,9 +626,9 @@ fn lower_value(
         .map(|text| text.to_string())
         .unwrap_or_else(|| join_tokens(&context.tokens_for(&binding)));
 
-    let type_annotation = child_node(node, SyntaxKind::TypeAnnotation)
-        .and_then(|type_node| child_node(&type_node, SyntaxKind::Expression))
-        .and_then(|expr| simple_type_from_expression(context, &expr));
+    let type_annotation = child_node(node, SyntaxKind::TypeAnnotation).and_then(|type_node| {
+        lower_type_annotation_container(context, &type_node, node, diagnostics)
+    });
 
     let initializer_clause = child_node(node, SyntaxKind::InitializerClause);
 
@@ -688,15 +689,50 @@ fn lower_value(
     }
 }
 
-fn simple_type_from_expression(
+fn lower_type_annotation_container(
     context: &LoweringContext<'_>,
-    node: &JvSyntaxNode,
+    container_node: &JvSyntaxNode,
+    owner: &JvSyntaxNode,
+    diagnostics: &mut Vec<LoweringDiagnostic>,
 ) -> Option<TypeAnnotation> {
-    let tokens = context.tokens_for(node);
-    if tokens.is_empty() {
-        return None;
+    let expr = match child_node(container_node, SyntaxKind::Expression) {
+        Some(expr) => expr,
+        None => {
+            diagnostics.push(LoweringDiagnostic::new(
+                LoweringDiagnosticSeverity::Error,
+                "型注釈の式が見つかりません",
+                context.span_for(container_node),
+                container_node.kind(),
+                first_identifier_text(owner),
+                collect_annotation_texts(owner),
+            ));
+            return None;
+        }
+    };
+
+    let tokens = context.tokens_for(&expr);
+    let owned_tokens: Vec<Token> = tokens.into_iter().cloned().collect();
+
+    match lower_type_annotation_from_tokens(&owned_tokens) {
+        Ok(lowered) => Some(lowered.into_annotation()),
+        Err(error) => {
+            let span = error
+                .span()
+                .cloned()
+                .or_else(|| context.span_for(&expr))
+                .or_else(|| context.span_for(container_node))
+                .or_else(|| context.span_for(owner));
+            diagnostics.push(LoweringDiagnostic::new(
+                LoweringDiagnosticSeverity::Error,
+                error.message().to_string(),
+                span,
+                container_node.kind(),
+                first_identifier_text(owner),
+                collect_annotation_texts(owner),
+            ));
+            None
+        }
     }
-    Some(TypeAnnotation::Simple(join_tokens(&tokens)))
 }
 
 fn lower_block_expression(
@@ -3164,8 +3200,7 @@ fn lower_function(
         .unwrap_or_default();
 
     let return_type = child_node(node, SyntaxKind::FunctionReturnType)
-        .and_then(|ret| child_node(&ret, SyntaxKind::Expression))
-        .and_then(|expr| simple_type_from_expression(context, &expr));
+        .and_then(|ret| lower_type_annotation_container(context, &ret, node, diagnostics));
 
     let fallback_span = span.clone();
     let body = if let Some(block) = child_node(node, SyntaxKind::Block) {
@@ -3349,9 +3384,9 @@ fn lower_property(
         .map(|text| text.to_string())
         .unwrap_or_else(|| join_tokens(&context.tokens_for(&binding)));
 
-    let type_annotation = child_node(node, SyntaxKind::TypeAnnotation)
-        .and_then(|type_node| child_node(&type_node, SyntaxKind::Expression))
-        .and_then(|expr| simple_type_from_expression(context, &expr));
+    let type_annotation = child_node(node, SyntaxKind::TypeAnnotation).and_then(|type_node| {
+        lower_type_annotation_container(context, &type_node, node, diagnostics)
+    });
 
     let initializer = match child_node(node, SyntaxKind::InitializerClause)
         .and_then(|clause| child_node(&clause, SyntaxKind::Expression))
@@ -3535,11 +3570,7 @@ fn lower_parameter_modifiers(
         .filter(|child| child.kind() == SyntaxKind::ParameterModifier)
     {
         let tokens = context.tokens_for(&modifier);
-        let Some(token) = tokens
-            .iter()
-            .copied()
-            .find(|token| !is_trivia_token(token))
-        else {
+        let Some(token) = tokens.iter().copied().find(|token| !is_trivia_token(token)) else {
             continue;
         };
 
@@ -3589,10 +3620,7 @@ fn lower_parameter_modifiers(
                     push_diagnostic(
                         diagnostics,
                         LoweringDiagnosticSeverity::Error,
-                        format!(
-                            "未対応のパラメータ修飾子 `{}` を検出しました",
-                            other
-                        ),
+                        format!("未対応のパラメータ修飾子 `{}` を検出しました", other),
                         context,
                         &modifier,
                     );
@@ -3602,10 +3630,7 @@ fn lower_parameter_modifiers(
                 push_diagnostic(
                     diagnostics,
                     LoweringDiagnosticSeverity::Error,
-                    format!(
-                        "未対応のパラメータ修飾子 `{}` を検出しました",
-                        token.lexeme
-                    ),
+                    format!("未対応のパラメータ修飾子 `{}` を検出しました", token.lexeme),
                     context,
                     &modifier,
                 );
@@ -3661,9 +3686,10 @@ fn lower_parameters(
             continue;
         }
 
-        let type_annotation = child_node(&child, SyntaxKind::TypeAnnotation)
-            .and_then(|type_node| child_node(&type_node, SyntaxKind::Expression))
-            .and_then(|expr| simple_type_from_expression(context, &expr));
+        let type_annotation =
+            child_node(&child, SyntaxKind::TypeAnnotation).and_then(|type_node| {
+                lower_type_annotation_container(context, &type_node, &child, diagnostics)
+            });
 
         let span = context.span_for(&child).unwrap_or_else(Span::dummy);
 

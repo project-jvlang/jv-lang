@@ -1,0 +1,11 @@
+[package]
+name = "jv_type_inference_java"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+chumsky = { workspace = true }
+thiserror = { workspace = true }
+jv_ast = { path = "../jv_ast" }
+jv_lexer = { path = "../jv_lexer" }
+jv_parser_syntax_support = { path = "../jv_parser_syntax_support" }
