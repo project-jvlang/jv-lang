@@ -106,6 +106,12 @@ pub enum SyntaxKind {
     BreakStatement,
     /// continue 文。
     ContinueStatement,
+    /// use 文。
+    UseStatement,
+    /// defer 文。
+    DeferStatement,
+    /// spawn 文。
+    SpawnStatement,
     /// パラメータ修飾子リスト。
     ParameterModifierList,
     /// パラメータ修飾子。
@@ -152,6 +158,12 @@ pub enum SyntaxKind {
     BreakKw,
     /// `continue` キーワード。
     ContinueKw,
+    /// `use` キーワード。
+    UseKw,
+    /// `defer` キーワード。
+    DeferKw,
+    /// `spawn` キーワード。
+    SpawnKw,
     /// `true` キーワード。
     TrueKw,
     /// `false` キーワード。
@@ -331,6 +343,12 @@ pub enum TokenKind {
     BreakKw,
     /// `continue` キーワード。
     ContinueKw,
+    /// `use` キーワード。
+    UseKw,
+    /// `defer` キーワード。
+    DeferKw,
+    /// `spawn` キーワード。
+    SpawnKw,
     /// `true` キーワード。
     TrueKw,
     /// `false` キーワード。
@@ -462,6 +480,9 @@ impl TokenKind {
             TokenKind::ThrowKw => SyntaxKind::ThrowKw,
             TokenKind::BreakKw => SyntaxKind::BreakKw,
             TokenKind::ContinueKw => SyntaxKind::ContinueKw,
+            TokenKind::UseKw => SyntaxKind::UseKw,
+            TokenKind::DeferKw => SyntaxKind::DeferKw,
+            TokenKind::SpawnKw => SyntaxKind::SpawnKw,
             TokenKind::TrueKw => SyntaxKind::TrueKw,
             TokenKind::FalseKw => SyntaxKind::FalseKw,
             TokenKind::BooleanLiteral => SyntaxKind::BooleanLiteral,
@@ -519,7 +540,15 @@ impl TokenKind {
 
     /// `jv_lexer::Token` から `TokenKind` を導出する。
     pub fn from_token(token: &Token) -> Self {
-        Self::from_token_type(&token.token_type)
+        match &token.token_type {
+            TokenType::Identifier(name) => match name.as_str() {
+                "use" => TokenKind::UseKw,
+                "defer" => TokenKind::DeferKw,
+                "spawn" => TokenKind::SpawnKw,
+                _ => Self::from_token_type(&token.token_type),
+            },
+            _ => Self::from_token_type(&token.token_type),
+        }
     }
 
     /// `jv_lexer::TokenType` から `TokenKind` を導出する。
@@ -638,6 +667,7 @@ mod tests {
         ("ImportClause", SyntaxKind::ImportClause),
         ("ImportWildcard", SyntaxKind::ImportWildcard),
         ("StatementList", SyntaxKind::StatementList),
+        ("CommentStatement", SyntaxKind::CommentStatement),
         ("AssignmentStatement", SyntaxKind::AssignmentStatement),
         ("AssignmentTarget", SyntaxKind::AssignmentTarget),
         ("ValDeclaration", SyntaxKind::ValDeclaration),
@@ -675,6 +705,9 @@ mod tests {
         ("ThrowStatement", SyntaxKind::ThrowStatement),
         ("BreakStatement", SyntaxKind::BreakStatement),
         ("ContinueStatement", SyntaxKind::ContinueStatement),
+        ("UseStatement", SyntaxKind::UseStatement),
+        ("DeferStatement", SyntaxKind::DeferStatement),
+        ("SpawnStatement", SyntaxKind::SpawnStatement),
         ("QualifiedName", SyntaxKind::QualifiedName),
         ("QualifiedNameSegment", SyntaxKind::QualifiedNameSegment),
         ("Expression", SyntaxKind::Expression),
@@ -689,6 +722,9 @@ mod tests {
         ("ThrowKw", SyntaxKind::ThrowKw),
         ("BreakKw", SyntaxKind::BreakKw),
         ("ContinueKw", SyntaxKind::ContinueKw),
+        ("UseKw", SyntaxKind::UseKw),
+        ("DeferKw", SyntaxKind::DeferKw),
+        ("SpawnKw", SyntaxKind::SpawnKw),
         ("IfKw", SyntaxKind::IfKw),
         ("ElseKw", SyntaxKind::ElseKw),
         ("WhenKw", SyntaxKind::WhenKw),
@@ -697,6 +733,9 @@ mod tests {
         ("WhileKw", SyntaxKind::WhileKw),
         ("DoKw", SyntaxKind::DoKw),
         ("WhereKw", SyntaxKind::WhereKw),
+        ("LineComment", SyntaxKind::LineComment),
+        ("BlockComment", SyntaxKind::BlockComment),
+        ("JavaDocComment", SyntaxKind::DocComment),
         ("At", SyntaxKind::At),
         ("Dot", SyntaxKind::Dot),
         ("Star", SyntaxKind::Star),

@@ -25,6 +25,9 @@ const SYNC_TOKENS: &[TokenKind] = &[
     TokenKind::ThrowKw,
     TokenKind::BreakKw,
     TokenKind::ContinueKw,
+    TokenKind::UseKw,
+    TokenKind::DeferKw,
+    TokenKind::SpawnKw,
     TokenKind::Eof,
 ];
 

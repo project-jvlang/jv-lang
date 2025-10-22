@@ -1,0 +1,18 @@
+description = "Rowan lowering covers use/defer/spawn resource statements"
+source = "tests/parser_rowan_specs/generated/sources/resource_use_defer_spawn.jv"
+
+[expect]
+statement_count = 2
+
+[[expect.statements]]
+index = 0
+kind = "package"
+name = "specs.resource"
+
+[[expect.statements]]
+index = 1
+kind = "function_declaration"
+name = "manage"
+
+  [expect.statements.block]
+  statement_kinds = ["resource_management", "resource_management", "concurrency"]

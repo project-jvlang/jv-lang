@@ -1,0 +1,15 @@
+package specs.resource
+
+fun manage(resource: Closeable) {
+    use (resource) {
+        println("using resource")
+    }
+
+    defer {
+        cleanup(resource)
+    }
+
+    spawn {
+        performAsync(resource)
+    }
+}

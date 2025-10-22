@@ -4,7 +4,10 @@ use super::helpers::{
 use crate::syntax::SyntaxKind;
 use jv_ast::comments::{CommentKind, CommentStatement, CommentVisibility};
 use jv_ast::expression::Parameter;
-use jv_ast::statement::{ForInStatement, LoopBinding, LoopStrategy, Property, ValBindingOrigin};
+use jv_ast::statement::{
+    ConcurrencyConstruct, ForInStatement, LoopBinding, LoopStrategy, Property, ResourceManagement,
+    ValBindingOrigin,
+};
 use jv_ast::types::{Literal, Modifiers, TypeAnnotation};
 use jv_ast::{Expression, Span, Statement};
 use jv_lexer::{Token, TokenType};
@@ -125,6 +128,9 @@ fn is_top_level_statement(kind: SyntaxKind) -> bool {
             | SyntaxKind::ThrowStatement
             | SyntaxKind::BreakStatement
             | SyntaxKind::ContinueStatement
+            | SyntaxKind::UseStatement
+            | SyntaxKind::DeferStatement
+            | SyntaxKind::SpawnStatement
             | SyntaxKind::AssignmentStatement
             | SyntaxKind::Expression
     )
@@ -193,6 +199,9 @@ fn lower_single_statement(
         SyntaxKind::ThrowStatement => lower_throw(context, node, diagnostics),
         SyntaxKind::BreakStatement => lower_break(context, node),
         SyntaxKind::ContinueStatement => lower_continue(context, node),
+        SyntaxKind::UseStatement => lower_use(context, node, diagnostics),
+        SyntaxKind::DeferStatement => lower_defer(context, node, diagnostics),
+        SyntaxKind::SpawnStatement => lower_spawn(context, node, diagnostics),
         SyntaxKind::IfStatement
         | SyntaxKind::WhenStatement
         | SyntaxKind::WhileStatement
@@ -397,6 +406,89 @@ fn lower_assignment(
         value,
         span,
     })
+}
+
+fn lower_use(
+    context: &LoweringContext<'_>,
+    node: &JvSyntaxNode,
+    diagnostics: &mut Vec<LoweringDiagnostic>,
+) -> Result<Statement, LoweringDiagnostic> {
+    let resource_node = child_node(node, SyntaxKind::Expression).ok_or_else(|| {
+        missing_child_diagnostic(
+            context,
+            node,
+            "`use` 文のリソース式が必要です",
+            SyntaxKind::Expression,
+        )
+    })?;
+
+    let resource = lower_expression_shallow(context, &resource_node, diagnostics)?;
+
+    let block_node = child_node(node, SyntaxKind::Block).ok_or_else(|| {
+        missing_child_diagnostic(
+            context,
+            node,
+            "`use` 文にはブロックが必要です",
+            SyntaxKind::Block,
+        )
+    })?;
+
+    let body = lower_block_expression(context, &block_node, diagnostics);
+    let resource_span = expression_span(&resource);
+    let body_span = expression_span(&body);
+    let span = merge_spans(&resource_span, &body_span);
+
+    Ok(Statement::ResourceManagement(ResourceManagement::Use {
+        resource: Box::new(resource),
+        body: Box::new(body),
+        span,
+    }))
+}
+
+fn lower_defer(
+    context: &LoweringContext<'_>,
+    node: &JvSyntaxNode,
+    diagnostics: &mut Vec<LoweringDiagnostic>,
+) -> Result<Statement, LoweringDiagnostic> {
+    let block_node = child_node(node, SyntaxKind::Block).ok_or_else(|| {
+        missing_child_diagnostic(
+            context,
+            node,
+            "`defer` 文にはブロックが必要です",
+            SyntaxKind::Block,
+        )
+    })?;
+
+    let body = lower_block_expression(context, &block_node, diagnostics);
+    let span = expression_span(&body);
+
+    Ok(Statement::ResourceManagement(ResourceManagement::Defer {
+        body: Box::new(body),
+        span,
+    }))
+}
+
+fn lower_spawn(
+    context: &LoweringContext<'_>,
+    node: &JvSyntaxNode,
+    diagnostics: &mut Vec<LoweringDiagnostic>,
+) -> Result<Statement, LoweringDiagnostic> {
+    let block_node = child_node(node, SyntaxKind::Block).ok_or_else(|| {
+        missing_child_diagnostic(
+            context,
+            node,
+            "`spawn` 文にはブロックが必要です",
+            SyntaxKind::Block,
+        )
+    })?;
+
+    let body = lower_block_expression(context, &block_node, diagnostics);
+    let span = expression_span(&body);
+
+    Ok(Statement::Concurrency(ConcurrencyConstruct::Spawn {
+        body: Box::new(body),
+        span,
+    }))
 }
 
 fn lower_assignment_target(

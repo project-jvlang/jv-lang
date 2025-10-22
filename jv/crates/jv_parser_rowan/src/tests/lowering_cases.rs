@@ -1,7 +1,7 @@
 use crate::lowering::{lower_program, LoweringDiagnosticSeverity, LoweringResult};
 use crate::{JvLanguage, ParseBuilder, SyntaxKind};
 use jv_ast::{
-    statement::{LoopStrategy, ValBindingOrigin},
+    statement::{ConcurrencyConstruct, LoopStrategy, ResourceManagement, ValBindingOrigin},
     types::{Literal, Modifiers, TypeAnnotation},
     Expression, Statement,
 };
@@ -335,6 +335,96 @@ fn assignment_member_rhs_tokens() -> (SyntaxNode<JvLanguage>, Vec<Token>) {
         builder.finish_node();
         builder.finish_node();
         builder.push_token(&tokens[7]);
+    });
+
+    (node, tokens)
+}
+
+fn use_statement_tokens() -> (SyntaxNode<JvLanguage>, Vec<Token>) {
+    let mut column = 0usize;
+    let mut tokens = Vec::new();
+    tokens.push(make_token(
+        &mut column,
+        TokenType::Identifier("use".to_string()),
+        "use",
+    ));
+    tokens.push(make_token(&mut column, TokenType::LeftParen, "("));
+    tokens.push(make_token(
+        &mut column,
+        TokenType::Identifier("resource".to_string()),
+        "resource",
+    ));
+    tokens.push(make_token(&mut column, TokenType::RightParen, ")"));
+    tokens.push(make_token(&mut column, TokenType::LeftBrace, "{"));
+    tokens.push(make_token(&mut column, TokenType::RightBrace, "}"));
+    tokens.push(make_token(&mut column, TokenType::Eof, ""));
+
+    let node = build_tree(&tokens, |builder, tokens| {
+        builder.start_node(SyntaxKind::UseStatement);
+        builder.push_token(&tokens[0]);
+        builder.push_token(&tokens[1]);
+        builder.start_node(SyntaxKind::Expression);
+        builder.push_token(&tokens[2]);
+        builder.finish_node();
+        builder.push_token(&tokens[3]);
+        builder.start_node(SyntaxKind::Block);
+        builder.push_token(&tokens[4]);
+        builder.push_token(&tokens[5]);
+        builder.finish_node();
+        builder.finish_node();
+        builder.push_token(&tokens[6]);
+    });
+
+    (node, tokens)
+}
+
+fn defer_statement_tokens() -> (SyntaxNode<JvLanguage>, Vec<Token>) {
+    let mut column = 0usize;
+    let mut tokens = Vec::new();
+    tokens.push(make_token(
+        &mut column,
+        TokenType::Identifier("defer".to_string()),
+        "defer",
+    ));
+    tokens.push(make_token(&mut column, TokenType::LeftBrace, "{"));
+    tokens.push(make_token(&mut column, TokenType::RightBrace, "}"));
+    tokens.push(make_token(&mut column, TokenType::Eof, ""));
+
+    let node = build_tree(&tokens, |builder, tokens| {
+        builder.start_node(SyntaxKind::DeferStatement);
+        builder.push_token(&tokens[0]);
+        builder.start_node(SyntaxKind::Block);
+        builder.push_token(&tokens[1]);
+        builder.push_token(&tokens[2]);
+        builder.finish_node();
+        builder.finish_node();
+        builder.push_token(&tokens[3]);
+    });
+
+    (node, tokens)
+}
+
+fn spawn_statement_tokens() -> (SyntaxNode<JvLanguage>, Vec<Token>) {
+    let mut column = 0usize;
+    let mut tokens = Vec::new();
+    tokens.push(make_token(
+        &mut column,
+        TokenType::Identifier("spawn".to_string()),
+        "spawn",
+    ));
+    tokens.push(make_token(&mut column, TokenType::LeftBrace, "{"));
+    tokens.push(make_token(&mut column, TokenType::RightBrace, "}"));
+    tokens.push(make_token(&mut column, TokenType::Eof, ""));
+
+    let node = build_tree(&tokens, |builder, tokens| {
+        builder.start_node(SyntaxKind::SpawnStatement);
+        builder.push_token(&tokens[0]);
+        builder.start_node(SyntaxKind::Block);
+        builder.push_token(&tokens[1]);
+        builder.push_token(&tokens[2]);
+        builder.finish_node();
+        builder.finish_node();
+        builder.push_token(&tokens[3]);
     });
 
     (node, tokens)
@@ -743,6 +833,81 @@ fn lowering_table_driven_cases() {
                         other => panic!("expected member access rhs, got {:?}", other),
                     },
                     other => panic!("expected assignment statement, got {:?}", other),
+                }
+            }),
+        },
+        LoweringCase {
+            build: use_statement_tokens,
+            verify: Box::new(|result| {
+                assert!(
+                    result.diagnostics.is_empty(),
+                    "unexpected diagnostics: {:?}",
+                    result.diagnostics
+                );
+                match result
+                    .statements
+                    .first()
+                    .expect("expected resource management statement")
+                {
+                    Statement::ResourceManagement(ResourceManagement::Use {
+                        resource,
+                        body,
+                        ..
+                    }) => {
+                        match resource.as_ref() {
+                            Expression::Identifier(name, _) => assert_eq!(name, "resource"),
+                            other => panic!("expected identifier resource, got {:?}", other),
+                        }
+                        match body.as_ref() {
+                            Expression::Block { .. } => {}
+                            other => panic!("expected block body, got {:?}", other),
+                        }
+                    }
+                    other => panic!(
+                        "expected use resource management statement, got {:?}",
+                        other
+                    ),
+                }
+            }),
+        },
+        LoweringCase {
+            build: defer_statement_tokens,
+            verify: Box::new(|result| {
+                assert!(
+                    result.diagnostics.is_empty(),
+                    "unexpected diagnostics: {:?}",
+                    result.diagnostics
+                );
+                match result.statements.first().expect("expected defer statement") {
+                    Statement::ResourceManagement(ResourceManagement::Defer { body, .. }) => {
+                        match body.as_ref() {
+                            Expression::Block { .. } => {}
+                            other => panic!("expected block body for defer, got {:?}", other),
+                        }
+                    }
+                    other => panic!(
+                        "expected defer resource management statement, got {:?}",
+                        other
+                    ),
+                }
+            }),
+        },
+        LoweringCase {
+            build: spawn_statement_tokens,
+            verify: Box::new(|result| {
+                assert!(
+                    result.diagnostics.is_empty(),
+                    "unexpected diagnostics: {:?}",
+                    result.diagnostics
+                );
+                match result.statements.first().expect("expected spawn statement") {
+                    Statement::Concurrency(ConcurrencyConstruct::Spawn { body, .. }) => {
+                        match body.as_ref() {
+                            Expression::Block { .. } => {}
+                            other => panic!("expected block body for spawn, got {:?}", other),
+                        }
+                    }
+                    other => panic!("expected spawn concurrency statement, got {:?}", other),
                 }
             }),
         },
