@@ -3,12 +3,12 @@ use super::helpers::{
 };
 use crate::syntax::SyntaxKind;
 use jv_ast::comments::{CommentKind, CommentStatement, CommentVisibility};
-use jv_ast::expression::Parameter;
+use jv_ast::expression::{Argument, CallArgumentMetadata, CallArgumentStyle, Parameter};
 use jv_ast::statement::{
     ConcurrencyConstruct, ForInStatement, LoopBinding, LoopStrategy, Property, ResourceManagement,
     ValBindingOrigin,
 };
-use jv_ast::types::{Literal, Modifiers, TypeAnnotation};
+use jv_ast::types::{BinaryOp, Literal, Modifiers, TypeAnnotation, UnaryOp};
 use jv_ast::{Expression, Span, Statement};
 use jv_lexer::{Token, TokenType};
 use jv_parser_syntax_support::support::spans::{expression_span, merge_spans, span_from_token};
@@ -368,7 +368,7 @@ fn is_jv_only_line_comment(raw: &str) -> bool {
 fn lower_assignment(
     context: &LoweringContext<'_>,
     node: &JvSyntaxNode,
-    diagnostics: &mut Vec<LoweringDiagnostic>,
+    _diagnostics: &mut Vec<LoweringDiagnostic>,
 ) -> Result<Statement, LoweringDiagnostic> {
     let target_node = child_node(node, SyntaxKind::AssignmentTarget).ok_or_else(|| {
         missing_child_diagnostic(
@@ -393,7 +393,7 @@ fn lower_assignment(
             )
         })?;
 
-    let value = lower_expression_shallow(context, &value_node, diagnostics)?;
+    let value = lower_expression(context, &value_node)?;
     let span = context.span_for(node).unwrap_or_else(Span::dummy);
 
     Ok(Statement::Assignment {
@@ -417,7 +417,7 @@ fn lower_use(
         )
     })?;
 
-    let resource = lower_expression_shallow(context, &resource_node, diagnostics)?;
+    let resource = lower_expression(context, &resource_node)?;
 
     let block_node = child_node(node, SyntaxKind::Block).ok_or_else(|| {
         missing_child_diagnostic(
@@ -587,44 +587,11 @@ fn lower_assignment_target(
     Ok(expr)
 }
 
-fn try_identifier_chain_expression(tokens: &[&Token]) -> Option<Expression> {
-    let mut iter = tokens.iter().copied();
-    let first = iter.next()?;
-    let span = span_from_token(first);
-    let mut expr = match &first.token_type {
-        TokenType::Identifier(name) => Expression::Identifier(name.clone(), span),
-        _ => return None,
-    };
-
-    while let Some(token) = iter.next() {
-        match token.token_type {
-            TokenType::Dot => {
-                let property_token = iter.next()?;
-                let property_name = match &property_token.token_type {
-                    TokenType::Identifier(name) => name.clone(),
-                    _ => return None,
-                };
-                let previous_span = expression_span(&expr);
-                let property_span = span_from_token(property_token);
-                let span = merge_spans(&previous_span, &property_span);
-                expr = Expression::MemberAccess {
-                    object: Box::new(expr),
-                    property: property_name,
-                    span,
-                };
-            }
-            _ => return None,
-        }
-    }
-
-    Some(expr)
-}
-
 fn lower_value(
     context: &LoweringContext<'_>,
     node: &JvSyntaxNode,
     is_val: bool,
-    diagnostics: &mut Vec<LoweringDiagnostic>,
+    _diagnostics: &mut Vec<LoweringDiagnostic>,
 ) -> Result<Statement, LoweringDiagnostic> {
     let binding = child_node(node, SyntaxKind::BindingPattern).ok_or_else(|| {
         missing_child_diagnostic(context, node, "バインディング", SyntaxKind::BindingPattern)
@@ -658,7 +625,7 @@ fn lower_value(
 
     let initializer = match initializer_clause {
         Some(clause) => match child_node(&clause, SyntaxKind::Expression) {
-            Some(expr_node) => Some(lower_expression_shallow(context, &expr_node, diagnostics)?),
+            Some(expr_node) => Some(lower_expression(context, &expr_node)?),
             None => {
                 return Err(LoweringDiagnostic::new(
                     LoweringDiagnosticSeverity::Error,
@@ -733,12 +700,11 @@ fn lower_block_expression(
     Expression::Block { statements, span }
 }
 
-fn lower_expression_shallow(
+fn lower_expression(
     context: &LoweringContext<'_>,
     node: &JvSyntaxNode,
-    diagnostics: &mut Vec<LoweringDiagnostic>,
 ) -> Result<Expression, LoweringDiagnostic> {
-    let mut tokens = context.tokens_for(node);
+    let tokens = context.tokens_for(node);
     if tokens.is_empty() {
         return Err(LoweringDiagnostic::new(
             LoweringDiagnosticSeverity::Error,
@@ -750,24 +716,13 @@ fn lower_expression_shallow(
         ));
     }
 
-    if let Some(comment_pos) = tokens
-        .iter()
-        .position(|token| matches!(token.token_type, TokenType::LineComment(_)))
-    {
-        tokens.truncate(comment_pos);
-    }
-
-    let meaningful_tokens: Vec<&Token> = tokens
+    let filtered: Vec<&Token> = tokens
         .iter()
         .copied()
         .filter(|token| !is_trivia_token(token))
         .collect();
 
-    if let Some(expr) = try_identifier_chain_expression(&meaningful_tokens) {
-        return Ok(expr);
-    }
-
-    if meaningful_tokens.is_empty() {
+    if filtered.is_empty() {
         return Err(LoweringDiagnostic::new(
             LoweringDiagnosticSeverity::Error,
             "式が解析対象のトークンを含みません",
@@ -778,32 +733,17 @@ fn lower_expression_shallow(
         ));
     }
 
-    let span = context.span_for(node).unwrap_or_else(jv_ast::Span::dummy);
-    if meaningful_tokens.len() == 1 {
-        let token = meaningful_tokens[0];
-        let expr = match &token.token_type {
-            TokenType::Number(value) => Expression::Literal(Literal::Number(value.clone()), span),
-            TokenType::Boolean(value) => Expression::Literal(Literal::Boolean(*value), span),
-            TokenType::String(value) => Expression::Literal(Literal::String(value.clone()), span),
-            TokenType::Null => Expression::Literal(Literal::Null, span),
-            TokenType::Identifier(text) => Expression::Identifier(text.clone(), span),
-            _ => Expression::Identifier(token.lexeme.clone(), span),
-        };
-        return Ok(expr);
+    match expression_parser::parse_expression(&filtered) {
+        Ok(expr) => Ok(expr),
+        Err(err) => {
+            let span = err
+                .span
+                .or_else(|| context.span_for(node))
+                .unwrap_or_else(Span::dummy);
+            let fallback = Expression::Identifier(join_tokens(&filtered), span);
+            Ok(fallback)
+        }
     }
-
-    push_diagnostic(
-        diagnostics,
-        LoweringDiagnosticSeverity::Warning,
-        "式ローワリングは暫定サポートのためテキストをそのまま識別子として扱います",
-        context,
-        node,
-    );
-
-    Ok(Expression::Identifier(
-        join_tokens(&meaningful_tokens),
-        span,
-    ))
 }
 
 fn qualified_name_segments(
@@ -870,6 +810,1104 @@ fn is_trivia_token(token: &Token) -> bool {
     )
 }
 
+mod expression_parser {
+    use super::*;
+
+    #[derive(Debug)]
+    #[allow(dead_code)]
+    pub(super) struct ExpressionError {
+        pub message: String,
+        pub span: Option<Span>,
+    }
+
+    impl ExpressionError {
+        fn new(message: impl Into<String>, span: Option<Span>) -> Self {
+            Self {
+                message: message.into(),
+                span,
+            }
+        }
+    }
+
+    pub(super) fn parse_expression(tokens: &[&Token]) -> Result<Expression, ExpressionError> {
+        let mut parser = ExpressionParser::new(tokens);
+        let parsed = parser.parse_expression_bp(0)?;
+        parser.consume_postfix_if_any(parsed)
+    }
+
+    struct ExpressionParser<'a> {
+        tokens: &'a [&'a Token],
+        pos: usize,
+    }
+
+    #[derive(Clone)]
+    struct ParsedExpr {
+        expr: Expression,
+        start: usize,
+        end: usize,
+    }
+
+    impl ParsedExpr {
+        fn span(&self) -> Span {
+            expression_span(&self.expr)
+        }
+    }
+
+    #[derive(Clone, Copy)]
+    enum Associativity {
+        Left,
+    }
+
+    struct BinaryInfo {
+        op: BinaryOp,
+        precedence: u8,
+        associativity: Associativity,
+    }
+
+    impl<'a> ExpressionParser<'a> {
+        fn new(tokens: &'a [&'a Token]) -> Self {
+            Self { tokens, pos: 0 }
+        }
+
+        fn parse_expression_bp(&mut self, min_prec: u8) -> Result<ParsedExpr, ExpressionError> {
+            let mut left = self.parse_prefix()?;
+
+            loop {
+                if let Some(kind) = self.peek_postfix_kind() {
+                    left = self.parse_postfix(left, kind)?;
+                    continue;
+                }
+
+                let Some(info) = self.peek_binary_info() else {
+                    break;
+                };
+
+                if info.precedence < min_prec {
+                    break;
+                }
+
+                let (op_token, _op_index) =
+                    self.advance_with_index_or_error("演算子を取得できませんでした")?;
+                let op_span = span_from_token(op_token);
+
+                let next_min_prec = if matches!(info.associativity, Associativity::Left) {
+                    info.precedence + 1
+                } else {
+                    info.precedence
+                };
+
+                let right = self.parse_expression_bp(next_min_prec)?;
+                left = self.make_binary(left, right, info.op, op_span)?;
+            }
+
+            Ok(left)
+        }
+
+        fn consume_postfix_if_any(
+            &mut self,
+            mut expr: ParsedExpr,
+        ) -> Result<Expression, ExpressionError> {
+            while let Some(kind) = self.peek_postfix_kind() {
+                expr = self.parse_postfix(expr, kind)?;
+            }
+
+            if self.peek_token().is_some() {
+                let span = self.span_at(self.pos);
+                return Err(ExpressionError::new(
+                    "式の末尾に解釈できないトークンがあります",
+                    span,
+                ));
+            }
+
+            Ok(expr.expr)
+        }
+
+        fn parse_prefix(&mut self) -> Result<ParsedExpr, ExpressionError> {
+            let Some((token, index)) = self.peek_with_index() else {
+                return Err(ExpressionError::new("式が必要です", None));
+            };
+
+            match &token.token_type {
+                TokenType::Plus => {
+                    let op_span = span_from_token(token);
+                    self.pos += 1;
+                    let operand = self.parse_expression_bp(PREFIX_PRECEDENCE)?;
+                    let span = merge_spans(&op_span, &operand.span());
+                    let expr = Expression::Unary {
+                        op: UnaryOp::Plus,
+                        operand: Box::new(operand.expr),
+                        span: span.clone(),
+                    };
+                    Ok(ParsedExpr {
+                        expr,
+                        start: index,
+                        end: operand.end,
+                    })
+                }
+                TokenType::Minus => {
+                    let op_span = span_from_token(token);
+                    self.pos += 1;
+                    let operand = self.parse_expression_bp(PREFIX_PRECEDENCE)?;
+                    let span = merge_spans(&op_span, &operand.span());
+                    let expr = Expression::Unary {
+                        op: UnaryOp::Minus,
+                        operand: Box::new(operand.expr),
+                        span: span.clone(),
+                    };
+                    Ok(ParsedExpr {
+                        expr,
+                        start: index,
+                        end: operand.end,
+                    })
+                }
+                TokenType::Not => {
+                    let op_span = span_from_token(token);
+                    self.pos += 1;
+                    let operand = self.parse_expression_bp(PREFIX_PRECEDENCE)?;
+                    let span = merge_spans(&op_span, &operand.span());
+                    let expr = Expression::Unary {
+                        op: UnaryOp::Not,
+                        operand: Box::new(operand.expr),
+                        span: span.clone(),
+                    };
+                    Ok(ParsedExpr {
+                        expr,
+                        start: index,
+                        end: operand.end,
+                    })
+                }
+                TokenType::LeftBrace => self.parse_brace_expression(),
+                _ => self.parse_primary(),
+            }
+        }
+
+        fn parse_primary(&mut self) -> Result<ParsedExpr, ExpressionError> {
+            let Some((token, index)) = self.advance_with_index() else {
+                return Err(ExpressionError::new("式が必要です", None));
+            };
+
+            match &token.token_type {
+                TokenType::Number(value) => {
+                    let span = span_from_token(token);
+                    Ok(ParsedExpr {
+                        expr: Expression::Literal(Literal::Number(value.clone()), span.clone()),
+                        start: index,
+                        end: index + 1,
+                    })
+                }
+                TokenType::Boolean(value) => {
+                    let span = span_from_token(token);
+                    Ok(ParsedExpr {
+                        expr: Expression::Literal(Literal::Boolean(*value), span.clone()),
+                        start: index,
+                        end: index + 1,
+                    })
+                }
+                TokenType::True => {
+                    let span = span_from_token(token);
+                    Ok(ParsedExpr {
+                        expr: Expression::Literal(Literal::Boolean(true), span.clone()),
+                        start: index,
+                        end: index + 1,
+                    })
+                }
+                TokenType::False => {
+                    let span = span_from_token(token);
+                    Ok(ParsedExpr {
+                        expr: Expression::Literal(Literal::Boolean(false), span.clone()),
+                        start: index,
+                        end: index + 1,
+                    })
+                }
+                TokenType::String(value) => {
+                    let span = span_from_token(token);
+                    Ok(ParsedExpr {
+                        expr: Expression::Literal(Literal::String(value.clone()), span.clone()),
+                        start: index,
+                        end: index + 1,
+                    })
+                }
+                TokenType::StringInterpolation(value) => {
+                    let span = span_from_token(token);
+                    Ok(ParsedExpr {
+                        expr: Expression::Literal(Literal::String(value.clone()), span.clone()),
+                        start: index,
+                        end: index + 1,
+                    })
+                }
+                TokenType::StringStart => {
+                    return self.parse_string_segments(index);
+                }
+                TokenType::Null => {
+                    let span = span_from_token(token);
+                    Ok(ParsedExpr {
+                        expr: Expression::Literal(Literal::Null, span.clone()),
+                        start: index,
+                        end: index + 1,
+                    })
+                }
+                TokenType::Identifier(name) => {
+                    let span = span_from_token(token);
+                    Ok(ParsedExpr {
+                        expr: Expression::Identifier(name.clone(), span.clone()),
+                        start: index,
+                        end: index + 1,
+                    })
+                }
+                TokenType::LeftParen => {
+                    let close_index = self.find_matching_paren(index).ok_or_else(|| {
+                        ExpressionError::new("')' が必要です", self.span_at(index))
+                    })?;
+                    let inner_tokens = &self.tokens[index + 1..close_index];
+                    let expr = Self::parse_nested_expression(inner_tokens)?;
+                    self.pos = close_index + 1;
+                    Ok(ParsedExpr {
+                        expr: expr.expr,
+                        start: index,
+                        end: close_index + 1,
+                    })
+                }
+                TokenType::LeftBrace => unreachable!(
+                    "LeftBrace should be handled in parse_prefix via parse_brace_expression"
+                ),
+                other => Err(ExpressionError::new(
+                    format!("未対応のトークン {:?} が式中に存在します", other),
+                    Some(span_from_index(self.tokens, index)),
+                )),
+            }
+        }
+
+        fn parse_brace_expression(&mut self) -> Result<ParsedExpr, ExpressionError> {
+            let start_index = self.pos;
+            self.pos += 1; // consume '{'
+
+            let closing_index = self
+                .find_matching_brace(start_index)
+                .ok_or_else(|| ExpressionError::new("'}' が必要です", self.span_at(start_index)))?;
+
+            let inner = &self.tokens[start_index + 1..closing_index];
+            let arrow_index = Self::find_top_level_arrow(inner);
+
+            let span = span_for_range(self.tokens, start_index, closing_index + 1);
+
+            let parsed = if let Some(relative_arrow) = arrow_index {
+                let arrow_absolute = start_index + 1 + relative_arrow;
+                let parameter_tokens = &self.tokens[start_index + 1..arrow_absolute];
+                let body_tokens = &self.tokens[arrow_absolute + 1..closing_index];
+
+                let parameters = self.parse_lambda_parameters(parameter_tokens)?;
+
+                let body_expr = if body_tokens.is_empty() {
+                    Expression::Block {
+                        statements: Vec::new(),
+                        span: span.clone(),
+                    }
+                } else {
+                    Self::parse_nested_expression(body_tokens)?.expr
+                };
+
+                ParsedExpr {
+                    expr: Expression::Lambda {
+                        parameters,
+                        body: Box::new(body_expr),
+                        span: span.clone(),
+                    },
+                    start: start_index,
+                    end: closing_index + 1,
+                }
+            } else {
+                ParsedExpr {
+                    expr: Expression::Block {
+                        statements: Vec::new(),
+                        span: span.clone(),
+                    },
+                    start: start_index,
+                    end: closing_index + 1,
+                }
+            };
+
+            self.pos = closing_index + 1;
+            Ok(parsed)
+        }
+
+        fn parse_postfix(
+            &mut self,
+            left: ParsedExpr,
+            kind: PostfixKind,
+        ) -> Result<ParsedExpr, ExpressionError> {
+            match kind {
+                PostfixKind::MemberAccess => self.parse_member_access(left),
+                PostfixKind::NullSafeMemberAccess => self.parse_null_safe_member(left),
+                PostfixKind::Index => self.parse_index_access(left, false),
+                PostfixKind::NullSafeIndex => self.parse_index_access(left, true),
+                PostfixKind::Call => self.parse_parenthesized_call(left),
+                PostfixKind::TrailingLambda => self.parse_trailing_lambda_call(left),
+            }
+        }
+
+        fn parse_string_segments(
+            &mut self,
+            start_index: usize,
+        ) -> Result<ParsedExpr, ExpressionError> {
+            let mut end_index = start_index;
+            let mut combined = String::new();
+
+            if let Some(token) = self.tokens.get(start_index) {
+                combined.push_str(token.lexeme.as_str());
+            }
+
+            while let Some(token) = self.tokens.get(end_index + 1) {
+                combined.push_str(token.lexeme.as_str());
+                end_index += 1;
+                if matches!(token.token_type, TokenType::StringEnd) {
+                    break;
+                }
+            }
+
+            if !matches!(
+                self.tokens.get(end_index).map(|token| &token.token_type),
+                Some(TokenType::StringEnd)
+            ) {
+                return Err(ExpressionError::new(
+                    "文字列リテラルが閉じられていません",
+                    self.span_at(end_index),
+                ));
+            }
+
+            self.pos = end_index + 1;
+            let span = span_for_range(self.tokens, start_index, end_index + 1);
+            let expr = Expression::Literal(Literal::String(combined), span.clone());
+            Ok(ParsedExpr {
+                expr,
+                start: start_index,
+                end: end_index + 1,
+            })
+        }
+
+        fn parse_member_access(&mut self, left: ParsedExpr) -> Result<ParsedExpr, ExpressionError> {
+            let (_, _dot_index) = self.advance_with_index_or_error("'.' が必要です")?;
+            let (token, name_index) = self.advance_with_index_or_error("メンバー名が必要です")?;
+            let property = match &token.token_type {
+                TokenType::Identifier(value) => value.clone(),
+                _ => {
+                    return Err(ExpressionError::new(
+                        "メンバーアクセスには識別子が必要です",
+                        Some(span_from_token(token)),
+                    ))
+                }
+            };
+
+            let span = merge_spans(&left.span(), &span_from_token(token));
+            let expr = Expression::MemberAccess {
+                object: Box::new(left.expr),
+                property,
+                span: span.clone(),
+            };
+            Ok(ParsedExpr {
+                expr,
+                start: left.start,
+                end: name_index + 1,
+            })
+        }
+
+        fn parse_null_safe_member(
+            &mut self,
+            left: ParsedExpr,
+        ) -> Result<ParsedExpr, ExpressionError> {
+            let (_, _op_index) = self.advance_with_index_or_error("'?.' が必要です")?;
+            let (token, name_index) = self.advance_with_index_or_error("メンバー名が必要です")?;
+            let property = match &token.token_type {
+                TokenType::Identifier(value) => value.clone(),
+                _ => {
+                    return Err(ExpressionError::new(
+                        "メンバーアクセスには識別子が必要です",
+                        Some(span_from_token(token)),
+                    ))
+                }
+            };
+
+            let span = merge_spans(&left.span(), &span_from_token(token));
+            let expr = Expression::NullSafeMemberAccess {
+                object: Box::new(left.expr),
+                property,
+                span: span.clone(),
+            };
+            Ok(ParsedExpr {
+                expr,
+                start: left.start,
+                end: name_index + 1,
+            })
+        }
+
+        fn parse_index_access(
+            &mut self,
+            left: ParsedExpr,
+            null_safe: bool,
+        ) -> Result<ParsedExpr, ExpressionError> {
+            let question_index = if null_safe {
+                let (_, idx) = self.advance_with_index_or_error("'?[' が必要です")?;
+                Some(idx)
+            } else {
+                None
+            };
+
+            let (open_token, open_index) = self.advance_with_index_or_error("'[' が必要です")?;
+            if !matches!(open_token.token_type, TokenType::LeftBracket) {
+                return Err(ExpressionError::new(
+                    "'[' が必要です",
+                    Some(span_from_token(open_token)),
+                ));
+            }
+
+            let close_index = self
+                .find_matching_bracket(open_index)
+                .ok_or_else(|| ExpressionError::new("']' が必要です", self.span_at(open_index)))?;
+            let inner_tokens = &self.tokens[open_index + 1..close_index];
+            let index_expr = if inner_tokens.is_empty() {
+                return Err(ExpressionError::new(
+                    "インデックス式が必要です",
+                    self.span_at(open_index),
+                ));
+            } else {
+                Self::parse_nested_expression(inner_tokens)?.expr
+            };
+            self.pos = close_index + 1;
+
+            let start_index = question_index.unwrap_or(left.start);
+            let span = span_for_range(self.tokens, start_index, close_index + 1);
+            let expr = if null_safe {
+                Expression::NullSafeIndexAccess {
+                    object: Box::new(left.expr),
+                    index: Box::new(index_expr),
+                    span: span.clone(),
+                }
+            } else {
+                Expression::IndexAccess {
+                    object: Box::new(left.expr),
+                    index: Box::new(index_expr),
+                    span: span.clone(),
+                }
+            };
+
+            Ok(ParsedExpr {
+                expr,
+                start: left.start,
+                end: close_index + 1,
+            })
+        }
+
+        fn parse_parenthesized_call(
+            &mut self,
+            left: ParsedExpr,
+        ) -> Result<ParsedExpr, ExpressionError> {
+            let (_, open_index) = self.advance_with_index_or_error("'(' が必要です")?;
+            let close_index = self
+                .find_matching_paren(open_index)
+                .ok_or_else(|| ExpressionError::new("')' が必要です", self.span_at(open_index)))?;
+
+            let (arguments, metadata, args_span_end) =
+                self.parse_arguments(open_index, close_index)?;
+            self.pos = close_index + 1;
+
+            let call_span = span_for_range(self.tokens, left.start, args_span_end);
+            let expr = Expression::Call {
+                function: Box::new(left.expr),
+                args: arguments,
+                type_arguments: Vec::new(),
+                argument_metadata: metadata,
+                span: call_span.clone(),
+            };
+
+            Ok(ParsedExpr {
+                expr,
+                start: left.start,
+                end: close_index + 1,
+            })
+        }
+
+        fn parse_trailing_lambda_call(
+            &mut self,
+            left: ParsedExpr,
+        ) -> Result<ParsedExpr, ExpressionError> {
+            let lambda = self.parse_brace_expression()?;
+            let call_span = span_for_range(self.tokens, left.start, lambda.end);
+            let mut metadata = CallArgumentMetadata::with_style(CallArgumentStyle::Whitespace);
+            metadata.used_commas = false;
+            let expr = Expression::Call {
+                function: Box::new(left.expr),
+                args: vec![Argument::Positional(lambda.expr)],
+                type_arguments: Vec::new(),
+                argument_metadata: metadata,
+                span: call_span.clone(),
+            };
+            Ok(ParsedExpr {
+                expr,
+                start: left.start,
+                end: lambda.end,
+            })
+        }
+
+        fn parse_arguments(
+            &self,
+            open_index: usize,
+            close_index: usize,
+        ) -> Result<(Vec<Argument>, CallArgumentMetadata, usize), ExpressionError> {
+            let inner = &self.tokens[open_index + 1..close_index];
+            if inner.is_empty() {
+                let metadata = CallArgumentMetadata::with_style(CallArgumentStyle::Comma);
+                return Ok((Vec::new(), metadata, close_index + 1));
+            }
+
+            let mut parts = Vec::new();
+            let mut separators = Vec::new();
+            let mut start = 0usize;
+            let mut depth_paren = 0usize;
+            let mut depth_brace = 0usize;
+            let mut depth_bracket = 0usize;
+
+            for (offset, token) in inner.iter().enumerate() {
+                match token.token_type {
+                    TokenType::LeftParen => depth_paren += 1,
+                    TokenType::RightParen if depth_paren > 0 => depth_paren -= 1,
+                    TokenType::LeftBrace => depth_brace += 1,
+                    TokenType::RightBrace if depth_brace > 0 => depth_brace -= 1,
+                    TokenType::LeftBracket => depth_bracket += 1,
+                    TokenType::RightBracket if depth_bracket > 0 => depth_bracket -= 1,
+                    TokenType::Comma | TokenType::LayoutComma
+                        if depth_paren == 0 && depth_brace == 0 && depth_bracket == 0 =>
+                    {
+                        if start != offset {
+                            parts.push(&inner[start..offset]);
+                            separators.push(&token.token_type);
+                        }
+                        start = offset + 1;
+                    }
+                    _ => {}
+                }
+            }
+
+            if start < inner.len() {
+                parts.push(&inner[start..]);
+            }
+
+            let mut arguments = Vec::new();
+            for slice in parts {
+                if slice.is_empty() {
+                    continue;
+                }
+                arguments.push(self.parse_argument_slice(slice)?);
+            }
+
+            let mut saw_comma = false;
+            let mut saw_layout = false;
+            for token_type in separators {
+                match token_type {
+                    TokenType::Comma => saw_comma = true,
+                    TokenType::LayoutComma => saw_layout = true,
+                    _ => {}
+                }
+            }
+
+            let style = if saw_layout && !saw_comma {
+                CallArgumentStyle::Whitespace
+            } else {
+                CallArgumentStyle::Comma
+            };
+            let mut metadata = CallArgumentMetadata::with_style(style);
+            metadata.used_commas = saw_comma;
+
+            Ok((arguments, metadata, close_index + 1))
+        }
+
+        fn parse_argument_slice(&self, slice: &[&Token]) -> Result<Argument, ExpressionError> {
+            let mut depth_paren = 0usize;
+            let mut depth_brace = 0usize;
+            let mut depth_bracket = 0usize;
+            let mut assign_index = None;
+
+            for (idx, token) in slice.iter().enumerate() {
+                match token.token_type {
+                    TokenType::LeftParen => depth_paren += 1,
+                    TokenType::RightParen if depth_paren > 0 => depth_paren -= 1,
+                    TokenType::LeftBrace => depth_brace += 1,
+                    TokenType::RightBrace if depth_brace > 0 => depth_brace -= 1,
+                    TokenType::LeftBracket => depth_bracket += 1,
+                    TokenType::RightBracket if depth_bracket > 0 => depth_bracket -= 1,
+                    TokenType::Assign
+                        if depth_paren == 0 && depth_brace == 0 && depth_bracket == 0 =>
+                    {
+                        assign_index = Some(idx);
+                        break;
+                    }
+                    _ => {}
+                }
+            }
+
+            if let Some(idx) = assign_index {
+                let name_token = slice
+                    .first()
+                    .ok_or_else(|| ExpressionError::new("引数名が必要です", None))?;
+                let name = match &name_token.token_type {
+                    TokenType::Identifier(value) => value.clone(),
+                    _ => {
+                        return Err(ExpressionError::new(
+                            "名前付き引数には識別子が必要です",
+                            Some(span_from_token(name_token)),
+                        ))
+                    }
+                };
+                let value_tokens = &slice[idx + 1..];
+                if value_tokens.is_empty() {
+                    return Err(ExpressionError::new(
+                        "名前付き引数の値が必要です",
+                        Some(span_from_token(slice[idx])),
+                    ));
+                }
+                let value_expr = Self::parse_nested_expression(value_tokens)?.expr;
+                let span = merge_spans(&span_from_token(name_token), &expression_span(&value_expr));
+                return Ok(Argument::Named {
+                    name,
+                    value: value_expr,
+                    span,
+                });
+            }
+
+            let expr = Self::parse_nested_expression(slice)?.expr;
+            Ok(Argument::Positional(expr))
+        }
+
+        fn parse_lambda_parameters(
+            &self,
+            tokens: &[&Token],
+        ) -> Result<Vec<Parameter>, ExpressionError> {
+            if tokens.is_empty() {
+                return Ok(Vec::new());
+            }
+
+            if matches!(tokens[0].token_type, TokenType::LeftParen) {
+                return self.parse_parenthesized_parameters(tokens);
+            }
+
+            if tokens.len() == 1 {
+                return match &tokens[0].token_type {
+                    TokenType::Identifier(name) => {
+                        let span = span_from_token(tokens[0]);
+                        Ok(vec![Parameter {
+                            name: name.clone(),
+                            type_annotation: None,
+                            default_value: None,
+                            span,
+                        }])
+                    }
+                    _ => Err(ExpressionError::new(
+                        "ラムダパラメータには識別子が必要です",
+                        Some(span_from_token(tokens[0])),
+                    )),
+                };
+            }
+
+            Err(ExpressionError::new(
+                "ラムダパラメータの解析に失敗しました",
+                tokens.first().map(|t| span_from_token(t)),
+            ))
+        }
+
+        fn parse_parenthesized_parameters(
+            &self,
+            tokens: &[&Token],
+        ) -> Result<Vec<Parameter>, ExpressionError> {
+            if tokens.len() < 2 {
+                return Err(ExpressionError::new(
+                    "ラムダパラメータの括弧が正しく閉じられていません",
+                    tokens.first().map(|t| span_from_token(t)),
+                ));
+            }
+
+            let mut params = Vec::new();
+            let mut current = Vec::new();
+            let mut depth = 0usize;
+            for token in &tokens[1..tokens.len() - 1] {
+                match token.token_type {
+                    TokenType::LeftParen => depth += 1,
+                    TokenType::RightParen if depth > 0 => depth -= 1,
+                    TokenType::Comma if depth == 0 => {
+                        if !current.is_empty() {
+                            params.push(self.make_parameter_from_slice(&current)?);
+                            current.clear();
+                        }
+                        continue;
+                    }
+                    _ => {}
+                }
+                current.push(*token);
+            }
+
+            if !current.is_empty() {
+                params.push(self.make_parameter_from_slice(&current)?);
+            }
+
+            Ok(params)
+        }
+
+        fn make_parameter_from_slice(
+            &self,
+            slice: &[&Token],
+        ) -> Result<Parameter, ExpressionError> {
+            if slice.is_empty() {
+                return Err(ExpressionError::new("パラメータが空です", None));
+            }
+
+            let name_token = slice[0];
+            let name = match &name_token.token_type {
+                TokenType::Identifier(value) => value.clone(),
+                _ => {
+                    return Err(ExpressionError::new(
+                        "パラメータ名には識別子が必要です",
+                        Some(span_from_token(name_token)),
+                    ))
+                }
+            };
+
+            let type_annotation = slice
+                .iter()
+                .enumerate()
+                .find(|(_, token)| matches!(token.token_type, TokenType::Colon))
+                .map(|(idx, _)| {
+                    let ty_tokens = &slice[idx + 1..];
+                    TypeAnnotation::Simple(join_tokens(ty_tokens))
+                });
+
+            let span = span_for_range_slice(slice);
+            Ok(Parameter {
+                name,
+                type_annotation,
+                default_value: None,
+                span,
+            })
+        }
+
+        fn make_binary(
+            &self,
+            left: ParsedExpr,
+            right: ParsedExpr,
+            op: BinaryOp,
+            op_span: Span,
+        ) -> Result<ParsedExpr, ExpressionError> {
+            let span = span_for_range(self.tokens, left.start, right.end);
+            match op {
+                BinaryOp::Add
+                | BinaryOp::Subtract
+                | BinaryOp::Multiply
+                | BinaryOp::Divide
+                | BinaryOp::Modulo
+                | BinaryOp::Equal
+                | BinaryOp::NotEqual
+                | BinaryOp::Less
+                | BinaryOp::LessEqual
+                | BinaryOp::Greater
+                | BinaryOp::GreaterEqual
+                | BinaryOp::And
+                | BinaryOp::Or
+                | BinaryOp::RangeExclusive
+                | BinaryOp::RangeInclusive
+                | BinaryOp::Elvis => {}
+                BinaryOp::Is => {
+                    return Err(ExpressionError::new(
+                        "`is` 演算子はまだサポートされていません",
+                        Some(op_span.clone()),
+                    ))
+                }
+                _ => {
+                    return Err(ExpressionError::new(
+                        format!("未対応の2項演算子 {:?}", op),
+                        Some(op_span.clone()),
+                    ));
+                }
+            }
+
+            let expr = Expression::Binary {
+                left: Box::new(left.expr),
+                op,
+                right: Box::new(right.expr),
+                span: span.clone(),
+            };
+            Ok(ParsedExpr {
+                expr,
+                start: left.start,
+                end: right.end,
+            })
+        }
+
+        fn peek_postfix_kind(&self) -> Option<PostfixKind> {
+            let token = self.peek_token()?;
+            match token.token_type {
+                TokenType::Dot => Some(PostfixKind::MemberAccess),
+                TokenType::NullSafe => Some(PostfixKind::NullSafeMemberAccess),
+                TokenType::LeftBracket => Some(PostfixKind::Index),
+                TokenType::Question => {
+                    if matches!(
+                        self.tokens.get(self.pos + 1).map(|token| &token.token_type),
+                        Some(TokenType::LeftBracket)
+                    ) {
+                        Some(PostfixKind::NullSafeIndex)
+                    } else {
+                        None
+                    }
+                }
+                TokenType::LeftParen => Some(PostfixKind::Call),
+                TokenType::LeftBrace => Some(PostfixKind::TrailingLambda),
+                _ => None,
+            }
+        }
+
+        fn peek_binary_info(&self) -> Option<BinaryInfo> {
+            let token = self.peek_token()?;
+            binary_info_for_token(&token.token_type)
+        }
+
+        fn parse_nested_expression(tokens: &[&Token]) -> Result<ParsedExpr, ExpressionError> {
+            let mut nested = ExpressionParser::new(tokens);
+            let parsed = nested.parse_expression_bp(0)?;
+            nested
+                .consume_postfix_if_any(parsed)
+                .map(|expr| ParsedExpr {
+                    expr,
+                    start: 0,
+                    end: tokens.len(),
+                })
+        }
+
+        fn peek_token(&self) -> Option<&Token> {
+            self.tokens.get(self.pos).copied()
+        }
+
+        fn peek_with_index(&self) -> Option<(&Token, usize)> {
+            self.tokens.get(self.pos).map(|token| (*token, self.pos))
+        }
+
+        fn advance_with_index(&mut self) -> Option<(&Token, usize)> {
+            let index = self.pos;
+            let token = self.tokens.get(self.pos)?;
+            self.pos += 1;
+            Some((*token, index))
+        }
+
+        fn span_at(&self, index: usize) -> Option<Span> {
+            self.tokens.get(index).map(|token| span_from_token(token))
+        }
+
+        fn advance_with_index_or_error(
+            &mut self,
+            message: &str,
+        ) -> Result<(&Token, usize), ExpressionError> {
+            match self.advance_with_index() {
+                Some(pair) => Ok(pair),
+                None => Err(ExpressionError::new(message, None)),
+            }
+        }
+
+        fn find_matching_paren(&self, open_index: usize) -> Option<usize> {
+            let mut depth = 0isize;
+            for (idx, token) in self.tokens.iter().enumerate().skip(open_index) {
+                match token.token_type {
+                    TokenType::LeftParen => depth += 1,
+                    TokenType::RightParen => {
+                        depth -= 1;
+                        if depth == 0 {
+                            return Some(idx);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            None
+        }
+
+        fn find_matching_brace(&self, open_index: usize) -> Option<usize> {
+            let mut depth = 0isize;
+            for (idx, token) in self.tokens.iter().enumerate().skip(open_index) {
+                match token.token_type {
+                    TokenType::LeftBrace => depth += 1,
+                    TokenType::RightBrace => {
+                        depth -= 1;
+                        if depth == 0 {
+                            return Some(idx);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            None
+        }
+
+        fn find_matching_bracket(&self, open_index: usize) -> Option<usize> {
+            let mut depth = 0isize;
+            for (idx, token) in self.tokens.iter().enumerate().skip(open_index) {
+                match token.token_type {
+                    TokenType::LeftBracket => depth += 1,
+                    TokenType::RightBracket => {
+                        depth -= 1;
+                        if depth == 0 {
+                            return Some(idx);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            None
+        }
+
+        fn find_top_level_arrow(tokens: &[&Token]) -> Option<usize> {
+            let mut depth_paren = 0usize;
+            let mut depth_brace = 0usize;
+            let mut depth_bracket = 0usize;
+            for (idx, token) in tokens.iter().enumerate() {
+                match token.token_type {
+                    TokenType::LeftParen => depth_paren += 1,
+                    TokenType::RightParen if depth_paren > 0 => depth_paren -= 1,
+                    TokenType::LeftBrace => depth_brace += 1,
+                    TokenType::RightBrace if depth_brace > 0 => depth_brace -= 1,
+                    TokenType::LeftBracket => depth_bracket += 1,
+                    TokenType::RightBracket if depth_bracket > 0 => depth_bracket -= 1,
+                    TokenType::Arrow
+                        if depth_paren == 0 && depth_brace == 0 && depth_bracket == 0 =>
+                    {
+                        return Some(idx);
+                    }
+                    _ => {}
+                }
+            }
+            None
+        }
+    }
+
+    #[derive(Clone, Copy)]
+    enum PostfixKind {
+        MemberAccess,
+        NullSafeMemberAccess,
+        Index,
+        NullSafeIndex,
+        Call,
+        TrailingLambda,
+    }
+
+    const PREFIX_PRECEDENCE: u8 = 8;
+
+    fn span_from_index(tokens: &[&Token], index: usize) -> Span {
+        tokens
+            .get(index)
+            .map(|token| span_from_token(token))
+            .unwrap_or_else(Span::dummy)
+    }
+
+    fn binary_info_for_token(token: &TokenType) -> Option<BinaryInfo> {
+        match token {
+            TokenType::Plus => Some(BinaryInfo {
+                op: BinaryOp::Add,
+                precedence: 6,
+                associativity: Associativity::Left,
+            }),
+            TokenType::Minus => Some(BinaryInfo {
+                op: BinaryOp::Subtract,
+                precedence: 6,
+                associativity: Associativity::Left,
+            }),
+            TokenType::Multiply => Some(BinaryInfo {
+                op: BinaryOp::Multiply,
+                precedence: 7,
+                associativity: Associativity::Left,
+            }),
+            TokenType::Divide => Some(BinaryInfo {
+                op: BinaryOp::Divide,
+                precedence: 7,
+                associativity: Associativity::Left,
+            }),
+            TokenType::Modulo => Some(BinaryInfo {
+                op: BinaryOp::Modulo,
+                precedence: 7,
+                associativity: Associativity::Left,
+            }),
+            TokenType::Equal => Some(BinaryInfo {
+                op: BinaryOp::Equal,
+                precedence: 4,
+                associativity: Associativity::Left,
+            }),
+            TokenType::NotEqual => Some(BinaryInfo {
+                op: BinaryOp::NotEqual,
+                precedence: 4,
+                associativity: Associativity::Left,
+            }),
+            TokenType::Less => Some(BinaryInfo {
+                op: BinaryOp::Less,
+                precedence: 5,
+                associativity: Associativity::Left,
+            }),
+            TokenType::LessEqual => Some(BinaryInfo {
+                op: BinaryOp::LessEqual,
+                precedence: 5,
+                associativity: Associativity::Left,
+            }),
+            TokenType::Greater => Some(BinaryInfo {
+                op: BinaryOp::Greater,
+                precedence: 5,
+                associativity: Associativity::Left,
+            }),
+            TokenType::GreaterEqual => Some(BinaryInfo {
+                op: BinaryOp::GreaterEqual,
+                precedence: 5,
+                associativity: Associativity::Left,
+            }),
+            TokenType::And => Some(BinaryInfo {
+                op: BinaryOp::And,
+                precedence: 2,
+                associativity: Associativity::Left,
+            }),
+            TokenType::Or => Some(BinaryInfo {
+                op: BinaryOp::Or,
+                precedence: 1,
+                associativity: Associativity::Left,
+            }),
+            TokenType::RangeExclusive => Some(BinaryInfo {
+                op: BinaryOp::RangeExclusive,
+                precedence: 5,
+                associativity: Associativity::Left,
+            }),
+            TokenType::RangeInclusive => Some(BinaryInfo {
+                op: BinaryOp::RangeInclusive,
+                precedence: 5,
+                associativity: Associativity::Left,
+            }),
+            TokenType::Elvis => Some(BinaryInfo {
+                op: BinaryOp::Elvis,
+                precedence: 3,
+                associativity: Associativity::Left,
+            }),
+            _ => None,
+        }
+    }
+
+    fn span_for_range(tokens: &[&Token], start: usize, end: usize) -> Span {
+        if start >= end || end == 0 {
+            return span_from_token(tokens[start.min(tokens.len().saturating_sub(1))]);
+        }
+        let start_span = span_from_token(tokens[start]);
+        let end_span = span_from_token(tokens[end - 1]);
+        merge_spans(&start_span, &end_span)
+    }
+
+    fn span_for_range_slice(slice: &[&Token]) -> Span {
+        let start = slice
+            .first()
+            .map(|token| span_from_token(token))
+            .unwrap_or_else(Span::dummy);
+        let end = slice
+            .last()
+            .map(|token| span_from_token(token))
+            .unwrap_or_else(Span::dummy);
+        merge_spans(&start, &end)
+    }
+}
+
 fn push_diagnostic(
     diagnostics: &mut Vec<LoweringDiagnostic>,
     severity: LoweringDiagnosticSeverity,
@@ -920,7 +1958,7 @@ fn lower_function(
     } else {
         node.children()
             .find(|child| child.kind() == SyntaxKind::Expression)
-            .map(|expr| lower_expression_shallow(context, &expr, diagnostics))
+            .map(|expr| lower_expression(context, &expr))
             .transpose()?
             .unwrap_or_else(|| Expression::Identifier(name.clone(), fallback_span))
     };
@@ -1111,7 +2149,7 @@ fn lower_property(
     let initializer = match child_node(node, SyntaxKind::InitializerClause)
         .and_then(|clause| child_node(&clause, SyntaxKind::Expression))
     {
-        Some(expr) => Some(lower_expression_shallow(context, &expr, diagnostics)?),
+        Some(expr) => Some(lower_expression(context, &expr)?),
         None => None,
     };
 
@@ -1163,7 +2201,7 @@ fn lower_for(
     let iterable_expr = node
         .children()
         .find(|child| child.kind() == SyntaxKind::Expression)
-        .map(|expr| lower_expression_shallow(context, &expr, diagnostics))
+        .map(|expr| lower_expression(context, &expr))
         .transpose()?
         .ok_or_else(|| {
             LoweringDiagnostic::new(
@@ -1209,10 +2247,10 @@ fn lower_for(
 fn lower_return(
     context: &LoweringContext<'_>,
     node: &JvSyntaxNode,
-    diagnostics: &mut Vec<LoweringDiagnostic>,
+    _diagnostics: &mut Vec<LoweringDiagnostic>,
 ) -> Result<Statement, LoweringDiagnostic> {
     let value = child_node(node, SyntaxKind::Expression)
-        .map(|expr| lower_expression_shallow(context, &expr, diagnostics))
+        .map(|expr| lower_expression(context, &expr))
         .transpose()?;
 
     Ok(Statement::Return {
@@ -1224,7 +2262,7 @@ fn lower_return(
 fn lower_throw(
     context: &LoweringContext<'_>,
     node: &JvSyntaxNode,
-    diagnostics: &mut Vec<LoweringDiagnostic>,
+    _diagnostics: &mut Vec<LoweringDiagnostic>,
 ) -> Result<Statement, LoweringDiagnostic> {
     let expr_node = child_node(node, SyntaxKind::Expression).ok_or_else(|| {
         missing_child_diagnostic(
@@ -1235,7 +2273,7 @@ fn lower_throw(
         )
     })?;
 
-    let expr = lower_expression_shallow(context, &expr_node, diagnostics)?;
+    let expr = lower_expression(context, &expr_node)?;
     Ok(Statement::Throw {
         expr,
         span: context.span_for(node).unwrap_or_else(Span::dummy),
@@ -1263,9 +2301,9 @@ fn lower_continue(
 fn lower_expression_statement(
     context: &LoweringContext<'_>,
     node: &JvSyntaxNode,
-    diagnostics: &mut Vec<LoweringDiagnostic>,
+    _diagnostics: &mut Vec<LoweringDiagnostic>,
 ) -> Result<Statement, LoweringDiagnostic> {
-    let expr = lower_expression_shallow(context, node, diagnostics)?;
+    let expr = lower_expression(context, node)?;
     Ok(Statement::Expression {
         expr,
         span: context.span_for(node).unwrap_or_else(Span::dummy),

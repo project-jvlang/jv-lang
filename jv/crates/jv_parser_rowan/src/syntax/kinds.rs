@@ -733,7 +733,7 @@ mod tests {
         ("RightBrace", SyntaxKind::RightBrace),
         ("Less", SyntaxKind::Less),
         ("Greater", SyntaxKind::Greater),
-        ("FatArrow", SyntaxKind::FatArrow),
+        ("Arrow", SyntaxKind::Arrow),
         ("Identifier", SyntaxKind::Identifier),
         ("ExpressionToken", SyntaxKind::Expression),
     ];

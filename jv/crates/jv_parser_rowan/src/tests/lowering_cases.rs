@@ -1,11 +1,13 @@
 use crate::lowering::{lower_program, LoweringDiagnosticSeverity, LoweringResult};
+use crate::parser::parse;
 use crate::{JvLanguage, ParseBuilder, SyntaxKind};
 use jv_ast::{
+    expression::{Argument, Parameter},
     statement::{ConcurrencyConstruct, LoopStrategy, ResourceManagement, ValBindingOrigin},
-    types::{Literal, Modifiers, TypeAnnotation},
+    types::{BinaryOp, Literal, Modifiers, TypeAnnotation},
     Expression, Statement,
 };
-use jv_lexer::{Token, TokenTrivia, TokenType};
+use jv_lexer::{Lexer, Token, TokenTrivia, TokenType};
 use rowan::SyntaxNode;
 
 fn make_token(column: &mut usize, token_type: TokenType, lexeme: &str) -> Token {
@@ -31,6 +33,21 @@ fn build_tree(
     build(&mut builder, tokens);
     builder.finish_node();
     SyntaxNode::new_root(builder.finish())
+}
+
+fn lower_source(source: &str) -> LoweringResult {
+    let tokens = Lexer::new(source.to_string())
+        .tokenize()
+        .expect("lex source");
+    let parse_output = parse(&tokens);
+    assert!(
+        parse_output.diagnostics.is_empty(),
+        "expected parser diagnostics to be empty, got {:?}",
+        parse_output.diagnostics
+    );
+    let green = ParseBuilder::build_from_events(&parse_output.events, &tokens);
+    let syntax: SyntaxNode<JvLanguage> = SyntaxNode::new_root(green);
+    lower_program(&syntax, &tokens)
 }
 
 fn sample_package_val() -> (SyntaxNode<JvLanguage>, Vec<Token>) {
@@ -697,23 +714,36 @@ fn lowering_table_driven_cases() {
         LoweringCase {
             build: complex_expression_tokens,
             verify: Box::new(|result| {
+                assert!(
+                    result.diagnostics.is_empty(),
+                    "unexpected diagnostics: {:?}",
+                    result.diagnostics
+                );
                 match result.statements.first().expect("expected val statement") {
                     Statement::ValDeclaration { initializer, .. } => match initializer {
-                        Expression::Identifier(text, _) => assert_eq!(text, "foo+bar"),
-                        other => panic!("expected identifier fallback, got {:?}", other),
+                        Expression::Binary {
+                            op, left, right, ..
+                        } => {
+                            assert_eq!(op, &BinaryOp::Add);
+                            match left.as_ref() {
+                                Expression::Identifier(name, _) => assert_eq!(name, "foo"),
+                                other => panic!(
+                                    "expected identifier lhs for binary expression, got {:?}",
+                                    other
+                                ),
+                            }
+                            match right.as_ref() {
+                                Expression::Identifier(name, _) => assert_eq!(name, "bar"),
+                                other => panic!(
+                                    "expected identifier rhs for binary expression, got {:?}",
+                                    other
+                                ),
+                            }
+                        }
+                        other => panic!("expected binary addition, got {:?}", other),
                     },
                     other => panic!("expected val declaration, got {:?}", other),
                 }
-                let warning = result
-                    .diagnostics
-                    .iter()
-                    .find(|diag| diag.severity == LoweringDiagnosticSeverity::Warning)
-                    .expect("expected warning for complex expression fallback");
-                assert!(
-                    warning.message.contains("式ローワリング"),
-                    "unexpected warning: {}",
-                    warning.message
-                );
             }),
         },
         LoweringCase {
@@ -990,5 +1020,186 @@ fn lowering_table_driven_cases() {
         let (root, tokens) = (case.build)();
         let result = lower_program(&root, &tokens);
         (case.verify)(&result);
+    }
+}
+
+#[test]
+fn expression_lowering_respects_operator_precedence() {
+    let result = lower_source("val result = 1 + 2 * 3");
+    assert!(
+        result.diagnostics.is_empty(),
+        "unexpected diagnostics: {:?}",
+        result.diagnostics
+    );
+
+    let initializer = match result.statements.first().expect("expected val statement") {
+        Statement::ValDeclaration {
+            name, initializer, ..
+        } => {
+            assert_eq!(name, "result");
+            initializer
+        }
+        other => panic!("expected val declaration, got {:?}", other),
+    };
+
+    match initializer {
+        Expression::Binary {
+            op, left, right, ..
+        } => {
+            assert_eq!(op, &BinaryOp::Add);
+            match left.as_ref() {
+                Expression::Literal(Literal::Number(value), _) => assert_eq!(value, "1"),
+                other => panic!("expected numeric literal lhs, got {:?}", other),
+            }
+            match right.as_ref() {
+                Expression::Binary {
+                    op: inner_op,
+                    left: mul_left,
+                    right: mul_right,
+                    ..
+                } => {
+                    assert_eq!(inner_op, &BinaryOp::Multiply);
+                    match mul_left.as_ref() {
+                        Expression::Literal(Literal::Number(value), _) => assert_eq!(value, "2"),
+                        other => {
+                            panic!("expected numeric literal for multiply lhs, got {:?}", other)
+                        }
+                    }
+                    match mul_right.as_ref() {
+                        Expression::Literal(Literal::Number(value), _) => assert_eq!(value, "3"),
+                        other => {
+                            panic!("expected numeric literal for multiply rhs, got {:?}", other)
+                        }
+                    }
+                }
+                other => panic!("expected multiplicative rhs, got {:?}", other),
+            }
+        }
+        other => panic!("expected additive binary expression, got {:?}", other),
+    }
+}
+
+#[test]
+fn expression_lowering_handles_lambda_literal() {
+    let result = lower_source("val twice = { x -> x * 2 }");
+    assert!(
+        result.diagnostics.is_empty(),
+        "unexpected diagnostics: {:?}",
+        result.diagnostics
+    );
+
+    let initializer = match result.statements.first().expect("expected val statement") {
+        Statement::ValDeclaration {
+            name, initializer, ..
+        } => {
+            assert_eq!(name, "twice");
+            initializer
+        }
+        other => panic!("expected val declaration, got {:?}", other),
+    };
+
+    match initializer {
+        Expression::Lambda {
+            parameters, body, ..
+        } => {
+            assert_eq!(parameters.len(), 1);
+            let Parameter { name, .. } = &parameters[0];
+            assert_eq!(name, "x");
+            match body.as_ref() {
+                Expression::Binary {
+                    op, left, right, ..
+                } => {
+                    assert_eq!(op, &BinaryOp::Multiply);
+                    match left.as_ref() {
+                        Expression::Identifier(name, _) => assert_eq!(name, "x"),
+                        other => panic!("expected identifier lhs, got {:?}", other),
+                    }
+                    match right.as_ref() {
+                        Expression::Literal(Literal::Number(value), _) => assert_eq!(value, "2"),
+                        other => panic!("expected numeric literal rhs, got {:?}", other),
+                    }
+                }
+                other => panic!("expected binary multiply body, got {:?}", other),
+            }
+        }
+        other => panic!("expected lambda expression, got {:?}", other),
+    }
+}
+
+#[test]
+fn expression_lowering_handles_trailing_lambda_call() {
+    let result = lower_source("val mapped = items.map { value -> value + 1 }");
+    assert!(
+        result.diagnostics.is_empty(),
+        "unexpected diagnostics: {:?}",
+        result.diagnostics
+    );
+
+    let initializer = match result.statements.first().expect("expected val statement") {
+        Statement::ValDeclaration {
+            name, initializer, ..
+        } => {
+            assert_eq!(name, "mapped");
+            initializer
+        }
+        other => panic!("expected val declaration, got {:?}", other),
+    };
+
+    match initializer {
+        Expression::Call { function, args, .. } => {
+            match function.as_ref() {
+                Expression::MemberAccess {
+                    object, property, ..
+                } => {
+                    match object.as_ref() {
+                        Expression::Identifier(name, _) => assert_eq!(name, "items"),
+                        other => panic!("expected identifier receiver, got {:?}", other),
+                    }
+                    assert_eq!(property, "map");
+                }
+                other => panic!("expected member access function, got {:?}", other),
+            }
+
+            assert_eq!(args.len(), 1, "expected trailing lambda argument only");
+            match &args[0] {
+                Argument::Positional(expr) => match expr {
+                    Expression::Lambda {
+                        parameters, body, ..
+                    } => {
+                        assert_eq!(parameters.len(), 1);
+                        assert_eq!(parameters[0].name, "value");
+                        match body.as_ref() {
+                            Expression::Binary {
+                                op, left, right, ..
+                            } => {
+                                assert_eq!(op, &BinaryOp::Add);
+                                match left.as_ref() {
+                                    Expression::Identifier(name, _) => assert_eq!(name, "value"),
+                                    other => panic!(
+                                        "expected identifier lambda body lhs, got {:?}",
+                                        other
+                                    ),
+                                }
+                                match right.as_ref() {
+                                    Expression::Literal(Literal::Number(value), _) => {
+                                        assert_eq!(value, "1")
+                                    }
+                                    other => panic!(
+                                        "expected numeric literal lambda body rhs, got {:?}",
+                                        other
+                                    ),
+                                }
+                            }
+                            other => {
+                                panic!("expected additive lambda body expression, got {:?}", other)
+                            }
+                        }
+                    }
+                    other => panic!("expected lambda argument, got {:?}", other),
+                },
+                other => panic!("expected positional argument, got {:?}", other),
+            }
+        }
+        other => panic!("expected call expression, got {:?}", other),
     }
 }

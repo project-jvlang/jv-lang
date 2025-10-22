@@ -32,7 +32,7 @@ AnnotationArgumentList = LeftParen (AnnotationArgument (Comma AnnotationArgument
 AnnotationArgument = Identifier Assign Expression | Expression
 ModifierList = Modifier Modifier*
 Modifier = Identifier
-FunctionDeclaration = AnnotationList? ModifierList? FunKw Identifier TypeParameterList? FunctionParameterList FunctionReturnType? WhereClause? (Block | FatArrow Expression)
+FunctionDeclaration = AnnotationList? ModifierList? FunKw Identifier TypeParameterList? FunctionParameterList FunctionReturnType? WhereClause? (Block | Arrow Expression)
 FunctionParameterList = LeftParen (FunctionParameter (Comma FunctionParameter)*)? RightParen
 FunctionParameter = ParameterModifierList? BindingPattern TypeAnnotation?
 ParameterModifierList = ParameterModifier ParameterModifier*
@@ -46,7 +46,7 @@ ClassDeclaration = AnnotationList? ModifierList? (ClassKw | DataKw) Identifier T
 ClassBody = LeftBrace StatementList RightBrace
 Block = LeftBrace StatementList RightBrace
 WhenStatement = WhenKw Expression LeftBrace WhenBranch* RightBrace
-WhenBranch = (Expression | ElseKw) FatArrow (Block | Expression)
+WhenBranch = (Expression | ElseKw) Arrow (Block | Expression)
 ForStatement = ForKw LeftParen BindingPattern InKw Expression RightParen Block
 ReturnStatement = ReturnKw Expression?
 ThrowStatement = ThrowKw Expression
@@ -92,7 +92,7 @@ LeftBrace = '{'
 RightBrace = '}'
 Less = '<'
 Greater = '>'
-FatArrow = '=>'
+Arrow = '->'
 Identifier = 'IDENTIFIER'
 ExpressionToken = 'EXPRESSION'
 "#;
