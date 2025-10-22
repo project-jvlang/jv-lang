@@ -4,7 +4,7 @@ use crate::{JvLanguage, ParseBuilder, SyntaxKind};
 use jv_ast::{
     expression::{Argument, Parameter},
     statement::{ConcurrencyConstruct, LoopStrategy, ResourceManagement, ValBindingOrigin},
-    types::{BinaryOp, Literal, Modifiers, TypeAnnotation},
+    types::{BinaryOp, Literal, Modifiers, Pattern, TypeAnnotation},
     Expression, Statement,
 };
 use jv_lexer::{Lexer, Token, TokenTrivia, TokenType};
@@ -1201,5 +1201,170 @@ fn expression_lowering_handles_trailing_lambda_call() {
             }
         }
         other => panic!("expected call expression, got {:?}", other),
+    }
+}
+
+#[test]
+fn expression_lowering_handles_when_with_subject_and_guard() {
+    let source = r#"
+    package demo
+    val value = 0
+    val result = when (value) {
+        is String && value.startsWith("A") -> value.length
+        in 0..10 -> 42
+        else -> 0
+    }
+    "#;
+
+    let result = lower_source(source);
+    assert!(
+        result.diagnostics.is_empty(),
+        "unexpected diagnostics: {:?}",
+        result.diagnostics
+    );
+
+    let when_expr = result
+        .statements
+        .iter()
+        .find_map(|statement| {
+            if let Statement::ValDeclaration {
+                name, initializer, ..
+            } = statement
+            {
+                if name == "result" {
+                    return Some(initializer);
+                }
+            }
+            None
+        })
+        .expect("expected val result declaration");
+
+    let (subject_expr, arms, else_branch) = match when_expr {
+        Expression::When {
+            expr,
+            arms,
+            else_arm,
+            ..
+        } => (expr, arms, else_arm),
+        other => panic!("expected when expression, got {:?}", other),
+    };
+
+    match subject_expr.as_ref().map(|expr| expr.as_ref()) {
+        Some(Expression::Identifier(name, _)) => assert_eq!(name, "value"),
+        other => panic!("expected identifier subject, got {:?}", other),
+    }
+
+    assert_eq!(arms.len(), 2, "expected two when arms");
+
+    let first_arm = &arms[0];
+    match &first_arm.pattern {
+        Pattern::Constructor { name, .. } => assert_eq!(name, "String"),
+        other => panic!("expected constructor pattern, got {:?}", other),
+    }
+    assert!(
+        first_arm.guard.is_some(),
+        "expected guard expression on first arm"
+    );
+    match &first_arm.body {
+        Expression::MemberAccess { property, .. } => assert_eq!(property, "length"),
+        other => panic!("unexpected first arm body {:?}", other),
+    }
+
+    let second_arm = &arms[1];
+    match &second_arm.pattern {
+        Pattern::Range { inclusive_end, .. } => assert!(!inclusive_end),
+        other => panic!("expected range pattern, got {:?}", other),
+    }
+    assert!(
+        second_arm.guard.is_none(),
+        "range arm should not have guard"
+    );
+    match &second_arm.body {
+        Expression::Literal(Literal::Number(value), _) => assert_eq!(value, "42"),
+        other => panic!("unexpected second arm body {:?}", other),
+    }
+
+    let else_expr = else_branch
+        .as_ref()
+        .expect("expected else branch expression")
+        .as_ref();
+    match else_expr {
+        Expression::Literal(Literal::Number(value), _) => assert_eq!(value, "0"),
+        other => panic!("unexpected else branch {:?}", other),
+    }
+}
+
+#[test]
+fn expression_lowering_handles_subjectless_when_expression() {
+    let source = r#"
+    package demo
+    val value = 5
+    val label = when {
+        value > 10 -> "large"
+        else -> "small"
+    }
+    "#;
+
+    let result = lower_source(source);
+    assert!(
+        result.diagnostics.is_empty(),
+        "unexpected diagnostics: {:?}",
+        result.diagnostics
+    );
+
+    let when_expr = result
+        .statements
+        .iter()
+        .find_map(|statement| {
+            if let Statement::ValDeclaration {
+                name, initializer, ..
+            } = statement
+            {
+                if name == "label" {
+                    return Some(initializer);
+                }
+            }
+            None
+        })
+        .expect("expected val label declaration");
+
+    let (subject_expr, arms, else_branch) = match when_expr {
+        Expression::When {
+            expr,
+            arms,
+            else_arm,
+            ..
+        } => (expr, arms, else_arm),
+        other => panic!("expected when expression, got {:?}", other),
+    };
+
+    assert!(
+        subject_expr.is_none(),
+        "subjectless when should not have a subject expression"
+    );
+    assert_eq!(arms.len(), 1, "expected single conditional arm");
+
+    let arm = &arms[0];
+    match &arm.pattern {
+        Pattern::Wildcard(_) => {}
+        other => panic!("expected wildcard pattern, got {:?}", other),
+    }
+    let guard = arm.guard.as_ref().expect("expected guard expression");
+    match guard {
+        Expression::Binary { op, .. } => assert_eq!(op, &BinaryOp::Greater),
+        other => panic!("unexpected guard expression {:?}", other),
+    }
+    match &arm.body {
+        Expression::Literal(Literal::String(text), _) => assert_eq!(text, "large"),
+        other => panic!("unexpected arm body {:?}", other),
+    }
+
+    let else_expr = else_branch
+        .as_ref()
+        .expect("expected else branch expression")
+        .as_ref();
+    match else_expr {
+        Expression::Literal(Literal::String(text), _) => assert_eq!(text, "small"),
+        other => panic!("unexpected else branch {:?}", other),
     }
 }

@@ -3,15 +3,18 @@ use super::helpers::{
 };
 use crate::syntax::SyntaxKind;
 use jv_ast::comments::{CommentKind, CommentStatement, CommentVisibility};
-use jv_ast::expression::{Argument, CallArgumentMetadata, CallArgumentStyle, Parameter};
+use jv_ast::expression::{Argument, CallArgumentMetadata, CallArgumentStyle, Parameter, WhenArm};
 use jv_ast::statement::{
     ConcurrencyConstruct, ForInStatement, LoopBinding, LoopStrategy, Property, ResourceManagement,
     ValBindingOrigin,
 };
-use jv_ast::types::{BinaryOp, Literal, Modifiers, TypeAnnotation, UnaryOp};
+use jv_ast::types::{BinaryOp, Literal, Modifiers, Pattern, TypeAnnotation, UnaryOp};
 use jv_ast::{Expression, Span, Statement};
 use jv_lexer::{Token, TokenType};
-use jv_parser_syntax_support::support::spans::{expression_span, merge_spans, span_from_token};
+use jv_parser_syntax_support::support::{
+    parsers::regex_literal_from_token,
+    spans::{expression_span, merge_spans, span_from_token},
+};
 
 /// ローワリング結果。
 #[derive(Debug)]
@@ -719,7 +722,7 @@ fn lower_expression(
     let filtered: Vec<&Token> = tokens
         .iter()
         .copied()
-        .filter(|token| !is_trivia_token(token))
+        .filter(|token| !is_trivia_token(token) && !matches!(token.token_type, TokenType::Eof))
         .collect();
 
     if filtered.is_empty() {
@@ -977,6 +980,7 @@ mod expression_parser {
                     })
                 }
                 TokenType::LeftBrace => self.parse_brace_expression(),
+                TokenType::When => self.parse_when_expression(),
                 _ => self.parse_primary(),
             }
         }
@@ -1128,6 +1132,614 @@ mod expression_parser {
 
             self.pos = closing_index + 1;
             Ok(parsed)
+        }
+
+        fn parse_when_expression(&mut self) -> Result<ParsedExpr, ExpressionError> {
+            let (when_token, when_index) = self.advance_with_index().ok_or_else(|| {
+                ExpressionError::new("`when` 式の先頭トークンを取得できませんでした", None)
+            })?;
+            let when_span = span_from_token(when_token);
+
+            while matches!(
+                self.peek_token().map(|token| &token.token_type),
+                Some(TokenType::LayoutComma)
+            ) {
+                self.pos += 1;
+            }
+
+            let mut subject_expr: Option<Expression> = None;
+
+            if matches!(
+                self.peek_token().map(|token| &token.token_type),
+                Some(TokenType::LeftParen)
+            ) {
+                let open_index = self.pos;
+                let close_index = self.find_matching_paren(open_index).ok_or_else(|| {
+                    ExpressionError::new(
+                        "`when` 条件を閉じる ')' が必要です",
+                        self.span_at(open_index),
+                    )
+                })?;
+                let inner_tokens = &self.tokens[open_index + 1..close_index];
+                if inner_tokens.is_empty() {
+                    return Err(ExpressionError::new(
+                        "`when` 条件式が必要です",
+                        self.span_at(open_index),
+                    ));
+                }
+                subject_expr = Some(Self::parse_nested_expression(inner_tokens)?.expr);
+                self.pos = close_index + 1;
+            } else {
+                let brace_index = self.find_next_left_brace(self.pos).ok_or_else(|| {
+                    ExpressionError::new(
+                        "`when` ブロックを開始する '{' が必要です",
+                        self.span_at(self.pos),
+                    )
+                })?;
+                if brace_index > self.pos {
+                    let subject_tokens = &self.tokens[self.pos..brace_index];
+                    if subject_tokens.is_empty() {
+                        return Err(ExpressionError::new(
+                            "`when` 条件式が必要です",
+                            self.span_at(self.pos),
+                        ));
+                    }
+                    subject_expr = Some(Self::parse_nested_expression(subject_tokens)?.expr);
+                }
+                self.pos = brace_index;
+            }
+
+            while matches!(
+                self.peek_token().map(|token| &token.token_type),
+                Some(TokenType::LayoutComma)
+            ) {
+                self.pos += 1;
+            }
+
+            let brace_index = self.pos;
+            let brace_token = self.peek_token().ok_or_else(|| {
+                ExpressionError::new(
+                    "`when` ブロックを開始する '{' が必要です",
+                    self.span_at(self.pos),
+                )
+            })?;
+            if brace_token.token_type != TokenType::LeftBrace {
+                return Err(ExpressionError::new(
+                    "`when` ブロックを開始する '{' が必要です",
+                    Some(span_from_token(brace_token)),
+                ));
+            }
+
+            let closing_index = self.find_matching_brace(brace_index).ok_or_else(|| {
+                ExpressionError::new(
+                    "`when` ブロックが閉じられていません",
+                    self.span_at(brace_index),
+                )
+            })?;
+            self.pos = brace_index + 1;
+
+            let mut arms = Vec::new();
+            let mut else_arm: Option<Expression> = None;
+
+            while self.pos < closing_index {
+                if matches!(self.tokens[self.pos].token_type, TokenType::LayoutComma) {
+                    self.pos += 1;
+                    continue;
+                }
+
+                if matches!(self.tokens[self.pos].token_type, TokenType::Else) {
+                    if else_arm.is_some() {
+                        return Err(ExpressionError::new(
+                            "`else` 分岐は複数定義できません",
+                            Some(span_from_token(self.tokens[self.pos])),
+                        ));
+                    }
+                    self.pos += 1;
+                    if self.pos >= closing_index
+                        || self.tokens[self.pos].token_type != TokenType::Arrow
+                    {
+                        return Err(ExpressionError::new(
+                            "`else` 分岐には `->` が必要です",
+                            self.span_at(self.pos),
+                        ));
+                    }
+                    self.pos += 1;
+
+                    while matches!(
+                        self.tokens.get(self.pos).map(|token| &token.token_type),
+                        Some(TokenType::LayoutComma)
+                    ) {
+                        self.pos += 1;
+                    }
+
+                    if self.pos >= closing_index {
+                        return Err(ExpressionError::new(
+                            "`else` 分岐の式が必要です",
+                            self.span_at(self.pos),
+                        ));
+                    }
+
+                    let slice = &self.tokens[self.pos..closing_index];
+                    let parsed_body = {
+                        let mut nested = ExpressionParser::new(slice);
+                        nested.parse_expression_bp(0)?
+                    };
+                    if parsed_body.end == 0 {
+                        return Err(ExpressionError::new(
+                            "`else` 分岐の式が必要です",
+                            self.span_at(self.pos),
+                        ));
+                    }
+                    let body_expr = parsed_body.expr;
+                    else_arm = Some(body_expr);
+                    self.pos += parsed_body.end;
+                    while self.pos < closing_index
+                        && matches!(self.tokens[self.pos].token_type, TokenType::LayoutComma)
+                    {
+                        self.pos += 1;
+                    }
+                    continue;
+                }
+
+                let arrow_index = self
+                    .find_top_level_arrow_in_range(self.pos, closing_index)
+                    .ok_or_else(|| {
+                        ExpressionError::new(
+                            "`when` 分岐に `->` が存在しません",
+                            self.span_at(self.pos),
+                        )
+                    })?;
+
+                if arrow_index <= self.pos {
+                    return Err(ExpressionError::new(
+                        "`when` 分岐のパターンが空です",
+                        Some(span_from_token(self.tokens[self.pos])),
+                    ));
+                }
+
+                let pattern_tokens = &self.tokens[self.pos..arrow_index];
+                let (pattern, guard, pattern_span) =
+                    Self::parse_when_pattern(pattern_tokens, subject_expr.is_some())?;
+                self.pos = arrow_index + 1;
+
+                while matches!(
+                    self.tokens.get(self.pos).map(|token| &token.token_type),
+                    Some(TokenType::LayoutComma)
+                ) {
+                    self.pos += 1;
+                }
+
+                if self.pos >= closing_index {
+                    return Err(ExpressionError::new(
+                        "`when` 分岐の式が必要です",
+                        self.span_at(self.pos),
+                    ));
+                }
+
+                let slice = &self.tokens[self.pos..closing_index];
+                let parsed_body = {
+                    let mut nested = ExpressionParser::new(slice);
+                    nested.parse_expression_bp(0)?
+                };
+                if parsed_body.end == 0 {
+                    return Err(ExpressionError::new(
+                        "`when` 分岐の式が必要です",
+                        self.span_at(self.pos),
+                    ));
+                }
+                let body_expr = parsed_body.expr;
+                let body_end = self.pos + parsed_body.end;
+                let body_span = expression_span(&body_expr);
+                let arm_span = merge_spans(&pattern_span, &body_span);
+
+                arms.push(WhenArm {
+                    pattern,
+                    guard,
+                    body: body_expr,
+                    span: arm_span,
+                });
+
+                self.pos = body_end;
+                while self.pos < closing_index
+                    && matches!(self.tokens[self.pos].token_type, TokenType::LayoutComma)
+                {
+                    self.pos += 1;
+                }
+            }
+
+            if arms.is_empty() && else_arm.is_none() {
+                return Err(ExpressionError::new(
+                    "`when` 式には少なくとも1つの分岐が必要です",
+                    Some(when_span),
+                ));
+            }
+
+            self.pos = closing_index + 1;
+            let end_span = span_from_token(self.tokens[closing_index]);
+            let span = merge_spans(&when_span, &end_span);
+
+            Ok(ParsedExpr {
+                expr: Expression::When {
+                    expr: subject_expr.map(Box::new),
+                    arms,
+                    else_arm: else_arm.map(Box::new),
+                    implicit_end: None,
+                    span: span.clone(),
+                },
+                start: when_index,
+                end: closing_index + 1,
+            })
+        }
+
+        fn find_next_left_brace(&self, start: usize) -> Option<usize> {
+            self.tokens
+                .iter()
+                .enumerate()
+                .skip(start)
+                .find_map(|(idx, token)| {
+                    if matches!(token.token_type, TokenType::LeftBrace) {
+                        Some(idx)
+                    } else {
+                        None
+                    }
+                })
+        }
+
+        fn find_top_level_arrow_in_range(&self, start: usize, end: usize) -> Option<usize> {
+            let mut depth_paren = 0usize;
+            let mut depth_brace = 0usize;
+            let mut depth_bracket = 0usize;
+            for idx in start..end {
+                match self.tokens[idx].token_type {
+                    TokenType::LeftParen => depth_paren += 1,
+                    TokenType::RightParen => {
+                        if depth_paren > 0 {
+                            depth_paren -= 1;
+                        }
+                    }
+                    TokenType::LeftBrace => depth_brace += 1,
+                    TokenType::RightBrace => {
+                        if depth_brace > 0 {
+                            depth_brace -= 1;
+                        } else {
+                            break;
+                        }
+                    }
+                    TokenType::LeftBracket => depth_bracket += 1,
+                    TokenType::RightBracket => {
+                        if depth_bracket > 0 {
+                            depth_bracket -= 1;
+                        }
+                    }
+                    TokenType::Arrow
+                        if depth_paren == 0 && depth_brace == 0 && depth_bracket == 0 =>
+                    {
+                        return Some(idx);
+                    }
+                    _ => {}
+                }
+            }
+            None
+        }
+
+        fn parse_when_pattern(
+            tokens: &[&'a Token],
+            has_subject: bool,
+        ) -> Result<(Pattern, Option<Expression>, Span), ExpressionError> {
+            let filtered = Self::filter_layout(tokens);
+            if filtered.is_empty() {
+                return Err(ExpressionError::new(
+                    "`when` 分岐のパターンが必要です",
+                    None,
+                ));
+            }
+
+            if !has_subject {
+                let condition = Self::parse_nested_expression(filtered.as_slice())?.expr;
+                let condition_span = expression_span(&condition);
+                let wildcard_span = condition_span.clone();
+                return Ok((
+                    Pattern::Wildcard(wildcard_span),
+                    Some(condition),
+                    condition_span,
+                ));
+            }
+
+            let (base_slice, guard_slice) = Self::split_guard_tokens(filtered.as_slice())?;
+            if base_slice.is_empty() {
+                return Err(ExpressionError::new(
+                    "`when` 分岐のパターンが必要です",
+                    Some(span_for_range_slice(filtered.as_slice())),
+                ));
+            }
+
+            let mut pattern = Self::parse_base_pattern(base_slice)?;
+            if let Some(guard_tokens) = guard_slice {
+                let guard_filtered = Self::filter_layout(guard_tokens);
+                if guard_filtered.is_empty() {
+                    return Err(ExpressionError::new(
+                        "`when` ガード式が空です",
+                        Some(span_for_range_slice(base_slice)),
+                    ));
+                }
+                let guard_expr = Self::parse_nested_expression(guard_filtered.as_slice())?.expr;
+                let base_span = pattern_span(&pattern);
+                let guard_span = expression_span(&guard_expr);
+                let span = merge_spans(&base_span, &guard_span);
+                pattern = Pattern::Guard {
+                    pattern: Box::new(pattern),
+                    condition: guard_expr,
+                    span,
+                };
+            }
+
+            let span_for_arm = pattern_span(&pattern);
+            let (final_pattern, guard) = split_when_guard(pattern);
+            Ok((final_pattern, guard, span_for_arm))
+        }
+
+        fn parse_base_pattern(tokens: &[&'a Token]) -> Result<Pattern, ExpressionError> {
+            let filtered = Self::filter_layout(tokens);
+            if filtered.is_empty() {
+                return Err(ExpressionError::new(
+                    "`when` 分岐のパターンが必要です",
+                    None,
+                ));
+            }
+
+            let first = filtered[0];
+            match &first.token_type {
+                TokenType::Identifier(name) if name == "_" => {
+                    let span = span_from_token(first);
+                    Ok(Pattern::Wildcard(span))
+                }
+                TokenType::Identifier(name) if name == "is" => {
+                    if filtered.len() < 2 {
+                        return Err(ExpressionError::new(
+                            "`is` パターンには型名が必要です",
+                            Some(span_from_token(first)),
+                        ));
+                    }
+                    let type_token = filtered[1];
+                    let type_name = match &type_token.token_type {
+                        TokenType::Identifier(value) => value.clone(),
+                        _ => {
+                            return Err(ExpressionError::new(
+                                "`is` パターンには識別子が必要です",
+                                Some(span_from_token(type_token)),
+                            ))
+                        }
+                    };
+                    let span = merge_spans(&span_from_token(first), &span_from_token(type_token));
+                    Ok(Pattern::Constructor {
+                        name: type_name,
+                        patterns: Vec::new(),
+                        span,
+                    })
+                }
+                TokenType::In => {
+                    let range_tokens = filtered.get(1..).ok_or_else(|| {
+                        ExpressionError::new(
+                            "`in` パターンには範囲式が必要です",
+                            Some(span_from_token(first)),
+                        )
+                    })?;
+                    let range_expr = Self::parse_nested_expression(range_tokens)?.expr;
+                    match range_expr {
+                        Expression::Binary {
+                            left,
+                            op: BinaryOp::RangeExclusive,
+                            right,
+                            span,
+                        } => Ok(Pattern::Range {
+                            start: left,
+                            end: right,
+                            inclusive_end: false,
+                            span,
+                        }),
+                        Expression::Binary {
+                            left,
+                            op: BinaryOp::RangeInclusive,
+                            right,
+                            span,
+                        } => Ok(Pattern::Range {
+                            start: left,
+                            end: right,
+                            inclusive_end: true,
+                            span,
+                        }),
+                        other => Err(ExpressionError::new(
+                            format!("範囲式が必要ですが {:?} が見つかりました", other),
+                            Some(expression_span(&other)),
+                        )),
+                    }
+                }
+                TokenType::String(value) => {
+                    let span = span_from_token(first);
+                    Ok(Pattern::Literal(Literal::String(value.clone()), span))
+                }
+                TokenType::Number(value) => {
+                    let span = span_from_token(first);
+                    Ok(Pattern::Literal(Literal::Number(value.clone()), span))
+                }
+                TokenType::Character(value) => {
+                    let span = span_from_token(first);
+                    Ok(Pattern::Literal(Literal::Character(value.clone()), span))
+                }
+                TokenType::Boolean(value) => {
+                    let span = span_from_token(first);
+                    Ok(Pattern::Literal(Literal::Boolean(value.clone()), span))
+                }
+                TokenType::Null => {
+                    let span = span_from_token(first);
+                    Ok(Pattern::Literal(Literal::Null, span))
+                }
+                TokenType::RegexLiteral(_) => {
+                    let span = span_from_token(first);
+                    let literal = regex_literal_from_token(first, span.clone());
+                    let literal_span = literal.span.clone();
+                    Ok(Pattern::Literal(Literal::Regex(literal), literal_span))
+                }
+                TokenType::Identifier(name) => {
+                    if filtered.len() == 1 {
+                        let span = span_from_token(first);
+                        return Ok(Pattern::Identifier(name.clone(), span));
+                    }
+
+                    if !matches!(
+                        filtered.get(1).map(|token| &token.token_type),
+                        Some(TokenType::LeftParen)
+                    ) {
+                        return Err(ExpressionError::new(
+                            format!("`{}` パターンの構文が解釈できません", name),
+                            Some(span_from_token(filtered[1])),
+                        ));
+                    }
+
+                    let open_index = 1;
+                    let close_index = find_matching_paren_in_slice(&filtered, open_index)
+                        .ok_or_else(|| {
+                            ExpressionError::new(
+                                "`when` コンストラクタパターンの ')' が必要です",
+                                Some(span_from_token(filtered[open_index])),
+                            )
+                        })?;
+                    let inner_tokens = &filtered[open_index + 1..close_index];
+                    let arguments = Self::parse_constructor_arguments(inner_tokens)?;
+                    let span = merge_spans(
+                        &span_from_token(first),
+                        &span_from_token(filtered[close_index]),
+                    );
+                    Ok(Pattern::Constructor {
+                        name: name.clone(),
+                        patterns: arguments,
+                        span,
+                    })
+                }
+                other => Err(ExpressionError::new(
+                    format!("未対応のパターントークン {:?}", other),
+                    Some(span_from_token(first)),
+                )),
+            }
+        }
+
+        fn parse_constructor_arguments(
+            tokens: &[&'a Token],
+        ) -> Result<Vec<Pattern>, ExpressionError> {
+            let mut args = Vec::new();
+            let mut start = 0usize;
+            let mut depth_paren = 0usize;
+            let mut depth_brace = 0usize;
+            let mut depth_bracket = 0usize;
+
+            for (index, token) in tokens.iter().enumerate() {
+                match token.token_type {
+                    TokenType::LeftParen => depth_paren += 1,
+                    TokenType::RightParen => {
+                        if depth_paren > 0 {
+                            depth_paren -= 1;
+                        }
+                    }
+                    TokenType::LeftBrace => depth_brace += 1,
+                    TokenType::RightBrace => {
+                        if depth_brace > 0 {
+                            depth_brace -= 1;
+                        }
+                    }
+                    TokenType::LeftBracket => depth_bracket += 1,
+                    TokenType::RightBracket => {
+                        if depth_bracket > 0 {
+                            depth_bracket -= 1;
+                        }
+                    }
+                    TokenType::Comma | TokenType::LayoutComma
+                        if depth_paren == 0 && depth_brace == 0 && depth_bracket == 0 =>
+                    {
+                        let slice = &tokens[start..index];
+                        if !slice.is_empty() {
+                            let (pattern, guard, _) = Self::parse_when_pattern(slice, true)?;
+                            if guard.is_some() {
+                                return Err(ExpressionError::new(
+                                    "コンストラクタ引数パターンでガードは使用できません",
+                                    Some(span_for_range_slice(slice)),
+                                ));
+                            }
+                            args.push(pattern);
+                        }
+                        start = index + 1;
+                    }
+                    _ => {}
+                }
+            }
+
+            if start < tokens.len() {
+                let slice = &tokens[start..];
+                if !slice.is_empty() {
+                    let (pattern, guard, _) = Self::parse_when_pattern(slice, true)?;
+                    if guard.is_some() {
+                        return Err(ExpressionError::new(
+                            "コンストラクタ引数パターンでガードは使用できません",
+                            Some(span_for_range_slice(slice)),
+                        ));
+                    }
+                    args.push(pattern);
+                }
+            }
+
+            Ok(args)
+        }
+
+        fn split_guard_tokens<'slice>(
+            tokens: &'slice [&'a Token],
+        ) -> Result<(&'slice [&'a Token], Option<&'slice [&'a Token]>), ExpressionError> {
+            let mut depth_paren = 0usize;
+            let mut depth_brace = 0usize;
+            let mut depth_bracket = 0usize;
+            for (idx, token) in tokens.iter().enumerate() {
+                match token.token_type {
+                    TokenType::LeftParen => depth_paren += 1,
+                    TokenType::RightParen => {
+                        if depth_paren > 0 {
+                            depth_paren -= 1;
+                        }
+                    }
+                    TokenType::LeftBrace => depth_brace += 1,
+                    TokenType::RightBrace => {
+                        if depth_brace > 0 {
+                            depth_brace -= 1;
+                        }
+                    }
+                    TokenType::LeftBracket => depth_bracket += 1,
+                    TokenType::RightBracket => {
+                        if depth_bracket > 0 {
+                            depth_bracket -= 1;
+                        }
+                    }
+                    TokenType::And
+                        if depth_paren == 0 && depth_brace == 0 && depth_bracket == 0 =>
+                    {
+                        if idx == 0 {
+                            return Err(ExpressionError::new(
+                                "`when` ガードの前にパターンが必要です",
+                                Some(span_from_token(token)),
+                            ));
+                        }
+                        let base = &tokens[..idx];
+                        let guard = &tokens[idx + 1..];
+                        return Ok((base, Some(guard)));
+                    }
+                    _ => {}
+                }
+            }
+            Ok((tokens, None))
+        }
+
+        fn filter_layout(tokens: &[&'a Token]) -> Vec<&'a Token> {
+            tokens
+                .iter()
+                .copied()
+                .filter(|token| !matches!(token.token_type, TokenType::LayoutComma))
+                .collect()
         }
 
         fn parse_postfix(
@@ -1894,18 +2506,6 @@ mod expression_parser {
         let end_span = span_from_token(tokens[end - 1]);
         merge_spans(&start_span, &end_span)
     }
-
-    fn span_for_range_slice(slice: &[&Token]) -> Span {
-        let start = slice
-            .first()
-            .map(|token| span_from_token(token))
-            .unwrap_or_else(Span::dummy);
-        let end = slice
-            .last()
-            .map(|token| span_from_token(token))
-            .unwrap_or_else(Span::dummy);
-        merge_spans(&start, &end)
-    }
 }
 
 fn push_diagnostic(
@@ -1923,6 +2523,55 @@ fn push_diagnostic(
         first_identifier_text(node),
         collect_annotation_texts(node),
     ));
+}
+
+fn split_when_guard(pattern: Pattern) -> (Pattern, Option<Expression>) {
+    match pattern {
+        Pattern::Guard {
+            pattern, condition, ..
+        } => (*pattern, Some(condition)),
+        other => (other, None),
+    }
+}
+
+fn pattern_span(pattern: &Pattern) -> Span {
+    match pattern {
+        Pattern::Literal(_, span)
+        | Pattern::Identifier(_, span)
+        | Pattern::Wildcard(span)
+        | Pattern::Constructor { span, .. }
+        | Pattern::Range { span, .. }
+        | Pattern::Guard { span, .. } => span.clone(),
+    }
+}
+
+fn find_matching_paren_in_slice(tokens: &[&Token], open_index: usize) -> Option<usize> {
+    let mut depth = 0isize;
+    for (idx, token) in tokens.iter().enumerate().skip(open_index) {
+        match token.token_type {
+            TokenType::LeftParen => depth += 1,
+            TokenType::RightParen => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(idx);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+fn span_for_range_slice(slice: &[&Token]) -> Span {
+    let start = slice
+        .first()
+        .map(|token| span_from_token(token))
+        .unwrap_or_else(Span::dummy);
+    let end = slice
+        .last()
+        .map(|token| span_from_token(token))
+        .unwrap_or_else(Span::dummy);
+    merge_spans(&start, &end)
 }
 
 fn lower_function(
