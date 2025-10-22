@@ -292,6 +292,54 @@ fn assignment_tokens() -> (SyntaxNode<JvLanguage>, Vec<Token>) {
     (node, tokens)
 }
 
+fn assignment_member_rhs_tokens() -> (SyntaxNode<JvLanguage>, Vec<Token>) {
+    let mut column = 0usize;
+    let mut tokens = Vec::new();
+    tokens.push(make_token(
+        &mut column,
+        TokenType::Identifier("user".to_string()),
+        "user",
+    ));
+    tokens.push(make_token(&mut column, TokenType::Dot, "."));
+    tokens.push(make_token(
+        &mut column,
+        TokenType::Identifier("name".to_string()),
+        "name",
+    ));
+    tokens.push(make_token(&mut column, TokenType::Assign, "="));
+    tokens.push(make_token(
+        &mut column,
+        TokenType::Identifier("other".to_string()),
+        "other",
+    ));
+    tokens.push(make_token(&mut column, TokenType::Dot, "."));
+    tokens.push(make_token(
+        &mut column,
+        TokenType::Identifier("profile".to_string()),
+        "profile",
+    ));
+    tokens.push(make_token(&mut column, TokenType::Eof, ""));
+
+    let node = build_tree(&tokens, |builder, tokens| {
+        builder.start_node(SyntaxKind::AssignmentStatement);
+        builder.start_node(SyntaxKind::AssignmentTarget);
+        builder.push_token(&tokens[0]);
+        builder.push_token(&tokens[1]);
+        builder.push_token(&tokens[2]);
+        builder.finish_node();
+        builder.push_token(&tokens[3]);
+        builder.start_node(SyntaxKind::Expression);
+        builder.push_token(&tokens[4]);
+        builder.push_token(&tokens[5]);
+        builder.push_token(&tokens[6]);
+        builder.finish_node();
+        builder.finish_node();
+        builder.push_token(&tokens[7]);
+    });
+
+    (node, tokens)
+}
+
 fn return_tokens() -> (SyntaxNode<JvLanguage>, Vec<Token>) {
     let mut column = 0usize;
     let mut tokens = Vec::new();
@@ -662,6 +710,38 @@ fn lowering_table_driven_cases() {
                             other => panic!("expected identifier rhs, got {:?}", other),
                         }
                     }
+                    other => panic!("expected assignment statement, got {:?}", other),
+                }
+            }),
+        },
+        LoweringCase {
+            build: assignment_member_rhs_tokens,
+            verify: Box::new(|result| {
+                assert!(
+                    result.diagnostics.is_empty(),
+                    "unexpected diagnostics: {:?}",
+                    result.diagnostics
+                );
+                let statement = result
+                    .statements
+                    .first()
+                    .expect("expected assignment statement");
+                match statement {
+                    Statement::Assignment { value, .. } => match value {
+                        Expression::MemberAccess {
+                            object, property, ..
+                        } => {
+                            assert_eq!(property, "profile");
+                            match object.as_ref() {
+                                Expression::Identifier(name, _) => assert_eq!(name, "other"),
+                                other => panic!(
+                                    "expected identifier object for rhs member access, got {:?}",
+                                    other
+                                ),
+                            }
+                        }
+                        other => panic!("expected member access rhs, got {:?}", other),
+                    },
                     other => panic!("expected assignment statement, got {:?}", other),
                 }
             }),

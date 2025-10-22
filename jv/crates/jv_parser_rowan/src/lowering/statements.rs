@@ -403,13 +403,14 @@ fn lower_assignment_target(
     context: &LoweringContext<'_>,
     node: &JvSyntaxNode,
 ) -> Result<Expression, LoweringDiagnostic> {
-    let tokens = context
-        .tokens_for(node)
-        .into_iter()
+    let tokens = context.tokens_for(node);
+    let filtered = tokens
+        .iter()
+        .copied()
         .filter(|token| !is_trivia_token(token))
         .collect::<Vec<_>>();
 
-    let mut iter = tokens.into_iter();
+    let mut iter = filtered.into_iter();
     let first = iter.next().ok_or_else(|| {
         LoweringDiagnostic::new(
             LoweringDiagnosticSeverity::Error,
@@ -497,6 +498,39 @@ fn lower_assignment_target(
     }
 
     Ok(expr)
+}
+
+fn try_identifier_chain_expression(tokens: &[&Token]) -> Option<Expression> {
+    let mut iter = tokens.iter().copied();
+    let first = iter.next()?;
+    let span = span_from_token(first);
+    let mut expr = match &first.token_type {
+        TokenType::Identifier(name) => Expression::Identifier(name.clone(), span),
+        _ => return None,
+    };
+
+    while let Some(token) = iter.next() {
+        match token.token_type {
+            TokenType::Dot => {
+                let property_token = iter.next()?;
+                let property_name = match &property_token.token_type {
+                    TokenType::Identifier(name) => name.clone(),
+                    _ => return None,
+                };
+                let previous_span = expression_span(&expr);
+                let property_span = span_from_token(property_token);
+                let span = merge_spans(&previous_span, &property_span);
+                expr = Expression::MemberAccess {
+                    object: Box::new(expr),
+                    property: property_name,
+                    span,
+                };
+            }
+            _ => return None,
+        }
+    }
+
+    Some(expr)
 }
 
 fn lower_value(
@@ -641,6 +675,10 @@ fn lower_expression_shallow(
         .copied()
         .filter(|token| !is_trivia_token(token))
         .collect();
+
+    if let Some(expr) = try_identifier_chain_expression(&meaningful_tokens) {
+        return Ok(expr);
+    }
 
     if meaningful_tokens.is_empty() {
         return Err(LoweringDiagnostic::new(
