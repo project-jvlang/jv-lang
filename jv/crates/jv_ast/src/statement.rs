@@ -1,4 +1,5 @@
 // jv_ast/statement - Statement types and program structure
+use crate::binding_pattern::BindingPatternKind;
 use crate::comments::*;
 use crate::expression::*;
 use crate::types::*;
@@ -68,6 +69,8 @@ pub enum ResourceManagement {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct LoopBinding {
     pub name: String,
+    #[serde(default)]
+    pub pattern: Option<BindingPatternKind>,
     pub type_annotation: Option<TypeAnnotation>,
     pub span: Span,
 }
@@ -109,6 +112,8 @@ pub enum Statement {
     // Variable declarations
     ValDeclaration {
         name: String,
+        #[serde(default)]
+        binding: Option<BindingPatternKind>,
         type_annotation: Option<TypeAnnotation>,
         initializer: Expression,
         modifiers: Modifiers,
@@ -119,6 +124,8 @@ pub enum Statement {
 
     VarDeclaration {
         name: String,
+        #[serde(default)]
+        binding: Option<BindingPatternKind>,
         type_annotation: Option<TypeAnnotation>,
         initializer: Option<Expression>,
         modifiers: Modifiers,
@@ -204,6 +211,8 @@ pub enum Statement {
     // Assignment statements
     Assignment {
         target: Expression, // Could be identifier or member access
+        #[serde(default)]
+        binding_pattern: Option<BindingPatternKind>,
         value: Expression,
         span: Span,
     },

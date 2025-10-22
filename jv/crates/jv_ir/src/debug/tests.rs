@@ -26,6 +26,8 @@ fn sample_program() -> Program {
         statements: vec![
             Statement::ValDeclaration {
                 name: "answer".to_string(),
+                binding: None,
+
                 type_annotation: Some(TypeAnnotation::Simple("Int".to_string())),
                 initializer: Expression::Literal(Literal::Number("42".to_string()), span.clone()),
                 modifiers: modifiers.clone(),

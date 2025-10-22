@@ -264,6 +264,8 @@ impl<'a> ReconstructionContext<'a> {
                         .unwrap_or_else(|| Expression::Literal(Literal::Null, span.clone()));
                     Ok(Statement::ValDeclaration {
                         name: name.clone(),
+                        binding: None,
+
                         type_annotation,
                         initializer,
                         modifiers,

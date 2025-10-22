@@ -2,8 +2,8 @@ use chumsky::error::Simple;
 use chumsky::prelude::*;
 use chumsky::Parser as ChumskyParser;
 use jv_ast::{
-    BinaryOp, ConcurrencyConstruct, Expression, ForInStatement, LoopBinding, LoopStrategy,
-    NumericRangeLoop, ResourceManagement, Span, Statement,
+    BinaryOp, BindingPatternKind, ConcurrencyConstruct, Expression, ForInStatement, LoopBinding,
+    LoopStrategy, NumericRangeLoop, ResourceManagement, Span, Statement,
 };
 use jv_lexer::{Token, TokenType};
 
@@ -25,6 +25,7 @@ pub(super) fn assignment_statement_parser(
             let span = merge_spans(&expression_span(&target), &expression_span(&value));
             Statement::Assignment {
                 target,
+                binding_pattern: None,
                 value,
                 span,
             }
@@ -136,6 +137,7 @@ fn loop_binding_parser() -> impl ChumskyParser<Token, LoopBinding, Error = Simpl
         .then(type_annotation_clause())
         .map(|((name, span), type_annotation)| LoopBinding {
             name,
+            pattern: Some(BindingPatternKind::identifier(name.clone(), span.clone())),
             type_annotation,
             span,
         })

@@ -2,8 +2,8 @@ use chumsky::error::Simple;
 use chumsky::prelude::*;
 use chumsky::Parser as ChumskyParser;
 use jv_ast::{
-    CommentKind, CommentStatement, CommentVisibility, Expression, ExtensionFunction, Span,
-    Statement, ValBindingOrigin,
+    BindingPatternKind, CommentKind, CommentStatement, CommentVisibility, Expression,
+    ExtensionFunction, Span, Statement, ValBindingOrigin,
 };
 use jv_lexer::{Token, TokenType};
 
@@ -135,42 +135,48 @@ pub(super) fn val_declaration_parser(
 ) -> impl ChumskyParser<Token, Statement, Error = Simple<Token>> + Clone {
     modifiers_parser()
         .then_ignore(token_val())
-        .then(identifier())
+        .then(identifier_with_span())
         .then(type_annotation_clause())
         .then_ignore(token_assign())
         .then(expr)
-        .map(|(((modifiers, name), type_annotation), initializer)| {
-            let span = expression_span(&initializer);
-            Statement::ValDeclaration {
-                name,
-                type_annotation,
-                initializer,
-                modifiers,
-                origin: ValBindingOrigin::ExplicitKeyword,
-                span,
-            }
-        })
+        .map(
+            |(((modifiers, (name, binding_span)), type_annotation), initializer)| {
+                let span = expression_span(&initializer);
+                Statement::ValDeclaration {
+                    name,
+                    binding: Some(BindingPatternKind::identifier(name.clone(), binding_span)),
+                    type_annotation,
+                    initializer,
+                    modifiers,
+                    origin: ValBindingOrigin::ExplicitKeyword,
+                    span,
+                }
+            },
+        )
 }
 
 pub(super) fn implicit_typed_val_declaration_parser(
     expr: impl ChumskyParser<Token, Expression, Error = Simple<Token>> + Clone,
 ) -> impl ChumskyParser<Token, Statement, Error = Simple<Token>> + Clone {
     modifiers_parser()
-        .then(identifier())
+        .then(identifier_with_span())
         .then(token_colon().ignore_then(type_annotation()))
         .then_ignore(token_assign())
         .then(expr)
-        .map(|(((modifiers, name), type_annotation), initializer)| {
-            let span = expression_span(&initializer);
-            Statement::ValDeclaration {
-                name,
-                type_annotation: Some(type_annotation),
-                initializer,
-                modifiers,
-                origin: ValBindingOrigin::ImplicitTyped,
-                span,
-            }
-        })
+        .map(
+            |(((modifiers, (name, binding_span)), type_annotation), initializer)| {
+                let span = expression_span(&initializer);
+                Statement::ValDeclaration {
+                    name,
+                    binding: Some(BindingPatternKind::identifier(name.clone(), binding_span)),
+                    type_annotation: Some(type_annotation),
+                    initializer,
+                    modifiers,
+                    origin: ValBindingOrigin::ImplicitTyped,
+                    span,
+                }
+            },
+        )
 }
 
 pub(super) fn var_declaration_parser(
@@ -178,22 +184,25 @@ pub(super) fn var_declaration_parser(
 ) -> impl ChumskyParser<Token, Statement, Error = Simple<Token>> + Clone {
     modifiers_parser()
         .then_ignore(token_var())
-        .then(identifier())
+        .then(identifier_with_span())
         .then(type_annotation_clause())
         .then(token_assign().ignore_then(expr).or_not())
-        .map(|(((modifiers, name), type_annotation), initializer)| {
-            let span = initializer
-                .as_ref()
-                .map(expression_span)
-                .unwrap_or_else(Span::dummy);
-            Statement::VarDeclaration {
-                name,
-                type_annotation,
-                initializer,
-                modifiers,
-                span,
-            }
-        })
+        .map(
+            |(((modifiers, (name, binding_span)), type_annotation), initializer)| {
+                let span = initializer
+                    .as_ref()
+                    .map(expression_span)
+                    .unwrap_or_else(Span::dummy);
+                Statement::VarDeclaration {
+                    name,
+                    binding: Some(BindingPatternKind::identifier(name.clone(), binding_span)),
+                    type_annotation,
+                    initializer,
+                    modifiers,
+                    span,
+                }
+            },
+        )
 }
 
 pub(super) fn function_declaration_parser(

@@ -173,6 +173,8 @@ fn check_program_populates_inference_snapshot() {
         statements: vec![
             Statement::ValDeclaration {
                 name: "lhs".into(),
+                binding: None,
+
                 type_annotation: None,
                 initializer: Expression::Literal(Literal::Number("1".into()), span.clone()),
                 modifiers: default_modifiers(),
@@ -181,6 +183,8 @@ fn check_program_populates_inference_snapshot() {
             },
             Statement::ValDeclaration {
                 name: "rhs".into(),
+                binding: None,
+
                 type_annotation: None,
                 initializer: Expression::Literal(Literal::Number("2".into()), span.clone()),
                 modifiers: default_modifiers(),
@@ -246,6 +250,8 @@ fn binding_resolver_collects_late_init_metadata() {
 
     let explicit_val = Statement::ValDeclaration {
         name: "explicitVal".into(),
+        binding: None,
+
         type_annotation: None,
         initializer: Expression::Literal(Literal::Number("1".into()), span.clone()),
         modifiers: default_modifiers(),
@@ -255,6 +261,8 @@ fn binding_resolver_collects_late_init_metadata() {
 
     let implicit_val = Statement::ValDeclaration {
         name: "implicitVal".into(),
+        binding: None,
+
         type_annotation: None,
         initializer: Expression::Literal(Literal::Number("2".into()), span.clone()),
         modifiers: default_modifiers(),
@@ -327,6 +335,8 @@ fn check_program_reports_type_error_on_mismatch() {
         imports: Vec::new(),
         statements: vec![Statement::ValDeclaration {
             name: "x".into(),
+            binding: None,
+
             type_annotation: None,
             initializer: mismatched_expr,
             modifiers: default_modifiers(),
@@ -406,6 +416,8 @@ fn override_annotation_on_field_is_rejected() {
         imports: Vec::new(),
         statements: vec![Statement::ValDeclaration {
             name: "count".into(),
+            binding: None,
+
             type_annotation: None,
             initializer: Expression::Literal(Literal::Number("1".into()), span.clone()),
             modifiers: field_modifiers,
@@ -438,6 +450,8 @@ fn duplicate_reserved_annotation_is_reported() {
         imports: Vec::new(),
         statements: vec![Statement::ValDeclaration {
             name: "fixture".into(),
+            binding: None,
+
             type_annotation: None,
             initializer: Expression::Literal(Literal::String("data".into()), span.clone()),
             modifiers,
@@ -482,6 +496,8 @@ fn reserved_annotation_shadowing_is_detected() {
         imports: Vec::new(),
         statements: vec![Statement::ValDeclaration {
             name: "fixture".into(),
+            binding: None,
+
             type_annotation: None,
             initializer: Expression::Literal(Literal::String("data".into()), span.clone()),
             modifiers,
@@ -510,6 +526,8 @@ fn null_safety_violation_is_reported() {
         imports: Vec::new(),
         statements: vec![Statement::ValDeclaration {
             name: "greeting".into(),
+            binding: None,
+
             type_annotation: Some(TypeAnnotation::Simple("String".into())),
             initializer: Expression::Literal(Literal::Null, span.clone()),
             modifiers: default_modifiers(),
@@ -532,6 +550,8 @@ fn null_safety_reports_jv3108_without_jv3003_regression() {
 
     let implicit_val = Statement::ValDeclaration {
         name: "implicitVal".into(),
+        binding: None,
+
         type_annotation: None,
         initializer: Expression::Literal(Literal::Number("1".into()), span.clone()),
         modifiers: default_modifiers(),
@@ -541,6 +561,8 @@ fn null_safety_reports_jv3108_without_jv3003_regression() {
 
     let token_binding = Statement::ValDeclaration {
         name: "token".into(),
+        binding: None,
+
         type_annotation: Some(TypeAnnotation::Simple("String".into())),
         initializer: Expression::Literal(Literal::String("hello".into()), span.clone()),
         modifiers: default_modifiers(),
@@ -569,6 +591,8 @@ fn null_safety_reports_jv3108_without_jv3003_regression() {
 
     let null_branch_label = Statement::ValDeclaration {
         name: "label".into(),
+        binding: None,
+
         type_annotation: None,
         initializer: when_expr,
         modifiers: default_modifiers(),
@@ -647,6 +671,8 @@ fn when_without_else_in_value_position_emits_validation_error() {
         imports: Vec::new(),
         statements: vec![Statement::ValDeclaration {
             name: "result".into(),
+            binding: None,
+
             type_annotation: None,
             initializer: when_expr,
             modifiers: default_modifiers(),
@@ -692,6 +718,8 @@ fn when_with_else_in_value_position_passes_validation() {
         imports: Vec::new(),
         statements: vec![Statement::ValDeclaration {
             name: "result".into(),
+            binding: None,
+
             type_annotation: None,
             initializer: when_expr,
             modifiers: default_modifiers(),
@@ -834,6 +862,8 @@ fn implicit_assignment_becomes_val_declaration() {
         imports: Vec::new(),
         statements: vec![Statement::Assignment {
             target: Expression::Identifier("total".into(), span.clone()),
+            binding_pattern: None,
+
             value: Expression::Literal(Literal::Number("42".into()), span.clone()),
             span: span.clone(),
         }],
@@ -951,6 +981,8 @@ fn implicit_assignment_normalization_is_stable_under_random_inputs() {
             imports: Vec::new(),
             statements: vec![Statement::Assignment {
                 target: Expression::Identifier(name.clone(), first_target_span.clone()),
+                binding_pattern: None,
+
                 value: Expression::Literal(
                     Literal::Number(first_value.clone()),
                     first_value_span.clone(),
@@ -973,6 +1005,8 @@ fn implicit_assignment_normalization_is_stable_under_random_inputs() {
         match normalized.statements.first() {
             Some(Statement::ValDeclaration {
                 name: normalized_name,
+                binding: None,
+
                 origin,
                 span,
                 initializer,
@@ -1031,6 +1065,8 @@ fn implicit_assignment_normalization_is_stable_under_random_inputs() {
             statements: vec![
                 Statement::Assignment {
                     target: Expression::Identifier(name.clone(), first_target_span.clone()),
+                    binding_pattern: None,
+
                     value: Expression::Literal(
                         Literal::Number(first_value.clone()),
                         first_value_span.clone(),
@@ -1039,6 +1075,8 @@ fn implicit_assignment_normalization_is_stable_under_random_inputs() {
                 },
                 Statement::Assignment {
                     target: Expression::Identifier(name.clone(), second_target_span.clone()),
+                    binding_pattern: None,
+
                     value: Expression::Literal(
                         Literal::Number(second_value.clone()),
                         second_value_span.clone(),
@@ -1073,6 +1111,8 @@ fn implicit_assignment_normalization_is_stable_under_random_inputs() {
             imports: Vec::new(),
             statements: vec![Statement::Assignment {
                 target: Expression::Identifier(name.clone(), second_target_span.clone()),
+                binding_pattern: None,
+
                 value: Expression::Identifier(name.clone(), self_value_span.clone()),
                 span: self_statement_span.clone(),
             }],
@@ -1105,6 +1145,8 @@ fn implicit_self_assignment_emits_jv4202() {
         imports: Vec::new(),
         statements: vec![Statement::Assignment {
             target: Expression::Identifier("total".into(), span.clone()),
+            binding_pattern: None,
+
             value: Expression::Identifier("total".into(), span.clone()),
             span: span.clone(),
         }],
@@ -1133,11 +1175,15 @@ fn reassigning_immutable_binding_emits_jv4201() {
         statements: vec![
             Statement::Assignment {
                 target: Expression::Identifier("value".into(), span.clone()),
+                binding_pattern: None,
+
                 value: Expression::Literal(Literal::Number("1".into()), span.clone()),
                 span: span.clone(),
             },
             Statement::Assignment {
                 target: Expression::Identifier("value".into(), span.clone()),
+                binding_pattern: None,
+
                 value: Expression::Literal(Literal::Number("2".into()), span.clone()),
                 span: span.clone(),
             },
@@ -1174,6 +1220,8 @@ fn mutable_var_allows_reassignment() {
             },
             Statement::Assignment {
                 target: Expression::Identifier("count".into(), span.clone()),
+                binding_pattern: None,
+
                 value: Expression::Literal(Literal::Number("1".into()), span.clone()),
                 span: span.clone(),
             },
@@ -1208,6 +1256,8 @@ fn explicit_var_self_assignment_is_allowed() {
             },
             Statement::Assignment {
                 target: Expression::Identifier("count".into(), span.clone()),
+                binding_pattern: None,
+
                 value: Expression::Identifier("count".into(), span.clone()),
                 span: span.clone(),
             },
@@ -1236,6 +1286,8 @@ fn regex_literal_infers_pattern_type() {
         imports: Vec::new(),
         statements: vec![Statement::ValDeclaration {
             name: "pattern".into(),
+            binding: None,
+
             type_annotation: None,
             initializer: Expression::RegexLiteral(literal),
             modifiers: default_modifiers(),
@@ -1282,6 +1334,8 @@ fn regex_validator_reports_unsupported_escape() {
         imports: Vec::new(),
         statements: vec![Statement::ValDeclaration {
             name: "pattern".into(),
+            binding: None,
+
             type_annotation: None,
             initializer: Expression::RegexLiteral(literal),
             modifiers: default_modifiers(),
@@ -1314,6 +1368,8 @@ fn regex_validator_reports_unbalanced_groups() {
         imports: Vec::new(),
         statements: vec![Statement::ValDeclaration {
             name: "pattern".into(),
+            binding: None,
+
             type_annotation: None,
             initializer: Expression::RegexLiteral(literal),
             modifiers: default_modifiers(),
@@ -1345,6 +1401,8 @@ fn build_regex_program(pattern: &str) -> Program {
         imports: Vec::new(),
         statements: vec![Statement::ValDeclaration {
             name: "pattern".into(),
+            binding: None,
+
             type_annotation: None,
             initializer: Expression::RegexLiteral(literal),
             modifiers: default_modifiers(),

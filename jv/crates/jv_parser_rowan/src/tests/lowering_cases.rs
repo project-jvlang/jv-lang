@@ -8,7 +8,7 @@ use jv_ast::{
     json::{JsonLiteral, JsonValue},
     statement::{ConcurrencyConstruct, LoopStrategy, ResourceManagement, ValBindingOrigin},
     types::{BinaryOp, Literal, Modifiers, Pattern, TypeAnnotation},
-    Expression, Statement,
+    BindingPatternKind, Expression, Statement,
 };
 use jv_lexer::{Lexer, Token, TokenTrivia, TokenType};
 use rowan::SyntaxNode;
@@ -417,6 +417,66 @@ fn destructuring_assignment_tokens() -> (SyntaxNode<JvLanguage>, Vec<Token>) {
     (node, tokens)
 }
 
+fn destructuring_val_tokens() -> (SyntaxNode<JvLanguage>, Vec<Token>) {
+    let mut column = 0usize;
+    let mut tokens = Vec::new();
+    tokens.push(make_token(&mut column, TokenType::Val, "val"));
+    tokens.push(make_token(&mut column, TokenType::LeftBracket, "["));
+    tokens.push(make_token(
+        &mut column,
+        TokenType::Identifier("first".to_string()),
+        "first",
+    ));
+    tokens.push(make_token(&mut column, TokenType::LayoutComma, ","));
+    tokens.push(make_token(
+        &mut column,
+        TokenType::Identifier("second".to_string()),
+        "second",
+    ));
+    tokens.push(make_token(&mut column, TokenType::RightBracket, "]"));
+    tokens.push(make_token(&mut column, TokenType::Assign, "="));
+    tokens.push(make_token(
+        &mut column,
+        TokenType::Identifier("pair".to_string()),
+        "pair",
+    ));
+    tokens.push(make_token(&mut column, TokenType::Eof, ""));
+
+    let node = build_tree(&tokens, |builder, tokens| {
+        builder.start_node(SyntaxKind::ValDeclaration);
+        builder.push_token(&tokens[0]);
+        builder.start_node(SyntaxKind::BindingPattern);
+        builder.start_node(SyntaxKind::BindingListPattern);
+        builder.push_token(&tokens[1]);
+
+        builder.start_node(SyntaxKind::BindingPattern);
+        builder.push_token(&tokens[2]);
+        builder.finish_node();
+
+        builder.push_token(&tokens[3]);
+
+        builder.start_node(SyntaxKind::BindingPattern);
+        builder.push_token(&tokens[4]);
+        builder.finish_node();
+
+        builder.push_token(&tokens[5]);
+        builder.finish_node(); // BindingListPattern
+        builder.finish_node(); // BindingPattern
+
+        builder.start_node(SyntaxKind::InitializerClause);
+        builder.push_token(&tokens[6]);
+        builder.start_node(SyntaxKind::Expression);
+        builder.push_token(&tokens[7]);
+        builder.finish_node();
+        builder.finish_node(); // InitializerClause
+
+        builder.finish_node(); // ValDeclaration
+        builder.push_token(&tokens[8]);
+    });
+
+    (node, tokens)
+}
+
 fn use_statement_tokens() -> (SyntaxNode<JvLanguage>, Vec<Token>) {
     let mut column = 0usize;
     let mut tokens = Vec::new();
@@ -685,6 +745,7 @@ fn lowering_table_driven_cases() {
                 match &result.statements[1] {
                     Statement::ValDeclaration {
                         name,
+                        binding,
                         type_annotation,
                         initializer,
                         modifiers,
@@ -692,6 +753,15 @@ fn lowering_table_driven_cases() {
                         ..
                     } => {
                         assert_eq!(name, "answer");
+                        let pattern = binding
+                            .as_ref()
+                            .expect("expected binding pattern for val declaration");
+                        match pattern {
+                            BindingPatternKind::Identifier { name, .. } => {
+                                assert_eq!(name, "answer")
+                            }
+                            other => panic!("expected identifier binding, got {:?}", other),
+                        }
                         assert_eq!(origin, &ValBindingOrigin::ExplicitKeyword);
                         assert_eq!(modifiers, &Modifiers::default());
                         assert_eq!(type_annotation, &Some(TypeAnnotation::Simple("Int".into())));
@@ -755,6 +825,15 @@ fn lowering_table_driven_cases() {
                 {
                     Statement::ForIn(stmt) => {
                         assert_eq!(stmt.binding.name, "item");
+                        let pattern = stmt
+                            .binding
+                            .pattern
+                            .as_ref()
+                            .expect("expected binding pattern on loop binding");
+                        match pattern {
+                            BindingPatternKind::Identifier { name, .. } => assert_eq!(name, "item"),
+                            other => panic!("expected identifier loop binding, got {:?}", other),
+                        }
                         assert_eq!(stmt.strategy, LoopStrategy::Iterable);
                     }
                     other => panic!("expected for-in statement, got {:?}", other),
@@ -930,26 +1009,113 @@ fn lowering_table_driven_cases() {
             build: destructuring_assignment_tokens,
             verify: Box::new(|result| {
                 assert!(
-                    result.statements.is_empty(),
-                    "expected no lowered statements for unsupported destructuring, got {:?}",
-                    result.statements
+                    result.diagnostics.is_empty(),
+                    "unexpected diagnostics for destructuring: {:?}",
+                    result.diagnostics
                 );
-                let diagnostic = result
-                    .diagnostics
+                let statement = result
+                    .statements
                     .first()
-                    .expect("expected diagnostic for destructuring assignment");
-                assert_eq!(
-                    diagnostic.severity,
-                    LoweringDiagnosticSeverity::Error,
-                    "expected error diagnostic"
-                );
+                    .expect("expected assignment statement for destructuring");
+                match statement {
+                    Statement::Assignment {
+                        target,
+                        binding_pattern,
+                        value,
+                        ..
+                    } => {
+                        let pattern = binding_pattern
+                            .as_ref()
+                            .expect("expected binding pattern for destructuring assignment");
+                        match pattern {
+                            BindingPatternKind::List { elements, .. } => {
+                                assert_eq!(elements.len(), 2);
+                                match &elements[0] {
+                                    BindingPatternKind::Identifier { name, .. } => {
+                                        assert_eq!(name, "first")
+                                    }
+                                    other => {
+                                        panic!("unexpected first binding element: {:?}", other)
+                                    }
+                                }
+                                match &elements[1] {
+                                    BindingPatternKind::Identifier { name, .. } => {
+                                        assert_eq!(name, "second")
+                                    }
+                                    other => {
+                                        panic!("unexpected second binding element: {:?}", other)
+                                    }
+                                }
+                            }
+                            other => panic!("expected list binding pattern, got {:?}", other),
+                        }
+                        match target {
+                            Expression::Identifier(name, _) => assert_eq!(name, "first"),
+                            other => panic!("unexpected lowered target expression: {:?}", other),
+                        }
+                        match value {
+                            Expression::Identifier(name, _) => assert_eq!(name, "point"),
+                            other => {
+                                panic!("unexpected destructuring value expression: {:?}", other)
+                            }
+                        }
+                    }
+                    other => panic!("expected assignment statement, got {:?}", other),
+                }
+            }),
+        },
+        LoweringCase {
+            build: destructuring_val_tokens,
+            verify: Box::new(|result| {
                 assert!(
-                    diagnostic
-                        .message
-                        .contains("代入ターゲットは識別子で始まる必要があります"),
-                    "unexpected diagnostic message: {}",
-                    diagnostic.message
+                    result.diagnostics.is_empty(),
+                    "unexpected diagnostics for destructuring val: {:?}",
+                    result.diagnostics
                 );
+                let statement = result
+                    .statements
+                    .first()
+                    .expect("expected val declaration for destructuring");
+                match statement {
+                    Statement::ValDeclaration {
+                        name,
+                        binding,
+                        initializer,
+                        ..
+                    } => {
+                        assert_eq!(name, "first");
+                        let pattern = binding
+                            .as_ref()
+                            .expect("expected binding pattern for destructuring val");
+                        match pattern {
+                            BindingPatternKind::List { elements, .. } => {
+                                assert_eq!(elements.len(), 2);
+                                match &elements[0] {
+                                    BindingPatternKind::Identifier { name, .. } => {
+                                        assert_eq!(name, "first")
+                                    }
+                                    other => {
+                                        panic!("unexpected first binding element: {:?}", other)
+                                    }
+                                }
+                                match &elements[1] {
+                                    BindingPatternKind::Identifier { name, .. } => {
+                                        assert_eq!(name, "second")
+                                    }
+                                    other => {
+                                        panic!("unexpected second binding element: {:?}", other)
+                                    }
+                                }
+                            }
+                            other => panic!("expected list binding pattern, got {:?}", other),
+                        }
+                        match initializer {
+                            Expression::Identifier(name, _) => assert_eq!(name, "pair"),
+                            other => panic!("unexpected destructuring initializer: {:?}", other),
+                        }
+                    }
+                    other => panic!("expected val declaration, got {:?}", other),
+                }
             }),
         },
         LoweringCase {

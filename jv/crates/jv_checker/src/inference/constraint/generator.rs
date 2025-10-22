@@ -922,6 +922,8 @@ mod tests {
             imports: Vec::new(),
             statements: vec![Statement::ValDeclaration {
                 name: "x".into(),
+                binding: None,
+
                 type_annotation: None,
                 initializer: Expression::Literal(Literal::Number("1".into()), span.clone()),
                 modifiers: default_modifiers(),
@@ -955,6 +957,8 @@ mod tests {
             statements: vec![
                 Statement::ValDeclaration {
                     name: "x".into(),
+                    binding: None,
+
                     type_annotation: None,
                     initializer: Expression::Literal(Literal::Number("1".into()), span.clone()),
                     modifiers: default_modifiers(),
@@ -963,6 +967,8 @@ mod tests {
                 },
                 Statement::ValDeclaration {
                     name: "sum".into(),
+                    binding: None,
+
                     type_annotation: None,
                     initializer: Expression::Binary {
                         left: Box::new(Expression::Identifier("x".into(), span.clone())),
@@ -1036,6 +1042,8 @@ mod tests {
             imports: Vec::new(),
             statements: vec![Statement::ValDeclaration {
                 name: "value".into(),
+                binding: None,
+
                 type_annotation: None,
                 initializer: when_expr,
                 modifiers: default_modifiers(),
@@ -1090,6 +1098,8 @@ val result = when (maybe) {
             statements: vec![
                 Statement::ValDeclaration {
                     name: "value".into(),
+                    binding: None,
+
                     type_annotation: None,
                     initializer: Expression::Literal(Literal::Number("1".into()), span.clone()),
                     modifiers: default_modifiers(),
@@ -1101,6 +1111,8 @@ val result = when (maybe) {
                         statements: vec![
                             Statement::ValDeclaration {
                                 name: "value".into(),
+                                binding: None,
+
                                 type_annotation: None,
                                 initializer: Expression::Literal(
                                     Literal::Number("1.5".into()),
@@ -1121,6 +1133,8 @@ val result = when (maybe) {
                 },
                 Statement::ValDeclaration {
                     name: "maybe".into(),
+                    binding: None,
+
                     type_annotation: None,
                     initializer: Expression::Literal(Literal::Null, span.clone()),
                     modifiers: default_modifiers(),

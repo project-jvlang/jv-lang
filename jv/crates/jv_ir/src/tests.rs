@@ -2895,6 +2895,8 @@ mod tests {
             imports: vec![],
             statements: vec![Statement::ValDeclaration {
                 name: "greeting".to_string(),
+                binding: None,
+
                 type_annotation: None,
                 initializer: Expression::Literal(
                     Literal::String("Hello, World!".to_string()),
@@ -3027,6 +3029,8 @@ fun sample(value: Any): Int {
 
         let stmt = Statement::ValDeclaration {
             name: "x".to_string(),
+            binding: None,
+
             type_annotation: Some(TypeAnnotation::Simple("Int".to_string())),
             initializer: Expression::Literal(Literal::Number("42".to_string()), dummy_span()),
             modifiers: Modifiers::default(),
@@ -4058,6 +4062,8 @@ fun sample(value: Any): Int {
 
         let binding = LoopBinding {
             name: "idx".to_string(),
+            pattern: None,
+
             type_annotation: None,
             span: span.clone(),
         };
@@ -4136,6 +4142,8 @@ fun sample(value: Any): Int {
         let stmt = Statement::ForIn(ForInStatement {
             binding: LoopBinding {
                 name: "idx".to_string(),
+                pattern: None,
+
                 type_annotation: None,
                 span: span.clone(),
             },
@@ -4189,6 +4197,8 @@ fun sample(value: Any): Int {
         let stmt = Statement::ForIn(ForInStatement {
             binding: LoopBinding {
                 name: "item".to_string(),
+                pattern: None,
+
                 type_annotation: None,
                 span: span.clone(),
             },
@@ -4228,6 +4238,8 @@ fun sample(value: Any): Int {
         let stmt = Statement::ForIn(ForInStatement {
             binding: LoopBinding {
                 name: "value".to_string(),
+                pattern: None,
+
                 type_annotation: None,
                 span: span.clone(),
             },

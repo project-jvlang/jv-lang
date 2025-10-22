@@ -6,6 +6,7 @@
 
 // Module declarations
 pub mod annotation;
+pub mod binding_pattern;
 pub mod comments;
 pub mod expression;
 pub mod json;
@@ -16,6 +17,7 @@ pub mod utils;
 
 // Re-export all public types for convenient access
 pub use annotation::*;
+pub use binding_pattern::*;
 pub use comments::*;
 pub use expression::*;
 pub use json::*;

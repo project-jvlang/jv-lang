@@ -383,12 +383,16 @@ impl BindingResolver {
                         });
                         Statement::Assignment {
                             target: Expression::Identifier(name, target_span),
+                            binding_pattern: None,
+
                             value,
                             span,
                         }
                     }
                     Some(BindingKind::Mutable { .. }) => Statement::Assignment {
                         target: Expression::Identifier(name, target_span),
+                        binding_pattern: None,
+
                         value,
                         span,
                     },
@@ -400,6 +404,8 @@ impl BindingResolver {
                             });
                             Statement::Assignment {
                                 target: Expression::Identifier(name, target_span),
+                                binding_pattern: None,
+
                                 value,
                                 span,
                             }

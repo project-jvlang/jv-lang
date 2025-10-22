@@ -244,6 +244,7 @@ fn regex_literal_roundtrips_through_serde() {
 fn val_declaration_origin_roundtrips_through_serde() {
     let stmt = Statement::ValDeclaration {
         name: "temperature".to_string(),
+        binding: Some(BindingPatternKind::identifier("temperature", Span::dummy())),
         type_annotation: Some(TypeAnnotation::Simple("Double".to_string())),
         initializer: Expression::Literal(Literal::Number("36.5".to_string()), Span::dummy()),
         modifiers: Modifiers::default(),

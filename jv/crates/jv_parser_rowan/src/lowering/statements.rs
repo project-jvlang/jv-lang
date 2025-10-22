@@ -15,7 +15,7 @@ use jv_ast::statement::{
 };
 use jv_ast::strings::{MultilineKind, MultilineStringLiteral};
 use jv_ast::types::{BinaryOp, Literal, Modifiers, Pattern, TypeAnnotation, UnaryOp};
-use jv_ast::{Expression, SequenceDelimiter, Span, Statement};
+use jv_ast::{BindingPatternKind, Expression, SequenceDelimiter, Span, Statement};
 use jv_lexer::{
     JsonCommentTrivia, JsonCommentTriviaKind, JsonConfidence, LayoutMode, Lexer,
     NumberGroupingKind, StringDelimiterKind, StringInterpolationSegment, StringLiteralMetadata,
@@ -392,7 +392,14 @@ fn lower_assignment(
         )
     })?;
 
-    let target = lower_assignment_target(context, &target_node)?;
+    let (target, binding_pattern) =
+        if let Some(pattern_node) = child_node(&target_node, SyntaxKind::BindingPattern) {
+            let pattern = lower_binding_pattern(context, &pattern_node)?;
+            let expr = binding_pattern_primary_expression(&pattern);
+            (expr, Some(pattern))
+        } else {
+            (lower_assignment_target(context, &target_node)?, None)
+        };
 
     let value_node = node
         .children()
@@ -411,6 +418,7 @@ fn lower_assignment(
 
     Ok(Statement::Assignment {
         target,
+        binding_pattern,
         value,
         span,
     })
@@ -610,25 +618,11 @@ fn lower_value(
         missing_child_diagnostic(context, node, "バインディング", SyntaxKind::BindingPattern)
     })?;
 
-    let name_tokens = context.tokens_for(&binding);
-    let identifier_token = name_tokens
-        .iter()
-        .find(|token| matches!(token.token_type, TokenType::Identifier(_)))
-        .ok_or_else(|| {
-            LoweringDiagnostic::new(
-                LoweringDiagnosticSeverity::Error,
-                "識別子が必要です",
-                context.span_for(&binding),
-                binding.kind(),
-                first_identifier_text(&binding),
-                collect_annotation_texts(&binding),
-            )
-        })?;
-
-    let name = match &identifier_token.token_type {
-        TokenType::Identifier(text) => text.clone(),
-        _ => identifier_token.lexeme.clone(),
-    };
+    let binding_pattern = lower_binding_pattern(context, &binding)?;
+    let name = binding_pattern
+        .first_identifier()
+        .map(|text| text.to_string())
+        .unwrap_or_else(|| join_tokens(&context.tokens_for(&binding)));
 
     let type_annotation = child_node(node, SyntaxKind::TypeAnnotation)
         .and_then(|type_node| child_node(&type_node, SyntaxKind::Expression))
@@ -674,6 +668,7 @@ fn lower_value(
     if is_val {
         Ok(Statement::ValDeclaration {
             name,
+            binding: Some(binding_pattern.clone()),
             type_annotation,
             initializer: initializer.unwrap(),
             modifiers,
@@ -683,6 +678,7 @@ fn lower_value(
     } else {
         Ok(Statement::VarDeclaration {
             name,
+            binding: Some(binding_pattern),
             type_annotation,
             initializer,
             modifiers,
@@ -3337,26 +3333,18 @@ fn lower_property(
     };
 
     let span = context.span_for(node).unwrap_or_else(Span::dummy);
-    let name =
-        match context
-            .tokens_for(&binding)
-            .into_iter()
-            .find_map(|token| match &token.token_type {
-                TokenType::Identifier(text) => Some(text.clone()),
-                _ => None,
-            }) {
-            Some(name) => name,
-            None => {
-                push_diagnostic(
-                    diagnostics,
-                    LoweringDiagnosticSeverity::Error,
-                    "プロパティ名を特定できませんでした",
-                    context,
-                    &binding,
-                );
-                return Ok(None);
-            }
-        };
+    let binding_pattern = match lower_binding_pattern(context, &binding) {
+        Ok(pattern) => pattern,
+        Err(diag) => {
+            diagnostics.push(diag);
+            return Ok(None);
+        }
+    };
+
+    let name = binding_pattern
+        .first_identifier()
+        .map(|text| text.to_string())
+        .unwrap_or_else(|| join_tokens(&context.tokens_for(&binding)));
 
     let type_annotation = child_node(node, SyntaxKind::TypeAnnotation)
         .and_then(|type_node| child_node(&type_node, SyntaxKind::Expression))
@@ -3395,21 +3383,15 @@ fn lower_for(
         )
     })?;
 
-    let binding_tokens = context.tokens_for(&binding_node);
-    let binding_name = extract_identifier(&binding_tokens).ok_or_else(|| {
-        LoweringDiagnostic::new(
-            LoweringDiagnosticSeverity::Error,
-            "for 文のバインディング識別子が見つかりません",
-            context.span_for(&binding_node),
-            binding_node.kind(),
-            first_identifier_text(&binding_node),
-            collect_annotation_texts(&binding_node),
-        )
-    })?;
-
+    let binding_pattern = lower_binding_pattern(context, &binding_node)?;
+    let binding_name = binding_pattern
+        .first_identifier()
+        .map(|text| text.to_string())
+        .unwrap_or_else(|| join_tokens(&context.tokens_for(&binding_node)));
     let binding_span = context.span_for(&binding_node).unwrap_or_else(Span::dummy);
     let loop_binding = LoopBinding {
         name: binding_name,
+        pattern: Some(binding_pattern),
         type_annotation: None,
         span: binding_span,
     };
@@ -3596,4 +3578,124 @@ fn lower_parameters(
     }
 
     (params, has_mutable)
+}
+
+fn lower_binding_pattern(
+    context: &LoweringContext<'_>,
+    node: &JvSyntaxNode,
+) -> Result<BindingPatternKind, LoweringDiagnostic> {
+    match node.kind() {
+        SyntaxKind::BindingPattern => lower_binding_pattern_node(context, node),
+        SyntaxKind::BindingListPattern | SyntaxKind::BindingTuplePattern => {
+            lower_binding_collection_pattern(context, node)
+        }
+        other => Err(LoweringDiagnostic::new(
+            LoweringDiagnosticSeverity::Error,
+            format!(
+                "BindingPattern ノードを期待しましたが {:?} を受け取りました",
+                other
+            ),
+            context.span_for(node),
+            node.kind(),
+            first_identifier_text(node),
+            collect_annotation_texts(node),
+        )),
+    }
+}
+
+fn lower_binding_pattern_node(
+    context: &LoweringContext<'_>,
+    node: &JvSyntaxNode,
+) -> Result<BindingPatternKind, LoweringDiagnostic> {
+    for child in node.children() {
+        match child.kind() {
+            SyntaxKind::BindingListPattern | SyntaxKind::BindingTuplePattern => {
+                return lower_binding_collection_pattern(context, &child);
+            }
+            _ => continue,
+        }
+    }
+
+    lower_identifier_binding(context, node)
+}
+
+fn lower_binding_collection_pattern(
+    context: &LoweringContext<'_>,
+    node: &JvSyntaxNode,
+) -> Result<BindingPatternKind, LoweringDiagnostic> {
+    let mut elements = Vec::new();
+    for child in node.children() {
+        if child.kind() == SyntaxKind::BindingPattern {
+            elements.push(lower_binding_pattern(context, &child)?);
+        }
+    }
+
+    let span = context.span_for(node).unwrap_or_else(Span::dummy);
+
+    match node.kind() {
+        SyntaxKind::BindingListPattern => Ok(BindingPatternKind::List { elements, span }),
+        SyntaxKind::BindingTuplePattern => Ok(BindingPatternKind::Tuple { elements, span }),
+        _ => Err(LoweringDiagnostic::new(
+            LoweringDiagnosticSeverity::Error,
+            "リスト/タプル以外のバインディングパターンを処理できません",
+            context.span_for(node),
+            node.kind(),
+            first_identifier_text(node),
+            collect_annotation_texts(node),
+        )),
+    }
+}
+
+fn lower_identifier_binding(
+    context: &LoweringContext<'_>,
+    node: &JvSyntaxNode,
+) -> Result<BindingPatternKind, LoweringDiagnostic> {
+    let tokens = context.tokens_for(node);
+    let identifier_token = tokens.iter().find(|token| match token.token_type {
+        TokenType::Identifier(_) => true,
+        _ => false,
+    });
+
+    let identifier_token = match identifier_token {
+        Some(token) => token,
+        None => {
+            return Err(LoweringDiagnostic::new(
+                LoweringDiagnosticSeverity::Error,
+                "識別子バインディングを特定できませんでした",
+                context.span_for(node),
+                node.kind(),
+                first_identifier_text(node),
+                collect_annotation_texts(node),
+            ))
+        }
+    };
+
+    let span = context
+        .span_for(node)
+        .unwrap_or_else(|| span_from_token(identifier_token));
+
+    match &identifier_token.token_type {
+        TokenType::Identifier(text) if text == "_" => Ok(BindingPatternKind::Wildcard { span }),
+        TokenType::Identifier(text) => Ok(BindingPatternKind::Identifier {
+            name: text.clone(),
+            span,
+        }),
+        _ => Err(LoweringDiagnostic::new(
+            LoweringDiagnosticSeverity::Error,
+            "バインディングパターンが識別子以外のトークンで始まりました",
+            context.span_for(node),
+            node.kind(),
+            first_identifier_text(node),
+            collect_annotation_texts(node),
+        )),
+    }
+}
+
+fn binding_pattern_primary_expression(pattern: &BindingPatternKind) -> Expression {
+    let span = pattern.span();
+    if let Some(name) = pattern.first_identifier() {
+        Expression::Identifier(name.to_string(), span)
+    } else {
+        Expression::Identifier("_".to_string(), span)
+    }
 }

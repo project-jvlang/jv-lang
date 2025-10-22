@@ -503,6 +503,8 @@ mod tests {
     ) -> Statement {
         Statement::ValDeclaration {
             name: name.into(),
+            binding: None,
+
             type_annotation: annotation,
             initializer,
             modifiers: modifiers(),

@@ -1026,6 +1026,8 @@ mod tests {
             imports: vec![],
             statements: vec![Statement::ValDeclaration {
                 name: "x".into(),
+                binding: None,
+
                 type_annotation: None,
                 initializer: Expression::Literal(Literal::Null, Span::dummy()),
                 modifiers: Default::default(),
@@ -1091,6 +1093,8 @@ mod tests {
         let block_statements = vec![
             Statement::ValDeclaration {
                 name: "trimmed".into(),
+                binding: None,
+
                 type_annotation: None,
                 initializer: Expression::Identifier("token".into(), Span::new(3, 18, 3, 23)),
                 modifiers: Default::default(),

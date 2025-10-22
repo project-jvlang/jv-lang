@@ -11,6 +11,7 @@ fn dummy_span() -> Span {
 fn test_statement_val_declaration() {
     let stmt = Statement::ValDeclaration {
         name: "x".to_string(),
+        binding: Some(BindingPatternKind::identifier("x", dummy_span())),
         type_annotation: Some(TypeAnnotation::Simple("Int".to_string())),
         initializer: Expression::Literal(Literal::Number("42".to_string()), dummy_span()),
         modifiers: Modifiers::default(),
@@ -27,6 +28,7 @@ fn test_statement_val_declaration() {
 fn test_statement_var_declaration() {
     let stmt = Statement::VarDeclaration {
         name: "y".to_string(),
+        binding: Some(BindingPatternKind::identifier("y", dummy_span())),
         type_annotation: Some(TypeAnnotation::Simple("String".to_string())),
         initializer: Some(Expression::Literal(
             Literal::String("hello".to_string()),
@@ -246,10 +248,12 @@ fn test_statement_assignment() {
 
 #[test]
 fn test_statement_for_in_iterable_strategy() {
+    let span = dummy_span();
     let binding = LoopBinding {
         name: "item".to_string(),
+        pattern: Some(BindingPatternKind::identifier("item", span.clone())),
         type_annotation: None,
-        span: dummy_span(),
+        span: span.clone(),
     };
     let iterable = Expression::Identifier("items".to_string(), dummy_span());
     let body = Expression::Block {
@@ -280,10 +284,12 @@ fn test_statement_for_in_iterable_strategy() {
 
 #[test]
 fn test_statement_for_in_numeric_range_strategy() {
+    let span = dummy_span();
     let binding = LoopBinding {
         name: "index".to_string(),
+        pattern: Some(BindingPatternKind::identifier("index", span.clone())),
         type_annotation: Some(TypeAnnotation::Simple("Int".to_string())),
-        span: dummy_span(),
+        span: span.clone(),
     };
     let range_span = dummy_span();
     let strategy = LoopStrategy::NumericRange(NumericRangeLoop {
