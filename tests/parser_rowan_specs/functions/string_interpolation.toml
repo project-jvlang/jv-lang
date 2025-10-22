@@ -1,0 +1,27 @@
+description = "String interpolation and JSON literal lower to dedicated AST nodes"
+source = "../fixtures/string_interpolation_and_json.jv"
+
+[expect]
+statement_count = 2
+
+[[expect.statements]]
+index = 0
+kind = "package"
+
+[[expect.statements]]
+index = 1
+kind = "function_declaration"
+name = "literalsDemo"
+
+  [expect.statements.block]
+  statement_kinds = [
+    "val_declaration",
+    "val_declaration",
+    "expression",
+    "val_declaration",
+    "expression",
+    "val_declaration",
+    "expression",
+    "expression",
+    "expression"
+  ]

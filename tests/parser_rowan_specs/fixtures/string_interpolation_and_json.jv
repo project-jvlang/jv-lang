@@ -1,0 +1,21 @@
+package specs.fixtures
+
+fun literalsDemo(): Unit {
+    val name = "jv"
+    val message = "Hello, ${name}!"
+
+    val template = """
+        Welcome, ${name}!
+        Enjoy the platform.
+    """
+
+    val config = {
+      "name": "jv",
+      "enabled": true,
+      "values": [1, 2, 3]
+    }
+
+    println(message)
+    println(template)
+    println(config)
+}

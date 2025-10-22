@@ -1,8 +1,11 @@
 use crate::lowering::{lower_program, LoweringDiagnosticSeverity, LoweringResult};
 use crate::parser::parse;
+use crate::verification::StatementKindKey;
 use crate::{JvLanguage, ParseBuilder, SyntaxKind};
+use jv_ast::strings::MultilineKind;
 use jv_ast::{
-    expression::{Argument, Parameter},
+    expression::{Argument, Parameter, StringPart},
+    json::{JsonLiteral, JsonValue},
     statement::{ConcurrencyConstruct, LoopStrategy, ResourceManagement, ValBindingOrigin},
     types::{BinaryOp, Literal, Modifiers, Pattern, TypeAnnotation},
     Expression, Statement,
@@ -1367,4 +1370,204 @@ fn expression_lowering_handles_subjectless_when_expression() {
         Expression::Literal(Literal::String(text), _) => assert_eq!(text, "small"),
         other => panic!("unexpected else branch {:?}", other),
     }
+}
+
+#[test]
+fn string_interpolation_lowering_builds_parts() {
+    let source = include_str!(
+        "../../../../../tests/parser_rowan_specs/fixtures/string_interpolation_and_json.jv"
+    );
+
+    let result = lower_source(source);
+    assert!(
+        result.diagnostics.is_empty(),
+        "unexpected diagnostics: {:?}",
+        result.diagnostics
+    );
+
+    let function_body = result
+        .statements
+        .iter()
+        .find_map(|statement| match statement {
+            Statement::FunctionDeclaration { name, body, .. } if name == "literalsDemo" => {
+                Some(body.as_ref())
+            }
+            _ => None,
+        })
+        .expect("expected literalsDemo function declaration");
+
+    let block_statements = match function_body {
+        Expression::Block { statements, .. } => statements,
+        other => panic!("expected block body, got {:?}", other),
+    };
+
+    let kinds: Vec<StatementKindKey> = block_statements
+        .iter()
+        .map(StatementKindKey::from_statement)
+        .collect();
+    assert_eq!(
+        kinds,
+        vec![
+            StatementKindKey::ValDeclaration,
+            StatementKindKey::ValDeclaration,
+            StatementKindKey::Expression,
+            StatementKindKey::ValDeclaration,
+            StatementKindKey::Expression,
+            StatementKindKey::ValDeclaration,
+            StatementKindKey::Expression,
+            StatementKindKey::Expression,
+            StatementKindKey::Expression
+        ],
+        "unexpected block statement kinds"
+    );
+
+    let message_expr = block_statements
+        .iter()
+        .find_map(|statement| match statement {
+            Statement::ValDeclaration {
+                name, initializer, ..
+            } if name == "message" => Some(initializer),
+            _ => None,
+        })
+        .expect("expected message val declaration");
+
+    match message_expr {
+        Expression::StringInterpolation { parts, .. } => {
+            assert_eq!(parts.len(), 3, "expected text, expression, text segments");
+            match &parts[0] {
+                StringPart::Text(text) => assert_eq!(text, "Hello, "),
+                other => panic!("unexpected first string part {:?}", other),
+            }
+            match &parts[1] {
+                StringPart::Expression(expr) => match expr {
+                    Expression::Identifier(identifier, _) => assert_eq!(identifier, "name"),
+                    other => panic!("unexpected interpolation expression {:?}", other),
+                },
+                other => panic!("expected expression part, got {:?}", other),
+            }
+            match &parts[2] {
+                StringPart::Text(text) => assert_eq!(text, "!"),
+                other => panic!("unexpected final string part {:?}", other),
+            }
+        }
+        other => panic!("expected string interpolation, got {:?}", other),
+    }
+
+    let template_expr = block_statements
+        .iter()
+        .find_map(|statement| match statement {
+            Statement::ValDeclaration {
+                name, initializer, ..
+            } if name == "template" => Some(initializer),
+            _ => None,
+        })
+        .expect("expected template val declaration");
+
+    match template_expr {
+        Expression::MultilineString(literal) => {
+            assert_eq!(literal.kind, MultilineKind::TripleQuote);
+            assert!(
+                literal.parts.iter().any(|part| matches!(
+                    part,
+                    StringPart::Expression(Expression::Identifier(identifier, _)) if identifier == "name"
+                )),
+                "expected embedded expression referencing name"
+            );
+        }
+        other => panic!("expected multiline string literal, got {:?}", other),
+    }
+}
+
+#[test]
+fn json_literal_lowering_builds_object_tree() {
+    let source = r#"
+    package fixtures
+    val config = {
+      "name": "jv",
+      "enabled": true,
+      "values": [1, 2, 3]
+    }
+    "#;
+
+    let result = lower_source(source);
+    assert!(
+        result.diagnostics.is_empty(),
+        "unexpected diagnostics: {:?}",
+        result.diagnostics
+    );
+
+    let config_expr = result
+        .statements
+        .iter()
+        .find_map(|statement| match statement {
+            Statement::ValDeclaration {
+                name, initializer, ..
+            } if name == "config" => Some(initializer),
+            _ => None,
+        })
+        .expect("expected config val declaration");
+
+    let literal: &JsonLiteral = match config_expr {
+        Expression::JsonLiteral(literal) => literal,
+        other => panic!("expected json literal expression, got {:?}", other),
+    };
+
+    match &literal.value {
+        JsonValue::Object { entries, .. } => {
+            assert_eq!(entries.len(), 3, "expected three object entries");
+
+            let mut name_found = false;
+            let mut enabled_found = false;
+            let mut values_found = false;
+
+            for entry in entries {
+                match entry.key.as_str() {
+                    "name" => {
+                        name_found = true;
+                        match &entry.value {
+                            JsonValue::String { value, .. } => assert_eq!(value, "jv"),
+                            other => panic!("expected string value for name, got {:?}", other),
+                        }
+                    }
+                    "enabled" => {
+                        enabled_found = true;
+                        match &entry.value {
+                            JsonValue::Boolean { value, .. } => assert!(*value),
+                            other => panic!("expected boolean value for enabled, got {:?}", other),
+                        }
+                    }
+                    "values" => {
+                        values_found = true;
+                        match &entry.value {
+                            JsonValue::Array { elements, .. } => {
+                                let literals: Vec<&str> = elements
+                                    .iter()
+                                    .map(|element| match element {
+                                        JsonValue::Number { literal, .. } => literal.as_str(),
+                                        other => panic!(
+                                            "expected numeric array elements, got {:?}",
+                                            other
+                                        ),
+                                    })
+                                    .collect();
+                                assert_eq!(literals, vec!["1", "2", "3"]);
+                            }
+                            other => panic!("expected array value for values, got {:?}", other),
+                        }
+                    }
+                    other => panic!("unexpected JSON entry key {:?}", other),
+                }
+            }
+
+            assert!(name_found, "missing name entry");
+            assert!(enabled_found, "missing enabled entry");
+            assert!(values_found, "missing values entry");
+        }
+        other => panic!("expected JSON object literal, got {:?}", other),
+    }
+
+    assert!(
+        literal.leading_comments.is_empty() && literal.trailing_comments.is_empty(),
+        "unexpected JSON comments in literal"
+    );
 }

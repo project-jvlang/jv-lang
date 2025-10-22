@@ -3,14 +3,24 @@ use super::helpers::{
 };
 use crate::syntax::SyntaxKind;
 use jv_ast::comments::{CommentKind, CommentStatement, CommentVisibility};
-use jv_ast::expression::{Argument, CallArgumentMetadata, CallArgumentStyle, Parameter, WhenArm};
+use jv_ast::expression::{
+    Argument, CallArgumentMetadata, CallArgumentStyle, Parameter, StringPart, WhenArm,
+};
+use jv_ast::json::{
+    JsonComment, JsonCommentKind, JsonEntry, JsonLiteral, JsonValue, NumberGrouping,
+};
 use jv_ast::statement::{
     ConcurrencyConstruct, ForInStatement, LoopBinding, LoopStrategy, Property, ResourceManagement,
     ValBindingOrigin,
 };
+use jv_ast::strings::{MultilineKind, MultilineStringLiteral};
 use jv_ast::types::{BinaryOp, Literal, Modifiers, Pattern, TypeAnnotation, UnaryOp};
-use jv_ast::{Expression, Span, Statement};
-use jv_lexer::{Token, TokenType};
+use jv_ast::{Expression, SequenceDelimiter, Span, Statement};
+use jv_lexer::{
+    JsonCommentTrivia, JsonCommentTriviaKind, JsonConfidence, LayoutMode, Lexer,
+    NumberGroupingKind, StringDelimiterKind, StringInterpolationSegment, StringLiteralMetadata,
+    Token, TokenMetadata, TokenTrivia, TokenType,
+};
 use jv_parser_syntax_support::support::{
     parsers::regex_literal_from_token,
     spans::{expression_span, merge_spans, span_from_token},
@@ -722,7 +732,10 @@ fn lower_expression(
     let filtered: Vec<&Token> = tokens
         .iter()
         .copied()
-        .filter(|token| !is_trivia_token(token) && !matches!(token.token_type, TokenType::Eof))
+        .filter(|token| {
+            !is_trivia_token(token)
+                && !matches!(token.token_type, TokenType::Eof | TokenType::LayoutComma)
+        })
         .collect();
 
     if filtered.is_empty() {
@@ -979,7 +992,16 @@ mod expression_parser {
                         end: operand.end,
                     })
                 }
-                TokenType::LeftBrace => self.parse_brace_expression(),
+                TokenType::LeftBrace => {
+                    if has_high_json_confidence(token) {
+                        self.parse_json_object_expression(index)
+                    } else {
+                        self.parse_brace_expression()
+                    }
+                }
+                TokenType::LeftBracket if has_high_json_confidence(token) => {
+                    self.parse_json_array_expression(index)
+                }
                 TokenType::When => self.parse_when_expression(),
                 _ => self.parse_primary(),
             }
@@ -1031,10 +1053,11 @@ mod expression_parser {
                         end: index + 1,
                     })
                 }
-                TokenType::StringInterpolation(value) => {
+                TokenType::StringInterpolation(_) => {
                     let span = span_from_token(token);
+                    let (expr, _) = parse_string_token_with_metadata(token, span.clone())?;
                     Ok(ParsedExpr {
-                        expr: Expression::Literal(Literal::String(value.clone()), span.clone()),
+                        expr,
                         start: index,
                         end: index + 1,
                     })
@@ -1079,6 +1102,40 @@ mod expression_parser {
                     Some(span_from_index(self.tokens, index)),
                 )),
             }
+        }
+
+        fn parse_json_object_expression(
+            &mut self,
+            start_index: usize,
+        ) -> Result<ParsedExpr, ExpressionError> {
+            let closing_index = self
+                .find_matching_brace(start_index)
+                .ok_or_else(|| ExpressionError::new("'}' が必要です", self.span_at(start_index)))?;
+            let slice = &self.tokens[start_index..=closing_index];
+            let json = parse_json_literal_tokens(slice)?;
+            self.pos = closing_index + 1;
+            Ok(ParsedExpr {
+                expr: Expression::JsonLiteral(json),
+                start: start_index,
+                end: closing_index + 1,
+            })
+        }
+
+        fn parse_json_array_expression(
+            &mut self,
+            start_index: usize,
+        ) -> Result<ParsedExpr, ExpressionError> {
+            let closing_index = self
+                .find_matching_bracket(start_index)
+                .ok_or_else(|| ExpressionError::new("']' が必要です", self.span_at(start_index)))?;
+            let slice = &self.tokens[start_index..=closing_index];
+            let json = parse_json_literal_tokens(slice)?;
+            self.pos = closing_index + 1;
+            Ok(ParsedExpr {
+                expr: Expression::JsonLiteral(json),
+                start: start_index,
+                end: closing_index + 1,
+            })
         }
 
         fn parse_brace_expression(&mut self) -> Result<ParsedExpr, ExpressionError> {
@@ -1761,38 +1818,38 @@ mod expression_parser {
             &mut self,
             start_index: usize,
         ) -> Result<ParsedExpr, ExpressionError> {
-            let mut end_index = start_index;
-            let mut combined = String::new();
+            let start_token = self
+                .tokens
+                .get(start_index)
+                .ok_or_else(|| ExpressionError::new("文字列リテラルが必要です", None))?;
 
-            if let Some(token) = self.tokens.get(start_index) {
-                combined.push_str(token.lexeme.as_str());
-            }
+            let initial_span = span_from_token(start_token);
+            let (mut expr, token_consumption) =
+                parse_string_token_with_metadata(start_token, initial_span.clone())?;
 
-            while let Some(token) = self.tokens.get(end_index + 1) {
-                combined.push_str(token.lexeme.as_str());
-                end_index += 1;
-                if matches!(token.token_type, TokenType::StringEnd) {
-                    break;
+            let end_index = start_index
+                .saturating_add(1)
+                .saturating_add(token_consumption)
+                .min(self.tokens.len());
+            self.pos = end_index;
+
+            let span = span_for_range(self.tokens, start_index, end_index.max(start_index + 1));
+            match &mut expr {
+                Expression::StringInterpolation {
+                    span: expr_span, ..
+                } => {
+                    *expr_span = span.clone();
                 }
+                Expression::MultilineString(literal) => {
+                    literal.span = span.clone();
+                }
+                _ => {}
             }
 
-            if !matches!(
-                self.tokens.get(end_index).map(|token| &token.token_type),
-                Some(TokenType::StringEnd)
-            ) {
-                return Err(ExpressionError::new(
-                    "文字列リテラルが閉じられていません",
-                    self.span_at(end_index),
-                ));
-            }
-
-            self.pos = end_index + 1;
-            let span = span_for_range(self.tokens, start_index, end_index + 1);
-            let expr = Expression::Literal(Literal::String(combined), span.clone());
             Ok(ParsedExpr {
                 expr,
                 start: start_index,
-                end: end_index + 1,
+                end: end_index,
             })
         }
 
@@ -2505,6 +2562,516 @@ mod expression_parser {
         let start_span = span_from_token(tokens[start]);
         let end_span = span_from_token(tokens[end - 1]);
         merge_spans(&start_span, &end_span)
+    }
+
+    fn parse_string_token_with_metadata(
+        token: &Token,
+        span: Span,
+    ) -> Result<(Expression, usize), ExpressionError> {
+        let segments = token.metadata.iter().find_map(|metadata| match metadata {
+            TokenMetadata::StringInterpolation { segments } => Some(segments.clone()),
+            _ => None,
+        });
+
+        let Some(segments) = segments else {
+            let value = match &token.token_type {
+                TokenType::StringInterpolation(value) | TokenType::String(value) => value.clone(),
+                _ => token.lexeme.clone(),
+            };
+            return Ok((Expression::Literal(Literal::String(value), span), 0));
+        };
+
+        let mut parts = Vec::new();
+        let mut raw = String::new();
+        let mut token_consumption = 0usize;
+
+        for segment in segments {
+            match segment {
+                StringInterpolationSegment::Literal(text) => {
+                    if !text.is_empty() {
+                        parts.push(StringPart::Text(text.clone()));
+                    }
+                    raw.push_str(&text);
+                }
+                StringInterpolationSegment::Expression(expr_source) => {
+                    let (expr, consumed) = parse_expression_from_text(&expr_source, span.clone())?;
+                    token_consumption = token_consumption.saturating_add(consumed);
+                    parts.push(StringPart::Expression(expr));
+                }
+            }
+        }
+
+        if let Some(metadata) = string_literal_metadata(token) {
+            if let Some(kind) = multiline_kind_from_metadata(metadata) {
+                let literal = build_multiline_literal(kind, raw, parts, span.clone());
+                return Ok((Expression::MultilineString(literal), token_consumption));
+            }
+        }
+
+        Ok((
+            Expression::StringInterpolation { parts, span },
+            token_consumption,
+        ))
+    }
+
+    fn parse_expression_from_text(
+        source: &str,
+        span: Span,
+    ) -> Result<(Expression, usize), ExpressionError> {
+        let mut lexer = Lexer::with_layout_mode(source.to_string(), LayoutMode::Disabled);
+        let tokens = lexer.tokenize().map_err(|_| {
+            ExpressionError::new("文字列補間式の字句解析に失敗しました", Some(span.clone()))
+        })?;
+
+        let filtered: Vec<&Token> = tokens
+            .iter()
+            .filter(|token| !matches!(token.token_type, TokenType::Eof | TokenType::LayoutComma))
+            .collect();
+
+        if filtered.is_empty() {
+            return Err(ExpressionError::new("文字列補間式が空です", Some(span)));
+        }
+
+        let expr = parse_expression(filtered.as_slice())?;
+        Ok((expr, filtered.len()))
+    }
+
+    fn parse_json_literal_tokens(tokens: &[&Token]) -> Result<JsonLiteral, ExpressionError> {
+        if tokens.is_empty() {
+            return Err(ExpressionError::new("JSON リテラルが空です", None));
+        }
+
+        let mut parser = JsonParser::new(tokens);
+        parser.parse_literal()
+    }
+
+    fn string_literal_metadata(token: &Token) -> Option<&StringLiteralMetadata> {
+        token.metadata.iter().find_map(|metadata| match metadata {
+            TokenMetadata::StringLiteral(data) => Some(data),
+            _ => None,
+        })
+    }
+
+    fn multiline_kind_from_metadata(metadata: &StringLiteralMetadata) -> Option<MultilineKind> {
+        match metadata.delimiter {
+            StringDelimiterKind::TripleQuote => Some(MultilineKind::TripleQuote),
+            StringDelimiterKind::BacktickBlock => Some(MultilineKind::Backtick),
+            _ => None,
+        }
+    }
+
+    fn build_multiline_literal(
+        kind: MultilineKind,
+        raw: String,
+        parts: Vec<StringPart>,
+        span: Span,
+    ) -> MultilineStringLiteral {
+        MultilineStringLiteral {
+            kind,
+            normalized: raw.clone(),
+            raw,
+            parts,
+            indent: None,
+            span,
+        }
+    }
+
+    fn has_high_json_confidence(token: &Token) -> bool {
+        token.metadata.iter().any(|metadata| match metadata {
+            TokenMetadata::PotentialJsonStart { confidence } => {
+                matches!(confidence, JsonConfidence::High)
+            }
+            _ => false,
+        })
+    }
+
+    fn collect_json_comments(trivia: &TokenTrivia) -> Vec<JsonComment> {
+        trivia
+            .json_comments
+            .iter()
+            .map(|comment| JsonComment {
+                kind: match comment.kind {
+                    JsonCommentTriviaKind::Line => JsonCommentKind::Line,
+                    JsonCommentTriviaKind::Block => JsonCommentKind::Block,
+                },
+                text: comment.text.clone(),
+                span: comment_span(comment),
+            })
+            .collect()
+    }
+
+    fn comment_span(comment: &JsonCommentTrivia) -> Span {
+        let width = comment.text.chars().count().max(1);
+        Span::new(
+            comment.line,
+            comment.column,
+            comment.line,
+            comment.column + width,
+        )
+    }
+
+    fn number_grouping_from_token(token: &Token) -> NumberGrouping {
+        token
+            .metadata
+            .iter()
+            .find_map(|metadata| match metadata {
+                TokenMetadata::NumberLiteral(info) => Some(match info.grouping {
+                    NumberGroupingKind::None => NumberGrouping::None,
+                    NumberGroupingKind::Comma => NumberGrouping::Comma,
+                    NumberGroupingKind::Underscore => NumberGrouping::Underscore,
+                    NumberGroupingKind::Mixed => NumberGrouping::Mixed,
+                }),
+                _ => None,
+            })
+            .unwrap_or_default()
+    }
+
+    fn json_value_span(value: &JsonValue) -> Span {
+        match value {
+            JsonValue::Object { span, .. }
+            | JsonValue::Array { span, .. }
+            | JsonValue::String { span, .. }
+            | JsonValue::Number { span, .. }
+            | JsonValue::Boolean { span, .. }
+            | JsonValue::Null { span } => span.clone(),
+        }
+    }
+
+    fn build_json_literal_from_object(
+        left: &Token,
+        entries: Vec<JsonEntry>,
+        right: &Token,
+    ) -> JsonLiteral {
+        let left_span = span_from_token(left);
+        let right_span = span_from_token(right);
+        let span = merge_spans(&left_span, &right_span);
+
+        JsonLiteral {
+            value: JsonValue::Object {
+                entries,
+                span: span.clone(),
+            },
+            leading_comments: collect_json_comments(&left.leading_trivia),
+            trailing_comments: collect_json_comments(&right.leading_trivia),
+            span,
+            inferred_schema: None,
+        }
+    }
+
+    fn build_json_literal_from_array(
+        left: &Token,
+        elements: Vec<JsonValue>,
+        right: &Token,
+    ) -> JsonLiteral {
+        let left_span = span_from_token(left);
+        let right_span = span_from_token(right);
+        let span = merge_spans(&left_span, &right_span);
+
+        JsonLiteral {
+            value: JsonValue::Array {
+                elements,
+                delimiter: SequenceDelimiter::Comma,
+                span: span.clone(),
+            },
+            leading_comments: collect_json_comments(&left.leading_trivia),
+            trailing_comments: collect_json_comments(&right.leading_trivia),
+            span,
+            inferred_schema: None,
+        }
+    }
+
+    struct JsonParser<'a> {
+        tokens: &'a [&'a Token],
+        pos: usize,
+    }
+
+    impl<'a> JsonParser<'a> {
+        fn new(tokens: &'a [&'a Token]) -> Self {
+            Self { tokens, pos: 0 }
+        }
+
+        fn parse_literal(&mut self) -> Result<JsonLiteral, ExpressionError> {
+            self.skip_trivia();
+            let token = self
+                .peek()
+                .ok_or_else(|| ExpressionError::new("JSON リテラルが空です", None))?;
+
+            match token.token_type {
+                TokenType::LeftBrace => self.parse_object_literal(),
+                TokenType::LeftBracket => self.parse_array_literal(),
+                _ => Err(ExpressionError::new(
+                    "JSON リテラルの開始トークンが不正です",
+                    Some(span_from_token(token)),
+                )),
+            }
+        }
+
+        fn parse_object_literal(&mut self) -> Result<JsonLiteral, ExpressionError> {
+            let (left, entries, right) = self.parse_object_components()?;
+            Ok(build_json_literal_from_object(left, entries, right))
+        }
+
+        fn parse_array_literal(&mut self) -> Result<JsonLiteral, ExpressionError> {
+            let (left, elements, right) = self.parse_array_components()?;
+            Ok(build_json_literal_from_array(left, elements, right))
+        }
+
+        fn parse_object_components(
+            &mut self,
+        ) -> Result<(&'a Token, Vec<JsonEntry>, &'a Token), ExpressionError> {
+            self.skip_trivia();
+            let left =
+                self.expect_token(|ty| matches!(ty, TokenType::LeftBrace), "'{' が必要です")?;
+            self.skip_trivia();
+
+            let mut entries = Vec::new();
+
+            if matches!(self.peek_type(), Some(TokenType::RightBrace)) {
+                let right = self
+                    .advance()
+                    .ok_or_else(|| ExpressionError::new("'}' が必要です", None))?;
+                return Ok((left, entries, right));
+            }
+
+            loop {
+                let entry = self.parse_entry()?;
+                entries.push(entry);
+                self.skip_trivia();
+
+                match self.peek_type() {
+                    Some(TokenType::Comma) => {
+                        self.pos += 1;
+                        self.skip_trivia();
+                        if matches!(self.peek_type(), Some(TokenType::RightBrace)) {
+                            break;
+                        }
+                    }
+                    Some(TokenType::RightBrace) => break,
+                    _ => {
+                        let span = self.peek().map(|token| span_from_token(token));
+                        return Err(ExpressionError::new(
+                            "JSON オブジェクトの要素区切りが不正です",
+                            span,
+                        ));
+                    }
+                }
+            }
+
+            self.skip_trivia();
+            let right =
+                self.expect_token(|ty| matches!(ty, TokenType::RightBrace), "'}' が必要です")?;
+            Ok((left, entries, right))
+        }
+
+        fn parse_array_components(
+            &mut self,
+        ) -> Result<(&'a Token, Vec<JsonValue>, &'a Token), ExpressionError> {
+            self.skip_trivia();
+            let left =
+                self.expect_token(|ty| matches!(ty, TokenType::LeftBracket), "'[' が必要です")?;
+            self.skip_trivia();
+
+            let mut elements = Vec::new();
+
+            if matches!(self.peek_type(), Some(TokenType::RightBracket)) {
+                let right = self
+                    .advance()
+                    .ok_or_else(|| ExpressionError::new("']' が必要です", None))?;
+                return Ok((left, elements, right));
+            }
+
+            loop {
+                let value = self.parse_value()?;
+                elements.push(value);
+                self.skip_trivia();
+
+                match self.peek_type() {
+                    Some(TokenType::Comma) => {
+                        self.pos += 1;
+                        self.skip_trivia();
+                        if matches!(self.peek_type(), Some(TokenType::RightBracket)) {
+                            break;
+                        }
+                    }
+                    Some(TokenType::RightBracket) => break,
+                    _ => {
+                        let span = self.peek().map(|token| span_from_token(token));
+                        return Err(ExpressionError::new(
+                            "JSON 配列の要素区切りが不正です",
+                            span,
+                        ));
+                    }
+                }
+            }
+
+            self.skip_trivia();
+            let right =
+                self.expect_token(|ty| matches!(ty, TokenType::RightBracket), "']' が必要です")?;
+            Ok((left, elements, right))
+        }
+
+        fn parse_entry(&mut self) -> Result<JsonEntry, ExpressionError> {
+            self.skip_trivia();
+            let key_token = self
+                .advance()
+                .ok_or_else(|| ExpressionError::new("JSON オブジェクトのキーが必要です", None))?;
+
+            let key = match &key_token.token_type {
+                TokenType::String(value) => value.clone(),
+                TokenType::Identifier(value) => value.clone(),
+                _ => {
+                    return Err(ExpressionError::new(
+                        "JSON オブジェクトのキーは識別子または文字列である必要があります",
+                        Some(span_from_token(key_token)),
+                    ))
+                }
+            };
+
+            self.skip_trivia();
+            let colon = self
+                .advance()
+                .ok_or_else(|| ExpressionError::new("':' が必要です", None))?;
+            if !matches!(colon.token_type, TokenType::Colon) {
+                return Err(ExpressionError::new(
+                    "':' が必要です",
+                    Some(span_from_token(colon)),
+                ));
+            }
+
+            self.skip_trivia();
+            let value = self.parse_value()?;
+
+            let key_span = span_from_token(key_token);
+            let value_span = json_value_span(&value);
+            let span = merge_spans(&key_span, &value_span);
+            let comments = collect_json_comments(&key_token.leading_trivia);
+
+            Ok(JsonEntry {
+                key,
+                comments,
+                value,
+                span,
+            })
+        }
+
+        fn parse_value(&mut self) -> Result<JsonValue, ExpressionError> {
+            self.skip_trivia();
+            let token = self
+                .peek()
+                .ok_or_else(|| ExpressionError::new("JSON 値が必要です", None))?;
+
+            match token.token_type {
+                TokenType::LeftBrace => {
+                    let (left, entries, right) = self.parse_object_components()?;
+                    let left_span = span_from_token(left);
+                    let right_span = span_from_token(right);
+                    let span = merge_spans(&left_span, &right_span);
+                    Ok(JsonValue::Object { entries, span })
+                }
+                TokenType::LeftBracket => {
+                    let (left, elements, right) = self.parse_array_components()?;
+                    let left_span = span_from_token(left);
+                    let right_span = span_from_token(right);
+                    let span = merge_spans(&left_span, &right_span);
+                    Ok(JsonValue::Array {
+                        elements,
+                        delimiter: SequenceDelimiter::Comma,
+                        span,
+                    })
+                }
+                TokenType::String(_) => {
+                    let token = self.advance().unwrap();
+                    let value = match &token.token_type {
+                        TokenType::String(content) => content.clone(),
+                        _ => unreachable!(),
+                    };
+                    let span = span_from_token(token);
+                    Ok(JsonValue::String { value, span })
+                }
+                TokenType::Number(_) => {
+                    let token = self.advance().unwrap();
+                    let literal = match &token.token_type {
+                        TokenType::Number(value) => value.clone(),
+                        _ => unreachable!(),
+                    };
+                    let grouping = number_grouping_from_token(token);
+                    let span = span_from_token(token);
+                    Ok(JsonValue::Number {
+                        literal,
+                        grouping,
+                        span,
+                    })
+                }
+                TokenType::Boolean(value) => {
+                    let token = self.advance().unwrap();
+                    let span = span_from_token(token);
+                    Ok(JsonValue::Boolean { value, span })
+                }
+                TokenType::True | TokenType::False => {
+                    let token = self.advance().unwrap();
+                    let span = span_from_token(token);
+                    let value = matches!(token.token_type, TokenType::True);
+                    Ok(JsonValue::Boolean { value, span })
+                }
+                TokenType::Null => {
+                    let token = self.advance().unwrap();
+                    let span = span_from_token(token);
+                    Ok(JsonValue::Null { span })
+                }
+                _ => Err(ExpressionError::new(
+                    "JSON 値が不正です",
+                    Some(span_from_token(token)),
+                )),
+            }
+        }
+
+        fn skip_trivia(&mut self) {
+            while let Some(token) = self.peek() {
+                match token.token_type {
+                    TokenType::Whitespace(_)
+                    | TokenType::Newline
+                    | TokenType::LayoutComma
+                    | TokenType::LineComment(_)
+                    | TokenType::BlockComment(_)
+                    | TokenType::JavaDocComment(_) => self.pos += 1,
+                    _ => break,
+                }
+            }
+        }
+
+        fn expect_token<F>(
+            &mut self,
+            mut predicate: F,
+            message: &str,
+        ) -> Result<&'a Token, ExpressionError>
+        where
+            F: FnMut(&TokenType) -> bool,
+        {
+            let token = self
+                .advance()
+                .ok_or_else(|| ExpressionError::new(message, None))?;
+            if predicate(&token.token_type) {
+                Ok(token)
+            } else {
+                Err(ExpressionError::new(message, Some(span_from_token(token))))
+            }
+        }
+
+        fn peek(&self) -> Option<&'a Token> {
+            self.tokens.get(self.pos).copied()
+        }
+
+        fn peek_type(&self) -> Option<&TokenType> {
+            self.peek().map(|token| &token.token_type)
+        }
+
+        fn advance(&mut self) -> Option<&'a Token> {
+            let token = self.tokens.get(self.pos).copied();
+            if token.is_some() {
+                self.pos += 1;
+            }
+            token
+        }
     }
 }
 
