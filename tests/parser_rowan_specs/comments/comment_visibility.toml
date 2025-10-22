@@ -1,0 +1,36 @@
+description = "Rowan lowering produces comment statements with expected ordering"
+source = "../fixtures/comment_visibility.jv"
+
+[expect]
+statement_count = 5
+
+[[expect.statements]]
+index = 0
+kind = "package"
+name = "comment.visibility"
+
+[[expect.statements]]
+index = 1
+kind = "comment"
+
+  [expect.statements.span]
+  start_line = 3
+
+[[expect.statements]]
+index = 2
+kind = "comment"
+
+  [expect.statements.span]
+  start_line = 4
+
+[[expect.statements]]
+index = 3
+kind = "comment"
+
+  [expect.statements.span]
+  start_line = 5
+
+[[expect.statements]]
+index = 4
+kind = "val_declaration"
+name = "marker"

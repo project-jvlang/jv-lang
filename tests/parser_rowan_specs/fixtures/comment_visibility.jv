@@ -1,0 +1,7 @@
+package comment.visibility
+
+// visible comment
+/// internal comment
+/* block comment */
+
+val marker = 1

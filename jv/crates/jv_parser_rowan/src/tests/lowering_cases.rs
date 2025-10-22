@@ -213,6 +213,45 @@ fn for_tokens() -> (SyntaxNode<JvLanguage>, Vec<Token>) {
     (node, tokens)
 }
 
+fn comment_tokens() -> (SyntaxNode<JvLanguage>, Vec<Token>) {
+    let mut column = 0usize;
+    let mut tokens = Vec::new();
+    tokens.push(make_token(
+        &mut column,
+        TokenType::LineComment("// visible".to_string()),
+        "// visible",
+    ));
+    tokens.push(make_token(
+        &mut column,
+        TokenType::LineComment("/// internal".to_string()),
+        "/// internal",
+    ));
+    tokens.push(make_token(
+        &mut column,
+        TokenType::BlockComment(" block ".to_string()),
+        "/* block */",
+    ));
+    tokens.push(make_token(&mut column, TokenType::Eof, ""));
+
+    let node = build_tree(&tokens, |builder, tokens| {
+        builder.start_node(SyntaxKind::CommentStatement);
+        builder.push_token(&tokens[0]);
+        builder.finish_node();
+
+        builder.start_node(SyntaxKind::CommentStatement);
+        builder.push_token(&tokens[1]);
+        builder.finish_node();
+
+        builder.start_node(SyntaxKind::CommentStatement);
+        builder.push_token(&tokens[2]);
+        builder.finish_node();
+
+        builder.push_token(&tokens[3]);
+    });
+
+    (node, tokens)
+}
+
 fn return_tokens() -> (SyntaxNode<JvLanguage>, Vec<Token>) {
     let mut column = 0usize;
     let mut tokens = Vec::new();
@@ -546,6 +585,54 @@ fn lowering_table_driven_cases() {
                         }
                     }
                     other => panic!("expected return statement, got {:?}", other),
+                }
+            }),
+        },
+        LoweringCase {
+            build: comment_tokens,
+            verify: Box::new(|result| {
+                assert!(
+                    result.diagnostics.is_empty(),
+                    "unexpected diagnostics: {:?}",
+                    result.diagnostics
+                );
+                assert_eq!(
+                    result.statements.len(),
+                    3,
+                    "expected three comment statements"
+                );
+                match &result.statements[0] {
+                    Statement::Comment(comment) => {
+                        assert_eq!(comment.kind, jv_ast::comments::CommentKind::Line);
+                        assert_eq!(
+                            comment.visibility,
+                            jv_ast::comments::CommentVisibility::Passthrough
+                        );
+                        assert_eq!(comment.text, "// visible");
+                    }
+                    other => panic!("expected line comment statement, got {:?}", other),
+                }
+                match &result.statements[1] {
+                    Statement::Comment(comment) => {
+                        assert_eq!(comment.kind, jv_ast::comments::CommentKind::Line);
+                        assert_eq!(
+                            comment.visibility,
+                            jv_ast::comments::CommentVisibility::JvOnly
+                        );
+                        assert_eq!(comment.text, "/// internal");
+                    }
+                    other => panic!("expected jv-only comment, got {:?}", other),
+                }
+                match &result.statements[2] {
+                    Statement::Comment(comment) => {
+                        assert_eq!(comment.kind, jv_ast::comments::CommentKind::Block);
+                        assert_eq!(
+                            comment.visibility,
+                            jv_ast::comments::CommentVisibility::Passthrough
+                        );
+                        assert_eq!(comment.text, "/* block */");
+                    }
+                    other => panic!("expected block comment, got {:?}", other),
                 }
             }),
         },

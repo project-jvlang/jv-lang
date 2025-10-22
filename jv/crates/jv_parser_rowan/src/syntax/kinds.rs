@@ -78,6 +78,8 @@ pub enum SyntaxKind {
     Block,
     /// ブロック内部のステートメント列。
     StatementList,
+    /// コメントステートメント。
+    CommentStatement,
     /// if 文。
     IfStatement,
     /// else 節。
@@ -604,6 +606,14 @@ impl TokenKind {
                 | TokenKind::LineComment
                 | TokenKind::BlockComment
                 | TokenKind::DocComment
+        )
+    }
+
+    /// コメントトークンかどうか。
+    pub const fn is_comment(self) -> bool {
+        matches!(
+            self,
+            TokenKind::LineComment | TokenKind::BlockComment | TokenKind::DocComment
         )
     }
 }

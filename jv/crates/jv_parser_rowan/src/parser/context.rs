@@ -129,12 +129,16 @@ impl<'tokens> ParserContext<'tokens> {
     /// ステートメント列を解析する。
     fn parse_statement_list(&mut self, terminator: Option<TokenKind>) {
         loop {
-            if self.consume_trivia() {
+            if self.consume_whitespace() {
                 continue;
             }
 
             if self.is_eof() {
                 break;
+            }
+
+            if self.consume_comment_statement() {
+                continue;
             }
 
             if let Some(term) = terminator {
@@ -192,7 +196,7 @@ impl<'tokens> ParserContext<'tokens> {
     fn consume_statement_terminators(&mut self) {
         loop {
             let mut progressed = false;
-            progressed |= self.consume_trivia();
+            progressed |= self.consume_whitespace();
             if self.peek_significant_kind() == Some(TokenKind::Semicolon) {
                 self.bump_raw();
                 progressed = true;
@@ -308,7 +312,7 @@ impl<'tokens> ParserContext<'tokens> {
 
     /// 修飾名を解析する。
     pub(crate) fn parse_qualified_name(&mut self, outer_kind: SyntaxKind) -> bool {
-        self.consume_trivia();
+        self.consume_whitespace();
         if self.peek_significant_kind() != Some(TokenKind::Identifier) {
             return false;
         }
@@ -321,10 +325,10 @@ impl<'tokens> ParserContext<'tokens> {
             self.bump_raw();
             self.finish_node();
 
-            self.consume_trivia();
+            self.consume_whitespace();
             if self.peek_significant_kind() == Some(TokenKind::Dot) {
                 self.bump_raw();
-                self.consume_trivia();
+                self.consume_whitespace();
                 if self.peek_significant_kind() != Some(TokenKind::Identifier) {
                     break;
                 }
@@ -455,15 +459,44 @@ impl<'tokens> ParserContext<'tokens> {
     /// トリビアを消費する。
     pub(crate) fn consume_trivia(&mut self) -> bool {
         let mut consumed = false;
+        consumed |= self.consume_whitespace();
         while let Some(token) = self.current_token() {
             let kind = TokenKind::from_token(token);
-            if !kind.is_trivia() {
+            if !kind.is_comment() {
                 break;
             }
             self.bump_raw();
             consumed = true;
         }
         consumed
+    }
+
+    /// ホワイトスペース・改行のみを消費する。
+    pub(crate) fn consume_whitespace(&mut self) -> bool {
+        let mut consumed = false;
+        while let Some(token) = self.current_token() {
+            let kind = TokenKind::from_token(token);
+            if !matches!(kind, TokenKind::Whitespace | TokenKind::Newline) {
+                break;
+            }
+            self.bump_raw();
+            consumed = true;
+        }
+        consumed
+    }
+
+    fn consume_comment_statement(&mut self) -> bool {
+        let Some(token) = self.current_token() else {
+            return false;
+        };
+        let kind = TokenKind::from_token(token);
+        if !matches!(kind, TokenKind::LineComment | TokenKind::BlockComment) {
+            return false;
+        }
+        self.start_node(SyntaxKind::CommentStatement);
+        self.bump_raw();
+        self.finish_node();
+        true
     }
 
     /// 次の有効トークン種別を取得する。

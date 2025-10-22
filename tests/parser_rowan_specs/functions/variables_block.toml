@@ -13,4 +13,4 @@ name = "main"
   start_line = 1
 
   [expect.statements.block]
-  statement_kinds = ["val_declaration", "var_declaration"]
+  statement_kinds = ["comment", "val_declaration", "var_declaration"]

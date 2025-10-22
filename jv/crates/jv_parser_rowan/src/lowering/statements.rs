@@ -2,6 +2,7 @@ use super::helpers::{
     collect_annotation_texts, first_identifier_text, JvSyntaxNode, LoweringContext,
 };
 use crate::syntax::SyntaxKind;
+use jv_ast::comments::{CommentKind, CommentStatement, CommentVisibility};
 use jv_ast::expression::Parameter;
 use jv_ast::statement::{ForInStatement, LoopBinding, LoopStrategy, Property, ValBindingOrigin};
 use jv_ast::types::{Literal, Modifiers, TypeAnnotation};
@@ -109,6 +110,7 @@ fn is_top_level_statement(kind: SyntaxKind) -> bool {
         kind,
         SyntaxKind::PackageDeclaration
             | SyntaxKind::ImportDeclaration
+            | SyntaxKind::CommentStatement
             | SyntaxKind::ValDeclaration
             | SyntaxKind::VarDeclaration
             | SyntaxKind::FunctionDeclaration
@@ -178,6 +180,7 @@ fn lower_single_statement(
     match node.kind() {
         SyntaxKind::PackageDeclaration => lower_package(context, node),
         SyntaxKind::ImportDeclaration => lower_import(context, node),
+        SyntaxKind::CommentStatement => lower_comment(context, node),
         SyntaxKind::ValDeclaration => lower_value(context, node, true, diagnostics),
         SyntaxKind::VarDeclaration => lower_value(context, node, false, diagnostics),
         SyntaxKind::FunctionDeclaration => lower_function(context, node, diagnostics),
@@ -283,6 +286,76 @@ fn lower_import(
         is_wildcard,
         span: context.span_for(node).unwrap_or_else(jv_ast::Span::dummy),
     })
+}
+
+fn lower_comment(
+    context: &LoweringContext<'_>,
+    node: &JvSyntaxNode,
+) -> Result<Statement, LoweringDiagnostic> {
+    let tokens = context.tokens_for(node);
+    let comment_token = tokens.first().ok_or_else(|| {
+        LoweringDiagnostic::new(
+            LoweringDiagnosticSeverity::Error,
+            "コメントノードからトークンを取得できませんでした",
+            context.span_for(node),
+            node.kind(),
+            first_identifier_text(node),
+            collect_annotation_texts(node),
+        )
+    })?;
+
+    let span = context.span_for(node).unwrap_or_else(Span::dummy);
+    let statement = match &comment_token.token_type {
+        TokenType::LineComment(raw) => {
+            let visibility = if is_jv_only_line_comment(raw) {
+                CommentVisibility::JvOnly
+            } else {
+                CommentVisibility::Passthrough
+            };
+            Statement::Comment(CommentStatement {
+                kind: CommentKind::Line,
+                visibility,
+                text: render_line_comment(raw),
+                span,
+            })
+        }
+        TokenType::BlockComment(raw) => Statement::Comment(CommentStatement {
+            kind: CommentKind::Block,
+            visibility: CommentVisibility::Passthrough,
+            text: format!("/*{}*/", raw),
+            span,
+        }),
+        other => {
+            return Err(LoweringDiagnostic::new(
+                LoweringDiagnosticSeverity::Error,
+                format!(
+                    "コメントローワリングで未対応のトークン {:?} を検出しました",
+                    other
+                ),
+                Some(span),
+                node.kind(),
+                None,
+                Vec::new(),
+            ))
+        }
+    };
+
+    Ok(statement)
+}
+
+fn render_line_comment(raw: &str) -> String {
+    if raw.starts_with("/*") {
+        format!("//{}", &raw[1..])
+    } else if raw.starts_with('/') {
+        raw.to_string()
+    } else {
+        format!("/{}", raw)
+    }
+}
+
+fn is_jv_only_line_comment(raw: &str) -> bool {
+    let trimmed = raw.trim_start();
+    trimmed.starts_with("///") || trimmed.starts_with("//*") || raw.contains("*//")
 }
 
 fn lower_value(

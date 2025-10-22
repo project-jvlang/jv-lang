@@ -147,9 +147,55 @@ fn function_block_statements_are_lowered() {
     assert_eq!(
         kinds,
         vec![
+            StatementKindKey::Comment,
             StatementKindKey::ValDeclaration,
             StatementKindKey::VarDeclaration
         ],
         "block statements lowered with expected kinds"
+    );
+}
+
+#[test]
+fn comment_fixture_emits_comment_statements() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let source_path =
+        manifest_dir.join("../../../tests/parser_rowan_specs/fixtures/comment_visibility.jv");
+    let source = std::fs::read_to_string(&source_path)
+        .expect("comment_visibility fixture should be readable");
+    let tokens = Lexer::new(source)
+        .tokenize()
+        .expect("lexing comment_visibility fixture");
+
+    let parse_output = parse_tokens(&tokens);
+    let green = ParseBuilder::build_from_events(&parse_output.events, &tokens);
+    let syntax: SyntaxNode<JvLanguage> = SyntaxNode::new_root(green);
+    let lowering = lower_program(&syntax, &tokens);
+
+    assert!(
+        lowering
+            .diagnostics
+            .iter()
+            .all(|diag| diag.severity != LoweringDiagnosticSeverity::Error),
+        "expected no lowering errors, got {:?}",
+        lowering.diagnostics
+    );
+
+    let kinds: Vec<StatementKindKey> = lowering
+        .statements
+        .iter()
+        .map(StatementKindKey::from_statement)
+        .collect();
+
+    assert_eq!(
+        kinds,
+        vec![
+            StatementKindKey::Package,
+            StatementKindKey::Comment,
+            StatementKindKey::Comment,
+            StatementKindKey::Comment,
+            StatementKindKey::ValDeclaration
+        ],
+        "expected package + three comments + val statement order, got {:?}",
+        kinds
     );
 }
