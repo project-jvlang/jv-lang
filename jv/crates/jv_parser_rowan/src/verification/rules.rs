@@ -41,6 +41,7 @@ impl StatementSummary {
         let name = statement_name(stmt);
         let block_statement_kinds = match stmt {
             Statement::FunctionDeclaration { body, .. } => block_statement_kinds(body),
+            Statement::ForIn(for_in) => block_statement_kinds(&for_in.body),
             _ => Vec::new(),
         };
 
@@ -253,15 +254,21 @@ fn check_block(
 ) -> Vec<RuleViolation> {
     let mut violations = Vec::new();
 
-    let Statement::FunctionDeclaration { body, .. } = statement else {
-        violations.push(RuleViolation {
-            rule: format!("statement[{}].block", index),
-            message: "block expectation only applies to function declarations".to_string(),
-        });
-        return violations;
+    let body_expr = match statement {
+        Statement::FunctionDeclaration { body, .. } => body.as_ref(),
+        Statement::ForIn(for_in) => for_in.body.as_ref(),
+        _ => {
+            violations.push(RuleViolation {
+                rule: format!("statement[{}].block", index),
+                message:
+                    "block expectation currently applies to function declarations or for-in loops"
+                        .to_string(),
+            });
+            return violations;
+        }
     };
 
-    match body.as_ref() {
+    match body_expr {
         Expression::Block { statements, .. } => {
             let kinds: Vec<StatementKindKey> = statements
                 .iter()

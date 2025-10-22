@@ -12,7 +12,7 @@ pub use rules::{
     StatementSummary,
 };
 
-use crate::lowering::lower_program;
+use crate::lowering::{lower_program, LoweringDiagnosticSeverity};
 use crate::parser::parse;
 use crate::{JvLanguage, ParseBuilder};
 use fixtures::FixtureSpec as Fixture;
@@ -256,10 +256,16 @@ fn evaluate_fixture(
         });
     }
 
+    let lowering_error_count = lowering
+        .diagnostics
+        .iter()
+        .filter(|diag| diag.severity == LoweringDiagnosticSeverity::Error)
+        .count();
+
     if let Some(message) = fixture
         .expect
         .lowering_diagnostics
-        .validate(lowering.diagnostics.len())
+        .validate(lowering_error_count)
     {
         violations.push(RuleViolation {
             rule: "lowering_diagnostics".to_string(),

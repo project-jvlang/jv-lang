@@ -11,3 +11,6 @@ name = "main"
 
   [expect.statements.span]
   start_line = 1
+
+  [expect.statements.block]
+  statement_kinds = ["val_declaration", "var_declaration"]

@@ -76,24 +76,31 @@ pub fn lower_program(root: &JvSyntaxNode, tokens: &[Token]) -> LoweringResult {
     let mut statements = Vec::new();
     let mut diagnostics = Vec::new();
 
-    for child in root.children() {
+    collect_statements_from_children(&context, root, &mut statements, &mut diagnostics);
+
+    LoweringResult {
+        statements,
+        diagnostics,
+    }
+}
+
+fn collect_statements_from_children(
+    context: &LoweringContext<'_>,
+    parent: &JvSyntaxNode,
+    statements: &mut Vec<Statement>,
+    diagnostics: &mut Vec<LoweringDiagnostic>,
+) {
+    for child in parent.children() {
         if child.kind().is_token() {
             continue;
         }
 
         if child.kind() == SyntaxKind::StatementList {
-            for statement_node in child.children() {
-                process_candidate(&context, statement_node, &mut statements, &mut diagnostics);
-            }
+            collect_statements_from_children(context, &child, statements, diagnostics);
             continue;
         }
 
-        process_candidate(&context, child, &mut statements, &mut diagnostics);
-    }
-
-    LoweringResult {
-        statements,
-        diagnostics,
+        process_candidate(context, child, statements, diagnostics);
     }
 }
 
@@ -380,6 +387,17 @@ fn simple_type_from_expression(
     Some(TypeAnnotation::Simple(join_tokens(&tokens)))
 }
 
+fn lower_block_expression(
+    context: &LoweringContext<'_>,
+    block: &JvSyntaxNode,
+    diagnostics: &mut Vec<LoweringDiagnostic>,
+) -> Expression {
+    let span = context.span_for(block).unwrap_or_else(Span::dummy);
+    let mut statements = Vec::new();
+    collect_statements_from_children(context, block, &mut statements, diagnostics);
+    Expression::Block { statements, span }
+}
+
 fn lower_expression_shallow(
     context: &LoweringContext<'_>,
     node: &JvSyntaxNode,
@@ -521,10 +539,7 @@ fn lower_function(
 
     let fallback_span = span.clone();
     let body = if let Some(block) = child_node(node, SyntaxKind::Block) {
-        Expression::Block {
-            statements: Vec::new(),
-            span: context.span_for(&block).unwrap_or_else(Span::dummy),
-        }
+        lower_block_expression(context, &block, diagnostics)
     } else {
         node.children()
             .find(|child| child.kind() == SyntaxKind::Expression)
@@ -788,12 +803,9 @@ fn lower_for(
         .and_then(|block| context.span_for(&block))
         .unwrap_or_else(|| context.span_for(node).unwrap_or_else(Span::dummy));
 
-    let body = child_node(node, SyntaxKind::Block)
-        .map(|block| Expression::Block {
-            statements: Vec::new(),
-            span: context.span_for(&block).unwrap_or_else(Span::dummy),
-        })
-        .unwrap_or_else(|| {
+    let body = match child_node(node, SyntaxKind::Block) {
+        Some(block) => lower_block_expression(context, &block, diagnostics),
+        None => {
             push_diagnostic(
                 diagnostics,
                 LoweringDiagnosticSeverity::Warning,
@@ -805,7 +817,8 @@ fn lower_for(
                 statements: Vec::new(),
                 span: body_span,
             }
-        });
+        }
+    };
 
     Ok(Statement::ForIn(ForInStatement {
         binding: loop_binding,

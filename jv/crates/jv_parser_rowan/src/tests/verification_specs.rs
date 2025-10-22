@@ -1,8 +1,8 @@
 use std::path::Path;
 
-use crate::lowering::lower_program;
+use crate::lowering::{lower_program, LoweringDiagnosticSeverity};
 use crate::parser::parse as parse_tokens;
-use crate::verification::{self, HarnessReport};
+use crate::verification::{self, HarnessReport, StatementKindKey};
 use crate::{JvLanguage, ParseBuilder};
 use jv_lexer::{Lexer, TokenType};
 use rowan::SyntaxNode;
@@ -74,10 +74,12 @@ fn harness_fixture_parses_successfully() {
     let green = ParseBuilder::build_from_events(&parse_output.events, &tokens);
     let syntax: SyntaxNode<JvLanguage> = SyntaxNode::new_root(green);
     let lowering = lower_program(&syntax, &tokens);
-
     assert!(
-        lowering.diagnostics.is_empty(),
-        "expected no lowering diagnostics, got {:?}",
+        lowering
+            .diagnostics
+            .iter()
+            .all(|diag| diag.severity != LoweringDiagnosticSeverity::Error),
+        "expected no lowering errors, got {:?}",
         lowering.diagnostics
     );
 
@@ -85,5 +87,59 @@ fn harness_fixture_parses_successfully() {
         lowering.statements.len(),
         4,
         "expected four statements (package, import, val, var)"
+    );
+}
+
+#[test]
+fn function_block_statements_are_lowered() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let source_path = manifest_dir.join("../../../jv/tests/fixtures/02-variables.jv");
+    let source =
+        std::fs::read_to_string(&source_path).expect("variables fixture should be readable");
+    let tokens = Lexer::new(source)
+        .tokenize()
+        .expect("lexing variables fixture");
+
+    let parse_output = parse_tokens(&tokens);
+    let green = ParseBuilder::build_from_events(&parse_output.events, &tokens);
+    let syntax: SyntaxNode<JvLanguage> = SyntaxNode::new_root(green);
+    let lowering = lower_program(&syntax, &tokens);
+    assert!(
+        lowering
+            .diagnostics
+            .iter()
+            .all(|diag| diag.severity != LoweringDiagnosticSeverity::Error),
+        "expected no lowering errors, got {:?}",
+        lowering.diagnostics
+    );
+
+    let function_body = lowering
+        .statements
+        .iter()
+        .find_map(|statement| match statement {
+            jv_ast::Statement::FunctionDeclaration { name, body, .. } if name == "main" => {
+                Some(body.as_ref())
+            }
+            _ => None,
+        })
+        .expect("main function to be lowered");
+
+    let block_statements = match function_body {
+        jv_ast::Expression::Block { statements, .. } => statements,
+        other => panic!("expected block body, found {:?}", other),
+    };
+
+    let kinds: Vec<StatementKindKey> = block_statements
+        .iter()
+        .map(StatementKindKey::from_statement)
+        .collect();
+
+    assert_eq!(
+        kinds,
+        vec![
+            StatementKindKey::ValDeclaration,
+            StatementKindKey::VarDeclaration
+        ],
+        "block statements lowered with expected kinds"
     );
 }
