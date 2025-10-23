@@ -3184,15 +3184,16 @@ fn lower_function(
     let tokens = context.tokens_for(node);
     let span = context.span_for(node).unwrap_or_else(Span::dummy);
 
-    let return_type_token_ptrs: Vec<*const Token> = child_node(node, SyntaxKind::FunctionReturnType)
-        .map(|ret| {
-            context
-                .tokens_for(&ret)
-                .into_iter()
-                .map(|token| token as *const Token)
-                .collect()
-        })
-        .unwrap_or_default();
+    let return_type_token_ptrs: Vec<*const Token> =
+        child_node(node, SyntaxKind::FunctionReturnType)
+            .map(|ret| {
+                context
+                    .tokens_for(&ret)
+                    .into_iter()
+                    .map(|token| token as *const Token)
+                    .collect()
+            })
+            .unwrap_or_default();
 
     let mut deprecated_arrow_index: Option<usize> = None;
     let mut depth_paren = 0usize;
@@ -3228,10 +3229,13 @@ fn lower_function(
             TokenType::Assign => break,
             TokenType::Arrow => {
                 let ptr = token as *const Token;
-                let belongs_to_return_type = return_type_token_ptrs
-                    .iter()
-                    .any(|&ret_ptr| ret_ptr == ptr);
-                if depth_paren == 0 && depth_brace == 0 && depth_bracket == 0 && !belongs_to_return_type {
+                let belongs_to_return_type =
+                    return_type_token_ptrs.iter().any(|&ret_ptr| ret_ptr == ptr);
+                if depth_paren == 0
+                    && depth_brace == 0
+                    && depth_bracket == 0
+                    && !belongs_to_return_type
+                {
                     deprecated_arrow_index = Some(idx);
                     break;
                 }

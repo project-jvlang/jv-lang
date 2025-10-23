@@ -4,8 +4,8 @@ use crate::lowering::{lower_program, LoweringDiagnosticSeverity};
 use crate::parser::parse as parse_tokens;
 use crate::verification::{self, HarnessReport, StatementKindKey};
 use crate::{JvLanguage, ParseBuilder};
-use jv_lexer::{Lexer, TokenType};
 use jv_ast::expression::ParameterProperty;
+use jv_lexer::{Lexer, TokenType};
 use rowan::SyntaxNode;
 
 #[test]
@@ -239,11 +239,9 @@ fn function_parameters_preserve_modifiers() {
         .statements
         .iter()
         .find_map(|statement| match statement {
-            jv_ast::Statement::FunctionDeclaration { name, parameters, .. }
-                if name == "modifiers" =>
-            {
-                Some(parameters)
-            }
+            jv_ast::Statement::FunctionDeclaration {
+                name, parameters, ..
+            } if name == "modifiers" => Some(parameters),
             _ => None,
         })
         .expect("function declaration to be lowered");

@@ -25,3 +25,8 @@ walkdir = "2.5"
 
 [dev-dependencies]
 ungrammar = "1.16.1"
+
+[[bin]]
+name = "rowan_spec_harness"
+path = "src/harness/rowan_spec.rs"
+required-features = ["rowan-parser"]

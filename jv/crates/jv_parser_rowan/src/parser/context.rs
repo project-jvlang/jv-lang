@@ -765,12 +765,7 @@ impl<'tokens> ParserContext<'tokens> {
     }
 
     /// 現在位置付近で診断を報告する。
-    pub(crate) fn report_error(
-        &mut self,
-        message: impl Into<String>,
-        start: usize,
-        end: usize,
-    ) {
+    pub(crate) fn report_error(&mut self, message: impl Into<String>, start: usize, end: usize) {
         let message = message.into();
         let span = self.make_span(start, end);
         self.push_error_event(&message, span);
