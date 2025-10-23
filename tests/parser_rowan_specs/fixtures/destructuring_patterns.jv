@@ -1,0 +1,7 @@
+package specs.destructuring
+
+fun destructuring(point: Point, pair: Pair2, user: User) {
+    val [first second] = point
+    var (left right) = pair
+    [name age] = user
+}

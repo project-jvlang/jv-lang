@@ -1,0 +1,20 @@
+description = "Class declarations lower without diagnostics and preserve class statements"
+source = "../fixtures/class_declarations.jv"
+
+[expect]
+statement_count = 3
+
+[[expect.statements]]
+index = 0
+kind = "package"
+name = "specs.classes"
+
+[[expect.statements]]
+index = 1
+kind = "class_declaration"
+name = "Service"
+
+[[expect.statements]]
+index = 2
+kind = "class_declaration"
+name = "Repository"

@@ -1,0 +1,12 @@
+package specs.classes
+
+class Service {
+    val name: String = "service"
+
+    fun ping(): String {
+        return name
+    }
+}
+
+class Repository {
+}

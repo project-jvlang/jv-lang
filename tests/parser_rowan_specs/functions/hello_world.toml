@@ -5,8 +5,8 @@ source = "jv/tests/fixtures/hello_world.jv"
 statement_count = 1
 
 [expect.parser_diagnostics]
-allowed = true
-max = 1
+allowed = false
+max = 0
 
 [[expect.statements]]
 index = 0

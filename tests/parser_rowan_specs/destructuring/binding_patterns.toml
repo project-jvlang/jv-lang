@@ -1,0 +1,22 @@
+description = "Destructuring declarations and assignments produce the expected statement kinds"
+source = "../fixtures/destructuring_patterns.jv"
+
+[expect]
+statement_count = 2
+
+[[expect.statements]]
+index = 0
+kind = "package"
+name = "specs.destructuring"
+
+[[expect.statements]]
+index = 1
+kind = "function_declaration"
+name = "destructuring"
+
+  [expect.statements.block]
+  statement_kinds = [
+    "val_declaration",
+    "var_declaration",
+    "assignment"
+  ]
