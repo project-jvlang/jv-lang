@@ -354,7 +354,10 @@ fn detect_boxed_type(fqcn: &str) -> Option<PrimitiveType> {
 ```rust
 #[test]
 fn primitive_vs_boxed_type_mismatch() {
-    let program = Parser::parse("val x: Int = Integer.valueOf(42)")
+    use jv_parser_rowan::frontend::RowanPipeline;
+
+    let program = RowanPipeline::default()
+        .parse("val x: Int = Integer.valueOf(42)")
         .unwrap()
         .into_program();
     let mut engine = InferenceEngine::new();
@@ -367,7 +370,10 @@ fn primitive_vs_boxed_type_mismatch() {
 
 #[test]
 fn null_assignment_to_primitive_rejected() {
-    let program = Parser::parse("val x: Int = null").unwrap().into_program();
+    let program = RowanPipeline::default()
+        .parse("val x: Int = null")
+        .unwrap()
+        .into_program();
     let mut engine = InferenceEngine::new();
 
     let result = engine.infer_program(&program);
@@ -378,7 +384,10 @@ fn null_assignment_to_primitive_rejected() {
 
 #[test]
 fn nullable_int_requires_boxed_type() {
-    let program = Parser::parse("val x: Int? = 42").unwrap().into_program();
+    let program = RowanPipeline::default()
+        .parse("val x: Int? = 42")
+        .unwrap()
+        .into_program();
     let mut engine = InferenceEngine::new();
 
     let result = engine.infer_program(&program);
@@ -744,7 +753,10 @@ impl ConstraintSolver {
 ```rust
 #[test]
 fn widening_primitive_conversion_allowed() {
-    let program = Parser::parse("val x: Long = 42").unwrap().into_program();
+    let program = RowanPipeline::default()
+        .parse("val x: Long = 42")
+        .unwrap()
+        .into_program();
     let mut engine = InferenceEngine::new();
 
     let result = engine.infer_program(&program);
@@ -758,7 +770,8 @@ fn widening_primitive_conversion_allowed() {
 
 #[test]
 fn boxing_conversion_in_collection() {
-    let program = Parser::parse("val list: List<Int> = listOf(1, 2, 3)")
+    let program = RowanPipeline::default()
+        .parse("val list: List<Int> = listOf(1, 2, 3)")
         .unwrap()
         .into_program();
     let mut engine = InferenceEngine::new();
@@ -775,7 +788,10 @@ fn boxing_conversion_in_collection() {
 
 #[test]
 fn narrowing_conversion_rejected() {
-    let program = Parser::parse("val x: Int = 42L").unwrap().into_program();
+    let program = RowanPipeline::default()
+        .parse("val x: Int = 42L")
+        .unwrap()
+        .into_program();
     let mut engine = InferenceEngine::new();
 
     let result = engine.infer_program(&program);

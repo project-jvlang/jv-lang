@@ -5,7 +5,8 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use jv_ir::{
     transform_program_with_context_profiled, TransformContext, TransformPools, TransformProfiler,
 };
-use jv_parser::Parser;
+use jv_parser_frontend::ParserPipeline;
+use jv_parser_rowan::frontend::RowanPipeline;
 use jv_support::perf::report::{BudgetChecks, PerfBudget, PerfReport, RunSample, Summary};
 
 const ITERATIONS: usize = 12;
@@ -40,6 +41,7 @@ fn perf_phase1() {
     let pools = TransformPools::with_chunk_capacity(256 * 1024);
     let mut context = TransformContext::with_pools(pools.clone());
     let mut profiler = TransformProfiler::new();
+    let pipeline = RowanPipeline::default();
 
     let mut latest_reuse_ratio = 0.0;
     let mut latest_peak_rss = None;
@@ -48,7 +50,8 @@ fn perf_phase1() {
 
     for iteration in 0..ITERATIONS {
         let parse_start = Instant::now();
-        let program = Parser::parse(&source)
+        let program = pipeline
+            .parse(&source)
             .expect("fixture should parse")
             .into_program();
         let parse_ms = duration_to_millis(parse_start.elapsed());

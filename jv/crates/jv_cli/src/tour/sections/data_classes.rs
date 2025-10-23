@@ -1,7 +1,8 @@
 use std::io::Write;
 
 use anyhow::{anyhow, Result};
-use jv_parser::Parser;
+use jv_parser_frontend::ParserPipeline;
+use jv_parser_rowan::frontend::RowanPipeline;
 
 /// Render the Data Classes learning module.
 pub fn render<W: Write>(writer: &mut W) -> Result<()> {
@@ -59,7 +60,8 @@ impl LessonExample {
 }
 
 fn validate_jv(source: &str) -> Result<()> {
-    Parser::parse(source)
+    RowanPipeline::default()
+        .parse(source)
         .map(|_| ())
         .map_err(|err| anyhow!("{:?}", err))
 }

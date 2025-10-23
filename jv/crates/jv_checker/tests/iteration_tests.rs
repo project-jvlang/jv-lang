@@ -1,8 +1,10 @@
 use jv_checker::{CheckError, TypeChecker};
-use jv_parser::Parser;
+use jv_parser_frontend::ParserPipeline;
+use jv_parser_rowan::frontend::RowanPipeline;
 
 fn parse_program(source: &str) -> jv_ast::Program {
-    Parser::parse(source)
+    RowanPipeline::default()
+        .parse(source)
         .expect("source snippet should parse")
         .into_program()
 }

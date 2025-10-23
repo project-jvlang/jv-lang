@@ -7,7 +7,7 @@ fn parse_fixture(name: &str, source: &str) -> (Program, Vec<Token>) {
     let output = Parser::parse(source).unwrap_or_else(|err| {
         panic!("failed to parse acceptance fixture `{name}`: {err:?}")
     });
-    let diagnostics = output.diagnostics().finalized();
+    let diagnostics = output.diagnostics().final_diagnostics();
     assert!(
         diagnostics.is_empty(),
         "expected no diagnostics for `{name}`, found {:?}",

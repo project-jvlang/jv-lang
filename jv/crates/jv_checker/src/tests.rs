@@ -11,7 +11,8 @@ use jv_ast::{
 };
 use jv_inference::types::{NullabilityFlag, TypeVariant as FactsTypeVariant};
 use jv_inference::TypeFacts;
-use jv_parser::Parser;
+use jv_parser_frontend::ParserPipeline;
+use jv_parser_rowan::frontend::RowanPipeline;
 use std::collections::HashMap;
 
 fn dummy_span() -> Span {
@@ -38,6 +39,13 @@ fn collect_null_safety_messages(errors: &[CheckError]) -> Vec<String> {
             _ => None,
         })
         .collect()
+}
+
+fn parse_program(source: &str) -> Program {
+    RowanPipeline::default()
+        .parse(source)
+        .expect("source snippet should parse")
+        .into_program()
 }
 
 fn random_identifier(rng: &mut Rng) -> String {
@@ -751,7 +759,7 @@ fn when_with_else_in_value_position_passes_validation() {
 
 #[test]
 fn when_branch_nullability_is_exposed_via_inference_service() {
-    let program = Parser::parse(
+    let program = parse_program(
         r#"
 fun provide(): String? = null
 
@@ -762,9 +770,7 @@ label = when (maybe) {
     else -> fallback
 }
 "#,
-    )
-    .expect("when sample should parse")
-    .into_program();
+    );
 
     let mut checker = TypeChecker::new();
     checker
@@ -905,7 +911,7 @@ fn implicit_assignment_becomes_val_declaration() {
 
 #[test]
 fn task15_debug_implicit_binding_manifest_and_missing_jv3002() {
-    let program = Parser::parse(
+    let program = parse_program(
         r#"
 fun provide(): String? = null
 
@@ -918,9 +924,7 @@ label = when (maybe) {
 
 label
 "#,
-    )
-    .expect("debug snippet should parse")
-    .into_program();
+    );
 
     let mut checker = TypeChecker::new();
     checker

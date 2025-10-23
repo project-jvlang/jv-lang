@@ -20,7 +20,8 @@ mod tests {
         TransformError, TransformPools, TransformProfiler, VirtualThreadOp,
     };
     use jv_ast::*;
-    use jv_parser::Parser;
+    use jv_parser_frontend::ParserPipeline;
+    use jv_parser_rowan::frontend::RowanPipeline;
     use sha2::{Digest, Sha256};
     use std::fs;
     use std::time::Duration;
@@ -30,10 +31,15 @@ mod tests {
         Span::dummy()
     }
 
-    fn parse_when_expression(source: &str) -> Expression {
-        let program = Parser::parse(source)
+    fn parse_program(source: &str) -> Program {
+        RowanPipeline::default()
+            .parse(source)
             .expect("snippet should parse")
-            .into_program();
+            .into_program()
+    }
+
+    fn parse_when_expression(source: &str) -> Expression {
+        let program = parse_program(source);
         for statement in program.statements {
             match statement {
                 Statement::ValDeclaration { initializer, .. } => {
@@ -600,9 +606,7 @@ mod tests {
             }
         "#;
 
-        let program = Parser::parse(source)
-            .expect("parse inline json payload")
-            .into_program();
+        let program = parse_program(source);
         let mut context = TransformContext::new();
         let ir_program =
             transform_program_with_context(program, &mut context).expect("lower inline json");
@@ -2936,9 +2940,7 @@ fun sample(value: Any): Int {
 }
 "#;
 
-        let program = Parser::parse(source)
-            .expect("sample snippet parses")
-            .into_program();
+        let program = parse_program(source);
         let mut context = TransformContext::new();
         let ir_program = transform_program_with_context(program, &mut context)
             .expect("sample lowering succeeds");

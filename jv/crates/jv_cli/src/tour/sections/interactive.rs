@@ -4,10 +4,12 @@ use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{anyhow, Context, Result};
+use jv_ast::Span;
 use jv_checker::TypeChecker;
 use jv_codegen_java::generate_java_source;
 use jv_ir::transform_program;
-use jv_parser::{ParseError, Parser};
+use jv_parser_frontend::{ParseError, ParserPipeline};
+use jv_parser_rowan::frontend::RowanPipeline;
 
 const DEFAULT_SNIPPET: &str = r#"fun main() {
     println("こんにちは、インタラクティブエディタ！")
@@ -225,7 +227,8 @@ impl SessionState {
         }
 
         writeln!(writer, "\n🧪 構文チェックを実行中...")?;
-        let frontend_output = match Parser::parse(&source) {
+        let pipeline = RowanPipeline::default();
+        let frontend_output = match pipeline.parse(&source) {
             Ok(output) => {
                 writeln!(writer, "✅ 構文チェックOK")?;
                 output
@@ -300,7 +303,8 @@ impl SessionState {
         source: &str,
     ) -> Result<()> {
         writeln!(writer, "❌ 構文エラーが発生しました: {}", error)?;
-        if let Some(span) = error.span() {
+        let span = error.span();
+        if span != Span::dummy() {
             let (line_idx, column) = (span.start_line, span.start_column);
             if let Some(line) = source.lines().nth(line_idx.saturating_sub(1)) {
                 writeln!(

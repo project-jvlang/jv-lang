@@ -1,10 +1,12 @@
 use jv_codegen_java::JavaCodeGenerator;
 use jv_ir::transform::transform_program_with_context;
 use jv_ir::TransformContext;
-use jv_parser::Parser;
+use jv_parser_frontend::ParserPipeline;
+use jv_parser_rowan::frontend::RowanPipeline;
 
 fn parse_and_lower(source: &str) -> jv_ir::types::IrProgram {
-    let program = Parser::parse(source)
+    let program = RowanPipeline::default()
+        .parse(source)
         .expect("fixture parses")
         .into_program();
     let mut context = TransformContext::new();

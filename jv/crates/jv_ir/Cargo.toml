@@ -16,7 +16,6 @@ path = "../../tests/performance/phase1.rs"
 [dependencies]
 anyhow = { workspace = true }
 jv_ast.workspace = true
-jv_parser.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
@@ -33,6 +32,8 @@ tracing.workspace = true
 
 [dev-dependencies]
 criterion = "0.5"
+jv_parser_frontend.workspace = true
+jv_parser_rowan.workspace = true
 
 [[bench]]
 name = "basic_syntax_sugar"

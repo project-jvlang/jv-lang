@@ -1,7 +1,8 @@
 use std::fs;
 use std::path::Path;
 
-use jv_parser::Parser;
+use jv_parser_frontend::ParserPipeline;
+use jv_parser_rowan::frontend::RowanPipeline;
 
 const JP_HEADING: &str = "## when式の基本構造";
 const EN_HEADING: &str = "## Structure of when Expressions";
@@ -108,13 +109,14 @@ fn assert_side_effect_sample_present(blocks: &[String]) {
 }
 
 fn assert_all_parse(blocks: &[String]) {
+    let pipeline = RowanPipeline::default();
     for block in blocks {
         if block.trim() == SIDE_EFFECT_SNIPPET.trim() {
             // The side-effect example intentionally omits surrounding context; only
             // presence is asserted above.
             continue;
         }
-        Parser::parse(block).unwrap_or_else(|error| {
+        pipeline.parse(block).unwrap_or_else(|error| {
             panic!("failed to parse jv example:\n{}\nerror: {:?}", block, error)
         });
     }

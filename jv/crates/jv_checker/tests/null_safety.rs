@@ -1,12 +1,14 @@
 //! Integration tests exercising the null safety pipeline end-to-end.
 
 use jv_checker::{CheckError, TypeChecker, TypeKind};
-use jv_parser::Parser;
+use jv_parser_frontend::ParserPipeline;
+use jv_parser_rowan::frontend::RowanPipeline;
 use serde_json::Value;
 use test_case::test_case;
 
 fn parse_program(source: &str) -> jv_ast::Program {
-    Parser::parse(source)
+    RowanPipeline::default()
+        .parse(source)
         .expect("source snippet should parse")
         .into_program()
 }

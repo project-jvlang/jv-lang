@@ -896,7 +896,8 @@ fn ensure_optional_type(ty: TypeKind) -> TypeKind {
 mod tests {
     use super::*;
     use jv_ast::{Modifiers, Pattern, Span, ValBindingOrigin, WhenArm};
-    use jv_parser::Parser;
+    use jv_parser_frontend::ParserPipeline;
+    use jv_parser_rowan::frontend::RowanPipeline;
 
     fn dummy_span() -> Span {
         Span::dummy()
@@ -912,6 +913,13 @@ mod tests {
             items.push(constraint);
         }
         items
+    }
+
+    fn parse_program(source: &str) -> Program {
+        RowanPipeline::default()
+            .parse(source)
+            .expect("source should parse for constraint generator tests")
+            .into_program()
     }
 
     #[test]
@@ -1066,7 +1074,7 @@ mod tests {
 
     #[test]
     fn when_branch_narrowing_unwraps_optional_subject() {
-        let program = Parser::parse(
+        let program = parse_program(
             r#"
 fun provide(): String? = null
 
@@ -1076,9 +1084,7 @@ val result = when (maybe) {
     else -> ""
 }
 "#,
-        )
-        .expect("program should parse")
-        .into_program();
+        );
 
         let mut env = TypeEnvironment::new();
         let extensions = ExtensionRegistry::new();

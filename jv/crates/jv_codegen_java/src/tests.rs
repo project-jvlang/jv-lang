@@ -15,7 +15,8 @@ use jv_ir::{
     SequencePipeline, SequenceSource, SequenceTerminal, SequenceTerminalEvaluation,
     SequenceTerminalKind,
 };
-use jv_parser::Parser;
+use jv_parser_frontend::ParserPipeline;
+use jv_parser_rowan::frontend::RowanPipeline;
 use serde_json::to_string_pretty;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
@@ -161,6 +162,15 @@ fn sample_declaration_tsv() -> IrSampleDeclaration {
         "users.tsv",
         sample_tsv_bytes(),
     )
+}
+
+fn parse_program(source: &str) -> IrProgram {
+    let program = RowanPipeline::default()
+        .parse(source)
+        .expect("IR codegen fixture should parse")
+        .into_program();
+    let mut context = TransformContext::new();
+    transform_program_with_context(program, &mut context).expect("program should lower to IR")
 }
 
 fn sample_sha256() -> String {
@@ -1967,11 +1977,7 @@ fn inline_json_sample_generates_payload_records() {
         }
     "#;
 
-    let program = Parser::parse(source)
-        .expect("inline JSON snippet parses")
-        .into_program();
-    let mut context = TransformContext::new();
-    let ir = transform_program_with_context(program, &mut context).expect("lowering succeeds");
+    let ir = parse_program(source);
 
     let unit = generate_java_code(&ir).expect("generate Java for inline JSON payload");
     let source = unit.to_source(&JavaCodeGenConfig::default());

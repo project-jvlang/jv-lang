@@ -29,7 +29,8 @@ use jv_inference::{
 };
 use jv_ir::types::{IrImport, IrImportDetail};
 use jv_ir::{transform_program_with_context, TransformContext};
-use jv_parser::Parser as JvParser;
+use jv_parser_frontend::ParserPipeline;
+use jv_parser_rowan::frontend::RowanPipeline;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt;
@@ -543,13 +544,15 @@ impl JvLanguageServer {
         &self,
         content: &str,
     ) -> Result<Vec<IrImport>, ImportPlanError> {
-        let frontend_output = JvParser::parse(content).map_err(|error| {
+        let pipeline = RowanPipeline::default();
+        let frontend_output = pipeline.parse(content).map_err(|error| {
             from_parse_error(&error)
                 .map(|diagnostic| ImportPlanError::new(diagnostic.message))
                 .unwrap_or_else(|| ImportPlanError::new(format!("Parser error: {error}")))
         })?;
-        let frontend_diagnostics =
-            from_frontend_diagnostics(frontend_output.diagnostics().finalized());
+        let frontend_diagnostics = from_frontend_diagnostics(
+            frontend_output.diagnostics().final_diagnostics(),
+        );
         if let Some(error_diag) = frontend_diagnostics
             .iter()
             .find(|diag| diag.severity == ToolingSeverity::Error)
@@ -615,7 +618,8 @@ impl JvLanguageServer {
             return Vec::new();
         };
 
-        let frontend_output = match JvParser::parse(content) {
+        let pipeline = RowanPipeline::default();
+        let frontend_output = match pipeline.parse(content) {
             Ok(output) => output,
             Err(error) => {
                 self.type_facts.remove(uri);
@@ -636,8 +640,9 @@ impl JvLanguageServer {
         let mut type_facts_snapshot: Option<TypeFactsSnapshot> = None;
         let mut regex_analyses: Vec<RegexAnalysis> = Vec::new();
 
-        let frontend_diagnostics =
-            from_frontend_diagnostics(frontend_output.diagnostics().finalized());
+        let frontend_diagnostics = from_frontend_diagnostics(
+            frontend_output.diagnostics().final_diagnostics(),
+        );
         for diagnostic in &frontend_diagnostics {
             diagnostics.push(tooling_diagnostic_to_lsp(
                 uri,

@@ -22,7 +22,8 @@ use jv_ir::{
     transform_program_with_context, IrGenericMetadata, IrProgram, IrStatement, IrTypeLevelValue,
     IrTypeParameter, IrVariance, JavaType, JavaWildcardKind, TransformContext,
 };
-use jv_parser::Parser as JvParser;
+use jv_parser_frontend::ParserPipeline;
+use jv_parser_rowan::frontend::RowanPipeline;
 use serde::Serialize;
 
 use crate::pipeline::generics::apply_type_facts;
@@ -996,6 +997,7 @@ fn visit_stdlib(
     modules: &mut Vec<StdlibModule>,
     catalog: &mut StdlibCatalog,
 ) -> Result<()> {
+    let pipeline = RowanPipeline::default();
     for entry in fs::read_dir(dir)? {
         let entry = entry?;
         let path = entry.path();
@@ -1020,15 +1022,16 @@ fn visit_stdlib(
         }
 
         let source = fs::read_to_string(&path)?;
-        let frontend_output = JvParser::parse(&source).map_err(|error| {
+        let frontend_output = pipeline.parse(&source).map_err(|error| {
             anyhow!(
                 "Failed to parse embedded stdlib module {}: {:?}",
                 path.display(),
                 error
             )
         })?;
-        let frontend_diagnostics =
-            from_frontend_diagnostics(frontend_output.diagnostics().finalized());
+        let frontend_diagnostics = from_frontend_diagnostics(
+            frontend_output.diagnostics().final_diagnostics(),
+        );
         if let Some(error_diag) = frontend_diagnostics
             .iter()
             .find(|diag| diag.severity == DiagnosticSeverity::Error)
@@ -1204,7 +1207,8 @@ fn compile_module(
     parallel_config: ParallelInferenceConfig,
     symbol_index: &Arc<SymbolIndex>,
 ) -> Result<StdlibModuleArtifacts> {
-    let frontend_output = match JvParser::parse(&module.source) {
+    let pipeline = RowanPipeline::default();
+    let frontend_output = match pipeline.parse(&module.source) {
         Ok(output) => output,
         Err(error) => {
             if let Some(diagnostic) = from_parse_error(&error) {
@@ -1216,7 +1220,9 @@ fn compile_module(
             return Err(anyhow!("Parser error: {:?}", error));
         }
     };
-    let frontend_diagnostics = from_frontend_diagnostics(frontend_output.diagnostics().finalized());
+    let frontend_diagnostics = from_frontend_diagnostics(
+        frontend_output.diagnostics().final_diagnostics(),
+    );
     if let Some(error_diag) = frontend_diagnostics
         .iter()
         .find(|diag| diag.severity == DiagnosticSeverity::Error)

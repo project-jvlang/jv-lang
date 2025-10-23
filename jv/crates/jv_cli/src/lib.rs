@@ -448,7 +448,8 @@ pub mod pipeline {
         transform_program_with_context, transform_program_with_context_profiled, TransformPools,
         TransformProfiler,
     };
-    use jv_parser::Parser as JvParser;
+    use jv_parser_frontend::ParserPipeline;
+    use jv_parser_rowan::frontend::RowanPipeline;
     use serde_json::json;
     use std::collections::{BTreeMap, HashSet};
     use std::ffi::OsStr;
@@ -606,7 +607,7 @@ pub mod pipeline {
             .with_context(|| format!("Failed to read file: {}", entrypoint.display()))?;
 
         let parse_start = Instant::now();
-        let frontend_output = match JvParser::parse(&source) {
+        let frontend_output = match RowanPipeline::default().parse(&source) {
             Ok(output) => output,
             Err(error) => {
                 if let Some(diagnostic) = from_parse_error(&error) {
@@ -618,8 +619,9 @@ pub mod pipeline {
                 return Err(anyhow!("Parser error: {:?}", error));
             }
         };
-        let frontend_diagnostics =
-            from_frontend_diagnostics(frontend_output.diagnostics().finalized());
+        let frontend_diagnostics = from_frontend_diagnostics(
+            frontend_output.diagnostics().final_diagnostics(),
+        );
         if !frontend_diagnostics.is_empty() {
             for diagnostic in &frontend_diagnostics {
                 let rendered = diagnostic

@@ -13,7 +13,8 @@ use jv_checker::inference::diagnostics::conversion_diagnostic;
 use jv_checker::InferenceTelemetry;
 use jv_checker::TypeChecker;
 use jv_ir::transform_program;
-use jv_parser::Parser as JvParser;
+use jv_parser_frontend::ParserPipeline;
+use jv_parser_rowan::frontend::RowanPipeline;
 
 use crate::{format_tooling_diagnostic, tooling_failure};
 
@@ -28,7 +29,7 @@ pub fn run(input: &str) -> Result<()> {
     let source =
         fs::read_to_string(input).with_context(|| format!("Failed to read file: {}", input))?;
 
-    let frontend_output = match JvParser::parse(&source) {
+    let frontend_output = match RowanPipeline::default().parse(&source) {
         Ok(output) => output,
         Err(error) => {
             if let Some(diagnostic) = from_parse_error(&error) {
@@ -40,7 +41,8 @@ pub fn run(input: &str) -> Result<()> {
             return Err(anyhow::anyhow!("Parser error: {:?}", error));
         }
     };
-    let frontend_diagnostics = from_frontend_diagnostics(frontend_output.diagnostics().finalized());
+    let frontend_diagnostics =
+        from_frontend_diagnostics(frontend_output.diagnostics().final_diagnostics());
     if !frontend_diagnostics.is_empty() {
         println!("Frontend diagnostics:");
         for diagnostic in &frontend_diagnostics {

@@ -2,7 +2,8 @@ use std::time::Instant;
 
 use jv_codegen_java::{JavaCodeGenConfig, JavaCodeGenerator};
 use jv_ir::transform_program;
-use jv_parser::Parser;
+use jv_parser_frontend::ParserPipeline;
+use jv_parser_rowan::frontend::RowanPipeline;
 use jv_pm::JavaTarget;
 
 const BASELINE_MS: u128 = 200;
@@ -28,7 +29,8 @@ fun main() {
 
     let start = Instant::now();
 
-    let program = Parser::parse(source)
+    let program = RowanPipeline::default()
+        .parse(source)
         .expect("loop sample should parse")
         .into_program();
 

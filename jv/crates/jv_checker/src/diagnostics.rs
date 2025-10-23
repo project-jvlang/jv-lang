@@ -6,10 +6,9 @@ use jv_ir::{
     error::TransformError,
     types::{IrProgram, IrStatement},
 };
-use jv_parser::frontend::{
-    Diagnostic as FrontendDiagnostic, DiagnosticSeverity as FrontendSeverity,
+use jv_parser_frontend::{
+    Diagnostic as FrontendDiagnostic, DiagnosticSeverity as FrontendSeverity, ParseError,
 };
-use jv_parser::ParseError;
 
 /// Severity level used when surfacing diagnostics to users.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
