@@ -215,7 +215,6 @@ mod tests {
             type_annotation: None,
             default_value: None,
             modifiers: ParameterModifiers::default(),
-            modifiers: ParameterModifiers::default(),
             span: dummy_span(),
         };
         let lambda_body = Expression::Call {
@@ -2288,7 +2287,6 @@ mod tests {
                 type_annotation: Some(TypeAnnotation::Simple("T".to_string())),
                 default_value: None,
                 modifiers: ParameterModifiers::default(),
-                modifiers: ParameterModifiers::default(),
                 span: dummy_span(),
             }],
             return_type: Some(TypeAnnotation::Simple("T".to_string())),
@@ -2505,8 +2503,7 @@ mod tests {
                 name: "id".to_string(),
                 type_annotation: Some(TypeAnnotation::Simple("Int".to_string())),
                 default_value: None,
-            modifiers: ParameterModifiers::default(),
-            modifiers: ParameterModifiers::default(),
+                modifiers: ParameterModifiers::default(),
                 span: dummy_span(),
             },
             Parameter {
@@ -2514,9 +2511,9 @@ mod tests {
                 type_annotation: None,
                 default_value: Some(Expression::Literal(
                     Literal::String("unknown".to_string()),
-            modifiers: ParameterModifiers::default(),
                     dummy_span(),
                 )),
+                modifiers: ParameterModifiers::default(),
                 span: dummy_span(),
             },
         ];
@@ -3536,9 +3533,9 @@ fun sample(value: Any): Int {
                 type_annotation: Some(TypeAnnotation::Simple("String".to_string())),
                 default_value: Some(Expression::Literal(
                     Literal::String("localhost".to_string()),
-            modifiers: ParameterModifiers::default(),
                     dummy_span(),
                 )),
+                modifiers: ParameterModifiers::default(),
                 span: dummy_span(),
             },
             Parameter {
@@ -3546,17 +3543,16 @@ fun sample(value: Any): Int {
                 type_annotation: Some(TypeAnnotation::Simple("Int".to_string())),
                 default_value: Some(Expression::Literal(
                     Literal::Number("8080".to_string()),
-            modifiers: ParameterModifiers::default(),
                     dummy_span(),
                 )),
+                modifiers: ParameterModifiers::default(),
                 span: dummy_span(),
             },
             Parameter {
                 name: "ssl".to_string(),
                 type_annotation: Some(TypeAnnotation::Simple("Boolean".to_string())),
                 default_value: Some(Expression::Literal(Literal::Boolean(false), dummy_span())),
-            modifiers: ParameterModifiers::default(),
-            modifiers: ParameterModifiers::default(),
+                modifiers: ParameterModifiers::default(),
                 span: dummy_span(),
             },
         ];
@@ -3606,7 +3602,6 @@ fun sample(value: Any): Int {
                         name: "conn".to_string(),
                         type_annotation: None,
                         default_value: None,
-                        modifiers: ParameterModifiers::default(),
                         modifiers: ParameterModifiers::default(),
                         span: dummy_span(),
                     }],
@@ -3942,7 +3937,6 @@ fun sample(value: Any): Int {
                 name: "x".to_string(),
                 type_annotation: None,
                 default_value: None,
-                modifiers: ParameterModifiers::default(),
                 modifiers: ParameterModifiers::default(),
                 span: lambda_span.clone(),
             }],
