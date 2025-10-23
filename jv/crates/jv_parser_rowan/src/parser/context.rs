@@ -364,6 +364,52 @@ impl<'tokens> ParserContext<'tokens> {
         true
     }
 
+    /// 関数・コンストラクタパラメータ修飾子を解析する。
+    pub(crate) fn parse_parameter_modifiers(&mut self) -> bool {
+        self.consume_trivia();
+
+        let mut consumed_any = false;
+        let mut list_started = false;
+
+        loop {
+            self.consume_trivia();
+
+            let Some((index, kind)) = self.peek_significant_kind_n(0) else {
+                break;
+            };
+
+            let recognized = match kind {
+                TokenKind::ValKw | TokenKind::VarKw => true,
+                TokenKind::Identifier => {
+                    let token = &self.tokens[index];
+                    matches!(token.lexeme.as_str(), "mut" | "ref")
+                }
+                _ => false,
+            };
+
+            if !recognized {
+                break;
+            }
+
+            if !list_started {
+                self.start_node(SyntaxKind::ParameterModifierList);
+                list_started = true;
+            }
+
+            self.start_node(SyntaxKind::ParameterModifier);
+            self.bump_raw();
+            self.finish_node();
+
+            consumed_any = true;
+        }
+
+        if list_started {
+            self.finish_node();
+        }
+
+        consumed_any
+    }
+
     /// 型注釈を解析する。
     pub(crate) fn parse_optional_type_annotation(&mut self) -> bool {
         self.consume_trivia();

@@ -5,12 +5,12 @@ source = "jv/tests/fixtures/pattern/example12.jv"
 statement_count = 3
 
 [expect.parser_diagnostics]
-allowed = true
-max = 4
+allowed = false
+max = 0
 
 [expect.lowering_diagnostics]
-allowed = true
-max = 3
+allowed = false
+max = 0
 
 [[expect.statements]]
 index = 0
@@ -21,7 +21,7 @@ name = "Payload"
 start_line = 1
 start_column = 1
 end_line = 1
-end_column = 20
+end_column = 50
 
 [[expect.statements]]
 index = 1

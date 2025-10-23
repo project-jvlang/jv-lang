@@ -5,12 +5,12 @@ source = "jv/tests/fixtures/pattern/example23.jv"
 statement_count = 4
 
 [expect.parser_diagnostics]
-allowed = true
-max = 8
+allowed = false
+max = 0
 
 [expect.lowering_diagnostics]
-allowed = true
-max = 6
+allowed = false
+max = 0
 
 [[expect.statements]]
 index = 0
@@ -21,7 +21,7 @@ name = "Vector"
 start_line = 1
 start_column = 1
 end_line = 1
-end_column = 19
+end_column = 42
 
 [[expect.statements]]
 index = 1
@@ -32,7 +32,7 @@ name = "Point"
 start_line = 2
 start_column = 1
 end_line = 2
-end_column = 18
+end_column = 54
 
 [[expect.statements]]
 index = 2

@@ -4,7 +4,7 @@ use crate::verification::StatementKindKey;
 use crate::{JvLanguage, ParseBuilder, SyntaxKind};
 use jv_ast::strings::MultilineKind;
 use jv_ast::{
-    expression::{Argument, Parameter, StringPart},
+    expression::{Argument, Parameter, ParameterProperty, StringPart},
     json::{JsonLiteral, JsonValue},
     statement::{ConcurrencyConstruct, LoopStrategy, ResourceManagement, ValBindingOrigin},
     types::{BinaryOp, Literal, Modifiers, Pattern, TypeAnnotation},
@@ -1970,4 +1970,69 @@ fn json_literal_lowering_builds_object_tree() {
         literal.leading_comments.is_empty() && literal.trailing_comments.is_empty(),
         "unexpected JSON comments in literal"
     );
+}
+
+#[test]
+fn data_class_lowering_produces_constructor_properties() {
+    let source = "data class Point(val x: Double, var y: Double)";
+
+    let result = lower_source(source);
+    assert!(
+        result.diagnostics.is_empty(),
+        "unexpected lowering diagnostics: {:?}",
+        result.diagnostics
+    );
+    assert_eq!(
+        result.statements.len(),
+        1,
+        "expected exactly one top-level statement"
+    );
+
+    let data_class = result
+        .statements
+        .iter()
+        .find_map(|statement| match statement {
+            Statement::DataClassDeclaration { .. } => Some(statement),
+            _ => None,
+        })
+        .expect("data class declaration to be lowered");
+
+    match data_class {
+        Statement::DataClassDeclaration {
+            name,
+            parameters,
+            is_mutable,
+            span,
+            ..
+        } => {
+            assert_eq!(name, "Point");
+            assert!(
+                *is_mutable,
+                "expected mutable data class due to var parameter"
+            );
+            assert!(
+                span.start_line > 0 || span.end_line > 0,
+                "data class span should not be dummy"
+            );
+
+            assert_eq!(parameters.len(), 2, "expected two constructor parameters");
+
+            let first = &parameters[0];
+            assert_eq!(first.name, "x");
+            assert_eq!(first.modifiers.property, ParameterProperty::Val);
+            match &first.type_annotation {
+                Some(TypeAnnotation::Simple(name)) => assert_eq!(name, "Double"),
+                other => panic!("expected Double annotation for x, got {:?}", other),
+            }
+
+            let second = &parameters[1];
+            assert_eq!(second.name, "y");
+            assert_eq!(second.modifiers.property, ParameterProperty::Var);
+            match &second.type_annotation {
+                Some(TypeAnnotation::Simple(name)) => assert_eq!(name, "Double"),
+                other => panic!("expected Double annotation for y, got {:?}", other),
+            }
+        }
+        _ => unreachable!("matched in find_map above"),
+    }
 }

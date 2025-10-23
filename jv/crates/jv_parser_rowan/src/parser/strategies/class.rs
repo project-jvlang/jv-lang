@@ -24,10 +24,12 @@ impl StatementStrategy for ClassStrategy {
         ctx.start_node(SyntaxKind::ClassDeclaration);
 
         let mut saw_keyword = false;
+        let mut is_data_class = false;
         if ctx.bump_if(TokenKind::ClassKw) {
             saw_keyword = true;
         } else if ctx.bump_if(TokenKind::DataKw) {
             saw_keyword = true;
+            is_data_class = true;
             let _ = ctx.bump_if(TokenKind::ClassKw);
         }
 
@@ -43,7 +45,8 @@ impl StatementStrategy for ClassStrategy {
 
         parse_primary_constructor(ctx);
 
-        if !ctx.parse_class_body() {
+        let has_body = ctx.parse_class_body();
+        if !has_body && !is_data_class {
             ctx.recover_statement("クラスボディが必要です", start);
         }
 
@@ -70,6 +73,7 @@ fn parse_primary_constructor(ctx: &mut ParserContext<'_>) {
 
         let param_start = ctx.position();
         ctx.start_node(SyntaxKind::FunctionParameter);
+        ctx.parse_parameter_modifiers();
         if !ctx.parse_binding_pattern() {
             ctx.recover_statement("コンストラクタパラメータ名が必要です", param_start);
             ctx.finish_node();

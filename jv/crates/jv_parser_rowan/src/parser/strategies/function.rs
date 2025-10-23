@@ -91,7 +91,7 @@ fn parse_parameter_list(ctx: &mut ParserContext<'_>) -> bool {
 
         let param_start = ctx.position();
         ctx.start_node(SyntaxKind::FunctionParameter);
-        parse_parameter_modifier(ctx);
+        ctx.parse_parameter_modifiers();
 
         if !ctx.parse_binding_pattern() {
             ctx.recover_statement("パラメータ名が必要です", param_start);
@@ -124,44 +124,6 @@ fn parse_parameter_list(ctx: &mut ParserContext<'_>) -> bool {
 
     ctx.finish_node(); // parameter list
     true
-}
-
-fn parse_parameter_modifier(ctx: &mut ParserContext<'_>) {
-    ctx.consume_trivia();
-    let mut consumed_any = false;
-
-    loop {
-        ctx.consume_trivia();
-        let Some((index, kind)) = ctx.peek_significant_kind_n(0) else {
-            break;
-        };
-
-        let token = &ctx.tokens[index];
-        let recognized = match kind {
-            TokenKind::ValKw | TokenKind::VarKw => true,
-            TokenKind::Identifier => {
-                matches!(token.lexeme.as_str(), "mut" | "ref")
-            }
-            _ => false,
-        };
-
-        if !recognized {
-            break;
-        }
-
-        if !consumed_any {
-            ctx.start_node(SyntaxKind::ParameterModifierList);
-            consumed_any = true;
-        }
-
-        ctx.start_node(SyntaxKind::ParameterModifier);
-        ctx.bump_raw();
-        ctx.finish_node();
-    }
-
-    if consumed_any {
-        ctx.finish_node();
-    }
 }
 
 fn parse_return_type(ctx: &mut ParserContext<'_>) {

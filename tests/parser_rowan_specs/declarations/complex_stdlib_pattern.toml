@@ -2,15 +2,15 @@ description = "Auto-generated expectation for jv/tests/fixtures/package/complex_
 source = "jv/tests/fixtures/package/complex_stdlib_pattern.jv"
 
 [expect]
-statement_count = 19
+statement_count = 17
 
 [expect.parser_diagnostics]
 allowed = true
-max = 20
+max = 12
 
 [expect.lowering_diagnostics]
 allowed = true
-max = 7
+max = 4
 
 [[expect.statements]]
 index = 0
@@ -31,53 +31,31 @@ name = "CollectionWrapper"
 [expect.statements.span]
 start_line = 6
 start_column = 1
-end_line = 11
-end_column = 27
+end_line = 6
+end_column = 23
 
 [[expect.statements]]
 index = 2
-kind = "function_declaration"
-name = "T"
+kind = "expression"
 
 [expect.statements.span]
-start_line = 12
-start_column = 5
-end_line = 12
-end_column = 50
+start_line = 6
+start_column = 23
+end_line = 6
+end_column = 41
 
 [[expect.statements]]
 index = 3
-kind = "return_statement"
+kind = "expression"
 
 [expect.statements.span]
-start_line = 13
-start_column = 9
-end_line = 13
-end_column = 46
+start_line = 11
+start_column = 1
+end_line = 19
+end_column = 2
 
 [[expect.statements]]
 index = 4
-kind = "function_declaration"
-name = "T"
-
-[expect.statements.span]
-start_line = 16
-start_column = 5
-end_line = 16
-end_column = 61
-
-[[expect.statements]]
-index = 5
-kind = "return_statement"
-
-[expect.statements.span]
-start_line = 17
-start_column = 9
-end_line = 17
-end_column = 40
-
-[[expect.statements]]
-index = 6
 kind = "function_declaration"
 name = "T"
 
@@ -88,7 +66,7 @@ end_line = 24
 end_column = 64
 
 [[expect.statements]]
-index = 7
+index = 5
 kind = "val_declaration"
 name = "list"
 
@@ -99,7 +77,7 @@ end_line = 25
 end_column = 41
 
 [[expect.statements]]
-index = 8
+index = 6
 kind = "expression"
 
 [expect.statements.span]
@@ -109,7 +87,7 @@ end_line = 26
 end_column = 19
 
 [[expect.statements]]
-index = 9
+index = 7
 kind = "return_statement"
 
 [expect.statements.span]
@@ -119,7 +97,7 @@ end_line = 27
 end_column = 35
 
 [[expect.statements]]
-index = 10
+index = 8
 kind = "function_declaration"
 name = "T"
 
@@ -130,7 +108,7 @@ end_line = 33
 end_column = 43
 
 [[expect.statements]]
-index = 11
+index = 9
 kind = "return_statement"
 
 [expect.statements.span]
@@ -140,7 +118,7 @@ end_line = 34
 end_column = 29
 
 [[expect.statements]]
-index = 12
+index = 10
 kind = "function_declaration"
 name = "T"
 
@@ -151,7 +129,7 @@ end_line = 40
 end_column = 50
 
 [[expect.statements]]
-index = 13
+index = 11
 kind = "return_statement"
 
 [expect.statements.span]
@@ -161,7 +139,7 @@ end_line = 41
 end_column = 32
 
 [[expect.statements]]
-index = 14
+index = 12
 kind = "function_declaration"
 name = "T"
 
@@ -172,7 +150,7 @@ end_line = 47
 end_column = 77
 
 [[expect.statements]]
-index = 15
+index = 13
 kind = "val_declaration"
 name = "result"
 
@@ -183,7 +161,7 @@ end_line = 48
 end_column = 43
 
 [[expect.statements]]
-index = 16
+index = 14
 kind = "for_in"
 name = "item"
 
@@ -197,7 +175,7 @@ end_column = 6
 statement_kinds = ["expression"]
 
 [[expect.statements]]
-index = 17
+index = 15
 kind = "return_statement"
 
 [expect.statements.span]
@@ -207,7 +185,7 @@ end_line = 52
 end_column = 37
 
 [[expect.statements]]
-index = 18
+index = 16
 kind = "function_declaration"
 name = "demonstrateUsage"
 
