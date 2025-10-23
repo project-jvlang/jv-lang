@@ -1880,9 +1880,8 @@ fn string_interpolation_lowering_builds_parts() {
 
 #[test]
 fn multiline_string_interpolation_handles_complex_patterns() {
-    let source = include_str!(
-        "../../../../../tests/parser_rowan_specs/fixtures/multiline_interpolation.jv"
-    );
+    let source =
+        include_str!("../../../../../tests/parser_rowan_specs/fixtures/multiline_interpolation.jv");
 
     let result = lower_source(source);
     assert!(
@@ -1927,24 +1926,18 @@ fn multiline_string_interpolation_handles_complex_patterns() {
     match greeting_expr {
         Expression::MultilineString(literal) => {
             assert!(
-                literal
-                    .parts
-                    .iter()
-                    .any(|part| matches!(
-                        part,
-                        StringPart::Expression(Expression::Identifier(identifier, _))
-                            if identifier == "userName"
-                    )),
+                literal.parts.iter().any(|part| matches!(
+                    part,
+                    StringPart::Expression(Expression::Identifier(identifier, _))
+                        if identifier == "userName"
+                )),
                 "greeting should reference userName"
             );
             assert!(
-                literal
-                    .parts
-                    .iter()
-                    .any(|part| matches!(
-                        part,
-                        StringPart::Text(text) if text.contains("Welcome to the pipeline.")
-                    )),
+                literal.parts.iter().any(|part| matches!(
+                    part,
+                    StringPart::Text(text) if text.contains("Welcome to the pipeline.")
+                )),
                 "greeting should include trailing text after interpolation"
             );
         }
@@ -1962,7 +1955,11 @@ fn multiline_string_interpolation_handles_complex_patterns() {
                     _ => None,
                 })
                 .collect();
-            assert_eq!(expr_parts.len(), 3, "expected three expressions in tagSummary");
+            assert_eq!(
+                expr_parts.len(),
+                3,
+                "expected three expressions in tagSummary"
+            );
 
             match expr_parts[0] {
                 Expression::Call { .. } => {}
@@ -2001,13 +1998,10 @@ fn multiline_string_interpolation_handles_complex_patterns() {
                 other => panic!("expected status identifier, got {:?}", other),
             }
             assert!(
-                literal
-                    .parts
-                    .iter()
-                    .any(|part| matches!(
-                        part,
-                        StringPart::Text(text) if text.ends_with("suffix")
-                    )),
+                literal.parts.iter().any(|part| matches!(
+                    part,
+                    StringPart::Text(text) if text.ends_with("suffix")
+                )),
                 "inline string should retain trailing literal text"
             );
         }
@@ -2025,7 +2019,11 @@ fn multiline_string_interpolation_handles_complex_patterns() {
                     _ => None,
                 })
                 .collect();
-            assert_eq!(expr_parts.len(), 3, "tight should contain three expressions");
+            assert_eq!(
+                expr_parts.len(),
+                3,
+                "tight should contain three expressions"
+            );
             match expr_parts[0] {
                 Expression::Identifier(identifier, _) if identifier == "userName" => {}
                 other => panic!("expected userName identifier, got {:?}", other),
@@ -2039,13 +2037,10 @@ fn multiline_string_interpolation_handles_complex_patterns() {
                 other => panic!("expected second index access, got {:?}", other),
             }
             assert!(
-                literal
-                    .parts
-                    .iter()
-                    .any(|part| matches!(
-                        part,
-                        StringPart::Text(text) if text.contains("tail")
-                    )),
+                literal.parts.iter().any(|part| matches!(
+                    part,
+                    StringPart::Text(text) if text.contains("tail")
+                )),
                 "tight multiline string should preserve trailing segment"
             );
         }

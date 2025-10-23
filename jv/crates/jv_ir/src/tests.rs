@@ -1805,10 +1805,7 @@ mod tests {
                 StringPart::Text("Hello, ".to_string()),
                 StringPart::Expression(Expression::Identifier("user".to_string(), dummy_span())),
                 StringPart::Text(" says ".to_string()),
-                StringPart::Expression(Expression::Identifier(
-                    "status".to_string(),
-                    dummy_span(),
-                )),
+                StringPart::Expression(Expression::Identifier("status".to_string(), dummy_span())),
             ],
             indent: None,
             span: dummy_span(),
@@ -1820,7 +1817,7 @@ mod tests {
         match result {
             IrExpression::StringFormat {
                 format_string,
-  		        args,
+                args,
                 ..
             } => {
                 assert_eq!(format_string, "Hello, %s says %s");

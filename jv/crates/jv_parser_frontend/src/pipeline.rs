@@ -20,6 +20,18 @@ impl PipelineArtifacts {
         }
     }
 
+    pub fn program(&self) -> &Program {
+        &self.program
+    }
+
+    pub fn tokens(&self) -> &[Token] {
+        &self.tokens
+    }
+
+    pub fn diagnostics(&self) -> &FrontendDiagnostics {
+        &self.diagnostics
+    }
+
     pub fn into_frontend_output(self) -> FrontendOutput {
         FrontendOutput::new(self.program, self.tokens, self.diagnostics)
     }

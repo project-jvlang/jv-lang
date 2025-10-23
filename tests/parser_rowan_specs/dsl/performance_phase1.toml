@@ -2,7 +2,7 @@ description = "Auto-generated expectation for jv/tests/performance/phase1.jv"
 source = "jv/tests/performance/phase1.jv"
 
 [expect]
-statement_count = 82
+statement_count = 83
 
 [expect.parser_diagnostics]
 allowed = false
@@ -31,7 +31,7 @@ name = "main"
 [expect.statements.span]
 start_line = 3
 start_column = 1
-end_line = 86
+end_line = 87
 end_column = 2
 
 [expect.statements.block]
@@ -117,7 +117,8 @@ statement_kinds = [
     "assignment",
     "assignment",
     "assignment",
-    "val_declaration",
+    "assignment",
+    "val_declaration"
 ]
 
 [[expect.statements]]
@@ -126,16 +127,16 @@ kind = "function_declaration"
 name = "scenario0"
 
 [expect.statements.span]
-start_line = 88
+start_line = 89
 start_column = 1
-end_line = 101
+end_line = 102
 end_column = 2
 
 [expect.statements.block]
 statement_kinds = [
     "var_declaration",
     "for_in",
-    "return_statement",
+    "return_statement"
 ]
 
 [[expect.statements]]
@@ -144,16 +145,16 @@ kind = "function_declaration"
 name = "scenario1"
 
 [expect.statements.span]
-start_line = 103
+start_line = 104
 start_column = 1
-end_line = 116
+end_line = 117
 end_column = 2
 
 [expect.statements.block]
 statement_kinds = [
     "var_declaration",
     "for_in",
-    "return_statement",
+    "return_statement"
 ]
 
 [[expect.statements]]
@@ -162,16 +163,16 @@ kind = "function_declaration"
 name = "scenario2"
 
 [expect.statements.span]
-start_line = 118
+start_line = 119
 start_column = 1
-end_line = 131
+end_line = 132
 end_column = 2
 
 [expect.statements.block]
 statement_kinds = [
     "var_declaration",
     "for_in",
-    "return_statement",
+    "return_statement"
 ]
 
 [[expect.statements]]
@@ -180,16 +181,16 @@ kind = "function_declaration"
 name = "scenario3"
 
 [expect.statements.span]
-start_line = 133
+start_line = 134
 start_column = 1
-end_line = 146
+end_line = 147
 end_column = 2
 
 [expect.statements.block]
 statement_kinds = [
     "var_declaration",
     "for_in",
-    "return_statement",
+    "return_statement"
 ]
 
 [[expect.statements]]
@@ -198,16 +199,16 @@ kind = "function_declaration"
 name = "scenario4"
 
 [expect.statements.span]
-start_line = 148
+start_line = 149
 start_column = 1
-end_line = 161
+end_line = 162
 end_column = 2
 
 [expect.statements.block]
 statement_kinds = [
     "var_declaration",
     "for_in",
-    "return_statement",
+    "return_statement"
 ]
 
 [[expect.statements]]
@@ -216,16 +217,16 @@ kind = "function_declaration"
 name = "scenario5"
 
 [expect.statements.span]
-start_line = 163
+start_line = 164
 start_column = 1
-end_line = 176
+end_line = 177
 end_column = 2
 
 [expect.statements.block]
 statement_kinds = [
     "var_declaration",
     "for_in",
-    "return_statement",
+    "return_statement"
 ]
 
 [[expect.statements]]
@@ -234,16 +235,16 @@ kind = "function_declaration"
 name = "scenario6"
 
 [expect.statements.span]
-start_line = 178
+start_line = 179
 start_column = 1
-end_line = 191
+end_line = 192
 end_column = 2
 
 [expect.statements.block]
 statement_kinds = [
     "var_declaration",
     "for_in",
-    "return_statement",
+    "return_statement"
 ]
 
 [[expect.statements]]
@@ -252,16 +253,16 @@ kind = "function_declaration"
 name = "scenario7"
 
 [expect.statements.span]
-start_line = 193
+start_line = 194
 start_column = 1
-end_line = 206
+end_line = 207
 end_column = 2
 
 [expect.statements.block]
 statement_kinds = [
     "var_declaration",
     "for_in",
-    "return_statement",
+    "return_statement"
 ]
 
 [[expect.statements]]
@@ -270,16 +271,16 @@ kind = "function_declaration"
 name = "scenario8"
 
 [expect.statements.span]
-start_line = 208
+start_line = 209
 start_column = 1
-end_line = 221
+end_line = 222
 end_column = 2
 
 [expect.statements.block]
 statement_kinds = [
     "var_declaration",
     "for_in",
-    "return_statement",
+    "return_statement"
 ]
 
 [[expect.statements]]
@@ -288,16 +289,16 @@ kind = "function_declaration"
 name = "scenario9"
 
 [expect.statements.span]
-start_line = 223
+start_line = 224
 start_column = 1
-end_line = 236
+end_line = 237
 end_column = 2
 
 [expect.statements.block]
 statement_kinds = [
     "var_declaration",
     "for_in",
-    "return_statement",
+    "return_statement"
 ]
 
 [[expect.statements]]
@@ -306,16 +307,16 @@ kind = "function_declaration"
 name = "scenario10"
 
 [expect.statements.span]
-start_line = 238
+start_line = 239
 start_column = 1
-end_line = 251
+end_line = 252
 end_column = 2
 
 [expect.statements.block]
 statement_kinds = [
     "var_declaration",
     "for_in",
-    "return_statement",
+    "return_statement"
 ]
 
 [[expect.statements]]
@@ -324,16 +325,16 @@ kind = "function_declaration"
 name = "scenario11"
 
 [expect.statements.span]
-start_line = 253
+start_line = 254
 start_column = 1
-end_line = 266
+end_line = 267
 end_column = 2
 
 [expect.statements.block]
 statement_kinds = [
     "var_declaration",
     "for_in",
-    "return_statement",
+    "return_statement"
 ]
 
 [[expect.statements]]
@@ -342,16 +343,16 @@ kind = "function_declaration"
 name = "scenario12"
 
 [expect.statements.span]
-start_line = 268
+start_line = 269
 start_column = 1
-end_line = 281
+end_line = 282
 end_column = 2
 
 [expect.statements.block]
 statement_kinds = [
     "var_declaration",
     "for_in",
-    "return_statement",
+    "return_statement"
 ]
 
 [[expect.statements]]
@@ -360,16 +361,16 @@ kind = "function_declaration"
 name = "scenario13"
 
 [expect.statements.span]
-start_line = 283
+start_line = 284
 start_column = 1
-end_line = 296
+end_line = 297
 end_column = 2
 
 [expect.statements.block]
 statement_kinds = [
     "var_declaration",
     "for_in",
-    "return_statement",
+    "return_statement"
 ]
 
 [[expect.statements]]
@@ -378,16 +379,16 @@ kind = "function_declaration"
 name = "scenario14"
 
 [expect.statements.span]
-start_line = 298
+start_line = 299
 start_column = 1
-end_line = 311
+end_line = 312
 end_column = 2
 
 [expect.statements.block]
 statement_kinds = [
     "var_declaration",
     "for_in",
-    "return_statement",
+    "return_statement"
 ]
 
 [[expect.statements]]
@@ -396,16 +397,16 @@ kind = "function_declaration"
 name = "scenario15"
 
 [expect.statements.span]
-start_line = 313
+start_line = 314
 start_column = 1
-end_line = 326
+end_line = 327
 end_column = 2
 
 [expect.statements.block]
 statement_kinds = [
     "var_declaration",
     "for_in",
-    "return_statement",
+    "return_statement"
 ]
 
 [[expect.statements]]
@@ -414,16 +415,16 @@ kind = "function_declaration"
 name = "scenario16"
 
 [expect.statements.span]
-start_line = 328
+start_line = 329
 start_column = 1
-end_line = 341
+end_line = 342
 end_column = 2
 
 [expect.statements.block]
 statement_kinds = [
     "var_declaration",
     "for_in",
-    "return_statement",
+    "return_statement"
 ]
 
 [[expect.statements]]
@@ -432,16 +433,16 @@ kind = "function_declaration"
 name = "scenario17"
 
 [expect.statements.span]
-start_line = 343
+start_line = 344
 start_column = 1
-end_line = 356
+end_line = 357
 end_column = 2
 
 [expect.statements.block]
 statement_kinds = [
     "var_declaration",
     "for_in",
-    "return_statement",
+    "return_statement"
 ]
 
 [[expect.statements]]
@@ -450,16 +451,16 @@ kind = "function_declaration"
 name = "scenario18"
 
 [expect.statements.span]
-start_line = 358
+start_line = 359
 start_column = 1
-end_line = 371
+end_line = 372
 end_column = 2
 
 [expect.statements.block]
 statement_kinds = [
     "var_declaration",
     "for_in",
-    "return_statement",
+    "return_statement"
 ]
 
 [[expect.statements]]
@@ -468,16 +469,16 @@ kind = "function_declaration"
 name = "scenario19"
 
 [expect.statements.span]
-start_line = 373
+start_line = 374
 start_column = 1
-end_line = 386
+end_line = 387
 end_column = 2
 
 [expect.statements.block]
 statement_kinds = [
     "var_declaration",
     "for_in",
-    "return_statement",
+    "return_statement"
 ]
 
 [[expect.statements]]
@@ -486,16 +487,16 @@ kind = "function_declaration"
 name = "scenario20"
 
 [expect.statements.span]
-start_line = 388
+start_line = 389
 start_column = 1
-end_line = 401
+end_line = 402
 end_column = 2
 
 [expect.statements.block]
 statement_kinds = [
     "var_declaration",
     "for_in",
-    "return_statement",
+    "return_statement"
 ]
 
 [[expect.statements]]
@@ -504,16 +505,16 @@ kind = "function_declaration"
 name = "scenario21"
 
 [expect.statements.span]
-start_line = 403
+start_line = 404
 start_column = 1
-end_line = 416
+end_line = 417
 end_column = 2
 
 [expect.statements.block]
 statement_kinds = [
     "var_declaration",
     "for_in",
-    "return_statement",
+    "return_statement"
 ]
 
 [[expect.statements]]
@@ -522,16 +523,16 @@ kind = "function_declaration"
 name = "scenario22"
 
 [expect.statements.span]
-start_line = 418
+start_line = 419
 start_column = 1
-end_line = 431
+end_line = 432
 end_column = 2
 
 [expect.statements.block]
 statement_kinds = [
     "var_declaration",
     "for_in",
-    "return_statement",
+    "return_statement"
 ]
 
 [[expect.statements]]
@@ -540,16 +541,16 @@ kind = "function_declaration"
 name = "scenario23"
 
 [expect.statements.span]
-start_line = 433
+start_line = 434
 start_column = 1
-end_line = 446
+end_line = 447
 end_column = 2
 
 [expect.statements.block]
 statement_kinds = [
     "var_declaration",
     "for_in",
-    "return_statement",
+    "return_statement"
 ]
 
 [[expect.statements]]
@@ -558,16 +559,16 @@ kind = "function_declaration"
 name = "scenario24"
 
 [expect.statements.span]
-start_line = 448
+start_line = 449
 start_column = 1
-end_line = 461
+end_line = 462
 end_column = 2
 
 [expect.statements.block]
 statement_kinds = [
     "var_declaration",
     "for_in",
-    "return_statement",
+    "return_statement"
 ]
 
 [[expect.statements]]
@@ -576,16 +577,16 @@ kind = "function_declaration"
 name = "scenario25"
 
 [expect.statements.span]
-start_line = 463
+start_line = 464
 start_column = 1
-end_line = 476
+end_line = 477
 end_column = 2
 
 [expect.statements.block]
 statement_kinds = [
     "var_declaration",
     "for_in",
-    "return_statement",
+    "return_statement"
 ]
 
 [[expect.statements]]
@@ -594,16 +595,16 @@ kind = "function_declaration"
 name = "scenario26"
 
 [expect.statements.span]
-start_line = 478
+start_line = 479
 start_column = 1
-end_line = 491
+end_line = 492
 end_column = 2
 
 [expect.statements.block]
 statement_kinds = [
     "var_declaration",
     "for_in",
-    "return_statement",
+    "return_statement"
 ]
 
 [[expect.statements]]
@@ -612,16 +613,16 @@ kind = "function_declaration"
 name = "scenario27"
 
 [expect.statements.span]
-start_line = 493
+start_line = 494
 start_column = 1
-end_line = 506
+end_line = 507
 end_column = 2
 
 [expect.statements.block]
 statement_kinds = [
     "var_declaration",
     "for_in",
-    "return_statement",
+    "return_statement"
 ]
 
 [[expect.statements]]
@@ -630,16 +631,16 @@ kind = "function_declaration"
 name = "scenario28"
 
 [expect.statements.span]
-start_line = 508
+start_line = 509
 start_column = 1
-end_line = 521
+end_line = 522
 end_column = 2
 
 [expect.statements.block]
 statement_kinds = [
     "var_declaration",
     "for_in",
-    "return_statement",
+    "return_statement"
 ]
 
 [[expect.statements]]
@@ -648,16 +649,16 @@ kind = "function_declaration"
 name = "scenario29"
 
 [expect.statements.span]
-start_line = 523
+start_line = 524
 start_column = 1
-end_line = 536
+end_line = 537
 end_column = 2
 
 [expect.statements.block]
 statement_kinds = [
     "var_declaration",
     "for_in",
-    "return_statement",
+    "return_statement"
 ]
 
 [[expect.statements]]
@@ -666,16 +667,16 @@ kind = "function_declaration"
 name = "scenario30"
 
 [expect.statements.span]
-start_line = 538
+start_line = 539
 start_column = 1
-end_line = 551
+end_line = 552
 end_column = 2
 
 [expect.statements.block]
 statement_kinds = [
     "var_declaration",
     "for_in",
-    "return_statement",
+    "return_statement"
 ]
 
 [[expect.statements]]
@@ -684,16 +685,16 @@ kind = "function_declaration"
 name = "scenario31"
 
 [expect.statements.span]
-start_line = 553
+start_line = 554
 start_column = 1
-end_line = 566
+end_line = 567
 end_column = 2
 
 [expect.statements.block]
 statement_kinds = [
     "var_declaration",
     "for_in",
-    "return_statement",
+    "return_statement"
 ]
 
 [[expect.statements]]
@@ -702,16 +703,16 @@ kind = "function_declaration"
 name = "scenario32"
 
 [expect.statements.span]
-start_line = 568
+start_line = 569
 start_column = 1
-end_line = 581
+end_line = 582
 end_column = 2
 
 [expect.statements.block]
 statement_kinds = [
     "var_declaration",
     "for_in",
-    "return_statement",
+    "return_statement"
 ]
 
 [[expect.statements]]
@@ -720,16 +721,16 @@ kind = "function_declaration"
 name = "scenario33"
 
 [expect.statements.span]
-start_line = 583
+start_line = 584
 start_column = 1
-end_line = 596
+end_line = 597
 end_column = 2
 
 [expect.statements.block]
 statement_kinds = [
     "var_declaration",
     "for_in",
-    "return_statement",
+    "return_statement"
 ]
 
 [[expect.statements]]
@@ -738,16 +739,16 @@ kind = "function_declaration"
 name = "scenario34"
 
 [expect.statements.span]
-start_line = 598
+start_line = 599
 start_column = 1
-end_line = 611
+end_line = 612
 end_column = 2
 
 [expect.statements.block]
 statement_kinds = [
     "var_declaration",
     "for_in",
-    "return_statement",
+    "return_statement"
 ]
 
 [[expect.statements]]
@@ -756,16 +757,16 @@ kind = "function_declaration"
 name = "scenario35"
 
 [expect.statements.span]
-start_line = 613
+start_line = 614
 start_column = 1
-end_line = 626
+end_line = 627
 end_column = 2
 
 [expect.statements.block]
 statement_kinds = [
     "var_declaration",
     "for_in",
-    "return_statement",
+    "return_statement"
 ]
 
 [[expect.statements]]
@@ -774,16 +775,16 @@ kind = "function_declaration"
 name = "scenario36"
 
 [expect.statements.span]
-start_line = 628
+start_line = 629
 start_column = 1
-end_line = 641
+end_line = 642
 end_column = 2
 
 [expect.statements.block]
 statement_kinds = [
     "var_declaration",
     "for_in",
-    "return_statement",
+    "return_statement"
 ]
 
 [[expect.statements]]
@@ -792,16 +793,16 @@ kind = "function_declaration"
 name = "scenario37"
 
 [expect.statements.span]
-start_line = 643
+start_line = 644
 start_column = 1
-end_line = 656
+end_line = 657
 end_column = 2
 
 [expect.statements.block]
 statement_kinds = [
     "var_declaration",
     "for_in",
-    "return_statement",
+    "return_statement"
 ]
 
 [[expect.statements]]
@@ -810,16 +811,16 @@ kind = "function_declaration"
 name = "scenario38"
 
 [expect.statements.span]
-start_line = 658
+start_line = 659
 start_column = 1
-end_line = 671
+end_line = 672
 end_column = 2
 
 [expect.statements.block]
 statement_kinds = [
     "var_declaration",
     "for_in",
-    "return_statement",
+    "return_statement"
 ]
 
 [[expect.statements]]
@@ -828,16 +829,16 @@ kind = "function_declaration"
 name = "scenario39"
 
 [expect.statements.span]
-start_line = 673
+start_line = 674
 start_column = 1
-end_line = 686
+end_line = 687
 end_column = 2
 
 [expect.statements.block]
 statement_kinds = [
     "var_declaration",
     "for_in",
-    "return_statement",
+    "return_statement"
 ]
 
 [[expect.statements]]
@@ -846,16 +847,16 @@ kind = "function_declaration"
 name = "scenario40"
 
 [expect.statements.span]
-start_line = 688
+start_line = 689
 start_column = 1
-end_line = 701
+end_line = 702
 end_column = 2
 
 [expect.statements.block]
 statement_kinds = [
     "var_declaration",
     "for_in",
-    "return_statement",
+    "return_statement"
 ]
 
 [[expect.statements]]
@@ -864,16 +865,16 @@ kind = "function_declaration"
 name = "scenario41"
 
 [expect.statements.span]
-start_line = 703
+start_line = 704
 start_column = 1
-end_line = 716
+end_line = 717
 end_column = 2
 
 [expect.statements.block]
 statement_kinds = [
     "var_declaration",
     "for_in",
-    "return_statement",
+    "return_statement"
 ]
 
 [[expect.statements]]
@@ -882,16 +883,16 @@ kind = "function_declaration"
 name = "scenario42"
 
 [expect.statements.span]
-start_line = 718
+start_line = 719
 start_column = 1
-end_line = 731
+end_line = 732
 end_column = 2
 
 [expect.statements.block]
 statement_kinds = [
     "var_declaration",
     "for_in",
-    "return_statement",
+    "return_statement"
 ]
 
 [[expect.statements]]
@@ -900,16 +901,16 @@ kind = "function_declaration"
 name = "scenario43"
 
 [expect.statements.span]
-start_line = 733
+start_line = 734
 start_column = 1
-end_line = 746
+end_line = 747
 end_column = 2
 
 [expect.statements.block]
 statement_kinds = [
     "var_declaration",
     "for_in",
-    "return_statement",
+    "return_statement"
 ]
 
 [[expect.statements]]
@@ -918,16 +919,16 @@ kind = "function_declaration"
 name = "scenario44"
 
 [expect.statements.span]
-start_line = 748
+start_line = 749
 start_column = 1
-end_line = 761
+end_line = 762
 end_column = 2
 
 [expect.statements.block]
 statement_kinds = [
     "var_declaration",
     "for_in",
-    "return_statement",
+    "return_statement"
 ]
 
 [[expect.statements]]
@@ -936,16 +937,16 @@ kind = "function_declaration"
 name = "scenario45"
 
 [expect.statements.span]
-start_line = 763
+start_line = 764
 start_column = 1
-end_line = 776
+end_line = 777
 end_column = 2
 
 [expect.statements.block]
 statement_kinds = [
     "var_declaration",
     "for_in",
-    "return_statement",
+    "return_statement"
 ]
 
 [[expect.statements]]
@@ -954,16 +955,16 @@ kind = "function_declaration"
 name = "scenario46"
 
 [expect.statements.span]
-start_line = 778
+start_line = 779
 start_column = 1
-end_line = 791
+end_line = 792
 end_column = 2
 
 [expect.statements.block]
 statement_kinds = [
     "var_declaration",
     "for_in",
-    "return_statement",
+    "return_statement"
 ]
 
 [[expect.statements]]
@@ -972,16 +973,16 @@ kind = "function_declaration"
 name = "scenario47"
 
 [expect.statements.span]
-start_line = 793
+start_line = 794
 start_column = 1
-end_line = 806
+end_line = 807
 end_column = 2
 
 [expect.statements.block]
 statement_kinds = [
     "var_declaration",
     "for_in",
-    "return_statement",
+    "return_statement"
 ]
 
 [[expect.statements]]
@@ -990,16 +991,16 @@ kind = "function_declaration"
 name = "scenario48"
 
 [expect.statements.span]
-start_line = 808
+start_line = 809
 start_column = 1
-end_line = 821
+end_line = 822
 end_column = 2
 
 [expect.statements.block]
 statement_kinds = [
     "var_declaration",
     "for_in",
-    "return_statement",
+    "return_statement"
 ]
 
 [[expect.statements]]
@@ -1008,16 +1009,16 @@ kind = "function_declaration"
 name = "scenario49"
 
 [expect.statements.span]
-start_line = 823
+start_line = 824
 start_column = 1
-end_line = 836
+end_line = 837
 end_column = 2
 
 [expect.statements.block]
 statement_kinds = [
     "var_declaration",
     "for_in",
-    "return_statement",
+    "return_statement"
 ]
 
 [[expect.statements]]
@@ -1026,16 +1027,16 @@ kind = "function_declaration"
 name = "scenario50"
 
 [expect.statements.span]
-start_line = 838
+start_line = 839
 start_column = 1
-end_line = 851
+end_line = 852
 end_column = 2
 
 [expect.statements.block]
 statement_kinds = [
     "var_declaration",
     "for_in",
-    "return_statement",
+    "return_statement"
 ]
 
 [[expect.statements]]
@@ -1044,16 +1045,16 @@ kind = "function_declaration"
 name = "scenario51"
 
 [expect.statements.span]
-start_line = 853
+start_line = 854
 start_column = 1
-end_line = 866
+end_line = 867
 end_column = 2
 
 [expect.statements.block]
 statement_kinds = [
     "var_declaration",
     "for_in",
-    "return_statement",
+    "return_statement"
 ]
 
 [[expect.statements]]
@@ -1062,16 +1063,16 @@ kind = "function_declaration"
 name = "scenario52"
 
 [expect.statements.span]
-start_line = 868
+start_line = 869
 start_column = 1
-end_line = 881
+end_line = 882
 end_column = 2
 
 [expect.statements.block]
 statement_kinds = [
     "var_declaration",
     "for_in",
-    "return_statement",
+    "return_statement"
 ]
 
 [[expect.statements]]
@@ -1080,16 +1081,16 @@ kind = "function_declaration"
 name = "scenario53"
 
 [expect.statements.span]
-start_line = 883
+start_line = 884
 start_column = 1
-end_line = 896
+end_line = 897
 end_column = 2
 
 [expect.statements.block]
 statement_kinds = [
     "var_declaration",
     "for_in",
-    "return_statement",
+    "return_statement"
 ]
 
 [[expect.statements]]
@@ -1098,16 +1099,16 @@ kind = "function_declaration"
 name = "scenario54"
 
 [expect.statements.span]
-start_line = 898
+start_line = 899
 start_column = 1
-end_line = 911
+end_line = 912
 end_column = 2
 
 [expect.statements.block]
 statement_kinds = [
     "var_declaration",
     "for_in",
-    "return_statement",
+    "return_statement"
 ]
 
 [[expect.statements]]
@@ -1116,16 +1117,16 @@ kind = "function_declaration"
 name = "scenario55"
 
 [expect.statements.span]
-start_line = 913
+start_line = 914
 start_column = 1
-end_line = 926
+end_line = 927
 end_column = 2
 
 [expect.statements.block]
 statement_kinds = [
     "var_declaration",
     "for_in",
-    "return_statement",
+    "return_statement"
 ]
 
 [[expect.statements]]
@@ -1134,16 +1135,16 @@ kind = "function_declaration"
 name = "scenario56"
 
 [expect.statements.span]
-start_line = 928
+start_line = 929
 start_column = 1
-end_line = 941
+end_line = 942
 end_column = 2
 
 [expect.statements.block]
 statement_kinds = [
     "var_declaration",
     "for_in",
-    "return_statement",
+    "return_statement"
 ]
 
 [[expect.statements]]
@@ -1152,16 +1153,16 @@ kind = "function_declaration"
 name = "scenario57"
 
 [expect.statements.span]
-start_line = 943
+start_line = 944
 start_column = 1
-end_line = 956
+end_line = 957
 end_column = 2
 
 [expect.statements.block]
 statement_kinds = [
     "var_declaration",
     "for_in",
-    "return_statement",
+    "return_statement"
 ]
 
 [[expect.statements]]
@@ -1170,16 +1171,16 @@ kind = "function_declaration"
 name = "scenario58"
 
 [expect.statements.span]
-start_line = 958
+start_line = 959
 start_column = 1
-end_line = 971
+end_line = 972
 end_column = 2
 
 [expect.statements.block]
 statement_kinds = [
     "var_declaration",
     "for_in",
-    "return_statement",
+    "return_statement"
 ]
 
 [[expect.statements]]
@@ -1188,16 +1189,16 @@ kind = "function_declaration"
 name = "scenario59"
 
 [expect.statements.span]
-start_line = 973
+start_line = 974
 start_column = 1
-end_line = 986
+end_line = 987
 end_column = 2
 
 [expect.statements.block]
 statement_kinds = [
     "var_declaration",
     "for_in",
-    "return_statement",
+    "return_statement"
 ]
 
 [[expect.statements]]
@@ -1206,16 +1207,16 @@ kind = "function_declaration"
 name = "scenario60"
 
 [expect.statements.span]
-start_line = 988
+start_line = 989
 start_column = 1
-end_line = 1001
+end_line = 1002
 end_column = 2
 
 [expect.statements.block]
 statement_kinds = [
     "var_declaration",
     "for_in",
-    "return_statement",
+    "return_statement"
 ]
 
 [[expect.statements]]
@@ -1224,16 +1225,16 @@ kind = "function_declaration"
 name = "scenario61"
 
 [expect.statements.span]
-start_line = 1003
+start_line = 1004
 start_column = 1
-end_line = 1016
+end_line = 1017
 end_column = 2
 
 [expect.statements.block]
 statement_kinds = [
     "var_declaration",
     "for_in",
-    "return_statement",
+    "return_statement"
 ]
 
 [[expect.statements]]
@@ -1242,16 +1243,16 @@ kind = "function_declaration"
 name = "scenario62"
 
 [expect.statements.span]
-start_line = 1018
+start_line = 1019
 start_column = 1
-end_line = 1031
+end_line = 1032
 end_column = 2
 
 [expect.statements.block]
 statement_kinds = [
     "var_declaration",
     "for_in",
-    "return_statement",
+    "return_statement"
 ]
 
 [[expect.statements]]
@@ -1260,16 +1261,16 @@ kind = "function_declaration"
 name = "scenario63"
 
 [expect.statements.span]
-start_line = 1033
+start_line = 1034
 start_column = 1
-end_line = 1046
+end_line = 1047
 end_column = 2
 
 [expect.statements.block]
 statement_kinds = [
     "var_declaration",
     "for_in",
-    "return_statement",
+    "return_statement"
 ]
 
 [[expect.statements]]
@@ -1278,16 +1279,16 @@ kind = "function_declaration"
 name = "scenario64"
 
 [expect.statements.span]
-start_line = 1048
+start_line = 1049
 start_column = 1
-end_line = 1061
+end_line = 1062
 end_column = 2
 
 [expect.statements.block]
 statement_kinds = [
     "var_declaration",
     "for_in",
-    "return_statement",
+    "return_statement"
 ]
 
 [[expect.statements]]
@@ -1296,16 +1297,16 @@ kind = "function_declaration"
 name = "scenario65"
 
 [expect.statements.span]
-start_line = 1063
+start_line = 1064
 start_column = 1
-end_line = 1076
+end_line = 1077
 end_column = 2
 
 [expect.statements.block]
 statement_kinds = [
     "var_declaration",
     "for_in",
-    "return_statement",
+    "return_statement"
 ]
 
 [[expect.statements]]
@@ -1314,16 +1315,16 @@ kind = "function_declaration"
 name = "scenario66"
 
 [expect.statements.span]
-start_line = 1078
+start_line = 1079
 start_column = 1
-end_line = 1091
+end_line = 1092
 end_column = 2
 
 [expect.statements.block]
 statement_kinds = [
     "var_declaration",
     "for_in",
-    "return_statement",
+    "return_statement"
 ]
 
 [[expect.statements]]
@@ -1332,16 +1333,16 @@ kind = "function_declaration"
 name = "scenario67"
 
 [expect.statements.span]
-start_line = 1093
+start_line = 1094
 start_column = 1
-end_line = 1106
+end_line = 1107
 end_column = 2
 
 [expect.statements.block]
 statement_kinds = [
     "var_declaration",
     "for_in",
-    "return_statement",
+    "return_statement"
 ]
 
 [[expect.statements]]
@@ -1350,16 +1351,16 @@ kind = "function_declaration"
 name = "scenario68"
 
 [expect.statements.span]
-start_line = 1108
+start_line = 1109
 start_column = 1
-end_line = 1121
+end_line = 1122
 end_column = 2
 
 [expect.statements.block]
 statement_kinds = [
     "var_declaration",
     "for_in",
-    "return_statement",
+    "return_statement"
 ]
 
 [[expect.statements]]
@@ -1368,16 +1369,16 @@ kind = "function_declaration"
 name = "scenario69"
 
 [expect.statements.span]
-start_line = 1123
+start_line = 1124
 start_column = 1
-end_line = 1136
+end_line = 1137
 end_column = 2
 
 [expect.statements.block]
 statement_kinds = [
     "var_declaration",
     "for_in",
-    "return_statement",
+    "return_statement"
 ]
 
 [[expect.statements]]
@@ -1386,16 +1387,16 @@ kind = "function_declaration"
 name = "scenario70"
 
 [expect.statements.span]
-start_line = 1138
+start_line = 1139
 start_column = 1
-end_line = 1151
+end_line = 1152
 end_column = 2
 
 [expect.statements.block]
 statement_kinds = [
     "var_declaration",
     "for_in",
-    "return_statement",
+    "return_statement"
 ]
 
 [[expect.statements]]
@@ -1404,16 +1405,16 @@ kind = "function_declaration"
 name = "scenario71"
 
 [expect.statements.span]
-start_line = 1153
+start_line = 1154
 start_column = 1
-end_line = 1166
+end_line = 1167
 end_column = 2
 
 [expect.statements.block]
 statement_kinds = [
     "var_declaration",
     "for_in",
-    "return_statement",
+    "return_statement"
 ]
 
 [[expect.statements]]
@@ -1422,16 +1423,16 @@ kind = "function_declaration"
 name = "scenario72"
 
 [expect.statements.span]
-start_line = 1168
+start_line = 1169
 start_column = 1
-end_line = 1181
+end_line = 1182
 end_column = 2
 
 [expect.statements.block]
 statement_kinds = [
     "var_declaration",
     "for_in",
-    "return_statement",
+    "return_statement"
 ]
 
 [[expect.statements]]
@@ -1440,16 +1441,16 @@ kind = "function_declaration"
 name = "scenario73"
 
 [expect.statements.span]
-start_line = 1183
+start_line = 1184
 start_column = 1
-end_line = 1196
+end_line = 1197
 end_column = 2
 
 [expect.statements.block]
 statement_kinds = [
     "var_declaration",
     "for_in",
-    "return_statement",
+    "return_statement"
 ]
 
 [[expect.statements]]
@@ -1458,16 +1459,16 @@ kind = "function_declaration"
 name = "scenario74"
 
 [expect.statements.span]
-start_line = 1198
+start_line = 1199
 start_column = 1
-end_line = 1211
+end_line = 1212
 end_column = 2
 
 [expect.statements.block]
 statement_kinds = [
     "var_declaration",
     "for_in",
-    "return_statement",
+    "return_statement"
 ]
 
 [[expect.statements]]
@@ -1476,16 +1477,16 @@ kind = "function_declaration"
 name = "scenario75"
 
 [expect.statements.span]
-start_line = 1213
+start_line = 1214
 start_column = 1
-end_line = 1226
+end_line = 1227
 end_column = 2
 
 [expect.statements.block]
 statement_kinds = [
     "var_declaration",
     "for_in",
-    "return_statement",
+    "return_statement"
 ]
 
 [[expect.statements]]
@@ -1494,16 +1495,16 @@ kind = "function_declaration"
 name = "scenario76"
 
 [expect.statements.span]
-start_line = 1228
+start_line = 1229
 start_column = 1
-end_line = 1241
+end_line = 1242
 end_column = 2
 
 [expect.statements.block]
 statement_kinds = [
     "var_declaration",
     "for_in",
-    "return_statement",
+    "return_statement"
 ]
 
 [[expect.statements]]
@@ -1512,16 +1513,16 @@ kind = "function_declaration"
 name = "scenario77"
 
 [expect.statements.span]
-start_line = 1243
+start_line = 1244
 start_column = 1
-end_line = 1256
+end_line = 1257
 end_column = 2
 
 [expect.statements.block]
 statement_kinds = [
     "var_declaration",
     "for_in",
-    "return_statement",
+    "return_statement"
 ]
 
 [[expect.statements]]
@@ -1530,16 +1531,16 @@ kind = "function_declaration"
 name = "scenario78"
 
 [expect.statements.span]
-start_line = 1258
+start_line = 1259
 start_column = 1
-end_line = 1271
+end_line = 1272
 end_column = 2
 
 [expect.statements.block]
 statement_kinds = [
     "var_declaration",
     "for_in",
-    "return_statement",
+    "return_statement"
 ]
 
 [[expect.statements]]
@@ -1548,14 +1549,42 @@ kind = "function_declaration"
 name = "scenario79"
 
 [expect.statements.span]
-start_line = 1273
+start_line = 1274
 start_column = 1
-end_line = 1286
+end_line = 1287
 end_column = 2
 
 [expect.statements.block]
 statement_kinds = [
     "var_declaration",
     "for_in",
-    "return_statement",
+    "return_statement"
+]
+
+[[expect.statements]]
+index = 82
+kind = "function_declaration"
+name = "scenario80"
+
+[expect.statements.span]
+start_line = 1289
+start_column = 1
+end_line = 1304
+end_column = 2
+
+[expect.statements.block]
+statement_kinds = [
+    "val_declaration",
+    "val_declaration",
+    "val_declaration",
+    "val_declaration",
+    "expression",
+    "expression",
+    "expression",
+    "expression",
+    "val_declaration",
+    "expression",
+    "expression",
+    "val_declaration",
+    "return_statement"
 ]

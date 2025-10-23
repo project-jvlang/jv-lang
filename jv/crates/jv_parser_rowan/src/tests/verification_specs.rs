@@ -1,12 +1,10 @@
 use std::path::Path;
 
-use crate::lowering::{lower_program, LoweringDiagnosticSeverity};
-use crate::parser::parse as parse_tokens;
+use crate::frontend::RowanPipeline;
+use crate::lowering::LoweringDiagnosticSeverity;
 use crate::verification::{self, HarnessReport, StatementKindKey};
-use crate::{JvLanguage, ParseBuilder};
 use jv_ast::expression::ParameterProperty;
-use jv_lexer::{Lexer, TokenType};
-use rowan::SyntaxNode;
+use jv_lexer::TokenType;
 
 #[test]
 fn specification_fixtures_produce_expected_ast() {
@@ -53,10 +51,12 @@ fn harness_fixture_parses_successfully() {
         manifest_dir.join("../../../tests/parser_rowan_specs/fixtures/package_and_bindings.jv");
     let source =
         std::fs::read_to_string(&source_path).expect("package_and_bindings fixture to be readable");
-    let tokens = Lexer::new(source)
-        .tokenize()
-        .expect("lexing harness fixture");
+    let pipeline = RowanPipeline::default();
+    let debug = pipeline
+        .execute_with_debug(&source)
+        .expect("Rowan pipeline to execute on harness fixture");
 
+    let tokens = debug.artifacts().tokens();
     assert!(
         matches!(
             tokens.first().map(|token| &token.token_type),
@@ -65,37 +65,33 @@ fn harness_fixture_parses_successfully() {
         "expected first token to be package keyword"
     );
 
-    let parse_output = parse_tokens(&tokens);
     assert!(
-        parse_output.diagnostics.is_empty(),
+        debug.parser_diagnostics().is_empty(),
         "expected no parser diagnostics, got {:?}",
-        parse_output.diagnostics
+        debug.parser_diagnostics()
     );
-
-    let green = ParseBuilder::build_from_events(&parse_output.events, &tokens);
-    let syntax: SyntaxNode<JvLanguage> = SyntaxNode::new_root(green);
-    let lowering = lower_program(&syntax, &tokens);
     assert!(
-        lowering
-            .diagnostics
+        debug
+            .lowering_diagnostics()
             .iter()
             .all(|diag| diag.severity != LoweringDiagnosticSeverity::Error),
         "expected no lowering errors, got {:?}",
-        lowering.diagnostics
+        debug.lowering_diagnostics()
     );
-    let warning_count = lowering
-        .diagnostics
+    let warning_count = debug
+        .lowering_diagnostics()
         .iter()
         .filter(|diag| diag.severity == LoweringDiagnosticSeverity::Warning)
         .count();
     assert_eq!(
-        warning_count, 0,
+        warning_count,
+        0,
         "expected no lowering warnings, got {:?}",
-        lowering.diagnostics
+        debug.lowering_diagnostics()
     );
 
     assert_eq!(
-        lowering.statements.len(),
+        debug.statements().len(),
         4,
         "expected four statements (package, import, val, var)"
     );
@@ -107,25 +103,21 @@ fn function_block_statements_are_lowered() {
     let source_path = manifest_dir.join("../../../jv/tests/fixtures/02-variables.jv");
     let source =
         std::fs::read_to_string(&source_path).expect("variables fixture should be readable");
-    let tokens = Lexer::new(source)
-        .tokenize()
-        .expect("lexing variables fixture");
-
-    let parse_output = parse_tokens(&tokens);
-    let green = ParseBuilder::build_from_events(&parse_output.events, &tokens);
-    let syntax: SyntaxNode<JvLanguage> = SyntaxNode::new_root(green);
-    let lowering = lower_program(&syntax, &tokens);
+    let pipeline = RowanPipeline::default();
+    let debug = pipeline
+        .execute_with_debug(&source)
+        .expect("Rowan pipeline to execute on variables fixture");
     assert!(
-        lowering
-            .diagnostics
+        debug
+            .lowering_diagnostics()
             .iter()
             .all(|diag| diag.severity != LoweringDiagnosticSeverity::Error),
         "expected no lowering errors, got {:?}",
-        lowering.diagnostics
+        debug.lowering_diagnostics()
     );
 
-    let function_body = lowering
-        .statements
+    let function_body = debug
+        .statements()
         .iter()
         .find_map(|statement| match statement {
             jv_ast::Statement::FunctionDeclaration { name, body, .. } if name == "main" => {
@@ -165,26 +157,22 @@ fn comment_fixture_emits_comment_statements() {
         manifest_dir.join("../../../tests/parser_rowan_specs/fixtures/comment_visibility.jv");
     let source = std::fs::read_to_string(&source_path)
         .expect("comment_visibility fixture should be readable");
-    let tokens = Lexer::new(source)
-        .tokenize()
-        .expect("lexing comment_visibility fixture");
-
-    let parse_output = parse_tokens(&tokens);
-    let green = ParseBuilder::build_from_events(&parse_output.events, &tokens);
-    let syntax: SyntaxNode<JvLanguage> = SyntaxNode::new_root(green);
-    let lowering = lower_program(&syntax, &tokens);
+    let pipeline = RowanPipeline::default();
+    let debug = pipeline
+        .execute_with_debug(&source)
+        .expect("Rowan pipeline to execute on comment fixture");
 
     assert!(
-        lowering
-            .diagnostics
+        debug
+            .lowering_diagnostics()
             .iter()
             .all(|diag| diag.severity != LoweringDiagnosticSeverity::Error),
         "expected no lowering errors, got {:?}",
-        lowering.diagnostics
+        debug.lowering_diagnostics()
     );
 
-    let kinds: Vec<StatementKindKey> = lowering
-        .statements
+    let kinds: Vec<StatementKindKey> = debug
+        .statements()
         .iter()
         .map(StatementKindKey::from_statement)
         .collect();
@@ -211,32 +199,27 @@ fn function_parameters_preserve_modifiers() {
         fun modifiers(val name: String, var age: Int, ref mut handle: Handle) = name
     "#;
 
-    let tokens = Lexer::new(source.to_string())
-        .tokenize()
-        .expect("lexing parameter modifier sample");
+    let pipeline = RowanPipeline::default();
+    let debug = pipeline
+        .execute_with_debug(source)
+        .expect("Rowan pipeline to execute on inline modifiers source");
 
-    let parse_output = parse_tokens(&tokens);
     assert!(
-        parse_output.diagnostics.is_empty(),
+        debug.parser_diagnostics().is_empty(),
         "expected no parser diagnostics, got {:?}",
-        parse_output.diagnostics
+        debug.parser_diagnostics()
     );
-
-    let green = ParseBuilder::build_from_events(&parse_output.events, &tokens);
-    let syntax: SyntaxNode<JvLanguage> = SyntaxNode::new_root(green);
-    let lowering = lower_program(&syntax, &tokens);
-
     assert!(
-        lowering
-            .diagnostics
+        debug
+            .lowering_diagnostics()
             .iter()
             .all(|diag| diag.severity != LoweringDiagnosticSeverity::Error),
         "expected no lowering errors, got {:?}",
-        lowering.diagnostics
+        debug.lowering_diagnostics()
     );
 
-    let function = lowering
-        .statements
+    let function = debug
+        .statements()
         .iter()
         .find_map(|statement| match statement {
             jv_ast::Statement::FunctionDeclaration {

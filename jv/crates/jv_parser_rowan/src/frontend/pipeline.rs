@@ -1,6 +1,6 @@
 use super::diagnostics;
-use crate::lowering::{self, LoweringDiagnosticSeverity, LoweringResult};
-use crate::parser::{self, DiagnosticSeverity as ParserDiagnosticSeverity};
+use crate::lowering::{self, LoweringDiagnostic, LoweringDiagnosticSeverity, LoweringResult};
+use crate::parser::{self, DiagnosticSeverity as ParserDiagnosticSeverity, ParserDiagnostic};
 use crate::ParseBuilder;
 use jv_ast::{Program, Span, Statement};
 use jv_lexer::Lexer;
@@ -11,6 +11,53 @@ use rowan::SyntaxNode;
 
 /// Rowan ベースのパイプライン実装。
 pub struct RowanPipeline;
+
+/// Rowanパイプラインのデバッグ用成果物。
+pub struct RowanPipelineDebug {
+    artifacts: PipelineArtifacts,
+    parser_diagnostics: Vec<ParserDiagnostic>,
+    parser_recovered: bool,
+    lowering_diagnostics: Vec<LoweringDiagnostic>,
+    lowered_statements: Vec<Statement>,
+    pipeline_error: Option<ParseError>,
+}
+
+impl RowanPipelineDebug {
+    /// パイプライン成果物への参照を取得する。
+    pub fn artifacts(&self) -> &PipelineArtifacts {
+        &self.artifacts
+    }
+
+    /// パイプライン成果物を消費して取り出す。
+    pub fn into_artifacts(self) -> PipelineArtifacts {
+        self.artifacts
+    }
+
+    /// パーサ診断の一覧を返す。
+    pub fn parser_diagnostics(&self) -> &[ParserDiagnostic] {
+        &self.parser_diagnostics
+    }
+
+    /// パーサがエラー回復を行ったかを返す。
+    pub fn parser_recovered(&self) -> bool {
+        self.parser_recovered
+    }
+
+    /// ローワリング診断の一覧を返す。
+    pub fn lowering_diagnostics(&self) -> &[LoweringDiagnostic] {
+        &self.lowering_diagnostics
+    }
+
+    /// ローワリング後のステートメント列を返す。
+    pub fn statements(&self) -> &[Statement] {
+        &self.lowered_statements
+    }
+
+    /// パイプラインがエラーを報告した場合はその内容を返す。
+    pub fn pipeline_error(&self) -> Option<&ParseError> {
+        self.pipeline_error.as_ref()
+    }
+}
 
 impl Default for RowanPipeline {
     fn default() -> Self {
@@ -61,6 +108,17 @@ impl RowanPipeline {
 
 impl ParserPipeline for RowanPipeline {
     fn execute(&self, source: &str) -> Result<PipelineArtifacts, ParseError> {
+        let debug = self.execute_with_debug(source)?;
+        match debug.pipeline_error {
+            Some(error) => Err(error),
+            None => Ok(debug.into_artifacts()),
+        }
+    }
+}
+
+impl RowanPipeline {
+    /// デバッグ用の成果物を含めてパイプラインを実行する。
+    pub fn execute_with_debug(&self, source: &str) -> Result<RowanPipelineDebug, ParseError> {
         let tokens = Lexer::new(source.to_string()).tokenize()?;
 
         let preprocess_result = jv_parser_preprocess::run(tokens);
@@ -72,83 +130,99 @@ impl ParserPipeline for RowanPipeline {
         }
 
         let parse_output = parser::parse(&tokens);
-
-        if let Some(diagnostic) = parse_output
+        let parser_diagnostics = parse_output.diagnostics.clone();
+        let parser_recovered = parse_output.recovered;
+        let parser_error = parse_output
             .diagnostics
             .iter()
             .find(|diagnostic| matches!(diagnostic.severity, ParserDiagnosticSeverity::Error))
-        {
-            let span = diagnostics::token_span_to_span(diagnostic.span, &tokens)
-                .unwrap_or_else(Span::dummy);
-            let message = format!(
-                "[{}] {}",
-                diagnostics::ROWAN_PARSER_STAGE,
-                diagnostic.message
-            );
-            return Err(ParseError::Syntax { message, span });
-        }
+            .map(|diagnostic| {
+                let span = diagnostics::token_span_to_span(diagnostic.span, &tokens)
+                    .unwrap_or_else(Span::dummy);
+                let message = format!(
+                    "[{}] {}",
+                    diagnostics::ROWAN_PARSER_STAGE,
+                    diagnostic.message.clone()
+                );
+                ParseError::Syntax { message, span }
+            });
 
         let green_tree = ParseBuilder::build_from_events(&parse_output.events, &tokens);
         let syntax_node = SyntaxNode::<crate::JvLanguage>::new_root(green_tree);
         let lowering_result = lowering::lower_program(&syntax_node, &tokens);
-
-        if let Some(diagnostic) = lowering_result
+        let lowering_diagnostics = lowering_result.diagnostics.clone();
+        let lowering_error = lowering_result
             .diagnostics
             .iter()
             .find(|diagnostic| matches!(diagnostic.severity, LoweringDiagnosticSeverity::Error))
-        {
-            let span = diagnostic.span.clone().unwrap_or_else(Span::dummy);
-            let message = format!(
-                "[{}] {}",
-                diagnostics::ROWAN_LOWERING_STAGE,
-                diagnostic.message.clone()
-            );
-            return Err(ParseError::Syntax { message, span });
-        }
+            .map(|diagnostic| {
+                let span = diagnostic.span.clone().unwrap_or_else(Span::dummy);
+                let message = format!(
+                    "[{}] {}",
+                    diagnostics::ROWAN_LOWERING_STAGE,
+                    diagnostic.message.clone()
+                );
+                ParseError::Syntax { message, span }
+            });
 
         let LoweringResult {
             statements,
-            diagnostics: lowering_diagnostics,
+            diagnostics: lowering_diagnostics_current,
         } = lowering_result;
 
+        let lowered_statements = statements.clone();
         let program = self.assemble_program(statements);
-        let semantics_result = jv_parser_semantics::run(&tokens, program);
 
-        if let Some(stage_name) = semantics_result.halted_stage {
-            let message = semantics_result
-                .staged_diagnostics
-                .first()
-                .map(|diagnostic| format!("[{}] {}", stage_name, diagnostic.message()))
-                .unwrap_or_else(|| format!("Stage 2 semantics halted at {}", stage_name));
-            let span = semantics_result
-                .staged_diagnostics
-                .first()
-                .and_then(|diagnostic| diagnostic.span().cloned())
-                .unwrap_or_else(Span::dummy);
-            return Err(ParseError::Syntax { message, span });
-        }
+        let (program, semantics_diagnostics, semantics_halted_stage, semantics_error) =
+            if parser_error.is_none() && lowering_error.is_none() {
+                let semantics_result = jv_parser_semantics::run(&tokens, program);
+                let error = if let Some(stage_name) = semantics_result.halted_stage {
+                    let message = semantics_result
+                        .staged_diagnostics
+                        .first()
+                        .map(|diagnostic| format!("[{}] {}", stage_name, diagnostic.message()))
+                        .unwrap_or_else(|| format!("Stage 2 semantics halted at {}", stage_name));
+                    let span = semantics_result
+                        .staged_diagnostics
+                        .first()
+                        .and_then(|diagnostic| diagnostic.span().cloned())
+                        .unwrap_or_else(Span::dummy);
+                    Some(ParseError::Syntax { message, span })
+                } else {
+                    None
+                };
+                (
+                    semantics_result.program,
+                    semantics_result.staged_diagnostics,
+                    semantics_result.halted_stage,
+                    error,
+                )
+            } else {
+                (program, Vec::new(), None, None)
+            };
 
-        let jv_parser_semantics::SemanticsResult {
-            program,
-            staged_diagnostics: semantics_diagnostics,
-            halted_stage: semantics_halted_stage,
-        } = semantics_result;
+        let pipeline_error = parser_error.or(lowering_error).or(semantics_error);
 
         let frontend_diagnostics = diagnostics::compose_frontend_diagnostics(
             &tokens,
             &parse_output.diagnostics,
-            &lowering_diagnostics,
+            &lowering_diagnostics_current,
             preprocess_diagnostics,
             preprocess_halted_stage,
             semantics_diagnostics,
             semantics_halted_stage,
         );
 
-        Ok(PipelineArtifacts::new(
-            program,
-            tokens,
-            frontend_diagnostics,
-        ))
+        let artifacts = PipelineArtifacts::new(program, tokens, frontend_diagnostics);
+
+        Ok(RowanPipelineDebug {
+            artifacts,
+            parser_diagnostics,
+            parser_recovered,
+            lowering_diagnostics,
+            lowered_statements,
+            pipeline_error,
+        })
     }
 }
 

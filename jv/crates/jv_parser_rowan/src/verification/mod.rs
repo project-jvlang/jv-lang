@@ -12,12 +12,11 @@ pub use rules::{
     StatementSummary,
 };
 
-use crate::lowering::{lower_program, LoweringDiagnosticSeverity};
-use crate::parser::parse;
-use crate::{JvLanguage, ParseBuilder};
+use crate::frontend::RowanPipeline;
+use crate::lowering::LoweringDiagnosticSeverity;
 use fixtures::FixtureSpec as Fixture;
-use jv_lexer::{LexError, Lexer};
-use rowan::SyntaxNode;
+use jv_lexer::LexError;
+use jv_parser_frontend::ParseError;
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
@@ -82,6 +81,14 @@ pub enum HarnessError {
         path: PathBuf,
         /// レキサエラー。
         source: LexError,
+    },
+    /// パイプラインの実行に失敗した。
+    #[error("pipeline execution failed for {path}: {error}")]
+    Pipeline {
+        /// パイプライン実行対象のソースパス。
+        path: PathBuf,
+        /// 発生したパースエラー。
+        error: ParseError,
     },
     /// レポートの JSON 変換に失敗した。
     #[error("failed to serialize verification report: {source}")]
@@ -232,23 +239,30 @@ fn evaluate_fixture(
         }
     })?;
 
-    let mut lexer = Lexer::new(source);
-    let tokens = lexer.tokenize().map_err(|source| HarnessError::Lex {
-        path: fixture.source_path.clone(),
-        source,
-    })?;
+    let pipeline = RowanPipeline::default();
+    let debug = match pipeline.execute_with_debug(&source) {
+        Ok(debug) => debug,
+        Err(ParseError::LexError(source_error)) => {
+            return Err(HarnessError::Lex {
+                path: fixture.source_path.clone(),
+                source: source_error,
+            });
+        }
+        Err(error) => {
+            return Err(HarnessError::Pipeline {
+                path: fixture.source_path.clone(),
+                error,
+            });
+        }
+    };
 
-    let parse_output = parse(&tokens);
-    let green = ParseBuilder::build_from_events(&parse_output.events, &tokens);
-    let syntax: SyntaxNode<JvLanguage> = SyntaxNode::new_root(green);
-    let lowering = lower_program(&syntax, &tokens);
-
-    let mut violations = rules::apply_expectations(&fixture.expect, &lowering.statements);
+    let lowered_statements = debug.statements();
+    let mut violations = rules::apply_expectations(&fixture.expect, lowered_statements);
 
     if let Some(message) = fixture
         .expect
         .parser_diagnostics
-        .validate(parse_output.diagnostics.len())
+        .validate(debug.parser_diagnostics().len())
     {
         violations.push(RuleViolation {
             rule: "parser_diagnostics".to_string(),
@@ -256,8 +270,8 @@ fn evaluate_fixture(
         });
     }
 
-    let lowering_error_count = lowering
-        .diagnostics
+    let lowering_error_count = debug
+        .lowering_diagnostics()
         .iter()
         .filter(|diag| diag.severity == LoweringDiagnosticSeverity::Error)
         .count();
@@ -273,18 +287,17 @@ fn evaluate_fixture(
         });
     }
 
-    let parser_diagnostics = parse_output
-        .diagnostics
+    let parser_diagnostics = debug
+        .parser_diagnostics()
         .iter()
         .map(ParserDiagnosticSummary::from)
         .collect();
-    let lowering_diagnostics = lowering
-        .diagnostics
+    let lowering_diagnostics = debug
+        .lowering_diagnostics()
         .iter()
         .map(LoweringDiagnosticSummary::from)
         .collect();
-    let statements = lowering
-        .statements
+    let statements = lowered_statements
         .iter()
         .map(StatementSummary::from_statement)
         .collect();
@@ -296,7 +309,7 @@ fn evaluate_fixture(
         spec,
         description: fixture.description.clone(),
         source,
-        parser_recovered: parse_output.recovered,
+        parser_recovered: debug.parser_recovered(),
         parser_diagnostics,
         lowering_diagnostics,
         statements,
