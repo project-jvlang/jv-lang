@@ -17,6 +17,9 @@ jv_lexer = { path = "../jv_lexer" }
 jv_ast = { path = "../jv_ast" }
 jv_parser_syntax_support = { path = "../jv_parser_syntax_support" }
 jv_type_inference_java = { path = "../jv_type_inference_java" }
+jv_parser_frontend = { path = "../jv_parser_frontend" }
+jv_parser_preprocess = { path = "../jv_parser_preprocess" }
+jv_parser_semantics = { path = "../jv_parser_semantics" }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 thiserror = "1.0"

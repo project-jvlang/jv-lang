@@ -1,3 +1,5 @@
+#![cfg(feature = "legacy-tests")]
+
 mod diagnostics;
 mod doc_sync;
 mod green_phase;

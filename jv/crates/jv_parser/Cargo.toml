@@ -4,15 +4,18 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[features]
+default = ["rowan-parser"]
+rowan-parser = ["dep:jv_parser_rowan", "jv_parser_rowan/rowan-parser"]
+legacy-tests = []
+
 [dependencies]
-chumsky.workspace = true
 jv_lexer.workspace = true
 jv_ast.workspace = true
-jv_parser_syntax.workspace = true
 jv_parser_preprocess.workspace = true
 jv_parser_semantics.workspace = true
 jv_parser_frontend.workspace = true
-thiserror.workspace = true
+jv_parser_rowan = { path = "../jv_parser_rowan", optional = true }
 
 [dev-dependencies]
 test-case.workspace = true

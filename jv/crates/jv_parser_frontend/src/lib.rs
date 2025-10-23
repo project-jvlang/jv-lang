@@ -2,9 +2,12 @@
 // Extracted from jv_parser for memory-efficient compilation
 
 mod formatter;
+mod pipeline;
 mod views;
 
 pub use formatter::{
     Diagnostic, DiagnosticContext, DiagnosticFormatter, DiagnosticSeverity, DiagnosticSource,
+    ParserDiagnosticView,
 };
-pub use views::{FrontendDiagnostics, FrontendOutput};
+pub use pipeline::{ParseError, ParserPipeline, PipelineArtifacts};
+pub use views::{FrontendDiagnostics, FrontendOutput, ProgramView};

@@ -19,6 +19,9 @@ use jv_lexer::Token;
 use rowan::{GreenNode, GreenNodeBuilder, Language};
 
 #[cfg(feature = "rowan-parser")]
+/// Rowan パイプライン統合。
+pub mod frontend;
+#[cfg(feature = "rowan-parser")]
 /// Rowanノードからjv_astへのローワリング層。
 pub mod lowering;
 #[cfg(feature = "rowan-parser")]

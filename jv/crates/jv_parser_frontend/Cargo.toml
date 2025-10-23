@@ -5,10 +5,8 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
-chumsky.workspace = true
 jv_lexer.workspace = true
 jv_ast.workspace = true
-jv_parser_syntax = { path = "../jv_parser_syntax" }
 jv_parser_preprocess = { path = "../jv_parser_preprocess" }
 jv_parser_semantics = { path = "../jv_parser_semantics" }
 thiserror.workspace = true
