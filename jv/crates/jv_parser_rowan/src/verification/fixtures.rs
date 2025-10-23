@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use super::HarnessError;
 
@@ -83,7 +83,7 @@ fn resolve_source_path(
 }
 
 /// 期待値定義。
-#[derive(Debug, Clone, Deserialize, Default)]
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
 #[serde(default)]
 pub struct ExpectationSpec {
     /// 期待するトップレベルステートメント数。
@@ -97,7 +97,7 @@ pub struct ExpectationSpec {
 }
 
 /// 診断の許容条件。
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(default)]
 pub struct DiagnosticsExpectation {
     #[serde(default)]
@@ -142,7 +142,7 @@ impl DiagnosticsExpectation {
 }
 
 /// ステートメント単位の期待値。
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct StatementExpectation {
     /// 対象とするステートメントのインデックス。
     pub index: usize,
@@ -160,7 +160,7 @@ pub struct StatementExpectation {
 }
 
 /// ブロック内ステートメントの期待値。
-#[derive(Debug, Clone, Deserialize, Default)]
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
 #[serde(default)]
 pub struct BlockExpectation {
     /// ブロックに出現するステートメント種別の列。
@@ -168,7 +168,7 @@ pub struct BlockExpectation {
 }
 
 /// スパンの期待値。
-#[derive(Debug, Clone, Deserialize, Default)]
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
 #[serde(default)]
 pub struct SpanExpectation {
     /// 開始行。

@@ -1,0 +1,65 @@
+description = "Auto-generated expectation for jv/tests/lang/strings/sequence_interpolation.jv"
+source = "jv/tests/lang/strings/sequence_interpolation.jv"
+
+[expect]
+statement_count = 3
+
+[expect.parser_diagnostics]
+allowed = false
+max = 0
+
+[expect.lowering_diagnostics]
+allowed = false
+max = 0
+
+[[expect.statements]]
+index = 0
+kind = "import"
+name = "jv.collections.SequenceCore"
+
+[expect.statements.span]
+start_line = 1
+start_column = 1
+end_line = 1
+end_column = 35
+
+[[expect.statements]]
+index = 1
+kind = "function_declaration"
+name = "inlineSequenceMessage"
+
+[expect.statements.span]
+start_line = 3
+start_column = 1
+end_line = 5
+end_column = 2
+
+[expect.statements.block]
+statement_kinds = [
+    "return_statement",
+    "expression",
+]
+
+[[expect.statements]]
+index = 2
+kind = "function_declaration"
+name = "main"
+
+[expect.statements.span]
+start_line = 7
+start_column = 1
+end_line = 20
+end_column = 2
+
+[expect.statements.block]
+statement_kinds = [
+    "val_declaration",
+    "val_declaration",
+    "val_declaration",
+    "expression",
+    "expression",
+    "val_declaration",
+    "expression",
+    "expression",
+    "expression",
+]

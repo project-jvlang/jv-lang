@@ -30,3 +30,8 @@ ungrammar = "1.16.1"
 name = "rowan_spec_harness"
 path = "src/harness/rowan_spec.rs"
 required-features = ["rowan-parser"]
+
+[[bin]]
+name = "rowan_spec_generate"
+path = "src/tools/generate_verification_spec.rs"
+required-features = ["rowan-parser"]

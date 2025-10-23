@@ -1,0 +1,56 @@
+description = "Auto-generated expectation for jv/tests/fixtures/java_annotations/pass_through.jv"
+source = "jv/tests/fixtures/java_annotations/pass_through.jv"
+
+[expect]
+statement_count = 4
+
+[expect.parser_diagnostics]
+allowed = true
+max = 4
+
+[expect.lowering_diagnostics]
+allowed = true
+max = 2
+
+[[expect.statements]]
+index = 0
+kind = "package"
+name = "fixtures"
+
+[expect.statements.span]
+start_line = 1
+start_column = 1
+end_line = 1
+end_column = 17
+
+[[expect.statements]]
+index = 1
+kind = "expression"
+
+[expect.statements.span]
+start_line = 3
+start_column = 1
+end_line = 3
+end_column = 11
+
+[[expect.statements]]
+index = 2
+kind = "class_declaration"
+name = "Service"
+
+[expect.statements.span]
+start_line = 4
+start_column = 1
+end_line = 11
+end_column = 6
+
+[[expect.statements]]
+index = 3
+kind = "class_declaration"
+name = "Repository"
+
+[expect.statements.span]
+start_line = 14
+start_column = 1
+end_line = 15
+end_column = 1

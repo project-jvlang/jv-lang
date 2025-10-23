@@ -1,0 +1,66 @@
+description = "Auto-generated expectation for jv/tests/fixtures/pattern/example26.jv"
+source = "jv/tests/fixtures/pattern/example26.jv"
+
+[expect]
+statement_count = 4
+
+[expect.parser_diagnostics]
+allowed = true
+max = 8
+
+[expect.lowering_diagnostics]
+allowed = true
+max = 6
+
+[[expect.statements]]
+index = 0
+kind = "data_class_declaration"
+name = "Range"
+
+[expect.statements.span]
+start_line = 1
+start_column = 1
+end_line = 1
+end_column = 18
+
+[[expect.statements]]
+index = 1
+kind = "data_class_declaration"
+name = "Span"
+
+[expect.statements.span]
+start_line = 2
+start_column = 1
+end_line = 2
+end_column = 17
+
+[[expect.statements]]
+index = 2
+kind = "function_declaration"
+name = "spread"
+
+[expect.statements.span]
+start_line = 4
+start_column = 1
+end_line = 9
+end_column = 2
+
+[expect.statements.block]
+statement_kinds = ["return_statement"]
+
+[[expect.statements]]
+index = 3
+kind = "function_declaration"
+name = "main"
+
+[expect.statements.span]
+start_line = 11
+start_column = 1
+end_line = 14
+end_column = 2
+
+[expect.statements.block]
+statement_kinds = [
+    "val_declaration",
+    "expression",
+]

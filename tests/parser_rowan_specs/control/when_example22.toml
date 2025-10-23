@@ -1,0 +1,41 @@
+description = "Auto-generated expectation for jv/tests/fixtures/pattern/example22.jv"
+source = "jv/tests/fixtures/pattern/example22.jv"
+
+[expect]
+statement_count = 2
+
+[expect.parser_diagnostics]
+allowed = false
+max = 0
+
+[expect.lowering_diagnostics]
+allowed = false
+max = 0
+
+[[expect.statements]]
+index = 0
+kind = "function_declaration"
+name = "message"
+
+[expect.statements.span]
+start_line = 1
+start_column = 1
+end_line = 8
+end_column = 2
+
+[expect.statements.block]
+statement_kinds = ["return_statement"]
+
+[[expect.statements]]
+index = 1
+kind = "function_declaration"
+name = "main"
+
+[expect.statements.span]
+start_line = 10
+start_column = 1
+end_line = 12
+end_column = 2
+
+[expect.statements.block]
+statement_kinds = ["expression"]

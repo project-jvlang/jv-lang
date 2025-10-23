@@ -1,0 +1,41 @@
+description = "Data class fixture lowers to data class and function statements"
+source = "jv/tests/fixtures/data_class.jv"
+
+[expect]
+statement_count = 2
+
+[expect.parser_diagnostics]
+allowed = true
+max = 4
+
+[expect.lowering_diagnostics]
+allowed = true
+max = 3
+
+[[expect.statements]]
+index = 0
+kind = "data_class_declaration"
+name = "Point"
+
+[expect.statements.span]
+start_line = 1
+start_column = 1
+end_line = 1
+end_column = 18
+
+[[expect.statements]]
+index = 1
+kind = "function_declaration"
+name = "main"
+
+[expect.statements.span]
+start_line = 3
+start_column = 1
+end_line = 6
+end_column = 2
+
+[expect.statements.block]
+statement_kinds = [
+    "val_declaration",
+    "expression",
+]

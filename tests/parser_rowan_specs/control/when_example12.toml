@@ -1,0 +1,55 @@
+description = "Auto-generated expectation for jv/tests/fixtures/pattern/example12.jv"
+source = "jv/tests/fixtures/pattern/example12.jv"
+
+[expect]
+statement_count = 3
+
+[expect.parser_diagnostics]
+allowed = true
+max = 4
+
+[expect.lowering_diagnostics]
+allowed = true
+max = 3
+
+[[expect.statements]]
+index = 0
+kind = "data_class_declaration"
+name = "Payload"
+
+[expect.statements.span]
+start_line = 1
+start_column = 1
+end_line = 1
+end_column = 20
+
+[[expect.statements]]
+index = 1
+kind = "function_declaration"
+name = "aggregate"
+
+[expect.statements.span]
+start_line = 3
+start_column = 1
+end_line = 10
+end_column = 2
+
+[expect.statements.block]
+statement_kinds = ["return_statement"]
+
+[[expect.statements]]
+index = 2
+kind = "function_declaration"
+name = "main"
+
+[expect.statements.span]
+start_line = 12
+start_column = 1
+end_line = 15
+end_column = 2
+
+[expect.statements.block]
+statement_kinds = [
+    "val_declaration",
+    "expression",
+]

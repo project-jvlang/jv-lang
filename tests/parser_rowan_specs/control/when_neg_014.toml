@@ -1,0 +1,27 @@
+description = "Auto-generated expectation for jv/tests/fixtures/pattern/neg-014.jv"
+source = "jv/tests/fixtures/pattern/neg-014.jv"
+
+[expect]
+statement_count = 1
+
+[expect.parser_diagnostics]
+allowed = false
+max = 0
+
+[expect.lowering_diagnostics]
+allowed = false
+max = 0
+
+[[expect.statements]]
+index = 0
+kind = "function_declaration"
+name = "evaluateSwitch"
+
+[expect.statements.span]
+start_line = 1
+start_column = 1
+end_line = 5
+end_column = 2
+
+[expect.statements.block]
+statement_kinds = ["return_statement"]

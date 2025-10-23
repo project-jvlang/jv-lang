@@ -1,0 +1,1561 @@
+description = "Auto-generated expectation for jv/tests/performance/phase1.jv"
+source = "jv/tests/performance/phase1.jv"
+
+[expect]
+statement_count = 82
+
+[expect.parser_diagnostics]
+allowed = false
+max = 0
+
+[expect.lowering_diagnostics]
+allowed = false
+max = 0
+
+[[expect.statements]]
+index = 0
+kind = "package"
+name = "perf.phase1"
+
+[expect.statements.span]
+start_line = 1
+start_column = 1
+end_line = 1
+end_column = 20
+
+[[expect.statements]]
+index = 1
+kind = "function_declaration"
+name = "main"
+
+[expect.statements.span]
+start_line = 3
+start_column = 1
+end_line = 86
+end_column = 2
+
+[expect.statements.block]
+statement_kinds = [
+    "var_declaration",
+    "assignment",
+    "assignment",
+    "assignment",
+    "assignment",
+    "assignment",
+    "assignment",
+    "assignment",
+    "assignment",
+    "assignment",
+    "assignment",
+    "assignment",
+    "assignment",
+    "assignment",
+    "assignment",
+    "assignment",
+    "assignment",
+    "assignment",
+    "assignment",
+    "assignment",
+    "assignment",
+    "assignment",
+    "assignment",
+    "assignment",
+    "assignment",
+    "assignment",
+    "assignment",
+    "assignment",
+    "assignment",
+    "assignment",
+    "assignment",
+    "assignment",
+    "assignment",
+    "assignment",
+    "assignment",
+    "assignment",
+    "assignment",
+    "assignment",
+    "assignment",
+    "assignment",
+    "assignment",
+    "assignment",
+    "assignment",
+    "assignment",
+    "assignment",
+    "assignment",
+    "assignment",
+    "assignment",
+    "assignment",
+    "assignment",
+    "assignment",
+    "assignment",
+    "assignment",
+    "assignment",
+    "assignment",
+    "assignment",
+    "assignment",
+    "assignment",
+    "assignment",
+    "assignment",
+    "assignment",
+    "assignment",
+    "assignment",
+    "assignment",
+    "assignment",
+    "assignment",
+    "assignment",
+    "assignment",
+    "assignment",
+    "assignment",
+    "assignment",
+    "assignment",
+    "assignment",
+    "assignment",
+    "assignment",
+    "assignment",
+    "assignment",
+    "assignment",
+    "assignment",
+    "assignment",
+    "assignment",
+    "val_declaration",
+]
+
+[[expect.statements]]
+index = 2
+kind = "function_declaration"
+name = "scenario0"
+
+[expect.statements.span]
+start_line = 88
+start_column = 1
+end_line = 101
+end_column = 2
+
+[expect.statements.block]
+statement_kinds = [
+    "var_declaration",
+    "for_in",
+    "return_statement",
+]
+
+[[expect.statements]]
+index = 3
+kind = "function_declaration"
+name = "scenario1"
+
+[expect.statements.span]
+start_line = 103
+start_column = 1
+end_line = 116
+end_column = 2
+
+[expect.statements.block]
+statement_kinds = [
+    "var_declaration",
+    "for_in",
+    "return_statement",
+]
+
+[[expect.statements]]
+index = 4
+kind = "function_declaration"
+name = "scenario2"
+
+[expect.statements.span]
+start_line = 118
+start_column = 1
+end_line = 131
+end_column = 2
+
+[expect.statements.block]
+statement_kinds = [
+    "var_declaration",
+    "for_in",
+    "return_statement",
+]
+
+[[expect.statements]]
+index = 5
+kind = "function_declaration"
+name = "scenario3"
+
+[expect.statements.span]
+start_line = 133
+start_column = 1
+end_line = 146
+end_column = 2
+
+[expect.statements.block]
+statement_kinds = [
+    "var_declaration",
+    "for_in",
+    "return_statement",
+]
+
+[[expect.statements]]
+index = 6
+kind = "function_declaration"
+name = "scenario4"
+
+[expect.statements.span]
+start_line = 148
+start_column = 1
+end_line = 161
+end_column = 2
+
+[expect.statements.block]
+statement_kinds = [
+    "var_declaration",
+    "for_in",
+    "return_statement",
+]
+
+[[expect.statements]]
+index = 7
+kind = "function_declaration"
+name = "scenario5"
+
+[expect.statements.span]
+start_line = 163
+start_column = 1
+end_line = 176
+end_column = 2
+
+[expect.statements.block]
+statement_kinds = [
+    "var_declaration",
+    "for_in",
+    "return_statement",
+]
+
+[[expect.statements]]
+index = 8
+kind = "function_declaration"
+name = "scenario6"
+
+[expect.statements.span]
+start_line = 178
+start_column = 1
+end_line = 191
+end_column = 2
+
+[expect.statements.block]
+statement_kinds = [
+    "var_declaration",
+    "for_in",
+    "return_statement",
+]
+
+[[expect.statements]]
+index = 9
+kind = "function_declaration"
+name = "scenario7"
+
+[expect.statements.span]
+start_line = 193
+start_column = 1
+end_line = 206
+end_column = 2
+
+[expect.statements.block]
+statement_kinds = [
+    "var_declaration",
+    "for_in",
+    "return_statement",
+]
+
+[[expect.statements]]
+index = 10
+kind = "function_declaration"
+name = "scenario8"
+
+[expect.statements.span]
+start_line = 208
+start_column = 1
+end_line = 221
+end_column = 2
+
+[expect.statements.block]
+statement_kinds = [
+    "var_declaration",
+    "for_in",
+    "return_statement",
+]
+
+[[expect.statements]]
+index = 11
+kind = "function_declaration"
+name = "scenario9"
+
+[expect.statements.span]
+start_line = 223
+start_column = 1
+end_line = 236
+end_column = 2
+
+[expect.statements.block]
+statement_kinds = [
+    "var_declaration",
+    "for_in",
+    "return_statement",
+]
+
+[[expect.statements]]
+index = 12
+kind = "function_declaration"
+name = "scenario10"
+
+[expect.statements.span]
+start_line = 238
+start_column = 1
+end_line = 251
+end_column = 2
+
+[expect.statements.block]
+statement_kinds = [
+    "var_declaration",
+    "for_in",
+    "return_statement",
+]
+
+[[expect.statements]]
+index = 13
+kind = "function_declaration"
+name = "scenario11"
+
+[expect.statements.span]
+start_line = 253
+start_column = 1
+end_line = 266
+end_column = 2
+
+[expect.statements.block]
+statement_kinds = [
+    "var_declaration",
+    "for_in",
+    "return_statement",
+]
+
+[[expect.statements]]
+index = 14
+kind = "function_declaration"
+name = "scenario12"
+
+[expect.statements.span]
+start_line = 268
+start_column = 1
+end_line = 281
+end_column = 2
+
+[expect.statements.block]
+statement_kinds = [
+    "var_declaration",
+    "for_in",
+    "return_statement",
+]
+
+[[expect.statements]]
+index = 15
+kind = "function_declaration"
+name = "scenario13"
+
+[expect.statements.span]
+start_line = 283
+start_column = 1
+end_line = 296
+end_column = 2
+
+[expect.statements.block]
+statement_kinds = [
+    "var_declaration",
+    "for_in",
+    "return_statement",
+]
+
+[[expect.statements]]
+index = 16
+kind = "function_declaration"
+name = "scenario14"
+
+[expect.statements.span]
+start_line = 298
+start_column = 1
+end_line = 311
+end_column = 2
+
+[expect.statements.block]
+statement_kinds = [
+    "var_declaration",
+    "for_in",
+    "return_statement",
+]
+
+[[expect.statements]]
+index = 17
+kind = "function_declaration"
+name = "scenario15"
+
+[expect.statements.span]
+start_line = 313
+start_column = 1
+end_line = 326
+end_column = 2
+
+[expect.statements.block]
+statement_kinds = [
+    "var_declaration",
+    "for_in",
+    "return_statement",
+]
+
+[[expect.statements]]
+index = 18
+kind = "function_declaration"
+name = "scenario16"
+
+[expect.statements.span]
+start_line = 328
+start_column = 1
+end_line = 341
+end_column = 2
+
+[expect.statements.block]
+statement_kinds = [
+    "var_declaration",
+    "for_in",
+    "return_statement",
+]
+
+[[expect.statements]]
+index = 19
+kind = "function_declaration"
+name = "scenario17"
+
+[expect.statements.span]
+start_line = 343
+start_column = 1
+end_line = 356
+end_column = 2
+
+[expect.statements.block]
+statement_kinds = [
+    "var_declaration",
+    "for_in",
+    "return_statement",
+]
+
+[[expect.statements]]
+index = 20
+kind = "function_declaration"
+name = "scenario18"
+
+[expect.statements.span]
+start_line = 358
+start_column = 1
+end_line = 371
+end_column = 2
+
+[expect.statements.block]
+statement_kinds = [
+    "var_declaration",
+    "for_in",
+    "return_statement",
+]
+
+[[expect.statements]]
+index = 21
+kind = "function_declaration"
+name = "scenario19"
+
+[expect.statements.span]
+start_line = 373
+start_column = 1
+end_line = 386
+end_column = 2
+
+[expect.statements.block]
+statement_kinds = [
+    "var_declaration",
+    "for_in",
+    "return_statement",
+]
+
+[[expect.statements]]
+index = 22
+kind = "function_declaration"
+name = "scenario20"
+
+[expect.statements.span]
+start_line = 388
+start_column = 1
+end_line = 401
+end_column = 2
+
+[expect.statements.block]
+statement_kinds = [
+    "var_declaration",
+    "for_in",
+    "return_statement",
+]
+
+[[expect.statements]]
+index = 23
+kind = "function_declaration"
+name = "scenario21"
+
+[expect.statements.span]
+start_line = 403
+start_column = 1
+end_line = 416
+end_column = 2
+
+[expect.statements.block]
+statement_kinds = [
+    "var_declaration",
+    "for_in",
+    "return_statement",
+]
+
+[[expect.statements]]
+index = 24
+kind = "function_declaration"
+name = "scenario22"
+
+[expect.statements.span]
+start_line = 418
+start_column = 1
+end_line = 431
+end_column = 2
+
+[expect.statements.block]
+statement_kinds = [
+    "var_declaration",
+    "for_in",
+    "return_statement",
+]
+
+[[expect.statements]]
+index = 25
+kind = "function_declaration"
+name = "scenario23"
+
+[expect.statements.span]
+start_line = 433
+start_column = 1
+end_line = 446
+end_column = 2
+
+[expect.statements.block]
+statement_kinds = [
+    "var_declaration",
+    "for_in",
+    "return_statement",
+]
+
+[[expect.statements]]
+index = 26
+kind = "function_declaration"
+name = "scenario24"
+
+[expect.statements.span]
+start_line = 448
+start_column = 1
+end_line = 461
+end_column = 2
+
+[expect.statements.block]
+statement_kinds = [
+    "var_declaration",
+    "for_in",
+    "return_statement",
+]
+
+[[expect.statements]]
+index = 27
+kind = "function_declaration"
+name = "scenario25"
+
+[expect.statements.span]
+start_line = 463
+start_column = 1
+end_line = 476
+end_column = 2
+
+[expect.statements.block]
+statement_kinds = [
+    "var_declaration",
+    "for_in",
+    "return_statement",
+]
+
+[[expect.statements]]
+index = 28
+kind = "function_declaration"
+name = "scenario26"
+
+[expect.statements.span]
+start_line = 478
+start_column = 1
+end_line = 491
+end_column = 2
+
+[expect.statements.block]
+statement_kinds = [
+    "var_declaration",
+    "for_in",
+    "return_statement",
+]
+
+[[expect.statements]]
+index = 29
+kind = "function_declaration"
+name = "scenario27"
+
+[expect.statements.span]
+start_line = 493
+start_column = 1
+end_line = 506
+end_column = 2
+
+[expect.statements.block]
+statement_kinds = [
+    "var_declaration",
+    "for_in",
+    "return_statement",
+]
+
+[[expect.statements]]
+index = 30
+kind = "function_declaration"
+name = "scenario28"
+
+[expect.statements.span]
+start_line = 508
+start_column = 1
+end_line = 521
+end_column = 2
+
+[expect.statements.block]
+statement_kinds = [
+    "var_declaration",
+    "for_in",
+    "return_statement",
+]
+
+[[expect.statements]]
+index = 31
+kind = "function_declaration"
+name = "scenario29"
+
+[expect.statements.span]
+start_line = 523
+start_column = 1
+end_line = 536
+end_column = 2
+
+[expect.statements.block]
+statement_kinds = [
+    "var_declaration",
+    "for_in",
+    "return_statement",
+]
+
+[[expect.statements]]
+index = 32
+kind = "function_declaration"
+name = "scenario30"
+
+[expect.statements.span]
+start_line = 538
+start_column = 1
+end_line = 551
+end_column = 2
+
+[expect.statements.block]
+statement_kinds = [
+    "var_declaration",
+    "for_in",
+    "return_statement",
+]
+
+[[expect.statements]]
+index = 33
+kind = "function_declaration"
+name = "scenario31"
+
+[expect.statements.span]
+start_line = 553
+start_column = 1
+end_line = 566
+end_column = 2
+
+[expect.statements.block]
+statement_kinds = [
+    "var_declaration",
+    "for_in",
+    "return_statement",
+]
+
+[[expect.statements]]
+index = 34
+kind = "function_declaration"
+name = "scenario32"
+
+[expect.statements.span]
+start_line = 568
+start_column = 1
+end_line = 581
+end_column = 2
+
+[expect.statements.block]
+statement_kinds = [
+    "var_declaration",
+    "for_in",
+    "return_statement",
+]
+
+[[expect.statements]]
+index = 35
+kind = "function_declaration"
+name = "scenario33"
+
+[expect.statements.span]
+start_line = 583
+start_column = 1
+end_line = 596
+end_column = 2
+
+[expect.statements.block]
+statement_kinds = [
+    "var_declaration",
+    "for_in",
+    "return_statement",
+]
+
+[[expect.statements]]
+index = 36
+kind = "function_declaration"
+name = "scenario34"
+
+[expect.statements.span]
+start_line = 598
+start_column = 1
+end_line = 611
+end_column = 2
+
+[expect.statements.block]
+statement_kinds = [
+    "var_declaration",
+    "for_in",
+    "return_statement",
+]
+
+[[expect.statements]]
+index = 37
+kind = "function_declaration"
+name = "scenario35"
+
+[expect.statements.span]
+start_line = 613
+start_column = 1
+end_line = 626
+end_column = 2
+
+[expect.statements.block]
+statement_kinds = [
+    "var_declaration",
+    "for_in",
+    "return_statement",
+]
+
+[[expect.statements]]
+index = 38
+kind = "function_declaration"
+name = "scenario36"
+
+[expect.statements.span]
+start_line = 628
+start_column = 1
+end_line = 641
+end_column = 2
+
+[expect.statements.block]
+statement_kinds = [
+    "var_declaration",
+    "for_in",
+    "return_statement",
+]
+
+[[expect.statements]]
+index = 39
+kind = "function_declaration"
+name = "scenario37"
+
+[expect.statements.span]
+start_line = 643
+start_column = 1
+end_line = 656
+end_column = 2
+
+[expect.statements.block]
+statement_kinds = [
+    "var_declaration",
+    "for_in",
+    "return_statement",
+]
+
+[[expect.statements]]
+index = 40
+kind = "function_declaration"
+name = "scenario38"
+
+[expect.statements.span]
+start_line = 658
+start_column = 1
+end_line = 671
+end_column = 2
+
+[expect.statements.block]
+statement_kinds = [
+    "var_declaration",
+    "for_in",
+    "return_statement",
+]
+
+[[expect.statements]]
+index = 41
+kind = "function_declaration"
+name = "scenario39"
+
+[expect.statements.span]
+start_line = 673
+start_column = 1
+end_line = 686
+end_column = 2
+
+[expect.statements.block]
+statement_kinds = [
+    "var_declaration",
+    "for_in",
+    "return_statement",
+]
+
+[[expect.statements]]
+index = 42
+kind = "function_declaration"
+name = "scenario40"
+
+[expect.statements.span]
+start_line = 688
+start_column = 1
+end_line = 701
+end_column = 2
+
+[expect.statements.block]
+statement_kinds = [
+    "var_declaration",
+    "for_in",
+    "return_statement",
+]
+
+[[expect.statements]]
+index = 43
+kind = "function_declaration"
+name = "scenario41"
+
+[expect.statements.span]
+start_line = 703
+start_column = 1
+end_line = 716
+end_column = 2
+
+[expect.statements.block]
+statement_kinds = [
+    "var_declaration",
+    "for_in",
+    "return_statement",
+]
+
+[[expect.statements]]
+index = 44
+kind = "function_declaration"
+name = "scenario42"
+
+[expect.statements.span]
+start_line = 718
+start_column = 1
+end_line = 731
+end_column = 2
+
+[expect.statements.block]
+statement_kinds = [
+    "var_declaration",
+    "for_in",
+    "return_statement",
+]
+
+[[expect.statements]]
+index = 45
+kind = "function_declaration"
+name = "scenario43"
+
+[expect.statements.span]
+start_line = 733
+start_column = 1
+end_line = 746
+end_column = 2
+
+[expect.statements.block]
+statement_kinds = [
+    "var_declaration",
+    "for_in",
+    "return_statement",
+]
+
+[[expect.statements]]
+index = 46
+kind = "function_declaration"
+name = "scenario44"
+
+[expect.statements.span]
+start_line = 748
+start_column = 1
+end_line = 761
+end_column = 2
+
+[expect.statements.block]
+statement_kinds = [
+    "var_declaration",
+    "for_in",
+    "return_statement",
+]
+
+[[expect.statements]]
+index = 47
+kind = "function_declaration"
+name = "scenario45"
+
+[expect.statements.span]
+start_line = 763
+start_column = 1
+end_line = 776
+end_column = 2
+
+[expect.statements.block]
+statement_kinds = [
+    "var_declaration",
+    "for_in",
+    "return_statement",
+]
+
+[[expect.statements]]
+index = 48
+kind = "function_declaration"
+name = "scenario46"
+
+[expect.statements.span]
+start_line = 778
+start_column = 1
+end_line = 791
+end_column = 2
+
+[expect.statements.block]
+statement_kinds = [
+    "var_declaration",
+    "for_in",
+    "return_statement",
+]
+
+[[expect.statements]]
+index = 49
+kind = "function_declaration"
+name = "scenario47"
+
+[expect.statements.span]
+start_line = 793
+start_column = 1
+end_line = 806
+end_column = 2
+
+[expect.statements.block]
+statement_kinds = [
+    "var_declaration",
+    "for_in",
+    "return_statement",
+]
+
+[[expect.statements]]
+index = 50
+kind = "function_declaration"
+name = "scenario48"
+
+[expect.statements.span]
+start_line = 808
+start_column = 1
+end_line = 821
+end_column = 2
+
+[expect.statements.block]
+statement_kinds = [
+    "var_declaration",
+    "for_in",
+    "return_statement",
+]
+
+[[expect.statements]]
+index = 51
+kind = "function_declaration"
+name = "scenario49"
+
+[expect.statements.span]
+start_line = 823
+start_column = 1
+end_line = 836
+end_column = 2
+
+[expect.statements.block]
+statement_kinds = [
+    "var_declaration",
+    "for_in",
+    "return_statement",
+]
+
+[[expect.statements]]
+index = 52
+kind = "function_declaration"
+name = "scenario50"
+
+[expect.statements.span]
+start_line = 838
+start_column = 1
+end_line = 851
+end_column = 2
+
+[expect.statements.block]
+statement_kinds = [
+    "var_declaration",
+    "for_in",
+    "return_statement",
+]
+
+[[expect.statements]]
+index = 53
+kind = "function_declaration"
+name = "scenario51"
+
+[expect.statements.span]
+start_line = 853
+start_column = 1
+end_line = 866
+end_column = 2
+
+[expect.statements.block]
+statement_kinds = [
+    "var_declaration",
+    "for_in",
+    "return_statement",
+]
+
+[[expect.statements]]
+index = 54
+kind = "function_declaration"
+name = "scenario52"
+
+[expect.statements.span]
+start_line = 868
+start_column = 1
+end_line = 881
+end_column = 2
+
+[expect.statements.block]
+statement_kinds = [
+    "var_declaration",
+    "for_in",
+    "return_statement",
+]
+
+[[expect.statements]]
+index = 55
+kind = "function_declaration"
+name = "scenario53"
+
+[expect.statements.span]
+start_line = 883
+start_column = 1
+end_line = 896
+end_column = 2
+
+[expect.statements.block]
+statement_kinds = [
+    "var_declaration",
+    "for_in",
+    "return_statement",
+]
+
+[[expect.statements]]
+index = 56
+kind = "function_declaration"
+name = "scenario54"
+
+[expect.statements.span]
+start_line = 898
+start_column = 1
+end_line = 911
+end_column = 2
+
+[expect.statements.block]
+statement_kinds = [
+    "var_declaration",
+    "for_in",
+    "return_statement",
+]
+
+[[expect.statements]]
+index = 57
+kind = "function_declaration"
+name = "scenario55"
+
+[expect.statements.span]
+start_line = 913
+start_column = 1
+end_line = 926
+end_column = 2
+
+[expect.statements.block]
+statement_kinds = [
+    "var_declaration",
+    "for_in",
+    "return_statement",
+]
+
+[[expect.statements]]
+index = 58
+kind = "function_declaration"
+name = "scenario56"
+
+[expect.statements.span]
+start_line = 928
+start_column = 1
+end_line = 941
+end_column = 2
+
+[expect.statements.block]
+statement_kinds = [
+    "var_declaration",
+    "for_in",
+    "return_statement",
+]
+
+[[expect.statements]]
+index = 59
+kind = "function_declaration"
+name = "scenario57"
+
+[expect.statements.span]
+start_line = 943
+start_column = 1
+end_line = 956
+end_column = 2
+
+[expect.statements.block]
+statement_kinds = [
+    "var_declaration",
+    "for_in",
+    "return_statement",
+]
+
+[[expect.statements]]
+index = 60
+kind = "function_declaration"
+name = "scenario58"
+
+[expect.statements.span]
+start_line = 958
+start_column = 1
+end_line = 971
+end_column = 2
+
+[expect.statements.block]
+statement_kinds = [
+    "var_declaration",
+    "for_in",
+    "return_statement",
+]
+
+[[expect.statements]]
+index = 61
+kind = "function_declaration"
+name = "scenario59"
+
+[expect.statements.span]
+start_line = 973
+start_column = 1
+end_line = 986
+end_column = 2
+
+[expect.statements.block]
+statement_kinds = [
+    "var_declaration",
+    "for_in",
+    "return_statement",
+]
+
+[[expect.statements]]
+index = 62
+kind = "function_declaration"
+name = "scenario60"
+
+[expect.statements.span]
+start_line = 988
+start_column = 1
+end_line = 1001
+end_column = 2
+
+[expect.statements.block]
+statement_kinds = [
+    "var_declaration",
+    "for_in",
+    "return_statement",
+]
+
+[[expect.statements]]
+index = 63
+kind = "function_declaration"
+name = "scenario61"
+
+[expect.statements.span]
+start_line = 1003
+start_column = 1
+end_line = 1016
+end_column = 2
+
+[expect.statements.block]
+statement_kinds = [
+    "var_declaration",
+    "for_in",
+    "return_statement",
+]
+
+[[expect.statements]]
+index = 64
+kind = "function_declaration"
+name = "scenario62"
+
+[expect.statements.span]
+start_line = 1018
+start_column = 1
+end_line = 1031
+end_column = 2
+
+[expect.statements.block]
+statement_kinds = [
+    "var_declaration",
+    "for_in",
+    "return_statement",
+]
+
+[[expect.statements]]
+index = 65
+kind = "function_declaration"
+name = "scenario63"
+
+[expect.statements.span]
+start_line = 1033
+start_column = 1
+end_line = 1046
+end_column = 2
+
+[expect.statements.block]
+statement_kinds = [
+    "var_declaration",
+    "for_in",
+    "return_statement",
+]
+
+[[expect.statements]]
+index = 66
+kind = "function_declaration"
+name = "scenario64"
+
+[expect.statements.span]
+start_line = 1048
+start_column = 1
+end_line = 1061
+end_column = 2
+
+[expect.statements.block]
+statement_kinds = [
+    "var_declaration",
+    "for_in",
+    "return_statement",
+]
+
+[[expect.statements]]
+index = 67
+kind = "function_declaration"
+name = "scenario65"
+
+[expect.statements.span]
+start_line = 1063
+start_column = 1
+end_line = 1076
+end_column = 2
+
+[expect.statements.block]
+statement_kinds = [
+    "var_declaration",
+    "for_in",
+    "return_statement",
+]
+
+[[expect.statements]]
+index = 68
+kind = "function_declaration"
+name = "scenario66"
+
+[expect.statements.span]
+start_line = 1078
+start_column = 1
+end_line = 1091
+end_column = 2
+
+[expect.statements.block]
+statement_kinds = [
+    "var_declaration",
+    "for_in",
+    "return_statement",
+]
+
+[[expect.statements]]
+index = 69
+kind = "function_declaration"
+name = "scenario67"
+
+[expect.statements.span]
+start_line = 1093
+start_column = 1
+end_line = 1106
+end_column = 2
+
+[expect.statements.block]
+statement_kinds = [
+    "var_declaration",
+    "for_in",
+    "return_statement",
+]
+
+[[expect.statements]]
+index = 70
+kind = "function_declaration"
+name = "scenario68"
+
+[expect.statements.span]
+start_line = 1108
+start_column = 1
+end_line = 1121
+end_column = 2
+
+[expect.statements.block]
+statement_kinds = [
+    "var_declaration",
+    "for_in",
+    "return_statement",
+]
+
+[[expect.statements]]
+index = 71
+kind = "function_declaration"
+name = "scenario69"
+
+[expect.statements.span]
+start_line = 1123
+start_column = 1
+end_line = 1136
+end_column = 2
+
+[expect.statements.block]
+statement_kinds = [
+    "var_declaration",
+    "for_in",
+    "return_statement",
+]
+
+[[expect.statements]]
+index = 72
+kind = "function_declaration"
+name = "scenario70"
+
+[expect.statements.span]
+start_line = 1138
+start_column = 1
+end_line = 1151
+end_column = 2
+
+[expect.statements.block]
+statement_kinds = [
+    "var_declaration",
+    "for_in",
+    "return_statement",
+]
+
+[[expect.statements]]
+index = 73
+kind = "function_declaration"
+name = "scenario71"
+
+[expect.statements.span]
+start_line = 1153
+start_column = 1
+end_line = 1166
+end_column = 2
+
+[expect.statements.block]
+statement_kinds = [
+    "var_declaration",
+    "for_in",
+    "return_statement",
+]
+
+[[expect.statements]]
+index = 74
+kind = "function_declaration"
+name = "scenario72"
+
+[expect.statements.span]
+start_line = 1168
+start_column = 1
+end_line = 1181
+end_column = 2
+
+[expect.statements.block]
+statement_kinds = [
+    "var_declaration",
+    "for_in",
+    "return_statement",
+]
+
+[[expect.statements]]
+index = 75
+kind = "function_declaration"
+name = "scenario73"
+
+[expect.statements.span]
+start_line = 1183
+start_column = 1
+end_line = 1196
+end_column = 2
+
+[expect.statements.block]
+statement_kinds = [
+    "var_declaration",
+    "for_in",
+    "return_statement",
+]
+
+[[expect.statements]]
+index = 76
+kind = "function_declaration"
+name = "scenario74"
+
+[expect.statements.span]
+start_line = 1198
+start_column = 1
+end_line = 1211
+end_column = 2
+
+[expect.statements.block]
+statement_kinds = [
+    "var_declaration",
+    "for_in",
+    "return_statement",
+]
+
+[[expect.statements]]
+index = 77
+kind = "function_declaration"
+name = "scenario75"
+
+[expect.statements.span]
+start_line = 1213
+start_column = 1
+end_line = 1226
+end_column = 2
+
+[expect.statements.block]
+statement_kinds = [
+    "var_declaration",
+    "for_in",
+    "return_statement",
+]
+
+[[expect.statements]]
+index = 78
+kind = "function_declaration"
+name = "scenario76"
+
+[expect.statements.span]
+start_line = 1228
+start_column = 1
+end_line = 1241
+end_column = 2
+
+[expect.statements.block]
+statement_kinds = [
+    "var_declaration",
+    "for_in",
+    "return_statement",
+]
+
+[[expect.statements]]
+index = 79
+kind = "function_declaration"
+name = "scenario77"
+
+[expect.statements.span]
+start_line = 1243
+start_column = 1
+end_line = 1256
+end_column = 2
+
+[expect.statements.block]
+statement_kinds = [
+    "var_declaration",
+    "for_in",
+    "return_statement",
+]
+
+[[expect.statements]]
+index = 80
+kind = "function_declaration"
+name = "scenario78"
+
+[expect.statements.span]
+start_line = 1258
+start_column = 1
+end_line = 1271
+end_column = 2
+
+[expect.statements.block]
+statement_kinds = [
+    "var_declaration",
+    "for_in",
+    "return_statement",
+]
+
+[[expect.statements]]
+index = 81
+kind = "function_declaration"
+name = "scenario79"
+
+[expect.statements.span]
+start_line = 1273
+start_column = 1
+end_line = 1286
+end_column = 2
+
+[expect.statements.block]
+statement_kinds = [
+    "var_declaration",
+    "for_in",
+    "return_statement",
+]

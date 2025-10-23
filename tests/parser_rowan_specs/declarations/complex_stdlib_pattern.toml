@@ -1,0 +1,229 @@
+description = "Auto-generated expectation for jv/tests/fixtures/package/complex_stdlib_pattern.jv"
+source = "jv/tests/fixtures/package/complex_stdlib_pattern.jv"
+
+[expect]
+statement_count = 19
+
+[expect.parser_diagnostics]
+allowed = true
+max = 20
+
+[expect.lowering_diagnostics]
+allowed = true
+max = 7
+
+[[expect.statements]]
+index = 0
+kind = "package"
+name = "jv.test.collections"
+
+[expect.statements.span]
+start_line = 1
+start_column = 1
+end_line = 1
+end_column = 28
+
+[[expect.statements]]
+index = 1
+kind = "data_class_declaration"
+name = "CollectionWrapper"
+
+[expect.statements.span]
+start_line = 6
+start_column = 1
+end_line = 11
+end_column = 27
+
+[[expect.statements]]
+index = 2
+kind = "function_declaration"
+name = "T"
+
+[expect.statements.span]
+start_line = 12
+start_column = 5
+end_line = 12
+end_column = 50
+
+[[expect.statements]]
+index = 3
+kind = "return_statement"
+
+[expect.statements.span]
+start_line = 13
+start_column = 9
+end_line = 13
+end_column = 46
+
+[[expect.statements]]
+index = 4
+kind = "function_declaration"
+name = "T"
+
+[expect.statements.span]
+start_line = 16
+start_column = 5
+end_line = 16
+end_column = 61
+
+[[expect.statements]]
+index = 5
+kind = "return_statement"
+
+[expect.statements.span]
+start_line = 17
+start_column = 9
+end_line = 17
+end_column = 40
+
+[[expect.statements]]
+index = 6
+kind = "function_declaration"
+name = "T"
+
+[expect.statements.span]
+start_line = 24
+start_column = 1
+end_line = 24
+end_column = 64
+
+[[expect.statements]]
+index = 7
+kind = "val_declaration"
+name = "list"
+
+[expect.statements.span]
+start_line = 25
+start_column = 5
+end_line = 25
+end_column = 41
+
+[[expect.statements]]
+index = 8
+kind = "expression"
+
+[expect.statements.span]
+start_line = 26
+start_column = 5
+end_line = 26
+end_column = 19
+
+[[expect.statements]]
+index = 9
+kind = "return_statement"
+
+[expect.statements.span]
+start_line = 27
+start_column = 5
+end_line = 27
+end_column = 35
+
+[[expect.statements]]
+index = 10
+kind = "function_declaration"
+name = "T"
+
+[expect.statements.span]
+start_line = 33
+start_column = 1
+end_line = 33
+end_column = 43
+
+[[expect.statements]]
+index = 11
+kind = "return_statement"
+
+[expect.statements.span]
+start_line = 34
+start_column = 5
+end_line = 34
+end_column = 29
+
+[[expect.statements]]
+index = 12
+kind = "function_declaration"
+name = "T"
+
+[expect.statements.span]
+start_line = 40
+start_column = 1
+end_line = 40
+end_column = 50
+
+[[expect.statements]]
+index = 13
+kind = "return_statement"
+
+[expect.statements.span]
+start_line = 41
+start_column = 5
+end_line = 41
+end_column = 32
+
+[[expect.statements]]
+index = 14
+kind = "function_declaration"
+name = "T"
+
+[expect.statements.span]
+start_line = 47
+start_column = 1
+end_line = 47
+end_column = 77
+
+[[expect.statements]]
+index = 15
+kind = "val_declaration"
+name = "result"
+
+[expect.statements.span]
+start_line = 48
+start_column = 5
+end_line = 48
+end_column = 43
+
+[[expect.statements]]
+index = 16
+kind = "for_in"
+name = "item"
+
+[expect.statements.span]
+start_line = 49
+start_column = 5
+end_line = 51
+end_column = 6
+
+[expect.statements.block]
+statement_kinds = ["expression"]
+
+[[expect.statements]]
+index = 17
+kind = "return_statement"
+
+[expect.statements.span]
+start_line = 52
+start_column = 5
+end_line = 52
+end_column = 37
+
+[[expect.statements]]
+index = 18
+kind = "function_declaration"
+name = "demonstrateUsage"
+
+[expect.statements.span]
+start_line = 58
+start_column = 1
+end_line = 65
+end_column = 2
+
+[expect.statements.block]
+statement_kinds = [
+    "val_declaration",
+    "val_declaration",
+    "val_declaration",
+    "val_declaration",
+    "return_statement",
+    "expression",
+    "expression",
+]
