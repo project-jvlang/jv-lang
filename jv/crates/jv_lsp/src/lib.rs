@@ -550,9 +550,8 @@ impl JvLanguageServer {
                 .map(|diagnostic| ImportPlanError::new(diagnostic.message))
                 .unwrap_or_else(|| ImportPlanError::new(format!("Parser error: {error}")))
         })?;
-        let frontend_diagnostics = from_frontend_diagnostics(
-            frontend_output.diagnostics().final_diagnostics(),
-        );
+        let frontend_diagnostics =
+            from_frontend_diagnostics(frontend_output.diagnostics().final_diagnostics());
         if let Some(error_diag) = frontend_diagnostics
             .iter()
             .find(|diag| diag.severity == ToolingSeverity::Error)
@@ -640,9 +639,8 @@ impl JvLanguageServer {
         let mut type_facts_snapshot: Option<TypeFactsSnapshot> = None;
         let mut regex_analyses: Vec<RegexAnalysis> = Vec::new();
 
-        let frontend_diagnostics = from_frontend_diagnostics(
-            frontend_output.diagnostics().final_diagnostics(),
-        );
+        let frontend_diagnostics =
+            from_frontend_diagnostics(frontend_output.diagnostics().final_diagnostics());
         for diagnostic in &frontend_diagnostics {
             diagnostics.push(tooling_diagnostic_to_lsp(
                 uri,

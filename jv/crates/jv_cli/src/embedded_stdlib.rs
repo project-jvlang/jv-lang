@@ -1029,9 +1029,8 @@ fn visit_stdlib(
                 error
             )
         })?;
-        let frontend_diagnostics = from_frontend_diagnostics(
-            frontend_output.diagnostics().final_diagnostics(),
-        );
+        let frontend_diagnostics =
+            from_frontend_diagnostics(frontend_output.diagnostics().final_diagnostics());
         if let Some(error_diag) = frontend_diagnostics
             .iter()
             .find(|diag| diag.severity == DiagnosticSeverity::Error)
@@ -1220,9 +1219,8 @@ fn compile_module(
             return Err(anyhow!("Parser error: {:?}", error));
         }
     };
-    let frontend_diagnostics = from_frontend_diagnostics(
-        frontend_output.diagnostics().final_diagnostics(),
-    );
+    let frontend_diagnostics =
+        from_frontend_diagnostics(frontend_output.diagnostics().final_diagnostics());
     if let Some(error_diag) = frontend_diagnostics
         .iter()
         .find(|diag| diag.severity == DiagnosticSeverity::Error)

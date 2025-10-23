@@ -11,8 +11,8 @@ use jv_ast::json::{
     JsonComment, JsonCommentKind, JsonEntry, JsonLiteral, JsonValue, NumberGrouping,
 };
 use jv_ast::statement::{
-    ConcurrencyConstruct, ForInStatement, LoopBinding, LoopStrategy, Property, ResourceManagement,
-    ValBindingOrigin,
+    ConcurrencyConstruct, ForInStatement, LoopBinding, LoopStrategy, NumericRangeLoop, Property,
+    ResourceManagement, ValBindingOrigin,
 };
 use jv_ast::strings::{MultilineKind, MultilineStringLiteral};
 use jv_ast::types::{BinaryOp, Literal, Modifiers, Pattern, TypeAnnotation, UnaryOp};
@@ -3544,10 +3544,12 @@ fn lower_for(
         }
     };
 
+    let strategy = infer_loop_strategy(&iterable_expr);
+
     Ok(Statement::ForIn(ForInStatement {
         binding: loop_binding,
         iterable: iterable_expr,
-        strategy: LoopStrategy::Iterable,
+        strategy,
         body: Box::new(body),
         span: context.span_for(node).unwrap_or_else(Span::dummy),
     }))
@@ -3596,6 +3598,27 @@ fn lower_break(
     Ok(Statement::Break(
         context.span_for(node).unwrap_or_else(Span::dummy),
     ))
+}
+
+fn infer_loop_strategy(iterable: &Expression) -> LoopStrategy {
+    match iterable {
+        Expression::Binary {
+            left,
+            op,
+            right,
+            span,
+        } if matches!(op, BinaryOp::RangeExclusive | BinaryOp::RangeInclusive) => {
+            let start = (*left.as_ref()).clone();
+            let end = (*right.as_ref()).clone();
+            LoopStrategy::NumericRange(NumericRangeLoop {
+                start,
+                end,
+                inclusive: matches!(op, BinaryOp::RangeInclusive),
+                span: span.clone(),
+            })
+        }
+        _ => LoopStrategy::Iterable,
+    }
 }
 
 fn lower_continue(

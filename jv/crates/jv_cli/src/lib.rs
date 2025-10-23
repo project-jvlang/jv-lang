@@ -619,9 +619,8 @@ pub mod pipeline {
                 return Err(anyhow!("Parser error: {:?}", error));
             }
         };
-        let frontend_diagnostics = from_frontend_diagnostics(
-            frontend_output.diagnostics().final_diagnostics(),
-        );
+        let frontend_diagnostics =
+            from_frontend_diagnostics(frontend_output.diagnostics().final_diagnostics());
         if !frontend_diagnostics.is_empty() {
             for diagnostic in &frontend_diagnostics {
                 let rendered = diagnostic

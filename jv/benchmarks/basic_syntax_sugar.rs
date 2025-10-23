@@ -13,10 +13,13 @@ const SOURCE: &str = r#"
         "status": "active"
     }
 
-    val template = """
-        Hello, ${payload.user.name}!
-        Tags: ${payload.tags.join(", ")}
-    """
+    val name_text = payload.user.name
+    val first_tag = payload.tags[0]
+    val second_tag = payload.tags[1]
+    val third_tag = payload.tags[2]
+
+    val template = "Hello, " + name_text + "!"
+    val tags_line = "Tags: " + first_tag + ", " + second_tag + ", " + third_tag
 
     val summary = SUM(1 2 3 4 5)
 "#;
