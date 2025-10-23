@@ -524,6 +524,16 @@ pub fn transform_expression(
         Expression::StringInterpolation { parts, span } => {
             desugar_string_interpolation(parts, span, context)
         }
+        Expression::MultilineString(literal) => {
+            if literal.parts.is_empty() {
+                Ok(IrExpression::Literal(
+                    Literal::String(literal.normalized),
+                    literal.span,
+                ))
+            } else {
+                desugar_string_interpolation(literal.parts, literal.span, context)
+            }
+        }
         Expression::Block { statements, span } => {
             context.enter_scope();
             let mut ir_statements = Vec::new();

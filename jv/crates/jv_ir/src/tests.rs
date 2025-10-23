@@ -1793,6 +1793,56 @@ mod tests {
     }
 
     #[test]
+    fn transform_multiline_string_with_interpolation_produces_string_format() {
+        let mut context = test_context();
+        context.add_variable("user".to_string(), JavaType::string());
+        context.add_variable("status".to_string(), JavaType::string());
+
+        let literal = MultilineStringLiteral {
+            kind: MultilineKind::TripleQuote,
+            normalized: "Hello,  says ".to_string(),
+            raw: "Hello,  says ".to_string(),
+            parts: vec![
+                StringPart::Text("Hello, ".to_string()),
+                StringPart::Expression(Expression::Identifier("user".to_string(), dummy_span())),
+                StringPart::Text(" says ".to_string()),
+                StringPart::Expression(Expression::Identifier(
+                    "status".to_string(),
+                    dummy_span(),
+                )),
+            ],
+            indent: None,
+            span: dummy_span(),
+        };
+
+        let result = transform_expression(Expression::MultilineString(literal), &mut context)
+            .expect("multiline interpolation should lower successfully");
+
+        match result {
+            IrExpression::StringFormat {
+                format_string,
+  		        args,
+                ..
+            } => {
+                assert_eq!(format_string, "Hello, %s says %s");
+                assert_eq!(args.len(), 2);
+                match &args[0] {
+                    IrExpression::Identifier { name, .. } => assert_eq!(name, "user"),
+                    other => panic!("expected first argument identifier, got {:?}", other),
+                }
+                match &args[1] {
+                    IrExpression::Identifier { name, .. } => assert_eq!(name, "status"),
+                    other => panic!("expected second argument identifier, got {:?}", other),
+                }
+            }
+            other => panic!(
+                "multiline interpolation should desugar to string format, got {:?}",
+                other
+            ),
+        }
+    }
+
+    #[test]
     fn test_desugar_spawn_expression_produces_virtual_thread() {
         let mut context = test_context();
 

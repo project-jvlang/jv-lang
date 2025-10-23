@@ -1879,6 +1879,181 @@ fn string_interpolation_lowering_builds_parts() {
 }
 
 #[test]
+fn multiline_string_interpolation_handles_complex_patterns() {
+    let source = include_str!(
+        "../../../../../tests/parser_rowan_specs/fixtures/multiline_interpolation.jv"
+    );
+
+    let result = lower_source(source);
+    assert!(
+        result.diagnostics.is_empty(),
+        "unexpected diagnostics: {:?}",
+        result.diagnostics
+    );
+
+    let function_body = result
+        .statements
+        .iter()
+        .find_map(|statement| match statement {
+            Statement::FunctionDeclaration { name, body, .. }
+                if name == "multilineInterpolationDemo" =>
+            {
+                Some(body.as_ref())
+            }
+            _ => None,
+        })
+        .expect("expected multilineInterpolationDemo function declaration");
+
+    let block_statements = match function_body {
+        Expression::Block { statements, .. } => statements,
+        other => panic!("expected block body, got {:?}", other),
+    };
+
+    let find_initializer = |name: &str| {
+        block_statements
+            .iter()
+            .find_map(|statement| match statement {
+                Statement::ValDeclaration {
+                    name: binding_name,
+                    initializer,
+                    ..
+                } if binding_name == name => Some(initializer),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("expected val declaration for {name}"))
+    };
+
+    let greeting_expr = find_initializer("greeting");
+    match greeting_expr {
+        Expression::MultilineString(literal) => {
+            assert!(
+                literal
+                    .parts
+                    .iter()
+                    .any(|part| matches!(
+                        part,
+                        StringPart::Expression(Expression::Identifier(identifier, _))
+                            if identifier == "userName"
+                    )),
+                "greeting should reference userName"
+            );
+            assert!(
+                literal
+                    .parts
+                    .iter()
+                    .any(|part| matches!(
+                        part,
+                        StringPart::Text(text) if text.contains("Welcome to the pipeline.")
+                    )),
+                "greeting should include trailing text after interpolation"
+            );
+        }
+        other => panic!("expected multiline string literal, got {:?}", other),
+    }
+
+    let tag_summary_expr = find_initializer("tagSummary");
+    match tag_summary_expr {
+        Expression::MultilineString(literal) => {
+            let expr_parts: Vec<&Expression> = literal
+                .parts
+                .iter()
+                .filter_map(|part| match part {
+                    StringPart::Expression(expr) => Some(expr),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(expr_parts.len(), 3, "expected three expressions in tagSummary");
+
+            match expr_parts[0] {
+                Expression::Call { .. } => {}
+                other => panic!("expected join call expression, got {:?}", other),
+            }
+            match expr_parts[1] {
+                Expression::IndexAccess { .. } => {}
+                other => panic!("expected index access expression, got {:?}", other),
+            }
+            match expr_parts[2] {
+                Expression::Call { .. } => {}
+                other => panic!("expected chained method call expression, got {:?}", other),
+            }
+        }
+        other => panic!("expected multiline string literal, got {:?}", other),
+    }
+
+    let inline_expr = find_initializer("inline");
+    match inline_expr {
+        Expression::MultilineString(literal) => {
+            let expr_parts: Vec<&Expression> = literal
+                .parts
+                .iter()
+                .filter_map(|part| match part {
+                    StringPart::Expression(expr) => Some(expr),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(expr_parts.len(), 2, "inline should contain two expressions");
+            match expr_parts[0] {
+                Expression::Identifier(identifier, _) if identifier == "userName" => {}
+                other => panic!("expected userName identifier, got {:?}", other),
+            }
+            match expr_parts[1] {
+                Expression::Identifier(identifier, _) if identifier == "status" => {}
+                other => panic!("expected status identifier, got {:?}", other),
+            }
+            assert!(
+                literal
+                    .parts
+                    .iter()
+                    .any(|part| matches!(
+                        part,
+                        StringPart::Text(text) if text.ends_with("suffix")
+                    )),
+                "inline string should retain trailing literal text"
+            );
+        }
+        other => panic!("expected multiline string literal, got {:?}", other),
+    }
+
+    let tight_expr = find_initializer("tight");
+    match tight_expr {
+        Expression::MultilineString(literal) => {
+            let expr_parts: Vec<&Expression> = literal
+                .parts
+                .iter()
+                .filter_map(|part| match part {
+                    StringPart::Expression(expr) => Some(expr),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(expr_parts.len(), 3, "tight should contain three expressions");
+            match expr_parts[0] {
+                Expression::Identifier(identifier, _) if identifier == "userName" => {}
+                other => panic!("expected userName identifier, got {:?}", other),
+            }
+            match expr_parts[1] {
+                Expression::IndexAccess { .. } => {}
+                other => panic!("expected first index access, got {:?}", other),
+            }
+            match expr_parts[2] {
+                Expression::IndexAccess { .. } => {}
+                other => panic!("expected second index access, got {:?}", other),
+            }
+            assert!(
+                literal
+                    .parts
+                    .iter()
+                    .any(|part| matches!(
+                        part,
+                        StringPart::Text(text) if text.contains("tail")
+                    )),
+                "tight multiline string should preserve trailing segment"
+            );
+        }
+        other => panic!("expected multiline string literal, got {:?}", other),
+    }
+}
+
+#[test]
 fn json_literal_lowering_builds_object_tree() {
     let source = r#"
     package fixtures

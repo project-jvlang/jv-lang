@@ -17,9 +17,18 @@ const SOURCE: &str = r#"
     val first_tag = payload.tags[0]
     val second_tag = payload.tags[1]
     val third_tag = payload.tags[2]
+    val status_text = "active"
 
-    val template = "Hello, " + name_text + "!"
-    val tags_line = "Tags: " + first_tag + ", " + second_tag + ", " + third_tag
+    val template = """
+Hello, ${name_text}!
+Status: ${status_text}
+"""
+
+    val tags_line = """
+Tags: ${first_tag}, ${second_tag}, ${third_tag}
+"""
+
+    val inline = """${name_text}${status_text}tail"""
 
     val summary = SUM(1 2 3 4 5)
 "#;

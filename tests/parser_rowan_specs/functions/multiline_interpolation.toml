@@ -1,0 +1,29 @@
+description = "Multiline string interpolation lowers expression parts"
+source = "../fixtures/multiline_interpolation.jv"
+
+[expect]
+statement_count = 2
+
+[[expect.statements]]
+index = 0
+kind = "package"
+
+[[expect.statements]]
+index = 1
+kind = "function_declaration"
+name = "multilineInterpolationDemo"
+
+  [expect.statements.block]
+  statement_kinds = [
+    "val_declaration",
+    "val_declaration",
+    "val_declaration",
+    "val_declaration",
+    "val_declaration",
+    "val_declaration",
+    "val_declaration",
+    "expression",
+    "expression",
+    "expression",
+    "expression"
+  ]

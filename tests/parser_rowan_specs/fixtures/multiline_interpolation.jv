@@ -1,0 +1,30 @@
+package specs.fixtures
+
+fun multilineInterpolationDemo(): Unit {
+    val userName = "Rowan"
+    val tags = ["parser" "rowan" "integration"]
+    val status = "ACTIVE"
+
+    val greeting = """
+Hello, ${userName}!
+Welcome to the pipeline.
+"""
+
+    val tagSummary = """
+Tags: ${tags.join(", ")}
+First tag: ${tags[0]}
+Status line: ${status.lowercase().uppercase()}
+"""
+
+    val inline = """${userName}${status}suffix"""
+
+    val tight = """
+${userName}
+${tags[1]}${tags[2]} tail
+"""
+
+    println(greeting)
+    println(tagSummary)
+    println(inline)
+    println(tight)
+}

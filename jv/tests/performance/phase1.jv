@@ -82,6 +82,7 @@ fun main() {
     checksum = checksum + scenario77()
     checksum = checksum + scenario78()
     checksum = checksum + scenario79()
+    checksum = checksum + scenario80()
     val sentinel = checksum
 }
 
@@ -1285,3 +1286,19 @@ fun scenario79(): Int {
     }
 }
 
+fun scenario80(): Int {
+    val userName = "Rowan"
+    val status = "ACTIVE"
+    val tags = ["parser" "rowan" "integration"]
+
+    val summary = """
+User: ${userName}
+Primary: ${tags[0]}
+Secondary: ${tags[1]}
+Status: ${status}
+"""
+
+    val inline = """${userName}${status}tail"""
+    val combined = summary + inline
+    return combined.length()
+}
