@@ -383,7 +383,7 @@ fn is_jv_only_line_comment(raw: &str) -> bool {
 fn lower_assignment(
     context: &LoweringContext<'_>,
     node: &JvSyntaxNode,
-    _diagnostics: &mut Vec<LoweringDiagnostic>,
+    diagnostics: &mut Vec<LoweringDiagnostic>,
 ) -> Result<Statement, LoweringDiagnostic> {
     let target_node = child_node(node, SyntaxKind::AssignmentTarget).ok_or_else(|| {
         missing_child_diagnostic(
@@ -417,6 +417,27 @@ fn lower_assignment(
 
     let value = lower_expression(context, &value_node)?;
     let span = context.span_for(node).unwrap_or_else(Span::dummy);
+
+    if let Some(pattern) = binding_pattern.clone() {
+        if let Some(type_node) = child_node(&target_node, SyntaxKind::TypeAnnotation) {
+            if let Some(annotation) =
+                lower_type_annotation_container(context, &type_node, node, diagnostics)
+            {
+                if let Some(name) = pattern.first_identifier() {
+                    let modifiers = Modifiers::default();
+                    return Ok(Statement::ValDeclaration {
+                        name: name.to_string(),
+                        binding: Some(pattern),
+                        type_annotation: Some(annotation),
+                        initializer: value,
+                        modifiers,
+                        origin: ValBindingOrigin::ImplicitTyped,
+                        span,
+                    });
+                }
+            }
+        }
+    }
 
     Ok(Statement::Assignment {
         target,

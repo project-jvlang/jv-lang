@@ -82,9 +82,14 @@ fn parse_assignment_target(ctx: &mut ParserContext<'_>) -> bool {
                     ctx.consume_trivia();
                     ctx.bump_raw(); // identifier
                 }
+                ctx.parse_optional_type_annotation();
                 true
             } else {
-                ctx.parse_binding_pattern()
+                let parsed = ctx.parse_binding_pattern();
+                if parsed {
+                    ctx.parse_optional_type_annotation();
+                }
+                parsed
             }
         }
         Some(TokenKind::LeftBracket) | Some(TokenKind::LeftParen) => ctx.parse_binding_pattern(),
@@ -98,6 +103,14 @@ impl AssignmentStrategy {
         while let Some((_, kind)) = ctx.peek_significant_kind_n(offset) {
             match kind {
                 TokenKind::Assign => return true,
+                TokenKind::Colon => {
+                    let next_offset = self.skip_type_annotation(ctx, offset + 1);
+                    if next_offset == offset + 1 {
+                        return false;
+                    }
+                    offset = next_offset;
+                    continue;
+                }
                 TokenKind::Dot => {
                     if let Some((_, next)) = ctx.peek_significant_kind_n(offset + 1) {
                         if next == TokenKind::Identifier {
@@ -115,6 +128,52 @@ impl AssignmentStrategy {
             }
         }
         false
+    }
+
+    fn skip_type_annotation(&self, ctx: &ParserContext<'_>, mut offset: usize) -> usize {
+        let mut depth_paren = 0usize;
+        let mut depth_bracket = 0usize;
+        let mut depth_angle = 0usize;
+
+        while let Some((_, kind)) = ctx.peek_significant_kind_n(offset) {
+            match kind {
+                TokenKind::LeftParen => depth_paren = depth_paren.saturating_add(1),
+                TokenKind::RightParen => {
+                    if depth_paren == 0 {
+                        break;
+                    }
+                    depth_paren -= 1;
+                }
+                TokenKind::LeftBracket => depth_bracket = depth_bracket.saturating_add(1),
+                TokenKind::RightBracket => {
+                    if depth_bracket == 0 {
+                        break;
+                    }
+                    depth_bracket -= 1;
+                }
+                TokenKind::Less => depth_angle = depth_angle.saturating_add(1),
+                TokenKind::Greater => {
+                    if depth_angle > 0 {
+                        depth_angle -= 1;
+                    }
+                }
+                TokenKind::Assign
+                | TokenKind::LeftBrace
+                | TokenKind::Semicolon
+                | TokenKind::RightBrace
+                | TokenKind::Comma
+                | TokenKind::WhereKw
+                    if depth_paren == 0 && depth_bracket == 0 && depth_angle == 0 =>
+                {
+                    break;
+                }
+                _ => {}
+            }
+
+            offset += 1;
+        }
+
+        offset
     }
 
     fn matches_pattern_target(&self, ctx: &ParserContext<'_>, opening: TokenKind) -> bool {

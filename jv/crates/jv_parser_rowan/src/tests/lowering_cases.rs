@@ -886,7 +886,9 @@ fn lowering_table_driven_cases() {
                 let diagnostic = &result.diagnostics[0];
                 assert_eq!(diagnostic.severity, LoweringDiagnosticSeverity::Error);
                 assert!(
-                    diagnostic.message.contains("想定外") || diagnostic.message.contains("型注釈"),
+                    diagnostic.message.contains("想定外")
+                        || diagnostic.message.contains("型注釈")
+                        || diagnostic.message.contains("識別子"),
                     "unexpected diagnostic message: {}",
                     diagnostic.message
                 );

@@ -419,6 +419,7 @@ impl<'tokens> ParserContext<'tokens> {
 
         self.start_node(SyntaxKind::TypeAnnotation);
         self.bump_raw(); // colon
+        self.start_node(SyntaxKind::Expression);
         self.parse_type_expression_until(&[
             TokenKind::Assign,
             TokenKind::LeftBrace,
@@ -426,7 +427,9 @@ impl<'tokens> ParserContext<'tokens> {
             TokenKind::RightBrace,
             TokenKind::Comma,
             TokenKind::RightParen,
+            TokenKind::WhereKw,
         ]);
+        self.finish_node();
         self.finish_node();
         true
     }
@@ -503,7 +506,10 @@ impl<'tokens> ParserContext<'tokens> {
         let mut depth_paren = 0usize;
         let mut depth_brace = 0usize;
         let mut depth_bracket = 0usize;
+        let mut depth_angle = 0usize;
         let mut last_line: Option<usize> = None;
+        let mut last_significant_kind: Option<TokenKind> = None;
+        let mut second_last_significant_kind: Option<TokenKind> = None;
 
         while let Some(token) = self.current_token() {
             let kind = TokenKind::from_token(token);
@@ -516,12 +522,14 @@ impl<'tokens> ParserContext<'tokens> {
             }
             let mut should_break_on_sync = false;
             if respect_statement_boundaries && at_top_level {
-                if let Some(prev_line) = last_line {
-                    if token.line > prev_line {
-                        should_break_on_sync = true;
+                if depth_angle == 0 {
+                    if let Some(prev_line) = last_line {
+                        if token.line > prev_line {
+                            should_break_on_sync = true;
+                        }
                     }
                 }
-                if kind == TokenKind::Comma {
+                if depth_angle == 0 && kind == TokenKind::Comma {
                     should_break_on_sync = true;
                 }
                 if kind == TokenKind::WhenKw {
@@ -593,6 +601,22 @@ impl<'tokens> ParserContext<'tokens> {
                     }
                     depth_bracket -= 1;
                 }
+                TokenKind::Less => {
+                    if depth_angle > 0 {
+                        depth_angle += 1;
+                    } else if self.is_generic_argument_sequence(
+                        self.cursor,
+                        last_significant_kind,
+                        second_last_significant_kind,
+                    ) {
+                        depth_angle = 1;
+                    }
+                }
+                TokenKind::Greater => {
+                    if depth_angle > 0 {
+                        depth_angle = depth_angle.saturating_sub(1);
+                    }
+                }
                 _ => {}
             }
 
@@ -604,12 +628,83 @@ impl<'tokens> ParserContext<'tokens> {
 
             self.bump_raw();
             last_line = Some(token.line);
+            if !kind.is_trivia() {
+                second_last_significant_kind = last_significant_kind;
+                last_significant_kind = Some(kind);
+            }
         }
 
         let consumed = self.cursor > start;
         self.finish_node();
         self.expression_states.pop();
         consumed
+    }
+
+    fn is_generic_argument_sequence(
+        &self,
+        start_index: usize,
+        prev_significant: Option<TokenKind>,
+        prev_prev_significant: Option<TokenKind>,
+    ) -> bool {
+        match prev_significant {
+            Some(TokenKind::Identifier)
+            | Some(TokenKind::RightParen)
+            | Some(TokenKind::RightBracket)
+            | Some(TokenKind::Greater) => {}
+            _ => return false,
+        }
+
+        if matches!(
+            prev_prev_significant,
+            Some(TokenKind::DataKw)
+                | Some(TokenKind::ClassKw)
+                | Some(TokenKind::FunKw)
+                | Some(TokenKind::ValKw)
+                | Some(TokenKind::VarKw)
+        ) {
+            return false;
+        }
+
+        let mut depth = 1usize;
+        let mut index = start_index + 1;
+        while index < self.tokens.len() {
+            let token = &self.tokens[index];
+            let kind = TokenKind::from_token(token);
+            if kind.is_trivia() {
+                index += 1;
+                continue;
+            }
+
+            match kind {
+                TokenKind::Less => depth = depth.saturating_add(1),
+                TokenKind::Greater => {
+                    if depth == 0 {
+                        return false;
+                    }
+                    depth -= 1;
+                    if depth == 0 {
+                        let mut lookahead = index + 1;
+                        while lookahead < self.tokens.len() {
+                            let next_kind = TokenKind::from_token(&self.tokens[lookahead]);
+                            if next_kind.is_trivia() {
+                                lookahead += 1;
+                                continue;
+                            }
+                            return matches!(next_kind, TokenKind::LeftParen);
+                        }
+                        return false;
+                    }
+                }
+                TokenKind::Semicolon
+                | TokenKind::Assign
+                | TokenKind::RightBrace
+                | TokenKind::Newline => return false,
+                _ => {}
+            }
+
+            index += 1;
+        }
+        false
     }
 
     fn reset_active_expression_state(&mut self) {

@@ -257,6 +257,7 @@ fn parse_return_type(ctx: &mut ParserContext<'_>) {
             TokenKind::LeftBrace,
             TokenKind::Semicolon,
             TokenKind::Newline,
+            TokenKind::WhereKw,
         ],
         false,
     );
