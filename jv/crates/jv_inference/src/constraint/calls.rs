@@ -245,6 +245,7 @@ mod tests {
     use crate::constraint::{ConstraintGraph, GenericConstraintKind};
     use crate::types::{TypeId, TypeKind, TypeVariant};
     use jv_ast::expression::Parameter;
+    use jv_ast::ParameterModifiers;
 
     fn dummy_span(start: usize) -> Span {
         Span::new(start, 0, start, 5)
@@ -272,6 +273,7 @@ mod tests {
                 name: "x".into(),
                 type_annotation: None,
                 default_value: None,
+                modifiers: ParameterModifiers::default(),
                 span: lambda_span.clone(),
             }],
             body: Box::new(Expression::Identifier("x".into(), lambda_span.clone())),

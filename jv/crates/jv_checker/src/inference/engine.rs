@@ -290,7 +290,8 @@ mod tests {
     use super::*;
     use crate::inference::types::PrimitiveType;
     use jv_ast::{
-        BinaryOp, Expression, Literal, Modifiers, Parameter, Span, Statement, TypeAnnotation,
+        BinaryOp, Expression, Literal, Modifiers, Parameter, ParameterModifiers, Span, Statement,
+        TypeAnnotation,
     };
 
     fn dummy_span() -> Span {

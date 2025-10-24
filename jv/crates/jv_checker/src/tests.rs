@@ -6,8 +6,9 @@ use crate::pattern::{self, PatternTarget};
 use crate::regex::RegexValidator;
 use fastrand::Rng;
 use jv_ast::{
-    Annotation, AnnotationName, BinaryOp, Expression, Literal, Modifiers, Parameter, Pattern,
-    Program, RegexLiteral, Span, Statement, TypeAnnotation, ValBindingOrigin, WhenArm,
+    Annotation, AnnotationName, BinaryOp, Expression, Literal, Modifiers, Parameter,
+    ParameterModifiers, Pattern, Program, RegexLiteral, Span, Statement, TypeAnnotation,
+    ValBindingOrigin, WhenArm,
 };
 use jv_inference::types::{NullabilityFlag, TypeVariant as FactsTypeVariant};
 use jv_inference::TypeFacts;
@@ -285,6 +286,7 @@ fn binding_resolver_collects_late_init_metadata() {
 
     let late_var = Statement::VarDeclaration {
         name: "lateVar".into(),
+        binding: None,
         type_annotation: None,
         initializer: None,
         modifiers: late_init_modifiers,
@@ -1216,6 +1218,7 @@ fn mutable_var_allows_reassignment() {
         statements: vec![
             Statement::VarDeclaration {
                 name: "count".into(),
+                binding: None,
                 type_annotation: None,
                 initializer: Some(Expression::Literal(
                     Literal::Number("0".into()),
@@ -1252,6 +1255,7 @@ fn explicit_var_self_assignment_is_allowed() {
         statements: vec![
             Statement::VarDeclaration {
                 name: "count".into(),
+                binding: None,
                 type_annotation: None,
                 initializer: Some(Expression::Literal(
                     Literal::Number("0".into()),

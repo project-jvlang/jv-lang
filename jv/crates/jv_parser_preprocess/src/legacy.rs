@@ -486,7 +486,7 @@ fn make_layout_comma_token(reference: &Token) -> Token {
 #[cfg(test)]
 mod tests {
     use super::run_legacy_preprocess;
-    use crate::preprocess;
+    use crate::run;
 
     fn tokenize(source: &str) -> Vec<jv_lexer::Token> {
         let mut lexer = jv_lexer::Lexer::new(source.to_string());
@@ -504,7 +504,7 @@ mod tests {
     fn json_object_metadata_preserved() {
         let source = "{\"key\": 1}";
         let legacy = run_legacy_preprocess(tokenize(source));
-        let (modern, _, _) = preprocess::run(tokenize(source)).into_parts();
+        let (modern, _, _) = run(tokenize(source)).into_parts();
         assert_eq!(modern, legacy);
         let first = modern
             .first()
@@ -519,7 +519,7 @@ mod tests {
     fn block_expression_metadata_removed() {
         let source = "{ val x = 1 }";
         let legacy = run_legacy_preprocess(tokenize(source));
-        let (modern, _, _) = preprocess::run(tokenize(source)).into_parts();
+        let (modern, _, _) = run(tokenize(source)).into_parts();
         assert_eq!(modern, legacy);
         let first = modern
             .first()
@@ -531,7 +531,7 @@ mod tests {
     fn json_array_of_strings_detected() {
         let source = "[\"a\", \"b\"]";
         let legacy = run_legacy_preprocess(tokenize(source));
-        let (modern, _, _) = preprocess::run(tokenize(source)).into_parts();
+        let (modern, _, _) = run(tokenize(source)).into_parts();
         assert_eq!(modern, legacy);
         let first = modern
             .first()
@@ -546,7 +546,7 @@ mod tests {
     fn jv_array_of_numbers_not_flagged_as_json() {
         let source = "[1, 2, 3]";
         let legacy = run_legacy_preprocess(tokenize(source));
-        let (modern, _, _) = preprocess::run(tokenize(source)).into_parts();
+        let (modern, _, _) = run(tokenize(source)).into_parts();
         assert_eq!(modern, legacy);
         let first = modern
             .first()

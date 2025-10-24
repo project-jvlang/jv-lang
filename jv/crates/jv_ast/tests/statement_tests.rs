@@ -240,6 +240,7 @@ fn test_statement_assignment() {
     let stmt = Statement::Assignment {
         target,
         value,
+        binding_pattern: None,
         span: dummy_span(),
     };
     match stmt {

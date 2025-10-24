@@ -2233,11 +2233,9 @@ mod expression_parser {
                 match token.token_type {
                     TokenType::LeftParen => depth += 1,
                     TokenType::RightParen if depth > 0 => depth -= 1,
-                    TokenType::Comma if depth == 0 => {
-                        if !current.is_empty() {
-                            params.push(self.make_parameter_from_slice(&current)?);
-                            current.clear();
-                        }
+                    TokenType::Comma | TokenType::LayoutComma if depth == 0 => {
+                        self.push_parameters_from_slice(&mut params, &current)?;
+                        current.clear();
                         continue;
                     }
                     _ => {}
@@ -2245,11 +2243,44 @@ mod expression_parser {
                 current.push(*token);
             }
 
-            if !current.is_empty() {
-                params.push(self.make_parameter_from_slice(&current)?);
-            }
+            self.push_parameters_from_slice(&mut params, &current)?;
 
             Ok(params)
+        }
+
+        fn push_parameters_from_slice(
+            &self,
+            params: &mut Vec<Parameter>,
+            slice: &[&Token],
+        ) -> Result<(), ExpressionError> {
+            if slice.is_empty() {
+                return Ok(());
+            }
+
+            let has_colon = slice
+                .iter()
+                .any(|token| matches!(token.token_type, TokenType::Colon));
+            let all_identifiers = slice.iter().all(|token| {
+                matches!(token.token_type, TokenType::Identifier(_) | TokenType::LayoutComma)
+            });
+
+            if !has_colon && all_identifiers {
+                for token in slice.iter().copied() {
+                    if let TokenType::Identifier(name) = &token.token_type {
+                        params.push(Parameter {
+                            name: name.clone(),
+                            type_annotation: None,
+                            default_value: None,
+                            modifiers: ParameterModifiers::default(),
+                            span: span_from_token(token),
+                        });
+                    }
+                }
+                return Ok(());
+            }
+
+            params.push(self.make_parameter_from_slice(slice)?);
+            Ok(())
         }
 
         fn make_parameter_from_slice(

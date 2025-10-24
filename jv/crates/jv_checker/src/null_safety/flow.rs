@@ -1196,6 +1196,7 @@ mod tests {
         let try_body = Expression::Block {
             statements: vec![Statement::VarDeclaration {
                 name: "value".into(),
+                binding: None,
                 type_annotation: None,
                 initializer: Some(Expression::Literal(Literal::Null, span.clone())),
                 modifiers: Default::default(),
@@ -1277,6 +1278,7 @@ mod tests {
                     body: Box::new(Expression::Block {
                         statements: vec![Statement::VarDeclaration {
                             name: "flag".into(),
+                            binding: None,
                             type_annotation: None,
                             initializer: Some(Expression::Literal(Literal::Null, span.clone())),
                             modifiers: Default::default(),
@@ -1322,6 +1324,7 @@ mod tests {
             imports: vec![],
             statements: vec![Statement::VarDeclaration {
                 name: "result".into(),
+                binding: None,
                 type_annotation: None,
                 initializer: Some(Expression::NullSafeMemberAccess {
                     object: Box::new(Expression::Identifier("user".into(), span.clone())),
@@ -1377,6 +1380,7 @@ mod tests {
             imports: vec![],
             statements: vec![Statement::VarDeclaration {
                 name: "display".into(),
+                binding: None,
                 type_annotation: None,
                 initializer: Some(elvis_expr),
                 modifiers: Default::default(),
@@ -1448,6 +1452,7 @@ mod tests {
             statements: vec![
                 Statement::VarDeclaration {
                     name: "x".into(),
+                    binding: None,
                     type_annotation: None,
                     initializer: Some(Expression::Literal(Literal::Null, decl_span.clone())),
                     modifiers: Default::default(),

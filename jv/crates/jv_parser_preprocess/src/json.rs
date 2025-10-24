@@ -160,13 +160,13 @@ impl PreprocessStage for JsonStage {
 
 #[cfg(test)]
 mod tests {
-    use crate::preprocess;
-    use jv_lexer::{JsonConfidence, TokenMetadata};
+    use crate::run;
+    use jv_lexer::TokenMetadata;
 
     fn run_stage(source: &str) -> Vec<jv_lexer::Token> {
         let mut lexer = jv_lexer::Lexer::new(source.to_string());
         let tokens = lexer.tokenize().expect("lexing should succeed");
-        let (tokens, _, _) = preprocess::run(tokens).into_parts();
+        let (tokens, _, _) = run(tokens).into_parts();
         tokens
     }
 
