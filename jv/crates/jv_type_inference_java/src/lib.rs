@@ -193,17 +193,17 @@ struct TypeAnnotationParser<'a> {
 
 impl<'a> TypeAnnotationParser<'a> {
     fn new(tokens: &'a [Token]) -> Self {
-        Self { tokens, position: 0 }
+        Self {
+            tokens,
+            position: 0,
+        }
     }
 
     fn parse(mut self) -> Result<TypeAnnotation, ParseError> {
         let ty = self.parse_type_annotation()?;
         if let Some(token) = self.peek() {
             return Err(ParseError::new(
-                format!(
-                    "型注釈の末尾に余分なトークン `{}` があります",
-                    token.lexeme
-                ),
+                format!("型注釈の末尾に余分なトークン `{}` があります", token.lexeme),
                 Some(span_from_token(token)),
             ));
         }
@@ -217,12 +217,18 @@ impl<'a> TypeAnnotationParser<'a> {
             self.parse_named_type()?
         };
 
-        while self.consume_if(|kind| matches!(kind, TokenType::LeftBracket)).is_some() {
+        while self
+            .consume_if(|kind| matches!(kind, TokenType::LeftBracket))
+            .is_some()
+        {
             self.expect(|kind| matches!(kind, TokenType::RightBracket), "`]`")?;
             ty = TypeAnnotation::Array(Box::new(ty));
         }
 
-        if self.consume_if(|kind| matches!(kind, TokenType::Question)).is_some() {
+        if self
+            .consume_if(|kind| matches!(kind, TokenType::Question))
+            .is_some()
+        {
             ty = TypeAnnotation::Nullable(Box::new(ty));
         }
 
@@ -235,7 +241,10 @@ impl<'a> TypeAnnotationParser<'a> {
         if !self.peek_is(|kind| matches!(kind, TokenType::RightParen)) {
             loop {
                 params.push(self.parse_type_annotation()?);
-                if self.consume_if(|kind| matches!(kind, TokenType::Comma)).is_some() {
+                if self
+                    .consume_if(|kind| matches!(kind, TokenType::Comma))
+                    .is_some()
+                {
                     continue;
                 }
                 break;
@@ -253,7 +262,10 @@ impl<'a> TypeAnnotationParser<'a> {
     fn parse_named_type(&mut self) -> Result<TypeAnnotation, ParseError> {
         let (name, _span) = self.parse_qualified_name()?;
 
-        if self.consume_if(|kind| matches!(kind, TokenType::Less)).is_some() {
+        if self
+            .consume_if(|kind| matches!(kind, TokenType::Less))
+            .is_some()
+        {
             let args = self.parse_type_arguments()?;
             Ok(TypeAnnotation::Generic {
                 name,
@@ -266,12 +278,18 @@ impl<'a> TypeAnnotationParser<'a> {
 
     fn parse_type_arguments(&mut self) -> Result<Vec<TypeAnnotation>, ParseError> {
         let mut args = Vec::new();
-        if self.consume_if(|kind| matches!(kind, TokenType::Greater)).is_some() {
+        if self
+            .consume_if(|kind| matches!(kind, TokenType::Greater))
+            .is_some()
+        {
             return Ok(args);
         }
         loop {
             args.push(self.parse_type_annotation()?);
-            if self.consume_if(|kind| matches!(kind, TokenType::Comma)).is_some() {
+            if self
+                .consume_if(|kind| matches!(kind, TokenType::Comma))
+                .is_some()
+            {
                 continue;
             }
             self.expect(|kind| matches!(kind, TokenType::Greater), "`>`")?;
@@ -282,23 +300,18 @@ impl<'a> TypeAnnotationParser<'a> {
 
     fn parse_qualified_name(&mut self) -> Result<(String, Span), ParseError> {
         let first = self.expect_identifier()?;
-        let mut name = identifier_text(first)
-            .map(str::to_string)
-            .ok_or_else(|| {
-                ParseError::new(
-                    "識別子を解析できませんでした",
-                    Some(span_from_token(first)),
-                )
-            })?;
+        let mut name = identifier_text(first).map(str::to_string).ok_or_else(|| {
+            ParseError::new("識別子を解析できませんでした", Some(span_from_token(first)))
+        })?;
         let mut span = span_from_token(first);
 
-        while self.consume_if(|kind| matches!(kind, TokenType::Dot)).is_some() {
+        while self
+            .consume_if(|kind| matches!(kind, TokenType::Dot))
+            .is_some()
+        {
             let next = self.expect_identifier()?;
             let next_name = identifier_text(next).ok_or_else(|| {
-                ParseError::new(
-                    "識別子を解析できませんでした",
-                    Some(span_from_token(next)),
-                )
+                ParseError::new("識別子を解析できませんでした", Some(span_from_token(next)))
             })?;
             name.push('.');
             name.push_str(next_name);
@@ -310,13 +323,14 @@ impl<'a> TypeAnnotationParser<'a> {
     }
 
     fn expect_identifier(&mut self) -> Result<&'a Token, ParseError> {
-        self.expect(
-            |kind| matches!(kind, TokenType::Identifier(_)),
-            "識別子",
-        )
+        self.expect(|kind| matches!(kind, TokenType::Identifier(_)), "識別子")
     }
 
-    fn expect<F>(&mut self, predicate: F, description: &'static str) -> Result<&'a Token, ParseError>
+    fn expect<F>(
+        &mut self,
+        predicate: F,
+        description: &'static str,
+    ) -> Result<&'a Token, ParseError>
     where
         F: Fn(&TokenType) -> bool,
     {
@@ -326,7 +340,10 @@ impl<'a> TypeAnnotationParser<'a> {
                 Ok(token)
             }
             Some(token) => Err(ParseError::new(
-                format!("{description} を期待しましたが `{}` が見つかりました", token.lexeme),
+                format!(
+                    "{description} を期待しましたが `{}` が見つかりました",
+                    token.lexeme
+                ),
                 Some(span_from_token(token)),
             )),
             None => Err(ParseError::new(
@@ -451,10 +468,16 @@ mod tests {
         ];
         let lowered = lower_type_annotation_from_tokens(&tokens).expect("should lower");
         match lowered.annotation() {
-            TypeAnnotation::Function { params, return_type } => {
+            TypeAnnotation::Function {
+                params,
+                return_type,
+            } => {
                 assert_eq!(params.len(), 1);
                 assert_eq!(params[0], TypeAnnotation::Simple("Int".into()));
-                assert_eq!(return_type.as_ref(), &TypeAnnotation::Simple("String".into()));
+                assert_eq!(
+                    return_type.as_ref(),
+                    &TypeAnnotation::Simple("String".into())
+                );
             }
             other => panic!("unexpected annotation: {:?}", other),
         }

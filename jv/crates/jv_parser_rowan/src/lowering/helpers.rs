@@ -1,8 +1,8 @@
+use crate::support::spans::{merge_spans, span_from_token};
 use crate::syntax::SyntaxKind;
 use crate::JvLanguage;
 use jv_ast::Span;
 use jv_lexer::Token;
-use crate::support::spans::{merge_spans, span_from_token};
 use rowan::{SyntaxElement, SyntaxNode, SyntaxToken, TextRange, TextSize};
 
 /// 型付きRowanノードのエイリアス。

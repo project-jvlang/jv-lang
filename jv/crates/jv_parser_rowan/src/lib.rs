@@ -28,13 +28,13 @@ pub mod lowering;
 /// Rowan ベースのイベントパーサ機能。
 pub mod parser;
 #[cfg(feature = "rowan-parser")]
+mod support;
+#[cfg(feature = "rowan-parser")]
 /// Rowan 構文種別定義。
 pub mod syntax;
 #[cfg(feature = "rowan-parser")]
 /// Rowan AST 検証ハーネス。
 pub mod verification;
-#[cfg(feature = "rowan-parser")]
-mod support;
 
 #[cfg(feature = "rowan-parser")]
 pub use parser::{parse, DiagnosticSeverity, ParseEvent, ParseOutput, ParserDiagnostic, TokenSpan};

@@ -1,5 +1,6 @@
 use crate::lowering::{LoweringDiagnostic, LoweringDiagnosticSeverity};
 use crate::parser::{DiagnosticSeverity as ParserDiagnosticSeverity, ParserDiagnostic, TokenSpan};
+use crate::support::spans::{merge_spans, span_from_token};
 use jv_ast::Span;
 use jv_lexer::Token;
 use jv_parser_frontend::{
@@ -8,7 +9,6 @@ use jv_parser_frontend::{
 };
 use jv_parser_preprocess::PreprocessDiagnostic;
 use jv_parser_semantics::SemanticsDiagnostic;
-use crate::support::spans::{merge_spans, span_from_token};
 
 pub(crate) const ROWAN_PARSER_STAGE: &str = "rowan-parser";
 pub(crate) const ROWAN_LOWERING_STAGE: &str = "rowan-lowering";

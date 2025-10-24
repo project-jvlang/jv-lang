@@ -1,6 +1,10 @@
 use super::helpers::{
     collect_annotation_texts, first_identifier_text, JvSyntaxNode, LoweringContext,
 };
+use crate::support::{
+    literals::regex_literal_from_token,
+    spans::{expression_span, merge_spans, span_from_token},
+};
 use crate::syntax::SyntaxKind;
 use jv_ast::comments::{CommentKind, CommentStatement, CommentVisibility};
 use jv_ast::expression::{
@@ -11,8 +15,8 @@ use jv_ast::json::{
     JsonComment, JsonCommentKind, JsonEntry, JsonLiteral, JsonValue, NumberGrouping,
 };
 use jv_ast::statement::{
-    ConcurrencyConstruct, ForInStatement, LoopBinding, LoopStrategy, NumericRangeLoop, Property,
-    ResourceManagement, ValBindingOrigin,
+    ConcurrencyConstruct, ExtensionFunction, ForInStatement, LoopBinding, LoopStrategy,
+    NumericRangeLoop, Property, ResourceManagement, ValBindingOrigin,
 };
 use jv_ast::strings::{MultilineKind, MultilineStringLiteral};
 use jv_ast::types::{BinaryOp, Literal, Modifiers, Pattern, TypeAnnotation, UnaryOp};
@@ -21,10 +25,6 @@ use jv_lexer::{
     JsonCommentTrivia, JsonCommentTriviaKind, JsonConfidence, LayoutMode, Lexer,
     NumberGroupingKind, StringDelimiterKind, StringInterpolationSegment, StringLiteralMetadata,
     Token, TokenMetadata, TokenTrivia, TokenType,
-};
-use crate::support::{
-    literals::regex_literal_from_token,
-    spans::{expression_span, merge_spans, span_from_token},
 };
 use jv_type_inference_java::lower_type_annotation_from_tokens;
 
@@ -2257,15 +2257,33 @@ mod expression_parser {
                 return Ok(());
             }
 
-            let has_colon = slice
+            let filtered: Vec<&Token> = slice
+                .iter()
+                .copied()
+                .filter(|token| {
+                    !matches!(
+                        token.token_type,
+                        TokenType::Whitespace(_) | TokenType::Newline
+                    )
+                })
+                .collect();
+
+            if filtered.is_empty() {
+                return Ok(());
+            }
+
+            let has_colon = filtered
                 .iter()
                 .any(|token| matches!(token.token_type, TokenType::Colon));
-            let all_identifiers = slice.iter().all(|token| {
-                matches!(token.token_type, TokenType::Identifier(_) | TokenType::LayoutComma)
+            let all_identifiers = filtered.iter().all(|token| {
+                matches!(
+                    token.token_type,
+                    TokenType::Identifier(_) | TokenType::LayoutComma
+                )
             });
 
             if !has_colon && all_identifiers {
-                for token in slice.iter().copied() {
+                for token in filtered.iter().copied() {
                     if let TokenType::Identifier(name) = &token.token_type {
                         params.push(Parameter {
                             name: name.clone(),
@@ -2279,7 +2297,7 @@ mod expression_parser {
                 return Ok(());
             }
 
-            params.push(self.make_parameter_from_slice(slice)?);
+            params.push(self.make_parameter_from_slice(&filtered)?);
             Ok(())
         }
 
@@ -3207,6 +3225,152 @@ fn span_for_range_slice(slice: &[&Token]) -> Span {
     merge_spans(&start, &end)
 }
 
+fn collect_function_signature_tokens<'a>(tokens: &'a [&'a Token]) -> Vec<&'a Token> {
+    let mut fun_index: Option<usize> = None;
+    let mut paren_index: Option<usize> = None;
+
+    for (idx, token) in tokens.iter().enumerate() {
+        match token.token_type {
+            TokenType::Fun => fun_index = Some(idx),
+            TokenType::LeftParen => {
+                paren_index = Some(idx);
+                break;
+            }
+            _ => {}
+        }
+    }
+
+    let (start, end) = match (fun_index, paren_index) {
+        (Some(fun), Some(paren)) if fun + 1 < paren => (fun + 1, paren),
+        _ => return Vec::new(),
+    };
+
+    tokens[start..end]
+        .iter()
+        .filter_map(|token| {
+            if matches!(
+                token.token_type,
+                TokenType::Whitespace(_) | TokenType::Newline
+            ) {
+                None
+            } else {
+                Some(*token)
+            }
+        })
+        .collect()
+}
+
+fn split_generic_segment<'a>(
+    tokens: &'a [&'a Token],
+) -> (Option<&'a [&'a Token]>, &'a [&'a Token]) {
+    if tokens
+        .first()
+        .map(|token| matches!(token.token_type, TokenType::Less))
+        .unwrap_or(false)
+    {
+        let mut depth = 0usize;
+        for (idx, token) in tokens.iter().enumerate() {
+            match token.token_type {
+                TokenType::Less => depth = depth.saturating_add(1),
+                TokenType::Greater => {
+                    depth = depth.saturating_sub(1);
+                    if depth == 0 {
+                        let generics = &tokens[..=idx];
+                        let rest = &tokens[idx + 1..];
+                        return (Some(generics), rest);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    (None, tokens)
+}
+
+fn extract_type_parameter_names(tokens: Option<&[&Token]>) -> Vec<String> {
+    let mut names = Vec::new();
+    let Some(tokens) = tokens else {
+        return names;
+    };
+
+    let mut depth = 0usize;
+    let mut expect_name = true;
+    for token in tokens {
+        match token.token_type {
+            TokenType::Less => {
+                depth = depth.saturating_add(1);
+                expect_name = true;
+            }
+            TokenType::Greater => {
+                if depth > 0 {
+                    depth -= 1;
+                }
+                expect_name = depth == 1;
+            }
+            TokenType::Comma | TokenType::LayoutComma => {
+                if depth == 1 {
+                    expect_name = true;
+                }
+            }
+            TokenType::Colon if depth == 1 => {
+                expect_name = false;
+            }
+            TokenType::Identifier(ref name) if depth == 1 && expect_name => {
+                names.push(name.clone());
+                expect_name = false;
+            }
+            _ => {}
+        }
+    }
+    names
+}
+
+fn locate_function_name_index(tokens: &[&Token]) -> Option<usize> {
+    let mut depth = 0usize;
+    for (index, token) in tokens.iter().enumerate().rev() {
+        match token.token_type {
+            TokenType::Greater => depth = depth.saturating_add(1),
+            TokenType::Less => {
+                if depth == 0 {
+                    continue;
+                }
+                depth = depth.saturating_sub(1);
+            }
+            _ if depth > 0 => continue,
+            TokenType::Identifier(_) => return Some(index),
+            _ => continue,
+        }
+    }
+    None
+}
+
+fn receiver_token_slice<'a>(tokens: &'a [&'a Token], name_index: usize) -> Option<&'a [&'a Token]> {
+    if name_index == 0 {
+        return None;
+    }
+
+    let mut depth = 0usize;
+    for idx in (0..name_index).rev() {
+        match tokens[idx].token_type {
+            TokenType::Greater => depth = depth.saturating_add(1),
+            TokenType::Less => {
+                if depth > 0 {
+                    depth = depth.saturating_sub(1);
+                }
+            }
+            _ if depth > 0 => continue,
+            TokenType::Dot => return Some(&tokens[..idx]),
+            _ => {}
+        }
+    }
+
+    None
+}
+
+fn clone_tokens(slice: &[&Token]) -> Vec<Token> {
+    slice.iter().map(|token| (*token).clone()).collect()
+}
+
 fn lower_function(
     context: &LoweringContext<'_>,
     node: &JvSyntaxNode,
@@ -3288,7 +3452,11 @@ fn lower_function(
         ));
     }
 
-    let name = extract_identifier(&tokens).ok_or_else(|| {
+    let signature_tokens = collect_function_signature_tokens(&tokens);
+    let (generic_segment, signature_tail) = split_generic_segment(signature_tokens.as_slice());
+    let type_parameters = extract_type_parameter_names(generic_segment);
+
+    let name_index = locate_function_name_index(signature_tail).ok_or_else(|| {
         LoweringDiagnostic::new(
             LoweringDiagnosticSeverity::Error,
             "関数名を特定できませんでした",
@@ -3298,6 +3466,41 @@ fn lower_function(
             collect_annotation_texts(node),
         )
     })?;
+
+    let name_token = signature_tail[name_index];
+    let name = if let TokenType::Identifier(text) = &name_token.token_type {
+        text.clone()
+    } else {
+        return Err(LoweringDiagnostic::new(
+            LoweringDiagnosticSeverity::Error,
+            "関数名を特定できませんでした",
+            context.span_for(node),
+            node.kind(),
+            first_identifier_text(node),
+            collect_annotation_texts(node),
+        ));
+    };
+
+    let receiver_type = receiver_token_slice(signature_tail, name_index).and_then(|slice| {
+        if slice.is_empty() {
+            return None;
+        }
+        let owned_tokens = clone_tokens(slice);
+        match lower_type_annotation_from_tokens(&owned_tokens) {
+            Ok(lowered) => Some(lowered.into_annotation()),
+            Err(error) => {
+                diagnostics.push(LoweringDiagnostic::new(
+                    LoweringDiagnosticSeverity::Error,
+                    error.message().to_string(),
+                    Some(span_for_range_slice(slice)),
+                    node.kind(),
+                    Some(name.clone()),
+                    collect_annotation_texts(node),
+                ));
+                None
+            }
+        }
+    });
 
     let (parameters, _) = child_node(node, SyntaxKind::FunctionParameterList)
         .map(|list| lower_parameters(context, &list, diagnostics))
@@ -3317,9 +3520,9 @@ fn lower_function(
             .unwrap_or_else(|| Expression::Identifier(name.clone(), fallback_span))
     };
 
-    Ok(Statement::FunctionDeclaration {
-        name,
-        type_parameters: Vec::new(),
+    let function_statement = Statement::FunctionDeclaration {
+        name: name.clone(),
+        type_parameters,
         generic_signature: None,
         where_clause: None,
         parameters,
@@ -3327,8 +3530,18 @@ fn lower_function(
         primitive_return: None,
         body: Box::new(body),
         modifiers: Modifiers::default(),
-        span,
-    })
+        span: span.clone(),
+    };
+
+    if let Some(receiver_type) = receiver_type {
+        Ok(Statement::ExtensionFunction(ExtensionFunction {
+            receiver_type,
+            function: Box::new(function_statement),
+            span,
+        }))
+    } else {
+        Ok(function_statement)
+    }
 }
 
 fn lower_class(

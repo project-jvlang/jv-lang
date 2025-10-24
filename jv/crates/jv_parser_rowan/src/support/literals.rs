@@ -12,9 +12,7 @@ pub fn regex_literal_from_token(token: &Token, span: Span) -> RegexLiteral {
         .metadata
         .iter()
         .find_map(|metadata| match metadata {
-            TokenMetadata::RegexLiteral { raw, pattern } => {
-                Some((raw.clone(), pattern.clone()))
-            }
+            TokenMetadata::RegexLiteral { raw, pattern } => Some((raw.clone(), pattern.clone())),
             _ => None,
         })
         .unwrap_or_else(|| (format!("/{normalized}/"), normalized.clone()));

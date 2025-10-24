@@ -419,16 +419,14 @@ impl<'tokens> ParserContext<'tokens> {
 
         self.start_node(SyntaxKind::TypeAnnotation);
         self.bump_raw(); // colon
-        self.parse_expression_until(
-            &[
-                TokenKind::Assign,
-                TokenKind::Comma,
-                TokenKind::RightParen,
-                TokenKind::Semicolon,
-                TokenKind::RightBrace,
-            ],
-            false,
-        );
+        self.parse_type_expression_until(&[
+            TokenKind::Assign,
+            TokenKind::LeftBrace,
+            TokenKind::Semicolon,
+            TokenKind::RightBrace,
+            TokenKind::Comma,
+            TokenKind::RightParen,
+        ]);
         self.finish_node();
         true
     }
@@ -661,6 +659,51 @@ impl<'tokens> ParserContext<'tokens> {
         self.bump_raw();
         self.finish_node();
         true
+    }
+
+    pub(crate) fn parse_type_expression_until(&mut self, terminators: &[TokenKind]) {
+        let mut angle_depth = 0usize;
+        let mut paren_depth = 0usize;
+        let mut bracket_depth = 0usize;
+
+        loop {
+            self.consume_trivia();
+            let Some(kind) = self.peek_significant_kind() else {
+                break;
+            };
+
+            if angle_depth == 0
+                && paren_depth == 0
+                && bracket_depth == 0
+                && terminators.contains(&kind)
+            {
+                break;
+            }
+
+            match kind {
+                TokenKind::Less => angle_depth = angle_depth.saturating_add(1),
+                TokenKind::Greater => {
+                    if angle_depth > 0 {
+                        angle_depth -= 1;
+                    }
+                }
+                TokenKind::LeftParen => paren_depth = paren_depth.saturating_add(1),
+                TokenKind::RightParen => {
+                    if paren_depth > 0 {
+                        paren_depth -= 1;
+                    }
+                }
+                TokenKind::LeftBracket => bracket_depth = bracket_depth.saturating_add(1),
+                TokenKind::RightBracket => {
+                    if bracket_depth > 0 {
+                        bracket_depth -= 1;
+                    }
+                }
+                _ => {}
+            }
+
+            self.bump_raw();
+        }
     }
 
     /// 次の有効トークン種別を取得する。
