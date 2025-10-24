@@ -1,13 +1,13 @@
-# rowan-parser-pipeline: Rowanフロントエンド技術仕様
+# Rowan Parser Pipeline 技術仕様
 
 ## 概要
 
-本書は `rowan-parser-integration` 仕様 Task 3.2 の成果物として、Rowan パイプラインを前提とした jv 言語パーサーの技術的な構成を整理する。`STATEMENT_MAPPING.md` に蓄積されたステートメント写像メモ、`.project-todolist/作業指示-20251016.md` の開発指針、`docs/design/java-aware-type-inference.md` の型推論設計を統合し、実装チームとドキュメント利用者が共通認識を持てるようにする。
+本書は jv 言語パーサーの Rowan ベースパイプラインアーキテクチャを定義する。エラー復元可能な構文解析、診断情報の統合、型注釈のローワリング機構を含む完全なフロントエンド実装を記述する。
 
 ### スコープ
-- 対象モジュール: `jv_lexer`, `jv_parser_preprocess`, `jv_parser_rowan`, `jv_parser_frontend`, `jv_parser_semantics`, `jv_type_inference_java`
-- 対象 API: `jv_parser_frontend::ParserPipeline`, `jv_parser_rowan::frontend::RowanPipeline`, `FrontendOutput`, `PipelineArtifacts`
-- 非対象: レガシー Chumsky ベースの `jv_parser` / `jv_parser_syntax*` クレート（ワークスペース外の参考実装としてのみ存続）
+- **対象モジュール**: `jv_lexer`, `jv_parser_preprocess`, `jv_parser_rowan`, `jv_parser_frontend`, `jv_parser_semantics`, `jv_type_inference_java`
+- **対象 API**: `jv_parser_frontend::ParserPipeline`, `jv_parser_rowan::frontend::RowanPipeline`, `FrontendOutput`, `PipelineArtifacts`
+- **アーキテクチャ**: Rowan (`rowan::GreenNode`) ベースのロスレス構文木、イベントドリブン解析
 
 ## パイプライン構造
 
@@ -33,13 +33,13 @@
 
 ### 3. Rowan 解析 (`jv_parser_rowan::parser`)
 - `ParseBuilder` がイベント列 (`ParseEvent`) から `rowan::GreenNode` を生成。ノード圧縮や未バランスノードの防止を実装。
-- `SyntaxKind` は `Root` / `StatementList` / `Expression` 等を定義し、`STATEMENT_MAPPING.md` の想定と一致する。
+- `SyntaxKind` は `Root` / `StatementList` / `Expression` 等を定義し、jv 言語の構文要素を網羅。
 - 診断 (`ParserDiagnostic`) は `TokenSpan` を保持し、後段で `Span` に変換される。
 
 ### 4. ローワリング (`jv_parser_rowan::lowering`)
 - `helpers.rs` が Rowan ノードと元トークンのバインディング (`TokenStore`) を提供。
 - `support::spans` / `support::literals` は旧 `jv_parser_syntax_support` が担っていたスパン結合・正規表現リテラル生成を置き換え、Rowan クレート内で自給自足する。
-- `statements.rs` が `lower_program` を公開し、`Statement` 列と `LoweringDiagnostic` を生成。詳細なノード→AST 対応は `STATEMENT_MAPPING.md` を参照。
+- `statements.rs` が `lower_program` を公開し、`Statement` 列と `LoweringDiagnostic` を生成。GreenNode から AST への写像ロジックを実装。
 - 型注釈は `lower_type_annotation_container` → `jv_type_inference_java::lower_type_annotation_from_tokens` を経由し、構造化された `TypeAnnotation` を生成する。
 
 ### 5. セマンティクス (`jv_parser_semantics`)
@@ -73,22 +73,56 @@
 
 ## テストと検証
 
-- `rowan_spec_harness` (bin) が既存 TOML フィクスチャ (`tests/parser_rowan_specs/**/*.toml`) を実行し、AST/診断のリグレッションを検知。
-- `lowering_cases.rs` がシンセティックな構文木を用いた単体テストを提供し、ステートメントごとのローワリング結果を固定。
-- `cargo check` / `cargo test` に加え、`.project-todolist/作業指示-20251016.md` が定義する性能ベンチで Rowan パイプラインを監視。
+### テストハーネス
+- **`rowan_spec_harness`**: TOML フィクスチャベーステスト (`tests/parser_rowan_specs/**/*.toml`)
+  - 構文解析の正確性、AST 構造、診断メッセージのリグレッション検証
+- **`lowering_cases.rs`**: ユニットテスト
+  - ステートメント単位のローワリング結果を検証
+  - シンセティックな構文木からの変換テスト
 
-## レガシーパイプラインからの移行状況
+### 検証方法
+```bash
+# パイプライン全体のテスト実行
+cargo test
 
-- `jv/Cargo.toml` から `jv_parser` および `jv_parser_syntax*` クレートを除外。`chumsky` もワークスペース依存から排除済み。
-- 旧クレートは `crates/jv_parser*` 配下にソースを残しつつ、ビルド対象外の参考実装として扱う。ドキュメントからは Rowan パイプラインへの導線のみを提示する。
-- CLI/LSP/テストハーネスは `ParserPipeline` 経由で `RowanPipeline` を利用しており、Chumsky ベースの API へはフォールバックしない。
+# 型システムの静的検証
+cargo check
 
-## 参考資料
+# 個別クレートのテスト
+cargo test -p jv_parser_rowan
+cargo test -p jv_parser_frontend
+```
 
-- `jv/crates/jv_parser_rowan/src/lowering/STATEMENT_MAPPING.md`
-- `docs/design/java-aware-type-inference.md`
-- `.project-todolist/作業指示-20251016.md`
-- `jv_parser_frontend::frontend` 実装 (`src/frontend/{mod.rs,pipeline.rs,diagnostics.rs}`)
-- `jv_type_inference_java::TypeAnnotationParser` 実装 (`src/lib.rs`)
+## アーキテクチャ原則
 
-本仕様書は Rowan パイプラインを前提とした開発・保守の基準であり、追加ステートメントや診断が導入される際は本書と `STATEMENT_MAPPING.md` を同時に更新すること。
+1. **ロスレス構文木**: すべてのトークン、トリビア、メタデータを保持し、元ソースを完全に復元可能
+2. **エラー復元**: 構文エラー時も部分的な AST を構築し、IDE 機能を提供
+3. **ステージ分離**: 各パイプラインステージは独立した診断を生成し、中断点を明確化
+4. **型注釈の統合**: Java 型システムを意識した型注釈ローワリングを `jv_type_inference_java` で実現
+
+## 参考実装
+
+### 主要モジュール
+- `jv_parser_frontend::frontend` ([src/frontend/](../../jv/crates/jv_parser_frontend/src/frontend/))
+  - `mod.rs`: パイプライン統合
+  - `pipeline.rs`: `ParserPipeline` / `RowanPipeline` 実装
+  - `diagnostics.rs`: 診断統合ロジック
+
+- `jv_parser_rowan` ([crates/jv_parser_rowan/](../../jv/crates/jv_parser_rowan/))
+  - `src/parser/`: イベントドリブンパーサ
+  - `src/lowering/`: GreenNode → AST 変換
+
+- `jv_type_inference_java` ([crates/jv_type_inference_java/](../../jv/crates/jv_type_inference_java/))
+  - `src/lib.rs`: 型注釈パーサ実装
+
+### 関連設計文書
+- [java-aware-type-inference.md](java-aware-type-inference.md): 型推論システム設計
+
+## 拡張ガイドライン
+
+新規ステートメントや型注釈構文を追加する際は、以下を同時更新すること:
+
+1. **`jv_parser_rowan::parser`**: `SyntaxKind` 定義とパースロジック
+2. **`jv_parser_rowan::lowering`**: ローワリング実装とテストケース
+3. **`rowan_spec_harness`**: 構文解析とローワリングの検証テスト
+4. **本仕様書**: パイプライン構造への影響を反映
