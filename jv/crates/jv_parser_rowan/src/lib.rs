@@ -33,6 +33,8 @@ pub mod syntax;
 #[cfg(feature = "rowan-parser")]
 /// Rowan AST 検証ハーネス。
 pub mod verification;
+#[cfg(feature = "rowan-parser")]
+mod support;
 
 #[cfg(feature = "rowan-parser")]
 pub use parser::{parse, DiagnosticSeverity, ParseEvent, ParseOutput, ParserDiagnostic, TokenSpan};

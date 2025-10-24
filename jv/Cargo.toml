@@ -3,11 +3,6 @@ resolver = "2"
 members = [
     "crates/jv_support",
     "crates/jv_lexer",
-    "crates/jv_parser",
-    "crates/jv_parser_syntax",
-    "crates/jv_parser_syntax_expressions",
-    "crates/jv_parser_syntax_statements",
-    "crates/jv_parser_syntax_support",
     "crates/jv_parser_preprocess",
     "crates/jv_parser_semantics",
     "crates/jv_parser_frontend",
@@ -35,9 +30,6 @@ authors = ["jv Language Team"]
 repository = "https://github.com/project-jvlang/jv-lang"
 
 [workspace.dependencies]
-# Parser framework
-chumsky = "0.9"
-
 # CLI framework
 clap = { version = "4.0", features = ["derive", "env"] }
 anyhow = "1.0"
@@ -67,11 +59,6 @@ once_cell = "1.20"
 
 # Internal crates
 jv_lexer = { path = "crates/jv_lexer" }
-jv_parser = { path = "crates/jv_parser" }
-jv_parser_syntax = { path = "crates/jv_parser_syntax" }
-jv_parser_syntax_expressions = { path = "crates/jv_parser_syntax_expressions" }
-jv_parser_syntax_statements = { path = "crates/jv_parser_syntax_statements" }
-jv_parser_syntax_support = { path = "crates/jv_parser_syntax_support" }
 jv_parser_preprocess = { path = "crates/jv_parser_preprocess" }
 jv_parser_semantics = { path = "crates/jv_parser_semantics" }
 jv_parser_frontend = { path = "crates/jv_parser_frontend" }
@@ -124,29 +111,6 @@ panic = "abort"
 [profile.dev.package."*"]
 opt-level = 0
 debug = 0
-
-# Optimize chumsky to reduce compilation memory usage
-# Higher opt-level reduces memory during compilation
-[profile.dev.package.chumsky]
-opt-level = 2
-debug = 0
-codegen-units = 256
-# Enable overflow checks even in dev mode
-overflow-checks = true
-
-# Split jv_parser_syntax into more codegen units to reduce memory
-[profile.dev.package.jv_parser_syntax]
-codegen-units = 64
-
-[profile.dev.package.jv_parser_syntax_expressions]
-codegen-units = 64
-
-[profile.dev.package.jv_parser_syntax_statements]
-opt-level = 0
-codegen-units = 256
-
-[profile.dev.package.jv_parser_syntax_support]
-codegen-units = 32
 
 # Don't optimize build dependencies to save memory
 [profile.dev.build-override]

@@ -5,14 +5,8 @@
 //! Chumsky ベースのローワラーは既存の `TypeAnnotation` から同じインターフェースで
 //! 型情報を取得できる。
 
-use chumsky::error::{Simple, SimpleReason};
-use chumsky::Parser as ChumskyParser;
 use jv_ast::{Span, TypeAnnotation};
 use jv_lexer::{Token, TokenType};
-use jv_parser_syntax_support::support::{
-    parsers::type_annotation as type_annotation_parser,
-    spans::{merge_spans, span_from_token},
-};
 use std::borrow::Cow;
 use thiserror::Error;
 
@@ -139,22 +133,18 @@ fn lower_from_tokens(tokens: &[Token]) -> Result<LoweredTypeAnnotation, TypeLowe
         ));
     }
 
-    let parser = type_annotation_parser();
-    match parser.parse(filtered.clone()) {
+    match TypeAnnotationParser::new(&filtered).parse() {
         Ok(annotation) => {
             let span = tokens_span(&filtered);
             Ok(LoweredTypeAnnotation { annotation, span })
         }
-        Err(errors) => {
-            let span = errors
-                .first()
-                .and_then(|err| error_span(err, &filtered))
-                .or_else(|| tokens_span(&filtered));
-            let message = format_parse_errors(&errors);
+        Err(error) => {
+            let ParseError { message, span } = error;
+            let diagnostic_span = span.or_else(|| tokens_span(&filtered));
             Err(TypeLoweringError::new(
                 TypeLoweringErrorKind::Parse,
                 message,
-                span,
+                diagnostic_span,
             ))
         }
     }
@@ -181,54 +171,217 @@ fn tokens_span(tokens: &[Token]) -> Option<Span> {
     Some(merge_spans(&start, &end))
 }
 
-fn format_parse_errors(errors: &[Simple<Token>]) -> Cow<'static, str> {
-    if errors.is_empty() {
-        return Cow::Borrowed("型注釈の解析に失敗しました");
-    }
-
-    let mut messages = Vec::with_capacity(errors.len());
-    for error in errors {
-        messages.push(format_single_error(error));
-    }
-    Cow::Owned(messages.join("; "))
+#[derive(Debug)]
+struct ParseError {
+    message: Cow<'static, str>,
+    span: Option<Span>,
 }
 
-fn format_single_error(error: &Simple<Token>) -> String {
-    match error.reason() {
-        SimpleReason::Custom(message) => message.clone(),
-        SimpleReason::Unexpected => match error.found() {
-            Some(token) => format!("想定外のトークン `{}`", token.lexeme.as_str()),
-            None => "入力の終端で型注釈が未完です".to_string(),
-        },
-        SimpleReason::Unclosed { span: _, delimiter } => {
-            format!("`{}` が閉じられていません", delimiter.lexeme.as_str())
+impl ParseError {
+    fn new(message: impl Into<Cow<'static, str>>, span: Option<Span>) -> Self {
+        Self {
+            message: message.into(),
+            span,
         }
     }
 }
 
-fn error_span(error: &Simple<Token>, tokens: &[Token]) -> Option<Span> {
-    if tokens.is_empty() {
-        return None;
+struct TypeAnnotationParser<'a> {
+    tokens: &'a [Token],
+    position: usize,
+}
+
+impl<'a> TypeAnnotationParser<'a> {
+    fn new(tokens: &'a [Token]) -> Self {
+        Self { tokens, position: 0 }
     }
-    let range = error.span();
-    let tokens_len = tokens.len();
-    let start_index = range.start.min(tokens_len.saturating_sub(1));
-    let raw_end = if range.end == range.start {
-        range.start
-    } else {
-        range.end.saturating_sub(1)
-    };
-    let end_index = raw_end.min(tokens_len.saturating_sub(1)).max(start_index);
-    let start_token = tokens
-        .get(start_index)
-        .unwrap_or_else(|| tokens.last().unwrap());
-    let end_token = tokens
-        .get(end_index)
-        .unwrap_or_else(|| tokens.last().unwrap());
-    Some(merge_spans(
-        &span_from_token(start_token),
-        &span_from_token(end_token),
-    ))
+
+    fn parse(mut self) -> Result<TypeAnnotation, ParseError> {
+        let ty = self.parse_type_annotation()?;
+        if let Some(token) = self.peek() {
+            return Err(ParseError::new(
+                format!(
+                    "型注釈の末尾に余分なトークン `{}` があります",
+                    token.lexeme
+                ),
+                Some(span_from_token(token)),
+            ));
+        }
+        Ok(ty)
+    }
+
+    fn parse_type_annotation(&mut self) -> Result<TypeAnnotation, ParseError> {
+        let mut ty = if self.peek_is(|kind| matches!(kind, TokenType::LeftParen)) {
+            self.parse_function_type()?
+        } else {
+            self.parse_named_type()?
+        };
+
+        while self.consume_if(|kind| matches!(kind, TokenType::LeftBracket)).is_some() {
+            self.expect(|kind| matches!(kind, TokenType::RightBracket), "`]`")?;
+            ty = TypeAnnotation::Array(Box::new(ty));
+        }
+
+        if self.consume_if(|kind| matches!(kind, TokenType::Question)).is_some() {
+            ty = TypeAnnotation::Nullable(Box::new(ty));
+        }
+
+        Ok(ty)
+    }
+
+    fn parse_function_type(&mut self) -> Result<TypeAnnotation, ParseError> {
+        self.expect(|kind| matches!(kind, TokenType::LeftParen), "`(`")?;
+        let mut params = Vec::new();
+        if !self.peek_is(|kind| matches!(kind, TokenType::RightParen)) {
+            loop {
+                params.push(self.parse_type_annotation()?);
+                if self.consume_if(|kind| matches!(kind, TokenType::Comma)).is_some() {
+                    continue;
+                }
+                break;
+            }
+        }
+        self.expect(|kind| matches!(kind, TokenType::RightParen), "`)`")?;
+        self.expect(|kind| matches!(kind, TokenType::Arrow), "`->`")?;
+        let return_type = self.parse_type_annotation()?;
+        Ok(TypeAnnotation::Function {
+            params,
+            return_type: Box::new(return_type),
+        })
+    }
+
+    fn parse_named_type(&mut self) -> Result<TypeAnnotation, ParseError> {
+        let (name, _span) = self.parse_qualified_name()?;
+
+        if self.consume_if(|kind| matches!(kind, TokenType::Less)).is_some() {
+            let args = self.parse_type_arguments()?;
+            Ok(TypeAnnotation::Generic {
+                name,
+                type_args: args,
+            })
+        } else {
+            Ok(TypeAnnotation::Simple(name))
+        }
+    }
+
+    fn parse_type_arguments(&mut self) -> Result<Vec<TypeAnnotation>, ParseError> {
+        let mut args = Vec::new();
+        if self.consume_if(|kind| matches!(kind, TokenType::Greater)).is_some() {
+            return Ok(args);
+        }
+        loop {
+            args.push(self.parse_type_annotation()?);
+            if self.consume_if(|kind| matches!(kind, TokenType::Comma)).is_some() {
+                continue;
+            }
+            self.expect(|kind| matches!(kind, TokenType::Greater), "`>`")?;
+            break;
+        }
+        Ok(args)
+    }
+
+    fn parse_qualified_name(&mut self) -> Result<(String, Span), ParseError> {
+        let first = self.expect_identifier()?;
+        let mut name = identifier_text(first)
+            .map(str::to_string)
+            .ok_or_else(|| {
+                ParseError::new(
+                    "識別子を解析できませんでした",
+                    Some(span_from_token(first)),
+                )
+            })?;
+        let mut span = span_from_token(first);
+
+        while self.consume_if(|kind| matches!(kind, TokenType::Dot)).is_some() {
+            let next = self.expect_identifier()?;
+            let next_name = identifier_text(next).ok_or_else(|| {
+                ParseError::new(
+                    "識別子を解析できませんでした",
+                    Some(span_from_token(next)),
+                )
+            })?;
+            name.push('.');
+            name.push_str(next_name);
+            let next_span = span_from_token(next);
+            span = merge_spans(&span, &next_span);
+        }
+
+        Ok((name, span))
+    }
+
+    fn expect_identifier(&mut self) -> Result<&'a Token, ParseError> {
+        self.expect(
+            |kind| matches!(kind, TokenType::Identifier(_)),
+            "識別子",
+        )
+    }
+
+    fn expect<F>(&mut self, predicate: F, description: &'static str) -> Result<&'a Token, ParseError>
+    where
+        F: Fn(&TokenType) -> bool,
+    {
+        match self.peek() {
+            Some(token) if predicate(&token.token_type) => {
+                self.advance();
+                Ok(token)
+            }
+            Some(token) => Err(ParseError::new(
+                format!("{description} を期待しましたが `{}` が見つかりました", token.lexeme),
+                Some(span_from_token(token)),
+            )),
+            None => Err(ParseError::new(
+                format!("{description} を期待しましたが、入力の終端に達しました"),
+                None,
+            )),
+        }
+    }
+
+    fn consume_if<F>(&mut self, predicate: F) -> Option<&'a Token>
+    where
+        F: Fn(&TokenType) -> bool,
+    {
+        if let Some(token) = self.peek() {
+            if predicate(&token.token_type) {
+                self.position += 1;
+                return Some(token);
+            }
+        }
+        None
+    }
+
+    fn peek_is<F>(&self, predicate: F) -> bool
+    where
+        F: Fn(&TokenType) -> bool,
+    {
+        self.peek()
+            .map(|token| predicate(&token.token_type))
+            .unwrap_or(false)
+    }
+
+    fn peek(&self) -> Option<&'a Token> {
+        self.tokens.get(self.position)
+    }
+
+    fn advance(&mut self) -> Option<&'a Token> {
+        let token = self.tokens.get(self.position)?;
+        self.position += 1;
+        Some(token)
+    }
+}
+
+fn identifier_text(token: &Token) -> Option<&str> {
+    match &token.token_type {
+        TokenType::Identifier(name) => Some(name.as_str()),
+        _ => None,
+    }
+}
+
+fn span_from_token(token: &Token) -> Span {
+    Span::from_token_lexeme(token.line, token.column, &token.lexeme)
+}
+
+fn merge_spans(start: &Span, end: &Span) -> Span {
+    start.merge(end)
 }
 
 #[cfg(test)]
@@ -285,5 +438,51 @@ mod tests {
         let annotation = TypeAnnotation::Simple("Int".into());
         let lowered = lower_type_annotation_from_parsed(&annotation);
         assert_eq!(lowered.annotation(), &annotation);
+    }
+
+    #[test]
+    fn lower_function_type() {
+        let tokens = vec![
+            token(TokenType::LeftParen, "("),
+            token(TokenType::Identifier("Int".into()), "Int"),
+            token(TokenType::RightParen, ")"),
+            token(TokenType::Arrow, "->"),
+            token(TokenType::Identifier("String".into()), "String"),
+        ];
+        let lowered = lower_type_annotation_from_tokens(&tokens).expect("should lower");
+        match lowered.annotation() {
+            TypeAnnotation::Function { params, return_type } => {
+                assert_eq!(params.len(), 1);
+                assert_eq!(params[0], TypeAnnotation::Simple("Int".into()));
+                assert_eq!(return_type.as_ref(), &TypeAnnotation::Simple("String".into()));
+            }
+            other => panic!("unexpected annotation: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn lower_generic_type_arguments() {
+        let tokens = vec![
+            token(TokenType::Identifier("Result".into()), "Result"),
+            token(TokenType::Less, "<"),
+            token(TokenType::Identifier("String".into()), "String"),
+            token(TokenType::Comma, ","),
+            token(TokenType::Identifier("Error".into()), "Error"),
+            token(TokenType::Greater, ">"),
+        ];
+        let lowered = lower_type_annotation_from_tokens(&tokens).expect("should lower");
+        match lowered.annotation() {
+            TypeAnnotation::Generic { name, type_args } => {
+                assert_eq!(name, "Result");
+                assert_eq!(
+                    type_args,
+                    &[
+                        TypeAnnotation::Simple("String".into()),
+                        TypeAnnotation::Simple("Error".into())
+                    ]
+                );
+            }
+            other => panic!("unexpected annotation: {:?}", other),
+        }
     }
 }

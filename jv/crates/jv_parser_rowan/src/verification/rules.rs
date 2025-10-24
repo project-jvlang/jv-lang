@@ -6,7 +6,7 @@ use super::fixtures::{
 };
 use crate::lowering::LoweringDiagnostic;
 use crate::parser::{DiagnosticSeverity, ParserDiagnostic};
-use jv_parser_syntax_support::support::spans::statement_span;
+use crate::support::spans::statement_span;
 
 /// 検証違反。
 #[derive(Debug, Clone, Serialize)]

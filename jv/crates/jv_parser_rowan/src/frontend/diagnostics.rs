@@ -8,7 +8,7 @@ use jv_parser_frontend::{
 };
 use jv_parser_preprocess::PreprocessDiagnostic;
 use jv_parser_semantics::SemanticsDiagnostic;
-use jv_parser_syntax_support::support::spans::{merge_spans, span_from_token};
+use crate::support::spans::{merge_spans, span_from_token};
 
 pub(crate) const ROWAN_PARSER_STAGE: &str = "rowan-parser";
 pub(crate) const ROWAN_LOWERING_STAGE: &str = "rowan-lowering";

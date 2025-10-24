@@ -22,8 +22,8 @@ use jv_lexer::{
     NumberGroupingKind, StringDelimiterKind, StringInterpolationSegment, StringLiteralMetadata,
     Token, TokenMetadata, TokenTrivia, TokenType,
 };
-use jv_parser_syntax_support::support::{
-    parsers::regex_literal_from_token,
+use crate::support::{
+    literals::regex_literal_from_token,
     spans::{expression_span, merge_spans, span_from_token},
 };
 use jv_type_inference_java::lower_type_annotation_from_tokens;
