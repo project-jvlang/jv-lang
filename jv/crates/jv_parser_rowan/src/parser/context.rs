@@ -525,7 +525,19 @@ impl<'tokens> ParserContext<'tokens> {
                 if depth_angle == 0 {
                     if let Some(prev_line) = last_line {
                         if token.line > prev_line {
-                            should_break_on_sync = true;
+                            let continuation_kind = self.peek_significant_kind();
+                            let continuation = continuation_kind.map_or(false, |kind| {
+                                matches!(
+                                    kind,
+                                    TokenKind::Dot
+                                        | TokenKind::NullSafe
+                                        | TokenKind::DoubleColon
+                                        | TokenKind::Arrow
+                                )
+                            });
+                            if !continuation {
+                                should_break_on_sync = true;
+                            }
                         }
                     }
                 }

@@ -28,11 +28,7 @@ statement_kinds = [
     "val_declaration",
     "val_declaration",
     "expression",
-    "expression",
-    "expression",
     "val_declaration",
-    "expression",
-    "expression",
     "expression",
     "expression",
 ]

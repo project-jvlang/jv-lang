@@ -1699,7 +1699,7 @@ impl JavaCodeGenerator {
             SequenceTerminalKind::Sum => {
                 if let Some(hint) = terminal.specialization_hint.as_ref() {
                     match hint.canonical {
-                        PrimitiveTypeName::Int => {
+                        PrimitiveTypeName::Int | PrimitiveTypeName::Char => {
                             let mapper = self.render_int_stream_mapper(terminal)?;
                             Ok(format!("{chain}.mapToInt({mapper}).sum()"))
                         }
@@ -1711,15 +1711,14 @@ impl JavaCodeGenerator {
                             let mapper = self.render_double_stream_mapper();
                             Ok(format!("{chain}.mapToDouble({mapper}).sum()"))
                         }
-                        _ => Ok(format!(
-                            "{chain}.mapToLong(value -> ((Number) value).longValue()).sum()"
-                        )),
+                        _ => {
+                            let mapper = self.render_int_stream_mapper(terminal)?;
+                            Ok(format!("{chain}.mapToInt({mapper}).sum()"))
+                        }
                     }
                 } else {
-                    Ok(format!(
-                        "{}.mapToLong(value -> ((Number) value).longValue()).sum()",
-                        chain
-                    ))
+                    let mapper = self.render_int_stream_mapper(terminal)?;
+                    Ok(format!("{chain}.mapToInt({mapper}).sum()"))
                 }
             }
             SequenceTerminalKind::ForEach { action } => {
@@ -2053,7 +2052,7 @@ impl JavaCodeGenerator {
         if let Some(adapter) = terminal.canonical_adapter.as_ref() {
             self.generate_expression(adapter)
         } else {
-            Ok("(value) -> ((Number) value).intValue()".to_string())
+            Ok("(value) -> { if (value instanceof Character) { return ((Character) value).charValue(); } else { return ((Number) value).intValue(); } }".to_string())
         }
     }
 

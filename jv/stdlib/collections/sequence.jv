@@ -128,7 +128,12 @@ fun Stream<Double>.sum(): Double {
 fun <T> Stream<T>.sumIntFamily(): Int
     where T : int, T : char, T : short {
     return this
-        .mapToInt { candidate -> normalizeIntFamilyValue(candidate) }
+        .mapToInt { candidate ->
+            when (candidate is Character) {
+                true -> candidate.toString().codePointAt(0)
+                else -> (candidate as Number).intValue()
+            }
+        }
         .sum()
 }
 
@@ -259,19 +264,4 @@ fun <T, K, V> Iterable<T>.associate(transform: (T) -> Map.Entry<K, V>): Map<K, V
         result.put(entry.getKey(), entry.getValue())
     }
     return result
-}
-
-private fun <T> normalizeIntFamilyValue(value: T): Int
-    where T : int, T : char, T : short {
-    when (value is Character) {
-        true -> {
-            val character = value as Character
-            val raw: Char = character.charValue()
-            return raw + 0
-        }
-        else -> {
-            val number = value as Number
-            return number.intValue()
-        }
-    }
 }

@@ -30,7 +30,4 @@ statement_kinds = [
     "expression",
     "expression",
     "expression",
-    "expression",
-    "expression",
-    "expression",
 ]

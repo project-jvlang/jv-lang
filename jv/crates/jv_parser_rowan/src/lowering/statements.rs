@@ -26,7 +26,7 @@ use jv_lexer::{
     NumberGroupingKind, StringDelimiterKind, StringInterpolationSegment, StringLiteralMetadata,
     Token, TokenMetadata, TokenTrivia, TokenType,
 };
-use jv_type_inference_java::lower_type_annotation_from_tokens;
+use jv_type_inference_java::{lower_type_annotation_from_tokens, TypeLoweringErrorKind};
 
 /// ローワリング結果。
 #[derive(Debug)]
@@ -772,46 +772,65 @@ fn lower_expression(
     node: &JvSyntaxNode,
 ) -> Result<Expression, LoweringDiagnostic> {
     let tokens = context.tokens_for(node);
+    lower_expression_from_tokens(context, node, tokens)
+}
+
+fn lower_expression_from_tokens(
+    context: &LoweringContext<'_>,
+    span_node: &JvSyntaxNode,
+    tokens: Vec<&Token>,
+) -> Result<Expression, LoweringDiagnostic> {
     if tokens.is_empty() {
         return Err(LoweringDiagnostic::new(
             LoweringDiagnosticSeverity::Error,
             "式が空です",
-            context.span_for(node),
-            node.kind(),
-            first_identifier_text(node),
-            collect_annotation_texts(node),
+            context.span_for(span_node),
+            span_node.kind(),
+            first_identifier_text(span_node),
+            collect_annotation_texts(span_node),
         ));
     }
 
     let filtered: Vec<&Token> = tokens
         .iter()
         .copied()
-        .filter(|token| {
-            !is_trivia_token(token)
-                && !matches!(token.token_type, TokenType::Eof | TokenType::LayoutComma)
-        })
+        .filter(|token| !is_trivia_token(token) && !matches!(token.token_type, TokenType::Eof))
         .collect();
 
     if filtered.is_empty() {
         return Err(LoweringDiagnostic::new(
             LoweringDiagnosticSeverity::Error,
             "式が解析対象のトークンを含みません",
-            context.span_for(node),
-            node.kind(),
-            first_identifier_text(node),
-            collect_annotation_texts(node),
+            context.span_for(span_node),
+            span_node.kind(),
+            first_identifier_text(span_node),
+            collect_annotation_texts(span_node),
         ));
     }
 
     match expression_parser::parse_expression(&filtered) {
         Ok(expr) => Ok(expr),
         Err(err) => {
-            let span = err
-                .span
-                .or_else(|| context.span_for(node))
-                .unwrap_or_else(Span::dummy);
-            let fallback = Expression::Identifier(join_tokens(&filtered), span);
-            Ok(fallback)
+            let expression_parser::ExpressionError { message, span } = err;
+            if message.contains("JV2101") {
+                let span = span
+                    .or_else(|| context.span_for(span_node))
+                    .unwrap_or_else(Span::dummy);
+                Err(LoweringDiagnostic::new(
+                    LoweringDiagnosticSeverity::Error,
+                    message,
+                    Some(span),
+                    span_node.kind(),
+                    first_identifier_text(span_node),
+                    collect_annotation_texts(span_node),
+                ))
+            } else {
+                let span = span
+                    .or_else(|| context.span_for(span_node))
+                    .unwrap_or_else(Span::dummy);
+                let fallback = Expression::Identifier(join_tokens(&filtered), span);
+                Ok(fallback)
+            }
         }
     }
 }
@@ -869,6 +888,41 @@ fn join_tokens(tokens: &[&Token]) -> String {
         .collect::<String>()
 }
 
+fn token_requires_followup(token_type: &TokenType) -> bool {
+    matches!(
+        token_type,
+        TokenType::Plus
+            | TokenType::Minus
+            | TokenType::Multiply
+            | TokenType::Divide
+            | TokenType::Modulo
+            | TokenType::Equal
+            | TokenType::NotEqual
+            | TokenType::Less
+            | TokenType::LessEqual
+            | TokenType::And
+            | TokenType::Or
+            | TokenType::RangeExclusive
+            | TokenType::RangeInclusive
+            | TokenType::Elvis
+            | TokenType::Assign
+            | TokenType::Dot
+            | TokenType::NullSafe
+            | TokenType::DoubleColon
+            | TokenType::Comma
+            | TokenType::LayoutComma
+            | TokenType::LeftParen
+            | TokenType::LeftBracket
+            | TokenType::LeftBrace
+            | TokenType::Arrow
+            | TokenType::FatArrow
+            | TokenType::Colon
+            | TokenType::Semicolon
+            | TokenType::At
+            | TokenType::Question
+    )
+}
+
 fn is_trivia_token(token: &Token) -> bool {
     matches!(
         token.token_type,
@@ -878,6 +932,80 @@ fn is_trivia_token(token: &Token) -> bool {
             | TokenType::BlockComment(_)
             | TokenType::JavaDocComment(_)
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use jv_lexer::Lexer;
+
+    fn parse_expression_from_source(source: &str) -> Expression {
+        let mut lexer = Lexer::with_layout_mode(source.to_string(), LayoutMode::Enabled);
+        let tokens = lexer.tokenize().expect("tokenize expression");
+        let filtered: Vec<&Token> = tokens
+            .iter()
+            .filter(|token| !matches!(token.token_type, TokenType::Eof))
+            .collect();
+        expression_parser::parse_expression(&filtered).expect("parse expression")
+    }
+
+    #[test]
+    fn call_with_whitespace_arguments_parses() {
+        let expr = parse_expression_from_source("operation(accumulator value)");
+        match expr {
+            Expression::Call { args, .. } => {
+                assert_eq!(args.len(), 2, "expected two positional arguments");
+            }
+            other => panic!("expected call expression, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parses_as_type_cast_expression() {
+        let expr = parse_expression_from_source("value as Character");
+        match expr {
+            Expression::TypeCast { .. } => {}
+            other => panic!("expected type cast expression, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn call_arguments_split_across_newlines_parse() {
+        let expr = parse_expression_from_source("operation(\n    accumulator\n    value\n)");
+        match expr {
+            Expression::Call { args, .. } => assert_eq!(args.len(), 2),
+            other => panic!("expected call expression, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn value_is_type_test_parses() {
+        let expr = parse_expression_from_source("value is Character");
+        match expr {
+            Expression::Binary { op, .. } if matches!(op, BinaryOp::Is) => {}
+            other => panic!("expected `is` binary expression, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn stream_fold_lambda_parses() {
+        let source = r#"this.forEach { value ->
+    accumulator = operation(
+        accumulator
+        value
+    )
+}"#;
+        let expr = parse_expression_from_source(source);
+        match expr {
+            Expression::Call { args, .. } => {
+                assert_eq!(args.len(), 1);
+            }
+            other => panic!(
+                "expected call expression with lambda argument, got {:?}",
+                other
+            ),
+        }
+    }
 }
 
 mod expression_parser {
@@ -908,6 +1036,7 @@ mod expression_parser {
     struct ExpressionParser<'a> {
         tokens: &'a [&'a Token],
         pos: usize,
+        pending_type_arguments: Option<Vec<TypeAnnotation>>,
     }
 
     #[derive(Clone)]
@@ -934,9 +1063,23 @@ mod expression_parser {
         associativity: Associativity,
     }
 
+    fn has_layout_break(token: &Token) -> bool {
+        token.leading_trivia.newlines > 0
+    }
+
+    #[derive(Clone, Copy)]
+    enum SeparatorKind {
+        Comma,
+        Layout,
+    }
+
     impl<'a> ExpressionParser<'a> {
         fn new(tokens: &'a [&'a Token]) -> Self {
-            Self { tokens, pos: 0 }
+            Self {
+                tokens,
+                pos: 0,
+                pending_type_arguments: None,
+            }
         }
 
         fn parse_expression_bp(&mut self, min_prec: u8) -> Result<ParsedExpr, ExpressionError> {
@@ -945,6 +1088,11 @@ mod expression_parser {
             loop {
                 if let Some(kind) = self.peek_postfix_kind() {
                     left = self.parse_postfix(left, kind)?;
+                    continue;
+                }
+
+                if self.peek_is_as_keyword() {
+                    left = self.parse_type_cast(left)?;
                     continue;
                 }
 
@@ -1053,9 +1201,7 @@ mod expression_parser {
                         self.parse_brace_expression()
                     }
                 }
-                TokenType::LeftBracket if has_high_json_confidence(token) => {
-                    self.parse_json_array_expression(index)
-                }
+                TokenType::LeftBracket => self.parse_array_expression(index),
                 TokenType::When => self.parse_when_expression(),
                 _ => self.parse_primary(),
             }
@@ -1103,6 +1249,14 @@ mod expression_parser {
                     let span = span_from_token(token);
                     Ok(ParsedExpr {
                         expr: Expression::Literal(Literal::String(value.clone()), span.clone()),
+                        start: index,
+                        end: index + 1,
+                    })
+                }
+                TokenType::Character(value) => {
+                    let span = span_from_token(token);
+                    Ok(ParsedExpr {
+                        expr: Expression::Literal(Literal::Character(*value), span.clone()),
                         start: index,
                         end: index + 1,
                     })
@@ -1175,18 +1329,164 @@ mod expression_parser {
             })
         }
 
-        fn parse_json_array_expression(
+        fn parse_array_expression(
             &mut self,
             start_index: usize,
         ) -> Result<ParsedExpr, ExpressionError> {
             let closing_index = self
                 .find_matching_bracket(start_index)
                 .ok_or_else(|| ExpressionError::new("']' が必要です", self.span_at(start_index)))?;
-            let slice = &self.tokens[start_index..=closing_index];
-            let json = parse_json_literal_tokens(slice)?;
+            let inner = &self.tokens[start_index + 1..closing_index];
+            let span = span_for_range(self.tokens, start_index, closing_index + 1);
+
+            if inner.is_empty()
+                || inner.iter().all(|token| {
+                    is_trivia_token(token) || matches!(token.token_type, TokenType::LayoutComma)
+                })
+            {
+                self.pos = closing_index + 1;
+                let expr = Expression::Array {
+                    elements: Vec::new(),
+                    delimiter: SequenceDelimiter::Comma,
+                    span: span.clone(),
+                };
+                return Ok(ParsedExpr {
+                    expr,
+                    start: start_index,
+                    end: closing_index + 1,
+                });
+            }
+
+            let mut parts: Vec<&[&Token]> = Vec::new();
+            let mut separators: Vec<SeparatorKind> = Vec::new();
+            let mut start = 0usize;
+            let mut depth_paren = 0usize;
+            let mut depth_brace = 0usize;
+            let mut depth_bracket = 0usize;
+
+            for (offset, token) in inner.iter().enumerate() {
+                let at_top_level = depth_paren == 0 && depth_brace == 0 && depth_bracket == 0;
+
+                if at_top_level
+                    && has_layout_break(token)
+                    && !matches!(token.token_type, TokenType::Comma | TokenType::LayoutComma)
+                    && start < offset
+                {
+                    parts.push(&inner[start..offset]);
+                    separators.push(SeparatorKind::Layout);
+                    start = offset;
+                }
+
+                if at_top_level
+                    && start < offset
+                    && token.leading_trivia.newlines == 0
+                    && token.leading_trivia.spaces > 0
+                {
+                    if let Some(prev_token) = inner.get(offset - 1) {
+                        if !token_requires_followup(&prev_token.token_type) {
+                            parts.push(&inner[start..offset]);
+                            separators.push(SeparatorKind::Layout);
+                            start = offset;
+                        }
+                    }
+                }
+
+                match token.token_type {
+                    TokenType::LeftParen => depth_paren += 1,
+                    TokenType::RightParen if depth_paren > 0 => depth_paren -= 1,
+                    TokenType::LeftBrace => depth_brace += 1,
+                    TokenType::RightBrace if depth_brace > 0 => depth_brace -= 1,
+                    TokenType::LeftBracket => depth_bracket += 1,
+                    TokenType::RightBracket if depth_bracket > 0 => depth_bracket -= 1,
+                    TokenType::Comma if at_top_level => {
+                        parts.push(&inner[start..offset]);
+                        separators.push(SeparatorKind::Comma);
+                        start = offset + 1;
+                        continue;
+                    }
+                    TokenType::LayoutComma if at_top_level => {
+                        parts.push(&inner[start..offset]);
+                        separators.push(SeparatorKind::Layout);
+                        start = offset + 1;
+                        continue;
+                    }
+                    _ => {}
+                }
+            }
+
+            let mut trailing_separator: Option<SeparatorKind> = None;
+            if start < inner.len() {
+                parts.push(&inner[start..]);
+            } else if start == inner.len() && !separators.is_empty() {
+                trailing_separator = separators.pop();
+            }
+
+            if !parts.is_empty() && parts.len() != separators.len() + 1 {
+                return Err(ExpressionError::new(
+                    "配列リテラルの要素区切りが不正です",
+                    Some(span.clone()),
+                ));
+            }
+
+            let mut elements = Vec::with_capacity(parts.len());
+            let mut saw_layout = false;
+            let mut saw_comma = false;
+
+            for (idx, part) in parts.iter().enumerate() {
+                let filtered: Vec<&Token> = part
+                    .iter()
+                    .copied()
+                    .filter(|token| {
+                        !is_trivia_token(token)
+                            && !matches!(token.token_type, TokenType::LayoutComma)
+                    })
+                    .collect();
+
+                if filtered.is_empty() {
+                    return Err(ExpressionError::new(
+                        array_comma_error_message(),
+                        Some(span.clone()),
+                    ));
+                }
+
+                let parsed = Self::parse_nested_expression(filtered.as_slice())?;
+                elements.push(parsed.expr);
+
+                if let Some(separator) = separators.get(idx) {
+                    match separator {
+                        SeparatorKind::Comma => saw_comma = true,
+                        SeparatorKind::Layout => saw_layout = true,
+                    }
+                }
+            }
+
+            if let Some(separator) = trailing_separator {
+                match separator {
+                    SeparatorKind::Comma => saw_comma = true,
+                    SeparatorKind::Layout => saw_layout = true,
+                }
+            }
+
+            if saw_comma {
+                return Err(ExpressionError::new(
+                    array_comma_error_message(),
+                    Some(span),
+                ));
+            }
+
+            let delimiter = if saw_layout {
+                SequenceDelimiter::Whitespace
+            } else {
+                SequenceDelimiter::Comma
+            };
+
             self.pos = closing_index + 1;
             Ok(ParsedExpr {
-                expr: Expression::JsonLiteral(json),
+                expr: Expression::Array {
+                    elements,
+                    delimiter,
+                    span: span.clone(),
+                },
                 start: start_index,
                 end: closing_index + 1,
             })
@@ -1218,7 +1518,12 @@ mod expression_parser {
                         span: span.clone(),
                     }
                 } else {
-                    Self::parse_nested_expression(body_tokens)?.expr
+                    match Self::parse_nested_expression(body_tokens) {
+                        Ok(expr) => expr.expr,
+                        Err(_) => {
+                            self.parse_lambda_body_as_block(body_tokens, arrow_absolute + 1)?
+                        }
+                    }
                 };
 
                 ParsedExpr {
@@ -1243,6 +1548,226 @@ mod expression_parser {
 
             self.pos = closing_index + 1;
             Ok(parsed)
+        }
+
+        fn parse_lambda_body_as_block(
+            &self,
+            body_tokens: &[&'a Token],
+            body_start: usize,
+        ) -> Result<Expression, ExpressionError> {
+            let mut statements = Vec::new();
+            let ranges = Self::split_lambda_body_statements(body_tokens);
+            for (rel_start, rel_end) in ranges {
+                if rel_start >= rel_end {
+                    continue;
+                }
+                let slice = &body_tokens[rel_start..rel_end];
+                let absolute_start = body_start + rel_start;
+                let statement = self.parse_lambda_statement(slice, absolute_start)?;
+                statements.push(statement);
+            }
+
+            let span = span_for_range(self.tokens, body_start, body_start + body_tokens.len());
+            Ok(Expression::Block { statements, span })
+        }
+
+        fn split_lambda_body_statements(tokens: &[&Token]) -> Vec<(usize, usize)> {
+            let mut ranges = Vec::new();
+            let mut start = 0usize;
+            let mut depth_paren = 0isize;
+            let mut depth_brace = 0isize;
+            let mut depth_bracket = 0isize;
+
+            for (idx, token) in tokens.iter().enumerate() {
+                match token.token_type {
+                    TokenType::LeftParen => depth_paren += 1,
+                    TokenType::RightParen => depth_paren = depth_paren.saturating_sub(1),
+                    TokenType::LeftBrace => depth_brace += 1,
+                    TokenType::RightBrace => depth_brace = depth_brace.saturating_sub(1),
+                    TokenType::LeftBracket => depth_bracket += 1,
+                    TokenType::RightBracket => depth_bracket = depth_bracket.saturating_sub(1),
+                    _ => {}
+                }
+
+                if idx + 1 < tokens.len()
+                    && depth_paren == 0
+                    && depth_brace == 0
+                    && depth_bracket == 0
+                {
+                    let next = tokens[idx + 1];
+                    if next.leading_trivia.newlines > 0
+                        && !matches!(
+                            next.token_type,
+                            TokenType::RightParen | TokenType::RightBrace | TokenType::RightBracket
+                        )
+                    {
+                        ranges.push((start, idx + 1));
+                        start = idx + 1;
+                    }
+                }
+            }
+
+            if start < tokens.len() {
+                ranges.push((start, tokens.len()));
+            }
+
+            ranges
+        }
+
+        fn parse_lambda_statement(
+            &self,
+            slice: &[&'a Token],
+            absolute_start: usize,
+        ) -> Result<Statement, ExpressionError> {
+            if slice.is_empty() {
+                return Err(ExpressionError::new("ラムダのステートメントが空です", None));
+            }
+
+            let absolute_end = absolute_start + slice.len();
+            let span = span_for_range(self.tokens, absolute_start, absolute_end);
+            let first = slice[0];
+
+            match first.token_type {
+                TokenType::Val => self.parse_val_statement(slice, absolute_start),
+                TokenType::Return => {
+                    let expr_slice = &slice[1..];
+                    let value = if expr_slice.is_empty() {
+                        None
+                    } else {
+                        Some(Self::parse_nested_expression(expr_slice)?.expr)
+                    };
+                    Ok(Statement::Return { value, span })
+                }
+                _ => {
+                    if let Some(assign_index) = Self::find_top_level_assign(slice) {
+                        let target_tokens = &slice[..assign_index];
+                        let value_tokens = &slice[assign_index + 1..];
+                        if target_tokens.is_empty() || value_tokens.is_empty() {
+                            return Err(ExpressionError::new(
+                                "代入ステートメントの構文が不正です",
+                                Some(span.clone()),
+                            ));
+                        }
+                        let target = Self::parse_nested_expression(target_tokens)?.expr;
+                        let value = Self::parse_nested_expression(value_tokens)?.expr;
+                        Ok(Statement::Assignment {
+                            target,
+                            binding_pattern: None,
+                            value,
+                            span,
+                        })
+                    } else {
+                        let expr = Self::parse_nested_expression(slice)?.expr;
+                        Ok(Statement::Expression { expr, span })
+                    }
+                }
+            }
+        }
+
+        fn parse_val_statement(
+            &self,
+            slice: &[&'a Token],
+            absolute_start: usize,
+        ) -> Result<Statement, ExpressionError> {
+            let absolute_end = absolute_start + slice.len();
+            let span = span_for_range(self.tokens, absolute_start, absolute_end);
+
+            if slice.len() < 3 {
+                return Err(ExpressionError::new(
+                    "`val` 宣言の構文が不正です",
+                    Some(span.clone()),
+                ));
+            }
+
+            let name_token = slice[1];
+            let name = match &name_token.token_type {
+                TokenType::Identifier(id) => id.clone(),
+                _ => {
+                    return Err(ExpressionError::new(
+                        "`val` 宣言には識別子が必要です",
+                        Some(span_from_token(name_token)),
+                    ))
+                }
+            };
+
+            let mut cursor = 2usize;
+            let mut type_annotation: Option<TypeAnnotation> = None;
+
+            if cursor < slice.len() && matches!(slice[cursor].token_type, TokenType::Colon) {
+                cursor += 1;
+                let mut type_end = cursor;
+                while type_end < slice.len()
+                    && !matches!(slice[type_end].token_type, TokenType::Assign)
+                {
+                    type_end += 1;
+                }
+
+                let type_tokens = &slice[cursor..type_end];
+                if !type_tokens.is_empty() {
+                    let owned: Vec<Token> =
+                        type_tokens.iter().map(|token| (*token).clone()).collect();
+                    match lower_type_annotation_from_tokens(&owned) {
+                        Ok(lowered) => type_annotation = Some(lowered.into_annotation()),
+                        Err(error) => {
+                            return Err(ExpressionError::new(
+                                error.message().to_string(),
+                                error.span().cloned(),
+                            ))
+                        }
+                    }
+                }
+                cursor = type_end;
+            }
+
+            if cursor >= slice.len() || !matches!(slice[cursor].token_type, TokenType::Assign) {
+                return Err(ExpressionError::new(
+                    "`val` 宣言には `=` が必要です",
+                    Some(span.clone()),
+                ));
+            }
+
+            let initializer_tokens = &slice[cursor + 1..];
+            if initializer_tokens.is_empty() {
+                return Err(ExpressionError::new(
+                    "`val` 宣言の初期化式が必要です",
+                    Some(span.clone()),
+                ));
+            }
+
+            let initializer = Self::parse_nested_expression(initializer_tokens)?.expr;
+
+            Ok(Statement::ValDeclaration {
+                name,
+                binding: None,
+                type_annotation,
+                initializer,
+                modifiers: Modifiers::default(),
+                origin: ValBindingOrigin::ExplicitKeyword,
+                span,
+            })
+        }
+
+        fn find_top_level_assign(slice: &[&Token]) -> Option<usize> {
+            let mut depth_paren = 0isize;
+            let mut depth_brace = 0isize;
+            let mut depth_bracket = 0isize;
+            for (idx, token) in slice.iter().enumerate() {
+                match token.token_type {
+                    TokenType::LeftParen => depth_paren += 1,
+                    TokenType::RightParen => depth_paren = depth_paren.saturating_sub(1),
+                    TokenType::LeftBrace => depth_brace += 1,
+                    TokenType::RightBrace => depth_brace = depth_brace.saturating_sub(1),
+                    TokenType::LeftBracket => depth_bracket += 1,
+                    TokenType::RightBracket => depth_bracket = depth_bracket.saturating_sub(1),
+                    TokenType::Assign
+                        if depth_paren == 0 && depth_brace == 0 && depth_bracket == 0 =>
+                    {
+                        return Some(idx);
+                    }
+                    _ => {}
+                }
+            }
+            None
         }
 
         fn parse_when_expression(&mut self) -> Result<ParsedExpr, ExpressionError> {
@@ -1373,7 +1898,33 @@ mod expression_parser {
                     let slice = &self.tokens[self.pos..closing_index];
                     let parsed_body = {
                         let mut nested = ExpressionParser::new(slice);
-                        nested.parse_expression_bp(0)?
+                        match nested.parse_expression_bp(0) {
+                            Ok(parsed) => parsed,
+                            Err(err) => {
+                                if matches!(
+                                    slice.first().map(|token| &token.token_type),
+                                    Some(TokenType::LeftBrace)
+                                ) {
+                                    let body_close =
+                                        self.find_matching_brace(self.pos).ok_or_else(|| {
+                                            ExpressionError::new(
+                                                "'}' が必要です",
+                                                self.span_at(self.pos),
+                                            )
+                                        })?;
+                                    let block_tokens = &self.tokens[self.pos + 1..body_close];
+                                    let block_expr = self
+                                        .parse_lambda_body_as_block(block_tokens, self.pos + 1)?;
+                                    ParsedExpr {
+                                        expr: block_expr,
+                                        start: 0,
+                                        end: body_close - self.pos + 1,
+                                    }
+                                } else {
+                                    return Err(err);
+                                }
+                            }
+                        }
                     };
                     if parsed_body.end == 0 {
                         return Err(ExpressionError::new(
@@ -1430,7 +1981,33 @@ mod expression_parser {
                 let slice = &self.tokens[self.pos..closing_index];
                 let parsed_body = {
                     let mut nested = ExpressionParser::new(slice);
-                    nested.parse_expression_bp(0)?
+                    match nested.parse_expression_bp(0) {
+                        Ok(parsed) => parsed,
+                        Err(err) => {
+                            if matches!(
+                                slice.first().map(|token| &token.token_type),
+                                Some(TokenType::LeftBrace)
+                            ) {
+                                let body_close =
+                                    self.find_matching_brace(self.pos).ok_or_else(|| {
+                                        ExpressionError::new(
+                                            "'}' が必要です",
+                                            self.span_at(self.pos),
+                                        )
+                                    })?;
+                                let block_tokens = &self.tokens[self.pos + 1..body_close];
+                                let block_expr =
+                                    self.parse_lambda_body_as_block(block_tokens, self.pos + 1)?;
+                                ParsedExpr {
+                                    expr: block_expr,
+                                    start: 0,
+                                    end: body_close - self.pos + 1,
+                                }
+                            } else {
+                                return Err(err);
+                            }
+                        }
+                    }
                 };
                 if parsed_body.end == 0 {
                     return Err(ExpressionError::new(
@@ -1863,6 +2440,7 @@ mod expression_parser {
                 PostfixKind::NullSafeMemberAccess => self.parse_null_safe_member(left),
                 PostfixKind::Index => self.parse_index_access(left, false),
                 PostfixKind::NullSafeIndex => self.parse_index_access(left, true),
+                PostfixKind::TypeArguments => self.parse_type_arguments_postfix(left),
                 PostfixKind::Call => self.parse_parenthesized_call(left),
                 PostfixKind::TrailingLambda => self.parse_trailing_lambda_call(left),
             }
@@ -2019,6 +2597,72 @@ mod expression_parser {
             })
         }
 
+        fn parse_type_arguments_postfix(
+            &mut self,
+            mut left: ParsedExpr,
+        ) -> Result<ParsedExpr, ExpressionError> {
+            if self.pending_type_arguments.is_some() {
+                return Err(ExpressionError::new(
+                    "型引数リストが重複しています",
+                    self.span_at(self.pos),
+                ));
+            }
+
+            let (end_index, ranges) = self.extract_type_argument_ranges(self.pos)?;
+            if ranges.is_empty() {
+                return Err(ExpressionError::new(
+                    "型引数リストが空です",
+                    self.span_at(self.pos),
+                ));
+            }
+
+            let mut annotations = Vec::with_capacity(ranges.len());
+            for (start, end) in ranges {
+                let owned_tokens: Vec<Token> = self.tokens[start..end]
+                    .iter()
+                    .map(|token| (*token).clone())
+                    .collect();
+
+                let has_non_trivia = owned_tokens.iter().any(|token| !is_trivia_token(token));
+
+                if !has_non_trivia {
+                    return Err(ExpressionError::new(
+                        "型引数が空です",
+                        self.span_at(start).or_else(|| self.span_at(end)),
+                    ));
+                }
+
+                match lower_type_annotation_from_tokens(&owned_tokens) {
+                    Ok(lowered) => annotations.push(lowered.into_annotation()),
+                    Err(error) => {
+                        let span = error
+                            .span()
+                            .cloned()
+                            .or_else(|| Some(span_for_range(self.tokens, start, end)));
+                        return Err(ExpressionError::new(error.message().to_string(), span));
+                    }
+                }
+            }
+
+            let next_index = end_index + 1;
+            self.pos = next_index;
+            while let Some(token) = self.tokens.get(self.pos) {
+                match token.token_type {
+                    TokenType::Whitespace(_)
+                    | TokenType::Newline
+                    | TokenType::LayoutComma
+                    | TokenType::LineComment(_)
+                    | TokenType::BlockComment(_)
+                    | TokenType::JavaDocComment(_) => self.pos += 1,
+                    _ => break,
+                }
+            }
+
+            self.pending_type_arguments = Some(annotations);
+            left.end = next_index;
+            Ok(left)
+        }
+
         fn parse_parenthesized_call(
             &mut self,
             left: ParsedExpr,
@@ -2028,15 +2672,17 @@ mod expression_parser {
                 .find_matching_paren(open_index)
                 .ok_or_else(|| ExpressionError::new("')' が必要です", self.span_at(open_index)))?;
 
+            let saved_type_arguments = self.pending_type_arguments.take();
             let (arguments, metadata, args_span_end) =
                 self.parse_arguments(open_index, close_index)?;
             self.pos = close_index + 1;
 
             let call_span = span_for_range(self.tokens, left.start, args_span_end);
+            let type_arguments = saved_type_arguments.unwrap_or_default();
             let expr = Expression::Call {
                 function: Box::new(left.expr),
                 args: arguments,
-                type_arguments: Vec::new(),
+                type_arguments,
                 argument_metadata: metadata,
                 span: call_span.clone(),
             };
@@ -2089,6 +2735,32 @@ mod expression_parser {
             let mut depth_bracket = 0usize;
 
             for (offset, token) in inner.iter().enumerate() {
+                let at_top_level = depth_paren == 0 && depth_brace == 0 && depth_bracket == 0;
+
+                if at_top_level
+                    && has_layout_break(token)
+                    && !matches!(token.token_type, TokenType::Comma | TokenType::LayoutComma)
+                    && start < offset
+                {
+                    parts.push(&inner[start..offset]);
+                    separators.push(SeparatorKind::Layout);
+                    start = offset;
+                }
+
+                if at_top_level
+                    && start < offset
+                    && token.leading_trivia.newlines == 0
+                    && token.leading_trivia.spaces > 0
+                {
+                    if let Some(prev_token) = inner.get(offset - 1) {
+                        if !token_requires_followup(&prev_token.token_type) {
+                            parts.push(&inner[start..offset]);
+                            separators.push(SeparatorKind::Layout);
+                            start = offset;
+                        }
+                    }
+                }
+
                 match token.token_type {
                     TokenType::LeftParen => depth_paren += 1,
                     TokenType::RightParen if depth_paren > 0 => depth_paren -= 1,
@@ -2096,21 +2768,31 @@ mod expression_parser {
                     TokenType::RightBrace if depth_brace > 0 => depth_brace -= 1,
                     TokenType::LeftBracket => depth_bracket += 1,
                     TokenType::RightBracket if depth_bracket > 0 => depth_bracket -= 1,
-                    TokenType::Comma | TokenType::LayoutComma
-                        if depth_paren == 0 && depth_brace == 0 && depth_bracket == 0 =>
-                    {
+                    TokenType::Comma if at_top_level => {
                         if start != offset {
                             parts.push(&inner[start..offset]);
-                            separators.push(&token.token_type);
+                            separators.push(SeparatorKind::Comma);
                         }
                         start = offset + 1;
+                        continue;
+                    }
+                    TokenType::LayoutComma if at_top_level => {
+                        if start != offset {
+                            parts.push(&inner[start..offset]);
+                            separators.push(SeparatorKind::Layout);
+                        }
+                        start = offset + 1;
+                        continue;
                     }
                     _ => {}
                 }
             }
 
+            let mut trailing_separator: Option<SeparatorKind> = None;
             if start < inner.len() {
                 parts.push(&inner[start..]);
+            } else if start == inner.len() && !separators.is_empty() {
+                trailing_separator = separators.pop();
             }
 
             let mut arguments = Vec::new();
@@ -2123,11 +2805,17 @@ mod expression_parser {
 
             let mut saw_comma = false;
             let mut saw_layout = false;
-            for token_type in separators {
-                match token_type {
-                    TokenType::Comma => saw_comma = true,
-                    TokenType::LayoutComma => saw_layout = true,
-                    _ => {}
+            for separator in &separators {
+                match separator {
+                    SeparatorKind::Comma => saw_comma = true,
+                    SeparatorKind::Layout => saw_layout = true,
+                }
+            }
+
+            if let Some(separator) = trailing_separator {
+                match separator {
+                    SeparatorKind::Comma => saw_comma = true,
+                    SeparatorKind::Layout => saw_layout = true,
                 }
             }
 
@@ -2203,18 +2891,29 @@ mod expression_parser {
             &self,
             tokens: &[&Token],
         ) -> Result<Vec<Parameter>, ExpressionError> {
-            if tokens.is_empty() {
+            let filtered: Vec<&Token> = tokens
+                .iter()
+                .copied()
+                .filter(|token| {
+                    !matches!(
+                        token.token_type,
+                        TokenType::Whitespace(_) | TokenType::Newline
+                    )
+                })
+                .collect();
+
+            if filtered.is_empty() {
                 return Ok(Vec::new());
             }
 
-            if matches!(tokens[0].token_type, TokenType::LeftParen) {
-                return self.parse_parenthesized_parameters(tokens);
+            if matches!(filtered[0].token_type, TokenType::LeftParen) {
+                return self.parse_parenthesized_parameters(&filtered);
             }
 
-            if tokens.len() == 1 {
-                return match &tokens[0].token_type {
+            if filtered.len() == 1 {
+                return match &filtered[0].token_type {
                     TokenType::Identifier(name) => {
-                        let span = span_from_token(tokens[0]);
+                        let span = span_from_token(filtered[0]);
                         Ok(vec![Parameter {
                             name: name.clone(),
                             type_annotation: None,
@@ -2225,15 +2924,31 @@ mod expression_parser {
                     }
                     _ => Err(ExpressionError::new(
                         "ラムダパラメータには識別子が必要です",
-                        Some(span_from_token(tokens[0])),
+                        Some(span_from_token(filtered[0])),
                     )),
                 };
             }
 
-            Err(ExpressionError::new(
-                "ラムダパラメータの解析に失敗しました",
-                tokens.first().map(|t| span_from_token(t)),
-            ))
+            let mut params = Vec::new();
+            let mut current: Vec<&Token> = Vec::new();
+            for token in filtered.iter().copied() {
+                if matches!(token.token_type, TokenType::LayoutComma) {
+                    self.push_parameters_from_slice(&mut params, &current)?;
+                    current.clear();
+                } else {
+                    current.push(token);
+                }
+            }
+            self.push_parameters_from_slice(&mut params, &current)?;
+
+            if params.is_empty() {
+                Err(ExpressionError::new(
+                    "ラムダパラメータの解析に失敗しました",
+                    tokens.first().map(|t| span_from_token(t)),
+                ))
+            } else {
+                Ok(params)
+            }
         }
 
         fn parse_parenthesized_parameters(
@@ -2251,6 +2966,15 @@ mod expression_parser {
             let mut current = Vec::new();
             let mut depth = 0usize;
             for token in &tokens[1..tokens.len() - 1] {
+                if depth == 0
+                    && has_layout_break(token)
+                    && !matches!(token.token_type, TokenType::Comma | TokenType::LayoutComma)
+                    && !current.is_empty()
+                {
+                    self.push_parameters_from_slice(&mut params, &current)?;
+                    current.clear();
+                }
+
                 match token.token_type {
                     TokenType::LeftParen => depth += 1,
                     TokenType::RightParen if depth > 0 => depth -= 1,
@@ -2382,15 +3106,10 @@ mod expression_parser {
                 | BinaryOp::GreaterEqual
                 | BinaryOp::And
                 | BinaryOp::Or
+                | BinaryOp::Is
                 | BinaryOp::RangeExclusive
                 | BinaryOp::RangeInclusive
                 | BinaryOp::Elvis => {}
-                BinaryOp::Is => {
-                    return Err(ExpressionError::new(
-                        "`is` 演算子はまだサポートされていません",
-                        Some(op_span.clone()),
-                    ))
-                }
                 _ => {
                     return Err(ExpressionError::new(
                         format!("未対応の2項演算子 {:?}", op),
@@ -2414,6 +3133,9 @@ mod expression_parser {
 
         fn peek_postfix_kind(&self) -> Option<PostfixKind> {
             let token = self.peek_token()?;
+            if matches!(token.token_type, TokenType::Less) && self.can_parse_type_arguments() {
+                return Some(PostfixKind::TypeArguments);
+            }
             match token.token_type {
                 TokenType::Dot => Some(PostfixKind::MemberAccess),
                 TokenType::NullSafe => Some(PostfixKind::NullSafeMemberAccess),
@@ -2434,9 +3156,263 @@ mod expression_parser {
             }
         }
 
+        fn can_parse_type_arguments(&self) -> bool {
+            match self.extract_type_argument_ranges(self.pos) {
+                Ok((end_index, ranges)) => {
+                    if ranges.is_empty() {
+                        return false;
+                    }
+                    matches!(
+                        self.next_significant_kind(end_index),
+                        Some(TokenType::LeftParen)
+                    )
+                }
+                Err(_) => false,
+            }
+        }
+
+        fn extract_type_argument_ranges(
+            &self,
+            start_index: usize,
+        ) -> Result<(usize, Vec<(usize, usize)>), ExpressionError> {
+            let Some(start_token) = self.tokens.get(start_index) else {
+                return Err(ExpressionError::new("`<` が必要です", None));
+            };
+
+            if !matches!(start_token.token_type, TokenType::Less) {
+                return Err(ExpressionError::new(
+                    "型引数リストの開始トークンが不正です",
+                    Some(span_from_token(start_token)),
+                ));
+            }
+
+            let mut ranges = Vec::new();
+            let mut depth_angle = 1usize;
+            let mut depth_paren = 0usize;
+            let mut depth_brace = 0usize;
+            let mut depth_bracket = 0usize;
+            let mut index = start_index + 1;
+            let mut part_start = index;
+
+            while index < self.tokens.len() {
+                let token = self.tokens[index];
+                match token.token_type {
+                    TokenType::Less => depth_angle += 1,
+                    TokenType::Greater => {
+                        if depth_angle == 0 {
+                            return Err(ExpressionError::new(
+                                "型引数リストで `>` が余分に存在します",
+                                Some(span_from_token(token)),
+                            ));
+                        }
+                        depth_angle -= 1;
+                        if depth_angle == 0 {
+                            ranges.push((part_start, index));
+                            return Ok((index, ranges));
+                        }
+                    }
+                    TokenType::Comma | TokenType::LayoutComma
+                        if depth_angle == 1
+                            && depth_paren == 0
+                            && depth_brace == 0
+                            && depth_bracket == 0 =>
+                    {
+                        ranges.push((part_start, index));
+                        part_start = index + 1;
+                    }
+                    TokenType::LeftParen => depth_paren += 1,
+                    TokenType::RightParen => {
+                        if depth_paren > 0 {
+                            depth_paren -= 1;
+                        }
+                    }
+                    TokenType::LeftBrace => depth_brace += 1,
+                    TokenType::RightBrace => {
+                        if depth_brace > 0 {
+                            depth_brace -= 1;
+                        }
+                    }
+                    TokenType::LeftBracket => depth_bracket += 1,
+                    TokenType::RightBracket => {
+                        if depth_bracket > 0 {
+                            depth_bracket -= 1;
+                        }
+                    }
+                    _ => {}
+                }
+                index += 1;
+            }
+
+            Err(ExpressionError::new(
+                "`>` が必要です",
+                self.span_at(start_index),
+            ))
+        }
+
+        fn next_significant_kind(&self, index: usize) -> Option<&TokenType> {
+            let mut idx = index + 1;
+            while let Some(token) = self.tokens.get(idx) {
+                match token.token_type {
+                    TokenType::Whitespace(_)
+                    | TokenType::Newline
+                    | TokenType::LayoutComma
+                    | TokenType::LineComment(_)
+                    | TokenType::BlockComment(_)
+                    | TokenType::JavaDocComment(_) => idx += 1,
+                    _ => return Some(&token.token_type),
+                }
+            }
+            None
+        }
+
+        fn peek_is_as_keyword(&self) -> bool {
+            matches!(
+                self.peek_token().map(|token| &token.token_type),
+                Some(TokenType::Identifier(text)) if text == "as"
+            )
+        }
+
+        fn parse_type_cast(&mut self, left: ParsedExpr) -> Result<ParsedExpr, ExpressionError> {
+            let (as_token, _as_index) = self.advance_with_index_or_error("`as` が必要です")?;
+            let as_span = span_from_token(as_token);
+
+            while let Some(token) = self.tokens.get(self.pos) {
+                match token.token_type {
+                    TokenType::Whitespace(_)
+                    | TokenType::Newline
+                    | TokenType::LayoutComma
+                    | TokenType::LineComment(_)
+                    | TokenType::BlockComment(_)
+                    | TokenType::JavaDocComment(_) => self.pos += 1,
+                    _ => break,
+                }
+            }
+
+            let start_index = self.pos;
+            if start_index >= self.tokens.len() {
+                return Err(ExpressionError::new(
+                    "`as` の後に型注釈が必要です",
+                    Some(as_span),
+                ));
+            }
+
+            let mut end = start_index;
+            let mut last_success: Option<(usize, TypeAnnotation, Option<Span>)> = None;
+            let mut last_error: Option<(String, Option<Span>)> = None;
+
+            while end < self.tokens.len() {
+                end += 1;
+                let owned_tokens: Vec<Token> = self.tokens[start_index..end]
+                    .iter()
+                    .map(|token| (*token).clone())
+                    .collect();
+
+                if owned_tokens.is_empty() {
+                    continue;
+                }
+
+                match lower_type_annotation_from_tokens(&owned_tokens) {
+                    Ok(lowered) => {
+                        let annotation_span = lowered.span().cloned();
+                        last_success = Some((end, lowered.into_annotation(), annotation_span));
+
+                        if let Some(next_kind) = self.tokens.get(end).map(|token| &token.token_type)
+                        {
+                            if Self::is_type_annotation_boundary_kind(next_kind) {
+                                break;
+                            }
+                        } else {
+                            break;
+                        }
+                    }
+                    Err(error) => {
+                        last_error = Some((error.message().to_string(), error.span().cloned()));
+                        if let Some(_) = last_success {
+                            if error.kind() == TypeLoweringErrorKind::Parse
+                                && error.message().contains("余分なトークン")
+                            {
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+
+            let (end_index, annotation, annotation_span_opt) = match last_success {
+                Some(result) => result,
+                None => {
+                    let span = last_error
+                        .as_ref()
+                        .and_then(|(_, span)| span.clone())
+                        .or_else(|| self.span_at(start_index))
+                        .or(Some(as_span));
+                    let message = last_error
+                        .map(|(msg, _)| msg)
+                        .unwrap_or_else(|| "`as` の後に型注釈が必要です".to_string());
+                    return Err(ExpressionError::new(message, span));
+                }
+            };
+
+            self.pos = end_index;
+
+            let annotation_span = annotation_span_opt
+                .unwrap_or_else(|| span_for_range(self.tokens, start_index, end_index));
+            let cast_span = merge_spans(&left.span(), &annotation_span);
+
+            let expr = Expression::TypeCast {
+                expr: Box::new(left.expr),
+                target: annotation,
+                span: cast_span.clone(),
+            };
+
+            Ok(ParsedExpr {
+                expr,
+                start: left.start,
+                end: end_index,
+            })
+        }
+
+        fn is_type_annotation_boundary_kind(kind: &TokenType) -> bool {
+            matches!(
+                kind,
+                TokenType::Comma
+                    | TokenType::LayoutComma
+                    | TokenType::RightParen
+                    | TokenType::RightBracket
+                    | TokenType::RightBrace
+                    | TokenType::Arrow
+                    | TokenType::FatArrow
+                    | TokenType::Semicolon
+                    | TokenType::Dot
+                    | TokenType::NullSafe
+                    | TokenType::DoubleColon
+                    | TokenType::Question
+                    | TokenType::Colon
+                    | TokenType::Plus
+                    | TokenType::Minus
+                    | TokenType::Multiply
+                    | TokenType::Divide
+                    | TokenType::Modulo
+                    | TokenType::Equal
+                    | TokenType::NotEqual
+                    | TokenType::Less
+                    | TokenType::LessEqual
+                    | TokenType::Greater
+                    | TokenType::GreaterEqual
+                    | TokenType::And
+                    | TokenType::Or
+                    | TokenType::Elvis
+                    | TokenType::RangeExclusive
+                    | TokenType::RangeInclusive
+                    | TokenType::Assign
+                    | TokenType::LeftBrace
+                    | TokenType::LeftBracket
+            )
+        }
+
         fn peek_binary_info(&self) -> Option<BinaryInfo> {
             let token = self.peek_token()?;
-            binary_info_for_token(&token.token_type)
+            binary_info_for_token(token)
         }
 
         fn parse_nested_expression(tokens: &[&Token]) -> Result<ParsedExpr, ExpressionError> {
@@ -2555,12 +3531,17 @@ mod expression_parser {
         }
     }
 
+    fn array_comma_error_message() -> String {
+        "JV2101: 配列リテラルでカンマ区切りはサポートされません。空白または改行のみで要素を分けてください。\nJV2101: Array literals do not support comma separators. Use whitespace or newlines between elements.\nQuick Fix: arrays.whitespace.remove-commas -> [a b c]（例: [1, 2, 3] => [1 2 3])\nQuick Fix: arrays.whitespace.remove-commas -> [a b c] (Example: [1, 2, 3] => [1 2 3])\nDoc: docs/whitespace-arrays.md".to_string()
+    }
+
     #[derive(Clone, Copy)]
     enum PostfixKind {
         MemberAccess,
         NullSafeMemberAccess,
         Index,
         NullSafeIndex,
+        TypeArguments,
         Call,
         TrailingLambda,
     }
@@ -2574,8 +3555,8 @@ mod expression_parser {
             .unwrap_or_else(Span::dummy)
     }
 
-    fn binary_info_for_token(token: &TokenType) -> Option<BinaryInfo> {
-        match token {
+    fn binary_info_for_token(token: &Token) -> Option<BinaryInfo> {
+        match &token.token_type {
             TokenType::Plus => Some(BinaryInfo {
                 op: BinaryOp::Add,
                 precedence: 6,
@@ -2629,6 +3610,11 @@ mod expression_parser {
             TokenType::GreaterEqual => Some(BinaryInfo {
                 op: BinaryOp::GreaterEqual,
                 precedence: 5,
+                associativity: Associativity::Left,
+            }),
+            TokenType::Identifier(name) if name == "is" => Some(BinaryInfo {
+                op: BinaryOp::Is,
+                precedence: 4,
                 associativity: Associativity::Left,
             }),
             TokenType::And => Some(BinaryInfo {
@@ -2784,7 +3770,7 @@ mod expression_parser {
     fn has_high_json_confidence(token: &Token) -> bool {
         token.metadata.iter().any(|metadata| match metadata {
             TokenMetadata::PotentialJsonStart { confidence } => {
-                matches!(confidence, JsonConfidence::High)
+                matches!(confidence, JsonConfidence::High | JsonConfidence::Medium)
             }
             _ => false,
         })
@@ -2944,7 +3930,7 @@ mod expression_parser {
                 self.skip_trivia();
 
                 match self.peek_type() {
-                    Some(TokenType::Comma) => {
+                    Some(TokenType::Comma) | Some(TokenType::LayoutComma) => {
                         self.pos += 1;
                         self.skip_trivia();
                         if matches!(self.peek_type(), Some(TokenType::RightBrace)) {
@@ -2991,7 +3977,7 @@ mod expression_parser {
                 self.skip_trivia();
 
                 match self.peek_type() {
-                    Some(TokenType::Comma) => {
+                    Some(TokenType::Comma) | Some(TokenType::LayoutComma) => {
                         self.pos += 1;
                         self.skip_trivia();
                         if matches!(self.peek_type(), Some(TokenType::RightBracket)) {
@@ -3135,7 +4121,6 @@ mod expression_parser {
                 match token.token_type {
                     TokenType::Whitespace(_)
                     | TokenType::Newline
-                    | TokenType::LayoutComma
                     | TokenType::LineComment(_)
                     | TokenType::BlockComment(_)
                     | TokenType::JavaDocComment(_) => self.pos += 1,

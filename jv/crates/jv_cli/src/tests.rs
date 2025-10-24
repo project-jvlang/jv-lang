@@ -532,14 +532,14 @@ include = ["src/**/*.jv"]
             java_source
         );
         assert!(
-            java_source.contains("charValue()"),
+            java_source.contains("if (value instanceof Character)"),
             "expected Character handling branch in canonical adapter for target {}:\n{}",
             target.as_str(),
             java_source
         );
         assert!(
-            java_source.contains("normalizeIntFamilyValue"),
-            "expected normalizeIntFamilyValue helper to appear for target {}:\n{}",
+            java_source.contains("return ((Number) value).intValue();"),
+            "expected Number fallback branch in Character handling lambda for target {}:\n{}",
             target.as_str(),
             java_source
         );
