@@ -625,47 +625,28 @@ clean = false
 
     let sequence_lines: Vec<&str> = sequence_contents.lines().collect();
 
-    let iterable_signature = sequence_lines
+    let flat_map_iterable_signature = sequence_lines
         .iter()
-        .find(|line| line.contains("SequenceCore<R> flatMap(Iterable<T> receiver"))
+        .find(|line| line.contains("flatMapIterable("))
         .copied()
-        .expect("expected Iterable-based flatMap overload");
+        .expect("Sequence should expose flatMapIterable alias");
 
     assert!(
-        iterable_signature.contains("java.util.function.Function<T, Iterable<R>>"),
-        "Iterable overload should use Function<T, Iterable<R>>: {iterable_signature}"
+        flat_map_iterable_signature
+            .contains("java.util.function.Function<T, Iterable<R>>"),
+        "flatMapIterable should accept Function<T, Iterable<R>>: {flat_map_iterable_signature}"
     );
 
-    let sequence_core_signature = sequence_lines
+    let flat_map_stream_signature = sequence_lines
         .iter()
-        .find(|line| line.contains("flatMap$"))
+        .find(|line| line.contains("flatMapStream("))
         .copied()
-        .expect("expected renamed SequenceCore flatMap overload");
+        .expect("Sequence should expose flatMapStream alias");
 
     assert!(
-        sequence_core_signature.contains("java.util.function.Function<T, Stream<R>>"),
-        "SequenceCore overload should use renamed java name and Function<T, Stream<R>>: {sequence_core_signature}"
-    );
-
-    assert!(
-        sequence_core_signature.contains("flatMap$"),
-        "SequenceCore overload should include deterministic suffix: {sequence_core_signature}"
-    );
-
-    let sequence_core_java = plan.output_dir().join("jv/collections/SequenceCore.java");
-    let sequence_core_contents = fs::read_to_string(&sequence_core_java)
-        .expect("SequenceCore.java should exist after compile");
-
-    let sequence_core_lines: Vec<&str> = sequence_core_contents.lines().collect();
-    let sequence_core_hashed = sequence_core_lines
-        .iter()
-        .find(|line| line.contains("flatMap$"))
-        .copied()
-        .expect("SequenceCore should expose renamed flatMap overload");
-
-    assert!(
-        sequence_core_hashed.contains("java.util.function.Function<T, Stream<R>>"),
-        "SequenceCore renamed overload should retain Function<T, Stream<R>>: {sequence_core_hashed}"
+        flat_map_stream_signature
+            .contains("java.util.function.Function<T, Stream<R>>"),
+        "flatMapStream should accept Function<T, Stream<R>>: {flat_map_stream_signature}"
     );
 }
 

@@ -80,6 +80,7 @@ fn parse_primary_constructor(ctx: &mut ParserContext<'_>) {
             break;
         }
         ctx.parse_optional_type_annotation();
+        ctx.parse_optional_parameter_default();
         ctx.finish_node();
 
         ctx.consume_trivia();

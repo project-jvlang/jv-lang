@@ -460,6 +460,24 @@ impl<'tokens> ParserContext<'tokens> {
         true
     }
 
+    /// 関数パラメータのデフォルト値を解析する。
+    pub(crate) fn parse_optional_parameter_default(&mut self) -> bool {
+        self.consume_trivia();
+        if self.peek_significant_kind() != Some(TokenKind::Assign) {
+            return false;
+        }
+
+        self.start_node(SyntaxKind::InitializerClause);
+        self.bump_raw(); // '='
+        self.parse_expression_until(
+            &[TokenKind::Comma, TokenKind::LayoutComma, TokenKind::RightParen],
+            false,
+        );
+        self.consume_trivia();
+        self.finish_node();
+        true
+    }
+
     /// 修飾名を解析する。
     pub(crate) fn parse_qualified_name(&mut self, outer_kind: SyntaxKind) -> bool {
         self.consume_whitespace();

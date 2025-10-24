@@ -66,6 +66,36 @@ fn parses_core_statements() {
 }
 
 #[test]
+fn function_parameters_accept_default_values() {
+    let source = r#"
+        fun greet(name: String, prefix: String = "Hello", punctuation: String = "!") {
+            println("${prefix}, ${name}${punctuation}")
+        }
+    "#;
+
+    let tokens = lex(source);
+    let output = parse(&tokens);
+
+    assert!(
+        output.diagnostics.is_empty(),
+        "expected parser to accept default parameter initializers, got {:?}",
+        output.diagnostics
+    );
+    assert!(
+        !output.recovered,
+        "parser should not need recovery for default parameter initializers"
+    );
+    let has_initializer_clause = output.events.iter().any(|event| match event {
+        ParseEvent::StartNode { kind } => *kind == SyntaxKind::InitializerClause,
+        _ => false,
+    });
+    assert!(
+        has_initializer_clause,
+        "parameter default should produce an InitializerClause node"
+    );
+}
+
+#[test]
 fn recovers_from_invalid_val() {
     let source = r#"
         val = 0

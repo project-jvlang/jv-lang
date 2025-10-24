@@ -171,7 +171,9 @@ mod tests {
 
     #[test]
     fn default_arguments_parse() {
-        assert!(validate_jv(LESSONS[0].jv_code).is_ok());
+        if let Err(err) = validate_jv(LESSONS[0].jv_code) {
+            panic!("default arguments lesson should parse with latest syntax: {err}");
+        }
         assert!(LESSONS[0].java_output.contains("greet"));
     }
 

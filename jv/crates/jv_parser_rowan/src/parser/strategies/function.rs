@@ -216,6 +216,7 @@ fn parse_parameter_list(ctx: &mut ParserContext<'_>) -> bool {
         }
 
         ctx.parse_optional_type_annotation();
+        ctx.parse_optional_parameter_default();
         ctx.finish_node(); // parameter
 
         ctx.consume_trivia();
