@@ -14,8 +14,8 @@ public class Example5 {
     public static int total(Outer value) {
         return // strategy=Switch arms=2 guards=0 default=true exhaustive=true
         switch (value) {
-            case Outer(Inner(var x, var y), var count) -> x + y + count
-            default -> 0
+            case Outer(Inner(var x, var y), var count) -> x + y + count;
+            default -> 0;
         }
         ;
     }

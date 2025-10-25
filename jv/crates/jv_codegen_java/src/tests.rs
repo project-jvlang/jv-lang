@@ -2421,7 +2421,7 @@ fn switch_expression_renders_guards_and_default_branch() {
         .expect("switch expression generation should succeed");
 
     let expected =
-        "switch (x) {\n    case 1 when (x > 0) -> \"positive\"\n    default -> \"fallback\"\n}\n";
+        "switch (x) {\n    case 1 when (x > 0) -> \"positive\";\n    default -> \"fallback\";\n}\n";
     assert_eq!(
         rendered, expected,
         "switch with guard/default should render"
@@ -2450,7 +2450,7 @@ fn switch_expression_appends_implicit_unit_branch_when_missing_default() {
         .generate_expression(&expression)
         .expect("implicit end should render");
 
-    let expected = "switch (x) {\n    case 1 -> \"one\"\n    default -> { }\n}\n";
+    let expected = "switch (x) {\n    case 1 -> \"one\";\n    default -> { }\n}\n";
     assert_eq!(
         rendered, expected,
         "implicit Unit branch should emit default"
@@ -2482,7 +2482,7 @@ fn switch_expression_respects_existing_default_over_implicit_unit() {
         .generate_expression(&expression)
         .expect("explicit default should win");
 
-    let expected = "switch (x) {\n    case 1 -> \"one\"\n    default -> \"other\"\n}\n";
+    let expected = "switch (x) {\n    case 1 -> \"one\";\n    default -> \"other\";\n}\n";
     assert_eq!(
         rendered, expected,
         "implicit end must not duplicate default"
@@ -2513,7 +2513,7 @@ fn switch_expression_includes_strategy_comment_when_present() {
         .generate_expression(&expression)
         .expect("strategy comment should render");
 
-    let expected = "// strategy=Switch arms=1 guards=0 default=false exhaustive=unknown\nswitch (x) {\n    case 1 -> \"one\"\n    default -> { }\n}\n";
+    let expected = "// strategy=Switch arms=1 guards=0 default=false exhaustive=unknown\nswitch (x) {\n    case 1 -> \"one\";\n    default -> { }\n}\n";
     assert_eq!(rendered, expected, "strategy comment missing");
 }
 
@@ -2582,7 +2582,7 @@ fn switch_expression_renders_range_case_with_comment() {
         .generate_expression(&expression)
         .expect("range case should render");
 
-    let expected = "switch (x) {\n    // range: 0..=10\n    case int it when (it >= 0 && it <= 10) -> \"small\"\n    default -> \"fallback\"\n}\n";
+    let expected = "switch (x) {\n    // range: 0..=10\n    case int it when (it >= 0 && it <= 10) -> \"small\";\n    default -> \"fallback\";\n}\n";
     assert_eq!(rendered, expected, "range case output mismatch");
 }
 
@@ -2819,7 +2819,7 @@ fn switch_expression_nested_destructuring_java25_and_java21() {
         .generate_expression(&expression)
         .expect("java25 nested pattern generation");
 
-    let expected_java25 = "// strategy=Switch arms=2 guards=0 default=true exhaustive=true\nswitch (value) {\n    case Outer(Inner(var x, var y), var count) -> x + y + count\n    default -> 0\n}\n";
+    let expected_java25 = "// strategy=Switch arms=2 guards=0 default=true exhaustive=true\nswitch (value) {\n    case Outer(Inner(var x, var y), var count) -> x + y + count;\n    default -> 0;\n}\n";
     assert_eq!(rendered_java25, expected_java25);
 
     let mut java21 =
