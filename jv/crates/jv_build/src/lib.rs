@@ -15,8 +15,10 @@ pub use config::{
 pub use jdk::{discover_jdk, JdkInfo};
 
 use anyhow::Result;
+use std::io;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::time::Duration;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -196,28 +198,19 @@ impl BuildSystem {
         current_dir: Option<&Path>,
     ) -> Result<CliCommandOutput, BuildError> {
         let resolved = self.resolve_sample_dependency(dependency)?;
+        let command_name = resolved.command.clone();
 
-        let mut command = Command::new(&resolved.path);
-        command.args(args);
-
-        if let Some(dir) = current_dir {
-            command.current_dir(dir);
-        }
-
-        let output = command
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .output()
-            .map_err(|error| BuildError::CliSpawnError {
-                command: resolved.command.clone(),
+        let output = spawn_cli_with_retry(&resolved.path, args, current_dir).map_err(|error| {
+            BuildError::CliSpawnError {
+                command: command_name.clone(),
                 source: error,
-            })?;
+            }
+        })?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
             return Err(BuildError::CliExecutionError {
-                command: resolved.command,
+                command: command_name,
                 status: output.status.code(),
                 stderr,
             });
@@ -227,6 +220,55 @@ impl BuildSystem {
             stdout: output.stdout,
             stderr: output.stderr,
         })
+    }
+}
+
+const CLI_SPAWN_RETRY_COUNT: usize = 3;
+const CLI_SPAWN_RETRY_DELAY_MS: u64 = 50;
+
+fn spawn_cli_with_retry(
+    path: &Path,
+    args: &[&str],
+    current_dir: Option<&Path>,
+) -> io::Result<std::process::Output> {
+    let mut attempts = 0usize;
+    loop {
+        let mut command = build_cli_command(path, args, current_dir);
+        match command.output() {
+            Ok(output) => return Ok(output),
+            Err(error) => {
+                if is_text_file_busy(&error) && attempts < CLI_SPAWN_RETRY_COUNT {
+                    attempts += 1;
+                    std::thread::sleep(Duration::from_millis(CLI_SPAWN_RETRY_DELAY_MS));
+                    continue;
+                }
+                return Err(error);
+            }
+        }
+    }
+}
+
+fn build_cli_command(path: &Path, args: &[&str], current_dir: Option<&Path>) -> Command {
+    let mut command = Command::new(path);
+    command.args(args);
+    if let Some(dir) = current_dir {
+        command.current_dir(dir);
+    }
+    command.stdin(Stdio::null());
+    command.stdout(Stdio::piped());
+    command.stderr(Stdio::piped());
+    command
+}
+
+fn is_text_file_busy(error: &io::Error) -> bool {
+    #[cfg(unix)]
+    {
+        error.raw_os_error() == Some(libc::ETXTBSY)
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = error;
+        false
     }
 }
 
