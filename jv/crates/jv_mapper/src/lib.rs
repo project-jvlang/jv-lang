@@ -5,6 +5,7 @@ pub use types::lower_generic_signature;
 
 use jv_ast::Span;
 use jv_ir::ConversionMetadata;
+use serde::de::{self, Deserializer};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -74,7 +75,7 @@ impl JavaSpan {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(tag = "category", content = "detail")]
 pub enum MappingCategory {
     #[serde(rename = "package")]
@@ -93,6 +94,77 @@ pub enum MappingCategory {
     Expression,
     #[serde(rename = "custom")]
     Custom(String),
+}
+
+const CATEGORY_VARIANTS: &[&str] = &[
+    "package",
+    "import",
+    "type_declaration",
+    "method",
+    "field",
+    "statement",
+    "expression",
+    "custom",
+];
+
+fn parse_tagged_category<'de, E>(
+    category: &str,
+    detail: Option<&Value>,
+) -> Result<MappingCategory, E>
+where
+    E: de::Error,
+{
+    match category {
+        "package" => Ok(MappingCategory::Package),
+        "import" => Ok(MappingCategory::Import),
+        "type_declaration" => Ok(MappingCategory::TypeDeclaration),
+        "method" => Ok(MappingCategory::Method),
+        "field" => Ok(MappingCategory::Field),
+        "statement" => Ok(MappingCategory::Statement),
+        "expression" => Ok(MappingCategory::Expression),
+        "custom" => {
+            let detail_str = detail
+                .and_then(Value::as_str)
+                .ok_or_else(|| de::Error::custom("custom mapping entries require detail"))?;
+            Ok(MappingCategory::Custom(detail_str.to_string()))
+        }
+        _ => Err(de::Error::unknown_variant(category, CATEGORY_VARIANTS)),
+    }
+}
+
+fn parse_simple_category<'de, E>(value: &str) -> Result<MappingCategory, E>
+where
+    E: de::Error,
+{
+    match value {
+        "package" => Ok(MappingCategory::Package),
+        "import" => Ok(MappingCategory::Import),
+        "type_declaration" => Ok(MappingCategory::TypeDeclaration),
+        "method" => Ok(MappingCategory::Method),
+        "field" => Ok(MappingCategory::Field),
+        "statement" => Ok(MappingCategory::Statement),
+        "expression" => Ok(MappingCategory::Expression),
+        other => Err(de::Error::unknown_variant(other, CATEGORY_VARIANTS)),
+    }
+}
+
+impl<'de> Deserialize<'de> for MappingCategory {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = Value::deserialize(deserializer)?;
+
+        if let Some(category) = value.get("category").and_then(Value::as_str) {
+            return parse_tagged_category(category, value.get("detail"));
+        }
+
+        if let Some(simple) = value.as_str() {
+            return parse_simple_category(simple);
+        }
+
+        Err(de::Error::custom("invalid mapping category"))
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -130,6 +202,7 @@ impl SourceMap {
     ///     java_span: JavaSpan::new(JavaPosition::new(1, 0), JavaPosition::new(1, 5)).unwrap(),
     ///     category: MappingCategory::Statement,
     ///     ir_node: Some("println".to_string()),
+    ///     conversions: None,
     /// });
     ///
     /// assert!(map.find_by_java_position(1, 2).is_some());

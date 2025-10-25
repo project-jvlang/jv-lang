@@ -291,7 +291,11 @@ fn caches_type_facts_after_successful_inference() {
         .get("greeting")
         .and_then(serde_json::Value::as_str)
         .expect("greeting binding exported");
-    assert!(greeting.contains("Primitive(\"String\")"));
+    assert!(
+        greeting.contains("Primitive(\"String\")")
+            || greeting.contains("Primitive(\"java.lang.String\")"),
+        "unexpected greeting binding type: {greeting}"
+    );
 }
 
 #[test]

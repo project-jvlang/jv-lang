@@ -1191,7 +1191,7 @@ const JAVA_RESERVED_KEYWORDS: &[&str] = &[
 ];
 
 fn format_type(ty: &TypeKind) -> String {
-    format!("{:?}", ty).replace("java.lang.", "")
+    format!("{:?}", ty)
 }
 
 #[cfg(test)]

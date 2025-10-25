@@ -1423,10 +1423,16 @@ fn type_error_to_diagnostic(uri: &str, error: CheckError) -> Diagnostic {
             diagnostic.with_strategy(DiagnosticStrategy::Interactive),
         )
     } else {
+        let mut message = format!("Type error: {error}");
+        if matches_call_target_mismatch(&error) {
+            message.push_str(
+                "\nambiguous function signature detected; add annotations or defaults to disambiguate.",
+            );
+        }
         Diagnostic {
             range: default_range(),
             severity: Some(DiagnosticSeverity::Error),
-            message: format!("Type error: {error}"),
+            message,
             code: None,
             source: Some("jv-lsp".to_string()),
             help: None,
@@ -1434,6 +1440,10 @@ fn type_error_to_diagnostic(uri: &str, error: CheckError) -> Diagnostic {
             strategy: Some("Immediate".to_string()),
         }
     }
+}
+
+fn matches_call_target_mismatch(error: &CheckError) -> bool {
+    matches!(error, CheckError::TypeError(message) if message.contains("call target must be compatible with argument list"))
 }
 
 fn lowered_import_plan(resolved_imports: &[ResolvedImport]) -> Vec<IrImport> {
