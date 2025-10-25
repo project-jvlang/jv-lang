@@ -7,9 +7,9 @@ use crate::types::{
     IrCommentKind, IrExpression, IrImport, IrImportDetail, IrProgram, IrStatement, JavaType,
 };
 use jv_ast::{
-    Argument, BinaryOp, CallArgumentMetadata, CallArgumentStyle, CommentKind, ConcurrencyConstruct,
-    Expression, Literal, Program, ResourceManagement, SequenceDelimiter, Span, Statement,
-    TypeAnnotation,
+    Argument, BinaryOp, BindingPatternKind, CallArgumentMetadata, CallArgumentStyle, CommentKind,
+    ConcurrencyConstruct, Expression, Literal, Modifiers, Program, ResourceManagement,
+    SequenceDelimiter, Span, Statement, TypeAnnotation, ValBindingOrigin,
 };
 
 mod concurrency;
@@ -223,9 +223,23 @@ pub fn transform_statement(
         Statement::Assignment {
             target,
             value,
+            binding_pattern,
             span,
-            ..
         } => {
+            if let Some(binding_name) = infer_implicit_binding_name(
+                binding_pattern.as_ref(),
+                &target,
+            ) {
+                if context.lookup_variable(&binding_name).is_none() {
+                    return Ok(vec![desugar_implicit_val_assignment(
+                        binding_name,
+                        value,
+                        span,
+                        context,
+                    )?]);
+                }
+            }
+
             let ir_target = transform_expression(target, context)?;
             let java_type = extract_java_type(&ir_target).ok_or_else(|| {
                 TransformError::TypeInferenceError {
@@ -296,6 +310,38 @@ pub fn transform_statement(
         },
         Statement::ForIn(for_in) => loops::desugar_for_in_statement(for_in, context),
         _ => Ok(vec![]),
+    }
+}
+
+fn desugar_implicit_val_assignment(
+    name: String,
+    initializer: Expression,
+    span: Span,
+    context: &mut TransformContext,
+) -> Result<IrStatement, TransformError> {
+    desugar_val_declaration(
+        name,
+        None,
+        initializer,
+        Modifiers::default(),
+        ValBindingOrigin::Implicit,
+        span,
+        context,
+    )
+}
+
+fn infer_implicit_binding_name(
+    binding_pattern: Option<&BindingPatternKind>,
+    target: &Expression,
+) -> Option<String> {
+    match (binding_pattern, target) {
+        (Some(BindingPatternKind::Identifier { name, .. }), Expression::Identifier(target, _))
+            if target == name =>
+        {
+            Some(name.clone())
+        }
+        (None, Expression::Identifier(name, _)) => Some(name.clone()),
+        _ => None,
     }
 }
 

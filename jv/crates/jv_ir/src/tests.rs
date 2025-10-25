@@ -3147,6 +3147,97 @@ fun sample(value: Any): Int {
     }
 
     #[test]
+    fn test_transform_statement_assignment_without_binding_creates_implicit_val() {
+        let mut context = test_context();
+
+        let stmt = Statement::Assignment {
+            target: Expression::Identifier("greeting".to_string(), dummy_span()),
+            binding_pattern: None,
+            value: Expression::Literal(
+                Literal::String("Hello, jv!".to_string()),
+                dummy_span(),
+            ),
+            span: dummy_span(),
+        };
+
+        let lowered = transform_statement(stmt, &mut context)
+            .expect("implicit assignment lowering should succeed");
+
+        match lowered.as_slice() {
+            [IrStatement::VariableDeclaration {
+                name,
+                is_final,
+                java_type,
+                ..
+            }] => {
+                assert_eq!(name, "greeting");
+                assert!(is_final, "implicit val declarations must be final");
+                assert_eq!(java_type, &JavaType::string());
+            }
+            other => panic!("expected single variable declaration, got {:?}", other),
+        }
+
+        let ty = context
+            .lookup_variable("greeting")
+            .expect("greeting should be registered in scope");
+        assert_eq!(ty, &JavaType::string());
+    }
+
+    #[test]
+    fn test_transform_statement_assignment_with_pattern_creates_implicit_val() {
+        let mut context = test_context();
+
+        let stmt = Statement::Assignment {
+            target: Expression::Identifier("greeting".to_string(), dummy_span()),
+            binding_pattern: Some(BindingPatternKind::identifier("greeting", dummy_span())),
+            value: Expression::Literal(
+                Literal::String("Hello, pattern!".to_string()),
+                dummy_span(),
+            ),
+            span: dummy_span(),
+        };
+
+        let lowered = transform_statement(stmt, &mut context)
+            .expect("patterned implicit assignment lowering should succeed");
+
+        match lowered.as_slice() {
+            [IrStatement::VariableDeclaration { name, .. }] => {
+                assert_eq!(name, "greeting");
+            }
+            other => panic!("expected variable declaration, got {:?}", other),
+        }
+
+        assert!(context.lookup_variable("greeting").is_some());
+    }
+
+    #[test]
+    fn test_transform_statement_assignment_existing_binding_remains_assignment() {
+        let mut context = test_context();
+        context.add_variable("counter".to_string(), JavaType::int());
+
+        let stmt = Statement::Assignment {
+            target: Expression::Identifier("counter".to_string(), dummy_span()),
+            binding_pattern: None,
+            value: Expression::Literal(
+                Literal::Number("2".to_string()),
+                dummy_span(),
+            ),
+            span: dummy_span(),
+        };
+
+        let lowered = transform_statement(stmt, &mut context)
+            .expect("assignment lowering should succeed");
+
+        match lowered.as_slice() {
+            [IrStatement::Expression {
+                expr: IrExpression::Assignment { .. },
+                ..
+            }] => {}
+            other => panic!("expected assignment expression, got {:?}", other),
+        }
+    }
+
+    #[test]
     fn test_transform_expression_binary_operation_creates_ir() {
         let mut context = test_context();
 
