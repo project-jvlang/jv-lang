@@ -12,6 +12,7 @@ pub use config::{
     BuildConfig, CliRequirement, JavaTarget, NetworkPolicy, SampleCliDependencies, SampleConfig,
     SampleConfigError, SampleDependency, SampleProtocol,
 };
+pub use jdk::{discover_jdk, JdkInfo};
 
 use anyhow::Result;
 use std::path::{Path, PathBuf};

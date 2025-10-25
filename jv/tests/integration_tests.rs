@@ -6,8 +6,9 @@ use std::sync::OnceLock;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use jv_build::{
+    discover_jdk,
     metadata::{BuildContext as SymbolBuildContext, SymbolIndexCache},
-    JavaTarget,
+    JavaTarget, JdkInfo,
 };
 use jv_checker::{PrimitiveType, TypeInferenceService, TypeKind};
 use jv_cli::pipeline::{compile, BuildOptionsFactory, CliOverrides};
@@ -111,23 +112,43 @@ fn workspace_file(relative: &str) -> PathBuf {
         .join(relative)
 }
 
+fn detected_jdk() -> Option<&'static JdkInfo> {
+    static INFO: OnceLock<Option<JdkInfo>> = OnceLock::new();
+    INFO.get_or_init(|| discover_jdk().ok()).as_ref()
+}
+
+fn javac_command() -> Option<Command> {
+    detected_jdk().map(|info| {
+        let mut cmd = Command::new(&info.javac_path);
+        cmd.env("JAVA_HOME", &info.java_home);
+        cmd
+    })
+}
+
+fn java_command() -> Option<Command> {
+    detected_jdk().map(|info| {
+        let java_path = info.java_home.join("bin").join(java_executable());
+        let mut cmd = Command::new(java_path);
+        cmd.env("JAVA_HOME", &info.java_home);
+        cmd
+    })
+}
+
+fn java_executable() -> &'static str {
+    if cfg!(windows) {
+        "java.exe"
+    } else {
+        "java"
+    }
+}
+
 fn has_javac() -> bool {
-    Command::new("javac")
-        .arg("-version")
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .map(|status| status.success())
-        .unwrap_or(false)
+    detected_jdk().is_some()
 }
 
 fn has_java_runtime() -> bool {
-    Command::new("java")
-        .arg("-version")
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .map(|status| status.success())
+    detected_jdk()
+        .map(|info| info.java_home.join("bin").join(java_executable()).exists())
         .unwrap_or(false)
 }
 
@@ -1057,7 +1078,7 @@ fn sequence_pipeline_fixture_runs_consistently_across_targets() {
         let classes_dir = java_dir.join("classes");
         fs::create_dir_all(&classes_dir).expect("create classes directory for javac");
 
-        let mut javac = Command::new("javac");
+        let mut javac = javac_command().expect("javac command unavailable");
         javac.arg("-d").arg(&classes_dir);
         for file in &artifacts.java_files {
             javac.arg(file);
@@ -1071,7 +1092,8 @@ fn sequence_pipeline_fixture_runs_consistently_across_targets() {
             target.as_str()
         );
 
-        let output = Command::new("java")
+        let mut java_cmd = java_command().expect("java runtime unavailable");
+        let output = java_cmd
             .arg("-cp")
             .arg(&classes_dir)
             .arg(&artifacts.script_main_class)
@@ -1184,7 +1206,7 @@ fn java21_compat_fixture_runs_across_targets() {
         let classes_dir = java_dir.join("classes");
         fs::create_dir_all(&classes_dir).expect("create classes directory for javac");
 
-        let mut javac = Command::new("javac");
+        let mut javac = javac_command().expect("javac command unavailable");
         javac.arg("-d").arg(&classes_dir);
         for file in &artifacts.java_files {
             javac.arg(file);
@@ -1194,7 +1216,8 @@ fn java21_compat_fixture_runs_across_targets() {
             .expect("invoke javac for java21 compat fixture");
         assert!(status.success(), "javac failed for target {}", target.as_str());
 
-        let output = Command::new("java")
+        let mut java_cmd = java_command().expect("java runtime unavailable");
+        let output = java_cmd
             .arg("-cp")
             .arg(&classes_dir)
             .arg(&artifacts.script_main_class)
@@ -1249,7 +1272,7 @@ fn sequence_interpolation_materializes_sequences_before_string_format() {
         let classes_dir = java_dir.join("classes");
         fs::create_dir_all(&classes_dir).expect("create classes directory for javac");
 
-        let mut javac = Command::new("javac");
+        let mut javac = javac_command().expect("javac command unavailable");
         javac.arg("-d").arg(&classes_dir);
         for file in &artifacts.java_files {
             javac.arg(file);
@@ -1263,7 +1286,8 @@ fn sequence_interpolation_materializes_sequences_before_string_format() {
             target.as_str()
         );
 
-        let output = Command::new("java")
+        let mut java_cmd = java_command().expect("java runtime unavailable");
+        let output = java_cmd
             .arg("-cp")
             .arg(&classes_dir)
             .arg(&artifacts.script_main_class)
