@@ -179,6 +179,35 @@ fn boolean_literal(value: bool) -> IrExpression {
     IrExpression::Literal(Literal::Boolean(value), dummy_span())
 }
 
+fn stream_identifier(name: &str) -> IrExpression {
+    IrExpression::Identifier {
+        name: name.to_string(),
+        java_type: JavaType::Reference {
+            name: "java.util.stream.Stream".to_string(),
+            generic_args: vec![JavaType::object()],
+        },
+        span: dummy_span(),
+    }
+}
+
+fn collectors_to_list_expression() -> IrExpression {
+    IrExpression::MethodCall {
+        receiver: None,
+        method_name: "toList".to_string(),
+        java_name: Some("toList".to_string()),
+        resolved_target: Some(IrResolvedMethodTarget {
+            owner: Some("java.util.stream.Collectors".to_string()),
+            original_name: Some("toList".to_string()),
+            java_name: Some("toList".to_string()),
+            erased_parameters: vec![],
+        }),
+        args: Vec::new(),
+        argument_style: jv_ast::CallArgumentStyle::Comma,
+        java_type: JavaType::object(),
+        span: dummy_span(),
+    }
+}
+
 #[test]
 fn cast_expression_renders_reference_cast_short_name() {
     let cast = IrExpression::Cast {
@@ -679,6 +708,50 @@ fn java21_sequence_to_set_falls_back_to_collectors() {
         rendered,
         "(numbers).stream().map((x) -> x).collect(Collectors.toSet())"
     );
+}
+
+#[test]
+fn stream_collect_to_list_prefers_tolist_in_java25() {
+    let expr = IrExpression::MethodCall {
+        receiver: Some(Box::new(stream_identifier("stream"))),
+        method_name: "collect".to_string(),
+        java_name: Some("collect".to_string()),
+        resolved_target: None,
+        args: vec![collectors_to_list_expression()],
+        argument_style: jv_ast::CallArgumentStyle::Comma,
+        java_type: JavaType::list(),
+        span: dummy_span(),
+    };
+
+    let mut generator =
+        JavaCodeGenerator::with_config(JavaCodeGenConfig::for_target(JavaTarget::Java25));
+    let rendered = generator
+        .generate_expression(&expr)
+        .expect("collect should render");
+
+    assert_eq!(rendered, "stream.toList()");
+}
+
+#[test]
+fn stream_collect_to_list_keeps_collectors_in_java21() {
+    let expr = IrExpression::MethodCall {
+        receiver: Some(Box::new(stream_identifier("stream"))),
+        method_name: "collect".to_string(),
+        java_name: Some("collect".to_string()),
+        resolved_target: None,
+        args: vec![collectors_to_list_expression()],
+        argument_style: jv_ast::CallArgumentStyle::Comma,
+        java_type: JavaType::list(),
+        span: dummy_span(),
+    };
+
+    let mut generator =
+        JavaCodeGenerator::with_config(JavaCodeGenConfig::for_target(JavaTarget::Java21));
+    let rendered = generator
+        .generate_expression(&expr)
+        .expect("collect should render");
+
+    assert_eq!(rendered, "stream.collect(Collectors.toList())");
 }
 
 #[test]

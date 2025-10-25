@@ -1612,6 +1612,15 @@ mod expression_parser {
             }
 
             ranges
+                .into_iter()
+                .filter(|(range_start, range_end)| {
+                    let slice = &tokens[*range_start..*range_end];
+                    !slice.is_empty()
+                        && !slice
+                            .iter()
+                            .all(|token| matches!(token.token_type, TokenType::StringEnd))
+                })
+                .collect()
         }
 
         fn parse_lambda_statement(

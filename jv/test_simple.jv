@@ -1,0 +1,15 @@
+package test
+
+val message = "Sequence output"
+
+fun main(): Unit {
+    val numbers = [1 2 3]
+
+    val doubled = numbers
+        .map { value -> value * 2 }
+        .toList()
+    println(doubled)
+
+    val formatted = message + ": " + doubled
+    println(formatted)
+}

@@ -2051,6 +2051,51 @@ fn multiline_string_interpolation_handles_complex_patterns() {
 }
 
 #[test]
+fn nested_package_fixture_preserves_interpolation_identifiers() {
+    let source = include_str!("../../../../../jv/tests/fixtures/package/nested_package.jv");
+    let result = lower_source(source);
+    assert!(
+        result.diagnostics.is_empty(),
+        "unexpected diagnostics while lowering nested_package.jv: {:?}",
+        result.diagnostics
+    );
+
+    let function_body = result
+        .statements
+        .iter()
+        .find_map(|statement| match statement {
+            Statement::FunctionDeclaration { name, body, .. } if name == "greet" => Some(body),
+            _ => None,
+        })
+        .expect("expected greet function in nested_package fixture");
+
+    let return_expr = match &**function_body {
+        Expression::Block { statements, .. } => statements
+            .iter()
+            .find_map(|statement| match statement {
+                Statement::Return {
+                    value: Some(expr), ..
+                } => Some(expr),
+                _ => None,
+            })
+            .expect("expected return statement in greet body"),
+        other => panic!("expected block body for greet, got {:?}", other),
+    };
+
+    match return_expr {
+        Expression::StringInterpolation { parts, .. } => {
+            match parts.get(1) {
+                Some(StringPart::Expression(Expression::Identifier(identifier, _))) => {
+                    assert_eq!(identifier, "name", "interpolation identifier should match parameter name");
+                }
+                other => panic!("expected identifier interpolation part, got {:?}", other),
+            }
+        }
+        other => panic!("expected string interpolation as return value, got {:?}", other),
+    }
+}
+
+#[test]
 fn json_literal_lowering_builds_object_tree() {
     let source = r#"
     package fixtures

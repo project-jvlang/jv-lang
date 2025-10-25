@@ -473,6 +473,9 @@ pub fn transform_expression(
             span: literal.span.clone(),
         }),
         Expression::Identifier(name, span) => {
+            if name.is_empty() {
+                return Ok(IrExpression::Literal(Literal::String(String::new()), span));
+            }
             if let Some(java_type) = context.lookup_variable(&name).cloned() {
                 return Ok(IrExpression::Identifier {
                     name,

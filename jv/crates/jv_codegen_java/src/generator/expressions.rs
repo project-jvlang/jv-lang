@@ -36,6 +36,21 @@ impl JavaCodeGenerator {
                 argument_style,
                 ..
             } => {
+                let effective_name = java_name
+                    .as_deref()
+                    .or_else(|| {
+                        resolved_target
+                            .as_ref()
+                            .and_then(|target| target.java_name.as_deref())
+                    })
+                    .unwrap_or(method_name);
+                if let Some(shortcut) = self.try_render_collectors_to_list(
+                    receiver.as_deref(),
+                    effective_name,
+                    args.as_slice(),
+                )? {
+                    return Ok(shortcut);
+                }
                 let mut invocation = String::new();
                 if let Some(target) = receiver {
                     if let Some(java_type) = Self::expression_java_type(target) {
@@ -54,14 +69,6 @@ impl JavaCodeGenerator {
                     invocation.push_str(owner);
                     invocation.push('.');
                 }
-                let effective_name = java_name
-                    .as_deref()
-                    .or_else(|| {
-                        resolved_target
-                            .as_ref()
-                            .and_then(|target| target.java_name.as_deref())
-                    })
-                    .unwrap_or(method_name);
                 invocation.push_str(effective_name);
                 invocation.push('(');
                 let rendered_args = if effective_name == "println"
@@ -252,6 +259,70 @@ impl JavaCodeGenerator {
                 resources, body, ..
             } => self.generate_try_with_resources_expression(resources, body),
         }
+    }
+
+    fn try_render_collectors_to_list(
+        &mut self,
+        receiver: Option<&IrExpression>,
+        method_name: &str,
+        args: &[IrExpression],
+    ) -> Result<Option<String>, CodeGenError> {
+        if !self.targeting.supports_collection_factories() {
+            return Ok(None);
+        }
+        if method_name != "collect" || args.len() != 1 {
+            return Ok(None);
+        }
+        if !Self::is_collectors_to_list_invocation(&args[0]) {
+            return Ok(None);
+        }
+        if let Some(target) = receiver {
+            let receiver_code = self.generate_expression(target)?;
+            return Ok(Some(format!("{receiver_code}.toList()")));
+        }
+        Ok(None)
+    }
+
+    fn is_collectors_to_list_invocation(expr: &IrExpression) -> bool {
+        if let IrExpression::MethodCall {
+            method_name,
+            java_name,
+            resolved_target,
+            receiver,
+            ..
+        } = expr
+        {
+            let is_to_list = java_name
+                .as_deref()
+                .or_else(|| {
+                    resolved_target
+                        .as_ref()
+                        .and_then(|target| target.java_name.as_deref())
+                })
+                .unwrap_or(method_name)
+                == "toList";
+
+            if !is_to_list {
+                return false;
+            }
+
+            if let Some(target) = resolved_target {
+                if target
+                    .owner
+                    .as_deref()
+                    .is_some_and(|owner| owner == "java.util.stream.Collectors")
+                {
+                    return true;
+                }
+            }
+
+            if let Some(rcv) = receiver {
+                if let IrExpression::Identifier { name, .. } = &**rcv {
+                    return name == "Collectors";
+                }
+            }
+        }
+        false
     }
 
     pub fn generate_switch_expression(

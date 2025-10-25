@@ -39,7 +39,10 @@ mod tests {
     }
 
     fn parse_when_expression(source: &str) -> Expression {
-        let program = parse_program(source);
+        let frontend = RowanPipeline::default()
+            .parse(source)
+            .expect("fixture should parse");
+        let (program, _, _) = frontend.into_parts();
         for statement in program.statements {
             match statement {
                 Statement::ValDeclaration { initializer, .. } => {
@@ -5278,5 +5281,56 @@ fun sample(value: Any): Int {
             call_first, call_second,
             "call rewriting must be deterministic"
         );
+    }
+
+    #[test]
+    fn transform_program_handles_nested_package_string_interpolation() {
+        let source = include_str!("../../../tests/fixtures/package/nested_package.jv");
+        let program = parse_program(source);
+        let return_expr = program
+            .statements
+            .iter()
+            .find_map(|statement| match statement {
+                Statement::FunctionDeclaration { name, body, .. } if name == "greet" => {
+                    if let Expression::Block { statements, .. } = &**body {
+                        statements.iter().find_map(|stmt| match stmt {
+                            Statement::Return {
+                                value: Some(expr), ..
+                            } => Some(expr),
+                            _ => None,
+                        })
+                    } else {
+                        None
+                    }
+                }
+                _ => None,
+            })
+            .expect("expected return expression in greet function");
+
+        if let Expression::StringInterpolation { parts, .. } = return_expr {
+            match parts.get(1) {
+                Some(StringPart::Expression(Expression::Identifier(identifier, _))) => {
+                    assert_eq!(
+                        identifier, "name",
+                        "interpolation identifier should match parameter"
+                    );
+                }
+                other => panic!("expected identifier interpolation part, got {:?}", other),
+            }
+            for part in parts {
+                if let StringPart::Expression(Expression::Identifier(identifier, _)) = part {
+                    assert!(
+                        !identifier.is_empty(),
+                        "interpolation expression should not be empty"
+                    );
+                }
+            }
+        } else {
+            panic!("expected string interpolation in greet return");
+        }
+
+        let mut context = TransformContext::new();
+        transform_program_with_context(program, &mut context)
+            .expect("nested_package fixture should lower to IR");
     }
 }
