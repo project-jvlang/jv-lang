@@ -937,6 +937,9 @@ impl JavaCodeGenerator {
     ) -> Result<String, CodeGenError> {
         let (source_expr, needs_resource_guard) = self.render_sequence_source(&pipeline.source)?;
 
+        let element_type = Self::infer_sequence_element_type(pipeline);
+        let element_type_ref = element_type.as_ref();
+
         if pipeline.terminal.is_none() {
             let chained = self.render_sequence_stage_chain(&source_expr, pipeline)?;
             return self.render_lazy_sequence_pipeline(
@@ -960,7 +963,8 @@ impl JavaCodeGenerator {
         }
 
         if needs_resource_guard {
-            let chained = self.render_sequence_chain("__jvStream", pipeline)?;
+            let chained =
+                self.render_sequence_chain("__jvStream", pipeline, Some(result_type), element_type_ref)?;
             let normalized_result_type = Self::normalize_void_like(result_type);
             let return_type = self.generate_type(normalized_result_type.as_ref())?;
             let is_void = Self::is_void_like(normalized_result_type.as_ref());
@@ -985,7 +989,7 @@ impl JavaCodeGenerator {
             builder.push_line("}.run()");
             Ok(builder.build())
         } else {
-            self.render_sequence_chain(&source_expr, pipeline)
+            self.render_sequence_chain(&source_expr, pipeline, Some(result_type), element_type_ref)
         }
     }
 
@@ -1589,6 +1593,8 @@ impl JavaCodeGenerator {
         &mut self,
         start_expr: &str,
         pipeline: &SequencePipeline,
+        result_type: Option<&JavaType>,
+        element_type: Option<&JavaType>,
     ) -> Result<String, CodeGenError> {
         let mut chain = start_expr.to_string();
         for stage in &pipeline.stages {
@@ -1596,7 +1602,7 @@ impl JavaCodeGenerator {
         }
 
         if let Some(terminal) = &pipeline.terminal {
-            self.render_sequence_terminal(chain, terminal)
+            self.render_sequence_terminal(chain, terminal, result_type, element_type)
         } else {
             Ok(chain)
         }
@@ -1665,7 +1671,13 @@ impl JavaCodeGenerator {
         let helper_var = "__jvSequence";
 
         let helper_stream = format!("{}.toStream()", helper_var);
-        let terminal_expr = self.render_sequence_terminal(helper_stream, terminal)?;
+        let element_type = Self::infer_sequence_element_type(pipeline);
+        let terminal_expr = self.render_sequence_terminal(
+            helper_stream,
+            terminal,
+            Some(result_type),
+            element_type.as_ref(),
+        )?;
 
         let mut builder = self.builder();
         builder.push_line("new Object() {");
@@ -1719,6 +1731,8 @@ impl JavaCodeGenerator {
         &mut self,
         chain: String,
         terminal: &SequenceTerminal,
+        result_type: Option<&JavaType>,
+        element_type: Option<&JavaType>,
     ) -> Result<String, CodeGenError> {
         match &terminal.kind {
             SequenceTerminalKind::ToList => {
@@ -1781,6 +1795,21 @@ impl JavaCodeGenerator {
                         PrimitiveTypeName::Double | PrimitiveTypeName::Float => {
                             let mapper = self.render_double_stream_mapper();
                             Ok(format!("{chain}.mapToDouble({mapper}).sum()"))
+                        }
+                        _ => {
+                            let mapper = self.render_int_stream_mapper(terminal)?;
+                            Ok(format!("{chain}.mapToInt({mapper}).sum()"))
+                        }
+                    }
+                } else if let Some(category) =
+                    element_type.and_then(Self::numeric_category_from_type)
+                {
+                    Self::render_sum_for_category(self, chain, terminal, category)
+                } else if let Some(primitive_name) = result_type.and_then(Self::primitive_name) {
+                    match primitive_name {
+                        "long" => Self::render_sum_for_category(self, chain, terminal, "long"),
+                        "double" | "float" => {
+                            Self::render_sum_for_category(self, chain, terminal, "double")
                         }
                         _ => {
                             let mapper = self.render_int_stream_mapper(terminal)?;
@@ -2116,6 +2145,126 @@ impl JavaCodeGenerator {
 }
 
 impl JavaCodeGenerator {
+    fn primitive_name(java_type: &JavaType) -> Option<&str> {
+        match java_type {
+            JavaType::Primitive(name) => Some(name),
+            _ => None,
+        }
+    }
+
+    fn render_sum_for_category(
+        &mut self,
+        chain: String,
+        terminal: &SequenceTerminal,
+        category: &str,
+    ) -> Result<String, CodeGenError> {
+        match category {
+            "long" => {
+                let mapper = self.render_long_stream_mapper();
+                Ok(format!("{chain}.mapToLong({mapper}).sum()"))
+            }
+            "double" => {
+                let mapper = self.render_double_stream_mapper();
+                Ok(format!("{chain}.mapToDouble({mapper}).sum()"))
+            }
+            _ => {
+                let mapper = self.render_int_stream_mapper(terminal)?;
+                Ok(format!("{chain}.mapToInt({mapper}).sum()"))
+            }
+        }
+    }
+
+    fn numeric_category_from_type(java_type: &JavaType) -> Option<&'static str> {
+        match java_type {
+            JavaType::Primitive(name) => Self::primitive_numeric_category(name),
+            JavaType::Reference { name, .. } => {
+                let simple = name.rsplit('.').next().unwrap_or(name);
+                match simple {
+                    "Byte" | "Short" | "Integer" | "Character" => Some("int"),
+                    "Long" => Some("long"),
+                    "Float" | "Double" => Some("double"),
+                    _ => None,
+                }
+            }
+            _ => None,
+        }
+    }
+
+    fn primitive_numeric_category(name: &str) -> Option<&'static str> {
+        match name {
+            "byte" | "short" | "int" | "char" => Some("int"),
+            "long" => Some("long"),
+            "float" | "double" => Some("double"),
+            _ => None,
+        }
+    }
+
+    fn infer_sequence_element_type(pipeline: &SequencePipeline) -> Option<JavaType> {
+        let mut current = Self::sequence_source_element_type(&pipeline.source);
+
+        for stage in &pipeline.stages {
+            match stage {
+                SequenceStage::Map { result_hint, .. } => {
+                    if let Some(hint) = result_hint {
+                        current = Some(hint.clone());
+                    }
+                }
+                SequenceStage::FlatMap { element_hint, .. } => {
+                    if let Some(hint) = element_hint {
+                        current = Some(hint.clone());
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        current
+    }
+
+    fn sequence_source_element_type(source: &SequenceSource) -> Option<JavaType> {
+        match source {
+            SequenceSource::Collection { expr, element_hint } => {
+                element_hint.clone().or_else(|| Self::collection_expr_element_type(expr))
+            }
+            SequenceSource::Array {
+                expr, element_hint, ..
+            } => element_hint.clone().or_else(|| Self::array_expr_element_type(expr)),
+            SequenceSource::ListLiteral { element_hint, .. } => element_hint.clone(),
+            SequenceSource::JavaStream { element_hint, expr, .. } => element_hint
+                .clone()
+                .or_else(|| Self::collection_expr_element_type(expr)),
+        }
+    }
+
+    fn collection_expr_element_type(expr: &IrExpression) -> Option<JavaType> {
+        Self::expression_java_type(expr).and_then(Self::first_generic_or_array)
+    }
+
+    fn array_expr_element_type(expr: &IrExpression) -> Option<JavaType> {
+        Self::expression_java_type(expr).and_then(|ty| match ty {
+            JavaType::Array { element_type, .. } => Some((**element_type).clone()),
+            _ => None,
+        })
+    }
+
+    fn first_generic_or_array(java_type: &JavaType) -> Option<JavaType> {
+        match java_type {
+            JavaType::Reference { generic_args, .. } if !generic_args.is_empty() => {
+                Some(Self::clone_type_excluding_wildcard(&generic_args[0]))
+            }
+            JavaType::Array { element_type, .. } => Some((**element_type).clone()),
+            _ => None,
+        }
+    }
+
+    fn clone_type_excluding_wildcard(java_type: &JavaType) -> JavaType {
+        match java_type {
+            JavaType::Wildcard { bound: Some(bound), .. } => *bound.clone(),
+            JavaType::Wildcard { .. } => JavaType::object(),
+            other => other.clone(),
+        }
+    }
+
     fn render_int_stream_mapper(
         &mut self,
         terminal: &SequenceTerminal,
