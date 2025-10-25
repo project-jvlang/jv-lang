@@ -2,6 +2,8 @@ use super::*;
 
 use crate::pipeline::pipeline::{CharScannerStage, ClassifierStage, EmitterStage, NormalizerStage};
 use fastrand::Rng;
+use std::fs;
+use std::path::{Path, PathBuf};
 use test_case::test_case;
 
 #[test]
@@ -1538,4 +1540,60 @@ fn arithmetic_division_remains_unchanged() {
             .all(|token| !matches!(token.token_type, TokenType::RegexLiteral(_))),
         "regex literal token should not appear in arithmetic expression"
     );
+}
+
+fn fixtures_root() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures")
+}
+
+fn collect_fixture_files(dir: &Path, files: &mut Vec<PathBuf>) {
+    if let Ok(entries) = fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.file_name().is_some_and(|name| name == "target") {
+                continue;
+            }
+            if path.is_dir() {
+                collect_fixture_files(&path, files);
+            } else if path.extension().is_some_and(|ext| ext == "jv") {
+                files.push(path);
+            }
+        }
+    }
+}
+
+#[test]
+fn tokenize_repository_fixtures() {
+    let root = fixtures_root();
+    let mut files = Vec::new();
+    collect_fixture_files(&root, &mut files);
+    assert!(
+        !files.is_empty(),
+        "expected to discover at least one fixture under {:?}",
+        root
+    );
+
+    let mut failures = Vec::new();
+    for path in files {
+        let source = match fs::read_to_string(&path) {
+            Ok(content) => content,
+            Err(err) => {
+                failures.push((path.display().to_string(), format!("read error: {err}")));
+                continue;
+            }
+        };
+        let mut lexer = Lexer::new(source);
+        if let Err(err) = lexer.tokenize() {
+            failures.push((path.display().to_string(), err.to_string()));
+        }
+    }
+
+    if !failures.is_empty() {
+        let details = failures
+            .into_iter()
+            .map(|(path, err)| format!("{path}: {err}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        panic!("lexer failed to tokenize fixtures:\n{details}");
+    }
 }

@@ -24,6 +24,7 @@ mod tests {
     use jv_parser_rowan::frontend::RowanPipeline;
     use sha2::{Digest, Sha256};
     use std::fs;
+    use std::path::{Path, PathBuf};
     use std::time::Duration;
     use tempfile::tempdir;
 
@@ -67,6 +68,26 @@ mod tests {
             }
         }
         panic!("expected when expression in snippet");
+    }
+
+    fn fixtures_root() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures")
+    }
+
+    fn collect_fixture_files(dir: &Path, files: &mut Vec<PathBuf>) {
+        if let Ok(entries) = fs::read_dir(dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.file_name().is_some_and(|name| name == "target") {
+                    continue;
+                }
+                if path.is_dir() {
+                    collect_fixture_files(&path, files);
+                } else if path.extension().is_some_and(|ext| ext == "jv") {
+                    files.push(path);
+                }
+            }
+        }
     }
 
     #[test]
@@ -5332,5 +5353,64 @@ fun sample(value: Any): Int {
         let mut context = TransformContext::new();
         transform_program_with_context(program, &mut context)
             .expect("nested_package fixture should lower to IR");
+    }
+
+    #[test]
+    fn transform_repository_fixtures_lowering_smoke() {
+        let root = fixtures_root();
+        let mut files = Vec::new();
+        collect_fixture_files(&root, &mut files);
+        assert!(
+            !files.is_empty(),
+            "expected to discover fixtures under {:?}",
+            root
+        );
+
+        let mut failures = Vec::new();
+        for path in files {
+            let display = path.display().to_string();
+            if display.contains("/pattern/") {
+                continue;
+            }
+            if display.contains("/java_annotations/") {
+                continue;
+            }
+            if display.contains("package/complex_stdlib_pattern.jv") {
+                continue;
+            }
+            let source = match fs::read_to_string(&path) {
+                Ok(content) => content,
+                Err(err) => {
+                    failures.push((display, format!("read error: {err}")));
+                    continue;
+                }
+            };
+            if source.contains("${") {
+                // CLI parser still lacks interpolation lowering; skip until support lands.
+                continue;
+            }
+
+            let frontend = match RowanPipeline::default().parse(&source) {
+                Ok(frontend) => frontend,
+                Err(err) => {
+                    failures.push((display, format!("parse error: {err}")));
+                    continue;
+                }
+            };
+            let program = frontend.into_program();
+            let mut context = TransformContext::new();
+            if let Err(err) = transform_program_with_context(program, &mut context) {
+                failures.push((display, err.to_string()));
+            }
+        }
+
+        if !failures.is_empty() {
+            let details = failures
+                .into_iter()
+                .map(|(path, err)| format!("{path}: {err}"))
+                .collect::<Vec<_>>()
+                .join("\n");
+            panic!("IR transform failed for fixtures:\n{details}");
+        }
     }
 }

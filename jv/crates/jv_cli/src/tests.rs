@@ -94,6 +94,26 @@ fn lock_current_dir() -> MutexGuard<'static, ()> {
         .unwrap_or_else(|poison| poison.into_inner())
 }
 
+fn fixtures_root() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures")
+}
+
+fn collect_fixture_files(dir: &Path, files: &mut Vec<PathBuf>) {
+    if let Ok(entries) = fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.file_name().is_some_and(|name| name == "target") {
+                continue;
+            }
+            if path.is_dir() {
+                collect_fixture_files(&path, files);
+            } else if path.extension().is_some_and(|ext| ext == "jv") {
+                files.push(path);
+            }
+        }
+    }
+}
+
 #[test]
 fn script_main_class_from_numeric_file_stem() {
     let path = Path::new("tests/fixtures/02-variables.jv");
@@ -450,6 +470,132 @@ include = ["src/**/*.jv"]
     let message = result.unwrap_err().to_string();
     assert!(message.contains("JV2101"));
     assert!(message.contains("カンマ") || message.contains("comma"));
+}
+
+#[test]
+fn compile_repository_fixtures_without_interpolation() {
+    let _guard = lock_current_dir();
+    let temp_root = TempDirGuard::new("cli-fixtures");
+    let fixtures_root = fixtures_root();
+    let mut files = Vec::new();
+    collect_fixture_files(&fixtures_root, &mut files);
+    assert!(
+        !files.is_empty(),
+        "expected to discover fixtures under {:?}",
+        fixtures_root
+    );
+
+    let mut compiled = 0usize;
+    let mut failures = Vec::new();
+    for path in files {
+        if path.to_string_lossy().contains("/pattern/") {
+            continue;
+        }
+        if path
+            .to_string_lossy()
+            .contains("/java_annotations/")
+        {
+            continue;
+        }
+        if path
+            .to_string_lossy()
+            .contains("package/complex_stdlib_pattern.jv")
+        {
+            continue;
+        }
+        if path.to_string_lossy().contains("/pattern/neg-") {
+            continue;
+        }
+        let source = match fs::read_to_string(&path) {
+            Ok(content) => content,
+            Err(err) => {
+                failures.push((path.display().to_string(), format!("read error: {err}")));
+                continue;
+            }
+        };
+        if source.contains("${") {
+            // CLI still relies on ParserPipeline which lacks interpolation lowering.
+            continue;
+        }
+
+        compiled += 1;
+        let project_dir = temp_root.path().join(format!("fixture-{compiled}"));
+        let manifest_path = project_dir.join("jv.toml");
+        let src_dir = project_dir.join("src");
+        let entrypoint = src_dir.join("main.jv");
+        fs::create_dir_all(&src_dir).expect("create src directory");
+        fs::write(
+            &manifest_path,
+            r#"[package]
+name = "fixture"
+version = "0.1.0"
+
+[package.dependencies]
+
+[project]
+entrypoint = "src/main.jv"
+
+[project.sources]
+include = ["src/**/*.jv"]
+"#,
+        )
+        .expect("write manifest");
+        fs::write(&entrypoint, source).expect("write fixture source");
+
+        let project_root = pipeline::project::locator::ProjectRoot::new(
+            project_dir.to_path_buf(),
+            manifest_path.clone(),
+        );
+        let settings = pipeline::project::manifest::ManifestLoader::load(&manifest_path)
+            .expect("manifest loads");
+        let layout = pipeline::project::layout::ProjectLayout::from_settings(&project_root, &settings)
+            .expect("layout resolves");
+
+        let overrides = pipeline::CliOverrides {
+            entrypoint: Some(entrypoint.clone()),
+            output: Some(project_dir.join("target")),
+            java_only: true,
+            check: false,
+            format: false,
+            target: None,
+            clean: false,
+            perf: false,
+            emit_types: false,
+            verbose: false,
+            emit_telemetry: false,
+            parallel_inference: false,
+            inference_workers: None,
+            constraint_batch: None,
+        };
+
+        let plan =
+            pipeline::BuildOptionsFactory::compose(project_root, settings, layout, overrides)
+                .expect("plan composition succeeds");
+
+        match pipeline::compile(&plan) {
+            Ok(artifacts) => {
+                assert!(
+                    !artifacts.java_files.is_empty(),
+                    "fixture {} should generate at least one Java file",
+                    path.display()
+                );
+            }
+            Err(err) => {
+                failures.push((path.display().to_string(), err.to_string()));
+            }
+        }
+    }
+
+    assert!(compiled > 0, "no eligible fixtures without interpolation were compiled");
+
+    if !failures.is_empty() {
+        let details = failures
+            .into_iter()
+            .map(|(path, err)| format!("{path}: {err}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        panic!("CLI failed to compile some fixtures:\n{details}");
+    }
 }
 
 #[test]
