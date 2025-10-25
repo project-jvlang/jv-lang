@@ -42,3 +42,88 @@ fn default_pipeline() -> ProcessingPipeline {
         .with_stage(layout::LayoutStage::new(shared_state))
         .build()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use jv_lexer::{Lexer, StringInterpolationSegment, TokenMetadata};
+
+    fn lex(source: &str) -> Vec<Token> {
+        Lexer::new(source.to_string())
+            .tokenize()
+            .expect("lex interpolation source")
+    }
+
+    fn interpolation_metadata<'a>(tokens: &'a [Token]) -> Option<&'a Vec<StringInterpolationSegment>> {
+        tokens.iter().find_map(|token| {
+            token
+                .metadata
+                .iter()
+                .find_map(|metadata| match metadata {
+                    TokenMetadata::StringInterpolation { segments } => Some(segments),
+                    _ => None,
+                })
+        })
+    }
+
+    #[test]
+    fn interpolation_metadata_survives_default_pipeline() {
+        let source = r#"println("Checkpoint ${stage}: Welcome, ${name}!")"#;
+        let tokens = lex(source);
+        assert!(
+            interpolation_metadata(&tokens).is_some(),
+            "lexer should tag interpolation tokens with metadata"
+        );
+
+        let (tokens, diagnostics, halted_stage) = run(tokens).into_parts();
+        assert!(
+            diagnostics.is_empty(),
+            "preprocess diagnostics should be empty: {:?}",
+            diagnostics
+        );
+        assert!(
+            halted_stage.is_none(),
+            "preprocess pipeline should not halt, got {:?}",
+            halted_stage
+        );
+
+        let segments = interpolation_metadata(&tokens)
+            .expect("string interpolation metadata should survive pipeline");
+        let expression_count = segments
+            .iter()
+            .filter(|segment| matches!(segment, StringInterpolationSegment::Expression(_)))
+            .count();
+        assert_eq!(
+            expression_count, 2,
+            "expected two interpolation expressions, got {:?}",
+            segments
+        );
+
+        // Spot-check that the segments retain both identifiers and literal text portions.
+        assert!(
+            segments.iter().any(|segment| {
+                matches!(
+                    segment,
+                    StringInterpolationSegment::Expression(expr) if expr == "stage"
+                )
+            }),
+            "stage expression should be preserved in interpolation segments: {:?}",
+            segments
+        );
+        assert!(
+            segments.iter().any(|segment| {
+                matches!(
+                    segment,
+                    StringInterpolationSegment::Expression(expr) if expr == "name"
+                )
+            }),
+            "name expression should be preserved in interpolation segments: {:?}",
+            segments
+        );
+        assert!(
+            segments.iter().any(|segment| matches!(segment, StringInterpolationSegment::Literal(literal) if literal.contains("Checkpoint"))),
+            "literal segments should be preserved alongside expressions: {:?}",
+            segments
+        );
+    }
+}

@@ -3,8 +3,9 @@ use std::path::Path;
 use crate::frontend::RowanPipeline;
 use crate::lowering::LoweringDiagnosticSeverity;
 use crate::verification::{self, HarnessReport, StatementKindKey};
-use jv_ast::expression::ParameterProperty;
-use jv_lexer::TokenType;
+use jv_ast::expression::{Argument, ParameterProperty, StringPart};
+use jv_ast::Expression;
+use jv_lexer::{StringInterpolationSegment, TokenMetadata, TokenType};
 
 #[test]
 fn specification_fixtures_produce_expected_ast() {
@@ -248,4 +249,114 @@ fn function_parameters_preserve_modifiers() {
     assert_eq!(third.modifiers.property, ParameterProperty::None);
     assert!(third.modifiers.is_ref);
     assert!(third.modifiers.is_mut);
+}
+
+#[test]
+fn rowan_pipeline_preserves_interpolation_after_preprocess() {
+    let source = r#"
+        package checkpoints
+
+        fun announce(stage: Int, name: String) {
+            println("Checkpoint ${stage}: Welcome, ${name}!")
+        }
+    "#;
+
+    let pipeline = RowanPipeline::default();
+    let debug = pipeline
+        .execute_with_debug(source)
+        .expect("Rowan pipeline to execute on interpolation sample");
+
+    let tokens = debug.artifacts().tokens();
+    let interpolation_segments = tokens.iter().find_map(|token| {
+        token
+            .metadata
+            .iter()
+            .find_map(|metadata| match metadata {
+                TokenMetadata::StringInterpolation { segments } => Some(segments),
+                _ => None,
+            })
+    });
+
+    let interpolation_segments = interpolation_segments
+        .expect("preprocess pipeline should not drop interpolation metadata");
+    let expression_count = interpolation_segments
+        .iter()
+        .filter(|segment| matches!(segment, StringInterpolationSegment::Expression(_)))
+        .count();
+    assert!(
+        expression_count >= 2,
+        "expected at least two expression segments, got {:?}",
+        interpolation_segments
+    );
+
+    fn extract_interpolation<'a>(expr: &'a Expression) -> Option<&'a Expression> {
+        match expr {
+            Expression::StringInterpolation { .. } => Some(expr),
+            Expression::Call { args, .. } => args.iter().find_map(|arg| match arg {
+                Argument::Positional(inner) => extract_interpolation(inner),
+                Argument::Named { value, .. } => extract_interpolation(value),
+            }),
+            Expression::Block { statements, .. } => statements.iter().find_map(|statement| {
+                match statement {
+                    jv_ast::Statement::Expression { expr, .. } => extract_interpolation(expr),
+                    jv_ast::Statement::Return {
+                        value: Some(expr), ..
+                    } => extract_interpolation(expr),
+                    jv_ast::Statement::ValDeclaration { initializer, .. } => {
+                        extract_interpolation(initializer)
+                    }
+                    jv_ast::Statement::VarDeclaration {
+                        initializer: Some(expr),
+                        ..
+                    } => extract_interpolation(expr),
+                    _ => None,
+                }
+            }),
+            _ => None,
+        }
+    }
+
+    let interpolation_expr = debug
+        .statements()
+        .iter()
+        .find_map(|statement| match statement {
+            jv_ast::Statement::FunctionDeclaration { name, body, .. }
+                if name == "announce" =>
+            {
+                extract_interpolation(body)
+            }
+            _ => None,
+        })
+        .expect("function body should contain interpolation expression");
+
+    match interpolation_expr {
+        Expression::StringInterpolation { parts, .. } => {
+            assert!(
+                parts
+                    .iter()
+                    .filter(|part| matches!(part, StringPart::Expression(_)))
+                    .count()
+                    >= 2,
+                "expected at least two expression parts inside interpolation, got {:?}",
+                parts
+            );
+            assert!(
+                parts.iter().any(|part| matches!(
+                    part,
+                    StringPart::Expression(Expression::Identifier(name, _)) if name == "stage"
+                )),
+                "stage identifier should be preserved in interpolation parts: {:?}",
+                parts
+            );
+            assert!(
+                parts.iter().any(|part| matches!(
+                    part,
+                    StringPart::Expression(Expression::Identifier(name, _)) if name == "name"
+                )),
+                "name identifier should be preserved in interpolation parts: {:?}",
+                parts
+            );
+        }
+        other => panic!("expected interpolation expression, found {:?}", other),
+    }
 }
