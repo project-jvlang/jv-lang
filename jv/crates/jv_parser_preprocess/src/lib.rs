@@ -10,6 +10,7 @@ mod legacy;
 mod pipeline;
 mod shared;
 mod stage;
+mod when_tracker;
 
 pub use pipeline::{PreprocessResult, ProcessingPipeline};
 pub use stage::{PreprocessDiagnostic, PreprocessStage, StageContext, StageStatus};

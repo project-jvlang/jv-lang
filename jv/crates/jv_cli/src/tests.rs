@@ -632,8 +632,7 @@ clean = false
         .expect("Sequence should expose flatMapIterable alias");
 
     assert!(
-        flat_map_iterable_signature
-            .contains("java.util.function.Function<T, Iterable<R>>"),
+        flat_map_iterable_signature.contains("java.util.function.Function<T, Iterable<R>>"),
         "flatMapIterable should accept Function<T, Iterable<R>>: {flat_map_iterable_signature}"
     );
 
@@ -644,8 +643,7 @@ clean = false
         .expect("Sequence should expose flatMapStream alias");
 
     assert!(
-        flat_map_stream_signature
-            .contains("java.util.function.Function<T, Stream<R>>"),
+        flat_map_stream_signature.contains("java.util.function.Function<T, Stream<R>>"),
         "flatMapStream should accept Function<T, Stream<R>>: {flat_map_stream_signature}"
     );
 }

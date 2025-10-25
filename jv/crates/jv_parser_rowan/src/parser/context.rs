@@ -470,7 +470,11 @@ impl<'tokens> ParserContext<'tokens> {
         self.start_node(SyntaxKind::InitializerClause);
         self.bump_raw(); // '='
         self.parse_expression_until(
-            &[TokenKind::Comma, TokenKind::LayoutComma, TokenKind::RightParen],
+            &[
+                TokenKind::Comma,
+                TokenKind::LayoutComma,
+                TokenKind::RightParen,
+            ],
             false,
         );
         self.consume_trivia();

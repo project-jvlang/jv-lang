@@ -1,4 +1,5 @@
 use super::stage::{PreprocessStage, StageContext, StageStatus};
+use crate::when_tracker::{PendingWhenTracker, WhenTrackerEvent};
 use jv_lexer::{
     ExplicitSeparatorLocation, JsonConfidence, LayoutCommaMetadata, LayoutSequenceKind, Token,
     TokenMetadata, TokenTrivia, TokenType,
@@ -36,6 +37,7 @@ impl PreprocessStage for LegacyPreprocessStage {
 enum SequenceContextKind {
     Array,
     Call,
+    When,
 }
 
 struct SequenceContext {
@@ -43,15 +45,22 @@ struct SequenceContext {
     prev_was_separator: bool,
     pending_layout: bool,
     last_explicit_separator: Option<ExplicitSeparatorLocation>,
+    when_brace_depth: usize,
 }
 
 impl SequenceContext {
     fn new(kind: SequenceContextKind) -> Self {
+        let when_brace_depth = if matches!(kind, SequenceContextKind::When) {
+            1
+        } else {
+            0
+        };
         Self {
             kind,
             prev_was_separator: true,
             pending_layout: false,
             last_explicit_separator: None,
+            when_brace_depth,
         }
     }
 }
@@ -93,6 +102,8 @@ fn requires_right_operand(token_type: &TokenType) -> bool {
             | TokenType::RangeExclusive
             | TokenType::RangeInclusive
             | TokenType::Elvis
+            | TokenType::Arrow
+            | TokenType::FatArrow
     )
 }
 
@@ -133,6 +144,18 @@ fn is_sequence_layout_candidate(
     }
 }
 
+fn is_when_layout_candidate(token_type: &TokenType) -> bool {
+    !matches!(
+        token_type,
+        TokenType::Comma
+            | TokenType::LayoutComma
+            | TokenType::Arrow
+            | TokenType::FatArrow
+            | TokenType::RightBrace
+            | TokenType::Else
+    )
+}
+
 pub(super) fn run_legacy_preprocess(tokens: Vec<Token>) -> Vec<Token> {
     let json_contexts = detect_json_contexts(&tokens);
     let mut result = Vec::with_capacity(tokens.len());
@@ -142,6 +165,7 @@ pub(super) fn run_legacy_preprocess(tokens: Vec<Token>) -> Vec<Token> {
     let mut in_interpolation_expr = false;
     let mut expect_interpolation_expr = false;
     let mut prev_token_type: Option<TokenType> = None;
+    let mut pending_when = PendingWhenTracker::new();
 
     let mut iter = tokens.into_iter().enumerate().peekable();
 
@@ -172,6 +196,8 @@ pub(super) fn run_legacy_preprocess(tokens: Vec<Token>) -> Vec<Token> {
 
         let token_type_ref = &token.token_type;
         let current_token_type = token.token_type.clone();
+        let when_event = pending_when.observe(token_type_ref);
+        let starts_when_block = matches!(when_event, WhenTrackerEvent::EnterBlock);
         if expect_interpolation_expr {
             in_interpolation_expr = true;
             expect_interpolation_expr = false;
@@ -209,6 +235,7 @@ pub(super) fn run_legacy_preprocess(tokens: Vec<Token>) -> Vec<Token> {
                     SequenceContextKind::Call => {
                         !matches!(token.token_type, TokenType::Comma | TokenType::RightParen)
                     }
+                    SequenceContextKind::When => is_when_layout_candidate(token_type_ref),
                 } && is_sequence_layout_candidate(
                     prev_token_type.as_ref(),
                     token_type_ref,
@@ -232,6 +259,17 @@ pub(super) fn run_legacy_preprocess(tokens: Vec<Token>) -> Vec<Token> {
                             }
                             SequenceContextKind::Call => {
                                 ctx.last_explicit_separator = None;
+                            }
+                            SequenceContextKind::When => {
+                                let metadata = LayoutCommaMetadata {
+                                    sequence: LayoutSequenceKind::When,
+                                    explicit_separator: None,
+                                };
+                                let mut synthetic = make_layout_comma_token(&token);
+                                synthetic
+                                    .metadata
+                                    .push(TokenMetadata::LayoutComma(metadata));
+                                result.push(synthetic);
                             }
                         }
 
@@ -320,6 +358,50 @@ pub(super) fn run_legacy_preprocess(tokens: Vec<Token>) -> Vec<Token> {
                     });
                 }
                 next_call_state = false;
+                result.push(token);
+            }
+            TokenType::LeftBrace => {
+                if let Some(ctx) = stack.last_mut() {
+                    ctx.prev_was_separator = false;
+                    ctx.last_explicit_separator = None;
+                }
+
+                if starts_when_block {
+                    stack.push(SequenceContext::new(SequenceContextKind::When));
+                } else if let Some(ctx) = stack.last_mut() {
+                    if let SequenceContextKind::When = ctx.kind {
+                        ctx.when_brace_depth = ctx.when_brace_depth.saturating_add(1);
+                    }
+                }
+
+                next_call_state = false;
+                result.push(token);
+            }
+            TokenType::RightBrace => {
+                let mut handled_when = false;
+                let mut popped_when = false;
+
+                if let Some(ctx) = stack.last_mut() {
+                    if let SequenceContextKind::When = ctx.kind {
+                        handled_when = true;
+                        if ctx.when_brace_depth > 1 {
+                            ctx.when_brace_depth -= 1;
+                            ctx.prev_was_separator = false;
+                            ctx.last_explicit_separator = None;
+                        } else {
+                            stack.pop();
+                            popped_when = true;
+                        }
+                    }
+                }
+
+                if popped_when || !handled_when {
+                    if let Some(ctx) = stack.last_mut() {
+                        ctx.prev_was_separator = false;
+                        ctx.last_explicit_separator = None;
+                    }
+                }
+
                 result.push(token);
             }
             _ => {

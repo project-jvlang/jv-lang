@@ -253,6 +253,7 @@ pub enum TokenMetadata {
 pub enum LayoutSequenceKind {
     Array,
     Call,
+    When,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]

@@ -2,6 +2,7 @@ use std::cell::RefCell;
 use std::collections::HashSet;
 use std::rc::Rc;
 
+use crate::when_tracker::{PendingWhenTracker, WhenTrackerEvent};
 use jv_lexer::{Token, TokenType};
 
 use super::shared::StageSharedState;
@@ -24,9 +25,13 @@ impl CommentsStage {
         let mut result_tokens = Vec::with_capacity(tokens.len());
         let mut result_origins = Vec::with_capacity(tokens.len());
         let mut stack: Vec<SequenceContext> = Vec::new();
+        let mut pending_when = PendingWhenTracker::new();
         let mut iter = tokens.into_iter().zip(origins.into_iter());
 
         while let Some((mut token, origin)) = iter.next() {
+            let when_event = pending_when.observe(&token.token_type);
+            let starts_when_block = matches!(when_event, WhenTrackerEvent::EnterBlock);
+
             match token.token_type {
                 TokenType::JavaDocComment(_) => {
                     if let Some(ctx) = stack.last_mut() {
@@ -93,6 +98,41 @@ impl CommentsStage {
                         ctx.pending_comment = false;
                     }
                 }
+                TokenType::LeftBrace => {
+                    if starts_when_block {
+                        stack.push(SequenceContext::new_when());
+                    } else if let Some(ctx) = stack.last_mut() {
+                        if let SequenceContextKind::When = ctx.kind {
+                            ctx.when_brace_depth = ctx.when_brace_depth.saturating_add(1);
+                        }
+                    }
+                    if let Some(ctx) = stack.last_mut() {
+                        ctx.pending_comment = false;
+                    }
+                }
+                TokenType::RightBrace => {
+                    let mut handled_when = false;
+                    let mut popped_when = false;
+
+                    if let Some(ctx) = stack.last_mut() {
+                        if let SequenceContextKind::When = ctx.kind {
+                            handled_when = true;
+                            if ctx.when_brace_depth > 1 {
+                                ctx.when_brace_depth -= 1;
+                                ctx.pending_comment = false;
+                            } else {
+                                stack.pop();
+                                popped_when = true;
+                            }
+                        }
+                    }
+
+                    if popped_when || !handled_when {
+                        if let Some(ctx) = stack.last_mut() {
+                            ctx.pending_comment = false;
+                        }
+                    }
+                }
                 _ => {}
             }
 
@@ -135,11 +175,13 @@ impl PreprocessStage for CommentsStage {
 enum SequenceContextKind {
     Array,
     Call,
+    When,
 }
 
 struct SequenceContext {
     kind: SequenceContextKind,
     pending_comment: bool,
+    when_brace_depth: usize,
 }
 
 impl SequenceContext {
@@ -147,6 +189,7 @@ impl SequenceContext {
         Self {
             kind: SequenceContextKind::Array,
             pending_comment: false,
+            when_brace_depth: 0,
         }
     }
 
@@ -154,6 +197,15 @@ impl SequenceContext {
         Self {
             kind: SequenceContextKind::Call,
             pending_comment: false,
+            when_brace_depth: 0,
+        }
+    }
+
+    fn new_when() -> Self {
+        Self {
+            kind: SequenceContextKind::When,
+            pending_comment: false,
+            when_brace_depth: 1,
         }
     }
 }

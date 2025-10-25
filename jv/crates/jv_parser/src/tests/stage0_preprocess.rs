@@ -101,3 +101,34 @@ fn layout_commas_respect_existing_separators() {
         "synthetic layout comma must appear after the explicit separator"
     );
 }
+
+#[test]
+fn when_blocks_receive_layout_commas_between_arms() {
+    let tokens = preprocess_tokens(
+        r#"
+when (value) {
+    1 -> foo()
+    2 -> bar()
+}
+"#,
+    );
+
+    let when_layouts: Vec<_> = tokens
+        .iter()
+        .filter(|token| matches!(token.token_type, TokenType::LayoutComma))
+        .filter(|token| {
+            token.metadata.iter().any(|meta| match meta {
+                TokenMetadata::LayoutComma(metadata) => {
+                    metadata.sequence == LayoutSequenceKind::When
+                }
+                _ => false,
+            })
+        })
+        .collect();
+
+    assert_eq!(
+        when_layouts.len(),
+        1,
+        "expected exactly one layout comma between when arms"
+    );
+}
