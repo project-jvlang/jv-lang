@@ -15,9 +15,14 @@ fun literalsDemo(): Unit {
       "values": [1, 2, 3]
     }
 
+    var runCount = 1
+    var channel = "console"
+
     println(message)
     println("Direct literal output line")
     println("Inline interpolation: ${name}")
+    println(runCount)
+    println("Channel ${channel}")
     println(template)
     println(config)
 }
