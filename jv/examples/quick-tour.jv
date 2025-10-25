@@ -1,0 +1,10 @@
+fun main(): Unit {
+    val learner = "traveler"
+    var checkPoint = 1
+
+    println("Checkpoint ${checkPoint}: Welcome, ${learner}!")
+
+    checkPoint = checkPoint + 1
+    val mission = "experiment with functions"
+    println("Checkpoint ${checkPoint}: ${mission}")
+}

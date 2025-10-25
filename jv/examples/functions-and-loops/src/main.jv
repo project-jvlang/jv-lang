@@ -1,0 +1,15 @@
+fun formatAttendee(position: Int, name: String): String {
+    return "Attendee ${position}: ${name}"
+}
+
+fun main(): Unit {
+    val attendees = ["Kai" "Mina" "Ren"]
+    var position = 1
+
+    for (person in attendees) {
+        println(formatAttendee(position person))
+        position = position + 1
+    }
+
+    println("Total visitors: ${attendees.size}")
+}

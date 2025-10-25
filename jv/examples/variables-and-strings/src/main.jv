@@ -1,0 +1,12 @@
+fun main(): Unit {
+    val learner = "jv traveler"
+    var chapter = 1
+
+    println("Chapter ${chapter}: warm up, ${learner}!")
+
+    chapter = chapter + 1
+    val focusAreas = ["syntax" "functions" "sequences"]
+
+    println("Chapter ${chapter}: ${focusAreas.size} topics to explore")
+    println("Focus areas: ${focusAreas}")
+}

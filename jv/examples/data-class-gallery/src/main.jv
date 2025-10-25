@@ -1,0 +1,21 @@
+data class Milestone(val title: String, val completed: Boolean, val estimateDays: Int)
+
+fun renderMilestone(item: Milestone): String {
+    val status = when (item.completed) {
+        true -> "done"
+        false -> "pending"
+    }
+    return "${item.title} - ${status} (${item.estimateDays}d)"
+}
+
+fun main(): Unit {
+    val roadmap = [
+        Milestone("Lexer foundations" true 2)
+        Milestone("Parser walkthrough" false 3)
+        Milestone("Codegen polish" false 4)
+    ]
+
+    for (milestone in roadmap) {
+        println(renderMilestone(milestone))
+    }
+}

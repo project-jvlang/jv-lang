@@ -1,0 +1,12 @@
+fun main(): Unit {
+    val modules = ["lexer" "parser" "ast" "codegen" "cli"]
+
+    val highlighted = modules
+        .map { value -> value + "-module" }
+        .filter { candidate -> candidate.length >= 7 }
+        .toList()
+
+    println(highlighted)
+    val containsParserModule = highlighted.contains("parser-module")
+    println("Has parser-module: ${containsParserModule}")
+}

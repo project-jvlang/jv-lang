@@ -1,0 +1,17 @@
+fun describe(value: Any): String {
+    return when (value) {
+        is Int && value % 2 == 0 -> "${value} is an even Int"
+        is String && value.length > 5 -> "Long text (${value.length} chars)"
+        is Boolean -> when (value) {
+            true -> "Flag is set"
+            false -> "Flag is off"
+        }
+        else -> "Unknown sample: ${value}"
+    }
+}
+
+fun main(): Unit {
+    println(describe(42))
+    println(describe("companion notebook"))
+    println(describe(false))
+}

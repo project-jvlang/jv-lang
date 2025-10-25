@@ -1,0 +1,21 @@
+data class Module(val name: String, val done: Boolean)
+
+fun render(item: Module): String {
+    val status = when (item.done) {
+        true -> "complete"
+        false -> "pending"
+    }
+    return "${item.name} - ${status}"
+}
+
+fun main(): Unit {
+    val plan = [
+        Module("lexer" true)
+        Module("parser" false)
+        Module("codegen" false)
+    ]
+
+    for (entry in plan) {
+        println(render(entry))
+    }
+}

@@ -1,0 +1,6 @@
+[package]
+name = "functions-and-loops"
+version = "0.1.0"
+
+[build]
+java_version = "25"

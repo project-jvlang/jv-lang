@@ -1,0 +1,11 @@
+fun main(): Unit {
+    val chapters = ["lexer" "parser" "ast" "codegen"]
+
+    val highlighted = chapters
+        .map { value -> value + "-guide" }
+        .filter { candidate -> candidate.length > 6 }
+        .toList()
+
+    println(highlighted)
+    println("Total highlighted: ${highlighted.size}")
+}
