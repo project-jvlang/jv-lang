@@ -103,4 +103,16 @@ impl PreprocessResult {
     pub fn into_parts(self) -> (Vec<Token>, Vec<PreprocessDiagnostic>, Option<&'static str>) {
         (self.tokens, self.diagnostics, self.halted_stage)
     }
+
+    pub fn map_tokens<F>(self, f: F) -> Self
+    where
+        F: FnOnce(Vec<Token>) -> Vec<Token>,
+    {
+        let (tokens, diagnostics, halted_stage) = self.into_parts();
+        Self {
+            tokens: f(tokens),
+            diagnostics,
+            halted_stage,
+        }
+    }
 }

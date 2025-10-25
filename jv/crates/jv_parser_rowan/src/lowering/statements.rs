@@ -1285,10 +1285,27 @@ mod expression_parser {
                         end: index + 1,
                     })
                 }
-                TokenType::String(value) => {
+                TokenType::String(_) | TokenType::StringInterpolation(_) => {
                     let span = span_from_token(token);
+                    let has_interpolation = token.metadata.iter().any(|metadata| {
+                        matches!(metadata, TokenMetadata::StringInterpolation { .. })
+                    });
+
+                    let expr = if has_interpolation {
+                        let (expr, _) = parse_string_token_with_metadata(token, span.clone())?;
+                        expr
+                    } else {
+                        let value = match &token.token_type {
+                            TokenType::String(value) | TokenType::StringInterpolation(value) => {
+                                value.clone()
+                            }
+                            _ => token.lexeme.clone(),
+                        };
+                        Expression::Literal(Literal::String(value), span.clone())
+                    };
+
                     Ok(ParsedExpr {
-                        expr: Expression::Literal(Literal::String(value.clone()), span.clone()),
+                        expr,
                         start: index,
                         end: index + 1,
                     })
@@ -1297,15 +1314,6 @@ mod expression_parser {
                     let span = span_from_token(token);
                     Ok(ParsedExpr {
                         expr: Expression::Literal(Literal::Character(*value), span.clone()),
-                        start: index,
-                        end: index + 1,
-                    })
-                }
-                TokenType::StringInterpolation(_) => {
-                    let span = span_from_token(token);
-                    let (expr, _) = parse_string_token_with_metadata(token, span.clone())?;
-                    Ok(ParsedExpr {
-                        expr,
                         start: index,
                         end: index + 1,
                     })
@@ -2508,9 +2516,12 @@ mod expression_parser {
             let (mut expr, token_consumption) =
                 parse_string_token_with_metadata(start_token, initial_span.clone())?;
 
+            let interpolation_expr_count = count_interpolation_expression_segments(start_token);
+            let string_mid_count = interpolation_expr_count.saturating_sub(1);
             let end_index = start_index
-                .saturating_add(1)
                 .saturating_add(token_consumption)
+                .saturating_add(string_mid_count)
+                .saturating_add(2)
                 .min(self.tokens.len());
             self.pos = end_index;
 
@@ -3702,6 +3713,24 @@ mod expression_parser {
         let start_span = span_from_token(tokens[start]);
         let end_span = span_from_token(tokens[end - 1]);
         merge_spans(&start_span, &end_span)
+    }
+
+    fn count_interpolation_expression_segments(token: &Token) -> usize {
+        token
+            .metadata
+            .iter()
+            .find_map(|metadata| match metadata {
+                TokenMetadata::StringInterpolation { segments } => Some(
+                    segments
+                        .iter()
+                        .filter(|segment| {
+                            matches!(segment, StringInterpolationSegment::Expression(_))
+                        })
+                        .count(),
+                ),
+                _ => None,
+            })
+            .unwrap_or(0)
     }
 
     fn parse_string_token_with_metadata(

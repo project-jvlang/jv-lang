@@ -99,11 +99,6 @@ statement_kinds = [
     "val_declaration",
     "val_declaration",
     "return_statement",
-    "expression",
-    "expression",
-    "expression",
-    "expression",
-    "expression",
 ]
 
 [[expect.statements]]

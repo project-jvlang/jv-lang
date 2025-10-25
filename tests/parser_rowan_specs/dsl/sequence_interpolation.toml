@@ -37,7 +37,6 @@ end_column = 2
 [expect.statements.block]
 statement_kinds = [
     "return_statement",
-    "expression",
 ]
 
 [[expect.statements]]
@@ -57,7 +56,6 @@ statement_kinds = [
     "val_declaration",
     "val_declaration",
     "val_declaration",
-    "expression",
     "expression",
     "expression",
 ]

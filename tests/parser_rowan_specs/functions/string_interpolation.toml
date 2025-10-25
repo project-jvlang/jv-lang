@@ -17,9 +17,7 @@ name = "literalsDemo"
   statement_kinds = [
     "val_declaration",
     "val_declaration",
-    "expression",
     "val_declaration",
-    "expression",
     "val_declaration",
     "var_declaration",
     "var_declaration",
