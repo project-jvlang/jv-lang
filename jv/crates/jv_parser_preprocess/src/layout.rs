@@ -269,7 +269,7 @@ impl SequenceContext {
     fn new_when() -> Self {
         Self {
             kind: SequenceContextKind::When,
-            prev_was_separator: true,
+            prev_was_separator: false,
             last_explicit_separator: None,
             when_brace_depth: 1,
         }
@@ -345,12 +345,11 @@ fn is_when_layout_candidate(token_type: &TokenType) -> bool {
             | TokenType::Arrow
             | TokenType::FatArrow
             | TokenType::RightBrace
-            | TokenType::Else
     )
 }
 
 fn has_layout_trivia(trivia: &TokenTrivia) -> bool {
-    trivia.spaces > 0 || trivia.newlines > 0 || trivia.comments
+    trivia.newlines > 0 || trivia.comments
 }
 
 fn make_layout_comma_token(reference: &Token) -> Token {

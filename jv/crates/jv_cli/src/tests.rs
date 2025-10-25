@@ -29,7 +29,7 @@ use std::fs;
 use std::fs::File;
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Mutex, MutexGuard, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 use zip::write::FileOptions;
 
@@ -86,6 +86,12 @@ impl Drop for TempDirGuard {
 fn current_dir_lock() -> &'static Mutex<()> {
     static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
     LOCK.get_or_init(|| Mutex::new(()))
+}
+
+fn lock_current_dir() -> MutexGuard<'static, ()> {
+    current_dir_lock()
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner())
 }
 
 #[test]
@@ -237,7 +243,7 @@ fn test_no_command() {
 
 #[test]
 fn test_init_project_in_temp_dir() {
-    let _guard = current_dir_lock().lock().unwrap();
+    let _guard = lock_current_dir();
     let temp_dir = TempDirGuard::new("init-temp");
     let temp_path = temp_dir.path().to_path_buf();
 
@@ -272,7 +278,7 @@ fn test_init_project_in_temp_dir() {
 
 #[test]
 fn test_init_project_with_name() {
-    let _guard = current_dir_lock().lock().unwrap();
+    let _guard = lock_current_dir();
     let temp_dir = TempDirGuard::new("init-named");
     let temp_path = temp_dir.path().to_path_buf();
 
@@ -448,7 +454,7 @@ include = ["src/**/*.jv"]
 
 #[test]
 fn primitive_int_family_sum_pipeline_executes_via_cli() {
-    let _guard = current_dir_lock().lock().unwrap();
+    let _guard = lock_current_dir();
     let temp_dir = TempDirGuard::new("primitive-sum-specialization");
     let project_root_path = temp_dir.path();
     let manifest_path = project_root_path.join("jv.toml");
