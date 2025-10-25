@@ -16,6 +16,8 @@ fun literalsDemo(): Unit {
     }
 
     println(message)
+    println("Direct literal output line")
+    println("Inline interpolation: ${name}")
     println(template)
     println(config)
 }

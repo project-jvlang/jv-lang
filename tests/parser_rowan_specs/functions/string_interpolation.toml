@@ -23,5 +23,7 @@ name = "literalsDemo"
     "val_declaration",
     "expression",
     "expression",
+    "expression",
+    "expression",
     "expression"
   ]

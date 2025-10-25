@@ -1818,6 +1818,8 @@ fn string_interpolation_lowering_builds_parts() {
             StatementKindKey::ValDeclaration,
             StatementKindKey::Expression,
             StatementKindKey::Expression,
+            StatementKindKey::Expression,
+            StatementKindKey::Expression,
             StatementKindKey::Expression
         ],
         "unexpected block statement kinds"
