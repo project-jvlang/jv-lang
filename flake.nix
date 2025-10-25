@@ -13,15 +13,6 @@
       let
         overlays = [ (import rust-overlay) ];
         pkgs = import nixpkgs { inherit system overlays; };
-        defaultJdk = pkgs.jdk;
-        jdk25 =
-          if builtins.hasAttr "temurin-bin-25" pkgs then pkgs."temurin-bin-25"
-          else if builtins.hasAttr "jdk25" pkgs then pkgs.jdk25
-          else defaultJdk;
-        jdk21 =
-          if builtins.hasAttr "temurin-bin-21" pkgs then pkgs."temurin-bin-21"
-          else if builtins.hasAttr "jdk21" pkgs then pkgs.jdk21
-          else defaultJdk;
         rustToolchain = pkgs.rust-bin.stable."1.90.0".default.override {
           extensions = [ "rust-src" "clippy" "rustfmt" "rust-analyzer" ];
         };
@@ -29,30 +20,34 @@
       {
         devShells.default = pkgs.mkShell {
           packages = [
-            # Rust 1.90.0 toolchain
             rustToolchain
 
-            # Java toolchains for compatibility testing
-            jdk25
-            jdk21
-
-            # Utilities
+            # Utilities needed for tooling/bootstrap scripts
             pkgs.git
             pkgs.pkg-config
+            pkgs.curl
           ];
 
           shellHook = ''
-            export JAVA25_HOME=${jdk25}
-            export JAVA21_HOME=${jdk21}
+            repo_root=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
+            installer="$repo_root/scripts/install_toolchain_jdks.sh"
+            if [ -x "$installer" ]; then
+              "$installer" "$repo_root"
+            else
+              echo "[devShell] Missing $installer; JDK toolchains not installed" >&2
+            fi
+
+            export JAVA21_HOME="$repo_root/toolchains/jdk21"
+            export JAVA25_HOME="$repo_root/toolchains/jdk25"
             export PATH="$JAVA25_HOME/bin:$JAVA21_HOME/bin:$PATH"
 
             cat <<'INSTRUCTIONS'
 JDK setup:
-  * Default PATH points to JDK 25 (java/javac from $JAVA25_HOME/bin).
-  * Use JAVA_HOME to pick a toolchain per test run, e.g.:
+  * toolchains/jdk21 and toolchains/jdk25 are auto-synced when entering nix develop.
+  * Default PATH prefers Java 25, override per-run via:
       JAVA_HOME=$JAVA25_HOME cargo test        # Java 25 compliance
       JAVA_HOME=$JAVA21_HOME cargo test        # Java 21 compatibility
-  * Both JDKs ship fully, so integration tests can spawn either version.
+  * Delete toolchains/ to force a re-download on next shell entry.
 INSTRUCTIONS
           '';
         };
