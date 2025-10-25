@@ -2083,15 +2083,19 @@ fn nested_package_fixture_preserves_interpolation_identifiers() {
     };
 
     match return_expr {
-        Expression::StringInterpolation { parts, .. } => {
-            match parts.get(1) {
-                Some(StringPart::Expression(Expression::Identifier(identifier, _))) => {
-                    assert_eq!(identifier, "name", "interpolation identifier should match parameter name");
-                }
-                other => panic!("expected identifier interpolation part, got {:?}", other),
+        Expression::StringInterpolation { parts, .. } => match parts.get(1) {
+            Some(StringPart::Expression(Expression::Identifier(identifier, _))) => {
+                assert_eq!(
+                    identifier, "name",
+                    "interpolation identifier should match parameter name"
+                );
             }
-        }
-        other => panic!("expected string interpolation as return value, got {:?}", other),
+            other => panic!("expected identifier interpolation part, got {:?}", other),
+        },
+        other => panic!(
+            "expected string interpolation as return value, got {:?}",
+            other
+        ),
     }
 }
 

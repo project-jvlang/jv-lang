@@ -289,8 +289,9 @@ fn lower_import(
         )
     })?;
 
-    let path_tokens = context.tokens_for(node);
-    let is_wildcard = path_tokens
+    let node_tokens = context.tokens_for(node);
+    let alias = import_alias_from_tokens(&node_tokens);
+    let is_wildcard = node_tokens
         .iter()
         .rev()
         .find(|token| {
@@ -304,10 +305,49 @@ fn lower_import(
 
     Ok(Statement::Import {
         path: segments.join("."),
-        alias: None,
+        alias,
         is_wildcard,
         span: context.span_for(node).unwrap_or_else(jv_ast::Span::dummy),
     })
+}
+
+fn import_alias_from_tokens(tokens: &[&Token]) -> Option<String> {
+    let mut awaiting_alias_name = false;
+    let mut previous_was_dot = false;
+
+    for token in tokens {
+        match &token.token_type {
+            TokenType::Whitespace(_) | TokenType::Newline => continue,
+            TokenType::LineComment(_)
+            | TokenType::BlockComment(_)
+            | TokenType::JavaDocComment(_) => continue,
+            TokenType::Dot => {
+                previous_was_dot = true;
+                if awaiting_alias_name {
+                    awaiting_alias_name = false;
+                }
+            }
+            TokenType::Identifier(value) => {
+                if awaiting_alias_name {
+                    return Some(value.clone());
+                }
+
+                if value == "as" && !previous_was_dot {
+                    awaiting_alias_name = true;
+                } else {
+                    previous_was_dot = false;
+                }
+            }
+            _ => {
+                previous_was_dot = false;
+                if awaiting_alias_name {
+                    awaiting_alias_name = false;
+                }
+            }
+        }
+    }
+
+    None
 }
 
 fn lower_comment(

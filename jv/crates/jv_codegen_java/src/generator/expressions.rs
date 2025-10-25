@@ -390,6 +390,7 @@ impl JavaCodeGenerator {
                 None => String::new(),
             };
             let body_expr = self.generate_expression(&case.body)?;
+            let body_expr = Self::finalize_switch_arm_body(body_expr);
             if Self::is_default_only_case(case) {
                 builder.push_line(&format!("default{} -> {}", guard, body_expr));
             } else {
@@ -963,8 +964,12 @@ impl JavaCodeGenerator {
         }
 
         if needs_resource_guard {
-            let chained =
-                self.render_sequence_chain("__jvStream", pipeline, Some(result_type), element_type_ref)?;
+            let chained = self.render_sequence_chain(
+                "__jvStream",
+                pipeline,
+                Some(result_type),
+                element_type_ref,
+            )?;
             let normalized_result_type = Self::normalize_void_like(result_type);
             let return_type = self.generate_type(normalized_result_type.as_ref())?;
             let is_void = Self::is_void_like(normalized_result_type.as_ref());
@@ -2046,10 +2051,32 @@ impl JavaCodeGenerator {
         }
 
         let rendered = match end {
-            IrImplicitWhenEnd::Unit { .. } => "default -> { }".to_string(),
+            IrImplicitWhenEnd::Unit { .. } => {
+                let body = Self::finalize_switch_arm_body("{ }".to_string());
+                format!("default -> {}", body)
+            }
         };
 
         Ok(Some(rendered))
+    }
+
+    fn finalize_switch_arm_body(body_expr: String) -> String {
+        let trimmed_start = body_expr.trim_start();
+        if trimmed_start.starts_with('{') {
+            return body_expr;
+        }
+
+        let trimmed_end = body_expr.trim_end();
+        if trimmed_end.ends_with(';') || trimmed_end.is_empty() {
+            return body_expr;
+        }
+
+        let trailing_whitespace = &body_expr[trimmed_end.len()..];
+        let mut result = String::with_capacity(body_expr.len() + 1);
+        result.push_str(trimmed_end);
+        result.push(';');
+        result.push_str(trailing_whitespace);
+        result
     }
 
     fn has_default_case(cases: &[IrSwitchCase]) -> bool {
@@ -2223,14 +2250,18 @@ impl JavaCodeGenerator {
 
     fn sequence_source_element_type(source: &SequenceSource) -> Option<JavaType> {
         match source {
-            SequenceSource::Collection { expr, element_hint } => {
-                element_hint.clone().or_else(|| Self::collection_expr_element_type(expr))
-            }
+            SequenceSource::Collection { expr, element_hint } => element_hint
+                .clone()
+                .or_else(|| Self::collection_expr_element_type(expr)),
             SequenceSource::Array {
                 expr, element_hint, ..
-            } => element_hint.clone().or_else(|| Self::array_expr_element_type(expr)),
+            } => element_hint
+                .clone()
+                .or_else(|| Self::array_expr_element_type(expr)),
             SequenceSource::ListLiteral { element_hint, .. } => element_hint.clone(),
-            SequenceSource::JavaStream { element_hint, expr, .. } => element_hint
+            SequenceSource::JavaStream {
+                element_hint, expr, ..
+            } => element_hint
                 .clone()
                 .or_else(|| Self::collection_expr_element_type(expr)),
         }
@@ -2259,7 +2290,9 @@ impl JavaCodeGenerator {
 
     fn clone_type_excluding_wildcard(java_type: &JavaType) -> JavaType {
         match java_type {
-            JavaType::Wildcard { bound: Some(bound), .. } => *bound.clone(),
+            JavaType::Wildcard {
+                bound: Some(bound), ..
+            } => *bound.clone(),
             JavaType::Wildcard { .. } => JavaType::object(),
             other => other.clone(),
         }
