@@ -21,6 +21,7 @@ fun literalsDemo(): Unit {
     println(message)
     println("Direct literal output line")
     println("Inline interpolation: ${name}")
+    println("Checkpoint ${runCount}: Welcome, ${name}!")
     println(runCount)
     println("Channel ${channel}")
     println(template)
