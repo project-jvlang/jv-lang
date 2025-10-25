@@ -517,6 +517,34 @@ fn cli_build_numeric_script_generates_worded_class() {
 }
 
 #[test]
+fn cli_build_quick_tour_script_compiles() {
+    let Some(cli_path) = std::env::var_os("CARGO_BIN_EXE_jv").map(PathBuf::from) else {
+        eprintln!("Skipping quick-tour test: CARGO_BIN_EXE_jv not set");
+        return;
+    };
+
+    let temp_dir = TempDirGuard::new("cli-quick-tour").expect("create temp dir");
+    let output_dir = temp_dir.path().join("out");
+    let quick_tour = workspace_file("examples/quick-tour.jv");
+
+    let status = Command::new(&cli_path)
+        .current_dir(temp_dir.path())
+        .arg("build")
+        .arg(&quick_tour)
+        .arg("--java-only")
+        .arg("-o")
+        .arg(&output_dir)
+        .status()
+        .expect("invoke jv build for quick-tour example");
+
+    assert!(
+        status.success(),
+        "jv build failed for quick-tour example: {:?}",
+        status
+    );
+}
+
+#[test]
 fn cli_build_emits_pattern_compile_for_regex_literal() {
     let Some(cli_path) = std::env::var_os("CARGO_BIN_EXE_jv").map(PathBuf::from) else {
         eprintln!("Skipping regex CLI build test: CARGO_BIN_EXE_jv not set");

@@ -74,6 +74,10 @@ mod tests {
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures")
     }
 
+    fn examples_root() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples")
+    }
+
     fn collect_fixture_files(dir: &Path, files: &mut Vec<PathBuf>) {
         if let Ok(entries) = fs::read_dir(dir) {
             for entry in entries.flatten() {
@@ -83,6 +87,22 @@ mod tests {
                 }
                 if path.is_dir() {
                     collect_fixture_files(&path, files);
+                } else if path.extension().is_some_and(|ext| ext == "jv") {
+                    files.push(path);
+                }
+            }
+        }
+    }
+
+    fn collect_example_files(dir: &Path, files: &mut Vec<PathBuf>) {
+        if let Ok(entries) = fs::read_dir(dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.file_name().is_some_and(|name| name == "target") {
+                    continue;
+                }
+                if path.is_dir() {
+                    collect_example_files(&path, files);
                 } else if path.extension().is_some_and(|ext| ext == "jv") {
                     files.push(path);
                 }
@@ -5411,6 +5431,55 @@ fun sample(value: Any): Int {
                 .collect::<Vec<_>>()
                 .join("\n");
             panic!("IR transform failed for fixtures:\n{details}");
+        }
+    }
+
+    #[test]
+    fn transform_quick_tour_lowers_successfully() {
+        let source = include_str!("../../../examples/quick-tour.jv");
+        let frontend = RowanPipeline::default()
+            .parse(source)
+            .expect("quick-tour example should parse");
+        let program = frontend.into_program();
+        let mut context = TransformContext::new();
+        transform_program_with_context(program, &mut context)
+            .expect("quick-tour example should lower without scope errors");
+    }
+
+    #[test]
+    fn transform_examples_without_failure() {
+        let root = examples_root();
+        let mut files = Vec::new();
+        collect_example_files(&root, &mut files);
+        assert!(
+            !files.is_empty(),
+            "expected at least one example under {:?}",
+            root
+        );
+
+        let mut failures = Vec::new();
+
+        for path in files {
+            let display = path.display().to_string();
+            let source = fs::read_to_string(&path)
+                .unwrap_or_else(|err| panic!("failed to read {}: {err}", display));
+            let frontend = RowanPipeline::default()
+                .parse(&source)
+                .unwrap_or_else(|err| panic!("Rowan parse failed for {}: {:?}", display, err));
+            let program = frontend.into_program();
+            let mut context = TransformContext::new();
+            if let Err(err) = transform_program_with_context(program, &mut context) {
+                failures.push((display, format!("{err:?}")));
+            }
+        }
+
+        if !failures.is_empty() {
+            let details = failures
+                .into_iter()
+                .map(|(path, message)| format!("{path}: {message}"))
+                .collect::<Vec<_>>()
+                .join("\n");
+            panic!("examples failed to lower:\n{details}");
         }
     }
 }
