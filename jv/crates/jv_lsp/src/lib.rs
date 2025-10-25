@@ -5,7 +5,8 @@ use handlers::imports::build_imports_response;
 pub use handlers::imports::{ImportItem, ImportsParams, ImportsResponse};
 use jv_ast::types::TypeLevelExpr;
 use jv_ast::{
-    ConstParameter, GenericParameter, GenericSignature, Program, Span, Statement, TypeAnnotation,
+    Argument, ConstParameter, Expression, GenericParameter, GenericSignature, Program,
+    RegexLiteral, Span, Statement, StringPart, TypeAnnotation,
 };
 use jv_build::metadata::{
     BuildContext as SymbolBuildContext, SymbolIndexBuilder, SymbolIndexCache,
@@ -29,6 +30,7 @@ use jv_inference::{
 };
 use jv_ir::types::{IrImport, IrImportDetail};
 use jv_ir::{transform_program_with_context, TransformContext};
+use jv_lexer::{Token, TokenMetadata, TokenType};
 use jv_parser_frontend::ParserPipeline;
 use jv_parser_rowan::frontend::RowanPipeline;
 use serde::{Deserialize, Serialize};
@@ -50,6 +52,7 @@ const REGEX_COMPLETION_TEMPLATES: &[&str] =
 
 const MAX_REGEX_PREVIEW_LENGTH: usize = 48;
 const HOVER_TEXT_MAX_LENGTH: usize = 160;
+const CALL_ARGUMENT_COMMA_ERROR_MESSAGE: &str = "JV2102: 関数呼び出しでカンマ区切りはサポートされません。位置引数は空白または改行で区切ってください。\nJV2102: Function calls do not support comma separators. Separate positional arguments with whitespace or newlines.\nQuick Fix: calls.whitespace.remove-commas -> func a b c（例: plot(1, 2, 3) => plot(1 2 3))\nQuick Fix: calls.whitespace.remove-commas -> func a b c (Example: plot(1, 2, 3) => plot(1 2 3))\nDoc: docs/whitespace-arrays.md#function-calls";
 
 struct SequenceOperationDoc {
     name: &'static str,
@@ -635,12 +638,12 @@ impl JvLanguageServer {
             }
         };
 
+        let (program, tokens, diagnostics_view) = frontend_output.into_parts();
+
         let mut diagnostics = Vec::new();
-        let mut type_facts_snapshot: Option<TypeFactsSnapshot> = None;
         let mut regex_analyses: Vec<RegexAnalysis> = Vec::new();
 
-        let frontend_diagnostics =
-            from_frontend_diagnostics(frontend_output.diagnostics().final_diagnostics());
+        let frontend_diagnostics = from_frontend_diagnostics(diagnostics_view.final_diagnostics());
         for diagnostic in &frontend_diagnostics {
             diagnostics.push(tooling_diagnostic_to_lsp(
                 uri,
@@ -659,8 +662,6 @@ impl JvLanguageServer {
             self.generics.remove(uri);
             return diagnostics;
         }
-
-        let program = frontend_output.into_program();
 
         self.programs.insert(uri.to_string(), program.clone());
         self.generics.insert(
@@ -719,8 +720,17 @@ impl JvLanguageServer {
 
         if regex_analyses.is_empty() {
             let mut validator = RegexValidator::new();
-            let _ = validator.validate_program(&program);
+            let regex_program = checker.normalized_program().unwrap_or(&program);
+            let _ = validator.validate_program(regex_program);
             regex_analyses = validator.take_analyses();
+        }
+
+        if regex_analyses.is_empty() {
+            if let Some(regex_program) = Self::regex_program_from_tokens(&tokens) {
+                let mut validator = RegexValidator::new();
+                let _ = validator.validate_program(&regex_program);
+                regex_analyses = validator.take_analyses();
+            }
         }
 
         match check_result {
@@ -732,7 +742,8 @@ impl JvLanguageServer {
                     checker.check_null_safety(&program, None)
                 };
                 if let Some(snapshot) = checker.take_inference_snapshot() {
-                    type_facts_snapshot = Some(snapshot.type_facts().clone());
+                    self.type_facts
+                        .insert(uri.to_string(), snapshot.type_facts().clone());
                 } else {
                     self.type_facts.remove(uri);
                 }
@@ -750,14 +761,32 @@ impl JvLanguageServer {
                     self.regex_metadata
                         .insert(uri.to_string(), regex_analyses.clone());
                 }
-                return errors
-                    .into_iter()
-                    .map(|error| type_error_to_diagnostic(uri, error))
-                    .collect();
+
+                for analysis in &regex_analyses {
+                    for diagnostic in &analysis.diagnostics {
+                        diagnostics.push(tooling_diagnostic_to_lsp(
+                            uri,
+                            diagnostic
+                                .clone()
+                                .with_strategy(DiagnosticStrategy::Interactive),
+                        ));
+                    }
+                }
+
+                diagnostics.extend(
+                    errors
+                        .into_iter()
+                        .map(|error| type_error_to_diagnostic(uri, error)),
+                );
+                diagnostics.extend(sequence_lambda_diagnostics(content));
+
+                return diagnostics;
             }
         }
 
-        let lowering_input = checker.take_normalized_program().unwrap_or(program);
+        let lowering_input = checker
+            .take_normalized_program()
+            .unwrap_or_else(|| program.clone());
         let mut context = TransformContext::new();
         if !import_plan.is_empty() {
             context.set_resolved_imports(import_plan.clone());
@@ -776,14 +805,22 @@ impl JvLanguageServer {
             }
         };
 
+        let mut emitted_raw_comment_diagnostics = false;
         if let Some(ir_program) = ir_program.as_ref() {
             let raw_type_diagnostics = collect_raw_type_diagnostics(ir_program);
+            if !raw_type_diagnostics.is_empty() {
+                emitted_raw_comment_diagnostics = true;
+            }
             diagnostics.extend(raw_type_diagnostics.into_iter().map(|diagnostic| {
                 tooling_diagnostic_to_lsp(
                     uri,
                     diagnostic.with_strategy(DiagnosticStrategy::Interactive),
                 )
             }));
+        }
+
+        if !emitted_raw_comment_diagnostics {
+            diagnostics.extend(fallback_raw_comment_diagnostics(&tokens));
         }
 
         for analysis in &regex_analyses {
@@ -797,10 +834,6 @@ impl JvLanguageServer {
             }
         }
 
-        if let Some(snapshot) = type_facts_snapshot {
-            self.type_facts.insert(uri.to_string(), snapshot);
-        }
-
         if let Some(index) = self.generics.get(uri) {
             let facts_ref = self.type_facts.get(uri);
             enrich_generic_diagnostics(&mut diagnostics, facts_ref, index);
@@ -811,6 +844,13 @@ impl JvLanguageServer {
         } else {
             self.regex_metadata
                 .insert(uri.to_string(), regex_analyses.clone());
+        }
+
+        if !diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code.as_deref() == Some("JV2102"))
+        {
+            diagnostics.extend(call_argument_diagnostics(&program, &tokens));
         }
 
         diagnostics.extend(sequence_lambda_diagnostics(content));
@@ -881,6 +921,38 @@ impl JvLanguageServer {
         self.regex_metadata
             .get(uri)
             .map(|entries| entries.as_slice())
+    }
+
+    fn regex_program_from_tokens(tokens: &[Token]) -> Option<Program> {
+        let mut statements = Vec::new();
+        for token in tokens {
+            for metadata in &token.metadata {
+                if let TokenMetadata::RegexLiteral { raw, pattern } = metadata {
+                    let end_column = token.column + raw.chars().count();
+                    let span = Span::new(token.line, token.column, token.line, end_column);
+                    let literal = RegexLiteral {
+                        pattern: pattern.clone(),
+                        raw: raw.clone(),
+                        span: span.clone(),
+                    };
+                    statements.push(Statement::Expression {
+                        expr: Expression::RegexLiteral(literal),
+                        span,
+                    });
+                }
+            }
+        }
+
+        if statements.is_empty() {
+            return None;
+        }
+
+        Some(Program {
+            package: None,
+            imports: Vec::new(),
+            statements,
+            span: Span::dummy(),
+        })
     }
 
     fn sequence_hover(&self, uri: &str, position: &Position) -> Option<HoverResult> {
@@ -1434,6 +1506,379 @@ fn default_range() -> Range {
             character: 1,
         },
     }
+}
+
+fn fallback_raw_comment_diagnostics(tokens: &[Token]) -> Vec<Diagnostic> {
+    let mut diagnostics = Vec::new();
+    for token in tokens {
+        match &token.token_type {
+            TokenType::LineComment(text) | TokenType::BlockComment(text) => {
+                if let Some((mode, owner)) = parse_raw_comment_directive(text) {
+                    let span = comment_span_from_token(token, text);
+                    diagnostics.push(build_raw_comment_diagnostic(mode, owner, span));
+                }
+            }
+            _ => {}
+        }
+    }
+    diagnostics
+}
+
+fn parse_raw_comment_directive(text: &str) -> Option<(RawDirectiveMode, String)> {
+    let trimmed = text.trim();
+    let content = if let Some(rest) = trimmed.strip_prefix("//") {
+        rest.trim_start_matches('*').trim()
+    } else if let Some(rest) = trimmed.strip_prefix("/*") {
+        rest.trim_end_matches("*/").trim()
+    } else {
+        trimmed
+    };
+
+    let (mode, payload) = if let Some(rest) = content.strip_prefix("jv:raw-allow") {
+        (RawDirectiveMode::AllowContinuation, rest.trim())
+    } else if let Some(rest) = content.strip_prefix("jv:raw-default") {
+        (RawDirectiveMode::DefaultPolicy, rest.trim())
+    } else {
+        return None;
+    };
+
+    let owner_token = payload.split_whitespace().next().unwrap_or("");
+    let normalized_owner = owner_token
+        .split('.')
+        .map(|segment| segment.trim())
+        .filter(|segment| !segment.is_empty())
+        .collect::<Vec<_>>()
+        .join(".");
+
+    if normalized_owner.is_empty() {
+        return None;
+    }
+
+    Some((mode, normalized_owner))
+}
+
+fn comment_span_from_token(token: &Token, text: &str) -> Span {
+    let mut end_line = token.line;
+    let mut end_column = token.column;
+
+    for ch in text.chars() {
+        if ch == '\n' {
+            end_line += 1;
+            end_column = 1;
+        } else {
+            end_column += 1;
+        }
+    }
+
+    Span::new(token.line, token.column, end_line, end_column)
+}
+
+fn build_raw_comment_diagnostic(mode: RawDirectiveMode, owner: String, span: Span) -> Diagnostic {
+    let (code, message, severity) = match mode {
+        RawDirectiveMode::DefaultPolicy => (
+            "JV3202",
+            format!(
+                "Raw型 `{owner}` を検出し、防御コードを挿入しました。ジェネリクス型を明示して警告を解消してください。/ Raw type `{owner}` detected; defensive guards were emitted. Provide explicit generics to address the warning."
+            ),
+            Some(DiagnosticSeverity::Warning),
+        ),
+        RawDirectiveMode::AllowContinuation => (
+            "JV3203",
+            format!(
+                "Raw型 `{owner}` はコメントによって継続されています。影響範囲を再確認してください。/ Raw type `{owner}` is continued via comment; verify that the trade-offs are acceptable."
+            ),
+            Some(DiagnosticSeverity::Information),
+        ),
+    };
+
+    Diagnostic {
+        range: span_to_range(&span),
+        severity,
+        message,
+        code: Some(code.to_string()),
+        source: Some("jv-lsp".to_string()),
+        help: None,
+        suggestions: Vec::new(),
+        strategy: Some("Interactive".to_string()),
+    }
+}
+
+enum RawDirectiveMode {
+    DefaultPolicy,
+    AllowContinuation,
+}
+
+fn call_argument_diagnostics(program: &Program, tokens: &[Token]) -> Vec<Diagnostic> {
+    let mut diagnostics = Vec::new();
+    for statement in &program.statements {
+        collect_call_diagnostics_from_statement(statement, tokens, &mut diagnostics);
+    }
+    diagnostics
+}
+
+fn collect_call_diagnostics_from_statement(
+    statement: &Statement,
+    tokens: &[Token],
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    match statement {
+        Statement::ValDeclaration { initializer, .. } => {
+            collect_call_diagnostics_from_expression(initializer, tokens, diagnostics);
+        }
+        Statement::VarDeclaration { initializer, .. } => {
+            if let Some(expr) = initializer {
+                collect_call_diagnostics_from_expression(expr, tokens, diagnostics);
+            }
+        }
+        Statement::FunctionDeclaration {
+            body, parameters, ..
+        } => {
+            for parameter in parameters {
+                if let Some(default) = &parameter.default_value {
+                    collect_call_diagnostics_from_expression(default, tokens, diagnostics);
+                }
+            }
+            collect_call_diagnostics_from_expression(body, tokens, diagnostics);
+        }
+        Statement::ClassDeclaration {
+            properties,
+            methods,
+            ..
+        }
+        | Statement::InterfaceDeclaration {
+            properties,
+            methods,
+            ..
+        } => {
+            for property in properties {
+                if let Some(initializer) = &property.initializer {
+                    collect_call_diagnostics_from_expression(initializer, tokens, diagnostics);
+                }
+                if let Some(getter) = &property.getter {
+                    collect_call_diagnostics_from_expression(getter, tokens, diagnostics);
+                }
+                if let Some(setter) = &property.setter {
+                    collect_call_diagnostics_from_expression(setter, tokens, diagnostics);
+                }
+            }
+            for method in methods {
+                collect_call_diagnostics_from_statement(method, tokens, diagnostics);
+            }
+        }
+        Statement::DataClassDeclaration { parameters, .. } => {
+            for parameter in parameters {
+                if let Some(default) = &parameter.default_value {
+                    collect_call_diagnostics_from_expression(default, tokens, diagnostics);
+                }
+            }
+        }
+        Statement::ExtensionFunction(extension) => {
+            collect_call_diagnostics_from_statement(&extension.function, tokens, diagnostics);
+        }
+        Statement::Expression { expr, .. } => {
+            collect_call_diagnostics_from_expression(expr, tokens, diagnostics);
+        }
+        Statement::Return { value, .. } => {
+            if let Some(expr) = value {
+                collect_call_diagnostics_from_expression(expr, tokens, diagnostics);
+            }
+        }
+        Statement::Throw { expr, .. } => {
+            collect_call_diagnostics_from_expression(expr, tokens, diagnostics);
+        }
+        Statement::Assignment { value, .. } => {
+            collect_call_diagnostics_from_expression(value, tokens, diagnostics);
+        }
+        Statement::ForIn(for_in) => {
+            collect_call_diagnostics_from_expression(&for_in.iterable, tokens, diagnostics);
+            collect_call_diagnostics_from_expression(&for_in.body, tokens, diagnostics);
+        }
+        Statement::Concurrency(construct) => match construct {
+            jv_ast::ConcurrencyConstruct::Spawn { body, .. }
+            | jv_ast::ConcurrencyConstruct::Async { body, .. } => {
+                collect_call_diagnostics_from_expression(body, tokens, diagnostics)
+            }
+            jv_ast::ConcurrencyConstruct::Await { expr, .. } => {
+                collect_call_diagnostics_from_expression(expr, tokens, diagnostics)
+            }
+        },
+        Statement::ResourceManagement(resource) => match resource {
+            jv_ast::ResourceManagement::Use { resource, body, .. } => {
+                collect_call_diagnostics_from_expression(resource, tokens, diagnostics);
+                collect_call_diagnostics_from_expression(body, tokens, diagnostics);
+            }
+            jv_ast::ResourceManagement::Defer { body, .. } => {
+                collect_call_diagnostics_from_expression(body, tokens, diagnostics);
+            }
+        },
+        Statement::Break(..)
+        | Statement::Continue(..)
+        | Statement::Import { .. }
+        | Statement::Package { .. }
+        | Statement::Comment(_) => {}
+    }
+}
+
+fn collect_call_diagnostics_from_expression(
+    expression: &Expression,
+    tokens: &[Token],
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    match expression {
+        Expression::Call {
+            function,
+            args,
+            span,
+            ..
+        } => {
+            if call_expression_contains_comma(span, tokens) {
+                diagnostics.push(build_call_argument_diagnostic(span));
+            }
+            collect_call_diagnostics_from_expression(function, tokens, diagnostics);
+            for argument in args {
+                match argument {
+                    Argument::Positional(expr) => {
+                        collect_call_diagnostics_from_expression(expr, tokens, diagnostics)
+                    }
+                    Argument::Named { value, .. } => {
+                        collect_call_diagnostics_from_expression(value, tokens, diagnostics)
+                    }
+                }
+            }
+        }
+        Expression::Binary { left, right, .. } => {
+            collect_call_diagnostics_from_expression(left, tokens, diagnostics);
+            collect_call_diagnostics_from_expression(right, tokens, diagnostics);
+        }
+        Expression::Unary { operand, .. } | Expression::TypeCast { expr: operand, .. } => {
+            collect_call_diagnostics_from_expression(operand, tokens, diagnostics);
+        }
+        Expression::MemberAccess { object, .. }
+        | Expression::NullSafeMemberAccess { object, .. } => {
+            collect_call_diagnostics_from_expression(object, tokens, diagnostics);
+        }
+        Expression::IndexAccess { object, index, .. }
+        | Expression::NullSafeIndexAccess { object, index, .. } => {
+            collect_call_diagnostics_from_expression(object, tokens, diagnostics);
+            collect_call_diagnostics_from_expression(index, tokens, diagnostics);
+        }
+        Expression::Array { elements, .. } => {
+            for element in elements {
+                collect_call_diagnostics_from_expression(element, tokens, diagnostics);
+            }
+        }
+        Expression::Lambda {
+            parameters, body, ..
+        } => {
+            for parameter in parameters {
+                if let Some(default) = &parameter.default_value {
+                    collect_call_diagnostics_from_expression(default, tokens, diagnostics);
+                }
+            }
+            collect_call_diagnostics_from_expression(body, tokens, diagnostics);
+        }
+        Expression::Block { statements, .. } => {
+            for statement in statements {
+                collect_call_diagnostics_from_statement(statement, tokens, diagnostics);
+            }
+        }
+        Expression::When {
+            expr,
+            arms,
+            else_arm,
+            ..
+        } => {
+            if let Some(condition) = expr {
+                collect_call_diagnostics_from_expression(condition, tokens, diagnostics);
+            }
+            for arm in arms {
+                if let Some(guard) = &arm.guard {
+                    collect_call_diagnostics_from_expression(guard, tokens, diagnostics);
+                }
+                collect_call_diagnostics_from_expression(&arm.body, tokens, diagnostics);
+            }
+            if let Some(else_branch) = else_arm {
+                collect_call_diagnostics_from_expression(else_branch, tokens, diagnostics);
+            }
+        }
+        Expression::If {
+            condition,
+            then_branch,
+            else_branch,
+            ..
+        } => {
+            collect_call_diagnostics_from_expression(condition, tokens, diagnostics);
+            collect_call_diagnostics_from_expression(then_branch, tokens, diagnostics);
+            if let Some(branch) = else_branch {
+                collect_call_diagnostics_from_expression(branch, tokens, diagnostics);
+            }
+        }
+        Expression::Try {
+            body,
+            catch_clauses,
+            finally_block,
+            ..
+        } => {
+            collect_call_diagnostics_from_expression(body, tokens, diagnostics);
+            for clause in catch_clauses {
+                collect_call_diagnostics_from_expression(&clause.body, tokens, diagnostics);
+            }
+            if let Some(finally_block) = finally_block {
+                collect_call_diagnostics_from_expression(finally_block, tokens, diagnostics);
+            }
+        }
+        Expression::JsonLiteral(_) => {}
+        Expression::StringInterpolation { parts, .. } => {
+            for part in parts {
+                if let StringPart::Expression(expr) = part {
+                    collect_call_diagnostics_from_expression(expr, tokens, diagnostics);
+                }
+            }
+        }
+        Expression::MultilineString(_)
+        | Expression::Literal(_, _)
+        | Expression::RegexLiteral(_)
+        | Expression::Identifier(_, _)
+        | Expression::This(_)
+        | Expression::Super(_) => {}
+    }
+}
+
+fn build_call_argument_diagnostic(span: &Span) -> Diagnostic {
+    Diagnostic {
+        range: span_to_range(span),
+        severity: Some(DiagnosticSeverity::Error),
+        message: CALL_ARGUMENT_COMMA_ERROR_MESSAGE.to_string(),
+        code: Some("JV2102".to_string()),
+        source: Some("jv-lsp".to_string()),
+        help: None,
+        suggestions: Vec::new(),
+        strategy: Some("Interactive".to_string()),
+    }
+}
+
+fn call_expression_contains_comma(span: &Span, tokens: &[Token]) -> bool {
+    tokens
+        .iter()
+        .any(|token| matches!(token.token_type, TokenType::Comma) && token_within_span(token, span))
+}
+
+fn token_within_span(token: &Token, span: &Span) -> bool {
+    let start_line = span.start_line;
+    let end_line = span.end_line;
+    if token.line < start_line || token.line > end_line {
+        return false;
+    }
+
+    if token.line == start_line && token.column < span.start_column {
+        return false;
+    }
+
+    if token.line == end_line && token.column > span.end_column.saturating_add(1) {
+        return false;
+    }
+
+    true
 }
 
 pub(crate) fn span_to_range(span: &jv_ast::Span) -> Range {

@@ -23,6 +23,7 @@ jv_parser_rowan.workspace = true
 jv_ir.workspace = true
 jv_checker.workspace = true
 jv_ast.workspace = true
+jv_lexer.workspace = true
 jv_inference.workspace = true
 jv_build.workspace = true
 jv_support.workspace = true
