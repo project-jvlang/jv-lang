@@ -12,8 +12,10 @@ use jv_build::{
     JavaTarget, JdkInfo,
 };
 use jv_checker::{PrimitiveType, TypeInferenceService, TypeKind};
+use jv_cli::pipeline::project::{
+    layout::ProjectLayout, locator::ProjectRoot, manifest::ManifestLoader,
+};
 use jv_cli::pipeline::{compile, BuildOptionsFactory, CliOverrides};
-use jv_cli::pipeline::project::{layout::ProjectLayout, locator::ProjectRoot, manifest::ManifestLoader};
 use jv_ir::types::IrImportDetail;
 
 struct TempDirGuard {
@@ -92,8 +94,8 @@ include = ["src/**/*.jv"]
 
     let project_root = ProjectRoot::new(project_dir.to_path_buf(), manifest_path.clone());
     let settings = ManifestLoader::load(&manifest_path).expect("manifest loads");
-    let layout = ProjectLayout::from_settings(&project_root, &settings)
-        .expect("layout enumerates sources");
+    let layout =
+        ProjectLayout::from_settings(&project_root, &settings).expect("layout enumerates sources");
 
     if overrides.entrypoint.is_none() {
         overrides.entrypoint = Some(entrypoint_path);
@@ -106,47 +108,197 @@ include = ["src/**/*.jv"]
         .expect("plan composition succeeds")
 }
 
+fn workspace_root() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join("..")
+}
+
 fn workspace_file(relative: &str) -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
-        .join("..")
-        .join(relative)
+    workspace_root().join(relative)
 }
 
-fn detected_jdk() -> Option<&'static JdkInfo> {
-    static INFO: OnceLock<Option<JdkInfo>> = OnceLock::new();
-    INFO.get_or_init(|| {
-        log_java_home();
-        discover_jdk().ok()
-    })
-    .as_ref()
-}
-
-fn log_java_home() {
-    static LOGGED: OnceLock<()> = OnceLock::new();
-    LOGGED.get_or_init(|| {
-        match env::var("JAVA_HOME") {
-            Ok(value) => eprintln!("[integration-tests] JAVA_HOME={}", value),
-            Err(err) => eprintln!("[integration-tests] JAVA_HOME not set ({})", err),
+fn ensure_toolchain_envs() {
+    static INIT: OnceLock<()> = OnceLock::new();
+    INIT.get_or_init(|| {
+        for (var, dir) in [
+            ("JAVA25_HOME", toolchain_java_home(JavaTarget::Java25)),
+            ("JAVA21_HOME", toolchain_java_home(JavaTarget::Java21)),
+        ] {
+            if env::var_os(var).is_none() {
+                if let Some(path) = dir {
+                    env::set_var(var, path);
+                }
+            }
         }
     });
 }
 
-fn javac_command() -> Option<Command> {
-    detected_jdk().map(|info| {
-        let mut cmd = Command::new(&info.javac_path);
-        cmd.env("JAVA_HOME", &info.java_home);
-        cmd
+fn target_env_var(target: JavaTarget) -> &'static str {
+    match target {
+        JavaTarget::Java25 => "JAVA25_HOME",
+        JavaTarget::Java21 => "JAVA21_HOME",
+    }
+}
+
+fn target_toolchain_dir(target: JavaTarget) -> &'static str {
+    match target {
+        JavaTarget::Java25 => "jdk25",
+        JavaTarget::Java21 => "jdk21",
+    }
+}
+
+fn expected_major_version(target: JavaTarget) -> u32 {
+    match target {
+        JavaTarget::Java25 => 25,
+        JavaTarget::Java21 => 21,
+    }
+}
+
+fn toolchain_java_home(target: JavaTarget) -> Option<PathBuf> {
+    let path = workspace_root()
+        .join("toolchains")
+        .join(target_toolchain_dir(target));
+    let java_bin = path.join("bin").join(java_executable());
+    if java_bin.exists() {
+        Some(path)
+    } else {
+        None
+    }
+}
+
+fn java_home_from_env(var: &str) -> Option<PathBuf> {
+    env::var_os(var)
+        .map(PathBuf::from)
+        .filter(|home| home.join("bin").join(java_executable()).exists())
+}
+
+fn jdk_info_for_target(target: JavaTarget) -> Option<&'static JdkInfo> {
+    ensure_toolchain_envs();
+
+    fn cache_for(target: JavaTarget) -> &'static OnceLock<Option<JdkInfo>> {
+        match target {
+            JavaTarget::Java25 => {
+                static CACHE_25: OnceLock<Option<JdkInfo>> = OnceLock::new();
+                &CACHE_25
+            }
+            JavaTarget::Java21 => {
+                static CACHE_21: OnceLock<Option<JdkInfo>> = OnceLock::new();
+                &CACHE_21
+            }
+        }
+    }
+
+    cache_for(target)
+        .get_or_init(|| find_jdk_for_target(target))
+        .as_ref()
+}
+
+fn find_jdk_for_target(target: JavaTarget) -> Option<JdkInfo> {
+    let expected = expected_major_version(target);
+    let mut candidates = Vec::new();
+
+    if let Some(env_home) = java_home_from_env(target_env_var(target)) {
+        candidates.push(env_home);
+    }
+    if let Some(toolchain_home) = toolchain_java_home(target) {
+        candidates.push(toolchain_home);
+    }
+    if let Some(java_home) = java_home_from_env("JAVA_HOME") {
+        candidates.push(java_home);
+    }
+
+    for home in candidates {
+        if let Some(info) = jdk_info_from_home(home, expected) {
+            return Some(info);
+        }
+    }
+
+    match discover_jdk() {
+        Ok(info) if info.major_version == expected => Some(info),
+        Ok(info) => {
+            eprintln!(
+                "Discovered JDK {} but target {} requires {}",
+                info.major_version,
+                target.as_str(),
+                expected
+            );
+            None
+        }
+        Err(error) => {
+            eprintln!(
+                "Failed to discover JDK for target {}: {}",
+                target.as_str(),
+                error
+            );
+            None
+        }
+    }
+}
+
+fn jdk_info_from_home(home: PathBuf, expected_major: u32) -> Option<JdkInfo> {
+    let javac = home.join("bin").join(javac_executable());
+    if !javac.exists() {
+        eprintln!(
+            "Missing javac at {} for configured JAVA_HOME={}",
+            javac.display(),
+            home.display()
+        );
+        return None;
+    }
+
+    let major = detect_major_version(&home)?;
+    if major != expected_major {
+        eprintln!(
+            "Skipping JAVA_HOME={} because its major version {} != expected {}",
+            home.display(),
+            major,
+            expected_major
+        );
+        return None;
+    }
+
+    Some(JdkInfo {
+        javac_path: javac,
+        java_home: home,
+        major_version: major,
     })
 }
 
-fn java_command() -> Option<Command> {
-    detected_jdk().map(|info| {
-        let java_path = info.java_home.join("bin").join(java_executable());
-        let mut cmd = Command::new(java_path);
-        cmd.env("JAVA_HOME", &info.java_home);
-        cmd
-    })
+fn detect_major_version(home: &Path) -> Option<u32> {
+    let java_bin = home.join("bin").join(java_executable());
+    if !java_bin.exists() {
+        return None;
+    }
+
+    let output = Command::new(&java_bin).arg("-version").output().ok()?;
+    let mut version_text = String::from_utf8_lossy(&output.stderr).to_string();
+    if version_text.trim().is_empty() {
+        version_text = String::from_utf8_lossy(&output.stdout).to_string();
+    }
+    parse_major_version(&version_text)
+}
+
+fn parse_major_version(output: &str) -> Option<u32> {
+    for line in output.lines() {
+        if let Some(start) = line.find('"') {
+            let rest = &line[start + 1..];
+            if let Some(end) = rest.find('"') {
+                let version_str = &rest[..end];
+                let major_part = version_str.split('.').next().unwrap_or(version_str);
+                if let Ok(value) = major_part.parse::<u32>() {
+                    return Some(value);
+                }
+            }
+        }
+    }
+    None
+}
+
+fn javac_executable() -> &'static str {
+    if cfg!(windows) {
+        "javac.exe"
+    } else {
+        "javac"
+    }
 }
 
 fn java_executable() -> &'static str {
@@ -157,14 +309,66 @@ fn java_executable() -> &'static str {
     }
 }
 
+fn default_java_target() -> JavaTarget {
+    JavaTarget::Java25
+}
+
+fn javac_command_for_target(target: JavaTarget) -> Option<Command> {
+    jdk_info_for_target(target).map(|info| {
+        let mut cmd = Command::new(&info.javac_path);
+        cmd.env("JAVA_HOME", &info.java_home);
+        cmd
+    })
+}
+
+fn java_command_for_target(target: JavaTarget) -> Option<Command> {
+    jdk_info_for_target(target).map(|info| {
+        let java_path = info.java_home.join("bin").join(java_executable());
+        let mut cmd = Command::new(java_path);
+        cmd.env("JAVA_HOME", &info.java_home);
+        cmd
+    })
+}
+
+fn javac_command() -> Option<Command> {
+    javac_command_for_target(default_java_target())
+}
+
+fn java_command() -> Option<Command> {
+    java_command_for_target(default_java_target())
+}
+
+fn has_javac_for_target(target: JavaTarget) -> bool {
+    jdk_info_for_target(target).is_some()
+}
+
+fn has_java_runtime_for_target(target: JavaTarget) -> bool {
+    jdk_info_for_target(target)
+        .map(|info| info.java_home.join("bin").join(java_executable()).exists())
+        .unwrap_or(false)
+}
+
 fn has_javac() -> bool {
-    detected_jdk().is_some()
+    has_javac_for_target(default_java_target())
 }
 
 fn has_java_runtime() -> bool {
-    detected_jdk()
-        .map(|info| info.java_home.join("bin").join(java_executable()).exists())
-        .unwrap_or(false)
+    has_java_runtime_for_target(default_java_target())
+}
+
+fn ensure_targets_available(targets: &[JavaTarget], reason: &str) -> bool {
+    for target in targets {
+        if !has_javac_for_target(*target) || !has_java_runtime_for_target(*target) {
+            eprintln!(
+                "Skipping {}: missing JDK {} (set {} to a valid install)",
+                reason,
+                target.as_str(),
+                target_env_var(*target)
+            );
+            return false;
+        }
+    }
+    true
 }
 
 fn resolve_module_artifacts(context: &SymbolBuildContext) -> Vec<PathBuf> {
@@ -484,10 +688,7 @@ fn pipeline_preserves_annotations_in_java_output() {
     let artifacts = match compile(&plan) {
         Ok(artifacts) => artifacts,
         Err(err) => {
-            eprintln!(
-                "Skipping annotation pipeline test: {}",
-                err
-            );
+            eprintln!("Skipping annotation pipeline test: {}", err);
             return;
         }
     };
@@ -500,7 +701,8 @@ fn pipeline_preserves_annotations_in_java_output() {
     let java_source = fs::read_to_string(service_java).expect("read generated Java");
     assert!(java_source.contains("@Component"));
     assert!(java_source.contains("@Autowired"));
-    assert!(java_source.contains("@RequestMapping(path = {\"/ping\"}, produces = {\"application/json\"})"));
+    assert!(java_source
+        .contains("@RequestMapping(path = {\"/ping\"}, produces = {\"application/json\"})"));
     assert!(java_source.contains("@Nullable"));
 }
 
@@ -581,7 +783,10 @@ fn pipeline_emit_types_produces_type_facts_json() {
         .expect("serialize type facts");
 
     assert!(json.contains("environment"), "missing environment: {json}");
-    assert!(json.contains("message"), "expected binding entry in json: {json}");
+    assert!(
+        json.contains("message"),
+        "expected binding entry in json: {json}"
+    );
 }
 
 #[test]
@@ -621,10 +826,7 @@ fn type_inference_snapshot_emitted_with_emit_types() {
     let scheme = environment
         .get("answer")
         .expect("answer binding exported in environment");
-    assert!(matches!(
-        scheme.ty,
-        TypeKind::Primitive(PrimitiveType::Int)
-    ));
+    assert!(matches!(scheme.ty, TypeKind::Primitive(PrimitiveType::Int)));
     assert!(snapshot.bindings().len() >= 1);
 }
 
@@ -667,8 +869,7 @@ fn type_inference_snapshot_tracks_program_changes() {
 
     fs::write(&snippet, "val base = 1\nval incremented = base + 1\n")
         .expect("write updated snippet");
-    fs::copy(&snippet, &plan.options.entrypoint)
-        .expect("sync updated snippet to entrypoint");
+    fs::copy(&snippet, &plan.options.entrypoint).expect("sync updated snippet to entrypoint");
 
     let second = compile(&plan).expect("second compile succeeds");
     let second_env = second
@@ -1014,7 +1215,10 @@ fn cli_all_subcommands_smoke_test() {
         .expect("Failed to start jv repl");
 
     {
-        let mut stdin = repl_child.stdin.take().expect("Failed to access repl stdin");
+        let mut stdin = repl_child
+            .stdin
+            .take()
+            .expect("Failed to access repl stdin");
         stdin
             .write_all(b":help\n:q\n")
             .expect("Failed to send commands to repl");
@@ -1033,9 +1237,7 @@ fn cli_all_subcommands_smoke_test() {
 #[test]
 fn advanced_generics_fixtures_compile() {
     if !has_java_runtime() || !has_javac() {
-        eprintln!(
-            "Skipping advanced generics fixtures: java runtime or javac not available"
-        );
+        eprintln!("Skipping advanced generics fixtures: java runtime or javac not available");
         return;
     }
 
@@ -1052,20 +1254,20 @@ fn advanced_generics_fixtures_compile() {
             name
         ));
         let temp_dir = TempDirGuard::new(&format!("advanced-generics-{name}")).expect("temp dir");
-        let plan = compose_plan_from_fixture(
-            temp_dir.path(),
-            &fixture_path,
-            CliOverrides::default(),
-        );
+        let plan =
+            compose_plan_from_fixture(temp_dir.path(), &fixture_path, CliOverrides::default());
 
-        assert!(plan.entrypoint().exists(), "entrypoint should exist for {name}");
+        assert!(
+            plan.entrypoint().exists(),
+            "entrypoint should exist for {name}"
+        );
     }
 }
 
 #[test]
 fn sequence_pipeline_fixture_runs_consistently_across_targets() {
-    if !has_javac() || !has_java_runtime() {
-        eprintln!("Skipping sequence pipeline fixture run: java runtime or javac missing");
+    let required = [JavaTarget::Java25, JavaTarget::Java21];
+    if !ensure_targets_available(&required, "sequence pipeline fixture run") {
         return;
     }
 
@@ -1093,7 +1295,7 @@ fn sequence_pipeline_fixture_runs_consistently_across_targets() {
         let classes_dir = java_dir.join("classes");
         fs::create_dir_all(&classes_dir).expect("create classes directory for javac");
 
-        let mut javac = javac_command().expect("javac command unavailable");
+        let mut javac = javac_command_for_target(target).expect("javac command unavailable");
         javac.arg("-d").arg(&classes_dir);
         for file in &artifacts.java_files {
             javac.arg(file);
@@ -1107,7 +1309,7 @@ fn sequence_pipeline_fixture_runs_consistently_across_targets() {
             target.as_str()
         );
 
-        let mut java_cmd = java_command().expect("java runtime unavailable");
+        let mut java_cmd = java_command_for_target(target).expect("java runtime unavailable");
         let output = java_cmd
             .arg("-cp")
             .arg(&classes_dir)
@@ -1192,8 +1394,8 @@ fn java_target_switch_emits_expected_sequence_collection_factories() {
 
 #[test]
 fn java21_compat_fixture_runs_across_targets() {
-    if !has_javac() || !has_java_runtime() {
-        eprintln!("Skipping java21 compat runtime test: java runtime or javac missing");
+    let required = [JavaTarget::Java25, JavaTarget::Java21];
+    if !ensure_targets_available(&required, "java21 compat runtime test") {
         return;
     }
 
@@ -1221,7 +1423,7 @@ fn java21_compat_fixture_runs_across_targets() {
         let classes_dir = java_dir.join("classes");
         fs::create_dir_all(&classes_dir).expect("create classes directory for javac");
 
-        let mut javac = javac_command().expect("javac command unavailable");
+        let mut javac = javac_command_for_target(target).expect("javac command unavailable");
         javac.arg("-d").arg(&classes_dir);
         for file in &artifacts.java_files {
             javac.arg(file);
@@ -1229,9 +1431,13 @@ fn java21_compat_fixture_runs_across_targets() {
         let status = javac
             .status()
             .expect("invoke javac for java21 compat fixture");
-        assert!(status.success(), "javac failed for target {}", target.as_str());
+        assert!(
+            status.success(),
+            "javac failed for target {}",
+            target.as_str()
+        );
 
-        let mut java_cmd = java_command().expect("java runtime unavailable");
+        let mut java_cmd = java_command_for_target(target).expect("java runtime unavailable");
         let output = java_cmd
             .arg("-cp")
             .arg(&classes_dir)
@@ -1258,8 +1464,8 @@ fn java21_compat_fixture_runs_across_targets() {
 
 #[test]
 fn sequence_interpolation_materializes_sequences_before_string_format() {
-    if !has_javac() || !has_java_runtime() {
-        eprintln!("Skipping sequence interpolation fixture run: java runtime or javac missing");
+    let required = [JavaTarget::Java25, JavaTarget::Java21];
+    if !ensure_targets_available(&required, "sequence interpolation fixture run") {
         return;
     }
 
@@ -1287,7 +1493,7 @@ fn sequence_interpolation_materializes_sequences_before_string_format() {
         let classes_dir = java_dir.join("classes");
         fs::create_dir_all(&classes_dir).expect("create classes directory for javac");
 
-        let mut javac = javac_command().expect("javac command unavailable");
+        let mut javac = javac_command_for_target(target).expect("javac command unavailable");
         javac.arg("-d").arg(&classes_dir);
         for file in &artifacts.java_files {
             javac.arg(file);
@@ -1301,7 +1507,7 @@ fn sequence_interpolation_materializes_sequences_before_string_format() {
             target.as_str()
         );
 
-        let mut java_cmd = java_command().expect("java runtime unavailable");
+        let mut java_cmd = java_command_for_target(target).expect("java runtime unavailable");
         let output = java_cmd
             .arg("-cp")
             .arg(&classes_dir)
@@ -1329,14 +1535,13 @@ fn sequence_interpolation_materializes_sequences_before_string_format() {
 #[test]
 fn smart_imports_resolve_alias_wildcard_static_and_module() {
     if !has_javac() || !has_java_runtime() {
-        eprintln!(
-            "Skipping smart import integration test: java runtime or javac missing"
-        );
+        eprintln!("Skipping smart import integration test: java runtime or javac missing");
         return;
     }
 
     let fixture = workspace_file("tests/lang/imports/smart_imports.jv");
-    let temp_dir = TempDirGuard::new("smart-imports").expect("create temp directory for smart imports fixture");
+    let temp_dir = TempDirGuard::new("smart-imports")
+        .expect("create temp directory for smart imports fixture");
     let mut metrics_checked = false;
 
     for target in [JavaTarget::Java25, JavaTarget::Java21] {
@@ -1352,17 +1557,22 @@ fn smart_imports_resolve_alias_wildcard_static_and_module() {
         );
 
         let artifacts = compile(&plan).expect("smart imports fixture compiles");
-        assert!(!artifacts.java_files.is_empty(), "expected generated Java output");
+        assert!(
+            !artifacts.java_files.is_empty(),
+            "expected generated Java output"
+        );
 
         let java_source = read_java_sources(&artifacts.java_files);
 
         let local_date_import = artifacts
             .resolved_imports
             .iter()
-            .find(|import| matches!(
-                import.detail,
-                IrImportDetail::Type { ref fqcn } if fqcn == "java.time.LocalDate"
-            ))
+            .find(|import| {
+                matches!(
+                    import.detail,
+                    IrImportDetail::Type { ref fqcn } if fqcn == "java.time.LocalDate"
+                )
+            })
             .expect("LocalDate import should be resolved");
         assert_eq!(
             local_date_import.alias.as_deref(),
@@ -1399,10 +1609,12 @@ fn smart_imports_resolve_alias_wildcard_static_and_module() {
         let driver_import = artifacts
             .resolved_imports
             .iter()
-            .find(|import| matches!(
-                import.detail,
-                IrImportDetail::Type { ref fqcn } if fqcn == "java.sql.DriverManager"
-            ))
+            .find(|import| {
+                matches!(
+                    import.detail,
+                    IrImportDetail::Type { ref fqcn } if fqcn == "java.sql.DriverManager"
+                )
+            })
             .expect("DriverManager import should be resolved");
 
         let module_imports: Vec<String> = artifacts
@@ -1485,7 +1697,10 @@ fn smart_imports_resolve_alias_wildcard_static_and_module() {
         }
     }
 
-    assert!(metrics_checked, "performance guard metrics were not validated");
+    assert!(
+        metrics_checked,
+        "performance guard metrics were not validated"
+    );
 }
 
 #[test]
@@ -1521,8 +1736,8 @@ fn pipeline_parses_package_declarations() {
 
         // Read generated Java source to verify package declaration
         for java_file in &artifacts.java_files {
-            let java_source = fs::read_to_string(java_file)
-                .expect(&format!("read generated Java for {}", name));
+            let java_source =
+                fs::read_to_string(java_file).expect(&format!("read generated Java for {}", name));
 
             // Verify package declaration in generated Java code
             assert!(
