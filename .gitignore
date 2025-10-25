@@ -132,3 +132,4 @@ gradle-app.setting
 .serena/
 .spec-workflow/
 .codex/
+toolchains/*
