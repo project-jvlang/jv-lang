@@ -1,3 +1,4 @@
+use std::env;
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -114,7 +115,21 @@ fn workspace_file(relative: &str) -> PathBuf {
 
 fn detected_jdk() -> Option<&'static JdkInfo> {
     static INFO: OnceLock<Option<JdkInfo>> = OnceLock::new();
-    INFO.get_or_init(|| discover_jdk().ok()).as_ref()
+    INFO.get_or_init(|| {
+        log_java_home();
+        discover_jdk().ok()
+    })
+    .as_ref()
+}
+
+fn log_java_home() {
+    static LOGGED: OnceLock<()> = OnceLock::new();
+    LOGGED.get_or_init(|| {
+        match env::var("JAVA_HOME") {
+            Ok(value) => eprintln!("[integration-tests] JAVA_HOME={}", value),
+            Err(err) => eprintln!("[integration-tests] JAVA_HOME not set ({})", err),
+        }
+    });
 }
 
 fn javac_command() -> Option<Command> {
