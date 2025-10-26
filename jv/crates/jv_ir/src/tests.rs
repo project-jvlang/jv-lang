@@ -391,6 +391,88 @@ mod tests {
     }
 
     #[test]
+    fn map_compute_if_absent_infers_lambda_parameter_name() {
+        let mut context = TransformContext::new();
+        context.add_variable(
+            "result".to_string(),
+            JavaType::Reference {
+                name: "java.util.LinkedHashMap".to_string(),
+                generic_args: vec![
+                    JavaType::Reference {
+                        name: "String".to_string(),
+                        generic_args: vec![],
+                    },
+                    JavaType::Reference {
+                        name: "java.util.List".to_string(),
+                        generic_args: vec![JavaType::Reference {
+                            name: "String".to_string(),
+                            generic_args: vec![],
+                        }],
+                    },
+                ],
+            },
+        );
+        context.add_variable(
+            "key".to_string(),
+            JavaType::Reference {
+                name: "String".to_string(),
+                generic_args: vec![],
+            },
+        );
+
+        let lambda_body = Expression::Call {
+            function: Box::new(Expression::Identifier(
+                "ArrayList".to_string(),
+                dummy_span(),
+            )),
+            args: vec![],
+            type_arguments: vec![TypeAnnotation::Simple("String".to_string())],
+            argument_metadata: CallArgumentMetadata::default(),
+            span: dummy_span(),
+        };
+        let lambda = Expression::Lambda {
+            parameters: vec![],
+            body: Box::new(lambda_body),
+            span: dummy_span(),
+        };
+
+        let call_expression = Expression::Call {
+            function: Box::new(Expression::MemberAccess {
+                object: Box::new(Expression::Identifier("result".to_string(), dummy_span())),
+                property: "computeIfAbsent".to_string(),
+                span: dummy_span(),
+            }),
+            args: vec![
+                Argument::Positional(Expression::Identifier("key".to_string(), dummy_span())),
+                Argument::Positional(lambda),
+            ],
+            type_arguments: Vec::new(),
+            argument_metadata: CallArgumentMetadata::default(),
+            span: dummy_span(),
+        };
+
+        let ir = transform_expression(call_expression, &mut context)
+            .expect("computeIfAbsent call should lower");
+
+        match ir {
+            IrExpression::MethodCall { args, .. } => {
+                assert_eq!(args.len(), 2);
+                match &args[1] {
+                    IrExpression::Lambda { param_names, .. } => {
+                        assert_eq!(
+                            param_names,
+                            &vec!["it".to_string()],
+                            "implicit trailing lambda should synthesize a parameter name"
+                        );
+                    }
+                    other => panic!("expected lambda argument, got {:?}", other),
+                }
+            }
+            other => panic!("expected method call IR, got {:?}", other),
+        }
+    }
+
+    #[test]
     fn transform_literal_regex_variant_also_creates_regex_pattern() {
         let span = dummy_span();
         let literal = RegexLiteral {
@@ -3153,10 +3235,7 @@ fun sample(value: Any): Int {
         let stmt = Statement::Assignment {
             target: Expression::Identifier("greeting".to_string(), dummy_span()),
             binding_pattern: None,
-            value: Expression::Literal(
-                Literal::String("Hello, jv!".to_string()),
-                dummy_span(),
-            ),
+            value: Expression::Literal(Literal::String("Hello, jv!".to_string()), dummy_span()),
             span: dummy_span(),
         };
 
@@ -3218,15 +3297,12 @@ fun sample(value: Any): Int {
         let stmt = Statement::Assignment {
             target: Expression::Identifier("counter".to_string(), dummy_span()),
             binding_pattern: None,
-            value: Expression::Literal(
-                Literal::Number("2".to_string()),
-                dummy_span(),
-            ),
+            value: Expression::Literal(Literal::Number("2".to_string()), dummy_span()),
             span: dummy_span(),
         };
 
-        let lowered = transform_statement(stmt, &mut context)
-            .expect("assignment lowering should succeed");
+        let lowered =
+            transform_statement(stmt, &mut context).expect("assignment lowering should succeed");
 
         match lowered.as_slice() {
             [IrStatement::Expression {

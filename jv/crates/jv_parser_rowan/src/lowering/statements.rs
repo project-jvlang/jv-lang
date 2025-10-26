@@ -1584,9 +1584,22 @@ mod expression_parser {
                     end: closing_index + 1,
                 }
             } else {
-                ParsedExpr {
-                    expr: Expression::Block {
+                let body_expr = if inner.is_empty() {
+                    Expression::Block {
                         statements: Vec::new(),
+                        span: span.clone(),
+                    }
+                } else {
+                    match Self::parse_nested_expression(inner) {
+                        Ok(expr) => expr.expr,
+                        Err(_) => self.parse_lambda_body_as_block(inner, start_index + 1)?,
+                    }
+                };
+
+                ParsedExpr {
+                    expr: Expression::Lambda {
+                        parameters: Vec::new(),
+                        body: Box::new(body_expr),
                         span: span.clone(),
                     },
                     start: start_index,
@@ -2758,10 +2771,23 @@ mod expression_parser {
             &mut self,
             left: ParsedExpr,
         ) -> Result<ParsedExpr, ExpressionError> {
-            let lambda = self.parse_brace_expression()?;
+            let lambda_parsed = self.parse_brace_expression()?;
+            let lambda_end = lambda_parsed.end;
+            let raw_lambda_expr = lambda_parsed.expr;
             let start = left.start;
-            let call_span = span_for_range(self.tokens, start, lambda.end);
+            let call_span = span_for_range(self.tokens, start, lambda_end);
             let base_expr = left.expr;
+            let lambda_expr = match raw_lambda_expr {
+                Expression::Lambda { .. } => raw_lambda_expr,
+                other => {
+                    let span = other.span().clone();
+                    Expression::Lambda {
+                        parameters: Vec::new(),
+                        body: Box::new(other),
+                        span,
+                    }
+                }
+            };
 
             if let Expression::Call {
                 function,
@@ -2771,7 +2797,7 @@ mod expression_parser {
                 ..
             } = base_expr
             {
-                args.push(Argument::Positional(lambda.expr));
+                args.push(Argument::Positional(lambda_expr));
                 let expr = Expression::Call {
                     function,
                     args,
@@ -2782,7 +2808,7 @@ mod expression_parser {
                 return Ok(ParsedExpr {
                     expr,
                     start,
-                    end: lambda.end,
+                    end: lambda_end,
                 });
             }
 
@@ -2790,7 +2816,7 @@ mod expression_parser {
             metadata.used_commas = false;
             let expr = Expression::Call {
                 function: Box::new(base_expr),
-                args: vec![Argument::Positional(lambda.expr)],
+                args: vec![Argument::Positional(lambda_expr)],
                 type_arguments: Vec::new(),
                 argument_metadata: metadata,
                 span: call_span.clone(),
@@ -2798,7 +2824,7 @@ mod expression_parser {
             Ok(ParsedExpr {
                 expr,
                 start,
-                end: lambda.end,
+                end: lambda_end,
             })
         }
 

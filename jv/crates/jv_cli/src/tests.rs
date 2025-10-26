@@ -491,10 +491,7 @@ fn compile_repository_fixtures_without_interpolation() {
         if path.to_string_lossy().contains("/pattern/") {
             continue;
         }
-        if path
-            .to_string_lossy()
-            .contains("/java_annotations/")
-        {
+        if path.to_string_lossy().contains("/java_annotations/") {
             continue;
         }
         if path
@@ -548,8 +545,9 @@ include = ["src/**/*.jv"]
         );
         let settings = pipeline::project::manifest::ManifestLoader::load(&manifest_path)
             .expect("manifest loads");
-        let layout = pipeline::project::layout::ProjectLayout::from_settings(&project_root, &settings)
-            .expect("layout resolves");
+        let layout =
+            pipeline::project::layout::ProjectLayout::from_settings(&project_root, &settings)
+                .expect("layout resolves");
 
         let overrides = pipeline::CliOverrides {
             entrypoint: Some(entrypoint.clone()),
@@ -586,7 +584,10 @@ include = ["src/**/*.jv"]
         }
     }
 
-    assert!(compiled > 0, "no eligible fixtures without interpolation were compiled");
+    assert!(
+        compiled > 0,
+        "no eligible fixtures without interpolation were compiled"
+    );
 
     if !failures.is_empty() {
         let details = failures

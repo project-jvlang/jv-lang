@@ -1611,8 +1611,7 @@ fn expression_lowering_handles_trailing_lambda_call() {
 
 #[test]
 fn expression_trailing_lambda_appends_to_parenthesized_arguments() {
-    let result =
-        lower_source("val bucket = cache.computeIfAbsent(key) { value -> value + 1 }");
+    let result = lower_source("val bucket = cache.computeIfAbsent(key) { value -> value + 1 }");
     assert!(
         result.diagnostics.is_empty(),
         "unexpected diagnostics: {:?}",
@@ -1644,7 +1643,11 @@ fn expression_trailing_lambda_appends_to_parenthesized_arguments() {
                 other => panic!("expected member access function, got {:?}", other),
             }
 
-            assert_eq!(args.len(), 2, "expected existing argument plus trailing lambda");
+            assert_eq!(
+                args.len(),
+                2,
+                "expected existing argument plus trailing lambda"
+            );
             match &args[0] {
                 Argument::Positional(expr) => match expr {
                     Expression::Identifier(name, _) => assert_eq!(name, "key"),
@@ -1661,6 +1664,40 @@ fn expression_trailing_lambda_appends_to_parenthesized_arguments() {
                     other => panic!("expected lambda trailing argument, got {:?}", other),
                 },
                 other => panic!("expected positional lambda argument, got {:?}", other),
+            }
+        }
+        other => panic!("expected call expression initializer, got {:?}", other),
+    }
+}
+
+#[test]
+fn expression_trailing_lambda_without_parameters_wraps_body() {
+    let result = lower_source("val bucket = cache.computeIfAbsent(key) { ArrayList<String>() }");
+    assert!(
+        result.diagnostics.is_empty(),
+        "unexpected diagnostics: {:?}",
+        result.diagnostics
+    );
+
+    let initializer = match result.statements.first().expect("expected val statement") {
+        Statement::ValDeclaration { initializer, .. } => initializer,
+        other => panic!("expected val declaration, got {:?}", other),
+    };
+
+    match initializer {
+        Expression::Call { args, .. } => {
+            assert_eq!(args.len(), 2, "expected key and trailing lambda arguments");
+            match &args[1] {
+                Argument::Positional(expr) => match expr {
+                    Expression::Lambda { parameters, .. } => {
+                        assert!(
+                            parameters.is_empty(),
+                            "implicit trailing lambda should not synthesize parameters yet"
+                        );
+                    }
+                    other => panic!("expected trailing lambda expression, got {:?}", other),
+                },
+                other => panic!("expected positional trailing lambda, got {:?}", other),
             }
         }
         other => panic!("expected call expression initializer, got {:?}", other),

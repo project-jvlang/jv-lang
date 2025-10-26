@@ -610,6 +610,21 @@ fn ensure_argument_type(
     set_expression_type(&mut args[index], expected.clone());
 }
 
+fn ensure_lambda_param_names(param_names: &mut Vec<String>, required: usize) {
+    if param_names.len() == required {
+        return;
+    }
+
+    param_names.clear();
+    for idx in 0..required {
+        if idx == 0 {
+            param_names.push("it".to_string());
+        } else {
+            param_names.push(format!("it{}", idx + 1));
+        }
+    }
+}
+
 fn ensure_unary_lambda_argument(
     args: &mut [IrExpression],
     argument_types: &mut Vec<JavaType>,
@@ -625,9 +640,12 @@ fn ensure_unary_lambda_argument(
         functional_interface,
         param_types,
         java_type,
+        param_names,
         ..
     } = &mut args[index]
     {
+        ensure_lambda_param_names(param_names, 1);
+
         if param_types.len() != 1 || param_types[0] != *param_type {
             param_types.clear();
             param_types.push(param_type.clone());
@@ -667,9 +685,12 @@ fn ensure_bifunction_lambda_argument(
         functional_interface,
         param_types,
         java_type,
+        param_names,
         ..
     } = &mut args[index]
     {
+        ensure_lambda_param_names(param_names, 2);
+
         let expected_params = [first_param.clone(), second_param.clone()];
 
         if param_types.len() != expected_params.len()

@@ -226,10 +226,9 @@ pub fn transform_statement(
             binding_pattern,
             span,
         } => {
-            if let Some(binding_name) = infer_implicit_binding_name(
-                binding_pattern.as_ref(),
-                &target,
-            ) {
+            if let Some(binding_name) =
+                infer_implicit_binding_name(binding_pattern.as_ref(), &target)
+            {
                 if context.lookup_variable(&binding_name).is_none() {
                     return Ok(vec![desugar_implicit_val_assignment(
                         binding_name,

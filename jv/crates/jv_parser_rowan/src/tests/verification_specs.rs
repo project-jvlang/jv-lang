@@ -268,17 +268,14 @@ fn rowan_pipeline_preserves_interpolation_after_preprocess() {
 
     let tokens = debug.artifacts().tokens();
     let interpolation_segments = tokens.iter().find_map(|token| {
-        token
-            .metadata
-            .iter()
-            .find_map(|metadata| match metadata {
-                TokenMetadata::StringInterpolation { segments } => Some(segments),
-                _ => None,
-            })
+        token.metadata.iter().find_map(|metadata| match metadata {
+            TokenMetadata::StringInterpolation { segments } => Some(segments),
+            _ => None,
+        })
     });
 
-    let interpolation_segments = interpolation_segments
-        .expect("preprocess pipeline should not drop interpolation metadata");
+    let interpolation_segments =
+        interpolation_segments.expect("preprocess pipeline should not drop interpolation metadata");
     let expression_count = interpolation_segments
         .iter()
         .filter(|segment| matches!(segment, StringInterpolationSegment::Expression(_)))
@@ -296,8 +293,8 @@ fn rowan_pipeline_preserves_interpolation_after_preprocess() {
                 Argument::Positional(inner) => extract_interpolation(inner),
                 Argument::Named { value, .. } => extract_interpolation(value),
             }),
-            Expression::Block { statements, .. } => statements.iter().find_map(|statement| {
-                match statement {
+            Expression::Block { statements, .. } => {
+                statements.iter().find_map(|statement| match statement {
                     jv_ast::Statement::Expression { expr, .. } => extract_interpolation(expr),
                     jv_ast::Statement::Return {
                         value: Some(expr), ..
@@ -310,8 +307,8 @@ fn rowan_pipeline_preserves_interpolation_after_preprocess() {
                         ..
                     } => extract_interpolation(expr),
                     _ => None,
-                }
-            }),
+                })
+            }
             _ => None,
         }
     }
@@ -320,9 +317,7 @@ fn rowan_pipeline_preserves_interpolation_after_preprocess() {
         .statements()
         .iter()
         .find_map(|statement| match statement {
-            jv_ast::Statement::FunctionDeclaration { name, body, .. }
-                if name == "announce" =>
-            {
+            jv_ast::Statement::FunctionDeclaration { name, body, .. } if name == "announce" => {
                 extract_interpolation(body)
             }
             _ => None,
