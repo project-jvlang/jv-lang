@@ -12,6 +12,8 @@ TEST_FLAGS := $(CARGO_FLAGS) --lib
 RELEASE_FLAGS := $(CARGO_FLAGS) --release
 # Reduce debug info size to avoid linker overflows during tests
 export RUSTFLAGS := -C debuginfo=0 -C strip=debuginfo
+CLI_BIN := $(abspath jv/target/debug/jv)
+CLI_EXAMPLES_TEST := cli_examples_build_without_java_errors
 
 help: ## Show this help message
 	@echo "jv Language Project Build Commands"
@@ -150,6 +152,12 @@ test-inference: check ## Test inference crate only
 
 test-cli: check ## Test CLI crate only
 	cargo test --lib -p jv_cli $(CARGO_FLAGS)
+
+test-with-exe-cli: build-jv ## Run full CLI test suite with CARGO_BIN_EXE_jv configured
+	cd jv && CARGO_BIN_EXE_jv=$(CLI_BIN) cargo test -p jv_cli -- --nocapture
+
+test-cli-examples: build-jv ## Run CLI example build tests with CARGO_BIN_EXE_jv configured
+	cd jv && CARGO_BIN_EXE_jv=$(CLI_BIN) cargo test -p jv_cli $(CLI_EXAMPLES_TEST) -- --nocapture
 
 test-lsp: check ## Test LSP server crate only
 	cargo test --lib -p jv_lsp $(CARGO_FLAGS)

@@ -545,6 +545,271 @@ fn cli_build_quick_tour_script_compiles() {
 }
 
 #[test]
+fn cli_examples_build_without_java_errors() {
+    let Some(cli_path) = std::env::var_os("CARGO_BIN_EXE_jv").map(PathBuf::from) else {
+        eprintln!("Skipping examples build test: CARGO_BIN_EXE_jv not set");
+        return;
+    };
+
+    let examples_root = workspace_file("examples");
+    assert!(
+        examples_root.is_dir(),
+        "examples root missing at {}",
+        examples_root.display()
+    );
+
+    let fixtures = discover_examples(&examples_root);
+    assert!(
+        !fixtures.is_empty(),
+        "no buildable examples discovered in {}",
+        examples_root.display()
+    );
+
+    let temp_root = TempDirGuard::new("cli-examples").expect("create temp dir for examples");
+    let mut failures = Vec::new();
+    for ExampleFixture { label, kind } in fixtures {
+        let (jv_file, result) = match kind {
+            ExampleKind::Script { source } => {
+                let res =
+                    build_script_example(cli_path.as_path(), &source, temp_root.path(), &label);
+                (source, res)
+            }
+            ExampleKind::Project { root } => {
+                let entrypoint = resolve_project_entrypoint(&root);
+                let res =
+                    build_project_example(cli_path.as_path(), &root, temp_root.path(), &label);
+                (entrypoint, res)
+            }
+        };
+
+        match result {
+            Ok(()) => {
+                println!(
+                    "[OK] {} -> {}",
+                    label,
+                    jv_file.display()
+                );
+            }
+            Err(err) => {
+                println!(
+                    "[FAIL] {} -> {}\n{}",
+                    label,
+                    jv_file.display(),
+                    err
+                );
+                failures.push(format!(
+                    "{} -> {}:\n{}",
+                    label,
+                    jv_file.display(),
+                    err
+                ));
+            }
+        }
+    }
+
+    assert!(
+        failures.is_empty(),
+        "一部の examples が正常にビルドできませんでした:\n{}",
+        failures.join("\n\n")
+    );
+}
+
+struct ExampleFixture {
+    label: String,
+    kind: ExampleKind,
+}
+
+enum ExampleKind {
+    Script { source: PathBuf },
+    Project { root: PathBuf },
+}
+
+fn discover_examples(root: &Path) -> Vec<ExampleFixture> {
+    let mut fixtures = Vec::new();
+    for entry in fs::read_dir(root).expect("read examples directory") {
+        let entry = entry.expect("read example entry");
+        let path = entry.path();
+        let file_type = entry.file_type().expect("stat example entry");
+        let label = entry.file_name().to_string_lossy().to_string();
+
+        if label == "target" {
+            continue;
+        }
+
+        if file_type.is_file() && path.extension().and_then(|ext| ext.to_str()) == Some("jv") {
+            fixtures.push(ExampleFixture {
+                label,
+                kind: ExampleKind::Script { source: path },
+            });
+        } else if file_type.is_dir() && path.join("jv.toml").exists() {
+            fixtures.push(ExampleFixture {
+                label,
+                kind: ExampleKind::Project { root: path },
+            });
+        }
+    }
+    fixtures.sort_by(|a, b| a.label.cmp(&b.label));
+    fixtures
+}
+
+fn build_script_example(
+    cli_path: &Path,
+    source: &Path,
+    temp_root: &Path,
+    label: &str,
+) -> Result<(), String> {
+    let output_dir = temp_root.join(format!("script-{}", sanitize_label(label)));
+    let output = Command::new(cli_path)
+        .current_dir(temp_root)
+        .arg("build")
+        .arg(&source)
+        .arg("--java-only")
+        .arg("--target")
+        .arg("25")
+        .arg("-o")
+        .arg(&output_dir)
+        .output()
+        .map_err(|err| format!("jv build 実行に失敗しました: {err}"))?;
+
+    if !output.status.success() {
+        return Err(format!(
+            "jv build failed for script example {}:\nstatus: {}\nstdout: {}\nstderr: {}",
+            source.display(),
+            output.status,
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+
+    verify_java_artifacts(&output_dir, label)
+}
+
+fn build_project_example(
+    cli_path: &Path,
+    root: &Path,
+    temp_root: &Path,
+    label: &str,
+) -> Result<(), String> {
+    let output_dir = temp_root.join(format!("project-{}", sanitize_label(label)));
+    let output = Command::new(cli_path)
+        .current_dir(root)
+        .arg("build")
+        .arg("--java-only")
+        .arg("--target")
+        .arg("25")
+        .arg("-o")
+        .arg(&output_dir)
+        .output()
+        .map_err(|err| format!("jv build 実行に失敗しました: {err}"))?;
+
+    if !output.status.success() {
+        return Err(format!(
+            "jv build failed for project example {}:\nstatus: {}\nstdout: {}\nstderr: {}",
+            root.display(),
+            output.status,
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+
+    verify_java_artifacts(&output_dir, label)
+}
+
+fn verify_java_artifacts(output_root: &Path, label: &str) -> Result<(), String> {
+    let java_dir = output_root.join("java25");
+    if !java_dir.is_dir() {
+        return Err(format!(
+            "java25 output missing for example {} at {}",
+            label,
+            java_dir.display()
+        ));
+    }
+
+    let java_sources = collect_java_sources(&java_dir);
+    if java_sources.is_empty() {
+        return Err(format!(
+            "no Java sources produced for example {} in {}",
+            label,
+            java_dir.display()
+        ));
+    }
+
+    let classes_dir = java_dir.join("classes");
+    fs::create_dir_all(&classes_dir)
+        .map_err(|err| format!("javac 出力ディレクトリを作成できませんでした: {err}"))?;
+
+    let mut javac =
+        javac_command_for_target(JavaTarget::Java25).ok_or_else(|| "javac command unavailable".to_string())?;
+    javac.arg("-d").arg(&classes_dir);
+    for source in &java_sources {
+        javac.arg(source);
+    }
+
+    let output = javac
+        .output()
+        .map_err(|err| format!("javac の起動に失敗しました: {err}"))?;
+    if !output.status.success() {
+        return Err(format!(
+            "javac reported errors for example {} stored in {}:\nstdout: {}\nstderr: {}",
+            label,
+            java_dir.display(),
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+
+    Ok(())
+}
+
+fn collect_java_sources(root: &Path) -> Vec<PathBuf> {
+    let mut java_files = Vec::new();
+    let mut stack = vec![root.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        if dir.is_dir() {
+            for entry in fs::read_dir(&dir).expect("traverse java output directory") {
+                let entry = entry.expect("read java output entry");
+                let path = entry.path();
+                if path.is_dir() {
+                    stack.push(path);
+                } else if path.extension().and_then(|ext| ext.to_str()) == Some("java") {
+                    java_files.push(path);
+                }
+            }
+        }
+    }
+    java_files
+}
+
+fn sanitize_label(label: &str) -> String {
+    label
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || ch == '-' {
+                ch
+            } else {
+                '-'
+            }
+        })
+        .collect()
+}
+
+fn resolve_project_entrypoint(root: &Path) -> PathBuf {
+    let manifest = root.join("jv.toml");
+    if let Ok(content) = fs::read_to_string(&manifest) {
+        if let Ok(value) = toml::from_str::<toml::Value>(&content) {
+            if let Some(entrypoint) = value
+                .get("project")
+                .and_then(|project| project.get("entrypoint"))
+                .and_then(|path| path.as_str())
+            {
+                return root.join(entrypoint);
+            }
+        }
+    }
+    root.join("src/main.jv")
+}
+
+#[test]
 fn cli_build_emits_pattern_compile_for_regex_literal() {
     let Some(cli_path) = std::env::var_os("CARGO_BIN_EXE_jv").map(PathBuf::from) else {
         eprintln!("Skipping regex CLI build test: CARGO_BIN_EXE_jv not set");
