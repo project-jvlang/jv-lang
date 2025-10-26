@@ -1610,6 +1610,64 @@ fn expression_lowering_handles_trailing_lambda_call() {
 }
 
 #[test]
+fn expression_trailing_lambda_appends_to_parenthesized_arguments() {
+    let result =
+        lower_source("val bucket = cache.computeIfAbsent(key) { value -> value + 1 }");
+    assert!(
+        result.diagnostics.is_empty(),
+        "unexpected diagnostics: {:?}",
+        result.diagnostics
+    );
+
+    let initializer = match result.statements.first().expect("expected val statement") {
+        Statement::ValDeclaration {
+            name, initializer, ..
+        } => {
+            assert_eq!(name, "bucket");
+            initializer
+        }
+        other => panic!("expected val declaration, got {:?}", other),
+    };
+
+    match initializer {
+        Expression::Call { function, args, .. } => {
+            match function.as_ref() {
+                Expression::MemberAccess {
+                    object, property, ..
+                } => {
+                    match object.as_ref() {
+                        Expression::Identifier(name, _) => assert_eq!(name, "cache"),
+                        other => panic!("expected identifier receiver, got {:?}", other),
+                    }
+                    assert_eq!(property, "computeIfAbsent");
+                }
+                other => panic!("expected member access function, got {:?}", other),
+            }
+
+            assert_eq!(args.len(), 2, "expected existing argument plus trailing lambda");
+            match &args[0] {
+                Argument::Positional(expr) => match expr {
+                    Expression::Identifier(name, _) => assert_eq!(name, "key"),
+                    other => panic!("expected identifier key argument, got {:?}", other),
+                },
+                other => panic!("expected positional argument, got {:?}", other),
+            }
+            match &args[1] {
+                Argument::Positional(expr) => match expr {
+                    Expression::Lambda { parameters, .. } => {
+                        assert_eq!(parameters.len(), 1, "lambda should have one parameter");
+                        assert_eq!(parameters[0].name, "value");
+                    }
+                    other => panic!("expected lambda trailing argument, got {:?}", other),
+                },
+                other => panic!("expected positional lambda argument, got {:?}", other),
+            }
+        }
+        other => panic!("expected call expression initializer, got {:?}", other),
+    }
+}
+
+#[test]
 fn expression_lowering_handles_when_with_subject_and_guard() {
     let source = r#"
     package demo

@@ -2759,11 +2759,37 @@ mod expression_parser {
             left: ParsedExpr,
         ) -> Result<ParsedExpr, ExpressionError> {
             let lambda = self.parse_brace_expression()?;
-            let call_span = span_for_range(self.tokens, left.start, lambda.end);
+            let start = left.start;
+            let call_span = span_for_range(self.tokens, start, lambda.end);
+            let base_expr = left.expr;
+
+            if let Expression::Call {
+                function,
+                mut args,
+                type_arguments,
+                argument_metadata,
+                ..
+            } = base_expr
+            {
+                args.push(Argument::Positional(lambda.expr));
+                let expr = Expression::Call {
+                    function,
+                    args,
+                    type_arguments,
+                    argument_metadata,
+                    span: call_span.clone(),
+                };
+                return Ok(ParsedExpr {
+                    expr,
+                    start,
+                    end: lambda.end,
+                });
+            }
+
             let mut metadata = CallArgumentMetadata::with_style(CallArgumentStyle::Whitespace);
             metadata.used_commas = false;
             let expr = Expression::Call {
-                function: Box::new(left.expr),
+                function: Box::new(base_expr),
                 args: vec![Argument::Positional(lambda.expr)],
                 type_arguments: Vec::new(),
                 argument_metadata: metadata,
@@ -2771,7 +2797,7 @@ mod expression_parser {
             };
             Ok(ParsedExpr {
                 expr,
-                start: left.start,
+                start,
                 end: lambda.end,
             })
         }
