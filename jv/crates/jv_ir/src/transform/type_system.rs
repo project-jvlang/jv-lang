@@ -70,6 +70,10 @@ pub fn convert_type_annotation(
 
 fn convert_simple_type(name: &str) -> JavaType {
     match name {
+        "Any" => JavaType::Reference {
+            name: "Object".to_string(),
+            generic_args: vec![],
+        },
         "Int" | "int" => JavaType::Primitive("int".to_string()),
         "Boolean" | "boolean" => JavaType::Primitive("boolean".to_string()),
         "Double" | "double" => JavaType::Primitive("double".to_string()),

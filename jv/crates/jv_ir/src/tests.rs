@@ -1447,6 +1447,40 @@ mod tests {
     }
 
     #[test]
+    fn when_constructor_pattern_normalizes_type_aliases() {
+        let mut context = test_context();
+        context.add_variable("value".to_string(), JavaType::object());
+
+        let subject = Some(Box::new(Expression::Identifier(
+            "value".to_string(),
+            dummy_span(),
+        )));
+
+        let arm = WhenArm {
+            pattern: Pattern::Constructor {
+                name: "Any".to_string(),
+                patterns: vec![],
+                span: dummy_span(),
+            },
+            guard: None,
+            body: Expression::Literal(Literal::Number("1".to_string()), dummy_span()),
+            span: dummy_span(),
+        };
+
+        let result =
+            desugar_when_expression(subject, vec![arm], None, None, dummy_span(), &mut context)
+                .expect("type alias pattern should lower successfully");
+
+        match result {
+            IrExpression::Switch { cases, .. } => match &cases[0].labels[0] {
+                IrCaseLabel::TypePattern { type_name, .. } => assert_eq!(type_name, "Object"),
+                other => panic!("expected type pattern, got {:?}", other),
+            },
+            other => panic!("expected switch expression, got {:?}", other),
+        }
+    }
+
+    #[test]
     fn test_desugar_when_expression_records_implicit_end() {
         let mut context = test_context();
         context.add_variable("x".to_string(), JavaType::int());
@@ -3041,6 +3075,18 @@ mod tests {
                     name: "String".to_string(),
                     generic_args: vec![],
                 }],
+            }
+        );
+    }
+    #[test]
+    fn convert_type_annotation_maps_any_to_object() {
+        let java_type = convert_type_annotation(TypeAnnotation::Simple("Any".to_string()))
+            .expect("Any should map to a Java reference type");
+        assert_eq!(
+            java_type,
+            JavaType::Reference {
+                name: "Object".to_string(),
+                generic_args: vec![],
             }
         );
     }

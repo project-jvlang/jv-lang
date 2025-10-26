@@ -1,4 +1,5 @@
 use super::transform_expression;
+use super::type_system::convert_type_annotation;
 use super::utils::extract_java_type;
 use crate::context::TransformContext;
 use crate::error::TransformError;
@@ -6,7 +7,9 @@ use crate::types::{
     IrCaseLabel, IrDeconstructionComponent, IrDeconstructionPattern, IrExpression,
     IrImplicitWhenEnd, IrSwitchCase, JavaType, JavaWildcardKind,
 };
-use jv_ast::{BinaryOp, Expression, ImplicitWhenEnd, Literal, Pattern, Span, WhenArm};
+use jv_ast::{
+    BinaryOp, Expression, ImplicitWhenEnd, Literal, Pattern, Span, TypeAnnotation, WhenArm,
+};
 
 /// Maximum supported destructuring depth inside a single `when` arm. The outer
 /// constructor counts as depth = 1; each nested constructor increments the
@@ -326,9 +329,10 @@ fn lower_pattern_case(
             let binding = CaseBinding::new(context.fresh_identifier("it"), subject_type.clone());
             let (deconstruction, nested_guard) =
                 lower_constructor_deconstruction(patterns, context, &span, 1)?;
+            let type_name = normalize_constructor_type_name(&name)?;
             Ok(PatternLowering {
                 labels: vec![IrCaseLabel::TypePattern {
-                    type_name: name,
+                    type_name,
                     variable: binding.name.clone(),
                     deconstruction,
                 }],
@@ -576,6 +580,11 @@ fn describe_exhaustiveness(summary: &PatternAnalysisSummary) -> String {
         Some(false) => "false".to_string(),
         None => "unknown".to_string(),
     }
+}
+
+fn normalize_constructor_type_name(name: &str) -> Result<String, TransformError> {
+    let annotation = TypeAnnotation::Simple(name.to_string());
+    convert_type_annotation(annotation).map(|java_type| type_name_for_case(&java_type))
 }
 
 fn type_name_for_case(java_type: &JavaType) -> String {
