@@ -14,6 +14,9 @@ RELEASE_FLAGS := $(CARGO_FLAGS) --release
 export RUSTFLAGS := -C debuginfo=0 -C strip=debuginfo
 CLI_BIN := $(abspath jv/target/debug/jv)
 CLI_EXAMPLES_TEST := cli_examples_build_without_java_errors
+JAVA21_HOME := $(abspath toolchains/jdk21)
+JAVA25_HOME := $(abspath toolchains/jdk25)
+JAVA_ENV_PREFIX := JAVA25_HOME=$(JAVA25_HOME) JAVA21_HOME=$(JAVA21_HOME) JAVA_HOME=$(JAVA25_HOME) PATH=$(JAVA25_HOME)/bin:$(JAVA21_HOME)/bin:$$PATH
 
 help: ## Show this help message
 	@echo "jv Language Project Build Commands"
@@ -154,10 +157,10 @@ test-cli: check ## Test CLI crate only
 	cargo test --lib -p jv_cli $(CARGO_FLAGS)
 
 test-with-exe-cli: build-jv ## Run full CLI test suite with CARGO_BIN_EXE_jv configured
-	cd jv && CARGO_BIN_EXE_jv=$(CLI_BIN) cargo test -p jv_cli -- --nocapture
+	cd jv && $(JAVA_ENV_PREFIX) CARGO_BIN_EXE_jv=$(CLI_BIN) cargo test -p jv_cli -- --nocapture
 
 test-cli-examples: build-jv ## Run CLI example build tests with CARGO_BIN_EXE_jv configured
-	cd jv && CARGO_BIN_EXE_jv=$(CLI_BIN) cargo test -p jv_cli $(CLI_EXAMPLES_TEST) -- --nocapture
+	cd jv && $(JAVA_ENV_PREFIX) CARGO_BIN_EXE_jv=$(CLI_BIN) cargo test -p jv_cli $(CLI_EXAMPLES_TEST) -- --nocapture
 
 test-lsp: check ## Test LSP server crate only
 	cargo test --lib -p jv_lsp $(CARGO_FLAGS)

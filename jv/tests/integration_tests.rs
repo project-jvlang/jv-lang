@@ -550,6 +550,10 @@ fn cli_examples_build_without_java_errors() {
         eprintln!("Skipping examples build test: CARGO_BIN_EXE_jv not set");
         return;
     };
+    if javac_command_for_target(JavaTarget::Java25).is_none() {
+        eprintln!("Skipping examples build test: javac for Java25 not available");
+        return;
+    }
 
     let examples_root = workspace_file("examples");
     assert!(
@@ -565,19 +569,16 @@ fn cli_examples_build_without_java_errors() {
         examples_root.display()
     );
 
-    let temp_root = TempDirGuard::new("cli-examples").expect("create temp dir for examples");
     let mut failures = Vec::new();
     for ExampleFixture { label, kind } in fixtures {
         let (jv_file, result) = match kind {
             ExampleKind::Script { source } => {
-                let res =
-                    build_script_example(cli_path.as_path(), &source, temp_root.path(), &label);
+                let res = build_script_example(cli_path.as_path(), &source, &label);
                 (source, res)
             }
             ExampleKind::Project { root } => {
                 let entrypoint = resolve_project_entrypoint(&root);
-                let res =
-                    build_project_example(cli_path.as_path(), &root, temp_root.path(), &label);
+                let res = build_project_example(cli_path.as_path(), &root, &label);
                 (entrypoint, res)
             }
         };
@@ -655,19 +656,32 @@ fn discover_examples(root: &Path) -> Vec<ExampleFixture> {
 fn build_script_example(
     cli_path: &Path,
     source: &Path,
-    temp_root: &Path,
     label: &str,
 ) -> Result<(), String> {
-    let output_dir = temp_root.join(format!("script-{}", sanitize_label(label)));
+    let workdir = source
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| PathBuf::from("."));
+    let relative_output = PathBuf::from(format!(
+        "target/test-cli-examples/scripts/{}",
+        sanitize_label(label)
+    ));
+    let absolute_output = workdir.join(&relative_output);
+    if let Some(parent) = absolute_output.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|err| format!("出力ディレクトリを作成できませんでした: {err}"))?;
+    }
+    let _ = fs::remove_dir_all(&absolute_output);
+
     let output = Command::new(cli_path)
-        .current_dir(temp_root)
+        .current_dir(&workdir)
         .arg("build")
         .arg(&source)
         .arg("--java-only")
         .arg("--target")
         .arg("25")
         .arg("-o")
-        .arg(&output_dir)
+        .arg(&relative_output)
         .output()
         .map_err(|err| format!("jv build 実行に失敗しました: {err}"))?;
 
@@ -681,16 +695,18 @@ fn build_script_example(
         ));
     }
 
-    verify_java_artifacts(&output_dir, label)
+    verify_java_artifacts(&absolute_output, label)
 }
 
 fn build_project_example(
     cli_path: &Path,
     root: &Path,
-    temp_root: &Path,
     label: &str,
 ) -> Result<(), String> {
-    let output_dir = temp_root.join(format!("project-{}", sanitize_label(label)));
+    let relative_output = PathBuf::from("target/test-cli-examples");
+    let absolute_output = root.join(&relative_output);
+    let _ = fs::remove_dir_all(&absolute_output);
+
     let output = Command::new(cli_path)
         .current_dir(root)
         .arg("build")
@@ -698,7 +714,7 @@ fn build_project_example(
         .arg("--target")
         .arg("25")
         .arg("-o")
-        .arg(&output_dir)
+        .arg(&relative_output)
         .output()
         .map_err(|err| format!("jv build 実行に失敗しました: {err}"))?;
 
@@ -712,7 +728,7 @@ fn build_project_example(
         ));
     }
 
-    verify_java_artifacts(&output_dir, label)
+    verify_java_artifacts(&absolute_output, label)
 }
 
 fn verify_java_artifacts(output_root: &Path, label: &str) -> Result<(), String> {
