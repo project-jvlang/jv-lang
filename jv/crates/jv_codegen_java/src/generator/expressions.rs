@@ -342,8 +342,10 @@ impl JavaCodeGenerator {
                 self.render_switch_expression_java25(
                     discriminant,
                     cases,
+                    java_type,
                     implicit_end.as_ref(),
                     strategy_description.as_ref(),
+                    span,
                 )
             } else {
                 self.render_switch_expression_java21(
@@ -367,9 +369,26 @@ impl JavaCodeGenerator {
         &mut self,
         discriminant: &IrExpression,
         cases: &[IrSwitchCase],
+        java_type: &JavaType,
         implicit_end: Option<&IrImplicitWhenEnd>,
         strategy_description: Option<&String>,
+        span: &Span,
     ) -> Result<String, CodeGenError> {
+        if cases.iter().any(|case| {
+            case.labels
+                .iter()
+                .any(|label| matches!(label, IrCaseLabel::Range { .. }))
+        }) {
+            return self.render_switch_expression_java21(
+                discriminant,
+                cases,
+                java_type,
+                implicit_end,
+                strategy_description,
+                span,
+            );
+        }
+
         let mut builder = self.builder();
         if let Some(description) = strategy_description {
             builder.push_line(&format!("// {}", description));
@@ -612,23 +631,7 @@ impl JavaCodeGenerator {
                     // Nested destructuring is handled by the higher level block builder.
                     return Ok(None);
                 }
-                IrCaseLabel::Range {
-                    type_name,
-                    variable,
-                    ..
-                } => {
-                    if !literal_conditions.is_empty() || type_pattern_condition.is_some() {
-                        return Err(self.java21_incompatibility_error(
-                            &case.span,
-                            "範囲パターンを同じ分岐の他のラベルと混在させることはできません",
-                            "range patterns cannot be combined with other labels in the same branch",
-                        ));
-                    }
-                    type_pattern_condition = Some(format!(
-                        "{} instanceof {} {}",
-                        subject_binding, type_name, variable
-                    ));
-                }
+                IrCaseLabel::Range { .. } => continue,
             }
         }
 
@@ -664,6 +667,17 @@ impl JavaCodeGenerator {
         result_is_void: bool,
         result_binding: &str,
     ) -> Result<Option<String>, CodeGenError> {
+        if Self::case_has_range_label(case) {
+            return self
+                .render_range_case_block_java21(
+                    case,
+                    subject_binding,
+                    result_is_void,
+                    result_binding,
+                )
+                .map(Some);
+        }
+
         if Self::case_has_deconstruction(case) {
             return self
                 .render_deconstruction_case_block_java21(
@@ -699,6 +713,12 @@ impl JavaCodeGenerator {
                 }
             )
         })
+    }
+
+    fn case_has_range_label(case: &IrSwitchCase) -> bool {
+        case.labels
+            .iter()
+            .any(|label| matches!(label, IrCaseLabel::Range { .. }))
     }
 
     fn render_deconstruction_case_block_java21(
@@ -756,6 +776,65 @@ impl JavaCodeGenerator {
 
         builder.dedent();
         builder.push_line("} while (false);");
+
+        Ok(builder.build())
+    }
+
+    fn render_range_case_block_java21(
+        &mut self,
+        case: &IrSwitchCase,
+        subject_binding: &str,
+        result_is_void: bool,
+        result_binding: &str,
+    ) -> Result<String, CodeGenError> {
+        let label_count = case
+            .labels
+            .iter()
+            .filter(|label| !matches!(label, IrCaseLabel::Default))
+            .count();
+        if label_count != 1 {
+            return Err(self.java21_incompatibility_error(
+                &case.span,
+                "範囲パターンを同じ分岐の他のラベルと混在させることはできません",
+                "range patterns cannot be combined with other labels in the same branch",
+            ));
+        }
+
+        let variable = case
+            .labels
+            .iter()
+            .find_map(|label| match label {
+                IrCaseLabel::Range { variable, .. } => Some(variable.clone()),
+                _ => None,
+            })
+            .ok_or_else(|| {
+                self.java21_incompatibility_error(
+                    &case.span,
+                    "範囲パターンのバインディング名が見つかりません",
+                    "range pattern binding name missing",
+                )
+            })?;
+
+        let guard = case.guard.as_ref().ok_or_else(|| {
+            self.java21_incompatibility_error(
+                &case.span,
+                "範囲パターンにはガード条件が必要です",
+                "range patterns require a guard condition",
+            )
+        })?;
+        let guard_expr = self.generate_expression(guard)?;
+
+        let mut builder = self.builder();
+        if let Some(comment) = self.render_case_leading_comment(case)? {
+            builder.push_line(&comment);
+        }
+        builder.push_line(&format!("final var {} = {};", variable, subject_binding));
+        builder.push_line(&format!("if ({}) {{", guard_expr));
+        builder.indent();
+        self.write_switch_case_body_java21(&mut builder, case, result_is_void, result_binding)?;
+        builder.push_line("__matched = true;");
+        builder.dedent();
+        builder.push_line("}");
 
         Ok(builder.build())
     }

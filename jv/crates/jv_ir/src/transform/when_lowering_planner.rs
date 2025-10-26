@@ -1,6 +1,6 @@
 use super::transform_expression;
 use super::type_system::convert_type_annotation;
-use super::utils::extract_java_type;
+use super::utils::{boxed_java_type, extract_java_type};
 use crate::context::TransformContext;
 use crate::error::TransformError;
 use crate::types::{
@@ -579,7 +579,12 @@ fn describe_exhaustiveness(summary: &PatternAnalysisSummary) -> String {
 
 fn normalize_constructor_type_name(name: &str) -> Result<String, TransformError> {
     let annotation = TypeAnnotation::Simple(name.to_string());
-    convert_type_annotation(annotation).map(|java_type| type_name_for_case(&java_type))
+    let java_type = convert_type_annotation(annotation)?;
+    let normalized = match java_type {
+        JavaType::Primitive(_) => boxed_java_type(&java_type),
+        _ => java_type,
+    };
+    Ok(type_name_for_case(&normalized))
 }
 
 fn type_name_for_case(java_type: &JavaType) -> String {

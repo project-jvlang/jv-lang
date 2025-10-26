@@ -2582,7 +2582,7 @@ fn switch_expression_renders_range_case_with_comment() {
         .generate_expression(&expression)
         .expect("range case should render");
 
-    let expected = "switch (x) {\n    // range: 0..=10\n    case int it when (it >= 0 && it <= 10) -> \"small\";\n    default -> \"fallback\";\n}\n";
+    let expected = "new Object() {\n    String matchExpr() {\n        final var __subject = x;\n        final String __matchResult;\n        boolean __matched = false;\n        if (!__matched) {\n            // range: 0..=10\n            final var it = __subject;\n            if (it >= 0 && it <= 10) {\n                __matchResult = \"small\";\n                __matched = true;\n            }\n        }\n        if (!__matched) {\n            __matchResult = \"fallback\";\n            __matched = true;\n        }\n        return __matchResult;\n    }\n}.matchExpr()\n";
     assert_eq!(rendered, expected, "range case output mismatch");
 }
 
@@ -2735,7 +2735,7 @@ fn switch_expression_java21_range_pattern_fallback() {
         .generate_expression(&expression)
         .expect("java21 range pattern fallback should render");
 
-    let expected = "new Object() {\n    String matchExpr() {\n        final var __subject = score;\n        final String __matchResult;\n        boolean __matched = false;\n        if (!__matched) {\n            if ((__subject instanceof int it0) && (it0 >= 0 && it0 <= 10)) {\n                __matchResult = \"small\";\n                __matched = true;\n            }\n        }\n        if (!__matched) {\n            __matchResult = \"other\";\n            __matched = true;\n        }\n        return __matchResult;\n    }\n}.matchExpr()\n";
+    let expected = "new Object() {\n    String matchExpr() {\n        final var __subject = score;\n        final String __matchResult;\n        boolean __matched = false;\n        if (!__matched) {\n            // range: 0..=10\n            final var it0 = __subject;\n            if (it0 >= 0 && it0 <= 10) {\n                __matchResult = \"small\";\n                __matched = true;\n            }\n        }\n        if (!__matched) {\n            __matchResult = \"other\";\n            __matched = true;\n        }\n        return __matchResult;\n    }\n}.matchExpr()\n";
     assert_eq!(
         rendered, expected,
         "java21 fallback should expand range patterns"

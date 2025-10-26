@@ -1,6 +1,6 @@
 ---
 source: crates/jv_codegen_java/src/tests/pattern_switch.rs
-assertion_line: 34
+assertion_line: 31
 expression: content
 ---
 // Java 21 fallback lowers range patterns into sequential guard checks with __matched
@@ -15,19 +15,25 @@ public class Example2 {
                 final String __matchResult;
                 boolean __matched = false;
                 if (!__matched) {
-                    if ((__subject instanceof int it0) && (score >= 0 && score < 60)) {
+                    // range: 0..60
+                    final var it0 = __subject;
+                    if (score >= 0 && score < 60) {
                         __matchResult = "Fail";
                         __matched = true;
                     }
                 }
                 if (!__matched) {
-                    if ((__subject instanceof int it0) && (score >= 60 && score < 80)) {
+                    // range: 60..80
+                    final var it0 = __subject;
+                    if (score >= 60 && score < 80) {
                         __matchResult = "Pass";
                         __matched = true;
                     }
                 }
                 if (!__matched) {
-                    if ((__subject instanceof int it0) && (score >= 80 && score <= 100)) {
+                    // range: 80..=100
+                    final var it0 = __subject;
+                    if (score >= 80 && score <= 100) {
                         __matchResult = "Excellent";
                         __matched = true;
                     }
