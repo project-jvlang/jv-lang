@@ -101,6 +101,8 @@ fn main() -> Result<()> {
                 }
             };
 
+            let entrypoint_override = resolve_cli_entrypoint_override(input.is_some(), &start_path);
+
             let layout = ProjectLayout::from_settings(&project_root, &settings)
                 .map_err(|diagnostic| tooling_failure(&diagnostic_path, diagnostic))?;
 
@@ -110,7 +112,7 @@ fn main() -> Result<()> {
             }
 
             let overrides = CliOverrides {
-                entrypoint: input.clone().map(PathBuf::from),
+                entrypoint: entrypoint_override,
                 output: output.clone().map(PathBuf::from),
                 java_only,
                 check,
@@ -281,11 +283,13 @@ fn main() -> Result<()> {
                 }
             };
 
+            let entrypoint_override = resolve_cli_entrypoint_override(true, &start_path);
+
             let layout = ProjectLayout::from_settings(&project_root, &settings)
                 .map_err(|diagnostic| tooling_failure(&error_path, diagnostic))?;
 
             let overrides = CliOverrides {
-                entrypoint: Some(start_path.clone()),
+                entrypoint: entrypoint_override,
                 output: None,
                 java_only: false,
                 check: false,
@@ -380,6 +384,23 @@ fn repl() -> Result<()> {
     }
 
     Ok(())
+}
+
+fn resolve_cli_entrypoint_override(explicit_input: bool, start_path: &Path) -> Option<PathBuf> {
+    if !explicit_input {
+        return None;
+    }
+
+    match fs::metadata(start_path) {
+        Ok(metadata) => {
+            if metadata.is_file() {
+                Some(start_path.to_path_buf())
+            } else {
+                None
+            }
+        }
+        Err(_) => Some(start_path.to_path_buf()),
+    }
 }
 
 fn build_ephemeral_run_settings(start_path: &Path) -> Option<(ProjectRoot, ProjectSettings)> {
