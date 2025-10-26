@@ -99,24 +99,13 @@ impl WhenLoweringPlanner {
         let mut result_type: Option<JavaType> = None;
         let mut has_default_case = false;
         let mut guard_count = 0usize;
-        let total_arms = arms.len();
 
-        for (index, arm) in arms.into_iter().enumerate() {
+        for arm in arms.into_iter() {
             let PatternLowering {
                 labels,
                 guard,
                 is_default,
             } = lower_pattern_case(arm.pattern, &discriminant_type, context, arm.span.clone())?;
-
-            if is_default {
-                if has_default_case {
-                    return Err(TransformError::UnsupportedConstruct {
-                        construct: "Multiple default patterns in when expression".to_string(),
-                        span: arm.span,
-                    });
-                }
-                has_default_case = true;
-            }
 
             let mut combined_guard = guard;
             if let Some(guard_expr) = arm.guard {
@@ -126,6 +115,17 @@ impl WhenLoweringPlanner {
 
             if combined_guard.is_some() {
                 guard_count += 1;
+            }
+
+            let marks_default = is_default && combined_guard.is_none();
+            if marks_default {
+                if has_default_case {
+                    return Err(TransformError::UnsupportedConstruct {
+                        construct: "Multiple default patterns in when expression".to_string(),
+                        span: arm.span,
+                    });
+                }
+                has_default_case = true;
             }
 
             let body = transform_expression(arm.body, context)?;
@@ -143,34 +143,26 @@ impl WhenLoweringPlanner {
                 body,
                 span: arm.span.clone(),
             });
-
-            if is_default && index != total_arms.saturating_sub(1) {
-                // continue allowing later arms to collect errors.
-            }
         }
 
         if let Some(else_arm) = else_arm {
             if has_default_case {
-                return Err(TransformError::UnsupportedConstruct {
-                    construct: "when expression cannot have both default pattern and else arm"
-                        .to_string(),
-                    span,
+                implicit_ir_end = None;
+            } else {
+                let body = transform_expression(*else_arm, context)?;
+                if result_type.is_none() {
+                    result_type = extract_java_type(&body);
+                }
+
+                cases.push(IrSwitchCase {
+                    labels: vec![IrCaseLabel::Default],
+                    guard: None,
+                    body,
+                    span: span.clone(),
                 });
+                implicit_ir_end = None;
+                has_default_case = true;
             }
-
-            let body = transform_expression(*else_arm, context)?;
-            if result_type.is_none() {
-                result_type = extract_java_type(&body);
-            }
-
-            cases.push(IrSwitchCase {
-                labels: vec![IrCaseLabel::Default],
-                guard: None,
-                body,
-                span: span.clone(),
-            });
-            implicit_ir_end = None;
-            has_default_case = true;
         }
 
         if cases.is_empty() {
@@ -330,6 +322,9 @@ fn lower_pattern_case(
             let (deconstruction, nested_guard) =
                 lower_constructor_deconstruction(patterns, context, &span, 1)?;
             let type_name = normalize_constructor_type_name(&name)?;
+            let matches_subject_type = type_name == type_name_for_case(subject_type);
+            let is_unconditional =
+                matches_subject_type && deconstruction.is_none() && nested_guard.is_none();
             Ok(PatternLowering {
                 labels: vec![IrCaseLabel::TypePattern {
                     type_name,
@@ -337,7 +332,7 @@ fn lower_pattern_case(
                     deconstruction,
                 }],
                 guard: nested_guard,
-                is_default: false,
+                is_default: is_unconditional,
             })
         }
         Pattern::Range {

@@ -25,6 +25,7 @@ mod type_system;
 mod utils;
 mod when_lowering_planner;
 
+use self::utils::boxed_java_type;
 pub(crate) use self::utils::{extract_java_type, ir_expression_span};
 pub use crate::types::{
     DataFormat, IrSampleDeclaration, PrimitiveType, SampleFetchError, SampleFetchRequest,
@@ -852,7 +853,10 @@ fn lower_call_expression(
                 };
                 let generic_args = type_arguments
                     .into_iter()
-                    .map(type_system::convert_type_annotation)
+                    .map(|annotation| {
+                        let java = type_system::convert_type_annotation(annotation)?;
+                        Ok(boxed_java_type(&java))
+                    })
                     .collect::<Result<Vec<_>, _>>()?;
                 return Ok(IrExpression::ObjectCreation {
                     class_name,

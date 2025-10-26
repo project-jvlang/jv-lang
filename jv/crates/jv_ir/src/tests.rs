@@ -1467,15 +1467,33 @@ mod tests {
             span: dummy_span(),
         };
 
-        let result =
-            desugar_when_expression(subject, vec![arm], None, None, dummy_span(), &mut context)
-                .expect("type alias pattern should lower successfully");
+        let else_arm = Some(Box::new(Expression::Literal(
+            Literal::Number("2".to_string()),
+            dummy_span(),
+        )));
+
+        let result = desugar_when_expression(
+            subject,
+            vec![arm],
+            else_arm,
+            None,
+            dummy_span(),
+            &mut context,
+        )
+        .expect("type alias pattern should lower successfully");
 
         match result {
-            IrExpression::Switch { cases, .. } => match &cases[0].labels[0] {
-                IrCaseLabel::TypePattern { type_name, .. } => assert_eq!(type_name, "Object"),
-                other => panic!("expected type pattern, got {:?}", other),
-            },
+            IrExpression::Switch { cases, .. } => {
+                assert_eq!(
+                    cases.len(),
+                    1,
+                    "else arm should be dropped for unconditional pattern"
+                );
+                match &cases[0].labels[0] {
+                    IrCaseLabel::TypePattern { type_name, .. } => assert_eq!(type_name, "Object"),
+                    other => panic!("expected type pattern, got {:?}", other),
+                }
+            }
             other => panic!("expected switch expression, got {:?}", other),
         }
     }
@@ -3089,6 +3107,38 @@ mod tests {
                 generic_args: vec![],
             }
         );
+    }
+
+    #[test]
+    fn constructor_type_arguments_box_primitives() {
+        let mut context = test_context();
+        let call_expression = Expression::Call {
+            function: Box::new(Expression::Identifier(
+                "ArrayList".to_string(),
+                dummy_span(),
+            )),
+            args: vec![],
+            type_arguments: vec![TypeAnnotation::Simple("Int".to_string())],
+            argument_metadata: CallArgumentMetadata::default(),
+            span: dummy_span(),
+        };
+
+        let ir = transform_expression(call_expression, &mut context)
+            .expect("constructor call should lower successfully");
+
+        match ir {
+            IrExpression::ObjectCreation { generic_args, .. } => {
+                assert_eq!(generic_args.len(), 1);
+                assert_eq!(
+                    generic_args[0],
+                    JavaType::Reference {
+                        name: "Integer".to_string(),
+                        generic_args: vec![],
+                    }
+                );
+            }
+            other => panic!("expected object creation, got {:?}", other),
+        }
     }
 
     // Test for utility class name generation
