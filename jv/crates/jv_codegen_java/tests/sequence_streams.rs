@@ -1114,8 +1114,8 @@ fn sum_terminal_with_int_hint_uses_map_to_int() {
         rendered
     );
     assert!(
-        rendered.contains("(int) (java.lang.Character)"),
-        "lambda should cast Character aliases to int. Rendered expression: {}",
+        rendered.contains("(int) ((java.lang.Character) __jvIntFamilyValue).charValue()"),
+        "lambda should cast Character aliases to int via charValue. Rendered expression: {}",
         rendered
     );
     assert!(

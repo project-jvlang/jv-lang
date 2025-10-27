@@ -12,7 +12,7 @@ public class Example1 {
         new Object() {
             int matchExpr() {
                 final var __subject = x;
-                final int __matchResult;
+                int __matchResult = 0;
                 boolean __matched = false;
                 if (!__matched) {
                     if (__subject instanceof String value) {

@@ -31,20 +31,40 @@ impl JavaCodeGenerator {
                 modifiers,
                 ..
             } => {
-                let mut parts = Vec::new();
-                let modifier = self.generate_local_modifiers(*is_final, modifiers);
-                if !modifier.is_empty() {
-                    parts.push(modifier);
+                if self.mutable_captures.contains(name) {
+                    self.add_import("java.util.concurrent.atomic.AtomicReference");
+                    let boxed_type = JavaCodeGenerator::boxed_type(java_type);
+                    let mut parts = Vec::new();
+                    let modifier = self.generate_local_modifiers(true, modifiers);
+                    if !modifier.is_empty() {
+                        parts.push(modifier);
+                    }
+                    let type_str = format!("AtomicReference<{}>", self.generate_type(&boxed_type)?);
+                    parts.push(type_str);
+                    parts.push(name.clone());
+                    let mut line = parts.join(" ");
+                    line.push_str(" = new AtomicReference<>(");
+                    if let Some(expr) = initializer {
+                        line.push_str(&self.generate_expression(expr)?);
+                    }
+                    line.push_str(");");
+                    line
+                } else {
+                    let mut parts = Vec::new();
+                    let modifier = self.generate_local_modifiers(*is_final, modifiers);
+                    if !modifier.is_empty() {
+                        parts.push(modifier);
+                    }
+                    parts.push(self.generate_type(java_type)?);
+                    parts.push(name.clone());
+                    let mut line = parts.join(" ");
+                    if let Some(expr) = initializer {
+                        line.push_str(" = ");
+                        line.push_str(&self.generate_expression(expr)?);
+                    }
+                    line.push(';');
+                    line
                 }
-                parts.push(self.generate_type(java_type)?);
-                parts.push(name.clone());
-                let mut line = parts.join(" ");
-                if let Some(expr) = initializer {
-                    line.push_str(" = ");
-                    line.push_str(&self.generate_expression(expr)?);
-                }
-                line.push(';');
-                line
             }
             IrStatement::FieldDeclaration {
                 name,
@@ -105,7 +125,16 @@ impl JavaCodeGenerator {
                 line
             }
             IrStatement::Return { value, .. } => match value {
-                Some(expr) => format!("return {};", self.generate_expression(expr)?),
+                Some(expr) => {
+                    let expr_code = self.generate_expression(expr)?;
+                    let coerced = if let Some(target) = self.current_return_type.as_ref() {
+                        let target_clone = target.clone();
+                        self.coerce_return_expression(expr, expr_code, &target_clone)?
+                    } else {
+                        expr_code
+                    };
+                    format!("return {};", coerced)
+                }
                 None => "return;".to_string(),
             },
             IrStatement::Block { statements, .. } => {
@@ -594,22 +623,44 @@ impl JavaCodeGenerator {
                 modifiers,
                 ..
             } => {
-                let mut parts = Vec::new();
-                let modifier = self.generate_local_modifiers(*is_final, modifiers);
-                if !modifier.is_empty() {
-                    parts.push(modifier);
+                if self.mutable_captures.contains(name) {
+                    self.add_import("java.util.concurrent.atomic.AtomicReference");
+                    let boxed_type = JavaCodeGenerator::boxed_type(java_type);
+                    let mut parts = Vec::new();
+                    let modifier = self.generate_local_modifiers(true, modifiers);
+                    if !modifier.is_empty() {
+                        parts.push(modifier);
+                    }
+                    let type_str = format!("AtomicReference<{}>", self.generate_type(&boxed_type)?);
+                    parts.push(type_str);
+                    parts.push(name.clone());
+                    let mut line = parts.join(" ");
+                    line.push_str(" = new AtomicReference<>(");
+                    if let Some(expr) = initializer {
+                        let expr_code = self.generate_expression(expr)?;
+                        let guarded = self.wrap_with_null_guard(expr_code, owner);
+                        line.push_str(&guarded);
+                    }
+                    line.push_str(");");
+                    Ok(line)
+                } else {
+                    let mut parts = Vec::new();
+                    let modifier = self.generate_local_modifiers(*is_final, modifiers);
+                    if !modifier.is_empty() {
+                        parts.push(modifier);
+                    }
+                    parts.push(self.generate_type(java_type)?);
+                    parts.push(name.clone());
+                    let mut line = parts.join(" ");
+                    if let Some(expr) = initializer {
+                        let expr_code = self.generate_expression(expr)?;
+                        let guarded = self.wrap_with_null_guard(expr_code, owner);
+                        line.push_str(" = ");
+                        line.push_str(&guarded);
+                    }
+                    line.push(';');
+                    Ok(line)
                 }
-                parts.push(self.generate_type(java_type)?);
-                parts.push(name.clone());
-                let mut line = parts.join(" ");
-                if let Some(expr) = initializer {
-                    let expr_code = self.generate_expression(expr)?;
-                    let guarded = self.wrap_with_null_guard(expr_code, owner);
-                    line.push_str(" = ");
-                    line.push_str(&guarded);
-                }
-                line.push(';');
-                Ok(line)
             }
             IrStatement::FieldDeclaration {
                 name,
@@ -639,11 +690,24 @@ impl JavaCodeGenerator {
                 value: Some(expr), ..
             } => {
                 let expr_code = self.generate_expression(expr)?;
-                let guarded = self.wrap_with_null_guard(expr_code, owner);
+                let coerced = if let Some(target) = self.current_return_type.as_ref() {
+                    let target_clone = target.clone();
+                    self.coerce_return_expression(expr, expr_code, &target_clone)?
+                } else {
+                    expr_code
+                };
+                let guarded = self.wrap_with_null_guard(coerced, owner);
                 Ok(format!("return {};", guarded))
             }
             IrStatement::Expression { expr, .. } => {
                 if let IrExpression::Assignment { target, value, .. } = expr {
+                    if let IrExpression::Identifier { name, .. } = target.as_ref() {
+                        if self.mutable_captures.contains(name) {
+                            let rhs = self.generate_expression(value)?;
+                            let guarded_rhs = self.wrap_with_null_guard(rhs, owner);
+                            return Ok(format!("{}.set({});", name, guarded_rhs));
+                        }
+                    }
                     let lhs = self.generate_expression(target)?;
                     let rhs = self.generate_expression(value)?;
                     let guarded_rhs = self.wrap_with_null_guard(rhs, owner);

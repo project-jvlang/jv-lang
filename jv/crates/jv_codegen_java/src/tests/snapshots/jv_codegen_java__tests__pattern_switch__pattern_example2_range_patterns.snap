@@ -12,7 +12,7 @@ public class Example2 {
         new Object() {
             String matchExpr() {
                 final var __subject = score;
-                final String __matchResult;
+                String __matchResult = null;
                 boolean __matched = false;
                 if (!__matched) {
                     // range: 0..60
@@ -59,7 +59,7 @@ public class Example2 {
         new Object() {
             String matchExpr() {
                 final var __subject = score;
-                final String __matchResult;
+                String __matchResult = null;
                 boolean __matched = false;
                 if (!__matched) {
                     // range: 0..60

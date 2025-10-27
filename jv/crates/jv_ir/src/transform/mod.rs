@@ -681,6 +681,16 @@ pub fn transform_expression(
                     {
                         JavaType::string()
                     }
+                    BinaryOp::Add
+                    | BinaryOp::Subtract
+                    | BinaryOp::Multiply
+                    | BinaryOp::Divide
+                    | BinaryOp::Modulo => {
+                        binary_numeric_result_type(left_type.as_ref(), right_type.as_ref())
+                    }
+                    BinaryOp::BitAnd | BinaryOp::BitOr | BinaryOp::BitXor => {
+                        integral_binary_result_type(left_type.as_ref(), right_type.as_ref())
+                    }
                     _ => JavaType::int(),
                 };
                 Ok(IrExpression::Binary {
@@ -1179,6 +1189,114 @@ fn is_iterable_like(name: &str) -> bool {
 
 fn is_stream_type(name: &str) -> bool {
     name == "java.util.stream.Stream"
+}
+
+fn binary_numeric_result_type(left: Option<&JavaType>, right: Option<&JavaType>) -> JavaType {
+    const RANK_INT: u8 = 1;
+    const RANK_LONG: u8 = 2;
+    const RANK_FLOAT: u8 = 3;
+    const RANK_DOUBLE: u8 = 4;
+
+    let left_rank = left.and_then(numeric_rank);
+    let right_rank = right.and_then(numeric_rank);
+
+    let rank = match (left_rank, right_rank) {
+        (Some(l), Some(r)) => l.max(r),
+        (Some(l), None) | (None, Some(l)) => l,
+        (None, None) => RANK_INT,
+    };
+
+    match rank {
+        RANK_DOUBLE => JavaType::Primitive("double".to_string()),
+        RANK_FLOAT => JavaType::Primitive("float".to_string()),
+        RANK_LONG => JavaType::Primitive("long".to_string()),
+        _ => JavaType::Primitive("int".to_string()),
+    }
+}
+
+fn integral_binary_result_type(left: Option<&JavaType>, right: Option<&JavaType>) -> JavaType {
+    const RANK_INT: u8 = 1;
+    const RANK_LONG: u8 = 2;
+
+    let left_rank = left.and_then(integral_rank);
+    let right_rank = right.and_then(integral_rank);
+
+    let rank = match (left_rank, right_rank) {
+        (Some(l), Some(r)) => l.max(r),
+        (Some(l), None) | (None, Some(l)) => l,
+        (None, None) => RANK_INT,
+    };
+
+    match rank {
+        RANK_LONG => JavaType::Primitive("long".to_string()),
+        _ => JavaType::Primitive("int".to_string()),
+    }
+}
+
+fn numeric_rank(java_type: &JavaType) -> Option<u8> {
+    match java_type {
+        JavaType::Primitive(name) => primitive_numeric_rank(name),
+        JavaType::Reference { name, .. } => wrapper_numeric_rank(name),
+        _ => None,
+    }
+}
+
+fn integral_rank(java_type: &JavaType) -> Option<u8> {
+    match java_type {
+        JavaType::Primitive(name) => primitive_integral_rank(name),
+        JavaType::Reference { name, .. } => wrapper_integral_rank(name),
+        _ => None,
+    }
+}
+
+fn primitive_numeric_rank(name: &str) -> Option<u8> {
+    match name {
+        "double" => Some(4),
+        "float" => Some(3),
+        "long" => Some(2),
+        "int" | "short" | "byte" | "char" => Some(1),
+        _ => None,
+    }
+}
+
+fn primitive_integral_rank(name: &str) -> Option<u8> {
+    match name {
+        "long" => Some(2),
+        "int" | "short" | "byte" | "char" => Some(1),
+        _ => None,
+    }
+}
+
+fn wrapper_numeric_rank(name: &str) -> Option<u8> {
+    match name {
+        "Double" | "java.lang.Double" => Some(4),
+        "Float" | "java.lang.Float" => Some(3),
+        "Long" | "java.lang.Long" => Some(2),
+        "Integer"
+        | "java.lang.Integer"
+        | "Short"
+        | "java.lang.Short"
+        | "Byte"
+        | "java.lang.Byte"
+        | "Character"
+        | "java.lang.Character" => Some(1),
+        _ => None,
+    }
+}
+
+fn wrapper_integral_rank(name: &str) -> Option<u8> {
+    match name {
+        "Long" | "java.lang.Long" => Some(2),
+        "Integer"
+        | "java.lang.Integer"
+        | "Short"
+        | "java.lang.Short"
+        | "Byte"
+        | "java.lang.Byte"
+        | "Character"
+        | "java.lang.Character" => Some(1),
+        _ => None,
+    }
 }
 
 fn flatten_member_access_chain(expr: &Expression) -> Option<Vec<String>> {

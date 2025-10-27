@@ -247,7 +247,10 @@ impl TransformContext {
         } = call
         {
             if let Some(receiver) = receiver_type.as_ref() {
-                if let Some(inferred) = infer_map_method_return_type(method_name, receiver) {
+                if let Some(inferred) = infer_known_method_return_type(method_name, Some(receiver))
+                {
+                    *java_type = inferred;
+                } else if let Some(inferred) = infer_map_method_return_type(method_name, receiver) {
                     *java_type = inferred;
                 }
 
@@ -258,6 +261,8 @@ impl TransformContext {
                     receiver,
                     java_type,
                 );
+            } else if let Some(inferred) = infer_known_method_return_type(method_name, None) {
+                *java_type = inferred;
             }
 
             let canonical_java_name = java_name.clone().unwrap_or_else(|| method_name.clone());
@@ -552,6 +557,84 @@ impl TransformContext {
     /// Consumes and returns the recorded lowering strategies.
     pub fn take_when_strategies(&mut self) -> Vec<WhenStrategyRecord> {
         std::mem::take(&mut self.when_strategies)
+    }
+}
+
+fn infer_known_method_return_type(
+    method_name: &str,
+    receiver_type: Option<&JavaType>,
+) -> Option<JavaType> {
+    match method_name {
+        "toString" => Some(JavaType::string()),
+        "codePointAt" => {
+            if receiver_type.map(is_string_like_reference).unwrap_or(false) {
+                Some(JavaType::int())
+            } else {
+                None
+            }
+        }
+        "intValue" if receiver_type.map(is_number_like_reference).unwrap_or(false) => {
+            Some(JavaType::int())
+        }
+        "longValue" if receiver_type.map(is_number_like_reference).unwrap_or(false) => {
+            Some(JavaType::Primitive("long".to_string()))
+        }
+        "floatValue" if receiver_type.map(is_number_like_reference).unwrap_or(false) => {
+            Some(JavaType::Primitive("float".to_string()))
+        }
+        "doubleValue" if receiver_type.map(is_number_like_reference).unwrap_or(false) => {
+            Some(JavaType::Primitive("double".to_string()))
+        }
+        "shortValue" if receiver_type.map(is_number_like_reference).unwrap_or(false) => {
+            Some(JavaType::Primitive("short".to_string()))
+        }
+        "byteValue" if receiver_type.map(is_number_like_reference).unwrap_or(false) => {
+            Some(JavaType::Primitive("byte".to_string()))
+        }
+        "charValue" if receiver_type.map(is_number_like_reference).unwrap_or(false) => {
+            Some(JavaType::Primitive("char".to_string()))
+        }
+        "booleanValue" if receiver_type.map(is_number_like_reference).unwrap_or(false) => {
+            Some(JavaType::Primitive("boolean".to_string()))
+        }
+        _ => None,
+    }
+}
+
+fn is_string_like_reference(java_type: &JavaType) -> bool {
+    match java_type {
+        JavaType::Reference { name, .. } => matches!(
+            name.as_str(),
+            "String" | "java.lang.String" | "CharSequence" | "java.lang.CharSequence"
+        ),
+        _ => false,
+    }
+}
+
+fn is_number_like_reference(java_type: &JavaType) -> bool {
+    match java_type {
+        JavaType::Reference { name, .. } => matches!(
+            name.as_str(),
+            "Number"
+                | "java.lang.Number"
+                | "Integer"
+                | "java.lang.Integer"
+                | "Long"
+                | "java.lang.Long"
+                | "Float"
+                | "java.lang.Float"
+                | "Double"
+                | "java.lang.Double"
+                | "Short"
+                | "java.lang.Short"
+                | "Byte"
+                | "java.lang.Byte"
+                | "Character"
+                | "java.lang.Character"
+                | "Boolean"
+                | "java.lang.Boolean"
+        ),
+        _ => false,
     }
 }
 

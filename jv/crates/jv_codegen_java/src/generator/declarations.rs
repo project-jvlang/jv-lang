@@ -726,6 +726,10 @@ impl JavaCodeGenerator {
         body: &IrExpression,
         return_type: &JavaType,
     ) -> Result<(), CodeGenError> {
+        let previous_return = self.current_return_type.clone();
+        let previous_captures = std::mem::take(&mut self.mutable_captures);
+        self.current_return_type = Some(return_type.clone());
+        self.mutable_captures = self.analyze_mutable_captures(body);
         if let IrExpression::Block { statements, .. } = body {
             for statement in statements {
                 let stmt_code = self.generate_statement(statement)?;
@@ -736,9 +740,13 @@ impl JavaCodeGenerator {
             if Self::is_void_like(return_type) {
                 builder.push_line(&format!("{};", expr_code));
             } else {
-                builder.push_line(&format!("return {};", expr_code));
+                let coerced = self.coerce_return_expression(body, expr_code, return_type)?;
+                builder.push_line(&format!("return {};", coerced));
             }
         }
+
+        self.current_return_type = previous_return;
+        self.mutable_captures = previous_captures;
         Ok(())
     }
 

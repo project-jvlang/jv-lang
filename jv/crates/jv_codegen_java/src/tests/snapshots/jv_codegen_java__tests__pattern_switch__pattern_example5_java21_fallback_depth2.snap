@@ -16,7 +16,7 @@ public class Example5 {
         new Object() {
             int matchExpr() {
                 final var __subject = value;
-                final int __matchResult;
+                int __matchResult = 0;
                 boolean __matched = false;
                 if (!__matched) {
                     do {

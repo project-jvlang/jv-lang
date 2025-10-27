@@ -10,7 +10,8 @@ use jv_ir::{
     IrForLoopMetadata, IrGenericMetadata, IrImplicitWhenEnd, IrImport, IrImportDetail, IrModifiers,
     IrNumericRangeLoop, IrParameter, IrProgram, IrRecordComponent, IrResource, IrSampleDeclaration,
     IrStatement, IrSwitchCase, IrTypeParameter, IrVariance, IrVisibility, JavaType, MethodOverload,
-    NullableGuard, NullableGuardReason, UtilityClass, VirtualThreadOp,
+    NullableGuard, NullableGuardReason, SequencePipeline, SequenceSource, SequenceStage,
+    SequenceTerminalKind, UtilityClass, VirtualThreadOp,
 };
 use jv_mapper::{
     JavaPosition, JavaSpan, MappingCategory, MappingError, SourceMap, SourceMapBuilder,
@@ -43,6 +44,9 @@ pub struct JavaCodeGenerator {
     script_class_simple_name: Option<String>,
     conversion_metadata: HashMap<SpanKey, Vec<ConversionMetadata>>,
     conversion_map_records: Vec<ConversionSourceMapRecord>,
+    current_return_type: Option<JavaType>,
+    mutable_captures: HashSet<String>,
+    record_components: HashMap<String, HashSet<String>>,
 }
 
 impl JavaCodeGenerator {
@@ -68,6 +72,9 @@ impl JavaCodeGenerator {
             script_class_simple_name: None,
             conversion_metadata: HashMap::new(),
             conversion_map_records: Vec::new(),
+            current_return_type: None,
+            mutable_captures: HashSet::new(),
+            record_components: HashMap::new(),
         }
     }
 
@@ -84,6 +91,7 @@ impl JavaCodeGenerator {
         self.generic_metadata = program.generic_metadata.clone();
         self.metadata_path.clear();
         self.conversion_metadata.clear();
+        self.register_record_components_from_declarations(&program.type_declarations, &[]);
         for entry in &program.conversion_metadata {
             self.conversion_metadata
                 .entry(SpanKey::from(&entry.span))
@@ -288,6 +296,93 @@ impl JavaCodeGenerator {
         self.script_class_simple_name = None;
         self.conversion_metadata.clear();
         self.conversion_map_records.clear();
+        self.current_return_type = None;
+        self.mutable_captures.clear();
+        self.record_components.clear();
+    }
+
+    fn register_record_components_from_declarations(
+        &mut self,
+        declarations: &[IrStatement],
+        enclosing: &[String],
+    ) {
+        for declaration in declarations {
+            self.register_record_components_from_statement(declaration, enclosing);
+        }
+    }
+
+    fn register_record_components_from_statement(
+        &mut self,
+        statement: &IrStatement,
+        enclosing: &[String],
+    ) {
+        match statement {
+            IrStatement::RecordDeclaration {
+                name, components, ..
+            } => {
+                self.add_record_components(name, components, enclosing);
+            }
+            IrStatement::ClassDeclaration {
+                name,
+                nested_classes,
+                ..
+            }
+            | IrStatement::InterfaceDeclaration {
+                name,
+                nested_types: nested_classes,
+                ..
+            } => {
+                let mut next_enclosing = enclosing.to_vec();
+                next_enclosing.push(name.clone());
+                self.register_record_components_from_declarations(nested_classes, &next_enclosing);
+            }
+            _ => {}
+        }
+    }
+
+    fn add_record_components(
+        &mut self,
+        name: &str,
+        components: &[IrRecordComponent],
+        enclosing: &[String],
+    ) {
+        let mut keys = Vec::new();
+        let simple_name = name.to_string();
+        keys.push(simple_name);
+
+        if !enclosing.is_empty() {
+            let dotted = format!("{}.{name}", enclosing.join("."));
+            let nested = format!("{}${name}", enclosing.join("$"));
+            keys.push(dotted);
+            keys.push(nested);
+        }
+
+        if let Some(pkg) = &self.package {
+            if !pkg.is_empty() {
+                keys.push(format!("{pkg}.{name}"));
+                if !enclosing.is_empty() {
+                    let dotted = format!("{pkg}.{}.{name}", enclosing.join("."));
+                    let nested = format!("{pkg}.{}${name}", enclosing.join("$"));
+                    keys.push(dotted);
+                    keys.push(nested);
+                }
+            }
+        }
+
+        let component_names: HashSet<String> = components
+            .iter()
+            .map(|component| component.name.clone())
+            .collect();
+
+        for key in keys {
+            if key.is_empty() {
+                continue;
+            }
+            self.record_components
+                .entry(key)
+                .or_insert_with(HashSet::new)
+                .extend(component_names.iter().cloned());
+        }
     }
 
     pub fn build_conversion_source_map(
@@ -336,6 +431,820 @@ impl JavaCodeGenerator {
         }
 
         Ok(builder.build())
+    }
+
+    fn coerce_return_expression(
+        &mut self,
+        expr: &IrExpression,
+        rendered: String,
+        target_type: &JavaType,
+    ) -> Result<String, CodeGenError> {
+        if let Some(source_type) = Self::expression_java_type(expr) {
+            if source_type == target_type {
+                return Ok(rendered);
+            }
+
+            match (source_type, target_type) {
+                (JavaType::Primitive(source_name), JavaType::Primitive(target_name))
+                    if source_name == "double" && target_name == "float" =>
+                {
+                    let target_rendered = self.generate_type(target_type)?;
+                    return Ok(format!("({}) {}", target_rendered, rendered));
+                }
+                _ => {}
+            }
+        }
+
+        Ok(rendered)
+    }
+
+    pub(crate) fn analyze_mutable_captures(&self, body: &IrExpression) -> HashSet<String> {
+        let mut locals = HashSet::new();
+        self.collect_method_locals_from_expression(body, &mut locals);
+        let mut captures = HashSet::new();
+        self.collect_mutable_captures_in_expression(body, &locals, &mut captures, &HashSet::new());
+        captures
+    }
+
+    fn collect_method_locals_from_expression(
+        &self,
+        expr: &IrExpression,
+        locals: &mut HashSet<String>,
+    ) {
+        if let IrExpression::Block { statements, .. } = expr {
+            for statement in statements {
+                self.collect_method_locals_from_statement(statement, locals);
+            }
+        }
+    }
+
+    fn collect_method_locals_from_statement(
+        &self,
+        statement: &IrStatement,
+        locals: &mut HashSet<String>,
+    ) {
+        match statement {
+            IrStatement::Commented { statement, .. } => {
+                self.collect_method_locals_from_statement(statement, locals);
+            }
+            IrStatement::VariableDeclaration {
+                name, initializer, ..
+            } => {
+                locals.insert(name.clone());
+                if let Some(init) = initializer {
+                    self.collect_method_locals_from_expression(init, locals);
+                }
+            }
+            IrStatement::Block { statements, .. } => {
+                for stmt in statements {
+                    self.collect_method_locals_from_statement(stmt, locals);
+                }
+            }
+            IrStatement::If {
+                condition,
+                then_stmt,
+                else_stmt,
+                ..
+            } => {
+                self.collect_method_locals_from_expression(condition, locals);
+                self.collect_method_locals_from_statement(then_stmt, locals);
+                if let Some(else_branch) = else_stmt {
+                    self.collect_method_locals_from_statement(else_branch, locals);
+                }
+            }
+            IrStatement::While { condition, body, .. } => {
+                self.collect_method_locals_from_expression(condition, locals);
+                self.collect_method_locals_from_statement(body, locals);
+            }
+            IrStatement::ForEach { iterable, body, .. } => {
+                self.collect_method_locals_from_expression(iterable, locals);
+                self.collect_method_locals_from_statement(body, locals);
+            }
+            IrStatement::For {
+                init,
+                condition,
+                update,
+                body,
+                ..
+            } => {
+                if let Some(init_stmt) = init.as_deref() {
+                    self.collect_method_locals_from_statement(init_stmt, locals);
+                }
+                if let Some(cond) = condition {
+                    self.collect_method_locals_from_expression(cond, locals);
+                }
+                if let Some(update_expr) = update {
+                    self.collect_method_locals_from_expression(update_expr, locals);
+                }
+                self.collect_method_locals_from_statement(body, locals);
+            }
+            IrStatement::Expression { expr, .. } => {
+                self.collect_method_locals_from_expression(expr, locals);
+            }
+            IrStatement::Return { value, .. } => {
+                if let Some(expr) = value {
+                    self.collect_method_locals_from_expression(expr, locals);
+                }
+            }
+            IrStatement::Switch { discriminant, cases, .. } => {
+                self.collect_method_locals_from_expression(discriminant, locals);
+                for case in cases {
+                    if let Some(guard) = &case.guard {
+                        self.collect_method_locals_from_expression(guard, locals);
+                    }
+                    self.collect_method_locals_from_expression(&case.body, locals);
+                }
+            }
+            IrStatement::Try {
+                body,
+                catch_clauses,
+                finally_block,
+                ..
+            } => {
+                self.collect_method_locals_from_statement(body, locals);
+                for clause in catch_clauses {
+                    self.collect_method_locals_from_statement(&clause.body, locals);
+                }
+                if let Some(finally_stmt) = finally_block {
+                    self.collect_method_locals_from_statement(finally_stmt, locals);
+                }
+            }
+            IrStatement::TryWithResources {
+                resources,
+                body,
+                catch_clauses,
+                finally_block,
+                ..
+            } => {
+                for resource in resources {
+                    locals.insert(resource.name.clone());
+                    self.collect_method_locals_from_expression(&resource.initializer, locals);
+                }
+                self.collect_method_locals_from_statement(body, locals);
+                for clause in catch_clauses {
+                    self.collect_method_locals_from_statement(&clause.body, locals);
+                }
+                if let Some(finally_stmt) = finally_block {
+                    self.collect_method_locals_from_statement(finally_stmt, locals);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn collect_mutable_captures_in_expression(
+        &self,
+        expr: &IrExpression,
+        method_locals: &HashSet<String>,
+        captures: &mut HashSet<String>,
+        scope_locals: &HashSet<String>,
+    ) {
+        match expr {
+            IrExpression::Assignment { target, value, .. } => {
+                if let IrExpression::Identifier { name, .. } = target.as_ref() {
+                    if method_locals.contains(name) && !scope_locals.contains(name) {
+                        captures.insert(name.clone());
+                    }
+                }
+                self.collect_mutable_captures_in_expression(
+                    value,
+                    method_locals,
+                    captures,
+                    scope_locals,
+                );
+            }
+            IrExpression::Block { statements, .. } => {
+                let mut block_scope = scope_locals.clone();
+                for statement in statements {
+                    block_scope = self.collect_mutable_captures_in_statement(
+                        statement,
+                        method_locals,
+                        captures,
+                        &block_scope,
+                    );
+                }
+            }
+            IrExpression::Lambda {
+                param_names, body, ..
+            } => {
+                let lambda_scope: HashSet<String> = param_names.iter().cloned().collect();
+                self.collect_mutable_captures_in_expression(
+                    body,
+                    method_locals,
+                    captures,
+                    &lambda_scope,
+                );
+            }
+            IrExpression::MethodCall {
+                receiver,
+                method_name: _,
+                args,
+                ..
+            } => {
+                if let Some(recv) = receiver {
+                    self.collect_mutable_captures_in_expression(
+                        recv,
+                        method_locals,
+                        captures,
+                        scope_locals,
+                    );
+                }
+                for arg in args {
+                    self.collect_mutable_captures_in_expression(
+                        arg,
+                        method_locals,
+                        captures,
+                        scope_locals,
+                    );
+                }
+            }
+            IrExpression::Binary { left, right, .. } => {
+                self.collect_mutable_captures_in_expression(
+                    left,
+                    method_locals,
+                    captures,
+                    scope_locals,
+                );
+                self.collect_mutable_captures_in_expression(
+                    right,
+                    method_locals,
+                    captures,
+                    scope_locals,
+                );
+            }
+            IrExpression::Unary { operand, .. } => {
+                self.collect_mutable_captures_in_expression(
+                    operand,
+                    method_locals,
+                    captures,
+                    scope_locals,
+                );
+            }
+            IrExpression::Conditional {
+                condition,
+                then_expr,
+                else_expr,
+                ..
+            } => {
+                self.collect_mutable_captures_in_expression(
+                    condition,
+                    method_locals,
+                    captures,
+                    scope_locals,
+                );
+                self.collect_mutable_captures_in_expression(
+                    then_expr,
+                    method_locals,
+                    captures,
+                    scope_locals,
+                );
+                self.collect_mutable_captures_in_expression(
+                    else_expr,
+                    method_locals,
+                    captures,
+                    scope_locals,
+                );
+            }
+            IrExpression::ObjectCreation { args, .. } => {
+                for arg in args {
+                    self.collect_mutable_captures_in_expression(
+                        arg,
+                        method_locals,
+                        captures,
+                        scope_locals,
+                    );
+                }
+            }
+            IrExpression::ArrayCreation { initializer, .. } => {
+                if let Some(values) = initializer {
+                    for value in values {
+                        self.collect_mutable_captures_in_expression(
+                            value,
+                            method_locals,
+                            captures,
+                            scope_locals,
+                        );
+                    }
+                }
+            }
+            IrExpression::SequencePipeline { pipeline, .. } => {
+                self.collect_mutable_captures_in_sequence_pipeline(
+                    pipeline,
+                    method_locals,
+                    captures,
+                    scope_locals,
+                );
+            }
+            IrExpression::Literal(_, _)
+            | IrExpression::RegexPattern { .. }
+            | IrExpression::Identifier { .. }
+            | IrExpression::Switch { .. }
+            | IrExpression::TryWithResources { .. }
+            | IrExpression::CompletableFuture { .. }
+            | IrExpression::VirtualThread { .. }
+            | IrExpression::NullSafeOperation { .. }
+            | IrExpression::FieldAccess { .. }
+            | IrExpression::ArrayAccess { .. }
+            | IrExpression::This { .. }
+            | IrExpression::Super { .. }
+            | IrExpression::StringFormat { .. }
+            | IrExpression::InstanceOf { .. }
+            | IrExpression::Cast { .. } => {}
+        }
+    }
+
+    fn collect_mutable_captures_in_sequence_pipeline(
+        &self,
+        pipeline: &SequencePipeline,
+        method_locals: &HashSet<String>,
+        captures: &mut HashSet<String>,
+        scope_locals: &HashSet<String>,
+    ) {
+        self.collect_mutable_captures_in_sequence_source(
+            &pipeline.source,
+            method_locals,
+            captures,
+            scope_locals,
+        );
+
+        for stage in &pipeline.stages {
+            match stage {
+                SequenceStage::Map { lambda, .. }
+                | SequenceStage::FlatMap { lambda, .. } => {
+                    self.collect_mutable_captures_in_expression(
+                        lambda,
+                        method_locals,
+                        captures,
+                        scope_locals,
+                    );
+                }
+                SequenceStage::Filter { predicate, .. } => {
+                    self.collect_mutable_captures_in_expression(
+                        predicate,
+                        method_locals,
+                        captures,
+                        scope_locals,
+                    );
+                }
+                SequenceStage::Take { count, .. }
+                | SequenceStage::Drop { count, .. } => {
+                    self.collect_mutable_captures_in_expression(
+                        count,
+                        method_locals,
+                        captures,
+                        scope_locals,
+                    );
+                }
+                SequenceStage::Sorted { comparator, .. } => {
+                    if let Some(expr) = comparator {
+                        self.collect_mutable_captures_in_expression(
+                            expr,
+                            method_locals,
+                            captures,
+                            scope_locals,
+                        );
+                    }
+                }
+            }
+        }
+
+        if let Some(terminal) = &pipeline.terminal {
+            match &terminal.kind {
+                SequenceTerminalKind::Fold { initial, accumulator } => {
+                    self.collect_mutable_captures_in_expression(
+                        initial,
+                        method_locals,
+                        captures,
+                        scope_locals,
+                    );
+                    self.collect_mutable_captures_in_expression(
+                        accumulator,
+                        method_locals,
+                        captures,
+                        scope_locals,
+                    );
+                }
+                SequenceTerminalKind::Reduce { accumulator } => {
+                    self.collect_mutable_captures_in_expression(
+                        accumulator,
+                        method_locals,
+                        captures,
+                        scope_locals,
+                    );
+                }
+                SequenceTerminalKind::GroupBy { key_selector } => {
+                    self.collect_mutable_captures_in_expression(
+                        key_selector,
+                        method_locals,
+                        captures,
+                        scope_locals,
+                    );
+                }
+                SequenceTerminalKind::Associate { pair_selector } => {
+                    self.collect_mutable_captures_in_expression(
+                        pair_selector,
+                        method_locals,
+                        captures,
+                        scope_locals,
+                    );
+                }
+                SequenceTerminalKind::ForEach { action } => {
+                    self.collect_mutable_captures_in_expression(
+                        action,
+                        method_locals,
+                        captures,
+                        scope_locals,
+                    );
+                }
+                SequenceTerminalKind::ToList
+                | SequenceTerminalKind::ToSet
+                | SequenceTerminalKind::Count
+                | SequenceTerminalKind::Sum => {}
+            }
+
+            if let Some(adapter) = &terminal.canonical_adapter {
+                self.collect_mutable_captures_in_expression(
+                    adapter,
+                    method_locals,
+                    captures,
+                    scope_locals,
+                );
+            }
+        }
+    }
+
+    fn collect_mutable_captures_in_sequence_source(
+        &self,
+        source: &SequenceSource,
+        method_locals: &HashSet<String>,
+        captures: &mut HashSet<String>,
+        scope_locals: &HashSet<String>,
+    ) {
+        match source {
+            SequenceSource::Collection { expr, .. }
+            | SequenceSource::Array { expr, .. }
+            | SequenceSource::JavaStream { expr, .. } => {
+                self.collect_mutable_captures_in_expression(
+                    expr,
+                    method_locals,
+                    captures,
+                    scope_locals,
+                );
+            }
+            SequenceSource::ListLiteral { elements, .. } => {
+                for element in elements {
+                    self.collect_mutable_captures_in_expression(
+                        element,
+                        method_locals,
+                        captures,
+                        scope_locals,
+                    );
+                }
+            }
+        }
+    }
+
+    fn is_known_record_component(&self, receiver: &IrExpression, field_name: &str) -> bool {
+        let Some(java_type) = Self::expression_java_type(receiver) else {
+            return false;
+        };
+
+        let JavaType::Reference { name, .. } = java_type else {
+            return false;
+        };
+
+        let mut candidates = Vec::new();
+        candidates.push(name.as_str());
+        if let Some(simple) = name.rsplit('.').next() {
+            candidates.push(simple);
+        }
+        if let Some(simple) = name.rsplit('$').next() {
+            candidates.push(simple);
+        }
+
+        for candidate in candidates {
+            if let Some(components) = self.record_components.get(candidate) {
+                if components.contains(field_name) {
+                    return true;
+                }
+            }
+        }
+
+        false
+    }
+
+    fn collect_mutable_captures_in_statement(
+        &self,
+        statement: &IrStatement,
+        method_locals: &HashSet<String>,
+        captures: &mut HashSet<String>,
+        scope_locals: &HashSet<String>,
+    ) -> HashSet<String> {
+        match statement {
+            IrStatement::Commented { statement, .. } => {
+                self.collect_mutable_captures_in_statement(
+                    statement,
+                    method_locals,
+                    captures,
+                    scope_locals,
+                )
+            }
+            IrStatement::VariableDeclaration {
+                name, initializer, ..
+            } => {
+                if let Some(init) = initializer {
+                    self.collect_mutable_captures_in_expression(
+                        init,
+                        method_locals,
+                        captures,
+                        scope_locals,
+                    );
+                }
+                let mut updated = scope_locals.clone();
+                updated.insert(name.clone());
+                updated
+            }
+            IrStatement::Expression { expr, .. } => {
+                self.collect_mutable_captures_in_expression(
+                    expr,
+                    method_locals,
+                    captures,
+                    scope_locals,
+                );
+                scope_locals.clone()
+            }
+            IrStatement::Return { value, .. } => {
+                if let Some(expr) = value {
+                    self.collect_mutable_captures_in_expression(
+                        expr,
+                        method_locals,
+                        captures,
+                        scope_locals,
+                    );
+                }
+                scope_locals.clone()
+            }
+            IrStatement::Block { statements, .. } => {
+                let mut block_scope = scope_locals.clone();
+                for stmt in statements {
+                    block_scope = self.collect_mutable_captures_in_statement(
+                        stmt,
+                        method_locals,
+                        captures,
+                        &block_scope,
+                    );
+                }
+                scope_locals.clone()
+            }
+            IrStatement::If {
+                condition,
+                then_stmt,
+                else_stmt,
+                ..
+            } => {
+                self.collect_mutable_captures_in_expression(
+                    condition,
+                    method_locals,
+                    captures,
+                    scope_locals,
+                );
+                let mut then_scope = scope_locals.clone();
+                then_scope = self.collect_mutable_captures_in_statement(
+                    then_stmt,
+                    method_locals,
+                    captures,
+                    &then_scope,
+                );
+                if let Some(else_branch) = else_stmt {
+                    let else_scope = scope_locals.clone();
+                    self.collect_mutable_captures_in_statement(
+                        else_branch,
+                        method_locals,
+                        captures,
+                        &else_scope,
+                    );
+                }
+                scope_locals.clone()
+            }
+            IrStatement::While { condition, body, .. } => {
+                self.collect_mutable_captures_in_expression(
+                    condition,
+                    method_locals,
+                    captures,
+                    scope_locals,
+                );
+                self.collect_mutable_captures_in_statement(
+                    body,
+                    method_locals,
+                    captures,
+                    scope_locals,
+                );
+                scope_locals.clone()
+            }
+            IrStatement::ForEach {
+                variable,
+                iterable,
+                body,
+                ..
+            } => {
+                self.collect_mutable_captures_in_expression(
+                    iterable,
+                    method_locals,
+                    captures,
+                    scope_locals,
+                );
+                let mut loop_scope = scope_locals.clone();
+                loop_scope.insert(variable.clone());
+                self.collect_mutable_captures_in_statement(
+                    body,
+                    method_locals,
+                    captures,
+                    &loop_scope,
+                );
+                scope_locals.clone()
+            }
+            IrStatement::For {
+                init,
+                condition,
+                update,
+                body,
+                ..
+            } => {
+                let mut loop_scope = scope_locals.clone();
+                if let Some(init_stmt) = init.as_deref() {
+                    loop_scope = self.collect_mutable_captures_in_statement(
+                        init_stmt,
+                        method_locals,
+                        captures,
+                        &loop_scope,
+                    );
+                }
+                if let Some(cond) = condition {
+                    self.collect_mutable_captures_in_expression(
+                        cond,
+                        method_locals,
+                        captures,
+                        &loop_scope,
+                    );
+                }
+                if let Some(update_expr) = update {
+                    self.collect_mutable_captures_in_expression(
+                        update_expr,
+                        method_locals,
+                        captures,
+                        &loop_scope,
+                    );
+                }
+                self.collect_mutable_captures_in_statement(
+                    body,
+                    method_locals,
+                    captures,
+                    &loop_scope,
+                );
+                scope_locals.clone()
+            }
+            IrStatement::Switch { discriminant, cases, .. } => {
+                self.collect_mutable_captures_in_expression(
+                    discriminant,
+                    method_locals,
+                    captures,
+                    scope_locals,
+                );
+                for case in cases {
+                    if let Some(guard) = &case.guard {
+                        self.collect_mutable_captures_in_expression(
+                            guard,
+                            method_locals,
+                            captures,
+                            scope_locals,
+                        );
+                    }
+                    self.collect_mutable_captures_in_expression(
+                        &case.body,
+                        method_locals,
+                        captures,
+                        scope_locals,
+                    );
+                }
+                scope_locals.clone()
+            }
+            IrStatement::Try {
+                body,
+                catch_clauses,
+                finally_block,
+                ..
+            } => {
+                self.collect_mutable_captures_in_statement(
+                    body,
+                    method_locals,
+                    captures,
+                    scope_locals,
+                );
+                for clause in catch_clauses {
+                    self.collect_mutable_captures_in_statement(
+                        &clause.body,
+                        method_locals,
+                        captures,
+                        scope_locals,
+                    );
+                }
+                if let Some(finally_stmt) = finally_block {
+                    self.collect_mutable_captures_in_statement(
+                        finally_stmt,
+                        method_locals,
+                        captures,
+                        scope_locals,
+                    );
+                }
+                scope_locals.clone()
+            }
+            IrStatement::TryWithResources {
+                resources,
+                body,
+                catch_clauses,
+                finally_block,
+                ..
+            } => {
+                let mut resource_scope = scope_locals.clone();
+                for resource in resources {
+                    resource_scope.insert(resource.name.clone());
+                    self.collect_mutable_captures_in_expression(
+                        &resource.initializer,
+                        method_locals,
+                        captures,
+                        &resource_scope,
+                    );
+                }
+                self.collect_mutable_captures_in_statement(
+                    body,
+                    method_locals,
+                    captures,
+                    &resource_scope,
+                );
+                for clause in catch_clauses {
+                    self.collect_mutable_captures_in_statement(
+                        &clause.body,
+                        method_locals,
+                        captures,
+                        scope_locals,
+                    );
+                }
+                if let Some(finally_stmt) = finally_block {
+                    self.collect_mutable_captures_in_statement(
+                        finally_stmt,
+                        method_locals,
+                        captures,
+                        scope_locals,
+                    );
+                }
+                scope_locals.clone()
+            }
+            _ => scope_locals.clone(),
+        }
+    }
+
+    fn boxed_type(java_type: &JavaType) -> JavaType {
+        match java_type {
+            JavaType::Primitive(name) => match name.as_str() {
+                "int" => JavaType::Reference {
+                    name: "Integer".to_string(),
+                    generic_args: vec![],
+                },
+                "boolean" => JavaType::Reference {
+                    name: "Boolean".to_string(),
+                    generic_args: vec![],
+                },
+                "double" => JavaType::Reference {
+                    name: "Double".to_string(),
+                    generic_args: vec![],
+                },
+                "float" => JavaType::Reference {
+                    name: "Float".to_string(),
+                    generic_args: vec![],
+                },
+                "long" => JavaType::Reference {
+                    name: "Long".to_string(),
+                    generic_args: vec![],
+                },
+                "byte" => JavaType::Reference {
+                    name: "Byte".to_string(),
+                    generic_args: vec![],
+                },
+                "short" => JavaType::Reference {
+                    name: "Short".to_string(),
+                    generic_args: vec![],
+                },
+                "char" => JavaType::Reference {
+                    name: "Character".to_string(),
+                    generic_args: vec![],
+                },
+                _ => JavaType::Reference {
+                    name: "Object".to_string(),
+                    generic_args: vec![],
+                },
+            },
+            _ => java_type.clone(),
+        }
     }
 
     fn symbol_index(&self) -> Option<&SymbolIndex> {

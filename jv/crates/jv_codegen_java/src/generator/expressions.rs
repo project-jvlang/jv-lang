@@ -26,7 +26,13 @@ impl JavaCodeGenerator {
                     Self::escape_string(pattern)
                 ))
             }
-            IrExpression::Identifier { name, .. } => Ok(name.clone()),
+            IrExpression::Identifier { name, .. } => {
+                if self.mutable_captures.contains(name) {
+                    Ok(format!("{}.get()", name))
+                } else {
+                    Ok(name.clone())
+                }
+            }
             IrExpression::MethodCall {
                 receiver,
                 method_name,
@@ -96,6 +102,7 @@ impl JavaCodeGenerator {
             } => {
                 let receiver_code = self.generate_expression(receiver)?;
                 if *is_record_component
+                    || self.is_known_record_component(receiver.as_ref(), field_name)
                     || self.should_call_method_for_field(receiver.as_ref(), field_name.as_str())
                 {
                     return Ok(format!("{}.{field_name}()", receiver_code));
@@ -137,11 +144,19 @@ impl JavaCodeGenerator {
                     UnaryOp::BitNot => format!("~{}", operand_code),
                 })
             }
-            IrExpression::Assignment { target, value, .. } => Ok(format!(
-                "{} = {}",
-                self.generate_expression(target)?,
-                self.generate_expression(value)?
-            )),
+            IrExpression::Assignment { target, value, .. } => {
+                if let IrExpression::Identifier { name, .. } = target.as_ref() {
+                    if self.mutable_captures.contains(name) {
+                        let value_expr = self.generate_expression(value)?;
+                        return Ok(format!("{}.set({})", name, value_expr));
+                    }
+                }
+                Ok(format!(
+                    "{} = {}",
+                    self.generate_expression(target)?,
+                    self.generate_expression(value)?
+                ))
+            }
             IrExpression::Conditional {
                 condition,
                 then_expr,
@@ -513,6 +528,23 @@ impl JavaCodeGenerator {
         }
     }
 
+    fn default_value_literal(java_type: &JavaType) -> String {
+        match java_type {
+            JavaType::Primitive(name) => match name.as_str() {
+                "boolean" => "false".to_string(),
+                "byte" => "(byte) 0".to_string(),
+                "short" => "(short) 0".to_string(),
+                "int" => "0".to_string(),
+                "long" => "0L".to_string(),
+                "float" => "0.0f".to_string(),
+                "double" => "0.0d".to_string(),
+                "char" => "'\\0'".to_string(),
+                _ => "0".to_string(),
+            },
+            _ => "null".to_string(),
+        }
+    }
+
     fn render_switch_expression_java21(
         &mut self,
         discriminant: &IrExpression,
@@ -580,7 +612,11 @@ impl JavaCodeGenerator {
             subject_binding, subject_expr
         ));
         if !result_is_void {
-            builder.push_line(&format!("final {} {};", result_type, result_binding));
+            let default_value = Self::default_value_literal(java_type);
+            builder.push_line(&format!(
+                "{} {} = {};",
+                result_type, result_binding, default_value
+            ));
         }
 
         builder.push_line("boolean __matched = false;");
@@ -1642,11 +1678,11 @@ impl JavaCodeGenerator {
         if let Some(index) = self.symbol_index() {
             if let Some(JavaType::Reference { name, .. }) = Self::expression_java_type(receiver) {
                 if let Some(entry) = index.lookup_type(name) {
-                    if entry.has_field(field_name) {
-                        return false;
-                    }
                     if entry.has_instance_method(field_name) {
                         return true;
+                    }
+                    if entry.has_field(field_name) {
+                        return false;
                     }
                 }
             }

@@ -3699,6 +3699,38 @@ fun sample(value: Any): Int {
     }
 
     #[test]
+    fn test_desugar_var_with_float_literal_infers_float_type() {
+        let mut context = test_context();
+
+        let stmt = Statement::VarDeclaration {
+            name: "total".to_string(),
+            type_annotation: None,
+            initializer: Some(Expression::Literal(
+                Literal::Number("0.0f".to_string()),
+                dummy_span(),
+            )),
+            modifiers: Modifiers::default(),
+            span: dummy_span(),
+            binding: None,
+        };
+
+        let lowered = transform_statement(stmt, &mut context)
+            .expect("var declaration lowering should succeed");
+
+        match lowered.as_slice() {
+            [IrStatement::VariableDeclaration { java_type, .. }] => {
+                assert_eq!(java_type, &JavaType::Primitive("float".to_string()));
+            }
+            other => panic!("expected variable declaration, got {:?}", other),
+        }
+
+        let ty = context
+            .lookup_variable("total")
+            .expect("total should be registered");
+        assert_eq!(ty, &JavaType::Primitive("float".to_string()));
+    }
+
+    #[test]
     fn test_transform_expression_binary_operation_creates_ir() {
         let mut context = test_context();
 
@@ -3721,6 +3753,34 @@ fun sample(value: Any): Int {
         match ir_expr {
             IrExpression::Binary { .. } => {}
             other => panic!("Expected binary IR expression, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_binary_addition_with_float_literals_preserves_float_type() {
+        let mut context = test_context();
+
+        let expr = Expression::Binary {
+            left: Box::new(Expression::Literal(
+                Literal::Number("0.5f".to_string()),
+                dummy_span(),
+            )),
+            op: BinaryOp::Add,
+            right: Box::new(Expression::Literal(
+                Literal::Number("1.5f".to_string()),
+                dummy_span(),
+            )),
+            span: dummy_span(),
+        };
+
+        let ir_expr = transform_expression(expr, &mut context)
+            .expect("float addition lowering should succeed");
+
+        match ir_expr {
+            IrExpression::Binary { java_type, .. } => {
+                assert_eq!(java_type, JavaType::Primitive("float".to_string()));
+            }
+            other => panic!("expected binary IR expression, got {:?}", other),
         }
     }
 

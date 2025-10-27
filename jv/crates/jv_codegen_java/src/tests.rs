@@ -1304,7 +1304,7 @@ fn primitive_specialized_pipeline_renders_character_casts() {
         "specialized sum should utilize mapToInt"
     );
     assert!(
-        class_java.contains("(int) (java.lang.Character) __jvIntFamilyValue.charValue()"),
+        class_java.contains("(int) ((java.lang.Character) __jvIntFamilyValue).charValue()"),
         "Character aliases must be cast to int\n\nGenerated output:\n{class_java}"
     );
     assert!(
@@ -1316,13 +1316,134 @@ fn primitive_specialized_pipeline_renders_character_casts() {
         "sequence source should stream the input collection"
     );
     assert!(
-        class_java.contains("(java.lang.Number) __jvIntFamilyValue.intValue()"),
+        class_java.contains("((java.lang.Number) __jvIntFamilyValue).intValue()"),
         "non-alias branch should fall back to Number::intValue\n\nGenerated output:\n{class_java}"
     );
     assert!(
         class_java.contains("sumCharsAsInt$IntVersion"),
         "primitive return metadata should trigger Int specialization suffix\n\nGenerated output:\n{class_java}"
     );
+}
+
+#[test]
+fn analyze_mutable_captures_detects_assignments_in_lambda() {
+    let mut generator = JavaCodeGenerator::new();
+
+    let accumulator_decl = IrStatement::VariableDeclaration {
+        name: "accumulator".to_string(),
+        java_type: JavaType::Reference {
+            name: "R".to_string(),
+            generic_args: vec![],
+        },
+        initializer: Some(IrExpression::Identifier {
+            name: "initial".to_string(),
+            java_type: JavaType::Reference {
+                name: "R".to_string(),
+                generic_args: vec![],
+            },
+            span: dummy_span(),
+        }),
+        is_final: false,
+        modifiers: IrModifiers::default(),
+        span: dummy_span(),
+    };
+
+    let assignment = IrExpression::Assignment {
+        target: Box::new(IrExpression::Identifier {
+            name: "accumulator".to_string(),
+            java_type: JavaType::Reference {
+                name: "R".to_string(),
+                generic_args: vec![],
+            },
+            span: dummy_span(),
+        }),
+        value: Box::new(IrExpression::Identifier {
+            name: "value".to_string(),
+            java_type: JavaType::Reference {
+                name: "T".to_string(),
+                generic_args: vec![],
+            },
+            span: dummy_span(),
+        }),
+        java_type: JavaType::Reference {
+            name: "R".to_string(),
+            generic_args: vec![],
+        },
+        span: dummy_span(),
+    };
+
+    let lambda = IrExpression::Lambda {
+        functional_interface: "java.util.function.Consumer".to_string(),
+        param_names: vec!["value".to_string()],
+        param_types: vec![JavaType::Reference {
+            name: "T".to_string(),
+            generic_args: vec![],
+        }],
+        body: Box::new(IrExpression::Block {
+            statements: vec![IrStatement::Expression {
+                expr: assignment,
+                span: dummy_span(),
+            }],
+            span: dummy_span(),
+            java_type: JavaType::Void,
+        }),
+        java_type: JavaType::Functional {
+            interface_name: "java.util.function.Consumer".to_string(),
+            param_types: vec![JavaType::Reference {
+                name: "T".to_string(),
+                generic_args: vec![],
+            }],
+            return_type: Box::new(JavaType::Void),
+        },
+        span: dummy_span(),
+    };
+
+    let for_each_call = IrExpression::MethodCall {
+        receiver: Some(Box::new(IrExpression::Identifier {
+            name: "receiver".to_string(),
+            java_type: JavaType::Reference {
+                name: "java.util.stream.Stream".to_string(),
+                generic_args: vec![],
+            },
+            span: dummy_span(),
+        })),
+        method_name: "forEach".to_string(),
+        java_name: Some("forEach".to_string()),
+        resolved_target: None,
+        args: vec![lambda],
+        argument_style: CallArgumentStyle::Comma,
+        java_type: JavaType::Void,
+        span: dummy_span(),
+    };
+
+    let method_body = IrExpression::Block {
+        statements: vec![
+            accumulator_decl,
+            IrStatement::Expression {
+                expr: for_each_call,
+                span: dummy_span(),
+            },
+            IrStatement::Return {
+                value: Some(IrExpression::Identifier {
+                    name: "accumulator".to_string(),
+                    java_type: JavaType::Reference {
+                        name: "R".to_string(),
+                        generic_args: vec![],
+                    },
+                    span: dummy_span(),
+                }),
+                span: dummy_span(),
+            },
+        ],
+        span: dummy_span(),
+        java_type: JavaType::Reference {
+            name: "R".to_string(),
+            generic_args: vec![],
+        },
+    };
+
+    let captures = generator.analyze_mutable_captures(&method_body);
+    assert!(captures.contains("accumulator"));
 }
 
 #[test]
@@ -2774,7 +2895,7 @@ fn switch_expression_renders_range_case_with_comment() {
         .generate_expression(&expression)
         .expect("range case should render");
 
-    let expected = "new Object() {\n    String matchExpr() {\n        final var __subject = x;\n        final String __matchResult;\n        boolean __matched = false;\n        if (!__matched) {\n            // range: 0..=10\n            final var it = __subject;\n            if (it >= 0 && it <= 10) {\n                __matchResult = \"small\";\n                __matched = true;\n            }\n        }\n        if (!__matched) {\n            __matchResult = \"fallback\";\n            __matched = true;\n        }\n        return __matchResult;\n    }\n}.matchExpr()\n";
+    let expected = "new Object() {\n    String matchExpr() {\n        final var __subject = x;\n        String __matchResult = null;\n        boolean __matched = false;\n        if (!__matched) {\n            // range: 0..=10\n            final var it = __subject;\n            if (it >= 0 && it <= 10) {\n                __matchResult = \"small\";\n                __matched = true;\n            }\n        }\n        if (!__matched) {\n            __matchResult = \"fallback\";\n            __matched = true;\n        }\n        return __matchResult;\n    }\n}.matchExpr()\n";
     assert_eq!(rendered, expected, "range case output mismatch");
 }
 
@@ -2801,7 +2922,7 @@ fn switch_expression_implicit_unit_renders_for_java21_target() {
         .generate_expression(&expression)
         .expect("java21 switch generation should succeed");
 
-    let expected = "new Object() {\n    String matchExpr() {\n        final var __subject = x;\n        final String __matchResult;\n        boolean __matched = false;\n        if (!__matched) {\n            if (java.util.Objects.equals(__subject, 1)) {\n                __matchResult = \"one\";\n                __matched = true;\n            }\n        }\n        if (!__matched) {\n            throw new IllegalStateException(\"non-exhaustive when expression\");\n        }\n        return __matchResult;\n    }\n}.matchExpr()\n";
+    let expected = "new Object() {\n    String matchExpr() {\n        final var __subject = x;\n        String __matchResult = null;\n        boolean __matched = false;\n        if (!__matched) {\n            if (java.util.Objects.equals(__subject, 1)) {\n                __matchResult = \"one\";\n                __matched = true;\n            }\n        }\n        if (!__matched) {\n            throw new IllegalStateException(\"non-exhaustive when expression\");\n        }\n        return __matchResult;\n    }\n}.matchExpr()\n";
     assert_eq!(
         rendered, expected,
         "java21 fallback should render lambda IIFE"
@@ -2843,7 +2964,7 @@ fn switch_expression_java21_type_pattern_fallback() {
         .generate_expression(&expression)
         .expect("java21 type pattern fallback should render");
 
-    let expected = "// strategy=Switch arms=2 guards=0 default=true exhaustive=true\nnew Object() {\n    String matchExpr() {\n        final var __subject = subject;\n        final String __matchResult;\n        boolean __matched = false;\n        if (!__matched) {\n            if (__subject instanceof String value) {\n                __matchResult = \"string\";\n                __matched = true;\n            }\n        }\n        if (!__matched) {\n            __matchResult = \"other\";\n            __matched = true;\n        }\n        return __matchResult;\n    }\n}.matchExpr()\n";
+    let expected = "// strategy=Switch arms=2 guards=0 default=true exhaustive=true\nnew Object() {\n    String matchExpr() {\n        final var __subject = subject;\n        String __matchResult = null;\n        boolean __matched = false;\n        if (!__matched) {\n            if (__subject instanceof String value) {\n                __matchResult = \"string\";\n                __matched = true;\n            }\n        }\n        if (!__matched) {\n            __matchResult = \"other\";\n            __matched = true;\n        }\n        return __matchResult;\n    }\n}.matchExpr()\n";
     assert_eq!(
         rendered, expected,
         "java21 fallback should use instanceof pattern"
@@ -2927,7 +3048,7 @@ fn switch_expression_java21_range_pattern_fallback() {
         .generate_expression(&expression)
         .expect("java21 range pattern fallback should render");
 
-    let expected = "new Object() {\n    String matchExpr() {\n        final var __subject = score;\n        final String __matchResult;\n        boolean __matched = false;\n        if (!__matched) {\n            // range: 0..=10\n            final var it0 = __subject;\n            if (it0 >= 0 && it0 <= 10) {\n                __matchResult = \"small\";\n                __matched = true;\n            }\n        }\n        if (!__matched) {\n            __matchResult = \"other\";\n            __matched = true;\n        }\n        return __matchResult;\n    }\n}.matchExpr()\n";
+    let expected = "new Object() {\n    String matchExpr() {\n        final var __subject = score;\n        String __matchResult = null;\n        boolean __matched = false;\n        if (!__matched) {\n            // range: 0..=10\n            final var it0 = __subject;\n            if (it0 >= 0 && it0 <= 10) {\n                __matchResult = \"small\";\n                __matched = true;\n            }\n        }\n        if (!__matched) {\n            __matchResult = \"other\";\n            __matched = true;\n        }\n        return __matchResult;\n    }\n}.matchExpr()\n";
     assert_eq!(
         rendered, expected,
         "java21 fallback should expand range patterns"
@@ -2965,7 +3086,7 @@ fn switch_expression_with_boolean_literals_does_not_require_preview() {
         .generate_expression(&expression)
         .expect("boolean literal switch should render");
 
-    let expected = "// strategy=Switch arms=2 guards=0 default=false exhaustive=unknown\nnew Object() {\n    String matchExpr() {\n        final var __subject = flag;\n        final String __matchResult;\n        boolean __matched = false;\n        if (!__matched) {\n            if (java.util.Objects.equals(__subject, true)) {\n                __matchResult = \"set\";\n                __matched = true;\n            }\n        }\n        if (!__matched) {\n            if (java.util.Objects.equals(__subject, false)) {\n                __matchResult = \"unset\";\n                __matched = true;\n            }\n        }\n        if (!__matched) {\n            throw new IllegalStateException(\"non-exhaustive when expression\");\n        }\n        return __matchResult;\n    }\n}.matchExpr()\n";
+    let expected = "// strategy=Switch arms=2 guards=0 default=false exhaustive=unknown\nnew Object() {\n    String matchExpr() {\n        final var __subject = flag;\n        String __matchResult = null;\n        boolean __matched = false;\n        if (!__matched) {\n            if (java.util.Objects.equals(__subject, true)) {\n                __matchResult = \"set\";\n                __matched = true;\n            }\n        }\n        if (!__matched) {\n            if (java.util.Objects.equals(__subject, false)) {\n                __matchResult = \"unset\";\n                __matched = true;\n            }\n        }\n        if (!__matched) {\n            throw new IllegalStateException(\"non-exhaustive when expression\");\n        }\n        return __matchResult;\n    }\n}.matchExpr()\n";
     assert_eq!(
         rendered, expected,
         "boolean cases should fall back to safe lowering"
@@ -3058,7 +3179,7 @@ fn switch_expression_nested_destructuring_java25_and_java21() {
         .generate_expression(&expression)
         .expect("java21 nested pattern fallback generation");
 
-    let expected_java21 = "// strategy=Switch arms=2 guards=0 default=true exhaustive=true\nnew Object() {\n    int matchExpr() {\n        final var __subject = value;\n        final int __matchResult;\n        boolean __matched = false;\n        if (!__matched) {\n            do {\n                if (!(__subject instanceof Outer(Inner(var x, var y), var count) outer)) {\n                    break;\n                }\n                __matched = true;\n                __matchResult = x + y + count;\n                break;\n            } while (false);\n        }\n        if (!__matched) {\n            __matchResult = 0;\n            __matched = true;\n        }\n        return __matchResult;\n    }\n}.matchExpr()\n";
+    let expected_java21 = "// strategy=Switch arms=2 guards=0 default=true exhaustive=true\nnew Object() {\n    int matchExpr() {\n        final var __subject = value;\n        int __matchResult = 0;\n        boolean __matched = false;\n        if (!__matched) {\n            do {\n                if (!(__subject instanceof Outer(Inner(var x, var y), var count) outer)) {\n                    break;\n                }\n                __matched = true;\n                __matchResult = x + y + count;\n                break;\n            } while (false);\n        }\n        if (!__matched) {\n            __matchResult = 0;\n            __matched = true;\n        }\n        return __matchResult;\n    }\n}.matchExpr()\n";
 
     assert_eq!(rendered_java21, expected_java21);
 }
