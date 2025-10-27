@@ -26,6 +26,7 @@ use jv_parser_frontend::ParserPipeline;
 use jv_parser_rowan::frontend::RowanPipeline;
 use serde::Serialize;
 
+use crate::java_type_names::derive_type_name;
 use crate::pipeline::generics::apply_type_facts;
 use crate::tooling_failure;
 use tracing::warn;
@@ -1556,38 +1557,6 @@ fn render_java_type(java_type: &JavaType) -> String {
         },
         JavaType::Void => "void".to_string(),
     }
-}
-
-fn derive_type_name(type_decl: &str) -> Option<String> {
-    let mut tokens = type_decl.split_whitespace().peekable();
-
-    while let Some(token) = tokens.next() {
-        match token {
-            "class" | "record" | "interface" | "enum" => {
-                let name_token = tokens.next()?;
-                return Some(clean_type_token(name_token));
-            }
-            "sealed" | "non-sealed" => {
-                if let Some(peek) = tokens.peek() {
-                    if matches!(*peek, "class" | "record" | "interface" | "enum") {
-                        continue;
-                    }
-                }
-            }
-            _ => continue,
-        }
-    }
-
-    None
-}
-
-fn clean_type_token(raw: &str) -> String {
-    let trimmed = raw.trim_matches(|c: char| c == '{' || c == ';');
-    let split = trimmed
-        .split(|c| matches!(c, '<' | '('))
-        .next()
-        .unwrap_or(trimmed);
-    split.trim().to_string()
 }
 
 #[cfg(test)]

@@ -252,6 +252,130 @@ fn end_to_end_sample_annotation_embed_workflow() {
 }
 
 #[test]
+fn generated_main_class_name_matches_primary_java_filename() {
+    let Some(cli_path) = std::env::var_os("CARGO_BIN_EXE_jv").map(PathBuf::from) else {
+        eprintln!("Skipping class/filename alignment test: CLI binary path not found");
+        return;
+    };
+
+    if !has_javac() {
+        eprintln!("Skipping class/filename alignment test: javac not available");
+        return;
+    }
+
+    let workspace = tempdir().expect("create temp workspace");
+    let main_path = workspace.path().join("class_name_alignment.jv");
+    let output_dir = workspace.path().join("out");
+    let main_class = compute_script_main_class("", &main_path);
+
+    let program = "fun main() {\n    println(\"class name alignment\")\n}\n";
+    fs::write(&main_path, program).expect("write alignment program");
+
+    let java_sources = build_sample_program(&cli_path, &main_path, &output_dir);
+    assert!(
+        !java_sources.is_empty(),
+        "expected Java sources to be generated in {}",
+        output_dir.display()
+    );
+
+    let expected_java = output_dir.join(format!("{}.java", main_class));
+    assert!(
+        expected_java.exists(),
+        "expected {} to be generated alongside {:?}",
+        expected_java.display(),
+        java_sources
+    );
+
+    assert!(
+        java_sources.iter().any(|path| {
+            path.file_stem().and_then(|stem| stem.to_str()) == Some(main_class.as_str())
+        }),
+        "expected at least one Java source matching class name {main_class}, got {:?}",
+        java_sources
+    );
+
+    let java_contents =
+        fs::read_to_string(&expected_java).expect("read generated Java source for alignment check");
+    assert!(
+        java_contents.contains(&format!("class {}", main_class)),
+        "Java file {} should declare class {}, but declaration was missing.\n{}",
+        expected_java.display(),
+        main_class,
+        &java_contents
+            .lines()
+            .take(20)
+            .collect::<Vec<_>>()
+            .join("\n")
+    );
+}
+
+#[test]
+fn data_class_generates_java_file_matching_type_name() {
+    let Some(cli_path) = std::env::var_os("CARGO_BIN_EXE_jv").map(PathBuf::from) else {
+        eprintln!("Skipping data class naming test: CLI binary path not found");
+        return;
+    };
+
+    if !has_javac() {
+        eprintln!("Skipping data class naming test: javac not available");
+        return;
+    }
+
+    let workspace = tempdir().expect("create temp workspace");
+    let main_path = workspace.path().join("data_class_alignment.jv");
+    let output_dir = workspace.path().join("out");
+    let main_class = compute_script_main_class("", &main_path);
+
+    let program = r#"
+data class User(val name: String, val age: Int)
+
+fun main() {
+    val user = User("Bob", 42)
+    println(user)
+}
+"#;
+    fs::write(&main_path, program).expect("write data class program");
+
+    let java_sources = build_sample_program(&cli_path, &main_path, &output_dir);
+    assert!(
+        java_sources.len() >= 2,
+        "expected multiple Java sources (script + data class), got {:?}",
+        java_sources
+    );
+
+    let expected_main = output_dir.join(format!("{main_class}.java"));
+    assert!(
+        expected_main.exists(),
+        "primary script file {main_class}.java should exist"
+    );
+
+    let user_java = output_dir.join("User.java");
+    assert!(
+        user_java.exists(),
+        "expected data class Java file {:?} to be emitted alongside {:?}",
+        user_java,
+        java_sources
+    );
+
+    let contains_user_java = java_sources
+        .iter()
+        .any(|path| path.file_name().is_some_and(|name| name == "User.java"));
+    assert!(
+        contains_user_java,
+        "enumerated Java sources should include User.java, got {:?}",
+        java_sources
+    );
+
+    let java_contents =
+        fs::read_to_string(&user_java).expect("read generated data class Java file");
+    assert!(
+        java_contents.contains("record User"),
+        "expected User.java to declare record User, contents:\n{}",
+        java_contents
+    );
+}
+
+#[test]
 fn end_to_end_sample_annotation_load_refreshes_runtime_data() {
     let Some(cli_path) = std::env::var_os("CARGO_BIN_EXE_jv").map(PathBuf::from) else {
         eprintln!("Skipping sample load end-to-end test: CLI binary path not found");

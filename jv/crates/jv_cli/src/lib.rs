@@ -14,6 +14,7 @@ use jv_checker::diagnostics::{
 use jv_pm::JavaTarget;
 
 mod embedded_stdlib;
+mod java_type_names;
 mod sequence_warnings;
 
 pub mod commands;
@@ -866,12 +867,28 @@ pub mod pipeline {
         })?;
 
         let mut java_files = Vec::new();
+        let mut emitted_java_filenames = HashSet::new();
         for (index, type_decl) in java_unit.type_declarations.iter().enumerate() {
-            let java_filename = if index == 0 {
-                format!("{}.java", script_main_class)
+            let preferred_name = if index == 0 {
+                script_main_class.clone()
             } else {
-                format!("{}{}.java", script_main_class, index)
+                crate::java_type_names::derive_type_name(type_decl)
+                    .unwrap_or_else(|| format!("{}{}", script_main_class, index))
             };
+
+            let mut java_filename = format!("{}.java", preferred_name);
+            if !emitted_java_filenames.insert(java_filename.clone()) {
+                let mut suffix = 1usize;
+                loop {
+                    let candidate = format!("{}_{suffix}.java", preferred_name);
+                    if emitted_java_filenames.insert(candidate.clone()) {
+                        java_filename = candidate;
+                        break;
+                    }
+                    suffix += 1;
+                }
+            }
+
             let java_path = options.output_dir.join(&java_filename);
 
             let mut java_content = String::new();
