@@ -365,6 +365,62 @@ fn filter_even_stage() -> SequenceStage {
     }
 }
 
+fn string_concatenation_map_stage() -> SequenceStage {
+    let suffix = IrExpression::Literal(Literal::String("-guide".to_string()), dummy_span());
+    let concatenation = IrExpression::Binary {
+        left: Box::new(identifier("value")),
+        op: BinaryOp::Add,
+        right: Box::new(suffix),
+        java_type: JavaType::object(),
+        span: dummy_span(),
+    };
+
+    let lambda = IrExpression::Lambda {
+        functional_interface: "java.util.function.Function".to_string(),
+        param_names: vec!["value".to_string()],
+        param_types: vec![JavaType::object()],
+        body: Box::new(concatenation),
+        java_type: JavaType::object(),
+        span: dummy_span(),
+    };
+
+    SequenceStage::Map {
+        lambda: Box::new(lambda),
+        result_hint: None,
+        span: dummy_span(),
+    }
+}
+
+fn string_length_filter_stage() -> SequenceStage {
+    let length_access = IrExpression::FieldAccess {
+        receiver: Box::new(identifier("candidate")),
+        field_name: "length".to_string(),
+        java_type: JavaType::Primitive("int".to_string()),
+        span: dummy_span(),
+        is_record_component: false,
+    };
+    let comparison = IrExpression::Binary {
+        left: Box::new(length_access),
+        op: BinaryOp::Greater,
+        right: Box::new(number_literal("6")),
+        java_type: JavaType::Primitive("boolean".to_string()),
+        span: dummy_span(),
+    };
+    let predicate = IrExpression::Lambda {
+        functional_interface: "java.util.function.Predicate".to_string(),
+        param_names: vec!["candidate".to_string()],
+        param_types: vec![JavaType::object()],
+        body: Box::new(comparison),
+        java_type: JavaType::Primitive("boolean".to_string()),
+        span: dummy_span(),
+    };
+
+    SequenceStage::Filter {
+        predicate: Box::new(predicate),
+        span: dummy_span(),
+    }
+}
+
 fn collection_source(name: &str) -> SequenceSource {
     SequenceSource::Collection {
         expr: Box::new(identifier(name)),
@@ -821,6 +877,43 @@ fn map_filter_pipeline_renders_expected_lambdas() {
     assert!(
         rendered21.contains("Collectors.toList()"),
         "expected Java 21 pipeline to collect to list, got: {rendered21}"
+    );
+}
+
+#[test]
+fn string_length_filter_prefers_accessor_call() {
+    let terminal = SequenceTerminal {
+        kind: SequenceTerminalKind::ToList,
+        evaluation: SequenceTerminalEvaluation::Collector,
+        requires_non_empty_source: false,
+        specialization_hint: None,
+        canonical_adapter: None,
+        span: dummy_span(),
+    };
+
+    let expr = build_pipeline(
+        collection_source("chapters"),
+        vec![
+            string_concatenation_map_stage(),
+            string_length_filter_stage(),
+        ],
+        terminal,
+        JavaType::list(),
+    );
+
+    let mut generator =
+        JavaCodeGenerator::with_config(JavaCodeGenConfig::for_target(JavaTarget::Java25));
+    let rendered = generator
+        .generate_expression(&expr)
+        .expect("string length filter pipeline renders for Java 25");
+
+    assert!(
+        rendered.contains("candidate.length()"),
+        "expected filter to call String::length accessor, got: {rendered}"
+    );
+    assert!(
+        !rendered.contains("candidate.length >"),
+        "filter should not use field-style access for String length: {rendered}"
     );
 }
 
