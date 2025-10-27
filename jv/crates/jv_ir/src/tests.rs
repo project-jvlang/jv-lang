@@ -111,6 +111,58 @@ mod tests {
     }
 
     #[test]
+    fn rowan_pipeline_produces_generic_signature() {
+        let source = r#"
+            fun <T, R : Comparable<R>> Iterable<T>.sortedBy(selector: (T) -> R): Stream<T> {
+                return this.sortedBy(selector)
+            }
+        "#;
+
+        let frontend = RowanPipeline::default()
+            .parse(source)
+            .expect("parse succeeds");
+        let program = frontend.into_program();
+        let statement = program.statements.first().expect("one statement produced");
+
+        let extension = match statement {
+            Statement::ExtensionFunction(ext) => ext,
+            other => panic!("expected extension function, got {:?}", other),
+        };
+
+        let signature = match extension.function.as_ref() {
+            Statement::FunctionDeclaration {
+                generic_signature: Some(signature),
+                ..
+            } => signature,
+            other => panic!("expected function with signature, got {:?}", other),
+        };
+
+        assert_eq!(signature.parameters.len(), 2);
+        let mut names = signature
+            .parameters
+            .iter()
+            .map(|param| param.name.as_str())
+            .collect::<Vec<_>>();
+        names.sort();
+        assert_eq!(names, vec!["R", "T"]);
+
+        let r_param = signature
+            .parameters
+            .iter()
+            .find(|param| param.name == "R")
+            .expect("R parameter present");
+        assert_eq!(r_param.bounds.len(), 1);
+        match &r_param.bounds[0] {
+            TypeAnnotation::Generic { name, type_args } => {
+                assert_eq!(name, "Comparable");
+                assert_eq!(type_args.len(), 1);
+                assert!(matches!(type_args[0], TypeAnnotation::Simple(ref inner) if inner == "R"));
+            }
+            other => panic!("unexpected bound annotation {:?}", other),
+        }
+    }
+
+    #[test]
     fn transform_profiler_collects_metrics() {
         let program = simple_program();
         let mut context = TransformContext::new();
@@ -2588,6 +2640,153 @@ mod tests {
                         generic_args: vec![],
                     }
                 );
+            }
+            other => panic!("Expected method declaration, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn desugar_top_level_function_preserves_generic_bounds() {
+        let mut context = test_context();
+
+        let function = Statement::FunctionDeclaration {
+            name: "useComparable".to_string(),
+            type_parameters: vec!["R".to_string()],
+            generic_signature: Some(GenericSignature {
+                parameters: vec![GenericParameter {
+                    name: "R".to_string(),
+                    bounds: vec![TypeAnnotation::Generic {
+                        name: "Comparable".to_string(),
+                        type_args: vec![TypeAnnotation::Simple("R".to_string())],
+                    }],
+                    variance: None,
+                    default: None,
+                    kind: None,
+                    span: dummy_span(),
+                }],
+                const_parameters: vec![],
+                where_clause: None,
+                raw_directives: vec![],
+                span: dummy_span(),
+            }),
+            where_clause: None,
+            parameters: vec![Parameter {
+                name: "value".to_string(),
+                type_annotation: Some(TypeAnnotation::Simple("R".to_string())),
+                default_value: None,
+                modifiers: ParameterModifiers::default(),
+                span: dummy_span(),
+            }],
+            return_type: Some(TypeAnnotation::Simple("R".to_string())),
+            primitive_return: None,
+            body: Box::new(Expression::Identifier("value".to_string(), dummy_span())),
+            modifiers: Modifiers::default(),
+            span: dummy_span(),
+        };
+
+        let result = desugar_top_level_function(function, &mut context)
+            .expect("bounded generics should desugar successfully");
+
+        match result {
+            IrStatement::MethodDeclaration {
+                type_parameters, ..
+            } => {
+                assert_eq!(type_parameters.len(), 1);
+                assert_eq!(type_parameters[0].name, "R");
+                let expected_bound = JavaType::Reference {
+                    name: "Comparable".to_string(),
+                    generic_args: vec![JavaType::Reference {
+                        name: "R".to_string(),
+                        generic_args: vec![],
+                    }],
+                };
+                assert_eq!(type_parameters[0].bounds, vec![expected_bound]);
+            }
+            other => panic!("Expected method declaration, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn desugar_extension_function_preserves_generic_bounds() {
+        let mut context = test_context();
+
+        let extension_body = Box::new(Statement::FunctionDeclaration {
+            name: "sortedBy".to_string(),
+            type_parameters: vec!["T".to_string(), "R".to_string()],
+            generic_signature: Some(GenericSignature {
+                parameters: vec![
+                    GenericParameter {
+                        name: "T".to_string(),
+                        bounds: vec![],
+                        variance: None,
+                        default: None,
+                        kind: None,
+                        span: dummy_span(),
+                    },
+                    GenericParameter {
+                        name: "R".to_string(),
+                        bounds: vec![TypeAnnotation::Generic {
+                            name: "Comparable".to_string(),
+                            type_args: vec![TypeAnnotation::Simple("R".to_string())],
+                        }],
+                        variance: None,
+                        default: None,
+                        kind: None,
+                        span: dummy_span(),
+                    },
+                ],
+                const_parameters: vec![],
+                where_clause: None,
+                raw_directives: vec![],
+                span: dummy_span(),
+            }),
+            where_clause: None,
+            parameters: vec![Parameter {
+                name: "selector".to_string(),
+                type_annotation: Some(TypeAnnotation::Function {
+                    params: vec![TypeAnnotation::Simple("T".to_string())],
+                    return_type: Box::new(TypeAnnotation::Simple("R".to_string())),
+                }),
+                default_value: None,
+                modifiers: ParameterModifiers::default(),
+                span: dummy_span(),
+            }],
+            return_type: Some(TypeAnnotation::Generic {
+                name: "Stream".to_string(),
+                type_args: vec![TypeAnnotation::Simple("T".to_string())],
+            }),
+            primitive_return: None,
+            body: Box::new(Expression::Identifier("receiver".to_string(), dummy_span())),
+            modifiers: Modifiers::default(),
+            span: dummy_span(),
+        });
+
+        let receiver_type = TypeAnnotation::Generic {
+            name: "Stream".to_string(),
+            type_args: vec![TypeAnnotation::Simple("T".to_string())],
+        };
+
+        let result =
+            desugar_extension_function(receiver_type, extension_body, dummy_span(), &mut context)
+                .expect("extension function should desugar successfully");
+
+        match result {
+            IrStatement::MethodDeclaration {
+                type_parameters, ..
+            } => {
+                assert_eq!(type_parameters.len(), 2);
+                let r_param = type_parameters
+                    .iter()
+                    .find(|param| param.name == "R")
+                    .expect("R param");
+                let expected_bound = JavaType::Reference {
+                    name: "Comparable".to_string(),
+                    generic_args: vec![JavaType::Reference {
+                        name: "R".to_string(),
+                        generic_args: vec![],
+                    }],
+                };
+                assert_eq!(r_param.bounds, vec![expected_bound]);
             }
             other => panic!("Expected method declaration, got {:?}", other),
         }

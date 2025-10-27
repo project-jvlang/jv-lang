@@ -19,7 +19,10 @@ use jv_ast::statement::{
     NumericRangeLoop, Property, ResourceManagement, ValBindingOrigin,
 };
 use jv_ast::strings::{MultilineKind, MultilineStringLiteral};
-use jv_ast::types::{BinaryOp, Literal, Modifiers, Pattern, TypeAnnotation, UnaryOp};
+use jv_ast::types::{
+    BinaryOp, GenericParameter, GenericSignature, Literal, Modifiers, Pattern, TypeAnnotation,
+    UnaryOp, VarianceMarker,
+};
 use jv_ast::{BindingPatternKind, Expression, SequenceDelimiter, Span, Statement};
 use jv_lexer::{
     JsonCommentTrivia, JsonCommentTriviaKind, JsonConfidence, LayoutMode, Lexer,
@@ -4461,6 +4464,161 @@ fn extract_type_parameter_names(tokens: Option<&[&Token]>) -> Vec<String> {
     names
 }
 
+fn lower_generic_signature_tokens(tokens: Option<&[&Token]>) -> Option<GenericSignature> {
+    let tokens = tokens?;
+    if tokens.len() < 3 {
+        return None;
+    }
+
+    let mut parameters = Vec::new();
+    let mut index = 1usize;
+    let end = tokens.len() - 1;
+
+    while index < end {
+        while index < end
+            && matches!(
+                tokens[index].token_type,
+                TokenType::Comma | TokenType::LayoutComma
+            )
+        {
+            index += 1;
+        }
+
+        if index >= end {
+            break;
+        }
+
+        let param_start_index = index;
+
+        let variance = match &tokens[index].token_type {
+            TokenType::Identifier(text) if text == "out" => {
+                index += 1;
+                Some(VarianceMarker::Covariant)
+            }
+            TokenType::Identifier(text) if text == "in" => {
+                index += 1;
+                Some(VarianceMarker::Contravariant)
+            }
+            _ => None,
+        };
+
+        if index >= end {
+            break;
+        }
+
+        let name_token = tokens[index];
+        let name = match &name_token.token_type {
+            TokenType::Identifier(text) => text.clone(),
+            _ => break,
+        };
+        index += 1;
+
+        let mut bounds = Vec::new();
+
+        if index < end && matches!(tokens[index].token_type, TokenType::Colon) {
+            index += 1;
+            loop {
+                let (annotation_tokens, next_index) =
+                    collect_type_annotation_tokens(tokens, index, end);
+                if annotation_tokens.is_empty() {
+                    index = next_index;
+                    break;
+                }
+
+                match lower_type_annotation_from_tokens(&annotation_tokens) {
+                    Ok(lowered) => bounds.push(lowered.annotation().clone()),
+                    Err(_) => return None,
+                }
+
+                index = next_index;
+
+                break;
+            }
+        }
+
+        let default = if index < end && matches!(tokens[index].token_type, TokenType::Assign) {
+            index += 1;
+            let (default_tokens, next_index) = collect_type_annotation_tokens(tokens, index, end);
+            index = next_index;
+            if default_tokens.is_empty() {
+                None
+            } else {
+                match lower_type_annotation_from_tokens(&default_tokens) {
+                    Ok(lowered) => Some(lowered.annotation().clone()),
+                    Err(_) => None,
+                }
+            }
+        } else {
+            None
+        };
+
+        let param_end_index = if index > param_start_index {
+            index - 1
+        } else {
+            param_start_index
+        };
+        let start_span = span_from_token(tokens[param_start_index]);
+        let end_span = span_from_token(tokens[param_end_index.min(end - 1)]);
+        let param_span = merge_spans(&start_span, &end_span);
+
+        parameters.push(GenericParameter {
+            name,
+            bounds,
+            variance,
+            default,
+            kind: None,
+            span: param_span,
+        });
+    }
+
+    if parameters.is_empty() {
+        return None;
+    }
+
+    let signature_span = merge_spans(
+        &span_from_token(tokens.first().unwrap()),
+        &span_from_token(tokens.last().unwrap()),
+    );
+
+    Some(GenericSignature {
+        parameters,
+        const_parameters: Vec::new(),
+        where_clause: None,
+        raw_directives: Vec::new(),
+        span: signature_span,
+    })
+}
+
+fn collect_type_annotation_tokens(
+    tokens: &[&Token],
+    mut index: usize,
+    end: usize,
+) -> (Vec<Token>, usize) {
+    let mut collected = Vec::new();
+    let mut depth = 0usize;
+
+    while index < end {
+        let token = tokens[index];
+        match token.token_type {
+            TokenType::Comma | TokenType::LayoutComma if depth == 0 => break,
+            TokenType::Assign if depth == 0 => break,
+            TokenType::Where if depth == 0 => break,
+            TokenType::Less | TokenType::LeftParen | TokenType::LeftBracket => {
+                depth = depth.saturating_add(1);
+            }
+            TokenType::Greater | TokenType::RightParen | TokenType::RightBracket => {
+                depth = depth.saturating_sub(1);
+            }
+            _ => {}
+        }
+
+        collected.push(token.clone());
+        index += 1;
+    }
+
+    (collected, index)
+}
+
 fn locate_function_name_index(tokens: &[&Token]) -> Option<usize> {
     let mut depth = 0usize;
     for (index, token) in tokens.iter().enumerate().rev() {
@@ -4590,7 +4748,16 @@ fn lower_function(
 
     let signature_tokens = collect_function_signature_tokens(&tokens);
     let (generic_segment, signature_tail) = split_generic_segment(signature_tokens.as_slice());
-    let type_parameters = extract_type_parameter_names(generic_segment);
+    let generic_signature = lower_generic_signature_tokens(generic_segment);
+    let type_parameters = if let Some(signature) = &generic_signature {
+        signature
+            .parameters
+            .iter()
+            .map(|param| param.name.clone())
+            .collect()
+    } else {
+        extract_type_parameter_names(generic_segment)
+    };
 
     let name_index = locate_function_name_index(signature_tail).ok_or_else(|| {
         LoweringDiagnostic::new(
@@ -4659,7 +4826,7 @@ fn lower_function(
     let function_statement = Statement::FunctionDeclaration {
         name: name.clone(),
         type_parameters,
-        generic_signature: None,
+        generic_signature,
         where_clause: None,
         parameters,
         return_type,
