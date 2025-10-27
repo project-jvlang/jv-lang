@@ -112,6 +112,17 @@ fn workspace_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join("..")
 }
 
+fn toolchains_root() -> Option<PathBuf> {
+    let workspace = workspace_root();
+    for ancestor in workspace.ancestors() {
+        let candidate = ancestor.join("toolchains");
+        if candidate.exists() {
+            return Some(candidate);
+        }
+    }
+    None
+}
+
 fn workspace_file(relative: &str) -> PathBuf {
     workspace_root().join(relative)
 }
@@ -154,9 +165,8 @@ fn expected_major_version(target: JavaTarget) -> u32 {
 }
 
 fn toolchain_java_home(target: JavaTarget) -> Option<PathBuf> {
-    let path = workspace_root()
-        .join("toolchains")
-        .join(target_toolchain_dir(target));
+    let root = toolchains_root()?;
+    let path = root.join(target_toolchain_dir(target));
     let java_bin = path.join("bin").join(java_executable());
     if java_bin.exists() {
         Some(path)
@@ -309,6 +319,89 @@ fn java_executable() -> &'static str {
     }
 }
 
+fn cli_binary_filename() -> &'static str {
+    if cfg!(windows) {
+        "jv.exe"
+    } else {
+        "jv"
+    }
+}
+
+fn cargo_target_dir() -> PathBuf {
+    env::var_os("CARGO_TARGET_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| workspace_root().join("target"))
+}
+
+fn discover_cli_binary() -> Option<PathBuf> {
+    let binary_name = cli_binary_filename();
+    let mut candidates = Vec::new();
+    let target_dir = cargo_target_dir();
+
+    candidates.push(target_dir.join("debug").join(binary_name));
+    candidates.push(target_dir.join("release").join(binary_name));
+
+    if let Ok(entries) = fs::read_dir(&target_dir) {
+        for entry in entries.flatten() {
+            if entry
+                .file_type()
+                .map(|ty| ty.is_dir())
+                .unwrap_or(false)
+            {
+                candidates.push(entry.path().join("debug").join(binary_name));
+                candidates.push(entry.path().join("release").join(binary_name));
+            }
+        }
+    }
+
+    if let Some(toolchains_dir) = toolchains_root() {
+        if let Ok(entries) = fs::read_dir(&toolchains_dir) {
+            for entry in entries.flatten() {
+                if !entry
+                    .file_type()
+                    .map(|ty| ty.is_dir())
+                    .unwrap_or(false)
+                {
+                    continue;
+                }
+                let root = entry.path();
+                candidates.push(root.join(binary_name));
+                candidates.push(root.join("bin").join(binary_name));
+                if let Ok(subentries) = fs::read_dir(&root) {
+                    for sub in subentries.flatten() {
+                        if sub
+                            .file_type()
+                            .map(|ty| ty.is_dir())
+                            .unwrap_or(false)
+                        {
+                            candidates.push(sub.path().join(binary_name));
+                            candidates.push(sub.path().join("bin").join(binary_name));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    candidates.into_iter().find(|path| path.exists())
+}
+
+fn cli_binary_path() -> Result<PathBuf, String> {
+    if let Some(path) = env::var_os("CARGO_BIN_EXE_jv").map(PathBuf::from) {
+        return Ok(path);
+    }
+
+    if let Some(path) = discover_cli_binary() {
+        eprintln!(
+            "CARGO_BIN_EXE_jv not set; inferred CLI binary at {}",
+            path.display()
+        );
+        return Ok(path);
+    }
+
+    Err("CLI binary not available; run `cargo build -p jv_cli --bin jv` before executing this test".to_string())
+}
+
 fn default_java_target() -> JavaTarget {
     JavaTarget::Java25
 }
@@ -416,9 +509,12 @@ fn read_java_sources(paths: &[PathBuf]) -> String {
 
 #[test]
 fn cli_build_generates_java_sources() {
-    let Some(cli_path) = std::env::var_os("CARGO_BIN_EXE_jv").map(PathBuf::from) else {
-        eprintln!("Skipping CLI binary integration test: CARGO_BIN_EXE_jv not set");
-        return;
+    let cli_path = match cli_binary_path() {
+        Ok(path) => path,
+        Err(reason) => {
+            eprintln!("Skipping CLI binary integration test: {}", reason);
+            return;
+        }
     };
 
     let temp_dir = TempDirGuard::new("cli-build").expect("Failed to create temp dir");
@@ -474,9 +570,12 @@ include = ["src/**/*.jv"]
 
 #[test]
 fn cli_build_numeric_script_generates_worded_class() {
-    let Some(cli_path) = std::env::var_os("CARGO_BIN_EXE_jv").map(PathBuf::from) else {
-        eprintln!("Skipping numeric script test: CARGO_BIN_EXE_jv not set");
-        return;
+    let cli_path = match cli_binary_path() {
+        Ok(path) => path,
+        Err(reason) => {
+            eprintln!("Skipping numeric script test: {}", reason);
+            return;
+        }
     };
 
     let temp_dir = TempDirGuard::new("cli-numeric").expect("create temp dir");
@@ -518,9 +617,12 @@ fn cli_build_numeric_script_generates_worded_class() {
 
 #[test]
 fn cli_build_quick_tour_script_compiles() {
-    let Some(cli_path) = std::env::var_os("CARGO_BIN_EXE_jv").map(PathBuf::from) else {
-        eprintln!("Skipping quick-tour test: CARGO_BIN_EXE_jv not set");
-        return;
+    let cli_path = match cli_binary_path() {
+        Ok(path) => path,
+        Err(reason) => {
+            eprintln!("Skipping quick-tour test: {}", reason);
+            return;
+        }
     };
 
     let temp_dir = TempDirGuard::new("cli-quick-tour").expect("create temp dir");
@@ -546,9 +648,12 @@ fn cli_build_quick_tour_script_compiles() {
 
 #[test]
 fn cli_examples_build_without_java_errors() {
-    let Some(cli_path) = std::env::var_os("CARGO_BIN_EXE_jv").map(PathBuf::from) else {
-        eprintln!("Skipping examples build test: CARGO_BIN_EXE_jv not set");
-        return;
+    let cli_path = match cli_binary_path() {
+        Ok(path) => path,
+        Err(reason) => {
+            eprintln!("Skipping examples build test: {}", reason);
+            return;
+        }
     };
     if javac_command_for_target(JavaTarget::Java25).is_none() {
         eprintln!("Skipping examples build test: javac for Java25 not available");
@@ -827,9 +932,12 @@ fn resolve_project_entrypoint(root: &Path) -> PathBuf {
 
 #[test]
 fn cli_build_emits_pattern_compile_for_regex_literal() {
-    let Some(cli_path) = std::env::var_os("CARGO_BIN_EXE_jv").map(PathBuf::from) else {
-        eprintln!("Skipping regex CLI build test: CARGO_BIN_EXE_jv not set");
-        return;
+    let cli_path = match cli_binary_path() {
+        Ok(path) => path,
+        Err(reason) => {
+            eprintln!("Skipping regex CLI build test: {}", reason);
+            return;
+        }
     };
 
     let temp_dir = TempDirGuard::new("cli-regex-build").expect("create temp dir");
@@ -898,9 +1006,12 @@ fun sample(input: String): Boolean {
 
 #[test]
 fn cli_check_reports_regex_diagnostics() {
-    let Some(cli_path) = std::env::var_os("CARGO_BIN_EXE_jv").map(PathBuf::from) else {
-        eprintln!("Skipping regex diagnostic test: CARGO_BIN_EXE_jv not set");
-        return;
+    let cli_path = match cli_binary_path() {
+        Ok(path) => path,
+        Err(reason) => {
+            eprintln!("Skipping regex diagnostic test: {}", reason);
+            return;
+        }
     };
 
     let temp_dir = TempDirGuard::new("cli-regex-diagnostic").expect("create temp dir");
@@ -1354,9 +1465,12 @@ fn pipeline_runs_javac_when_available() {
 
 #[test]
 fn cli_check_reports_missing_else_diagnostic() {
-    let Some(cli_path) = std::env::var_os("CARGO_BIN_EXE_jv").map(PathBuf::from) else {
-        eprintln!("Skipping CLI diagnostic test: CARGO_BIN_EXE_jv not set");
-        return;
+    let cli_path = match cli_binary_path() {
+        Ok(path) => path,
+        Err(reason) => {
+            eprintln!("Skipping CLI diagnostic test: {}", reason);
+            return;
+        }
     };
 
     let temp_dir = TempDirGuard::new("cli-check-when").expect("create temp dir");
@@ -1394,9 +1508,12 @@ fn cli_check_reports_missing_else_diagnostic() {
 
 #[test]
 fn cli_check_reports_forbidden_if_expression() {
-    let Some(cli_path) = std::env::var_os("CARGO_BIN_EXE_jv").map(PathBuf::from) else {
-        eprintln!("Skipping CLI diagnostic test: CARGO_BIN_EXE_jv not set");
-        return;
+    let cli_path = match cli_binary_path() {
+        Ok(path) => path,
+        Err(reason) => {
+            eprintln!("Skipping CLI diagnostic test: {}", reason);
+            return;
+        }
     };
 
     let temp_dir = TempDirGuard::new("cli-check-if").expect("create temp dir");
@@ -1427,9 +1544,12 @@ fn cli_check_reports_forbidden_if_expression() {
 
 #[test]
 fn cli_all_subcommands_smoke_test() {
-    let Some(cli_path) = std::env::var_os("CARGO_BIN_EXE_jv").map(PathBuf::from) else {
-        eprintln!("Skipping CLI integration test: CARGO_BIN_EXE_jv not set");
-        return;
+    let cli_path = match cli_binary_path() {
+        Ok(path) => path,
+        Err(reason) => {
+            eprintln!("Skipping CLI integration test: {}", reason);
+            return;
+        }
     };
 
     let temp_dir = TempDirGuard::new("cli-all").expect("Failed to create temp dir");
