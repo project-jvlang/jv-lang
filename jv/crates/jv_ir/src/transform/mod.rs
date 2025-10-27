@@ -711,13 +711,24 @@ pub fn transform_expression(
             }
 
             let receiver_expr = transform_expression(*object, context)?;
-            let java_type = extract_java_type(&receiver_expr).unwrap_or_else(JavaType::object);
+            let field_name = property;
+            let receiver_type = extract_java_type(&receiver_expr).unwrap_or_else(JavaType::object);
+            let mut field_java_type = receiver_type.clone();
+            let mut is_record_component = false;
+
+            if let JavaType::Reference { name, .. } = &receiver_type {
+                if let Some(component_type) = context.record_component_type(name, &field_name) {
+                    field_java_type = component_type;
+                    is_record_component = true;
+                }
+            }
 
             Ok(IrExpression::FieldAccess {
                 receiver: Box::new(receiver_expr),
-                field_name: property,
-                java_type,
+                field_name,
+                java_type: field_java_type,
                 span,
+                is_record_component,
             })
         }
         Expression::Call {
@@ -1227,6 +1238,7 @@ fn lower_system_field(
                 field_name: receiver_kind.field_name().to_string(),
                 java_type: receiver_kind.java_type(),
                 span,
+                is_record_component: false,
             };
 
             Some((field_expr, receiver_kind))
@@ -1296,6 +1308,7 @@ fn create_system_field_access(receiver: SystemReceiver, span: Span) -> IrExpress
         field_name: receiver.field_name().to_string(),
         java_type: receiver.java_type(),
         span,
+        is_record_component: false,
     }
 }
 

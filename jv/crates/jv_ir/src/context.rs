@@ -35,6 +35,8 @@ pub struct TransformContext {
     extension_scope_stack: Vec<ExtensionScope>,
     /// Current package
     pub current_package: Option<String>,
+    /// Record component metadata keyed by type name (supports FQCN and simple names)
+    pub record_components: HashMap<String, HashMap<String, JavaType>>,
     /// Options controlling @Sample transformation behaviour
     pub sample_options: SampleOptions,
     /// Cache tracking whitespace-delimited sequence element types to avoid recomputation
@@ -81,6 +83,7 @@ impl TransformContext {
             extension_registry: HashMap::new(),
             extension_scope_stack: Vec::new(),
             current_package: None,
+            record_components: HashMap::new(),
             sample_options: SampleOptions::default(),
             sequence_style_cache: SequenceStyleCache::with_capacity(),
             temp_counter: 0,
@@ -119,6 +122,73 @@ impl TransformContext {
 
     pub fn register_function_signature(&mut self, name: String, params: Vec<JavaType>) {
         self.function_signatures.insert(name, params);
+    }
+
+    pub fn register_record_components(
+        &mut self,
+        type_name: String,
+        components: Vec<(String, JavaType)>,
+    ) {
+        let component_map: HashMap<String, JavaType> = components
+            .into_iter()
+            .map(|(name, ty)| (name, ty))
+            .collect();
+        for key in Self::record_type_keys(&type_name) {
+            self.record_components
+                .entry(key)
+                .or_insert_with(HashMap::new)
+                .extend(
+                    component_map
+                        .iter()
+                        .map(|(name, ty)| (name.clone(), ty.clone())),
+                );
+        }
+    }
+
+    pub fn record_component_type(&self, type_name: &str, component: &str) -> Option<JavaType> {
+        self.record_components
+            .get(type_name)
+            .and_then(|components| components.get(component))
+            .cloned()
+            .or_else(|| {
+                type_name
+                    .rsplit('.')
+                    .next()
+                    .filter(|simple| *simple != type_name)
+                    .and_then(|simple| {
+                        self.record_components
+                            .get(simple)
+                            .and_then(|components| components.get(component))
+                            .cloned()
+                    })
+            })
+            .or_else(|| {
+                type_name
+                    .rsplit('$')
+                    .next()
+                    .filter(|simple| *simple != type_name)
+                    .and_then(|simple| {
+                        self.record_components
+                            .get(simple)
+                            .and_then(|components| components.get(component))
+                            .cloned()
+                    })
+            })
+    }
+
+    fn record_type_keys(type_name: &str) -> Vec<String> {
+        let mut keys = vec![type_name.to_string()];
+        if let Some(simple) = type_name.rsplit('.').next() {
+            if simple != type_name {
+                keys.push(simple.to_string());
+            }
+        }
+        if let Some(simple) = type_name.rsplit('$').next() {
+            if simple != type_name {
+                keys.push(simple.to_string());
+            }
+        }
+        keys
     }
 
     /// Registers a lowered method declaration so that later passes can resolve Java naming.
@@ -773,6 +843,7 @@ impl Clone for TransformContext {
             extension_registry: self.extension_registry.clone(),
             extension_scope_stack: self.extension_scope_stack.clone(),
             current_package: self.current_package.clone(),
+            record_components: self.record_components.clone(),
             sample_options: self.sample_options.clone(),
             sequence_style_cache: self.sequence_style_cache.clone(),
             temp_counter: self.temp_counter,

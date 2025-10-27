@@ -427,6 +427,7 @@ fn simple_method() -> IrStatement {
         field_name: "greeting".to_string(),
         java_type: string_type(),
         span: dummy_span(),
+        is_record_component: false,
     };
     let return_stmt = IrStatement::Return {
         value: Some(return_expression),
@@ -938,6 +939,148 @@ fn top_level_records_drop_private_visibility() {
 }
 
 #[test]
+fn record_field_access_is_lowered_to_accessor_calls() {
+    let mut generator = JavaCodeGenerator::new();
+    let span = dummy_span();
+
+    let record_declaration = IrStatement::RecordDeclaration {
+        name: "Module".to_string(),
+        type_parameters: vec![],
+        components: vec![
+            IrRecordComponent {
+                name: "name".to_string(),
+                java_type: string_type(),
+                span: span.clone(),
+            },
+            IrRecordComponent {
+                name: "done".to_string(),
+                java_type: JavaType::Primitive("boolean".to_string()),
+                span: span.clone(),
+            },
+        ],
+        interfaces: vec![],
+        methods: vec![],
+        modifiers: IrModifiers {
+            visibility: IrVisibility::Public,
+            ..IrModifiers::default()
+        },
+        span: span.clone(),
+    };
+
+    let module_type = JavaType::Reference {
+        name: "Module".to_string(),
+        generic_args: vec![],
+    };
+
+    let module_param = |name: &str| IrParameter {
+        name: name.to_string(),
+        java_type: module_type.clone(),
+        modifiers: IrModifiers::default(),
+        span: span.clone(),
+    };
+
+    let accessor_block = |field: &str, ty: JavaType| IrExpression::Block {
+        statements: vec![IrStatement::Return {
+            value: Some(IrExpression::FieldAccess {
+                receiver: Box::new(IrExpression::Identifier {
+                    name: "module".to_string(),
+                    java_type: module_type.clone(),
+                    span: span.clone(),
+                }),
+                field_name: field.to_string(),
+                java_type: ty.clone(),
+                span: span.clone(),
+                is_record_component: true,
+            }),
+            span: span.clone(),
+        }],
+        java_type: ty,
+        span: span.clone(),
+    };
+
+    let name_method = IrStatement::MethodDeclaration {
+        name: "moduleName".to_string(),
+        java_name: None,
+        type_parameters: vec![],
+        parameters: vec![module_param("module")],
+        primitive_return: None,
+        return_type: string_type(),
+        body: Some(accessor_block("name", string_type())),
+        modifiers: IrModifiers {
+            visibility: IrVisibility::Public,
+            is_static: true,
+            ..IrModifiers::default()
+        },
+        throws: vec![],
+        span: span.clone(),
+    };
+
+    let done_method = IrStatement::MethodDeclaration {
+        name: "isModuleComplete".to_string(),
+        java_name: None,
+        type_parameters: vec![],
+        parameters: vec![module_param("module")],
+        primitive_return: None,
+        return_type: JavaType::Primitive("boolean".to_string()),
+        body: Some(accessor_block(
+            "done",
+            JavaType::Primitive("boolean".to_string()),
+        )),
+        modifiers: IrModifiers {
+            visibility: IrVisibility::Public,
+            is_static: true,
+            ..IrModifiers::default()
+        },
+        throws: vec![],
+        span: span.clone(),
+    };
+
+    let renderer_class = IrStatement::ClassDeclaration {
+        name: "ModuleRenderer".to_string(),
+        type_parameters: vec![],
+        superclass: None,
+        interfaces: vec![],
+        fields: vec![],
+        methods: vec![name_method, done_method],
+        nested_classes: vec![],
+        modifiers: IrModifiers {
+            visibility: IrVisibility::Public,
+            ..IrModifiers::default()
+        },
+        span: span.clone(),
+    };
+
+    let program = IrProgram {
+        package: Some("demo.records".to_string()),
+        imports: vec![],
+        type_declarations: vec![record_declaration, renderer_class],
+        generic_metadata: Default::default(),
+        conversion_metadata: Vec::new(),
+        span,
+    };
+
+    let unit = generator
+        .generate_compilation_unit(&program)
+        .expect("code generation should succeed");
+
+    assert_eq!(unit.type_declarations.len(), 2);
+    let renderer_java = &unit.type_declarations[1];
+
+    assert!(
+        renderer_java.contains("return module.name();"),
+        "record component access should call accessor: {renderer_java}"
+    );
+    assert!(
+        renderer_java.contains("return module.done();"),
+        "boolean component access should call accessor: {renderer_java}"
+    );
+    assert!(
+        !renderer_java.contains("module.name;"),
+        "record fields must not be accessed directly: {renderer_java}"
+    );
+}
+
+#[test]
 fn class_extension_method_is_emitted_as_instance_method() {
     let mut generator = JavaCodeGenerator::new();
     let span = dummy_span();
@@ -1423,6 +1566,7 @@ fn script_statements_are_wrapped_in_generated_main() {
                 generic_args: vec![],
             },
             span: dummy_span(),
+            is_record_component: false,
         })),
         method_name: "println".to_string(),
         java_name: None,
@@ -2820,7 +2964,10 @@ fn switch_expression_with_boolean_literals_does_not_require_preview() {
         .expect("boolean literal switch should render");
 
     let expected = "// strategy=Switch arms=2 guards=0 default=false exhaustive=unknown\nnew Object() {\n    String matchExpr() {\n        final var __subject = flag;\n        final String __matchResult;\n        boolean __matched = false;\n        if (!__matched) {\n            if (java.util.Objects.equals(__subject, true)) {\n                __matchResult = \"set\";\n                __matched = true;\n            }\n        }\n        if (!__matched) {\n            if (java.util.Objects.equals(__subject, false)) {\n                __matchResult = \"unset\";\n                __matched = true;\n            }\n        }\n        if (!__matched) {\n            throw new IllegalStateException(\"non-exhaustive when expression\");\n        }\n        return __matchResult;\n    }\n}.matchExpr()\n";
-    assert_eq!(rendered, expected, "boolean cases should fall back to safe lowering");
+    assert_eq!(
+        rendered, expected,
+        "boolean cases should fall back to safe lowering"
+    );
 }
 
 #[test]

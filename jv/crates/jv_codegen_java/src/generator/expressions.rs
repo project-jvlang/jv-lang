@@ -87,10 +87,13 @@ impl JavaCodeGenerator {
             IrExpression::FieldAccess {
                 receiver,
                 field_name,
+                is_record_component,
                 ..
             } => {
                 let receiver_code = self.generate_expression(receiver)?;
-                if self.should_call_method_for_field(receiver.as_ref(), field_name) {
+                if *is_record_component
+                    || self.should_call_method_for_field(receiver.as_ref(), field_name.as_str())
+                {
                     return Ok(format!("{}.{field_name}()", receiver_code));
                 }
                 Ok(format!("{receiver_code}.{field_name}"))
@@ -484,9 +487,7 @@ impl JavaCodeGenerator {
     fn is_boolean_switch_type(java_type: &JavaType) -> bool {
         match java_type {
             JavaType::Primitive(name) => name == "boolean",
-            JavaType::Reference { name, .. } => {
-                name == "Boolean" || name == "java.lang.Boolean"
-            }
+            JavaType::Reference { name, .. } => name == "Boolean" || name == "java.lang.Boolean",
             _ => false,
         }
     }
@@ -2495,6 +2496,7 @@ mod tests {
             field_name: "size".to_string(),
             java_type: JavaType::Primitive("int".to_string()),
             span: Span::dummy(),
+            is_record_component: false,
         };
 
         let rendered = generator
@@ -2516,6 +2518,7 @@ mod tests {
             field_name: "length".to_string(),
             java_type: JavaType::Primitive("int".to_string()),
             span: Span::dummy(),
+            is_record_component: false,
         };
 
         let rendered = generator
@@ -2551,6 +2554,7 @@ mod tests {
             field_name: "size".to_string(),
             java_type: JavaType::Primitive("int".to_string()),
             span: Span::dummy(),
+            is_record_component: false,
         };
 
         let rendered = generator

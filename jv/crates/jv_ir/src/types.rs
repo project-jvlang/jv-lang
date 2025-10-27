@@ -94,6 +94,8 @@ pub enum IrExpression {
         field_name: String,
         java_type: JavaType,
         span: Span,
+        #[serde(default)]
+        is_record_component: bool,
     },
 
     // Array access

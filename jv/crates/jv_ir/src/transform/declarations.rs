@@ -284,6 +284,17 @@ pub fn desugar_data_class(
             });
         }
 
+        let component_pairs = components
+            .iter()
+            .map(|component| (component.name.clone(), component.java_type.clone()))
+            .collect::<Vec<_>>();
+
+        if let Some(package) = context.current_package.clone() {
+            context
+                .register_record_components(format!("{package}.{name}"), component_pairs.clone());
+        }
+        context.register_record_components(name.clone(), component_pairs);
+
         return Ok(IrStatement::RecordDeclaration {
             name,
             type_parameters: ir_type_parameters,
@@ -385,6 +396,7 @@ fn replace_this_ir_expression(
             field_name,
             java_type,
             span,
+            is_record_component,
         } => IrExpression::FieldAccess {
             receiver: Box::new(replace_this_ir_expression(
                 *receiver,
@@ -394,6 +406,7 @@ fn replace_this_ir_expression(
             field_name,
             java_type,
             span,
+            is_record_component,
         },
         IrExpression::ArrayAccess {
             array,

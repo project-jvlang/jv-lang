@@ -4,8 +4,8 @@ use super::utils::{boxed_java_type, extract_java_type};
 use crate::context::TransformContext;
 use crate::error::TransformError;
 use crate::types::{
-    IrCaseLabel, IrDeconstructionComponent, IrDeconstructionPattern, IrExpression, IrImplicitWhenEnd,
-    IrResource, IrStatement, IrSwitchCase, JavaType, JavaWildcardKind,
+    IrCaseLabel, IrDeconstructionComponent, IrDeconstructionPattern, IrExpression,
+    IrImplicitWhenEnd, IrResource, IrStatement, IrSwitchCase, JavaType, JavaWildcardKind,
 };
 use jv_ast::{
     BinaryOp, Expression, ImplicitWhenEnd, Literal, Pattern, Span, TypeAnnotation, WhenArm,
@@ -123,9 +123,8 @@ impl WhenLoweringPlanner {
             if let (Some(binding), Some(subject_name)) =
                 (binding.as_ref(), subject_identifier.as_deref())
             {
-                combined_guard = combined_guard.map(|expr| {
-                    rewrite_expression_with_binding(expr, subject_name, binding)
-                });
+                combined_guard = combined_guard
+                    .map(|expr| rewrite_expression_with_binding(expr, subject_name, binding));
             }
 
             if combined_guard.is_some() {
@@ -602,9 +601,7 @@ fn describe_exhaustiveness(summary: &PatternAnalysisSummary) -> String {
     }
 }
 
-fn resolve_constructor_pattern_type(
-    name: &str,
-) -> Result<(String, JavaType), TransformError> {
+fn resolve_constructor_pattern_type(name: &str) -> Result<(String, JavaType), TransformError> {
     let annotation = TypeAnnotation::Simple(name.to_string());
     let java_type = convert_type_annotation(annotation)?;
     let normalized = if matches!(java_type, JavaType::Primitive(_)) {
@@ -646,18 +643,19 @@ fn unsupported_nested_feature_message(reason_en: &str, reason_ja: &str) -> Strin
     )
 }
 
-
 fn rewrite_expression_with_binding(
     expr: IrExpression,
     subject_name: &str,
     binding: &CaseBinding,
 ) -> IrExpression {
     match expr {
-        IrExpression::Identifier { name, span, .. } if name == subject_name => IrExpression::Identifier {
-            name: binding.name.clone(),
-            java_type: binding.java_type.clone(),
-            span,
-        },
+        IrExpression::Identifier { name, span, .. } if name == subject_name => {
+            IrExpression::Identifier {
+                name: binding.name.clone(),
+                java_type: binding.java_type.clone(),
+                span,
+            }
+        }
         IrExpression::This { java_type, span } => IrExpression::This { java_type, span },
         IrExpression::MethodCall {
             receiver,
@@ -692,6 +690,7 @@ fn rewrite_expression_with_binding(
             field_name,
             java_type,
             span,
+            is_record_component,
         } => IrExpression::FieldAccess {
             receiver: Box::new(rewrite_expression_with_binding(
                 *receiver,
@@ -701,6 +700,7 @@ fn rewrite_expression_with_binding(
             field_name,
             java_type,
             span,
+            is_record_component,
         },
         IrExpression::ArrayAccess {
             array,
@@ -824,17 +824,13 @@ fn rewrite_expression_with_binding(
             dimensions: dimensions
                 .into_iter()
                 .map(|dim| {
-                    dim.map(|expr| {
-                        rewrite_expression_with_binding(expr, subject_name, binding)
-                    })
+                    dim.map(|expr| rewrite_expression_with_binding(expr, subject_name, binding))
                 })
                 .collect(),
             initializer: initializer.map(|values| {
                 values
                     .into_iter()
-                    .map(|expr| {
-                        rewrite_expression_with_binding(expr, subject_name, binding)
-                    })
+                    .map(|expr| rewrite_expression_with_binding(expr, subject_name, binding))
                     .collect()
             }),
             delimiter,
@@ -892,9 +888,9 @@ fn rewrite_expression_with_binding(
                 .into_iter()
                 .map(|case| IrSwitchCase {
                     labels: case.labels,
-                    guard: case.guard.map(|expr| {
-                        rewrite_expression_with_binding(expr, subject_name, binding)
-                    }),
+                    guard: case
+                        .guard
+                        .map(|expr| rewrite_expression_with_binding(expr, subject_name, binding)),
                     body: rewrite_expression_with_binding(case.body, subject_name, binding),
                     span: case.span,
                 })
@@ -1048,8 +1044,7 @@ fn rewrite_statement_with_binding(
             span,
         },
         IrStatement::Return { value, span } => IrStatement::Return {
-            value: value
-                .map(|expr| rewrite_expression_with_binding(expr, subject_name, binding)),
+            value: value.map(|expr| rewrite_expression_with_binding(expr, subject_name, binding)),
             span,
         },
         IrStatement::VariableDeclaration {

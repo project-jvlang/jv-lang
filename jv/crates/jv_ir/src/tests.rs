@@ -1459,10 +1459,7 @@ mod tests {
         let string_pattern_span = dummy_span();
         let guard_call = Expression::Call {
             function: Box::new(Expression::MemberAccess {
-                object: Box::new(Expression::Identifier(
-                    "value".to_string(),
-                    dummy_span(),
-                )),
+                object: Box::new(Expression::Identifier("value".to_string(), dummy_span())),
                 property: "startsWith".to_string(),
                 span: dummy_span(),
             }),
@@ -1511,11 +1508,7 @@ mod tests {
             IrExpression::Switch { cases, .. } => {
                 assert_eq!(cases.len(), 2, "expected two explicit cases");
                 let string_case = &cases[0];
-                let guard_receiver = match string_case
-                    .guard
-                    .as_ref()
-                    .expect("guard should exist")
-                {
+                let guard_receiver = match string_case.guard.as_ref().expect("guard should exist") {
                     IrExpression::MethodCall { receiver, .. } => receiver
                         .as_ref()
                         .and_then(|inner| match inner.as_ref() {

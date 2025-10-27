@@ -1,10 +1,10 @@
 use super::*;
-use std::borrow::Cow;
 use jv_ast::types::{Kind, PrimitiveTypeName};
 use jv_ir::{
     IrAnnotation, IrAnnotationArgument, IrAnnotationValue, IrGenericMetadata, IrTypeLevelValue,
     PrimitiveReturnMetadata,
 };
+use std::borrow::Cow;
 
 impl JavaCodeGenerator {
     pub fn generate_class(&mut self, class: &IrStatement) -> Result<String, CodeGenError> {
@@ -945,11 +945,13 @@ fn replace_receiver_expression(expr: IrExpression, receiver_type: &JavaType) -> 
             field_name,
             java_type,
             span,
+            is_record_component,
         } => IrExpression::FieldAccess {
             receiver: Box::new(replace_receiver_expression(*receiver, receiver_type)),
             field_name,
             java_type,
             span,
+            is_record_component,
         },
         IrExpression::ArrayAccess {
             array,

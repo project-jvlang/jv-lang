@@ -27,6 +27,7 @@ pub fn desugar_null_safe_member_access(
         field_name: property,
         java_type: result_type.clone(),
         span: span.clone(),
+        is_record_component: false,
     };
 
     let default_value = Some(Box::new(IrExpression::Literal(Literal::Null, span.clone())));
