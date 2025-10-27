@@ -657,6 +657,8 @@ pub fn transform_expression(
             } else {
                 let left_ir = transform_expression(*left, context)?;
                 let right_ir = transform_expression(*right, context)?;
+                let left_type = extract_java_type(&left_ir);
+                let right_type = extract_java_type(&right_ir);
                 let java_type = match op {
                     BinaryOp::Equal
                     | BinaryOp::NotEqual
@@ -667,6 +669,18 @@ pub fn transform_expression(
                     | BinaryOp::And
                     | BinaryOp::Or
                     | BinaryOp::Is => JavaType::boolean(),
+                    BinaryOp::Add
+                        if left_type
+                            .as_ref()
+                            .map(is_string_like_java_type)
+                            .unwrap_or(false)
+                            || right_type
+                                .as_ref()
+                                .map(is_string_like_java_type)
+                                .unwrap_or(false) =>
+                    {
+                        JavaType::string()
+                    }
                     _ => JavaType::int(),
                 };
                 Ok(IrExpression::Binary {
@@ -795,6 +809,23 @@ pub fn transform_expression(
             span,
         } => desugar_when_expression(subject, arms, else_arm, implicit_end, span, context),
         _ => Ok(IrExpression::Literal(Literal::Null, Span::default())),
+    }
+}
+
+fn is_string_like_java_type(java_type: &JavaType) -> bool {
+    match java_type {
+        JavaType::Reference { name, .. } => matches!(
+            name.as_str(),
+            "String"
+                | "java.lang.String"
+                | "CharSequence"
+                | "java.lang.CharSequence"
+                | "StringBuilder"
+                | "java.lang.StringBuilder"
+                | "StringBuffer"
+                | "java.lang.StringBuffer"
+        ),
+        _ => false,
     }
 }
 

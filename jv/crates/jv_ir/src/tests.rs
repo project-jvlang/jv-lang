@@ -4236,6 +4236,8 @@ fun sample(value: Any): Int {
             lazy: false,
             span: dummy_span(),
             shape: PipelineShape::default(),
+            source_element_type: None,
+            stage_element_types: Vec::new(),
         };
         pipeline.recompute_shape();
 
@@ -4437,6 +4439,8 @@ fun sample(value: Any): Int {
             lazy: false,
             span: dummy_span(),
             shape: PipelineShape::default(),
+            source_element_type: None,
+            stage_element_types: Vec::new(),
         };
         single_stage.recompute_shape();
         assert!(matches!(single_stage.shape, PipelineShape::SingleStageMap));
@@ -4455,6 +4459,8 @@ fun sample(value: Any): Int {
             lazy: false,
             span: dummy_span(),
             shape: PipelineShape::default(),
+            source_element_type: None,
+            stage_element_types: Vec::new(),
         };
         multi_stage.recompute_shape();
         match multi_stage.shape {
@@ -4484,6 +4490,8 @@ fun sample(value: Any): Int {
             lazy: true,
             span: dummy_span(),
             shape: PipelineShape::default(),
+            source_element_type: None,
+            stage_element_types: Vec::new(),
         };
         repeated.recompute_shape();
         match repeated.shape {
@@ -4509,6 +4517,8 @@ fun sample(value: Any): Int {
             lazy: false,
             span: dummy_span(),
             shape: PipelineShape::default(),
+            source_element_type: None,
+            stage_element_types: Vec::new(),
         };
         explicit_source.recompute_shape();
         assert!(matches!(

@@ -1289,6 +1289,8 @@ fn apply_type_facts_sets_sequence_specialization_hint() {
         lazy: false,
         span: span.clone(),
         shape: PipelineShape::default(),
+        source_element_type: None,
+        stage_element_types: Vec::new(),
     };
     pipeline.recompute_shape();
 

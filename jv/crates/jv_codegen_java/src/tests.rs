@@ -1213,6 +1213,8 @@ fn primitive_specialized_pipeline_renders_character_casts() {
         lazy: false,
         span: span.clone(),
         shape: PipelineShape::default(),
+        source_element_type: None,
+        stage_element_types: Vec::new(),
     };
     pipeline.recompute_shape();
     pipeline.apply_specialization_hint();

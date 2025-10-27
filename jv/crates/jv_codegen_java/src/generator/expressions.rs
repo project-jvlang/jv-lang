@@ -56,7 +56,11 @@ impl JavaCodeGenerator {
                     if let Some(java_type) = Self::expression_java_type(target) {
                         self.ensure_stdlib_import(java_type);
                     }
-                    invocation.push_str(&self.generate_expression(target)?);
+                    let mut receiver_expr = self.generate_expression(target)?;
+                    if matches!(target.as_ref(), IrExpression::Cast { .. }) {
+                        receiver_expr = format!("({receiver_expr})");
+                    }
+                    invocation.push_str(&receiver_expr);
                     invocation.push('.');
                 } else if let Some(owner) = resolved_target
                     .as_ref()
@@ -2365,75 +2369,7 @@ impl JavaCodeGenerator {
     }
 
     fn infer_sequence_element_type(pipeline: &SequencePipeline) -> Option<JavaType> {
-        let mut current = Self::sequence_source_element_type(&pipeline.source);
-
-        for stage in &pipeline.stages {
-            match stage {
-                SequenceStage::Map { result_hint, .. } => {
-                    if let Some(hint) = result_hint {
-                        current = Some(hint.clone());
-                    }
-                }
-                SequenceStage::FlatMap { element_hint, .. } => {
-                    if let Some(hint) = element_hint {
-                        current = Some(hint.clone());
-                    }
-                }
-                _ => {}
-            }
-        }
-
-        current
-    }
-
-    fn sequence_source_element_type(source: &SequenceSource) -> Option<JavaType> {
-        match source {
-            SequenceSource::Collection { expr, element_hint } => element_hint
-                .clone()
-                .or_else(|| Self::collection_expr_element_type(expr)),
-            SequenceSource::Array {
-                expr, element_hint, ..
-            } => element_hint
-                .clone()
-                .or_else(|| Self::array_expr_element_type(expr)),
-            SequenceSource::ListLiteral { element_hint, .. } => element_hint.clone(),
-            SequenceSource::JavaStream {
-                element_hint, expr, ..
-            } => element_hint
-                .clone()
-                .or_else(|| Self::collection_expr_element_type(expr)),
-        }
-    }
-
-    fn collection_expr_element_type(expr: &IrExpression) -> Option<JavaType> {
-        Self::expression_java_type(expr).and_then(Self::first_generic_or_array)
-    }
-
-    fn array_expr_element_type(expr: &IrExpression) -> Option<JavaType> {
-        Self::expression_java_type(expr).and_then(|ty| match ty {
-            JavaType::Array { element_type, .. } => Some((**element_type).clone()),
-            _ => None,
-        })
-    }
-
-    fn first_generic_or_array(java_type: &JavaType) -> Option<JavaType> {
-        match java_type {
-            JavaType::Reference { generic_args, .. } if !generic_args.is_empty() => {
-                Some(Self::clone_type_excluding_wildcard(&generic_args[0]))
-            }
-            JavaType::Array { element_type, .. } => Some((**element_type).clone()),
-            _ => None,
-        }
-    }
-
-    fn clone_type_excluding_wildcard(java_type: &JavaType) -> JavaType {
-        match java_type {
-            JavaType::Wildcard {
-                bound: Some(bound), ..
-            } => *bound.clone(),
-            JavaType::Wildcard { .. } => JavaType::object(),
-            other => other.clone(),
-        }
+        pipeline.element_type().cloned()
     }
 
     fn render_int_stream_mapper(

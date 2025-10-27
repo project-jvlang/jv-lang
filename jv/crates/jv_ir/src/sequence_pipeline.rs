@@ -1,10 +1,10 @@
 use crate::context::TransformContext;
 use crate::error::TransformError;
 use crate::transform::{extract_java_type, transform_expression};
-use crate::types::{IrExpression, IrResolvedMethodTarget, JavaType};
+use crate::types::{IrExpression, IrResolvedMethodTarget, IrStatement, JavaType};
 use jv_ast::{
-    types::PrimitiveTypeName, Argument, CallArgumentMetadata, CallArgumentStyle, Expression,
-    SequenceDelimiter, Span,
+    types::PrimitiveTypeName, Argument, BinaryOp, CallArgumentMetadata, CallArgumentStyle,
+    Expression, SequenceDelimiter, Span,
 };
 use serde::{Deserialize, Serialize};
 use std::mem;
@@ -40,11 +40,16 @@ pub struct SequencePipeline {
     pub lazy: bool,
     pub span: Span,
     pub shape: PipelineShape,
+    #[serde(default)]
+    pub source_element_type: Option<JavaType>,
+    #[serde(default)]
+    pub stage_element_types: Vec<Option<JavaType>>,
 }
 
 impl SequencePipeline {
     pub fn recompute_shape(&mut self) {
         self.shape = PipelineShape::classify(&self.source, &self.stages, self.terminal.as_ref());
+        self.recompute_element_types();
     }
 
     pub fn apply_specialization_hint(&mut self) {
@@ -67,6 +72,115 @@ impl SequencePipeline {
             }
             _ => {}
         }
+    }
+
+    pub fn recompute_element_types(&mut self) {
+        self.source_element_type = source_element_type(&self.source);
+        let mut current = self.source_element_type.clone();
+        if current.is_none() {
+            current = Some(JavaType::object());
+        }
+
+        self.stage_element_types.clear();
+        self.stage_element_types.reserve(self.stages.len());
+
+        for stage in self.stages.iter_mut() {
+            match stage {
+                SequenceStage::Map {
+                    lambda,
+                    result_hint,
+                    ..
+                } => {
+                    let input_type = current.clone().unwrap_or_else(JavaType::object);
+                    let output_type =
+                        infer_map_result_hint(lambda.as_ref()).unwrap_or_else(JavaType::object);
+                    update_single_param_lambda(
+                        lambda.as_mut(),
+                        "java.util.function.Function",
+                        input_type.clone(),
+                        output_type.clone(),
+                    );
+                    *result_hint = Some(output_type.clone());
+                    current = Some(output_type);
+                }
+                SequenceStage::Filter { predicate, .. } => {
+                    let input_type = current.clone().unwrap_or_else(JavaType::object);
+                    update_single_param_lambda(
+                        predicate.as_mut(),
+                        "java.util.function.Predicate",
+                        input_type,
+                        JavaType::boolean(),
+                    );
+                }
+                SequenceStage::FlatMap {
+                    lambda,
+                    element_hint,
+                    ..
+                } => {
+                    let input_type = current.clone().unwrap_or_else(JavaType::object);
+                    let lambda_return =
+                        infer_lambda_return_type(lambda.as_ref()).unwrap_or_else(JavaType::object);
+                    update_single_param_lambda(
+                        lambda.as_mut(),
+                        "java.util.function.Function",
+                        input_type,
+                        lambda_return.clone(),
+                    );
+
+                    let container_type = infer_flat_map_element_hint(lambda.as_ref())
+                        .or_else(|| element_hint.clone());
+                    if container_type != *element_hint {
+                        *element_hint = container_type.clone();
+                    }
+
+                    let element_type = container_type
+                        .as_ref()
+                        .and_then(|ty| extract_iterable_element_type(ty))
+                        .unwrap_or_else(JavaType::object);
+                    current = Some(element_type);
+                }
+                SequenceStage::Take { .. } | SequenceStage::Drop { .. } => {
+                    if current.is_none() {
+                        current = Some(JavaType::object());
+                    }
+                }
+                SequenceStage::Sorted { comparator, .. } => {
+                    if let Some(comparator) = comparator.as_mut() {
+                        let element_type = current.clone().unwrap_or_else(JavaType::object);
+                        update_bi_param_lambda(
+                            comparator,
+                            "java.util.Comparator",
+                            &element_type,
+                            &element_type,
+                            JavaType::int(),
+                        );
+                    }
+                    if current.is_none() {
+                        current = Some(JavaType::object());
+                    }
+                }
+            }
+
+            self.stage_element_types.push(current.clone());
+        }
+    }
+
+    pub fn element_type(&self) -> Option<&JavaType> {
+        self.stage_element_types
+            .iter()
+            .rev()
+            .find_map(|entry| entry.as_ref())
+            .or_else(|| self.source_element_type.as_ref())
+    }
+
+    pub fn element_type_before_stage(&self, index: usize) -> Option<&JavaType> {
+        if index == 0 {
+            return self.source_element_type.as_ref();
+        }
+
+        self.stage_element_types
+            .get(index - 1)
+            .and_then(|entry| entry.as_ref())
     }
 }
 
@@ -379,6 +493,8 @@ pub fn try_lower_sequence_call(
         lazy: true,
         span: span.clone(),
         shape: PipelineShape::default(),
+        source_element_type: None,
+        stage_element_types: Vec::new(),
     };
 
     for segment in segments {
@@ -663,8 +779,80 @@ fn infer_flat_map_element_hint(lambda: &IrExpression) -> Option<JavaType> {
 
 fn infer_map_result_hint(lambda: &IrExpression) -> Option<JavaType> {
     match lambda {
-        IrExpression::Lambda { body, .. } => extract_java_type(body.as_ref()),
+        IrExpression::Lambda { body, .. } => infer_expression_type(body.as_ref()),
         _ => None,
+    }
+}
+
+fn infer_expression_type(expr: &IrExpression) -> Option<JavaType> {
+    match expr {
+        IrExpression::Binary {
+            op: BinaryOp::Add,
+            left,
+            right,
+            ..
+        } => {
+            let left_ty = infer_expression_type(left).or_else(|| extract_java_type(left));
+            let right_ty = infer_expression_type(right).or_else(|| extract_java_type(right));
+
+            if left_ty.as_ref().map(is_string_like_type).unwrap_or(false)
+                || right_ty.as_ref().map(is_string_like_type).unwrap_or(false)
+            {
+                return Some(JavaType::string());
+            }
+
+            extract_java_type(expr)
+        }
+        IrExpression::Conditional {
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            let then_ty = infer_expression_type(then_expr).or_else(|| extract_java_type(then_expr));
+            let else_ty = infer_expression_type(else_expr).or_else(|| extract_java_type(else_expr));
+
+            match (then_ty, else_ty) {
+                (Some(a), Some(b)) if a == b => Some(a),
+                (Some(a), None) => Some(a),
+                (None, Some(b)) => Some(b),
+                _ => extract_java_type(expr),
+            }
+        }
+        IrExpression::Block {
+            statements,
+            java_type,
+            ..
+        } => {
+            if let Some(last) = statements.last() {
+                match last {
+                    IrStatement::Expression { expr, .. }
+                    | IrStatement::Return {
+                        value: Some(expr), ..
+                    } => infer_expression_type(expr).or_else(|| extract_java_type(expr)),
+                    _ => Some(java_type.clone()),
+                }
+            } else {
+                Some(java_type.clone())
+            }
+        }
+        _ => extract_java_type(expr),
+    }
+}
+
+fn is_string_like_type(java_type: &JavaType) -> bool {
+    match java_type {
+        JavaType::Reference { name, .. } => matches!(
+            name.as_str(),
+            "String"
+                | "java.lang.String"
+                | "CharSequence"
+                | "java.lang.CharSequence"
+                | "StringBuilder"
+                | "java.lang.StringBuilder"
+                | "StringBuffer"
+                | "java.lang.StringBuffer"
+        ),
+        _ => false,
     }
 }
 
@@ -1044,45 +1232,530 @@ fn is_iterable_like_name(name: &str) -> bool {
     )
 }
 
-fn infer_pipeline_element_type(pipeline: &SequencePipeline) -> Option<JavaType> {
-    let mut current = source_element_type(&pipeline.source);
+fn infer_lambda_return_type(lambda: &IrExpression) -> Option<JavaType> {
+    match lambda {
+        IrExpression::Lambda { body, .. } => extract_java_type(body.as_ref()),
+        _ => extract_java_type(lambda),
+    }
+}
 
-    for stage in &pipeline.stages {
-        match stage {
-            SequenceStage::Map {
-                lambda,
-                result_hint,
-                ..
-            } => {
-                if let Some(hint) = result_hint {
-                    current = Some(hint.clone());
-                } else if let Some(hint) = infer_map_result_hint(lambda) {
-                    current = Some(hint);
-                }
-            }
-            SequenceStage::FlatMap {
-                lambda,
-                element_hint,
-                ..
-            } => {
-                let container = element_hint
-                    .as_ref()
-                    .cloned()
-                    .or_else(|| infer_iterable_like_type(lambda));
+fn update_single_param_lambda(
+    lambda: &mut IrExpression,
+    interface: &str,
+    param_type: JavaType,
+    return_type: JavaType,
+) {
+    if let IrExpression::Lambda {
+        functional_interface,
+        param_types,
+        java_type,
+        param_names,
+        body,
+        ..
+    } = lambda
+    {
+        *functional_interface = interface.to_string();
 
-                if let Some(container_type) = container {
-                    if let Some(inner) = extract_iterable_element_type(&container_type) {
-                        current = Some(inner);
-                    } else {
-                        current = Some(JavaType::object());
-                    }
-                }
-            }
-            _ => {}
+        if param_types.len() != 1 || param_types[0] != param_type {
+            param_types.clear();
+            param_types.push(param_type.clone());
+        }
+
+        *java_type = JavaType::Functional {
+            interface_name: interface.to_string(),
+            param_types: vec![param_type.clone()],
+            return_type: Box::new(return_type.clone()),
+        };
+
+        if let Some(name) = param_names.get(0) {
+            update_identifier_usage(body.as_mut(), name, &param_type);
         }
     }
+}
 
-    current
+fn update_bi_param_lambda(
+    lambda: &mut IrExpression,
+    interface: &str,
+    first_param: &JavaType,
+    second_param: &JavaType,
+    return_type: JavaType,
+) {
+    if let IrExpression::Lambda {
+        functional_interface,
+        param_types,
+        java_type,
+        param_names,
+        body,
+        ..
+    } = lambda
+    {
+        *functional_interface = interface.to_string();
+
+        if param_types.len() != 2
+            || param_types[0] != *first_param
+            || param_types[1] != *second_param
+        {
+            param_types.clear();
+            param_types.push(first_param.clone());
+            param_types.push(second_param.clone());
+        }
+
+        *java_type = JavaType::Functional {
+            interface_name: interface.to_string(),
+            param_types: vec![first_param.clone(), second_param.clone()],
+            return_type: Box::new(return_type.clone()),
+        };
+
+        if let Some(name) = param_names.get(0) {
+            update_identifier_usage(body.as_mut(), name, first_param);
+        }
+        if let Some(name) = param_names.get(1) {
+            update_identifier_usage(body.as_mut(), name, second_param);
+        }
+    }
+}
+
+fn update_identifier_usage(expr: &mut IrExpression, target: &str, java_type: &JavaType) {
+    match expr {
+        IrExpression::Identifier {
+            name,
+            java_type: ty,
+            ..
+        } if name == target => {
+            *ty = java_type.clone();
+        }
+        IrExpression::MethodCall { receiver, args, .. } => {
+            if let Some(recv) = receiver.as_mut() {
+                update_identifier_usage(recv, target, java_type);
+            }
+            for arg in args.iter_mut() {
+                update_identifier_usage(arg, target, java_type);
+            }
+        }
+        IrExpression::FieldAccess { receiver, .. } => {
+            update_identifier_usage(receiver, target, java_type);
+        }
+        IrExpression::ArrayAccess { array, index, .. } => {
+            update_identifier_usage(array, target, java_type);
+            update_identifier_usage(index, target, java_type);
+        }
+        IrExpression::Binary { left, right, .. } => {
+            update_identifier_usage(left, target, java_type);
+            update_identifier_usage(right, target, java_type);
+        }
+        IrExpression::Unary { operand, .. } => {
+            update_identifier_usage(operand, target, java_type);
+        }
+        IrExpression::Assignment {
+            target: assign,
+            value,
+            ..
+        } => {
+            update_identifier_usage(assign, target, java_type);
+            update_identifier_usage(value, target, java_type);
+        }
+        IrExpression::Conditional {
+            condition,
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            update_identifier_usage(condition, target, java_type);
+            update_identifier_usage(then_expr, target, java_type);
+            update_identifier_usage(else_expr, target, java_type);
+        }
+        IrExpression::Block { statements, .. } => {
+            for stmt in statements.iter_mut() {
+                update_identifier_usage_in_statement(stmt, target, java_type);
+            }
+        }
+        IrExpression::ObjectCreation { args, .. } => {
+            for arg in args.iter_mut() {
+                update_identifier_usage(arg, target, java_type);
+            }
+        }
+        IrExpression::Lambda {
+            param_names, body, ..
+        } => {
+            if param_names.iter().any(|name| name == target) {
+                return;
+            }
+            update_identifier_usage(body.as_mut(), target, java_type);
+        }
+        IrExpression::SequencePipeline { pipeline, .. } => {
+            update_sequence_pipeline_identifiers(pipeline, target, java_type);
+        }
+        IrExpression::Switch {
+            discriminant,
+            cases,
+            ..
+        } => {
+            update_identifier_usage(discriminant, target, java_type);
+            for case in cases.iter_mut() {
+                update_switch_case_identifiers(case, target, java_type);
+            }
+        }
+        IrExpression::Cast { expr, .. } => {
+            update_identifier_usage(expr, target, java_type);
+        }
+        IrExpression::InstanceOf { expr, .. } => {
+            update_identifier_usage(expr, target, java_type);
+        }
+        IrExpression::ArrayCreation {
+            dimensions,
+            initializer,
+            ..
+        } => {
+            for dimension in dimensions.iter_mut().flatten() {
+                update_identifier_usage(dimension, target, java_type);
+            }
+            if let Some(elements) = initializer.as_mut() {
+                for element in elements.iter_mut() {
+                    update_identifier_usage(element, target, java_type);
+                }
+            }
+        }
+        IrExpression::NullSafeOperation {
+            expr,
+            operation,
+            default_value,
+            ..
+        } => {
+            update_identifier_usage(expr, target, java_type);
+            update_identifier_usage(operation, target, java_type);
+            if let Some(default) = default_value.as_mut() {
+                update_identifier_usage(default, target, java_type);
+            }
+        }
+        IrExpression::StringFormat { args, .. }
+        | IrExpression::CompletableFuture { args, .. }
+        | IrExpression::VirtualThread { args, .. } => {
+            for arg in args.iter_mut() {
+                update_identifier_usage(arg, target, java_type);
+            }
+        }
+        IrExpression::TryWithResources {
+            resources, body, ..
+        } => {
+            for resource in resources.iter_mut() {
+                update_resource_identifiers(resource, target, java_type);
+            }
+            update_identifier_usage(body.as_mut(), target, java_type);
+        }
+        IrExpression::RegexPattern { .. }
+        | IrExpression::Literal(_, _)
+        | IrExpression::This { .. }
+        | IrExpression::Super { .. } => {}
+        _ => {}
+    }
+}
+
+fn update_identifier_usage_in_statement(
+    statement: &mut IrStatement,
+    target: &str,
+    java_type: &JavaType,
+) {
+    match statement {
+        IrStatement::VariableDeclaration { initializer, .. } => {
+            if let Some(expr) = initializer.as_mut() {
+                update_identifier_usage(expr, target, java_type);
+            }
+        }
+        IrStatement::Expression { expr, .. } => {
+            update_identifier_usage(expr, target, java_type);
+        }
+        IrStatement::Return { value, .. } => {
+            if let Some(expr) = value.as_mut() {
+                update_identifier_usage(expr, target, java_type);
+            }
+        }
+        IrStatement::If {
+            condition,
+            then_stmt,
+            else_stmt,
+            ..
+        } => {
+            update_identifier_usage(condition, target, java_type);
+            update_identifier_usage_in_statement(then_stmt.as_mut(), target, java_type);
+            if let Some(else_stmt) = else_stmt.as_mut() {
+                update_identifier_usage_in_statement(else_stmt, target, java_type);
+            }
+        }
+        IrStatement::While {
+            condition, body, ..
+        } => {
+            update_identifier_usage(condition, target, java_type);
+            update_identifier_usage_in_statement(body.as_mut(), target, java_type);
+        }
+        IrStatement::ForEach {
+            variable,
+            iterable,
+            body,
+            ..
+        } => {
+            update_identifier_usage(iterable, target, java_type);
+            if variable != target {
+                update_identifier_usage_in_statement(body.as_mut(), target, java_type);
+            }
+        }
+        IrStatement::For {
+            init,
+            condition,
+            update,
+            body,
+            ..
+        } => {
+            if let Some(init_stmt) = init.as_mut() {
+                update_identifier_usage_in_statement(init_stmt, target, java_type);
+            }
+            if let Some(cond) = condition.as_mut() {
+                update_identifier_usage(cond, target, java_type);
+            }
+            if let Some(update_expr) = update.as_mut() {
+                update_identifier_usage(update_expr, target, java_type);
+            }
+            update_identifier_usage_in_statement(body.as_mut(), target, java_type);
+        }
+        IrStatement::Switch {
+            discriminant,
+            cases,
+            ..
+        } => {
+            update_identifier_usage(discriminant, target, java_type);
+            for case in cases.iter_mut() {
+                update_switch_case_identifiers(case, target, java_type);
+            }
+        }
+        IrStatement::Try {
+            body,
+            catch_clauses,
+            finally_block,
+            ..
+        } => {
+            update_identifier_usage_in_statement(body.as_mut(), target, java_type);
+            for clause in catch_clauses.iter_mut() {
+                if clause.variable_name != target {
+                    update_identifier_usage_in_statement(&mut clause.body, target, java_type);
+                }
+            }
+            if let Some(finally_stmt) = finally_block.as_mut() {
+                update_identifier_usage_in_statement(finally_stmt, target, java_type);
+            }
+        }
+        IrStatement::TryWithResources {
+            resources,
+            body,
+            catch_clauses,
+            finally_block,
+            ..
+        } => {
+            for resource in resources.iter_mut() {
+                update_resource_identifiers(resource, target, java_type);
+            }
+            update_identifier_usage_in_statement(body.as_mut(), target, java_type);
+            for clause in catch_clauses.iter_mut() {
+                if clause.variable_name != target {
+                    update_identifier_usage_in_statement(&mut clause.body, target, java_type);
+                }
+            }
+            if let Some(finally_stmt) = finally_block.as_mut() {
+                update_identifier_usage_in_statement(finally_stmt, target, java_type);
+            }
+        }
+        IrStatement::Throw { expr, .. } => {
+            update_identifier_usage(expr, target, java_type);
+        }
+        IrStatement::Block { statements, .. } => {
+            for stmt in statements.iter_mut() {
+                update_identifier_usage_in_statement(stmt, target, java_type);
+            }
+        }
+        IrStatement::ClassDeclaration {
+            fields,
+            methods,
+            nested_classes,
+            ..
+        } => {
+            for field in fields.iter_mut() {
+                update_identifier_usage_in_statement(field, target, java_type);
+            }
+            for method in methods.iter_mut() {
+                update_identifier_usage_in_statement(method, target, java_type);
+            }
+            for nested in nested_classes.iter_mut() {
+                update_identifier_usage_in_statement(nested, target, java_type);
+            }
+        }
+        IrStatement::InterfaceDeclaration {
+            fields,
+            methods,
+            default_methods,
+            nested_types,
+            ..
+        } => {
+            for field in fields.iter_mut() {
+                update_identifier_usage_in_statement(field, target, java_type);
+            }
+            for method in methods.iter_mut() {
+                update_identifier_usage_in_statement(method, target, java_type);
+            }
+            for default_method in default_methods.iter_mut() {
+                update_identifier_usage_in_statement(default_method, target, java_type);
+            }
+            for nested in nested_types.iter_mut() {
+                update_identifier_usage_in_statement(nested, target, java_type);
+            }
+        }
+        IrStatement::RecordDeclaration { methods, .. } => {
+            for method in methods.iter_mut() {
+                update_identifier_usage_in_statement(method, target, java_type);
+            }
+        }
+        IrStatement::MethodDeclaration { body, .. } => {
+            if let Some(body_expr) = body.as_mut() {
+                update_identifier_usage(body_expr, target, java_type);
+            }
+        }
+        IrStatement::FieldDeclaration { initializer, .. } => {
+            if let Some(expr) = initializer.as_mut() {
+                update_identifier_usage(expr, target, java_type);
+            }
+        }
+        IrStatement::SampleDeclaration(_)
+        | IrStatement::Comment { .. }
+        | IrStatement::Commented { .. }
+        | IrStatement::Break { .. }
+        | IrStatement::Continue { .. }
+        | IrStatement::Import(_)
+        | IrStatement::Package { .. } => {}
+    }
+}
+
+fn update_switch_case_identifiers(
+    case: &mut crate::types::IrSwitchCase,
+    target: &str,
+    java_type: &JavaType,
+) {
+    for label in case.labels.iter_mut() {
+        update_case_label_identifiers(label, target, java_type);
+    }
+    if let Some(guard) = case.guard.as_mut() {
+        update_identifier_usage(guard, target, java_type);
+    }
+    update_identifier_usage(&mut case.body, target, java_type);
+}
+
+fn update_case_label_identifiers(
+    label: &mut crate::types::IrCaseLabel,
+    target: &str,
+    java_type: &JavaType,
+) {
+    match label {
+        crate::types::IrCaseLabel::Range { lower, upper, .. } => {
+            update_identifier_usage(lower, target, java_type);
+            update_identifier_usage(upper, target, java_type);
+        }
+        _ => {}
+    }
+}
+
+fn update_resource_identifiers(
+    resource: &mut crate::types::IrResource,
+    target: &str,
+    java_type: &JavaType,
+) {
+    update_identifier_usage(&mut resource.initializer, target, java_type);
+}
+
+fn update_sequence_pipeline_identifiers(
+    pipeline: &mut SequencePipeline,
+    target: &str,
+    java_type: &JavaType,
+) {
+    update_sequence_source_identifiers(&mut pipeline.source, target, java_type);
+    for stage in pipeline.stages.iter_mut() {
+        update_sequence_stage_identifiers(stage, target, java_type);
+    }
+    if let Some(terminal) = pipeline.terminal.as_mut() {
+        update_sequence_terminal_identifiers(terminal, target, java_type);
+    }
+}
+
+fn update_sequence_source_identifiers(
+    source: &mut SequenceSource,
+    target: &str,
+    java_type: &JavaType,
+) {
+    match source {
+        SequenceSource::Collection { expr, .. }
+        | SequenceSource::Array { expr, .. }
+        | SequenceSource::JavaStream { expr, .. } => {
+            update_identifier_usage(expr, target, java_type);
+        }
+        SequenceSource::ListLiteral { elements, .. } => {
+            for element in elements.iter_mut() {
+                update_identifier_usage(element, target, java_type);
+            }
+        }
+    }
+}
+
+fn update_sequence_stage_identifiers(
+    stage: &mut SequenceStage,
+    target: &str,
+    java_type: &JavaType,
+) {
+    match stage {
+        SequenceStage::Map { lambda, .. } | SequenceStage::FlatMap { lambda, .. } => {
+            update_identifier_usage(lambda.as_mut(), target, java_type);
+        }
+        SequenceStage::Filter { predicate, .. } => {
+            update_identifier_usage(predicate.as_mut(), target, java_type);
+        }
+        SequenceStage::Take { count, .. } | SequenceStage::Drop { count, .. } => {
+            update_identifier_usage(count.as_mut(), target, java_type);
+        }
+        SequenceStage::Sorted { comparator, .. } => {
+            if let Some(comp) = comparator.as_mut() {
+                update_identifier_usage(comp.as_mut(), target, java_type);
+            }
+        }
+    }
+}
+
+fn update_sequence_terminal_identifiers(
+    terminal: &mut SequenceTerminal,
+    target: &str,
+    java_type: &JavaType,
+) {
+    use SequenceTerminalKind::*;
+
+    match &mut terminal.kind {
+        Fold {
+            initial,
+            accumulator,
+        } => {
+            update_identifier_usage(initial.as_mut(), target, java_type);
+            update_identifier_usage(accumulator.as_mut(), target, java_type);
+        }
+        Reduce { accumulator } => {
+            update_identifier_usage(accumulator.as_mut(), target, java_type);
+        }
+        GroupBy { key_selector } => {
+            update_identifier_usage(key_selector.as_mut(), target, java_type);
+        }
+        Associate { pair_selector } => {
+            update_identifier_usage(pair_selector.as_mut(), target, java_type);
+        }
+        ForEach { action } => {
+            update_identifier_usage(action.as_mut(), target, java_type);
+        }
+        ToList | ToSet | Count | Sum => {}
+    }
+}
+
+fn infer_pipeline_element_type(pipeline: &SequencePipeline) -> Option<JavaType> {
+    pipeline.element_type().cloned()
 }
 
 fn source_element_type(source: &SequenceSource) -> Option<JavaType> {

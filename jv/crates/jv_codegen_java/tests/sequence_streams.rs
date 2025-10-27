@@ -459,6 +459,8 @@ fn build_pipeline(
         lazy: false,
         span: dummy_span(),
         shape: PipelineShape::default(),
+        source_element_type: None,
+        stage_element_types: Vec::new(),
     };
     pipeline.recompute_shape();
 
@@ -646,6 +648,8 @@ fn lazy_sequence_pipeline_produces_sequence_wrapper() {
         lazy: true,
         span: dummy_span(),
         shape: PipelineShape::default(),
+        source_element_type: None,
+        stage_element_types: Vec::new(),
     };
     pipeline.recompute_shape();
 
@@ -1084,6 +1088,8 @@ fn sum_terminal_with_int_hint_uses_map_to_int() {
         lazy: false,
         span: dummy_span(),
         shape: PipelineShape::default(),
+        source_element_type: None,
+        stage_element_types: Vec::new(),
     };
     pipeline.recompute_shape();
     pipeline.apply_specialization_hint();

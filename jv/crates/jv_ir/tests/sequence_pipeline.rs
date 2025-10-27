@@ -612,6 +612,8 @@ fn int_family_specialization_injects_cast_adapter() {
         lazy: false,
         span: span.clone(),
         shape: PipelineShape::default(),
+        source_element_type: None,
+        stage_element_types: Vec::new(),
     };
 
     if let Some(terminal) = pipeline.terminal.as_mut() {

@@ -6,7 +6,7 @@ use crate::error::TransformError;
 use crate::types::{IrExpression, IrStatement, JavaType, MethodOverload};
 use jv_ast::{
     Argument, CallArgumentStyle, Expression, Literal, Modifiers, Parameter, Span, Statement,
-    TypeAnnotation,
+    TypeAnnotation, VarianceMarker,
 };
 
 pub fn desugar_default_parameters(
@@ -315,6 +315,7 @@ pub fn desugar_top_level_function(
             modifiers,
             span,
             type_parameters,
+            generic_signature,
             ..
         } => {
             // Convert return type
@@ -323,10 +324,46 @@ pub fn desugar_top_level_function(
                 None => JavaType::void(),
             };
 
-            let ir_type_parameters = type_parameters
+            let mut ir_type_parameters = type_parameters
                 .into_iter()
-                .map(|tp| crate::types::IrTypeParameter::new(tp, span.clone()))
+                .map(|tp| crate::types::IrTypeParameter::new(tp.clone(), span.clone()))
                 .collect::<Vec<_>>();
+
+            if let Some(signature) = generic_signature {
+                use std::collections::HashMap;
+
+                let index_by_name: HashMap<_, _> = ir_type_parameters
+                    .iter()
+                    .enumerate()
+                    .map(|(idx, param)| (param.name.clone(), idx))
+                    .collect();
+
+                for parameter in &signature.parameters {
+                    if let Some(&index) = index_by_name.get(&parameter.name) {
+                        let bounds = parameter
+                            .bounds
+                            .iter()
+                            .map(|annotation: &TypeAnnotation| {
+                                convert_type_annotation(annotation.clone())
+                            })
+                            .collect::<Result<Vec<_>, _>>()?;
+                        ir_type_parameters[index].bounds = bounds;
+
+                        if let Some(variance) = parameter.variance.clone() {
+                            ir_type_parameters[index].variance = match variance {
+                                VarianceMarker::Covariant => crate::types::IrVariance::Covariant,
+                                VarianceMarker::Contravariant => {
+                                    crate::types::IrVariance::Contravariant
+                                }
+                            };
+                        }
+
+                        if let Some(kind) = parameter.kind.clone() {
+                            ir_type_parameters[index].kind = Some(kind);
+                        }
+                    }
+                }
+            }
 
             // Register the function's return type so subsequent calls can resolve it.
             context

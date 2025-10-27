@@ -540,6 +540,8 @@ fn apply_hint_to_sequence_pipeline(
     if let Some(terminal) = pipeline.terminal.as_mut() {
         apply_hint_to_sequence_terminal(terminal, hint);
     }
+
+    pipeline.recompute_element_types();
 }
 
 fn apply_hint_to_sequence_source(

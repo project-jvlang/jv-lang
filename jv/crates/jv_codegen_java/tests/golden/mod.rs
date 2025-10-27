@@ -162,6 +162,8 @@ pub(crate) fn build_pipeline_expression(
         lazy: false,
         span: dummy_span(),
         shape: PipelineShape::default(),
+        source_element_type: None,
+        stage_element_types: Vec::new(),
     };
     pipeline.recompute_shape();
 
