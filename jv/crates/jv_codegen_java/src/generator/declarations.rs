@@ -1,4 +1,5 @@
 use super::*;
+use std::borrow::Cow;
 use jv_ast::types::{Kind, PrimitiveTypeName};
 use jv_ir::{
     IrAnnotation, IrAnnotationArgument, IrAnnotationValue, IrGenericMetadata, IrTypeLevelValue,
@@ -19,6 +20,7 @@ impl JavaCodeGenerator {
             ..
         } = JavaCodeGenerator::base_statement(class)
         {
+            let is_nested = !self.metadata_path.is_empty();
             self.metadata_path.push(name.clone());
             let metadata_entry = self.current_generic_metadata().cloned();
 
@@ -27,6 +29,9 @@ impl JavaCodeGenerator {
 
             let result = (|| -> Result<String, CodeGenError> {
                 let mut builder = self.builder();
+                let modifiers_view = Self::normalize_type_modifiers(modifiers, is_nested);
+                let modifiers = modifiers_view.as_ref();
+
                 self.render_annotations(&mut builder, modifiers);
                 self.emit_generic_metadata_comment(
                     &mut builder,
@@ -129,6 +134,7 @@ impl JavaCodeGenerator {
             ..
         } = JavaCodeGenerator::base_statement(record)
         {
+            let is_nested = !self.metadata_path.is_empty();
             self.metadata_path.push(name.clone());
             let metadata_entry = self.current_generic_metadata().cloned();
 
@@ -137,6 +143,9 @@ impl JavaCodeGenerator {
 
             let result = (|| -> Result<String, CodeGenError> {
                 let mut builder = self.builder();
+                let modifiers_view = Self::normalize_type_modifiers(modifiers, is_nested);
+                let modifiers = modifiers_view.as_ref();
+
                 self.render_annotations(&mut builder, modifiers);
                 self.emit_generic_metadata_comment(
                     &mut builder,
@@ -212,6 +221,7 @@ impl JavaCodeGenerator {
             ..
         } = JavaCodeGenerator::base_statement(interface)
         {
+            let is_nested = !self.metadata_path.is_empty();
             self.metadata_path.push(name.clone());
             let metadata_entry = self.current_generic_metadata().cloned();
 
@@ -220,6 +230,9 @@ impl JavaCodeGenerator {
 
             let result = (|| -> Result<String, CodeGenError> {
                 let mut builder = self.builder();
+                let modifiers_view = Self::normalize_type_modifiers(modifiers, is_nested);
+                let modifiers = modifiers_view.as_ref();
+
                 self.render_annotations(&mut builder, modifiers);
                 self.emit_generic_metadata_comment(
                     &mut builder,
@@ -825,6 +838,24 @@ impl JavaCodeGenerator {
                 self.register_annotation_imports(annotation);
             }
             _ => {}
+        }
+    }
+
+    fn normalize_type_modifiers<'a>(
+        modifiers: &'a IrModifiers,
+        is_nested: bool,
+    ) -> Cow<'a, IrModifiers> {
+        if is_nested {
+            return Cow::Borrowed(modifiers);
+        }
+
+        match modifiers.visibility {
+            IrVisibility::Private | IrVisibility::Protected => {
+                let mut adjusted = modifiers.clone();
+                adjusted.visibility = IrVisibility::Package;
+                Cow::Owned(adjusted)
+            }
+            _ => Cow::Borrowed(modifiers),
         }
     }
 

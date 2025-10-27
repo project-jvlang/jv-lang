@@ -4,8 +4,8 @@ use super::utils::{boxed_java_type, extract_java_type};
 use crate::context::TransformContext;
 use crate::error::TransformError;
 use crate::types::{
-    IrCaseLabel, IrDeconstructionComponent, IrDeconstructionPattern, IrExpression,
-    IrImplicitWhenEnd, IrSwitchCase, JavaType, JavaWildcardKind,
+    IrCaseLabel, IrDeconstructionComponent, IrDeconstructionPattern, IrExpression, IrImplicitWhenEnd,
+    IrResource, IrStatement, IrSwitchCase, JavaType, JavaWildcardKind,
 };
 use jv_ast::{
     BinaryOp, Expression, ImplicitWhenEnd, Literal, Pattern, Span, TypeAnnotation, WhenArm,
@@ -100,17 +100,32 @@ impl WhenLoweringPlanner {
         let mut has_default_case = false;
         let mut guard_count = 0usize;
 
+        let subject_identifier = match &discriminant {
+            IrExpression::Identifier { name, .. } => Some(name.clone()),
+            IrExpression::This { .. } => Some("this".to_string()),
+            _ => None,
+        };
+
         for arm in arms.into_iter() {
             let PatternLowering {
                 labels,
                 guard,
                 is_default,
+                binding,
             } = lower_pattern_case(arm.pattern, &discriminant_type, context, arm.span.clone())?;
 
             let mut combined_guard = guard;
             if let Some(guard_expr) = arm.guard {
                 let transformed_guard = transform_expression(guard_expr, context)?;
                 combined_guard = combine_guards(combined_guard, Some(transformed_guard), &arm.span);
+            }
+
+            if let (Some(binding), Some(subject_name)) =
+                (binding.as_ref(), subject_identifier.as_deref())
+            {
+                combined_guard = combined_guard.map(|expr| {
+                    rewrite_expression_with_binding(expr, subject_name, binding)
+                });
             }
 
             if combined_guard.is_some() {
@@ -128,7 +143,12 @@ impl WhenLoweringPlanner {
                 has_default_case = true;
             }
 
-            let body = transform_expression(arm.body, context)?;
+            let mut body = transform_expression(arm.body, context)?;
+            if let (Some(binding), Some(subject_name)) =
+                (binding.as_ref(), subject_identifier.as_deref())
+            {
+                body = rewrite_expression_with_binding(body, subject_name, binding);
+            }
             if result_type.is_none() {
                 result_type = extract_java_type(&body);
             }
@@ -274,6 +294,7 @@ struct PatternLowering {
     labels: Vec<IrCaseLabel>,
     guard: Option<IrExpression>,
     is_default: bool,
+    binding: Option<CaseBinding>,
 }
 
 #[derive(Debug, Clone)]
@@ -307,21 +328,23 @@ fn lower_pattern_case(
             labels: vec![IrCaseLabel::Default],
             guard: None,
             is_default: true,
+            binding: None,
         }),
         Pattern::Literal(literal, _) => Ok(PatternLowering {
             labels: vec![IrCaseLabel::Literal(literal)],
             guard: None,
             is_default: false,
+            binding: None,
         }),
         Pattern::Constructor {
             name,
             patterns,
             span,
         } => {
-            let binding = CaseBinding::new(context.fresh_identifier("it"), subject_type.clone());
+            let (type_name, binding_type) = resolve_constructor_pattern_type(&name)?;
+            let binding = CaseBinding::new(context.fresh_identifier("it"), binding_type);
             let (deconstruction, nested_guard) =
                 lower_constructor_deconstruction(patterns, context, &span, 1)?;
-            let type_name = normalize_constructor_type_name(&name)?;
             let matches_subject_type = type_name == type_name_for_case(subject_type);
             let is_unconditional =
                 matches_subject_type && deconstruction.is_none() && nested_guard.is_none();
@@ -333,6 +356,7 @@ fn lower_pattern_case(
                 }],
                 guard: nested_guard,
                 is_default: is_unconditional,
+                binding: Some(binding),
             })
         }
         Pattern::Range {
@@ -375,6 +399,7 @@ fn lower_pattern_case(
                 }],
                 guard,
                 is_default: false,
+                binding: Some(binding),
             })
         }
         Pattern::Guard {
@@ -577,14 +602,17 @@ fn describe_exhaustiveness(summary: &PatternAnalysisSummary) -> String {
     }
 }
 
-fn normalize_constructor_type_name(name: &str) -> Result<String, TransformError> {
+fn resolve_constructor_pattern_type(
+    name: &str,
+) -> Result<(String, JavaType), TransformError> {
     let annotation = TypeAnnotation::Simple(name.to_string());
     let java_type = convert_type_annotation(annotation)?;
-    let normalized = match java_type {
-        JavaType::Primitive(_) => boxed_java_type(&java_type),
-        _ => java_type,
+    let normalized = if matches!(java_type, JavaType::Primitive(_)) {
+        boxed_java_type(&java_type)
+    } else {
+        java_type
     };
-    Ok(type_name_for_case(&normalized))
+    Ok((type_name_for_case(&normalized), normalized))
 }
 
 fn type_name_for_case(java_type: &JavaType) -> String {
@@ -616,4 +644,445 @@ fn unsupported_nested_feature_message(reason_en: &str, reason_ja: &str) -> Strin
     format!(
         "JV3199: {reason_ja}。後続タスクで対応予定です。\nJV3199: {reason_en}. This construct will be available in a subsequent update.\n--explain JV3199: Advanced nested pattern features (guards, ranges) are limited in the current release."
     )
+}
+
+
+fn rewrite_expression_with_binding(
+    expr: IrExpression,
+    subject_name: &str,
+    binding: &CaseBinding,
+) -> IrExpression {
+    match expr {
+        IrExpression::Identifier { name, span, .. } if name == subject_name => IrExpression::Identifier {
+            name: binding.name.clone(),
+            java_type: binding.java_type.clone(),
+            span,
+        },
+        IrExpression::This { java_type, span } => IrExpression::This { java_type, span },
+        IrExpression::MethodCall {
+            receiver,
+            method_name,
+            java_name,
+            resolved_target,
+            args,
+            argument_style,
+            java_type,
+            span,
+        } => IrExpression::MethodCall {
+            receiver: receiver.map(|inner| {
+                Box::new(rewrite_expression_with_binding(
+                    *inner,
+                    subject_name,
+                    binding,
+                ))
+            }),
+            method_name,
+            java_name,
+            resolved_target,
+            args: args
+                .into_iter()
+                .map(|arg| rewrite_expression_with_binding(arg, subject_name, binding))
+                .collect(),
+            argument_style,
+            java_type,
+            span,
+        },
+        IrExpression::FieldAccess {
+            receiver,
+            field_name,
+            java_type,
+            span,
+        } => IrExpression::FieldAccess {
+            receiver: Box::new(rewrite_expression_with_binding(
+                *receiver,
+                subject_name,
+                binding,
+            )),
+            field_name,
+            java_type,
+            span,
+        },
+        IrExpression::ArrayAccess {
+            array,
+            index,
+            java_type,
+            span,
+        } => IrExpression::ArrayAccess {
+            array: Box::new(rewrite_expression_with_binding(
+                *array,
+                subject_name,
+                binding,
+            )),
+            index: Box::new(rewrite_expression_with_binding(
+                *index,
+                subject_name,
+                binding,
+            )),
+            java_type,
+            span,
+        },
+        IrExpression::Binary {
+            left,
+            op,
+            right,
+            java_type,
+            span,
+        } => IrExpression::Binary {
+            left: Box::new(rewrite_expression_with_binding(
+                *left,
+                subject_name,
+                binding,
+            )),
+            op,
+            right: Box::new(rewrite_expression_with_binding(
+                *right,
+                subject_name,
+                binding,
+            )),
+            java_type,
+            span,
+        },
+        IrExpression::Unary {
+            op,
+            operand,
+            java_type,
+            span,
+        } => IrExpression::Unary {
+            op,
+            operand: Box::new(rewrite_expression_with_binding(
+                *operand,
+                subject_name,
+                binding,
+            )),
+            java_type,
+            span,
+        },
+        IrExpression::Assignment {
+            target,
+            value,
+            java_type,
+            span,
+        } => IrExpression::Assignment {
+            target: Box::new(rewrite_expression_with_binding(
+                *target,
+                subject_name,
+                binding,
+            )),
+            value: Box::new(rewrite_expression_with_binding(
+                *value,
+                subject_name,
+                binding,
+            )),
+            java_type,
+            span,
+        },
+        IrExpression::Conditional {
+            condition,
+            then_expr,
+            else_expr,
+            java_type,
+            span,
+        } => IrExpression::Conditional {
+            condition: Box::new(rewrite_expression_with_binding(
+                *condition,
+                subject_name,
+                binding,
+            )),
+            then_expr: Box::new(rewrite_expression_with_binding(
+                *then_expr,
+                subject_name,
+                binding,
+            )),
+            else_expr: Box::new(rewrite_expression_with_binding(
+                *else_expr,
+                subject_name,
+                binding,
+            )),
+            java_type,
+            span,
+        },
+        IrExpression::Block {
+            statements,
+            java_type,
+            span,
+        } => IrExpression::Block {
+            statements: statements
+                .into_iter()
+                .map(|stmt| rewrite_statement_with_binding(stmt, subject_name, binding))
+                .collect(),
+            java_type,
+            span,
+        },
+        IrExpression::ArrayCreation {
+            element_type,
+            dimensions,
+            initializer,
+            delimiter,
+            span,
+        } => IrExpression::ArrayCreation {
+            element_type,
+            dimensions: dimensions
+                .into_iter()
+                .map(|dim| {
+                    dim.map(|expr| {
+                        rewrite_expression_with_binding(expr, subject_name, binding)
+                    })
+                })
+                .collect(),
+            initializer: initializer.map(|values| {
+                values
+                    .into_iter()
+                    .map(|expr| {
+                        rewrite_expression_with_binding(expr, subject_name, binding)
+                    })
+                    .collect()
+            }),
+            delimiter,
+            span,
+        },
+        IrExpression::ObjectCreation {
+            class_name,
+            generic_args,
+            args,
+            java_type,
+            span,
+        } => IrExpression::ObjectCreation {
+            class_name,
+            generic_args,
+            args: args
+                .into_iter()
+                .map(|expr| rewrite_expression_with_binding(expr, subject_name, binding))
+                .collect(),
+            java_type,
+            span,
+        },
+        IrExpression::Lambda {
+            functional_interface,
+            param_names,
+            param_types,
+            body,
+            java_type,
+            span,
+        } => IrExpression::Lambda {
+            functional_interface,
+            param_names,
+            param_types,
+            body: Box::new(rewrite_expression_with_binding(
+                *body,
+                subject_name,
+                binding,
+            )),
+            java_type,
+            span,
+        },
+        IrExpression::Switch {
+            discriminant,
+            cases,
+            java_type,
+            implicit_end,
+            span,
+            strategy_description,
+        } => IrExpression::Switch {
+            discriminant: Box::new(rewrite_expression_with_binding(
+                *discriminant,
+                subject_name,
+                binding,
+            )),
+            cases: cases
+                .into_iter()
+                .map(|case| IrSwitchCase {
+                    labels: case.labels,
+                    guard: case.guard.map(|expr| {
+                        rewrite_expression_with_binding(expr, subject_name, binding)
+                    }),
+                    body: rewrite_expression_with_binding(case.body, subject_name, binding),
+                    span: case.span,
+                })
+                .collect(),
+            java_type,
+            implicit_end,
+            strategy_description,
+            span,
+        },
+        IrExpression::Cast {
+            expr,
+            target_type,
+            span,
+        } => IrExpression::Cast {
+            expr: Box::new(rewrite_expression_with_binding(
+                *expr,
+                subject_name,
+                binding,
+            )),
+            target_type,
+            span,
+        },
+        IrExpression::InstanceOf {
+            expr,
+            target_type,
+            span,
+        } => IrExpression::InstanceOf {
+            expr: Box::new(rewrite_expression_with_binding(
+                *expr,
+                subject_name,
+                binding,
+            )),
+            target_type,
+            span,
+        },
+        IrExpression::NullSafeOperation {
+            expr,
+            operation,
+            default_value,
+            java_type,
+            span,
+        } => IrExpression::NullSafeOperation {
+            expr: Box::new(rewrite_expression_with_binding(
+                *expr,
+                subject_name,
+                binding,
+            )),
+            operation: Box::new(rewrite_expression_with_binding(
+                *operation,
+                subject_name,
+                binding,
+            )),
+            default_value: default_value.map(|expr| {
+                Box::new(rewrite_expression_with_binding(
+                    *expr,
+                    subject_name,
+                    binding,
+                ))
+            }),
+            java_type,
+            span,
+        },
+        IrExpression::StringFormat {
+            format_string,
+            args,
+            span,
+        } => IrExpression::StringFormat {
+            format_string,
+            args: args
+                .into_iter()
+                .map(|expr| rewrite_expression_with_binding(expr, subject_name, binding))
+                .collect(),
+            span,
+        },
+        IrExpression::CompletableFuture {
+            operation,
+            args,
+            java_type,
+            span,
+        } => IrExpression::CompletableFuture {
+            operation,
+            args: args
+                .into_iter()
+                .map(|expr| rewrite_expression_with_binding(expr, subject_name, binding))
+                .collect(),
+            java_type,
+            span,
+        },
+        IrExpression::VirtualThread {
+            operation,
+            args,
+            java_type,
+            span,
+        } => IrExpression::VirtualThread {
+            operation,
+            args: args
+                .into_iter()
+                .map(|expr| rewrite_expression_with_binding(expr, subject_name, binding))
+                .collect(),
+            java_type,
+            span,
+        },
+        IrExpression::TryWithResources {
+            resources,
+            body,
+            java_type,
+            span,
+        } => IrExpression::TryWithResources {
+            resources: resources
+                .into_iter()
+                .map(|res| IrResource {
+                    name: res.name,
+                    initializer: rewrite_expression_with_binding(
+                        res.initializer,
+                        subject_name,
+                        binding,
+                    ),
+                    java_type: res.java_type,
+                    span: res.span,
+                })
+                .collect(),
+            body: Box::new(rewrite_expression_with_binding(
+                *body,
+                subject_name,
+                binding,
+            )),
+            java_type,
+            span,
+        },
+        IrExpression::SequencePipeline {
+            pipeline,
+            java_type,
+            span,
+        } => IrExpression::SequencePipeline {
+            pipeline,
+            java_type,
+            span,
+        },
+        other => other,
+    }
+}
+
+fn rewrite_statement_with_binding(
+    stmt: IrStatement,
+    subject_name: &str,
+    binding: &CaseBinding,
+) -> IrStatement {
+    match stmt {
+        IrStatement::Expression { expr, span } => IrStatement::Expression {
+            expr: rewrite_expression_with_binding(expr, subject_name, binding),
+            span,
+        },
+        IrStatement::Return { value, span } => IrStatement::Return {
+            value: value
+                .map(|expr| rewrite_expression_with_binding(expr, subject_name, binding)),
+            span,
+        },
+        IrStatement::VariableDeclaration {
+            name,
+            java_type,
+            initializer,
+            is_final,
+            modifiers,
+            span,
+        } => IrStatement::VariableDeclaration {
+            name,
+            java_type,
+            initializer: initializer
+                .map(|expr| rewrite_expression_with_binding(expr, subject_name, binding)),
+            is_final,
+            modifiers,
+            span,
+        },
+        IrStatement::ForEach {
+            variable,
+            variable_type,
+            iterable,
+            body,
+            iterable_kind,
+            span,
+        } => IrStatement::ForEach {
+            variable,
+            variable_type,
+            iterable: rewrite_expression_with_binding(iterable, subject_name, binding),
+            body: Box::new(rewrite_statement_with_binding(*body, subject_name, binding)),
+            iterable_kind,
+            span,
+        },
+        other => other,
+    }
 }

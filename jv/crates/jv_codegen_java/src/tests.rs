@@ -892,6 +892,52 @@ fn record_extension_method_is_emitted_as_instance_method() {
 }
 
 #[test]
+fn top_level_records_drop_private_visibility() {
+    let mut generator = JavaCodeGenerator::new();
+    let span = dummy_span();
+    let mut private_modifiers = IrModifiers::default();
+    private_modifiers.visibility = IrVisibility::Private;
+
+    let record_declaration = IrStatement::RecordDeclaration {
+        name: "Event".to_string(),
+        type_parameters: vec![],
+        components: vec![IrRecordComponent {
+            name: "label".to_string(),
+            java_type: string_type(),
+            span: span.clone(),
+        }],
+        interfaces: vec![],
+        methods: vec![],
+        modifiers: private_modifiers,
+        span: span.clone(),
+    };
+
+    let program = IrProgram {
+        package: None,
+        imports: vec![],
+        type_declarations: vec![record_declaration],
+        generic_metadata: Default::default(),
+        conversion_metadata: Vec::new(),
+        span,
+    };
+
+    let unit = generator
+        .generate_compilation_unit(&program)
+        .expect("code generation should succeed");
+
+    assert_eq!(unit.type_declarations.len(), 1);
+    let record_java = &unit.type_declarations[0];
+    assert!(
+        record_java.contains("record Event"),
+        "record name should be preserved: {record_java}"
+    );
+    assert!(
+        !record_java.contains("private record"),
+        "top-level record should not emit private modifier: {record_java}"
+    );
+}
+
+#[test]
 fn class_extension_method_is_emitted_as_instance_method() {
     let mut generator = JavaCodeGenerator::new();
     let span = dummy_span();

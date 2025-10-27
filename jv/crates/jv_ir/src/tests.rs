@@ -1447,6 +1447,103 @@ mod tests {
     }
 
     #[test]
+    fn when_constructor_pattern_rewrites_subject_usage_in_guard_and_body() {
+        let mut context = test_context();
+        context.add_variable("value".to_string(), JavaType::object());
+
+        let subject = Some(Box::new(Expression::Identifier(
+            "value".to_string(),
+            dummy_span(),
+        )));
+
+        let string_pattern_span = dummy_span();
+        let guard_call = Expression::Call {
+            function: Box::new(Expression::MemberAccess {
+                object: Box::new(Expression::Identifier(
+                    "value".to_string(),
+                    dummy_span(),
+                )),
+                property: "startsWith".to_string(),
+                span: dummy_span(),
+            }),
+            args: vec![Argument::Positional(Expression::Literal(
+                Literal::String("jv".to_string()),
+                dummy_span(),
+            ))],
+            type_arguments: vec![],
+            argument_metadata: CallArgumentMetadata::default(),
+            span: dummy_span(),
+        };
+
+        let string_arm = WhenArm {
+            pattern: Pattern::Guard {
+                pattern: Box::new(Pattern::Constructor {
+                    name: "String".to_string(),
+                    patterns: vec![],
+                    span: string_pattern_span.clone(),
+                }),
+                condition: guard_call,
+                span: string_pattern_span.clone(),
+            },
+            guard: None,
+            body: Expression::Identifier("value".to_string(), dummy_span()),
+            span: string_pattern_span,
+        };
+
+        let fallback_arm = WhenArm {
+            pattern: Pattern::Wildcard(dummy_span()),
+            guard: None,
+            body: Expression::Literal(Literal::String("fallback".to_string()), dummy_span()),
+            span: dummy_span(),
+        };
+
+        let result = desugar_when_expression(
+            subject,
+            vec![string_arm, fallback_arm],
+            None,
+            None,
+            dummy_span(),
+            &mut context,
+        )
+        .expect("when expression should lower successfully");
+
+        match result {
+            IrExpression::Switch { cases, .. } => {
+                assert_eq!(cases.len(), 2, "expected two explicit cases");
+                let string_case = &cases[0];
+                let guard_receiver = match string_case
+                    .guard
+                    .as_ref()
+                    .expect("guard should exist")
+                {
+                    IrExpression::MethodCall { receiver, .. } => receiver
+                        .as_ref()
+                        .and_then(|inner| match inner.as_ref() {
+                            IrExpression::Identifier { name, .. } => Some(name.clone()),
+                            _ => None,
+                        })
+                        .expect("method guard should have receiver"),
+                    other => panic!("expected method call guard, got {:?}", other),
+                };
+                assert!(
+                    guard_receiver.starts_with("it"),
+                    "guard should use binding identifier, got {guard_receiver}"
+                );
+
+                let body_binding = match &string_case.body {
+                    IrExpression::Identifier { name, .. } => name.clone(),
+                    other => panic!("expected identifier body, got {:?}", other),
+                };
+                assert!(
+                    body_binding.starts_with("it"),
+                    "body should use binding identifier, got {body_binding}"
+                );
+            }
+            other => panic!("expected switch expression, got {:?}", other),
+        }
+    }
+
+    #[test]
     fn when_constructor_pattern_normalizes_type_aliases() {
         let mut context = test_context();
         context.add_variable("value".to_string(), JavaType::object());
