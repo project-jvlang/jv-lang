@@ -2789,6 +2789,41 @@ fn switch_expression_java21_range_pattern_fallback() {
 }
 
 #[test]
+fn switch_expression_with_boolean_literals_does_not_require_preview() {
+    let bool_type = JavaType::Primitive("boolean".to_string());
+
+    let expression = IrExpression::Switch {
+        discriminant: Box::new(ir_identifier("flag", &bool_type)),
+        cases: vec![
+            switch_case(
+                vec![IrCaseLabel::Literal(Literal::Boolean(true))],
+                None,
+                string_literal("set"),
+            ),
+            switch_case(
+                vec![IrCaseLabel::Literal(Literal::Boolean(false))],
+                None,
+                string_literal("unset"),
+            ),
+        ],
+        java_type: JavaType::string(),
+        implicit_end: None,
+        strategy_description: Some(
+            "strategy=Switch arms=2 guards=0 default=false exhaustive=unknown".to_string(),
+        ),
+        span: dummy_span(),
+    };
+
+    let mut generator = JavaCodeGenerator::new();
+    let rendered = generator
+        .generate_expression(&expression)
+        .expect("boolean literal switch should render");
+
+    let expected = "// strategy=Switch arms=2 guards=0 default=false exhaustive=unknown\nnew Object() {\n    String matchExpr() {\n        final var __subject = flag;\n        final String __matchResult;\n        boolean __matched = false;\n        if (!__matched) {\n            if (java.util.Objects.equals(__subject, true)) {\n                __matchResult = \"set\";\n                __matched = true;\n            }\n        }\n        if (!__matched) {\n            if (java.util.Objects.equals(__subject, false)) {\n                __matchResult = \"unset\";\n                __matched = true;\n            }\n        }\n        if (!__matched) {\n            throw new IllegalStateException(\"non-exhaustive when expression\");\n        }\n        return __matchResult;\n    }\n}.matchExpr()\n";
+    assert_eq!(rendered, expected, "boolean cases should fall back to safe lowering");
+}
+
+#[test]
 fn switch_expression_nested_destructuring_java25_and_java21() {
     let outer_type = JavaType::Reference {
         name: "Outer".to_string(),

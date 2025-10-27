@@ -389,6 +389,17 @@ impl JavaCodeGenerator {
             );
         }
 
+        if Self::switch_requires_boolean_fallback(discriminant, cases) {
+            return self.render_switch_expression_java21(
+                discriminant,
+                cases,
+                java_type,
+                implicit_end,
+                strategy_description,
+                span,
+            );
+        }
+
         let mut builder = self.builder();
         if let Some(description) = strategy_description {
             builder.push_line(&format!("// {}", description));
@@ -450,6 +461,34 @@ impl JavaCodeGenerator {
         }
 
         Ok(None)
+    }
+
+    fn switch_requires_boolean_fallback(
+        discriminant: &IrExpression,
+        cases: &[IrSwitchCase],
+    ) -> bool {
+        if !Self::expression_java_type(discriminant)
+            .map(Self::is_boolean_switch_type)
+            .unwrap_or(false)
+        {
+            return false;
+        }
+
+        cases.iter().any(|case| {
+            case.labels
+                .iter()
+                .any(|label| matches!(label, IrCaseLabel::Literal(Literal::Boolean(_))))
+        })
+    }
+
+    fn is_boolean_switch_type(java_type: &JavaType) -> bool {
+        match java_type {
+            JavaType::Primitive(name) => name == "boolean",
+            JavaType::Reference { name, .. } => {
+                name == "Boolean" || name == "java.lang.Boolean"
+            }
+            _ => false,
+        }
     }
 
     fn java21_incompatibility_error(
@@ -1595,10 +1634,6 @@ impl JavaCodeGenerator {
             return true;
         }
 
-        if field_name != "size" {
-            return false;
-        }
-
         if let Some(index) = self.symbol_index() {
             if let Some(JavaType::Reference { name, .. }) = Self::expression_java_type(receiver) {
                 if let Some(entry) = index.lookup_type(name) {
@@ -1612,7 +1647,13 @@ impl JavaCodeGenerator {
             }
         }
 
-        self.is_sequence_core_expression(receiver)
+        match field_name {
+            "size" => self.is_sequence_core_expression(receiver),
+            "length" => Self::expression_java_type(receiver)
+                .map(Self::is_string_like_type)
+                .unwrap_or(false),
+            _ => false,
+        }
     }
 
     fn is_sequence_core_type(java_type: &JavaType) -> bool {
@@ -1620,6 +1661,23 @@ impl JavaCodeGenerator {
             JavaType::Reference { name, .. } => {
                 name == "SequenceCore" || name == "jv.collections.SequenceCore"
             }
+            _ => false,
+        }
+    }
+
+    fn is_string_like_type(java_type: &JavaType) -> bool {
+        match java_type {
+            JavaType::Reference { name, .. } => matches!(
+                name.as_str(),
+                "String"
+                    | "java.lang.String"
+                    | "CharSequence"
+                    | "java.lang.CharSequence"
+                    | "StringBuilder"
+                    | "java.lang.StringBuilder"
+                    | "StringBuffer"
+                    | "java.lang.StringBuffer"
+            ),
             _ => false,
         }
     }
@@ -2443,6 +2501,27 @@ mod tests {
             .generate_expression(&expr)
             .expect("codegen succeeds");
         assert_eq!(rendered, "items.size()");
+    }
+
+    #[test]
+    fn converts_string_length_field_to_method() {
+        let mut generator = JavaCodeGenerator::new();
+
+        let expr = IrExpression::FieldAccess {
+            receiver: Box::new(IrExpression::Identifier {
+                name: "text".to_string(),
+                java_type: JavaType::string(),
+                span: Span::dummy(),
+            }),
+            field_name: "length".to_string(),
+            java_type: JavaType::Primitive("int".to_string()),
+            span: Span::dummy(),
+        };
+
+        let rendered = generator
+            .generate_expression(&expr)
+            .expect("codegen succeeds");
+        assert_eq!(rendered, "text.length()");
     }
 
     #[test]
