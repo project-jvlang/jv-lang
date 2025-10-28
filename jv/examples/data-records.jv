@@ -8,7 +8,7 @@ fun render(item) {
     return "${item.name} - ${status}"
 }
 
-fun main(): Unit {
+fun main {
     val plan = [
         Module("lexer" true)
         Module("parser" false)

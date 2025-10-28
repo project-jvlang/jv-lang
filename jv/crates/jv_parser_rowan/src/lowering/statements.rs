@@ -4366,37 +4366,52 @@ fn span_for_range_slice(slice: &[&Token]) -> Span {
 
 fn collect_function_signature_tokens<'a>(tokens: &'a [&'a Token]) -> Vec<&'a Token> {
     let mut fun_index: Option<usize> = None;
-    let mut paren_index: Option<usize> = None;
 
     for (idx, token) in tokens.iter().enumerate() {
-        match token.token_type {
-            TokenType::Fun => fun_index = Some(idx),
-            TokenType::LeftParen => {
-                paren_index = Some(idx);
-                break;
-            }
-            _ => {}
+        if matches!(token.token_type, TokenType::Fun) {
+            fun_index = Some(idx);
         }
     }
 
-    let (start, end) = match (fun_index, paren_index) {
-        (Some(fun), Some(paren)) if fun + 1 < paren => (fun + 1, paren),
-        _ => return Vec::new(),
+    let Some(fun) = fun_index else {
+        return Vec::new();
     };
 
-    tokens[start..end]
-        .iter()
-        .filter_map(|token| {
-            if matches!(
-                token.token_type,
-                TokenType::Whitespace(_) | TokenType::Newline
-            ) {
-                None
-            } else {
-                Some(*token)
+    let mut result = Vec::new();
+    let mut idx = fun + 1;
+    let mut generic_depth = 0usize;
+
+    while idx < tokens.len() {
+        let token = tokens[idx];
+        match token.token_type {
+            TokenType::Whitespace(_) | TokenType::Newline => {
+                idx += 1;
+                continue;
             }
-        })
-        .collect()
+            TokenType::LeftParen if generic_depth == 0 => break,
+            TokenType::LeftBrace | TokenType::Assign | TokenType::Arrow | TokenType::Where => {
+                if generic_depth == 0 {
+                    break;
+                }
+            }
+            TokenType::Colon if generic_depth == 0 => break,
+            TokenType::Less => {
+                generic_depth = generic_depth.saturating_add(1);
+            }
+            TokenType::Greater => {
+                if generic_depth == 0 {
+                    break;
+                }
+                generic_depth = generic_depth.saturating_sub(1);
+            }
+            _ => {}
+        }
+
+        result.push(token);
+        idx += 1;
+    }
+
+    result
 }
 
 fn split_generic_segment<'a>(

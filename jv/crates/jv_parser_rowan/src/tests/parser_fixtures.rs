@@ -96,6 +96,49 @@ fn function_parameters_accept_default_values() {
 }
 
 #[test]
+fn function_without_parentheses_forms_empty_parameter_list() {
+    let source = r#"
+        fun main {
+            println("hello")
+        }
+    "#;
+
+    let tokens = lex(source);
+    let output = parse(&tokens);
+
+    assert!(
+        output.diagnostics.is_empty(),
+        "expected parser to accept omitted parentheses, got {:?}",
+        output.diagnostics
+    );
+    assert!(
+        !output.recovered,
+        "parser should not require recovery when parentheses are omitted"
+    );
+
+    let tree: SyntaxNode<JvLanguage> =
+        SyntaxNode::new_root(ParseBuilder::build_from_events(&output.events, &tokens));
+    let statement_list = tree
+        .children()
+        .find(|node| node.kind() == SyntaxKind::StatementList)
+        .expect("parsed tree should contain a StatementList");
+    let function = statement_list
+        .children()
+        .find(|node| node.kind() == SyntaxKind::FunctionDeclaration)
+        .expect("function declaration should be emitted");
+    let params = function
+        .children()
+        .find(|node| node.kind() == SyntaxKind::FunctionParameterList)
+        .expect("parameter list node should be present");
+    assert!(
+        !params
+            .children()
+            .any(|child| child.kind() == SyntaxKind::FunctionParameter),
+        "parameter list should be empty when parentheses are omitted"
+    );
+}
+
+#[test]
 fn recovers_from_invalid_val() {
     let source = r#"
         val = 0

@@ -34,7 +34,9 @@ impl StatementStrategy for FunctionStrategy {
         }
 
         if !parse_parameter_list(ctx) {
-            ctx.recover_statement("パラメータリストが必要です", start);
+            // 括弧省略時は空のパラメータリストを追加する
+            ctx.start_node(SyntaxKind::FunctionParameterList);
+            ctx.finish_node();
         }
 
         parse_return_type(ctx);
