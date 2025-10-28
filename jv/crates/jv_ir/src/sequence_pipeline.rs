@@ -1958,9 +1958,8 @@ fn determine_java_type(pipeline: &SequencePipeline) -> JavaType {
                     generic_args: vec![],
                 }
             }
-            SequenceTerminalKind::Count | SequenceTerminalKind::Sum => {
-                JavaType::Primitive("long".to_string())
-            }
+            SequenceTerminalKind::Count => JavaType::Primitive("long".to_string()),
+            SequenceTerminalKind::Sum => determine_sum_result_type(pipeline, terminal),
             SequenceTerminalKind::ForEach { .. } => JavaType::void(),
         };
     }
@@ -1971,6 +1970,40 @@ fn determine_java_type(pipeline: &SequencePipeline) -> JavaType {
             .unwrap_or_else(default_java_stream_type),
         _ => JavaType::sequence(),
     }
+}
+
+fn determine_sum_result_type(pipeline: &SequencePipeline, terminal: &SequenceTerminal) -> JavaType {
+    if let Some(hint) = terminal.specialization_hint.as_ref() {
+        return match hint.canonical {
+            PrimitiveTypeName::Int | PrimitiveTypeName::Char => {
+                JavaType::Primitive("int".to_string())
+            }
+            PrimitiveTypeName::Long => JavaType::Primitive("long".to_string()),
+            PrimitiveTypeName::Double | PrimitiveTypeName::Float => {
+                JavaType::Primitive("double".to_string())
+            }
+            _ => JavaType::Primitive("long".to_string()),
+        };
+    }
+
+    if let Some(element_type) = infer_pipeline_element_type(pipeline) {
+        return match element_type {
+            JavaType::Primitive(ref name)
+                if matches!(name.as_str(), "int" | "short" | "byte" | "char") =>
+            {
+                JavaType::Primitive("int".to_string())
+            }
+            JavaType::Primitive(ref name) if name == "long" => {
+                JavaType::Primitive("long".to_string())
+            }
+            JavaType::Primitive(ref name) if name == "float" || name == "double" => {
+                JavaType::Primitive("double".to_string())
+            }
+            _ => JavaType::Primitive("long".to_string()),
+        };
+    }
+
+    JavaType::Primitive("int".to_string())
 }
 
 fn expect_single_positional(args: &[Argument]) -> Result<Expression, TransformError> {

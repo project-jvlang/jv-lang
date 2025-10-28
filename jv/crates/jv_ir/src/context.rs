@@ -661,6 +661,14 @@ fn infer_known_method_return_type(
         "booleanValue" if receiver_type.map(is_number_like_reference).unwrap_or(false) => {
             Some(JavaType::Primitive("boolean".to_string()))
         }
+        "size"
+            if receiver_type
+                .map(is_collection_like_reference)
+                .unwrap_or(false)
+                || receiver_type.map(is_map_like_reference).unwrap_or(false) =>
+        {
+            Some(JavaType::int())
+        }
         _ => None,
     }
 }
@@ -698,6 +706,34 @@ fn is_number_like_reference(java_type: &JavaType) -> bool {
                 | "Boolean"
                 | "java.lang.Boolean"
         ),
+        _ => false,
+    }
+}
+
+fn is_collection_like_reference(java_type: &JavaType) -> bool {
+    match java_type {
+        JavaType::Reference { name, .. } => matches!(
+            name.as_str(),
+            "java.util.Collection"
+                | "Collection"
+                | "java.util.List"
+                | "List"
+                | "java.util.Set"
+                | "Set"
+                | "java.util.Queue"
+                | "Queue"
+                | "java.util.Deque"
+                | "Deque"
+                | "java.lang.Iterable"
+                | "Iterable"
+        ),
+        _ => false,
+    }
+}
+
+fn is_map_like_reference(java_type: &JavaType) -> bool {
+    match java_type {
+        JavaType::Reference { name, .. } => matches!(name.as_str(), "java.util.Map" | "Map"),
         _ => false,
     }
 }
