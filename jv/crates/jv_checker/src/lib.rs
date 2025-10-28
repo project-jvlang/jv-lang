@@ -551,8 +551,17 @@ impl TypeChecker {
                 Ok(())
             }
             Err(error) => {
+                let bindings = self.engine.bindings().to_vec();
+                let function_schemes = self.engine.function_schemes().clone();
+                let result_type = self.engine.result_type().cloned();
+                let facts = build_type_facts(
+                    self.engine.environment(),
+                    bindings.as_slice(),
+                    &function_schemes,
+                    result_type.as_ref(),
+                );
                 self.snapshot = None;
-                self.merged_facts = None;
+                self.merged_facts = Some(facts);
                 self.update_type_facts_telemetry();
                 Err(vec![CheckError::TypeError(error.to_string())])
             }

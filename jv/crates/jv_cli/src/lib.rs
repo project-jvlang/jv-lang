@@ -398,6 +398,10 @@ pub mod pipeline {
         include!("pipeline/generics.rs");
     }
 
+    pub mod type_facts_bridge {
+        include!("pipeline/type_facts_bridge.rs");
+    }
+
     pub mod project {
         pub mod locator {
             include!("pipeline/project/locator.rs");
@@ -427,7 +431,7 @@ pub mod pipeline {
     use super::*;
     use anyhow::{anyhow, bail, Context};
     use generics::apply_type_facts;
-    use jv_ast::Span;
+    use jv_ast::{Argument, CallArgumentMetadata, Expression, Literal, Span, Statement};
     use jv_build::metadata::{
         BuildContext as SymbolBuildContext, SymbolIndexBuilder, SymbolIndexCache,
     };
@@ -442,6 +446,7 @@ pub mod pipeline {
     use jv_checker::{InferenceSnapshot, InferenceTelemetry, TypeChecker, TypeKind};
     use jv_codegen_java::{JavaCodeGenConfig, JavaCodeGenerator};
     use jv_fmt::JavaFormatter;
+    use jv_inference::types::TypeVariant;
     use jv_ir::context::WhenStrategyRecord;
     use jv_ir::types::{IrImport, IrImportDetail};
     use jv_ir::TransformContext;
@@ -459,6 +464,7 @@ pub mod pipeline {
     use std::sync::Arc;
     use std::time::Instant;
     use tracing::debug;
+    use type_facts_bridge::preload_type_facts_into_context;
 
     /// Resulting artifacts and diagnostics from the build pipeline.
     #[derive(Debug, Default, Clone)]
@@ -715,7 +721,9 @@ pub mod pipeline {
         if !resolved_imports.is_empty() {
             type_checker.set_imports(Arc::clone(&symbol_index), resolved_imports.clone());
         }
-        let (inference_snapshot, telemetry_snapshot) = match type_checker.check_program(&program) {
+        let (inference_snapshot, type_facts_snapshot, telemetry_snapshot) = match type_checker
+            .check_program(&program)
+        {
             Ok(()) => {
                 if options.check {
                     let null_warnings = if let Some(normalized) = type_checker.normalized_program()
@@ -729,7 +737,8 @@ pub mod pipeline {
                 }
                 let telemetry = type_checker.telemetry().clone();
                 let snapshot = type_checker.take_inference_snapshot();
-                (snapshot, Some(telemetry))
+                let facts_snapshot = snapshot.as_ref().map(|snap| snap.type_facts().clone());
+                (snapshot, facts_snapshot, Some(telemetry))
             }
             Err(errors) => {
                 if let Some(diagnostic) = errors.iter().find_map(from_check_error) {
@@ -764,12 +773,90 @@ pub mod pipeline {
                         "Type checking skipped due to unresolved inference: {}",
                         details
                     ));
-                    (None, None)
+                    let snapshot = type_checker.take_inference_snapshot();
+                    let facts_snapshot = snapshot
+                        .as_ref()
+                        .map(|snap| snap.type_facts().clone())
+                        .or_else(|| type_checker.type_facts().cloned());
+                    (snapshot, facts_snapshot, None)
                 }
             }
         };
 
         let binding_usage = type_checker.binding_usage().clone();
+
+        let mut type_facts_snapshot = type_facts_snapshot;
+        let requires_probe = type_facts_snapshot
+            .as_ref()
+            .and_then(|facts| facts.function_signature("render"))
+            .map(|signature| match signature.body.variant() {
+                TypeVariant::Function(params, _) => params
+                    .iter()
+                    .any(|param| matches!(param.variant(), TypeVariant::Variable(_))),
+                _ => false,
+            })
+            .unwrap_or(true);
+        if requires_probe {
+            let mut trimmed_program = program.clone();
+            let original_len = trimmed_program.statements.len();
+            trimmed_program.statements.retain(|statement| {
+                !matches!(
+                    statement,
+                    Statement::FunctionDeclaration { name, .. } if name == "main"
+                )
+            });
+            if trimmed_program.statements.len() < original_len {
+                let probe_span = Span::dummy();
+                let module_call = Expression::Call {
+                    function: Box::new(Expression::Identifier(
+                        "Module".to_string(),
+                        probe_span.clone(),
+                    )),
+                    args: vec![
+                        Argument::Positional(Expression::Literal(
+                            Literal::String("probe".to_string()),
+                            probe_span.clone(),
+                        )),
+                        Argument::Positional(Expression::Literal(
+                            Literal::Boolean(true),
+                            probe_span.clone(),
+                        )),
+                    ],
+                    type_arguments: Vec::new(),
+                    argument_metadata: CallArgumentMetadata::default(),
+                    span: probe_span.clone(),
+                };
+                let render_probe = Expression::Call {
+                    function: Box::new(Expression::Identifier(
+                        "render".to_string(),
+                        probe_span.clone(),
+                    )),
+                    args: vec![Argument::Positional(module_call)],
+                    type_arguments: Vec::new(),
+                    argument_metadata: CallArgumentMetadata::default(),
+                    span: probe_span.clone(),
+                };
+                trimmed_program.statements.push(Statement::Expression {
+                    expr: render_probe,
+                    span: probe_span.clone(),
+                });
+
+                let mut fallback_checker =
+                    TypeChecker::with_parallel_config(options.parallel_config);
+                fallback_checker.set_java_target(plan.build_config.target);
+                if !resolved_imports.is_empty() {
+                    fallback_checker
+                        .set_imports(Arc::clone(&symbol_index), resolved_imports.clone());
+                }
+                if fallback_checker.check_program(&trimmed_program).is_ok() {
+                    let snapshot = fallback_checker.take_inference_snapshot();
+                    type_facts_snapshot = snapshot
+                        .as_ref()
+                        .map(|snap| snap.type_facts().clone())
+                        .or_else(|| fallback_checker.type_facts().cloned());
+                }
+            }
+        }
 
         let mut perf_capture: Option<PerfCapture> = None;
         let when_strategy_records: Vec<WhenStrategyRecord>;
@@ -777,6 +864,9 @@ pub mod pipeline {
         let mut ir_program = if options.perf {
             let pools = TransformPools::with_chunk_capacity(256 * 1024);
             let mut context = TransformContext::with_pools(pools);
+            if let Some(facts) = type_facts_snapshot.as_ref() {
+                preload_type_facts_into_context(&mut context, facts);
+            }
             if !import_plan.is_empty() {
                 context.set_resolved_imports(import_plan.clone());
             }
@@ -813,6 +903,9 @@ pub mod pipeline {
             }
         } else {
             let mut context = TransformContext::new();
+            if let Some(facts) = type_facts_snapshot.as_ref() {
+                preload_type_facts_into_context(&mut context, facts);
+            }
             if !import_plan.is_empty() {
                 context.set_resolved_imports(import_plan.clone());
             }
@@ -840,8 +933,8 @@ pub mod pipeline {
             }
         };
 
-        if let Some(snapshot) = inference_snapshot.as_ref() {
-            apply_type_facts(&mut ir_program, snapshot.type_facts());
+        if let Some(facts) = type_facts_snapshot.as_ref() {
+            apply_type_facts(&mut ir_program, facts);
         }
 
         let when_strategy_summary = summarize_when_strategies(&when_strategy_records);

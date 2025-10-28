@@ -159,11 +159,13 @@ impl InferenceEngine {
 
         // 関数シグネチャを精算し、曖昧さを検出する。
         let mut function_schemes = HashMap::new();
+        let mut ambiguous_functions = Vec::new();
         for name in collect_function_names(program) {
             if let Some(existing) = environment.lookup(&name).cloned() {
                 let resolved = resolve_type(&existing.ty, &substitutions);
                 if resolved.contains_unknown() {
-                    return Err(InferenceError::AmbiguousFunction { name });
+                    ambiguous_functions.push(name);
+                    continue;
                 }
                 let quantifiers = resolved.free_type_vars();
                 let final_scheme = TypeScheme::new(quantifiers, resolved.clone());
@@ -211,7 +213,11 @@ impl InferenceEngine {
         telemetry.conversion_catalog_misses = catalog_misses;
         telemetry.record_conversions(&conversions);
         self.telemetry = telemetry;
-        Ok(())
+        if let Some(name) = ambiguous_functions.into_iter().next() {
+            Err(InferenceError::AmbiguousFunction { name })
+        } else {
+            Ok(())
+        }
     }
 
     /// 現在保持している型束縛一覧。

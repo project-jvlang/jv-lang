@@ -3,11 +3,13 @@ use super::type_system::convert_type_annotation;
 use super::utils::extract_java_type;
 use crate::context::TransformContext;
 use crate::error::TransformError;
-use crate::types::{IrExpression, IrStatement, JavaType, MethodOverload};
+use crate::types::{IrExpression, IrParameter, IrStatement, JavaType, MethodOverload};
 use jv_ast::{
     Argument, CallArgumentStyle, Expression, Literal, Modifiers, Parameter, Span, Statement,
     TypeAnnotation, VarianceMarker,
 };
+use std::collections::HashMap;
+use tracing::debug;
 
 pub fn desugar_default_parameters(
     function_name: String,
@@ -22,7 +24,6 @@ pub fn desugar_default_parameters(
 
     let mut overloads = Vec::new();
 
-    // Convert modifiers to IR modifiers
     let ir_modifiers = IrModifiers {
         visibility: match modifiers.visibility {
             jv_ast::Visibility::Public => IrVisibility::Public,
@@ -36,49 +37,113 @@ pub fn desugar_default_parameters(
         ..Default::default()
     };
 
-    let infer_return_type = return_type.is_none();
-
-    // Convert return type
+    let mut infer_return_type = return_type.is_none();
     let mut java_return_type = match return_type {
         Some(type_ann) => convert_type_annotation(type_ann)?,
         None => JavaType::void(),
     };
 
-    // Find parameters with default values
-    let mut required_params = Vec::new();
-    let mut optional_params = Vec::new();
+    let param_count = parameters.len();
+    let signature_hint = context.function_signature_hint(&function_name).cloned();
 
-    for param in parameters {
+    let mut hint_param_types: Option<Vec<JavaType>> = None;
+    let mut hint_return_type: Option<JavaType> = None;
+
+    if let Some(hint) = signature_hint.as_ref() {
+        hint_return_type = hint.return_type.clone();
+        if hint.parameters.len() == param_count {
+            hint_param_types = Some(hint.parameters.clone());
+            debug!(
+                target: "jv::transform::facts",
+                function = %function_name,
+                params = param_count,
+                "applying TypeFacts signature hint for default parameters"
+            );
+        } else {
+            debug!(
+                target: "jv::transform::facts",
+                function = %function_name,
+                hint_params = hint.parameters.len(),
+                ast_params = param_count,
+                "TypeFacts parameter count mismatch for default parameters"
+            );
+            debug_assert_eq!(
+                hint.parameters.len(),
+                param_count,
+                "TypeFacts parameter count mismatch for {}",
+                function_name
+            );
+        }
+    }
+
+    if infer_return_type {
+        if let Some(hinted_return) = hint_return_type.clone() {
+            java_return_type = hinted_return;
+            infer_return_type = false;
+            debug!(
+                target: "jv::transform::facts",
+                function = %function_name,
+                "using TypeFacts return type for default parameters"
+            );
+        }
+    }
+
+    let fallback_record_type = unique_record_type(context);
+    if fallback_record_type.is_some() {
+        debug!(
+            target: "jv::transform::facts",
+            function = %function_name,
+            "fallback record type available for default parameters"
+        );
+    }
+
+    let mut required_params = Vec::new();
+    let mut required_indexes = Vec::new();
+    let mut optional_params = Vec::new();
+    let mut optional_indexes = Vec::new();
+
+    for (idx, param) in parameters.into_iter().enumerate() {
         if param.default_value.is_some() {
+            optional_indexes.push(idx);
             optional_params.push(param);
         } else {
+            required_indexes.push(idx);
             required_params.push(param);
         }
     }
 
-    // Generate overloads for each combination of parameters
-    // Start with all required parameters only
     let mut current_params = required_params.clone();
+    let mut current_indexes = required_indexes.clone();
 
-    // Convert parameters to IR
-    let ir_params: Result<Vec<IrParameter>, TransformError> = current_params
-        .iter()
-        .map(|p| {
-            Ok(IrParameter {
-                name: p.name.clone(),
-                java_type: match &p.type_annotation {
+    let build_ir_parameters =
+        |params: &[Parameter], indexes: &[usize]| -> Result<Vec<IrParameter>, TransformError> {
+            let mut result = Vec::with_capacity(params.len());
+            for (param, index) in params.iter().zip(indexes.iter()) {
+                let java_type = match &param.type_annotation {
                     Some(type_ann) => convert_type_annotation(type_ann.clone())?,
-                    None => JavaType::object(), // Default to Object if no type specified
-                },
-                modifiers: IrModifiers::default(),
-                span: p.span.clone(),
-            })
-        })
-        .collect();
+                    None => {
+                        let hinted = hint_param_types
+                            .as_ref()
+                            .and_then(|types| types.get(*index).cloned());
+                        hinted
+                            .filter(|ty| ty != &JavaType::object())
+                            .or_else(|| fallback_record_type.clone())
+                            .unwrap_or_else(JavaType::object)
+                    }
+                };
 
-    let ir_params = ir_params?;
+                result.push(IrParameter {
+                    name: param.name.clone(),
+                    java_type,
+                    modifiers: IrModifiers::default(),
+                    span: param.span.clone(),
+                });
+            }
+            Ok(result)
+        };
 
-    // Convert body to IR expression
+    let mut ir_params = build_ir_parameters(&current_params, &current_indexes)?;
+
     let ir_body = transform_expression(*body, context)?;
 
     if infer_return_type {
@@ -87,41 +152,31 @@ pub fn desugar_default_parameters(
         }
     }
 
-    // Create base overload with required parameters only
+    context
+        .type_info
+        .insert(function_name.clone(), java_return_type.clone());
+
     overloads.push(MethodOverload {
         name: function_name.clone(),
-        parameters: ir_params,
+        parameters: ir_params.clone(),
         return_type: java_return_type.clone(),
         body: ir_body.clone(),
         modifiers: ir_modifiers.clone(),
         span: span.clone(),
     });
 
-    // Create additional overloads by adding optional parameters one by one
-    for optional_param in optional_params {
+    for (optional_param, optional_index) in optional_params
+        .into_iter()
+        .zip(optional_indexes.into_iter())
+    {
         current_params.push(optional_param.clone());
+        current_indexes.push(optional_index);
 
-        let ir_params: Result<Vec<IrParameter>, TransformError> = current_params
-            .iter()
-            .map(|p| {
-                Ok(IrParameter {
-                    name: p.name.clone(),
-                    java_type: match &p.type_annotation {
-                        Some(type_ann) => convert_type_annotation(type_ann.clone())?,
-                        None => JavaType::object(),
-                    },
-                    modifiers: IrModifiers::default(),
-                    span: p.span.clone(),
-                })
-            })
-            .collect();
+        ir_params = build_ir_parameters(&current_params, &current_indexes)?;
 
-        let ir_params = ir_params?;
-
-        // Create a delegating body that calls the full method with default values
         let delegating_body = create_delegating_call(
             &function_name,
-            &current_params,
+            &ir_params,
             &optional_param.default_value,
             &java_return_type,
             context,
@@ -129,7 +184,7 @@ pub fn desugar_default_parameters(
 
         overloads.push(MethodOverload {
             name: function_name.clone(),
-            parameters: ir_params,
+            parameters: ir_params.clone(),
             return_type: java_return_type.clone(),
             body: delegating_body,
             modifiers: ir_modifiers.clone(),
@@ -140,26 +195,22 @@ pub fn desugar_default_parameters(
     Ok(overloads)
 }
 
-// Helper function to create delegating method calls
 fn create_delegating_call(
     function_name: &str,
-    current_params: &[Parameter],
+    parameters: &[IrParameter],
     default_value: &Option<Expression>,
     return_type: &JavaType,
     context: &mut TransformContext,
 ) -> Result<IrExpression, TransformError> {
-    // Create method call arguments from current parameters
-    let mut args = Vec::new();
-
-    for param in current_params {
-        args.push(IrExpression::Identifier {
+    let mut args: Vec<IrExpression> = parameters
+        .iter()
+        .map(|param| IrExpression::Identifier {
             name: param.name.clone(),
-            java_type: JavaType::object(),
+            java_type: param.java_type.clone(),
             span: param.span.clone(),
-        });
-    }
+        })
+        .collect();
 
-    // Add default value if provided
     if let Some(default_expr) = default_value {
         args.push(convert_expression_to_ir(default_expr.clone(), context)?);
     }
@@ -170,7 +221,7 @@ fn create_delegating_call(
         .collect();
 
     let mut call = IrExpression::MethodCall {
-        receiver: None, // Static call to overloaded method
+        receiver: None,
         method_name: function_name.to_string(),
         java_name: None,
         resolved_target: None,
@@ -197,6 +248,40 @@ fn infer_return_type_from_ir_expression(body: &IrExpression) -> Option<JavaType>
     accumulator
         .into_option()
         .filter(|java_type| *java_type != JavaType::void())
+}
+
+fn unique_record_type(context: &TransformContext) -> Option<JavaType> {
+    if context.record_components.is_empty() {
+        return None;
+    }
+
+    let mut canonical_by_simple: HashMap<String, String> = HashMap::new();
+    for name in context.record_components.keys() {
+        debug!(
+            target: "jv::transform::facts",
+            record = %name,
+            "record components available for fallback"
+        );
+        let simple = name.rsplit(['.', '$']).next().unwrap_or(name).to_string();
+        let entry = canonical_by_simple
+            .entry(simple)
+            .or_insert_with(|| name.clone());
+        let name_has_namespace = name.contains('.') || name.contains('$');
+        let entry_has_namespace = entry.contains('.') || entry.contains('$');
+        if name_has_namespace && !entry_has_namespace {
+            *entry = name.clone();
+        }
+    }
+
+    if canonical_by_simple.len() == 1 {
+        let name = canonical_by_simple.into_values().next().unwrap();
+        Some(JavaType::Reference {
+            name,
+            generic_args: Vec::new(),
+        })
+    } else {
+        None
+    }
 }
 
 fn gather_return_types_from_expression(expr: &IrExpression, acc: &mut ReturnTypeAccumulator) {
@@ -625,13 +710,65 @@ pub fn desugar_top_level_function(
             generic_signature,
             ..
         } => {
-            let should_infer_return = return_type.is_none();
+            let mut should_infer_return = return_type.is_none();
+            let param_count = parameters.len();
 
-            // Convert return type
             let mut java_return_type = match return_type {
                 Some(type_ann) => convert_type_annotation(type_ann)?,
                 None => JavaType::void(),
             };
+
+            let signature_hint = context.function_signature_hint(&name).cloned();
+            let mut hint_param_types: Option<Vec<JavaType>> = None;
+            let mut hint_return_type: Option<JavaType> = None;
+
+            if let Some(hint) = signature_hint.as_ref() {
+                hint_return_type = hint.return_type.clone();
+                if hint.parameters.len() == param_count {
+                    hint_param_types = Some(hint.parameters.clone());
+                    debug!(
+                        target: "jv::transform::facts",
+                        function = %name,
+                        params = param_count,
+                        "applying TypeFacts signature hint"
+                    );
+                } else {
+                    debug!(
+                        target: "jv::transform::facts",
+                        function = %name,
+                        hint_params = hint.parameters.len(),
+                        ast_params = param_count,
+                        "TypeFacts parameter count mismatch"
+                    );
+                    debug_assert_eq!(
+                        hint.parameters.len(),
+                        param_count,
+                        "TypeFacts parameter count mismatch for {}",
+                        name
+                    );
+                }
+            }
+
+            if should_infer_return {
+                if let Some(hinted_return) = hint_return_type.clone() {
+                    java_return_type = hinted_return;
+                    should_infer_return = false;
+                    debug!(
+                        target: "jv::transform::facts",
+                        function = %name,
+                        "using TypeFacts return type"
+                    );
+                }
+            }
+
+            let fallback_record_type = unique_record_type(context);
+            if fallback_record_type.is_some() {
+                debug!(
+                    target: "jv::transform::facts",
+                    function = %name,
+                    "fallback record type available"
+                );
+            }
 
             let mut ir_type_parameters = type_parameters
                 .into_iter()
@@ -721,10 +858,18 @@ pub fn desugar_top_level_function(
 
                 throws.push("java.lang.Exception".to_string());
             } else {
-                for param in parameters.into_iter() {
+                for (idx, param) in parameters.into_iter().enumerate() {
                     let java_type = match param.type_annotation {
                         Some(type_ann) => convert_type_annotation(type_ann)?,
-                        None => JavaType::object(),
+                        None => {
+                            let hinted = hint_param_types
+                                .as_ref()
+                                .and_then(|types| types.get(idx).cloned());
+                            hinted
+                                .filter(|ty| ty != &JavaType::object())
+                                .or_else(|| fallback_record_type.clone())
+                                .unwrap_or_else(JavaType::object)
+                        }
                     };
 
                     context.add_variable(param.name.clone(), java_type.clone());

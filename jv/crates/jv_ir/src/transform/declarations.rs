@@ -15,6 +15,7 @@ use jv_ast::{
     Expression, Modifiers, Parameter, Span, Statement, TypeAnnotation, ValBindingOrigin,
     VarianceMarker,
 };
+use tracing::debug;
 
 pub fn desugar_val_declaration(
     name: String,
@@ -316,7 +317,24 @@ pub fn desugar_data_class(
         for param in parameters {
             let java_type = match param.type_annotation {
                 Some(annotation) => convert_type_annotation(annotation)?,
-                None => JavaType::object(),
+                None => {
+                    let mut hint = context.record_component_type(&name, &param.name);
+                    if hint.is_none() {
+                        if let Some(package) = context.current_package.as_deref() {
+                            let fq = format!("{package}.{name}");
+                            hint = context.record_component_type(&fq, &param.name);
+                        }
+                    }
+                    if hint.is_some() {
+                        debug!(
+                            target: "jv::transform::facts",
+                            record = %name,
+                            field = %param.name,
+                            "resolved record component type from TypeFacts"
+                        );
+                    }
+                    hint.unwrap_or_else(JavaType::object)
+                }
             };
 
             components.push(IrRecordComponent {
@@ -336,6 +354,11 @@ pub fn desugar_data_class(
                 .register_record_components(format!("{package}.{name}"), component_pairs.clone());
         }
         context.register_record_components(name.clone(), component_pairs);
+        debug!(
+            target: "jv::transform::facts",
+            record = %name,
+            "registered record components"
+        );
 
         return Ok(IrStatement::RecordDeclaration {
             name,
@@ -358,10 +381,29 @@ pub fn desugar_data_class(
 
         let java_type = match param.type_annotation {
             Some(annotation) => convert_type_annotation(annotation)?,
-            None => initializer_ir
-                .as_ref()
-                .and_then(|expr| extract_java_type(expr))
-                .unwrap_or_else(JavaType::object),
+            None => {
+                let mut hint = context.record_component_type(&name, &param.name);
+                if hint.is_none() {
+                    if let Some(package) = context.current_package.as_deref() {
+                        let fq = format!("{package}.{name}");
+                        hint = context.record_component_type(&fq, &param.name);
+                    }
+                }
+                if let Some(ref ty) = hint {
+                    debug!(
+                        target: "jv::transform::facts",
+                        record = %name,
+                        field = %param.name,
+                        "resolved mutable data-class field type from TypeFacts"
+                    );
+                    ty.clone()
+                } else {
+                    initializer_ir
+                        .as_ref()
+                        .and_then(|expr| extract_java_type(expr))
+                        .unwrap_or_else(JavaType::object)
+                }
+            }
         };
 
         let mut field_modifiers = IrModifiers::default();

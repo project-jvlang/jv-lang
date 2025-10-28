@@ -19,6 +19,8 @@ pub struct TransformContext {
     pub type_info: HashMap<String, JavaType>,
     /// Recorded Java signatures for top-level functions
     pub function_signatures: HashMap<String, Vec<JavaType>>,
+    /// Preloaded signature hints sourced from TypeFacts
+    signature_hints: HashMap<String, FunctionSignatureHint>,
     /// Current scope for variable resolution
     pub scope_stack: Vec<HashMap<String, JavaType>>,
     /// Generated utility classes
@@ -53,6 +55,13 @@ pub struct TransformContext {
     import_aliases: HashMap<String, JavaType>,
 }
 
+/// Hint describing a function signature sourced from TypeFacts prior to lowering.
+#[derive(Debug, Clone, Default)]
+pub struct FunctionSignatureHint {
+    pub parameters: Vec<JavaType>,
+    pub return_type: Option<JavaType>,
+}
+
 impl TransformContext {
     /// Create a fresh transformation context with an initial scope.
     ///
@@ -75,6 +84,7 @@ impl TransformContext {
         Self {
             type_info: HashMap::new(),
             function_signatures: HashMap::new(),
+            signature_hints: HashMap::new(),
             scope_stack: vec![HashMap::new()],
             utility_classes: Vec::new(),
             method_overloads: Vec::new(),
@@ -122,6 +132,60 @@ impl TransformContext {
 
     pub fn register_function_signature(&mut self, name: String, params: Vec<JavaType>) {
         self.function_signatures.insert(name, params);
+    }
+
+    /// Registers a preloaded function signature hint sourced from upstream analysis.
+    pub fn preload_function_signature(
+        &mut self,
+        name: impl Into<String>,
+        parameters: Vec<JavaType>,
+        return_type: Option<JavaType>,
+    ) {
+        let name = name.into();
+        let hint = FunctionSignatureHint {
+            parameters,
+            return_type,
+        };
+        for key in Self::function_name_keys(&name) {
+            self.signature_hints.insert(key, hint.clone());
+        }
+    }
+
+    /// Retrieves a preloaded signature hint for the provided function name, if any.
+    pub fn function_signature_hint(&self, name: &str) -> Option<&FunctionSignatureHint> {
+        self.signature_hints.get(name)
+    }
+
+    fn function_name_keys(name: &str) -> Vec<String> {
+        let mut keys = Vec::new();
+        let mut push_key = |candidate: &str| {
+            if candidate.is_empty() {
+                return;
+            }
+            if !keys.iter().any(|existing| existing == candidate) {
+                keys.push(candidate.to_string());
+            }
+        };
+
+        push_key(name);
+
+        if let Some(simple) = name.rsplit("::").next() {
+            push_key(simple);
+        }
+
+        let dotted = name.replace("::", ".");
+        if dotted != name {
+            push_key(&dotted);
+        }
+        if let Some(simple_dot) = dotted.rsplit('.').next() {
+            push_key(simple_dot);
+        }
+
+        if let Some(simple_dollar) = dotted.rsplit('$').next() {
+            push_key(simple_dollar);
+        }
+
+        keys
     }
 
     pub fn register_record_components(
@@ -918,6 +982,7 @@ impl Clone for TransformContext {
         Self {
             type_info: self.type_info.clone(),
             function_signatures: self.function_signatures.clone(),
+            signature_hints: self.signature_hints.clone(),
             scope_stack: self.scope_stack.clone(),
             utility_classes: self.utility_classes.clone(),
             method_overloads: self.method_overloads.clone(),

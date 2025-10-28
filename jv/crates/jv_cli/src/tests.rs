@@ -473,6 +473,105 @@ include = ["src/**/*.jv"]
 }
 
 #[test]
+fn compile_without_parameter_type_annotation_uses_object() {
+    let temp_dir = TempDirGuard::new("param-inference");
+    let project_root_path = temp_dir.path();
+    let manifest_path = project_root_path.join("jv.toml");
+    fs::write(
+        &manifest_path,
+        r#"[package]
+name = "inference-gap"
+version = "0.1.0"
+
+[package.dependencies]
+
+[project]
+entrypoint = "src/main.jv"
+
+[project.sources]
+include = ["src/**/*.jv"]
+"#,
+    )
+    .unwrap();
+
+    let src_dir = project_root_path.join("src");
+    fs::create_dir_all(&src_dir).unwrap();
+    let input_path = src_dir.join("main.jv");
+    fs::write(
+        &input_path,
+        r#"
+            data Module(val name: String, val done: Boolean)
+
+            fun render(item) {
+                val status = when (item.done) {
+                    true -> "complete"
+                    false -> "pending"
+                }
+                return "${item.name} - ${status}"
+            }
+
+            fun main(): Unit {
+                val plan = [
+                    Module("lexer" true)
+                    Module("parser" false)
+                    Module("codegen" false)
+                ]
+
+                for (entry in plan) {
+                    println(render(entry))
+                }
+            }
+        "#,
+    )
+    .unwrap();
+
+    let project_root = pipeline::project::locator::ProjectRoot::new(
+        project_root_path.to_path_buf(),
+        manifest_path.clone(),
+    );
+    let settings =
+        pipeline::project::manifest::ManifestLoader::load(&manifest_path).expect("manifest loads");
+    let layout = pipeline::project::layout::ProjectLayout::from_settings(&project_root, &settings)
+        .expect("layout resolves");
+
+    let overrides = pipeline::CliOverrides {
+        entrypoint: Some(input_path.clone()),
+        output: Some(project_root.root_dir().join("out/inference-gap")),
+        java_only: true,
+        check: false,
+        format: false,
+        target: None,
+        clean: false,
+        perf: false,
+        emit_types: false,
+        verbose: false,
+        emit_telemetry: false,
+        parallel_inference: false,
+        inference_workers: None,
+        constraint_batch: None,
+    };
+
+    let plan = pipeline::BuildOptionsFactory::compose(project_root, settings, layout, overrides)
+        .expect("plan composition succeeds");
+
+    let artifacts = pipeline::compile(&plan).expect("program should compile");
+    assert!(
+        !artifacts.java_files.is_empty(),
+        "expected java output to be generated"
+    );
+
+    let java_source = fs::read_to_string(&artifacts.java_files[0]).expect("read generated java");
+    assert!(
+        java_source.contains("render(Module item)"),
+        "expected inferred record parameter type to flow into generated Java.\nGenerated Java:\n{java_source}"
+    );
+    assert!(
+        !java_source.contains("render(Object item)"),
+        "render parameter should no longer default to Object when TypeFacts supply record details.\nGenerated Java:\n{java_source}"
+    );
+}
+
+#[test]
 fn compile_repository_fixtures_without_interpolation() {
     let _guard = lock_current_dir();
     let temp_root = TempDirGuard::new("cli-fixtures");
