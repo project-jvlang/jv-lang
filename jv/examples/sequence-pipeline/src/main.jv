@@ -7,6 +7,21 @@ fun main(): Unit {
         .toList()
 
     println(highlighted)
+
+    val highlightedCast = (
+        modules
+            .map { value -> value + "-module" }
+            .filter { candidate -> candidate.length >= 7 }
+    ) as List
+
+    println("Cast with as List: ${highlightedCast}")
+
+    val highlightedImplicit: List = modules
+        .map { value -> value + "-module" }
+        .filter { candidate -> candidate.length >= 7 }
+
+    println("Implicit List via type: ${highlightedImplicit}")
+
     val containsParserModule = highlighted.contains("parser-module")
     println("Has parser-module: ${containsParserModule}")
 }
