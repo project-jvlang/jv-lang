@@ -36,8 +36,10 @@ pub fn desugar_default_parameters(
         ..Default::default()
     };
 
+    let infer_return_type = return_type.is_none();
+
     // Convert return type
-    let java_return_type = match return_type {
+    let mut java_return_type = match return_type {
         Some(type_ann) => convert_type_annotation(type_ann)?,
         None => JavaType::void(),
     };
@@ -79,6 +81,12 @@ pub fn desugar_default_parameters(
     // Convert body to IR expression
     let ir_body = transform_expression(*body, context)?;
 
+    if infer_return_type {
+        if let Some(inferred) = infer_return_type_from_ir_expression(&ir_body) {
+            java_return_type = inferred;
+        }
+    }
+
     // Create base overload with required parameters only
     overloads.push(MethodOverload {
         name: function_name.clone(),
@@ -115,6 +123,7 @@ pub fn desugar_default_parameters(
             &function_name,
             &current_params,
             &optional_param.default_value,
+            &java_return_type,
             context,
         )?;
 
@@ -136,6 +145,7 @@ fn create_delegating_call(
     function_name: &str,
     current_params: &[Parameter],
     default_value: &Option<Expression>,
+    return_type: &JavaType,
     context: &mut TransformContext,
 ) -> Result<IrExpression, TransformError> {
     // Create method call arguments from current parameters
@@ -166,13 +176,310 @@ fn create_delegating_call(
         resolved_target: None,
         args,
         argument_style: CallArgumentStyle::Comma,
-        java_type: JavaType::object(), // Return type would be inferred
+        java_type: return_type.clone(),
         span: Span::dummy(),
     };
 
     context.bind_method_call(&mut call, None, None, argument_types);
 
     Ok(call)
+}
+
+fn infer_return_type_from_ir_expression(body: &IrExpression) -> Option<JavaType> {
+    if let Some(java_type) = extract_java_type(body) {
+        if java_type != JavaType::void() {
+            return Some(java_type);
+        }
+    }
+
+    let mut accumulator = ReturnTypeAccumulator::default();
+    gather_return_types_from_expression(body, &mut accumulator);
+    accumulator
+        .into_option()
+        .filter(|java_type| *java_type != JavaType::void())
+}
+
+fn gather_return_types_from_expression(expr: &IrExpression, acc: &mut ReturnTypeAccumulator) {
+    if acc.is_conflicted() {
+        return;
+    }
+
+    match expr {
+        IrExpression::Block { statements, .. } => {
+            for statement in statements {
+                gather_return_types_from_statement(statement, acc);
+                if acc.is_conflicted() {
+                    break;
+                }
+            }
+        }
+        IrExpression::Lambda { body, .. } => gather_return_types_from_expression(body, acc),
+        IrExpression::NullSafeOperation {
+            operation,
+            default_value,
+            ..
+        } => {
+            gather_return_types_from_expression(operation, acc);
+            if let Some(default) = default_value.as_ref() {
+                gather_return_types_from_expression(default, acc);
+            }
+        }
+        IrExpression::Conditional {
+            condition,
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            gather_return_types_from_expression(condition, acc);
+            gather_return_types_from_expression(then_expr, acc);
+            gather_return_types_from_expression(else_expr, acc);
+        }
+        IrExpression::Switch {
+            discriminant,
+            cases,
+            ..
+        } => {
+            gather_return_types_from_expression(discriminant, acc);
+            for case in cases {
+                if acc.is_conflicted() {
+                    break;
+                }
+                gather_return_types_from_expression(&case.body, acc);
+            }
+        }
+        IrExpression::TryWithResources {
+            resources, body, ..
+        } => {
+            for resource in resources {
+                gather_return_types_from_expression(&resource.initializer, acc);
+                if acc.is_conflicted() {
+                    return;
+                }
+            }
+            gather_return_types_from_expression(body, acc);
+        }
+        _ => {}
+    }
+}
+
+fn gather_return_types_from_statement(stmt: &IrStatement, acc: &mut ReturnTypeAccumulator) {
+    if acc.is_conflicted() {
+        return;
+    }
+
+    match stmt {
+        IrStatement::Commented { statement, .. } => {
+            gather_return_types_from_statement(statement, acc);
+        }
+        IrStatement::VariableDeclaration { initializer, .. }
+        | IrStatement::FieldDeclaration { initializer, .. } => {
+            if let Some(expr) = initializer.as_ref() {
+                gather_return_types_from_expression(expr, acc);
+            }
+        }
+        IrStatement::Expression { expr, .. } => gather_return_types_from_expression(expr, acc),
+        IrStatement::Return { value, .. } => {
+            let candidate = match value {
+                Some(expr) => extract_java_type(expr),
+                None => Some(JavaType::void()),
+            };
+
+            match candidate {
+                Some(java_type) => acc.push(java_type),
+                None => acc.mark_unknown(),
+            }
+        }
+        IrStatement::If {
+            condition,
+            then_stmt,
+            else_stmt,
+            ..
+        } => {
+            gather_return_types_from_expression(condition, acc);
+            gather_return_types_from_statement(then_stmt, acc);
+            if let Some(else_branch) = else_stmt.as_ref() {
+                gather_return_types_from_statement(else_branch, acc);
+            }
+        }
+        IrStatement::While {
+            condition, body, ..
+        } => {
+            gather_return_types_from_expression(condition, acc);
+            gather_return_types_from_statement(body, acc);
+        }
+        IrStatement::ForEach { iterable, body, .. } => {
+            gather_return_types_from_expression(iterable, acc);
+            gather_return_types_from_statement(body, acc);
+        }
+        IrStatement::For {
+            init,
+            condition,
+            update,
+            body,
+            ..
+        } => {
+            if let Some(init_stmt) = init.as_ref() {
+                gather_return_types_from_statement(init_stmt, acc);
+            }
+            if let Some(cond) = condition.as_ref() {
+                gather_return_types_from_expression(cond, acc);
+            }
+            if let Some(update_expr) = update.as_ref() {
+                gather_return_types_from_expression(update_expr, acc);
+            }
+            gather_return_types_from_statement(body, acc);
+        }
+        IrStatement::Switch {
+            discriminant,
+            cases,
+            ..
+        } => {
+            gather_return_types_from_expression(discriminant, acc);
+            for case in cases {
+                if acc.is_conflicted() {
+                    break;
+                }
+                gather_return_types_from_expression(&case.body, acc);
+            }
+        }
+        IrStatement::Try {
+            body,
+            catch_clauses,
+            finally_block,
+            ..
+        } => {
+            gather_return_types_from_statement(body, acc);
+            for clause in catch_clauses {
+                gather_return_types_from_statement(&clause.body, acc);
+            }
+            if let Some(finally_stmt) = finally_block.as_ref() {
+                gather_return_types_from_statement(finally_stmt, acc);
+            }
+        }
+        IrStatement::TryWithResources {
+            resources,
+            body,
+            catch_clauses,
+            finally_block,
+            ..
+        } => {
+            for resource in resources {
+                gather_return_types_from_expression(&resource.initializer, acc);
+                if acc.is_conflicted() {
+                    return;
+                }
+            }
+            gather_return_types_from_statement(body, acc);
+            for clause in catch_clauses {
+                gather_return_types_from_statement(&clause.body, acc);
+            }
+            if let Some(finally_stmt) = finally_block.as_ref() {
+                gather_return_types_from_statement(finally_stmt, acc);
+            }
+        }
+        IrStatement::Throw { expr, .. } => gather_return_types_from_expression(expr, acc),
+        IrStatement::Block { statements, .. } => {
+            for statement in statements {
+                gather_return_types_from_statement(statement, acc);
+                if acc.is_conflicted() {
+                    break;
+                }
+            }
+        }
+        IrStatement::ClassDeclaration {
+            fields,
+            methods,
+            nested_classes,
+            ..
+        } => {
+            for field in fields {
+                gather_return_types_from_statement(field, acc);
+            }
+            for method in methods {
+                gather_return_types_from_statement(method, acc);
+            }
+            for nested in nested_classes {
+                gather_return_types_from_statement(nested, acc);
+            }
+        }
+        IrStatement::InterfaceDeclaration {
+            fields,
+            methods,
+            default_methods,
+            nested_types,
+            ..
+        } => {
+            for field in fields {
+                gather_return_types_from_statement(field, acc);
+            }
+            for method in methods {
+                gather_return_types_from_statement(method, acc);
+            }
+            for default_method in default_methods {
+                gather_return_types_from_statement(default_method, acc);
+            }
+            for nested in nested_types {
+                gather_return_types_from_statement(nested, acc);
+            }
+        }
+        IrStatement::RecordDeclaration { methods, .. } => {
+            for method in methods {
+                gather_return_types_from_statement(method, acc);
+            }
+        }
+        IrStatement::MethodDeclaration { body, .. } => {
+            if let Some(body_expr) = body.as_ref() {
+                gather_return_types_from_expression(body_expr, acc);
+            }
+        }
+        IrStatement::SampleDeclaration(_)
+        | IrStatement::Comment { .. }
+        | IrStatement::Break { .. }
+        | IrStatement::Continue { .. }
+        | IrStatement::Import(_)
+        | IrStatement::Package { .. } => {}
+    }
+}
+
+#[derive(Default)]
+struct ReturnTypeAccumulator {
+    value: Option<JavaType>,
+    conflicted: bool,
+}
+
+impl ReturnTypeAccumulator {
+    fn push(&mut self, candidate: JavaType) {
+        if self.conflicted {
+            return;
+        }
+
+        match &self.value {
+            Some(existing) => {
+                if *existing != candidate {
+                    self.conflicted = true;
+                }
+            }
+            None => {
+                self.value = Some(candidate);
+            }
+        }
+    }
+
+    fn mark_unknown(&mut self) {
+        self.conflicted = true;
+    }
+
+    fn is_conflicted(&self) -> bool {
+        self.conflicted
+    }
+
+    fn into_option(self) -> Option<JavaType> {
+        if self.conflicted {
+            None
+        } else {
+            self.value
+        }
+    }
 }
 
 fn convert_expression_to_ir(
@@ -318,8 +625,10 @@ pub fn desugar_top_level_function(
             generic_signature,
             ..
         } => {
+            let should_infer_return = return_type.is_none();
+
             // Convert return type
-            let java_return_type = match return_type {
+            let mut java_return_type = match return_type {
                 Some(type_ann) => convert_type_annotation(type_ann)?,
                 None => JavaType::void(),
             };
@@ -439,6 +748,15 @@ pub fn desugar_top_level_function(
             let body_ir_result = convert_expression_to_ir(*body, context);
             context.exit_scope();
             let ir_body = body_ir_result?;
+
+            if should_infer_return {
+                if let Some(inferred) = infer_return_type_from_ir_expression(&ir_body) {
+                    java_return_type = inferred;
+                    context
+                        .type_info
+                        .insert(name.clone(), java_return_type.clone());
+                }
+            }
 
             // Create method declaration
             let mut method = IrStatement::MethodDeclaration {

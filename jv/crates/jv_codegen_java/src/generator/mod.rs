@@ -512,7 +512,9 @@ impl JavaCodeGenerator {
                     self.collect_method_locals_from_statement(else_branch, locals);
                 }
             }
-            IrStatement::While { condition, body, .. } => {
+            IrStatement::While {
+                condition, body, ..
+            } => {
                 self.collect_method_locals_from_expression(condition, locals);
                 self.collect_method_locals_from_statement(body, locals);
             }
@@ -546,7 +548,11 @@ impl JavaCodeGenerator {
                     self.collect_method_locals_from_expression(expr, locals);
                 }
             }
-            IrStatement::Switch { discriminant, cases, .. } => {
+            IrStatement::Switch {
+                discriminant,
+                cases,
+                ..
+            } => {
                 self.collect_method_locals_from_expression(discriminant, locals);
                 for case in cases {
                     if let Some(guard) = &case.guard {
@@ -769,8 +775,7 @@ impl JavaCodeGenerator {
 
         for stage in &pipeline.stages {
             match stage {
-                SequenceStage::Map { lambda, .. }
-                | SequenceStage::FlatMap { lambda, .. } => {
+                SequenceStage::Map { lambda, .. } | SequenceStage::FlatMap { lambda, .. } => {
                     self.collect_mutable_captures_in_expression(
                         lambda,
                         method_locals,
@@ -786,8 +791,7 @@ impl JavaCodeGenerator {
                         scope_locals,
                     );
                 }
-                SequenceStage::Take { count, .. }
-                | SequenceStage::Drop { count, .. } => {
+                SequenceStage::Take { count, .. } | SequenceStage::Drop { count, .. } => {
                     self.collect_mutable_captures_in_expression(
                         count,
                         method_locals,
@@ -810,7 +814,10 @@ impl JavaCodeGenerator {
 
         if let Some(terminal) = &pipeline.terminal {
             match &terminal.kind {
-                SequenceTerminalKind::Fold { initial, accumulator } => {
+                SequenceTerminalKind::Fold {
+                    initial,
+                    accumulator,
+                } => {
                     self.collect_mutable_captures_in_expression(
                         initial,
                         method_locals,
@@ -941,14 +948,12 @@ impl JavaCodeGenerator {
         scope_locals: &HashSet<String>,
     ) -> HashSet<String> {
         match statement {
-            IrStatement::Commented { statement, .. } => {
-                self.collect_mutable_captures_in_statement(
-                    statement,
-                    method_locals,
-                    captures,
-                    scope_locals,
-                )
-            }
+            IrStatement::Commented { statement, .. } => self.collect_mutable_captures_in_statement(
+                statement,
+                method_locals,
+                captures,
+                scope_locals,
+            ),
             IrStatement::VariableDeclaration {
                 name, initializer, ..
             } => {
@@ -1026,7 +1031,9 @@ impl JavaCodeGenerator {
                 }
                 scope_locals.clone()
             }
-            IrStatement::While { condition, body, .. } => {
+            IrStatement::While {
+                condition, body, ..
+            } => {
                 self.collect_mutable_captures_in_expression(
                     condition,
                     method_locals,
@@ -1103,7 +1110,11 @@ impl JavaCodeGenerator {
                 );
                 scope_locals.clone()
             }
-            IrStatement::Switch { discriminant, cases, .. } => {
+            IrStatement::Switch {
+                discriminant,
+                cases,
+                ..
+            } => {
                 self.collect_mutable_captures_in_expression(
                     discriminant,
                     method_locals,

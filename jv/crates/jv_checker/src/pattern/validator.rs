@@ -226,9 +226,7 @@ impl<'a> WhenUsageValidator<'a> {
                 let missing_else = expects_value && else_arm.is_none() && implicit_end.is_none();
                 if let Some(else_expr) = else_arm {
                     self.visit_expression(else_expr, expects_value);
-                } else if missing_else
-                    && !(has_subject && arms_cover_boolean_literals(arms))
-                {
+                } else if missing_else && !(has_subject && arms_cover_boolean_literals(arms)) {
                     self.record_missing_else(span);
                 }
                 self.analyze_when_expression(expression, span, expects_value, has_subject);

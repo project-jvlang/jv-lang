@@ -2499,6 +2499,60 @@ mod tests {
         assert_eq!(result[1].parameters[1].name, "greeting");
     }
 
+    #[test]
+    fn desugar_default_parameters_infers_return_type_when_unspecified() {
+        let mut context = test_context();
+
+        let required = Parameter {
+            name: "name".to_string(),
+            type_annotation: Some(TypeAnnotation::Simple("String".to_string())),
+            default_value: None,
+            modifiers: ParameterModifiers::default(),
+            span: dummy_span(),
+        };
+        let optional = Parameter {
+            name: "suffix".to_string(),
+            type_annotation: Some(TypeAnnotation::Simple("String".to_string())),
+            default_value: Some(Expression::Literal(
+                Literal::String("!".to_string()),
+                dummy_span(),
+            )),
+            modifiers: ParameterModifiers::default(),
+            span: dummy_span(),
+        };
+
+        let body = Box::new(Expression::Literal(
+            Literal::String("greeting".to_string()),
+            dummy_span(),
+        ));
+
+        let overloads = desugar_default_parameters(
+            "welcome".to_string(),
+            vec![required, optional],
+            None,
+            body,
+            Modifiers::default(),
+            dummy_span(),
+            &mut context,
+        )
+        .expect("default parameters should infer return type");
+
+        assert_eq!(overloads.len(), 2);
+        assert!(
+            overloads
+                .iter()
+                .all(|overload| overload.return_type == JavaType::string()),
+            "all overloads should share inferred return type"
+        );
+
+        match &overloads[1].body {
+            IrExpression::MethodCall { java_type, .. } => {
+                assert_eq!(*java_type, JavaType::string());
+            }
+            other => panic!("expected delegating method call, got {:?}", other),
+        }
+    }
+
     // Test for named arguments desugaring
     #[test]
     fn test_desugar_named_arguments_creates_method_call() {
@@ -2643,6 +2697,65 @@ mod tests {
             }
             other => panic!("Expected method declaration, got {:?}", other),
         }
+    }
+
+    #[test]
+    fn desugar_top_level_function_infers_return_type_from_block_return() {
+        let mut context = test_context();
+
+        let function_body = Expression::Block {
+            statements: vec![
+                Statement::ValDeclaration {
+                    name: "message".to_string(),
+                    binding: None,
+                    type_annotation: None,
+                    initializer: Expression::Literal(
+                        Literal::String("Hello".to_string()),
+                        dummy_span(),
+                    ),
+                    modifiers: Modifiers::default(),
+                    origin: ValBindingOrigin::ExplicitKeyword,
+                    span: dummy_span(),
+                },
+                Statement::Return {
+                    value: Some(Expression::Identifier("message".to_string(), dummy_span())),
+                    span: dummy_span(),
+                },
+            ],
+            span: dummy_span(),
+        };
+
+        let function = Statement::FunctionDeclaration {
+            name: "renderGreeting".to_string(),
+            type_parameters: Vec::new(),
+            generic_signature: None,
+            where_clause: None,
+            parameters: Vec::new(),
+            return_type: None,
+            primitive_return: None,
+            body: Box::new(function_body),
+            modifiers: Modifiers::default(),
+            span: dummy_span(),
+        };
+
+        let result = desugar_top_level_function(function, &mut context)
+            .expect("top-level function should infer return type");
+
+        match result {
+            IrStatement::MethodDeclaration { return_type, .. } => {
+                assert_eq!(return_type, JavaType::string());
+            }
+            other => panic!("Expected method declaration, got {:?}", other),
+        }
+
+        assert_eq!(
+            context
+                .type_info
+                .get("renderGreeting")
+                .cloned()
+                .expect("function type registered in context"),
+            JavaType::string()
+        );
     }
 
     #[test]
