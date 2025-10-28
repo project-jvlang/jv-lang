@@ -8,11 +8,9 @@ fun main(): Unit {
 
     println(highlighted)
 
-    val highlightedCast = (
-        modules
+    val highlightedCast = modules
             .map { value -> value + "-module" }
-            .filter { candidate -> candidate.length >= 7 }
-    ) as List
+            .filter { candidate -> candidate.length >= 7 } as List
 
     println("Cast with as List: ${highlightedCast}")
 
@@ -21,6 +19,19 @@ fun main(): Unit {
         .filter { candidate -> candidate.length >= 7 }
 
     println("Implicit List via type: ${highlightedImplicit}")
+
+    val metrics = [120 95 130 105 150]
+
+    val adjustedMetrics = metrics
+        .map { value -> value + 10 }
+        .filter { candidate -> candidate % 3 == 0 } as List
+
+    val totalAdjusted = adjustedMetrics.sum()
+    val averageAdjusted = if (adjustedMetrics.size > 0) totalAdjusted / adjustedMetrics.size else 0
+
+    println("Adjusted metrics: ${adjustedMetrics}")
+    println("Total adjusted: ${totalAdjusted}")
+    println("Average adjusted: ${averageAdjusted}")
 
     val containsParserModule = highlighted.contains("parser-module")
     println("Has parser-module: ${containsParserModule}")
