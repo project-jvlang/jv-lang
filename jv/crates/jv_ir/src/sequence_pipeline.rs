@@ -1,7 +1,7 @@
 use crate::context::TransformContext;
 use crate::error::TransformError;
 use crate::transform::{extract_java_type, transform_expression};
-use crate::types::{IrExpression, IrResolvedMethodTarget, IrStatement, JavaType};
+use crate::types::{IrExpression, IrProgram, IrResolvedMethodTarget, IrStatement, JavaType};
 use jv_ast::{
     types::PrimitiveTypeName, Argument, BinaryOp, CallArgumentMetadata, CallArgumentStyle,
     Expression, SequenceDelimiter, Span,
@@ -2052,4 +2052,337 @@ fn has_repeated_transform(stages: &[SequenceStage]) -> bool {
     }
 
     false
+}
+
+pub fn enforce_list_terminals(program: &mut IrProgram) {
+    let mut enforcer = ListTerminalEnforcer {
+        return_type_stack: Vec::new(),
+    };
+    enforcer.visit_program(program);
+}
+
+struct ListTerminalEnforcer {
+    return_type_stack: Vec<Option<JavaType>>,
+}
+
+impl ListTerminalEnforcer {
+    fn visit_program(&mut self, program: &mut IrProgram) {
+        for stmt in &mut program.type_declarations {
+            self.visit_statement(stmt);
+        }
+    }
+
+    fn visit_statement(&mut self, stmt: &mut IrStatement) {
+        match stmt {
+            IrStatement::VariableDeclaration {
+                java_type,
+                initializer,
+                ..
+            }
+            | IrStatement::FieldDeclaration {
+                java_type,
+                initializer,
+                ..
+            } => {
+                if let Some(expr) = initializer {
+                    self.visit_expression(expr, Some(java_type));
+                }
+            }
+            IrStatement::Return { value, .. } => {
+                if let Some(expr) = value {
+                    let expected_type = self
+                        .return_type_stack
+                        .last()
+                        .and_then(|ty| ty.clone());
+                    let expected_ref = expected_type.as_ref();
+                    self.visit_expression(expr, expected_ref);
+                }
+            }
+            IrStatement::Expression { expr, .. } => {
+                self.visit_expression(expr, None);
+            }
+            IrStatement::Block { statements, .. } => {
+                for stmt in statements {
+                    self.visit_statement(stmt);
+                }
+            }
+            IrStatement::If {
+                condition,
+                then_stmt,
+                else_stmt,
+                ..
+            } => {
+                self.visit_expression(condition, None);
+                self.visit_statement(then_stmt);
+                if let Some(else_branch) = else_stmt {
+                    self.visit_statement(else_branch);
+                }
+            }
+            IrStatement::While { condition, body, .. } => {
+                self.visit_expression(condition, None);
+                self.visit_statement(body);
+            }
+            IrStatement::For {
+                init,
+                condition,
+                update,
+                body,
+                ..
+            } => {
+                if let Some(init_stmt) = init {
+                    self.visit_statement(init_stmt);
+                }
+                if let Some(cond) = condition {
+                    self.visit_expression(cond, None);
+                }
+                if let Some(update_expr) = update {
+                    self.visit_expression(update_expr, None);
+                }
+                self.visit_statement(body);
+            }
+            IrStatement::ForEach { iterable, body, .. } => {
+                self.visit_expression(iterable, None);
+                self.visit_statement(body);
+            }
+            IrStatement::Switch {
+                discriminant,
+                cases,
+                ..
+            } => {
+                self.visit_expression(discriminant, None);
+                for case in cases {
+                    self.visit_expression(&mut case.body, None);
+                }
+            }
+            IrStatement::Try {
+                body,
+                catch_clauses,
+                finally_block,
+                ..
+            } => {
+                self.visit_statement(body);
+                for clause in catch_clauses {
+                    self.visit_statement(&mut clause.body);
+                }
+                if let Some(finally_stmt) = finally_block {
+                    self.visit_statement(finally_stmt);
+                }
+            }
+            IrStatement::MethodDeclaration { return_type, body, .. } => {
+                self.return_type_stack.push(Some(return_type.clone()));
+                if let Some(expr) = body {
+                    self.visit_expression(expr, Some(return_type));
+                }
+                self.return_type_stack.pop();
+            }
+            IrStatement::ClassDeclaration {
+                fields,
+                methods,
+                nested_classes,
+                ..
+            } => {
+                for field in fields {
+                    self.visit_statement(field);
+                }
+                for method in methods {
+                    self.visit_statement(method);
+                }
+                for nested in nested_classes {
+                    self.visit_statement(nested);
+                }
+            }
+            IrStatement::InterfaceDeclaration {
+                fields,
+                methods,
+                default_methods,
+                nested_types,
+                ..
+            } => {
+                for field in fields {
+                    self.visit_statement(field);
+                }
+                for method in methods {
+                    self.visit_statement(method);
+                }
+                for default_method in default_methods {
+                    self.visit_statement(default_method);
+                }
+                for nested in nested_types {
+                    self.visit_statement(nested);
+                }
+            }
+            IrStatement::RecordDeclaration { methods, .. } => {
+                for method in methods {
+                    self.visit_statement(method);
+                }
+            }
+            IrStatement::TryWithResources {
+                resources,
+                body,
+                catch_clauses,
+                finally_block,
+                ..
+            } => {
+                for resource in resources {
+                    self.visit_expression(&mut resource.initializer, None);
+                }
+                self.visit_statement(body);
+                for clause in catch_clauses {
+                    self.visit_statement(&mut clause.body);
+                }
+                if let Some(finally_stmt) = finally_block {
+                    self.visit_statement(finally_stmt);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn visit_expression(&mut self, expr: &mut IrExpression, expected: Option<&JavaType>) {
+        if let Some(expected_type) = expected {
+            if Self::is_list_type(expected_type) {
+                if let IrExpression::SequencePipeline {
+                    pipeline,
+                    java_type,
+                    ..
+                } = expr
+                {
+                    eprintln!("[debug] enforcing list pipeline");
+                    for (idx, stage) in pipeline.stages.iter().enumerate() {
+                        if idx == 2 {
+                            eprintln!("  stage {idx}: {:?}", stage);
+                        }
+                    }
+                    if pipeline.terminal.is_none() {
+                        let terminal = SequenceTerminal {
+                            kind: SequenceTerminalKind::ToList,
+                            evaluation: SequenceTerminalEvaluation::Collector,
+                            requires_non_empty_source: false,
+                            specialization_hint: None,
+                            canonical_adapter: None,
+                            span: pipeline.span.clone(),
+                        };
+                        pipeline.terminal = Some(terminal);
+                        pipeline.lazy = false;
+                        pipeline.recompute_shape();
+                    }
+                    *java_type = expected_type.clone();
+                }
+            }
+        }
+
+        match expr {
+            IrExpression::SequencePipeline { .. }
+            | IrExpression::Literal(_, _)
+            | IrExpression::RegexPattern { .. }
+            | IrExpression::Identifier { .. }
+            | IrExpression::InstanceOf { .. }
+            | IrExpression::This { .. }
+            | IrExpression::Super { .. } => {}
+            IrExpression::MethodCall { receiver, args, .. } => {
+                if let Some(recv) = receiver.as_mut() {
+                    self.visit_expression(recv, None);
+                }
+                for arg in args {
+                    self.visit_expression(arg, None);
+                }
+            }
+            IrExpression::FieldAccess { receiver, .. } => {
+                self.visit_expression(receiver, None);
+            }
+            IrExpression::ArrayAccess { array, index, .. } => {
+                self.visit_expression(array, None);
+                self.visit_expression(index, None);
+            }
+            IrExpression::Binary { left, right, .. } => {
+                self.visit_expression(left, None);
+                self.visit_expression(right, None);
+            }
+            IrExpression::Unary { operand, .. } => {
+                self.visit_expression(operand, None);
+            }
+            IrExpression::Assignment { target, value, .. } => {
+                let expected_type = extract_java_type(target);
+                let expected_ref = expected_type.as_ref();
+                self.visit_expression(value, expected_ref);
+                self.visit_expression(target, None);
+            }
+            IrExpression::Conditional {
+                condition,
+                then_expr,
+                else_expr,
+                java_type,
+                ..
+            } => {
+                self.visit_expression(condition, None);
+                self.visit_expression(then_expr, Some(java_type));
+                self.visit_expression(else_expr, Some(java_type));
+            }
+            IrExpression::Block { statements, .. } => {
+                for stmt in statements {
+                    self.visit_statement(stmt);
+                }
+            }
+            IrExpression::ArrayCreation { initializer, .. } => {
+                if let Some(values) = initializer {
+                    for value in values {
+                        self.visit_expression(value, None);
+                    }
+                }
+            }
+            IrExpression::ObjectCreation { args, .. } => {
+                for arg in args {
+                    self.visit_expression(arg, None);
+                }
+            }
+            IrExpression::Lambda { body, .. } => {
+                self.visit_expression(body, None);
+            }
+            IrExpression::Switch { discriminant, cases, .. } => {
+                self.visit_expression(discriminant, None);
+                for case in cases {
+                    self.visit_expression(&mut case.body, None);
+                }
+            }
+            IrExpression::Cast { expr: inner, target_type, .. } => {
+                self.visit_expression(inner, Some(target_type));
+            }
+            IrExpression::TryWithResources { resources, body, .. } => {
+                for resource in resources {
+                    self.visit_expression(&mut resource.initializer, None);
+                }
+                self.visit_expression(body, None);
+            }
+            IrExpression::CompletableFuture { args, .. }
+            | IrExpression::VirtualThread { args, .. } => {
+                for arg in args {
+                    self.visit_expression(arg, None);
+                }
+            }
+            IrExpression::NullSafeOperation {
+                expr,
+                operation,
+                default_value,
+                ..
+            } => {
+                self.visit_expression(expr, None);
+                self.visit_expression(operation, None);
+                if let Some(default) = default_value {
+                    self.visit_expression(default, None);
+                }
+            }
+            IrExpression::StringFormat { args, .. } => {
+                for arg in args {
+                    self.visit_expression(arg, None);
+                }
+            }
+        }
+    }
+
+    fn is_list_type(java_type: &JavaType) -> bool {
+        match java_type {
+            JavaType::Reference { name, .. } => matches!(name.as_str(), "java.util.List" | "List"),
+            _ => false,
+        }
+    }
 }

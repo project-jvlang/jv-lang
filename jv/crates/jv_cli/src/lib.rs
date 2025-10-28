@@ -1,7 +1,7 @@
 // jv_cli - CLI functionality (library interface for testing)
 use anyhow::Result;
 use clap::Parser;
-use jv_ir::types::{IrImport, IrImportDetail};
+use jv_ir::{sequence_pipeline, types::{IrImport, IrImportDetail}};
 use jv_support::i18n::{catalog, LocaleCode};
 use std::collections::HashMap;
 use std::fs;
@@ -936,6 +936,8 @@ pub mod pipeline {
         if let Some(facts) = type_facts_snapshot.as_ref() {
             apply_type_facts(&mut ir_program, facts);
         }
+
+        sequence_pipeline::enforce_list_terminals(&mut ir_program);
 
         let when_strategy_summary = summarize_when_strategies(&when_strategy_records);
 

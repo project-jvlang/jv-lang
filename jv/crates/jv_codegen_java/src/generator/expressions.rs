@@ -1188,6 +1188,17 @@ impl JavaCodeGenerator {
             return Ok(stream_expr);
         }
 
+        if Self::is_java_list_type(result_type) {
+            if self.targeting.supports_collection_factories() {
+                return Ok(format!("{stream_expr}.toList()"));
+            }
+            self.add_import("java.util.stream.Collectors");
+            return Ok(format!(
+                "{}.collect(Collectors.toList())",
+                stream_expr
+            ));
+        }
+
         match result_type {
             JavaType::Reference { name, .. } if name == "jv.collections.SequenceCore" => {}
             _ => {
@@ -1727,6 +1738,15 @@ impl JavaCodeGenerator {
         match java_type {
             JavaType::Reference { name, .. } => {
                 name == "Stream" || name == "java.util.stream.Stream"
+            }
+            _ => false,
+        }
+    }
+
+    fn is_java_list_type(java_type: &JavaType) -> bool {
+        match java_type {
+            JavaType::Reference { name, .. } => {
+                name == "java.util.List" || name == "List"
             }
             _ => false,
         }
