@@ -8,9 +8,11 @@ fun main(): Unit {
 
     println(highlighted)
 
-    val highlightedCast = modules
+    val highlightedCast = (
+        modules
             .map { value -> value + "-module" }
-            .filter { candidate -> candidate.length >= 7 } as List
+            .filter { candidate -> candidate.length >= 7 }
+    ) as List
 
     println("Cast with as List: ${highlightedCast}")
 
@@ -27,7 +29,11 @@ fun main(): Unit {
         .filter { candidate -> candidate % 3 == 0 } as List
 
     val totalAdjusted = adjustedMetrics.sum()
-    val averageAdjusted = if (adjustedMetrics.size > 0) totalAdjusted / adjustedMetrics.size else 0
+    val adjustedCount = adjustedMetrics.size
+    val averageAdjusted = when (adjustedCount) {
+        0 -> 0
+        else -> totalAdjusted / adjustedCount
+    }
 
     println("Adjusted metrics: ${adjustedMetrics}")
     println("Total adjusted: ${totalAdjusted}")
