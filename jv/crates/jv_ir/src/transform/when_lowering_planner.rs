@@ -8,7 +8,7 @@ use crate::types::{
     IrImplicitWhenEnd, IrResource, IrStatement, IrSwitchCase, JavaType, JavaWildcardKind,
 };
 use jv_ast::{
-    BinaryOp, Expression, ImplicitWhenEnd, Literal, Pattern, Span, TypeAnnotation, WhenArm,
+    BinaryOp, Expression, ImplicitWhenEnd, Literal, Pattern, Span, TypeAnnotation, UnaryOp, WhenArm,
 };
 
 /// Maximum supported destructuring depth inside a single `when` arm. The outer
@@ -191,9 +191,26 @@ impl WhenLoweringPlanner {
             });
         }
 
-        let java_type = result_type.unwrap_or_else(JavaType::object);
-        let strategy_label = if guard_count > 0 { "Hybrid" } else { "Switch" };
+        let resolved_result_type = result_type.clone().unwrap_or_else(JavaType::object);
         let exhaustive = describe_exhaustiveness(&analysis);
+        if requires_boolean_if_chain(&discriminant_type, &cases) {
+            if let Some(ir) = build_boolean_if_chain(
+                discriminant.clone(),
+                cases.clone(),
+                implicit_ir_end.clone(),
+                resolved_result_type.clone(),
+            ) {
+                let description = format!(
+                    "strategy=IfChain arms={} exhaustive={}",
+                    cases.len(),
+                    exhaustive
+                );
+                return Ok(WhenLoweringPlan { description, ir });
+            }
+        }
+
+        let java_type = resolved_result_type;
+        let strategy_label = if guard_count > 0 { "Hybrid" } else { "Switch" };
         let description = format!(
             "strategy={} arms={} guards={} default={} exhaustive={}",
             strategy_label,
@@ -483,6 +500,16 @@ fn and_expression(left: IrExpression, right: IrExpression, span: Span) -> IrExpr
     }
 }
 
+fn or_expression(left: IrExpression, right: IrExpression, span: Span) -> IrExpression {
+    IrExpression::Binary {
+        left: Box::new(left),
+        op: BinaryOp::Or,
+        right: Box::new(right),
+        java_type: JavaType::boolean(),
+        span,
+    }
+}
+
 fn comparison_expression(
     subject: IrExpression,
     op: BinaryOp,
@@ -512,6 +539,16 @@ fn convert_implicit_end(end: ImplicitWhenEnd) -> IrImplicitWhenEnd {
     match end {
         ImplicitWhenEnd::Unit { span } => IrImplicitWhenEnd::Unit { span },
     }
+}
+
+fn implicit_end_ir_expression(end: &Option<IrImplicitWhenEnd>) -> Option<IrExpression> {
+    end.as_ref().map(|implicit| match implicit {
+        IrImplicitWhenEnd::Unit { span } => IrExpression::Block {
+            statements: Vec::new(),
+            java_type: JavaType::void(),
+            span: span.clone(),
+        },
+    })
 }
 
 fn lower_constructor_deconstruction(
@@ -598,6 +635,109 @@ fn describe_exhaustiveness(summary: &PatternAnalysisSummary) -> String {
         Some(true) => "true".to_string(),
         Some(false) => "false".to_string(),
         None => "unknown".to_string(),
+    }
+}
+
+fn requires_boolean_if_chain(discriminant_type: &JavaType, cases: &[IrSwitchCase]) -> bool {
+    is_boolean_type(discriminant_type) && cases.iter().all(boolean_case_supported)
+}
+
+fn is_boolean_type(java_type: &JavaType) -> bool {
+    match java_type {
+        JavaType::Primitive(name) => name == "boolean",
+        JavaType::Reference { name, .. } => {
+            let simple = name.rsplit('.').next().unwrap_or(name);
+            simple == "Boolean"
+        }
+        _ => false,
+    }
+}
+
+fn boolean_case_supported(case: &IrSwitchCase) -> bool {
+    case.labels.iter().all(|label| match label {
+        IrCaseLabel::Literal(Literal::Boolean(_)) => true,
+        IrCaseLabel::Default => case.guard.is_none(),
+        _ => false,
+    })
+}
+
+fn build_boolean_if_chain(
+    discriminant: IrExpression,
+    cases: Vec<IrSwitchCase>,
+    implicit_end: Option<IrImplicitWhenEnd>,
+    result_type: JavaType,
+) -> Option<IrExpression> {
+    let mut default_body: Option<IrExpression> = None;
+    let mut filtered_cases = Vec::new();
+
+    for case in cases {
+        if case
+            .labels
+            .iter()
+            .any(|label| matches!(label, IrCaseLabel::Default))
+            && case.guard.is_none()
+            && default_body.is_none()
+        {
+            default_body = Some(case.body);
+        } else {
+            filtered_cases.push(case);
+        }
+    }
+
+    let mut fallback = default_body.or_else(|| implicit_end_ir_expression(&implicit_end))?;
+
+    for case in filtered_cases.into_iter().rev() {
+        let condition = boolean_case_condition(&discriminant, &case)?;
+        let branch_body = case.body;
+        fallback = IrExpression::Conditional {
+            condition: Box::new(condition),
+            then_expr: Box::new(branch_body),
+            else_expr: Box::new(fallback),
+            java_type: result_type.clone(),
+            span: case.span,
+        };
+    }
+
+    Some(fallback)
+}
+
+fn boolean_case_condition(
+    discriminant: &IrExpression,
+    case: &IrSwitchCase,
+) -> Option<IrExpression> {
+    let mut condition: Option<IrExpression> = None;
+    for label in &case.labels {
+        match label {
+            IrCaseLabel::Literal(Literal::Boolean(value)) => {
+                let label_condition = boolean_label_condition(discriminant, *value, &case.span);
+                condition = Some(match condition {
+                    Some(existing) => or_expression(existing, label_condition, case.span.clone()),
+                    None => label_condition,
+                });
+            }
+            IrCaseLabel::Default => {}
+            _ => return None,
+        }
+    }
+
+    let mut final_condition = condition.unwrap_or_else(|| discriminant.clone());
+    if let Some(guard) = case.guard.clone() {
+        final_condition = and_expression(final_condition, guard, case.span.clone());
+    }
+
+    Some(final_condition)
+}
+
+fn boolean_label_condition(discriminant: &IrExpression, value: bool, span: &Span) -> IrExpression {
+    if value {
+        discriminant.clone()
+    } else {
+        IrExpression::Unary {
+            op: UnaryOp::Not,
+            operand: Box::new(discriminant.clone()),
+            java_type: JavaType::boolean(),
+            span: span.clone(),
+        }
     }
 }
 
