@@ -1764,6 +1764,76 @@ fn sequence_pipeline_fixture_runs_consistently_across_targets() {
 }
 
 #[test]
+fn sequence_stream_casts_compile_successfully() {
+    if !ensure_targets_available(
+        &[JavaTarget::Java25],
+        "sequence stream cast regression verification",
+    ) {
+        return;
+    }
+
+    let fixture =
+        workspace_file("tests/fixtures/sequence/sequence_stream_cast_failure.jv");
+    let temp_dir =
+        TempDirGuard::new("sequence-stream-cast-regression").expect("create temp dir");
+    let plan = compose_plan_from_fixture(
+        temp_dir.path(),
+        &fixture,
+        CliOverrides {
+            java_only: true,
+            target: Some(JavaTarget::Java25),
+            ..CliOverrides::default()
+        },
+    );
+
+    let artifacts = compile(&plan).expect("fixture should compile to Java sources");
+    let java_dir = plan
+        .options
+        .output_dir
+        .join(format!("java{}", JavaTarget::Java25.as_str()));
+    let classes_dir = java_dir.join("classes");
+    fs::create_dir_all(&classes_dir).expect("create classes directory for javac");
+
+    let mut javac =
+        javac_command_for_target(JavaTarget::Java25).expect("javac command unavailable");
+    javac.arg("-d").arg(&classes_dir);
+    for file in &artifacts.java_files {
+        javac.arg(file);
+    }
+
+    let javac_status = javac
+        .status()
+        .expect("invoke javac for sequence stream cast fixture");
+    assert!(
+        javac_status.success(),
+        "javac failed for sequence stream cast fixture"
+    );
+
+    let mut java_cmd =
+        java_command_for_target(JavaTarget::Java25).expect("java runtime unavailable");
+    let output = java_cmd
+        .arg("-cp")
+        .arg(&classes_dir)
+        .arg(&artifacts.script_main_class)
+        .output()
+        .expect("execute compiled sequence stream cast script");
+
+    assert!(
+        output.status.success(),
+        "sequence stream cast execution failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let expected = "[lexer-module, parser-module, ast-module, codegen-module]\n[lexer-module, parser-module, ast-module, codegen-module]";
+    assert_eq!(
+        stdout.trim(),
+        expected,
+        "unexpected output from sequence stream cast fixture"
+    );
+}
+
+#[test]
 fn java_target_switch_emits_expected_sequence_collection_factories() {
     let fixture = workspace_file("tests/fixtures/sequence/java21_compat.jv");
 

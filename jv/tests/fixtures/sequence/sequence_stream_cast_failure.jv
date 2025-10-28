@@ -1,0 +1,17 @@
+fun main(): Unit {
+    val modules = ["lexer" "parser" "ast" "codegen"]
+
+    val implicitList: List = modules
+        .map { value -> value + "-module" }
+        .filter { candidate -> candidate.length >= 6 }
+
+    println(implicitList)
+
+    val castList = (
+        modules
+            .map { value -> value + "-module" }
+            .filter { candidate -> candidate.length >= 6 }
+    ) as List
+
+    println(castList)
+}
