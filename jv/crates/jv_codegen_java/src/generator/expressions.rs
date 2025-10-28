@@ -1193,10 +1193,7 @@ impl JavaCodeGenerator {
                 return Ok(format!("{stream_expr}.toList()"));
             }
             self.add_import("java.util.stream.Collectors");
-            return Ok(format!(
-                "{}.collect(Collectors.toList())",
-                stream_expr
-            ));
+            return Ok(format!("{}.collect(Collectors.toList())", stream_expr));
         }
 
         match result_type {
@@ -1745,9 +1742,7 @@ impl JavaCodeGenerator {
 
     fn is_java_list_type(java_type: &JavaType) -> bool {
         match java_type {
-            JavaType::Reference { name, .. } => {
-                name == "java.util.List" || name == "List"
-            }
+            JavaType::Reference { name, .. } => name == "java.util.List" || name == "List",
             _ => false,
         }
     }

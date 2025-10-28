@@ -9,7 +9,7 @@ use crate::types::{
 use jv_ast::{
     Argument, BinaryOp, BindingPatternKind, CallArgumentMetadata, CallArgumentStyle, CommentKind,
     ConcurrencyConstruct, Expression, Literal, Modifiers, Program, ResourceManagement,
-    SequenceDelimiter, Span, Statement, TypeAnnotation, ValBindingOrigin,
+    SequenceDelimiter, Span, Statement, TypeAnnotation, UnaryOp, ValBindingOrigin,
 };
 
 mod concurrency;
@@ -603,6 +603,12 @@ pub fn transform_expression(
             delimiter,
             span,
         } => {
+            let elements = if delimiter == SequenceDelimiter::Whitespace {
+                normalize_whitespace_array_elements(elements)
+            } else {
+                elements
+            };
+
             let mut lowered_elements = Vec::with_capacity(elements.len());
             let mut element_type: Option<JavaType> = None;
 
@@ -701,6 +707,24 @@ pub fn transform_expression(
                     span,
                 })
             }
+        }
+        Expression::Unary { op, operand, span } => {
+            let operand_ir = transform_expression(*operand, context)?;
+            let operand_type = extract_java_type(&operand_ir);
+
+            let java_type = match op {
+                UnaryOp::Not => JavaType::boolean(),
+                UnaryOp::Plus | UnaryOp::Minus | UnaryOp::BitNot => {
+                    operand_type.unwrap_or_else(JavaType::int)
+                }
+            };
+
+            Ok(IrExpression::Unary {
+                op,
+                operand: Box::new(operand_ir),
+                java_type,
+                span,
+            })
         }
         Expression::MemberAccess {
             object,
@@ -1449,6 +1473,54 @@ fn system_identifier(span: Span) -> IrExpression {
         },
         span,
     }
+}
+
+pub(crate) fn normalize_whitespace_array_elements(elements: Vec<Expression>) -> Vec<Expression> {
+    let mut normalized = Vec::with_capacity(elements.len());
+
+    for expr in elements.into_iter() {
+        match expr {
+            Expression::Unary { op, operand, span }
+                if matches!(op, UnaryOp::Plus | UnaryOp::Minus) =>
+            {
+                if let Some(prev) = normalized.pop() {
+                    if matches!(
+                        &prev,
+                        Expression::Unary {
+                            op: UnaryOp::Plus,
+                            ..
+                        } | Expression::Unary {
+                            op: UnaryOp::Minus,
+                            ..
+                        }
+                    ) {
+                        normalized.push(prev);
+                        normalized.push(Expression::Unary { op, operand, span });
+                    } else {
+                        let prev_span = prev.span().clone();
+                        let merged_span = prev_span.merge(&span);
+                        let binary_op = match op {
+                            UnaryOp::Plus => BinaryOp::Add,
+                            UnaryOp::Minus => BinaryOp::Subtract,
+                            _ => unreachable!(),
+                        };
+
+                        normalized.push(Expression::Binary {
+                            left: Box::new(prev),
+                            op: binary_op,
+                            right: operand,
+                            span: merged_span,
+                        });
+                    }
+                } else {
+                    normalized.push(Expression::Unary { op, operand, span });
+                }
+            }
+            other => normalized.push(other),
+        }
+    }
+
+    normalized
 }
 
 fn create_system_field_access(receiver: SystemReceiver, span: Span) -> IrExpression {

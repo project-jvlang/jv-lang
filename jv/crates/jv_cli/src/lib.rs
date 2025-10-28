@@ -1,7 +1,10 @@
 // jv_cli - CLI functionality (library interface for testing)
 use anyhow::Result;
 use clap::Parser;
-use jv_ir::{sequence_pipeline, types::{IrImport, IrImportDetail}};
+use jv_ir::{
+    sequence_pipeline,
+    types::{IrImport, IrImportDetail},
+};
 use jv_support::i18n::{catalog, LocaleCode};
 use std::collections::HashMap;
 use std::fs;

@@ -1,6 +1,8 @@
 use crate::context::TransformContext;
 use crate::error::TransformError;
-use crate::transform::{extract_java_type, transform_expression};
+use crate::transform::{
+    extract_java_type, normalize_whitespace_array_elements, transform_expression,
+};
 use crate::types::{IrExpression, IrProgram, IrResolvedMethodTarget, IrStatement, JavaType};
 use jv_ast::{
     types::PrimitiveTypeName, Argument, BinaryOp, CallArgumentMetadata, CallArgumentStyle,
@@ -551,6 +553,7 @@ fn lower_sequence_source(
             delimiter: SequenceDelimiter::Whitespace,
             span,
         } => {
+            let elements = normalize_whitespace_array_elements(elements);
             let mut lowered = Vec::with_capacity(elements.len());
             for element in elements {
                 lowered.push(transform_expression(element, context)?);
@@ -2090,10 +2093,7 @@ impl ListTerminalEnforcer {
             }
             IrStatement::Return { value, .. } => {
                 if let Some(expr) = value {
-                    let expected_type = self
-                        .return_type_stack
-                        .last()
-                        .and_then(|ty| ty.clone());
+                    let expected_type = self.return_type_stack.last().and_then(|ty| ty.clone());
                     let expected_ref = expected_type.as_ref();
                     self.visit_expression(expr, expected_ref);
                 }
@@ -2118,7 +2118,9 @@ impl ListTerminalEnforcer {
                     self.visit_statement(else_branch);
                 }
             }
-            IrStatement::While { condition, body, .. } => {
+            IrStatement::While {
+                condition, body, ..
+            } => {
                 self.visit_expression(condition, None);
                 self.visit_statement(body);
             }
@@ -2168,7 +2170,9 @@ impl ListTerminalEnforcer {
                     self.visit_statement(finally_stmt);
                 }
             }
-            IrStatement::MethodDeclaration { return_type, body, .. } => {
+            IrStatement::MethodDeclaration {
+                return_type, body, ..
+            } => {
                 self.return_type_stack.push(Some(return_type.clone()));
                 if let Some(expr) = body {
                     self.visit_expression(expr, Some(return_type));
@@ -2247,12 +2251,6 @@ impl ListTerminalEnforcer {
                     ..
                 } = expr
                 {
-                    eprintln!("[debug] enforcing list pipeline");
-                    for (idx, stage) in pipeline.stages.iter().enumerate() {
-                        if idx == 2 {
-                            eprintln!("  stage {idx}: {:?}", stage);
-                        }
-                    }
                     if pipeline.terminal.is_none() {
                         let terminal = SequenceTerminal {
                             kind: SequenceTerminalKind::ToList,
@@ -2338,16 +2336,26 @@ impl ListTerminalEnforcer {
             IrExpression::Lambda { body, .. } => {
                 self.visit_expression(body, None);
             }
-            IrExpression::Switch { discriminant, cases, .. } => {
+            IrExpression::Switch {
+                discriminant,
+                cases,
+                ..
+            } => {
                 self.visit_expression(discriminant, None);
                 for case in cases {
                     self.visit_expression(&mut case.body, None);
                 }
             }
-            IrExpression::Cast { expr: inner, target_type, .. } => {
+            IrExpression::Cast {
+                expr: inner,
+                target_type,
+                ..
+            } => {
                 self.visit_expression(inner, Some(target_type));
             }
-            IrExpression::TryWithResources { resources, body, .. } => {
+            IrExpression::TryWithResources {
+                resources, body, ..
+            } => {
                 for resource in resources {
                     self.visit_expression(&mut resource.initializer, None);
                 }
