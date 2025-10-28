@@ -760,6 +760,67 @@ fn when_with_else_in_value_position_passes_validation() {
 }
 
 #[test]
+fn when_boolean_true_false_without_else_passes_validation() {
+    let span = dummy_span();
+    let when_expr = Expression::When {
+        expr: Some(Box::new(Expression::Identifier(
+            "flag".into(),
+            span.clone(),
+        ))),
+        arms: vec![
+            WhenArm {
+                pattern: Pattern::Literal(Literal::Boolean(true), span.clone()),
+                guard: None,
+                body: Expression::Literal(Literal::Number("1".into()), span.clone()),
+                span: span.clone(),
+            },
+            WhenArm {
+                pattern: Pattern::Literal(Literal::Boolean(false), span.clone()),
+                guard: None,
+                body: Expression::Literal(Literal::Number("0".into()), span.clone()),
+                span: span.clone(),
+            },
+        ],
+        else_arm: None,
+        implicit_end: None,
+        span: span.clone(),
+    };
+
+    let program = Program {
+        package: None,
+        imports: Vec::new(),
+        statements: vec![
+            Statement::ValDeclaration {
+                name: "flag".into(),
+                binding: None,
+
+                type_annotation: None,
+                initializer: Expression::Literal(Literal::Boolean(true), span.clone()),
+                modifiers: default_modifiers(),
+                origin: ValBindingOrigin::ExplicitKeyword,
+                span: span.clone(),
+            },
+            Statement::ValDeclaration {
+                name: "result".into(),
+                binding: None,
+
+                type_annotation: None,
+                initializer: when_expr,
+                modifiers: default_modifiers(),
+                origin: ValBindingOrigin::ExplicitKeyword,
+                span: span.clone(),
+            },
+        ],
+        span: span.clone(),
+    };
+
+    let mut checker = TypeChecker::new();
+    checker
+        .check_program(&program)
+        .expect("boolean when with true/false arms should pass without else");
+}
+
+#[test]
 fn when_branch_nullability_is_exposed_via_inference_service() {
     let program = parse_program(
         r#"

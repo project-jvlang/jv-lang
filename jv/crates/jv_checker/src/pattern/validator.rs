@@ -3,9 +3,9 @@ use super::{
 };
 use crate::CheckError;
 use jv_ast::{
-    Argument, ConcurrencyConstruct, Expression, ForInStatement, LoopStrategy, NumericRangeLoop,
-    Pattern, Program, Property, ResourceManagement, Span, Statement, StringPart, TypeAnnotation,
-    WhenArm,
+    Argument, ConcurrencyConstruct, Expression, ForInStatement, Literal, LoopStrategy,
+    NumericRangeLoop, Pattern, Program, Property, ResourceManagement, Span, Statement, StringPart,
+    TypeAnnotation, WhenArm,
 };
 
 pub(super) fn validate_program(
@@ -222,12 +222,16 @@ impl<'a> WhenUsageValidator<'a> {
                 for arm in arms {
                     self.visit_when_arm(arm, expects_value);
                 }
+                let has_subject = expr.is_some();
+                let missing_else = expects_value && else_arm.is_none() && implicit_end.is_none();
                 if let Some(else_expr) = else_arm {
                     self.visit_expression(else_expr, expects_value);
-                } else if expects_value && implicit_end.is_none() {
+                } else if missing_else
+                    && !(has_subject && arms_cover_boolean_literals(arms))
+                {
                     self.record_missing_else(span);
                 }
-                self.analyze_when_expression(expression, span, expects_value, expr.is_some());
+                self.analyze_when_expression(expression, span, expects_value, has_subject);
             }
         }
     }
@@ -398,6 +402,22 @@ fn type_annotation_is_unit(annotation: &TypeAnnotation) -> bool {
         TypeAnnotation::Nullable(inner) => type_annotation_is_unit(inner),
         _ => false,
     }
+}
+
+fn arms_cover_boolean_literals(arms: &[WhenArm]) -> bool {
+    let mut covers_true = false;
+    let mut covers_false = false;
+    for arm in arms {
+        match &arm.pattern {
+            Pattern::Literal(Literal::Boolean(true), _) => covers_true = true,
+            Pattern::Literal(Literal::Boolean(false), _) => covers_false = true,
+            _ => {}
+        }
+        if covers_true && covers_false {
+            return true;
+        }
+    }
+    covers_true && covers_false
 }
 
 fn boolean_labels(case: MissingBooleanCase) -> (&'static str, &'static str) {
