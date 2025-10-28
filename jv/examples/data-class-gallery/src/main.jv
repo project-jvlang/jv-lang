@@ -1,4 +1,4 @@
-data class Milestone(val title: String, val completed: Boolean, val estimateDays: Int)
+data Milestone(val title: String, val completed: Boolean, val estimateDays: Int)
 
 fun renderMilestone(item: Milestone): String {
     val status = when (item.completed) {

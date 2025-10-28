@@ -1,4 +1,4 @@
-data class Event(val label: String, val priority: Int)
+data Event(val label: String, val priority: Int)
 
 fun describe(value: Any): String {
     return when (value) {

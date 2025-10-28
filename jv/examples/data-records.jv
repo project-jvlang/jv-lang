@@ -1,4 +1,4 @@
-data class Module(val name: String, val done: Boolean)
+data Module(val name: String, val done: Boolean)
 
 fun render(item: Module): String {
     val status = when (item.done) {
