@@ -22,7 +22,7 @@ fun main(): Unit {
 
     println("Implicit List via type: ${highlightedImplicit}")
 
-    val metrics = [120 95 130 105 150]
+    val metrics = [122 95 128 131 140]
 
     val adjustedMetrics = metrics
         .map { value -> value + 10 }
