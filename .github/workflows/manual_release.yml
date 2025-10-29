@@ -247,6 +247,8 @@ jobs:
           name: jv ${{ inputs.version }}
           body: ${{ steps.release_body.outputs.body }}
           makeLatest: true
+          prerelease: false
+          draft: false
           allowUpdates: true
           artifacts: |
             release/jv-${{ inputs.version }}-linux-x86_64.tar.gz
