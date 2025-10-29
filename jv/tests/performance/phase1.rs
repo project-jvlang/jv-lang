@@ -20,7 +20,7 @@ const MIN_REUSE_RATIO: f64 = 0.90;
 #[ignore]
 fn perf_phase1() {
     let workspace = workspace_root();
-    let fixture_path = workspace.join("jv/tests/performance/phase1.jv");
+    let fixture_path = workspace.join("tests/performance/phase1.jv");
     let report_dir = workspace.join("target/perf-reports");
     let report_path = report_dir.join(REPORT_FILENAME);
 
