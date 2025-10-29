@@ -49,7 +49,7 @@ The `ir-java-codegen` milestone is feature-complete and tagged for the 0.1.0 rel
 
 ```bash
 # Install from GitHub releases
-curl -L https://github.com/project-jvlang/jv-lang/releases/latest/download/install.sh | sh
+curl -fsSL https://github.com/project-jvlang/jv-lang/releases/latest/download/install.sh | bash
 
 # Or using cargo
 cargo install jv-cli
