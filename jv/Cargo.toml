@@ -35,9 +35,6 @@ clap = { version = "4.0", features = ["derive", "env"] }
 anyhow = "1.0"
 indicatif = "0.17"
 
-# Fix ring dependency for Apple Silicon compatibility
-ring = "0.17.8"
-
 # LSP framework  
 tower-lsp = "0.20"
 tokio = { version = "1.0", features = ["full"] }
@@ -120,9 +117,3 @@ debug = 0
 opt-level = 0
 debug = 0
 codegen-units = 16
-
-# Patch ring for Apple Silicon compatibility
-# ring v0.17.14 has compile errors on aarch64-apple-darwin
-# Use git version with fix or wait for 0.17.15 release
-[patch.crates-io]
-ring = { git = "https://github.com/briansmith/ring", branch = "main" }

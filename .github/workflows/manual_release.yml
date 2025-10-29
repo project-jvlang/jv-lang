@@ -30,10 +30,17 @@ jobs:
             artifact_suffix: macos-x86_64
             binary_ext: ""
             target: x86_64-apple-darwin
-          - os: macos-latest
-            artifact_suffix: macos-aarch64
-            binary_ext: ""
-            target: aarch64-apple-darwin
+          # TODO: Enable macOS ARM64 build after fixing ring dependency issue
+          # ring v0.17.14 has compile errors on aarch64-apple-darwin
+          # Error: evaluation panicked: assertion failed in cpu/aarch64/darwin.rs
+          # Possible solutions:
+          #   1. Wait for ring v0.17.15+ release with Apple Silicon fix
+          #   2. Use rustls-native-certs instead of ring
+          #   3. Switch to native-tls backend
+          # - os: macos-latest
+          #   artifact_suffix: macos-aarch64
+          #   binary_ext: ""
+          #   target: aarch64-apple-darwin
           - os: windows-latest
             artifact_suffix: windows-x86_64
             binary_ext: ".exe"
@@ -109,7 +116,8 @@ jobs:
 
           package_tarball "downloads/binaries-linux-x86_64" "linux-x86_64"
           package_tarball "downloads/binaries-macos-x86_64" "macos-x86_64"
-          package_tarball "downloads/binaries-macos-aarch64" "macos-aarch64"
+          # TODO: Re-enable after fixing ring dependency for Apple Silicon
+          # package_tarball "downloads/binaries-macos-aarch64" "macos-aarch64"
           package_tarball "downloads/binaries-linux-aarch64" "linux-aarch64"
 
           WINDOWS_DIR="downloads/binaries-windows-x86_64"
@@ -255,8 +263,6 @@ jobs:
             release/jv-${{ inputs.version }}-linux-x86_64.tar.gz.sha256
             release/jv-${{ inputs.version }}-macos-x86_64.tar.gz
             release/jv-${{ inputs.version }}-macos-x86_64.tar.gz.sha256
-            release/jv-${{ inputs.version }}-macos-aarch64.tar.gz
-            release/jv-${{ inputs.version }}-macos-aarch64.tar.gz.sha256
             release/jv-${{ inputs.version }}-linux-aarch64.tar.gz
             release/jv-${{ inputs.version }}-linux-aarch64.tar.gz.sha256
             release/jv-${{ inputs.version }}-windows-x86_64.zip
