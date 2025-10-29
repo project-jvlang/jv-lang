@@ -72,6 +72,15 @@ jobs:
       - name: Add Rust target
         run: rustup target add ${{ matrix.target }}
 
+      - name: Configure aarch64 linker
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          mkdir -p .cargo
+          cat >> .cargo/config.toml << EOF
+          [target.aarch64-unknown-linux-gnu]
+          linker = "aarch64-linux-gnu-gcc"
+          EOF
+
       - name: Build release binaries
         run: cargo build --release -p jv_cli --target ${{ matrix.target }}
         working-directory: jv
@@ -178,7 +187,9 @@ jobs:
               Darwin*)
                 case "$ARCH" in
                   x86_64) SUFFIX="macos-x86_64" ;;
-                  arm64|aarch64) SUFFIX="macos-aarch64" ;;
+                  arm64|aarch64)
+                    die "macOS ARM64 (Apple Silicon) is not yet supported due to dependency issues. Please use Rosetta to run the x86_64 version: arch -x86_64 /bin/bash -c \"\$(curl -fsSL https://github.com/${REPO}/releases/latest/download/install.sh)\""
+                    ;;
                   *)
                     die "Unsupported macOS architecture: $ARCH"
                     ;;
