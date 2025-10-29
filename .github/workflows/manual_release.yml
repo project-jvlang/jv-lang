@@ -89,6 +89,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: binaries-${{ matrix.artifact_suffix }}
+          if-no-files-found: error
           path: |
             jv/target/${{ matrix.target }}/release/jv${{ matrix.binary_ext }}
             jv/target/${{ matrix.target }}/release/jvx${{ matrix.binary_ext }}
@@ -97,15 +98,15 @@ jobs:
     runs-on: ubuntu-latest
     needs: build
     steps:
-      - name: Download build artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: downloads
-
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: downloads
 
       - name: Package release archives
         run: |
