@@ -50,7 +50,7 @@ jvは、モダンで簡潔な構文を純粋なJava 25ソースコードにト�
 
 ```bash
 # GitHubリリースからインストール
-curl -L https://github.com/project-jvlang/jv-lang/releases/latest/download/install.sh | sh
+curl -fsSL https://github.com/project-jvlang/jv-lang/releases/latest/download/install.sh | bash
 
 # またはcargoを使用
 cargo install jv-cli

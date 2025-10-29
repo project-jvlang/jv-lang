@@ -175,6 +175,11 @@ jobs:
 
           cat > "${INSTALL_SCRIPT}" << 'INSTALL_EOF'
           #!/usr/bin/env bash
+          # If this script is accidentally run with `sh`, exit with guidance
+          if [ -z "${BASH_VERSION:-}" ]; then
+            echo "This installer requires bash. Run with: curl -fsSL https://github.com/${REPO}/releases/latest/download/install.sh | bash" >&2
+            exit 1
+          fi
           set -euo pipefail
 
           VERSION="VERSION_PLACEHOLDER"
