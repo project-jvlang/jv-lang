@@ -1,5 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
+use std::io::{Cursor, Read};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 
@@ -31,7 +32,11 @@ use crate::pipeline::generics::apply_type_facts;
 use crate::tooling_failure;
 use tracing::warn;
 
-const STDLIB_ROOT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../stdlib");
+mod bundled_stdlib {
+    include!(concat!(env!("OUT_DIR"), "/embedded_stdlib_data.rs"));
+}
+
+const EMBEDDED_STDLIB_ROOT: &str = "embedded-stdlib";
 
 struct StdlibModule {
     path: PathBuf,
@@ -985,48 +990,56 @@ pub fn compile_stdlib_modules(
 }
 
 fn collect_stdlib_inventory() -> Result<StdlibInventory> {
-    let root = Path::new(STDLIB_ROOT);
     let mut modules = Vec::new();
     let mut catalog = StdlibCatalog::default();
-    visit_stdlib(root, root, &mut modules, &mut catalog)?;
+    visit_embedded_stdlib(&mut modules, &mut catalog)?;
     Ok(StdlibInventory { modules, catalog })
 }
 
-fn visit_stdlib(
-    root: &Path,
-    dir: &Path,
+fn visit_embedded_stdlib(
     modules: &mut Vec<StdlibModule>,
     catalog: &mut StdlibCatalog,
 ) -> Result<()> {
     let pipeline = RowanPipeline::default();
-    for entry in fs::read_dir(dir)? {
-        let entry = entry?;
-        let path = entry.path();
+    #[cfg(feature = "dump-sequence-ast")]
+    let debug_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../stdlib");
+    let cursor = Cursor::new(bundled_stdlib::STDLIB_ZIP);
+    let mut archive = zip::ZipArchive::new(cursor)?;
+    let mut entries = Vec::new();
 
-        if path.is_dir() {
-            if path.file_name().map_or(false, |name| name == "tests") {
-                continue;
-            }
-            visit_stdlib(root, &path, modules, catalog)?;
+    for index in 0..archive.len() {
+        let mut file = archive.by_index(index)?;
+
+        if file.is_dir() {
             continue;
         }
 
-        if path.extension().and_then(|ext| ext.to_str()) != Some("jv") {
+        if !file.name().ends_with(".jv") {
             continue;
         }
 
-        if path
-            .components()
-            .any(|component| component.as_os_str() == "tests")
+        if file
+            .name()
+            .split('/')
+            .any(|segment| segment.eq_ignore_ascii_case("tests"))
         {
             continue;
         }
 
-        let source = fs::read_to_string(&path)?;
+        let mut source = String::new();
+        file.read_to_string(&mut source)?;
+        let relative_path = PathBuf::from(file.name());
+        entries.push((relative_path, source));
+    }
+
+    entries.sort_by(|(left, _), (right, _)| left.cmp(right));
+
+    for (relative_path, source) in entries {
+        let virtual_path = Path::new(EMBEDDED_STDLIB_ROOT).join(&relative_path);
         let frontend_output = pipeline.parse(&source).map_err(|error| {
             anyhow!(
                 "Failed to parse embedded stdlib module {}: {:?}",
-                path.display(),
+                virtual_path.display(),
                 error
             )
         })?;
@@ -1041,7 +1054,7 @@ fn visit_stdlib(
                 .with_strategy(DiagnosticStrategy::Deferred);
             return Err(anyhow!(
                 "{}",
-                crate::format_tooling_diagnostic(&path, &rendered)
+                crate::format_tooling_diagnostic(&virtual_path, &rendered)
             ));
         }
         for diagnostic in frontend_diagnostics {
@@ -1050,27 +1063,27 @@ fn visit_stdlib(
                 .with_strategy(DiagnosticStrategy::Deferred);
             warn!(
                 target: "jv::stdlib",
-                "{}", crate::format_tooling_diagnostic(&path, &rendered)
+                "{}", crate::format_tooling_diagnostic(&virtual_path, &rendered)
             );
         }
         let mut program = frontend_output.into_program();
         promote_stdlib_visibility(&mut program);
         #[cfg(feature = "dump-sequence-ast")]
-        if path.ends_with("sequence.jv") {
-            let dump_path = root.join("../debug-sequence-ast.json");
+        if relative_path.ends_with("sequence.jv") {
+            let dump_path = debug_root.join("../debug-sequence-ast.json");
             if let Ok(json) = serde_json::to_string_pretty(&program) {
                 let _ = fs::write(&dump_path, json);
             }
         }
         let package = program.package.clone();
-        let script_main_class = derive_script_name(&path, package.as_deref());
+        let script_main_class = derive_script_name(&virtual_path, package.as_deref());
         let mut metadata = StdlibModuleMetadata::from_program(&program);
         if !metadata.type_names.contains(&script_main_class) {
             metadata.type_names.insert(script_main_class.clone());
         }
         let dependencies = extract_stdlib_dependencies(&program);
         let module = StdlibModule {
-            path,
+            path: virtual_path,
             source,
             script_main_class,
             package,
