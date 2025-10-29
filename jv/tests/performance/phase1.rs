@@ -113,8 +113,7 @@ fn perf_phase1() {
     let checks = BudgetChecks {
         cold_within_budget: cold_total_ms <= budget.max_elapsed_ms,
         warm_within_budget,
-        reuse_ratio_ok: latest_reuse_ratio
-            .map_or(true, |ratio| ratio >= budget.min_reuse_ratio),
+        reuse_ratio_ok: latest_reuse_ratio.map_or(true, |ratio| ratio >= budget.min_reuse_ratio),
         peak_rss_ok: latest_peak_rss.map(|mb| mb <= budget.max_peak_rss_mb),
     };
 

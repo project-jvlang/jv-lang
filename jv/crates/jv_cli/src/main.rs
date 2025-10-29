@@ -190,11 +190,16 @@ fn main() -> Result<()> {
             if let Some(perf) = &artifacts.perf_capture {
                 let summary = &perf.report.summary;
                 let checks = &perf.report.checks;
+                let reuse_display = if summary.warm_sessions == 0 {
+                    "--".to_string()
+                } else {
+                    format!("{:.3}", summary.reuse_ratio)
+                };
                 println!(
-                    "性能: total={:.2}ms lowering={:.2}ms reuse={:.3} (sessions {}/{})",
+                    "性能: total={:.2}ms lowering={:.2}ms reuse={} (sessions {}/{})",
                     summary.cold_total_ms,
                     summary.warm_average_ms,
-                    summary.reuse_ratio,
+                    reuse_display,
                     summary.warm_sessions,
                     summary.sessions
                 );

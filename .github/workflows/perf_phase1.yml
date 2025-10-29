@@ -25,15 +25,16 @@ jobs:
 
       - name: Validate perf report freshness
         run: |
-          REPORT="jv/tests/performance/target/perf-reports/ast-ir-phase1.json"
-          if [ ! -f "$REPORT" ]; then
-            ALT="jv/target/perf-reports/ast-ir-phase1.json"
-            if [ -f "$ALT" ]; then
-              REPORT="$ALT"
-            else
-              echo "::error ::Performance report not found at $REPORT or $ALT" >&2
-              exit 1
-            fi
+          PRIMARY="jv/target/perf-reports/ast-ir-phase1.json"
+          SECONDARY="jv/tests/performance/target/perf-reports/ast-ir-phase1.json"
+
+          if [ -f "$PRIMARY" ]; then
+            REPORT="$PRIMARY"
+          elif [ -f "$SECONDARY" ]; then
+            REPORT="$SECONDARY"
+          else
+            echo "::error ::Performance report not found at $PRIMARY or $SECONDARY" >&2
+            exit 1
           fi
 
           jq -e '.pass == true' "$REPORT" >/dev/null || {
