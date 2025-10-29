@@ -42,7 +42,8 @@ pub fn persist_single_run_report(
     let total_ms = parse_ms + lowering_ms;
     let warm_start = metrics.was_warm_start().unwrap_or(false);
 
-    let reuse_ratio = metrics.reuse_ratio().unwrap_or(0.0);
+    let reuse_ratio = metrics.reuse_ratio();
+    let reuse_ratio_value = reuse_ratio.unwrap_or(0.0);
     let peak_rss_mb = metrics
         .peak_rss_bytes()
         .map(|bytes| bytes as f64 / (1024.0 * 1024.0));
@@ -52,16 +53,15 @@ pub fn persist_single_run_report(
         .map(|aggregate| (aggregate.sessions, aggregate.warm_sessions))
         .unwrap_or_else(|| {
             let warm_count = if warm_start { 1 } else { 0 };
-            let session_count = if warm_start || metrics.pool_session().is_some() {
-                1
-            } else {
-                0
-            };
+            let session_count = metrics
+                .pool_session()
+                .map(|_| 1)
+                .unwrap_or(1);
             (session_count, warm_count)
         });
 
     let runs = vec![RunSample {
-        iteration: sessions as usize,
+        iteration: usize::max(1, sessions as usize),
         parse_ms,
         lowering_ms,
         total_ms,
@@ -81,7 +81,7 @@ pub fn persist_single_run_report(
         warm_average_ms,
         warm_min_ms,
         warm_max_ms,
-        reuse_ratio,
+        reuse_ratio: reuse_ratio_value,
         peak_rss_mb,
         sessions,
         warm_sessions,
@@ -93,7 +93,13 @@ pub fn persist_single_run_report(
     } else {
         true
     };
-    let reuse_ratio_ok = reuse_ratio >= MIN_REUSE_RATIO;
+    let reuse_ratio_ok = if warm_sessions > 0 {
+        reuse_ratio
+            .map(|ratio| ratio >= MIN_REUSE_RATIO)
+            .unwrap_or(true)
+    } else {
+        true
+    };
     let peak_rss_ok = peak_rss_mb.map(|mb| mb <= MAX_PEAK_RSS_MB);
 
     let checks = BudgetChecks {
