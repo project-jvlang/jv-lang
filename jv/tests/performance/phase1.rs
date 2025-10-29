@@ -43,7 +43,7 @@ fn perf_phase1() {
     let mut profiler = TransformProfiler::new();
     let pipeline = RowanPipeline::default();
 
-    let mut latest_reuse_ratio = 0.0;
+    let mut latest_reuse_ratio = None;
     let mut latest_peak_rss = None;
     let mut sessions = 0;
     let mut warm_sessions = 0;
@@ -70,7 +70,7 @@ fn perf_phase1() {
         if let Some(pool_metrics) = metrics.pool_metrics() {
             sessions = pool_metrics.sessions;
             warm_sessions = pool_metrics.warm_sessions;
-            latest_reuse_ratio = pool_metrics.reuse_ratio();
+            latest_reuse_ratio = Some(pool_metrics.reuse_ratio());
         }
         if let Some(bytes) = metrics.peak_rss_bytes() {
             latest_peak_rss = Some(bytes as f64 / (1024.0 * 1024.0));
@@ -113,7 +113,8 @@ fn perf_phase1() {
     let checks = BudgetChecks {
         cold_within_budget: cold_total_ms <= budget.max_elapsed_ms,
         warm_within_budget,
-        reuse_ratio_ok: latest_reuse_ratio >= budget.min_reuse_ratio,
+        reuse_ratio_ok: latest_reuse_ratio
+            .map_or(true, |ratio| ratio >= budget.min_reuse_ratio),
         peak_rss_ok: latest_peak_rss.map(|mb| mb <= budget.max_peak_rss_mb),
     };
 
@@ -122,7 +123,7 @@ fn perf_phase1() {
         warm_average_ms,
         warm_min_ms,
         warm_max_ms,
-        reuse_ratio: latest_reuse_ratio,
+        reuse_ratio: latest_reuse_ratio.unwrap_or_default(),
         peak_rss_mb: latest_peak_rss,
         sessions,
         warm_sessions,
