@@ -114,12 +114,30 @@ jobs:
           RELEASE_DIR="release"
           mkdir -p "$RELEASE_DIR"
 
+          # Find binaries inside the downloaded artifact folder (handles nested paths)
+          find_binary() {
+            # $1: base dir, $2: filename
+            find "$1" -type f -name "$2" | head -n1
+          }
+
           package_tarball() {
-            local src_dir="$1"
-            local suffix="$2"
+            # $1: src_dir, $2: suffix
+            local src_dir="$1"; local suffix="$2"
             if [ -d "$src_dir" ]; then
-              tar -czf "${RELEASE_DIR}/jv-${VERSION}-${suffix}.tar.gz" -C "$src_dir" jv jvx
-              sha256sum "${RELEASE_DIR}/jv-${VERSION}-${suffix}.tar.gz" > "${RELEASE_DIR}/jv-${VERSION}-${suffix}.tar.gz.sha256"
+              local jv_path; jv_path="$(find_binary "$src_dir" jv || true)"
+              local jvx_path; jvx_path="$(find_binary "$src_dir" jvx || true)"
+              if [ -n "${jv_path}" ] && [ -n "${jvx_path}" ]; then
+                local tmp_dir; tmp_dir="$(mktemp -d)"
+                cp "${jv_path}" "${tmp_dir}/jv"
+                cp "${jvx_path}" "${tmp_dir}/jvx"
+                tar -czf "${RELEASE_DIR}/jv-${VERSION}-${suffix}.tar.gz" -C "${tmp_dir}" jv jvx
+                sha256sum "${RELEASE_DIR}/jv-${VERSION}-${suffix}.tar.gz" > "${RELEASE_DIR}/jv-${VERSION}-${suffix}.tar.gz.sha256"
+                rm -rf "${tmp_dir}"
+              else
+                echo "[package] Skipping ${suffix}: binaries not found under ${src_dir}" >&2
+              fi
+            else
+              echo "[package] Skipping ${suffix}: directory not found: ${src_dir}" >&2
             fi
           }
 
@@ -131,8 +149,16 @@ jobs:
 
           WINDOWS_DIR="downloads/binaries-windows-x86_64"
           if [ -d "$WINDOWS_DIR" ]; then
-            zip -j "${RELEASE_DIR}/jv-${VERSION}-windows-x86_64.zip" "${WINDOWS_DIR}/jv.exe" "${WINDOWS_DIR}/jvx.exe"
-            sha256sum "${RELEASE_DIR}/jv-${VERSION}-windows-x86_64.zip" > "${RELEASE_DIR}/jv-${VERSION}-windows-x86_64.zip.sha256"
+            jv_win="$(find_binary "$WINDOWS_DIR" 'jv.exe' || true)"
+            jvx_win="$(find_binary "$WINDOWS_DIR" 'jvx.exe' || true)"
+            if [ -n "${jv_win}" ] && [ -n "${jvx_win}" ]; then
+              zip -j "${RELEASE_DIR}/jv-${VERSION}-windows-x86_64.zip" "${jv_win}" "${jvx_win}"
+              sha256sum "${RELEASE_DIR}/jv-${VERSION}-windows-x86_64.zip" > "${RELEASE_DIR}/jv-${VERSION}-windows-x86_64.zip.sha256"
+            else
+              echo "[package] Skipping windows-x86_64: executables not found under ${WINDOWS_DIR}" >&2
+            fi
+          else
+            echo "[package] Skipping windows-x86_64: directory not found: ${WINDOWS_DIR}" >&2
           fi
 
           cp scripts/install_toolchain_jdks.sh "${RELEASE_DIR}/install_toolchain_jdks.sh"
@@ -269,14 +295,6 @@ jobs:
           prerelease: false
           draft: false
           allowUpdates: true
-          artifacts: |
-            release/jv-${{ inputs.version }}-linux-x86_64.tar.gz
-            release/jv-${{ inputs.version }}-linux-x86_64.tar.gz.sha256
-            release/jv-${{ inputs.version }}-macos-x86_64.tar.gz
-            release/jv-${{ inputs.version }}-macos-x86_64.tar.gz.sha256
-            release/jv-${{ inputs.version }}-linux-aarch64.tar.gz
-            release/jv-${{ inputs.version }}-linux-aarch64.tar.gz.sha256
-            release/jv-${{ inputs.version }}-windows-x86_64.zip
-            release/jv-${{ inputs.version }}-windows-x86_64.zip.sha256
-            release/install.sh
-            release/install_toolchain_jdks.sh
+          # Upload everything produced in the release directory
+          artifacts: "release/*"
+          artifactErrorsFailBuild: true
