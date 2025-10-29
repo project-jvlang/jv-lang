@@ -124,127 +124,112 @@ jobs:
       - name: Generate install script
         run: |
           set -euo pipefail
-          export VERSION="${{ inputs.version }}"
-          export GITHUB_REPOSITORY="${{ github.repository }}"
-          export RELEASE_DIR="release"
-          export INSTALL_SCRIPT="${RELEASE_DIR}/install.sh"
+          VERSION="${{ inputs.version }}"
+          REPO="${{ github.repository }}"
+          RELEASE_DIR="release"
+          INSTALL_SCRIPT="${RELEASE_DIR}/install.sh"
 
-          python <<'PY'
-import os
-import stat
-import textwrap
+          cat > "${INSTALL_SCRIPT}" << 'INSTALL_EOF'
+          #!/usr/bin/env bash
+          set -euo pipefail
 
-version = os.environ["VERSION"]
-repo = os.environ["GITHUB_REPOSITORY"]
-install_script = os.environ["INSTALL_SCRIPT"]
+          VERSION="VERSION_PLACEHOLDER"
+          REPO="REPO_PLACEHOLDER"
 
-script = textwrap.dedent("""\
-    #!/usr/bin/env bash
-    set -euo pipefail
+          die() {
+            echo "install.sh: $*" >&2
+            exit 1
+          }
 
-    VERSION="@VERSION@"
-    REPO="@REPO@"
+          log() {
+            echo "[install] $*" >&2
+          }
 
-    die() {
-      echo "install.sh: $*" >&2
-      exit 1
-    }
+          require_cmd() {
+            command -v "$1" >/dev/null 2>&1 || die "Required command '$1' not found in PATH"
+          }
 
-    log() {
-      echo "[install] $*" >&2
-    }
+          require_cmd uname
+          require_cmd curl
+          require_cmd tar
+          require_cmd install
 
-    require_cmd() {
-      command -v "$1" >/dev/null 2>&1 || die "Required command '$1' not found in PATH"
-    }
+          OS="$(uname -s)"
+          ARCH="$(uname -m)"
+          SUFFIX="${JV_INSTALL_SUFFIX:-}"
 
-    require_cmd uname
-    require_cmd curl
-    require_cmd tar
-    require_cmd install
+          if [[ -z "$SUFFIX" ]]; then
+            case "$OS" in
+              Linux*)
+                case "$ARCH" in
+                  x86_64|amd64) SUFFIX="linux-x86_64" ;;
+                  aarch64|arm64) SUFFIX="linux-aarch64" ;;
+                  *) die "Unsupported Linux architecture: $ARCH" ;;
+                esac
+                ;;
+              Darwin*)
+                case "$ARCH" in
+                  x86_64) SUFFIX="macos-x86_64" ;;
+                  arm64|aarch64) SUFFIX="macos-aarch64" ;;
+                  *)
+                    die "Unsupported macOS architecture: $ARCH"
+                    ;;
+                esac
+                ;;
+              *)
+                die "Unsupported operating system: $OS"
+                ;;
+            esac
+          fi
 
-    OS="$(uname -s)"
-    ARCH="$(uname -m)"
-    SUFFIX="${JV_INSTALL_SUFFIX:-}"
-
-    if [[ -z "$SUFFIX" ]]; then
-      case "$OS" in
-        Linux*)
-          case "$ARCH" in
-            x86_64|amd64) SUFFIX="linux-x86_64" ;;
-            aarch64|arm64) SUFFIX="linux-aarch64" ;;
-            *) die "Unsupported Linux architecture: $ARCH" ;;
+          ARCHIVE_BASENAME="jv-${VERSION}-${SUFFIX}"
+          case "$SUFFIX" in
+            windows-*) die "Windows installation is not supported by this script. Please download the ZIP manually." ;;
+            *) ARCHIVE_NAME="${ARCHIVE_BASENAME}.tar.gz" ;;
           esac
-          ;;
-        Darwin*)
-          case "$ARCH" in
-            x86_64) SUFFIX="macos-x86_64" ;;
-            arm64|aarch64) SUFFIX="macos-aarch64" ;;
-            *)
-              die "Unsupported macOS architecture: $ARCH"
-              ;;
-          esac
-          ;;
-        *)
-          die "Unsupported operating system: $OS"
-          ;;
-      esac
-    fi
 
-    ARCHIVE_BASENAME="jv-${VERSION}-${SUFFIX}"
-    case "$SUFFIX" in
-      windows-*) die "Windows installation is not supported by this script. Please download the ZIP manually." ;;
-      *) ARCHIVE_NAME="${ARCHIVE_BASENAME}.tar.gz" ;;
-    esac
+          DOWNLOAD_URL="https://github.com/${REPO}/releases/download/${VERSION}/${ARCHIVE_NAME}"
+          JDK_SCRIPT_URL="https://github.com/${REPO}/releases/download/${VERSION}/install_toolchain_jdks.sh"
 
-    DOWNLOAD_URL="https://github.com/${REPO}/releases/download/${VERSION}/${ARCHIVE_NAME}"
-    JDK_SCRIPT_URL="https://github.com/${REPO}/releases/download/${VERSION}/install_toolchain_jdks.sh"
+          TMP_DIR="$(mktemp -d)"
+          trap 'rm -rf "$TMP_DIR"' EXIT
 
-    TMP_DIR="$(mktemp -d)"
-    trap 'rm -rf "$TMP_DIR"' EXIT
+          ARCHIVE_PATH="${TMP_DIR}/${ARCHIVE_NAME}"
+          log "Downloading ${ARCHIVE_NAME}..."
+          curl -L "${DOWNLOAD_URL}" -o "${ARCHIVE_PATH}"
 
-    ARCHIVE_PATH="${TMP_DIR}/${ARCHIVE_NAME}"
-    log "Downloading ${ARCHIVE_NAME}..."
-    curl -L "${DOWNLOAD_URL}" -o "${ARCHIVE_PATH}"
+          log "Extracting archive..."
+          tar -xzf "${ARCHIVE_PATH}" -C "${TMP_DIR}"
+          [[ -f "${TMP_DIR}/jv" && -f "${TMP_DIR}/jvx" ]] || die "Archive did not contain jv binaries"
 
-    log "Extracting archive..."
-    tar -xzf "${ARCHIVE_PATH}" -C "${TMP_DIR}"
-    [[ -f "${TMP_DIR}/jv" && -f "${TMP_DIR}/jvx" ]] || die "Archive did not contain jv binaries"
+          BIN_DIR="${JV_BIN_DIR:-$HOME/.local/bin}"
+          mkdir -p "${BIN_DIR}"
+          install -m 0755 "${TMP_DIR}/jv" "${BIN_DIR}/jv"
+          install -m 0755 "${TMP_DIR}/jvx" "${BIN_DIR}/jvx"
+          log "Installed jv and jvx to ${BIN_DIR}"
 
-    BIN_DIR="${JV_BIN_DIR:-$HOME/.local/bin}"
-    mkdir -p "${BIN_DIR}"
-    install -m 0755 "${TMP_DIR}/jv" "${BIN_DIR}/jv"
-    install -m 0755 "${TMP_DIR}/jvx" "${BIN_DIR}/jvx"
-    log "Installed jv and jvx to ${BIN_DIR}"
+          if ! command -v jv >/dev/null 2>&1; then
+            log "Warning: ${BIN_DIR} is not on your PATH. Add the following to your shell profile:"
+            log "  export PATH=\"${BIN_DIR}:\$PATH\""
+          fi
 
-    if ! command -v jv >/dev/null 2>&1; then
-      log "Warning: ${BIN_DIR} is not on your PATH. Add the following to your shell profile:"
-      log "  export PATH=\\"${BIN_DIR}:\\$PATH\\""
-    fi
+          INSTALL_ROOT="${JV_INSTALL_ROOT:-$HOME/.jv}"
+          SCRIPT_DIR="${INSTALL_ROOT}/scripts"
+          mkdir -p "${SCRIPT_DIR}"
 
-    INSTALL_ROOT="${JV_INSTALL_ROOT:-$HOME/.jv}"
-    SCRIPT_DIR="${INSTALL_ROOT}/scripts"
-    mkdir -p "${SCRIPT_DIR}"
+          log "Downloading JDK setup helper..."
+          curl -L "${JDK_SCRIPT_URL}" -o "${SCRIPT_DIR}/install_toolchain_jdks.sh"
+          chmod +x "${SCRIPT_DIR}/install_toolchain_jdks.sh"
 
-    log "Downloading JDK setup helper..."
-    curl -L "${JDK_SCRIPT_URL}" -o "${SCRIPT_DIR}/install_toolchain_jdks.sh"
-    chmod +x "${SCRIPT_DIR}/install_toolchain_jdks.sh"
+          log "Ensuring GraalVM toolchains..."
+          "${SCRIPT_DIR}/install_toolchain_jdks.sh" "${INSTALL_ROOT}"
 
-    log "Ensuring GraalVM toolchains..."
-    "${SCRIPT_DIR}/install_toolchain_jdks.sh" "${INSTALL_ROOT}"
+          log "Installation complete."
+          INSTALL_EOF
 
-    log "Installation complete."
-    """)
-
-script = script.replace("@VERSION@", version)
-script = script.replace("@REPO@", repo)
-
-with open(install_script, "w", encoding="utf-8") as fh:
-    fh.write(script)
-
-mode = os.stat(install_script).st_mode
-os.chmod(install_script, mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
-PY
+          sed -i "s|VERSION_PLACEHOLDER|${VERSION}|g" "${INSTALL_SCRIPT}"
+          sed -i "s|REPO_PLACEHOLDER|${REPO}|g" "${INSTALL_SCRIPT}"
+          chmod +x "${INSTALL_SCRIPT}"
 
       - name: Prepare release body
         id: release_body
