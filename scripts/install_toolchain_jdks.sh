@@ -1,6 +1,28 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Detect OS and Architecture
+detect_platform() {
+  local os arch
+
+  case "$(uname -s)" in
+    Linux*)  os="linux" ;;
+    Darwin*) os="macos" ;;
+    *)       echo "Unsupported OS: $(uname -s)" >&2; exit 1 ;;
+  esac
+
+  case "$(uname -m)" in
+    x86_64)  arch="x64" ;;
+    aarch64|arm64) arch="aarch64" ;;
+    *)       echo "Unsupported arch: $(uname -m)" >&2; exit 1 ;;
+  esac
+
+  echo "${os}-${arch}"
+}
+
+PLATFORM=$(detect_platform)
+echo "Detected platform: $PLATFORM" >&2
+
 # Allow overriding repo root via first argument (useful when invoked from Nix shellHook)
 if [[ $# -gt 0 ]]; then
   REPO_ROOT=$(cd -- "$1" && pwd)
@@ -39,5 +61,5 @@ download_and_install() {
   echo "[jdk$version] Installed to $target_dir" >&2
 }
 
-download_and_install "21" "https://download.oracle.com/java/21/latest/jdk-21_linux-x64_bin.tar.gz" "jdk21"
-download_and_install "25" "https://download.oracle.com/java/25/latest/jdk-25_linux-x64_bin.tar.gz" "jdk25"
+download_and_install "graalvm-21" "https://download.oracle.com/graalvm/21/latest/graalvm-jdk-21_${PLATFORM}_bin.tar.gz" "graalvm21"
+download_and_install "graalvm-25" "https://download.oracle.com/graalvm/25/latest/graalvm-jdk-25_${PLATFORM}_bin.tar.gz" "graalvm25"

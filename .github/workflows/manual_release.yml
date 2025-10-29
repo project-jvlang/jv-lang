@@ -1,0 +1,278 @@
+name: manual-release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version (e.g. v0.5.0)'
+        required: true
+        type: string
+      release-notes:
+        description: 'Additional release notes (optional)'
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.artifact_suffix }} binaries
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            artifact_suffix: linux-x86_64
+            binary_ext: ""
+            target: x86_64-unknown-linux-gnu
+          - os: macos-13
+            artifact_suffix: macos-x86_64
+            binary_ext: ""
+            target: x86_64-apple-darwin
+          - os: macos-latest
+            artifact_suffix: macos-aarch64
+            binary_ext: ""
+            target: aarch64-apple-darwin
+          - os: windows-latest
+            artifact_suffix: windows-x86_64
+            binary_ext: ".exe"
+            target: x86_64-pc-windows-msvc
+          - os: ubuntu-latest
+            artifact_suffix: linux-aarch64
+            binary_ext: ""
+            target: aarch64-unknown-linux-gnu
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: jv -> target
+
+      - name: Install aarch64 linker
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+
+      - name: Add Rust target
+        run: rustup target add ${{ matrix.target }}
+
+      - name: Build release binaries
+        run: cargo build --release -p jv_cli --target ${{ matrix.target }}
+        working-directory: jv
+
+      - name: Upload binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: binaries-${{ matrix.artifact_suffix }}
+          path: |
+            jv/target/${{ matrix.target }}/release/jv${{ matrix.binary_ext }}
+            jv/target/${{ matrix.target }}/release/jvx${{ matrix.binary_ext }}
+
+  release:
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: downloads
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Package release archives
+        run: |
+          set -euo pipefail
+          VERSION="${{ inputs.version }}"
+          RELEASE_DIR="release"
+          mkdir -p "$RELEASE_DIR"
+
+          package_tarball() {
+            local src_dir="$1"
+            local suffix="$2"
+            if [ -d "$src_dir" ]; then
+              tar -czf "${RELEASE_DIR}/jv-${VERSION}-${suffix}.tar.gz" -C "$src_dir" jv jvx
+              sha256sum "${RELEASE_DIR}/jv-${VERSION}-${suffix}.tar.gz" > "${RELEASE_DIR}/jv-${VERSION}-${suffix}.tar.gz.sha256"
+            fi
+          }
+
+          package_tarball "downloads/binaries-linux-x86_64" "linux-x86_64"
+          package_tarball "downloads/binaries-macos-x86_64" "macos-x86_64"
+          package_tarball "downloads/binaries-macos-aarch64" "macos-aarch64"
+          package_tarball "downloads/binaries-linux-aarch64" "linux-aarch64"
+
+          WINDOWS_DIR="downloads/binaries-windows-x86_64"
+          if [ -d "$WINDOWS_DIR" ]; then
+            zip -j "${RELEASE_DIR}/jv-${VERSION}-windows-x86_64.zip" "${WINDOWS_DIR}/jv.exe" "${WINDOWS_DIR}/jvx.exe"
+            sha256sum "${RELEASE_DIR}/jv-${VERSION}-windows-x86_64.zip" > "${RELEASE_DIR}/jv-${VERSION}-windows-x86_64.zip.sha256"
+          fi
+
+          cp scripts/install_toolchain_jdks.sh "${RELEASE_DIR}/install_toolchain_jdks.sh"
+          chmod +x "${RELEASE_DIR}/install_toolchain_jdks.sh"
+
+      - name: Generate install script
+        run: |
+          set -euo pipefail
+          export VERSION="${{ inputs.version }}"
+          export GITHUB_REPOSITORY="${{ github.repository }}"
+          export RELEASE_DIR="release"
+          export INSTALL_SCRIPT="${RELEASE_DIR}/install.sh"
+
+          python <<'PY'
+import os
+import stat
+import textwrap
+
+version = os.environ["VERSION"]
+repo = os.environ["GITHUB_REPOSITORY"]
+install_script = os.environ["INSTALL_SCRIPT"]
+
+script = textwrap.dedent("""\
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    VERSION="@VERSION@"
+    REPO="@REPO@"
+
+    die() {
+      echo "install.sh: $*" >&2
+      exit 1
+    }
+
+    log() {
+      echo "[install] $*" >&2
+    }
+
+    require_cmd() {
+      command -v "$1" >/dev/null 2>&1 || die "Required command '$1' not found in PATH"
+    }
+
+    require_cmd uname
+    require_cmd curl
+    require_cmd tar
+    require_cmd install
+
+    OS="$(uname -s)"
+    ARCH="$(uname -m)"
+    SUFFIX="${JV_INSTALL_SUFFIX:-}"
+
+    if [[ -z "$SUFFIX" ]]; then
+      case "$OS" in
+        Linux*)
+          case "$ARCH" in
+            x86_64|amd64) SUFFIX="linux-x86_64" ;;
+            aarch64|arm64) SUFFIX="linux-aarch64" ;;
+            *) die "Unsupported Linux architecture: $ARCH" ;;
+          esac
+          ;;
+        Darwin*)
+          case "$ARCH" in
+            x86_64) SUFFIX="macos-x86_64" ;;
+            arm64|aarch64) SUFFIX="macos-aarch64" ;;
+            *)
+              die "Unsupported macOS architecture: $ARCH"
+              ;;
+          esac
+          ;;
+        *)
+          die "Unsupported operating system: $OS"
+          ;;
+      esac
+    fi
+
+    ARCHIVE_BASENAME="jv-${VERSION}-${SUFFIX}"
+    case "$SUFFIX" in
+      windows-*) die "Windows installation is not supported by this script. Please download the ZIP manually." ;;
+      *) ARCHIVE_NAME="${ARCHIVE_BASENAME}.tar.gz" ;;
+    esac
+
+    DOWNLOAD_URL="https://github.com/${REPO}/releases/download/${VERSION}/${ARCHIVE_NAME}"
+    JDK_SCRIPT_URL="https://github.com/${REPO}/releases/download/${VERSION}/install_toolchain_jdks.sh"
+
+    TMP_DIR="$(mktemp -d)"
+    trap 'rm -rf "$TMP_DIR"' EXIT
+
+    ARCHIVE_PATH="${TMP_DIR}/${ARCHIVE_NAME}"
+    log "Downloading ${ARCHIVE_NAME}..."
+    curl -L "${DOWNLOAD_URL}" -o "${ARCHIVE_PATH}"
+
+    log "Extracting archive..."
+    tar -xzf "${ARCHIVE_PATH}" -C "${TMP_DIR}"
+    [[ -f "${TMP_DIR}/jv" && -f "${TMP_DIR}/jvx" ]] || die "Archive did not contain jv binaries"
+
+    BIN_DIR="${JV_BIN_DIR:-$HOME/.local/bin}"
+    mkdir -p "${BIN_DIR}"
+    install -m 0755 "${TMP_DIR}/jv" "${BIN_DIR}/jv"
+    install -m 0755 "${TMP_DIR}/jvx" "${BIN_DIR}/jvx"
+    log "Installed jv and jvx to ${BIN_DIR}"
+
+    if ! command -v jv >/dev/null 2>&1; then
+      log "Warning: ${BIN_DIR} is not on your PATH. Add the following to your shell profile:"
+      log "  export PATH=\\"${BIN_DIR}:\\$PATH\\""
+    fi
+
+    INSTALL_ROOT="${JV_INSTALL_ROOT:-$HOME/.jv}"
+    SCRIPT_DIR="${INSTALL_ROOT}/scripts"
+    mkdir -p "${SCRIPT_DIR}"
+
+    log "Downloading JDK setup helper..."
+    curl -L "${JDK_SCRIPT_URL}" -o "${SCRIPT_DIR}/install_toolchain_jdks.sh"
+    chmod +x "${SCRIPT_DIR}/install_toolchain_jdks.sh"
+
+    log "Ensuring GraalVM toolchains..."
+    "${SCRIPT_DIR}/install_toolchain_jdks.sh" "${INSTALL_ROOT}"
+
+    log "Installation complete."
+    """)
+
+script = script.replace("@VERSION@", version)
+script = script.replace("@REPO@", repo)
+
+with open(install_script, "w", encoding="utf-8") as fh:
+    fh.write(script)
+
+mode = os.stat(install_script).st_mode
+os.chmod(install_script, mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+PY
+
+      - name: Prepare release body
+        id: release_body
+        run: |
+          if [ -z "${{ inputs.release-notes }}" ]; then
+            echo "body=Automated release for version ${{ inputs.version }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "body=${{ inputs.release-notes }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Publish GitHub release
+        uses: ncipollo/release-action@v1
+        with:
+          tag: ${{ inputs.version }}
+          name: jv ${{ inputs.version }}
+          body: ${{ steps.release_body.outputs.body }}
+          makeLatest: true
+          allowUpdates: true
+          artifacts: |
+            release/jv-${{ inputs.version }}-linux-x86_64.tar.gz
+            release/jv-${{ inputs.version }}-linux-x86_64.tar.gz.sha256
+            release/jv-${{ inputs.version }}-macos-x86_64.tar.gz
+            release/jv-${{ inputs.version }}-macos-x86_64.tar.gz.sha256
+            release/jv-${{ inputs.version }}-macos-aarch64.tar.gz
+            release/jv-${{ inputs.version }}-macos-aarch64.tar.gz.sha256
+            release/jv-${{ inputs.version }}-linux-aarch64.tar.gz
+            release/jv-${{ inputs.version }}-linux-aarch64.tar.gz.sha256
+            release/jv-${{ inputs.version }}-windows-x86_64.zip
+            release/jv-${{ inputs.version }}-windows-x86_64.zip.sha256
+            release/install.sh
+            release/install_toolchain_jdks.sh
