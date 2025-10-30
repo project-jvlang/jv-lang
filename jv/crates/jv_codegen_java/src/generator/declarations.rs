@@ -1242,7 +1242,12 @@ fn replace_receiver_in_statement(stmt: IrStatement, receiver_type: &JavaType) ->
             modifiers,
             span,
         },
-        IrStatement::Block { statements, span } => IrStatement::Block {
+        IrStatement::Block {
+            label,
+            statements,
+            span,
+        } => IrStatement::Block {
+            label,
             statements: statements
                 .into_iter()
                 .map(|inner| replace_receiver_in_statement(inner, receiver_type))
@@ -1271,6 +1276,7 @@ fn replace_receiver_in_statement(stmt: IrStatement, receiver_type: &JavaType) ->
             span,
         },
         IrStatement::ForEach {
+            label,
             variable,
             variable_type,
             iterable,
@@ -1278,6 +1284,7 @@ fn replace_receiver_in_statement(stmt: IrStatement, receiver_type: &JavaType) ->
             iterable_kind,
             span,
         } => IrStatement::ForEach {
+            label,
             variable,
             variable_type,
             iterable: replace_receiver_expression(iterable, receiver_type),
@@ -1286,6 +1293,7 @@ fn replace_receiver_in_statement(stmt: IrStatement, receiver_type: &JavaType) ->
             span,
         },
         IrStatement::For {
+            label,
             init,
             condition,
             update,
@@ -1293,6 +1301,7 @@ fn replace_receiver_in_statement(stmt: IrStatement, receiver_type: &JavaType) ->
             metadata,
             span,
         } => IrStatement::For {
+            label,
             init: init.map(|stmt| Box::new(replace_receiver_in_statement(*stmt, receiver_type))),
             condition: condition.map(|expr| replace_receiver_expression(expr, receiver_type)),
             update: update.map(|expr| replace_receiver_expression(expr, receiver_type)),

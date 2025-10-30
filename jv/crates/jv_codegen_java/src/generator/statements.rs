@@ -137,9 +137,15 @@ impl JavaCodeGenerator {
                 }
                 None => "return;".to_string(),
             },
-            IrStatement::Block { statements, .. } => {
+            IrStatement::Block {
+                label, statements, ..
+            } => {
                 let mut builder = self.builder();
-                builder.push_line("{");
+                if let Some(raw_label) = label.as_deref() {
+                    builder.push_line(&format!("{}: {{", Self::normalize_label(raw_label)));
+                } else {
+                    builder.push_line("{");
+                }
                 builder.indent();
                 for statement in statements {
                     let inner = self.generate_statement(statement)?;
@@ -187,16 +193,23 @@ impl JavaCodeGenerator {
                 builder.build()
             }
             IrStatement::ForEach {
+                label,
                 variable,
                 variable_type,
                 iterable,
                 body,
                 iterable_kind,
                 ..
-            } => {
-                self.generate_for_each_loop(variable, variable_type, iterable, body, iterable_kind)?
-            }
+            } => self.generate_for_each_loop(
+                label.as_deref(),
+                variable,
+                variable_type,
+                iterable,
+                body,
+                iterable_kind,
+            )?,
             IrStatement::For {
+                label,
                 init,
                 condition,
                 update,
@@ -204,6 +217,7 @@ impl JavaCodeGenerator {
                 metadata,
                 ..
             } => self.generate_for_loop(
+                label.as_deref(),
                 init.as_deref(),
                 condition.as_ref(),
                 update.as_ref(),
@@ -237,11 +251,11 @@ impl JavaCodeGenerator {
                 format!("throw {};", self.generate_expression(expr)?)
             }
             IrStatement::Break { label, .. } => match label {
-                Some(name) => format!("break {};", name),
+                Some(name) => format!("break {};", Self::normalize_label(name)),
                 None => "break;".to_string(),
             },
             IrStatement::Continue { label, .. } => match label {
-                Some(name) => format!("continue {};", name),
+                Some(name) => format!("continue {};", Self::normalize_label(name)),
                 None => "continue;".to_string(),
             },
             IrStatement::Package { name, .. } => format!("package {};", name),
@@ -254,6 +268,7 @@ impl JavaCodeGenerator {
 
     fn generate_for_each_loop(
         &mut self,
+        label: Option<&str>,
         variable: &str,
         variable_type: &JavaType,
         iterable: &IrExpression,
@@ -262,13 +277,13 @@ impl JavaCodeGenerator {
     ) -> Result<String, CodeGenError> {
         match iterable_kind {
             IrForEachKind::Iterable => {
-                self.render_enhanced_for_loop(variable, variable_type, iterable, body)
+                self.render_enhanced_for_loop(label, variable, variable_type, iterable, body)
             }
             IrForEachKind::LazySequence { needs_cleanup } => {
                 if *needs_cleanup {
-                    self.render_lazy_sequence_loop(variable, variable_type, iterable, body)
+                    self.render_lazy_sequence_loop(label, variable, variable_type, iterable, body)
                 } else {
-                    self.render_enhanced_for_loop(variable, variable_type, iterable, body)
+                    self.render_enhanced_for_loop(label, variable, variable_type, iterable, body)
                 }
             }
         }
@@ -276,19 +291,31 @@ impl JavaCodeGenerator {
 
     fn render_enhanced_for_loop(
         &mut self,
+        label: Option<&str>,
         variable: &str,
         variable_type: &JavaType,
         iterable: &IrExpression,
         body: &IrStatement,
     ) -> Result<String, CodeGenError> {
         let item_type = self.resolve_for_each_item_type(variable_type, iterable);
+        let item_type_str = self.generate_type(&item_type)?;
+        let iterable_expr = self.generate_expression(iterable)?;
         let mut builder = self.builder();
-        builder.push_line(&format!(
-            "for ({} {} : {}) {{",
-            self.generate_type(&item_type)?,
-            variable,
-            self.generate_expression(iterable)?
-        ));
+        let header = if let Some(raw_label) = label {
+            format!(
+                "{}: for ({} {} : {}) {{",
+                Self::normalize_label(raw_label),
+                item_type_str,
+                variable,
+                iterable_expr
+            )
+        } else {
+            format!(
+                "for ({} {} : {}) {{",
+                item_type_str, variable, iterable_expr
+            )
+        };
+        builder.push_line(&header);
         builder.indent();
         let body_code = self.generate_statement(body)?;
         Self::push_lines(&mut builder, &body_code);
@@ -299,6 +326,7 @@ impl JavaCodeGenerator {
 
     fn render_lazy_sequence_loop(
         &mut self,
+        label: Option<&str>,
         variable: &str,
         variable_type: &JavaType,
         iterable: &IrExpression,
@@ -313,10 +341,17 @@ impl JavaCodeGenerator {
         builder.push_line(&format!("final var __jvSequence = {};", iterable_source));
         builder.push_line("try {");
         builder.indent();
-        builder.push_line(&format!(
-            "for ({} {} : __jvSequence) {{",
-            item_type, variable
-        ));
+        let header = if let Some(raw_label) = label {
+            format!(
+                "{}: for ({} {} : __jvSequence) {{",
+                Self::normalize_label(raw_label),
+                item_type,
+                variable
+            )
+        } else {
+            format!("for ({} {} : __jvSequence) {{", item_type, variable)
+        };
+        builder.push_line(&header);
         builder.indent();
         let body_code = self.generate_statement(body)?;
         Self::push_lines(&mut builder, &body_code);
@@ -397,6 +432,7 @@ impl JavaCodeGenerator {
 
     fn generate_for_loop(
         &mut self,
+        label: Option<&str>,
         init: Option<&IrStatement>,
         condition: Option<&IrExpression>,
         update: Option<&IrExpression>,
@@ -420,10 +456,18 @@ impl JavaCodeGenerator {
         };
 
         let mut builder = self.builder();
-        builder.push_line(&format!(
-            "for ({}; {}; {}) {{",
-            init_str, condition_str, update_str
-        ));
+        let header = if let Some(raw_label) = label {
+            format!(
+                "{}: for ({}; {}; {}) {{",
+                Self::normalize_label(raw_label),
+                init_str,
+                condition_str,
+                update_str
+            )
+        } else {
+            format!("for ({}; {}; {}) {{", init_str, condition_str, update_str)
+        };
+        builder.push_line(&header);
         builder.indent();
         let body_code = self.generate_statement(body)?;
         Self::push_lines(&mut builder, &body_code);
@@ -745,5 +789,15 @@ impl JavaCodeGenerator {
     /// Check if switch case contains only a default label.
     pub(super) fn is_default_only_case(case: &IrSwitchCase) -> bool {
         case.labels.len() == 1 && matches!(case.labels[0], IrCaseLabel::Default)
+    }
+
+    fn normalize_label(label: &str) -> String {
+        let trimmed = label.trim();
+        let without_hash = trimmed.strip_prefix('#').unwrap_or(trimmed);
+        if without_hash.is_empty() {
+            trimmed.to_string()
+        } else {
+            without_hash.to_string()
+        }
     }
 }

@@ -518,6 +518,7 @@ fn snapshot_program() -> IrProgram {
     };
 
     let then_block = IrStatement::Block {
+        label: None,
         statements: vec![IrStatement::Return {
             value: Some(IrExpression::Identifier {
                 name: "input".to_string(),
@@ -530,6 +531,7 @@ fn snapshot_program() -> IrProgram {
     };
 
     let else_block = IrStatement::Block {
+        label: None,
         statements: vec![IrStatement::Return {
             value: Some(IrExpression::Identifier {
                 name: "message".to_string(),
@@ -2022,6 +2024,7 @@ fn snapshot_ir_program() {
                         },
                         "then_stmt": {
                           "Block": {
+                            "label": null,
                             "statements": [
                               {
                                 "Return": {
@@ -2061,6 +2064,7 @@ fn snapshot_ir_program() {
                         },
                         "else_stmt": {
                           "Block": {
+                            "label": null,
                             "statements": [
                               {
                                 "Return": {
