@@ -1,5 +1,5 @@
-use criterion::{criterion_group, criterion_main, Criterion};
-use jv_ir::{transform::transform_program_with_context, TransformContext};
+use criterion::{Criterion, criterion_group, criterion_main};
+use jv_ir::{TransformContext, transform::transform_program_with_context};
 use jv_parser_frontend::ParserPipeline;
 use jv_parser_rowan::frontend::RowanPipeline;
 

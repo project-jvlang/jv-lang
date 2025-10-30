@@ -1,8 +1,8 @@
 use super::{GenericConstraint, GenericConstraintKind};
+use crate::ConstraintCache;
 use crate::types::{
     BoundConstraint, BoundPredicate, CapabilitySolution, GenericBounds, SymbolId, TypeId,
 };
-use crate::ConstraintCache;
 use std::collections::{HashMap, HashSet};
 
 /// Collection of resolved bounds for a specific type parameter.
@@ -157,11 +157,11 @@ impl ConstraintSolution {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ConstraintCache;
     use crate::types::{
         BoundTypeReference, CapabilityBound, CapabilityHints, DispatchKind, TraitBound, TypeKind,
         TypeVariant,
     };
-    use crate::ConstraintCache;
     use jv_ast::Span;
 
     fn constraint(predicate: BoundPredicate, parameter: TypeId) -> GenericConstraint {

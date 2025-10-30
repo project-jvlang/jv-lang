@@ -1,8 +1,8 @@
 use super::*;
 use crate::constraint::AstId;
 use crate::service::TypeLevelValue;
-use jv_ast::types::{TypeLevelExpr, TypeLevelIdentifier, TypeLevelOp};
 use jv_ast::Span;
+use jv_ast::types::{TypeLevelExpr, TypeLevelIdentifier, TypeLevelOp};
 
 fn node_id(id: u32) -> AstId {
     id

@@ -1,6 +1,7 @@
 #[cfg(test)]
 mod tests {
     use crate::context::{RegisteredMethodCall, RegisteredMethodDeclaration, SequenceStyleCache};
+    use crate::types::{CharToStringConversion, RawStringFlavor};
     use crate::{
         CompletableFutureOp, DataFormat, IrCaseLabel, IrDeconstructionComponent,
         IrDeconstructionPattern, IrExpression, IrForEachKind, IrForLoopMetadata, IrImplicitWhenEnd,
@@ -19,7 +20,6 @@ mod tests {
         transform_expression, transform_program, transform_program_with_context,
         transform_program_with_context_profiled, transform_statement,
     };
-    use crate::types::{CharToStringConversion, RawStringFlavor};
     use jv_ast::*;
     use jv_parser_frontend::ParserPipeline;
     use jv_parser_rowan::frontend::RowanPipeline;
@@ -4616,7 +4616,11 @@ fun sample(value: Any): Int {
             serde_json::from_str(&json).expect("literal expression should deserialize from JSON");
 
         match restored {
-            IrExpression::Literal(Literal::String(value), Some(RawStringFlavor::SingleLine), restored_span) => {
+            IrExpression::Literal(
+                Literal::String(value),
+                Some(RawStringFlavor::SingleLine),
+                restored_span,
+            ) => {
                 assert_eq!(value, "raw");
                 assert_eq!(restored_span, span);
             }
@@ -4641,7 +4645,10 @@ fun sample(value: Any): Int {
             serde_json::from_str(&json).expect("conversion should deserialize");
 
         match restored {
-            IrExpression::CharToString(CharToStringConversion { value, span: restored_span }) => {
+            IrExpression::CharToString(CharToStringConversion {
+                value,
+                span: restored_span,
+            }) => {
                 assert_eq!(restored_span, span);
                 match *value {
                     IrExpression::Literal(Literal::Character('x'), None, inner_span) => {
@@ -4650,7 +4657,10 @@ fun sample(value: Any): Int {
                     other => panic!("unexpected nested literal: {:?}", other),
                 }
             }
-            other => panic!("expected CharToStringConversion after roundtrip, got {:?}", other),
+            other => panic!(
+                "expected CharToStringConversion after roundtrip, got {:?}",
+                other
+            ),
         }
     }
 

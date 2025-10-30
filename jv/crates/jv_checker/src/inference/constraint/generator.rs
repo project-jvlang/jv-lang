@@ -344,7 +344,9 @@ impl<'env, 'ext, 'imp> ConstraintGenerator<'env, 'ext, 'imp> {
                         .as_ref()
                         .and_then(|params| params.get(index))
                         .cloned();
-                    let param_ty = target_ty.clone().unwrap_or_else(|| self.env.fresh_type_variable());
+                    let param_ty = target_ty
+                        .clone()
+                        .unwrap_or_else(|| self.env.fresh_type_variable());
                     let span = expression_span(arg_expr).cloned();
                     if target_ty
                         .as_ref()

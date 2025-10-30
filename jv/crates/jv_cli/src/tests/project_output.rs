@@ -1,8 +1,8 @@
 use std::fs;
 
 use crate::pipeline::{
-    project::{layout::ProjectLayout, locator::ProjectRoot, manifest::ManifestLoader},
     BuildOptionsFactory, CliOverrides, OutputManager,
+    project::{layout::ProjectLayout, locator::ProjectRoot, manifest::ManifestLoader},
 };
 
 use super::TempDirGuard;

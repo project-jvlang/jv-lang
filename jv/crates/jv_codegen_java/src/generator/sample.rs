@@ -711,7 +711,11 @@ impl JavaCodeGenerator {
                         construct: "boolean型に真偽値以外が指定されました".to_string(),
                         span: Some(span.clone()),
                     })?;
-                Ok(IrExpression::Literal(Literal::Boolean(some), None, span.clone()))
+                Ok(IrExpression::Literal(
+                    Literal::Boolean(some),
+                    None,
+                    span.clone(),
+                ))
             }
             PrimitiveType::Integer => {
                 let some = value

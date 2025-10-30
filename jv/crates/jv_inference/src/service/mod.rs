@@ -13,7 +13,7 @@ use jv_ast::json::{JsonLiteral, JsonValue};
 use jv_ast::types::Kind;
 use jv_ir::transform::infer_json_value_schema;
 use jv_ir::types::Schema;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
 use std::fmt;

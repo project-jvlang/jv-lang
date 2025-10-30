@@ -31,11 +31,7 @@ fn literal_switch_cases(arm_count: usize) -> Vec<IrSwitchCase> {
     cases.push(IrSwitchCase {
         labels: vec![IrCaseLabel::Default],
         guard: None,
-        body: IrExpression::Literal(
-            Literal::String("fallback".to_string()),
-            None,
-            dummy_span(),
-        ),
+        body: IrExpression::Literal(Literal::String("fallback".to_string()), None, dummy_span()),
         span: dummy_span(),
     });
 

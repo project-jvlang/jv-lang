@@ -466,7 +466,7 @@ impl JavaCodeGenerator {
                             } = left.as_ref()
                             {
                                 if left_name == target_name {
-                    if let IrExpression::Literal(literal, _, _) = right.as_ref() {
+                                    if let IrExpression::Literal(literal, _, _) = right.as_ref() {
                                         if let Literal::Number(number) = literal {
                                             if number == "1" {
                                                 return Some(format!("{}++", target_name));
