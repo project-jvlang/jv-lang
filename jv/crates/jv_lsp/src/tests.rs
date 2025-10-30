@@ -156,7 +156,8 @@ fn test_diagnostics_for_immutable_reassignment() {
 #[test]
 fn test_diagnostics_for_missing_initializer_self_reference() {
     let descriptor = descriptor("JV4202").expect("descriptor JV4202");
-    let diagnostic = EnhancedDiagnostic::new(descriptor, "self reference", Some(Span::new(1, 1, 1, 5)));
+    let diagnostic =
+        EnhancedDiagnostic::new(descriptor, "self reference", Some(Span::new(1, 1, 1, 5)));
     let mapped = tooling_diagnostic_to_lsp("file:///self.jv", diagnostic);
     assert_eq!(mapped.code.as_deref(), Some("JV4202"));
 }
@@ -392,10 +393,17 @@ fn caches_type_facts_after_successful_inference() {
 fn reports_type_error_for_ambiguous_function() {
     // Lightweight test: verify diagnostic conversion mechanism
     let descriptor = descriptor("JV4201").expect("descriptor JV4201");
-    let diagnostic = EnhancedDiagnostic::new(descriptor, "ambiguous function call", Some(Span::new(1, 1, 1, 10)))
-        .with_strategy(DiagnosticStrategy::Interactive);
+    let diagnostic = EnhancedDiagnostic::new(
+        descriptor,
+        "ambiguous function call",
+        Some(Span::new(1, 1, 1, 10)),
+    )
+    .with_strategy(DiagnosticStrategy::Interactive);
     let mapped = tooling_diagnostic_to_lsp("file:///ambiguous.jv", diagnostic);
-    assert!(mapped.message.contains("ambiguous"), "diagnostic message should include 'ambiguous'");
+    assert!(
+        mapped.message.contains("ambiguous"),
+        "diagnostic message should include 'ambiguous'"
+    );
 }
 
 #[test]
@@ -529,14 +537,17 @@ fn test_sequence_lambda_diagnostic_for_it_parameter() {
     // Lightweight test: verify diagnostic structure with suggestions
     use jv_ast::Span;
 
-    let descriptor = descriptor("E-LABEL-UNDEFINED").expect("descriptor E-LABEL-UNDEFINED should exist");
+    let descriptor =
+        descriptor("E-LABEL-UNDEFINED").expect("descriptor E-LABEL-UNDEFINED should exist");
     let diagnostic = EnhancedDiagnostic::new(
         descriptor,
         "Sequence operations require explicit lambda parameters",
         Some(Span::new(2, 18, 2, 20)),
     )
     .with_strategy(DiagnosticStrategy::Interactive)
-    .with_suggestions(vec!["Use explicit parameter: { value -> value * 2 }".to_string()]);
+    .with_suggestions(vec![
+        "Use explicit parameter: { value -> value * 2 }".to_string(),
+    ]);
 
     let lsp_diagnostic = tooling_diagnostic_to_lsp("file:///diag.jv", diagnostic);
 
