@@ -1063,6 +1063,10 @@ fn pipeline_compile_produces_artifacts() {
             parallel_inference: false,
             inference_workers: None,
             constraint_batch: None,
+            apt_enabled: false,
+            apt_processors: None,
+            apt_processorpath: None,
+            apt_options: Vec::new(),
         },
     );
 
@@ -1102,6 +1106,10 @@ fn pipeline_preserves_annotations_in_java_output() {
             parallel_inference: false,
             inference_workers: None,
             constraint_batch: None,
+            apt_enabled: false,
+            apt_processors: None,
+            apt_processorpath: None,
+            apt_options: Vec::new(),
         },
     );
 
@@ -1190,6 +1198,10 @@ fn pipeline_emit_types_produces_type_facts_json() {
             parallel_inference: false,
             inference_workers: None,
             constraint_batch: None,
+            apt_enabled: false,
+            apt_processors: None,
+            apt_processorpath: None,
+            apt_options: Vec::new(),
         },
     );
 
@@ -1233,6 +1245,10 @@ fn type_inference_snapshot_emitted_with_emit_types() {
             parallel_inference: false,
             inference_workers: None,
             constraint_batch: None,
+            apt_enabled: false,
+            apt_processors: None,
+            apt_processorpath: None,
+            apt_options: Vec::new(),
         },
     );
 
@@ -1274,6 +1290,10 @@ fn type_inference_snapshot_tracks_program_changes() {
             parallel_inference: false,
             inference_workers: None,
             constraint_batch: None,
+            apt_enabled: false,
+            apt_processors: None,
+            apt_processorpath: None,
+            apt_options: Vec::new(),
         },
     );
 
@@ -1332,6 +1352,10 @@ fn null_safety_warnings_survive_pipeline() {
             parallel_inference: false,
             inference_workers: None,
             constraint_batch: None,
+            apt_enabled: false,
+            apt_processors: None,
+            apt_processorpath: None,
+            apt_options: Vec::new(),
         },
     );
 
@@ -1366,6 +1390,10 @@ fn ambiguous_function_causes_type_error() {
             parallel_inference: false,
             inference_workers: None,
             constraint_batch: None,
+            apt_enabled: false,
+            apt_processors: None,
+            apt_processorpath: None,
+            apt_options: Vec::new(),
         },
     );
 
@@ -1408,6 +1436,10 @@ fn pipeline_reports_missing_else_in_value_when() {
             parallel_inference: false,
             inference_workers: None,
             constraint_batch: None,
+            apt_enabled: false,
+            apt_processors: None,
+            apt_processorpath: None,
+            apt_options: Vec::new(),
         },
     );
 
@@ -1447,6 +1479,10 @@ fn pipeline_runs_javac_when_available() {
             parallel_inference: false,
             inference_workers: None,
             constraint_batch: None,
+            apt_enabled: false,
+            apt_processors: None,
+            apt_processorpath: None,
+            apt_options: Vec::new(),
         },
     );
 

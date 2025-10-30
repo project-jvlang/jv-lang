@@ -155,6 +155,11 @@ fn project_pipeline_supports_multi_target_builds() {
         parallel_inference: false,
         inference_workers: None,
         constraint_batch: None,
+        // APT defaults
+        apt_enabled: false,
+        apt_processors: None,
+        apt_processorpath: None,
+        apt_options: Vec::new(),
     };
 
     let plan21 = BuildOptionsFactory::compose(
@@ -193,6 +198,10 @@ fn project_pipeline_supports_multi_target_builds() {
         parallel_inference: false,
         inference_workers: None,
         constraint_batch: None,
+        apt_enabled: false,
+        apt_processors: None,
+        apt_processorpath: None,
+        apt_options: Vec::new(),
     };
 
     let plan25 = BuildOptionsFactory::compose(project_root, settings, layout, overrides25)
@@ -243,6 +252,10 @@ fn clean_option_removes_stale_target_artifacts() {
         parallel_inference: false,
         inference_workers: None,
         constraint_batch: None,
+        apt_enabled: false,
+        apt_processors: None,
+        apt_processorpath: None,
+        apt_options: Vec::new(),
     };
 
     let plan_initial = BuildOptionsFactory::compose(
