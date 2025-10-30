@@ -23,6 +23,8 @@ pub enum Expression {
         op: BinaryOp,
         right: Box<Expression>,
         span: Span,
+        #[serde(default)]
+        metadata: BinaryMetadata,
     },
 
     // Unary operations
@@ -279,6 +281,78 @@ pub enum Argument {
 pub enum StringPart {
     Text(String),
     Expression(Expression),
+}
+
+/// 2項演算子に付随する補助メタデータ。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct BinaryMetadata {
+    /// `is` 演算子に関するメタデータ。
+    #[serde(default)]
+    pub is_test: Option<IsTestMetadata>,
+}
+
+/// `is` 演算子の種別と関連情報。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct IsTestMetadata {
+    /// 解析された `is` 演算子の判定種別。
+    pub kind: IsTestKind,
+    /// 正規表現リテラルが右辺に現れた場合のリテラル情報。
+    #[serde(default)]
+    pub regex: Option<RegexLiteral>,
+    /// `Pattern` 型を返す式が右辺に現れた場合の式ツリー。
+    #[serde(default)]
+    pub pattern_expr: Option<Box<Expression>>,
+    /// 事前検証で得られた診断情報。
+    #[serde(default)]
+    pub diagnostics: Vec<RegexTestDiagnostic>,
+    /// 左辺に適用するガード戦略ヒント。
+    #[serde(default)]
+    pub guard_strategy: RegexGuardStrategy,
+    /// `is` 判定全体のソーススパン。
+    pub span: Span,
+}
+
+/// `is` 判定で利用される分類。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum IsTestKind {
+    /// 型テスト（従来の `is Type`）。
+    Type,
+    /// 正規表現リテラル。
+    RegexLiteral,
+    /// `Pattern` 型を返す任意の式。
+    PatternExpression,
+}
+
+/// 正規表現判定に付随する簡易診断。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RegexTestDiagnostic {
+    /// 日本語での診断メッセージ。
+    pub message: String,
+    /// 任意の診断コード。
+    #[serde(default)]
+    pub code: Option<String>,
+    /// 該当箇所のスパン。
+    #[serde(default)]
+    pub span: Option<Span>,
+}
+
+/// 左辺に適用するガード戦略。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum RegexGuardStrategy {
+    /// ガード不要。
+    None,
+    /// 一時変数へ退避しつつ null ガードを行う。
+    CaptureAndGuard {
+        /// 生成済みの一時変数名（未定義時は `None`）。
+        #[serde(default)]
+        temp_name: Option<String>,
+    },
+}
+
+impl Default for RegexGuardStrategy {
+    fn default() -> Self {
+        RegexGuardStrategy::None
+    }
 }
 
 /// When expression arms with pattern matching

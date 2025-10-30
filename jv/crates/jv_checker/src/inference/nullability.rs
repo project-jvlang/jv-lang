@@ -488,6 +488,7 @@ impl NullabilityAnalyzer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use jv_ast::BinaryMetadata;
     use jv_ast::ValBindingOrigin;
     use jv_ast::types::{Modifiers, Visibility};
 
@@ -558,6 +559,7 @@ mod tests {
             op: BinaryOp::Elvis,
             right: Box::new(Expression::Literal(Literal::Number("0".into()), span())),
             span: span(),
+            metadata: BinaryMetadata::default(),
         };
 
         let program = program_with(vec![

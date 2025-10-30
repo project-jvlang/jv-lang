@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use crate::CheckError;
 use jv_ast::Span;
 use jv_ast::{
-    Argument, ConcurrencyConstruct, Expression, ExtensionFunction, Modifiers, Program,
+    Argument, ConcurrencyConstruct, Expression, ExtensionFunction, IsTestKind, Modifiers, Program,
     ResourceManagement, Statement, TryCatchClause, ValBindingOrigin,
 };
 
@@ -453,12 +453,24 @@ impl BindingResolver {
                 op,
                 right,
                 span,
-            } => Expression::Binary {
-                left: Box::new(self.resolve_expression(*left)),
-                op,
-                right: Box::new(self.resolve_expression(*right)),
-                span,
-            },
+                metadata,
+            } => {
+                let resolved_left = self.resolve_expression(*left);
+                let resolved_right = self.resolve_expression(*right);
+                let mut metadata = metadata;
+                if let Some(is_test) = metadata.is_test.as_mut() {
+                    if matches!(is_test.kind, IsTestKind::PatternExpression) {
+                        is_test.pattern_expr = Some(Box::new(resolved_right.clone()));
+                    }
+                }
+                Expression::Binary {
+                    left: Box::new(resolved_left),
+                    op,
+                    right: Box::new(resolved_right),
+                    span,
+                    metadata,
+                }
+            }
             Expression::Unary { op, operand, span } => Expression::Unary {
                 op,
                 operand: Box::new(self.resolve_expression(*operand)),

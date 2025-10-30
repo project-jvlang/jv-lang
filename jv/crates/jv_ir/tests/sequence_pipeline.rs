@@ -1,8 +1,8 @@
 use jv_ast::expression::ParameterModifiers;
 use jv_ast::types::PrimitiveTypeName;
 use jv_ast::{
-    Argument, BinaryOp, CallArgumentStyle, Expression, Literal, Parameter, SequenceDelimiter, Span,
-    StringPart,
+    Argument, BinaryMetadata, BinaryOp, CallArgumentStyle, Expression, Literal, Parameter,
+    SequenceDelimiter, Span, StringPart,
 };
 use jv_ir::context::{RegisteredMethodCall, RegisteredMethodDeclaration};
 use jv_ir::naming::method_erasure::apply_method_erasure;
@@ -54,6 +54,7 @@ fn add(lhs: Expression, rhs: Expression) -> Expression {
         op: BinaryOp::Add,
         right: Box::new(rhs),
         span: dummy_span(),
+        metadata: BinaryMetadata::default(),
     }
 }
 
@@ -77,6 +78,7 @@ fn multiply(lhs: Expression, rhs: Expression) -> Expression {
         op: BinaryOp::Multiply,
         right: Box::new(rhs),
         span: dummy_span(),
+        metadata: BinaryMetadata::default(),
     }
 }
 
@@ -86,6 +88,7 @@ fn modulo(lhs: Expression, rhs: Expression) -> Expression {
         op: BinaryOp::Modulo,
         right: Box::new(rhs),
         span: dummy_span(),
+        metadata: BinaryMetadata::default(),
     }
 }
 
@@ -95,6 +98,7 @@ fn equal(lhs: Expression, rhs: Expression) -> Expression {
         op: BinaryOp::Equal,
         right: Box::new(rhs),
         span: dummy_span(),
+        metadata: BinaryMetadata::default(),
     }
 }
 

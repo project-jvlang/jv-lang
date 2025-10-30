@@ -8,8 +8,8 @@ use crate::support::{
 use crate::syntax::SyntaxKind;
 use jv_ast::comments::{CommentKind, CommentStatement, CommentVisibility};
 use jv_ast::expression::{
-    Argument, CallArgumentMetadata, CallArgumentStyle, Parameter, ParameterModifiers,
-    ParameterProperty, StringPart, WhenArm,
+    Argument, BinaryMetadata, CallArgumentMetadata, CallArgumentStyle, IsTestKind, IsTestMetadata,
+    Parameter, ParameterModifiers, ParameterProperty, RegexGuardStrategy, StringPart, WhenArm,
 };
 use jv_ast::json::{
     JsonComment, JsonCommentKind, JsonEntry, JsonLiteral, JsonValue, NumberGrouping,
@@ -20,8 +20,8 @@ use jv_ast::statement::{
 };
 use jv_ast::strings::{MultilineKind, MultilineStringLiteral, RawStringFlavor};
 use jv_ast::types::{
-    BinaryOp, GenericParameter, GenericSignature, Literal, Modifiers, Pattern, TypeAnnotation,
-    UnaryOp, VarianceMarker,
+    BinaryOp, GenericParameter, GenericSignature, Literal, Modifiers, Pattern, RegexLiteral,
+    TypeAnnotation, UnaryOp, VarianceMarker,
 };
 use jv_ast::{BindingPatternKind, Expression, SequenceDelimiter, Span, Statement};
 use jv_lexer::{
@@ -1026,8 +1026,52 @@ mod tests {
     fn value_is_type_test_parses() {
         let expr = parse_expression_from_source("value is Character");
         match expr {
-            Expression::Binary { op, .. } if matches!(op, BinaryOp::Is) => {}
+            Expression::Binary { op, metadata, .. }
+                if matches!(op, BinaryOp::Is)
+                    && matches!(
+                        metadata.is_test.as_ref().map(|m| &m.kind),
+                        Some(IsTestKind::Type)
+                    ) => {}
             other => panic!("expected `is` binary expression, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn regex_literal_is_expression_carries_metadata() {
+        let expr = parse_expression_from_source("text is /[a-z]+/");
+        match expr {
+            Expression::Binary { metadata, .. } => {
+                let Some(is_test) = metadata.is_test else {
+                    panic!("expected is-test metadata for regex literal");
+                };
+                assert!(matches!(is_test.kind, IsTestKind::RegexLiteral));
+                assert!(
+                    is_test.regex.is_some(),
+                    "正規表現リテラル情報が欠落しています"
+                );
+                assert!(is_test.pattern_expr.is_none());
+                assert!(matches!(is_test.guard_strategy, RegexGuardStrategy::None));
+            }
+            other => panic!("expected binary expression, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn pattern_expression_is_expression_carries_metadata() {
+        let expr = parse_expression_from_source("subject is provider().pattern()");
+        match expr {
+            Expression::Binary { metadata, .. } => {
+                let Some(is_test) = metadata.is_test else {
+                    panic!("expected is-test metadata for pattern expression");
+                };
+                assert!(matches!(is_test.kind, IsTestKind::PatternExpression));
+                assert!(is_test.regex.is_none());
+                assert!(
+                    is_test.pattern_expr.is_some(),
+                    "パターン式が保存されていません"
+                );
+            }
+            other => panic!("expected binary expression, got {:?}", other),
         }
     }
 
@@ -2293,6 +2337,7 @@ mod expression_parser {
                             op: BinaryOp::RangeExclusive,
                             right,
                             span,
+                            ..
                         } => Ok(Pattern::Range {
                             start: left,
                             end: right,
@@ -2304,6 +2349,7 @@ mod expression_parser {
                             op: BinaryOp::RangeInclusive,
                             right,
                             span,
+                            ..
                         } => Ok(Pattern::Range {
                             start: left,
                             end: right,
@@ -3234,11 +3280,20 @@ mod expression_parser {
                 }
             }
 
+            let metadata = if matches!(op, BinaryOp::Is) {
+                BinaryMetadata {
+                    is_test: detect_is_test_metadata(&right.expr, &span),
+                }
+            } else {
+                BinaryMetadata::default()
+            };
+
             let expr = Expression::Binary {
                 left: Box::new(left.expr),
                 op,
                 right: Box::new(right.expr),
                 span: span.clone(),
+                metadata,
             };
             Ok(ParsedExpr {
                 expr,
@@ -4337,6 +4392,71 @@ mod expression_parser {
     }
 }
 
+fn detect_is_test_metadata(right: &Expression, span: &Span) -> Option<IsTestMetadata> {
+    if let Some(literal) = extract_regex_literal(right) {
+        return Some(IsTestMetadata {
+            kind: IsTestKind::RegexLiteral,
+            regex: Some(literal),
+            pattern_expr: None,
+            diagnostics: Vec::new(),
+            guard_strategy: RegexGuardStrategy::None,
+            span: span.clone(),
+        });
+    }
+
+    if expression_looks_like_type_reference(right) {
+        return Some(IsTestMetadata {
+            kind: IsTestKind::Type,
+            regex: None,
+            pattern_expr: None,
+            diagnostics: Vec::new(),
+            guard_strategy: RegexGuardStrategy::None,
+            span: span.clone(),
+        });
+    }
+
+    Some(IsTestMetadata {
+        kind: IsTestKind::PatternExpression,
+        regex: None,
+        pattern_expr: Some(Box::new(right.clone())),
+        diagnostics: Vec::new(),
+        guard_strategy: RegexGuardStrategy::None,
+        span: span.clone(),
+    })
+}
+
+fn extract_regex_literal(expr: &Expression) -> Option<RegexLiteral> {
+    match expr {
+        Expression::RegexLiteral(literal) => Some(literal.clone()),
+        Expression::Literal(Literal::Regex(literal), _) => Some(literal.clone()),
+        _ => None,
+    }
+}
+
+fn expression_looks_like_type_reference(expr: &Expression) -> bool {
+    match expr {
+        Expression::Identifier(name, _) => is_probably_type_name(name),
+        Expression::MemberAccess {
+            object, property, ..
+        } => {
+            is_probably_type_name(property)
+                && matches!(
+                    object.as_ref(),
+                    Expression::Identifier(_, _) | Expression::MemberAccess { .. }
+                )
+        }
+        _ => false,
+    }
+}
+
+fn is_probably_type_name(name: &str) -> bool {
+    let mut chars = name.chars();
+    match chars.next() {
+        Some(first) if first.is_uppercase() => true,
+        _ => false,
+    }
+}
+
 fn push_diagnostic(
     diagnostics: &mut Vec<LoweringDiagnostic>,
     severity: LoweringDiagnosticSeverity,
@@ -5208,6 +5328,7 @@ fn infer_loop_strategy(iterable: &Expression) -> LoopStrategy {
             op,
             right,
             span,
+            ..
         } if matches!(op, BinaryOp::RangeExclusive | BinaryOp::RangeInclusive) => {
             let start = (*left.as_ref()).clone();
             let end = (*right.as_ref()).clone();

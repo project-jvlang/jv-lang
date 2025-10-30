@@ -34,6 +34,7 @@ fn test_expression_binary() {
         op: BinaryOp::Add,
         right: Box::new(right),
         span: dummy_span(),
+        metadata: BinaryMetadata::default(),
     };
     match expr {
         Expression::Binary { op, .. } => assert_eq!(op, BinaryOp::Add),
@@ -278,6 +279,7 @@ fn test_expression_lambda() {
             dummy_span(),
         )),
         span: dummy_span(),
+        metadata: BinaryMetadata::default(),
     };
     let expr = Expression::Lambda {
         parameters: vec![param],

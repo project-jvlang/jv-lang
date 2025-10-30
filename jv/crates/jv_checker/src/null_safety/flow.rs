@@ -886,6 +886,7 @@ fn classify_expression(
             op,
             right,
             span,
+            ..
         } => {
             let left_info = classify_expression(builder, left);
             let right_info = classify_expression(builder, right);
@@ -1017,6 +1018,7 @@ mod tests {
     use super::*;
     use crate::null_safety::JavaLoweringStrategy;
     use crate::null_safety::graph::BranchAssumption;
+    use jv_ast::BinaryMetadata;
     use jv_ast::ValBindingOrigin;
     use jv_ast::{Expression, Pattern, Program, Statement, TryCatchClause, WhenArm, types::Span};
 
@@ -1373,6 +1375,7 @@ mod tests {
                 span.clone(),
             )),
             span: span.clone(),
+            metadata: BinaryMetadata::default(),
         };
 
         let program = Program {

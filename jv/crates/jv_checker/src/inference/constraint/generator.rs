@@ -969,6 +969,7 @@ fn ensure_optional_type(ty: TypeKind) -> TypeKind {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use jv_ast::BinaryMetadata;
     use jv_ast::{Modifiers, Pattern, Span, ValBindingOrigin, WhenArm};
     use jv_parser_frontend::ParserPipeline;
     use jv_parser_rowan::frontend::RowanPipeline;
@@ -1060,6 +1061,7 @@ mod tests {
                             span.clone(),
                         )),
                         span: span.clone(),
+                        metadata: BinaryMetadata::default(),
                     },
                     modifiers: default_modifiers(),
                     origin: ValBindingOrigin::ExplicitKeyword,

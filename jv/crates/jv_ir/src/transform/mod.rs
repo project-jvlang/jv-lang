@@ -8,9 +8,10 @@ use crate::types::{
     RawStringFlavor,
 };
 use jv_ast::{
-    Argument, BinaryOp, BindingPatternKind, CallArgumentMetadata, CallArgumentStyle, CommentKind,
-    ConcurrencyConstruct, Expression, Literal, Modifiers, Program, ResourceManagement,
-    SequenceDelimiter, Span, Statement, TypeAnnotation, UnaryOp, ValBindingOrigin,
+    Argument, BinaryMetadata, BinaryOp, BindingPatternKind, CallArgumentMetadata,
+    CallArgumentStyle, CommentKind, ConcurrencyConstruct, Expression, Literal, Modifiers, Program,
+    ResourceManagement, SequenceDelimiter, Span, Statement, TypeAnnotation, UnaryOp,
+    ValBindingOrigin,
 };
 
 mod concurrency;
@@ -668,6 +669,7 @@ pub fn transform_expression(
             op,
             right,
             span,
+            ..
         } => {
             if matches!(op, BinaryOp::Elvis) {
                 desugar_elvis_operator(left, right, span, context)
@@ -1501,6 +1503,7 @@ pub(crate) fn normalize_whitespace_array_elements(elements: Vec<Expression>) -> 
                             op: binary_op,
                             right: operand,
                             span: merged_span,
+                            metadata: BinaryMetadata::default(),
                         });
                     }
                 } else {

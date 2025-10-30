@@ -6,8 +6,8 @@ use crate::pattern::{self, PatternTarget};
 use crate::regex::RegexValidator;
 use fastrand::Rng;
 use jv_ast::{
-    Annotation, AnnotationName, BinaryOp, Expression, Literal, Modifiers, Parameter,
-    ParameterModifiers, Pattern, Program, RegexLiteral, Span, Statement, TypeAnnotation,
+    Annotation, AnnotationName, BinaryMetadata, BinaryOp, Expression, Literal, Modifiers,
+    Parameter, ParameterModifiers, Pattern, Program, RegexLiteral, Span, Statement, TypeAnnotation,
     ValBindingOrigin, WhenArm,
 };
 use jv_inference::TypeFacts;
@@ -174,6 +174,7 @@ fn check_program_populates_inference_snapshot() {
         op: BinaryOp::Add,
         right: Box::new(Expression::Identifier("rhs".into(), span.clone())),
         span: span.clone(),
+        metadata: BinaryMetadata::default(),
     };
 
     let program = Program {
@@ -340,6 +341,7 @@ fn check_program_reports_type_error_on_mismatch() {
             span.clone(),
         )),
         span: span.clone(),
+        metadata: BinaryMetadata::default(),
     };
 
     let program = Program {

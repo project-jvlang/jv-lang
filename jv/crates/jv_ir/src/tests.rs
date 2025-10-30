@@ -3928,6 +3928,7 @@ fun sample(value: Any): Int {
                 dummy_span(),
             )),
             span: dummy_span(),
+            metadata: BinaryMetadata::default(),
         };
 
         let ir_expr = transform_expression(expr, &mut context)
@@ -3954,6 +3955,7 @@ fun sample(value: Any): Int {
                 dummy_span(),
             )),
             span: dummy_span(),
+            metadata: BinaryMetadata::default(),
         };
 
         let ir_expr = transform_expression(expr, &mut context)
@@ -4118,6 +4120,7 @@ fun sample(value: Any): Int {
                     dummy_span(),
                 )),
                 span: dummy_span(),
+                metadata: BinaryMetadata::default(),
             },
             span: dummy_span(),
         };
@@ -4278,6 +4281,7 @@ fun sample(value: Any): Int {
                         dummy_span(),
                     )),
                     span: dummy_span(),
+                    metadata: BinaryMetadata::default(),
                 }),
                 then_branch: Box::new(Expression::IndexAccess {
                     object: Box::new(Expression::This(dummy_span())),

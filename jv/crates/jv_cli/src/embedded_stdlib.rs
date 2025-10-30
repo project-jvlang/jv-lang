@@ -490,6 +490,14 @@ impl StdlibUsage {
                     break;
                 }
             }
+            for segment in token.split('.') {
+                if segment.is_empty() {
+                    continue;
+                }
+                for package in catalog.packages_for_reference(segment) {
+                    self.packages.insert(package);
+                }
+            }
         }
     }
 
