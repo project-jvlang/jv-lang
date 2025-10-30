@@ -663,8 +663,7 @@ impl JvLanguageServer {
         if highlights.is_empty() {
             self.token_highlights.remove(uri);
         } else {
-            self.token_highlights
-                .insert(uri.to_string(), highlights);
+            self.token_highlights.insert(uri.to_string(), highlights);
         }
 
         let frontend_diagnostics = from_frontend_diagnostics(diagnostics_view.final_diagnostics());
@@ -717,9 +716,9 @@ impl JvLanguageServer {
             match import_service.resolve(import_stmt) {
                 Ok(resolved) => resolved_imports.push(resolved),
                 Err(error) => {
-                self.type_facts.remove(uri);
-                self.regex_metadata.remove(uri);
-                return vec![match import_diagnostics::from_error(&error) {
+                    self.type_facts.remove(uri);
+                    self.regex_metadata.remove(uri);
+                    return vec![match import_diagnostics::from_error(&error) {
                         Some(diagnostic) => tooling_diagnostic_to_lsp(
                             uri,
                             diagnostic.with_strategy(DiagnosticStrategy::Interactive),

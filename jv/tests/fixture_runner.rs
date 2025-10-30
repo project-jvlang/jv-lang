@@ -418,6 +418,24 @@ fn string_literal(value: &str) -> IrExpression {
     IrExpression::Literal(Literal::String(value.to_string()), None, dummy_span())
 }
 
+pub mod integration_support {
+    use super::*;
+
+    pub fn detect_javac_major() -> Option<u32> {
+        detect_javac_version()
+    }
+
+    pub fn compile_java_with_javac(
+        java_source: &str,
+        required: u32,
+        detected: u32,
+        stem: &str,
+        label: &str,
+    ) -> Result<()> {
+        compile_with_javac(java_source, required, detected, stem, label)
+    }
+}
+
 fn number_literal(value: &str) -> IrExpression {
     IrExpression::Literal(Literal::Number(value.to_string()), None, dummy_span())
 }

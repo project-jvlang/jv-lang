@@ -208,7 +208,11 @@ fn test_unterminated_raw_string_reports_jv4300() {
     server.open_document(uri.clone(), "val bad = 'unterminated".to_string());
 
     let diagnostics = server.get_diagnostics(&uri);
-    assert_eq!(diagnostics.len(), 1, "expected single diagnostic: {diagnostics:?}");
+    assert_eq!(
+        diagnostics.len(),
+        1,
+        "expected single diagnostic: {diagnostics:?}"
+    );
     assert_eq!(diagnostics[0].code.as_deref(), Some("JV4300"));
     assert!(
         diagnostics[0].message.contains("JV4300"),

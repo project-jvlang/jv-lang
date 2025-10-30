@@ -407,10 +407,7 @@ fn lex_error_to_diagnostic(error: &LexError) -> Option<EnhancedDiagnostic> {
             let descriptor = lookup("JV4300")?;
             let message = format!(
                 "JV4300: 生文字列リテラルが閉じられていません（{}行{}列）。' または ''' で閉じてください。\nJV4300: Raw string literal is unterminated at line {}, column {}. Add the matching closing quote sequence.",
-                line,
-                column,
-                line,
-                column
+                line, column, line, column
             );
             let span = Span::new(*line, *column, *line, column.saturating_add(1));
             Some(EnhancedDiagnostic::new(descriptor, message, Some(span)))

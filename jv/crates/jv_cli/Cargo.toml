@@ -28,6 +28,10 @@ name = "fixture_runner"
 path = "../../tests/fixture_runner.rs"
 harness = false
 
+[[test]]
+name = "raw_string_literals"
+path = "../../tests/integration/raw_string_literals.rs"
+
 [dependencies]
 clap.workspace = true
 anyhow.workspace = true
