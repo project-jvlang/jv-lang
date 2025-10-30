@@ -598,6 +598,7 @@ fn null_safety_reports_jv3108_without_jv3003_regression() {
             span.clone(),
         ))),
         implicit_end: None,
+        label: None,
         span: span.clone(),
     };
 
@@ -675,6 +676,7 @@ fn when_without_else_in_value_position_emits_validation_error() {
         arms: vec![sample_when_arm(&span)],
         else_arm: None,
         implicit_end: None,
+        label: None,
         span: span.clone(),
     };
 
@@ -722,6 +724,7 @@ fn when_with_else_in_value_position_passes_validation() {
             span.clone(),
         ))),
         implicit_end: None,
+        label: None,
         span: span.clone(),
     };
 
@@ -783,6 +786,7 @@ fn when_boolean_true_false_without_else_passes_validation() {
         ],
         else_arm: None,
         implicit_end: None,
+        label: None,
         span: span.clone(),
     };
 
@@ -904,6 +908,7 @@ fn when_without_else_in_statement_position_is_allowed() {
         arms: vec![sample_when_arm(&span)],
         else_arm: None,
         implicit_end: None,
+        label: None,
         span: span.clone(),
     };
 

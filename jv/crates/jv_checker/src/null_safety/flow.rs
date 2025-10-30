@@ -1051,7 +1051,9 @@ mod tests {
             imports: vec![],
             statements: vec![Statement::Expression {
                 expr: Expression::Block {
+                    label: None,
                     statements: vec![Statement::Return {
+                        label: None,
                         value: Some(Expression::Literal(
                             Literal::Number("0".into()),
                             Span::dummy(),
@@ -1113,6 +1115,7 @@ mod tests {
             pattern: Pattern::Identifier("value".into(), Span::new(3, 4, 3, 9)),
             guard: None,
             body: Expression::Block {
+                label: None,
                 statements: block_statements,
                 span: block_span.clone(),
             },
@@ -1120,6 +1123,7 @@ mod tests {
         };
 
         let else_block = Expression::Block {
+            label: None,
             statements: vec![Statement::Expression {
                 expr: Expression::Literal(Literal::String("".into()), Span::new(4, 10, 4, 12)),
                 span: Span::new(4, 10, 4, 12),
@@ -1135,6 +1139,7 @@ mod tests {
             arms: vec![when_arm],
             else_arm: Some(Box::new(else_block)),
             implicit_end: None,
+            label: None,
             span: Span::new(2, 5, 4, 15),
         };
 
@@ -1195,6 +1200,7 @@ mod tests {
     fn try_with_catch_creates_exceptional_edges() {
         let span = Span::dummy();
         let try_body = Expression::Block {
+            label: None,
             statements: vec![Statement::VarDeclaration {
                 name: "value".into(),
                 binding: None,
@@ -1215,6 +1221,7 @@ mod tests {
                 span: span.clone(),
             }),
             body: Box::new(Expression::Block {
+                label: None,
                 statements: vec![Statement::Expression {
                     expr: Expression::Identifier("value".into(), span.clone()),
                     span: span.clone(),
@@ -1277,6 +1284,7 @@ mod tests {
             statements: vec![Statement::Expression {
                 expr: Expression::Try {
                     body: Box::new(Expression::Block {
+                        label: None,
                         statements: vec![Statement::VarDeclaration {
                             name: "flag".into(),
                             binding: None,
@@ -1289,6 +1297,7 @@ mod tests {
                     }),
                     catch_clauses: vec![],
                     finally_block: Some(Box::new(Expression::Block {
+                        label: None,
                         statements: vec![Statement::Expression {
                             expr: Expression::Identifier("flag".into(), span.clone()),
                             span: span.clone(),
@@ -1428,6 +1437,7 @@ mod tests {
                 pattern: Pattern::Literal(Literal::Null, null_arm_span.clone()),
                 guard: None,
                 body: Expression::Block {
+                    label: None,
                     statements: vec![Statement::Expression {
                         expr: Expression::Identifier("x".into(), id_span.clone()),
                         span: null_arm_span.clone(),
@@ -1437,6 +1447,7 @@ mod tests {
                 span: null_arm_span.clone(),
             }],
             else_arm: Some(Box::new(Expression::Block {
+                label: None,
                 statements: vec![Statement::Expression {
                     expr: Expression::Identifier("x".into(), id_span.clone()),
                     span: else_span.clone(),
@@ -1444,6 +1455,7 @@ mod tests {
                 span: else_span.clone(),
             })),
             implicit_end: None,
+            label: None,
             span: when_span.clone(),
         };
 

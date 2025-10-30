@@ -203,6 +203,30 @@ const DIAGNOSTICS: &[DiagnosticDescriptor] = &[
         severity: DiagnosticSeverity::Error,
     },
     DiagnosticDescriptor {
+        code: "E-LABEL-UNDEFINED",
+        title: "Label reference not found / ラベル参照が見つかりません",
+        help: "Declare the matching `#label` within scope or verify the spelling. / 対応する `#label` をスコープ内で宣言するか綴りを確認してください。",
+        severity: DiagnosticSeverity::Error,
+    },
+    DiagnosticDescriptor {
+        code: "E-LABEL-NON_LOOP_CONTINUE",
+        title: "`continue` requires a loop label / `continue` はループラベルのみ許可されます",
+        help: "Point `continue #label` to a loop statement or adjust the control flow. / `continue #label` がループ文を指すようにするか制御フローを見直してください。",
+        severity: DiagnosticSeverity::Error,
+    },
+    DiagnosticDescriptor {
+        code: "E-LABEL-NON_LAMBDA_RETURN",
+        title: "`return #label` requires a lambda label / `return #label` はラムダラベルが必要です",
+        help: "Attach the label to a lambda expression or remove it. / ラベルをラムダ式に付与するか指定を削除してください。",
+        severity: DiagnosticSeverity::Error,
+    },
+    DiagnosticDescriptor {
+        code: "E-LABEL-REDECLARED",
+        title: "Label redeclared in the same scope / 同じスコープでラベルが再宣言されています",
+        help: "Use a unique label name within the current scope. / 現在のスコープでは重複しないラベル名を使用してください。",
+        severity: DiagnosticSeverity::Error,
+    },
+    DiagnosticDescriptor {
         code: "JV2101",
         title: "配列リテラルでカンマ区切りは使用できません / Array literals cannot use comma separators",
         help: "要素は空白または改行で区切ってください。examples: docs/whitespace-arrays.md。/ Separate elements with whitespace or newlines. See docs/whitespace-arrays.md for examples. (--explain JV2101)",

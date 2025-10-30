@@ -239,6 +239,7 @@ mod tests {
                 None
             },
             implicit_end: None,
+            label: None,
             span,
         }
     }

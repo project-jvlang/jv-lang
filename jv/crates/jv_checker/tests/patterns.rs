@@ -237,6 +237,7 @@ fn when_with_constructors(subject: &str, variants: &[&str]) -> Expression {
             .collect(),
         else_arm: None,
         implicit_end: None,
+        label: None,
         span,
     }
 }
@@ -368,6 +369,7 @@ fn when_without_span_is_not_cached() {
         }],
         else_arm: None,
         implicit_end: None,
+        label: None,
         span: span.clone(),
     };
 
@@ -414,6 +416,7 @@ fn transform_error_maps_to_jv3199_diagnostic() {
             span.clone(),
         ))),
         implicit_end: None,
+        label: None,
         span: span.clone(),
     };
 

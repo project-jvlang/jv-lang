@@ -1042,6 +1042,7 @@ mod tests {
                 span.clone(),
             ))),
             implicit_end: None,
+            label: None,
             span: span.clone(),
         };
 
@@ -1114,6 +1115,7 @@ val result = when (maybe) {
                 },
                 Statement::Expression {
                     expr: Expression::Block {
+                        label: None,
                         statements: vec![
                             Statement::ValDeclaration {
                                 name: "value".into(),

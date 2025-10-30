@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::CheckError;
 use jv_ast::Span;
@@ -67,6 +67,8 @@ struct BindingResolver {
     diagnostics: Vec<CheckError>,
     usage: BindingUsageSummary,
     late_init_seeds: HashMap<String, LateInitSeed>,
+    label_stack: Vec<LabelEntry>,
+    label_scopes: Vec<HashSet<String>>,
 }
 
 #[derive(Clone)]
@@ -80,6 +82,21 @@ enum BindingKind {
     },
 }
 
+#[derive(Debug, Clone)]
+struct LabelEntry {
+    name: String,
+    kind: LabelKind,
+    span: Span,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LabelKind {
+    Loop,
+    Block,
+    When,
+    Lambda,
+}
+
 impl BindingResolver {
     fn new() -> Self {
         Self {
@@ -87,6 +104,8 @@ impl BindingResolver {
             diagnostics: Vec::new(),
             usage: BindingUsageSummary::default(),
             late_init_seeds: HashMap::new(),
+            label_stack: Vec::new(),
+            label_scopes: vec![HashSet::new()],
         }
     }
 
@@ -124,10 +143,13 @@ impl BindingResolver {
     }
 
     fn resolve_statements(&mut self, statements: Vec<Statement>) -> Vec<Statement> {
-        statements
+        self.enter_label_scope();
+        let resolved = statements
             .into_iter()
             .map(|statement| self.resolve_statement(statement))
-            .collect()
+            .collect();
+        self.exit_label_scope();
+        resolved
     }
 
     fn resolve_statement(&mut self, statement: Statement) -> Statement {
@@ -328,18 +350,26 @@ impl BindingResolver {
                 let extension = self.resolve_extension_function(extension);
                 Statement::ExtensionFunction(extension)
             }
-            Statement::Return { label, value, span } => Statement::Return {
-                label,
-                value: value.map(|expr| self.resolve_expression(expr)),
-                span,
-            },
+            Statement::Return { label, value, span } => {
+                if let Some(ref name) = label {
+                    self.validate_return_label(name, &span);
+                }
+                Statement::Return {
+                    label,
+                    value: value.map(|expr| self.resolve_expression(expr)),
+                    span,
+                }
+            }
             Statement::Throw { expr, span } => Statement::Throw {
                 expr: self.resolve_expression(expr),
                 span,
             },
             Statement::ForIn(mut for_in) => {
+                let label_active =
+                    self.activate_label(&for_in.label, LabelKind::Loop, &for_in.span);
                 for_in.iterable = self.resolve_expression(for_in.iterable);
                 self.enter_scope();
+                self.enter_label_scope();
                 self.declare_immutable(
                     for_in.binding.name.clone(),
                     ValBindingOrigin::Implicit,
@@ -347,8 +377,22 @@ impl BindingResolver {
                     false,
                 );
                 for_in.body = Box::new(self.resolve_expression(*for_in.body));
+                self.exit_label_scope();
                 self.exit_scope();
+                self.deactivate_label(label_active);
                 Statement::ForIn(for_in)
+            }
+            Statement::Break { label, span } => {
+                if let Some(ref name) = label {
+                    self.validate_break_label(name, &span);
+                }
+                Statement::Break { label, span }
+            }
+            Statement::Continue { label, span } => {
+                if let Some(ref name) = label {
+                    self.validate_continue_label(name, &span);
+                }
+                Statement::Continue { label, span }
             }
             Statement::Concurrency(construct) => {
                 Statement::Concurrency(self.resolve_concurrency(construct))
@@ -356,11 +400,9 @@ impl BindingResolver {
             Statement::ResourceManagement(resource) => {
                 Statement::ResourceManagement(self.resolve_resource_management(resource))
             }
-            Statement::Import { .. }
-            | Statement::Package { .. }
-            | Statement::Break { .. }
-            | Statement::Continue { .. }
-            | Statement::Comment(_) => statement,
+            Statement::Import { .. } | Statement::Package { .. } | Statement::Comment(_) => {
+                statement
+            }
         }
     }
 
@@ -541,14 +583,17 @@ impl BindingResolver {
                 implicit_end,
                 span,
                 label,
-            } => Expression::When {
-                expr: expr.map(|inner| Box::new(self.resolve_expression(*inner))),
-                arms: arms
+            } => {
+                let label_active = self.activate_label(&label, LabelKind::When, &span);
+                let expr = expr.map(|inner| Box::new(self.resolve_expression(*inner)));
+                let arms = arms
                     .into_iter()
                     .map(|arm| {
                         self.enter_scope();
+                        self.enter_label_scope();
                         let guard = arm.guard.map(|g| self.resolve_expression(g));
                         let body = self.resolve_expression(arm.body);
+                        self.exit_label_scope();
                         self.exit_scope();
                         jv_ast::WhenArm {
                             pattern: arm.pattern,
@@ -557,12 +602,18 @@ impl BindingResolver {
                             span: arm.span,
                         }
                     })
-                    .collect(),
-                else_arm: else_arm.map(|expr| Box::new(self.resolve_expression(*expr))),
-                implicit_end,
-                label,
-                span,
-            },
+                    .collect();
+                let else_arm = else_arm.map(|expr| Box::new(self.resolve_expression(*expr)));
+                self.deactivate_label(label_active);
+                Expression::When {
+                    expr,
+                    arms,
+                    else_arm,
+                    implicit_end,
+                    label,
+                    span,
+                }
+            }
             Expression::If {
                 condition,
                 then_branch,
@@ -579,9 +630,13 @@ impl BindingResolver {
                 span,
                 label,
             } => {
+                let label_active = self.activate_label(&label, LabelKind::Block, &span);
                 self.enter_scope();
+                self.enter_label_scope();
                 let statements = self.resolve_statements(statements);
+                self.exit_label_scope();
                 self.exit_scope();
+                self.deactivate_label(label_active);
                 Expression::Block {
                     statements,
                     label,
@@ -615,7 +670,9 @@ impl BindingResolver {
                         param
                     })
                     .collect::<Vec<_>>();
+                let label_active = self.activate_label(&label, LabelKind::Lambda, &span);
                 self.enter_scope();
+                self.enter_label_scope();
                 for param in &parameters {
                     self.declare_immutable(
                         param.name.clone(),
@@ -625,7 +682,9 @@ impl BindingResolver {
                     );
                 }
                 let body = Box::new(self.resolve_expression(*body));
+                self.exit_label_scope();
                 self.exit_scope();
+                self.deactivate_label(label_active);
                 Expression::Lambda {
                     parameters,
                     body,
@@ -799,6 +858,108 @@ impl BindingResolver {
         self.scopes.pop();
     }
 
+    fn enter_label_scope(&mut self) {
+        self.label_scopes.push(HashSet::new());
+    }
+
+    fn exit_label_scope(&mut self) {
+        if self.label_scopes.len() > 1 {
+            self.label_scopes.pop();
+        }
+    }
+
+    fn declare_label_name(&mut self, name: &str) -> bool {
+        if let Some(scope) = self.label_scopes.last_mut() {
+            if scope.contains(name) {
+                return false;
+            }
+            scope.insert(name.to_string());
+            true
+        } else {
+            let mut scope = HashSet::new();
+            scope.insert(name.to_string());
+            self.label_scopes.push(scope);
+            true
+        }
+    }
+
+    fn activate_label(&mut self, label: &Option<String>, kind: LabelKind, span: &Span) -> bool {
+        if let Some(name) = label {
+            if !self.declare_label_name(name) {
+                self.report_validation_error(label_redeclared_message(name), Some(span.clone()));
+            }
+            self.label_stack.push(LabelEntry {
+                name: name.clone(),
+                kind,
+                span: span.clone(),
+            });
+            true
+        } else {
+            false
+        }
+    }
+
+    fn deactivate_label(&mut self, active: bool) {
+        if active {
+            self.label_stack.pop();
+        }
+    }
+
+    fn lookup_label(&self, name: &str) -> Option<&LabelEntry> {
+        self.label_stack
+            .iter()
+            .rev()
+            .find(|entry| entry.name == name)
+    }
+
+    fn validate_break_label(&mut self, name: &str, span: &Span) {
+        match self.lookup_label(name) {
+            Some(entry)
+                if matches!(
+                    entry.kind,
+                    LabelKind::Loop | LabelKind::Block | LabelKind::When
+                ) => {}
+            Some(_) | None => {
+                self.report_validation_error(label_undefined_message(name), Some(span.clone()));
+            }
+        }
+    }
+
+    fn validate_continue_label(&mut self, name: &str, span: &Span) {
+        match self.lookup_label(name) {
+            Some(entry) if matches!(entry.kind, LabelKind::Loop) => {}
+            Some(_) => {
+                self.report_validation_error(
+                    label_non_loop_continue_message(name),
+                    Some(span.clone()),
+                );
+            }
+            None => {
+                self.report_validation_error(label_undefined_message(name), Some(span.clone()));
+            }
+        }
+    }
+
+    fn validate_return_label(&mut self, name: &str, span: &Span) {
+        match self.lookup_label(name) {
+            Some(entry) if matches!(entry.kind, LabelKind::Lambda) => {}
+            Some(_) => {
+                self.report_validation_error(
+                    label_non_lambda_return_message(name),
+                    Some(span.clone()),
+                );
+            }
+            None => {
+                self.report_validation_error(label_undefined_message(name), Some(span.clone()));
+            }
+        }
+    }
+
+    fn report_validation_error(&mut self, message: String, span: Option<Span>) {
+        self.diagnostics
+            .push(CheckError::ValidationError { message, span });
+    }
+
     fn is_self_reference(&self, name: &str, expr: &Expression) -> bool {
         matches!(expr, Expression::Identifier(other, _) if other == name)
     }
@@ -824,5 +985,33 @@ fn missing_initializer_message(name: &str) -> String {
     format!(
         "JV4202: 暗黙宣言 `{}` には初期化子が必要です。`identifier = value` の形式で値を割り当ててください。\nJV4202: Implicit binding `{}` must provide an initializer. Assign a value using `identifier = value`.",
         name, name
+    )
+}
+
+fn label_undefined_message(label: &str) -> String {
+    format!(
+        "E-LABEL-UNDEFINED: `#{}` はこのスコープで利用できるラベルではありません。対応するラベルを宣言するか名前を確認してください。\nE-LABEL-UNDEFINED: Label `#{}` is not available in this scope. Declare the matching label or verify the name.",
+        label, label
+    )
+}
+
+fn label_non_loop_continue_message(label: &str) -> String {
+    format!(
+        "E-LABEL-NON_LOOP_CONTINUE: `continue #{}` はループラベルのみを対象にできます。`#{}` はループを指していません。\nE-LABEL-NON_LOOP_CONTINUE: `continue #{}` can only target loop labels; `#{}` does not refer to a loop.",
+        label, label, label, label
+    )
+}
+
+fn label_non_lambda_return_message(label: &str) -> String {
+    format!(
+        "E-LABEL-NON_LAMBDA_RETURN: `return #{}` はラムダ式に付与したラベルだけを指定できます。`#{}` はラムダを指していません。\nE-LABEL-NON_LAMBDA_RETURN: `return #{}` may only target lambda labels; `#{}` does not resolve to a lambda.",
+        label, label, label, label
+    )
+}
+
+fn label_redeclared_message(label: &str) -> String {
+    format!(
+        "E-LABEL-REDECLARED: ラベル `#{}` は同じスコープ内ですでに宣言されています。別名を使用してください。\nE-LABEL-REDECLARED: Label `#{}` is already declared in this scope. Use a different name.",
+        label, label
     )
 }
