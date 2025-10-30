@@ -3,6 +3,7 @@
 //! `ConstraintGenerator` はスコープ管理を `TypeEnvironment` に委ねつつ、
 //! val/var 宣言や代表的な式から型整合性と null 許容性の制約を収集する。
 
+use crate::diagnostics::messages;
 use crate::inference::compatibility::CompatibilityChecker;
 use crate::inference::constraint::{Constraint, ConstraintKind, ConstraintSet};
 use crate::inference::context_adaptation;
@@ -876,22 +877,16 @@ impl<'env, 'ext, 'imp> ConstraintGenerator<'env, 'ext, 'imp> {
 
     fn regex_subject_error_message(&self, ty: &TypeKind) -> String {
         let ty_desc = ty.describe();
-        format!(
-            "JV_REGEX_E002: `is /pattern/` の左辺型 `{}` は CharSequence 互換である必要があります。`toString()` などで文字列へ変換するか、CharSequence を実装した型を使用してください。\nJV_REGEX_E002: The left-hand side type `{}` must be compatible with CharSequence when using `is /pattern/`. Convert it with `toString()` or provide a CharSequence implementation.",
-            ty_desc, ty_desc
-        )
+        messages::regex_subject_error_message(&ty_desc)
     }
 
     fn regex_optional_warning_message(&self) -> String {
-        "JV_REGEX_W001: Optional 型の左辺は自動的に `value != null && matcher(value)` へ展開されます。明示的な null ガードを追加して意図を強調することも検討してください。\nJV_REGEX_W001: Optional subjects are evaluated as `value != null && matcher(value)` automatically. Consider adding an explicit null guard to make the intention clear.".into()
+        messages::regex_optional_warning_message()
     }
 
     fn regex_pattern_error_message(&self, ty: &TypeKind) -> String {
         let ty_desc = ty.describe();
-        format!(
-            "JV_REGEX_E003: `is` の右辺は `java.util.regex.Pattern` 型でなければなりません。現在の型は `{}` です。`Pattern.compile(...)` で生成するか、Pattern 型の値を渡してください。\nJV_REGEX_E003: The right-hand side of `is` must be a `java.util.regex.Pattern`, but the current type is `{}`. Construct a Pattern with `Pattern.compile(...)` or pass an existing Pattern.",
-            ty_desc, ty_desc
-        )
+        messages::regex_pattern_error_message(&ty_desc)
     }
 
     fn infer_unary_expression(&mut self, op: &UnaryOp, operand: &Expression) -> TypeKind {

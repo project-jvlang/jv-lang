@@ -548,7 +548,9 @@ fn apply_expression(expr: &mut IrExpression, resolution: &MethodResolution) {
             apply_expression(left, resolution);
             apply_expression(right, resolution);
         }
-        IrExpression::RegexMatch { subject, pattern, .. } => {
+        IrExpression::RegexMatch {
+            subject, pattern, ..
+        } => {
             apply_expression(subject, resolution);
             apply_expression(pattern, resolution);
         }

@@ -10,8 +10,8 @@ use crate::types::{
 use jv_ast::{
     Argument, BinaryMetadata, BinaryOp, BindingPatternKind, CallArgumentMetadata,
     CallArgumentStyle, CommentKind, ConcurrencyConstruct, Expression, IsTestKind, Literal,
-    Modifiers, Program, RegexGuardStrategy, ResourceManagement, SequenceDelimiter, Span,
-    Statement, TypeAnnotation, UnaryOp, ValBindingOrigin,
+    Modifiers, Program, RegexGuardStrategy, ResourceManagement, SequenceDelimiter, Span, Statement,
+    TypeAnnotation, UnaryOp, ValBindingOrigin,
 };
 
 mod concurrency;

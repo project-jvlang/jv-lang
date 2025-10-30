@@ -2330,7 +2330,9 @@ impl ListTerminalEnforcer {
                 self.visit_expression(left, None);
                 self.visit_expression(right, None);
             }
-            IrExpression::RegexMatch { subject, pattern, .. } => {
+            IrExpression::RegexMatch {
+                subject, pattern, ..
+            } => {
                 self.visit_expression(subject, None);
                 self.visit_expression(pattern, None);
             }

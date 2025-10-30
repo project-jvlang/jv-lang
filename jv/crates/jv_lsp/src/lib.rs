@@ -1433,10 +1433,34 @@ fn fallback_diagnostic(uri: &str, label: &str) -> Diagnostic {
 }
 
 fn warning_diagnostic(uri: &str, warning: CheckError) -> Diagnostic {
+    if let Some(diagnostic) = from_check_error(&warning) {
+        return tooling_diagnostic_to_lsp(
+            uri,
+            diagnostic.with_strategy(DiagnosticStrategy::Interactive),
+        );
+    }
+
+    if let CheckError::ValidationError { message, span } = warning {
+        let range = span
+            .as_ref()
+            .map(span_to_range)
+            .unwrap_or_else(default_range);
+        return Diagnostic {
+            range,
+            severity: Some(DiagnosticSeverity::Warning),
+            message,
+            code: None,
+            source: Some("jv-lsp".to_string()),
+            help: None,
+            suggestions: Vec::new(),
+            strategy: Some("Deferred".to_string()),
+        };
+    }
+
     Diagnostic {
         range: default_range(),
         severity: Some(DiagnosticSeverity::Warning),
-        message: format!("Warning ({uri}): {warning}"),
+        message: format!("Warning ({uri}): {}", warning),
         code: None,
         source: Some("jv-lsp".to_string()),
         help: None,

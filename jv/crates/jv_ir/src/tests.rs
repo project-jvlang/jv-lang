@@ -243,10 +243,7 @@ mod tests {
         };
 
         let mut context = TransformContext::new();
-        context.add_variable(
-            "text".to_string(),
-            JavaType::string(),
-        );
+        context.add_variable("text".to_string(), JavaType::string());
         let lowered = transform_expression(expr, &mut context).expect("regex is lowering");
 
         match lowered {
@@ -301,10 +298,7 @@ mod tests {
         };
 
         let mut context = TransformContext::new();
-        context.add_variable(
-            "input".to_string(),
-            JavaType::string(),
-        );
+        context.add_variable("input".to_string(), JavaType::string());
         let lowered = transform_expression(expr, &mut context).expect("regex guarded lowering");
 
         match lowered {

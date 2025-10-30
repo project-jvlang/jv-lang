@@ -386,10 +386,13 @@ fn surfaces_null_safety_warning() {
     server.open_document(uri.clone(), "val message: String = null".to_string());
 
     let diagnostics = server.get_diagnostics(&uri);
-    assert!(diagnostics.iter().any(|diag| matches!(
-        diag.severity,
-        Some(DiagnosticSeverity::Warning)
-    ) && diag.message.contains("Null safety")));
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diag| diag.code.as_deref() == Some("JV3002")),
+        "null 安全エラー JV3002 が報告される必要があります: {:?}",
+        diagnostics
+    );
 }
 
 #[test]
@@ -409,6 +412,44 @@ fn surfaces_regex_diagnostics_from_validator() {
         .regex_metadata(&uri)
         .expect("regex metadata should be recorded");
     assert_eq!(metadata.len(), 1);
+}
+
+#[test]
+fn regex_optional_warning_surfaces_with_precise_range() {
+    let span = Span::new(3, 5, 3, 20);
+    let message = jv_checker::diagnostics::messages::regex_optional_warning_message();
+    let error = CheckError::ValidationError {
+        message: message.clone(),
+        span: Some(span.clone()),
+    };
+
+    let diagnostic = warning_diagnostic("file:///regex-optional.jv", error);
+
+    assert_eq!(
+        diagnostic.code.as_deref(),
+        Some("JV_REGEX_W001"),
+        "診断コードが保持されている必要があります: {:?}",
+        diagnostic
+    );
+    assert_eq!(
+        diagnostic.range.start.line,
+        span.start_line.saturating_sub(1) as u32,
+        "スパン開始行が保持される必要があります: {:?}",
+        diagnostic.range
+    );
+    assert_eq!(
+        diagnostic.range.start.character,
+        span.start_column.saturating_sub(1) as u32,
+        "スパン開始カラムが保持される必要があります: {:?}",
+        diagnostic.range
+    );
+    assert!(
+        diagnostic
+            .message
+            .contains("Optional 型の左辺ではコンパイラが"),
+        "日本語メッセージが整備されている必要があります: {}",
+        diagnostic.message
+    );
 }
 
 #[test]
