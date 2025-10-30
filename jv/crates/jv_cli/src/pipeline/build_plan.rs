@@ -39,6 +39,11 @@ pub struct CliOverrides {
     pub parallel_inference: bool,
     pub inference_workers: Option<usize>,
     pub constraint_batch: Option<usize>,
+    // APT options
+    pub apt_enabled: bool,
+    pub apt_processors: Option<String>,
+    pub apt_processorpath: Option<String>,
+    pub apt_options: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -132,7 +137,44 @@ impl BuildOptionsFactory {
             settings,
             layout,
             options,
-            build_config,
+            build_config: {
+                // Apply APT overrides
+                let mut cfg = build_config;
+                if overrides.apt_enabled
+                    || overrides.apt_processors.is_some()
+                    || overrides.apt_processorpath.is_some()
+                    || !overrides.apt_options.is_empty()
+                {
+                    cfg.enable_apt();
+                }
+                if let Some(list) = overrides.apt_processors.as_ref() {
+                    let processors = list
+                        .split(',')
+                        .map(|s| s.trim().to_string())
+                        .filter(|s| !s.is_empty())
+                        .collect::<Vec<_>>();
+                    if !processors.is_empty() {
+                        cfg.set_apt_processors(processors);
+                    }
+                }
+                if let Some(path) = overrides.apt_processorpath.as_ref() {
+                    // Do not try to be smart here; allow user to pass joined path
+                    let entries = path
+                        .split(if cfg!(windows) { ';' } else { ':' })
+                        .map(|s| s.trim().to_string())
+                        .filter(|s| !s.is_empty())
+                        .collect::<Vec<_>>();
+                    if !entries.is_empty() {
+                        cfg.set_apt_processorpath(entries);
+                    }
+                }
+                for opt in overrides.apt_options {
+                    if !opt.trim().is_empty() {
+                        cfg.add_apt_option(opt);
+                    }
+                }
+                cfg
+            },
         })
     }
 }

@@ -70,6 +70,10 @@ fn main() -> Result<()> {
             binary,
             bin_name,
             target,
+            apt,
+            processors,
+            processorpath,
+            apt_options,
         }) => {
             let cwd = std::env::current_dir()?;
             let start_path = input
@@ -126,6 +130,11 @@ fn main() -> Result<()> {
                 parallel_inference,
                 inference_workers,
                 constraint_batch,
+                // APT
+                apt_enabled: apt,
+                apt_processors: processors.clone(),
+                apt_processorpath: processorpath.clone(),
+                apt_options: apt_options.clone(),
             };
 
             let plan = BuildOptionsFactory::compose(project_root, settings, layout, overrides)
@@ -308,6 +317,11 @@ fn main() -> Result<()> {
                 parallel_inference: false,
                 inference_workers: None,
                 constraint_batch: None,
+                // APT defaults disabled
+                apt_enabled: false,
+                apt_processors: None,
+                apt_processorpath: None,
+                apt_options: Vec::new(),
             };
 
             let plan = BuildOptionsFactory::compose(project_root, settings, layout, overrides)

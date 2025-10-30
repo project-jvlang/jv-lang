@@ -95,6 +95,11 @@ fn build_plan_for_input(input_path: &Path) -> Result<BuildPlan> {
         parallel_inference: false,
         inference_workers: None,
         constraint_batch: None,
+        // APT defaults disabled for quick runner
+        apt_enabled: false,
+        apt_processors: None,
+        apt_processorpath: None,
+        apt_options: Vec::new(),
     };
 
     BuildOptionsFactory::compose(project_root, settings, layout, overrides)

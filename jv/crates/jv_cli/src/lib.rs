@@ -98,6 +98,18 @@ pub enum Commands {
         /// Override the Java target (e.g., 21 or 25)
         #[arg(long, value_name = "java-target")]
         target: Option<JavaTarget>,
+        /// Enable javac annotation processing (APT)
+        #[arg(long, default_value_t = false)]
+        apt: bool,
+        /// Comma-separated annotation processors (e.g., org.example.Proc1,Proc2)
+        #[arg(long, value_name = "list")]
+        processors: Option<String>,
+        /// Processor path entries (jar/dir). Use platform separator if multiple.
+        #[arg(long, value_name = "path")]
+        processorpath: Option<String>,
+        /// Repeated processor option to pass as -A<k=v>
+        #[arg(long = "apt-option", value_name = "k=v")]
+        apt_options: Vec<String>,
     },
     /// Run a compiled jv program
     Run {

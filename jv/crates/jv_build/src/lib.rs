@@ -102,6 +102,19 @@ impl BuildSystem {
             cmd.args(["-cp", &self.config.classpath.join(":")]);
         }
 
+        // Annotation processing (APT)
+        if self.config.apt.enabled {
+            if !self.config.apt.processors.is_empty() {
+                cmd.args(["-processor", &self.config.apt.processors.join(",")]);
+            }
+            if !self.config.apt.processorpath.is_empty() {
+                cmd.args(["-processorpath", &self.config.apt.processorpath.join(":")]);
+            }
+            for opt in &self.config.apt.options {
+                cmd.arg(format!("-A{}", opt));
+            }
+        }
+
         // Add source files
         for file in java_files {
             cmd.arg(file);
