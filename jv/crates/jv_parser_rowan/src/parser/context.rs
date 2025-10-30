@@ -79,6 +79,14 @@ impl ExpressionState {
     }
 }
 
+#[derive(Clone, Copy)]
+enum UnitSuffixDescriptor {
+    SimpleWithAt,
+    SimpleWithoutAt,
+    BracketWithAt,
+    BracketWithoutAt,
+}
+
 /// パーサ内部状態。
 pub(crate) struct ParserContext<'tokens> {
     pub(crate) tokens: &'tokens [Token],
@@ -593,7 +601,127 @@ impl<'tokens> ParserContext<'tokens> {
                 break;
             }
 
+            if matches!(
+                kind,
+                TokenKind::NumberLiteral | TokenKind::StringLiteral | TokenKind::CharacterLiteral
+            ) {
+                let literal_index = self.cursor;
+                if let Some(descriptor) = self.detect_unit_suffix(literal_index) {
+                    self.start_node(SyntaxKind::UnitLiteral);
+
+                    let literal_token = self
+                        .bump_raw()
+                        .expect("literal token should be available when building unit literal");
+                    let mut last_kind_consumed = TokenKind::from_token(literal_token);
+                    let mut last_line_consumed = literal_token.line;
+
+                    self.consume_inline_whitespace();
+
+                    match descriptor {
+                        UnitSuffixDescriptor::SimpleWithAt => {
+                            if let Some(token) = self.current_token() {
+                                debug_assert!(
+                                    TokenKind::from_token(token) == TokenKind::At,
+                                    "単位識別子の前には `@` トークンが必要です"
+                                );
+                            }
+                            if let Some(token) = self.bump_raw() {
+                                last_kind_consumed = TokenKind::from_token(token);
+                                last_line_consumed = token.line;
+                            }
+                            self.consume_inline_whitespace();
+                            if let Some(token) = self.current_token() {
+                                debug_assert!(
+                                    TokenKind::from_token(token) == TokenKind::Identifier,
+                                    "`@` の直後には単位識別子が必要です"
+                                );
+                            }
+                            if let Some(token) = self.bump_raw() {
+                                last_kind_consumed = TokenKind::from_token(token);
+                                last_line_consumed = token.line;
+                            }
+                        }
+                        UnitSuffixDescriptor::SimpleWithoutAt => {
+                            if let Some(token) = self.current_token() {
+                                debug_assert!(
+                                    TokenKind::from_token(token) == TokenKind::Identifier,
+                                    "単位リテラルの末尾には単位識別子が必要です"
+                                );
+                            }
+                            if let Some(token) = self.bump_raw() {
+                                last_kind_consumed = TokenKind::from_token(token);
+                                last_line_consumed = token.line;
+                            }
+                        }
+                        UnitSuffixDescriptor::BracketWithAt => {
+                            if let Some(token) = self.current_token() {
+                                debug_assert!(
+                                    TokenKind::from_token(token) == TokenKind::At,
+                                    "角括弧付き単位の前には `@` トークンが必要です"
+                                );
+                            }
+                            if let Some(token) = self.bump_raw() {
+                                last_kind_consumed = TokenKind::from_token(token);
+                                last_line_consumed = token.line;
+                            }
+                            self.consume_inline_whitespace();
+                            let mut depth = 0usize;
+                            while let Some(token) = self.current_token() {
+                                let kind_now = TokenKind::from_token(token);
+                                let line_now = token.line;
+                                self.bump_raw();
+                                if kind_now == TokenKind::LeftBracket {
+                                    depth = depth.saturating_add(1);
+                                } else if kind_now == TokenKind::RightBracket {
+                                    depth = depth.saturating_sub(1);
+                                    if depth == 0 {
+                                        last_kind_consumed = kind_now;
+                                        last_line_consumed = line_now;
+                                        break;
+                                    }
+                                }
+                                last_kind_consumed = kind_now;
+                                last_line_consumed = line_now;
+                            }
+                        }
+                        UnitSuffixDescriptor::BracketWithoutAt => {
+                            let mut depth = 0usize;
+                            while let Some(token) = self.current_token() {
+                                let kind_now = TokenKind::from_token(token);
+                                let line_now = token.line;
+                                self.bump_raw();
+                                if kind_now == TokenKind::LeftBracket {
+                                    depth = depth.saturating_add(1);
+                                } else if kind_now == TokenKind::RightBracket {
+                                    depth = depth.saturating_sub(1);
+                                    if depth == 0 {
+                                        last_kind_consumed = kind_now;
+                                        last_line_consumed = line_now;
+                                        break;
+                                    }
+                                }
+                                last_kind_consumed = kind_now;
+                                last_line_consumed = line_now;
+                            }
+                        }
+                    }
+
+                    self.finish_node();
+
+                    last_line = Some(last_line_consumed);
+                    second_last_significant_kind = last_significant_kind;
+                    last_significant_kind = Some(last_kind_consumed);
+                    continue;
+                }
+            }
+
             let mut started_when_block = false;
+                            if let Some(token) = self.current_token() {
+                                debug_assert!(
+                                    TokenKind::from_token(token) == TokenKind::At,
+                                    "角括弧付き単位の前には `@` トークンが必要です"
+                                );
+                            }
             if respect_statement_boundaries && at_top_level && kind == TokenKind::LeftBrace {
                 if let Some(state) = self.expression_states.last_mut() {
                     if state.has_pending_when() {
@@ -776,6 +904,19 @@ impl<'tokens> ParserContext<'tokens> {
         consumed
     }
 
+    fn consume_inline_whitespace(&mut self) -> bool {
+        let mut consumed = false;
+        while let Some(token) = self.current_token() {
+            if TokenKind::from_token(token) == TokenKind::Whitespace {
+                self.bump_raw();
+                consumed = true;
+            } else {
+                break;
+            }
+        }
+        consumed
+    }
+
     fn consume_comment_statement(&mut self) -> bool {
         let Some(token) = self.current_token() else {
             return false;
@@ -860,6 +1001,90 @@ impl<'tokens> ParserContext<'tokens> {
     }
 
     /// 指定インデックスの `@` トークン直後にホワイトスペースが存在するかを判定する。
+    fn detect_unit_suffix(&self, literal_index: usize) -> Option<UnitSuffixDescriptor> {
+        let mut index = literal_index.saturating_add(1);
+        let len = self.tokens.len();
+        let mut saw_whitespace = false;
+
+        while index < len {
+            let token = &self.tokens[index];
+            let kind = TokenKind::from_token(token);
+            match kind {
+                TokenKind::Whitespace => {
+                    saw_whitespace = true;
+                    index += 1;
+                }
+                TokenKind::Newline => return None,
+                TokenKind::At => {
+                    index += 1;
+                    while index < len {
+                        let token_after = &self.tokens[index];
+                        let kind_after = TokenKind::from_token(token_after);
+                        match kind_after {
+                            TokenKind::Whitespace => index += 1,
+                            TokenKind::Newline => return None,
+                            TokenKind::Identifier => {
+                                return Some(UnitSuffixDescriptor::SimpleWithAt);
+                            }
+                            TokenKind::LeftBracket => {
+                                if self.find_matching_right_bracket(index).is_some() {
+                                    return Some(UnitSuffixDescriptor::BracketWithAt);
+                                } else {
+                                    return None;
+                                }
+                            }
+                            _ => return None,
+                        }
+                    }
+                    return None;
+                }
+                TokenKind::Identifier => {
+                    if saw_whitespace {
+                        return None;
+                    }
+                    return Some(UnitSuffixDescriptor::SimpleWithoutAt);
+                }
+                TokenKind::LeftBracket => {
+                    if saw_whitespace {
+                        return None;
+                    }
+                    if self.find_matching_right_bracket(index).is_some() {
+                        return Some(UnitSuffixDescriptor::BracketWithoutAt);
+                    } else {
+                        return None;
+                    }
+                }
+                _ => return None,
+            }
+        }
+
+        None
+    }
+
+    fn find_matching_right_bracket(&self, start_index: usize) -> Option<usize> {
+        let mut depth = 0usize;
+        let len = self.tokens.len();
+        let mut index = start_index;
+
+        while index < len {
+            let token = &self.tokens[index];
+            let kind = TokenKind::from_token(token);
+            match kind {
+                TokenKind::LeftBracket => depth = depth.saturating_add(1),
+                TokenKind::RightBracket => {
+                    depth = depth.saturating_sub(1);
+                    if depth == 0 {
+                        return Some(index);
+                    }
+                }
+                TokenKind::Newline => return None,
+                _ => {}
+            }
+            index += 1;
+        }
+
+        None
+    }
     #[allow(dead_code)]
     pub(crate) fn has_whitespace_after_at(&self, index: usize) -> bool {
         let Some(token) = self.tokens.get(index) else {

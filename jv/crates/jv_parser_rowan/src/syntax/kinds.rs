@@ -46,6 +46,8 @@ pub enum SyntaxKind {
     AnnotationArgumentList,
     /// アノテーション引数。
     AnnotationArgument,
+    /// 単位リテラル。
+    UnitLiteral,
     /// ステートメントレベル修飾子のリスト。
     ModifierList,
     /// 単一の修飾子。
@@ -677,6 +679,7 @@ mod tests {
         ("Annotation", SyntaxKind::Annotation),
         ("AnnotationArgumentList", SyntaxKind::AnnotationArgumentList),
         ("AnnotationArgument", SyntaxKind::AnnotationArgument),
+        ("UnitLiteral", SyntaxKind::UnitLiteral),
         ("ModifierList", SyntaxKind::ModifierList),
         ("Modifier", SyntaxKind::Modifier),
         ("FunctionDeclaration", SyntaxKind::FunctionDeclaration),
