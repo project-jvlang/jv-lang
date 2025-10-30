@@ -23,8 +23,8 @@ members = [
 ]
 
 [workspace.package]
-version = "0.1.0"
-edition = "2021"
+version = "0.1.4"
+edition = "2024"
 license = "MIT OR Apache-2.0"
 authors = ["jv Language Team"]
 repository = "https://github.com/project-jvlang/jv-lang"
