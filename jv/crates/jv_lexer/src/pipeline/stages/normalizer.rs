@@ -299,6 +299,7 @@ impl Normalizer {
             delimiter_kind,
             StringDelimiterKind::TripleQuote | StringDelimiterKind::TripleSingleQuote
         );
+        string_metadata.raw_lexeme = Some(token.text.to_string());
         let allows_interpolation = string_metadata.allows_interpolation;
         metadata
             .provisional_metadata

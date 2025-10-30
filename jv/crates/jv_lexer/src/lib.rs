@@ -210,6 +210,8 @@ pub struct StringLiteralMetadata {
     pub char_length: usize,
     #[serde(default)]
     pub raw_flavor: Option<RawStringFlavor>,
+    #[serde(default)]
+    pub raw_lexeme: Option<String>,
 }
 
 impl StringLiteralMetadata {
@@ -227,6 +229,7 @@ impl StringLiteralMetadata {
             is_raw,
             char_length: 0,
             raw_flavor,
+            raw_lexeme: None,
         }
     }
 }

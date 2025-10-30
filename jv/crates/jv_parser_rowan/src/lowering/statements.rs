@@ -1335,23 +1335,7 @@ mod expression_parser {
                 }
                 TokenType::String(_) | TokenType::StringInterpolation(_) => {
                     let span = span_from_token(token);
-                    let has_interpolation = token.metadata.iter().any(|metadata| {
-                        matches!(metadata, TokenMetadata::StringInterpolation { .. })
-                    });
-
-                    let expr = if has_interpolation {
-                        let (expr, _) = parse_string_token_with_metadata(token, span.clone())?;
-                        expr
-                    } else {
-                        let value = match &token.token_type {
-                            TokenType::String(value) | TokenType::StringInterpolation(value) => {
-                                value.clone()
-                            }
-                            _ => token.lexeme.clone(),
-                        };
-                        Expression::Literal(Literal::String(value), span.clone())
-                    };
-
+                    let (expr, _) = parse_string_token_with_metadata(token, span.clone())?;
                     Ok(ParsedExpr {
                         expr,
                         start: index,
@@ -1401,6 +1385,15 @@ mod expression_parser {
                 TokenType::LeftBrace => unreachable!(
                     "LeftBrace should be handled in parse_prefix via parse_brace_expression"
                 ),
+                TokenType::RegexLiteral(_) => {
+                    let span = span_from_token(token);
+                    let literal = regex_literal_from_token(token, span.clone());
+                    Ok(ParsedExpr {
+                        expr: Expression::RegexLiteral(literal),
+                        start: index,
+                        end: index + 1,
+                    })
+                }
                 other => Err(ExpressionError::new(
                     format!("未対応のトークン {:?} が式中に存在します", other),
                     Some(span_from_index(self.tokens, index)),
@@ -3881,7 +3874,7 @@ mod expression_parser {
                     let literal = build_multiline_literal(
                         kind,
                         normalized,
-                        token.lexeme.clone(),
+                        raw_lexeme_from_metadata(token, metadata),
                         parts,
                         span.clone(),
                         metadata,
@@ -3906,7 +3899,7 @@ mod expression_parser {
                 let literal = build_multiline_literal(
                     kind,
                     value.clone(),
-                    token.lexeme.clone(),
+                    raw_lexeme_from_metadata(token, metadata),
                     Vec::new(),
                     span.clone(),
                     metadata,
@@ -3992,6 +3985,12 @@ mod expression_parser {
             LexerRawStringFlavor::SingleLine => RawStringFlavor::SingleLine,
             LexerRawStringFlavor::MultiLine => RawStringFlavor::MultiLine,
         })
+    }
+
+    fn raw_lexeme_from_metadata(token: &Token, metadata: Option<&StringLiteralMetadata>) -> String {
+        metadata
+            .and_then(|meta| meta.raw_lexeme.clone())
+            .unwrap_or_else(|| token.lexeme.clone())
     }
 
     fn has_high_json_confidence(token: &Token) -> bool {

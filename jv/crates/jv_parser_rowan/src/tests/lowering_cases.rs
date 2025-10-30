@@ -2180,7 +2180,7 @@ fn raw_string_literals_lower_with_raw_metadata() {
             assert_eq!(literal.raw_flavor, Some(RawStringFlavor::SingleLine));
             assert!(literal.parts.is_empty());
             assert_eq!(literal.normalized, "C:\\Users\\dev");
-            assert_eq!(literal.raw, "'C\\Users\\dev'");
+            assert_eq!(literal.raw, "'C:\\Users\\dev'");
         }
         other => panic!("expected raw single literal, got {:?}", other),
     }
