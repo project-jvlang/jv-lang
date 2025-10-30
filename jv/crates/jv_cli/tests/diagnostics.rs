@@ -132,3 +132,45 @@ fun main(): Unit {
         combined
     );
 }
+
+#[test]
+fn check_command_reports_label_error() {
+    let Some(cli_path): Option<PathBuf> = std::env::var_os("CARGO_BIN_EXE_jv").map(Into::into)
+    else {
+        eprintln!("Skipping label diagnostic test: CLI binary unavailable");
+        return;
+    };
+
+    let dir = tempdir().expect("create temp dir");
+    let source_path = dir.path().join("label_error.jv");
+    let source = r#"
+fun main(): Unit {
+    val values = [1 2 3]
+    #outer for value in values {
+        break #missing
+    }
+}
+"#;
+    fs::write(&source_path, source.trim_start()).expect("write label error source");
+
+    let output = Command::new(cli_path)
+        .arg("check")
+        .arg(&source_path)
+        .output()
+        .expect("invoke jv check for label error");
+
+    assert!(
+        !output.status.success(),
+        "未定義ラベルを含む場合、jv check は失敗すべきです"
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let combined = format!("{}{}", stdout, stderr);
+
+    assert!(
+        combined.contains("E-LABEL-UNDEFINED"),
+        "CLI出力に E-LABEL-UNDEFINED が含まれるべきです:\n{}",
+        combined
+    );
+}

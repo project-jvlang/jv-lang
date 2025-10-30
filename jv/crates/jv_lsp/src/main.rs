@@ -165,7 +165,7 @@ impl tower_lsp::LanguageServer for Backend {
         };
 
         let completions = {
-            let server = self.language_server.lock().await;
+            let mut server = self.language_server.lock().await;
             server.get_completions(&uri, jv_position)
         };
 
@@ -202,7 +202,7 @@ impl tower_lsp::LanguageServer for Backend {
         };
 
         let hover = {
-            let server = self.language_server.lock().await;
+            let mut server = self.language_server.lock().await;
             server.get_hover(&uri, jv_position)
         };
 

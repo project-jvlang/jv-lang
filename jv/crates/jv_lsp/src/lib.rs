@@ -5,8 +5,9 @@ use handlers::imports::build_imports_response;
 pub use handlers::imports::{ImportItem, ImportsParams, ImportsResponse};
 use jv_ast::types::TypeLevelExpr;
 use jv_ast::{
-    Argument, ConstParameter, Expression, GenericParameter, GenericSignature, Program,
-    RegexLiteral, Span, Statement, StringPart, TypeAnnotation,
+    Argument, ConcurrencyConstruct, ConstParameter, Expression, GenericParameter, GenericSignature,
+    LoopStrategy, Parameter, Program, RegexLiteral, ResourceManagement, Span, Statement,
+    StringPart, TypeAnnotation,
 };
 use jv_build::BuildConfig;
 use jv_build::metadata::{
@@ -284,6 +285,443 @@ impl GenericDocumentIndex {
     }
 }
 
+#[derive(Debug, Clone)]
+struct LabelDefinition {
+    name: String,
+    scope: Span,
+    declaration: Span,
+    target: LabelTarget,
+}
+
+impl LabelDefinition {
+    fn display(&self) -> String {
+        format!("#{}", self.name)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LabelTarget {
+    Loop,
+    Block,
+    When,
+    Lambda,
+}
+
+impl LabelTarget {
+    fn display_name(self) -> &'static str {
+        match self {
+            LabelTarget::Loop => "ループ",
+            LabelTarget::Block => "ブロック",
+            LabelTarget::When => "when式",
+            LabelTarget::Lambda => "ラムダ式",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LabelUsageKind {
+    Break,
+    Continue,
+    Return,
+    Definition,
+    Unknown,
+}
+
+#[derive(Default, Debug, Clone)]
+struct LabelDocumentIndex {
+    definitions: Vec<LabelDefinition>,
+}
+
+impl LabelDocumentIndex {
+    fn from_program(program: &Program) -> Self {
+        let mut collector = LabelCollector::default();
+        collector.collect_program(program);
+        Self {
+            definitions: collector.definitions,
+        }
+    }
+
+    fn resolve(&self, name: &str, position: &Position) -> Option<&LabelDefinition> {
+        let mut candidates: Vec<&LabelDefinition> = self
+            .definitions
+            .iter()
+            .filter(|definition| {
+                definition.name == name
+                    && (position_overlaps_span(position, &definition.scope)
+                        || position_overlaps_span(position, &definition.declaration))
+            })
+            .collect();
+        candidates.sort_by_key(|definition| span_metric(&definition.scope));
+        candidates.into_iter().next()
+    }
+
+    fn labels_for_completion<'a>(
+        &'a self,
+        position: &Position,
+        usage: LabelUsageKind,
+    ) -> Vec<&'a LabelDefinition> {
+        let mut results: Vec<&LabelDefinition> = self
+            .definitions
+            .iter()
+            .filter(|definition| position_overlaps_span(position, &definition.scope))
+            .filter(|definition| match usage {
+                LabelUsageKind::Continue => definition.target == LabelTarget::Loop,
+                LabelUsageKind::Return => definition.target == LabelTarget::Lambda,
+                LabelUsageKind::Break | LabelUsageKind::Definition | LabelUsageKind::Unknown => {
+                    true
+                }
+            })
+            .collect();
+        results.sort_by_key(|definition| span_metric(&definition.scope));
+        results
+    }
+}
+
+#[derive(Default)]
+struct LabelCollector {
+    definitions: Vec<LabelDefinition>,
+}
+
+impl LabelCollector {
+    fn collect_program(&mut self, program: &Program) {
+        for statement in &program.statements {
+            self.collect_statement(statement);
+        }
+    }
+
+    fn collect_statement(&mut self, statement: &Statement) {
+        match statement {
+            Statement::Comment(_) => {}
+            Statement::ValDeclaration { initializer, .. } => {
+                self.collect_expression(initializer);
+            }
+            Statement::VarDeclaration { initializer, .. } => {
+                if let Some(expr) = initializer {
+                    self.collect_expression(expr);
+                }
+            }
+            Statement::FunctionDeclaration {
+                parameters, body, ..
+            } => {
+                self.collect_parameters(parameters);
+                self.collect_expression(body);
+            }
+            Statement::ClassDeclaration {
+                properties,
+                methods,
+                ..
+            } => {
+                for property in properties {
+                    if let Some(init) = &property.initializer {
+                        self.collect_expression(init);
+                    }
+                    if let Some(getter) = &property.getter {
+                        self.collect_expression(getter);
+                    }
+                    if let Some(setter) = &property.setter {
+                        self.collect_expression(setter);
+                    }
+                }
+                for method in methods {
+                    self.collect_statement(method);
+                }
+            }
+            Statement::DataClassDeclaration { parameters, .. } => {
+                self.collect_parameters(parameters);
+            }
+            Statement::InterfaceDeclaration {
+                methods,
+                properties,
+                ..
+            } => {
+                for method in methods {
+                    self.collect_statement(method);
+                }
+                for property in properties {
+                    if let Some(init) = &property.initializer {
+                        self.collect_expression(init);
+                    }
+                    if let Some(getter) = &property.getter {
+                        self.collect_expression(getter);
+                    }
+                    if let Some(setter) = &property.setter {
+                        self.collect_expression(setter);
+                    }
+                }
+            }
+            Statement::ExtensionFunction(extension) => {
+                self.collect_statement(extension.function.as_ref());
+            }
+            Statement::Expression { expr, .. } => {
+                self.collect_expression(expr);
+            }
+            Statement::Return { value, .. } => {
+                if let Some(expr) = value {
+                    self.collect_expression(expr);
+                }
+            }
+            Statement::Throw { expr, .. } => {
+                self.collect_expression(expr);
+            }
+            Statement::Assignment { target, value, .. } => {
+                self.collect_expression(target);
+                self.collect_expression(value);
+            }
+            Statement::ForIn(for_in) => {
+                if let Some(label) = &for_in.label {
+                    let scope = expression_span(&for_in.body);
+                    self.register_label(label, LabelTarget::Loop, &scope, &for_in.span);
+                }
+                self.collect_expression(&for_in.iterable);
+                self.collect_loop_strategy(&for_in.strategy);
+                self.collect_expression(&for_in.body);
+            }
+            Statement::Break { .. } => {}
+            Statement::Continue { .. } => {}
+            Statement::Import { .. } => {}
+            Statement::Package { .. } => {}
+            Statement::Concurrency(construct) => {
+                self.collect_concurrency(construct);
+            }
+            Statement::ResourceManagement(resource) => {
+                self.collect_resource_management(resource);
+            }
+        }
+    }
+
+    fn collect_expression(&mut self, expression: &Expression) {
+        match expression {
+            Expression::Literal(_, _) => {}
+            Expression::RegexLiteral(_) => {}
+            Expression::Identifier(_, _) => {}
+            Expression::Binary { left, right, .. } => {
+                self.collect_expression(left);
+                self.collect_expression(right);
+            }
+            Expression::Unary { operand, .. } => {
+                self.collect_expression(operand);
+            }
+            Expression::Call {
+                function,
+                args,
+                type_arguments: _,
+                argument_metadata: _,
+                ..
+            } => {
+                self.collect_expression(function);
+                for arg in args {
+                    self.collect_argument(arg);
+                }
+            }
+            Expression::MemberAccess { object, .. } => {
+                self.collect_expression(object);
+            }
+            Expression::NullSafeMemberAccess { object, .. } => {
+                self.collect_expression(object);
+            }
+            Expression::IndexAccess { object, index, .. } => {
+                self.collect_expression(object);
+                self.collect_expression(index);
+            }
+            Expression::NullSafeIndexAccess { object, index, .. } => {
+                self.collect_expression(object);
+                self.collect_expression(index);
+            }
+            Expression::TypeCast { expr, .. } => {
+                self.collect_expression(expr);
+            }
+            Expression::StringInterpolation { parts, .. } => {
+                for part in parts {
+                    if let StringPart::Expression(expr) = part {
+                        self.collect_expression(expr);
+                    }
+                }
+            }
+            Expression::MultilineString(_) => {}
+            Expression::JsonLiteral(_) => {}
+            Expression::When {
+                expr,
+                arms,
+                else_arm,
+                label,
+                span,
+                ..
+            } => {
+                if let Some(name) = label {
+                    self.register_label(name, LabelTarget::When, span, span);
+                }
+                if let Some(value) = expr {
+                    self.collect_expression(value);
+                }
+                for arm in arms {
+                    if let Some(guard) = &arm.guard {
+                        self.collect_expression(guard);
+                    }
+                    self.collect_expression(&arm.body);
+                }
+                if let Some(else_branch) = else_arm {
+                    self.collect_expression(else_branch);
+                }
+            }
+            Expression::If {
+                condition,
+                then_branch,
+                else_branch,
+                ..
+            } => {
+                self.collect_expression(condition);
+                self.collect_expression(then_branch);
+                if let Some(branch) = else_branch {
+                    self.collect_expression(branch);
+                }
+            }
+            Expression::Block {
+                statements,
+                label,
+                span,
+            } => {
+                if let Some(name) = label {
+                    self.register_label(name, LabelTarget::Block, span, span);
+                }
+                for stmt in statements {
+                    self.collect_statement(stmt);
+                }
+            }
+            Expression::Array { elements, .. } => {
+                for element in elements {
+                    self.collect_expression(element);
+                }
+            }
+            Expression::Lambda {
+                parameters,
+                body,
+                label,
+                span,
+                ..
+            } => {
+                if let Some(name) = label {
+                    self.register_label(name, LabelTarget::Lambda, span, span);
+                }
+                self.collect_parameters(parameters);
+                self.collect_expression(body);
+            }
+            Expression::Try {
+                body,
+                catch_clauses,
+                finally_block,
+                ..
+            } => {
+                self.collect_expression(body);
+                for clause in catch_clauses {
+                    if let Some(parameter) = &clause.parameter {
+                        if let Some(default) = &parameter.default_value {
+                            self.collect_expression(default);
+                        }
+                    }
+                    self.collect_expression(&clause.body);
+                }
+                if let Some(finally_expr) = finally_block {
+                    self.collect_expression(finally_expr);
+                }
+            }
+            Expression::This(_) => {}
+            Expression::Super(_) => {}
+        }
+    }
+
+    fn collect_argument(&mut self, argument: &Argument) {
+        match argument {
+            Argument::Positional(expr) => self.collect_expression(expr),
+            Argument::Named { value, .. } => self.collect_expression(value),
+        }
+    }
+
+    fn collect_parameters(&mut self, parameters: &[Parameter]) {
+        for parameter in parameters {
+            if let Some(default_value) = &parameter.default_value {
+                self.collect_expression(default_value);
+            }
+        }
+    }
+
+    fn collect_loop_strategy(&mut self, strategy: &LoopStrategy) {
+        if let LoopStrategy::NumericRange(range) = strategy {
+            self.collect_expression(&range.start);
+            self.collect_expression(&range.end);
+        }
+    }
+
+    fn collect_concurrency(&mut self, construct: &ConcurrencyConstruct) {
+        match construct {
+            ConcurrencyConstruct::Spawn { body, .. } | ConcurrencyConstruct::Async { body, .. } => {
+                self.collect_expression(body)
+            }
+            ConcurrencyConstruct::Await { expr, .. } => self.collect_expression(expr),
+        }
+    }
+
+    fn collect_resource_management(&mut self, resource: &ResourceManagement) {
+        match resource {
+            ResourceManagement::Use {
+                resource,
+                body,
+                span: _,
+            } => {
+                self.collect_expression(resource);
+                self.collect_expression(body);
+            }
+            ResourceManagement::Defer { body, .. } => self.collect_expression(body),
+        }
+    }
+
+    fn register_label(
+        &mut self,
+        name: &str,
+        target: LabelTarget,
+        scope: &Span,
+        declaration: &Span,
+    ) {
+        self.definitions.push(LabelDefinition {
+            name: name.to_string(),
+            scope: scope.clone(),
+            declaration: declaration.clone(),
+            target,
+        });
+    }
+}
+
+fn span_metric(span: &Span) -> (usize, usize) {
+    let line_span = span.end_line.saturating_sub(span.start_line);
+    let column_span = span.end_column.saturating_sub(span.start_column);
+    (line_span, column_span)
+}
+
+fn expression_span(expr: &Expression) -> Span {
+    match expr {
+        Expression::Literal(_, span)
+        | Expression::Identifier(_, span)
+        | Expression::Binary { span, .. }
+        | Expression::Unary { span, .. }
+        | Expression::Call { span, .. }
+        | Expression::MemberAccess { span, .. }
+        | Expression::NullSafeMemberAccess { span, .. }
+        | Expression::IndexAccess { span, .. }
+        | Expression::NullSafeIndexAccess { span, .. }
+        | Expression::TypeCast { span, .. }
+        | Expression::StringInterpolation { span, .. }
+        | Expression::When { span, .. }
+        | Expression::If { span, .. }
+        | Expression::Block { span, .. }
+        | Expression::Array { span, .. }
+        | Expression::Lambda { span, .. }
+        | Expression::Try { span, .. } => span.clone(),
+        Expression::RegexLiteral(literal) => literal.span.clone(),
+        Expression::MultilineString(literal) => literal.span.clone(),
+        Expression::JsonLiteral(literal) => literal.span.clone(),
+        Expression::This(span) | Expression::Super(span) => span.clone(),
+    }
+}
+
 fn collect_generic_symbols(
     statement: &Statement,
     path: &mut Vec<String>,
@@ -497,6 +935,7 @@ pub struct JvLanguageServer {
     regex_metadata: HashMap<String, Vec<RegexAnalysis>>,
     programs: HashMap<String, Program>,
     generics: HashMap<String, GenericDocumentIndex>,
+    labels: HashMap<String, LabelDocumentIndex>,
     parallel_config: ParallelInferenceConfig,
 }
 
@@ -535,6 +974,7 @@ impl JvLanguageServer {
             regex_metadata: HashMap::new(),
             programs: HashMap::new(),
             generics: HashMap::new(),
+            labels: HashMap::new(),
             parallel_config: config,
         }
     }
@@ -605,6 +1045,7 @@ impl JvLanguageServer {
         self.regex_metadata.remove(&uri);
         self.programs.remove(&uri);
         self.generics.remove(&uri);
+        self.labels.remove(&uri);
     }
 
     pub fn close_document(&mut self, uri: &str) {
@@ -613,6 +1054,7 @@ impl JvLanguageServer {
         self.regex_metadata.remove(uri);
         self.programs.remove(uri);
         self.generics.remove(uri);
+        self.labels.remove(uri);
     }
 
     pub fn get_diagnostics(&mut self, uri: &str) -> Vec<Diagnostic> {
@@ -628,6 +1070,7 @@ impl JvLanguageServer {
                 self.regex_metadata.remove(uri);
                 self.programs.remove(uri);
                 self.generics.remove(uri);
+                self.labels.remove(uri);
                 return match from_parse_error(&error) {
                     Some(diagnostic) => vec![tooling_diagnostic_to_lsp(
                         uri,
@@ -660,6 +1103,7 @@ impl JvLanguageServer {
             self.regex_metadata.remove(uri);
             self.programs.remove(uri);
             self.generics.remove(uri);
+            self.labels.remove(uri);
             return diagnostics;
         }
 
@@ -682,6 +1126,7 @@ impl JvLanguageServer {
                 ));
                 self.type_facts.remove(uri);
                 self.regex_metadata.remove(uri);
+                self.labels.remove(uri);
                 return diagnostics;
             }
         };
@@ -695,6 +1140,7 @@ impl JvLanguageServer {
                 Err(error) => {
                     self.type_facts.remove(uri);
                     self.regex_metadata.remove(uri);
+                    self.labels.remove(uri);
                     return vec![match import_diagnostics::from_error(&error) {
                         Some(diagnostic) => tooling_diagnostic_to_lsp(
                             uri,
@@ -858,7 +1304,7 @@ impl JvLanguageServer {
         diagnostics
     }
 
-    pub fn get_completions(&self, uri: &str, position: Position) -> Vec<String> {
+    pub fn get_completions(&mut self, uri: &str, position: Position) -> Vec<String> {
         let mut items: Vec<String> = COMPLETION_TEMPLATES
             .iter()
             .map(|template| (*template).to_string())
@@ -867,6 +1313,17 @@ impl JvLanguageServer {
         if let Some(content) = self.documents.get(uri) {
             if should_offer_sequence_completions(content, &position) {
                 items.extend(SEQUENCE_OPERATIONS.iter().map(sequence_completion_item));
+            }
+            if let Some(context) = label_completion_context(content, &position) {
+                if let Some(index) = self.ensure_label_index(uri) {
+                    for definition in index.labels_for_completion(&position, context.usage) {
+                        items.push(format!(
+                            "{} · {}",
+                            definition.display(),
+                            definition.target.display_name()
+                        ));
+                    }
+                }
             }
         }
 
@@ -899,8 +1356,22 @@ impl JvLanguageServer {
         self.type_facts.get(uri)
     }
 
-    pub fn get_hover(&self, uri: &str, position: Position) -> Option<HoverResult> {
+    fn ensure_label_index(&mut self, uri: &str) -> Option<&LabelDocumentIndex> {
+        if !self.labels.contains_key(uri) {
+            if let Some(program) = self.programs.get(uri) {
+                let index = LabelDocumentIndex::from_program(program);
+                self.labels.insert(uri.to_string(), index);
+            }
+        }
+        self.labels.get(uri)
+    }
+
+    pub fn get_hover(&mut self, uri: &str, position: Position) -> Option<HoverResult> {
         if let Some(hover) = self.sequence_hover(uri, &position) {
+            return Some(hover);
+        }
+
+        if let Some(hover) = self.label_hover(uri, &position) {
             return Some(hover);
         }
 
@@ -962,6 +1433,42 @@ impl JvLanguageServer {
             .iter()
             .find(|candidate| candidate.name == word)?;
         let contents = build_sequence_hover(operation);
+        Some(HoverResult {
+            contents,
+            range: Range {
+                start: Position {
+                    line: position.line,
+                    character: start as u32,
+                },
+                end: Position {
+                    line: position.line,
+                    character: end as u32,
+                },
+            },
+        })
+    }
+
+    fn label_hover(&mut self, uri: &str, position: &Position) -> Option<HoverResult> {
+        let content = self.documents.get(uri)?;
+        let (start, end, word) = word_at_position(content, position)?;
+        if !word.starts_with('#') {
+            return None;
+        }
+        let label_name = word.trim_start_matches('#');
+        if label_name.is_empty() {
+            return None;
+        }
+        let index = self.ensure_label_index(uri)?;
+        let definition = index.resolve(label_name, position)?;
+        let contents = format!(
+            "ラベル `{}`\n対象: {}\n有効範囲: L{}C{} → L{}C{}",
+            word,
+            definition.target.display_name(),
+            definition.scope.start_line,
+            definition.scope.start_column,
+            definition.scope.end_line,
+            definition.scope.end_column
+        );
         Some(HoverResult {
             contents,
             range: Range {
@@ -2031,6 +2538,50 @@ fn sequence_completion_item(operation: &SequenceOperationDoc) -> String {
     entry
 }
 
+struct LabelCompletionContext {
+    usage: LabelUsageKind,
+}
+
+fn label_completion_context(content: &str, position: &Position) -> Option<LabelCompletionContext> {
+    let line_index = position.line as usize;
+    let lines: Vec<&str> = content.split('\n').collect();
+    if line_index >= lines.len() {
+        return None;
+    }
+
+    let line = lines[line_index];
+    let mut char_index = position.character as usize;
+    if char_index > line.len() {
+        char_index = line.len();
+    }
+
+    if line.is_empty() || char_index == 0 {
+        return None;
+    }
+
+    let bytes = line.as_bytes();
+    let mut start = char_index;
+    while start > 0 && is_word_byte(bytes[start.saturating_sub(1)]) {
+        start = start.saturating_sub(1);
+    }
+
+    let hash_index = start.checked_sub(1)?;
+    if bytes.get(hash_index)? != &b'#' {
+        return None;
+    }
+
+    let before = line[..hash_index].trim_end();
+    let usage = match before.split_whitespace().last() {
+        Some("break") => LabelUsageKind::Break,
+        Some("continue") => LabelUsageKind::Continue,
+        Some("return") => LabelUsageKind::Return,
+        Some(_) => LabelUsageKind::Unknown,
+        None => LabelUsageKind::Definition,
+    };
+
+    Some(LabelCompletionContext { usage })
+}
+
 fn should_offer_sequence_completions(content: &str, position: &Position) -> bool {
     let line_index = position.line as usize;
     let lines: Vec<&str> = content.split('\n').collect();
@@ -2082,6 +2633,12 @@ fn word_at_position(content: &str, position: &Position) -> Option<(usize, usize,
     let mut start = char_index;
     while start > 0 && is_word_byte(bytes[start - 1]) {
         start -= 1;
+    }
+
+    if start > 0 && bytes[start - 1] == b'#' {
+        start -= 1;
+    } else if start == 0 && !bytes.is_empty() && bytes[0] == b'#' {
+        // 行頭で '#name' のパターンを扱う
     }
 
     let mut end = char_index;

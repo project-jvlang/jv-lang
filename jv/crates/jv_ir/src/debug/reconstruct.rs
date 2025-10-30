@@ -318,8 +318,9 @@ impl<'a> ReconstructionContext<'a> {
                 statements,
                 span,
             } => {
-                let block_expr =
-                    self.with_segment("block", |ctx| ctx.convert_block(statements, label, span))?;
+                let block_expr = self.with_segment("block", |ctx| {
+                    ctx.convert_block(statements, label.as_ref(), span)
+                })?;
                 self.record_success();
                 Ok(Statement::Expression {
                     expr: block_expr,
