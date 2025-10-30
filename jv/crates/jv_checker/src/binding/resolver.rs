@@ -787,7 +787,7 @@ impl BindingResolver {
     }
 
     fn is_self_reference(&self, name: &str, expr: &Expression) -> bool {
-        matches!(expr, Expression::Identifier(ref other, _) if other == name)
+        matches!(expr, Expression::Identifier(other, _) if other == name)
     }
 }
 
