@@ -649,6 +649,33 @@ impl<'tokens> ParserContext<'tokens> {
                 }
             }
 
+            if at_top_level && kind == TokenKind::HashLabel {
+                if let Some((_, next_kind)) = self.peek_significant_kind_n(1) {
+                    if next_kind == TokenKind::LeftBrace {
+                        self.start_node(SyntaxKind::LabeledStatement);
+                        self.bump_raw(); // HashLabel
+                        self.consume_trivia();
+                        let parsed_block = self.parse_block();
+                        self.finish_node();
+                        if parsed_block {
+                            if let Some(last_token) = self
+                                .cursor
+                                .checked_sub(1)
+                                .and_then(|idx| self.tokens.get(idx))
+                            {
+                                last_line = Some(last_token.line);
+                                let tail_kind = TokenKind::from_token(last_token);
+                                if !tail_kind.is_trivia() {
+                                    second_last_significant_kind = last_significant_kind;
+                                    last_significant_kind = Some(tail_kind);
+                                }
+                            }
+                            continue;
+                        }
+                    }
+                }
+            }
+
             if should_break_on_sync {
                 break;
             }

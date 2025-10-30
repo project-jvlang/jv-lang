@@ -1448,6 +1448,33 @@ fn lowering_reports_unimplemented_for_labeled_statement() {
 }
 
 #[test]
+fn lowering_result_for_labeled_trailing_lambda_is_placeholder() {
+    let source = r#"
+        processor.map #finish {
+            break #finish
+        }
+    "#;
+    let result = lower_source(source);
+    assert!(
+        result.diagnostics.is_empty(),
+        "トレーリングラムダで新たな診断が発生しないことを期待しました: {:?}",
+        result.diagnostics
+    );
+    assert!(
+        result.statements.len() == 1,
+        "トレーリングラムダ付き式は単一の式ステートメントとしてローワリングされるはずです: {:?}",
+        result.statements
+    );
+    match &result.statements[0] {
+        Statement::Expression { .. } => {}
+        other => panic!(
+            "式ステートメントとして扱われることを期待しましたが {:?} でした",
+            other
+        ),
+    }
+}
+
+#[test]
 fn expression_lowering_respects_operator_precedence() {
     let result = lower_source("val result = 1 + 2 * 3");
     assert!(

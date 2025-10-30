@@ -345,6 +345,50 @@ fn hash_label_without_target_falls_back_to_comment() {
 }
 
 #[test]
+fn hash_label_attaches_to_trailing_lambda_in_expression() {
+    let source = r#"
+        processor.map #finish {
+            break #finish
+        }
+    "#;
+
+    let tokens = lex(source);
+    let output = parse(&tokens);
+
+    assert!(
+        output.diagnostics.is_empty(),
+        "ラベル付きトレーリングラムダで診断が発生しないことを期待しました: {:?}",
+        output.diagnostics
+    );
+
+    let green = ParseBuilder::build_from_events(&output.events, &tokens);
+    let tree: SyntaxNode<JvLanguage> = SyntaxNode::new_root(green);
+    let statement_list = tree
+        .children()
+        .find(|node| node.kind() == SyntaxKind::StatementList)
+        .expect("トップレベルのステートメント列が必要です");
+    let expression = statement_list
+        .children()
+        .find(|node| node.kind() == SyntaxKind::Expression)
+        .expect("式ステートメントが生成されるはずです");
+    let labeled = expression
+        .descendants()
+        .find(|node| node.kind() == SyntaxKind::LabeledStatement)
+        .expect("トレーリングラムダにラベル付きノードが付与されるはずです");
+    assert!(
+        labeled.children_with_tokens().any(|child| child
+            .as_token()
+            .map(|token| token.kind() == SyntaxKind::HashLabel)
+            .unwrap_or(false)),
+        "ラベル付きノードにHashLabelトークンが含まれるべきです"
+    );
+    let block_exists = labeled
+        .children()
+        .any(|child| child.kind() == SyntaxKind::Block);
+    assert!(block_exists, "ラベル付きラムダはBlockノードを含むべきです");
+}
+
+#[test]
 fn parses_deeply_nested_constructs() {
     let source = r#"
         package deep.example.core

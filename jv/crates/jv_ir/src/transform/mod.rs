@@ -583,7 +583,9 @@ pub fn transform_expression(
                 desugar_string_interpolation(literal.parts, literal.span, context)
             }
         }
-        Expression::Block { statements, span, .. } => {
+        Expression::Block {
+            statements, span, ..
+        } => {
             context.enter_scope();
             let mut ir_statements = Vec::new();
             for stmt in statements {

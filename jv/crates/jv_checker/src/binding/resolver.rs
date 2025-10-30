@@ -556,8 +556,8 @@ impl BindingResolver {
                             body,
                             span: arm.span,
                         }
-                })
-                .collect(),
+                    })
+                    .collect(),
                 else_arm: else_arm.map(|expr| Box::new(self.resolve_expression(*expr))),
                 implicit_end,
                 label,
@@ -574,7 +574,11 @@ impl BindingResolver {
                 else_branch: else_branch.map(|expr| Box::new(self.resolve_expression(*expr))),
                 span,
             },
-            Expression::Block { statements, span, label } => {
+            Expression::Block {
+                statements,
+                span,
+                label,
+            } => {
                 self.enter_scope();
                 let statements = self.resolve_statements(statements);
                 self.exit_scope();
