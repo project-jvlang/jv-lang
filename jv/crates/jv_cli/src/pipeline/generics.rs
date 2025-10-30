@@ -523,6 +523,7 @@ fn apply_hint_to_expression(expr: &mut IrExpression, hint: &PrimitiveSpecializat
             apply_hint_to_expression(&mut conversion.value, hint);
         }
         IrExpression::RegexPattern { .. }
+        | IrExpression::RegexMatch { .. }
         | IrExpression::Literal(..)
         | IrExpression::Identifier { .. }
         | IrExpression::This { .. }

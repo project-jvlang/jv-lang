@@ -188,9 +188,7 @@ impl StringDelimiterKind {
     fn normalize_indentation(self) -> bool {
         matches!(
             self,
-            StringDelimiterKind::TripleQuote
-                | StringDelimiterKind::TripleSingleQuote
-                | StringDelimiterKind::BacktickBlock
+            StringDelimiterKind::TripleQuote | StringDelimiterKind::TripleSingleQuote
         )
     }
 }

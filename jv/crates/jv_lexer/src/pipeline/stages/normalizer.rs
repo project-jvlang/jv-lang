@@ -286,9 +286,8 @@ impl Normalizer {
 
         let unescaped = match delimiter_kind {
             StringDelimiterKind::SingleQuote => Self::collapse_raw_single(inner),
-            StringDelimiterKind::TripleSingleQuote | StringDelimiterKind::BacktickBlock => {
-                inner.to_string()
-            }
+            StringDelimiterKind::TripleSingleQuote => Self::collapse_raw_triple_single(inner),
+            StringDelimiterKind::BacktickBlock => inner.to_string(),
             _ => self.unescape(inner, token.span.start)?,
         };
 
@@ -298,9 +297,7 @@ impl Normalizer {
         string_metadata.char_length = normalized.chars().count();
         string_metadata.normalize_indentation = matches!(
             delimiter_kind,
-            StringDelimiterKind::TripleQuote
-                | StringDelimiterKind::TripleSingleQuote
-                | StringDelimiterKind::BacktickBlock
+            StringDelimiterKind::TripleQuote | StringDelimiterKind::TripleSingleQuote
         );
         let allows_interpolation = string_metadata.allows_interpolation;
         metadata
@@ -502,6 +499,36 @@ impl Normalizer {
                 }
             }
             output.push(ch);
+        }
+
+        output
+    }
+
+    fn collapse_raw_triple_single(inner: &str) -> String {
+        let mut chars = inner.chars().peekable();
+        let mut output = String::with_capacity(inner.len());
+
+        while let Some(ch) = chars.next() {
+            if ch != '\'' {
+                output.push(ch);
+                continue;
+            }
+
+            let mut count = 1usize;
+            while let Some('\'') = chars.peek() {
+                chars.next();
+                count += 1;
+            }
+
+            let groups_of_four = count / 4;
+            for _ in 0..groups_of_four {
+                output.push('\'');
+            }
+
+            let remaining = count % 4;
+            for _ in 0..remaining {
+                output.push('\'');
+            }
         }
 
         output

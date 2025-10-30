@@ -1,83 +1,34 @@
 //! 正規表現 `is` 判定に関する型推論と null 安全解析の統合テスト。
 
-use jv_ast::{
-    BinaryMetadata, BinaryOp, Expression, IsTestKind, IsTestMetadata, Literal, Modifiers, Program,
-    RegexGuardStrategy, RegexLiteral, Span, Statement, TypeAnnotation, ValBindingOrigin,
-};
+use jv_ast::{Program, RegexGuardStrategy};
 use jv_checker::{CheckError, TypeChecker};
 use jv_parser_frontend::ParserPipeline;
 use jv_parser_rowan::frontend::RowanPipeline;
 
-fn dummy_span() -> Span {
-    Span::dummy()
+fn parse_program(source: &str) -> Program {
+    RowanPipeline::default()
+        .parse(source)
+        .expect("サンプルコードが構文解析できること")
+        .into_program()
 }
 
 fn optional_subject_program() -> Program {
-    let span = dummy_span();
-    let regex_literal = RegexLiteral {
-        pattern: "\\d+".to_string(),
-        raw: "/\\d+/".to_string(),
-        span: span.clone(),
-    };
-    let is_metadata = IsTestMetadata {
-        kind: IsTestKind::RegexLiteral,
-        regex: Some(regex_literal.clone()),
-        pattern_expr: None,
-        diagnostics: Vec::new(),
-        guard_strategy: RegexGuardStrategy::None,
-        span: span.clone(),
-    };
-    let metadata = BinaryMetadata {
-        is_test: Some(is_metadata),
-    };
-
-    let maybe_decl = Statement::ValDeclaration {
-        name: "maybe".to_string(),
-        binding: None,
-        type_annotation: Some(TypeAnnotation::Nullable(Box::new(TypeAnnotation::Simple(
-            "String".to_string(),
-        )))),
-        initializer: Expression::Literal(Literal::Null, span.clone()),
-        modifiers: Modifiers::default(),
-        origin: ValBindingOrigin::ExplicitKeyword,
-        span: span.clone(),
-    };
-
-    let judged_decl = Statement::ValDeclaration {
-        name: "judged".to_string(),
-        binding: None,
-        type_annotation: None,
-        initializer: Expression::Binary {
-            left: Box::new(Expression::Identifier("maybe".to_string(), span.clone())),
-            op: BinaryOp::Is,
-            right: Box::new(Expression::RegexLiteral(regex_literal)),
-            span: span.clone(),
-            metadata,
-        },
-        modifiers: Modifiers::default(),
-        origin: ValBindingOrigin::ExplicitKeyword,
-        span: span.clone(),
-    };
-
-    Program {
-        package: None,
-        imports: Vec::new(),
-        statements: vec![maybe_decl, judged_decl],
-        span,
-    }
+    parse_program(
+        r#"
+val maybe: String? = null
+val judged = maybe is /\d+/
+"#,
+    )
 }
 
 fn pattern_expression_program() -> Program {
-    let source = r#"
+    parse_program(
+        r#"
 val pattern = java.util.regex.Pattern.compile("\\d+")
 val text: String = "123"
 val matched = text is pattern
-"#;
-
-    RowanPipeline::default()
-        .parse(source)
-        .expect("Pattern 式のサンプルコードが構文解析できること")
-        .into_program()
+"#,
+    )
 }
 
 #[test]

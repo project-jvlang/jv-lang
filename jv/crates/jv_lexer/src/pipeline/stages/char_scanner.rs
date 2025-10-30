@@ -788,6 +788,7 @@ impl CharScanner {
         start_line: usize,
         start_column: usize,
     ) -> Result<(), LexError> {
+        let mut has_value = false;
         loop {
             if self.remaining(source).is_empty() {
                 return Err(LexError::UnterminatedRawString {
@@ -805,18 +806,27 @@ impl CharScanner {
                 });
             }
 
-            self.advance_char(ch, source)?;
+            if ch == '\'' {
+                if self.remaining(source).starts_with("''") {
+                    self.advance_char('\'', source)?;
+                    self.advance_char('\'', source)?;
+                    has_value = true;
+                    continue;
+                }
 
-            if ch != '\'' {
-                continue;
-            }
+                if !has_value {
+                    return Err(LexError::UnterminatedRawString {
+                        line: start_line,
+                        column: start_column,
+                    });
+                }
 
-            if self.remaining(source).starts_with("'") {
                 self.advance_char('\'', source)?;
-                continue;
+                break;
             }
 
-            break;
+            self.advance_char(ch, source)?;
+            has_value = true;
         }
 
         Ok(())
@@ -838,6 +848,7 @@ impl CharScanner {
 
             if self.remaining(source).starts_with("''''") {
                 self.advance_char('\'', source)?;
+                self.advance_char('\'', source)?;
                 continue;
             }
 
@@ -856,23 +867,25 @@ impl CharScanner {
     }
 
     fn regex_cannot_follow(token: &TokenType) -> bool {
-        matches!(
-            token,
+        match token {
+            // `is` 演算子直後は正規表現リテラルを許可する
+            TokenType::Identifier(text) if text == "is" => false,
             TokenType::Identifier(_)
-                | TokenType::Number(_)
-                | TokenType::Character(_)
-                | TokenType::String(_)
-                | TokenType::StringInterpolation(_)
-                | TokenType::StringEnd
-                | TokenType::Boolean(_)
-                | TokenType::True
-                | TokenType::False
-                | TokenType::Null
-                | TokenType::RightParen
-                | TokenType::RightBracket
-                | TokenType::RightBrace
-                | TokenType::RegexLiteral(_)
-        )
+            | TokenType::Number(_)
+            | TokenType::Character(_)
+            | TokenType::String(_)
+            | TokenType::StringInterpolation(_)
+            | TokenType::StringEnd
+            | TokenType::Boolean(_)
+            | TokenType::True
+            | TokenType::False
+            | TokenType::Null
+            | TokenType::RightParen
+            | TokenType::RightBracket
+            | TokenType::RightBrace
+            | TokenType::RegexLiteral(_) => true,
+            _ => false,
+        }
     }
 
     fn can_start_regex(ctx: &LexerContext<'_>) -> bool {
