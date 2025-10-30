@@ -100,7 +100,18 @@ impl JavaCodeGenerator {
                     line.push_str(&self.generate_expression(expr)?);
                 }
                 line.push(';');
-                line
+                if !modifiers.annotations.is_empty() {
+                    let mut builder = self.builder();
+                    for annotation in &modifiers.annotations {
+                        // Ensure imports are registered for qualified annotations
+                        self.register_annotation_imports(annotation);
+                        builder.push_line(&self.format_annotation(annotation));
+                    }
+                    builder.push_line(&line);
+                    builder.build()
+                } else {
+                    line
+                }
             }
             IrStatement::MethodDeclaration { .. } => self.generate_method(stmt)?,
             IrStatement::ClassDeclaration { .. } => self.generate_class(stmt)?,
