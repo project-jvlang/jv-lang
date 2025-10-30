@@ -1,8 +1,10 @@
 // jv_lsp - Language Server Protocol implementation
 mod handlers;
+mod highlight;
 
 use handlers::imports::build_imports_response;
 pub use handlers::imports::{ImportItem, ImportsParams, ImportsResponse};
+pub use highlight::tokens::{HighlightKind, HighlightToken};
 use jv_ast::types::TypeLevelExpr;
 use jv_ast::{
     Argument, ConstParameter, Expression, GenericParameter, GenericSignature, Program,
@@ -38,6 +40,8 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt;
 use std::sync::Arc;
 use thiserror::Error;
+
+use highlight::tokens::collect_highlights;
 
 const COMPLETION_TEMPLATES: &[&str] = &[
     "name = value",
@@ -497,6 +501,7 @@ pub struct JvLanguageServer {
     regex_metadata: HashMap<String, Vec<RegexAnalysis>>,
     programs: HashMap<String, Program>,
     generics: HashMap<String, GenericDocumentIndex>,
+    token_highlights: HashMap<String, Vec<HighlightToken>>,
     parallel_config: ParallelInferenceConfig,
 }
 
@@ -535,6 +540,7 @@ impl JvLanguageServer {
             regex_metadata: HashMap::new(),
             programs: HashMap::new(),
             generics: HashMap::new(),
+            token_highlights: HashMap::new(),
             parallel_config: config,
         }
     }
@@ -605,6 +611,7 @@ impl JvLanguageServer {
         self.regex_metadata.remove(&uri);
         self.programs.remove(&uri);
         self.generics.remove(&uri);
+        self.token_highlights.remove(&uri);
     }
 
     pub fn close_document(&mut self, uri: &str) {
@@ -613,12 +620,21 @@ impl JvLanguageServer {
         self.regex_metadata.remove(uri);
         self.programs.remove(uri);
         self.generics.remove(uri);
+        self.token_highlights.remove(uri);
+    }
+
+    pub fn token_highlights(&self, uri: &str) -> Option<&[HighlightToken]> {
+        self.token_highlights
+            .get(uri)
+            .map(|entries| entries.as_slice())
     }
 
     pub fn get_diagnostics(&mut self, uri: &str) -> Vec<Diagnostic> {
         let Some(content) = self.documents.get(uri) else {
             return Vec::new();
         };
+
+        self.token_highlights.remove(uri);
 
         let pipeline = RowanPipeline::default();
         let frontend_output = match pipeline.parse(content) {
@@ -642,6 +658,14 @@ impl JvLanguageServer {
 
         let mut diagnostics = Vec::new();
         let mut regex_analyses: Vec<RegexAnalysis> = Vec::new();
+
+        let highlights = collect_highlights(&tokens);
+        if highlights.is_empty() {
+            self.token_highlights.remove(uri);
+        } else {
+            self.token_highlights
+                .insert(uri.to_string(), highlights);
+        }
 
         let frontend_diagnostics = from_frontend_diagnostics(diagnostics_view.final_diagnostics());
         for diagnostic in &frontend_diagnostics {
@@ -693,9 +717,9 @@ impl JvLanguageServer {
             match import_service.resolve(import_stmt) {
                 Ok(resolved) => resolved_imports.push(resolved),
                 Err(error) => {
-                    self.type_facts.remove(uri);
-                    self.regex_metadata.remove(uri);
-                    return vec![match import_diagnostics::from_error(&error) {
+                self.type_facts.remove(uri);
+                self.regex_metadata.remove(uri);
+                return vec![match import_diagnostics::from_error(&error) {
                         Some(diagnostic) => tooling_diagnostic_to_lsp(
                             uri,
                             diagnostic.with_strategy(DiagnosticStrategy::Interactive),

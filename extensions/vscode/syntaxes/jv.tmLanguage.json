@@ -1,0 +1,140 @@
+{
+  "name": "jv",
+  "scopeName": "source.jv",
+  "patterns": [
+    {
+      "include": "#raw-triple-string"
+    },
+    {
+      "include": "#raw-single-string"
+    },
+    {
+      "include": "#triple-double-string"
+    },
+    {
+      "include": "#double-string"
+    },
+    {
+      "include": "#line-comment"
+    },
+    {
+      "include": "#block-comment"
+    }
+  ],
+  "repository": {
+    "raw-single-string": {
+      "name": "string.quoted.single.raw.jv",
+      "comment": "シングルクォートで囲まれた生文字列。",
+      "begin": "'",
+      "end": "'",
+      "beginCaptures": {
+        "0": {
+          "name": "punctuation.definition.string.begin.jv"
+        }
+      },
+      "endCaptures": {
+        "0": {
+          "name": "punctuation.definition.string.end.jv"
+        }
+      },
+      "contentName": "string.quoted.single.raw.content.jv",
+      "patterns": [
+        {
+          "match": "''",
+          "name": "constant.character.escape.quote.jv",
+          "comment": "'' はリテラルのシングルクォートを表す。"
+        }
+      ]
+    },
+    "raw-triple-string": {
+      "name": "string.quoted.triple.raw.jv",
+      "comment": "三重シングルクォートで囲まれた複数行の生文字列。",
+      "begin": "'''",
+      "end": "'''",
+      "applyEndPatternLast": true,
+      "beginCaptures": {
+        "0": {
+          "name": "punctuation.definition.string.begin.jv"
+        }
+      },
+      "endCaptures": {
+        "0": {
+          "name": "punctuation.definition.string.end.jv"
+        }
+      },
+      "contentName": "string.quoted.triple.raw.content.jv",
+      "patterns": [
+        {
+          "match": "''''",
+          "name": "constant.character.escape.quote.jv",
+          "comment": "'''' は内部で単一のシングルクォートを表し、文字列を終了させない。"
+        }
+      ]
+    },
+    "double-string": {
+      "name": "string.quoted.double.jv",
+      "comment": "通常のダブルクォート文字列。既存ハイライトとの整合性を保つ。",
+      "begin": "\"",
+      "end": "\"",
+      "beginCaptures": {
+        "0": {
+          "name": "punctuation.definition.string.begin.jv"
+        }
+      },
+      "endCaptures": {
+        "0": {
+          "name": "punctuation.definition.string.end.jv"
+        }
+      },
+      "contentName": "string.quoted.double.content.jv",
+      "patterns": [
+        {
+          "match": "\\\\.",
+          "name": "constant.character.escape.jv"
+        }
+      ]
+    },
+    "triple-double-string": {
+      "name": "string.quoted.triple.double.jv",
+      "comment": "バッククォート以外の既存複数行文字列を簡易的にハイライト。",
+      "begin": "\"\"\"",
+      "end": "\"\"\"",
+      "applyEndPatternLast": true,
+      "beginCaptures": {
+        "0": {
+          "name": "punctuation.definition.string.begin.jv"
+        }
+      },
+      "endCaptures": {
+        "0": {
+          "name": "punctuation.definition.string.end.jv"
+        }
+      },
+      "contentName": "string.quoted.triple.double.content.jv",
+      "patterns": [
+        {
+          "match": "\\\\.",
+          "name": "constant.character.escape.jv"
+        }
+      ]
+    },
+    "line-comment": {
+      "name": "comment.line.double-slash.jv",
+      "comment": "行コメント。",
+      "begin": "//",
+      "end": "$"
+    },
+    "block-comment": {
+      "name": "comment.block.jv",
+      "comment": "ブロックコメント。",
+      "begin": "/\\*",
+      "end": "\\*/",
+      "patterns": [
+        {
+          "match": "/\\*",
+          "name": "invalid.illegal.nested-comment.jv"
+        }
+      ]
+    }
+  }
+}

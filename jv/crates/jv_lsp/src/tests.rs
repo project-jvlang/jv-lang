@@ -139,6 +139,41 @@ fn test_diagnostics_for_clean_source() {
 }
 
 #[test]
+fn test_raw_string_highlight_is_captured() {
+    let mut server = JvLanguageServer::new();
+    let uri = "file:///raw_highlight.jv".to_string();
+    let source = "val path = 'C:\\\\Users\\\\Alice'".to_string();
+    server.open_document(uri.clone(), source);
+
+    let diagnostics = server.get_diagnostics(&uri);
+    assert!(
+        diagnostics.is_empty(),
+        "raw literal should not emit diagnostics: {diagnostics:?}"
+    );
+
+    let highlights = server
+        .token_highlights(&uri)
+        .expect("raw literal highlight must be recorded");
+    assert!(
+        highlights
+            .iter()
+            .any(|entry| matches!(entry.kind, HighlightKind::RawSingle)),
+        "expected RawSingle highlight entry: {highlights:?}"
+    );
+
+    let entry = highlights
+        .iter()
+        .find(|entry| matches!(entry.kind, HighlightKind::RawSingle))
+        .expect("highlight entry missing");
+    assert_eq!(entry.span.start_line, 1);
+    assert!(
+        entry.span.end_column > entry.span.start_column,
+        "raw literal highlight should advance columns: {:?}",
+        entry.span
+    );
+}
+
+#[test]
 fn test_diagnostics_for_mixed_delimiters() {
     let mut server = JvLanguageServer::new();
     let uri = "file:///test.jv".to_string();
@@ -163,6 +198,22 @@ fn test_diagnostics_for_mixed_argument_commas() {
         diagnostics.iter().any(|diag| {
             diag.message.contains("JV2102") && diag.code.as_deref() == Some("JV2102")
         })
+    );
+}
+
+#[test]
+fn test_unterminated_raw_string_reports_jv4300() {
+    let mut server = JvLanguageServer::new();
+    let uri = "file:///unterminated.jv".to_string();
+    server.open_document(uri.clone(), "val bad = 'unterminated".to_string());
+
+    let diagnostics = server.get_diagnostics(&uri);
+    assert_eq!(diagnostics.len(), 1, "expected single diagnostic: {diagnostics:?}");
+    assert_eq!(diagnostics[0].code.as_deref(), Some("JV4300"));
+    assert!(
+        diagnostics[0].message.contains("JV4300"),
+        "diagnostic message should mention JV4300: {}",
+        diagnostics[0].message
     );
 }
 

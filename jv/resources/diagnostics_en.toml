@@ -63,3 +63,11 @@ summary = "Alias: {alias}"
 
 [imports.plan.module_dependency]
 summary = "Module dependency: {module}"
+
+[raw_string.unterminated]
+message = "JV4300: Raw string literal is unterminated. Add the matching closing quote sequence (' or ''')."
+note_hint = "For triple-quoted raw strings, close the literal with the same ''' sequence used at the start."
+
+[raw_string.ambiguous_char]
+message = "JV4301: Single-character literal is ambiguous. Clarify whether it should be treated as Char or String."
+note_hint = "Use \"a\" or toString() when you need a String, or annotate the binding as Char when a character value is intended."

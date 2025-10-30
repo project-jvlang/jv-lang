@@ -63,3 +63,11 @@ summary = "別名: {alias}"
 
 [imports.plan.module_dependency]
 summary = "モジュール依存: {module}"
+
+[raw_string.unterminated]
+message = "JV4300: 生文字列リテラルが閉じられていません。対応する閉じクォート（' または '''）を追加してください。"
+note_hint = "三重シングルクォートの場合は開きと同じだけの ''' を末尾に記述します。"
+
+[raw_string.ambiguous_char]
+message = "JV4301: 1文字リテラルの型が曖昧です。Char か String かを型注釈や補助メソッドで明示してください。"
+note_hint = "String として扱いたい場合は \"a\" や .toString() を使用し、Char として扱う場合は Char 型注釈を追加します。"

@@ -6,6 +6,7 @@ use jv_ir::{
     error::TransformError,
     types::{IrProgram, IrStatement},
 };
+use jv_lexer::LexError;
 use jv_parser_frontend::{
     Diagnostic as FrontendDiagnostic, DiagnosticSeverity as FrontendSeverity, ParseError,
 };
@@ -227,6 +228,18 @@ const DIAGNOSTICS: &[DiagnosticDescriptor] = &[
         severity: DiagnosticSeverity::Error,
     },
     DiagnosticDescriptor {
+        code: "JV4300",
+        title: "生文字列リテラルが未終端です / Raw string literal is unterminated",
+        help: "対応する閉じクォート（' または '''）を追加して生文字列を終了してください。/ Add the matching closing quote sequence (' or ''') to finish the raw string literal.",
+        severity: DiagnosticSeverity::Error,
+    },
+    DiagnosticDescriptor {
+        code: "JV4301",
+        title: "1文字リテラルの型が曖昧です / Single-character literal has ambiguous type",
+        help: "Char か String のどちらとして扱うか型注釈や補助メソッドで明示してください。/ Disambiguate whether the literal should be treated as Char or String via annotations or helper calls.",
+        severity: DiagnosticSeverity::Error,
+    },
+    DiagnosticDescriptor {
         code: "JV1008",
         title: "空白区切りの要素が同種ではありません",
         help: "空白区切りを使う場合は同じ型の要素だけを並べます。型が混在する場合はカンマ区切りに切り替えてください。",
@@ -373,7 +386,9 @@ fn map_frontend_severity(severity: FrontendSeverity) -> DiagnosticSeverity {
 pub fn lookup(code: &str) -> Option<&'static DiagnosticDescriptor> {
     DIAGNOSTICS
         .iter()
+        .chain(crate::inference::diagnostics::CONVERSION_DIAGNOSTICS.iter())
         .chain(crate::compat::diagnostics::ENTRIES.iter())
+        .chain(crate::imports::diagnostics::ENTRIES.iter())
         .find(|desc| desc.code == code)
 }
 
@@ -381,6 +396,25 @@ pub fn lookup(code: &str) -> Option<&'static DiagnosticDescriptor> {
 pub fn from_parse_error(error: &ParseError) -> Option<EnhancedDiagnostic> {
     match error {
         ParseError::Syntax { message, span } => detect_in_message(message, Some(span.clone())),
+        ParseError::LexError(lex) => lex_error_to_diagnostic(lex),
+        ParseError::UnexpectedEof { .. } => None,
+    }
+}
+
+fn lex_error_to_diagnostic(error: &LexError) -> Option<EnhancedDiagnostic> {
+    match error {
+        LexError::UnterminatedRawString { line, column } => {
+            let descriptor = lookup("JV4300")?;
+            let message = format!(
+                "JV4300: 生文字列リテラルが閉じられていません（{}行{}列）。' または ''' で閉じてください。\nJV4300: Raw string literal is unterminated at line {}, column {}. Add the matching closing quote sequence.",
+                line,
+                column,
+                line,
+                column
+            );
+            let span = Span::new(*line, *column, *line, column.saturating_add(1));
+            Some(EnhancedDiagnostic::new(descriptor, message, Some(span)))
+        }
         _ => None,
     }
 }
@@ -415,7 +449,9 @@ pub fn from_transform_error(error: &TransformError) -> Option<EnhancedDiagnostic
 fn detect_in_message(message: &str, span: Option<Span>) -> Option<EnhancedDiagnostic> {
     let descriptor = DIAGNOSTICS
         .iter()
+        .chain(crate::inference::diagnostics::CONVERSION_DIAGNOSTICS.iter())
         .chain(crate::compat::diagnostics::ENTRIES.iter())
+        .chain(crate::imports::diagnostics::ENTRIES.iter())
         .find(|descriptor| message.contains(descriptor.code))?;
 
     let (clean_message, suggestions, learning_hint) = extract_tooling_metadata(message);
