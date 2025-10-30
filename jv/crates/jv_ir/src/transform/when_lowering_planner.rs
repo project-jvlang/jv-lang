@@ -1204,6 +1204,7 @@ fn rewrite_statement_with_binding(
             span,
         },
         IrStatement::ForEach {
+            label,
             variable,
             variable_type,
             iterable,
@@ -1211,6 +1212,7 @@ fn rewrite_statement_with_binding(
             iterable_kind,
             span,
         } => IrStatement::ForEach {
+            label,
             variable,
             variable_type,
             iterable: rewrite_expression_with_binding(iterable, subject_name, binding),

@@ -326,6 +326,7 @@ mod tests {
         let lambda = Expression::Lambda {
             parameters: vec![lambda_param],
             body: Box::new(lambda_body),
+            label: None,
             span: dummy_span(),
         };
 
@@ -485,6 +486,7 @@ mod tests {
         let lambda = Expression::Lambda {
             parameters: vec![],
             body: Box::new(lambda_body),
+            label: None,
             span: dummy_span(),
         };
 
@@ -1393,6 +1395,7 @@ mod tests {
             else_arm,
             implicit_end,
             span,
+            ..
         } = expr
         else {
             panic!("expected when expression");
@@ -2384,6 +2387,7 @@ mod tests {
                 Literal::String("done".to_string()),
                 dummy_span(),
             )),
+            label: None,
             span: dummy_span(),
         });
 
@@ -4725,6 +4729,7 @@ fun sample(value: Any): Int {
                 span: lambda_span.clone(),
             }],
             body: Box::new(Expression::Identifier("x".to_string(), lambda_span.clone())),
+            label: None,
             span: lambda_span.clone(),
         };
 
@@ -5125,6 +5130,134 @@ fun sample(value: Any): Int {
     }
 
     #[test]
+    fn labeled_iterable_loop_propagates_label() {
+        let mut context = TransformContext::new();
+        let span = dummy_span();
+        context.add_variable("values".to_string(), JavaType::object());
+
+        let stmt = Statement::ForIn(ForInStatement {
+            binding: LoopBinding {
+                name: "value".to_string(),
+                pattern: None,
+
+                type_annotation: None,
+                span: span.clone(),
+            },
+            iterable: Expression::Identifier("values".to_string(), span.clone()),
+            strategy: LoopStrategy::Iterable,
+            label: Some("#outer".to_string()),
+            body: Box::new(Expression::Literal(Literal::Null, span.clone())),
+            span: span.clone(),
+        });
+
+        let ir =
+            transform_statement(stmt, &mut context).expect("ループのローワリングに失敗しました");
+        assert_eq!(ir.len(), 1, "Foreachが1つ生成される想定です");
+        match &ir[0] {
+            IrStatement::ForEach { label, .. } => {
+                assert_eq!(
+                    label.as_deref(),
+                    Some("#outer"),
+                    "HashラベルがIRへ伝搬されるべきです"
+                );
+            }
+            other => panic!("Foreachが生成されるべきですが {:?} でした", other),
+        }
+    }
+
+    #[test]
+    fn labeled_numeric_range_loop_sets_for_label() {
+        let mut context = TransformContext::new();
+        let span = dummy_span();
+
+        let stmt = Statement::ForIn(ForInStatement {
+            binding: LoopBinding {
+                name: "idx".to_string(),
+                pattern: None,
+
+                type_annotation: None,
+                span: span.clone(),
+            },
+            iterable: Expression::Literal(Literal::Null, span.clone()),
+            strategy: LoopStrategy::NumericRange(NumericRangeLoop {
+                start: Expression::Literal(Literal::Number("0".to_string()), span.clone()),
+                end: Expression::Literal(Literal::Number("1".to_string()), span.clone()),
+                inclusive: false,
+                span: span.clone(),
+            }),
+            label: Some("#range".to_string()),
+            body: Box::new(Expression::Literal(
+                Literal::Number("0".to_string()),
+                span.clone(),
+            )),
+            span: span.clone(),
+        });
+
+        let ir = transform_statement(stmt, &mut context)
+            .expect("数値レンジのローワリングに失敗しました");
+        assert_eq!(ir.len(), 1, "外側ブロックのみ生成される想定です");
+        let block_statements = match &ir[0] {
+            IrStatement::Block { statements, .. } => statements,
+            other => panic!("ブロックが期待されましたが {:?} でした", other),
+        };
+        assert_eq!(
+            block_statements.len(),
+            2,
+            "初期化とfor本体の2要素を期待します"
+        );
+        match &block_statements[1] {
+            IrStatement::For { label, .. } => assert_eq!(
+                label.as_deref(),
+                Some("#range"),
+                "for文へラベルが伝搬されるべきです"
+            ),
+            other => panic!("for文が期待されましたが {:?} でした", other),
+        }
+    }
+
+    #[test]
+    fn labeled_break_and_continue_preserve_labels() {
+        let mut context = TransformContext::new();
+        let span = dummy_span();
+
+        let break_stmt = Statement::Break {
+            label: Some("#loop".to_string()),
+            span: span.clone(),
+        };
+        let break_ir = transform_statement(break_stmt, &mut context)
+            .expect("breakのローワリングに失敗しました");
+        assert_eq!(break_ir.len(), 1, "breakは単一ステートメントのはずです");
+        match &break_ir[0] {
+            IrStatement::Break { label, .. } => assert_eq!(
+                label.as_deref(),
+                Some("#loop"),
+                "breakのラベルが保持されるべきです"
+            ),
+            other => panic!("breakが期待されましたが {:?} でした", other),
+        }
+
+        let continue_stmt = Statement::Continue {
+            label: Some("#loop".to_string()),
+            span,
+        };
+        let continue_ir = transform_statement(continue_stmt, &mut context)
+            .expect("continueのローワリングに失敗しました");
+        assert_eq!(
+            continue_ir.len(),
+            1,
+            "continueも単一ステートメントになるはずです"
+        );
+        match &continue_ir[0] {
+            IrStatement::Continue { label, .. } => assert_eq!(
+                label.as_deref(),
+                Some("#loop"),
+                "continueのラベルが保持されるべきです"
+            ),
+            other => panic!("continueが期待されましたが {:?} でした", other),
+        }
+    }
+
+    #[test]
     fn when_expression_with_subject_desugars_to_switch() {
         let expr = parse_when_expression(
             "val value = \"input\"\n             val label = when (value) {\n             is String -> \"string\"\n             else -> \"fallback\"\n        }\n",
@@ -5136,6 +5269,7 @@ fun sample(value: Any): Int {
             else_arm,
             implicit_end,
             span,
+            ..
         } = expr
         else {
             panic!("expected when expression");
@@ -5191,6 +5325,7 @@ fun sample(value: Any): Int {
             else_arm,
             implicit_end,
             span,
+            ..
         } = expr
         else {
             panic!("expected when expression");
@@ -5233,6 +5368,7 @@ fun sample(value: Any): Int {
             else_arm,
             implicit_end,
             span,
+            ..
         } = expr
         else {
             panic!("expected when expression");
@@ -5301,6 +5437,7 @@ fun sample(value: Any): Int {
                 span.clone(),
             ))),
             implicit_end: None,
+            label: None,
             span: span.clone(),
         };
 
@@ -5310,6 +5447,7 @@ fun sample(value: Any): Int {
             else_arm,
             implicit_end,
             span,
+            ..
         } = when_expr
         else {
             unreachable!("constructed expression should be a when expression");
@@ -5376,6 +5514,7 @@ fun sample(value: Any): Int {
                 span.clone(),
             ))),
             implicit_end: None,
+            label: None,
             span: span.clone(),
         };
 
@@ -5385,6 +5524,7 @@ fun sample(value: Any): Int {
             else_arm,
             implicit_end,
             span,
+            ..
         } = when_expr
         else {
             unreachable!("constructed expression should be a when expression");
@@ -5457,6 +5597,7 @@ fun sample(value: Any): Int {
             }],
             else_arm: None,
             implicit_end: None,
+            label: None,
             span: span.clone(),
         };
 
@@ -5466,6 +5607,7 @@ fun sample(value: Any): Int {
             else_arm,
             implicit_end,
             span,
+            ..
         } = when_expr
         else {
             unreachable!("constructed expression should be a when expression");
@@ -5522,6 +5664,7 @@ fun sample(value: Any): Int {
             }],
             else_arm: None,
             implicit_end: None,
+            label: None,
             span: span.clone(),
         };
 
@@ -5531,6 +5674,7 @@ fun sample(value: Any): Int {
             else_arm,
             implicit_end,
             span,
+            ..
         } = when_expr
         else {
             unreachable!("constructed expression should be a when expression");

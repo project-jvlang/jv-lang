@@ -161,6 +161,8 @@ pub fn transform_statement(
                 span,
             }])
         }
+        Statement::Break { label, span } => Ok(vec![IrStatement::Break { label, span }]),
+        Statement::Continue { label, span } => Ok(vec![IrStatement::Continue { label, span }]),
         Statement::FunctionDeclaration {
             name,
             parameters,

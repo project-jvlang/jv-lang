@@ -875,6 +875,8 @@ pub enum IrStatement {
 
     // For loops (enhanced for)
     ForEach {
+        #[serde(default)]
+        label: Option<String>,
         variable: String,
         variable_type: JavaType,
         iterable: IrExpression,
@@ -885,6 +887,8 @@ pub enum IrStatement {
 
     // Traditional for loops
     For {
+        #[serde(default)]
+        label: Option<String>,
         init: Option<Box<IrStatement>>,
         condition: Option<IrExpression>,
         update: Option<IrExpression>,
@@ -935,6 +939,8 @@ pub enum IrStatement {
 
     // Block statements
     Block {
+        #[serde(default)]
+        label: Option<String>,
         statements: Vec<IrStatement>,
         span: Span,
     },

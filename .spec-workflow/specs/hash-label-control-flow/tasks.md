@@ -48,10 +48,10 @@
 - [x] ラベル診断のユニットテスト（未定義、非ループ continue、非ラムダ return、シャドーイング許容）を作成する。
 
 ## 5. IR ローワリング (`jv/crates/jv_ir`)
-- [ ] `IrStatement::ForEach` / `For` / `Block` などに `label: Option<String>` フィールドを追加し、`Return` からラベル情報を除去する。
-- [ ] `transform::mod` で AST の `label` フィールドを IR へコピーし、`Break` / `Continue` のラベルを伝搬する。
-- [ ] `sequence_pipeline` / `naming` などラベル情報を扱う補助モジュールを更新する。
-- [ ] IR テスト（`jv_ir/src/tests.rs`）にラベル付きループ・break/continue ケースを追加する。
+- [x] `IrStatement::ForEach` / `For` / `Block` などに `label: Option<String>` フィールドを追加し、`Return` からラベル情報を除去する。
+- [x] `transform::mod` で AST の `label` フィールドを IR へコピーし、`Break` / `Continue` のラベルを伝搬する。
+- [x] `sequence_pipeline` / `naming` などラベル情報を扱う補助モジュールを更新する。
+- [x] IR テスト（`jv_ir/src/tests.rs`）にラベル付きループ・break/continue ケースを追加する。
 
 ## 6. コード生成 (`jv/crates/jv_codegen_java`)
 - [ ] `generator::statements` でラベル付き `for` / `block` 出力を実装し、`break` / `continue` に付属するラベル文字列から `#` を除去して Java 標準の `label:` / `break label;` を生成する。

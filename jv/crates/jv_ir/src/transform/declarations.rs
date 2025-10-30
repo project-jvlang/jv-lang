@@ -1090,6 +1090,7 @@ fn replace_this_in_statement(
             span,
         },
         IrStatement::ForEach {
+            label,
             variable,
             variable_type,
             iterable,
@@ -1097,6 +1098,7 @@ fn replace_this_in_statement(
             iterable_kind,
             span,
         } => IrStatement::ForEach {
+            label,
             variable,
             variable_type,
             iterable: replace_this_ir_expression(iterable, replacement_name, replacement_type),

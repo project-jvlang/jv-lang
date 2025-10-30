@@ -313,9 +313,13 @@ impl<'a> ReconstructionContext<'a> {
                     span: span.clone(),
                 })
             }
-            IrStatement::Block { statements, span } => {
+            IrStatement::Block {
+                label,
+                statements,
+                span,
+            } => {
                 let block_expr =
-                    self.with_segment("block", |ctx| ctx.convert_block(statements, span))?;
+                    self.with_segment("block", |ctx| ctx.convert_block(statements, label, span))?;
                 self.record_success();
                 Ok(Statement::Expression {
                     expr: block_expr,
@@ -396,6 +400,7 @@ impl<'a> ReconstructionContext<'a> {
     fn convert_block(
         &mut self,
         statements: &[IrStatement],
+        label: Option<&String>,
         span: &Span,
     ) -> Result<Expression, ReconstructionError> {
         self.visit_node();
@@ -412,7 +417,7 @@ impl<'a> ReconstructionContext<'a> {
 
         Ok(Expression::Block {
             statements: stmts,
-            label: None,
+            label: label.cloned(),
             span: span.clone(),
         })
     }

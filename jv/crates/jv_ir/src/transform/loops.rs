@@ -20,19 +20,25 @@ pub fn desugar_for_in_statement(
         strategy,
         body,
         span,
-        label: _,
+        label,
     } = for_in;
 
     match strategy {
         LoopStrategy::NumericRange(range) => {
-            lower_numeric_range(binding, *body, range, span, context)
+            lower_numeric_range(binding, *body, range, label, span, context)
         }
         LoopStrategy::Iterable | LoopStrategy::Unknown => {
-            lower_iterable(binding, iterable, *body, span, context)
+            lower_iterable(binding, iterable, *body, label, span, context)
         }
-        LoopStrategy::LazySequence { needs_cleanup } => {
-            lower_lazy_sequence(binding, iterable, *body, span, needs_cleanup, context)
-        }
+        LoopStrategy::LazySequence { needs_cleanup } => lower_lazy_sequence(
+            binding,
+            iterable,
+            *body,
+            label,
+            span,
+            needs_cleanup,
+            context,
+        ),
     }
 }
 
@@ -40,6 +46,7 @@ fn lower_numeric_range(
     binding: LoopBinding,
     body_expr: Expression,
     range: NumericRangeLoop,
+    label: Option<String>,
     span: Span,
     context: &mut TransformContext,
 ) -> Result<Vec<IrStatement>, TransformError> {
@@ -130,6 +137,7 @@ fn lower_numeric_range(
         };
 
         let for_stmt = IrStatement::For {
+            label: label.clone(),
             init: Some(Box::new(init_stmt)),
             condition: Some(condition_expr),
             update: Some(update_expr),
@@ -148,6 +156,7 @@ fn lower_numeric_range(
         statements.push(for_stmt);
 
         Ok(vec![IrStatement::Block {
+            label: None,
             statements,
             span: span.clone(),
         }])
@@ -160,6 +169,7 @@ fn lower_iterable(
     binding: LoopBinding,
     iterable_expr: Expression,
     body_expr: Expression,
+    label: Option<String>,
     span: Span,
     context: &mut TransformContext,
 ) -> Result<Vec<IrStatement>, TransformError> {
@@ -176,6 +186,7 @@ fn lower_iterable(
     };
 
     Ok(vec![IrStatement::ForEach {
+        label,
         variable: binding_name,
         variable_type: binding_type,
         iterable: iterable_ir,
@@ -189,6 +200,7 @@ fn lower_lazy_sequence(
     binding: LoopBinding,
     iterable_expr: Expression,
     body_expr: Expression,
+    label: Option<String>,
     span: Span,
     needs_cleanup: bool,
     context: &mut TransformContext,
@@ -224,6 +236,7 @@ fn lower_lazy_sequence(
         };
 
         statements.push(IrStatement::ForEach {
+            label: label.clone(),
             variable: binding_name,
             variable_type: binding_type,
             iterable: make_identifier(&temp_name, &iterable_type, binding_span.clone()),
@@ -233,6 +246,7 @@ fn lower_lazy_sequence(
         });
 
         Ok(vec![IrStatement::Block {
+            label: None,
             statements,
             span: span.clone(),
         }])
@@ -249,7 +263,11 @@ fn lower_loop_body(
     Ok(match ir_expr {
         IrExpression::Block {
             statements, span, ..
-        } => IrStatement::Block { statements, span },
+        } => IrStatement::Block {
+            label: None,
+            statements,
+            span,
+        },
         other => {
             let span = ir_expression_span(&other);
             IrStatement::Expression { expr: other, span }
