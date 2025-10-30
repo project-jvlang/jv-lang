@@ -3,9 +3,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use jv_cli::pipeline::compute_script_main_class;
-use jv_ir::transform::{
-    fetch_sample_data, SampleFetchError, SampleFetchRequest, SampleSourceKind,
-};
+use jv_ir::transform::{SampleFetchError, SampleFetchRequest, SampleSourceKind, fetch_sample_data};
 use jv_lexer::{Lexer, TokenType};
 use sha2::{Digest, Sha256};
 use tempfile::tempdir;
@@ -583,7 +581,8 @@ fn sample_network_sources_require_explicit_allow() {
 fn sample_fetch_pipeline_accepts_json_comments() {
     let sample = "sample_users_comment.json";
     let fixtures = fixtures_dir();
-    let expected_bytes = fs::read(fixture_path(sample)).expect("コメント付きサンプルを読み取れませんでした");
+    let expected_bytes =
+        fs::read(fixture_path(sample)).expect("コメント付きサンプルを読み取れませんでした");
 
     let mut request = SampleFetchRequest::new(sample);
     request.base_dir = Some(fixtures);
@@ -599,7 +598,8 @@ fn sample_fetch_pipeline_accepts_json_comments() {
         result.bytes, expected_bytes,
         "コメント付きサンプルの読み出し結果が元データと一致しません"
     );
-    let body = String::from_utf8(result.bytes).expect("コメント付きサンプルをUTF-8として読めませんでした");
+    let body =
+        String::from_utf8(result.bytes).expect("コメント付きサンプルをUTF-8として読めませんでした");
     assert!(
         body.contains("// 利用者一覧") && body.contains("/*") && body.contains("*/"),
         "コメント情報が読み出し結果に保持されていません: {body}"

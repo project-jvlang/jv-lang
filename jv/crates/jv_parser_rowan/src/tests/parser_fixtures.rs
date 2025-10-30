@@ -37,6 +37,13 @@ fn parses_core_statements() {
     "#;
 
     let tokens = lex(source);
+    eprintln!("tokens.len() = {}", tokens.len());
+    for token in &tokens {
+        eprintln!(
+            "token: {:?} @{}:{}",
+            token.token_type, token.line, token.column
+        );
+    }
     let output = parse(&tokens);
 
     assert!(
@@ -291,6 +298,56 @@ fn parses_nested_labeled_statements() {
         return_has_label,
         "return文がハッシュラベルを保持しているべきです"
     );
+}
+
+#[test]
+fn labeled_for_after_unicode_string_retains_label() {
+    let source = r#"
+        val members = []
+        var firstActive = "未検出"
+        #outer for (user in members) {
+            break #outer
+        }
+    "#;
+
+    let tokens = lex(source);
+    let output = parse(&tokens);
+
+    assert!(
+        output.diagnostics.is_empty(),
+        "ハッシュラベルの後続処理で診断が発生しないことを期待しました: {:?}",
+        output.diagnostics
+    );
+
+    let green = ParseBuilder::build_from_events(&output.events, &tokens);
+    let tree: SyntaxNode<JvLanguage> = SyntaxNode::new_root(green);
+    let statement_list = tree
+        .children()
+        .find(|node| node.kind() == SyntaxKind::StatementList)
+        .expect("ステートメント列が構築されるはずです");
+
+    let labeled = statement_list
+        .children()
+        .find(|node| node.kind() == SyntaxKind::LabeledStatement)
+        .expect("ラベル付き for 文が生成されるはずです");
+    let label_token = labeled
+        .children_with_tokens()
+        .find_map(|child| child.as_token().cloned())
+        .filter(|token| token.kind() == SyntaxKind::HashLabel)
+        .expect("HashLabel トークンが存在するはずです");
+    assert_eq!(label_token.text(), "outer");
+
+    let break_statement = labeled
+        .descendants()
+        .find(|node| node.kind() == SyntaxKind::BreakStatement)
+        .expect("break 文が存在するはずです");
+    let break_has_label = break_statement.children_with_tokens().any(|child| {
+        child
+            .as_token()
+            .map(|token| token.kind() == SyntaxKind::HashLabel)
+            .unwrap_or(false)
+    });
+    assert!(break_has_label, "break #outer が解析結果に含まれるべきです");
 }
 
 #[test]

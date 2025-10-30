@@ -350,6 +350,42 @@ fn hash_label_tokens_are_emitted_and_comments_preserved() {
         "ラベルはコメントとして出力されない想定です",
     );
 }
+
+#[test]
+fn hash_label_after_unicode_string_is_tokenized_correctly() {
+    let source = r#"
+        var firstActive = "未検出"
+        #outer for (user in members) {
+            println(user)
+            break #outer
+        }
+    "#;
+
+    let mut lexer = Lexer::new(source.to_string());
+    let tokens = lexer
+        .tokenize()
+        .expect("tokenize unicode hash label sample");
+
+    let mut labels = tokens.iter().filter_map(|token| match &token.token_type {
+        TokenType::HashLabel(name) => Some(name.clone()),
+        _ => None,
+    });
+
+    assert_eq!(
+        labels.next().as_deref(),
+        Some("outer"),
+        "直前に日本語文字列があってもハッシュラベルが検出されるべきです",
+    );
+    assert_eq!(
+        labels.next().as_deref(),
+        Some("outer"),
+        "ブロック内の break #outer も検出されるべきです",
+    );
+    assert!(
+        labels.next().is_none(),
+        "余計なハッシュラベルが検出されました"
+    );
+}
 #[test]
 fn test_comment_trivia_passthrough_and_jv_only() {
     let source = "// keep

@@ -606,16 +606,24 @@ impl<'tokens> ParserContext<'tokens> {
                     if let Some(prev_line) = last_line {
                         if token.line > prev_line {
                             let continuation_kind = self.peek_significant_kind();
-                            let continuation = continuation_kind.map_or(false, |kind| {
-                                matches!(
-                                    kind,
-                                    TokenKind::Dot
-                                        | TokenKind::NullSafe
-                                        | TokenKind::DoubleColon
-                                        | TokenKind::Arrow
-                                        | TokenKind::HashLabel
-                                ) || (kind == TokenKind::LeftBrace
-                                    && matches!(last_significant_kind, Some(TokenKind::HashLabel)))
+                            let continuation = continuation_kind.map_or(false, |kind| match kind {
+                                TokenKind::HashLabel => self
+                                    .peek_significant_kind_n(1)
+                                    .map(|(_, next)| next == TokenKind::LeftBrace)
+                                    .unwrap_or(false),
+                                TokenKind::LeftBrace
+                                    if matches!(
+                                        last_significant_kind,
+                                        Some(TokenKind::HashLabel)
+                                    ) =>
+                                {
+                                    true
+                                }
+                                TokenKind::Dot
+                                | TokenKind::NullSafe
+                                | TokenKind::DoubleColon
+                                | TokenKind::Arrow => true,
+                                _ => false,
                             });
                             if !continuation {
                                 should_break_on_sync = true;
