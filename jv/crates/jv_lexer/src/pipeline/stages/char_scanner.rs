@@ -1,14 +1,14 @@
 use std::collections::VecDeque;
 
 use crate::{
+    CommentCarryOverMetadata, JsonCommentTrivia, JsonCommentTriviaKind, LexError,
+    SourceCommentKind, SourceCommentTrivia, TokenTrivia, TokenType,
     pipeline::{
         context::LexerContext,
         pipeline::CharScannerStage,
         pipeline::DEFAULT_LOOKAHEAD_LIMIT,
         types::{RawToken, RawTokenKind, ScannerPosition, Span},
     },
-    CommentCarryOverMetadata, JsonCommentTrivia, JsonCommentTriviaKind, LexError,
-    SourceCommentKind, SourceCommentTrivia, TokenTrivia, TokenType,
 };
 use unicode_ident::{is_xid_continue, is_xid_start};
 
@@ -718,46 +718,141 @@ impl CharScanner {
         let start_column = self.position.column;
         let remaining = self.remaining(source);
 
-        let (opening, closing, is_raw) = if remaining.starts_with("```") {
-            ("```", "```", true)
+        enum RawMode {
+            None,
+            SingleQuote,
+            TripleSingleQuote,
+            Backtick,
+        }
+
+        let (opening, closing, raw_mode) = if remaining.starts_with("```") {
+            ("```", "```", RawMode::Backtick)
         } else if remaining.starts_with("\"\"\"") {
-            ("\"\"\"", "\"\"\"", false)
+            ("\"\"\"", "\"\"\"", RawMode::None)
         } else if remaining.starts_with("\"") {
-            ("\"", "\"", false)
+            ("\"", "\"", RawMode::None)
+        } else if remaining.starts_with("'''") {
+            ("'''", "'''", RawMode::TripleSingleQuote)
         } else if remaining.starts_with("'") {
-            ("'", "'", false)
+            ("'", "'", RawMode::SingleQuote)
         } else {
-            ("\"", "\"", false)
+            ("\"", "\"", RawMode::None)
         };
 
         for ch in opening.chars() {
             self.advance_char(ch, source)?;
         }
 
+        let is_raw = matches!(
+            raw_mode,
+            RawMode::SingleQuote | RawMode::TripleSingleQuote | RawMode::Backtick
+        );
+
+        match raw_mode {
+            RawMode::SingleQuote => {
+                self.scan_raw_single_quote(source, start_line, start_column)?;
+            }
+            RawMode::TripleSingleQuote => {
+                self.scan_raw_triple_single_quote(source, start_line, start_column)?;
+            }
+            _ => loop {
+                if self.remaining(source).is_empty() {
+                    return Err(LexError::UnterminatedString(start_line, start_column));
+                }
+
+                if self.remaining(source).starts_with(closing) {
+                    for ch in closing.chars() {
+                        self.advance_char(ch, source)?;
+                    }
+                    break;
+                }
+
+                let ch = self.peek_char_from(source).unwrap();
+                self.advance_char(ch, source)?;
+
+                if !is_raw && ch == '\\' {
+                    let Some(escaped) = self.peek_char_from(source) else {
+                        return Err(LexError::UnterminatedString(start_line, start_column));
+                    };
+                    self.advance_char(escaped, source)?;
+                }
+            },
+        }
+
+        Ok(self.take_slice(source, start, self.cursor))
+    }
+
+    fn scan_raw_single_quote<'source>(
+        &mut self,
+        source: &'source str,
+        start_line: usize,
+        start_column: usize,
+    ) -> Result<(), LexError> {
         loop {
             if self.remaining(source).is_empty() {
-                return Err(LexError::UnterminatedString(start_line, start_column));
+                return Err(LexError::UnterminatedRawString {
+                    line: start_line,
+                    column: start_column,
+                });
             }
 
-            if self.remaining(source).starts_with(closing) {
-                for ch in closing.chars() {
-                    self.advance_char(ch, source)?;
+            let ch = self.peek_char_from(source).unwrap();
+
+            if matches!(ch, '\n' | '\r') {
+                return Err(LexError::UnterminatedRawString {
+                    line: start_line,
+                    column: start_column,
+                });
+            }
+
+            self.advance_char(ch, source)?;
+
+            if ch != '\'' {
+                continue;
+            }
+
+            if self.remaining(source).starts_with("'") {
+                self.advance_char('\'', source)?;
+                continue;
+            }
+
+            break;
+        }
+
+        Ok(())
+    }
+
+    fn scan_raw_triple_single_quote<'source>(
+        &mut self,
+        source: &'source str,
+        start_line: usize,
+        start_column: usize,
+    ) -> Result<(), LexError> {
+        loop {
+            if self.remaining(source).is_empty() {
+                return Err(LexError::UnterminatedRawString {
+                    line: start_line,
+                    column: start_column,
+                });
+            }
+
+            if self.remaining(source).starts_with("''''") {
+                self.advance_char('\'', source)?;
+                continue;
+            }
+
+            if self.remaining(source).starts_with("'''") {
+                for _ in 0..3 {
+                    self.advance_char('\'', source)?;
                 }
                 break;
             }
 
             let ch = self.peek_char_from(source).unwrap();
             self.advance_char(ch, source)?;
-
-            if !is_raw && ch == '\\' {
-                let Some(escaped) = self.peek_char_from(source) else {
-                    return Err(LexError::UnterminatedString(start_line, start_column));
-                };
-                self.advance_char(escaped, source)?;
-            }
         }
 
-        Ok(self.take_slice(source, start, self.cursor))
+        Ok(())
     }
 
     fn regex_cannot_follow(token: &TokenType) -> bool {

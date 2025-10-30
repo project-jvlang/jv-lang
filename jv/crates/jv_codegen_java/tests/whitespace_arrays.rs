@@ -19,7 +19,7 @@ fn identifier(name: &str) -> IrExpression {
 }
 
 fn number_literal(value: &str) -> IrExpression {
-    IrExpression::Literal(Literal::Number(value.to_string()), dummy_span())
+    IrExpression::Literal(Literal::Number(value.to_string()), None, dummy_span())
 }
 
 fn addition_expr(right_value: &str) -> IrExpression {

@@ -69,6 +69,7 @@ fn example1_program() -> IrProgram {
             op: BinaryOp::Multiply,
             right: Box::new(IrExpression::Literal(
                 Literal::Number("2".to_string()),
+                None,
                 dummy_span(),
             )),
             java_type: int.clone(),
@@ -79,7 +80,7 @@ fn example1_program() -> IrProgram {
     let default_case = switch_case(
         vec![IrCaseLabel::Default],
         None,
-        IrExpression::Literal(Literal::Number("0".to_string()), dummy_span()),
+        IrExpression::Literal(Literal::Number("0".to_string()), None, dummy_span()),
     );
 
     let switch_expr = IrExpression::Switch {
@@ -164,6 +165,7 @@ fn example2_program() -> IrProgram {
             op: BinaryOp::GreaterEqual,
             right: Box::new(IrExpression::Literal(
                 Literal::Number(lower.to_string()),
+                None,
                 dummy_span(),
             )),
             java_type: JavaType::boolean(),
@@ -175,6 +177,7 @@ fn example2_program() -> IrProgram {
             op: guard,
             right: Box::new(IrExpression::Literal(
                 Literal::Number(upper.to_string()),
+                None,
                 dummy_span(),
             )),
             java_type: JavaType::boolean(),
@@ -195,16 +198,18 @@ fn example2_program() -> IrProgram {
                 variable: "it0".to_string(),
                 lower: Box::new(IrExpression::Literal(
                     Literal::Number(lower.to_string()),
+                    None,
                     dummy_span(),
                 )),
                 upper: Box::new(IrExpression::Literal(
                     Literal::Number(upper.to_string()),
+                    None,
                     dummy_span(),
                 )),
                 inclusive_end: inclusive,
             }],
             Some(condition),
-            IrExpression::Literal(Literal::String(label.to_string()), dummy_span()),
+            IrExpression::Literal(Literal::String(label.to_string()), None, dummy_span()),
         )
     }
 
@@ -217,7 +222,7 @@ fn example2_program() -> IrProgram {
         switch_case(
             vec![IrCaseLabel::Default],
             None,
-            IrExpression::Literal(Literal::String("Invalid".to_string()), dummy_span()),
+            IrExpression::Literal(Literal::String("Invalid".to_string()), None, dummy_span()),
         ),
     ];
 
@@ -452,7 +457,7 @@ fn record_component(name: &str, java_type: JavaType) -> IrRecordComponent {
 }
 
 fn number_literal(value: &str) -> IrExpression {
-    IrExpression::Literal(Literal::Number(value.to_string()), dummy_span())
+    IrExpression::Literal(Literal::Number(value.to_string()), None, dummy_span())
 }
 
 #[test]

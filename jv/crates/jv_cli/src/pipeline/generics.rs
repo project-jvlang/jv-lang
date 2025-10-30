@@ -519,6 +519,9 @@ fn apply_hint_to_expression(expr: &mut IrExpression, hint: &PrimitiveSpecializat
             }
             apply_hint_to_expression(body, hint);
         }
+        IrExpression::CharToString(conversion) => {
+            apply_hint_to_expression(&mut conversion.value, hint);
+        }
         IrExpression::RegexPattern { .. }
         | IrExpression::Literal(..)
         | IrExpression::Identifier { .. }

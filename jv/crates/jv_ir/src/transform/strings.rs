@@ -35,7 +35,11 @@ pub fn desugar_string_interpolation(
     }
 
     if !has_expression {
-        return Ok(IrExpression::Literal(Literal::String(raw_text), span));
+        return Ok(IrExpression::Literal(
+            Literal::String(raw_text),
+            None,
+            span,
+        ));
     }
 
     Ok(IrExpression::StringFormat {

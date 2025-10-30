@@ -1,9 +1,9 @@
 use crate::{
+    LexError, TokenMetadata, TokenType,
     pipeline::{
         context::LexerContext,
         types::{EmissionPlan, NormalizedToken, RawTokenKind},
     },
-    LexError, StringDelimiterKind, TokenMetadata, TokenType,
 };
 
 use super::{ClassificationModule, ClassificationState};
@@ -40,22 +40,31 @@ impl ClassificationModule for StringInterpolationModule {
             return Ok(());
         }
 
-        let delimiter_kind = state.metadata().iter().find_map(|meta| {
+        let string_metadata = state.metadata().iter().find_map(|meta| {
             if let TokenMetadata::StringLiteral(data) = meta {
-                Some(data.delimiter)
+                Some(data.clone())
             } else {
                 None
             }
         });
 
-        if matches!(delimiter_kind, Some(StringDelimiterKind::SingleQuote)) {
-            let mut chars = token.normalized_text.chars();
-            if let (Some(ch), None) = (chars.next(), chars.next()) {
-                state.set_token_type(TokenType::Character(ch));
-            } else {
-                state.set_token_type(TokenType::Invalid(token.raw.text.to_string()));
+        if let Some(meta) = &string_metadata {
+            if meta.is_raw {
+                match meta.char_length {
+                    1 => {
+                        let mut chars = token.normalized_text.chars();
+                        if let (Some(ch), None) = (chars.next(), chars.next()) {
+                            state.set_token_type(TokenType::Character(ch));
+                        } else {
+                            state.set_token_type(TokenType::Invalid(token.raw.text.to_string()));
+                        }
+                    }
+                    _ => {
+                        state.set_token_type(TokenType::String(token.normalized_text.clone()));
+                    }
+                }
+                return Ok(());
             }
-            return Ok(());
         }
 
         let interpolation_segments = state.metadata().iter().find_map(|meta| {

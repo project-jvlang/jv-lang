@@ -446,10 +446,18 @@ fn lower_subjectless_pattern(
 ) -> Result<IrExpression, TransformError> {
     match pattern {
         Pattern::Wildcard(wild_span) => {
-            Ok(IrExpression::Literal(Literal::Boolean(true), wild_span))
+            Ok(IrExpression::Literal(
+                Literal::Boolean(true),
+                None,
+                wild_span,
+            ))
         }
         Pattern::Literal(Literal::Boolean(value), literal_span) => {
-            Ok(IrExpression::Literal(Literal::Boolean(value), literal_span))
+            Ok(IrExpression::Literal(
+                Literal::Boolean(value),
+                None,
+                literal_span,
+            ))
         }
         Pattern::Guard {
             pattern,

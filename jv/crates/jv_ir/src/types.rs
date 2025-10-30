@@ -57,11 +57,18 @@ pub enum JavaWildcardKind {
     Super,
 }
 
+/// Flavor metadata for raw string literals.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RawStringFlavor {
+    SingleLine,
+    MultiLine,
+}
+
 /// Desugared expressions - all jv sugar removed
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum IrExpression {
     // Basic expressions that map directly to Java
-    Literal(Literal, Span),
+    Literal(Literal, Option<RawStringFlavor>, Span),
     /// Compiled regular expression pattern handle.
     RegexPattern {
         pattern: String,
@@ -201,6 +208,9 @@ pub enum IrExpression {
         span: Span,
     },
 
+    // Char-to-string conversion synthesized by type adaptation.
+    CharToString(CharToStringConversion),
+
     // instanceof check
     InstanceOf {
         expr: Box<IrExpression>,
@@ -259,6 +269,13 @@ pub enum IrExpression {
         java_type: JavaType,
         span: Span,
     },
+}
+
+/// IR node representing a char-to-string conversion operation.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CharToStringConversion {
+    pub value: Box<IrExpression>,
+    pub span: Span,
 }
 
 /// Metadata describing the resolved target for a method call after name mapping.
@@ -378,7 +395,7 @@ impl IrExpression {
     /// Returns the source span associated with the expression node.
     pub fn span(&self) -> Span {
         match self {
-            IrExpression::Literal(_, span)
+            IrExpression::Literal(_, _, span)
             | IrExpression::RegexPattern { span, .. }
             | IrExpression::Identifier { span, .. }
             | IrExpression::MethodCall { span, .. }
@@ -403,6 +420,7 @@ impl IrExpression {
             | IrExpression::CompletableFuture { span, .. }
             | IrExpression::VirtualThread { span, .. }
             | IrExpression::TryWithResources { span, .. } => span.clone(),
+            IrExpression::CharToString(conversion) => conversion.span.clone(),
         }
     }
 }

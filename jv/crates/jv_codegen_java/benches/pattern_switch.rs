@@ -1,4 +1,4 @@
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, black_box, criterion_group, criterion_main};
 use jv_ast::{Literal, Span};
 use jv_codegen_java::{JavaCodeGenConfig, JavaCodeGenerator, JavaTarget};
 use jv_ir::{
@@ -19,7 +19,11 @@ fn literal_switch_cases(arm_count: usize) -> Vec<IrSwitchCase> {
         cases.push(IrSwitchCase {
             labels: vec![IrCaseLabel::Literal(Literal::Number(index.to_string()))],
             guard: None,
-            body: IrExpression::Literal(Literal::String(format!("case_{index}")), dummy_span()),
+            body: IrExpression::Literal(
+                Literal::String(format!("case_{index}")),
+                None,
+                dummy_span(),
+            ),
             span: dummy_span(),
         });
     }
@@ -27,7 +31,11 @@ fn literal_switch_cases(arm_count: usize) -> Vec<IrSwitchCase> {
     cases.push(IrSwitchCase {
         labels: vec![IrCaseLabel::Default],
         guard: None,
-        body: IrExpression::Literal(Literal::String("fallback".to_string()), dummy_span()),
+        body: IrExpression::Literal(
+            Literal::String("fallback".to_string()),
+            None,
+            dummy_span(),
+        ),
         span: dummy_span(),
     });
 
@@ -68,7 +76,11 @@ fn sealed_switch_cases(levels: usize) -> Vec<IrSwitchCase> {
                 deconstruction: Some(variant_pattern),
             }],
             guard: None,
-            body: IrExpression::Literal(Literal::String(format!("sealed_{index}")), dummy_span()),
+            body: IrExpression::Literal(
+                Literal::String(format!("sealed_{index}")),
+                None,
+                dummy_span(),
+            ),
             span: dummy_span(),
         });
     }
@@ -76,7 +88,11 @@ fn sealed_switch_cases(levels: usize) -> Vec<IrSwitchCase> {
     cases.push(IrSwitchCase {
         labels: vec![IrCaseLabel::Default],
         guard: None,
-        body: IrExpression::Literal(Literal::String("sealed_default".to_string()), dummy_span()),
+        body: IrExpression::Literal(
+            Literal::String("sealed_default".to_string()),
+            None,
+            dummy_span(),
+        ),
         span: dummy_span(),
     });
 

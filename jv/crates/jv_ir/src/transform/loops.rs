@@ -110,6 +110,7 @@ fn lower_numeric_range(
                 op: BinaryOp::Add,
                 right: Box::new(IrExpression::Literal(
                     Literal::Number("1".to_string()),
+                    None,
                     range.span.clone(),
                 )),
                 java_type: binding_type.clone(),

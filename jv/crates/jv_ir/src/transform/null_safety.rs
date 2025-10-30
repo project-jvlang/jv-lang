@@ -30,7 +30,11 @@ pub fn desugar_null_safe_member_access(
         is_record_component: false,
     };
 
-    let default_value = Some(Box::new(IrExpression::Literal(Literal::Null, span.clone())));
+    let default_value = Some(Box::new(IrExpression::Literal(
+        Literal::Null,
+        None,
+        span.clone(),
+    )));
 
     Ok(IrExpression::NullSafeOperation {
         expr: Box::new(ir_object),
@@ -74,7 +78,11 @@ pub fn desugar_null_safe_index_access(
     let default_value = if matches!(element_type, JavaType::Primitive(_)) {
         None
     } else {
-        Some(Box::new(IrExpression::Literal(Literal::Null, span.clone())))
+        Some(Box::new(IrExpression::Literal(
+            Literal::Null,
+            None,
+            span.clone(),
+        )))
     };
 
     Ok(IrExpression::NullSafeOperation {

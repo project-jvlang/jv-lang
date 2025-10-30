@@ -5,8 +5,8 @@ use crate::transform::{
 };
 use crate::types::{IrExpression, IrProgram, IrResolvedMethodTarget, IrStatement, JavaType};
 use jv_ast::{
-    types::PrimitiveTypeName, Argument, BinaryOp, CallArgumentMetadata, CallArgumentStyle,
-    Expression, SequenceDelimiter, Span,
+    Argument, BinaryOp, CallArgumentMetadata, CallArgumentStyle, Expression, SequenceDelimiter,
+    Span, types::PrimitiveTypeName,
 };
 use serde::{Deserialize, Serialize};
 use std::mem;
@@ -1444,7 +1444,7 @@ fn update_identifier_usage(expr: &mut IrExpression, target: &str, java_type: &Ja
             update_identifier_usage(body.as_mut(), target, java_type);
         }
         IrExpression::RegexPattern { .. }
-        | IrExpression::Literal(_, _)
+        | IrExpression::Literal(..)
         | IrExpression::This { .. }
         | IrExpression::Super { .. } => {}
         _ => {}
@@ -2302,12 +2302,15 @@ impl ListTerminalEnforcer {
 
         match expr {
             IrExpression::SequencePipeline { .. }
-            | IrExpression::Literal(_, _)
+            | IrExpression::Literal(..)
             | IrExpression::RegexPattern { .. }
             | IrExpression::Identifier { .. }
             | IrExpression::InstanceOf { .. }
             | IrExpression::This { .. }
             | IrExpression::Super { .. } => {}
+            IrExpression::CharToString(conversion) => {
+                self.visit_expression(&mut conversion.value, None);
+            }
             IrExpression::MethodCall { receiver, args, .. } => {
                 if let Some(recv) = receiver.as_mut() {
                     self.visit_expression(recv, None);

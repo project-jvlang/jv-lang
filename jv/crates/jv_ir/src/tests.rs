@@ -2,23 +2,24 @@
 mod tests {
     use crate::context::{RegisteredMethodCall, RegisteredMethodDeclaration, SequenceStyleCache};
     use crate::{
-        convert_type_annotation, desugar_async_expression, desugar_await_expression,
-        desugar_data_class, desugar_default_parameters, desugar_defer_expression,
-        desugar_elvis_operator, desugar_extension_function, desugar_named_arguments,
-        desugar_null_safe_index_access, desugar_null_safe_member_access, desugar_spawn_expression,
-        desugar_string_interpolation, desugar_top_level_function, desugar_use_expression,
-        desugar_val_declaration, desugar_var_declaration, desugar_when_expression,
-        generate_extension_class_name, generate_utility_class_name, infer_java_type,
-        naming::method_erasure::apply_method_erasure, transform_expression, transform_program,
-        transform_program_with_context, transform_program_with_context_profiled,
-        transform_statement, CompletableFutureOp, DataFormat, IrCaseLabel,
-        IrDeconstructionComponent, IrDeconstructionPattern, IrExpression, IrForEachKind,
-        IrForLoopMetadata, IrImplicitWhenEnd, IrModifiers, IrNumericRangeLoop, IrParameter,
-        IrResolvedMethodTarget, IrStatement, IrVisibility, JavaType, PipelineShape, SampleMode,
-        SampleSourceKind, Schema, SequencePipeline, SequenceSource, SequenceStage,
-        SequenceTerminal, SequenceTerminalEvaluation, SequenceTerminalKind, TransformContext,
-        TransformError, TransformPools, TransformProfiler, VirtualThreadOp,
+        CompletableFutureOp, DataFormat, IrCaseLabel, IrDeconstructionComponent,
+        IrDeconstructionPattern, IrExpression, IrForEachKind, IrForLoopMetadata, IrImplicitWhenEnd,
+        IrModifiers, IrNumericRangeLoop, IrParameter, IrResolvedMethodTarget, IrStatement,
+        IrVisibility, JavaType, PipelineShape, SampleMode, SampleSourceKind, Schema,
+        SequencePipeline, SequenceSource, SequenceStage, SequenceTerminal,
+        SequenceTerminalEvaluation, SequenceTerminalKind, TransformContext, TransformError,
+        TransformPools, TransformProfiler, VirtualThreadOp, convert_type_annotation,
+        desugar_async_expression, desugar_await_expression, desugar_data_class,
+        desugar_default_parameters, desugar_defer_expression, desugar_elvis_operator,
+        desugar_extension_function, desugar_named_arguments, desugar_null_safe_index_access,
+        desugar_null_safe_member_access, desugar_spawn_expression, desugar_string_interpolation,
+        desugar_top_level_function, desugar_use_expression, desugar_val_declaration,
+        desugar_var_declaration, desugar_when_expression, generate_extension_class_name,
+        generate_utility_class_name, infer_java_type, naming::method_erasure::apply_method_erasure,
+        transform_expression, transform_program, transform_program_with_context,
+        transform_program_with_context_profiled, transform_statement,
     };
+    use crate::types::{CharToStringConversion, RawStringFlavor};
     use jv_ast::*;
     use jv_parser_frontend::ParserPipeline;
     use jv_parser_rowan::frontend::RowanPipeline;
@@ -795,10 +796,12 @@ mod tests {
                 assert_eq!(declaration.format, DataFormat::Json);
                 assert_eq!(declaration.mode, SampleMode::Embed);
                 assert_eq!(declaration.source_kind, SampleSourceKind::Inline);
-                assert!(declaration
-                    .embedded_data
-                    .as_ref()
-                    .is_some_and(|data| !data.is_empty()));
+                assert!(
+                    declaration
+                        .embedded_data
+                        .as_ref()
+                        .is_some_and(|data| !data.is_empty())
+                );
                 assert!(!declaration.records.is_empty());
 
                 let registered = context
@@ -1276,7 +1279,7 @@ mod tests {
                     .as_ref()
                     .expect("guard expression should be preserved");
                 match guard_ir {
-                    IrExpression::Literal(Literal::Boolean(true), _) => {}
+                    IrExpression::Literal(Literal::Boolean(true), _, _) => {}
                     other => panic!("Expected boolean literal guard, got {:?}", other),
                 }
 
@@ -1882,7 +1885,7 @@ mod tests {
 
                 let default = default_value.expect("expected default value for nullable type");
                 match *default {
-                    IrExpression::Literal(_, literal_span) => {
+                    IrExpression::Literal(_, _, literal_span) => {
                         assert_eq!(literal_span, expression_span);
                     }
                     other => panic!("Expected literal default preserving span, got {:?}", other),
@@ -2104,7 +2107,7 @@ mod tests {
             .expect("pure text interpolation should produce literal");
 
         match result {
-            IrExpression::Literal(Literal::String(text), _) => {
+            IrExpression::Literal(Literal::String(text), _, _) => {
                 assert_eq!(text, "No expressions");
             }
             other => panic!("Expected literal string, got {:?}", other),
@@ -2128,6 +2131,7 @@ mod tests {
                 StringPart::Expression(Expression::Identifier("status".to_string(), dummy_span())),
             ],
             indent: None,
+            raw_flavor: None,
             span: dummy_span(),
         };
 
@@ -2155,6 +2159,68 @@ mod tests {
                 "multiline interpolation should desugar to string format, got {:?}",
                 other
             ),
+        }
+    }
+
+    #[test]
+    fn transform_raw_single_string_literal_preserves_ir_metadata() {
+        let mut context = test_context();
+        let span = dummy_span();
+
+        let literal = MultilineStringLiteral {
+            kind: MultilineKind::RawSingle,
+            normalized: "C:\\Users".to_string(),
+            raw: "C:\\Users".to_string(),
+            parts: Vec::new(),
+            indent: None,
+            raw_flavor: Some(jv_ast::strings::RawStringFlavor::SingleLine),
+            span: span.clone(),
+        };
+
+        let result = transform_expression(Expression::MultilineString(literal), &mut context)
+            .expect("raw single string should lower successfully");
+
+        match result {
+            IrExpression::Literal(
+                Literal::String(value),
+                Some(RawStringFlavor::SingleLine),
+                result_span,
+            ) => {
+                assert_eq!(value, "C:\\Users");
+                assert_eq!(result_span, span);
+            }
+            other => panic!("expected raw single literal in IR, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn transform_raw_triple_string_literal_preserves_ir_metadata() {
+        let mut context = test_context();
+        let span = dummy_span();
+
+        let literal = MultilineStringLiteral {
+            kind: MultilineKind::RawTriple,
+            normalized: "line1\nline2".to_string(),
+            raw: "line1\nline2".to_string(),
+            parts: Vec::new(),
+            indent: None,
+            raw_flavor: Some(jv_ast::strings::RawStringFlavor::MultiLine),
+            span: span.clone(),
+        };
+
+        let result = transform_expression(Expression::MultilineString(literal), &mut context)
+            .expect("raw triple string should lower successfully");
+
+        match result {
+            IrExpression::Literal(
+                Literal::String(value),
+                Some(RawStringFlavor::MultiLine),
+                result_span,
+            ) => {
+                assert_eq!(value, "line1\nline2");
+                assert_eq!(result_span, span);
+            }
+            other => panic!("expected raw triple literal in IR, got {:?}", other),
         }
     }
 
@@ -2397,7 +2463,7 @@ mod tests {
                 assert_eq!(resources[0].name, "f");
                 assert_eq!(java_type, JavaType::string());
                 match *body {
-                    IrExpression::Literal(Literal::String(ref value), _) => {
+                    IrExpression::Literal(Literal::String(ref value), _, _) => {
                         assert_eq!(value, "done");
                     }
                     other => panic!("Expected literal body, got {:?}", other),
@@ -2968,7 +3034,7 @@ mod tests {
             IrStatement::Return {
                 value: Some(expr), ..
             } => match expr {
-                IrExpression::Literal(Literal::String(text), _) => {
+                IrExpression::Literal(Literal::String(text), _, _) => {
                     assert_eq!(text, "result")
                 }
                 other => panic!("unexpected return expression: {:?}", other),
@@ -3011,7 +3077,7 @@ mod tests {
                 assert_eq!(java_type, JavaType::string());
                 assert_eq!(args.len(), 1);
                 match &args[0] {
-                    IrExpression::Literal(Literal::String(value), _) => {
+                    IrExpression::Literal(Literal::String(value), _, _) => {
                         assert_eq!(value, "World")
                     }
                     other => panic!("unexpected argument expression: {:?}", other),
@@ -3256,7 +3322,7 @@ mod tests {
 
                 match default_value {
                     Some(boxed) => match *boxed {
-                        IrExpression::Literal(Literal::String(ref s), _) => {
+                        IrExpression::Literal(Literal::String(ref s), _, _) => {
                             assert_eq!(s, "default");
                         }
                         other => panic!("Expected string literal default, got {:?}", other),
@@ -3300,7 +3366,7 @@ mod tests {
         let mut context = test_context();
 
         let ir_initializer =
-            IrExpression::Literal(Literal::String("hello".to_string()), dummy_span());
+            IrExpression::Literal(Literal::String("hello".to_string()), None, dummy_span());
 
         let inferred = infer_java_type(None, Some(&ir_initializer), &mut context)
             .expect("type inference should succeed for string literal");
@@ -3316,8 +3382,8 @@ mod tests {
             element_type: JavaType::int(),
             dimensions: Vec::new(),
             initializer: Some(vec![
-                IrExpression::Literal(Literal::Number("1".to_string()), dummy_span()),
-                IrExpression::Literal(Literal::Number("2".to_string()), dummy_span()),
+                IrExpression::Literal(Literal::Number("1".to_string()), None, dummy_span()),
+                IrExpression::Literal(Literal::Number("2".to_string()), None, dummy_span()),
             ]),
             delimiter: SequenceDelimiter::Whitespace,
             span: dummy_span(),
@@ -3346,8 +3412,8 @@ mod tests {
             element_type: JavaType::object(),
             dimensions: Vec::new(),
             initializer: Some(vec![
-                IrExpression::Literal(Literal::Number("1".to_string()), dummy_span()),
-                IrExpression::Literal(Literal::String("oops".to_string()), dummy_span()),
+                IrExpression::Literal(Literal::Number("1".to_string()), None, dummy_span()),
+                IrExpression::Literal(Literal::String("oops".to_string()), None, dummy_span()),
             ]),
             delimiter: SequenceDelimiter::Whitespace,
             span: dummy_span(),
@@ -3404,7 +3470,7 @@ mod tests {
                 assert_eq!(init.len(), 2);
                 for (index, element) in init.into_iter().enumerate() {
                     match element {
-                        IrExpression::Literal(Literal::Number(value), _) => {
+                        IrExpression::Literal(Literal::Number(value), _, _) => {
                             assert_eq!(value, (index + 1).to_string());
                         }
                         other => panic!("expected numeric literal, got {:?}", other),
@@ -3460,9 +3526,9 @@ mod tests {
             java_name: None,
             resolved_target: None,
             args: vec![
-                IrExpression::Literal(Literal::Number("1".to_string()), dummy_span()),
-                IrExpression::Literal(Literal::Number("2".to_string()), dummy_span()),
-                IrExpression::Literal(Literal::String("oops".to_string()), dummy_span()),
+                IrExpression::Literal(Literal::Number("1".to_string()), None, dummy_span()),
+                IrExpression::Literal(Literal::Number("2".to_string()), None, dummy_span()),
+                IrExpression::Literal(Literal::String("oops".to_string()), None, dummy_span()),
             ],
             argument_style: CallArgumentStyle::Whitespace,
             java_type: JavaType::void(),
@@ -3741,12 +3807,14 @@ fun sample(value: Any): Int {
             .expect("implicit assignment lowering should succeed");
 
         match lowered.as_slice() {
-            [IrStatement::VariableDeclaration {
-                name,
-                is_final,
-                java_type,
-                ..
-            }] => {
+            [
+                IrStatement::VariableDeclaration {
+                    name,
+                    is_final,
+                    java_type,
+                    ..
+                },
+            ] => {
                 assert_eq!(name, "greeting");
                 assert!(is_final, "implicit val declarations must be final");
                 assert_eq!(java_type, &JavaType::string());
@@ -3803,10 +3871,12 @@ fun sample(value: Any): Int {
             transform_statement(stmt, &mut context).expect("assignment lowering should succeed");
 
         match lowered.as_slice() {
-            [IrStatement::Expression {
-                expr: IrExpression::Assignment { .. },
-                ..
-            }] => {}
+            [
+                IrStatement::Expression {
+                    expr: IrExpression::Assignment { .. },
+                    ..
+                },
+            ] => {}
             other => panic!("expected assignment expression, got {:?}", other),
         }
     }
@@ -4466,9 +4536,11 @@ fun sample(value: Any): Int {
             construct: "goto statement".to_string(),
             span: span.clone(),
         };
-        assert!(unsupported_error
-            .to_string()
-            .contains("Unsupported construct"));
+        assert!(
+            unsupported_error
+                .to_string()
+                .contains("Unsupported construct")
+        );
 
         let pattern_error = TransformError::InvalidPattern {
             message: "Invalid range pattern".to_string(),
@@ -4529,6 +4601,59 @@ fun sample(value: Any): Int {
         assert_eq!(restored, call);
     }
 
+    #[test]
+    fn literal_serialization_preserves_raw_flavor() {
+        let span = dummy_span();
+        let literal = IrExpression::Literal(
+            Literal::String("raw".to_string()),
+            Some(RawStringFlavor::SingleLine),
+            span.clone(),
+        );
+
+        let json =
+            serde_json::to_string(&literal).expect("literal expression should serialize to JSON");
+        let restored: IrExpression =
+            serde_json::from_str(&json).expect("literal expression should deserialize from JSON");
+
+        match restored {
+            IrExpression::Literal(Literal::String(value), Some(RawStringFlavor::SingleLine), restored_span) => {
+                assert_eq!(value, "raw");
+                assert_eq!(restored_span, span);
+            }
+            other => panic!("raw flavor metadata was lost: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn char_to_string_conversion_serialization_roundtrip() {
+        let span = dummy_span();
+        let conversion = IrExpression::CharToString(CharToStringConversion {
+            value: Box::new(IrExpression::Literal(
+                Literal::Character('x'),
+                None,
+                span.clone(),
+            )),
+            span: span.clone(),
+        });
+
+        let json = serde_json::to_string(&conversion).expect("conversion should serialize");
+        let restored: IrExpression =
+            serde_json::from_str(&json).expect("conversion should deserialize");
+
+        match restored {
+            IrExpression::CharToString(CharToStringConversion { value, span: restored_span }) => {
+                assert_eq!(restored_span, span);
+                match *value {
+                    IrExpression::Literal(Literal::Character('x'), None, inner_span) => {
+                        assert_eq!(inner_span, span);
+                    }
+                    other => panic!("unexpected nested literal: {:?}", other),
+                }
+            }
+            other => panic!("expected CharToStringConversion after roundtrip, got {:?}", other),
+        }
+    }
+
     // Integration test for IR node structure validation
     #[test]
     fn test_ir_node_structure_completeness() {
@@ -4556,8 +4681,9 @@ fun sample(value: Any): Int {
         assert!(matches!(functional_type, JavaType::Functional { .. }));
 
         // Test IrExpression variants
-        let literal_expr = IrExpression::Literal(Literal::Number("42".to_string()), dummy_span());
-        assert!(matches!(literal_expr, IrExpression::Literal(_, _)));
+        let literal_expr =
+            IrExpression::Literal(Literal::Number("42".to_string()), None, dummy_span());
+        assert!(matches!(literal_expr, IrExpression::Literal(_, _, _)));
 
         let method_call = IrExpression::MethodCall {
             receiver: None,
@@ -4577,6 +4703,7 @@ fun sample(value: Any): Int {
             param_types: vec![JavaType::object()],
             body: Box::new(IrExpression::Literal(
                 Literal::Number("0".to_string()),
+                None,
                 dummy_span(),
             )),
             java_type: JavaType::object(),
@@ -4632,6 +4759,7 @@ fun sample(value: Any): Int {
             java_type: JavaType::int(),
             initializer: Some(IrExpression::Literal(
                 Literal::Number("42".to_string()),
+                None,
                 dummy_span(),
             )),
             is_final: true,

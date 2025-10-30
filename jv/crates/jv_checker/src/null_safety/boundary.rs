@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
+use super::NullabilityKind;
 use super::context::NullSafetyContext;
 use super::flow::FlowAnalysisOutcome;
-use super::NullabilityKind;
 use crate::CheckError;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -70,9 +70,11 @@ mod tests {
 
         let warnings = BoundaryChecker::new(&context).evaluate(&outcome);
 
-        assert!(warnings
-            .iter()
-            .any(|warning| warning.to_string().contains("JV3006")));
+        assert!(
+            warnings
+                .iter()
+                .any(|warning| warning.to_string().contains("JV3006"))
+        );
     }
 }
 

@@ -26,7 +26,8 @@ fn generate_source_and_map(program: &IrProgram) -> (String, SourceMap) {
 #[test]
 fn boxing_conversion_wraps_literal_expression() {
     let expr_span = span(1);
-    let expression = IrExpression::Literal(Literal::Number("1".to_string()), expr_span.clone());
+    let expression =
+        IrExpression::Literal(Literal::Number("1".to_string()), None, expr_span.clone());
     let statement = IrStatement::Expression {
         expr: expression,
         span: expr_span.clone(),

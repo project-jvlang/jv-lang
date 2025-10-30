@@ -264,19 +264,11 @@ fn interpret_version_token(token: &str) -> Option<u32> {
 }
 
 fn javac_executable() -> &'static str {
-    if cfg!(windows) {
-        "javac.exe"
-    } else {
-        "javac"
-    }
+    if cfg!(windows) { "javac.exe" } else { "javac" }
 }
 
 fn java_executable() -> &'static str {
-    if cfg!(windows) {
-        "java.exe"
-    } else {
-        "java"
-    }
+    if cfg!(windows) { "java.exe" } else { "java" }
 }
 
 #[cfg(test)]
@@ -375,7 +367,10 @@ Java(TM) SE Runtime Environment"#;
 
         fn set_os(key: &'static str, value: &std::ffi::OsStr) -> Self {
             let original = env::var_os(key);
-            env::set_var(key, value);
+            // Nightly 1.92互換: 環境変数操作APIがunsafe指定に変わったため明示的に包む。
+            unsafe {
+                env::set_var(key, value);
+            }
             Self { key, original }
         }
     }
@@ -383,9 +378,13 @@ Java(TM) SE Runtime Environment"#;
     impl Drop for EnvVarGuard {
         fn drop(&mut self) {
             if let Some(value) = self.original.take() {
-                env::set_var(self.key, value);
+                unsafe {
+                    env::set_var(self.key, value);
+                }
             } else {
-                env::remove_var(self.key);
+                unsafe {
+                    env::remove_var(self.key);
+                }
             }
         }
     }

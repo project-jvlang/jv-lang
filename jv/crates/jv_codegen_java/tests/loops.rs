@@ -19,7 +19,7 @@ fn identifier(name: &str, ty: &JavaType, span: Span) -> IrExpression {
 }
 
 fn number_literal(value: &str, span: Span) -> IrExpression {
-    IrExpression::Literal(Literal::Number(value.to_string()), span)
+    IrExpression::Literal(Literal::Number(value.to_string()), None, span)
 }
 
 fn empty_block(span: Span) -> IrStatement {

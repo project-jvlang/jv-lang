@@ -70,13 +70,17 @@ fn test_string_interpolation_red_phase() {
 
     // Look for interpolation-related tokens
     let token_types: Vec<_> = tokens.iter().map(|t| &t.token_type).collect();
-    assert!(token_types
-        .iter()
-        .any(|t| matches!(t, TokenType::StringStart)));
+    assert!(
+        token_types
+            .iter()
+            .any(|t| matches!(t, TokenType::StringStart))
+    );
     assert!(token_types.contains(&&TokenType::Identifier("name".to_string())));
-    assert!(token_types
-        .iter()
-        .any(|t| matches!(t, TokenType::StringEnd)));
+    assert!(
+        token_types
+            .iter()
+            .any(|t| matches!(t, TokenType::StringEnd))
+    );
 }
 
 #[test]
@@ -493,9 +497,11 @@ fn test_block_brace_has_no_json_metadata() {
         .map(|token| token.metadata.iter().collect::<Vec<_>>())
         .unwrap_or_default();
 
-    assert!(brace_metadata
-        .iter()
-        .all(|metadata| !matches!(metadata, TokenMetadata::PotentialJsonStart { .. })));
+    assert!(
+        brace_metadata
+            .iter()
+            .all(|metadata| !matches!(metadata, TokenMetadata::PotentialJsonStart { .. }))
+    );
 }
 
 #[test]
@@ -543,6 +549,82 @@ fn test_complex_string_interpolation_red_phase() {
     assert!(token_types.contains(&&TokenType::Dot));
     assert!(token_types.contains(&&TokenType::Identifier("name".to_string())));
     assert!(token_types.contains(&&TokenType::Identifier("age".to_string())));
+}
+
+#[test]
+fn lex_raw_single_character_token() {
+    let mut lexer = Lexer::new("'a'".to_string());
+    let tokens = lexer.tokenize().expect("tokenize raw single char");
+
+    assert!(matches!(tokens[0].token_type, TokenType::Character('a')));
+
+    let metadata = tokens[0]
+        .metadata
+        .iter()
+        .find_map(|meta| match meta {
+            TokenMetadata::StringLiteral(info) => Some(info.clone()),
+            _ => None,
+        })
+        .expect("string literal metadata missing");
+    assert!(metadata.is_raw);
+    assert_eq!(metadata.char_length, 1);
+    assert_eq!(metadata.raw_flavor, Some(RawStringFlavor::SingleLine));
+}
+
+#[test]
+fn lex_raw_single_string_with_embedded_quote() {
+    let mut lexer = Lexer::new("'It''s fine'".to_string());
+    let tokens = lexer.tokenize().expect("tokenize raw single string");
+
+    assert_eq!(
+        tokens[0].token_type,
+        TokenType::String("It's fine".to_string())
+    );
+
+    let metadata = tokens[0]
+        .metadata
+        .iter()
+        .find_map(|meta| match meta {
+            TokenMetadata::StringLiteral(info) => Some(info.clone()),
+            _ => None,
+        })
+        .expect("string literal metadata missing");
+    assert!(metadata.is_raw);
+    assert_eq!(metadata.char_length, "It's fine".chars().count());
+}
+
+#[test]
+fn lex_raw_triple_string_with_single_quote() {
+    let mut lexer = Lexer::new("'''foo''''bar'''".to_string());
+    let tokens = lexer.tokenize().expect("tokenize raw triple string");
+
+    assert_eq!(
+        tokens[0].token_type,
+        TokenType::String("foo'bar".to_string())
+    );
+
+    let metadata = tokens[0]
+        .metadata
+        .iter()
+        .find_map(|meta| match meta {
+            TokenMetadata::StringLiteral(info) => Some(info.clone()),
+            _ => None,
+        })
+        .expect("string literal metadata missing");
+    assert!(metadata.is_raw);
+    assert_eq!(metadata.raw_flavor, Some(RawStringFlavor::MultiLine));
+    assert!(metadata.normalize_indentation);
+}
+
+#[test]
+fn lex_unterminated_raw_single_reports_error() {
+    let mut lexer = Lexer::new("'unterminated".to_string());
+    let err = lexer.tokenize().expect_err("expected raw string error");
+
+    match err {
+        LexError::UnterminatedRawString { .. } => {}
+        other => panic!("unexpected error kind: {other:?}"),
+    }
 }
 
 #[test]
@@ -644,12 +726,16 @@ fn test_range_tokens() {
     let mut lexer = Lexer::new(source.to_string());
     let tokens = lexer.tokenize().unwrap();
 
-    assert!(tokens
-        .iter()
-        .any(|t| matches!(t.token_type, TokenType::RangeExclusive)));
-    assert!(tokens
-        .iter()
-        .any(|t| matches!(t.token_type, TokenType::RangeInclusive)));
+    assert!(
+        tokens
+            .iter()
+            .any(|t| matches!(t.token_type, TokenType::RangeExclusive))
+    );
+    assert!(
+        tokens
+            .iter()
+            .any(|t| matches!(t.token_type, TokenType::RangeInclusive))
+    );
 }
 
 #[test]
@@ -1249,13 +1335,11 @@ fn classifier_marks_string_interpolation_plan() {
     let source = "\"Hello, ${name}!\"";
     let mut ctx = pipeline::LexerContext::new(source);
     let mut metadata = pipeline::PreMetadata::default();
+    let mut literal_meta = StringLiteralMetadata::from_kind(StringDelimiterKind::DoubleQuote);
+    literal_meta.char_length = source.chars().count();
     metadata
         .provisional_metadata
-        .push(TokenMetadata::StringLiteral(StringLiteralMetadata {
-            delimiter: StringDelimiterKind::DoubleQuote,
-            allows_interpolation: true,
-            normalize_indentation: false,
-        }));
+        .push(TokenMetadata::StringLiteral(literal_meta));
     metadata
         .provisional_metadata
         .push(TokenMetadata::StringInterpolation {
@@ -1286,6 +1370,21 @@ fn classifier_marks_string_interpolation_plan() {
         }
         other => panic!("expected string interpolation token, got {:?}", other),
     }
+}
+
+#[test]
+fn string_literal_metadata_marks_raw_variants() {
+    let single = StringLiteralMetadata::from_kind(StringDelimiterKind::SingleQuote);
+    assert!(single.is_raw);
+    assert_eq!(single.raw_flavor, Some(RawStringFlavor::SingleLine));
+
+    let triple = StringLiteralMetadata::from_kind(StringDelimiterKind::TripleSingleQuote);
+    assert!(triple.is_raw);
+    assert_eq!(triple.raw_flavor, Some(RawStringFlavor::MultiLine));
+
+    let double = StringLiteralMetadata::from_kind(StringDelimiterKind::DoubleQuote);
+    assert!(!double.is_raw);
+    assert_eq!(double.raw_flavor, None);
 }
 
 #[test]

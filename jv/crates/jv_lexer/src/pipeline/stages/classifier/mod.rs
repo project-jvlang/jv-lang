@@ -1,10 +1,10 @@
 use crate::{
+    LexError, TokenDiagnostic, TokenMetadata, TokenType,
     pipeline::{
         context::LexerContext,
         pipeline::ClassifierStage,
         types::{ClassifiedToken, EmissionPlan, NormalizedToken, RawTokenKind},
     },
-    LexError, TokenDiagnostic, TokenMetadata, TokenType,
 };
 
 mod comment;
@@ -282,12 +282,10 @@ mod tests {
         let mut classifier = Classifier::new();
         let raw = make_raw_token(RawTokenKind::Symbol, "\"hello\"");
         let mut pre = PreMetadata::default();
+        let mut literal_meta = StringLiteralMetadata::from_kind(StringDelimiterKind::DoubleQuote);
+        literal_meta.char_length = 5;
         pre.provisional_metadata
-            .push(TokenMetadata::StringLiteral(StringLiteralMetadata {
-                delimiter: StringDelimiterKind::DoubleQuote,
-                allows_interpolation: true,
-                normalize_indentation: false,
-            }));
+            .push(TokenMetadata::StringLiteral(literal_meta));
         let token = NormalizedToken::new(raw, "hello".to_string(), pre);
         let mut ctx = build_context("\"hello\"");
 
@@ -301,12 +299,10 @@ mod tests {
         let mut classifier = Classifier::new();
         let raw = make_raw_token(RawTokenKind::Symbol, "\"Hello ${name}!\"");
         let mut pre = PreMetadata::default();
+        let mut literal_meta = StringLiteralMetadata::from_kind(StringDelimiterKind::DoubleQuote);
+        literal_meta.char_length = "Hello ${name}!".chars().count();
         pre.provisional_metadata
-            .push(TokenMetadata::StringLiteral(StringLiteralMetadata {
-                delimiter: StringDelimiterKind::DoubleQuote,
-                allows_interpolation: true,
-                normalize_indentation: false,
-            }));
+            .push(TokenMetadata::StringLiteral(literal_meta));
         pre.provisional_metadata
             .push(TokenMetadata::StringInterpolation {
                 segments: vec![
@@ -323,10 +319,12 @@ mod tests {
             classified.token_type,
             TokenType::StringInterpolation(ref value) if value == "Hello ${name}!"
         ));
-        assert!(classified
-            .metadata
-            .iter()
-            .any(|meta| matches!(meta, TokenMetadata::StringInterpolation { .. })));
+        assert!(
+            classified
+                .metadata
+                .iter()
+                .any(|meta| matches!(meta, TokenMetadata::StringInterpolation { .. }))
+        );
         match &classified.emission_plan {
             EmissionPlan::StringInterpolation { segments } => {
                 assert_eq!(segments.len(), 3);
@@ -372,10 +370,12 @@ mod tests {
 
         let classified = classifier.classify(token, &mut ctx).unwrap();
         assert!(matches!(classified.token_type, TokenType::LayoutComma));
-        assert!(classified
-            .metadata
-            .iter()
-            .any(|meta| matches!(meta, TokenMetadata::LayoutComma(_))));
+        assert!(
+            classified
+                .metadata
+                .iter()
+                .any(|meta| matches!(meta, TokenMetadata::LayoutComma(_)))
+        );
     }
 
     #[test]

@@ -741,7 +741,15 @@ impl JavaCodeGenerator {
                     scope_locals,
                 );
             }
-            IrExpression::Literal(_, _)
+            IrExpression::CharToString(conversion) => {
+                self.collect_mutable_captures_in_expression(
+                    &conversion.value,
+                    method_locals,
+                    captures,
+                    scope_locals,
+                );
+            }
+            IrExpression::Literal(..)
             | IrExpression::RegexPattern { .. }
             | IrExpression::Identifier { .. }
             | IrExpression::Switch { .. }

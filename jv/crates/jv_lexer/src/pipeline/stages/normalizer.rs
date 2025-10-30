@@ -3,14 +3,14 @@ use std::char;
 use unicode_normalization::UnicodeNormalization;
 
 use crate::{
+    LayoutCommaMetadata, LayoutSequenceKind, LexError, NumberGroupingKind, NumberLiteralMetadata,
+    StringDelimiterKind, StringInterpolationSegment, StringLiteralMetadata, TokenDiagnostic,
+    TokenMetadata, TokenType,
     pipeline::{
         context::LexerContext,
         pipeline::NormalizerStage,
         types::{NormalizedToken, PreMetadata, RawToken, RawTokenKind, Span},
     },
-    LayoutCommaMetadata, LayoutSequenceKind, LexError, NumberGroupingKind, NumberLiteralMetadata,
-    StringDelimiterKind, StringInterpolationSegment, StringLiteralMetadata, TokenDiagnostic,
-    TokenMetadata, TokenType,
 };
 
 use super::json_utils::{detect_array_confidence, detect_object_confidence};
@@ -282,34 +282,37 @@ impl Normalizer {
         }
 
         let inner = &lexeme[opening_len..lexeme.len() - closing_len];
-        let unescaped = if matches!(delimiter_kind, StringDelimiterKind::BacktickBlock) {
-            inner.to_string()
-        } else {
-            self.unescape(inner, token.span.start)?
+        let mut string_metadata = StringLiteralMetadata::from_kind(delimiter_kind);
+
+        let unescaped = match delimiter_kind {
+            StringDelimiterKind::SingleQuote => Self::collapse_raw_single(inner),
+            StringDelimiterKind::TripleSingleQuote | StringDelimiterKind::BacktickBlock => {
+                inner.to_string()
+            }
+            _ => self.unescape(inner, token.span.start)?,
         };
 
         let normalized = unescaped.nfc().collect::<String>();
 
         let mut metadata = PreMetadata::default();
-        let mut string_metadata = StringLiteralMetadata::from_kind(delimiter_kind);
-        string_metadata.normalize_indentation =
-            matches!(delimiter_kind, StringDelimiterKind::TripleQuote);
+        string_metadata.char_length = normalized.chars().count();
+        string_metadata.normalize_indentation = matches!(
+            delimiter_kind,
+            StringDelimiterKind::TripleQuote
+                | StringDelimiterKind::TripleSingleQuote
+                | StringDelimiterKind::BacktickBlock
+        );
+        let allows_interpolation = string_metadata.allows_interpolation;
         metadata
             .provisional_metadata
             .push(TokenMetadata::StringLiteral(string_metadata));
 
-        if matches!(delimiter_kind, StringDelimiterKind::SingleQuote) {
-            if normalized.chars().count() != 1 {
-                return Err(LexError::UnexpectedChar(
-                    '\'',
-                    token.span.start.line,
-                    token.span.start.column,
-                ));
+        if allows_interpolation {
+            if let Some(segments) = self.collect_interpolation_segments(inner, &token.span)? {
+                metadata
+                    .provisional_metadata
+                    .push(TokenMetadata::StringInterpolation { segments });
             }
-        } else if let Some(segments) = self.collect_interpolation_segments(inner, &token.span)? {
-            metadata
-                .provisional_metadata
-                .push(TokenMetadata::StringInterpolation { segments });
         }
 
         Ok(self.finalize_token(token, metadata, normalized))
@@ -477,11 +480,31 @@ impl Normalizer {
             (StringDelimiterKind::TripleQuote, 3)
         } else if lexeme.starts_with("\"") {
             (StringDelimiterKind::DoubleQuote, 1)
+        } else if lexeme.starts_with("'''") {
+            (StringDelimiterKind::TripleSingleQuote, 3)
         } else if lexeme.starts_with("'") {
             (StringDelimiterKind::SingleQuote, 1)
         } else {
             (StringDelimiterKind::DoubleQuote, 0)
         }
+    }
+
+    fn collapse_raw_single(inner: &str) -> String {
+        let mut chars = inner.chars().peekable();
+        let mut output = String::with_capacity(inner.len());
+
+        while let Some(ch) = chars.next() {
+            if ch == '\'' {
+                if let Some('\'') = chars.peek().copied() {
+                    chars.next();
+                    output.push('\'');
+                    continue;
+                }
+            }
+            output.push(ch);
+        }
+
+        output
     }
 
     fn unescape(
@@ -749,11 +772,13 @@ mod tests {
             .expect("string normalization");
 
         assert_eq!(normalized.normalized_text, "Café");
-        assert!(normalized
-            .metadata
-            .provisional_metadata
-            .iter()
-            .any(|meta| matches!(meta, TokenMetadata::StringLiteral(_))));
+        assert!(
+            normalized
+                .metadata
+                .provisional_metadata
+                .iter()
+                .any(|meta| matches!(meta, TokenMetadata::StringLiteral(_)))
+        );
         assert!(normalized.metadata.provisional_diagnostics.is_empty());
 
         let string_meta = normalized
@@ -809,15 +834,17 @@ mod tests {
             .expect("number normalization");
 
         assert_eq!(normalized.normalized_text, "1234567");
-        assert!(normalized
-            .metadata
-            .provisional_metadata
-            .iter()
-            .any(|meta| matches!(
-                meta,
-                TokenMetadata::NumberLiteral(info)
-                if matches!(info.grouping, NumberGroupingKind::Mixed)
-            )));
+        assert!(
+            normalized
+                .metadata
+                .provisional_metadata
+                .iter()
+                .any(|meta| matches!(
+                    meta,
+                    TokenMetadata::NumberLiteral(info)
+                    if matches!(info.grouping, NumberGroupingKind::Mixed)
+                ))
+        );
     }
 
     #[test]
@@ -845,12 +872,14 @@ mod tests {
                 .unwrap_or_else(|_| panic!("number normalization failed for {}", lexeme));
 
             assert_eq!(normalized.normalized_text, expected);
-            assert!(normalized
-                .metadata
-                .provisional_metadata
-                .iter()
-                .any(|meta| matches!(meta, TokenMetadata::NumberLiteral(info)
-                    if info.original_lexeme == lexeme && info.suffix == suffix)));
+            assert!(
+                normalized
+                    .metadata
+                    .provisional_metadata
+                    .iter()
+                    .any(|meta| matches!(meta, TokenMetadata::NumberLiteral(info)
+                    if info.original_lexeme == lexeme && info.suffix == suffix))
+            );
         }
     }
 
@@ -1085,11 +1114,13 @@ mod tests {
             .normalize(raw, &mut ctx)
             .expect("comment normalization");
 
-        assert!(normalized
-            .metadata
-            .provisional_metadata
-            .iter()
-            .all(|meta| !matches!(meta, TokenMetadata::CommentCarryOver(_))));
+        assert!(
+            normalized
+                .metadata
+                .provisional_metadata
+                .iter()
+                .all(|meta| !matches!(meta, TokenMetadata::CommentCarryOver(_)))
+        );
         assert_eq!(normalized.raw.carry_over, Some(carry));
     }
 }

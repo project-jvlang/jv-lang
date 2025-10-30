@@ -136,7 +136,10 @@ fn ensure_toolchain_envs() {
         ] {
             if env::var_os(var).is_none() {
                 if let Some(path) = dir {
-                    env::set_var(var, path);
+                    // Nightly 1.92では`std::env::set_var`が`unsafe`指定となったため明示的に包む。
+                    unsafe {
+                        env::set_var(var, path);
+                    }
                 }
             }
         }

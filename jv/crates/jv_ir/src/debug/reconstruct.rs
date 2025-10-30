@@ -421,7 +421,7 @@ impl<'a> ReconstructionContext<'a> {
     ) -> Result<Expression, ReconstructionError> {
         self.visit_node();
         let expression = match expr {
-            IrExpression::Literal(literal, span) => {
+            IrExpression::Literal(literal, _, span) => {
                 self.record_success();
                 Expression::Literal(literal.clone(), span.clone())
             }
@@ -820,7 +820,7 @@ fn extract_span(stmt: &IrStatement) -> Option<Span> {
 
 fn extract_expr_span(expr: &IrExpression) -> Span {
     match expr {
-        IrExpression::Literal(_, span)
+        IrExpression::Literal(_, _, span)
         | IrExpression::Identifier { span, .. }
         | IrExpression::MethodCall { span, .. }
         | IrExpression::FieldAccess { span, .. }
@@ -845,5 +845,6 @@ fn extract_expr_span(expr: &IrExpression) -> Span {
         | IrExpression::TryWithResources { span, .. }
         | IrExpression::RegexPattern { span, .. }
         | IrExpression::SequencePipeline { span, .. } => span.clone(),
+        IrExpression::CharToString(conversion) => conversion.span.clone(),
     }
 }

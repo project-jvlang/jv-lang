@@ -5,6 +5,7 @@ use crate::profiling::{PerfMetrics, TransformProfiler};
 use crate::sequence_pipeline;
 use crate::types::{
     IrCommentKind, IrExpression, IrImport, IrImportDetail, IrProgram, IrStatement, JavaType,
+    RawStringFlavor,
 };
 use jv_ast::{
     Argument, BinaryOp, BindingPatternKind, CallArgumentMetadata, CallArgumentStyle, CommentKind,
@@ -511,7 +512,7 @@ pub fn transform_expression(
                     span: regex.span.clone(),
                 });
             }
-            Ok(IrExpression::Literal(lit, span))
+            Ok(IrExpression::Literal(lit, None, span))
         }
         Expression::RegexLiteral(literal) => Ok(IrExpression::RegexPattern {
             pattern: literal.pattern.clone(),
@@ -520,7 +521,11 @@ pub fn transform_expression(
         }),
         Expression::Identifier(name, span) => {
             if name.is_empty() {
-                return Ok(IrExpression::Literal(Literal::String(String::new()), span));
+                return Ok(IrExpression::Literal(
+                    Literal::String(String::new()),
+                    None,
+                    span,
+                ));
             }
             if let Some(java_type) = context.lookup_variable(&name).cloned() {
                 return Ok(IrExpression::Identifier {
@@ -575,8 +580,14 @@ pub fn transform_expression(
         }
         Expression::MultilineString(literal) => {
             if literal.parts.is_empty() {
+                let raw_flavor = literal.raw_flavor.map(|flavor| match flavor {
+                    jv_ast::strings::RawStringFlavor::SingleLine => RawStringFlavor::SingleLine,
+                    jv_ast::strings::RawStringFlavor::MultiLine => RawStringFlavor::MultiLine,
+                });
+
                 Ok(IrExpression::Literal(
                     Literal::String(literal.normalized),
+                    raw_flavor,
                     literal.span,
                 ))
             } else {
@@ -842,7 +853,7 @@ pub fn transform_expression(
             implicit_end,
             span,
         } => desugar_when_expression(subject, arms, else_arm, implicit_end, span, context),
-        _ => Ok(IrExpression::Literal(Literal::Null, Span::default())),
+        _ => Ok(IrExpression::Literal(Literal::Null, None, Span::default())),
     }
 }
 

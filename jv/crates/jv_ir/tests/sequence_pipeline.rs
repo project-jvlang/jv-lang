@@ -7,9 +7,9 @@ use jv_ast::{
 use jv_ir::context::{RegisteredMethodCall, RegisteredMethodDeclaration};
 use jv_ir::naming::method_erasure::apply_method_erasure;
 use jv_ir::{
-    transform_expression, IrExpression, IrModifiers, IrParameter, IrStatement, JavaType,
-    PipelineShape, PrimitiveSpecializationHint, SequencePipeline, SequenceSource, SequenceStage,
-    SequenceTerminal, SequenceTerminalEvaluation, SequenceTerminalKind, TransformContext,
+    IrExpression, IrModifiers, IrParameter, IrStatement, JavaType, PipelineShape,
+    PrimitiveSpecializationHint, SequencePipeline, SequenceSource, SequenceStage, SequenceTerminal,
+    SequenceTerminalEvaluation, SequenceTerminalKind, TransformContext, transform_expression,
 };
 
 fn dummy_span() -> Span {
@@ -398,7 +398,7 @@ fn fold_terminal_retains_initial_expression() {
         .expect("fold pipeline should have terminal");
     match &terminal.kind {
         SequenceTerminalKind::Fold { initial, .. } => {
-            assert!(matches!(**initial, IrExpression::Literal(_, _)));
+            assert!(matches!(**initial, IrExpression::Literal(_, _, _)));
         }
         other => panic!("expected fold terminal, got {:?}", other),
     }
@@ -734,7 +734,7 @@ fn whitespace_list_literal_becomes_list_sequence_source() {
     assert!(
         list_elements
             .iter()
-            .all(|element| matches!(element, IrExpression::Literal(_, _))),
+            .all(|element| matches!(element, IrExpression::Literal(_, _, _))),
         "list literal elements should lower to literal IR nodes",
     );
     assert_eq!(pipeline.stages.len(), 2, "map + filter stages expected");
@@ -1043,7 +1043,7 @@ fn sequence_flatmap_overloads_receive_stable_java_names() {
     };
 
     assert_eq!(iter_name, "flatMap");
-    let expected_seq_name = "flatMap$838775ca";
+    let expected_seq_name = "flatMap$1b3b055b";
     assert_eq!(seq_name, expected_seq_name);
 
     let (call_iter_name, call_iter_target) = match &statements[2] {

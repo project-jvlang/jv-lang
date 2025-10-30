@@ -1,6 +1,6 @@
 use jv_ast::{
-    types::{Kind, QualifiedName, RawTypeContinuation, RawTypeDirective},
     Literal, Span,
+    types::{Kind, QualifiedName, RawTypeContinuation, RawTypeDirective},
 };
 use jv_codegen_java::{JavaCodeGenConfig, JavaCodeGenerator, JavaTarget};
 use jv_ir::{
@@ -385,7 +385,7 @@ fn raw_default_comment_on_variable_inserts_guard() {
             name: "java.util.List".to_string(),
             generic_args: Vec::new(),
         },
-        initializer: Some(IrExpression::Literal(Literal::Null, span.clone())),
+        initializer: Some(IrExpression::Literal(Literal::Null, None, span.clone())),
         is_final: false,
         modifiers: IrModifiers::default(),
         span: span.clone(),
@@ -418,7 +418,7 @@ fn raw_default_comment_on_field_adds_import_and_guard() {
             name: "java.util.List".to_string(),
             generic_args: Vec::new(),
         },
-        initializer: Some(IrExpression::Literal(Literal::Null, span.clone())),
+        initializer: Some(IrExpression::Literal(Literal::Null, None, span.clone())),
         modifiers: IrModifiers::default(),
         span: span.clone(),
     };

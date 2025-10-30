@@ -559,11 +559,7 @@ impl ReturnTypeAccumulator {
     }
 
     fn into_option(self) -> Option<JavaType> {
-        if self.conflicted {
-            None
-        } else {
-            self.value
-        }
+        if self.conflicted { None } else { self.value }
     }
 }
 
@@ -582,7 +578,7 @@ fn convert_expression_to_ir(
                         span: regex.span.clone(),
                     });
                 }
-                Ok(IrExpression::Literal(lit, span))
+                Ok(IrExpression::Literal(lit, None, span))
             }
             Expression::RegexLiteral(literal) => Ok(IrExpression::RegexPattern {
                 pattern: literal.pattern.clone(),

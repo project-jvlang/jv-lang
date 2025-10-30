@@ -2,11 +2,11 @@ use std::fs::{self, File};
 use std::io::{self, BufWriter, Write};
 use std::path::{Path, PathBuf};
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use clap::{ArgAction, Args, ValueEnum};
 use jv_ir::debug::{
-    load_ir_program, AstArtifactWriter, DiagnosticsSummary, IrArtifactSource, IrAstRebuilder,
-    ReconstructedAst, ReconstructionOptions,
+    AstArtifactWriter, DiagnosticsSummary, IrArtifactSource, IrAstRebuilder, ReconstructedAst,
+    ReconstructionOptions, load_ir_program,
 };
 
 #[derive(Debug, Clone, Copy, ValueEnum, PartialEq, Eq)]

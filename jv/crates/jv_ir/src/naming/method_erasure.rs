@@ -553,6 +553,9 @@ fn apply_expression(expr: &mut IrExpression, resolution: &MethodResolution) {
             apply_expression(target, resolution);
             apply_expression(value, resolution);
         }
+        IrExpression::CharToString(conversion) => {
+            apply_expression(&mut conversion.value, resolution);
+        }
         IrExpression::Conditional {
             condition,
             then_expr,

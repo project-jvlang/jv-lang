@@ -1,11 +1,11 @@
 use super::*;
 use insta::assert_snapshot;
 use jv_ast::{
-    types::{PrimitiveTypeName, PrimitiveTypeReference, PrimitiveTypeSource},
     BinaryOp, CallArgumentStyle, Literal, SequenceDelimiter, Span,
+    types::{PrimitiveTypeName, PrimitiveTypeReference, PrimitiveTypeSource},
 };
-use jv_ir::transform::transform_program_with_context;
 use jv_ir::TransformContext;
+use jv_ir::transform::transform_program_with_context;
 use jv_ir::{
     DataFormat, IrCaseLabel, IrCommentKind, IrDeconstructionComponent, IrDeconstructionPattern,
     IrExpression, IrImplicitWhenEnd, IrModifiers, IrParameter, IrProgram, IrRecordComponent,
@@ -207,9 +207,9 @@ fn user_sample_constructor(name: &str, age: i32, email: &str) -> IrExpression {
         class_name: "UserSample".to_string(),
         generic_args: vec![],
         args: vec![
-            IrExpression::Literal(Literal::String(name.to_string()), dummy_span()),
-            IrExpression::Literal(Literal::Number(age.to_string()), dummy_span()),
-            IrExpression::Literal(Literal::String(email.to_string()), dummy_span()),
+            IrExpression::Literal(Literal::String(name.to_string()), None, dummy_span()),
+            IrExpression::Literal(Literal::Number(age.to_string()), None, dummy_span()),
+            IrExpression::Literal(Literal::String(email.to_string()), None, dummy_span()),
         ],
         java_type: user_sample_type(),
         span: dummy_span(),
@@ -222,6 +222,7 @@ fn embed_raw_json_field() -> IrStatement {
         java_type: string_type(),
         initializer: Some(IrExpression::Literal(
             Literal::String("{\"users\": 2}".to_string()),
+            None,
             dummy_span(),
         )),
         modifiers: IrModifiers {
@@ -305,6 +306,7 @@ fn load_path_of_call() -> IrExpression {
         resolved_target: None,
         args: vec![IrExpression::Literal(
             Literal::String("/data/users.json".to_string()),
+            None,
             dummy_span(),
         )],
         argument_style: CallArgumentStyle::Comma,
@@ -461,6 +463,7 @@ fn simple_class() -> IrStatement {
         java_type: string_type(),
         initializer: Some(IrExpression::Literal(
             Literal::String("Hello".to_string()),
+            None,
             dummy_span(),
         )),
         modifiers: IrModifiers {
@@ -495,6 +498,7 @@ fn snapshot_program() -> IrProgram {
         java_type: string_type(),
         initializer: Some(IrExpression::Literal(
             Literal::String("Hello".to_string()),
+            None,
             dummy_span(),
         )),
         is_final: true,
@@ -511,6 +515,7 @@ fn snapshot_program() -> IrProgram {
         op: jv_ast::BinaryOp::NotEqual,
         right: Box::new(IrExpression::Literal(
             Literal::String("".to_string()),
+            None,
             dummy_span(),
         )),
         java_type: JavaType::Primitive("boolean".to_string()),
@@ -656,7 +661,7 @@ fn method_generation_renders_generic_type_parameters() {
         return_type: stream_type.clone(),
         body: Some(IrExpression::Block {
             statements: vec![IrStatement::Return {
-                value: Some(IrExpression::Literal(Literal::Null, span.clone())),
+                value: Some(IrExpression::Literal(Literal::Null, None, span.clone())),
                 span: span.clone(),
             }],
             java_type: stream_type,
@@ -707,6 +712,7 @@ fn primitive_return_methods_receive_specialized_names() {
         return_type: JavaType::Primitive("int".to_string()),
         body: Some(IrExpression::Literal(
             Literal::Number("0".to_string()),
+            None,
             span.clone(),
         )),
         modifiers: IrModifiers {
@@ -1475,6 +1481,7 @@ fn external_extension_method_remains_static_utility() {
             statements: vec![IrStatement::Return {
                 value: Some(IrExpression::Literal(
                     Literal::Number("0".to_string()),
+                    None,
                     span.clone(),
                 )),
                 span: span.clone(),
@@ -1576,9 +1583,9 @@ fn whitespace_array_uses_list_of_for_java25_target() {
         element_type: int_type(),
         dimensions: vec![],
         initializer: Some(vec![
-            IrExpression::Literal(Literal::Number("1".to_string()), dummy_span()),
-            IrExpression::Literal(Literal::Number("2".to_string()), dummy_span()),
-            IrExpression::Literal(Literal::Number("3".to_string()), dummy_span()),
+            IrExpression::Literal(Literal::Number("1".to_string()), None, dummy_span()),
+            IrExpression::Literal(Literal::Number("2".to_string()), None, dummy_span()),
+            IrExpression::Literal(Literal::Number("3".to_string()), None, dummy_span()),
         ]),
         delimiter: SequenceDelimiter::Whitespace,
         span: dummy_span(),
@@ -1600,9 +1607,9 @@ fn whitespace_array_uses_java21_fallback_for_legacy_target() {
         element_type: int_type(),
         dimensions: vec![],
         initializer: Some(vec![
-            IrExpression::Literal(Literal::Number("1".to_string()), dummy_span()),
-            IrExpression::Literal(Literal::Number("2".to_string()), dummy_span()),
-            IrExpression::Literal(Literal::Number("3".to_string()), dummy_span()),
+            IrExpression::Literal(Literal::Number("1".to_string()), None, dummy_span()),
+            IrExpression::Literal(Literal::Number("2".to_string()), None, dummy_span()),
+            IrExpression::Literal(Literal::Number("3".to_string()), None, dummy_span()),
         ]),
         delimiter: SequenceDelimiter::Whitespace,
         span: dummy_span(),
@@ -1624,9 +1631,9 @@ fn whitespace_call_arguments_render_multiline_for_readability() {
         java_name: None,
         resolved_target: None,
         args: vec![
-            IrExpression::Literal(Literal::Number("1".to_string()), dummy_span()),
-            IrExpression::Literal(Literal::Number("2".to_string()), dummy_span()),
-            IrExpression::Literal(Literal::Number("3".to_string()), dummy_span()),
+            IrExpression::Literal(Literal::Number("1".to_string()), None, dummy_span()),
+            IrExpression::Literal(Literal::Number("2".to_string()), None, dummy_span()),
+            IrExpression::Literal(Literal::Number("3".to_string()), None, dummy_span()),
         ],
         argument_style: CallArgumentStyle::Whitespace,
         java_type: JavaType::void(),
@@ -1666,6 +1673,7 @@ fn script_statements_are_wrapped_in_generated_main() {
         java_type: JavaType::string(),
         initializer: Some(IrExpression::Literal(
             Literal::String("Hello, jv!".to_string()),
+            None,
             dummy_span(),
         )),
         is_final: true,
@@ -2522,6 +2530,7 @@ fn numeric_variable_declarations_preserve_literal_suffixes() {
             java_type: java_type.clone(),
             initializer: Some(IrExpression::Literal(
                 Literal::Number(literal.to_string()),
+                None,
                 span.clone(),
             )),
             is_final: false,
@@ -2696,7 +2705,7 @@ fn switch_case(
 }
 
 fn string_literal(value: &str) -> IrExpression {
-    IrExpression::Literal(Literal::String(value.to_string()), dummy_span())
+    IrExpression::Literal(Literal::String(value.to_string()), None, dummy_span())
 }
 
 #[test]
@@ -2713,6 +2722,7 @@ fn switch_expression_renders_guards_and_default_branch() {
                     op: BinaryOp::Greater,
                     right: Box::new(IrExpression::Literal(
                         Literal::Number("0".to_string()),
+                        None,
                         dummy_span(),
                     )),
                     java_type: JavaType::boolean(),
@@ -2841,8 +2851,8 @@ fn switch_expression_renders_range_case_with_comment() {
         span: dummy_span(),
     };
 
-    let range_lower = IrExpression::Literal(Literal::Number("0".to_string()), dummy_span());
-    let range_upper = IrExpression::Literal(Literal::Number("10".to_string()), dummy_span());
+    let range_lower = IrExpression::Literal(Literal::Number("0".to_string()), None, dummy_span());
+    let range_upper = IrExpression::Literal(Literal::Number("10".to_string()), None, dummy_span());
 
     let lower_guard = IrExpression::Binary {
         left: Box::new(binding_identifier("it")),
@@ -2985,6 +2995,7 @@ fn switch_expression_java21_range_pattern_fallback() {
         op: BinaryOp::GreaterEqual,
         right: Box::new(IrExpression::Literal(
             Literal::Number("0".to_string()),
+            None,
             dummy_span(),
         )),
         java_type: bool_type.clone(),
@@ -3000,6 +3011,7 @@ fn switch_expression_java21_range_pattern_fallback() {
         op: BinaryOp::LessEqual,
         right: Box::new(IrExpression::Literal(
             Literal::Number("10".to_string()),
+            None,
             dummy_span(),
         )),
         java_type: bool_type.clone(),
@@ -3023,10 +3035,12 @@ fn switch_expression_java21_range_pattern_fallback() {
                     variable: "it0".to_string(),
                     lower: Box::new(IrExpression::Literal(
                         Literal::Number("0".to_string()),
+                        None,
                         dummy_span(),
                     )),
                     upper: Box::new(IrExpression::Literal(
                         Literal::Number("10".to_string()),
+                        None,
                         dummy_span(),
                     )),
                     inclusive_end: true,
@@ -3153,7 +3167,7 @@ fn switch_expression_nested_destructuring_java25_and_java21() {
             switch_case(
                 vec![IrCaseLabel::Default],
                 None,
-                IrExpression::Literal(Literal::Number("0".to_string()), dummy_span()),
+                IrExpression::Literal(Literal::Number("0".to_string()), None, dummy_span()),
             ),
         ],
         java_type: int_type.clone(),
@@ -3264,6 +3278,7 @@ fn trailing_comments_remain_inline() {
         java_type: JavaType::Primitive("int".to_string()),
         initializer: Some(IrExpression::Literal(
             Literal::Number("25".to_string()),
+            None,
             dummy_span(),
         )),
         is_final: false,

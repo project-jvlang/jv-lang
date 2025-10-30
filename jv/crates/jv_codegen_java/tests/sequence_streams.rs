@@ -163,7 +163,7 @@ fn flat_map_set_of_stage_without_hint() -> SequenceStage {
 }
 
 fn number_literal(value: &str) -> IrExpression {
-    IrExpression::Literal(Literal::Number(value.to_string()), dummy_span())
+    IrExpression::Literal(Literal::Number(value.to_string()), None, dummy_span())
 }
 
 fn cast_to_long(expr: IrExpression) -> IrExpression {
@@ -176,7 +176,7 @@ fn cast_to_long(expr: IrExpression) -> IrExpression {
 }
 
 fn boolean_literal(value: bool) -> IrExpression {
-    IrExpression::Literal(Literal::Boolean(value), dummy_span())
+    IrExpression::Literal(Literal::Boolean(value), None, dummy_span())
 }
 
 fn stream_identifier(name: &str) -> IrExpression {
@@ -366,7 +366,7 @@ fn filter_even_stage() -> SequenceStage {
 }
 
 fn string_concatenation_map_stage() -> SequenceStage {
-    let suffix = IrExpression::Literal(Literal::String("-guide".to_string()), dummy_span());
+    let suffix = IrExpression::Literal(Literal::String("-guide".to_string()), None, dummy_span());
     let concatenation = IrExpression::Binary {
         left: Box::new(identifier("value")),
         op: BinaryOp::Add,

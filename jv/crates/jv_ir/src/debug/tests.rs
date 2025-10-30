@@ -60,7 +60,11 @@ fn reconstructs_basic_program_with_variable_and_expression() {
             IrStatement::VariableDeclaration {
                 name: "answer".to_string(),
                 java_type: JavaType::Primitive("int".into()),
-                initializer: Some(IrExpression::Literal(Literal::Number("42".into()), span())),
+                initializer: Some(IrExpression::Literal(
+                    Literal::Number("42".into()),
+                    None,
+                    span(),
+                )),
                 is_final: true,
                 modifiers: IrModifiers {
                     visibility: IrVisibility::Public,
@@ -243,9 +247,9 @@ fn produces_warning_for_unsupported_statement() {
         package: None,
         imports: vec![],
         type_declarations: vec![IrStatement::While {
-            condition: IrExpression::Literal(Literal::Boolean(true), span()),
+            condition: IrExpression::Literal(Literal::Boolean(true), None, span()),
             body: Box::new(IrStatement::Expression {
-                expr: IrExpression::Literal(Literal::Number("1".into()), span()),
+                expr: IrExpression::Literal(Literal::Number("1".into()), None, span()),
                 span: span(),
             }),
             span: span(),

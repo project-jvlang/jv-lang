@@ -187,11 +187,11 @@ fn identifier(name: &str) -> IrExpression {
 }
 
 fn number_literal(value: &str) -> IrExpression {
-    IrExpression::Literal(Literal::Number(value.to_string()), dummy_span())
+    IrExpression::Literal(Literal::Number(value.to_string()), None, dummy_span())
 }
 
 fn boolean_literal(value: bool) -> IrExpression {
-    IrExpression::Literal(Literal::Boolean(value), dummy_span())
+    IrExpression::Literal(Literal::Boolean(value), None, dummy_span())
 }
 
 fn reduce_lambda() -> IrExpression {

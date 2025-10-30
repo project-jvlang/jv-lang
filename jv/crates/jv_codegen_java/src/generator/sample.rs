@@ -100,6 +100,7 @@ impl JavaCodeGenerator {
             },
             initializer: Some(IrExpression::Literal(
                 Literal::String(raw_string),
+                None,
                 declaration.span.clone(),
             )),
             modifiers: IrModifiers {
@@ -699,6 +700,7 @@ impl JavaCodeGenerator {
                     })?;
                 Ok(IrExpression::Literal(
                     Literal::String(some.to_string()),
+                    None,
                     span.clone(),
                 ))
             }
@@ -709,7 +711,7 @@ impl JavaCodeGenerator {
                         construct: "boolean型に真偽値以外が指定されました".to_string(),
                         span: Some(span.clone()),
                     })?;
-                Ok(IrExpression::Literal(Literal::Boolean(some), span.clone()))
+                Ok(IrExpression::Literal(Literal::Boolean(some), None, span.clone()))
             }
             PrimitiveType::Integer => {
                 let some = value
@@ -720,6 +722,7 @@ impl JavaCodeGenerator {
                     })?;
                 Ok(IrExpression::Literal(
                     Literal::Number(some.to_string()),
+                    None,
                     span.clone(),
                 ))
             }
@@ -732,6 +735,7 @@ impl JavaCodeGenerator {
                     })?;
                 Ok(IrExpression::Literal(
                     Literal::Number(format!("{}L", some)),
+                    None,
                     span.clone(),
                 ))
             }
@@ -744,6 +748,7 @@ impl JavaCodeGenerator {
                     })?;
                 Ok(IrExpression::Literal(
                     Literal::Number(some.to_string()),
+                    None,
                     span.clone(),
                 ))
             }
@@ -760,7 +765,11 @@ impl JavaCodeGenerator {
                 Ok(IrExpression::ObjectCreation {
                     class_name: "java.math.BigInteger".to_string(),
                     generic_args: Vec::new(),
-                    args: vec![IrExpression::Literal(Literal::String(number), span.clone())],
+                    args: vec![IrExpression::Literal(
+                        Literal::String(number),
+                        None,
+                        span.clone(),
+                    )],
                     java_type: JavaType::Reference {
                         name: "java.math.BigInteger".to_string(),
                         generic_args: Vec::new(),
@@ -781,7 +790,11 @@ impl JavaCodeGenerator {
                 Ok(IrExpression::ObjectCreation {
                     class_name: "java.math.BigDecimal".to_string(),
                     generic_args: Vec::new(),
-                    args: vec![IrExpression::Literal(Literal::String(number), span.clone())],
+                    args: vec![IrExpression::Literal(
+                        Literal::String(number),
+                        None,
+                        span.clone(),
+                    )],
                     java_type: JavaType::Reference {
                         name: "java.math.BigDecimal".to_string(),
                         generic_args: Vec::new(),
@@ -789,7 +802,7 @@ impl JavaCodeGenerator {
                     span: span.clone(),
                 })
             }
-            PrimitiveType::Null => Ok(IrExpression::Literal(Literal::Null, span.clone())),
+            PrimitiveType::Null => Ok(IrExpression::Literal(Literal::Null, None, span.clone())),
         }
     }
 
@@ -2277,44 +2290,31 @@ impl<'a> LoadHelperGenerator<'a> {
             (Schema::Primitive(PrimitiveType::Boolean), _) => {
                 Ok(format!("requireBoolean({}, {})", value_expr, path_expr))
             }
-            (Schema::Primitive(PrimitiveType::Integer), _) => {
-                Ok(format!(
-                    "parseInt(requireNumber({}, {}), {})",
-                    value_expr, path_expr, path_expr
-                ))
-            }
-            (Schema::Primitive(PrimitiveType::Long), _) => {
-                Ok(format!(
-                    "parseLong(requireNumber({}, {}), {})",
-                    value_expr, path_expr, path_expr
-                ))
-            }
-            (Schema::Primitive(PrimitiveType::Double), _) => {
-                Ok(format!(
-                    "parseDouble(requireNumber({}, {}), {})",
-                    value_expr, path_expr, path_expr
-                ))
-            }
-            (Schema::Primitive(PrimitiveType::BigInteger), _) => {
-                Ok(format!(
-                    "parseBigInteger(requireNumber({}, {}), {})",
-                    value_expr, path_expr, path_expr
-                ))
-            }
-            (Schema::Primitive(PrimitiveType::BigDecimal), _) => {
-                Ok(format!(
-                    "parseBigDecimal(requireNumber({}, {}), {})",
-                    value_expr, path_expr, path_expr
-                ))
-            }
+            (Schema::Primitive(PrimitiveType::Integer), _) => Ok(format!(
+                "parseInt(requireNumber({}, {}), {})",
+                value_expr, path_expr, path_expr
+            )),
+            (Schema::Primitive(PrimitiveType::Long), _) => Ok(format!(
+                "parseLong(requireNumber({}, {}), {})",
+                value_expr, path_expr, path_expr
+            )),
+            (Schema::Primitive(PrimitiveType::Double), _) => Ok(format!(
+                "parseDouble(requireNumber({}, {}), {})",
+                value_expr, path_expr, path_expr
+            )),
+            (Schema::Primitive(PrimitiveType::BigInteger), _) => Ok(format!(
+                "parseBigInteger(requireNumber({}, {}), {})",
+                value_expr, path_expr, path_expr
+            )),
+            (Schema::Primitive(PrimitiveType::BigDecimal), _) => Ok(format!(
+                "parseBigDecimal(requireNumber({}, {}), {})",
+                value_expr, path_expr, path_expr
+            )),
             (Schema::Array { .. }, JavaType::Reference { .. }) => {
                 let decoder = self.json_list_decoder_name(java_type)?;
                 Ok(format!("{}({}, {})", decoder, value_expr, path_expr))
             }
-            (
-                Schema::Object { .. },
-                JavaType::Reference { name, .. },
-            ) => Ok(format!(
+            (Schema::Object { .. }, JavaType::Reference { name, .. }) => Ok(format!(
                 "{}({}, {})",
                 self.json_record_decoder_name(name),
                 value_expr,
@@ -2326,7 +2326,9 @@ impl<'a> LoadHelperGenerator<'a> {
                     if matches!(variant, Schema::Primitive(PrimitiveType::Null)) {
                         continue;
                     }
-                    variant_exprs.push(self.json_value_expression(value_expr, path_expr, variant, core_type)?);
+                    variant_exprs.push(
+                        self.json_value_expression(value_expr, path_expr, variant, core_type)?,
+                    );
                 }
                 if variant_exprs.is_empty() {
                     return Err(CodeGenError::UnsupportedConstruct {
@@ -2648,7 +2650,7 @@ impl<'a> LoadHelperGenerator<'a> {
                             construct: "CSV/TSVルートはRecordリストのみサポートされています"
                                 .to_string(),
                             span: Some(self.declaration.span.clone()),
-                        })
+                        });
                     }
                 };
                 (method_name, type_str)
@@ -2657,7 +2659,7 @@ impl<'a> LoadHelperGenerator<'a> {
                 return Err(CodeGenError::UnsupportedConstruct {
                     construct: "CSV/TSVルートはList<Record>型である必要があります".to_string(),
                     span: Some(self.declaration.span.clone()),
-                })
+                });
             }
         };
 

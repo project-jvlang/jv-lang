@@ -18,7 +18,7 @@ use jv_ast::statement::{
     ConcurrencyConstruct, ExtensionFunction, ForInStatement, LoopBinding, LoopStrategy,
     NumericRangeLoop, Property, ResourceManagement, ValBindingOrigin,
 };
-use jv_ast::strings::{MultilineKind, MultilineStringLiteral};
+use jv_ast::strings::{MultilineKind, MultilineStringLiteral, RawStringFlavor};
 use jv_ast::types::{
     BinaryOp, GenericParameter, GenericSignature, Literal, Modifiers, Pattern, TypeAnnotation,
     UnaryOp, VarianceMarker,
@@ -26,8 +26,9 @@ use jv_ast::types::{
 use jv_ast::{BindingPatternKind, Expression, SequenceDelimiter, Span, Statement};
 use jv_lexer::{
     JsonCommentTrivia, JsonCommentTriviaKind, JsonConfidence, LayoutMode, Lexer,
-    NumberGroupingKind, StringDelimiterKind, StringInterpolationSegment, StringLiteralMetadata,
-    Token, TokenMetadata, TokenTrivia, TokenType,
+    NumberGroupingKind, RawStringFlavor as LexerRawStringFlavor, StringDelimiterKind,
+    StringInterpolationSegment, StringLiteralMetadata, Token, TokenMetadata, TokenTrivia,
+    TokenType,
 };
 use jv_type_inference_java::{lower_type_annotation_from_tokens, TypeLoweringErrorKind};
 
@@ -3796,46 +3797,70 @@ mod expression_parser {
             TokenMetadata::StringInterpolation { segments } => Some(segments.clone()),
             _ => None,
         });
+        let metadata = string_literal_metadata(token);
 
-        let Some(segments) = segments else {
-            let value = match &token.token_type {
-                TokenType::StringInterpolation(value) | TokenType::String(value) => value.clone(),
-                _ => token.lexeme.clone(),
-            };
-            return Ok((Expression::Literal(Literal::String(value), span), 0));
+        if let Some(segments) = segments {
+            let mut parts = Vec::new();
+            let mut normalized = String::new();
+            let mut token_consumption = 0usize;
+
+            for segment in segments {
+                match segment {
+                    StringInterpolationSegment::Literal(text) => {
+                        if !text.is_empty() {
+                            parts.push(StringPart::Text(text.clone()));
+                        }
+                        normalized.push_str(&text);
+                    }
+                    StringInterpolationSegment::Expression(expr_source) => {
+                        let (expr, consumed) =
+                            parse_expression_from_text(&expr_source, span.clone())?;
+                        token_consumption = token_consumption.saturating_add(consumed);
+                        parts.push(StringPart::Expression(expr));
+                    }
+                }
+            }
+
+            if let Some(meta) = metadata {
+                if let Some(kind) = multiline_kind_from_metadata(meta) {
+                    let literal = build_multiline_literal(
+                        kind,
+                        normalized,
+                        token.lexeme.clone(),
+                        parts,
+                        span.clone(),
+                        metadata,
+                    );
+                    return Ok((Expression::MultilineString(literal), token_consumption));
+                }
+            }
+
+            return Ok((
+                Expression::StringInterpolation { parts, span },
+                token_consumption,
+            ));
+        }
+
+        let value = match &token.token_type {
+            TokenType::StringInterpolation(value) | TokenType::String(value) => value.clone(),
+            _ => token.lexeme.clone(),
         };
 
-        let mut parts = Vec::new();
-        let mut raw = String::new();
-        let mut token_consumption = 0usize;
-
-        for segment in segments {
-            match segment {
-                StringInterpolationSegment::Literal(text) => {
-                    if !text.is_empty() {
-                        parts.push(StringPart::Text(text.clone()));
-                    }
-                    raw.push_str(&text);
-                }
-                StringInterpolationSegment::Expression(expr_source) => {
-                    let (expr, consumed) = parse_expression_from_text(&expr_source, span.clone())?;
-                    token_consumption = token_consumption.saturating_add(consumed);
-                    parts.push(StringPart::Expression(expr));
-                }
+        if let Some(meta) = metadata {
+            if let Some(kind) = multiline_kind_from_metadata(meta) {
+                let literal = build_multiline_literal(
+                    kind,
+                    value.clone(),
+                    token.lexeme.clone(),
+                    Vec::new(),
+                    span.clone(),
+                    metadata,
+                );
+                return Ok((Expression::MultilineString(literal), 0));
             }
         }
 
-        if let Some(metadata) = string_literal_metadata(token) {
-            if let Some(kind) = multiline_kind_from_metadata(metadata) {
-                let literal = build_multiline_literal(kind, raw, parts, span.clone());
-                return Ok((Expression::MultilineString(literal), token_consumption));
-            }
-        }
-
-        Ok((
-            Expression::StringInterpolation { parts, span },
-            token_consumption,
-        ))
+        Ok((Expression::Literal(Literal::String(value), span), 0))
     }
 
     fn parse_expression_from_text(
@@ -3880,24 +3905,38 @@ mod expression_parser {
         match metadata.delimiter {
             StringDelimiterKind::TripleQuote => Some(MultilineKind::TripleQuote),
             StringDelimiterKind::BacktickBlock => Some(MultilineKind::Backtick),
+            StringDelimiterKind::SingleQuote if metadata.is_raw => Some(MultilineKind::RawSingle),
+            StringDelimiterKind::TripleSingleQuote if metadata.is_raw => {
+                Some(MultilineKind::RawTriple)
+            }
             _ => None,
         }
     }
 
     fn build_multiline_literal(
         kind: MultilineKind,
+        normalized: String,
         raw: String,
         parts: Vec<StringPart>,
         span: Span,
+        metadata: Option<&StringLiteralMetadata>,
     ) -> MultilineStringLiteral {
         MultilineStringLiteral {
             kind,
-            normalized: raw.clone(),
+            normalized,
             raw,
             parts,
             indent: None,
+            raw_flavor: metadata.and_then(raw_flavor_from_metadata),
             span,
         }
+    }
+
+    fn raw_flavor_from_metadata(metadata: &StringLiteralMetadata) -> Option<RawStringFlavor> {
+        metadata.raw_flavor.map(|flavor| match flavor {
+            LexerRawStringFlavor::SingleLine => RawStringFlavor::SingleLine,
+            LexerRawStringFlavor::MultiLine => RawStringFlavor::MultiLine,
+        })
     }
 
     fn has_high_json_confidence(token: &Token) -> bool {

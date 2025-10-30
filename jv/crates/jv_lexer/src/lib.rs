@@ -174,16 +174,31 @@ pub enum StringDelimiterKind {
     TripleQuote,
     BacktickBlock,
     SingleQuote,
+    TripleSingleQuote,
 }
 
 impl StringDelimiterKind {
     fn allows_interpolation(self) -> bool {
-        !matches!(self, StringDelimiterKind::SingleQuote)
+        !matches!(
+            self,
+            StringDelimiterKind::SingleQuote | StringDelimiterKind::TripleSingleQuote
+        )
     }
 
     fn normalize_indentation(self) -> bool {
-        matches!(self, StringDelimiterKind::TripleQuote)
+        matches!(
+            self,
+            StringDelimiterKind::TripleQuote
+                | StringDelimiterKind::TripleSingleQuote
+                | StringDelimiterKind::BacktickBlock
+        )
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum RawStringFlavor {
+    SingleLine,
+    MultiLine,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -191,14 +206,29 @@ pub struct StringLiteralMetadata {
     pub delimiter: StringDelimiterKind,
     pub allows_interpolation: bool,
     pub normalize_indentation: bool,
+    #[serde(default)]
+    pub is_raw: bool,
+    #[serde(default)]
+    pub char_length: usize,
+    #[serde(default)]
+    pub raw_flavor: Option<RawStringFlavor>,
 }
 
 impl StringLiteralMetadata {
     fn from_kind(kind: StringDelimiterKind) -> Self {
+        let (is_raw, raw_flavor) = match kind {
+            StringDelimiterKind::SingleQuote => (true, Some(RawStringFlavor::SingleLine)),
+            StringDelimiterKind::TripleSingleQuote => (true, Some(RawStringFlavor::MultiLine)),
+            _ => (false, None),
+        };
+
         Self {
             delimiter: kind,
             allows_interpolation: kind.allows_interpolation(),
             normalize_indentation: kind.normalize_indentation(),
+            is_raw,
+            char_length: 0,
+            raw_flavor,
         }
     }
 }
@@ -304,6 +334,8 @@ pub enum LexError {
     UnexpectedChar(char, usize, usize),
     #[error("Unterminated string at line {0}, column {1}")]
     UnterminatedString(usize, usize),
+    #[error("Unterminated raw string at line {line}, column {column}")]
+    UnterminatedRawString { line: usize, column: usize },
     #[error("Unterminated regex literal at line {line}, column {column}")]
     UnterminatedRegex { line: usize, column: usize },
     #[error("Invalid character {character:?} in regex literal at line {line}, column {column}")]

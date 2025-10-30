@@ -998,11 +998,12 @@ fn set_expression_type(expr: &mut IrExpression, java_type: JavaType) {
             *target_type = java_type;
         }
         IrExpression::Lambda { .. }
-        | IrExpression::Literal(_, _)
+        | IrExpression::Literal(..)
         | IrExpression::RegexPattern { .. }
         | IrExpression::ArrayCreation { .. }
         | IrExpression::StringFormat { .. }
-        | IrExpression::InstanceOf { .. } => {}
+        | IrExpression::InstanceOf { .. }
+        | IrExpression::CharToString(_) => {}
     }
 }
 

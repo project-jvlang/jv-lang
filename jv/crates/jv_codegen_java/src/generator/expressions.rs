@@ -1,5 +1,5 @@
 use super::*;
-use jv_ast::{types::PrimitiveTypeName, Span};
+use jv_ast::{Span, types::PrimitiveTypeName};
 use jv_ir::PipelineShape;
 use jv_ir::{
     SequencePipeline, SequenceSource, SequenceStage, SequenceTerminal, SequenceTerminalKind,
@@ -18,7 +18,7 @@ impl JavaCodeGenerator {
 
     fn generate_expression_inner(&mut self, expr: &IrExpression) -> Result<String, CodeGenError> {
         match expr {
-            IrExpression::Literal(literal, _) => Ok(Self::literal_to_string(literal)),
+            IrExpression::Literal(literal, _, _) => Ok(Self::literal_to_string(literal)),
             IrExpression::RegexPattern { pattern, .. } => {
                 self.add_import("java.util.regex.Pattern");
                 Ok(format!(
@@ -84,7 +84,7 @@ impl JavaCodeGenerator {
                 let rendered_args = if effective_name == "println"
                     && Self::is_system_out(receiver.as_deref())
                     && args.len() == 1
-                    && matches!(args[0], IrExpression::Literal(Literal::Null, _))
+                    && matches!(args[0], IrExpression::Literal(Literal::Null, _, _))
                 {
                     "(Object) null".to_string()
                 } else {
@@ -280,6 +280,10 @@ impl JavaCodeGenerator {
             IrExpression::TryWithResources {
                 resources, body, ..
             } => self.generate_try_with_resources_expression(resources, body),
+            IrExpression::CharToString(conversion) => {
+                let value = self.generate_expression(&conversion.value)?;
+                Ok(format!("String.valueOf({value})"))
+            }
         }
     }
 
@@ -1007,7 +1011,7 @@ impl JavaCodeGenerator {
                     return Err(CodeGenError::InvalidMethodSignature {
                         message: "supplyAsync expects supplier (and optional executor)".to_string(),
                         span: None,
-                    })
+                    });
                 }
             },
             CompletableFutureOp::ThenApply => match rendered_args.as_slice() {
@@ -1016,7 +1020,7 @@ impl JavaCodeGenerator {
                     return Err(CodeGenError::InvalidMethodSignature {
                         message: "thenApply expects future and function".to_string(),
                         span: None,
-                    })
+                    });
                 }
             },
             CompletableFutureOp::ThenCompose => match rendered_args.as_slice() {
@@ -1025,7 +1029,7 @@ impl JavaCodeGenerator {
                     return Err(CodeGenError::InvalidMethodSignature {
                         message: "thenCompose expects future and function".to_string(),
                         span: None,
-                    })
+                    });
                 }
             },
             CompletableFutureOp::Get => match rendered_args.as_slice() {
@@ -1034,7 +1038,7 @@ impl JavaCodeGenerator {
                     return Err(CodeGenError::InvalidMethodSignature {
                         message: "get expects future".to_string(),
                         span: None,
-                    })
+                    });
                 }
             },
             CompletableFutureOp::CompletedFuture => match rendered_args.as_slice() {
@@ -1043,7 +1047,7 @@ impl JavaCodeGenerator {
                     return Err(CodeGenError::InvalidMethodSignature {
                         message: "completedFuture expects a single value".to_string(),
                         span: None,
-                    })
+                    });
                 }
             },
         })
@@ -2284,13 +2288,13 @@ impl JavaCodeGenerator {
                 return Err(CodeGenError::UnsupportedConstruct {
                     construct: "Range operators must be lowered before Java emission".to_string(),
                     span: None,
-                })
+                });
             }
             BinaryOp::Elvis => {
                 return Err(CodeGenError::UnsupportedConstruct {
                     construct: "Elvis operator requires specialised lowering".to_string(),
                     span: None,
-                })
+                });
             }
         })
     }

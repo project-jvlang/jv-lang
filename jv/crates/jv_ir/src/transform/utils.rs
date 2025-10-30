@@ -99,7 +99,7 @@ fn convert_annotation_value(value: &AnnotationValue) -> IrAnnotationValue {
 
 pub(crate) fn extract_java_type(expr: &IrExpression) -> Option<JavaType> {
     match expr {
-        IrExpression::Literal(literal, _) => Some(literal_to_java_type(literal)),
+        IrExpression::Literal(literal, _, _) => Some(literal_to_java_type(literal)),
         IrExpression::RegexPattern { java_type, .. }
         | IrExpression::Identifier { java_type, .. }
         | IrExpression::MethodCall { java_type, .. }
@@ -143,12 +143,13 @@ pub(crate) fn extract_java_type(expr: &IrExpression) -> Option<JavaType> {
             }
         }
         IrExpression::StringFormat { .. } => Some(JavaType::string()),
+        IrExpression::CharToString(_) => Some(JavaType::string()),
     }
 }
 
 pub(crate) fn ir_expression_span(expr: &IrExpression) -> Span {
     match expr {
-        IrExpression::Literal(_, span)
+        IrExpression::Literal(_, _, span)
         | IrExpression::RegexPattern { span, .. }
         | IrExpression::Identifier { span, .. }
         | IrExpression::MethodCall { span, .. }
@@ -173,6 +174,7 @@ pub(crate) fn ir_expression_span(expr: &IrExpression) -> Span {
         | IrExpression::CompletableFuture { span, .. }
         | IrExpression::VirtualThread { span, .. }
         | IrExpression::TryWithResources { span, .. } => span.clone(),
+        IrExpression::CharToString(conversion) => conversion.span.clone(),
     }
 }
 

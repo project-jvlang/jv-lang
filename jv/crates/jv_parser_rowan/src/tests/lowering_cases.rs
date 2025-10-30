@@ -2,7 +2,7 @@ use crate::lowering::{lower_program, LoweringDiagnosticSeverity, LoweringResult}
 use crate::parser::parse;
 use crate::verification::StatementKindKey;
 use crate::{JvLanguage, ParseBuilder, SyntaxKind};
-use jv_ast::strings::MultilineKind;
+use jv_ast::strings::{MultilineKind, RawStringFlavor};
 use jv_ast::{
     expression::{Argument, Parameter, ParameterProperty, StringPart},
     json::{JsonLiteral, JsonValue},
@@ -2149,6 +2149,62 @@ fn multiline_string_interpolation_handles_complex_patterns() {
             );
         }
         other => panic!("expected multiline string literal, got {:?}", other),
+    }
+}
+
+#[test]
+fn raw_string_literals_lower_with_raw_metadata() {
+    let source = "val path = 'C:\\Users\\dev'\nval script = '''line1\nline2'''";
+
+    let result = lower_source(source);
+    assert!(
+        result.diagnostics.is_empty(),
+        "unexpected diagnostics: {:?}",
+        result.diagnostics
+    );
+
+    let mut statements = result.statements.iter();
+
+    let path_literal = statements
+        .find_map(|statement| match statement {
+            Statement::ValDeclaration {
+                name, initializer, ..
+            } if name == "path" => Some(initializer),
+            _ => None,
+        })
+        .expect("expected path declaration");
+
+    match path_literal {
+        Expression::MultilineString(literal) => {
+            assert_eq!(literal.kind, MultilineKind::RawSingle);
+            assert_eq!(literal.raw_flavor, Some(RawStringFlavor::SingleLine));
+            assert!(literal.parts.is_empty());
+            assert_eq!(literal.normalized, "C:\\Users\\dev");
+            assert_eq!(literal.raw, "'C\\Users\\dev'");
+        }
+        other => panic!("expected raw single literal, got {:?}", other),
+    }
+
+    let script_literal = result
+        .statements
+        .iter()
+        .find_map(|statement| match statement {
+            Statement::ValDeclaration {
+                name, initializer, ..
+            } if name == "script" => Some(initializer),
+            _ => None,
+        })
+        .expect("expected script declaration");
+
+    match script_literal {
+        Expression::MultilineString(literal) => {
+            assert_eq!(literal.kind, MultilineKind::RawTriple);
+            assert_eq!(literal.raw_flavor, Some(RawStringFlavor::MultiLine));
+            assert!(literal.parts.is_empty());
+            assert_eq!(literal.normalized, "line1\nline2");
+            assert_eq!(literal.raw, "'''line1\nline2'''");
+        }
+        other => panic!("expected raw triple literal, got {:?}", other),
     }
 }
 
