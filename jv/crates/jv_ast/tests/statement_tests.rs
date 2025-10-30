@@ -221,6 +221,7 @@ fn test_statement_expression() {
 #[test]
 fn test_statement_return() {
     let stmt = Statement::Return {
+        label: None,
         value: Some(Expression::Literal(
             Literal::String("result".to_string()),
             dummy_span(),
@@ -261,12 +262,14 @@ fn test_statement_for_in_iterable_strategy() {
     let iterable = Expression::Identifier("items".to_string(), dummy_span());
     let body = Expression::Block {
         statements: vec![],
+        label: None,
         span: dummy_span(),
     };
     let stmt = Statement::ForIn(ForInStatement {
         binding,
         iterable: iterable.clone(),
         strategy: LoopStrategy::Iterable,
+        label: None,
         body: Box::new(body),
         span: dummy_span(),
     });
@@ -304,12 +307,14 @@ fn test_statement_for_in_numeric_range_strategy() {
     let iterable = Expression::Identifier("range".to_string(), dummy_span());
     let body = Expression::Block {
         statements: vec![],
+        label: None,
         span: dummy_span(),
     };
     let stmt = Statement::ForIn(ForInStatement {
         binding,
         iterable,
         strategy,
+        label: None,
         body: Box::new(body),
         span: dummy_span(),
     });
@@ -328,19 +333,75 @@ fn test_statement_for_in_numeric_range_strategy() {
 
 #[test]
 fn test_statement_break() {
-    let stmt = Statement::Break(dummy_span());
+    let stmt = Statement::Break {
+        label: None,
+        span: dummy_span(),
+    };
     match stmt {
-        Statement::Break(_) => assert!(true),
+        Statement::Break { .. } => assert!(true),
         _ => panic!("Expected break statement"),
     }
 }
 
 #[test]
 fn test_statement_continue() {
-    let stmt = Statement::Continue(dummy_span());
+    let stmt = Statement::Continue {
+        label: None,
+        span: dummy_span(),
+    };
     match stmt {
-        Statement::Continue(_) => assert!(true),
+        Statement::Continue { .. } => assert!(true),
         _ => panic!("Expected continue statement"),
+    }
+}
+
+#[test]
+fn test_statement_return_label_serialization() {
+    let stmt = Statement::Return {
+        label: Some("loopラベル".to_string()),
+        value: None,
+        span: dummy_span(),
+    };
+    let json = serde_json::to_value(&stmt).expect("Return文のシリアライズに失敗しました");
+    let label_text = json
+        .as_object()
+        .and_then(|outer| outer.get("Return"))
+        .and_then(|inner| inner.get("label"))
+        .and_then(|value| value.as_str())
+        .expect("labelフィールドが存在するはずです");
+    assert_eq!(label_text, "loopラベル");
+
+    let restored: Statement =
+        serde_json::from_value(json).expect("Return文のデシリアライズに失敗しました");
+    match restored {
+        Statement::Return { label, .. } => {
+            assert_eq!(label.as_deref(), Some("loopラベル"));
+        }
+        other => panic!("Return文として復元されるべきです: {:?}", other),
+    }
+}
+
+#[test]
+fn test_statement_break_label_backward_compat() {
+    let stmt = Statement::Break {
+        label: None,
+        span: dummy_span(),
+    };
+    let mut json = serde_json::to_value(&stmt).expect("break文のシリアライズに失敗しました");
+    let break_payload = json
+        .as_object_mut()
+        .and_then(|outer| outer.get_mut("Break"))
+        .and_then(|inner| inner.as_object_mut())
+        .expect("Breakペイロードが存在するはずです");
+    break_payload.remove("label");
+
+    let restored: Statement =
+        serde_json::from_value(json).expect("break文のデシリアライズに失敗しました");
+    match restored {
+        Statement::Break { label, .. } => {
+            assert!(label.is_none(), "labelはNoneのままのはずです");
+        }
+        other => panic!("break文として復元されるべきです: {:?}", other),
     }
 }
 
@@ -392,6 +453,7 @@ fn test_program() {
         primitive_return: None,
         body: Box::new(Expression::Block {
             statements: vec![],
+            label: None,
             span: dummy_span(),
         }),
         modifiers: Modifiers::default(),
@@ -464,6 +526,7 @@ fn test_extension_function() {
 fn test_concurrency_spawn() {
     let body = Expression::Block {
         statements: vec![],
+        label: None,
         span: dummy_span(),
     };
     let construct = ConcurrencyConstruct::Spawn {
@@ -480,6 +543,7 @@ fn test_concurrency_spawn() {
 fn test_concurrency_async() {
     let body = Expression::Block {
         statements: vec![],
+        label: None,
         span: dummy_span(),
     };
     let construct = ConcurrencyConstruct::Async {
@@ -526,6 +590,7 @@ fn test_resource_use() {
     };
     let body = Expression::Block {
         statements: vec![],
+        label: None,
         span: dummy_span(),
     };
     let construct = ResourceManagement::Use {

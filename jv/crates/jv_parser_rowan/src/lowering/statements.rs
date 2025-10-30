@@ -807,7 +807,11 @@ fn lower_block_expression(
     let span = context.span_for(block).unwrap_or_else(Span::dummy);
     let mut statements = Vec::new();
     collect_statements_from_children(context, block, &mut statements, diagnostics);
-    Expression::Block { statements, span }
+    Expression::Block {
+        statements,
+        label: None,
+        span,
+    }
 }
 
 fn lower_expression(
@@ -1566,6 +1570,7 @@ mod expression_parser {
                 let body_expr = if body_tokens.is_empty() {
                     Expression::Block {
                         statements: Vec::new(),
+                        label: None,
                         span: span.clone(),
                     }
                 } else {
@@ -1581,6 +1586,7 @@ mod expression_parser {
                     expr: Expression::Lambda {
                         parameters,
                         body: Box::new(body_expr),
+                        label: None,
                         span: span.clone(),
                     },
                     start: start_index,
@@ -1590,6 +1596,7 @@ mod expression_parser {
                 let body_expr = if inner.is_empty() {
                     Expression::Block {
                         statements: Vec::new(),
+                        label: None,
                         span: span.clone(),
                     }
                 } else {
@@ -1603,6 +1610,7 @@ mod expression_parser {
                     expr: Expression::Lambda {
                         parameters: Vec::new(),
                         body: Box::new(body_expr),
+                        label: None,
                         span: span.clone(),
                     },
                     start: start_index,
@@ -1632,7 +1640,11 @@ mod expression_parser {
             }
 
             let span = span_for_range(self.tokens, body_start, body_start + body_tokens.len());
-            Ok(Expression::Block { statements, span })
+            Ok(Expression::Block {
+                statements,
+                label: None,
+                span,
+            })
         }
 
         fn split_lambda_body_statements(tokens: &[&Token]) -> Vec<(usize, usize)> {
@@ -1709,7 +1721,11 @@ mod expression_parser {
                     } else {
                         Some(Self::parse_nested_expression(expr_slice)?.expr)
                     };
-                    Ok(Statement::Return { value, span })
+                    Ok(Statement::Return {
+                        label: None,
+                        value,
+                        span,
+                    })
                 }
                 _ => {
                     if let Some(assign_index) = Self::find_top_level_assign(slice) {
@@ -2125,6 +2141,7 @@ mod expression_parser {
                     arms,
                     else_arm: else_arm.map(Box::new),
                     implicit_end: None,
+                    label: None,
                     span: span.clone(),
                 },
                 start: when_index,
@@ -2787,6 +2804,7 @@ mod expression_parser {
                     Expression::Lambda {
                         parameters: Vec::new(),
                         body: Box::new(other),
+                        label: None,
                         span,
                     }
                 }
@@ -5101,6 +5119,7 @@ fn lower_for(
             );
             Expression::Block {
                 statements: Vec::new(),
+                label: None,
                 span: body_span,
             }
         }
@@ -5112,6 +5131,7 @@ fn lower_for(
         binding: loop_binding,
         iterable: iterable_expr,
         strategy,
+        label: None,
         body: Box::new(body),
         span: context.span_for(node).unwrap_or_else(Span::dummy),
     }))
@@ -5127,6 +5147,7 @@ fn lower_return(
         .transpose()?;
 
     Ok(Statement::Return {
+        label: None,
         value,
         span: context.span_for(node).unwrap_or_else(Span::dummy),
     })
@@ -5157,9 +5178,10 @@ fn lower_break(
     context: &LoweringContext<'_>,
     node: &JvSyntaxNode,
 ) -> Result<Statement, LoweringDiagnostic> {
-    Ok(Statement::Break(
-        context.span_for(node).unwrap_or_else(Span::dummy),
-    ))
+    Ok(Statement::Break {
+        label: None,
+        span: context.span_for(node).unwrap_or_else(Span::dummy),
+    })
 }
 
 fn infer_loop_strategy(iterable: &Expression) -> LoopStrategy {
@@ -5187,9 +5209,10 @@ fn lower_continue(
     context: &LoweringContext<'_>,
     node: &JvSyntaxNode,
 ) -> Result<Statement, LoweringDiagnostic> {
-    Ok(Statement::Continue(
-        context.span_for(node).unwrap_or_else(Span::dummy),
-    ))
+    Ok(Statement::Continue {
+        label: None,
+        span: context.span_for(node).unwrap_or_else(Span::dummy),
+    })
 }
 
 fn lower_expression_statement(

@@ -300,6 +300,7 @@ impl<'a> ReconstructionContext<'a> {
                 };
                 self.record_success();
                 Ok(Statement::Return {
+                    label: None,
                     value,
                     span: span.clone(),
                 })
@@ -411,6 +412,7 @@ impl<'a> ReconstructionContext<'a> {
 
         Ok(Expression::Block {
             statements: stmts,
+            label: None,
             span: span.clone(),
         })
     }
@@ -571,6 +573,7 @@ impl<'a> ReconstructionContext<'a> {
                 self.record_success();
                 Expression::Block {
                     statements,
+                    label: None,
                     span: span.clone(),
                 }
             }

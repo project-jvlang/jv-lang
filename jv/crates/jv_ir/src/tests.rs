@@ -2289,6 +2289,7 @@ mod tests {
             resource: Box::new(Expression::Identifier("file".to_string(), dummy_span())),
             body: Box::new(Expression::Block {
                 statements: vec![],
+                label: None,
                 span: dummy_span(),
             }),
             span: dummy_span(),
@@ -2342,6 +2343,7 @@ mod tests {
                 )),
                 span: dummy_span(),
             })],
+            label: None,
             span: dummy_span(),
         };
 
@@ -2720,10 +2722,12 @@ mod tests {
                     span: dummy_span(),
                 },
                 Statement::Return {
+                    label: None,
                     value: Some(Expression::Identifier("message".to_string(), dummy_span())),
                     span: dummy_span(),
                 },
             ],
+            label: None,
             span: dummy_span(),
         };
 
@@ -2955,6 +2959,7 @@ mod tests {
         let mut context = test_context();
 
         let stmt = Statement::Return {
+            label: None,
             value: Some(Expression::Literal(
                 Literal::String("result".to_string()),
                 dummy_span(),
@@ -4421,12 +4426,15 @@ fun sample(value: Any): Int {
                                 span: dummy_span(),
                             }),
                         ],
+                        label: None,
                         span: dummy_span(),
                     }),
+                    label: None,
                     span: dummy_span(),
                 }),
                 span: dummy_span(),
             })],
+            label: None,
             span: dummy_span(),
         };
 
@@ -4931,6 +4939,7 @@ fun sample(value: Any): Int {
                 expr: Expression::Literal(Literal::Number("1".to_string()), span.clone()),
                 span: span.clone(),
             }],
+            label: None,
             span: span.clone(),
         };
 
@@ -4938,6 +4947,7 @@ fun sample(value: Any): Int {
             binding,
             iterable: Expression::Literal(Literal::Null, span.clone()),
             strategy: LoopStrategy::NumericRange(range),
+            label: None,
             body: Box::new(body_expr),
             span: span.clone(),
         });
@@ -5005,6 +5015,7 @@ fun sample(value: Any): Int {
                 inclusive: true,
                 span: span.clone(),
             }),
+            label: None,
             body: Box::new(Expression::Literal(
                 Literal::Number("2".to_string()),
                 span.clone(),
@@ -5057,6 +5068,7 @@ fun sample(value: Any): Int {
             strategy: LoopStrategy::LazySequence {
                 needs_cleanup: true,
             },
+            label: None,
             body: Box::new(Expression::Literal(Literal::Null, span.clone())),
             span: span.clone(),
         });
@@ -5096,6 +5108,7 @@ fun sample(value: Any): Int {
             },
             iterable: Expression::Identifier("values".to_string(), span.clone()),
             strategy: LoopStrategy::Iterable,
+            label: None,
             body: Box::new(Expression::Literal(Literal::Null, span.clone())),
             span: span.clone(),
         });

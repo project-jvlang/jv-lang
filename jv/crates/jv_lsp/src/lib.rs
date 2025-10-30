@@ -1727,8 +1727,8 @@ fn collect_call_diagnostics_from_statement(
                 collect_call_diagnostics_from_expression(body, tokens, diagnostics);
             }
         },
-        Statement::Break(..)
-        | Statement::Continue(..)
+        Statement::Break { .. }
+        | Statement::Continue { .. }
         | Statement::Import { .. }
         | Statement::Package { .. }
         | Statement::Comment(_) => {}

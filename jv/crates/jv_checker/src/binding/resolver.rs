@@ -328,7 +328,8 @@ impl BindingResolver {
                 let extension = self.resolve_extension_function(extension);
                 Statement::ExtensionFunction(extension)
             }
-            Statement::Return { value, span } => Statement::Return {
+            Statement::Return { label, value, span } => Statement::Return {
+                label,
                 value: value.map(|expr| self.resolve_expression(expr)),
                 span,
             },
@@ -357,8 +358,8 @@ impl BindingResolver {
             }
             Statement::Import { .. }
             | Statement::Package { .. }
-            | Statement::Break(_)
-            | Statement::Continue(_)
+            | Statement::Break { .. }
+            | Statement::Continue { .. }
             | Statement::Comment(_) => statement,
         }
     }
@@ -539,6 +540,7 @@ impl BindingResolver {
                 else_arm,
                 implicit_end,
                 span,
+                label,
             } => Expression::When {
                 expr: expr.map(|inner| Box::new(self.resolve_expression(*inner))),
                 arms: arms
@@ -554,10 +556,11 @@ impl BindingResolver {
                             body,
                             span: arm.span,
                         }
-                    })
-                    .collect(),
+                })
+                .collect(),
                 else_arm: else_arm.map(|expr| Box::new(self.resolve_expression(*expr))),
                 implicit_end,
+                label,
                 span,
             },
             Expression::If {
@@ -571,11 +574,15 @@ impl BindingResolver {
                 else_branch: else_branch.map(|expr| Box::new(self.resolve_expression(*expr))),
                 span,
             },
-            Expression::Block { statements, span } => {
+            Expression::Block { statements, span, label } => {
                 self.enter_scope();
                 let statements = self.resolve_statements(statements);
                 self.exit_scope();
-                Expression::Block { statements, span }
+                Expression::Block {
+                    statements,
+                    label,
+                    span,
+                }
             }
             Expression::Array {
                 elements,
@@ -593,6 +600,7 @@ impl BindingResolver {
                 parameters,
                 body,
                 span,
+                label,
             } => {
                 let parameters = parameters
                     .into_iter()
@@ -617,6 +625,7 @@ impl BindingResolver {
                 Expression::Lambda {
                     parameters,
                     body,
+                    label,
                     span,
                 }
             }

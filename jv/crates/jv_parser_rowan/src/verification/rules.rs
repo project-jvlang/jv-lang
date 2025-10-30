@@ -320,11 +320,11 @@ impl StatementKindKey {
     pub fn from_statement(statement: &Statement) -> Self {
         match statement {
             Statement::Assignment { .. } => StatementKindKey::Assignment,
-            Statement::Break(_) => StatementKindKey::BreakStatement,
+            Statement::Break { .. } => StatementKindKey::BreakStatement,
             Statement::ClassDeclaration { .. } => StatementKindKey::ClassDeclaration,
             Statement::Comment(_) => StatementKindKey::Comment,
             Statement::Concurrency(_) => StatementKindKey::Concurrency,
-            Statement::Continue(_) => StatementKindKey::ContinueStatement,
+            Statement::Continue { .. } => StatementKindKey::ContinueStatement,
             Statement::DataClassDeclaration { .. } => StatementKindKey::DataClassDeclaration,
             Statement::ExtensionFunction(_) => StatementKindKey::ExtensionFunction,
             Statement::Expression { .. } => StatementKindKey::Expression,

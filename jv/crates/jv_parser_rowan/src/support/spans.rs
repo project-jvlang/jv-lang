@@ -55,8 +55,8 @@ pub fn statement_span(stmt: &Statement) -> Span {
         Statement::ExtensionFunction(ef) => ef.span.clone(),
         Statement::Import { span, .. } => span.clone(),
         Statement::ForIn(for_in) => for_in.span.clone(),
-        Statement::Break(span) => span.clone(),
-        Statement::Continue(span) => span.clone(),
+        Statement::Break { span, .. } => span.clone(),
+        Statement::Continue { span, .. } => span.clone(),
         Statement::Package { span, .. } => span.clone(),
         Statement::Comment(comment) => comment.span.clone(),
         Statement::Concurrency(concurrency) => match concurrency {

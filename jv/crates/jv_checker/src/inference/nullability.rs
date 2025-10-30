@@ -238,8 +238,8 @@ impl NullabilityAnalyzer {
             | Statement::Import { .. }
             | Statement::Package { .. }
             | Statement::ExtensionFunction(_)
-            | Statement::Break(_)
-            | Statement::Continue(_)
+            | Statement::Break { .. }
+            | Statement::Continue { .. }
             | Statement::Comment(_) => None,
         }
     }

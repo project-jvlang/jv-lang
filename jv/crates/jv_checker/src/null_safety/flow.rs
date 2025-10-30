@@ -251,6 +251,7 @@ impl<'g, 'ctx, 'facts> FlowGraphBuilder<'g, 'ctx, 'facts> {
             Expression::Block {
                 statements,
                 span: block_span,
+                ..
             } => {
                 let mut cursor = current;
                 for statement in statements {

@@ -176,8 +176,8 @@ impl<'a> RegexValidationVisitor<'a> {
             Statement::Concurrency(construct) => self.visit_concurrency(construct),
             Statement::ResourceManagement(resource) => self.visit_resource_management(resource),
             Statement::Comment(_)
-            | Statement::Break(_)
-            | Statement::Continue(_)
+            | Statement::Break { .. }
+            | Statement::Continue { .. }
             | Statement::Import { .. }
             | Statement::Package { .. } => {}
         }

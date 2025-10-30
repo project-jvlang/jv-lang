@@ -20,6 +20,7 @@ pub fn desugar_for_in_statement(
         strategy,
         body,
         span,
+        label: _,
     } = for_in;
 
     match strategy {

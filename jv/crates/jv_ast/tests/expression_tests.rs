@@ -165,6 +165,7 @@ fn test_expression_when_with_subject() {
         arms: vec![arm],
         else_arm: None,
         implicit_end: None,
+        label: None,
         span: dummy_span(),
     };
     match expr {
@@ -193,6 +194,7 @@ fn test_expression_when_without_subject() {
             dummy_span(),
         ))),
         implicit_end: None,
+        label: None,
         span: dummy_span(),
     };
     match expr {
@@ -207,6 +209,45 @@ fn test_expression_when_without_subject() {
             assert!(else_arm.is_some());
         }
         _ => panic!("Expected when expression"),
+    }
+}
+
+#[test]
+fn test_expression_when_label_serialization() {
+    let arm = WhenArm {
+        pattern: Pattern::Wildcard(dummy_span()),
+        guard: None,
+        body: Expression::Literal(Literal::Number("1".to_string()), dummy_span()),
+        span: dummy_span(),
+    };
+    let expr = Expression::When {
+        expr: None,
+        arms: vec![arm],
+        else_arm: Some(Box::new(Expression::Literal(
+            Literal::Number("2".to_string()),
+            dummy_span(),
+        ))),
+        implicit_end: None,
+        label: Some("whenラベル".to_string()),
+        span: dummy_span(),
+    };
+
+    let json = serde_json::to_value(&expr).expect("when式のシリアライズに失敗しました");
+    let label_text = json
+        .as_object()
+        .and_then(|outer| outer.get("When"))
+        .and_then(|inner| inner.get("label"))
+        .and_then(|value| value.as_str())
+        .expect("labelフィールドが存在するはずです");
+    assert_eq!(label_text, "whenラベル");
+
+    let restored: Expression =
+        serde_json::from_value(json).expect("when式のデシリアライズに失敗しました");
+    match restored {
+        Expression::When { label, .. } => {
+            assert_eq!(label.as_deref(), Some("whenラベル"));
+        }
+        other => panic!("when式として復元されるべきです: {:?}", other),
     }
 }
 
@@ -235,6 +276,7 @@ fn test_expression_block() {
     };
     let expr = Expression::Block {
         statements: vec![stmt],
+        label: None,
         span: dummy_span(),
     };
     match expr {
@@ -282,6 +324,7 @@ fn test_expression_lambda() {
     let expr = Expression::Lambda {
         parameters: vec![param],
         body: Box::new(body),
+        label: None,
         span: dummy_span(),
     };
     match expr {

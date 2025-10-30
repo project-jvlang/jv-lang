@@ -145,7 +145,7 @@ pub fn transform_statement(
             span,
             context,
         )?]),
-        Statement::Return { value, span } => {
+        Statement::Return { value, span, .. } => {
             let ir_value = value
                 .map(|expr| transform_expression(expr, context))
                 .transpose()?;
@@ -583,7 +583,7 @@ pub fn transform_expression(
                 desugar_string_interpolation(literal.parts, literal.span, context)
             }
         }
-        Expression::Block { statements, span } => {
+        Expression::Block { statements, span, .. } => {
             context.enter_scope();
             let mut ir_statements = Vec::new();
             for stmt in statements {
@@ -809,6 +809,7 @@ pub fn transform_expression(
             parameters,
             body,
             span,
+            ..
         } => {
             context.enter_scope();
             let mut param_names = Vec::with_capacity(parameters.len());
@@ -841,6 +842,7 @@ pub fn transform_expression(
             else_arm,
             implicit_end,
             span,
+            ..
         } => desugar_when_expression(subject, arms, else_arm, implicit_end, span, context),
         _ => Ok(IrExpression::Literal(Literal::Null, Span::default())),
     }

@@ -116,8 +116,8 @@ impl SequenceWarningCollector {
             Statement::ResourceManagement(resource) => self.visit_resource_management(resource),
             Statement::Import { .. }
             | Statement::Package { .. }
-            | Statement::Break(_)
-            | Statement::Continue(_) => {}
+            | Statement::Break { .. }
+            | Statement::Continue { .. } => {}
         }
     }
 

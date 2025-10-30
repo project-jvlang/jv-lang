@@ -261,8 +261,8 @@ fn validate_statement(statement: &Statement, errors: &mut Vec<CheckError>) {
         | Statement::Throw { .. }
         | Statement::Assignment { .. }
         | Statement::ForIn(_)
-        | Statement::Break(_)
-        | Statement::Continue(_)
+        | Statement::Break { .. }
+        | Statement::Continue { .. }
         | Statement::Import { .. }
         | Statement::Package { .. }
         | Statement::Concurrency(_)

@@ -78,8 +78,8 @@ fn annotate_statement_for_primitives(statement: &mut Statement, tokens: &[Token]
         | Statement::Assignment { .. }
         | Statement::Import { .. }
         | Statement::ForIn { .. }
-        | Statement::Break(_)
-        | Statement::Continue(_)
+        | Statement::Break { .. }
+        | Statement::Continue { .. }
         | Statement::Package { .. }
         | Statement::Comment(_)
         | Statement::Concurrency(_)
@@ -243,8 +243,8 @@ fn annotate_statement_for_directives(statement: &mut Statement, tokens: &[Token]
         | Statement::Assignment { .. }
         | Statement::Import { .. }
         | Statement::ForIn { .. }
-        | Statement::Break(_)
-        | Statement::Continue(_)
+        | Statement::Break { .. }
+        | Statement::Continue { .. }
         | Statement::Package { .. }
         | Statement::Comment(_)
         | Statement::Concurrency(_)

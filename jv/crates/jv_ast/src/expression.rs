@@ -97,6 +97,8 @@ pub enum Expression {
         else_arm: Option<Box<Expression>>,
         #[serde(default)]
         implicit_end: Option<ImplicitWhenEnd>,
+        #[serde(default)]
+        label: Option<String>,
         span: Span,
     },
 
@@ -111,6 +113,8 @@ pub enum Expression {
     // Block expressions
     Block {
         statements: Vec<crate::Statement>,
+        #[serde(default)]
+        label: Option<String>,
         span: Span,
     },
 
@@ -125,6 +129,8 @@ pub enum Expression {
     Lambda {
         parameters: Vec<Parameter>,
         body: Box<Expression>,
+        #[serde(default)]
+        label: Option<String>,
         span: Span,
     },
 

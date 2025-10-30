@@ -99,6 +99,8 @@ pub struct ForInStatement {
     pub binding: LoopBinding,
     pub iterable: Expression,
     pub strategy: LoopStrategy,
+    #[serde(default)]
+    pub label: Option<String>,
     pub body: Box<Expression>,
     pub span: Span,
 }
@@ -198,6 +200,8 @@ pub enum Statement {
 
     // Return statements
     Return {
+        #[serde(default)]
+        label: Option<String>,
         value: Option<Expression>,
         span: Span,
     },
@@ -221,8 +225,16 @@ pub enum Statement {
     ForIn(ForInStatement),
 
     // Break/continue
-    Break(Span),
-    Continue(Span),
+    Break {
+        #[serde(default)]
+        label: Option<String>,
+        span: Span,
+    },
+    Continue {
+        #[serde(default)]
+        label: Option<String>,
+        span: Span,
+    },
 
     // Import statements
     Import {

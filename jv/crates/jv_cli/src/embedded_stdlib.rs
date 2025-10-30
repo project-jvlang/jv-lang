@@ -134,8 +134,8 @@ fn promote_visibility(statement: &mut Statement) {
         | Statement::Comment(_)
         | Statement::Import { .. }
         | Statement::Package { .. }
-        | Statement::Break(_)
-        | Statement::Continue(_) => {}
+        | Statement::Break { .. }
+        | Statement::Continue { .. } => {}
     }
 }
 
@@ -235,8 +235,8 @@ fn rewrite_statement(statement: &mut Statement) {
         Statement::Comment(_)
         | Statement::Import { .. }
         | Statement::Package { .. }
-        | Statement::Break(_)
-        | Statement::Continue(_) => {}
+        | Statement::Break { .. }
+        | Statement::Continue { .. } => {}
     }
 }
 
@@ -603,8 +603,8 @@ impl<'a, 'b> ProgramUsageDetector<'a, 'b> {
             Statement::DataClassDeclaration { .. }
             | Statement::Import { .. }
             | Statement::Package { .. }
-            | Statement::Break(_)
-            | Statement::Continue(_)
+            | Statement::Break { .. }
+            | Statement::Continue { .. }
             | Statement::Comment(_) => {}
         }
     }

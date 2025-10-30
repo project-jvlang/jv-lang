@@ -110,8 +110,8 @@ impl<'a> WhenUsageValidator<'a> {
             }
             Statement::Import { .. }
             | Statement::Package { .. }
-            | Statement::Break(_)
-            | Statement::Continue(_)
+            | Statement::Break { .. }
+            | Statement::Continue { .. }
             | Statement::Comment(_) => {}
         }
     }
