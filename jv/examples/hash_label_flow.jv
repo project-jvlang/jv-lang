@@ -1,0 +1,40 @@
+// ラベル付き制御フローと JSON コメント対応の簡易サンプル
+
+val members = {
+  // コメント付き JSONC でもパース可能
+  "users": [
+    { "name": "Alice", "active": true },
+    { "name": "Bob", "active": false },
+    { "name": "Carol", "active": true }
+  ]
+}
+
+fun main(): Unit {
+    var firstActive = "未検出"
+
+    #outer for (user in members.users) {
+        when {
+            !user.active -> {
+                println("非アクティブ: ${user.name}")
+                continue #outer
+            }
+            else -> {
+                firstActive = user.name
+                println("最初のアクティブ会員: ${user.name}")
+                break #outer
+            }
+        }
+    }
+
+    println("探索結果: ${firstActive}")
+
+    members.users.forEach #scan { user ->
+        when {
+            user.active -> {
+                println("確認済み: ${user.name}")
+                return #scan
+            }
+            else -> println("スキップ: ${user.name}")
+        }
+    }
+}
