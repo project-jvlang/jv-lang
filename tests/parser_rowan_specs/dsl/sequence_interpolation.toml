@@ -15,7 +15,7 @@ max = 0
 [[expect.statements]]
 index = 0
 kind = "import"
-name = "jv.collections.SequenceCore"
+name = "java.util.stream.Stream"
 
 [expect.statements.span]
 start_line = 1

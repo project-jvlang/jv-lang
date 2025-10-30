@@ -1,7 +1,7 @@
-import jv.collections.SequenceCore
+import java.util.stream.Stream
 
-fun inlineSequenceMessage(numbers: SequenceCore<Int>): String {
-    return "inline=${numbers.map { value -> value * 2 }}"
+fun inlineSequenceMessage(numbers: Stream<Int>): String {
+    return "inline=${numbers.map { value -> value * 2 }.toList()}"
 }
 
 fun main(): Unit {
@@ -12,6 +12,7 @@ fun main(): Unit {
     val storedSequence = numbers
         .map { candidate -> candidate + 1 }
         .filter { candidate -> candidate % 2 == 0 }
+        .toList()
 
     val stored = "stored=${storedSequence}"
 

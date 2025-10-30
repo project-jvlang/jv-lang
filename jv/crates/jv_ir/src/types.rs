@@ -1234,9 +1234,9 @@ impl JavaType {
         }
     }
 
-    pub fn sequence() -> Self {
+    pub fn stream() -> Self {
         JavaType::Reference {
-            name: "jv.collections.SequenceCore".to_string(),
+            name: "java.util.stream.Stream".to_string(),
             generic_args: vec![],
         }
     }

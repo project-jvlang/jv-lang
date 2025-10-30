@@ -1100,7 +1100,7 @@ fn is_iterable_factory_method(owner: &str, method_name: &str) -> bool {
 
 fn is_sequence_owner(name: &str) -> bool {
     let simple = name.rsplit('.').next().unwrap_or(name);
-    matches!(simple, "Sequence" | "SequenceCore")
+    simple == "Sequence"
 }
 
 fn build_iterable_type_hint(owner: &str, java_type: &JavaType, args: &[IrExpression]) -> JavaType {
@@ -1217,7 +1217,6 @@ fn is_iterable_like_name(name: &str) -> bool {
             | "LinkedHashSet"
             | "HashSet"
             | "Sequence"
-            | "SequenceCore"
     ) || matches!(
         name,
         "java.lang.Iterable"
@@ -1231,7 +1230,6 @@ fn is_iterable_like_name(name: &str) -> bool {
             | "java.util.LinkedHashSet"
             | "java.util.HashSet"
             | "jv.collections.Sequence"
-            | "jv.collections.SequenceCore"
     )
 }
 
@@ -1968,7 +1966,7 @@ fn determine_java_type(pipeline: &SequencePipeline) -> JavaType {
         SequenceSource::JavaStream { expr, .. } => extract_java_type(expr.as_ref())
             .filter(|ty| is_java_stream_type(ty))
             .unwrap_or_else(default_java_stream_type),
-        _ => JavaType::sequence(),
+        _ => JavaType::stream(),
     }
 }
 

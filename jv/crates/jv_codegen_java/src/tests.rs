@@ -634,8 +634,8 @@ fn method_generation_renders_generic_type_parameters() {
             generic_args: vec![],
         }],
     };
-    let sequence_core_type = JavaType::Reference {
-        name: "SequenceCore".to_string(),
+    let stream_type = JavaType::Reference {
+        name: "Stream".to_string(),
         generic_args: vec![JavaType::Reference {
             name: "T".to_string(),
             generic_args: vec![],
@@ -643,7 +643,7 @@ fn method_generation_renders_generic_type_parameters() {
     };
 
     let method = IrStatement::MethodDeclaration {
-        name: "sequenceFromIterable".to_string(),
+        name: "toStream".to_string(),
         java_name: None,
         type_parameters: vec![IrTypeParameter::new("T", span.clone())],
         parameters: vec![IrParameter {
@@ -653,13 +653,13 @@ fn method_generation_renders_generic_type_parameters() {
             span: span.clone(),
         }],
         primitive_return: None,
-        return_type: sequence_core_type.clone(),
+        return_type: stream_type.clone(),
         body: Some(IrExpression::Block {
             statements: vec![IrStatement::Return {
                 value: Some(IrExpression::Literal(Literal::Null, span.clone())),
                 span: span.clone(),
             }],
-            java_type: sequence_core_type,
+            java_type: stream_type,
             span: span.clone(),
         }),
         modifiers: IrModifiers {
@@ -681,7 +681,7 @@ fn method_generation_renders_generic_type_parameters() {
         .expect("method should have a signature line");
     assert_eq!(
         first_line,
-        "private static <T> SequenceCore<T> sequenceFromIterable(Iterable<T> source) {"
+        "private static <T> Stream<T> toStream(Iterable<T> source) {"
     );
 }
 
@@ -796,12 +796,12 @@ fn record_extension_method_is_emitted_as_instance_method() {
     let mut generator = JavaCodeGenerator::new();
     let span = dummy_span();
     let record_type = JavaType::Reference {
-        name: "SequenceCore".to_string(),
+        name: "StreamWrapper".to_string(),
         generic_args: vec![],
     };
 
     let record_declaration = IrStatement::RecordDeclaration {
-        name: "SequenceCore".to_string(),
+        name: "StreamWrapper".to_string(),
         type_parameters: vec![],
         components: vec![IrRecordComponent {
             name: "value".to_string(),
@@ -871,11 +871,11 @@ fn record_extension_method_is_emitted_as_instance_method() {
 
     let record_java = &unit.type_declarations[0];
     assert!(
-        record_java.contains("public record SequenceCore(String value)"),
+        record_java.contains("public record StreamWrapper(String value)"),
         "record declaration should be generated"
     );
     assert!(
-        record_java.contains("public SequenceCore identity()"),
+        record_java.contains("public StreamWrapper identity()"),
         "extension must become an instance method"
     );
     assert!(
@@ -883,11 +883,11 @@ fn record_extension_method_is_emitted_as_instance_method() {
         "receiver references should be rewritten to `this`"
     );
     assert!(
-        !record_java.contains("static SequenceCore identity"),
+        !record_java.contains("static StreamWrapper identity"),
         "static modifier must be removed from instance method"
     );
     assert!(
-        !record_java.contains("SequenceCore identity(SequenceCore receiver)"),
+        !record_java.contains("StreamWrapper identity(StreamWrapper receiver)"),
         "receiver parameter must be removed from instance method signature"
     );
 }

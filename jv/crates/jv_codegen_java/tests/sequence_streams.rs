@@ -640,7 +640,7 @@ fn java25_sequence_renders_full_stage_chain() {
 }
 
 #[test]
-fn lazy_sequence_pipeline_produces_sequence_wrapper() {
+fn lazy_sequence_pipeline_produces_stream_chain() {
     let mut pipeline = SequencePipeline {
         source: collection_source("numbers"),
         stages: vec![map_stage()],
@@ -655,7 +655,7 @@ fn lazy_sequence_pipeline_produces_sequence_wrapper() {
 
     let expr = IrExpression::SequencePipeline {
         pipeline,
-        java_type: JavaType::sequence(),
+        java_type: JavaType::stream(),
         span: dummy_span(),
     };
 
@@ -665,10 +665,7 @@ fn lazy_sequence_pipeline_produces_sequence_wrapper() {
         .generate_expression(&expr)
         .expect("lazy pipeline should render");
 
-    assert_eq!(
-        rendered,
-        "Sequence.sequenceFromStream((numbers).stream().map((x) -> x))"
-    );
+    assert_eq!(rendered, "(numbers).stream().map((x) -> x)");
 }
 
 #[test]

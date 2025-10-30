@@ -968,14 +968,6 @@ fn lower_call_expression(
                 return Ok(call);
             }
 
-            #[cfg(debug_assertions)]
-            if name == "SequenceCore" {
-                eprintln!(
-                    "[debug] lowering call to SequenceCore with inferred type: {:?}",
-                    java_type
-                );
-            }
-
             let mut call = IrExpression::MethodCall {
                 receiver: None,
                 method_name: name,
@@ -1092,14 +1084,13 @@ fn coerce_argument_for_parameter(
     param_type: &JavaType,
     context: &mut TransformContext,
 ) -> IrExpression {
-    if !is_sequence_core_type(param_type) {
+    if !is_stream_reference_type(param_type) {
         return arg;
     }
 
     match extract_java_type(&arg) {
         Some(JavaType::Reference { name, .. }) if is_iterable_like(&name) => {
-            let mut call =
-                make_sequence_factory_call("sequenceFromIterable", arg, param_type.clone());
+            let mut call = make_sequence_helper_call("toStream", arg, param_type.clone());
             register_call_metadata(
                 context,
                 &mut call,
@@ -1107,21 +1098,12 @@ fn coerce_argument_for_parameter(
             );
             call
         }
-        Some(JavaType::Reference { name, .. }) if is_stream_type(&name) => {
-            let mut call =
-                make_sequence_factory_call("sequenceFromStream", arg, param_type.clone());
-            register_call_metadata(
-                context,
-                &mut call,
-                Some("jv.collections.Sequence".to_string()),
-            );
-            call
-        }
+        Some(JavaType::Reference { name, .. }) if is_stream_type(&name) => arg,
         _ => arg,
     }
 }
 
-fn make_sequence_factory_call(
+fn make_sequence_helper_call(
     method: &str,
     argument: IrExpression,
     result_type: JavaType,
@@ -1195,11 +1177,9 @@ fn register_call_metadata(
     }
 }
 
-fn is_sequence_core_type(java_type: &JavaType) -> bool {
+fn is_stream_reference_type(java_type: &JavaType) -> bool {
     match java_type {
-        JavaType::Reference { name, .. } => {
-            name == "SequenceCore" || name == "jv.collections.SequenceCore"
-        }
+        JavaType::Reference { name, .. } => is_stream_type(name),
         _ => false,
     }
 }
@@ -1212,7 +1192,7 @@ fn is_iterable_like(name: &str) -> bool {
 }
 
 fn is_stream_type(name: &str) -> bool {
-    name == "java.util.stream.Stream"
+    matches!(name, "java.util.stream.Stream" | "Stream")
 }
 
 fn binary_numeric_result_type(left: Option<&JavaType>, right: Option<&JavaType>) -> JavaType {

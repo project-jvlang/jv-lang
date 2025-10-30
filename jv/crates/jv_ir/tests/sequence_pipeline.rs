@@ -203,7 +203,7 @@ fn map_pipeline_without_terminal_stays_lazy_sequence() {
     );
     assert_eq!(
         java_type,
-        JavaType::sequence(),
+        JavaType::stream(),
         "lazy pipeline should infer Sequence return type"
     );
 }
@@ -880,14 +880,14 @@ fn string_interpolation_materializes_lazy_sequence() {
 #[test]
 fn sequence_flatmap_overloads_receive_stable_java_names() {
     let mut context = TransformContext::new();
-    let owner = Some("jv.collections.SequenceCore".to_string());
+    let owner = Some("java.util.stream.Stream".to_string());
 
     let span_decl_iter = Span::new(200, 1, 200, 40);
     let span_decl_seq = Span::new(201, 1, 201, 40);
     let span_call_iter = Span::new(210, 1, 210, 40);
     let span_call_seq = Span::new(211, 1, 211, 40);
 
-    let sequence_type = JavaType::sequence();
+    let sequence_type = JavaType::stream();
     let iterable_type = JavaType::Reference {
         name: "java.lang.Iterable".to_string(),
         generic_args: vec![],

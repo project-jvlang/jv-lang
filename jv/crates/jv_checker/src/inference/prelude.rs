@@ -2,15 +2,14 @@
 //!
 //! The prelude seeds the type environment with well-known symbols so that end-user
 //! programs can rely on stdlib facilities without explicitly compiling the stdlib
-//! sources as part of the same unit. At the moment we focus on the rewritten
-//! Sequence API (`SequenceCore`, the factory helpers, and their extension functions).
+//! sources as part of the same unit. 現時点では Stream ベースで再構成したシーケンス API
+//! （標準の `java.util.stream.Stream` と Iterable 拡張）を登録する。
 
 use crate::inference::environment::{TypeEnvironment, TypeScheme};
 use crate::inference::extensions::ExtensionRegistry;
 use crate::inference::type_factory::TypeFactory;
 use crate::inference::types::{PrimitiveType, TypeId, TypeKind};
 
-const SEQUENCE_CORE: &str = "jv.collections.SequenceCore";
 const ITERABLE: &str = "java.lang.Iterable";
 const ITERATOR: &str = "java.util.Iterator";
 const STREAM: &str = "java.util.stream.Stream";
@@ -40,114 +39,95 @@ fn scheme(vars: Vec<TypeId>, ty: TypeKind) -> TypeScheme {
 /// Install built-in symbols and extension functions into the provided environment.
 pub fn install_prelude(env: &mut TypeEnvironment) -> ExtensionRegistry {
     let mut registry = ExtensionRegistry::new();
-    register_sequence_symbols(env, &mut registry);
+    register_stream_symbols(env, &mut registry);
     registry
 }
 
-fn register_sequence_symbols(env: &mut TypeEnvironment, registry: &mut ExtensionRegistry) {
-    register_sequence_factory_functions(env);
-    register_sequence_core_extensions(env, registry);
+fn register_stream_symbols(env: &mut TypeEnvironment, registry: &mut ExtensionRegistry) {
+    register_stream_extensions(env, registry);
     register_iterable_extensions(env, registry);
 }
 
-fn register_sequence_factory_functions(env: &mut TypeEnvironment) {
-    let from_iterable = TypeScheme::monotype(function(
-        vec![primitive(ITERABLE)],
-        primitive(SEQUENCE_CORE),
-    ));
-    env.define_scheme("sequenceFromIterable", from_iterable);
-
-    let from_stream =
-        TypeScheme::monotype(function(vec![primitive(STREAM)], primitive(SEQUENCE_CORE)));
-    env.define_scheme("sequenceFromStream", from_stream);
-}
-
-fn register_sequence_core_extensions(env: &mut TypeEnvironment, registry: &mut ExtensionRegistry) {
+fn register_stream_extensions(env: &mut TypeEnvironment, registry: &mut ExtensionRegistry) {
     registry.register(
-        SEQUENCE_CORE,
+        STREAM,
         "iterator",
         TypeScheme::monotype(function(Vec::new(), primitive(ITERATOR))),
     );
 
     registry.register(
-        SEQUENCE_CORE,
+        STREAM,
         "close",
         TypeScheme::monotype(function(Vec::new(), primitive(UNIT))),
     );
 
-    registry.register(
-        SEQUENCE_CORE,
-        "toStream",
-        TypeScheme::monotype(function(Vec::new(), primitive(STREAM))),
-    );
-
-    // map: (T -> R) -> SequenceCore
+    // map: (T -> R) -> Stream
     let map_t = env.fresh_type_id();
     let map_r = env.fresh_type_id();
     let map_transform = function(vec![type_var(map_t)], type_var(map_r));
     registry.register(
-        SEQUENCE_CORE,
+        STREAM,
         "map",
         scheme(
             vec![map_t, map_r],
-            function(vec![map_transform], primitive(SEQUENCE_CORE)),
+            function(vec![map_transform], primitive(STREAM)),
         ),
     );
 
-    // filter: (T -> Boolean) -> SequenceCore
+    // filter: (T -> Boolean) -> Stream
     let filter_t = env.fresh_type_id();
     let filter_predicate = function(
         vec![type_var(filter_t)],
         TypeKind::primitive(PrimitiveType::Boolean),
     );
     registry.register(
-        SEQUENCE_CORE,
+        STREAM,
         "filter",
         scheme(
             vec![filter_t],
-            function(vec![filter_predicate], primitive(SEQUENCE_CORE)),
+            function(vec![filter_predicate], primitive(STREAM)),
         ),
     );
 
-    // take/drop: Int -> SequenceCore
-    let take_sig = TypeScheme::monotype(function(vec![primitive(INT)], primitive(SEQUENCE_CORE)));
-    registry.register(SEQUENCE_CORE, "take", take_sig.clone());
-    registry.register(SEQUENCE_CORE, "drop", take_sig);
+    // take/drop: Int -> Stream
+    let take_sig = TypeScheme::monotype(function(vec![primitive(INT)], primitive(STREAM)));
+    registry.register(STREAM, "take", take_sig.clone());
+    registry.register(STREAM, "drop", take_sig);
 
-    // flatMap: (T -> ?) -> SequenceCore
+    // flatMap: (T -> ?) -> Stream
     let flat_map_t = env.fresh_type_id();
     let flat_map_r = env.fresh_type_id();
     let flat_map_transform = function(vec![type_var(flat_map_t)], TypeKind::Unknown);
     registry.register(
-        SEQUENCE_CORE,
+        STREAM,
         "flatMap",
         scheme(
             vec![flat_map_t, flat_map_r],
-            function(vec![flat_map_transform], primitive(SEQUENCE_CORE)),
+            function(vec![flat_map_transform], primitive(STREAM)),
         ),
     );
 
     // sorted / sortedBy
     registry.register(
-        SEQUENCE_CORE,
+        STREAM,
         "sorted",
-        TypeScheme::monotype(function(Vec::new(), primitive(SEQUENCE_CORE))),
+        TypeScheme::monotype(function(Vec::new(), primitive(STREAM))),
     );
     let sorted_by_t = env.fresh_type_id();
     let sorted_by_key = env.fresh_type_id();
     let sorted_selector = function(vec![type_var(sorted_by_t)], type_var(sorted_by_key));
     registry.register(
-        SEQUENCE_CORE,
+        STREAM,
         "sortedBy",
         scheme(
             vec![sorted_by_t, sorted_by_key],
-            function(vec![sorted_selector], primitive(SEQUENCE_CORE)),
+            function(vec![sorted_selector], primitive(STREAM)),
         ),
     );
 
     // toList
     registry.register(
-        SEQUENCE_CORE,
+        STREAM,
         "toList",
         TypeScheme::monotype(function(Vec::new(), primitive(LIST))),
     );
@@ -157,7 +137,7 @@ fn register_sequence_core_extensions(env: &mut TypeEnvironment, registry: &mut E
     let fold_r = env.fresh_type_id();
     let fold_op = function(vec![type_var(fold_r), type_var(fold_t)], type_var(fold_r));
     registry.register(
-        SEQUENCE_CORE,
+        STREAM,
         "fold",
         scheme(
             vec![fold_t, fold_r],
@@ -172,7 +152,7 @@ fn register_sequence_core_extensions(env: &mut TypeEnvironment, registry: &mut E
         type_var(reduce_t),
     );
     registry.register(
-        SEQUENCE_CORE,
+        STREAM,
         "reduce",
         scheme(
             vec![reduce_t],
@@ -181,13 +161,13 @@ fn register_sequence_core_extensions(env: &mut TypeEnvironment, registry: &mut E
     );
 
     registry.register(
-        SEQUENCE_CORE,
+        STREAM,
         "count",
         TypeScheme::monotype(function(Vec::new(), primitive(LONG))),
     );
 
     registry.register(
-        SEQUENCE_CORE,
+        STREAM,
         "sum",
         TypeScheme::monotype(function(Vec::new(), primitive(LONG))),
     );
@@ -195,7 +175,7 @@ fn register_sequence_core_extensions(env: &mut TypeEnvironment, registry: &mut E
     let for_each_t = env.fresh_type_id();
     let for_each_action = function(vec![type_var(for_each_t)], primitive(UNIT));
     registry.register(
-        SEQUENCE_CORE,
+        STREAM,
         "forEach",
         scheme(
             vec![for_each_t],
@@ -207,7 +187,7 @@ fn register_sequence_core_extensions(env: &mut TypeEnvironment, registry: &mut E
     let group_by_key = env.fresh_type_id();
     let group_by_selector = function(vec![type_var(group_by_t)], type_var(group_by_key));
     registry.register(
-        SEQUENCE_CORE,
+        STREAM,
         "groupBy",
         scheme(
             vec![group_by_t, group_by_key],
@@ -220,7 +200,7 @@ fn register_sequence_core_extensions(env: &mut TypeEnvironment, registry: &mut E
     let associate_v = env.fresh_type_id();
     let associate_transform = function(vec![type_var(associate_t)], primitive(MAP_ENTRY));
     registry.register(
-        SEQUENCE_CORE,
+        STREAM,
         "associate",
         scheme(
             vec![associate_t, associate_k, associate_v],
@@ -230,6 +210,12 @@ fn register_sequence_core_extensions(env: &mut TypeEnvironment, registry: &mut E
 }
 
 fn register_iterable_extensions(env: &mut TypeEnvironment, registry: &mut ExtensionRegistry) {
+    registry.register(
+        ITERABLE,
+        "toStream",
+        TypeScheme::monotype(function(Vec::new(), primitive(STREAM))),
+    );
+
     let iterable_map_t = env.fresh_type_id();
     let iterable_map_r = env.fresh_type_id();
     let iterable_map_transform = function(vec![type_var(iterable_map_t)], type_var(iterable_map_r));
@@ -238,7 +224,7 @@ fn register_iterable_extensions(env: &mut TypeEnvironment, registry: &mut Extens
         "map",
         scheme(
             vec![iterable_map_t, iterable_map_r],
-            function(vec![iterable_map_transform], primitive(SEQUENCE_CORE)),
+            function(vec![iterable_map_transform], primitive(STREAM)),
         ),
     );
 
@@ -252,12 +238,11 @@ fn register_iterable_extensions(env: &mut TypeEnvironment, registry: &mut Extens
         "filter",
         scheme(
             vec![iterable_filter_t],
-            function(vec![iterable_filter_predicate], primitive(SEQUENCE_CORE)),
+            function(vec![iterable_filter_predicate], primitive(STREAM)),
         ),
     );
 
-    let iterable_take_sig =
-        TypeScheme::monotype(function(vec![primitive(INT)], primitive(SEQUENCE_CORE)));
+    let iterable_take_sig = TypeScheme::monotype(function(vec![primitive(INT)], primitive(STREAM)));
     registry.register(ITERABLE, "take", iterable_take_sig.clone());
     registry.register(ITERABLE, "drop", iterable_take_sig);
 
@@ -270,14 +255,14 @@ fn register_iterable_extensions(env: &mut TypeEnvironment, registry: &mut Extens
         "flatMap",
         scheme(
             vec![iterable_flat_map_t, iterable_flat_map_r],
-            function(vec![iterable_flat_map_transform], primitive(SEQUENCE_CORE)),
+            function(vec![iterable_flat_map_transform], primitive(STREAM)),
         ),
     );
 
     registry.register(
         ITERABLE,
         "sorted",
-        TypeScheme::monotype(function(Vec::new(), primitive(SEQUENCE_CORE))),
+        TypeScheme::monotype(function(Vec::new(), primitive(STREAM))),
     );
 
     let iterable_sorted_by_t = env.fresh_type_id();
@@ -291,7 +276,7 @@ fn register_iterable_extensions(env: &mut TypeEnvironment, registry: &mut Extens
         "sortedBy",
         scheme(
             vec![iterable_sorted_by_t, iterable_sorted_by_key],
-            function(vec![iterable_selector], primitive(SEQUENCE_CORE)),
+            function(vec![iterable_selector], primitive(STREAM)),
         ),
     );
 

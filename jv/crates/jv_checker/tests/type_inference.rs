@@ -205,9 +205,7 @@ fn type_facts_update_after_rechecking_program() {
 fn sequence_extension_chain_maintains_inference() {
     let program = parse_program(
         r#"
-        import jv.collections.sequenceFromIterable
-
-        val numbers = sequenceFromIterable([1 2 3 4 5])
+        val numbers = [1 2 3 4 5]
         val doubled = numbers.map { value -> value * 2 }
         val filtered = doubled.filter { value -> value > 4 }
         val total = filtered.reduce { (acc value) -> acc + value }
@@ -228,7 +226,7 @@ fn sequence_extension_chain_maintains_inference() {
         .expect("filtered binding registered");
     assert_eq!(
         filtered_scheme.ty,
-        TypeKind::reference("jv.collections.SequenceCore")
+        TypeKind::reference("java.util.stream.Stream")
     );
 
     let total_scheme = snapshot
@@ -244,9 +242,7 @@ fn sequence_extension_chain_maintains_inference() {
 fn lambda_extension_receiver_resolves_sequence_core() {
     let program = parse_program(
         r#"
-        import jv.collections.sequenceFromIterable
-
-        val source = sequenceFromIterable([1 2 3])
+        val source = [1 2 3]
         val toStream = { seq -> seq.toStream() }
         val stream = toStream(source)
     "#,
@@ -266,10 +262,7 @@ fn lambda_extension_receiver_resolves_sequence_core() {
     assert!(lambda_scheme.quantifiers.is_empty());
     match &lambda_scheme.ty {
         TypeKind::Function(params, ret) => {
-            assert_eq!(
-                params,
-                &vec![TypeKind::reference("jv.collections.SequenceCore")]
-            );
+            assert_eq!(params, &vec![TypeKind::reference("java.lang.Iterable")]);
             assert_eq!(**ret, TypeKind::reference("java.util.stream.Stream"));
         }
         other => panic!("expected function type, found {other:?}"),

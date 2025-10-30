@@ -1,0 +1,9 @@
+fun main(): Unit {
+    numbers = [1 2 3 4 5]
+    doubledInts = numbers.map { value -> value * 2 } as List
+    println("Doubled ints: ${doubledInts}")
+
+    decimals = [1.0 2.0 3.0 4.0 5.0]
+    doubledFloats = decimals.map { value -> value * 2.0 } as List
+    println("Doubled floats: ${doubledFloats}")
+}

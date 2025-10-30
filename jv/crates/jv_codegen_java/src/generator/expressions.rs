@@ -1196,21 +1196,12 @@ impl JavaCodeGenerator {
             return Ok(format!("{}.collect(Collectors.toList())", stream_expr));
         }
 
-        match result_type {
-            JavaType::Reference { name, .. } if name == "jv.collections.SequenceCore" => {}
-            _ => {
-                return Err(CodeGenError::TypeGenerationError {
-                    message: "lazy sequence pipeline must resolve to jv.collections.SequenceCore"
-                        .to_string(),
-                    span: Some(span.clone()),
-                })
-            }
-        }
-
-        const FACTORY_OWNER: &str = "jv.collections.Sequence";
-        self.ensure_stdlib_import_name(FACTORY_OWNER);
-        let simple_name = FACTORY_OWNER.rsplit('.').next().unwrap_or(FACTORY_OWNER);
-        Ok(format!("{simple_name}.sequenceFromStream({})", stream_expr))
+        Err(CodeGenError::TypeGenerationError {
+            message:
+                "lazy sequence pipeline must resolve to java.util.stream.Stream or a supported materialization"
+                    .to_string(),
+            span: Some(span.clone()),
+        })
     }
 
     fn take_conversion_metadata_for_span(
@@ -1335,16 +1326,11 @@ impl JavaCodeGenerator {
     ) -> Result<(String, bool), CodeGenError> {
         match source {
             SequenceSource::Collection { expr, .. } => {
-                let sequence_stream_field = self.is_sequence_core_stream_field(expr);
                 let java_stream = Self::is_java_stream_expression(expr);
-                let needs_sequence_core_conversion =
-                    self.is_sequence_core_expression(expr) && !sequence_stream_field;
                 let rendered = self.generate_expression(expr)?;
 
-                if sequence_stream_field || java_stream {
+                if java_stream {
                     Ok((rendered, false))
-                } else if needs_sequence_core_conversion {
-                    Ok((format!("({}).stream()", rendered), false))
                 } else {
                     Ok((format!("({}).stream()", rendered), false))
                 }
@@ -1364,23 +1350,6 @@ impl JavaCodeGenerator {
                 let rendered = self.generate_expression(expr)?;
                 Ok((rendered, *auto_close))
             }
-        }
-    }
-
-    fn is_sequence_core_expression(&self, expr: &IrExpression) -> bool {
-        Self::expression_java_type(expr)
-            .map(Self::is_sequence_core_type)
-            .unwrap_or(false)
-    }
-
-    fn is_sequence_core_stream_field(&self, expr: &IrExpression) -> bool {
-        match expr {
-            IrExpression::FieldAccess {
-                receiver,
-                field_name,
-                ..
-            } => field_name == "stream" && self.is_sequence_core_expression(receiver),
-            _ => false,
         }
     }
 
@@ -1592,7 +1561,7 @@ impl JavaCodeGenerator {
 
     fn is_sequence_owner(name: &str) -> bool {
         let simple = name.rsplit('.').next().unwrap_or(name);
-        matches!(simple, "Sequence" | "SequenceCore")
+        simple == "Sequence"
     }
 
     fn returns_object_like(java_type: &JavaType) -> bool {
@@ -1625,7 +1594,6 @@ impl JavaCodeGenerator {
                 | "LinkedHashSet"
                 | "HashSet"
                 | "Sequence"
-                | "SequenceCore"
         ) || matches!(
             name,
             "java.lang.Iterable"
@@ -1639,7 +1607,6 @@ impl JavaCodeGenerator {
                 | "java.util.LinkedHashSet"
                 | "java.util.HashSet"
                 | "jv.collections.Sequence"
-                | "jv.collections.SequenceCore"
         )
     }
 
@@ -1679,7 +1646,7 @@ impl JavaCodeGenerator {
     }
 
     fn should_call_method_for_field(&self, receiver: &IrExpression, field_name: &str) -> bool {
-        if self.is_sequence_core_expression(receiver) {
+        if Self::is_java_stream_expression(receiver) {
             return true;
         }
 
@@ -1697,19 +1664,10 @@ impl JavaCodeGenerator {
         }
 
         match field_name {
-            "size" => self.is_sequence_core_expression(receiver),
+            "size" => Self::is_java_stream_expression(receiver),
             "length" => Self::expression_java_type(receiver)
                 .map(Self::is_string_like_type)
                 .unwrap_or(false),
-            _ => false,
-        }
-    }
-
-    fn is_sequence_core_type(java_type: &JavaType) -> bool {
-        match java_type {
-            JavaType::Reference { name, .. } => {
-                name == "SequenceCore" || name == "jv.collections.SequenceCore"
-            }
             _ => false,
         }
     }

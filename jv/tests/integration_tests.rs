@@ -2032,6 +2032,77 @@ fn sequence_interpolation_materializes_sequences_before_string_format() {
 }
 
 #[test]
+fn sequence_map_materialization_casts_streams_to_lists() {
+    let required = [JavaTarget::Java25, JavaTarget::Java21];
+    if !ensure_targets_available(&required, "sequence map materialization fixture run") {
+        return;
+    }
+
+    let fixture = workspace_file("tests/lang/streams/map_materialization.jv");
+    let expected_output =
+        "Doubled ints: [2, 4, 6, 8, 10]\nDoubled floats: [2.0, 4.0, 6.0, 8.0, 10.0]";
+
+    for target in [JavaTarget::Java25, JavaTarget::Java21] {
+        let temp_dir =
+            TempDirGuard::new("sequence-map-materialization").expect("create temp directory for fixture");
+        let plan = compose_plan_from_fixture(
+            temp_dir.path(),
+            &fixture,
+            CliOverrides {
+                java_only: true,
+                target: Some(target),
+                ..CliOverrides::default()
+            },
+        );
+
+        let artifacts = compile(&plan).expect("sequence map materialization fixture compiles");
+        let java_dir = plan
+            .options
+            .output_dir
+            .join(format!("java{}", target.as_str()));
+        let classes_dir = java_dir.join("classes");
+        fs::create_dir_all(&classes_dir).expect("create classes directory for javac");
+
+        let mut javac = javac_command_for_target(target).expect("javac command unavailable");
+        javac.arg("-d").arg(&classes_dir);
+        for file in &artifacts.java_files {
+            javac.arg(file);
+        }
+        let status = javac
+            .status()
+            .expect("invoke javac for sequence map materialization fixture");
+        assert!(
+            status.success(),
+            "javac failed for target {}",
+            target.as_str()
+        );
+
+        let mut java_cmd = java_command_for_target(target).expect("java command unavailable");
+        java_cmd
+            .arg("-cp")
+            .arg(&classes_dir)
+            .arg(&artifacts.script_main_class);
+        let output = java_cmd
+            .output()
+            .expect("execute compiled sequence map materialization script");
+        assert!(
+            output.status.success(),
+            "java execution failed for target {}: {}",
+            target.as_str(),
+            String::from_utf8_lossy(&output.stderr)
+        );
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert_eq!(
+            stdout.trim(),
+            expected_output,
+            "unexpected output for target {}",
+            target.as_str()
+        );
+    }
+}
+
+#[test]
 fn smart_imports_resolve_alias_wildcard_static_and_module() {
     if !has_javac() || !has_java_runtime() {
         eprintln!("Skipping smart import integration test: java runtime or javac missing");

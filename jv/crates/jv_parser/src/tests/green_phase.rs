@@ -34,7 +34,7 @@ fn test_simple_val_declaration() {
 fn function_declaration_with_primitive_prefix_records_metadata() {
     let program = parse_program(
         r#"
-        fun int sum(values: SequenceCore<Int>) {
+        fun int sum(values: Stream<Int>) {
             return 0
         }
     "#,

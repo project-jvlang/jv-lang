@@ -1,6 +1,6 @@
 //! Registry for built-in extension functions used during type inference.
 //!
-//! The registry maps a receiver type (e.g., `SequenceCore`) and method name (e.g., `map`)
+//! The registry maps a receiver type (e.g., `java.util.stream.Stream`) and method name (e.g., `map`)
 //! to a `TypeScheme` describing the callable signature. Constraint generation consults the
 //! registry when it encounters member access expressions so that extension functions defined
 //! in the standard library can participate in inference even if their source code is not part

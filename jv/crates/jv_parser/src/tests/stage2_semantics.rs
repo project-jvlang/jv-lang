@@ -84,7 +84,7 @@ fn clear_raw_directives(program: &mut Program) {
 #[test]
 fn primitive_return_pass_restores_metadata() {
     let source = r#"
-        fun int sum(values: SequenceCore<Int>) {
+        fun int sum(values: Stream<Int>) {
             return 0
         }
     "#;

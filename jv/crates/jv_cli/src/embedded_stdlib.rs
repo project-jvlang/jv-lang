@@ -1588,12 +1588,10 @@ mod tests {
     fn test_catalog() -> StdlibCatalog {
         let mut catalog = StdlibCatalog::default();
         let mut metadata = StdlibModuleMetadata::default();
-        metadata.type_names.insert("SequenceCore".to_string());
+        metadata.type_names.insert("Stream".to_string());
         metadata.type_names.insert("Sequence".to_string());
         metadata.extension_methods.insert("map".to_string());
-        metadata
-            .functions
-            .insert("sequenceFromIterable".to_string());
+        metadata.functions.insert("toStream".to_string());
         catalog.register_module("jv.collections", &metadata);
         catalog
     }
@@ -1602,11 +1600,11 @@ mod tests {
     fn stdlib_usage_collects_packages_from_resolved_imports() {
         let import = ResolvedImport {
             source_span: Span::dummy(),
-            original_path: "jv.collections.SequenceCore".to_string(),
+            original_path: "java.util.stream.Stream".to_string(),
             alias: None,
             is_wildcard: false,
             kind: ResolvedImportKind::Type {
-                fqcn: "jv.collections.SequenceCore".to_string(),
+                fqcn: "java.util.stream.Stream".to_string(),
             },
             module_dependency: Some("jv.collections".to_string()),
         };
@@ -1642,11 +1640,11 @@ mod tests {
 
         let import = ResolvedImport {
             source_span: Span::dummy(),
-            original_path: "jv.collections.SequenceCore".to_string(),
+            original_path: "java.util.stream.Stream".to_string(),
             alias: None,
             is_wildcard: false,
             kind: ResolvedImportKind::Type {
-                fqcn: "jv.collections.SequenceCore".to_string(),
+                fqcn: "java.util.stream.Stream".to_string(),
             },
             module_dependency: Some("jv.collections".to_string()),
         };
@@ -1669,7 +1667,7 @@ mod tests {
             .iter()
             .any(|pkg| pkg == "jv.collections"));
         let mut usage = StdlibUsage::default();
-        usage.scan_java_source("return jv.collections.SequenceCore.map(values);", &catalog);
+        usage.scan_java_source("return java.util.stream.Stream.of(values);", &catalog);
         assert!(
             usage.package_set().contains("jv.collections"),
             "scan should detect stdlib package"

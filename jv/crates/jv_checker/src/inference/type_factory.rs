@@ -42,8 +42,6 @@ impl TypeFactory {
 
         match normalized {
             "String" => Ok(TypeKind::reference("java.lang.String")),
-            "SequenceCore" => Ok(TypeKind::reference("jv.collections.SequenceCore")),
-            "jv.collections.SequenceCore" => Ok(TypeKind::reference("jv.collections.SequenceCore")),
             "Iterable" | "java.lang.Iterable" => Ok(TypeKind::reference("java.lang.Iterable")),
             "Iterator" | "java.util.Iterator" => Ok(TypeKind::reference("java.util.Iterator")),
             "Stream" | "java.util.stream.Stream" => {
