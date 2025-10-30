@@ -50,6 +50,7 @@ impl<'ctx> DiagnosticsEmitter<'ctx> {
             &overrides,
             &outcome.java_hints,
         ));
+        warnings.extend(self.regex_warnings());
 
         DiagnosticsPayload {
             errors,
@@ -95,6 +96,19 @@ impl<'ctx> DiagnosticsEmitter<'ctx> {
         };
 
         Some(builder.build())
+    }
+
+    fn regex_warnings(&self) -> Vec<CheckError> {
+        let mut warnings = Vec::new();
+        for typing in self.context.regex_typings() {
+            for warning in &typing.warnings {
+                warnings.push(CheckError::ValidationError {
+                    message: warning.message.clone(),
+                    span: Some(typing.span.clone()),
+                });
+            }
+        }
+        warnings
     }
 
     fn verify_exit_state(

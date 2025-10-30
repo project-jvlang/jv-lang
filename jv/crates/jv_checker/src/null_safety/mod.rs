@@ -91,6 +91,10 @@ impl NullSafetyReport {
         std::mem::take(&mut self.java_hints)
     }
 
+    pub fn take_warnings(&mut self) -> Vec<CheckError> {
+        std::mem::take(&mut self.warnings)
+    }
+
     pub fn set_type_facts(&mut self, snapshot: TypeFactsSnapshot) {
         self.type_facts = Some(snapshot);
     }

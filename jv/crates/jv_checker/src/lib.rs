@@ -605,7 +605,9 @@ impl TypeChecker {
         } else {
             self.engine.telemetry_mut().pattern_bridge_ms = 0.0;
         }
-        report.take_diagnostics()
+        let mut diagnostics = report.take_diagnostics();
+        diagnostics.extend(report.take_warnings());
+        diagnostics
     }
 
     /// 現在保持している推論スナップショットを取得する。

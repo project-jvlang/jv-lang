@@ -1,7 +1,7 @@
 use std::collections::{HashMap, VecDeque};
 
 use jv_ast::{
-    BinaryOp, Expression, Program, Statement, TryCatchClause, WhenArm,
+    BinaryMetadata, BinaryOp, Expression, IsTestKind, Program, Statement, TryCatchClause, WhenArm,
     expression::Argument,
     types::{Literal, Modifiers, Span},
 };
@@ -298,7 +298,7 @@ impl<'g, 'ctx, 'facts> FlowGraphBuilder<'g, 'ctx, 'facts> {
         let condition_node = self.add_graph_node(FlowNodeKind::Expression, Some(span.clone()));
         self.connect(current, condition_node, FlowEdgeKind::Normal);
 
-        let assumptions = detect_null_comparison(condition);
+        let assumptions = self.detect_condition_assumptions(condition);
 
         let then_node = self.add_graph_node(FlowNodeKind::Merge, None);
         let true_edge = FlowEdgeKind::TrueBranch {
@@ -641,6 +641,94 @@ impl<'g, 'ctx, 'facts> FlowGraphBuilder<'g, 'ctx, 'facts> {
             span
         })
     }
+
+    fn detect_condition_assumptions(&self, condition: &Expression) -> ConditionAssumptions {
+        let mut assumptions = ConditionAssumptions::default();
+
+        if let Expression::Binary {
+            left,
+            op,
+            right,
+            metadata,
+            ..
+        } = condition
+        {
+            match op {
+                BinaryOp::Equal | BinaryOp::NotEqual => {
+                    if let Some(identifier) = extract_identifier(left) {
+                        if is_null_literal(right) {
+                            match op {
+                                BinaryOp::Equal => {
+                                    assumptions.true_assumption = Some(BranchAssumption::Equals {
+                                        variable: identifier.clone(),
+                                        state: NullabilityKind::Nullable,
+                                    });
+                                    assumptions.false_assumption =
+                                        Some(BranchAssumption::NotEquals {
+                                            variable: identifier,
+                                            state: NullabilityKind::NonNull,
+                                        });
+                                }
+                                BinaryOp::NotEqual => {
+                                    assumptions.true_assumption =
+                                        Some(BranchAssumption::NotEquals {
+                                            variable: identifier.clone(),
+                                            state: NullabilityKind::NonNull,
+                                        });
+                                    assumptions.false_assumption = Some(BranchAssumption::Equals {
+                                        variable: identifier,
+                                        state: NullabilityKind::Nullable,
+                                    });
+                                }
+                                _ => {}
+                            }
+                        }
+                    } else if let Some(identifier) = extract_identifier(right) {
+                        if is_null_literal(left) {
+                            match op {
+                                BinaryOp::Equal => {
+                                    assumptions.true_assumption = Some(BranchAssumption::Equals {
+                                        variable: identifier.clone(),
+                                        state: NullabilityKind::Nullable,
+                                    });
+                                    assumptions.false_assumption =
+                                        Some(BranchAssumption::NotEquals {
+                                            variable: identifier,
+                                            state: NullabilityKind::NonNull,
+                                        });
+                                }
+                                BinaryOp::NotEqual => {
+                                    assumptions.true_assumption =
+                                        Some(BranchAssumption::NotEquals {
+                                            variable: identifier.clone(),
+                                            state: NullabilityKind::NonNull,
+                                        });
+                                    assumptions.false_assumption = Some(BranchAssumption::Equals {
+                                        variable: identifier,
+                                        state: NullabilityKind::Nullable,
+                                    });
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                }
+                BinaryOp::Is => {
+                    if let Some(identifier) = extract_identifier(left) {
+                        if should_apply_is_narrowing(metadata, self.context) {
+                            assumptions.true_assumption = Some(BranchAssumption::Equals {
+                                variable: identifier,
+                                state: NullabilityKind::NonNull,
+                            });
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        assumptions
+    }
 }
 
 fn select_true_assumption(
@@ -708,82 +796,16 @@ impl Default for ConditionAssumptions {
     }
 }
 
-fn detect_null_comparison(condition: &Expression) -> ConditionAssumptions {
-    let mut assumptions = ConditionAssumptions::default();
-
-    if let Expression::Binary {
-        left, op, right, ..
-    } = condition
-    {
-        match op {
-            BinaryOp::Equal | BinaryOp::NotEqual => {
-                if let Some(identifier) = extract_identifier(left) {
-                    if is_null_literal(right) {
-                        match op {
-                            BinaryOp::Equal => {
-                                assumptions.true_assumption = Some(BranchAssumption::Equals {
-                                    variable: identifier.clone(),
-                                    state: NullabilityKind::Nullable,
-                                });
-                                assumptions.false_assumption = Some(BranchAssumption::NotEquals {
-                                    variable: identifier,
-                                    state: NullabilityKind::NonNull,
-                                });
-                            }
-                            BinaryOp::NotEqual => {
-                                assumptions.true_assumption = Some(BranchAssumption::NotEquals {
-                                    variable: identifier.clone(),
-                                    state: NullabilityKind::NonNull,
-                                });
-                                assumptions.false_assumption = Some(BranchAssumption::Equals {
-                                    variable: identifier,
-                                    state: NullabilityKind::Nullable,
-                                });
-                            }
-                            _ => {}
-                        }
-                    }
-                } else if let Some(identifier) = extract_identifier(right) {
-                    if is_null_literal(left) {
-                        match op {
-                            BinaryOp::Equal => {
-                                assumptions.true_assumption = Some(BranchAssumption::Equals {
-                                    variable: identifier.clone(),
-                                    state: NullabilityKind::Nullable,
-                                });
-                                assumptions.false_assumption = Some(BranchAssumption::NotEquals {
-                                    variable: identifier,
-                                    state: NullabilityKind::NonNull,
-                                });
-                            }
-                            BinaryOp::NotEqual => {
-                                assumptions.true_assumption = Some(BranchAssumption::NotEquals {
-                                    variable: identifier.clone(),
-                                    state: NullabilityKind::NonNull,
-                                });
-                                assumptions.false_assumption = Some(BranchAssumption::Equals {
-                                    variable: identifier,
-                                    state: NullabilityKind::Nullable,
-                                });
-                            }
-                            _ => {}
-                        }
-                    }
-                }
+fn should_apply_is_narrowing(metadata: &BinaryMetadata, context: &NullSafetyContext<'_>) -> bool {
+    match metadata.is_test.as_ref() {
+        None => true,
+        Some(is_metadata) => match is_metadata.kind {
+            IsTestKind::Type => true,
+            IsTestKind::RegexLiteral | IsTestKind::PatternExpression => {
+                context.regex_typing_for_span(&is_metadata.span).is_some()
             }
-            BinaryOp::Is => {
-                if let Some(identifier) = extract_identifier(left) {
-                    assumptions.true_assumption = Some(BranchAssumption::Equals {
-                        variable: identifier,
-                        state: NullabilityKind::NonNull,
-                    });
-                }
-            }
-            _ => {}
-        }
+        },
     }
-
-    assumptions
 }
 
 fn extract_identifier(expr: &Expression) -> Option<String> {

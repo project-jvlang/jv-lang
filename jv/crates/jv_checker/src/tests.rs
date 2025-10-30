@@ -32,6 +32,60 @@ fn annotation(name: &str) -> Annotation {
     }
 }
 
+fn program_with_optional_regex(span: &Span) -> Program {
+    let regex_literal = RegexLiteral {
+        pattern: "\\d+".into(),
+        raw: "/\\d+/".into(),
+        span: span.clone(),
+    };
+    let metadata = BinaryMetadata {
+        is_test: Some(IsTestMetadata {
+            kind: IsTestKind::RegexLiteral,
+            regex: Some(regex_literal.clone()),
+            pattern_expr: None,
+            diagnostics: Vec::new(),
+            guard_strategy: RegexGuardStrategy::None,
+            span: span.clone(),
+        }),
+    };
+
+    let text_decl = Statement::ValDeclaration {
+        name: "text".into(),
+        binding: None,
+        type_annotation: Some(TypeAnnotation::Nullable(Box::new(TypeAnnotation::Simple(
+            "String".into(),
+        )))),
+        initializer: Expression::Literal(Literal::Null, span.clone()),
+        modifiers: default_modifiers(),
+        origin: ValBindingOrigin::ExplicitKeyword,
+        span: span.clone(),
+    };
+
+    let regex_expr = Expression::Binary {
+        left: Box::new(Expression::Identifier("text".into(), span.clone())),
+        op: BinaryOp::Is,
+        right: Box::new(Expression::RegexLiteral(regex_literal)),
+        span: span.clone(),
+        metadata,
+    };
+    let matched_decl = Statement::ValDeclaration {
+        name: "matched".into(),
+        binding: None,
+        type_annotation: None,
+        initializer: regex_expr,
+        modifiers: default_modifiers(),
+        origin: ValBindingOrigin::ExplicitKeyword,
+        span: span.clone(),
+    };
+
+    Program {
+        package: None,
+        imports: Vec::new(),
+        statements: vec![text_decl, matched_decl],
+        span: span.clone(),
+    }
+}
+
 fn collect_null_safety_messages(errors: &[CheckError]) -> Vec<String> {
     errors
         .iter()
@@ -1397,55 +1451,7 @@ fn regex_literal_infers_pattern_type() {
 #[test]
 fn regex_is_optional_records_guard_and_warning() {
     let span = dummy_span();
-    let regex_literal = RegexLiteral {
-        pattern: "\\d+".into(),
-        raw: "/\\d+/".into(),
-        span: span.clone(),
-    };
-    let metadata = BinaryMetadata {
-        is_test: Some(IsTestMetadata {
-            kind: IsTestKind::RegexLiteral,
-            regex: Some(regex_literal.clone()),
-            pattern_expr: None,
-            diagnostics: Vec::new(),
-            guard_strategy: RegexGuardStrategy::None,
-            span: span.clone(),
-        }),
-    };
-    let text_decl = Statement::ValDeclaration {
-        name: "text".into(),
-        binding: None,
-        type_annotation: Some(TypeAnnotation::Nullable(Box::new(TypeAnnotation::Simple(
-            "String".into(),
-        )))),
-        initializer: Expression::Literal(Literal::Null, span.clone()),
-        modifiers: default_modifiers(),
-        origin: ValBindingOrigin::ExplicitKeyword,
-        span: span.clone(),
-    };
-    let regex_expr = Expression::Binary {
-        left: Box::new(Expression::Identifier("text".into(), span.clone())),
-        op: BinaryOp::Is,
-        right: Box::new(Expression::RegexLiteral(regex_literal)),
-        span: span.clone(),
-        metadata,
-    };
-    let matched_decl = Statement::ValDeclaration {
-        name: "matched".into(),
-        binding: None,
-        type_annotation: None,
-        initializer: regex_expr,
-        modifiers: default_modifiers(),
-        origin: ValBindingOrigin::ExplicitKeyword,
-        span: span.clone(),
-    };
-
-    let program = Program {
-        package: None,
-        imports: Vec::new(),
-        statements: vec![text_decl, matched_decl],
-        span: span.clone(),
-    };
+    let program = program_with_optional_regex(&span);
 
     let mut checker = TypeChecker::new();
     let result = checker.check_program(&program);
@@ -1471,6 +1477,35 @@ fn regex_is_optional_records_guard_and_warning() {
         warning.message.contains("null ガード"),
         "警告文に null ガードへの言及が必要です: {}",
         warning.message
+    );
+}
+
+#[test]
+fn regex_is_optional_warning_emitted_by_null_safety() {
+    let span = dummy_span();
+    let program = program_with_optional_regex(&span);
+
+    let mut checker = TypeChecker::new();
+    checker
+        .check_program(&program)
+        .expect("regex program should type-check");
+
+    let snapshot = checker.inference_snapshot().cloned();
+    let diagnostics = checker.check_null_safety(&program, snapshot.as_ref());
+
+    assert!(
+        diagnostics.iter().any(|error| matches!(
+            error,
+            CheckError::ValidationError { message, span: Some(s) }
+                if message.contains("JV_REGEX_W001") && *s == span
+        )),
+        "JV_REGEX_W001 警告が null 安全解析で報告される必要があります: {diagnostics:?}"
+    );
+    assert!(
+        diagnostics
+            .iter()
+            .all(|error| !matches!(error, CheckError::NullSafetyError(_))),
+        "regex is の Optional 左辺で予期せぬ null 安全エラーが発生しました: {diagnostics:?}"
     );
 }
 

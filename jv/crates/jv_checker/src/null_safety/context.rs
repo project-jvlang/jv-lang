@@ -2,10 +2,11 @@ use std::collections::{HashMap, HashSet};
 
 use super::annotations::{JavaNullabilityHint, lookup_nullability_hint};
 use crate::binding::LateInitManifest;
+use crate::inference::regex::RegexMatchTyping;
 use crate::inference::{TypeEnvironment, TypeKind as CheckerTypeKind, TypeScheme};
 use crate::pattern::{PatternMatchFacts, PatternTarget};
 use crate::{InferenceSnapshot, TypeInferenceService};
-use jv_ast::ValBindingOrigin;
+use jv_ast::{Span, ValBindingOrigin};
 use jv_inference::service::{TypeFacts, TypeFactsSnapshot};
 use jv_inference::types::{
     NullabilityFlag, TypeKind as FactsTypeKind, TypeVariant as FactsTypeVariant,
@@ -331,6 +332,7 @@ pub struct NullSafetyContext<'facts> {
     late_init_contracts: LateInitContracts,
     java_metadata: HashMap<String, JavaSymbolMetadata>,
     pattern_facts: HashMap<u64, PatternMatchFacts>,
+    regex_typings: Vec<RegexMatchTyping>,
 }
 
 impl<'facts> NullSafetyContext<'facts> {
@@ -380,6 +382,10 @@ impl<'facts> NullSafetyContext<'facts> {
             hydrate_java_annotations(facts, &mut lattice, &mut java_metadata);
         }
 
+        let regex_typings = environment
+            .map(|env| env.regex_typings().to_vec())
+            .unwrap_or_default();
+
         let late_init = LateInitRegistry::new(&lattice, manifest);
         let late_init_contracts = LateInitContracts::new(&lattice, manifest);
 
@@ -392,6 +398,7 @@ impl<'facts> NullSafetyContext<'facts> {
             late_init_contracts,
             java_metadata,
             pattern_facts: HashMap::new(),
+            regex_typings,
         }
     }
 
@@ -405,6 +412,7 @@ impl<'facts> NullSafetyContext<'facts> {
             late_init_contracts: LateInitContracts::default(),
             java_metadata: HashMap::new(),
             pattern_facts: HashMap::new(),
+            regex_typings: Vec::new(),
         }
     }
 
@@ -469,6 +477,16 @@ impl<'facts> NullSafetyContext<'facts> {
 
     pub fn pattern_facts(&self, node_id: u64) -> Option<&PatternMatchFacts> {
         self.pattern_facts.get(&node_id)
+    }
+
+    pub fn regex_typings(&self) -> &[RegexMatchTyping] {
+        &self.regex_typings
+    }
+
+    pub fn regex_typing_for_span(&self, span: &Span) -> Option<&RegexMatchTyping> {
+        self.regex_typings
+            .iter()
+            .find(|typing| typing.span == *span)
     }
 }
 
