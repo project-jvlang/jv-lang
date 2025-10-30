@@ -792,7 +792,7 @@ impl JavaCodeGenerator {
 
     fn format_annotation_value(&self, value: &IrAnnotationValue) -> String {
         match value {
-            IrAnnotationValue::Literal(literal) => Self::literal_to_string(literal),
+            IrAnnotationValue::Literal(literal) => Self::literal_to_string(literal, None),
             IrAnnotationValue::EnumConstant {
                 type_name,
                 constant,

@@ -7,13 +7,13 @@ use jv_ast::{
 use jv_ir::TransformContext;
 use jv_ir::transform::transform_program_with_context;
 use jv_ir::{
-    DataFormat, IrCaseLabel, IrCommentKind, IrDeconstructionComponent, IrDeconstructionPattern,
-    IrExpression, IrImplicitWhenEnd, IrModifiers, IrParameter, IrProgram, IrRecordComponent,
-    IrSampleDeclaration, IrStatement, IrSwitchCase, IrTypeParameter, IrVisibility, JavaType,
-    MethodOverload, PipelineShape, PrimitiveReturnMetadata, PrimitiveSpecializationHint,
-    PrimitiveType, SampleMode, SampleRecordDescriptor, SampleRecordField, SampleSourceKind, Schema,
-    SequencePipeline, SequenceSource, SequenceTerminal, SequenceTerminalEvaluation,
-    SequenceTerminalKind,
+    CharToStringConversion, DataFormat, IrCaseLabel, IrCommentKind, IrDeconstructionComponent,
+    IrDeconstructionPattern, IrExpression, IrImplicitWhenEnd, IrModifiers, IrParameter, IrProgram,
+    IrRecordComponent, IrSampleDeclaration, IrStatement, IrSwitchCase, IrTypeParameter,
+    IrVisibility, JavaType, MethodOverload, PipelineShape, PrimitiveReturnMetadata,
+    PrimitiveSpecializationHint, PrimitiveType, RawStringFlavor, SampleMode,
+    SampleRecordDescriptor, SampleRecordField, SampleSourceKind, Schema, SequencePipeline,
+    SequenceSource, SequenceTerminal, SequenceTerminalEvaluation, SequenceTerminalKind,
 };
 use jv_parser_frontend::ParserPipeline;
 use jv_parser_rowan::frontend::RowanPipeline;
@@ -1953,6 +1953,7 @@ fn snapshot_ir_program() {
                             {
                               "String": "Hello"
                             },
+                            null,
                             {
                               "start_line": 0,
                               "start_column": 0,
@@ -2009,6 +2010,7 @@ fn snapshot_ir_program() {
                                 {
                                   "String": ""
                                 },
+                                null,
                                 {
                                   "start_line": 0,
                                   "start_column": 0,
@@ -2706,6 +2708,60 @@ fn switch_case(
 
 fn string_literal(value: &str) -> IrExpression {
     IrExpression::Literal(Literal::String(value.to_string()), None, dummy_span())
+}
+
+fn raw_multiline_literal(value: &str) -> IrExpression {
+    IrExpression::Literal(
+        Literal::String(value.to_string()),
+        Some(RawStringFlavor::MultiLine),
+        dummy_span(),
+    )
+}
+
+#[test]
+fn char_to_string_conversion_emits_string_value_of() {
+    let conversion = CharToStringConversion {
+        value: Box::new(IrExpression::Literal(
+            Literal::Character('a'),
+            None,
+            dummy_span(),
+        )),
+        span: dummy_span(),
+    };
+    let expression = IrExpression::CharToString(conversion);
+
+    let mut generator = JavaCodeGenerator::new();
+    let rendered = generator
+        .generate_expression(&expression)
+        .expect("char-to-string conversion should render");
+
+    assert_eq!(rendered, "String.valueOf('a')");
+}
+
+#[test]
+fn raw_triple_string_literal_renders_text_block_without_trailing_newline() {
+    let expression = raw_multiline_literal("line1\nline2");
+
+    let mut generator = JavaCodeGenerator::new();
+    let rendered = generator
+        .generate_expression(&expression)
+        .expect("raw triple string should render");
+
+    let expected = "\"\"\"\nline1\nline2\\\n\"\"\"";
+    assert_eq!(rendered, expected);
+}
+
+#[test]
+fn raw_triple_string_literal_preserves_terminal_newline() {
+    let expression = raw_multiline_literal("行1\n行2\n");
+
+    let mut generator = JavaCodeGenerator::new();
+    let rendered = generator
+        .generate_expression(&expression)
+        .expect("raw triple string with trailing newline should render");
+
+    let expected = "\"\"\"\n行1\n行2\n\"\"\"";
+    assert_eq!(rendered, expected);
 }
 
 #[test]

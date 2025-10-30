@@ -2,8 +2,10 @@ use super::*;
 use jv_ast::{Span, types::PrimitiveTypeName};
 use jv_ir::PipelineShape;
 use jv_ir::{
-    SequencePipeline, SequenceSource, SequenceStage, SequenceTerminal, SequenceTerminalKind,
+    RawStringFlavor, SequencePipeline, SequenceSource, SequenceStage, SequenceTerminal,
+    SequenceTerminalKind,
 };
+use std::fmt::Write;
 
 impl JavaCodeGenerator {
     pub fn generate_expression(&mut self, expr: &IrExpression) -> Result<String, CodeGenError> {
@@ -18,7 +20,9 @@ impl JavaCodeGenerator {
 
     fn generate_expression_inner(&mut self, expr: &IrExpression) -> Result<String, CodeGenError> {
         match expr {
-            IrExpression::Literal(literal, _, _) => Ok(Self::literal_to_string(literal)),
+            IrExpression::Literal(literal, raw_flavor, _) => {
+                Ok(Self::literal_to_string(literal, *raw_flavor))
+            }
             IrExpression::RegexPattern { pattern, .. } => {
                 self.add_import("java.util.regex.Pattern");
                 Ok(format!(
@@ -928,7 +932,7 @@ impl JavaCodeGenerator {
         subject_binding: &str,
         literal: &Literal,
     ) -> Result<String, CodeGenError> {
-        let literal_value = Self::literal_to_string(literal);
+        let literal_value = Self::literal_to_string(literal, None);
         self.add_import("java.util.Objects");
         Ok(format!(
             "java.util.Objects.equals({}, {})",
@@ -2133,7 +2137,9 @@ impl JavaCodeGenerator {
         let mut rendered = Vec::new();
         for label in labels.iter().cloned() {
             match label {
-                IrCaseLabel::Literal(literal) => rendered.push(Self::literal_to_string(&literal)),
+                IrCaseLabel::Literal(literal) => {
+                    rendered.push(Self::literal_to_string(&literal, None))
+                }
                 IrCaseLabel::TypePattern {
                     type_name,
                     variable: _,
@@ -2184,7 +2190,9 @@ impl JavaCodeGenerator {
         match component {
             IrDeconstructionComponent::Wildcard => Ok("_".to_string()),
             IrDeconstructionComponent::Binding { name } => Ok(format!("var {}", name)),
-            IrDeconstructionComponent::Literal(literal) => Ok(Self::literal_to_string(literal)),
+            IrDeconstructionComponent::Literal(literal) => {
+                Ok(Self::literal_to_string(literal, None))
+            }
             IrDeconstructionComponent::Type { type_name, pattern } => {
                 if let Some(nested) = pattern {
                     let nested_rendered = self.render_deconstruction_pattern(nested)?;
@@ -2300,9 +2308,12 @@ impl JavaCodeGenerator {
     }
 
     /// Convert literal to Java string representation.
-    pub(super) fn literal_to_string(literal: &Literal) -> String {
+    pub(super) fn literal_to_string(
+        literal: &Literal,
+        raw_flavor: Option<RawStringFlavor>,
+    ) -> String {
         match literal {
-            Literal::String(value) => format!("\"{}\"", Self::escape_string(value)),
+            Literal::String(value) => Self::render_string_literal(value, raw_flavor),
             Literal::Number(value) => value.clone(),
             Literal::Boolean(value) => value.to_string(),
             Literal::Null => "null".to_string(),
@@ -2323,6 +2334,63 @@ impl JavaCodeGenerator {
                 Self::escape_string(&regex.pattern)
             ),
         }
+    }
+
+    fn render_string_literal(value: &str, raw_flavor: Option<RawStringFlavor>) -> String {
+        match raw_flavor {
+            Some(RawStringFlavor::MultiLine) if value.contains('\n') && !value.is_empty() => {
+                Self::render_text_block(value)
+            }
+            _ => format!("\"{}\"", Self::escape_string(value)),
+        }
+    }
+
+    fn render_text_block(value: &str) -> String {
+        let mut builder = String::from("\"\"\"\n");
+        let escaped = Self::escape_text_block_content(value);
+        builder.push_str(&escaped);
+        if !value.ends_with('\n') {
+            builder.push('\\');
+            builder.push('\n');
+        }
+        builder.push_str("\"\"\"");
+        builder
+    }
+
+    fn escape_text_block_content(value: &str) -> String {
+        let mut result = String::new();
+        let mut chars = value.chars().peekable();
+        while let Some(ch) = chars.next() {
+            match ch {
+                '\\' => result.push_str("\\\\"),
+                '\n' => result.push('\n'),
+                '\r' => result.push_str("\\r"),
+                '\t' => result.push_str("\\t"),
+                '\u{0008}' => result.push_str("\\b"),
+                '\u{000C}' => result.push_str("\\f"),
+                '"' => {
+                    let mut count = 1;
+                    while matches!(chars.peek(), Some('"')) {
+                        chars.next();
+                        count += 1;
+                    }
+                    if count >= 3 {
+                        for _ in 0..count {
+                            result.push_str("\\\"");
+                        }
+                    } else {
+                        for _ in 0..count {
+                            result.push('"');
+                        }
+                    }
+                }
+                other if other.is_control() => {
+                    let _ = write!(result, "\\u{:04X}", other as u32);
+                }
+                other => result.push(other),
+            }
+        }
+        result
     }
 }
 
