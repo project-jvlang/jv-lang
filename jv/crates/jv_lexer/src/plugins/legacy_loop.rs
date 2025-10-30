@@ -1,6 +1,6 @@
 use crate::{
-    pipeline::{context::LexerContext, pipeline::TokenPlugin, types::ClassifiedToken},
     LegacyLoopKeyword, LexError, TokenDiagnostic, TokenType,
+    pipeline::{context::LexerContext, pipeline::TokenPlugin, types::ClassifiedToken},
 };
 
 #[derive(Default)]

@@ -17,8 +17,9 @@ ImportDeclaration = AnnotationList? ImportKw ImportPath ImportClause?
 ImportPath = QualifiedName
 ImportClause = ImportWildcard
 ImportWildcard = Dot Star
-StatementList = (CommentStatement | AssignmentStatement | ValDeclaration | VarDeclaration | FunctionDeclaration | ClassDeclaration | WhenStatement | ForStatement | ReturnStatement | ThrowStatement | BreakStatement | ContinueStatement | UseStatement | DeferStatement | SpawnStatement)*
-CommentStatement = LineComment | BlockComment
+StatementList = (CommentStatement | LabeledStatement | AssignmentStatement | ValDeclaration | VarDeclaration | FunctionDeclaration | ClassDeclaration | WhenStatement | ForStatement | ReturnStatement | ThrowStatement | BreakStatement | ContinueStatement | UseStatement | DeferStatement | SpawnStatement)*
+CommentStatement = LineComment | BlockComment | HashLabel
+LabeledStatement = HashLabel (Block | WhenStatement | ForStatement | Expression)
 AssignmentStatement = AssignmentTarget Assign Expression
 AssignmentTarget = BindingPattern | Identifier Dot Identifier (Dot Identifier)*
 ValDeclaration = AnnotationList? ModifierList? ValKw BindingPattern TypeAnnotation? InitializerClause?
@@ -50,10 +51,10 @@ Block = LeftBrace StatementList RightBrace
 WhenStatement = WhenKw Expression LeftBrace WhenBranch* RightBrace
 WhenBranch = (Expression | ElseKw) Arrow (Block | Expression)
 ForStatement = ForKw LeftParen BindingPattern InKw Expression RightParen Block
-ReturnStatement = ReturnKw Expression?
+ReturnStatement = ReturnKw HashLabel? Expression?
 ThrowStatement = ThrowKw Expression
-BreakStatement = BreakKw
-ContinueStatement = ContinueKw
+BreakStatement = BreakKw HashLabel?
+ContinueStatement = ContinueKw HashLabel?
 UseStatement = UseKw LeftParen Expression RightParen Block
 DeferStatement = DeferKw Block
 SpawnStatement = SpawnKw Block
@@ -98,6 +99,7 @@ Greater = '>'
 Arrow = '->'
 Identifier = 'IDENTIFIER'
 ExpressionToken = 'EXPRESSION'
+HashLabel = 'HASH_LABEL'
 "#;
 
 #[cfg(test)]

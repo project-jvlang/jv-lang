@@ -82,6 +82,8 @@ pub enum SyntaxKind {
     Block,
     /// ブロック内部のステートメント列。
     StatementList,
+    /// ハッシュラベル付きステートメント。
+    LabeledStatement,
     /// 代入ステートメント。
     AssignmentStatement,
     /// 代入ターゲット。
@@ -669,6 +671,7 @@ mod tests {
         ("ImportClause", SyntaxKind::ImportClause),
         ("ImportWildcard", SyntaxKind::ImportWildcard),
         ("StatementList", SyntaxKind::StatementList),
+        ("LabeledStatement", SyntaxKind::LabeledStatement),
         ("CommentStatement", SyntaxKind::CommentStatement),
         ("AssignmentStatement", SyntaxKind::AssignmentStatement),
         ("AssignmentTarget", SyntaxKind::AssignmentTarget),

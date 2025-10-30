@@ -45,7 +45,7 @@ impl StatementStrategy for ControlStrategy {
     }
 }
 
-fn parse_when(ctx: &mut ParserContext<'_>) -> bool {
+pub(crate) fn parse_when(ctx: &mut ParserContext<'_>) -> bool {
     let start = ctx.position();
     ctx.consume_trivia();
     ctx.start_node(SyntaxKind::WhenStatement);
@@ -144,7 +144,7 @@ fn parse_when_branch_body(ctx: &mut ParserContext<'_>) {
     }
 }
 
-fn parse_for(ctx: &mut ParserContext<'_>) -> bool {
+pub(crate) fn parse_for(ctx: &mut ParserContext<'_>) -> bool {
     let start = ctx.position();
     ctx.consume_trivia();
     ctx.start_node(SyntaxKind::ForStatement);
@@ -171,14 +171,24 @@ fn parse_return(ctx: &mut ParserContext<'_>) -> bool {
     ctx.consume_trivia();
     ctx.start_node(SyntaxKind::ReturnStatement);
     ctx.bump_expected(TokenKind::ReturnKw, "`return` キーワードが必要です");
-    ctx.parse_expression_until(
-        &[
-            TokenKind::Semicolon,
-            TokenKind::Newline,
-            TokenKind::RightBrace,
-        ],
-        true,
-    );
+    ctx.bump_if(TokenKind::HashLabel);
+    match ctx.peek_significant_kind() {
+        Some(TokenKind::Semicolon)
+        | Some(TokenKind::Newline)
+        | Some(TokenKind::RightBrace)
+        | Some(TokenKind::Eof)
+        | None => {}
+        _ => {
+            ctx.parse_expression_until(
+                &[
+                    TokenKind::Semicolon,
+                    TokenKind::Newline,
+                    TokenKind::RightBrace,
+                ],
+                true,
+            );
+        }
+    }
     ctx.finish_node();
     true
 }
@@ -203,6 +213,7 @@ fn parse_break(ctx: &mut ParserContext<'_>) -> bool {
     ctx.consume_trivia();
     ctx.start_node(SyntaxKind::BreakStatement);
     ctx.bump_expected(TokenKind::BreakKw, "`break` キーワードが必要です");
+    ctx.bump_if(TokenKind::HashLabel);
     ctx.finish_node();
     true
 }
@@ -211,6 +222,7 @@ fn parse_continue(ctx: &mut ParserContext<'_>) -> bool {
     ctx.consume_trivia();
     ctx.start_node(SyntaxKind::ContinueStatement);
     ctx.bump_expected(TokenKind::ContinueKw, "`continue` キーワードが必要です");
+    ctx.bump_if(TokenKind::HashLabel);
     ctx.finish_node();
     true
 }

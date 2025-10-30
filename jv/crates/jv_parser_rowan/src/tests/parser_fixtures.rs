@@ -180,6 +180,171 @@ fn recovers_from_invalid_val() {
 }
 
 #[test]
+fn parses_labeled_for_statement_and_break_labels() {
+    let source = r#"
+        #outer for (item in items) {
+            when (item) {
+                else -> break #outer
+            }
+        }
+    "#;
+
+    let tokens = lex(source);
+    let output = parse(&tokens);
+
+    assert!(
+        output.diagnostics.is_empty(),
+        "ハッシュラベル対応で診断が出力されないことを期待しました: {:?}",
+        output.diagnostics
+    );
+
+    let green = ParseBuilder::build_from_events(&output.events, &tokens);
+    let tree: SyntaxNode<JvLanguage> = SyntaxNode::new_root(green);
+    let statement_list = tree
+        .children()
+        .find(|node| node.kind() == SyntaxKind::StatementList)
+        .expect("ステートメント列ノードが存在するはずです");
+    let labeled = statement_list
+        .children()
+        .find(|node| node.kind() == SyntaxKind::LabeledStatement)
+        .expect("ラベル付きfor文が出力されるはずです");
+    let has_label_token = labeled.children_with_tokens().any(|child| {
+        child
+            .as_token()
+            .map(|token| token.kind() == SyntaxKind::HashLabel)
+            .unwrap_or(false)
+    });
+    assert!(
+        has_label_token,
+        "ラベル付きノードにHashLabelトークンが含まれるべきです"
+    );
+    let for_statement = labeled
+        .children()
+        .find(|node| node.kind() == SyntaxKind::ForStatement)
+        .expect("ラベルの直後にfor文が存在するはずです");
+    let break_has_label = for_statement
+        .descendants()
+        .find(|node| node.kind() == SyntaxKind::BreakStatement)
+        .map(|node| {
+            node.children_with_tokens().any(|child| {
+                child
+                    .as_token()
+                    .map(|token| token.kind() == SyntaxKind::HashLabel)
+                    .unwrap_or(false)
+            })
+        })
+        .unwrap_or(false);
+    assert!(
+        break_has_label,
+        "break文にハッシュラベルが付与されていることを期待しました"
+    );
+}
+
+#[test]
+fn parses_nested_labeled_statements() {
+    let source = r#"
+        #outer for (item in items) {
+            #inner {
+                return #outer
+            }
+        }
+    "#;
+
+    let tokens = lex(source);
+    let output = parse(&tokens);
+
+    assert!(
+        output.diagnostics.is_empty(),
+        "ネストしたラベルで診断が発生しないことを期待しました: {:?}",
+        output.diagnostics
+    );
+
+    let green = ParseBuilder::build_from_events(&output.events, &tokens);
+    let tree: SyntaxNode<JvLanguage> = SyntaxNode::new_root(green);
+    let statement_list = tree
+        .children()
+        .find(|node| node.kind() == SyntaxKind::StatementList)
+        .expect("トップレベルにステートメント列が必要です");
+    let labeled_nodes: Vec<_> = statement_list
+        .descendants()
+        .filter(|node| node.kind() == SyntaxKind::LabeledStatement)
+        .collect();
+    assert_eq!(
+        labeled_nodes.len(),
+        2,
+        "外側と内側で2つのラベル付きステートメントが生成されるはずです"
+    );
+    let return_has_label = labeled_nodes
+        .iter()
+        .flat_map(|node| node.descendants())
+        .find(|node| node.kind() == SyntaxKind::ReturnStatement)
+        .map(|node| {
+            node.children_with_tokens().any(|child| {
+                child
+                    .as_token()
+                    .map(|token| token.kind() == SyntaxKind::HashLabel)
+                    .unwrap_or(false)
+            })
+        })
+        .unwrap_or(false);
+    assert!(
+        return_has_label,
+        "return文がハッシュラベルを保持しているべきです"
+    );
+}
+
+#[test]
+fn hash_label_without_target_falls_back_to_comment() {
+    let source = r#"
+        #meta
+        val value = 1
+    "#;
+
+    let tokens = lex(source);
+    let output = parse(&tokens);
+
+    assert!(
+        output.diagnostics.is_empty(),
+        "ラベルフォールバック時に診断が発生しないことを期待しました: {:?}",
+        output.diagnostics
+    );
+
+    let green = ParseBuilder::build_from_events(&output.events, &tokens);
+    let tree: SyntaxNode<JvLanguage> = SyntaxNode::new_root(green);
+    let mut statements = tree
+        .children()
+        .find(|node| node.kind() == SyntaxKind::StatementList)
+        .expect("トップレベルのステートメント列が必要です")
+        .children();
+    let first = statements
+        .next()
+        .expect("少なくとも1つのステートメントが存在するはずです");
+    assert_eq!(
+        first.kind(),
+        SyntaxKind::CommentStatement,
+        "不正な位置のハッシュラベルはコメント扱いになるべきです"
+    );
+    let comment_contains_hash_label = first.children_with_tokens().any(|child| {
+        child
+            .as_token()
+            .map(|token| token.kind() == SyntaxKind::HashLabel)
+            .unwrap_or(false)
+    });
+    assert!(
+        comment_contains_hash_label,
+        "フォールバックコメントにHashLabelトークンが含まれるべきです"
+    );
+    let second = statements
+        .next()
+        .expect("コメントの後にval宣言が続くはずです");
+    assert_eq!(
+        second.kind(),
+        SyntaxKind::ValDeclaration,
+        "フォールバック後も通常の宣言が解析されるべきです"
+    );
+}
+
+#[test]
 fn parses_deeply_nested_constructs() {
     let source = r#"
         package deep.example.core

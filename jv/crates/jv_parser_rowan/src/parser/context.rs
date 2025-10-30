@@ -2,7 +2,10 @@ use jv_lexer::Token;
 
 use crate::syntax::{SyntaxKind, TokenKind};
 
-use super::{strategies, DiagnosticSeverity, ParseEvent, ParseOutput, ParserDiagnostic, TokenSpan};
+use super::{
+    strategies, strategies::control, DiagnosticSeverity, ParseEvent, ParseOutput, ParserDiagnostic,
+    TokenSpan,
+};
 
 /// デフォルトの同期トークン集合。
 const SYNC_TOKENS: &[TokenKind] = &[
@@ -172,6 +175,13 @@ impl<'tokens> ParserContext<'tokens> {
             return true;
         }
 
+        if lookahead == TokenKind::HashLabel {
+            self.consume_trivia();
+            self.parse_hash_label_statement();
+            self.consume_statement_terminators();
+            return true;
+        }
+
         for strategy in strategies::registry() {
             if strategy.matches(self, lookahead) {
                 let before = self.cursor;
@@ -190,6 +200,54 @@ impl<'tokens> ParserContext<'tokens> {
 
         self.unexpected_statement(lookahead);
         true
+    }
+
+    fn parse_hash_label_statement(&mut self) {
+        let next_kind = self.peek_significant_kind_n(1).map(|(_, kind)| kind);
+        let is_labeled_target = matches!(
+            next_kind,
+            Some(TokenKind::ForKw) | Some(TokenKind::WhenKw) | Some(TokenKind::LeftBrace)
+        );
+
+        if !is_labeled_target {
+            self.emit_hash_label_comment();
+            return;
+        }
+
+        self.start_node(SyntaxKind::LabeledStatement);
+        self.bump_raw(); // HashLabel
+        self.consume_trivia();
+
+        match self.peek_significant_kind() {
+            Some(TokenKind::ForKw) => {
+                control::parse_for(self);
+            }
+            Some(TokenKind::WhenKw) => {
+                control::parse_when(self);
+            }
+            Some(TokenKind::LeftBrace) => {
+                if !self.parse_block() {
+                    let start = self.position();
+                    self.report_error(
+                        "ハッシュラベルの直後にブロックを解析できませんでした",
+                        start,
+                        start,
+                    );
+                }
+            }
+            _ => {
+                let start = self.position();
+                self.report_error("ハッシュラベルに対応する構文が見つかりません", start, start);
+            }
+        }
+
+        self.finish_node();
+    }
+
+    fn emit_hash_label_comment(&mut self) {
+        self.start_node(SyntaxKind::CommentStatement);
+        self.bump_raw();
+        self.finish_node();
     }
 
     /// ステートメント終端トークンを読み飛ばす。
@@ -555,7 +613,9 @@ impl<'tokens> ParserContext<'tokens> {
                                         | TokenKind::NullSafe
                                         | TokenKind::DoubleColon
                                         | TokenKind::Arrow
-                                )
+                                        | TokenKind::HashLabel
+                                ) || (kind == TokenKind::LeftBrace
+                                    && matches!(last_significant_kind, Some(TokenKind::HashLabel)))
                             });
                             if !continuation {
                                 should_break_on_sync = true;

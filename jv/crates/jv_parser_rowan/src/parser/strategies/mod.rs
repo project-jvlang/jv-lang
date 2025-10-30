@@ -1,6 +1,6 @@
 mod assignment;
 mod class;
-mod control;
+pub(crate) mod control;
 mod expression;
 mod function;
 mod import;

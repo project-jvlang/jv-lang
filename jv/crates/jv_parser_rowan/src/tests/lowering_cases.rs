@@ -1429,6 +1429,25 @@ fn lowering_table_driven_cases() {
 }
 
 #[test]
+fn lowering_reports_unimplemented_for_labeled_statement() {
+    let source = r#"
+        #outer for (item in items) {
+            break #outer
+        }
+    "#;
+    let result = lower_source(source);
+    assert!(
+        result.diagnostics.is_empty(),
+        "現時点ではラベル付きステートメントはローワリング対象外のため診断は空のはずです: {:?}",
+        result.diagnostics
+    );
+    assert!(
+        result.statements.is_empty(),
+        "未対応のラベル付きステートメントはローワリング結果に含まれるべきではありません"
+    );
+}
+
+#[test]
 fn expression_lowering_respects_operator_precedence() {
     let result = lower_source("val result = 1 + 2 * 3");
     assert!(

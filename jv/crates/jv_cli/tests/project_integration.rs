@@ -6,7 +6,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use jv_cli::pipeline::project::{
     layout::ProjectLayout, locator::ProjectLocator, manifest::ManifestLoader,
 };
-use jv_cli::pipeline::{compile, BuildOptionsFactory, CliOverrides, OutputManager};
+use jv_cli::pipeline::{BuildOptionsFactory, CliOverrides, OutputManager, compile};
 use jv_pm::JavaTarget;
 
 const SAMPLE_MAIN: &str = r#"

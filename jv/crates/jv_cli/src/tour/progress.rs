@@ -813,11 +813,13 @@ mod tests {
             tracker.complete_section(section).expect("complete section");
         }
 
-        assert!(tracker
-            .state
-            .certificates
-            .iter()
-            .any(|cert| cert.title == CERTIFICATE_TITLE));
+        assert!(
+            tracker
+                .state
+                .certificates
+                .iter()
+                .any(|cert| cert.title == CERTIFICATE_TITLE)
+        );
     }
 
     #[test]

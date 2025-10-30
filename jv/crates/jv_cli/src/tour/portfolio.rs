@@ -380,11 +380,10 @@ fn build_execution_example(project: &Project, artifact: &JarArtifact) -> String 
     format!(
         "=== {name} 実行例 ===\n$ {run}\n> ... サンプル出力をここに追加してください (セクションで学んだ内容を示すログ)。\n",
         name = project.name,
-        run = artifact
-            .commands
-            .last()
-            .cloned()
-            .unwrap_or_else(|| format!("java -jar target/jv/{}/dist/{}.jar", project.slug, project.slug))
+        run = artifact.commands.last().cloned().unwrap_or_else(|| format!(
+            "java -jar target/jv/{}/dist/{}.jar",
+            project.slug, project.slug
+        ))
     )
 }
 

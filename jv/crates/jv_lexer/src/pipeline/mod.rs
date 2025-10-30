@@ -6,8 +6,8 @@ pub mod types;
 
 pub use context::LexerContext;
 pub use pipeline::{
-    CharScannerStage, ClassifierStage, EmitterStage, LexerPipeline, NormalizerStage,
-    PipelineStages, TokenPlugin, TokenPluginManager, TokenSink, DEFAULT_LOOKAHEAD_LIMIT,
+    CharScannerStage, ClassifierStage, DEFAULT_LOOKAHEAD_LIMIT, EmitterStage, LexerPipeline,
+    NormalizerStage, PipelineStages, TokenPlugin, TokenPluginManager, TokenSink,
 };
 pub use stages::{CharScanner, Classifier, Emitter, Normalizer};
 pub use types::{

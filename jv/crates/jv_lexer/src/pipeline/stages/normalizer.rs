@@ -3,14 +3,14 @@ use std::char;
 use unicode_normalization::UnicodeNormalization;
 
 use crate::{
+    LayoutCommaMetadata, LayoutSequenceKind, LexError, NumberGroupingKind, NumberLiteralMetadata,
+    StringDelimiterKind, StringInterpolationSegment, StringLiteralMetadata, TokenDiagnostic,
+    TokenMetadata, TokenType,
     pipeline::{
         context::LexerContext,
         pipeline::NormalizerStage,
         types::{NormalizedToken, PreMetadata, RawToken, RawTokenKind, Span},
     },
-    LayoutCommaMetadata, LayoutSequenceKind, LexError, NumberGroupingKind, NumberLiteralMetadata,
-    StringDelimiterKind, StringInterpolationSegment, StringLiteralMetadata, TokenDiagnostic,
-    TokenMetadata, TokenType,
 };
 
 use super::json_utils::{detect_array_confidence, detect_object_confidence};
@@ -753,11 +753,13 @@ mod tests {
             .expect("string normalization");
 
         assert_eq!(normalized.normalized_text, "Café");
-        assert!(normalized
-            .metadata
-            .provisional_metadata
-            .iter()
-            .any(|meta| matches!(meta, TokenMetadata::StringLiteral(_))));
+        assert!(
+            normalized
+                .metadata
+                .provisional_metadata
+                .iter()
+                .any(|meta| matches!(meta, TokenMetadata::StringLiteral(_)))
+        );
         assert!(normalized.metadata.provisional_diagnostics.is_empty());
 
         let string_meta = normalized
@@ -813,15 +815,17 @@ mod tests {
             .expect("number normalization");
 
         assert_eq!(normalized.normalized_text, "1234567");
-        assert!(normalized
-            .metadata
-            .provisional_metadata
-            .iter()
-            .any(|meta| matches!(
-                meta,
-                TokenMetadata::NumberLiteral(info)
-                if matches!(info.grouping, NumberGroupingKind::Mixed)
-            )));
+        assert!(
+            normalized
+                .metadata
+                .provisional_metadata
+                .iter()
+                .any(|meta| matches!(
+                    meta,
+                    TokenMetadata::NumberLiteral(info)
+                    if matches!(info.grouping, NumberGroupingKind::Mixed)
+                ))
+        );
     }
 
     #[test]
@@ -849,12 +853,14 @@ mod tests {
                 .unwrap_or_else(|_| panic!("number normalization failed for {}", lexeme));
 
             assert_eq!(normalized.normalized_text, expected);
-            assert!(normalized
-                .metadata
-                .provisional_metadata
-                .iter()
-                .any(|meta| matches!(meta, TokenMetadata::NumberLiteral(info)
-                    if info.original_lexeme == lexeme && info.suffix == suffix)));
+            assert!(
+                normalized
+                    .metadata
+                    .provisional_metadata
+                    .iter()
+                    .any(|meta| matches!(meta, TokenMetadata::NumberLiteral(info)
+                    if info.original_lexeme == lexeme && info.suffix == suffix))
+            );
         }
     }
 
@@ -1089,11 +1095,13 @@ mod tests {
             .normalize(raw, &mut ctx)
             .expect("comment normalization");
 
-        assert!(normalized
-            .metadata
-            .provisional_metadata
-            .iter()
-            .all(|meta| !matches!(meta, TokenMetadata::CommentCarryOver(_))));
+        assert!(
+            normalized
+                .metadata
+                .provisional_metadata
+                .iter()
+                .all(|meta| !matches!(meta, TokenMetadata::CommentCarryOver(_)))
+        );
         assert_eq!(normalized.raw.carry_over, Some(carry));
     }
 }

@@ -1,14 +1,14 @@
 use std::collections::{HashMap, VecDeque};
 
 use jv_ast::{
+    BinaryOp, Expression, Program, Statement, TryCatchClause, WhenArm,
     expression::Argument,
     types::{Literal, Modifiers, Span},
-    BinaryOp, Expression, Program, Statement, TryCatchClause, WhenArm,
 };
 
-use super::{patterns, NullSafetyContext, NullabilityKind, NullabilityLattice};
-use crate::pattern::{self, ArmId, NarrowedBinding, NarrowedNullability, NarrowingSnapshot};
+use super::{NullSafetyContext, NullabilityKind, NullabilityLattice, patterns};
 use crate::CheckError;
+use crate::pattern::{self, ArmId, NarrowedBinding, NarrowedNullability, NarrowingSnapshot};
 
 use crate::null_safety::graph::{
     BranchAssumption, FlowConstraint, FlowEdgeKind, FlowGraph, FlowNodeId, FlowNodeKind,
@@ -1015,10 +1015,10 @@ impl FlowStateSnapshot {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::null_safety::graph::BranchAssumption;
     use crate::null_safety::JavaLoweringStrategy;
+    use crate::null_safety::graph::BranchAssumption;
     use jv_ast::ValBindingOrigin;
-    use jv_ast::{types::Span, Expression, Pattern, Program, Statement, TryCatchClause, WhenArm};
+    use jv_ast::{Expression, Pattern, Program, Statement, TryCatchClause, WhenArm, types::Span};
 
     #[test]
     fn build_graph_with_linear_statements() {

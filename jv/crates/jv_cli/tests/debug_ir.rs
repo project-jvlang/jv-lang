@@ -104,27 +104,41 @@ fn debug_ir_prints_summary_footer() {
     let stderr = String::from_utf8(output.stderr).expect("stderr must be UTF-8");
     let summary_lines: Vec<_> = stderr.lines().collect();
 
-    assert!(summary_lines
-        .iter()
-        .any(|line| line.trim() == "=== 再構築サマリー ==="));
-    assert!(summary_lines
-        .iter()
-        .any(|line| line.contains("合計ノード数: ")));
-    assert!(summary_lines
-        .iter()
-        .any(|line| line.contains("復元ノード数: ")));
-    assert!(summary_lines
-        .iter()
-        .any(|line| line.contains("プレースホルダー数: 0")));
-    assert!(summary_lines
-        .iter()
-        .any(|line| line.starts_with("警告件数: 0")));
-    assert!(summary_lines
-        .iter()
-        .any(|line| line.trim_start().starts_with("警告内訳")));
-    assert!(summary_lines
-        .iter()
-        .any(|line| line.starts_with("経過時間: ")));
+    assert!(
+        summary_lines
+            .iter()
+            .any(|line| line.trim() == "=== 再構築サマリー ===")
+    );
+    assert!(
+        summary_lines
+            .iter()
+            .any(|line| line.contains("合計ノード数: "))
+    );
+    assert!(
+        summary_lines
+            .iter()
+            .any(|line| line.contains("復元ノード数: "))
+    );
+    assert!(
+        summary_lines
+            .iter()
+            .any(|line| line.contains("プレースホルダー数: 0"))
+    );
+    assert!(
+        summary_lines
+            .iter()
+            .any(|line| line.starts_with("警告件数: 0"))
+    );
+    assert!(
+        summary_lines
+            .iter()
+            .any(|line| line.trim_start().starts_with("警告内訳"))
+    );
+    assert!(
+        summary_lines
+            .iter()
+            .any(|line| line.starts_with("経過時間: "))
+    );
 
     // Also ensure stdout remains valid JSON even when stats footer is enabled.
     let stdout = String::from_utf8(output.stdout).expect("stdout must be UTF-8");

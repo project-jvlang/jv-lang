@@ -173,7 +173,7 @@ pub fn desugar_extension_function(
             return Err(TransformError::ExtensionFunctionError {
                 message: "Extension function must wrap a function declaration".to_string(),
                 span,
-            })
+            });
         }
     };
 

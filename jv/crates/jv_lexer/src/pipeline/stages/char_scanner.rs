@@ -1,14 +1,14 @@
 use std::collections::VecDeque;
 
 use crate::{
+    CommentCarryOverMetadata, JsonCommentTrivia, JsonCommentTriviaKind, LexError,
+    SourceCommentKind, SourceCommentTrivia, TokenTrivia, TokenType,
     pipeline::{
         context::LexerContext,
         pipeline::CharScannerStage,
         pipeline::DEFAULT_LOOKAHEAD_LIMIT,
         types::{RawToken, RawTokenKind, ScannerPosition, Span},
     },
-    CommentCarryOverMetadata, JsonCommentTrivia, JsonCommentTriviaKind, LexError,
-    SourceCommentKind, SourceCommentTrivia, TokenTrivia, TokenType,
 };
 use unicode_ident::{is_xid_continue, is_xid_start};
 
@@ -586,10 +586,7 @@ impl CharScanner {
     }
 
     /// `#` に続く識別子をラベルとして読み取り、`#` を含むスライスを返す。
-    fn read_hash_label<'source>(
-        &mut self,
-        source: &'source str,
-    ) -> Result<&'source str, LexError> {
+    fn read_hash_label<'source>(&mut self, source: &'source str) -> Result<&'source str, LexError> {
         let start = self.cursor;
         self.advance_char('#', source)?;
 

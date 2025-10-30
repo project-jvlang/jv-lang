@@ -10,8 +10,8 @@ use jv_ast::{
     ParameterModifiers, Pattern, Program, RegexLiteral, Span, Statement, TypeAnnotation,
     ValBindingOrigin, WhenArm,
 };
-use jv_inference::types::{NullabilityFlag, TypeVariant as FactsTypeVariant};
 use jv_inference::TypeFacts;
+use jv_inference::types::{NullabilityFlag, TypeVariant as FactsTypeVariant};
 use jv_parser_frontend::ParserPipeline;
 use jv_parser_rowan::frontend::RowanPipeline;
 use std::collections::HashMap;
