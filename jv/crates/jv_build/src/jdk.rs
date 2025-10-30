@@ -367,7 +367,10 @@ Java(TM) SE Runtime Environment"#;
 
         fn set_os(key: &'static str, value: &std::ffi::OsStr) -> Self {
             let original = env::var_os(key);
-            env::set_var(key, value);
+            // SAFETY: テストでのみ環境変数を書き換える必要があり、要求に従い unsafe ブロックで包む。
+            unsafe {
+                env::set_var(key, value);
+            }
             Self { key, original }
         }
     }
@@ -375,9 +378,15 @@ Java(TM) SE Runtime Environment"#;
     impl Drop for EnvVarGuard {
         fn drop(&mut self) {
             if let Some(value) = self.original.take() {
-                env::set_var(self.key, value);
+                // SAFETY: テスト用に退避した値へ戻すだけの操作であり、Rust の API 仕様に従って unsafe を明示する。
+                unsafe {
+                    env::set_var(self.key, value);
+                }
             } else {
-                env::remove_var(self.key);
+                // SAFETY: テスト後に環境変数を除去するために必要な操作。
+                unsafe {
+                    env::remove_var(self.key);
+                }
             }
         }
     }

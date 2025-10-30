@@ -479,6 +479,15 @@ impl StdlibUsage {
             if token.is_empty() {
                 continue;
             }
+            // ドット区切りの終端識別子（`Stream` など）も拾うため、個々のセグメントを先に解決する。
+            for segment in token.split('.') {
+                if segment.is_empty() {
+                    continue;
+                }
+                for package in catalog.packages_for_reference(segment) {
+                    self.packages.insert(package);
+                }
+            }
             let mut current = token;
             loop {
                 for package in catalog.packages_for_reference(current) {

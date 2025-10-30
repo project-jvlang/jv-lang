@@ -136,7 +136,11 @@ fn ensure_toolchain_envs() {
         ] {
             if env::var_os(var).is_none() {
                 if let Some(path) = dir {
-                    env::set_var(var, path);
+                    // SAFETY: テストのみでプロセス全体の環境変数を書き換える必然性があり、
+                    // Rust による unsafe 要求に従って明示ブロックで包む。
+                    unsafe {
+                        env::set_var(var, path);
+                    }
                 }
             }
         }

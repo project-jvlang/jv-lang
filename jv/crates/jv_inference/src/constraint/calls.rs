@@ -277,6 +277,7 @@ mod tests {
                 span: lambda_span.clone(),
             }],
             body: Box::new(Expression::Identifier("x".into(), lambda_span.clone())),
+            label: None,
             span: lambda_span.clone(),
         };
         let lambda_type = TypeKind::function(

@@ -3,7 +3,10 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use jv_cli::pipeline::compute_script_main_class;
-use jv_ir::transform::{SampleFetchError, SampleFetchRequest, SampleSourceKind, fetch_sample_data};
+use jv_ir::transform::{
+    fetch_sample_data, SampleFetchError, SampleFetchRequest, SampleSourceKind,
+};
+use jv_lexer::{Lexer, TokenType};
 use sha2::{Digest, Sha256};
 use tempfile::tempdir;
 
@@ -573,5 +576,92 @@ fn sample_network_sources_require_explicit_allow() {
             || combined.contains("Network access for @Sample protocol"),
         "expected network denial message, got: {}",
         combined
+    );
+}
+
+#[test]
+fn sample_fetch_pipeline_accepts_json_comments() {
+    let sample = "sample_users_comment.json";
+    let fixtures = fixtures_dir();
+    let expected_bytes = fs::read(fixture_path(sample)).expect("コメント付きサンプルを読み取れませんでした");
+
+    let mut request = SampleFetchRequest::new(sample);
+    request.base_dir = Some(fixtures);
+
+    let result = fetch_sample_data(&request).expect("コメント付きサンプルの取得に失敗しました");
+
+    assert_eq!(
+        result.source_kind,
+        SampleSourceKind::LocalFile,
+        "コメント付きサンプルはローカルファイルとして扱われるべきです"
+    );
+    assert_eq!(
+        result.bytes, expected_bytes,
+        "コメント付きサンプルの読み出し結果が元データと一致しません"
+    );
+    let body = String::from_utf8(result.bytes).expect("コメント付きサンプルをUTF-8として読めませんでした");
+    assert!(
+        body.contains("// 利用者一覧") && body.contains("/*") && body.contains("*/"),
+        "コメント情報が読み出し結果に保持されていません: {body}"
+    );
+}
+
+#[test]
+fn hash_label_control_flow_smoke_executes() {
+    let source = r#"
+fun main(): Unit {
+    val numbers = [1 2 3 4]
+    var trace = ""
+
+    #outer for (value in numbers) {
+        when (value) {
+            2 -> {
+                trace = trace + "skip-"
+                continue #outer
+            }
+            4 -> {
+                trace = trace + "break"
+                break #outer
+            }
+            else -> {
+                trace = trace + "loop${value}-"
+            }
+        }
+    }
+
+    var firstLarge = -1
+    numbers.forEach #scan { value ->
+        when {
+            value > 2 -> {
+                firstLarge = value
+                return #scan
+            }
+            else -> {}
+        }
+    }
+
+    println(trace)
+    println("first-large=${firstLarge}")
+}
+"#;
+    let mut lexer = Lexer::new(source.to_string());
+    let tokens = lexer
+        .tokenize()
+        .expect("ラベル付きソースのトークナイズに失敗しました");
+
+    let mut labels = Vec::new();
+    for token in tokens {
+        if let TokenType::HashLabel(label) = token.token_type {
+            labels.push(label);
+        }
+    }
+
+    assert!(
+        labels.iter().any(|label| label == "outer"),
+        "ループラベル outer がトークンとして検出されませんでした"
+    );
+    assert!(
+        labels.iter().any(|label| label == "scan"),
+        "ラムダラベル scan がトークンとして検出されませんでした"
     );
 }
