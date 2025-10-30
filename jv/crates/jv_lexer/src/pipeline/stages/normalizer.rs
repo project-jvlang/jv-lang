@@ -667,6 +667,10 @@ impl NormalizerStage for Normalizer {
             RawTokenKind::Eof => {
                 Ok(self.finalize_token(token, PreMetadata::default(), String::new()))
             }
+            RawTokenKind::HashLabelCandidate => {
+                let normalized_text = token.text.trim_start_matches('#').to_string();
+                Ok(self.finalize_token(token, PreMetadata::default(), normalized_text))
+            }
             RawTokenKind::Identifier => {
                 let normalized_text = token.text.to_string();
                 Ok(self.finalize_token(token, PreMetadata::default(), normalized_text))

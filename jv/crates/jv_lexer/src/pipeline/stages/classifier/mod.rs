@@ -156,6 +156,9 @@ impl ClassifierStage for Classifier {
         let resolved_type = match token_type {
             Some(ty) => ty,
             None => match token.raw.kind {
+                RawTokenKind::HashLabelCandidate => {
+                    TokenType::HashLabel(token.normalized_text.clone())
+                }
                 RawTokenKind::Identifier => TokenType::Identifier(token.normalized_text.clone()),
                 RawTokenKind::NumberCandidate => TokenType::Number(token.normalized_text.clone()),
                 RawTokenKind::Symbol => TokenType::Invalid(token.normalized_text.clone()),

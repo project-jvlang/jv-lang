@@ -305,6 +305,44 @@ fn test_comments_red_phase() {
     assert!(has_line_comment);
     assert!(has_block_comment);
 }
+
+#[test]
+fn hash_label_tokens_are_emitted_and_comments_preserved() {
+    let source = "#outer for\n# comment\nval x = 1 # trailing\ncall #lambda { }";
+    let mut lexer = Lexer::new(source.to_string());
+    let tokens = lexer.tokenize().expect("tokenize hash label sample");
+
+    let mut labels = tokens.iter().filter_map(|token| match &token.token_type {
+        TokenType::HashLabel(name) => Some(name.clone()),
+        _ => None,
+    });
+
+    let first_label = labels.next().expect("expected first hash label");
+    assert_eq!(first_label, "outer");
+    let second_label = labels.next().expect("expected second hash label");
+    assert_eq!(second_label, "lambda");
+    assert!(labels.next().is_none(), "unexpected extra hash label tokens");
+
+    assert!(
+        tokens
+            .iter()
+            .any(|token| matches!(token.token_type, TokenType::LineComment(ref text) if text == "# comment")),
+        "line-leading hashコメントがLineCommentとして残るべきです",
+    );
+    assert!(
+        tokens
+            .iter()
+            .any(|token| matches!(token.token_type, TokenType::LineComment(ref text) if text == "# trailing")),
+        "行途中のハッシュコメントもLineCommentとして扱うべきです",
+    );
+
+    assert!(
+        tokens
+            .iter()
+            .all(|token| !matches!(token.token_type, TokenType::LineComment(ref text) if text.starts_with("#outer"))),
+        "ラベルはコメントとして出力されない想定です",
+    );
+}
 #[test]
 fn test_comment_trivia_passthrough_and_jv_only() {
     let source = "// keep

@@ -176,6 +176,8 @@ pub enum SyntaxKind {
     CharacterLiteral,
     /// 識別子。
     Identifier,
+    /// `#` 接頭辞付きラベル。
+    HashLabel,
     /// コロン。
     Colon,
     /// セミコロン。
@@ -361,6 +363,8 @@ pub enum TokenKind {
     CharacterLiteral,
     /// 識別子。
     Identifier,
+    /// `#` 接頭辞付きラベル。
+    HashLabel,
     /// コロン。
     Colon,
     /// セミコロン。
@@ -487,6 +491,7 @@ impl TokenKind {
             TokenKind::RegexLiteral => SyntaxKind::RegexLiteral,
             TokenKind::CharacterLiteral => SyntaxKind::CharacterLiteral,
             TokenKind::Identifier => SyntaxKind::Identifier,
+            TokenKind::HashLabel => SyntaxKind::HashLabel,
             TokenKind::Colon => SyntaxKind::Colon,
             TokenKind::Semicolon => SyntaxKind::Semicolon,
             TokenKind::Assign => SyntaxKind::Assign,
@@ -577,6 +582,7 @@ impl TokenKind {
             TokenType::String(_) | TokenType::StringInterpolation(_) => TokenKind::StringLiteral,
             TokenType::RegexLiteral(_) => TokenKind::RegexLiteral,
             TokenType::Character(_) => TokenKind::CharacterLiteral,
+            TokenType::HashLabel(_) => TokenKind::HashLabel,
             TokenType::Identifier(_) => TokenKind::Identifier,
             TokenType::Colon => TokenKind::Colon,
             TokenType::Semicolon => TokenKind::Semicolon,
@@ -742,6 +748,7 @@ mod tests {
         ("Greater", SyntaxKind::Greater),
         ("Arrow", SyntaxKind::Arrow),
         ("Identifier", SyntaxKind::Identifier),
+        ("HashLabel", SyntaxKind::HashLabel),
         ("ExpressionToken", SyntaxKind::Expression),
     ];
 

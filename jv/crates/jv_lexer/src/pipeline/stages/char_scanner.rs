@@ -585,6 +585,61 @@ impl CharScanner {
         Ok(self.take_slice(source, start, self.cursor))
     }
 
+    /// `#` に続く識別子をラベルとして読み取り、`#` を含むスライスを返す。
+    fn read_hash_label<'source>(
+        &mut self,
+        source: &'source str,
+    ) -> Result<&'source str, LexError> {
+        let start = self.cursor;
+        self.advance_char('#', source)?;
+
+        if let Some(ch) = self.peek_char_from(source) {
+            self.advance_char(ch, source)?;
+        }
+
+        while let Some(ch) = self.peek_char_from(source) {
+            if Self::is_identifier_continue(ch) {
+                self.advance_char(ch, source)?;
+            } else {
+                break;
+            }
+        }
+
+        Ok(self.take_slice(source, start, self.cursor))
+    }
+
+    /// `#` 接頭辞がラベルとして扱えるかを判定する。
+    /// `#` の直後が空白または識別子以外の場合はコメント扱いとする。
+    /// 識別子が続き、その直後が空白・改行・`{` のいずれか（またはソース終端）であればラベルとみなす。
+    fn is_hash_label_start(remaining: &str) -> bool {
+        let mut iter = remaining.char_indices();
+        let Some((_, '#')) = iter.next() else {
+            return false;
+        };
+
+        let Some((offset, first_char)) = iter.next() else {
+            return false;
+        };
+
+        if first_char.is_whitespace() || !Self::is_identifier_start(first_char) {
+            return false;
+        }
+
+        let mut identifier_end = offset + first_char.len_utf8();
+
+        for (idx, ch) in iter {
+            if Self::is_identifier_continue(ch) {
+                identifier_end = idx + ch.len_utf8();
+                continue;
+            }
+
+            return ch.is_whitespace() || ch == '{';
+        }
+
+        // ソース終端まで識別子が続いた場合はラベル扱いにする
+        identifier_end > 0
+    }
+
     fn is_jv_block_comment(rest: &str) -> bool {
         rest.contains("*//")
     }
@@ -764,6 +819,7 @@ impl CharScanner {
         matches!(
             token,
             TokenType::Identifier(_)
+                | TokenType::HashLabel(_)
                 | TokenType::Number(_)
                 | TokenType::Character(_)
                 | TokenType::String(_)
@@ -1155,7 +1211,7 @@ impl CharScannerStage for CharScanner {
             });
         }
 
-        if remaining.starts_with('#') {
+        if remaining.starts_with('#') && !Self::is_hash_label_start(remaining) {
             let slice = self.read_hash_comment(source)?;
             let trivia_piece =
                 self.build_hash_comment_trivia(slice, start_position.line, start_position.column);
@@ -1177,7 +1233,10 @@ impl CharScannerStage for CharScanner {
         let current_char = self.peek_char_from(source).unwrap_or('\0');
 
         let mut kind_override = None;
-        let slice = if Self::is_identifier_start(current_char) {
+        let slice = if current_char == '#' {
+            kind_override = Some(RawTokenKind::HashLabelCandidate);
+            self.read_hash_label(source)?
+        } else if Self::is_identifier_start(current_char) {
             self.read_identifier(source)?
         } else if current_char.is_ascii_digit() {
             self.read_number(source)?
@@ -1356,6 +1415,45 @@ mod tests {
         assert_eq!(identifier.kind, RawTokenKind::Identifier);
         assert_eq!(identifier.text, "val");
         assert!(identifier.trivia.is_some());
+    }
+
+    #[test]
+    fn scan_hash_label_candidate_and_hash_comment() {
+        let mut scanner = CharScanner::new();
+        let source = "#outer for\nval x = 1 # trailing\n# comment\ncall #lambda { }";
+        let mut ctx = LexerContext::new(source);
+
+        let hash_label = scanner.scan_next_token(&mut ctx).expect("hash label");
+        assert_eq!(hash_label.kind, RawTokenKind::HashLabelCandidate);
+        assert_eq!(hash_label.text, "#outer");
+
+        let for_kw = scanner.scan_next_token(&mut ctx).expect("for token");
+        assert_eq!(for_kw.kind, RawTokenKind::Identifier);
+        assert_eq!(for_kw.text, "for");
+
+        // consume identifiers/assignments until inline hash commentが現れる
+        loop {
+            let token = scanner.scan_next_token(&mut ctx).expect("token");
+            if token.kind == RawTokenKind::CommentCandidate {
+                assert_eq!(token.text, "# trailing");
+                break;
+            }
+        }
+
+        let line_comment = scanner
+            .scan_next_token(&mut ctx)
+            .expect("line comment token");
+        assert_eq!(line_comment.kind, RawTokenKind::CommentCandidate);
+        assert_eq!(line_comment.text, "# comment");
+
+        // 次の呼び出し用ラベルがHashLabelCandidateになることを確認
+        let call_ident = scanner.scan_next_token(&mut ctx).expect("call ident");
+        assert_eq!(call_ident.kind, RawTokenKind::Identifier);
+        assert_eq!(call_ident.text, "call");
+
+        let lambda_label = scanner.scan_next_token(&mut ctx).expect("lambda label");
+        assert_eq!(lambda_label.kind, RawTokenKind::HashLabelCandidate);
+        assert_eq!(lambda_label.text, "#lambda");
     }
 
     #[test]

@@ -61,6 +61,7 @@ impl Span {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RawTokenKind {
     Identifier,
+    HashLabelCandidate,
     NumberCandidate,
     Symbol,
     RegexCandidate,

@@ -16,6 +16,7 @@ pub enum TokenType {
     Number(String),              // Store as string to avoid f64 Eq issues, parse later
     Character(char),
     Identifier(String),
+    HashLabel(String),
     Boolean(bool),
     RegexLiteral(String),
 
