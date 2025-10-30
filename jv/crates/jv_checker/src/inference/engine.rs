@@ -4,15 +4,16 @@
 //! `TypeScheme` として公開する。タスク5では特に関数パラメータ・デフォルト値・
 //! return 経路を制約に反映し、解決結果から曖昧なシグネチャを検出する。
 
+use crate::InferenceTelemetry;
 use crate::imports::ResolvedImport;
 use crate::inference::constraint::ConstraintGenerator;
+use crate::inference::context_adaptation::{self, ContextAdaptation};
 use crate::inference::conversions::ConversionHelperCatalog;
 use crate::inference::environment::{TypeEnvironment, TypeScheme};
 use crate::inference::imports::ImportRegistry;
 use crate::inference::prelude;
 use crate::inference::types::{TypeBinding, TypeId, TypeKind};
 use crate::inference::unify::{ConstraintSolver, SolveError, SolveResult};
-use crate::InferenceTelemetry;
 use jv_ast::{Program, Statement};
 use jv_build::metadata::{ConversionCatalogCache, SymbolIndex};
 use jv_inference::ParallelInferenceConfig;
@@ -49,6 +50,7 @@ pub struct InferenceEngine {
     java_target: JavaTarget,
     conversion_cache: ConversionCatalogCache,
     active_conversion_catalog: Option<Arc<ConversionHelperCatalog>>,
+    context_adaptations: Vec<ContextAdaptation>,
 }
 
 impl Default for InferenceEngine {
@@ -65,6 +67,7 @@ impl Default for InferenceEngine {
             java_target: JavaTarget::default(),
             conversion_cache: ConversionCatalogCache::new(),
             active_conversion_catalog: None,
+            context_adaptations: Vec::new(),
         }
     }
 }
@@ -212,6 +215,7 @@ impl InferenceEngine {
         telemetry.conversion_catalog_hits = catalog_hits;
         telemetry.conversion_catalog_misses = catalog_misses;
         telemetry.record_conversions(&conversions);
+        self.context_adaptations = context_adaptation::collect_context_adaptations(&conversions);
         self.telemetry = telemetry;
         if let Some(name) = ambiguous_functions.into_iter().next() {
             Err(InferenceError::AmbiguousFunction { name })
@@ -238,6 +242,11 @@ impl InferenceEngine {
     /// 推論済み関数シグネチャを取得する。
     pub fn function_scheme(&self, name: &str) -> Option<&TypeScheme> {
         self.function_schemes.get(name)
+    }
+
+    /// Returns planned context adaptations inferred during solving.
+    pub fn context_adaptations(&self) -> &[ContextAdaptation] {
+        &self.context_adaptations
     }
 
     /// 推論済み関数シグネチャの一覧を返す。

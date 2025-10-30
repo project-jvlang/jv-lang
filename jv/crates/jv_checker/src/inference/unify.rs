@@ -12,6 +12,7 @@ use crate::inference::conversions::{
 use crate::inference::types::{
     TypeBinding, TypeError, TypeId, TypeKind, TypeVariable, TypeVariableKind,
 };
+use jv_ast::Span;
 use jv_inference::ParallelInferenceConfig;
 use std::collections::HashMap;
 use std::fmt;
@@ -172,10 +173,22 @@ impl ConstraintSolver {
                 self.unify(TypeKind::Variable(*id), ty.clone(), constraint.note.clone())?;
             }
             ConstraintKind::Convertible { from, to } => {
-                self.handle_convertible(from.clone(), to.clone(), false, constraint.note.clone())?;
+                self.handle_convertible(
+                    from.clone(),
+                    to.clone(),
+                    false,
+                    constraint.note.clone(),
+                    constraint.span(),
+                )?;
             }
             ConstraintKind::ConvertibleWithWarning { from, to } => {
-                self.handle_convertible(from.clone(), to.clone(), true, constraint.note.clone())?;
+                self.handle_convertible(
+                    from.clone(),
+                    to.clone(),
+                    true,
+                    constraint.note.clone(),
+                    constraint.span(),
+                )?;
             }
             ConstraintKind::Placeholder(placeholder) => {
                 return Err(SolveError::Placeholder {
@@ -196,6 +209,7 @@ impl ConstraintSolver {
         to: TypeKind,
         warned: bool,
         note: Option<String>,
+        span: Option<&Span>,
     ) -> Result<(), SolveError> {
         let from = self.prune(from);
         let to = self.prune(to);
@@ -209,7 +223,7 @@ impl ConstraintSolver {
                 self.unify(from, to, note)?;
             }
             ConversionOutcome::Allowed(metadata) => {
-                self.register_conversion(from.clone(), to.clone(), metadata, warned);
+                self.register_conversion(from.clone(), to.clone(), metadata, warned, span);
                 self.bind_for_conversion(&from, &to, note)?;
             }
             ConversionOutcome::Rejected(error) => {
@@ -225,20 +239,18 @@ impl ConstraintSolver {
         to: TypeKind,
         metadata: ConversionMetadata,
         warned: bool,
+        span: Option<&Span>,
     ) {
         let ConversionMetadata {
             kind,
             helper,
             nullable_guard,
         } = metadata;
-        self.conversions.push(AppliedConversion::new(
-            from,
-            to,
-            kind,
-            helper,
-            nullable_guard,
-            warned,
-        ));
+        let mut event = AppliedConversion::new(from, to, kind, helper, nullable_guard, warned);
+        if let Some(span) = span {
+            event = event.with_source_span(span.clone());
+        }
+        self.conversions.push(event);
     }
 
     fn bind_for_conversion(

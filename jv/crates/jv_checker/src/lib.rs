@@ -11,15 +11,15 @@ pub mod regex;
 pub mod telemetry;
 
 pub use inference::{
-    InferenceEngine, InferenceError, InferenceResult, NullabilityAnalyzer, PrimitiveType,
-    TypeBinding, TypeEnvironment, TypeId, TypeKind, TypeScheme,
+    CharToStringAdaptation, ContextAdaptation, InferenceEngine, InferenceError, InferenceResult,
+    NullabilityAnalyzer, PrimitiveType, TypeBinding, TypeEnvironment, TypeId, TypeKind, TypeScheme,
 };
 pub use java::{JavaBoxingTable, JavaNullabilityPolicy, JavaPrimitive};
 pub use jv_inference::ParallelInferenceConfig;
 pub use regex::RegexAnalysis;
 
 use crate::imports::ResolvedImport;
-use binding::{resolve_bindings, BindingResolution, BindingUsageSummary, LateInitManifest};
+use binding::{BindingResolution, BindingUsageSummary, LateInitManifest, resolve_bindings};
 use inference::conversions::{AppliedConversion, ConversionKind, HelperSpec, NullableGuard};
 use jv_ast::{Program, Span};
 use jv_build::metadata::SymbolIndex;
@@ -66,6 +66,7 @@ pub struct InferenceSnapshot {
     pattern_facts: HashMap<(u64, PatternTarget), PatternMatchFacts>,
     regex_analyses: Vec<RegexAnalysis>,
     late_init_manifest: LateInitManifest,
+    context_adaptations: Vec<ContextAdaptation>,
 }
 
 impl InferenceSnapshot {
@@ -96,6 +97,7 @@ impl InferenceSnapshot {
             pattern_facts,
             regex_analyses,
             late_init_manifest,
+            context_adaptations: engine.context_adaptations().to_vec(),
         }
     }
 
@@ -121,6 +123,10 @@ impl InferenceSnapshot {
 
     pub fn late_init_manifest(&self) -> &LateInitManifest {
         &self.late_init_manifest
+    }
+
+    pub fn context_adaptations(&self) -> &[ContextAdaptation] {
+        &self.context_adaptations
     }
 }
 

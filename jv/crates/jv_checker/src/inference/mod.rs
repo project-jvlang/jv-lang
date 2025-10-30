@@ -5,6 +5,7 @@
 
 pub mod compatibility;
 pub mod constraint;
+pub mod context_adaptation;
 pub mod conversions;
 pub mod diagnostics;
 pub mod engine;
@@ -22,6 +23,7 @@ pub mod utils;
 pub use crate::java::{JavaBoxingTable, JavaNullabilityPolicy, JavaPrimitive};
 pub use compatibility::CompatibilityChecker;
 pub use constraint::{Constraint, ConstraintGenerator, ConstraintKind, ConstraintSet};
+pub use context_adaptation::{CharToStringAdaptation, ContextAdaptation};
 pub use conversions::{
     AppliedConversion, ConversionKind, ConversionMetadata, ConversionOutcome,
     ConversionRulesEngine, HelperSpec, NullableGuard, NullableGuardReason,

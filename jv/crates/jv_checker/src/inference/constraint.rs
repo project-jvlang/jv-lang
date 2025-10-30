@@ -6,6 +6,7 @@
 pub mod generator;
 
 use crate::inference::types::{TypeError, TypeId, TypeKind};
+use jv_ast::Span;
 use std::collections::VecDeque;
 
 /// 制約の種類を表す列挙体。
@@ -30,18 +31,34 @@ pub enum ConstraintKind {
 pub struct Constraint {
     pub kind: ConstraintKind,
     pub note: Option<String>,
+    pub span: Option<Span>,
 }
 
 impl Constraint {
     /// 制約を生成するユーティリティコンストラクタ。
     pub fn new(kind: ConstraintKind) -> Self {
-        Self { kind, note: None }
+        Self {
+            kind,
+            note: None,
+            span: None,
+        }
     }
 
     /// 補足情報を追加するチェイン可能なメソッド。
     pub fn with_note(mut self, note: impl Into<String>) -> Self {
         self.note = Some(note.into());
         self
+    }
+
+    /// スパン情報を追加するチェイン可能なメソッド。
+    pub fn with_span(mut self, span: Option<&Span>) -> Self {
+        self.span = span.cloned();
+        self
+    }
+
+    /// 制約に付随するスパンを取得する。
+    pub fn span(&self) -> Option<&Span> {
+        self.span.as_ref()
     }
 }
 

@@ -5,6 +5,7 @@
 
 use crate::inference::compatibility::CompatibilityChecker;
 use crate::inference::constraint::{Constraint, ConstraintKind, ConstraintSet};
+use crate::inference::context_adaptation;
 use crate::inference::conversions::ConversionOutcome;
 use crate::inference::environment::{TypeEnvironment, TypeScheme};
 use crate::inference::extensions::ExtensionRegistry;
@@ -16,6 +17,7 @@ use crate::inference::type_factory::TypeFactory;
 use crate::inference::types::{PrimitiveType, TypeError, TypeId, TypeKind};
 use crate::pattern::{
     NarrowedBinding, NarrowedNullability, NarrowingSnapshot, PatternMatchService, PatternTarget,
+    expression_span,
 };
 use jv_ast::{
     Argument, BinaryOp, Expression, ForInStatement, Literal, Parameter, Program, Span, Statement,
@@ -60,22 +62,40 @@ impl<'env, 'ext, 'imp> ConstraintGenerator<'env, 'ext, 'imp> {
     }
 
     fn push_constraint(&mut self, kind: ConstraintKind, note: Option<&str>) {
+        self.push_constraint_with_span(kind, note, None);
+    }
+
+    fn push_constraint_with_span(
+        &mut self,
+        kind: ConstraintKind,
+        note: Option<&str>,
+        span: Option<&Span>,
+    ) {
         self.record_type_vars_in_constraint(&kind);
-        let constraint = if let Some(text) = note {
-            Constraint::new(kind).with_note(text)
-        } else {
-            Constraint::new(kind)
-        };
+        let mut constraint = Constraint::new(kind).with_span(span);
+        if let Some(text) = note {
+            constraint = constraint.with_note(text);
+        }
         self.constraints.push(constraint);
     }
 
-    fn push_assignability_constraint(&mut self, from: TypeKind, to: TypeKind, note: Option<&str>) {
+    fn push_assignability_constraint(
+        &mut self,
+        from: TypeKind,
+        to: TypeKind,
+        note: Option<&str>,
+        span: Option<&Span>,
+    ) {
         match CompatibilityChecker::analyze(self.env, &from, &to) {
             ConversionOutcome::Identity => {
-                self.push_constraint(ConstraintKind::Equal(to, from), note);
+                self.push_constraint_with_span(ConstraintKind::Equal(to, from), note, span);
             }
             ConversionOutcome::Allowed(_) => {
-                self.push_constraint(ConstraintKind::Convertible { from, to }, note);
+                self.push_constraint_with_span(
+                    ConstraintKind::Convertible { from, to },
+                    note,
+                    span,
+                );
             }
             ConversionOutcome::Rejected(error) => self.report_type_error(error),
         }
@@ -97,7 +117,12 @@ impl<'env, 'ext, 'imp> ConstraintGenerator<'env, 'ext, 'imp> {
                 ..
             } => {
                 let init_ty = self.infer_expression(initializer);
-                self.bind_symbol(name, type_annotation.as_ref(), Some(init_ty));
+                self.bind_symbol(
+                    name,
+                    type_annotation.as_ref(),
+                    Some(initializer),
+                    Some(init_ty),
+                );
             }
             Statement::VarDeclaration {
                 name,
@@ -106,7 +131,12 @@ impl<'env, 'ext, 'imp> ConstraintGenerator<'env, 'ext, 'imp> {
                 ..
             } => {
                 let init_ty = initializer.as_ref().map(|expr| self.infer_expression(expr));
-                self.bind_symbol(name, type_annotation.as_ref(), init_ty);
+                self.bind_symbol(
+                    name,
+                    type_annotation.as_ref(),
+                    initializer.as_ref(),
+                    init_ty,
+                );
             }
             Statement::Expression { expr, .. } => {
                 self.infer_expression(expr);
@@ -118,6 +148,7 @@ impl<'env, 'ext, 'imp> ConstraintGenerator<'env, 'ext, 'imp> {
                     value_ty,
                     target_ty,
                     Some("assignment target and value must align"),
+                    expression_span(value),
                 );
             }
             Statement::ForIn(for_in) => {
@@ -165,6 +196,7 @@ impl<'env, 'ext, 'imp> ConstraintGenerator<'env, 'ext, 'imp> {
                             default_ty,
                             param_ty.clone(),
                             Some("parameter default must match declared type"),
+                            expression_span(default_expr),
                         );
                     }
                 }
@@ -174,6 +206,7 @@ impl<'env, 'ext, 'imp> ConstraintGenerator<'env, 'ext, 'imp> {
                     body_ty,
                     return_ty.clone(),
                     Some("function body must satisfy return type"),
+                    expression_span(body),
                 );
 
                 self.env.leave_scope();
@@ -239,10 +272,12 @@ impl<'env, 'ext, 'imp> ConstraintGenerator<'env, 'ext, 'imp> {
         &mut self,
         name: &str,
         annotation: Option<&TypeAnnotation>,
+        initializer_expr: Option<&Expression>,
         initializer_ty: Option<TypeKind>,
     ) {
         let symbol_ty = self.env.fresh_type_variable();
         let mut representative = initializer_ty.clone().unwrap_or_else(|| TypeKind::Unknown);
+        let mut annotated_ty: Option<TypeKind> = None;
 
         if let Some(ann) = annotation {
             let annotated = self.type_from_annotation(ann);
@@ -251,15 +286,19 @@ impl<'env, 'ext, 'imp> ConstraintGenerator<'env, 'ext, 'imp> {
                     ConstraintKind::Equal(symbol_ty.clone(), annotated.clone()),
                     Some("declaration annotation must match symbol"),
                 );
-                representative = annotated;
+                representative = annotated.clone();
+                annotated_ty = Some(annotated);
             }
         }
 
         if let Some(init) = initializer_ty {
+            let span = initializer_expr.and_then(expression_span);
+            let target_ty = annotated_ty.clone().unwrap_or_else(|| symbol_ty.clone());
             self.push_assignability_constraint(
                 init.clone(),
-                symbol_ty.clone(),
+                target_ty,
                 Some("initializer must satisfy declaration"),
+                span,
             );
             if matches!(representative, TypeKind::Unknown) {
                 representative = init;
@@ -290,21 +329,47 @@ impl<'env, 'ext, 'imp> ConstraintGenerator<'env, 'ext, 'imp> {
             Expression::Unary { op, operand, .. } => self.infer_unary_expression(op, operand),
             Expression::Call { function, args, .. } => {
                 let fn_ty = self.infer_expression(function);
-                let mut argument_types = Vec::with_capacity(args.len());
-                for arg in args {
-                    let ty = match arg {
-                        Argument::Positional(expr) => self.infer_expression(expr),
-                        Argument::Named { value, .. } => self.infer_expression(value),
+                let (concrete_params, concrete_result) = match fn_ty.clone() {
+                    TypeKind::Function(params, result) => (Some(params), Some(*result)),
+                    _ => (None, None),
+                };
+                let mut parameter_types = Vec::with_capacity(args.len());
+                let mut pending_arguments = Vec::with_capacity(args.len());
+                for (index, arg) in args.iter().enumerate() {
+                    let (arg_expr, arg_ty) = match arg {
+                        Argument::Positional(expr) => (expr, self.infer_expression(expr)),
+                        Argument::Named { value, .. } => (value, self.infer_expression(value)),
                     };
-                    argument_types.push(ty);
+                    let target_ty = concrete_params
+                        .as_ref()
+                        .and_then(|params| params.get(index))
+                        .cloned();
+                    let param_ty = target_ty.clone().unwrap_or_else(|| self.env.fresh_type_variable());
+                    let span = expression_span(arg_expr).cloned();
+                    if target_ty
+                        .as_ref()
+                        .is_some_and(|ty| !matches!(ty, TypeKind::Function(_, _)))
+                    {
+                        pending_arguments.push((arg_ty, param_ty.clone(), span));
+                    }
+                    parameter_types.push(param_ty);
                 }
 
-                let result_ty = self.env.fresh_type_variable();
-                let expected_fn = TypeKind::function(argument_types, result_ty.clone());
+                let result_ty = concrete_result.unwrap_or_else(|| self.env.fresh_type_variable());
+                let expected_fn = TypeKind::function(parameter_types, result_ty.clone());
                 self.push_constraint(
                     ConstraintKind::Equal(fn_ty, expected_fn),
                     Some("call target must be compatible with argument list"),
                 );
+
+                for (arg_ty, param_ty, span) in pending_arguments {
+                    self.push_assignability_constraint(
+                        arg_ty,
+                        param_ty,
+                        Some("call argument must satisfy parameter type"),
+                        span.as_ref(),
+                    );
+                }
                 result_ty
             }
             Expression::TypeCast { expr, target, .. } => {
@@ -319,12 +384,13 @@ impl<'env, 'ext, 'imp> ConstraintGenerator<'env, 'ext, 'imp> {
                 ..
             } => {
                 let cond_ty = self.infer_expression(condition);
-                self.push_constraint(
+                self.push_constraint_with_span(
                     ConstraintKind::Convertible {
                         from: cond_ty,
                         to: TypeKind::primitive(PrimitiveType::Boolean),
                     },
                     Some("if condition requires boolean"),
+                    expression_span(condition),
                 );
                 let then_ty = self.infer_expression(then_branch);
                 if let Some(else_expr) = else_branch {
@@ -403,12 +469,13 @@ impl<'env, 'ext, 'imp> ConstraintGenerator<'env, 'ext, 'imp> {
                     }
                     if let Some(guard_expr) = &arm.guard {
                         let guard_ty = self.infer_expression(guard_expr);
-                        self.push_constraint(
+                        self.push_constraint_with_span(
                             ConstraintKind::Convertible {
                                 from: guard_ty,
                                 to: TypeKind::primitive(PrimitiveType::Boolean),
                             },
                             Some("when guard must evaluate to boolean"),
+                            expression_span(guard_expr),
                         );
                     }
                     let body_ty = self.infer_expression(&arm.body);
@@ -480,7 +547,9 @@ impl<'env, 'ext, 'imp> ConstraintGenerator<'env, 'ext, 'imp> {
                 }
                 TypeKind::reference("java.lang.String")
             }
-            Expression::MultilineString(_) => TypeKind::reference("java.lang.String"),
+            Expression::MultilineString(literal) => {
+                context_adaptation::infer_multiline_literal_type(literal)
+            }
             Expression::JsonLiteral(_) => TypeKind::Unknown,
             Expression::This(_) | Expression::Super(_) => TypeKind::Unknown,
         }
@@ -652,19 +721,21 @@ impl<'env, 'ext, 'imp> ConstraintGenerator<'env, 'ext, 'imp> {
             }
             And | Or => {
                 let expected = TypeKind::primitive(PrimitiveType::Boolean);
-                self.push_constraint(
+                self.push_constraint_with_span(
                     ConstraintKind::Convertible {
                         from: left_ty.clone(),
                         to: expected.clone(),
                     },
                     Some("logical operations require boolean operands"),
+                    expression_span(left),
                 );
-                self.push_constraint(
+                self.push_constraint_with_span(
                     ConstraintKind::Convertible {
                         from: right_ty.clone(),
                         to: expected.clone(),
                     },
                     Some("logical operations require boolean operands"),
+                    expression_span(right),
                 );
                 expected
             }
@@ -707,12 +778,13 @@ impl<'env, 'ext, 'imp> ConstraintGenerator<'env, 'ext, 'imp> {
         match op {
             Not => {
                 let expected = TypeKind::primitive(PrimitiveType::Boolean);
-                self.push_constraint(
+                self.push_constraint_with_span(
                     ConstraintKind::Convertible {
                         from: operand_ty,
                         to: expected.clone(),
                     },
                     Some("logical not requires boolean"),
+                    expression_span(operand),
                 );
                 expected
             }

@@ -2,7 +2,9 @@
 //!
 //! Run with: `cargo test --lib -p jv_checker`.
 
-use jv_checker::{CheckError, PrimitiveType, TypeChecker, TypeInferenceService, TypeKind};
+use jv_checker::{
+    CheckError, ContextAdaptation, PrimitiveType, TypeChecker, TypeInferenceService, TypeKind,
+};
 use jv_inference::service::TypeFacts;
 use jv_parser_frontend::ParserPipeline;
 use jv_parser_rowan::frontend::RowanPipeline;
@@ -199,6 +201,74 @@ fn type_facts_update_after_rechecking_program() {
         incremented.contains("Primitive(\"Int\")"),
         "expected incremented binding to be inferred as Int"
     );
+}
+
+#[test]
+fn raw_single_literal_infers_char_type() {
+    let program = parse_program("val ch = 'a'\n");
+
+    let mut checker = TypeChecker::new();
+    checker
+        .check_program(&program)
+        .expect("raw literal should type-check");
+
+    let snapshot = checker
+        .inference_snapshot()
+        .expect("snapshot available after inference");
+    let scheme = snapshot
+        .binding_scheme("ch")
+        .expect("binding for ch must be registered");
+
+    assert_eq!(scheme.ty, TypeKind::primitive(PrimitiveType::Char));
+    assert!(
+        snapshot.context_adaptations().is_empty(),
+        "unexpected context adaptations recorded"
+    );
+}
+
+#[test]
+fn char_literal_promotes_to_string_with_adaptation() {
+    let program = parse_program("val s: String = 'a'\n");
+
+    let mut checker = TypeChecker::new();
+    checker
+        .check_program(&program)
+        .expect("assignment with raw literal should type-check");
+
+    let snapshot = checker
+        .inference_snapshot()
+        .expect("snapshot available after inference");
+    let adaptations = snapshot.context_adaptations();
+
+    assert_eq!(adaptations.len(), 1, "expected one adaptation record");
+    match &adaptations[0] {
+        ContextAdaptation::CharToString(adaptation) => {
+            assert_eq!(adaptation.span.start_line, 1);
+        }
+    }
+}
+
+#[test]
+fn char_literal_argument_records_adaptation() {
+    let source = "fun echoStr(value: String) = value\nval result = echoStr('a')\n";
+    let program = parse_program(source);
+
+    let mut checker = TypeChecker::new();
+    checker
+        .check_program(&program)
+        .expect("function call with raw literal should type-check");
+
+    let snapshot = checker
+        .inference_snapshot()
+        .expect("snapshot available after inference");
+    let adaptations = snapshot.context_adaptations();
+
+    assert_eq!(adaptations.len(), 1, "expected single adaptation");
+    match &adaptations[0] {
+        ContextAdaptation::CharToString(adaptation) => {
+            assert_eq!(adaptation.span.start_line, 2);
+        }
+    }
 }
 
 #[test]
