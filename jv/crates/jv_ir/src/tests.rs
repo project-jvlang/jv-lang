@@ -215,6 +215,111 @@ mod tests {
     }
 
     #[test]
+    fn transform_regex_is_literal_produces_regex_match() {
+        let span = dummy_span();
+        let literal = RegexLiteral {
+            pattern: "[a-z]+".to_string(),
+            raw: "/[a-z]+/".to_string(),
+            span: span.clone(),
+        };
+
+        let metadata = BinaryMetadata {
+            is_test: Some(IsTestMetadata {
+                kind: IsTestKind::RegexLiteral,
+                regex: Some(literal.clone()),
+                pattern_expr: None,
+                diagnostics: Vec::new(),
+                guard_strategy: RegexGuardStrategy::None,
+                span: span.clone(),
+            }),
+        };
+
+        let expr = Expression::Binary {
+            left: Box::new(Expression::Identifier("text".to_string(), span.clone())),
+            op: BinaryOp::Is,
+            right: Box::new(Expression::RegexLiteral(literal)),
+            span: span.clone(),
+            metadata,
+        };
+
+        let mut context = TransformContext::new();
+        context.add_variable(
+            "text".to_string(),
+            JavaType::string(),
+        );
+        let lowered = transform_expression(expr, &mut context).expect("regex is lowering");
+
+        match lowered {
+            IrExpression::RegexMatch {
+                guard_strategy,
+                pattern,
+                java_type,
+                span: ir_span,
+                ..
+            } => {
+                assert!(matches!(guard_strategy, RegexGuardStrategy::None));
+                assert_eq!(java_type, JavaType::boolean());
+                assert_eq!(ir_span, span);
+
+                match pattern.as_ref() {
+                    IrExpression::RegexPattern { pattern: p, .. } => {
+                        assert_eq!(p, "[a-z]+")
+                    }
+                    other => panic!("expected regex pattern IR inside match, got {:?}", other),
+                }
+            }
+            other => panic!("expected regex match IR expression, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn transform_regex_is_with_guard_assigns_temp_name() {
+        let span = dummy_span();
+        let literal = RegexLiteral {
+            pattern: "\\d+".to_string(),
+            raw: "/\\d+/".to_string(),
+            span: span.clone(),
+        };
+
+        let metadata = BinaryMetadata {
+            is_test: Some(IsTestMetadata {
+                kind: IsTestKind::RegexLiteral,
+                regex: Some(literal.clone()),
+                pattern_expr: None,
+                diagnostics: Vec::new(),
+                guard_strategy: RegexGuardStrategy::CaptureAndGuard { temp_name: None },
+                span: span.clone(),
+            }),
+        };
+
+        let expr = Expression::Binary {
+            left: Box::new(Expression::Identifier("input".to_string(), span.clone())),
+            op: BinaryOp::Is,
+            right: Box::new(Expression::RegexLiteral(literal)),
+            span: span.clone(),
+            metadata,
+        };
+
+        let mut context = TransformContext::new();
+        context.add_variable(
+            "input".to_string(),
+            JavaType::string(),
+        );
+        let lowered = transform_expression(expr, &mut context).expect("regex guarded lowering");
+
+        match lowered {
+            IrExpression::RegexMatch { guard_strategy, .. } => match guard_strategy {
+                RegexGuardStrategy::CaptureAndGuard { temp_name } => {
+                    let name = temp_name.expect("temp name assigned");
+                    assert!(name.starts_with("__jvRegexSubject_"));
+                }
+                other => panic!("expected capture guard, found {:?}", other),
+            },
+            other => panic!("expected regex match IR expression, got {:?}", other),
+        }
+    }
+
+    #[test]
     fn map_get_infers_value_type_from_map_generics() {
         let mut context = TransformContext::new();
         context.add_variable(

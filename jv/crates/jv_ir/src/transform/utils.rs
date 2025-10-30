@@ -114,6 +114,7 @@ pub(crate) fn extract_java_type(expr: &IrExpression) -> Option<JavaType> {
         | IrExpression::Lambda { java_type, .. }
         | IrExpression::SequencePipeline { java_type, .. }
         | IrExpression::Switch { java_type, .. }
+        | IrExpression::RegexMatch { java_type, .. }
         | IrExpression::NullSafeOperation { java_type, .. }
         | IrExpression::CompletableFuture { java_type, .. }
         | IrExpression::VirtualThread { java_type, .. }
@@ -171,6 +172,7 @@ pub(crate) fn ir_expression_span(expr: &IrExpression) -> Span {
         | IrExpression::Super { span, .. }
         | IrExpression::StringFormat { span, .. }
         | IrExpression::NullSafeOperation { span, .. }
+        | IrExpression::RegexMatch { span, .. }
         | IrExpression::CompletableFuture { span, .. }
         | IrExpression::VirtualThread { span, .. }
         | IrExpression::TryWithResources { span, .. } => span.clone(),

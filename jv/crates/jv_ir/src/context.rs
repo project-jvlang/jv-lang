@@ -986,6 +986,7 @@ fn set_expression_type(expr: &mut IrExpression, java_type: JavaType) {
         | IrExpression::ObjectCreation { java_type: ty, .. }
         | IrExpression::SequencePipeline { java_type: ty, .. }
         | IrExpression::Switch { java_type: ty, .. }
+        | IrExpression::RegexMatch { java_type: ty, .. }
         | IrExpression::NullSafeOperation { java_type: ty, .. }
         | IrExpression::CompletableFuture { java_type: ty, .. }
         | IrExpression::VirtualThread { java_type: ty, .. }

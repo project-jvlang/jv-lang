@@ -239,6 +239,15 @@ pub enum IrExpression {
         span: Span,
     },
 
+    /// Regular expression `is` checks lowered to matcher invocations.
+    RegexMatch {
+        subject: Box<IrExpression>,
+        pattern: Box<IrExpression>,
+        guard_strategy: RegexGuardStrategy,
+        java_type: JavaType,
+        span: Span,
+    },
+
     // String formatting (from string interpolation)
     StringFormat {
         format_string: String,
@@ -416,6 +425,7 @@ impl IrExpression {
             | IrExpression::This { span, .. }
             | IrExpression::Super { span, .. }
             | IrExpression::NullSafeOperation { span, .. }
+            | IrExpression::RegexMatch { span, .. }
             | IrExpression::StringFormat { span, .. }
             | IrExpression::CompletableFuture { span, .. }
             | IrExpression::VirtualThread { span, .. }

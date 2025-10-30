@@ -678,6 +678,20 @@ impl JavaCodeGenerator {
                     scope_locals,
                 );
             }
+            IrExpression::RegexMatch { subject, pattern, .. } => {
+                self.collect_mutable_captures_in_expression(
+                    subject,
+                    method_locals,
+                    captures,
+                    scope_locals,
+                );
+                self.collect_mutable_captures_in_expression(
+                    pattern,
+                    method_locals,
+                    captures,
+                    scope_locals,
+                );
+            }
             IrExpression::Unary { operand, .. } => {
                 self.collect_mutable_captures_in_expression(
                     operand,

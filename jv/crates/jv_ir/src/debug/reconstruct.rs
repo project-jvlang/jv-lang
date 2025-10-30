@@ -5,7 +5,7 @@ use crate::types::{
     IrVisibility, JavaType, JavaWildcardKind,
 };
 use jv_ast::{
-    Argument, BinaryMetadata, CallArgumentMetadata, CommentKind, CommentStatement,
+    Argument, BinaryMetadata, BinaryOp, CallArgumentMetadata, CommentKind, CommentStatement,
     CommentVisibility, Expression, Literal, Modifiers, Program, RegexLiteral, Span, Statement,
     StringPart, TypeAnnotation, ValBindingOrigin, Visibility,
 };
@@ -456,6 +456,23 @@ impl<'a> ReconstructionContext<'a> {
                     metadata: BinaryMetadata::default(),
                 }
             }
+            IrExpression::RegexMatch {
+                subject,
+                pattern,
+                span,
+                ..
+            } => {
+                let left = self.with_segment("subject", |ctx| ctx.convert_expression(subject))?;
+                let right = self.with_segment("pattern", |ctx| ctx.convert_expression(pattern))?;
+                self.record_success();
+                Expression::Binary {
+                    left: Box::new(left),
+                    op: BinaryOp::Is,
+                    right: Box::new(right),
+                    span: span.clone(),
+                    metadata: BinaryMetadata::default(),
+                }
+            }
             IrExpression::Unary {
                 op, operand, span, ..
             } => {
@@ -845,6 +862,7 @@ fn extract_expr_span(expr: &IrExpression) -> Span {
         | IrExpression::VirtualThread { span, .. }
         | IrExpression::TryWithResources { span, .. }
         | IrExpression::RegexPattern { span, .. }
+        | IrExpression::RegexMatch { span, .. }
         | IrExpression::SequencePipeline { span, .. } => span.clone(),
         IrExpression::CharToString(conversion) => conversion.span.clone(),
     }

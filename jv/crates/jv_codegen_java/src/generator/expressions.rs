@@ -1,5 +1,5 @@
 use super::*;
-use jv_ast::{Span, types::PrimitiveTypeName};
+use jv_ast::{RegexGuardStrategy, Span, types::PrimitiveTypeName};
 use jv_ir::PipelineShape;
 use jv_ir::{
     RawStringFlavor, SequencePipeline, SequenceSource, SequenceStage, SequenceTerminal,
@@ -137,6 +137,30 @@ impl JavaCodeGenerator {
                         op, left, right, java_type, left_expr, right_expr,
                     )?;
                     Ok(format!("{} {} {}", left_expr, operator, right_expr))
+                }
+            }
+            IrExpression::RegexMatch {
+                subject,
+                pattern,
+                guard_strategy,
+                ..
+            } => {
+                let subject_code = self.generate_expression(subject)?;
+                let pattern_code = self.generate_expression(pattern)?;
+                let pattern_expr = format!("({})", pattern_code);
+
+                match guard_strategy {
+                    RegexGuardStrategy::None => Ok(format!(
+                        "{}.matcher({}).matches()",
+                        pattern_expr, subject_code
+                    )),
+                    RegexGuardStrategy::CaptureAndGuard { temp_name } => {
+                        let temp = temp_name.as_deref().unwrap_or("__jvRegexSubject_guard");
+                        Ok(format!(
+                            "(({}) instanceof java.lang.CharSequence {} && {}.matcher({}).matches())",
+                            subject_code, temp, pattern_expr, temp
+                        ))
+                    }
                 }
             }
             IrExpression::Unary { op, operand, .. } => {
@@ -1633,6 +1657,7 @@ impl JavaCodeGenerator {
             | IrExpression::Lambda { java_type, .. }
             | IrExpression::SequencePipeline { java_type, .. }
             | IrExpression::Switch { java_type, .. }
+            | IrExpression::RegexMatch { java_type, .. }
             | IrExpression::NullSafeOperation { java_type, .. }
             | IrExpression::CompletableFuture { java_type, .. }
             | IrExpression::VirtualThread { java_type, .. }
@@ -2578,6 +2603,74 @@ mod tests {
             .generate_expression(&expr)
             .expect("codegen succeeds");
         assert_eq!(rendered, "counter.size");
+    }
+
+    #[test]
+    fn renders_regex_match_without_guard() {
+        let mut generator = JavaCodeGenerator::new();
+
+        let expr = IrExpression::RegexMatch {
+            subject: Box::new(IrExpression::Identifier {
+                name: "text".to_string(),
+                java_type: JavaType::string(),
+                span: Span::dummy(),
+            }),
+            pattern: Box::new(IrExpression::RegexPattern {
+                pattern: "\\d+".to_string(),
+                java_type: JavaType::Reference {
+                    name: "java.util.regex.Pattern".to_string(),
+                    generic_args: Vec::new(),
+                },
+                span: Span::dummy(),
+            }),
+            guard_strategy: RegexGuardStrategy::None,
+            java_type: JavaType::boolean(),
+            span: Span::dummy(),
+        };
+
+        let rendered = generator
+            .generate_expression(&expr)
+            .expect("codegen succeeds");
+
+        assert_eq!(
+            rendered,
+            "(Pattern.compile(\"\\\\d+\")).matcher(text).matches()"
+        );
+    }
+
+    #[test]
+    fn renders_regex_match_with_capture_guard() {
+        let mut generator = JavaCodeGenerator::new();
+
+        let expr = IrExpression::RegexMatch {
+            subject: Box::new(IrExpression::Identifier {
+                name: "userInput".to_string(),
+                java_type: JavaType::string(),
+                span: Span::dummy(),
+            }),
+            pattern: Box::new(IrExpression::RegexPattern {
+                pattern: "[a-zA-Z]+".to_string(),
+                java_type: JavaType::Reference {
+                    name: "java.util.regex.Pattern".to_string(),
+                    generic_args: Vec::new(),
+                },
+                span: Span::dummy(),
+            }),
+            guard_strategy: RegexGuardStrategy::CaptureAndGuard {
+                temp_name: Some("__tmp".to_string()),
+            },
+            java_type: JavaType::boolean(),
+            span: Span::dummy(),
+        };
+
+        let rendered = generator
+            .generate_expression(&expr)
+            .expect("codegen succeeds");
+
+        assert_eq!(
+            rendered,
+            "((userInput) instanceof java.lang.CharSequence __tmp && (Pattern.compile(\"[a-zA-Z]+\")).matcher(__tmp).matches())"
+        );
     }
 }
 

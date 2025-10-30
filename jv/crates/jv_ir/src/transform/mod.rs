@@ -9,9 +9,9 @@ use crate::types::{
 };
 use jv_ast::{
     Argument, BinaryMetadata, BinaryOp, BindingPatternKind, CallArgumentMetadata,
-    CallArgumentStyle, CommentKind, ConcurrencyConstruct, Expression, Literal, Modifiers, Program,
-    ResourceManagement, SequenceDelimiter, Span, Statement, TypeAnnotation, UnaryOp,
-    ValBindingOrigin,
+    CallArgumentStyle, CommentKind, ConcurrencyConstruct, Expression, IsTestKind, Literal,
+    Modifiers, Program, RegexGuardStrategy, ResourceManagement, SequenceDelimiter, Span,
+    Statement, TypeAnnotation, UnaryOp, ValBindingOrigin,
 };
 
 mod concurrency;
@@ -669,8 +669,39 @@ pub fn transform_expression(
             op,
             right,
             span,
-            ..
+            metadata,
         } => {
+            if matches!(op, BinaryOp::Is) {
+                if let Some(is_metadata) = metadata.is_test.as_ref() {
+                    if matches!(
+                        is_metadata.kind,
+                        IsTestKind::RegexLiteral | IsTestKind::PatternExpression
+                    ) {
+                        let subject_ir = transform_expression(*left, context)?;
+                        let pattern_ir = transform_expression(*right, context)?;
+                        let guard_strategy = match &is_metadata.guard_strategy {
+                            RegexGuardStrategy::CaptureAndGuard { temp_name } => {
+                                let name = temp_name.clone().unwrap_or_else(|| {
+                                    context.fresh_identifier("__jvRegexSubject_")
+                                });
+                                RegexGuardStrategy::CaptureAndGuard {
+                                    temp_name: Some(name),
+                                }
+                            }
+                            RegexGuardStrategy::None => RegexGuardStrategy::None,
+                        };
+
+                        return Ok(IrExpression::RegexMatch {
+                            subject: Box::new(subject_ir),
+                            pattern: Box::new(pattern_ir),
+                            guard_strategy,
+                            java_type: JavaType::boolean(),
+                            span,
+                        });
+                    }
+                }
+            }
+
             if matches!(op, BinaryOp::Elvis) {
                 desugar_elvis_operator(left, right, span, context)
             } else {
