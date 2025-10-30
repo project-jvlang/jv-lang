@@ -282,6 +282,65 @@ jobs:
           sed -i "s|REPO_PLACEHOLDER|${REPO}|g" "${INSTALL_SCRIPT}"
           chmod +x "${INSTALL_SCRIPT}"
 
+      - name: Test install script
+        run: |
+          set -euo pipefail
+          VERSION="${{ inputs.version }}"
+          REPO="${{ github.repository }}"
+          RELEASE_DIR="release"
+          TEST_ROOT="$(mktemp -d)"
+          FAKE_BIN="${TEST_ROOT}/bin"
+          mkdir -p "${FAKE_BIN}"
+          cat > "${FAKE_BIN}/curl" <<EOF
+          #!/usr/bin/env bash
+          set -euo pipefail
+          DEST=""
+          URL=""
+          while [[ \$# -gt 0 ]]; do
+            case "\$1" in
+              -L|--location)
+                shift
+                ;;
+              -o|--output)
+                DEST="\$2"
+                shift 2
+                ;;
+              *)
+                URL="\$1"
+                shift
+                ;;
+            esac
+          done
+          case "\$URL" in
+            "https://github.com/${REPO}/releases/download/${VERSION}/jv-${VERSION}-linux-x86_64.tar.gz")
+              cp "${RELEASE_DIR}/jv-${VERSION}-linux-x86_64.tar.gz" "\$DEST"
+              ;;
+            "https://github.com/${REPO}/releases/download/${VERSION}/install_toolchain_jdks.sh")
+              cat <<'SCRIPT' > "\$DEST"
+          #!/usr/bin/env bash
+          set -euo pipefail
+          echo "stub install_toolchain_jdks.sh invoked with: \$@"
+          SCRIPT
+              chmod +x "\$DEST"
+              ;;
+            *)
+              echo "Unexpected URL: \$URL" >&2
+              exit 1
+              ;;
+          esac
+          EOF
+          chmod +x "${FAKE_BIN}/curl"
+
+          export PATH="${FAKE_BIN}:${PATH}"
+          export JV_INSTALL_SUFFIX="linux-x86_64"
+          export JV_BIN_DIR="${TEST_ROOT}/install/bin"
+          export JV_INSTALL_ROOT="${TEST_ROOT}/install/root"
+
+          bash "${RELEASE_DIR}/install.sh"
+
+          test -x "${TEST_ROOT}/install/bin/jv"
+          test -x "${TEST_ROOT}/install/bin/jvx"
+
       - name: Prepare release body
         id: release_body
         run: |
