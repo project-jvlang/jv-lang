@@ -1,16 +1,16 @@
-use crate::constraint::generic::GenericConstraint;
 use crate::constraint::GenericConstraintKind;
+use crate::constraint::generic::GenericConstraint;
 use crate::solver::variance::VariancePosition;
 use crate::types::{
     BoundPredicate, BoundTypeReference, CapabilityBound, CapabilityHints, FunctionSignatureBound,
     PrimitiveBoundConstraint, PrimitiveBoundMetadata, PrimitiveTypeName, PrimitiveTypeNameExt,
     PrimitiveTypeReference, SymbolId, TraitBound, TypeId,
 };
+use jv_ast::Span;
 use jv_ast::types::{
     CapabilityHints as AstCapabilityHints, FunctionConstraintSignature, TypeAnnotation,
     WhereClause, WherePredicate,
 };
-use jv_ast::Span;
 use std::cmp::Ordering;
 use std::collections::HashMap;
 
@@ -318,11 +318,11 @@ mod tests {
     use super::*;
     use crate::constraint::generic::GenericConstraintKind;
     use crate::types::BoundPredicate;
+    use jv_ast::Span;
     use jv_ast::types::{
         CapabilityHints as AstCapabilityHints, CapabilityRequirement, PrimitiveBound,
         PrimitiveTypeName, PrimitiveTypeReference, PrimitiveTypeSource, QualifiedName,
     };
-    use jv_ast::Span;
     use std::collections::HashMap;
 
     fn symbol() -> SymbolId {

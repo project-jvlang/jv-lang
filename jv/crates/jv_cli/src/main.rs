@@ -7,8 +7,8 @@ use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
 use jv_checker::diagnostics::{
-    from_frontend_diagnostics, from_parse_error, from_transform_error, DiagnosticSeverity,
-    DiagnosticStrategy,
+    DiagnosticSeverity, DiagnosticStrategy, from_frontend_diagnostics, from_parse_error,
+    from_transform_error,
 };
 use jv_fmt::JavaFormatter;
 use jv_ir::transform_program;
@@ -22,12 +22,12 @@ use jv_cli::pipeline::project::{
     manifest::{ManifestLoader, OutputConfig, ProjectSettings, SourceConfig},
 };
 use jv_cli::pipeline::{
-    compile, produce_binary, run_program, BuildOptionsFactory, CliOverrides, OutputManager,
+    BuildOptionsFactory, CliOverrides, OutputManager, compile, produce_binary, run_program,
 };
 use jv_cli::tour::TourOrchestrator;
 use jv_cli::{
-    format_resolved_import, get_version, init_project as cli_init_project, resolved_imports_header,
-    tooling_failure, Cli, Commands,
+    Cli, Commands, format_resolved_import, get_version, init_project as cli_init_project,
+    resolved_imports_header, tooling_failure,
 };
 use jv_pm::{Manifest, PackageInfo, ProjectSection};
 
@@ -190,10 +190,7 @@ fn main() -> Result<()> {
             let usage = &artifacts.binding_usage;
             println!(
                 "バインディング統計 / Binding usage: explicit val={} implicit val={} implicit typed={} var={}",
-                usage.explicit,
-                usage.implicit,
-                usage.implicit_typed,
-                usage.vars
+                usage.explicit, usage.implicit, usage.implicit_typed, usage.vars
             );
 
             if let Some(perf) = &artifacts.perf_capture {

@@ -36,7 +36,9 @@ pub enum TransformError {
     #[error("@Sample処理エラー: {message}")]
     SampleProcessingError { message: String, span: Span },
 
-    #[error("JV1008: whitespace-delimited sequence must be homogeneous. expected {expected}, found {found}")]
+    #[error(
+        "JV1008: whitespace-delimited sequence must be homogeneous. expected {expected}, found {found}"
+    )]
     WhitespaceSequenceTypeMismatch {
         expected: String,
         found: String,

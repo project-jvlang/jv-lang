@@ -90,10 +90,12 @@ fn analyze_config_flags_manifest_requiring_java25() {
         other => panic!("expected RequiresHigherTarget, got {other:?}"),
     }
     assert_eq!(report.required_release(), Some(25));
-    assert!(report
-        .findings
-        .iter()
-        .any(|finding| finding.artifact.contains("needs-25.jar")));
+    assert!(
+        report
+            .findings
+            .iter()
+            .any(|finding| finding.artifact.contains("needs-25.jar"))
+    );
 
     config.set_target(JavaTarget::Java25);
     let report_for_25 = BuildSystem::new(config)

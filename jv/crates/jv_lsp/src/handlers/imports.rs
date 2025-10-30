@@ -1,6 +1,6 @@
 use crate::span_to_range;
 use jv_ir::types::{IrImport, IrImportDetail};
-use jv_support::i18n::{catalog, LocaleCode};
+use jv_support::i18n::{LocaleCode, catalog};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use tower_lsp::lsp_types::{Position, Range, TextDocumentIdentifier};

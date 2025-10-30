@@ -1,7 +1,7 @@
 use super::ImportError;
 use crate::diagnostics::{DiagnosticDescriptor, DiagnosticSeverity, EnhancedDiagnostic};
 use jv_ast::Span;
-use jv_support::i18n::{catalog, LocaleCode};
+use jv_support::i18n::{LocaleCode, catalog};
 use std::collections::HashMap;
 
 const MAX_SUGGESTIONS: usize = 4;

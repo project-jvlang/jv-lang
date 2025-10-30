@@ -2,8 +2,8 @@ use std::collections::{BTreeSet, HashMap};
 use std::sync::OnceLock;
 
 use jv_ast::{
-    detect_reserved_conflicts, Annotation, AnnotationName, Program, Property, ReservedConflictKind,
-    Statement,
+    Annotation, AnnotationName, Program, Property, ReservedConflictKind, Statement,
+    detect_reserved_conflicts,
 };
 
 use crate::CheckError;

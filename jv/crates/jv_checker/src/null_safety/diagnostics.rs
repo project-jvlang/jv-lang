@@ -1,17 +1,17 @@
-use std::collections::{hash_map::Entry, HashMap, HashSet};
+use std::collections::{HashMap, HashSet, hash_map::Entry};
 
+use super::NullabilityKind;
 use super::annotations::JavaNullabilityHint;
 use super::context::{LateInitContractKind, NullSafetyContext};
 use super::flow::FlowAnalysisOutcome;
 use super::graph::FlowStateSnapshot;
 use super::operators::{JavaLoweringHint, JavaLoweringStrategy, OperatorOperand};
-use super::NullabilityKind;
 use crate::CheckError;
+use jv_inference::TypeFacts;
 use jv_inference::service::{TypeFactsBuilder, TypeFactsSnapshot};
 use jv_inference::types::{
     NullabilityFlag, TypeKind as FactsTypeKind, TypeVariant as FactsTypeVariant,
 };
-use jv_inference::TypeFacts;
 
 const DEFAULT_ERROR_CODE: &str = "JV3002";
 
@@ -501,8 +501,8 @@ mod tests {
     use crate::inference::TypeEnvironment;
     use crate::null_safety::graph::FlowStateSnapshot;
     use crate::null_safety::operators::{JavaLoweringHint, JavaLoweringStrategy, OperatorOperand};
-    use jv_ast::types::Span;
     use jv_ast::ValBindingOrigin;
+    use jv_ast::types::Span;
     use jv_inference::service::TypeFactsBuilder;
     use jv_inference::types::{
         NullabilityFlag, TypeKind as FactsTypeKind, TypeVariant as FactsTypeVariant,
@@ -596,11 +596,13 @@ mod tests {
         let emitter = DiagnosticsEmitter::new(&context);
         let payload = emitter.emit(&outcome);
 
-        assert!(payload
-            .warnings
-            .iter()
-            .any(|warning| warning.to_string().contains("JV3005")
-                && warning.to_string().contains("MaybeNull")));
+        assert!(
+            payload
+                .warnings
+                .iter()
+                .any(|warning| warning.to_string().contains("JV3005")
+                    && warning.to_string().contains("MaybeNull"))
+        );
     }
 
     #[test]
@@ -624,11 +626,13 @@ mod tests {
         let emitter = DiagnosticsEmitter::new(&context);
         let payload = emitter.emit(&outcome);
 
-        assert!(payload
-            .warnings
-            .iter()
-            .any(|warning| warning.to_string().contains("JV3005")
-                && warning.to_string().contains("external")));
+        assert!(
+            payload
+                .warnings
+                .iter()
+                .any(|warning| warning.to_string().contains("JV3005")
+                    && warning.to_string().contains("external"))
+        );
     }
 
     #[test]
@@ -660,12 +664,14 @@ mod tests {
         let payload = emitter.emit(&outcome);
 
         assert_eq!(payload.errors.len(), 0);
-        assert!(payload
-            .warnings
-            .iter()
-            .any(|warning| warning.to_string().contains("JV3001")
-                && warning.to_string().contains("?.")
-                && warning.to_string().contains("user")));
+        assert!(
+            payload
+                .warnings
+                .iter()
+                .any(|warning| warning.to_string().contains("JV3001")
+                    && warning.to_string().contains("?.")
+                    && warning.to_string().contains("user"))
+        );
     }
 
     #[test]
@@ -699,12 +705,14 @@ mod tests {
         let emitter = DiagnosticsEmitter::new(&context);
         let payload = emitter.emit(&outcome);
 
-        assert!(payload
-            .warnings
-            .iter()
-            .any(|warning| warning.to_string().contains("JV3001")
-                && warning.to_string().contains("!!")
-                && warning.to_string().contains("value")));
+        assert!(
+            payload
+                .warnings
+                .iter()
+                .any(|warning| warning.to_string().contains("JV3001")
+                    && warning.to_string().contains("!!")
+                    && warning.to_string().contains("value"))
+        );
     }
 
     #[test]
@@ -834,10 +842,12 @@ mod tests {
         let emitter = DiagnosticsEmitter::new(&context);
         let payload = emitter.emit(&outcome);
 
-        assert!(payload
-            .errors
-            .iter()
-            .any(|error| error.to_string().contains("JV3002")));
+        assert!(
+            payload
+                .errors
+                .iter()
+                .any(|error| error.to_string().contains("JV3002"))
+        );
     }
 
     #[test]
@@ -919,10 +929,12 @@ mod tests {
         let emitter = DiagnosticsEmitter::new(&context);
         let payload = emitter.emit(&outcome);
 
-        assert!(payload
-            .errors
-            .iter()
-            .all(|error| !error.to_string().contains("JV3003")));
+        assert!(
+            payload
+                .errors
+                .iter()
+                .all(|error| !error.to_string().contains("JV3003"))
+        );
     }
 
     #[test]
@@ -946,9 +958,11 @@ mod tests {
         let emitter = DiagnosticsEmitter::new(&context);
         let payload = emitter.emit(&outcome);
 
-        assert!(payload
-            .errors
-            .iter()
-            .all(|error| !error.to_string().contains("JV3003")));
+        assert!(
+            payload
+                .errors
+                .iter()
+                .all(|error| !error.to_string().contains("JV3003"))
+        );
     }
 }

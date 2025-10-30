@@ -1,5 +1,5 @@
 use super::*;
-use jv_ast::{types::PrimitiveTypeName, Span};
+use jv_ast::{Span, types::PrimitiveTypeName};
 use jv_ir::PipelineShape;
 use jv_ir::{
     SequencePipeline, SequenceSource, SequenceStage, SequenceTerminal, SequenceTerminalKind,
@@ -1007,7 +1007,7 @@ impl JavaCodeGenerator {
                     return Err(CodeGenError::InvalidMethodSignature {
                         message: "supplyAsync expects supplier (and optional executor)".to_string(),
                         span: None,
-                    })
+                    });
                 }
             },
             CompletableFutureOp::ThenApply => match rendered_args.as_slice() {
@@ -1016,7 +1016,7 @@ impl JavaCodeGenerator {
                     return Err(CodeGenError::InvalidMethodSignature {
                         message: "thenApply expects future and function".to_string(),
                         span: None,
-                    })
+                    });
                 }
             },
             CompletableFutureOp::ThenCompose => match rendered_args.as_slice() {
@@ -1025,7 +1025,7 @@ impl JavaCodeGenerator {
                     return Err(CodeGenError::InvalidMethodSignature {
                         message: "thenCompose expects future and function".to_string(),
                         span: None,
-                    })
+                    });
                 }
             },
             CompletableFutureOp::Get => match rendered_args.as_slice() {
@@ -1034,7 +1034,7 @@ impl JavaCodeGenerator {
                     return Err(CodeGenError::InvalidMethodSignature {
                         message: "get expects future".to_string(),
                         span: None,
-                    })
+                    });
                 }
             },
             CompletableFutureOp::CompletedFuture => match rendered_args.as_slice() {
@@ -1043,7 +1043,7 @@ impl JavaCodeGenerator {
                     return Err(CodeGenError::InvalidMethodSignature {
                         message: "completedFuture expects a single value".to_string(),
                         span: None,
-                    })
+                    });
                 }
             },
         })
@@ -2284,13 +2284,13 @@ impl JavaCodeGenerator {
                 return Err(CodeGenError::UnsupportedConstruct {
                     construct: "Range operators must be lowered before Java emission".to_string(),
                     span: None,
-                })
+                });
             }
             BinaryOp::Elvis => {
                 return Err(CodeGenError::UnsupportedConstruct {
                     construct: "Elvis operator requires specialised lowering".to_string(),
                     span: None,
-                })
+                });
             }
         })
     }

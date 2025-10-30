@@ -5,9 +5,9 @@ use std::error::Error as StdError;
 use tokio::io::{stdin, stdout};
 use tokio::sync::{Mutex, RwLock};
 use tower_lsp::{
+    LspService, Server,
     jsonrpc::{Error as JsonRpcError, ErrorCode, Result as LspResult},
     lsp_types::*,
-    LspService, Server,
 };
 
 #[tokio::main]

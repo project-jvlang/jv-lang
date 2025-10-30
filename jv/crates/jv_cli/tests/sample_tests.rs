@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use jv_cli::pipeline::compute_script_main_class;
-use jv_ir::transform::{fetch_sample_data, SampleFetchError, SampleFetchRequest, SampleSourceKind};
+use jv_ir::transform::{SampleFetchError, SampleFetchRequest, SampleSourceKind, fetch_sample_data};
 use sha2::{Digest, Sha256};
 use tempfile::tempdir;
 
