@@ -13,6 +13,23 @@ use jv_parser_semantics::SemanticsDiagnostic;
 pub(crate) const ROWAN_PARSER_STAGE: &str = "rowan-parser";
 pub(crate) const ROWAN_LOWERING_STAGE: &str = "rowan-lowering";
 
+#[allow(dead_code)]
+/// 単位系構文: `@` 直後にスペースが無い。
+pub(crate) const DIAGNOSTIC_JV_UNIT_001_MISSING_SPACE: &str =
+    "JV_UNIT_001: 単位型定義を宣言するには `@` の直後にスペースを挿入してください";
+#[allow(dead_code)]
+/// 単位系構文: `/` を含む単位で角括弧が不足している。
+pub(crate) const DIAGNOSTIC_JV_UNIT_002_BRACKET_REQUIRED: &str =
+    "JV_UNIT_002: `/` を含む単位は `[]` で囲む必要があります（例: `100[m/s]`）";
+#[allow(dead_code)]
+/// 単位系構文: `:=` の右辺が不足している。
+pub(crate) const DIAGNOSTIC_JV_UNIT_003_DEPENDENCY_MISSING_RHS: &str =
+    "JV_UNIT_003: 単位依存定義の右辺が不足しています";
+#[allow(dead_code)]
+/// 単位系構文: 未知の単位変換ディレクティブ。
+pub(crate) const DIAGNOSTIC_JV_UNIT_004_UNKNOWN_DIRECTIVE: &str =
+    "JV_UNIT_004: `@Conversion` か `@ReverseConversion` のみをサポートしています";
+
 pub(crate) fn compose_frontend_diagnostics(
     tokens: &[Token],
     parser_diagnostics: &[ParserDiagnostic],

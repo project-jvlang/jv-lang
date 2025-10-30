@@ -859,6 +859,33 @@ impl<'tokens> ParserContext<'tokens> {
         None
     }
 
+    /// 指定インデックスの `@` トークン直後にホワイトスペースが存在するかを判定する。
+    #[allow(dead_code)]
+    pub(crate) fn has_whitespace_after_at(&self, index: usize) -> bool {
+        let Some(token) = self.tokens.get(index) else {
+            return false;
+        };
+        if TokenKind::from_token(token) != TokenKind::At {
+            return false;
+        }
+
+        let next_index = match index.checked_add(1) {
+            Some(next) => next,
+            None => return false,
+        };
+        let Some(next_token) = self.tokens.get(next_index) else {
+            return false;
+        };
+
+        matches!(TokenKind::from_token(next_token), TokenKind::Whitespace)
+    }
+
+    /// 現在のカーソル位置が `@` であり直後にホワイトスペースが存在するかを判定する。
+    #[allow(dead_code)]
+    pub(crate) fn cursor_has_whitespace_after_at(&self) -> bool {
+        self.has_whitespace_after_at(self.cursor)
+    }
+
     /// EoF かどうか。
     pub(crate) fn is_eof(&self) -> bool {
         self.peek_significant_kind()
@@ -1020,5 +1047,66 @@ impl<'tokens> ParserContext<'tokens> {
     /// ノードの終了を記録する。
     pub(crate) fn finish_node(&mut self) {
         self.events.push(ParseEvent::FinishNode);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use jv_lexer::{Token, TokenTrivia, TokenType};
+
+    fn make_token(token_type: TokenType, lexeme: &str) -> Token {
+        Token {
+            token_type,
+            lexeme: lexeme.to_string(),
+            line: 0,
+            column: 0,
+            leading_trivia: TokenTrivia::default(),
+            diagnostic: None,
+            metadata: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn detects_whitespace_after_at() {
+        let tokens = vec![
+            make_token(TokenType::At, "@"),
+            make_token(TokenType::Whitespace(" ".into()), " "),
+            make_token(TokenType::Identifier("unit".into()), "unit"),
+        ];
+        let ctx = ParserContext::new(tokens.as_slice());
+        assert!(ctx.has_whitespace_after_at(0));
+        assert!(ctx.cursor_has_whitespace_after_at());
+    }
+
+    #[test]
+    fn detects_absence_of_whitespace_after_at() {
+        let tokens = vec![
+            make_token(TokenType::At, "@"),
+            make_token(TokenType::Identifier("unit".into()), "unit"),
+        ];
+        let ctx = ParserContext::new(tokens.as_slice());
+        assert!(!ctx.has_whitespace_after_at(0));
+        assert!(!ctx.cursor_has_whitespace_after_at());
+    }
+
+    #[test]
+    fn ignores_non_at_tokens() {
+        let tokens = vec![
+            make_token(TokenType::Identifier("leading".into()), "leading"),
+            make_token(TokenType::Whitespace(" ".into()), " "),
+            make_token(TokenType::At, "@"),
+            make_token(TokenType::Whitespace("\t".into()), "\t"),
+            make_token(TokenType::Identifier("unit".into()), "unit"),
+        ];
+        let mut ctx = ParserContext::new(tokens.as_slice());
+        assert!(!ctx.cursor_has_whitespace_after_at());
+
+        ctx.bump_raw(); // identifier
+        assert!(!ctx.cursor_has_whitespace_after_at());
+
+        ctx.bump_raw(); // whitespace
+        assert!(ctx.cursor_has_whitespace_after_at());
+        assert!(ctx.has_whitespace_after_at(ctx.position()));
     }
 }
