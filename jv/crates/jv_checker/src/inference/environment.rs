@@ -6,6 +6,7 @@
 //! 単一化ソルバが決定的で借用しやすい API を通じて推論状態へアクセスできる。
 
 use crate::inference::conversions::ConversionHelperCatalog;
+use crate::inference::regex::RegexMatchTyping;
 use crate::inference::types::{TypeId, TypeKind};
 use crate::inference::utils::TypeIdGenerator;
 use std::collections::{HashMap, HashSet};
@@ -49,6 +50,7 @@ pub struct TypeEnvironment {
     generator: TypeIdGenerator,
     instantiation_origins: HashMap<TypeId, TypeId>,
     conversion_catalog: Option<Arc<ConversionHelperCatalog>>,
+    regex_typings: Vec<RegexMatchTyping>,
 }
 
 impl TypeEnvironment {
@@ -59,6 +61,7 @@ impl TypeEnvironment {
             generator: TypeIdGenerator::new(),
             instantiation_origins: HashMap::new(),
             conversion_catalog: None,
+            regex_typings: Vec::new(),
         }
     }
 
@@ -160,6 +163,16 @@ impl TypeEnvironment {
             }
         }
         merged
+    }
+
+    /// 正規表現 `is` 演算子に関する型解析結果を追加する。
+    pub fn push_regex_typing(&mut self, typing: RegexMatchTyping) {
+        self.regex_typings.push(typing);
+    }
+
+    /// 収集済みの正規表現マッチング情報を返す。
+    pub fn regex_typings(&self) -> &[RegexMatchTyping] {
+        &self.regex_typings
     }
 
     /// 環境全体で自由な型変数を収集する。

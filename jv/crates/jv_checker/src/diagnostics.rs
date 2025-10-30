@@ -330,6 +330,24 @@ const DIAGNOSTICS: &[DiagnosticDescriptor] = &[
         severity: DiagnosticSeverity::Information,
     },
     DiagnosticDescriptor {
+        code: "JV_REGEX_W001",
+        title: "Optional 左辺には null ガードが必要です / Optional subject requires null guard",
+        help: "`text? is /pattern/` のように Optional 型を評価する際は null ガードが自動挿入されますが、明示的なチェックで意図を示すことも検討してください。/ When an Optional value participates in `text? is /pattern/`, the compiler inserts `value != null && ...` automatically; consider adding an explicit guard for clarity.",
+        severity: DiagnosticSeverity::Warning,
+    },
+    DiagnosticDescriptor {
+        code: "JV_REGEX_E002",
+        title: "`is /pattern/` 左辺の型が互換性を満たしません / Left-hand side type is not regex-compatible",
+        help: "`CharSequence` を実装する型、もしくは `toString()` で文字列へ変換した値を使用してください。/ Provide a value implementing `CharSequence`, or call `toString()` to convert it before applying `is /pattern/`.",
+        severity: DiagnosticSeverity::Error,
+    },
+    DiagnosticDescriptor {
+        code: "JV_REGEX_E003",
+        title: "`is` 右辺は Pattern 型でなければなりません / Right-hand side must be a Pattern",
+        help: "`java.util.regex.Pattern` を返す式を使用するか、`Pattern.compile(...)` で明示的に生成してください。/ Use an expression of type `java.util.regex.Pattern` or construct one explicitly with `Pattern.compile(...)`.",
+        severity: DiagnosticSeverity::Error,
+    },
+    DiagnosticDescriptor {
         code: "JV3199",
         title: "Advanced pattern matching not yet supported / 高度なパターンマッチングは未対応",
         help: "深度11以上の分解パターンや複合ガードは段階的に提供されます。サポート済みの構文へ書き換えるか今後のアップデートをお待ちください。/ Deep destructuring (depth ≥ 11) and complex guards are still rolling out. Rewrite the pattern using supported constructs or wait for a forthcoming update. (--explain JV3199)",

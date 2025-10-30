@@ -208,7 +208,7 @@ impl ConstraintSolver {
         from: TypeKind,
         to: TypeKind,
         warned: bool,
-        note: Option<String>,
+        mut note: Option<String>,
         span: Option<&Span>,
     ) -> Result<(), SolveError> {
         let from = self.prune(from);
@@ -220,13 +220,16 @@ impl ConstraintSolver {
             self.conversion_catalog.as_deref(),
         ) {
             ConversionOutcome::Identity => {
-                self.unify(from, to, note)?;
+                self.unify(from, to, note.clone())?;
             }
             ConversionOutcome::Allowed(metadata) => {
                 self.register_conversion(from.clone(), to.clone(), metadata, warned, span);
-                self.bind_for_conversion(&from, &to, note)?;
+                self.bind_for_conversion(&from, &to, note.clone())?;
             }
             ConversionOutcome::Rejected(error) => {
+                if let Some(message) = note.take() {
+                    return Err(SolveError::TypeError(TypeError::custom(message)));
+                }
                 return Err(SolveError::TypeError(error));
             }
         }

@@ -6,9 +6,9 @@ use crate::pattern::{self, PatternTarget};
 use crate::regex::RegexValidator;
 use fastrand::Rng;
 use jv_ast::{
-    Annotation, AnnotationName, BinaryMetadata, BinaryOp, Expression, Literal, Modifiers,
-    Parameter, ParameterModifiers, Pattern, Program, RegexLiteral, Span, Statement, TypeAnnotation,
-    ValBindingOrigin, WhenArm,
+    Annotation, AnnotationName, BinaryMetadata, BinaryOp, Expression, IsTestKind, IsTestMetadata,
+    Literal, Modifiers, Parameter, ParameterModifiers, Pattern, Program, RegexGuardStrategy,
+    RegexLiteral, Span, Statement, TypeAnnotation, ValBindingOrigin, WhenArm,
 };
 use jv_inference::TypeFacts;
 use jv_inference::types::{NullabilityFlag, TypeVariant as FactsTypeVariant};
@@ -1392,6 +1392,226 @@ fn regex_literal_infers_pattern_type() {
     assert_eq!(analyses.len(), 1);
     assert!(analyses[0].diagnostics.is_empty());
     assert_eq!(analyses[0].pattern, "\\d+");
+}
+
+#[test]
+fn regex_is_optional_records_guard_and_warning() {
+    let span = dummy_span();
+    let regex_literal = RegexLiteral {
+        pattern: "\\d+".into(),
+        raw: "/\\d+/".into(),
+        span: span.clone(),
+    };
+    let metadata = BinaryMetadata {
+        is_test: Some(IsTestMetadata {
+            kind: IsTestKind::RegexLiteral,
+            regex: Some(regex_literal.clone()),
+            pattern_expr: None,
+            diagnostics: Vec::new(),
+            guard_strategy: RegexGuardStrategy::None,
+            span: span.clone(),
+        }),
+    };
+    let text_decl = Statement::ValDeclaration {
+        name: "text".into(),
+        binding: None,
+        type_annotation: Some(TypeAnnotation::Nullable(Box::new(TypeAnnotation::Simple(
+            "String".into(),
+        )))),
+        initializer: Expression::Literal(Literal::Null, span.clone()),
+        modifiers: default_modifiers(),
+        origin: ValBindingOrigin::ExplicitKeyword,
+        span: span.clone(),
+    };
+    let regex_expr = Expression::Binary {
+        left: Box::new(Expression::Identifier("text".into(), span.clone())),
+        op: BinaryOp::Is,
+        right: Box::new(Expression::RegexLiteral(regex_literal)),
+        span: span.clone(),
+        metadata,
+    };
+    let matched_decl = Statement::ValDeclaration {
+        name: "matched".into(),
+        binding: None,
+        type_annotation: None,
+        initializer: regex_expr,
+        modifiers: default_modifiers(),
+        origin: ValBindingOrigin::ExplicitKeyword,
+        span: span.clone(),
+    };
+
+    let program = Program {
+        package: None,
+        imports: Vec::new(),
+        statements: vec![text_decl, matched_decl],
+        span: span.clone(),
+    };
+
+    let mut checker = TypeChecker::new();
+    let result = checker.check_program(&program);
+    assert!(
+        result.is_ok(),
+        "Optional 左辺の正規表現判定が失敗しています: {result:?}"
+    );
+
+    let snapshot = checker
+        .inference_snapshot()
+        .expect("type snapshot should exist");
+    let typings = snapshot.regex_typings();
+    assert_eq!(typings.len(), 1, "正規表現 typing が1件記録される想定");
+    let typing = &typings[0];
+    assert!(matches!(
+        typing.guard_strategy,
+        RegexGuardStrategy::CaptureAndGuard { .. }
+    ));
+    assert_eq!(typing.warnings.len(), 1, "Optional 警告が付与される想定");
+    let warning = &typing.warnings[0];
+    assert_eq!(warning.code, "JV_REGEX_W001");
+    assert!(
+        warning.message.contains("null ガード"),
+        "警告文に null ガードへの言及が必要です: {}",
+        warning.message
+    );
+}
+
+#[test]
+fn regex_is_reports_non_char_sequence_subject() {
+    let span = dummy_span();
+    let regex_literal = RegexLiteral {
+        pattern: "\\d+".into(),
+        raw: "/\\d+/".into(),
+        span: span.clone(),
+    };
+    let metadata = BinaryMetadata {
+        is_test: Some(IsTestMetadata {
+            kind: IsTestKind::RegexLiteral,
+            regex: Some(regex_literal.clone()),
+            pattern_expr: None,
+            diagnostics: Vec::new(),
+            guard_strategy: RegexGuardStrategy::None,
+            span: span.clone(),
+        }),
+    };
+
+    let value_decl = Statement::ValDeclaration {
+        name: "value".into(),
+        binding: None,
+        type_annotation: Some(TypeAnnotation::Simple("Int".into())),
+        initializer: Expression::Literal(Literal::Number("1".into()), span.clone()),
+        modifiers: default_modifiers(),
+        origin: ValBindingOrigin::ExplicitKeyword,
+        span: span.clone(),
+    };
+    let regex_expr = Expression::Binary {
+        left: Box::new(Expression::Identifier("value".into(), span.clone())),
+        op: BinaryOp::Is,
+        right: Box::new(Expression::RegexLiteral(regex_literal)),
+        span: span.clone(),
+        metadata,
+    };
+    let matched_decl = Statement::ValDeclaration {
+        name: "matched".into(),
+        binding: None,
+        type_annotation: None,
+        initializer: regex_expr,
+        modifiers: default_modifiers(),
+        origin: ValBindingOrigin::ExplicitKeyword,
+        span: span.clone(),
+    };
+
+    let program = Program {
+        package: None,
+        imports: Vec::new(),
+        statements: vec![value_decl, matched_decl],
+        span: span.clone(),
+    };
+
+    let mut checker = TypeChecker::new();
+    let result = checker.check_program(&program);
+    assert!(
+        result.is_err(),
+        "CharSequence 非互換の左辺はエラーになるべきです"
+    );
+    let errors = result.err().unwrap();
+    assert!(errors.iter().any(|error| matches!(
+        error,
+        CheckError::TypeError(message) if message.contains("JV_REGEX_E002")
+    )));
+}
+
+#[test]
+fn regex_is_requires_pattern_expression_type() {
+    let span = dummy_span();
+    let metadata = BinaryMetadata {
+        is_test: Some(IsTestMetadata {
+            kind: IsTestKind::PatternExpression,
+            regex: None,
+            pattern_expr: Some(Box::new(Expression::Identifier(
+                "pattern_holder".into(),
+                span.clone(),
+            ))),
+            diagnostics: Vec::new(),
+            guard_strategy: RegexGuardStrategy::None,
+            span: span.clone(),
+        }),
+    };
+
+    let pattern_holder_decl = Statement::ValDeclaration {
+        name: "pattern_holder".into(),
+        binding: None,
+        type_annotation: Some(TypeAnnotation::Simple("Int".into())),
+        initializer: Expression::Literal(Literal::Number("1".into()), span.clone()),
+        modifiers: default_modifiers(),
+        origin: ValBindingOrigin::ExplicitKeyword,
+        span: span.clone(),
+    };
+    let text_decl = Statement::ValDeclaration {
+        name: "text".into(),
+        binding: None,
+        type_annotation: Some(TypeAnnotation::Simple("String".into())),
+        initializer: Expression::Literal(Literal::String("abc".into()), span.clone()),
+        modifiers: default_modifiers(),
+        origin: ValBindingOrigin::ExplicitKeyword,
+        span: span.clone(),
+    };
+    let regex_expr = Expression::Binary {
+        left: Box::new(Expression::Identifier("text".into(), span.clone())),
+        op: BinaryOp::Is,
+        right: Box::new(Expression::Identifier(
+            "pattern_holder".into(),
+            span.clone(),
+        )),
+        span: span.clone(),
+        metadata,
+    };
+    let matched_decl = Statement::ValDeclaration {
+        name: "matched".into(),
+        binding: None,
+        type_annotation: None,
+        initializer: regex_expr,
+        modifiers: default_modifiers(),
+        origin: ValBindingOrigin::ExplicitKeyword,
+        span: span.clone(),
+    };
+
+    let program = Program {
+        package: None,
+        imports: Vec::new(),
+        statements: vec![pattern_holder_decl, text_decl, matched_decl],
+        span: span.clone(),
+    };
+
+    let mut checker = TypeChecker::new();
+    let result = checker.check_program(&program);
+    assert!(
+        result.is_err(),
+        "Pattern 型以外の右辺はエラーになるべきです"
+    );
+    let errors = result.err().unwrap();
+    assert!(errors.iter().any(|error| matches!(
+        error,
+        CheckError::TypeError(message) if message.contains("JV_REGEX_E003")
+    )));
 }
 
 #[test]

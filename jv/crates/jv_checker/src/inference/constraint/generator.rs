@@ -13,6 +13,7 @@ use crate::inference::imports::ImportRegistry;
 use crate::inference::iteration::{
     LoopClassification, classify_loop, expression_can_yield_iterable,
 };
+use crate::inference::regex::{RegexMatchTyping, RegexMatchWarning};
 use crate::inference::type_factory::TypeFactory;
 use crate::inference::types::{PrimitiveType, TypeError, TypeId, TypeKind};
 use crate::pattern::{
@@ -20,8 +21,8 @@ use crate::pattern::{
     expression_span,
 };
 use jv_ast::{
-    Argument, BinaryOp, Expression, ForInStatement, Literal, Parameter, Program, Span, Statement,
-    TypeAnnotation, UnaryOp,
+    Argument, BinaryMetadata, BinaryOp, Expression, ForInStatement, IsTestKind, IsTestMetadata,
+    Literal, Parameter, Program, RegexGuardStrategy, Span, Statement, TypeAnnotation, UnaryOp,
 };
 use jv_inference::types::NullabilityFlag;
 use std::collections::HashMap;
@@ -324,8 +325,12 @@ impl<'env, 'ext, 'imp> ConstraintGenerator<'env, 'ext, 'imp> {
                 }
             }
             Expression::Binary {
-                left, op, right, ..
-            } => self.infer_binary_expression(op, left, right),
+                left,
+                op,
+                right,
+                metadata,
+                ..
+            } => self.infer_binary_expression(op, left, right, metadata),
             Expression::Unary { op, operand, .. } => self.infer_unary_expression(op, operand),
             Expression::Call { function, args, .. } => {
                 let fn_ty = self.infer_expression(function);
@@ -694,6 +699,7 @@ impl<'env, 'ext, 'imp> ConstraintGenerator<'env, 'ext, 'imp> {
         op: &BinaryOp,
         left: &Expression,
         right: &Expression,
+        metadata: &BinaryMetadata,
     ) -> TypeKind {
         use BinaryOp::*;
 
@@ -748,7 +754,17 @@ impl<'env, 'ext, 'imp> ConstraintGenerator<'env, 'ext, 'imp> {
                 );
                 TypeKind::primitive(PrimitiveType::Boolean)
             }
-            Is => TypeKind::primitive(PrimitiveType::Boolean),
+            Is => {
+                if let Some(is_test) = metadata.is_test.as_ref() {
+                    match is_test.kind {
+                        IsTestKind::RegexLiteral | IsTestKind::PatternExpression => {
+                            self.infer_regex_is(left, &left_ty, right, &right_ty, is_test);
+                        }
+                        IsTestKind::Type => {}
+                    }
+                }
+                TypeKind::primitive(PrimitiveType::Boolean)
+            }
             RangeExclusive | RangeInclusive => {
                 self.push_constraint(
                     ConstraintKind::Equal(left_ty.clone(), right_ty.clone()),
@@ -770,6 +786,112 @@ impl<'env, 'ext, 'imp> ConstraintGenerator<'env, 'ext, 'imp> {
                 result_inner
             }
         }
+    }
+
+    fn infer_regex_is(
+        &mut self,
+        left_expr: &Expression,
+        left_ty: &TypeKind,
+        right_expr: &Expression,
+        right_ty: &TypeKind,
+        metadata: &IsTestMetadata,
+    ) {
+        let subject_span = expression_span(left_expr);
+        let pattern_span = expression_span(right_expr);
+        let subject_error = self.regex_subject_error_message(left_ty);
+
+        let char_sequence_ty = TypeKind::reference("java.lang.CharSequence");
+        let optional_char_sequence_ty = TypeKind::optional(char_sequence_ty.clone());
+
+        let mut typing = RegexMatchTyping::new(metadata.span.clone(), RegexGuardStrategy::None);
+
+        let subject_ok = if matches!(left_ty, TypeKind::Optional(_)) {
+            typing.guard_strategy = RegexGuardStrategy::CaptureAndGuard { temp_name: None };
+            typing.push_warning(RegexMatchWarning::new(
+                "JV_REGEX_W001",
+                self.regex_optional_warning_message(),
+            ));
+            self.push_regex_constraint(
+                left_ty.clone(),
+                optional_char_sequence_ty,
+                subject_span,
+                subject_error,
+                true,
+            )
+        } else {
+            self.push_regex_constraint(
+                left_ty.clone(),
+                char_sequence_ty,
+                subject_span,
+                subject_error,
+                false,
+            )
+        };
+
+        if !subject_ok {
+            return;
+        }
+
+        if matches!(metadata.kind, IsTestKind::PatternExpression) {
+            let pattern_error = self.regex_pattern_error_message(right_ty);
+            let pattern_ok = self.push_regex_constraint(
+                right_ty.clone(),
+                TypeKind::reference("java.util.regex.Pattern"),
+                pattern_span,
+                pattern_error,
+                false,
+            );
+            if !pattern_ok {
+                return;
+            }
+        }
+
+        self.env.push_regex_typing(typing);
+    }
+
+    fn push_regex_constraint(
+        &mut self,
+        from: TypeKind,
+        to: TypeKind,
+        span: Option<&Span>,
+        note: String,
+        warn: bool,
+    ) -> bool {
+        match CompatibilityChecker::analyze(self.env, &from, &to) {
+            ConversionOutcome::Rejected(_) => {
+                self.report_type_error(TypeError::custom(note));
+                false
+            }
+            _ => {
+                let kind = if warn {
+                    ConstraintKind::ConvertibleWithWarning { from, to }
+                } else {
+                    ConstraintKind::Convertible { from, to }
+                };
+                self.push_constraint_with_span(kind, Some(note.as_str()), span);
+                true
+            }
+        }
+    }
+
+    fn regex_subject_error_message(&self, ty: &TypeKind) -> String {
+        let ty_desc = ty.describe();
+        format!(
+            "JV_REGEX_E002: `is /pattern/` の左辺型 `{}` は CharSequence 互換である必要があります。`toString()` などで文字列へ変換するか、CharSequence を実装した型を使用してください。\nJV_REGEX_E002: The left-hand side type `{}` must be compatible with CharSequence when using `is /pattern/`. Convert it with `toString()` or provide a CharSequence implementation.",
+            ty_desc, ty_desc
+        )
+    }
+
+    fn regex_optional_warning_message(&self) -> String {
+        "JV_REGEX_W001: Optional 型の左辺は自動的に `value != null && matcher(value)` へ展開されます。明示的な null ガードを追加して意図を強調することも検討してください。\nJV_REGEX_W001: Optional subjects are evaluated as `value != null && matcher(value)` automatically. Consider adding an explicit null guard to make the intention clear.".into()
+    }
+
+    fn regex_pattern_error_message(&self, ty: &TypeKind) -> String {
+        let ty_desc = ty.describe();
+        format!(
+            "JV_REGEX_E003: `is` の右辺は `java.util.regex.Pattern` 型でなければなりません。現在の型は `{}` です。`Pattern.compile(...)` で生成するか、Pattern 型の値を渡してください。\nJV_REGEX_E003: The right-hand side of `is` must be a `java.util.regex.Pattern`, but the current type is `{}`. Construct a Pattern with `Pattern.compile(...)` or pass an existing Pattern.",
+            ty_desc, ty_desc
+        )
     }
 
     fn infer_unary_expression(&mut self, op: &UnaryOp, operand: &Expression) -> TypeKind {

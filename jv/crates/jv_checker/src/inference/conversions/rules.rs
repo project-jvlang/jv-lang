@@ -77,6 +77,12 @@ impl ConversionRulesEngine {
                         .with_nullable_guard(NullableGuard::new(NullableGuardReason::Unboxing)),
                 )
             }
+            (TypeKind::Reference(left), TypeKind::Reference(right))
+                if right == "java.lang.CharSequence"
+                    && (left == right || left == "java.lang.String") =>
+            {
+                ConversionOutcome::Allowed(ConversionMetadata::new(ConversionKind::Identity))
+            }
             (_, TypeKind::Reference(name)) if name == "java.lang.String" => {
                 let owner = Self::string_helper_owner(from);
                 let metadata = ConversionMetadata::new(ConversionKind::StringConversion)

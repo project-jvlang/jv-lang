@@ -175,6 +175,8 @@ pub enum TypeError {
     NullabilityMismatch { from: String, to: String },
     #[error("cannot convert `{from}` to `{to}`")]
     IncompatibleConversion { from: String, to: String },
+    #[error("{message}")]
+    Custom { message: String },
 }
 
 impl TypeError {
@@ -184,6 +186,12 @@ impl TypeError {
 
     pub fn incompatible_conversion(from: String, to: String) -> Self {
         Self::IncompatibleConversion { from, to }
+    }
+
+    pub fn custom(message: impl Into<String>) -> Self {
+        Self::Custom {
+            message: message.into(),
+        }
     }
 }
 
