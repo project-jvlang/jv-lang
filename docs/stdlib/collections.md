@@ -28,6 +28,22 @@ catalog = products
 - Kotlin の暗黙 `it` パラメータ（`{ it * 2 }`）はコンパイルエラーになります。
 - タプル分解 `{ (acc, value) -> ... }` はサポートされ、IR と生成 Java で中間タプルなしに展開されます。
 
+### `return #label` による早期脱出
+高階関数に付与したラベルへ `return #label` で戻ると、イテレーションを即時終了できます。
+
+```jv
+numbers.forEach #scan { value ->
+    if (value < 0) {
+        return #scan  // それ以上の処理を行わずに脱出
+    }
+    println("value=$value")
+}
+```
+
+- `forEach #scan { ... }` のように呼び出し直前でラベルを宣言します。
+- `return #scan result` と記述すると、生成 Java では `return result;` が出力されます。
+- コメント扱いにしたい場合は `# comment` のように `#` の直後へ空白を挿入してください。
+
 ## Sequence ⇔ Kotlin パリティ表
 | Kotlin 操作 | jv の書き方 | Java 25 出力 | Java 21 出力 | 注記 |
 |-------------|-------------|---------------|---------------|------|
