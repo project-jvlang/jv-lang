@@ -110,11 +110,15 @@ impl JavaCodeGenerator {
                 self.generate_sample_declaration_binding(declaration)?
             }
             IrStatement::Expression { expr, .. } => {
-                let mut line = self.generate_expression(expr)?;
-                if !line.ends_with(';') {
-                    line.push(';');
+                if matches!(expr, IrExpression::Block { .. }) {
+                    self.generate_expression(expr)?
+                } else {
+                    let mut line = self.generate_expression(expr)?;
+                    if !line.ends_with(';') {
+                        line.push(';');
+                    }
+                    line
                 }
-                line
             }
             IrStatement::Return { value, .. } => match value {
                 Some(expr) => {
@@ -542,14 +546,48 @@ impl JavaCodeGenerator {
                 builder.push_line(&format!("case {}{}:", labels, guard));
             }
             builder.indent();
-            let body_expr = self.generate_expression(&case.body)?;
-            builder.push_line(&format!("{};", body_expr));
-            builder.push_line("break;");
+            let body_stmt = Self::expression_to_statement(&case.body);
+            let body_code = self.generate_statement(&body_stmt)?;
+            Self::push_lines(&mut builder, &body_code);
+            if Self::case_body_needs_break(&body_stmt) {
+                builder.push_line("break;");
+            }
             builder.dedent();
         }
         builder.dedent();
         builder.push_line("}");
         Ok(builder.build())
+    }
+
+    fn expression_to_statement(expr: &IrExpression) -> IrStatement {
+        match expr {
+            IrExpression::Block {
+                statements, span, ..
+            } => IrStatement::Block {
+                label: None,
+                statements: statements.clone(),
+                span: span.clone(),
+            },
+            IrExpression::Lambda { body, .. } => Self::expression_to_statement(body),
+            other => IrStatement::Expression {
+                expr: other.clone(),
+                span: other.span(),
+            },
+        }
+    }
+
+    fn case_body_needs_break(stmt: &IrStatement) -> bool {
+        match stmt {
+            IrStatement::Return { .. }
+            | IrStatement::Throw { .. }
+            | IrStatement::Break { .. }
+            | IrStatement::Continue { .. } => false,
+            IrStatement::Block { statements, .. } => statements
+                .last()
+                .map(|inner| Self::case_body_needs_break(inner))
+                .unwrap_or(true),
+            _ => true,
+        }
     }
 
     fn generate_try_statement(

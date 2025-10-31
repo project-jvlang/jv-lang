@@ -221,6 +221,7 @@ impl WhenLoweringPlanner {
                 cases.clone(),
                 implicit_ir_end.clone(),
                 resolved_result_type.clone(),
+                span.clone(),
             ) {
                 let description = format!(
                     "strategy=IfChain arms={} exhaustive={}",
@@ -279,7 +280,7 @@ impl WhenLoweringPlanner {
             });
         }
 
-        let mut fallback = match (else_arm, implicit_end) {
+        let base_fallback = match (else_arm, implicit_end) {
             (Some(else_arm), _) => transform_expression(*else_arm, context)?,
             (None, Some(end)) => implicit_end_expression(end),
             (None, None) => {
@@ -290,8 +291,10 @@ impl WhenLoweringPlanner {
             }
         };
 
+        let mut fallback = base_fallback.clone();
         let mut result_type = extract_java_type(&fallback);
         let total_arms = arms.len();
+        let mut branches: Vec<(IrExpression, IrExpression, Span)> = Vec::new();
 
         while let Some(arm) = arms.pop() {
             let condition = lower_subjectless_pattern(arm.pattern, context, &arm.span)?;
@@ -314,6 +317,8 @@ impl WhenLoweringPlanner {
             }
             let java_type = result_type.clone().unwrap_or_else(JavaType::object);
 
+            branches.push((condition.clone(), body.clone(), arm.span.clone()));
+
             fallback = IrExpression::Conditional {
                 condition: Box::new(condition),
                 then_expr: Box::new(body),
@@ -321,6 +326,24 @@ impl WhenLoweringPlanner {
                 java_type,
                 span: arm.span,
             };
+        }
+
+        branches.reverse();
+
+        if result_type
+            .as_ref()
+            .is_some_and(|ty| matches!(ty, JavaType::Void))
+        {
+            let block = build_void_if_chain_block(branches, base_fallback, span.clone());
+            let exhaustive = describe_exhaustiveness(&analysis);
+            let description = format!(
+                "strategy=IfChain arms={} exhaustive={}",
+                total_arms, exhaustive
+            );
+            return Ok(WhenLoweringPlan {
+                description,
+                ir: block,
+            });
         }
 
         let exhaustive = describe_exhaustiveness(&analysis);
@@ -697,39 +720,91 @@ fn build_boolean_if_chain(
     cases: Vec<IrSwitchCase>,
     implicit_end: Option<IrImplicitWhenEnd>,
     result_type: JavaType,
+    when_span: Span,
 ) -> Option<IrExpression> {
     let mut default_body: Option<IrExpression> = None;
-    let mut filtered_cases = Vec::new();
+    let mut branches: Vec<(IrExpression, IrExpression, Span)> = Vec::new();
 
     for case in cases {
-        if case
+        let has_default_label = case
             .labels
             .iter()
-            .any(|label| matches!(label, IrCaseLabel::Default))
-            && case.guard.is_none()
-            && default_body.is_none()
-        {
+            .any(|label| matches!(label, IrCaseLabel::Default));
+        if has_default_label && case.guard.is_none() && default_body.is_none() {
             default_body = Some(case.body);
-        } else {
-            filtered_cases.push(case);
+            continue;
+        }
+
+        let condition = boolean_case_condition(&discriminant, &case)?;
+        branches.push((condition, case.body, case.span.clone()));
+    }
+
+    let fallback = default_body.or_else(|| implicit_end_ir_expression(&implicit_end))?;
+
+    match result_type {
+        JavaType::Void => Some(build_void_if_chain_block(branches, fallback, when_span)),
+        other => {
+            let mut fallback_expr = fallback;
+            for (condition, body, span) in branches.into_iter().rev() {
+                fallback_expr = IrExpression::Conditional {
+                    condition: Box::new(condition),
+                    then_expr: Box::new(body),
+                    else_expr: Box::new(fallback_expr),
+                    java_type: other.clone(),
+                    span,
+                };
+            }
+            Some(fallback_expr)
         }
     }
+}
 
-    let mut fallback = default_body.or_else(|| implicit_end_ir_expression(&implicit_end))?;
+fn build_void_if_chain_block(
+    branches: Vec<(IrExpression, IrExpression, Span)>,
+    fallback: IrExpression,
+    span: Span,
+) -> IrExpression {
+    let mut else_branch = Some(expression_to_statement(fallback));
 
-    for case in filtered_cases.into_iter().rev() {
-        let condition = boolean_case_condition(&discriminant, &case)?;
-        let branch_body = case.body;
-        fallback = IrExpression::Conditional {
-            condition: Box::new(condition),
-            then_expr: Box::new(branch_body),
-            else_expr: Box::new(fallback),
-            java_type: result_type.clone(),
-            span: case.span,
+    for (condition, body, arm_span) in branches.into_iter().rev() {
+        let then_stmt = expression_to_statement(body);
+        let next_else = else_branch.take().map(Box::new);
+        let if_stmt = IrStatement::If {
+            condition,
+            then_stmt: Box::new(then_stmt),
+            else_stmt: next_else,
+            span: arm_span,
         };
+        else_branch = Some(if_stmt);
     }
 
-    Some(fallback)
+    let mut statements = Vec::new();
+    if let Some(stmt) = else_branch {
+        statements.push(stmt);
+    }
+
+    IrExpression::Block {
+        statements,
+        java_type: JavaType::void(),
+        span,
+    }
+}
+
+fn expression_to_statement(expr: IrExpression) -> IrStatement {
+    match expr {
+        IrExpression::Lambda { body, .. } => expression_to_statement(*body),
+        IrExpression::Block {
+            statements, span, ..
+        } => IrStatement::Block {
+            label: None,
+            statements,
+            span,
+        },
+        other => IrStatement::Expression {
+            span: other.span(),
+            expr: other,
+        },
+    }
 }
 
 fn boolean_case_condition(
