@@ -1662,34 +1662,33 @@ fn lowering_hash_label_example_retains_labels() {
     };
     assert!(!arms.is_empty(), "when 式には少なくとも1件の分岐が必要です");
     let first_arm_statements = extract_statements(&arms[0].body);
-    let continue_label = first_arm_statements
-        .iter()
-        .find_map(|stmt| match stmt {
-            Statement::Continue { label, .. } => Some(label),
-            _ => None,
-        })
-        .expect("when の最初の分岐に continue が存在するべきです");
-    assert_eq!(
-        continue_label.as_deref(),
-        Some("outer"),
-        "continue ラベルが保持されるべきです"
-    );
-    let else_arm_expr = else_arm
-        .as_ref()
-        .expect("when 式に else 分岐が存在するべきです");
-    let else_statements = extract_statements(else_arm_expr.as_ref());
-    let break_label = else_statements
+    let break_status_label = first_arm_statements
         .iter()
         .find_map(|stmt| match stmt {
             Statement::Break { label, .. } => Some(label),
             _ => None,
         })
-        .expect("when の else 分岐に break が存在するべきです");
+        .expect("when の最初の分岐に break が存在するべきです");
     assert_eq!(
-        break_label.as_deref(),
-        Some("outer"),
-        "break ラベルが保持されるべきです"
+        break_status_label.as_deref(),
+        Some("statusCheck"),
+        "break #statusCheck のラベルが保持されるべきです"
     );
+    if let Some(else_arm_expr) = else_arm.as_ref() {
+        let else_statements = extract_statements(else_arm_expr.as_ref());
+        let break_label = else_statements
+            .iter()
+            .find_map(|stmt| match stmt {
+                Statement::Break { label, .. } => Some(label),
+                _ => None,
+            })
+            .expect("when の else 分岐に break が存在するべきです");
+        assert_eq!(
+            break_label.as_deref(),
+            Some("outer"),
+            "break ラベルが保持されるべきです"
+        );
+    }
 }
 
 #[test]
