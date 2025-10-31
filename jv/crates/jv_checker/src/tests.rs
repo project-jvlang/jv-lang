@@ -8,9 +8,9 @@ use fastrand::Rng;
 use jv_ast::{
     Annotation, AnnotationName, BinaryMetadata, BinaryOp, Expression, IsTestKind, IsTestMetadata,
     Literal, Modifiers, Parameter, ParameterModifiers, Pattern, Program, RegexCommand,
-    RegexCommandMode, RegexCommandModeOrigin, RegexFlag, RegexGuardStrategy, RegexLambdaReplacement,
-    RegexLiteral, RegexLiteralReplacement, RegexReplacement, Span, Statement, TypeAnnotation,
-    ValBindingOrigin, WhenArm,
+    RegexCommandMode, RegexCommandModeOrigin, RegexFlag, RegexGuardStrategy,
+    RegexLambdaReplacement, RegexLiteral, RegexLiteralReplacement, RegexReplacement, Span,
+    Statement, TypeAnnotation, ValBindingOrigin, WhenArm,
 };
 use jv_inference::TypeFacts;
 use jv_inference::types::{NullabilityFlag, TypeVariant as FactsTypeVariant};
@@ -1563,10 +1563,13 @@ fn regex_command_unknown_flag_reports_error() {
     let result = checker.check_program(&program);
     assert!(result.is_err(), "未知フラグはエラーになる想定です");
     let errors = result.err().unwrap();
-    assert!(errors.iter().any(|error| matches!(
-        error,
-        CheckError::TypeError(message) if message.contains("JV_REGEX_E101")
-    )), "JV_REGEX_E101 エラーが報告される必要があります: {errors:?}");
+    assert!(
+        errors.iter().any(|error| matches!(
+            error,
+            CheckError::TypeError(message) if message.contains("JV_REGEX_E101")
+        )),
+        "JV_REGEX_E101 エラーが報告される必要があります: {errors:?}"
+    );
     assert!(
         checker.inference_snapshot().is_none(),
         "エラー時は推論スナップショットが生成されない想定です"
@@ -1603,12 +1606,18 @@ fn regex_command_lambda_must_return_string() {
 
     let mut checker = TypeChecker::new();
     let result = checker.check_program(&program);
-    assert!(result.is_err(), "String 以外を返すラムダはエラーになる想定です");
+    assert!(
+        result.is_err(),
+        "String 以外を返すラムダはエラーになる想定です"
+    );
     let errors = result.err().unwrap();
-    assert!(errors.iter().any(|error| matches!(
-        error,
-        CheckError::TypeError(message) if message.contains("JV_REGEX_E102")
-    )), "JV_REGEX_E102 エラーが必要です: {errors:?}");
+    assert!(
+        errors.iter().any(|error| matches!(
+            error,
+            CheckError::TypeError(message) if message.contains("JV_REGEX_E102")
+        )),
+        "JV_REGEX_E102 エラーが必要です: {errors:?}"
+    );
 }
 
 #[test]

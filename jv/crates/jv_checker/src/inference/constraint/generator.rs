@@ -25,8 +25,8 @@ use crate::pattern::{
 };
 use jv_ast::{
     Argument, BinaryMetadata, BinaryOp, Expression, ForInStatement, IsTestKind, IsTestMetadata,
-    Literal, Parameter, Program, RegexCommand, RegexCommandMode, RegexCommandModeOrigin,
-    RegexFlag, RegexGuardStrategy, RegexReplacement, Span, Statement, TypeAnnotation, UnaryOp,
+    Literal, Parameter, Program, RegexCommand, RegexCommandMode, RegexCommandModeOrigin, RegexFlag,
+    RegexGuardStrategy, RegexReplacement, Span, Statement, TypeAnnotation, UnaryOp,
 };
 use jv_inference::types::NullabilityFlag;
 use std::collections::{HashMap, HashSet};
@@ -964,9 +964,7 @@ impl<'env, 'ext, 'imp> ConstraintGenerator<'env, 'ext, 'imp> {
                         .type_annotation
                         .as_ref()
                         .map(|ann| self.type_from_annotation(ann))
-                        .unwrap_or_else(|| {
-                            TypeKind::reference("java.util.regex.MatchResult")
-                        });
+                        .unwrap_or_else(|| TypeKind::reference("java.util.regex.MatchResult"));
 
                     self.env
                         .define_scheme(param.name.clone(), TypeScheme::monotype(ty.clone()));
@@ -1061,10 +1059,7 @@ impl<'env, 'ext, 'imp> ConstraintGenerator<'env, 'ext, 'imp> {
                 let normalized = ch.to_ascii_lowercase();
                 if !self.is_known_regex_flag(normalized) && reported.insert(normalized) {
                     let message = messages::regex_unknown_flag_message(ch);
-                    diagnostics.push(RegexCommandIssue::new(
-                        "JV_REGEX_E101",
-                        message.clone(),
-                    ));
+                    diagnostics.push(RegexCommandIssue::new("JV_REGEX_E101", message.clone()));
                     self.report_type_error(TypeError::custom(message));
                 }
             }
@@ -1072,10 +1067,7 @@ impl<'env, 'ext, 'imp> ConstraintGenerator<'env, 'ext, 'imp> {
 
         if let Some((primary, secondary)) = self.detect_literal_flag_conflict(&command.flags) {
             let message = messages::regex_flag_conflict_message(primary, secondary);
-            diagnostics.push(RegexCommandIssue::new(
-                "JV_REGEX_E103",
-                message.clone(),
-            ));
+            diagnostics.push(RegexCommandIssue::new("JV_REGEX_E103", message.clone()));
             self.report_type_error(TypeError::custom(message));
         }
     }

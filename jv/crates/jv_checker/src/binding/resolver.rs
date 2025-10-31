@@ -602,9 +602,9 @@ impl BindingResolver {
                 delimiter,
                 span,
             },
-            Expression::RegexCommand(command) => Expression::RegexCommand(Box::new(
-                self.resolve_regex_command(*command),
-            )),
+            Expression::RegexCommand(command) => {
+                Expression::RegexCommand(Box::new(self.resolve_regex_command(*command)))
+            }
             Expression::Lambda {
                 parameters,
                 body,
@@ -673,9 +673,7 @@ impl BindingResolver {
             RegexReplacement::Expression(expr) => {
                 RegexReplacement::Expression(self.resolve_expression(expr))
             }
-            RegexReplacement::Lambda(lambda) => {
-                self.resolve_regex_lambda(lambda)
-            }
+            RegexReplacement::Lambda(lambda) => self.resolve_regex_lambda(lambda),
         }
     }
 

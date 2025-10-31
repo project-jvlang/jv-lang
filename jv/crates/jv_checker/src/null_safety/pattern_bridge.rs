@@ -338,9 +338,7 @@ impl PatternFactsBridge {
         match replacement {
             RegexReplacement::Literal(_) => BridgeOutcome::default(),
             RegexReplacement::Expression(expr) => self.visit_expression(expr, service, context),
-            RegexReplacement::Lambda(lambda) => {
-                self.visit_regex_lambda(lambda, service, context)
-            }
+            RegexReplacement::Lambda(lambda) => self.visit_regex_lambda(lambda, service, context),
         }
     }
 

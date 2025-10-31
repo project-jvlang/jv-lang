@@ -20,8 +20,8 @@ pub use regex::RegexAnalysis;
 
 use crate::imports::ResolvedImport;
 use binding::{BindingResolution, BindingUsageSummary, LateInitManifest, resolve_bindings};
-use inference::{RegexCommandTyping, RegexMatchTyping};
 use inference::conversions::{AppliedConversion, ConversionKind, HelperSpec, NullableGuard};
+use inference::{RegexCommandTyping, RegexMatchTyping};
 use jv_ast::{Program, Span};
 use jv_build::metadata::SymbolIndex;
 use null_safety::{JavaLoweringHint, NullSafetyCoordinator};

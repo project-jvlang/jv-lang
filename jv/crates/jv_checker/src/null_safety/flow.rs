@@ -2,7 +2,8 @@ use std::collections::{HashMap, VecDeque};
 
 use jv_ast::{
     BinaryMetadata, BinaryOp, Expression, IsTestKind, Program, RegexLambdaReplacement,
-    RegexReplacement, Statement, TryCatchClause, WhenArm, expression::Argument,
+    RegexReplacement, Statement, TryCatchClause, WhenArm,
+    expression::Argument,
     types::{Literal, Modifiers, Span},
 };
 
