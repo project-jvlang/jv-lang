@@ -1,7 +1,9 @@
 // jv_lsp - Language Server Protocol implementation
+mod features;
 mod handlers;
 mod highlight;
 
+use features::regex_command::{RegexCommandDiagnostic, RegexCommandIndex};
 use handlers::imports::build_imports_response;
 pub use handlers::imports::{ImportItem, ImportsParams, ImportsResponse};
 pub use highlight::tokens::{HighlightKind, HighlightToken};
@@ -17,8 +19,8 @@ use jv_build::metadata::{
 };
 use jv_checker::diagnostics::{
     DiagnosticSeverity as ToolingSeverity, DiagnosticStrategy, EnhancedDiagnostic,
-    collect_raw_type_diagnostics, from_check_error, from_frontend_diagnostics, from_parse_error,
-    from_transform_error,
+    collect_raw_type_diagnostics, descriptor as lookup_descriptor, from_check_error,
+    from_frontend_diagnostics, from_parse_error, from_transform_error,
 };
 use jv_checker::imports::{
     ImportResolutionService, ResolvedImport, ResolvedImportKind, diagnostics as import_diagnostics,
@@ -500,6 +502,7 @@ pub struct JvLanguageServer {
     documents: HashMap<String, String>,
     type_facts: HashMap<String, TypeFactsSnapshot>,
     regex_metadata: HashMap<String, Vec<RegexAnalysis>>,
+    regex_commands: HashMap<String, RegexCommandIndex>,
     programs: HashMap<String, Program>,
     generics: HashMap<String, GenericDocumentIndex>,
     token_highlights: HashMap<String, Vec<HighlightToken>>,
@@ -539,6 +542,7 @@ impl JvLanguageServer {
             documents: HashMap::new(),
             type_facts: HashMap::new(),
             regex_metadata: HashMap::new(),
+            regex_commands: HashMap::new(),
             programs: HashMap::new(),
             generics: HashMap::new(),
             token_highlights: HashMap::new(),
@@ -610,6 +614,7 @@ impl JvLanguageServer {
         self.documents.insert(uri.clone(), content);
         self.type_facts.remove(&uri);
         self.regex_metadata.remove(&uri);
+        self.regex_commands.remove(&uri);
         self.programs.remove(&uri);
         self.generics.remove(&uri);
         self.token_highlights.remove(&uri);
@@ -619,6 +624,7 @@ impl JvLanguageServer {
         self.documents.remove(uri);
         self.type_facts.remove(uri);
         self.regex_metadata.remove(uri);
+        self.regex_commands.remove(uri);
         self.programs.remove(uri);
         self.generics.remove(uri);
         self.token_highlights.remove(uri);
@@ -643,6 +649,7 @@ impl JvLanguageServer {
             Err(error) => {
                 self.type_facts.remove(uri);
                 self.regex_metadata.remove(uri);
+                self.regex_commands.remove(uri);
                 self.programs.remove(uri);
                 self.generics.remove(uri);
                 return match from_parse_error(&error) {
@@ -682,6 +689,7 @@ impl JvLanguageServer {
         {
             self.type_facts.remove(uri);
             self.regex_metadata.remove(uri);
+            self.regex_commands.remove(uri);
             self.programs.remove(uri);
             self.generics.remove(uri);
             return diagnostics;
@@ -706,6 +714,7 @@ impl JvLanguageServer {
                 ));
                 self.type_facts.remove(uri);
                 self.regex_metadata.remove(uri);
+                self.regex_commands.remove(uri);
                 return diagnostics;
             }
         };
@@ -719,6 +728,7 @@ impl JvLanguageServer {
                 Err(error) => {
                     self.type_facts.remove(uri);
                     self.regex_metadata.remove(uri);
+                    self.regex_commands.remove(uri);
                     return vec![match import_diagnostics::from_error(&error) {
                         Some(diagnostic) => tooling_diagnostic_to_lsp(
                             uri,
@@ -768,8 +778,25 @@ impl JvLanguageServer {
                 if let Some(snapshot) = checker.take_inference_snapshot() {
                     self.type_facts
                         .insert(uri.to_string(), snapshot.type_facts().clone());
+                    let command_index = RegexCommandIndex::build(
+                        &program,
+                        &tokens,
+                        snapshot.regex_command_typings(),
+                    );
+                    let command_diagnostics = command_index.diagnostics();
+                    if command_index.is_empty() {
+                        self.regex_commands.remove(uri);
+                    } else {
+                        self.regex_commands.insert(uri.to_string(), command_index);
+                    }
+                    diagnostics.extend(
+                        command_diagnostics
+                            .into_iter()
+                            .map(|diagnostic| regex_command_diagnostic_to_lsp(uri, diagnostic)),
+                    );
                 } else {
                     self.type_facts.remove(uri);
+                    self.regex_commands.remove(uri);
                 }
                 diagnostics.extend(
                     null_safety_warnings
@@ -779,6 +806,7 @@ impl JvLanguageServer {
             }
             Err(errors) => {
                 self.type_facts.remove(uri);
+                self.regex_commands.remove(uri);
                 if regex_analyses.is_empty() {
                     self.regex_metadata.remove(uri);
                 } else {
@@ -894,6 +922,10 @@ impl JvLanguageServer {
             }
         }
 
+        if let Some(index) = self.regex_commands.get(uri) {
+            items.extend(index.completions(&position));
+        }
+
         if let Some(analyses) = self.regex_metadata.get(uri) {
             items.extend(
                 REGEX_COMPLETION_TEMPLATES
@@ -932,6 +964,10 @@ impl JvLanguageServer {
             return Some(hover);
         }
 
+        if let Some(hover) = self.regex_command_hover(uri, &position) {
+            return Some(hover);
+        }
+
         let analyses = self.regex_metadata.get(uri)?;
         let analysis = analyses
             .iter()
@@ -945,6 +981,15 @@ impl JvLanguageServer {
         self.regex_metadata
             .get(uri)
             .map(|entries| entries.as_slice())
+    }
+
+    fn regex_command_hover(&self, uri: &str, position: &Position) -> Option<HoverResult> {
+        let index = self.regex_commands.get(uri)?;
+        let (span, contents) = index.hover(position)?;
+        Some(HoverResult {
+            contents,
+            range: span_to_range(&span),
+        })
     }
 
     fn regex_program_from_tokens(tokens: &[Token]) -> Option<Program> {
@@ -1392,6 +1437,40 @@ fn format_type_level_expr(expr: &TypeLevelExpr) -> String {
 
 fn format_type_level_value(value: &TypeLevelValue) -> String {
     value.to_string()
+}
+
+fn regex_command_diagnostic_to_lsp(uri: &str, diagnostic: RegexCommandDiagnostic) -> Diagnostic {
+    let descriptor = lookup_descriptor(&diagnostic.code);
+    let (title, severity, help) = if let Some(descriptor) = descriptor {
+        (
+            descriptor.title.to_string(),
+            Some(map_severity(descriptor.severity)),
+            Some(descriptor.help.to_string()),
+        )
+    } else {
+        (
+            diagnostic.code.clone(),
+            Some(DiagnosticSeverity::Information),
+            None,
+        )
+    };
+
+    Diagnostic {
+        range: span_to_range(&diagnostic.span),
+        severity,
+        message: format!(
+            "{code}: {title}\nSource: {uri}\n{detail}",
+            code = diagnostic.code,
+            title = title,
+            uri = uri,
+            detail = diagnostic.message,
+        ),
+        code: Some(diagnostic.code),
+        source: Some("jv-lsp".to_string()),
+        help,
+        suggestions: diagnostic.suggestions,
+        strategy: Some("Interactive".to_string()),
+    }
 }
 
 fn tooling_diagnostic_to_lsp(uri: &str, diagnostic: EnhancedDiagnostic) -> Diagnostic {
