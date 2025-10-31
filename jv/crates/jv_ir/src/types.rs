@@ -191,6 +191,8 @@ pub enum IrExpression {
         implicit_end: Option<IrImplicitWhenEnd>,
         #[serde(default)]
         strategy_description: Option<String>,
+        #[serde(default)]
+        label: Option<String>,
         span: Span,
     },
 

@@ -670,8 +670,9 @@ fn replace_this_ir_expression(
             cases,
             java_type,
             implicit_end,
-            span,
             strategy_description,
+            label,
+            span,
         } => IrExpression::Switch {
             discriminant: Box::new(replace_this_ir_expression(
                 *discriminant,
@@ -692,6 +693,7 @@ fn replace_this_ir_expression(
             java_type,
             implicit_end,
             strategy_description,
+            label,
             span,
         },
         IrExpression::Cast {

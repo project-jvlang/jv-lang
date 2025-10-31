@@ -791,7 +791,7 @@ impl JavaCodeGenerator {
         case.labels.len() == 1 && matches!(case.labels[0], IrCaseLabel::Default)
     }
 
-    fn normalize_label(label: &str) -> String {
+    pub(super) fn normalize_label(label: &str) -> String {
         let trimmed = label.trim();
         let without_hash = trimmed.strip_prefix('#').unwrap_or(trimmed);
         if without_hash.is_empty() {

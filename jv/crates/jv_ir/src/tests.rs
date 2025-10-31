@@ -1275,7 +1275,13 @@ mod tests {
         .expect("ラベル付き when はローワリングできるべきです");
 
         match ir {
-            IrExpression::Switch { .. } => {}
+            IrExpression::Switch {
+                label: Some(lowered_label),
+                ..
+            } => assert_eq!(lowered_label, "status"),
+            IrExpression::Switch { label: None, .. } => {
+                panic!("ラベル付き when の Switch にラベルが伝搬されていません")
+            }
             other => panic!("Switch へのローワリングを期待しましたが {:?} でした", other),
         }
 

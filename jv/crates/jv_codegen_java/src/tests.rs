@@ -2729,6 +2729,7 @@ fn switch_expression_renders_guards_and_default_branch() {
         java_type: JavaType::string(),
         implicit_end: None,
         strategy_description: None,
+        label: None,
         span: dummy_span(),
     };
 
@@ -2759,6 +2760,7 @@ fn switch_expression_appends_implicit_unit_branch_when_missing_default() {
         java_type: JavaType::string(),
         implicit_end: Some(IrImplicitWhenEnd::Unit { span: dummy_span() }),
         strategy_description: None,
+        label: None,
         span: dummy_span(),
     };
 
@@ -2791,6 +2793,7 @@ fn switch_expression_respects_existing_default_over_implicit_unit() {
         java_type: JavaType::string(),
         implicit_end: Some(IrImplicitWhenEnd::Unit { span: dummy_span() }),
         strategy_description: None,
+        label: None,
         span: dummy_span(),
     };
 
@@ -2822,6 +2825,7 @@ fn switch_expression_includes_strategy_comment_when_present() {
         strategy_description: Some(
             "strategy=Switch arms=1 guards=0 default=false exhaustive=unknown".to_string(),
         ),
+        label: None,
         span: dummy_span(),
     };
 
@@ -2891,6 +2895,7 @@ fn switch_expression_renders_range_case_with_comment() {
         java_type: JavaType::string(),
         implicit_end: None,
         strategy_description: None,
+        label: None,
         span: dummy_span(),
     };
 
@@ -2917,6 +2922,7 @@ fn switch_expression_implicit_unit_renders_for_java21_target() {
         java_type: JavaType::string(),
         implicit_end: Some(IrImplicitWhenEnd::Unit { span: dummy_span() }),
         strategy_description: None,
+        label: None,
         span: dummy_span(),
     };
 
@@ -2959,6 +2965,7 @@ fn switch_expression_java21_type_pattern_fallback() {
         strategy_description: Some(
             "strategy=Switch arms=2 guards=0 default=true exhaustive=true".to_string(),
         ),
+        label: None,
         span: dummy_span(),
     };
 
@@ -3043,6 +3050,7 @@ fn switch_expression_java21_range_pattern_fallback() {
         java_type: JavaType::string(),
         implicit_end: None,
         strategy_description: None,
+        label: None,
         span: dummy_span(),
     };
 
@@ -3082,6 +3090,7 @@ fn switch_expression_with_boolean_literals_does_not_require_preview() {
         strategy_description: Some(
             "strategy=Switch arms=2 guards=0 default=false exhaustive=unknown".to_string(),
         ),
+        label: None,
         span: dummy_span(),
     };
 
@@ -3103,24 +3112,39 @@ fn hash_label_flow_generates_switch_for_labeled_when() {
     let unit = generate_java_code(&program).expect("hash_label_flow の Java 生成に失敗しました");
     let source = unit.to_source(&JavaCodeGenConfig::for_target(JavaTarget::Java25));
 
-    let switch_pos = source
-        .find("switch (members.users.isEmpty())")
-        .expect("ラベル付き when が switch へ変換されるべきです");
-    let end_pos = (switch_pos + 200).min(source.len());
-    let snippet = &source[switch_pos..end_pos];
     assert!(
-        snippet.contains("case true"),
-        "true 分岐が switch ケースとして出力されるべきです:\n{}",
+        source.contains("statusCheck: {"),
+        "ラベル付き when ブロックが生成されるべきです:\n{}",
+        source
+    );
+    let labeled_pos = source
+        .find("statusCheck: {")
+        .expect("ラベル付き when ブロックが生成されるべきです");
+    let end_pos = (labeled_pos + 220).min(source.len());
+    let snippet = &source[labeled_pos..end_pos];
+    assert!(
+        snippet.contains("switch (user.active)"),
+        "ラベル付き when が switch 文として出力されるべきです:\n{}",
         snippet
     );
     assert!(
-        snippet.contains("case false"),
-        "false 分岐が switch ケースとして出力されるべきです:\n{}",
+        snippet.contains("case false:"),
+        "false 分岐がラベル付き switch で生成されるべきです:\n{}",
         snippet
     );
     assert!(
-        !snippet.contains("?"),
-        "ラベル付き when は三項演算子にフォールバックすべきではありません:\n{}",
+        source.contains("break statusCheck;"),
+        "break #statusCheck が Java ラベルを参照するべきです:\n{}",
+        source
+    );
+    assert!(
+        source.contains("continue outer;"),
+        "switch 直後に continue outer; が挿入されるべきです:\n{}",
+        source
+    );
+    assert!(
+        !snippet.contains("->"),
+        "ラベル付き when は switch 式ではなく従来の switch 文として出力されるべきです:\n{}",
         snippet
     );
 }
@@ -3193,6 +3217,7 @@ fn switch_expression_nested_destructuring_java25_and_java21() {
         strategy_description: Some(
             "strategy=Switch arms=2 guards=0 default=true exhaustive=true".to_string(),
         ),
+        label: None,
         span: dummy_span(),
     };
 
@@ -3237,6 +3262,7 @@ fn switch_expression_java21_mixed_labels_emits_jv3105() {
         java_type: JavaType::string(),
         implicit_end: None,
         strategy_description: None,
+        label: None,
         span: dummy_span(),
     };
 

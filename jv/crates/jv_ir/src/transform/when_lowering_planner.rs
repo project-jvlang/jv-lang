@@ -37,6 +37,7 @@ pub struct WhenLoweringPlanner {
     span: Span,
     analysis: PatternAnalysisSummary,
     has_label: bool,
+    label: Option<String>,
 }
 
 impl WhenLoweringPlanner {
@@ -56,6 +57,7 @@ impl WhenLoweringPlanner {
             span,
             analysis: PatternAnalysisSummary::default(),
             has_label: label.is_some(),
+            label,
         }
     }
 
@@ -68,6 +70,7 @@ impl WhenLoweringPlanner {
             span,
             analysis,
             has_label,
+            label,
         } = self;
 
         match subject {
@@ -79,6 +82,7 @@ impl WhenLoweringPlanner {
                 span,
                 analysis,
                 has_label,
+                label,
                 context,
             ),
             None => Self::plan_without_subject(
@@ -88,6 +92,7 @@ impl WhenLoweringPlanner {
                 span,
                 analysis,
                 has_label,
+                label,
                 context,
             ),
         }
@@ -101,6 +106,7 @@ impl WhenLoweringPlanner {
         span: Span,
         analysis: PatternAnalysisSummary,
         has_label: bool,
+        label: Option<String>,
         context: &mut TransformContext,
     ) -> Result<WhenLoweringPlan, TransformError> {
         let mut implicit_ir_end = implicit_end.map(convert_implicit_end);
@@ -242,6 +248,7 @@ impl WhenLoweringPlanner {
             java_type,
             implicit_end: implicit_ir_end,
             strategy_description: Some(description.clone()),
+            label,
             span,
         };
 
@@ -254,9 +261,16 @@ impl WhenLoweringPlanner {
         implicit_end: Option<ImplicitWhenEnd>,
         span: Span,
         analysis: PatternAnalysisSummary,
-        _has_label: bool,
+        has_label: bool,
+        label: Option<String>,
         context: &mut TransformContext,
     ) -> Result<WhenLoweringPlan, TransformError> {
+        if has_label || label.is_some() {
+            return Err(TransformError::UnsupportedConstruct {
+                construct: "subjectless when cannot carry a label".to_string(),
+                span,
+            });
+        }
         let mut arms = arms;
         if arms.is_empty() {
             return Err(TransformError::UnsupportedConstruct {
@@ -1035,6 +1049,7 @@ fn rewrite_expression_with_binding(
             implicit_end,
             span,
             strategy_description,
+            label,
         } => IrExpression::Switch {
             discriminant: Box::new(rewrite_expression_with_binding(
                 *discriminant,
@@ -1055,6 +1070,7 @@ fn rewrite_expression_with_binding(
             java_type,
             implicit_end,
             strategy_description,
+            label,
             span,
         },
         IrExpression::Cast {

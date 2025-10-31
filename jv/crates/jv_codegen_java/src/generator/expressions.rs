@@ -357,6 +357,7 @@ impl JavaCodeGenerator {
             java_type,
             implicit_end,
             strategy_description,
+            label,
             span,
         } = switch
         {
@@ -366,6 +367,7 @@ impl JavaCodeGenerator {
                     cases,
                     implicit_end.as_ref(),
                     strategy_description.as_ref(),
+                    label.as_ref(),
                 );
             }
             if self.targeting.supports_pattern_switch() {
@@ -401,6 +403,7 @@ impl JavaCodeGenerator {
         cases: &[IrSwitchCase],
         implicit_end: Option<&IrImplicitWhenEnd>,
         strategy_description: Option<&String>,
+        label: Option<&String>,
     ) -> Result<String, CodeGenError> {
         let mut statement_cases = cases
             .iter()
@@ -433,7 +436,12 @@ impl JavaCodeGenerator {
         }
 
         let mut builder = self.builder();
-        builder.push_line("{");
+        if let Some(raw_label) = label {
+            let normalized = Self::normalize_label(raw_label);
+            builder.push_line(&format!("{}: {{", normalized));
+        } else {
+            builder.push_line("{");
+        }
         builder.indent();
         if let Some(description) = strategy_description {
             builder.push_line(&format!("// {}", description));

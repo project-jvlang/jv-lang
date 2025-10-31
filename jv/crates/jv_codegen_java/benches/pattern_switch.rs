@@ -107,6 +107,7 @@ fn build_switch_program(
         java_type: return_type.clone(),
         implicit_end: None,
         strategy_description,
+        label: None,
         span: dummy_span(),
     };
 

@@ -1089,8 +1089,9 @@ fn replace_receiver_expression(expr: IrExpression, receiver_type: &JavaType) -> 
             cases,
             java_type,
             implicit_end,
-            span,
             strategy_description,
+            label,
+            span,
         } => IrExpression::Switch {
             discriminant: Box::new(replace_receiver_expression(*discriminant, receiver_type)),
             cases: cases
@@ -1107,6 +1108,7 @@ fn replace_receiver_expression(expr: IrExpression, receiver_type: &JavaType) -> 
             java_type,
             implicit_end,
             strategy_description,
+            label,
             span,
         },
         IrExpression::Cast {
