@@ -1,7 +1,7 @@
 //! `when` 分岐と `is` 演算子の正規表現リテラル統合を検証するテスト。
 
 use jv_ast::{
-    Expression, IsTestKind, Literal, RegexGuardStrategy, Statement, types::Pattern, BinaryOp,
+    types::Pattern, BinaryOp, Expression, IsTestKind, Literal, RegexGuardStrategy, Statement,
 };
 use jv_parser_frontend::ParserPipeline;
 use jv_parser_rowan::frontend::RowanPipeline;
@@ -15,7 +15,9 @@ fn extract_when_expression(source: &str) -> Expression {
     for statement in program.statements {
         match statement {
             Statement::ValDeclaration { initializer, .. }
-            | Statement::Expression { expr: initializer, .. } => {
+            | Statement::Expression {
+                expr: initializer, ..
+            } => {
                 if matches!(initializer, Expression::When { .. }) {
                     return initializer;
                 }
@@ -42,11 +44,14 @@ fn extract_is_expression(source: &str) -> Expression {
     for statement in program.statements {
         match statement {
             Statement::ValDeclaration { initializer, .. }
-            | Statement::Expression { expr: initializer, .. } => {
+            | Statement::Expression {
+                expr: initializer, ..
+            } => {
                 if matches!(
                     initializer,
                     Expression::Binary {
-                        op: BinaryOp::Is, ..
+                        op: BinaryOp::Is,
+                        ..
                     }
                 ) {
                     return initializer;
@@ -58,7 +63,8 @@ fn extract_is_expression(source: &str) -> Expression {
             } if matches!(
                 initializer,
                 Expression::Binary {
-                    op: BinaryOp::Is, ..
+                    op: BinaryOp::Is,
+                    ..
                 }
             ) =>
             {

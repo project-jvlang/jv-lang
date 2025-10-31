@@ -53,7 +53,10 @@ fn optional左辺ではガード戦略と警告が記録される() {
     );
     let typing = &typings[0];
     assert!(
-        matches!(typing.guard_strategy, RegexGuardStrategy::CaptureAndGuard { .. }),
+        matches!(
+            typing.guard_strategy,
+            RegexGuardStrategy::CaptureAndGuard { .. }
+        ),
         "Optional 左辺では一時変数を伴うガード戦略が設定される想定です: {:?}",
         typing.guard_strategy
     );
