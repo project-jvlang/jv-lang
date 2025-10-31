@@ -447,10 +447,9 @@ pub mod pipeline {
         ImportResolutionService, ResolvedImport, ResolvedImportKind,
         diagnostics as import_diagnostics,
     };
+    use jv_checker::inference::regex::RegexCommandTyping;
     use jv_checker::inference::{AppliedConversion, HelperSpec, NullableGuardReason};
-    use jv_checker::{
-        InferenceSnapshot, InferenceTelemetry, RegexCommandTyping, TypeChecker, TypeKind,
-    };
+    use jv_checker::{InferenceSnapshot, InferenceTelemetry, TypeChecker, TypeKind};
     use jv_codegen_java::{JavaCodeGenConfig, JavaCodeGenerator};
     use jv_fmt::JavaFormatter;
     use jv_inference::types::TypeVariant;

@@ -8,10 +8,11 @@ use jv_ir::{
     CompletableFutureOp, ConversionHelper, ConversionKind, ConversionMetadata, IrCaseLabel,
     IrCatchClause, IrDeconstructionComponent, IrDeconstructionPattern, IrExpression, IrForEachKind,
     IrForLoopMetadata, IrGenericMetadata, IrImplicitWhenEnd, IrImport, IrImportDetail, IrModifiers,
-    IrNumericRangeLoop, IrParameter, IrProgram, IrRecordComponent, IrResource, IrSampleDeclaration,
-    IrStatement, IrSwitchCase, IrTypeParameter, IrVariance, IrVisibility, JavaType, MethodOverload,
-    NullableGuard, NullableGuardReason, SequencePipeline, SequenceSource, SequenceStage,
-    SequenceTerminalKind, UtilityClass, VirtualThreadOp,
+    IrNumericRangeLoop, IrParameter, IrProgram, IrRecordComponent, IrRegexReplacement,
+    IrRegexTemplateSegment, IrResource, IrSampleDeclaration, IrStatement, IrSwitchCase,
+    IrTypeParameter, IrVariance, IrVisibility, JavaType, MethodOverload, NullableGuard,
+    NullableGuardReason, SequencePipeline, SequenceSource, SequenceStage, SequenceTerminalKind,
+    UtilityClass, VirtualThreadOp,
 };
 use jv_mapper::{
     JavaPosition, JavaSpan, MappingCategory, MappingError, SourceMap, SourceMapBuilder,
@@ -764,6 +765,54 @@ impl JavaCodeGenerator {
                     captures,
                     scope_locals,
                 );
+            }
+            IrExpression::RegexCommand(command) => {
+                self.collect_mutable_captures_in_expression(
+                    &command.subject,
+                    method_locals,
+                    captures,
+                    scope_locals,
+                );
+                self.collect_mutable_captures_in_expression(
+                    &command.pattern,
+                    method_locals,
+                    captures,
+                    scope_locals,
+                );
+
+                match &command.replacement {
+                    IrRegexReplacement::None => {}
+                    IrRegexReplacement::Literal(literal) => {
+                        for segment in &literal.segments {
+                            if let IrRegexTemplateSegment::Expression(expr) = segment {
+                                self.collect_mutable_captures_in_expression(
+                                    expr,
+                                    method_locals,
+                                    captures,
+                                    scope_locals,
+                                );
+                            }
+                        }
+                    }
+                    IrRegexReplacement::Lambda(lambda) => {
+                        let lambda_scope: HashSet<String> =
+                            lambda.param_names.iter().cloned().collect();
+                        self.collect_mutable_captures_in_expression(
+                            &lambda.body,
+                            method_locals,
+                            captures,
+                            &lambda_scope,
+                        );
+                    }
+                    IrRegexReplacement::Expression(expr) => {
+                        self.collect_mutable_captures_in_expression(
+                            expr,
+                            method_locals,
+                            captures,
+                            scope_locals,
+                        );
+                    }
+                }
             }
             IrExpression::Literal(..)
             | IrExpression::RegexPattern { .. }

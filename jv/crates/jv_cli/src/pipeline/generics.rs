@@ -6,8 +6,8 @@ use jv_inference::solver::Variance;
 use jv_inference::types::{BoundPredicate, GenericBounds, SymbolId, TypeId, TypeKind, TypeVariant};
 use jv_ir::{
     GenericMetadataMap, IrExpression, IrGenericMetadata, IrModifiers, IrProgram, IrStatement,
-    IrTypeLevelValue, IrTypeParameter, IrVariance, JavaType, PrimitiveSpecializationHint,
-    SequencePipeline, SequenceSource, SequenceStage,
+    IrTypeLevelValue, IrTypeParameter, IrVariance, IrRegexReplacement, IrRegexTemplateSegment,
+    JavaType, PrimitiveSpecializationHint, SequencePipeline, SequenceSource, SequenceStage,
 };
 
 /// Enriches the generated IR program with generic metadata sourced from type inference facts.
@@ -521,6 +521,27 @@ fn apply_hint_to_expression(expr: &mut IrExpression, hint: &PrimitiveSpecializat
         }
         IrExpression::CharToString(conversion) => {
             apply_hint_to_expression(&mut conversion.value, hint);
+        }
+        IrExpression::RegexCommand(command) => {
+            apply_hint_to_expression(command.subject.as_mut(), hint);
+            apply_hint_to_expression(command.pattern.as_mut(), hint);
+
+            match command.replacement {
+                IrRegexReplacement::None => {}
+                IrRegexReplacement::Literal(ref mut literal) => {
+                    for segment in literal.segments.iter_mut() {
+                        if let IrRegexTemplateSegment::Expression(expr) = segment {
+                            apply_hint_to_expression(expr.as_mut(), hint);
+                        }
+                    }
+                }
+                IrRegexReplacement::Lambda(ref mut lambda) => {
+                    apply_hint_to_expression(lambda.body.as_mut(), hint);
+                }
+                IrRegexReplacement::Expression(ref mut expr) => {
+                    apply_hint_to_expression(expr.as_mut(), hint);
+                }
+            }
         }
         IrExpression::RegexPattern { .. }
         | IrExpression::RegexMatch { .. }

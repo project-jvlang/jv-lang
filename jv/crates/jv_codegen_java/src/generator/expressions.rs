@@ -1,9 +1,10 @@
 use super::*;
-use jv_ast::{RegexGuardStrategy, Span, types::PrimitiveTypeName};
+use jv_ast::{RegexCommandMode, RegexFlag, RegexGuardStrategy, Span, types::PrimitiveTypeName};
 use jv_ir::PipelineShape;
 use jv_ir::{
-    RawStringFlavor, SequencePipeline, SequenceSource, SequenceStage, SequenceTerminal,
-    SequenceTerminalKind,
+    IrRegexCommand, IrRegexLambdaReplacement, IrRegexLiteralReplacement, IrRegexReplacement,
+    IrRegexTemplateSegment, RawStringFlavor, SequencePipeline, SequenceSource, SequenceStage,
+    SequenceTerminal, SequenceTerminalKind,
 };
 use std::fmt::Write;
 
@@ -163,6 +164,7 @@ impl JavaCodeGenerator {
                     }
                 }
             }
+            IrExpression::RegexCommand(command) => self.render_regex_command(command),
             IrExpression::Unary { op, operand, .. } => {
                 let operand_code = self.generate_expression(operand)?;
                 Ok(match op {
@@ -2289,6 +2291,262 @@ impl JavaCodeGenerator {
         }
         result.push(')');
         Ok(result)
+    }
+
+    fn render_regex_command(&mut self, command: &IrRegexCommand) -> Result<String, CodeGenError> {
+        match command.mode {
+            RegexCommandMode::All => self.render_regex_replace(command, "replaceAll"),
+            RegexCommandMode::First => self.render_regex_replace(command, "replaceFirst"),
+            RegexCommandMode::Match => self.render_regex_match_command(command),
+            RegexCommandMode::Split => self.render_regex_split_command(command),
+            RegexCommandMode::Iterate => self.render_regex_iterate_command(command),
+        }
+    }
+
+    fn render_regex_replace(
+        &mut self,
+        command: &IrRegexCommand,
+        method: &str,
+    ) -> Result<String, CodeGenError> {
+        let pattern_code =
+            self.render_regex_pattern_expr(command.pattern.as_ref(), &command.flags)?;
+        let pattern_expr = format!("({pattern_code})", pattern_code = pattern_code);
+        let replacement_code = self.render_regex_replacement(&command.replacement)?;
+        self.guard_regex_subject(
+            &command.subject,
+            &command.guard_strategy,
+            "\"\"",
+            move |subject_ref| {
+                Ok(format!(
+                    "{pattern}.matcher({subject}).{method}({replacement})",
+                    pattern = pattern_expr,
+                    subject = subject_ref,
+                    method = method,
+                    replacement = replacement_code,
+                ))
+            },
+        )
+    }
+
+    fn render_regex_match_command(
+        &mut self,
+        command: &IrRegexCommand,
+    ) -> Result<String, CodeGenError> {
+        let pattern_code =
+            self.render_regex_pattern_expr(command.pattern.as_ref(), &command.flags)?;
+        let pattern_expr = format!("({pattern_code})", pattern_code = pattern_code);
+        self.guard_regex_subject(
+            &command.subject,
+            &command.guard_strategy,
+            "false",
+            move |subject_ref| {
+                Ok(format!(
+                    "{pattern}.matcher({subject}).matches()",
+                    pattern = pattern_expr,
+                    subject = subject_ref,
+                ))
+            },
+        )
+    }
+
+    fn render_regex_split_command(
+        &mut self,
+        command: &IrRegexCommand,
+    ) -> Result<String, CodeGenError> {
+        let pattern_code =
+            self.render_regex_pattern_expr(command.pattern.as_ref(), &command.flags)?;
+        let pattern_expr = format!("({pattern_code})", pattern_code = pattern_code);
+        self.guard_regex_subject(
+            &command.subject,
+            &command.guard_strategy,
+            "new String[0]",
+            move |subject_ref| {
+                Ok(format!(
+                    "{pattern}.split({subject}, -1)",
+                    pattern = pattern_expr,
+                    subject = subject_ref,
+                ))
+            },
+        )
+    }
+
+    fn render_regex_iterate_command(
+        &mut self,
+        command: &IrRegexCommand,
+    ) -> Result<String, CodeGenError> {
+        if matches!(command.replacement, IrRegexReplacement::None) {
+            self.add_import("java.util.stream.Stream");
+            let pattern_code =
+                self.render_regex_pattern_expr(command.pattern.as_ref(), &command.flags)?;
+            let pattern_expr = format!("({pattern_code})", pattern_code = pattern_code);
+            return self.guard_regex_subject(
+                &command.subject,
+                &command.guard_strategy,
+                "Stream.empty()",
+                move |subject_ref| {
+                    Ok(format!(
+                        "{pattern}.matcher({subject}).results()",
+                        pattern = pattern_expr,
+                        subject = subject_ref,
+                    ))
+                },
+            );
+        }
+
+        self.render_regex_replace(command, "replaceAll")
+    }
+
+    fn render_regex_replacement(
+        &mut self,
+        replacement: &IrRegexReplacement,
+    ) -> Result<String, CodeGenError> {
+        match replacement {
+            IrRegexReplacement::None => Ok("\"\"".to_string()),
+            IrRegexReplacement::Literal(literal) => self.render_regex_literal_replacement(literal),
+            IrRegexReplacement::Lambda(lambda) => self.render_regex_lambda_replacement(lambda),
+            IrRegexReplacement::Expression(expr) => self.generate_expression(expr),
+        }
+    }
+
+    fn render_regex_literal_replacement(
+        &mut self,
+        literal: &IrRegexLiteralReplacement,
+    ) -> Result<String, CodeGenError> {
+        if literal.segments.is_empty() {
+            return Ok("\"\"".to_string());
+        }
+
+        self.add_import("java.util.regex.Matcher");
+        let mut builder = String::from("new StringBuilder()");
+
+        for segment in &literal.segments {
+            match segment {
+                IrRegexTemplateSegment::Text(text) => {
+                    builder.push_str(&format!(
+                        ".append(Matcher.quoteReplacement(\"{}\"))",
+                        Self::escape_string(text)
+                    ));
+                }
+                IrRegexTemplateSegment::BackReference(index) => {
+                    builder.push_str(&format!(".append(\"${}\")", index));
+                }
+                IrRegexTemplateSegment::Expression(expr) => {
+                    let expr_code = self.generate_expression(expr)?;
+                    builder.push_str(&format!(
+                        ".append(Matcher.quoteReplacement(String.valueOf({})))",
+                        expr_code
+                    ));
+                }
+            }
+        }
+
+        builder.push_str(".toString()");
+        Ok(builder)
+    }
+
+    fn render_regex_lambda_replacement(
+        &mut self,
+        lambda: &IrRegexLambdaReplacement,
+    ) -> Result<String, CodeGenError> {
+        if !lambda.param_types.is_empty() {
+            self.add_import("java.util.regex.MatchResult");
+        }
+
+        let mut params = Vec::with_capacity(lambda.param_names.len());
+        for (index, name) in lambda.param_names.iter().enumerate() {
+            if let Some(java_type) = lambda.param_types.get(index) {
+                let ty = self.generate_type(java_type)?;
+                params.push(format!("{ty} {name}", ty = ty, name = name));
+            } else {
+                params.push(name.clone());
+            }
+        }
+
+        let params_code = if params.len() == 1 {
+            params[0].clone()
+        } else {
+            params.join(", ")
+        };
+
+        let body_expr = self.generate_expression(&lambda.body)?;
+        Ok(format!(
+            "({params}) -> {body}",
+            params = params_code,
+            body = body_expr
+        ))
+    }
+
+    fn render_regex_pattern_expr(
+        &mut self,
+        pattern: &IrExpression,
+        flags: &[RegexFlag],
+    ) -> Result<String, CodeGenError> {
+        if flags.is_empty() {
+            return self.generate_expression(pattern);
+        }
+
+        if let IrExpression::RegexPattern { pattern: value, .. } = pattern {
+            self.add_import("java.util.regex.Pattern");
+            let escaped = Self::escape_string(value);
+            let flag_mask = self.render_regex_flag_mask(flags);
+            Ok(format!("Pattern.compile(\"{escaped}\", {flag_mask})"))
+        } else {
+            self.generate_expression(pattern)
+        }
+    }
+
+    fn render_regex_flag_mask(&mut self, flags: &[RegexFlag]) -> String {
+        self.add_import("java.util.regex.Pattern");
+        let mut parts = Vec::with_capacity(flags.len());
+        for flag in flags {
+            let constant = match flag {
+                RegexFlag::CaseInsensitive => "CASE_INSENSITIVE",
+                RegexFlag::Multiline => "MULTILINE",
+                RegexFlag::DotAll => "DOTALL",
+                RegexFlag::UnicodeCase => "UNICODE_CASE",
+                RegexFlag::UnixLines => "UNIX_LINES",
+                RegexFlag::Comments => "COMMENTS",
+                RegexFlag::Literal => "LITERAL",
+                RegexFlag::CanonEq => "CANON_EQ",
+            };
+            parts.push(format!("Pattern.{constant}", constant = constant));
+        }
+
+        if parts.is_empty() {
+            "0".to_string()
+        } else {
+            parts.join(" | ")
+        }
+    }
+
+    fn guard_regex_subject<F>(
+        &mut self,
+        subject: &IrExpression,
+        strategy: &RegexGuardStrategy,
+        fallback: &str,
+        build: F,
+    ) -> Result<String, CodeGenError>
+    where
+        F: FnOnce(&str) -> Result<String, CodeGenError>,
+    {
+        let subject_code = self.generate_expression(subject)?;
+        let guarded_subject = format!("({})", subject_code);
+        match strategy {
+            RegexGuardStrategy::None => build(&subject_code),
+            RegexGuardStrategy::CaptureAndGuard { temp_name } => {
+                let temp = temp_name
+                    .clone()
+                    .unwrap_or_else(|| "__jvRegexSubject_guard".to_string());
+                let body = build(&temp)?;
+                Ok(format!(
+                    "(({subject}) instanceof java.lang.CharSequence {temp} ? {body} : {fallback})",
+                    subject = guarded_subject,
+                    temp = temp,
+                    body = body,
+                    fallback = fallback,
+                ))
+            }
+        }
     }
 
     // === Expression Helpers (moved from helpers.rs) ===
