@@ -107,15 +107,7 @@ impl JavaCodeGenerator {
             IrStatement::InterfaceDeclaration { .. } => self.generate_interface(stmt)?,
             IrStatement::RecordDeclaration { .. } => self.generate_record(stmt)?,
             IrStatement::SampleDeclaration(declaration) => {
-                let artifacts = self.generate_sample_declaration_artifacts(declaration)?;
-                let mut builder = self.builder();
-                for (index, code) in artifacts.iter().enumerate() {
-                    if index > 0 {
-                        builder.push_line("");
-                    }
-                    Self::push_lines(&mut builder, code);
-                }
-                builder.build()
+                self.generate_sample_declaration_binding(declaration)?
             }
             IrStatement::Expression { expr, .. } => {
                 let mut line = self.generate_expression(expr)?;

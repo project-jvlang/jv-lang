@@ -11,7 +11,7 @@ use jv_ir::{
     IrNumericRangeLoop, IrParameter, IrProgram, IrRecordComponent, IrResource, IrSampleDeclaration,
     IrStatement, IrSwitchCase, IrTypeParameter, IrVariance, IrVisibility, JavaType, MethodOverload,
     NullableGuard, NullableGuardReason, SequencePipeline, SequenceSource, SequenceStage,
-    SequenceTerminalKind, UtilityClass, VirtualThreadOp,
+    SequenceTerminal, SequenceTerminalKind, UtilityClass, VirtualThreadOp,
 };
 use jv_mapper::{
     JavaPosition, JavaSpan, MappingCategory, MappingError, SourceMap, SourceMapBuilder,
@@ -111,16 +111,43 @@ impl JavaCodeGenerator {
         let mut script_statements = Vec::new();
         let mut script_methods = Vec::new();
         let mut remaining_declarations = Vec::new();
+        let mut script_sample_nested_types: Vec<String> = Vec::new();
+        let mut script_sample_bindings: Vec<String> = Vec::new();
+        let mut script_sample_declarations: Vec<IrSampleDeclaration> = Vec::new();
+        let mut standalone_sample_types: Vec<IrStatement> = Vec::new();
 
         for declaration in &program.type_declarations {
             match Self::base_statement(declaration) {
+                IrStatement::ClassDeclaration { name, .. } if Self::is_sample_type_name(name) => {
+                    let code = self.generate_nested_type(declaration)?;
+                    script_sample_nested_types.push(code);
+                    standalone_sample_types.push(declaration.clone());
+                }
+                IrStatement::RecordDeclaration { name, .. } if Self::is_sample_type_name(name) => {
+                    let code = self.generate_nested_type(declaration)?;
+                    script_sample_nested_types.push(code);
+                    standalone_sample_types.push(declaration.clone());
+                }
                 IrStatement::ClassDeclaration { .. }
                 | IrStatement::InterfaceDeclaration { .. }
-                | IrStatement::RecordDeclaration { .. }
-                | IrStatement::SampleDeclaration(_) => {
+                | IrStatement::RecordDeclaration { .. } => {
                     remaining_declarations.push(declaration.clone());
                 }
-                IrStatement::MethodDeclaration { .. } => {
+                IrStatement::SampleDeclaration(sample) => {
+                    let artifacts = self.generate_sample_declaration_artifacts(sample, true)?;
+                    script_sample_nested_types.extend(artifacts);
+                    let binding = self.generate_sample_declaration_binding(sample)?;
+                    script_sample_bindings.push(binding);
+                    script_sample_declarations.push(sample.clone());
+                }
+                IrStatement::MethodDeclaration { body, .. } => {
+                    if let Some(expr) = body.as_ref() {
+                        self.collect_sample_declarations_from_expression(
+                            expr,
+                            &mut script_sample_nested_types,
+                            &mut script_sample_declarations,
+                        )?;
+                    }
                     if self.try_register_instance_extension_method(declaration, program) {
                         continue;
                     }
@@ -132,6 +159,17 @@ impl JavaCodeGenerator {
             }
         }
 
+        let mut processed_statements = Vec::new();
+        for statement in script_statements.drain(..) {
+            self.collect_sample_declarations_from_statement(
+                &statement,
+                &mut script_sample_nested_types,
+                &mut script_sample_declarations,
+            )?;
+            processed_statements.push(statement);
+        }
+        script_statements = processed_statements;
+
         let mut hoisted_regex_fields = Vec::new();
         let mut retained_statements = Vec::new();
         for statement in script_statements.drain(..) {
@@ -142,6 +180,22 @@ impl JavaCodeGenerator {
             }
         }
         script_statements = retained_statements;
+
+        let mut refined_statements = Vec::new();
+        for statement in script_statements.drain(..) {
+            match Self::base_statement(&statement) {
+                IrStatement::RecordDeclaration { name, .. } if Self::is_sample_type_name(name) => {
+                    let code = self.generate_record(&statement)?;
+                    script_sample_nested_types.push(code);
+                }
+                IrStatement::ClassDeclaration { name, .. } if Self::is_sample_type_name(name) => {
+                    let code = self.generate_class(&statement)?;
+                    script_sample_nested_types.push(code);
+                }
+                _ => refined_statements.push(statement),
+            }
+        }
+        script_statements = refined_statements;
 
         let has_entry_method = script_methods.iter().any(Self::is_entry_point_method);
         let needs_wrapper = !script_statements.is_empty() || !has_entry_method;
@@ -167,6 +221,13 @@ impl JavaCodeGenerator {
             builder.push_line(&format!("public final class {} {{", script_class));
             builder.indent();
 
+            if !script_sample_nested_types.is_empty() {
+                for nested in &script_sample_nested_types {
+                    Self::push_lines(&mut builder, nested);
+                    builder.push_line("");
+                }
+            }
+
             if !hoisted_regex_fields.is_empty() {
                 for field in &hoisted_regex_fields {
                     let code = self.generate_statement(field)?;
@@ -181,6 +242,12 @@ impl JavaCodeGenerator {
             if needs_wrapper {
                 builder.push_line("public static void main(String[] args) throws Exception {");
                 builder.indent();
+                for binding in &script_sample_bindings {
+                    builder.push_line(binding);
+                }
+                if !script_sample_bindings.is_empty() && !script_statements.is_empty() {
+                    builder.push_line("");
+                }
                 for statement in &script_statements {
                     let code = self.generate_statement(statement)?;
                     Self::push_lines(&mut builder, &code);
@@ -225,7 +292,7 @@ impl JavaCodeGenerator {
 
         for declaration in remaining_declarations {
             if let IrStatement::SampleDeclaration(sample) = Self::base_statement(&declaration) {
-                let artifacts = self.generate_sample_declaration_artifacts(sample)?;
+                let artifacts = self.generate_sample_declaration_artifacts(sample, false)?;
                 unit.type_declarations.extend(artifacts);
                 continue;
             }
@@ -263,6 +330,24 @@ impl JavaCodeGenerator {
             unit.type_declarations.push(code);
         }
 
+        if unit.type_declarations.is_empty() && !standalone_sample_types.is_empty() {
+            for declaration in standalone_sample_types.drain(..) {
+                let code = match Self::base_statement(&declaration) {
+                    IrStatement::ClassDeclaration { .. } => self.generate_class(&declaration)?,
+                    IrStatement::RecordDeclaration { .. } => self.generate_record(&declaration)?,
+                    _ => continue,
+                };
+                unit.type_declarations.push(code);
+            }
+        }
+
+        if unit.type_declarations.is_empty() && !script_sample_declarations.is_empty() {
+            for sample in &script_sample_declarations {
+                let artifacts = self.generate_sample_declaration_artifacts(sample, false)?;
+                unit.type_declarations.extend(artifacts);
+            }
+        }
+
         if let Some(helper) = self.sequence_helper.take() {
             unit.type_declarations.push(helper);
         }
@@ -279,6 +364,680 @@ impl JavaCodeGenerator {
 
     fn builder(&self) -> JavaSourceBuilder {
         JavaSourceBuilder::new(self.config.indent.clone())
+    }
+
+    fn is_sample_type_name(name: &str) -> bool {
+        name.contains("Sample")
+    }
+
+    fn generate_nested_type(&mut self, statement: &IrStatement) -> Result<String, CodeGenError> {
+        match Self::base_statement(statement) {
+            IrStatement::ClassDeclaration { .. } => {
+                let mut cloned = statement.clone();
+                if let IrStatement::ClassDeclaration { modifiers, .. } = &mut cloned {
+                    modifiers.is_static = true;
+                }
+                self.generate_class(&cloned)
+            }
+            IrStatement::RecordDeclaration { .. } => {
+                let mut cloned = statement.clone();
+                if let IrStatement::RecordDeclaration { modifiers, .. } = &mut cloned {
+                    modifiers.is_static = true;
+                }
+                self.generate_record(&cloned)
+            }
+            _ => Err(CodeGenError::UnsupportedConstruct {
+                construct: "Nested type generation対象ではありません".to_string(),
+                span: None,
+            }),
+        }
+    }
+
+    fn collect_sample_declarations_from_expression(
+        &mut self,
+        expression: &IrExpression,
+        nested_types: &mut Vec<String>,
+        declarations: &mut Vec<IrSampleDeclaration>,
+    ) -> Result<(), CodeGenError> {
+        match expression {
+            IrExpression::Block { statements, .. } => {
+                for statement in statements {
+                    self.collect_sample_declarations_from_statement(
+                        statement,
+                        nested_types,
+                        declarations,
+                    )?;
+                }
+            }
+            IrExpression::MethodCall { receiver, args, .. } => {
+                if let Some(receiver) = receiver.as_deref() {
+                    self.collect_sample_declarations_from_expression(
+                        receiver,
+                        nested_types,
+                        declarations,
+                    )?;
+                }
+                for arg in args {
+                    self.collect_sample_declarations_from_expression(
+                        arg,
+                        nested_types,
+                        declarations,
+                    )?;
+                }
+            }
+            IrExpression::FieldAccess { receiver, .. } => {
+                self.collect_sample_declarations_from_expression(
+                    receiver,
+                    nested_types,
+                    declarations,
+                )?;
+            }
+            IrExpression::ArrayAccess { array, index, .. } => {
+                self.collect_sample_declarations_from_expression(
+                    array,
+                    nested_types,
+                    declarations,
+                )?;
+                self.collect_sample_declarations_from_expression(
+                    index,
+                    nested_types,
+                    declarations,
+                )?;
+            }
+            IrExpression::Binary { left, right, .. } => {
+                self.collect_sample_declarations_from_expression(left, nested_types, declarations)?;
+                self.collect_sample_declarations_from_expression(
+                    right,
+                    nested_types,
+                    declarations,
+                )?;
+            }
+            IrExpression::Unary { operand, .. } => {
+                self.collect_sample_declarations_from_expression(
+                    operand,
+                    nested_types,
+                    declarations,
+                )?;
+            }
+            IrExpression::Assignment { target, value, .. } => {
+                self.collect_sample_declarations_from_expression(
+                    target,
+                    nested_types,
+                    declarations,
+                )?;
+                self.collect_sample_declarations_from_expression(
+                    value,
+                    nested_types,
+                    declarations,
+                )?;
+            }
+            IrExpression::Conditional {
+                condition,
+                then_expr,
+                else_expr,
+                ..
+            } => {
+                self.collect_sample_declarations_from_expression(
+                    condition,
+                    nested_types,
+                    declarations,
+                )?;
+                self.collect_sample_declarations_from_expression(
+                    then_expr,
+                    nested_types,
+                    declarations,
+                )?;
+                self.collect_sample_declarations_from_expression(
+                    else_expr,
+                    nested_types,
+                    declarations,
+                )?;
+            }
+            IrExpression::ArrayCreation {
+                dimensions,
+                initializer,
+                ..
+            } => {
+                for dimension in dimensions {
+                    if let Some(expr) = dimension {
+                        self.collect_sample_declarations_from_expression(
+                            expr,
+                            nested_types,
+                            declarations,
+                        )?;
+                    }
+                }
+                if let Some(values) = initializer {
+                    for expr in values {
+                        self.collect_sample_declarations_from_expression(
+                            expr,
+                            nested_types,
+                            declarations,
+                        )?;
+                    }
+                }
+            }
+            IrExpression::ObjectCreation { args, .. } => {
+                for arg in args {
+                    self.collect_sample_declarations_from_expression(
+                        arg,
+                        nested_types,
+                        declarations,
+                    )?;
+                }
+            }
+            IrExpression::Lambda { body, .. } => {
+                self.collect_sample_declarations_from_expression(
+                    body.as_ref(),
+                    nested_types,
+                    declarations,
+                )?;
+            }
+            IrExpression::SequencePipeline { pipeline, .. } => {
+                self.collect_sample_declarations_from_sequence_pipeline(
+                    pipeline,
+                    nested_types,
+                    declarations,
+                )?;
+            }
+            IrExpression::Switch {
+                discriminant,
+                cases,
+                ..
+            } => {
+                self.collect_sample_declarations_from_expression(
+                    discriminant,
+                    nested_types,
+                    declarations,
+                )?;
+                for case in cases {
+                    self.collect_sample_declarations_from_switch_case(
+                        case,
+                        nested_types,
+                        declarations,
+                    )?;
+                }
+            }
+            IrExpression::Cast { expr, .. } | IrExpression::InstanceOf { expr, .. } => {
+                self.collect_sample_declarations_from_expression(
+                    expr.as_ref(),
+                    nested_types,
+                    declarations,
+                )?;
+            }
+            IrExpression::NullSafeOperation {
+                expr,
+                operation,
+                default_value,
+                ..
+            } => {
+                self.collect_sample_declarations_from_expression(
+                    expr.as_ref(),
+                    nested_types,
+                    declarations,
+                )?;
+                self.collect_sample_declarations_from_expression(
+                    operation.as_ref(),
+                    nested_types,
+                    declarations,
+                )?;
+                if let Some(value) = default_value.as_deref() {
+                    self.collect_sample_declarations_from_expression(
+                        value,
+                        nested_types,
+                        declarations,
+                    )?;
+                }
+            }
+            IrExpression::StringFormat { args, .. }
+            | IrExpression::CompletableFuture { args, .. }
+            | IrExpression::VirtualThread { args, .. } => {
+                for arg in args {
+                    self.collect_sample_declarations_from_expression(
+                        arg,
+                        nested_types,
+                        declarations,
+                    )?;
+                }
+            }
+            IrExpression::TryWithResources {
+                resources, body, ..
+            } => {
+                for resource in resources {
+                    self.collect_sample_declarations_from_expression(
+                        &resource.initializer,
+                        nested_types,
+                        declarations,
+                    )?;
+                }
+                self.collect_sample_declarations_from_expression(
+                    body.as_ref(),
+                    nested_types,
+                    declarations,
+                )?;
+            }
+            _ => {}
+        }
+
+        Ok(())
+    }
+
+    fn collect_sample_declarations_from_statement(
+        &mut self,
+        statement: &IrStatement,
+        nested_types: &mut Vec<String>,
+        declarations: &mut Vec<IrSampleDeclaration>,
+    ) -> Result<(), CodeGenError> {
+        let base = Self::base_statement(statement);
+        match base {
+            IrStatement::SampleDeclaration(sample) => {
+                let artifacts = self.generate_sample_declaration_artifacts(sample, true)?;
+                nested_types.extend(artifacts);
+                declarations.push(sample.clone());
+            }
+            IrStatement::Block { statements, .. } => {
+                for stmt in statements {
+                    self.collect_sample_declarations_from_statement(
+                        stmt,
+                        nested_types,
+                        declarations,
+                    )?;
+                }
+            }
+            IrStatement::If {
+                condition,
+                then_stmt,
+                else_stmt,
+                ..
+            } => {
+                self.collect_sample_declarations_from_expression(
+                    condition,
+                    nested_types,
+                    declarations,
+                )?;
+                self.collect_sample_declarations_from_statement(
+                    then_stmt.as_ref(),
+                    nested_types,
+                    declarations,
+                )?;
+                if let Some(else_branch) = else_stmt.as_deref() {
+                    self.collect_sample_declarations_from_statement(
+                        else_branch,
+                        nested_types,
+                        declarations,
+                    )?;
+                }
+            }
+            IrStatement::While {
+                condition, body, ..
+            } => {
+                self.collect_sample_declarations_from_expression(
+                    condition,
+                    nested_types,
+                    declarations,
+                )?;
+                self.collect_sample_declarations_from_statement(
+                    body.as_ref(),
+                    nested_types,
+                    declarations,
+                )?;
+            }
+            IrStatement::ForEach { iterable, body, .. } => {
+                self.collect_sample_declarations_from_expression(
+                    iterable,
+                    nested_types,
+                    declarations,
+                )?;
+                self.collect_sample_declarations_from_statement(
+                    body.as_ref(),
+                    nested_types,
+                    declarations,
+                )?;
+            }
+            IrStatement::For {
+                init,
+                condition,
+                update,
+                body,
+                ..
+            } => {
+                if let Some(init_stmt) = init.as_deref() {
+                    self.collect_sample_declarations_from_statement(
+                        init_stmt,
+                        nested_types,
+                        declarations,
+                    )?;
+                }
+                if let Some(cond) = condition {
+                    self.collect_sample_declarations_from_expression(
+                        cond,
+                        nested_types,
+                        declarations,
+                    )?;
+                }
+                if let Some(update_expr) = update {
+                    self.collect_sample_declarations_from_expression(
+                        update_expr,
+                        nested_types,
+                        declarations,
+                    )?;
+                }
+                self.collect_sample_declarations_from_statement(
+                    body.as_ref(),
+                    nested_types,
+                    declarations,
+                )?;
+            }
+            IrStatement::Switch {
+                discriminant,
+                cases,
+                ..
+            } => {
+                self.collect_sample_declarations_from_expression(
+                    discriminant,
+                    nested_types,
+                    declarations,
+                )?;
+                for case in cases {
+                    self.collect_sample_declarations_from_switch_case(
+                        case,
+                        nested_types,
+                        declarations,
+                    )?;
+                }
+            }
+            IrStatement::Try {
+                body,
+                catch_clauses,
+                finally_block,
+                ..
+            } => {
+                self.collect_sample_declarations_from_statement(
+                    body.as_ref(),
+                    nested_types,
+                    declarations,
+                )?;
+                for clause in catch_clauses {
+                    self.collect_sample_declarations_from_statement(
+                        &clause.body,
+                        nested_types,
+                        declarations,
+                    )?;
+                }
+                if let Some(finally_stmt) = finally_block.as_deref() {
+                    self.collect_sample_declarations_from_statement(
+                        finally_stmt,
+                        nested_types,
+                        declarations,
+                    )?;
+                }
+            }
+            IrStatement::TryWithResources {
+                resources,
+                body,
+                catch_clauses,
+                finally_block,
+                ..
+            } => {
+                for resource in resources {
+                    self.collect_sample_declarations_from_expression(
+                        &resource.initializer,
+                        nested_types,
+                        declarations,
+                    )?;
+                }
+                self.collect_sample_declarations_from_statement(
+                    body.as_ref(),
+                    nested_types,
+                    declarations,
+                )?;
+                for clause in catch_clauses {
+                    self.collect_sample_declarations_from_statement(
+                        &clause.body,
+                        nested_types,
+                        declarations,
+                    )?;
+                }
+                if let Some(finally_stmt) = finally_block.as_deref() {
+                    self.collect_sample_declarations_from_statement(
+                        finally_stmt,
+                        nested_types,
+                        declarations,
+                    )?;
+                }
+            }
+            IrStatement::VariableDeclaration { initializer, .. } => {
+                if let Some(init) = initializer {
+                    self.collect_sample_declarations_from_expression(
+                        init,
+                        nested_types,
+                        declarations,
+                    )?;
+                }
+            }
+            IrStatement::Expression { expr, .. } => {
+                self.collect_sample_declarations_from_expression(expr, nested_types, declarations)?;
+            }
+            IrStatement::Return { value, .. } => {
+                if let Some(expr) = value {
+                    self.collect_sample_declarations_from_expression(
+                        expr,
+                        nested_types,
+                        declarations,
+                    )?;
+                }
+            }
+            IrStatement::Throw { expr, .. } => {
+                self.collect_sample_declarations_from_expression(expr, nested_types, declarations)?;
+            }
+            _ => {}
+        }
+
+        Ok(())
+    }
+
+    fn collect_sample_declarations_from_sequence_pipeline(
+        &mut self,
+        pipeline: &SequencePipeline,
+        nested_types: &mut Vec<String>,
+        declarations: &mut Vec<IrSampleDeclaration>,
+    ) -> Result<(), CodeGenError> {
+        self.collect_sample_declarations_from_sequence_source(
+            &pipeline.source,
+            nested_types,
+            declarations,
+        )?;
+
+        for stage in &pipeline.stages {
+            self.collect_sample_declarations_from_sequence_stage(
+                stage,
+                nested_types,
+                declarations,
+            )?;
+        }
+
+        if let Some(terminal) = pipeline.terminal.as_ref() {
+            self.collect_sample_declarations_from_sequence_terminal(
+                terminal,
+                nested_types,
+                declarations,
+            )?;
+        }
+
+        Ok(())
+    }
+
+    fn collect_sample_declarations_from_sequence_source(
+        &mut self,
+        source: &SequenceSource,
+        nested_types: &mut Vec<String>,
+        declarations: &mut Vec<IrSampleDeclaration>,
+    ) -> Result<(), CodeGenError> {
+        match source {
+            SequenceSource::Collection { expr, .. }
+            | SequenceSource::Array { expr, .. }
+            | SequenceSource::JavaStream { expr, .. } => {
+                self.collect_sample_declarations_from_expression(
+                    expr.as_ref(),
+                    nested_types,
+                    declarations,
+                )?;
+            }
+            SequenceSource::ListLiteral { elements, .. } => {
+                for element in elements {
+                    self.collect_sample_declarations_from_expression(
+                        element,
+                        nested_types,
+                        declarations,
+                    )?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn collect_sample_declarations_from_sequence_stage(
+        &mut self,
+        stage: &SequenceStage,
+        nested_types: &mut Vec<String>,
+        declarations: &mut Vec<IrSampleDeclaration>,
+    ) -> Result<(), CodeGenError> {
+        match stage {
+            SequenceStage::Map { lambda, .. } | SequenceStage::FlatMap { lambda, .. } => {
+                self.collect_sample_declarations_from_expression(
+                    lambda.as_ref(),
+                    nested_types,
+                    declarations,
+                )?;
+            }
+            SequenceStage::Filter { predicate, .. } => {
+                self.collect_sample_declarations_from_expression(
+                    predicate.as_ref(),
+                    nested_types,
+                    declarations,
+                )?;
+            }
+            SequenceStage::Take { count, .. } | SequenceStage::Drop { count, .. } => {
+                self.collect_sample_declarations_from_expression(
+                    count.as_ref(),
+                    nested_types,
+                    declarations,
+                )?;
+            }
+            SequenceStage::Sorted { comparator, .. } => {
+                if let Some(comparator) = comparator.as_deref() {
+                    self.collect_sample_declarations_from_expression(
+                        comparator,
+                        nested_types,
+                        declarations,
+                    )?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn collect_sample_declarations_from_sequence_terminal(
+        &mut self,
+        terminal: &SequenceTerminal,
+        nested_types: &mut Vec<String>,
+        declarations: &mut Vec<IrSampleDeclaration>,
+    ) -> Result<(), CodeGenError> {
+        if let Some(adapter) = terminal.canonical_adapter.as_deref() {
+            self.collect_sample_declarations_from_expression(adapter, nested_types, declarations)?;
+        }
+
+        match &terminal.kind {
+            SequenceTerminalKind::Fold {
+                initial,
+                accumulator,
+            } => {
+                self.collect_sample_declarations_from_expression(
+                    initial.as_ref(),
+                    nested_types,
+                    declarations,
+                )?;
+                self.collect_sample_declarations_from_expression(
+                    accumulator.as_ref(),
+                    nested_types,
+                    declarations,
+                )?;
+            }
+            SequenceTerminalKind::Reduce { accumulator } => {
+                self.collect_sample_declarations_from_expression(
+                    accumulator.as_ref(),
+                    nested_types,
+                    declarations,
+                )?;
+            }
+            SequenceTerminalKind::GroupBy { key_selector } => {
+                self.collect_sample_declarations_from_expression(
+                    key_selector.as_ref(),
+                    nested_types,
+                    declarations,
+                )?;
+            }
+            SequenceTerminalKind::Associate { pair_selector } => {
+                self.collect_sample_declarations_from_expression(
+                    pair_selector.as_ref(),
+                    nested_types,
+                    declarations,
+                )?;
+            }
+            SequenceTerminalKind::ForEach { action } => {
+                self.collect_sample_declarations_from_expression(
+                    action.as_ref(),
+                    nested_types,
+                    declarations,
+                )?;
+            }
+            SequenceTerminalKind::ToList
+            | SequenceTerminalKind::ToSet
+            | SequenceTerminalKind::Count
+            | SequenceTerminalKind::Sum => {}
+        }
+
+        Ok(())
+    }
+
+    fn collect_sample_declarations_from_switch_case(
+        &mut self,
+        case: &IrSwitchCase,
+        nested_types: &mut Vec<String>,
+        declarations: &mut Vec<IrSampleDeclaration>,
+    ) -> Result<(), CodeGenError> {
+        for label in &case.labels {
+            self.collect_sample_declarations_from_case_label(label, nested_types, declarations)?;
+        }
+
+        if let Some(guard) = case.guard.as_ref() {
+            self.collect_sample_declarations_from_expression(guard, nested_types, declarations)?;
+        }
+
+        self.collect_sample_declarations_from_expression(&case.body, nested_types, declarations)?;
+
+        Ok(())
+    }
+
+    fn collect_sample_declarations_from_case_label(
+        &mut self,
+        label: &IrCaseLabel,
+        nested_types: &mut Vec<String>,
+        declarations: &mut Vec<IrSampleDeclaration>,
+    ) -> Result<(), CodeGenError> {
+        if let IrCaseLabel::Range { lower, upper, .. } = label {
+            self.collect_sample_declarations_from_expression(
+                lower.as_ref(),
+                nested_types,
+                declarations,
+            )?;
+            self.collect_sample_declarations_from_expression(
+                upper.as_ref(),
+                nested_types,
+                declarations,
+            )?;
+        }
+        Ok(())
     }
 
     fn add_import(&mut self, import_path: &str) {

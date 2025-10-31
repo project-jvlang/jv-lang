@@ -3,7 +3,7 @@ use csv::StringRecord;
 use jv_ast::Span;
 use jv_ir::{DataFormat, PrimitiveType, SampleMode, SampleRecordDescriptor, Schema};
 use serde_json::{Map, Number, Value};
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, HashMap};
 use std::io::Cursor;
 use std::str::FromStr;
 
@@ -11,23 +11,49 @@ impl JavaCodeGenerator {
     pub(super) fn generate_sample_declaration_artifacts(
         &mut self,
         declaration: &IrSampleDeclaration,
+        as_static_nested: bool,
     ) -> Result<Vec<String>, CodeGenError> {
-        let mut artifacts = self.generate_sample_declaration_records(declaration)?;
+        let mut artifacts =
+            self.generate_sample_declaration_records(declaration, as_static_nested)?;
 
         if declaration.mode == SampleMode::Embed {
-            let helper = self.generate_sample_embed_helper(declaration)?;
+            let helper = self.generate_sample_embed_helper(declaration, as_static_nested)?;
             artifacts.push(helper);
         } else if declaration.mode == SampleMode::Load {
-            let helper = self.generate_sample_load_helper(declaration)?;
+            let helper = self.generate_sample_load_helper(declaration, as_static_nested)?;
             artifacts.push(helper);
         }
 
         Ok(artifacts)
     }
 
+    pub(super) fn generate_sample_declaration_binding(
+        &mut self,
+        declaration: &IrSampleDeclaration,
+    ) -> Result<String, CodeGenError> {
+        let initializer = match declaration.mode {
+            SampleMode::Embed => {
+                let helper = self.embed_helper_class_name(declaration);
+                let field = declaration.variable_name.to_ascii_uppercase();
+                format!("{helper}.{field}")
+            }
+            SampleMode::Load => {
+                let helper = self.load_helper_class_name(declaration);
+                let method = self.load_method_name(declaration);
+                format!("{helper}.{}()", method)
+            }
+        };
+
+        Ok(format!(
+            "var {} = {};",
+            declaration.variable_name, initializer
+        ))
+    }
+
     fn generate_sample_declaration_records(
         &mut self,
         declaration: &IrSampleDeclaration,
+        as_static_nested: bool,
     ) -> Result<Vec<String>, CodeGenError> {
         let mut records = Vec::new();
 
@@ -50,6 +76,7 @@ impl JavaCodeGenerator {
                 methods: Vec::new(),
                 modifiers: IrModifiers {
                     visibility: IrVisibility::Public,
+                    is_static: as_static_nested,
                     ..IrModifiers::default()
                 },
                 span: declaration.span.clone(),
@@ -73,6 +100,7 @@ impl JavaCodeGenerator {
     fn generate_sample_embed_helper(
         &mut self,
         declaration: &IrSampleDeclaration,
+        as_static_nested: bool,
     ) -> Result<String, CodeGenError> {
         let data_bytes = declaration.embedded_data.as_ref().ok_or_else(|| {
             CodeGenError::UnsupportedConstruct {
@@ -183,6 +211,7 @@ impl JavaCodeGenerator {
             nested_classes: Vec::new(),
             modifiers: IrModifiers {
                 visibility: IrVisibility::Public,
+                is_static: as_static_nested,
                 ..IrModifiers::default()
             },
             span: declaration.span.clone(),
@@ -194,6 +223,7 @@ impl JavaCodeGenerator {
     fn generate_sample_load_helper(
         &mut self,
         declaration: &IrSampleDeclaration,
+        as_static_nested: bool,
     ) -> Result<String, CodeGenError> {
         let descriptor_lookup = Self::build_descriptor_lookup(&declaration.records);
         let object_schema_map = self.build_object_schema_map(
@@ -215,6 +245,7 @@ impl JavaCodeGenerator {
             descriptor_lookup,
             object_schema_map,
             list_types,
+            as_static_nested,
         )?;
 
         generator.build()
@@ -956,13 +987,12 @@ impl JavaCodeGenerator {
         let (core_type, _) = Self::unwrap_optional_java_type(java_type);
 
         match (core_schema, core_type) {
-            (Schema::Object { fields, required }, JavaType::Reference { name, .. }) => {
+            (Schema::Object { fields, .. }, JavaType::Reference { name, .. }) => {
                 if !map.contains_key(name) {
                     map.insert(
                         name.clone(),
                         ObjectSchemaInfo {
                             fields: fields.clone(),
-                            required: required.clone(),
                         },
                     );
 
@@ -1067,7 +1097,6 @@ impl JavaCodeGenerator {
 #[derive(Clone)]
 struct ObjectSchemaInfo {
     fields: BTreeMap<String, Schema>,
-    required: BTreeSet<String>,
 }
 
 #[derive(Clone)]
@@ -1087,6 +1116,7 @@ struct LoadHelperGenerator<'a> {
     helper_name: String,
     method_name: String,
     return_type: String,
+    is_static_nested: bool,
 }
 
 impl<'a> LoadHelperGenerator<'a> {
@@ -1096,6 +1126,7 @@ impl<'a> LoadHelperGenerator<'a> {
         descriptor_lookup: HashMap<String, SampleRecordDescriptor>,
         object_schema_map: HashMap<String, ObjectSchemaInfo>,
         list_types: Vec<ListTypeInfo>,
+        is_static_nested: bool,
     ) -> Result<Self, CodeGenError> {
         let helper_name = generator.load_helper_class_name(declaration);
         let method_name = generator.load_method_name(declaration);
@@ -1112,6 +1143,7 @@ impl<'a> LoadHelperGenerator<'a> {
             helper_name,
             method_name,
             return_type,
+            is_static_nested,
         })
     }
 
@@ -1160,8 +1192,13 @@ impl<'a> LoadHelperGenerator<'a> {
     }
 
     fn write_class_header(&mut self) {
+        let prefix = if self.is_static_nested {
+            "public static final"
+        } else {
+            "public final"
+        };
         self.builder
-            .push_line(&format!("public final class {} {{", self.helper_name));
+            .push_line(&format!("{} class {} {{", prefix, self.helper_name));
         self.builder.indent();
     }
 

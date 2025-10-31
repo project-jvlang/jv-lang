@@ -8,12 +8,12 @@ use jv_ir::TransformContext;
 use jv_ir::transform::transform_program_with_context;
 use jv_ir::{
     DataFormat, IrCaseLabel, IrCommentKind, IrDeconstructionComponent, IrDeconstructionPattern,
-    IrExpression, IrImplicitWhenEnd, IrModifiers, IrParameter, IrProgram, IrRecordComponent,
-    IrSampleDeclaration, IrStatement, IrSwitchCase, IrTypeParameter, IrVisibility, JavaType,
-    MethodOverload, PipelineShape, PrimitiveReturnMetadata, PrimitiveSpecializationHint,
-    PrimitiveType, SampleMode, SampleRecordDescriptor, SampleRecordField, SampleSourceKind, Schema,
-    SequencePipeline, SequenceSource, SequenceTerminal, SequenceTerminalEvaluation,
-    SequenceTerminalKind,
+    IrExpression, IrForEachKind, IrImplicitWhenEnd, IrModifiers, IrParameter, IrProgram,
+    IrRecordComponent, IrSampleDeclaration, IrStatement, IrSwitchCase, IrTypeParameter,
+    IrVisibility, JavaType, MethodOverload, PipelineShape, PrimitiveReturnMetadata,
+    PrimitiveSpecializationHint, PrimitiveType, SampleMode, SampleRecordDescriptor,
+    SampleRecordField, SampleSourceKind, Schema, SequencePipeline, SequenceSource,
+    SequenceTerminal, SequenceTerminalEvaluation, SequenceTerminalKind,
 };
 use jv_parser_frontend::ParserPipeline;
 use jv_parser_rowan::frontend::RowanPipeline;
@@ -2306,6 +2306,53 @@ fn inline_json_sample_generates_payload_records() {
     assert!(
         source.contains("record PayloadUserSample("),
         "nested user record should be generated for inline JSON payload: {source}"
+    );
+}
+
+#[test]
+fn sample_declaration_inside_loop_is_hoisted_into_script_class() {
+    let loop_body = IrStatement::Block {
+        label: None,
+        statements: vec![IrStatement::SampleDeclaration(sample_declaration(vec![
+            sample_record_descriptor(),
+        ]))],
+        span: dummy_span(),
+    };
+
+    let for_each = IrStatement::ForEach {
+        label: None,
+        variable: "user".to_string(),
+        variable_type: user_sample_type(),
+        iterable: IrExpression::Identifier {
+            name: "users".to_string(),
+            java_type: user_sample_list_type(),
+            span: dummy_span(),
+        },
+        body: Box::new(loop_body),
+        iterable_kind: IrForEachKind::Iterable,
+        span: dummy_span(),
+    };
+
+    let program = IrProgram {
+        package: None,
+        imports: vec![],
+        type_declarations: vec![for_each],
+        generic_metadata: Default::default(),
+        conversion_metadata: Vec::new(),
+        span: dummy_span(),
+    };
+
+    let unit =
+        generate_java_code(&program).expect("loop内に含まれる@Sample宣言のJava生成に成功すること");
+    let source = unit.to_source(&JavaCodeGenConfig::default());
+
+    assert!(
+        source.contains("public static record UserSample("),
+        "loop内の@Sample宣言は静的ネストのrecordとして出力されるべきです: {source}"
+    );
+    assert!(
+        source.contains("public static class UserSampleData"),
+        "loop内の@Sample宣言は補助クラスも静的ネストで生成されるべきです: {source}"
     );
 }
 
