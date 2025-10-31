@@ -29,6 +29,7 @@ impl Expression {
             Expression::Try { span, .. } => span,
             Expression::This(span) => span,
             Expression::Super(span) => span,
+            Expression::RegexCommand(command) => &command.span,
         }
     }
 }

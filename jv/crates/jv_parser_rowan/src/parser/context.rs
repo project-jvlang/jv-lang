@@ -1,4 +1,4 @@
-use jv_lexer::Token;
+use jv_lexer::{Token, TokenType};
 
 use crate::syntax::{SyntaxKind, TokenKind};
 
@@ -31,6 +31,66 @@ const SYNC_TOKENS: &[TokenKind] = &[
 #[derive(Default)]
 struct WhenBlockState {
     brace_depth: usize,
+}
+
+fn is_short_mode_identifier(token: &Token) -> bool {
+    match &token.token_type {
+        TokenType::Identifier(value) if value.len() == 1 => matches!(
+            value.as_bytes()[0],
+            b'a' | b'A' | b'f' | b'F' | b'm' | b'M' | b's' | b'S' | b'i' | b'I'
+        ),
+        _ => false,
+    }
+}
+
+fn consume_explicit_mode_tokens(
+    collected: &[(usize, TokenKind, &Token)],
+    index: &mut usize,
+) -> bool {
+    let len = collected.len();
+    *index += 1;
+    while *index < len {
+        if collected[*index].1 == TokenKind::RightBracket {
+            *index += 1;
+            return true;
+        }
+        *index += 1;
+    }
+    false
+}
+
+fn flag_token_content(token: &Token) -> Option<String> {
+    let value = match &token.token_type {
+        TokenType::Identifier(value)
+        | TokenType::String(value)
+        | TokenType::StringInterpolation(value) => value.clone(),
+        _ => return None,
+    };
+
+    if value.chars().all(|ch| {
+        matches!(
+            ch,
+            'i' | 'I'
+                | 'm'
+                | 'M'
+                | 's'
+                | 'S'
+                | 'u'
+                | 'U'
+                | 'd'
+                | 'D'
+                | 'x'
+                | 'X'
+                | 'l'
+                | 'L'
+                | 'c'
+                | 'C'
+        )
+    }) {
+        Some(value)
+    } else {
+        None
+    }
 }
 
 #[derive(Default)]
@@ -603,6 +663,20 @@ impl<'tokens> ParserContext<'tokens> {
                 }
             }
 
+            if respect_statement_boundaries && at_top_level {
+                if let Some((line, consumed_kind, prev_kind)) = self.try_start_regex_command_node()
+                {
+                    last_line = Some(line);
+                    if let Some(prev) = prev_kind {
+                        second_last_significant_kind = Some(prev);
+                    } else {
+                        second_last_significant_kind = last_significant_kind;
+                    }
+                    last_significant_kind = Some(consumed_kind);
+                    continue;
+                }
+            }
+
             match kind {
                 TokenKind::LeftParen => depth_paren += 1,
                 TokenKind::RightParen => {
@@ -672,6 +746,131 @@ impl<'tokens> ParserContext<'tokens> {
         self.finish_node();
         self.expression_states.pop();
         consumed
+    }
+
+    fn try_start_regex_command_node(&mut self) -> Option<(usize, TokenKind, Option<TokenKind>)> {
+        let original_cursor = self.cursor;
+        let mut collected: Vec<(usize, TokenKind, &Token)> = Vec::new();
+        let mut raw_index = self.cursor;
+
+        while raw_index < self.tokens.len() && collected.len() < 64 {
+            let token = &self.tokens[raw_index];
+            let kind = TokenKind::from_token(token);
+            if matches!(kind, TokenKind::Eof) {
+                break;
+            }
+
+            if !kind.is_trivia() {
+                if !collected.is_empty()
+                    && matches!(
+                        kind,
+                        TokenKind::Semicolon | TokenKind::Newline | TokenKind::RightBrace
+                    )
+                {
+                    break;
+                }
+                collected.push((raw_index, kind, token));
+            }
+
+            raw_index += 1;
+        }
+
+        if collected.is_empty() {
+            return None;
+        }
+
+        let len = collected.len();
+        let mut idx = 0usize;
+
+        if let Some((_, kind, token)) = collected.get(idx) {
+            if *kind == TokenKind::Identifier && is_short_mode_identifier(token) {
+                idx += 1;
+            } else if *kind == TokenKind::LeftBracket {
+                if !consume_explicit_mode_tokens(&collected, &mut idx) {
+                    self.cursor = original_cursor;
+                    return None;
+                }
+            } else if *kind != TokenKind::Slash {
+                self.cursor = original_cursor;
+                return None;
+            }
+        }
+
+        if idx >= len || collected[idx].1 != TokenKind::Slash {
+            self.cursor = original_cursor;
+            return None;
+        }
+        idx += 1;
+        if idx >= len {
+            self.cursor = original_cursor;
+            return None;
+        }
+
+        let subject_start = idx;
+        let mut pattern_index = None;
+        while idx < len {
+            if matches!(collected[idx].2.token_type, TokenType::RegexLiteral(_)) {
+                pattern_index = Some(idx);
+                break;
+            }
+            idx += 1;
+        }
+
+        let Some(pattern_index) = pattern_index else {
+            self.cursor = original_cursor;
+            return None;
+        };
+
+        if subject_start == pattern_index {
+            self.cursor = original_cursor;
+            return None;
+        }
+
+        idx = pattern_index + 1;
+
+        if idx < len && collected[idx].1 == TokenKind::Slash {
+            idx += 1;
+            let mut replacement_end = idx;
+            while replacement_end < len && collected[replacement_end].1 != TokenKind::Slash {
+                replacement_end += 1;
+            }
+            if replacement_end >= len {
+                self.cursor = original_cursor;
+                return None;
+            }
+            idx = replacement_end + 1;
+
+            if idx < len {
+                if flag_token_content(collected[idx].2).is_some() {
+                    idx += 1;
+                }
+            }
+        }
+
+        let consumed = idx;
+        if consumed == 0 || consumed > collected.len() {
+            self.cursor = original_cursor;
+            return None;
+        }
+
+        let last_entry = &collected[consumed - 1];
+        let last_raw_index = last_entry.0;
+
+        self.start_node(SyntaxKind::RegexCommand);
+        while self.cursor <= last_raw_index {
+            self.bump_raw();
+        }
+        self.finish_node();
+
+        let last_kind = last_entry.1;
+        let last_line = last_entry.2.line;
+        let prev_kind = if consumed >= 2 {
+            Some(collected[consumed - 2].1)
+        } else {
+            None
+        };
+
+        Some((last_line, last_kind, prev_kind))
     }
 
     fn is_generic_argument_sequence(

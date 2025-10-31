@@ -14,6 +14,9 @@ pub enum Expression {
     /// Regex literal with raw + normalized pattern metadata.
     RegexLiteral(RegexLiteral),
 
+    /// Concise regex command expression.
+    RegexCommand(Box<RegexCommand>),
+
     // Identifiers
     Identifier(String, Span),
 
@@ -143,6 +146,100 @@ pub enum Expression {
     // This/super references
     This(Span),
     Super(Span),
+}
+
+/// Regex command expression data.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RegexCommand {
+    pub mode: RegexCommandMode,
+    pub mode_origin: RegexCommandModeOrigin,
+    pub subject: Box<Expression>,
+    pub pattern: RegexLiteral,
+    #[serde(default)]
+    pub replacement: Option<RegexReplacement>,
+    #[serde(default)]
+    pub flags: Vec<RegexFlag>,
+    #[serde(default)]
+    pub raw_flags: Option<String>,
+    pub span: Span,
+}
+
+/// Regex command execution mode.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RegexCommandMode {
+    /// Replace all matches with the replacement.
+    All,
+    /// Replace only the first match.
+    First,
+    /// Perform a boolean match test.
+    Match,
+    /// Split the subject into an array of strings.
+    Split,
+    /// Iterate over matches as a stream.
+    Iterate,
+}
+
+/// Origin of the resolved regex command mode.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RegexCommandModeOrigin {
+    /// Mode provided via long-form token such as `[match]`.
+    ExplicitToken,
+    /// Mode provided via short single-character prefix such as `m`.
+    ShortMode,
+    /// Mode inferred from presence of replacement section.
+    DefaultReplacement,
+    /// Mode inferred due to absence of replacement section.
+    DefaultMatch,
+}
+
+/// Replacement description for a regex command.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum RegexReplacement {
+    /// Literal replacement with optional embedded expressions/back-references.
+    Literal(RegexLiteralReplacement),
+    /// Lambda replacement capturing parameters and body.
+    Lambda(RegexLambdaReplacement),
+    /// Fallback expression replacement (e.g. helper function returning `String`).
+    Expression(Expression),
+}
+
+/// Literal replacement metadata.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RegexLiteralReplacement {
+    pub raw: String,
+    pub normalized: String,
+    #[serde(default)]
+    pub template_segments: Vec<RegexTemplateSegment>,
+    pub span: Span,
+}
+
+/// Lambda replacement metadata.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RegexLambdaReplacement {
+    pub params: Vec<Parameter>,
+    pub body: Box<Expression>,
+    pub span: Span,
+}
+
+/// Template segment in a literal replacement.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum RegexTemplateSegment {
+    Text(String),
+    BackReference(u32),
+    Expression(Expression),
+}
+
+/// Regex flag identifiers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RegexFlag {
+    CaseInsensitive,
+    Multiline,
+    DotAll,
+    UnicodeCase,
+    UnixLines,
+    Comments,
+    Literal,
+    CanonEq,
 }
 
 /// Delimiter metadata describing how a sequence literal separated its elements.

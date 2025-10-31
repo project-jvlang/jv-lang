@@ -52,6 +52,8 @@ pub enum SyntaxKind {
     Modifier,
     /// 一般的な式プレースホルダー。
     Expression,
+    /// 正規表現コマンド式。
+    RegexCommand,
     /// 修飾名。
     QualifiedName,
     /// 修飾名セグメント。

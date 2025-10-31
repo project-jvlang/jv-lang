@@ -9,7 +9,9 @@ use crate::syntax::SyntaxKind;
 use jv_ast::comments::{CommentKind, CommentStatement, CommentVisibility};
 use jv_ast::expression::{
     Argument, BinaryMetadata, CallArgumentMetadata, CallArgumentStyle, IsTestKind, IsTestMetadata,
-    Parameter, ParameterModifiers, ParameterProperty, RegexGuardStrategy, StringPart, WhenArm,
+    Parameter, ParameterModifiers, ParameterProperty, RegexCommand, RegexCommandMode,
+    RegexCommandModeOrigin, RegexFlag, RegexGuardStrategy, RegexLambdaReplacement,
+    RegexLiteralReplacement, RegexReplacement, RegexTemplateSegment, StringPart, WhenArm,
 };
 use jv_ast::json::{
     JsonComment, JsonCommentKind, JsonEntry, JsonLiteral, JsonValue, NumberGrouping,
@@ -1094,6 +1096,66 @@ mod tests {
             ),
         }
     }
+
+    #[test]
+    fn regex_command_without_explicit_mode_defaults_to_match() {
+        let expr = parse_expression_from_source("/text/\\d+/");
+        match expr {
+            Expression::RegexCommand(command) => {
+                assert_eq!(command.mode, RegexCommandMode::Match);
+                assert!(command.replacement.is_none());
+                assert!(command.flags.is_empty());
+                assert!(matches!(
+                    command.mode_origin,
+                    RegexCommandModeOrigin::DefaultMatch
+                ));
+            }
+            other => panic!("expected regex command expression, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn regex_command_with_replacement_defaults_to_all() {
+        let expr = parse_expression_from_source("/text/\\d+//");
+        match expr {
+            Expression::RegexCommand(command) => {
+                assert_eq!(command.mode, RegexCommandMode::All);
+                assert!(matches!(
+                    command.mode_origin,
+                    RegexCommandModeOrigin::DefaultReplacement
+                ));
+                let replacement = command
+                    .replacement
+                    .as_ref()
+                    .expect("replacement should exist for empty string");
+                match replacement {
+                    RegexReplacement::Literal(literal) => {
+                        assert!(literal.raw.is_empty());
+                        assert!(literal.template_segments.is_empty());
+                    }
+                    other => panic!("expected literal replacement, got {:?}", other),
+                }
+            }
+            other => panic!("expected regex command expression, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn regex_command_with_short_mode_and_flags_parses() {
+        let source = "a/sub/\\d+/\"X\"/ims";
+        let expr = parse_expression_from_source(source);
+        match expr {
+            Expression::RegexCommand(command) => {
+                assert_eq!(command.mode, RegexCommandMode::All);
+                assert!(matches!(
+                    command.mode_origin,
+                    RegexCommandModeOrigin::ShortMode
+                ));
+                assert_eq!(command.flags.len(), 3);
+            }
+            other => panic!("expected regex command expression, got {:?}", other),
+        }
+    }
 }
 
 mod expression_parser {
@@ -1125,6 +1187,22 @@ mod expression_parser {
         tokens: &'a [&'a Token],
         pos: usize,
         pending_type_arguments: Option<Vec<TypeAnnotation>>,
+    }
+
+    #[derive(Clone, Copy)]
+    enum ParsedMode {
+        Short(RegexCommandMode),
+        Explicit(RegexCommandMode),
+    }
+
+    #[derive(Clone)]
+    struct RegexCommandSegments {
+        mode: Option<ParsedMode>,
+        subject_range: (usize, usize),
+        pattern_index: usize,
+        replacement_range: Option<(usize, usize)>,
+        flags_index: Option<usize>,
+        end_index: usize,
     }
 
     #[derive(Clone)]
@@ -1170,6 +1248,79 @@ mod expression_parser {
             }
         }
 
+        fn try_parse_regex_command(&mut self) -> Result<Option<ParsedExpr>, ExpressionError> {
+            let start = self.pos;
+            let segments = match detect_regex_command_segments(self.tokens, start)? {
+                Some(segments) => segments,
+                None => return Ok(None),
+            };
+
+            let subject_tokens = &self.tokens[segments.subject_range.0..segments.subject_range.1];
+            let subject_expr = parse_expression(subject_tokens)?;
+
+            let pattern_token = self.tokens[segments.pattern_index];
+            let pattern_span = span_from_token(pattern_token);
+            let regex_literal = regex_literal_from_token(pattern_token, pattern_span);
+
+            let replacement = if let Some(range) = segments.replacement_range.clone() {
+                Some(self.parse_regex_replacement(range)?)
+            } else {
+                None
+            };
+
+            let (flags, raw_flags) = if let Some(idx) = segments.flags_index {
+                let (flags, raw) = parse_regex_flags(self.tokens[idx]);
+                (flags, Some(raw))
+            } else {
+                (Vec::new(), None)
+            };
+
+            let (mode, origin) = match segments.mode {
+                Some(ParsedMode::Short(mode)) => (mode, RegexCommandModeOrigin::ShortMode),
+                Some(ParsedMode::Explicit(mode)) => (mode, RegexCommandModeOrigin::ExplicitToken),
+                None => {
+                    if segments.replacement_range.is_some() {
+                        (
+                            RegexCommandMode::All,
+                            RegexCommandModeOrigin::DefaultReplacement,
+                        )
+                    } else {
+                        (
+                            RegexCommandMode::Match,
+                            RegexCommandModeOrigin::DefaultMatch,
+                        )
+                    }
+                }
+            };
+
+            let start_span = span_from_token(self.tokens[start]);
+            let end_index = segments
+                .end_index
+                .saturating_sub(1)
+                .min(self.tokens.len().saturating_sub(1));
+            let end_span = span_from_token(self.tokens[end_index]);
+            let span = merge_spans(&start_span, &end_span);
+
+            let command = RegexCommand {
+                mode,
+                mode_origin: origin,
+                subject: Box::new(subject_expr),
+                pattern: regex_literal,
+                replacement,
+                flags,
+                raw_flags,
+                span: span.clone(),
+            };
+
+            self.pos = segments.end_index;
+
+            Ok(Some(ParsedExpr {
+                expr: Expression::RegexCommand(Box::new(command)),
+                start,
+                end: segments.end_index,
+            }))
+        }
+
         fn parse_expression_bp(&mut self, min_prec: u8) -> Result<ParsedExpr, ExpressionError> {
             let mut left = self.parse_prefix()?;
 
@@ -1209,6 +1360,52 @@ mod expression_parser {
             Ok(left)
         }
 
+        fn parse_regex_replacement(
+            &self,
+            range: (usize, usize),
+        ) -> Result<RegexReplacement, ExpressionError> {
+            let (start, end) = range;
+            if start >= end {
+                let anchor_index = start
+                    .saturating_sub(1)
+                    .min(self.tokens.len().saturating_sub(1));
+                let span = span_from_token(self.tokens[anchor_index]);
+                return Ok(RegexReplacement::Literal(RegexLiteralReplacement {
+                    raw: String::new(),
+                    normalized: String::new(),
+                    template_segments: Vec::new(),
+                    span,
+                }));
+            }
+
+            let slice = &self.tokens[start..end];
+            if slice.len() == 1
+                && matches!(
+                    slice[0].token_type,
+                    TokenType::String(_) | TokenType::StringInterpolation(_)
+                )
+            {
+                let token = slice[0];
+                let span = span_from_token(token);
+                let literal = build_regex_literal_replacement(token, span)?;
+                return Ok(RegexReplacement::Literal(literal));
+            }
+
+            let expr = parse_expression(slice)?;
+            match expr.clone() {
+                Expression::Lambda {
+                    parameters,
+                    body,
+                    span,
+                } => Ok(RegexReplacement::Lambda(RegexLambdaReplacement {
+                    params: parameters,
+                    body,
+                    span,
+                })),
+                _ => Ok(RegexReplacement::Expression(expr)),
+            }
+        }
+
         fn consume_postfix_if_any(
             &mut self,
             mut expr: ParsedExpr,
@@ -1229,6 +1426,10 @@ mod expression_parser {
         }
 
         fn parse_prefix(&mut self) -> Result<ParsedExpr, ExpressionError> {
+            if let Some(regex_expr) = self.try_parse_regex_command()? {
+                return Ok(regex_expr);
+            }
+
             let Some((token, index)) = self.peek_with_index() else {
                 return Err(ExpressionError::new("式が必要です", None));
             };
@@ -3991,6 +4192,341 @@ mod expression_parser {
         metadata
             .and_then(|meta| meta.raw_lexeme.clone())
             .unwrap_or_else(|| token.lexeme.clone())
+    }
+
+    fn detect_regex_command_segments(
+        tokens: &[&Token],
+        start: usize,
+    ) -> Result<Option<RegexCommandSegments>, ExpressionError> {
+        let len = tokens.len();
+        if start >= len {
+            return Ok(None);
+        }
+
+        let mut idx = start;
+        let mut mode = None;
+
+        if let Some(short_mode) = parse_short_mode_token(tokens[idx]) {
+            mode = Some(ParsedMode::Short(short_mode));
+            idx += 1;
+        } else if let Some((explicit_mode, next_idx)) = parse_explicit_mode(tokens, idx)? {
+            mode = Some(ParsedMode::Explicit(explicit_mode));
+            idx = next_idx;
+        } else if !matches!(tokens[idx].token_type, TokenType::Divide) {
+            return Ok(None);
+        }
+
+        if idx >= len || !matches!(tokens[idx].token_type, TokenType::Divide) {
+            return Ok(None);
+        }
+
+        idx += 1;
+        if idx >= len {
+            return Ok(None);
+        }
+
+        let subject_start = idx;
+        let mut pattern_index = None;
+
+        while idx < len {
+            if matches!(tokens[idx].token_type, TokenType::RegexLiteral(_)) {
+                pattern_index = Some(idx);
+                break;
+            }
+            idx += 1;
+        }
+
+        let Some(pattern_index) = pattern_index else {
+            return Ok(None);
+        };
+
+        if subject_start == pattern_index {
+            return Ok(None);
+        }
+
+        let mut end_index = pattern_index + 1;
+        let mut replacement_range = None;
+        let mut flags_index = None;
+
+        if end_index < len && matches!(tokens[end_index].token_type, TokenType::Divide) {
+            end_index += 1;
+            let replacement_start = end_index;
+
+            while end_index < len && !matches!(tokens[end_index].token_type, TokenType::Divide) {
+                end_index += 1;
+            }
+
+            if end_index >= len {
+                replacement_range = Some((replacement_start, end_index));
+                return Ok(Some(RegexCommandSegments {
+                    mode,
+                    subject_range: (subject_start, pattern_index),
+                    pattern_index,
+                    replacement_range,
+                    flags_index: None,
+                    end_index,
+                }));
+            }
+
+            replacement_range = Some((replacement_start, end_index));
+            end_index += 1;
+
+            if end_index < len && extract_flag_string(tokens[end_index]).is_some() {
+                flags_index = Some(end_index);
+                end_index += 1;
+            }
+        } else if end_index < len {
+            // Replacement without an explicit preceding slash (e.g. short mode commands).
+            let replacement_start = end_index;
+            while end_index < len && !matches!(tokens[end_index].token_type, TokenType::Divide) {
+                end_index += 1;
+            }
+
+            replacement_range = Some((replacement_start, end_index));
+
+            if end_index < len && matches!(tokens[end_index].token_type, TokenType::Divide) {
+                end_index += 1;
+                if end_index < len && extract_flag_string(tokens[end_index]).is_some() {
+                    flags_index = Some(end_index);
+                    end_index += 1;
+                }
+            }
+        }
+
+        Ok(Some(RegexCommandSegments {
+            mode,
+            subject_range: (subject_start, pattern_index),
+            pattern_index,
+            replacement_range,
+            flags_index,
+            end_index,
+        }))
+    }
+
+    fn parse_short_mode_token(token: &Token) -> Option<RegexCommandMode> {
+        match &token.token_type {
+            TokenType::Identifier(value) if value.len() == 1 => match value.as_bytes()[0] {
+                b'a' | b'A' => Some(RegexCommandMode::All),
+                b'f' | b'F' => Some(RegexCommandMode::First),
+                b'm' | b'M' => Some(RegexCommandMode::Match),
+                b's' | b'S' => Some(RegexCommandMode::Split),
+                b'i' | b'I' => Some(RegexCommandMode::Iterate),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
+    fn parse_explicit_mode(
+        tokens: &[&Token],
+        start: usize,
+    ) -> Result<Option<(RegexCommandMode, usize)>, ExpressionError> {
+        let len = tokens.len();
+        if start >= len || !matches!(tokens[start].token_type, TokenType::LeftBracket) {
+            return Ok(None);
+        }
+
+        let mut idx = start + 1;
+        let mut buffer = String::new();
+
+        while idx < len {
+            match &tokens[idx].token_type {
+                TokenType::RightBracket => break,
+                TokenType::Identifier(value) => buffer.push_str(value),
+                TokenType::Minus => buffer.push('-'),
+                TokenType::String(value) | TokenType::StringInterpolation(value) => {
+                    buffer.push_str(value)
+                }
+                TokenType::Number(value) => buffer.push_str(value),
+                TokenType::Dot => buffer.push('.'),
+                _ => buffer.push_str(&tokens[idx].lexeme),
+            }
+            idx += 1;
+        }
+
+        if idx >= len || !matches!(tokens[idx].token_type, TokenType::RightBracket) {
+            let span = span_from_token(tokens[start]);
+            return Err(ExpressionError::new(
+                "`[` で始まるモード指定が閉じられていません",
+                Some(span),
+            ));
+        }
+
+        let normalized = buffer
+            .replace(|c: char| c == '-' || c == '_' || c == ' ', "")
+            .to_lowercase();
+        let mode = match normalized.as_str() {
+            "replace" | "replaceall" | "all" => RegexCommandMode::All,
+            "first" | "replacefirst" => RegexCommandMode::First,
+            "match" | "matches" => RegexCommandMode::Match,
+            "split" => RegexCommandMode::Split,
+            "iterate" | "results" => RegexCommandMode::Iterate,
+            other => {
+                let span = span_from_token(tokens[start]);
+                return Err(ExpressionError::new(
+                    format!("未知の正規表現モード `{other}` です"),
+                    Some(span),
+                ));
+            }
+        };
+
+        Ok(Some((mode, idx + 1)))
+    }
+
+    fn extract_flag_string(token: &Token) -> Option<String> {
+        let value = match &token.token_type {
+            TokenType::Identifier(value)
+            | TokenType::String(value)
+            | TokenType::StringInterpolation(value) => value.clone(),
+            _ => return None,
+        };
+
+        if value.chars().all(|ch| {
+            matches!(
+                ch,
+                'i' | 'I'
+                    | 'm'
+                    | 'M'
+                    | 's'
+                    | 'S'
+                    | 'u'
+                    | 'U'
+                    | 'd'
+                    | 'D'
+                    | 'x'
+                    | 'X'
+                    | 'l'
+                    | 'L'
+                    | 'c'
+                    | 'C'
+            )
+        }) {
+            Some(value)
+        } else {
+            None
+        }
+    }
+
+    fn parse_regex_flags(token: &Token) -> (Vec<RegexFlag>, String) {
+        let content = extract_flag_string(token).unwrap_or_else(|| match &token.token_type {
+            TokenType::Identifier(value)
+            | TokenType::String(value)
+            | TokenType::StringInterpolation(value) => value.clone(),
+            _ => token.lexeme.clone(),
+        });
+
+        let mut seen = Vec::new();
+        for ch in content.chars() {
+            let flag = match ch {
+                'i' | 'I' => Some(RegexFlag::CaseInsensitive),
+                'm' | 'M' => Some(RegexFlag::Multiline),
+                's' | 'S' => Some(RegexFlag::DotAll),
+                'u' | 'U' => Some(RegexFlag::UnicodeCase),
+                'd' | 'D' => Some(RegexFlag::UnixLines),
+                'x' | 'X' => Some(RegexFlag::Comments),
+                'l' | 'L' => Some(RegexFlag::Literal),
+                'c' | 'C' => Some(RegexFlag::CanonEq),
+                _ => None,
+            };
+            if let Some(flag) = flag {
+                if !seen.contains(&flag) {
+                    seen.push(flag);
+                }
+            }
+        }
+
+        (seen, content)
+    }
+
+    fn build_regex_literal_replacement(
+        token: &Token,
+        span: Span,
+    ) -> Result<RegexLiteralReplacement, ExpressionError> {
+        let metadata = string_literal_metadata(token);
+        let raw = raw_lexeme_from_metadata(token, metadata);
+        let normalized = match &token.token_type {
+            TokenType::String(value) | TokenType::StringInterpolation(value) => value.clone(),
+            _ => token.lexeme.clone(),
+        };
+
+        let interpolation_segments = token.metadata.iter().find_map(|meta| match meta {
+            TokenMetadata::StringInterpolation { segments } => Some(segments.clone()),
+            _ => None,
+        });
+
+        let mut template_segments = Vec::new();
+        let mut aggregated = String::new();
+
+        if let Some(segments) = interpolation_segments {
+            for segment in segments {
+                match segment {
+                    StringInterpolationSegment::Literal(text) => {
+                        append_literal_segments(&mut template_segments, &text);
+                        aggregated.push_str(&text);
+                    }
+                    StringInterpolationSegment::Expression(expr_source) => {
+                        let (expr, _) = parse_expression_from_text(&expr_source, span.clone())?;
+                        template_segments.push(RegexTemplateSegment::Expression(expr));
+                    }
+                }
+            }
+        } else {
+            append_literal_segments(&mut template_segments, &normalized);
+            aggregated.push_str(&normalized);
+        }
+
+        Ok(RegexLiteralReplacement {
+            raw,
+            normalized: aggregated,
+            template_segments,
+            span,
+        })
+    }
+
+    fn append_literal_segments(segments: &mut Vec<RegexTemplateSegment>, text: &str) {
+        if text.is_empty() {
+            return;
+        }
+
+        let mut buffer = String::new();
+        let mut chars = text.chars().peekable();
+
+        while let Some(ch) = chars.next() {
+            if ch == '$' {
+                if !buffer.is_empty() {
+                    segments.push(RegexTemplateSegment::Text(buffer.clone()));
+                    buffer.clear();
+                }
+
+                if matches!(chars.peek(), Some('$')) {
+                    chars.next();
+                    buffer.push('$');
+                    continue;
+                }
+
+                let mut digits = String::new();
+                while matches!(chars.peek(), Some(c) if c.is_ascii_digit()) {
+                    if let Some(digit) = chars.next() {
+                        digits.push(digit);
+                    }
+                }
+
+                if digits.is_empty() {
+                    buffer.push('$');
+                } else if let Ok(index) = digits.parse::<u32>() {
+                    segments.push(RegexTemplateSegment::BackReference(index));
+                } else {
+                    buffer.push('$');
+                    buffer.push_str(&digits);
+                }
+            } else {
+                buffer.push(ch);
+            }
+        }
+
+        if !buffer.is_empty() {
+            segments.push(RegexTemplateSegment::Text(buffer));
+        }
     }
 
     fn has_high_json_confidence(token: &Token) -> bool {

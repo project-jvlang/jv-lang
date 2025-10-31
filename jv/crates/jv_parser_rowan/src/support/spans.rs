@@ -16,6 +16,7 @@ pub fn expression_span(expr: &Expression) -> Span {
     match expr {
         Expression::Literal(_, span) => span.clone(),
         Expression::RegexLiteral(literal) => literal.span.clone(),
+        Expression::RegexCommand(command) => command.span.clone(),
         Expression::Identifier(_, span) => span.clone(),
         Expression::Binary { span, .. } => span.clone(),
         Expression::Unary { span, .. } => span.clone(),
