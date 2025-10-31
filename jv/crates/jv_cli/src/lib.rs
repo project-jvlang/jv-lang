@@ -434,7 +434,9 @@ pub mod pipeline {
     use super::*;
     use anyhow::{Context, anyhow, bail};
     use generics::apply_type_facts;
-    use jv_ast::{Argument, CallArgumentMetadata, Expression, Literal, Span, Statement};
+    use jv_ast::{
+        Argument, CallArgumentMetadata, Expression, Literal, RegexCommandMode, Span, Statement,
+    };
     use jv_build::BuildSystem;
     use jv_build::metadata::{
         BuildContext as SymbolBuildContext, SymbolIndexBuilder, SymbolIndexCache,
@@ -446,13 +448,15 @@ pub mod pipeline {
         diagnostics as import_diagnostics,
     };
     use jv_checker::inference::{AppliedConversion, HelperSpec, NullableGuardReason};
-    use jv_checker::{InferenceSnapshot, InferenceTelemetry, TypeChecker, TypeKind};
+    use jv_checker::{
+        InferenceSnapshot, InferenceTelemetry, RegexCommandTyping, TypeChecker, TypeKind,
+    };
     use jv_codegen_java::{JavaCodeGenConfig, JavaCodeGenerator};
     use jv_fmt::JavaFormatter;
     use jv_inference::types::TypeVariant;
     use jv_ir::TransformContext;
-    use jv_ir::context::WhenStrategyRecord;
-    use jv_ir::types::{IrImport, IrImportDetail};
+    use jv_ir::context::{RegexCommandLoweringInfo, WhenStrategyRecord};
+    use jv_ir::types::{IrImport, IrImportDetail, JavaType};
     use jv_ir::{
         TransformPools, TransformProfiler, transform_program_with_context,
         transform_program_with_context_profiled,
@@ -870,6 +874,9 @@ pub mod pipeline {
             if let Some(facts) = type_facts_snapshot.as_ref() {
                 preload_type_facts_into_context(&mut context, facts);
             }
+            if let Some(snapshot) = inference_snapshot.as_ref() {
+                preload_regex_command_typings(&mut context, snapshot.regex_command_typings());
+            }
             if !import_plan.is_empty() {
                 context.set_resolved_imports(import_plan.clone());
             }
@@ -908,6 +915,9 @@ pub mod pipeline {
             let mut context = TransformContext::new();
             if let Some(facts) = type_facts_snapshot.as_ref() {
                 preload_type_facts_into_context(&mut context, facts);
+            }
+            if let Some(snapshot) = inference_snapshot.as_ref() {
+                preload_regex_command_typings(&mut context, snapshot.regex_command_typings());
             }
             if !import_plan.is_empty() {
                 context.set_resolved_imports(import_plan.clone());
@@ -1370,6 +1380,117 @@ pub mod pipeline {
                 format!("fn({}) -> {}", param_repr, format_type_kind(result))
             }
             TypeKind::Unknown => "unknown".to_string(),
+        }
+    }
+
+    fn preload_regex_command_typings(
+        context: &mut TransformContext,
+        typings: &[RegexCommandTyping],
+    ) {
+        for typing in typings {
+            let mut java_type = java_type_from_checker_kind(&typing.return_type);
+            if matches!(typing.mode, RegexCommandMode::Iterate)
+                && typing.requires_stream_materialization
+            {
+                java_type = JavaType::Reference {
+                    name: "java.util.stream.Stream".to_string(),
+                    generic_args: vec![JavaType::Reference {
+                        name: "java.util.regex.MatchResult".to_string(),
+                        generic_args: vec![],
+                    }],
+                };
+            }
+
+            let info = RegexCommandLoweringInfo {
+                mode: typing.mode,
+                guard_strategy: typing.guard_strategy.clone(),
+                java_type,
+                requires_stream_materialization: typing.requires_stream_materialization,
+            };
+            context.register_regex_command_typing(&typing.span, info);
+        }
+    }
+
+    fn java_type_from_checker_kind(kind: &TypeKind) -> JavaType {
+        match kind {
+            TypeKind::Primitive(primitive) => {
+                JavaType::Primitive(primitive.java_name().to_string())
+            }
+            TypeKind::Boxed(primitive) => JavaType::Reference {
+                name: primitive.boxed_fqcn().to_string(),
+                generic_args: vec![],
+            },
+            TypeKind::Reference(name) => reference_name_to_java_type(name),
+            TypeKind::Optional(inner) => {
+                let inner_type = java_type_from_checker_kind(inner);
+                JavaType::Reference {
+                    name: "java.util.Optional".to_string(),
+                    generic_args: vec![boxed_java_type_for_optional(inner_type)],
+                }
+            }
+            TypeKind::Function(_, _) => JavaType::Reference {
+                name: "java.util.function.Function".to_string(),
+                generic_args: vec![],
+            },
+            TypeKind::Variable(_) | TypeKind::Unknown => JavaType::object(),
+        }
+    }
+
+    fn reference_name_to_java_type(name: &str) -> JavaType {
+        let mut base = name.replace("::", ".");
+        let mut dimensions = 0usize;
+
+        while let Some(stripped) = base.strip_suffix("[]") {
+            base = stripped.to_string();
+            dimensions += 1;
+        }
+
+        let mut result = match base.as_str() {
+            "String" | "java.lang.String" => JavaType::string(),
+            "Boolean" | "java.lang.Boolean" => JavaType::Reference {
+                name: "java.lang.Boolean".to_string(),
+                generic_args: vec![],
+            },
+            other => JavaType::Reference {
+                name: other.to_string(),
+                generic_args: vec![],
+            },
+        };
+
+        if dimensions > 0 {
+            result = JavaType::Array {
+                element_type: Box::new(result),
+                dimensions,
+            };
+        }
+
+        result
+    }
+
+    fn boxed_java_type_for_optional(java_type: JavaType) -> JavaType {
+        match java_type {
+            JavaType::Primitive(name) => {
+                let boxed = match name.as_str() {
+                    "int" => "java.lang.Integer",
+                    "boolean" => "java.lang.Boolean",
+                    "char" => "java.lang.Character",
+                    "double" => "java.lang.Double",
+                    "float" => "java.lang.Float",
+                    "long" => "java.lang.Long",
+                    "byte" => "java.lang.Byte",
+                    "short" => "java.lang.Short",
+                    other => other,
+                };
+                JavaType::Reference {
+                    name: boxed.to_string(),
+                    generic_args: vec![],
+                }
+            }
+            JavaType::Array { .. }
+            | JavaType::Reference { .. }
+            | JavaType::Functional { .. }
+            | JavaType::Void
+            | JavaType::Wildcard { .. } => java_type,
         }
     }
 

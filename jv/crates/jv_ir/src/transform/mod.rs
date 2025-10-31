@@ -4,14 +4,16 @@ use crate::naming::method_erasure::apply_method_erasure;
 use crate::profiling::{PerfMetrics, TransformProfiler};
 use crate::sequence_pipeline;
 use crate::types::{
-    IrCommentKind, IrExpression, IrImport, IrImportDetail, IrProgram, IrStatement, JavaType,
-    RawStringFlavor,
+    IrCommentKind, IrExpression, IrImport, IrImportDetail, IrProgram, IrRegexCommand,
+    IrRegexLambdaReplacement, IrRegexLiteralReplacement, IrRegexReplacement,
+    IrRegexTemplateSegment, IrStatement, JavaType, RawStringFlavor,
 };
 use jv_ast::{
     Argument, BinaryMetadata, BinaryOp, BindingPatternKind, CallArgumentMetadata,
     CallArgumentStyle, CommentKind, ConcurrencyConstruct, Expression, IsTestKind, Literal,
-    Modifiers, Program, RegexGuardStrategy, ResourceManagement, SequenceDelimiter, Span, Statement,
-    TypeAnnotation, UnaryOp, ValBindingOrigin,
+    Modifiers, Program, RegexCommand, RegexCommandMode, RegexGuardStrategy, RegexLambdaReplacement,
+    RegexLiteralReplacement, RegexReplacement, RegexTemplateSegment, ResourceManagement,
+    SequenceDelimiter, Span, Statement, TypeAnnotation, UnaryOp, ValBindingOrigin,
 };
 
 mod concurrency;
@@ -520,6 +522,7 @@ pub fn transform_expression(
             java_type: JavaType::pattern(),
             span: literal.span.clone(),
         }),
+        Expression::RegexCommand(command) => lower_regex_command(*command, context),
         Expression::Identifier(name, span) => {
             if name.is_empty() {
                 return Ok(IrExpression::Literal(
@@ -887,6 +890,196 @@ pub fn transform_expression(
             span,
         } => desugar_when_expression(subject, arms, else_arm, implicit_end, span, context),
         _ => Ok(IrExpression::Literal(Literal::Null, None, Span::default())),
+    }
+}
+
+fn lower_regex_command(
+    command: RegexCommand,
+    context: &mut TransformContext,
+) -> Result<IrExpression, TransformError> {
+    let command_span = command.span.clone();
+    let metadata = context.regex_command_typing(&command_span).cloned();
+
+    let RegexCommand {
+        mode: ast_mode,
+        mode_origin: _,
+        subject,
+        pattern,
+        replacement,
+        flags,
+        raw_flags,
+        span,
+    } = command;
+
+    let has_replacement = replacement.is_some();
+
+    let metadata_present = metadata.is_some();
+    let (mode, mut guard_strategy, mut java_type, mut requires_stream_materialization) =
+        match metadata {
+            Some(info) => (
+                info.mode,
+                info.guard_strategy,
+                info.java_type,
+                info.requires_stream_materialization,
+            ),
+            None => (
+                ast_mode,
+                RegexGuardStrategy::None,
+                default_regex_command_java_type(ast_mode, has_replacement),
+                matches!(ast_mode, RegexCommandMode::Iterate) && !has_replacement,
+            ),
+        };
+
+    guard_strategy = match guard_strategy {
+        RegexGuardStrategy::CaptureAndGuard { temp_name } => RegexGuardStrategy::CaptureAndGuard {
+            temp_name: Some(
+                temp_name.unwrap_or_else(|| context.fresh_identifier("__jvRegexSubject_")),
+            ),
+        },
+        RegexGuardStrategy::None => RegexGuardStrategy::None,
+    };
+
+    let subject_ir = transform_expression(*subject, context)?;
+    let pattern_ir = IrExpression::RegexPattern {
+        pattern: pattern.pattern.clone(),
+        java_type: JavaType::pattern(),
+        span: pattern.span.clone(),
+    };
+
+    let replacement_ir = lower_regex_replacement(replacement, context)?;
+
+    if !metadata_present {
+        if matches!(mode, RegexCommandMode::Iterate) {
+            requires_stream_materialization = matches!(replacement_ir, IrRegexReplacement::None);
+        }
+        java_type = default_regex_command_java_type(
+            mode,
+            !matches!(replacement_ir, IrRegexReplacement::None),
+        );
+    }
+
+    let ir_command = IrRegexCommand {
+        mode,
+        subject: Box::new(subject_ir),
+        pattern: Box::new(pattern_ir),
+        replacement: replacement_ir,
+        flags,
+        raw_flags,
+        guard_strategy,
+        java_type,
+        requires_stream_materialization,
+        span,
+    };
+
+    Ok(IrExpression::RegexCommand(ir_command))
+}
+
+fn lower_regex_replacement(
+    replacement: Option<RegexReplacement>,
+    context: &mut TransformContext,
+) -> Result<IrRegexReplacement, TransformError> {
+    match replacement {
+        None => Ok(IrRegexReplacement::None),
+        Some(RegexReplacement::Literal(literal)) => {
+            lower_regex_literal_replacement(literal, context).map(IrRegexReplacement::Literal)
+        }
+        Some(RegexReplacement::Lambda(lambda)) => {
+            lower_regex_lambda_replacement(lambda, context).map(IrRegexReplacement::Lambda)
+        }
+        Some(RegexReplacement::Expression(expr)) => {
+            let ir_expr = transform_expression(expr, context)?;
+            Ok(IrRegexReplacement::Expression(Box::new(ir_expr)))
+        }
+    }
+}
+
+fn lower_regex_literal_replacement(
+    literal: RegexLiteralReplacement,
+    context: &mut TransformContext,
+) -> Result<IrRegexLiteralReplacement, TransformError> {
+    let mut segments = Vec::with_capacity(literal.template_segments.len());
+    for segment in literal.template_segments {
+        let lowered = match segment {
+            RegexTemplateSegment::Text(text) => IrRegexTemplateSegment::Text(text),
+            RegexTemplateSegment::BackReference(index) => {
+                IrRegexTemplateSegment::BackReference(index)
+            }
+            RegexTemplateSegment::Expression(expr) => {
+                let lowered_expr = transform_expression(expr, context)?;
+                IrRegexTemplateSegment::Expression(Box::new(lowered_expr))
+            }
+        };
+        segments.push(lowered);
+    }
+
+    Ok(IrRegexLiteralReplacement {
+        raw: literal.raw,
+        normalized: literal.normalized,
+        segments,
+        span: literal.span,
+    })
+}
+
+fn lower_regex_lambda_replacement(
+    lambda: RegexLambdaReplacement,
+    context: &mut TransformContext,
+) -> Result<IrRegexLambdaReplacement, TransformError> {
+    let RegexLambdaReplacement { params, body, span } = lambda;
+
+    context.enter_scope();
+    let mut param_names = Vec::with_capacity(params.len());
+    let mut param_types = Vec::with_capacity(params.len());
+
+    for param in params {
+        let java_type = if let Some(annotation) = param.type_annotation {
+            convert_type_annotation(annotation)?
+        } else {
+            JavaType::Reference {
+                name: "java.util.regex.MatchResult".to_string(),
+                generic_args: vec![],
+            }
+        };
+        context.add_variable(param.name.clone(), java_type.clone());
+        param_names.push(param.name);
+        param_types.push(java_type);
+    }
+
+    let result = transform_expression(*body, context);
+    context.exit_scope();
+    let body_ir = result?;
+
+    Ok(IrRegexLambdaReplacement {
+        param_names,
+        param_types,
+        body: Box::new(body_ir),
+        span,
+    })
+}
+
+fn default_regex_command_java_type(mode: RegexCommandMode, has_replacement: bool) -> JavaType {
+    match mode {
+        RegexCommandMode::All | RegexCommandMode::First => JavaType::string(),
+        RegexCommandMode::Match => JavaType::Reference {
+            name: "java.lang.Boolean".to_string(),
+            generic_args: vec![],
+        },
+        RegexCommandMode::Split => JavaType::Array {
+            element_type: Box::new(JavaType::string()),
+            dimensions: 1,
+        },
+        RegexCommandMode::Iterate => {
+            if has_replacement {
+                JavaType::string()
+            } else {
+                JavaType::Reference {
+                    name: "java.util.stream.Stream".to_string(),
+                    generic_args: vec![JavaType::Reference {
+                        name: "java.util.regex.MatchResult".to_string(),
+                        generic_args: vec![],
+                    }],
+                }
+            }
+        }
     }
 }
 

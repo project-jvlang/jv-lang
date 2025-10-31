@@ -6,7 +6,7 @@ use crate::types::{
     DataFormat, IrExpression, IrImport, IrImportDetail, IrResolvedMethodTarget, IrStatement,
     JavaType, MethodOverload, PrimitiveReturnMetadata, SampleMode, UtilityClass,
 };
-use jv_ast::{CallArgumentStyle, Span};
+use jv_ast::{CallArgumentStyle, RegexCommandMode, RegexGuardStrategy, Span};
 use jv_support::arena::{
     PoolMetrics as TransformPoolMetrics, PoolSessionMetrics as TransformPoolSessionMetrics,
     TransformPools, TransformPoolsGuard,
@@ -43,6 +43,8 @@ pub struct TransformContext {
     pub sample_options: SampleOptions,
     /// Cache tracking whitespace-delimited sequence element types to avoid recomputation
     pub sequence_style_cache: SequenceStyleCache,
+    /// Regex command typing metadata supplied by type inference.
+    regex_command_typings: HashMap<SpanKey, RegexCommandLoweringInfo>,
     /// Counter for synthesised local identifiers
     temp_counter: usize,
     /// Optional arena pools shared across lowering sessions
@@ -96,6 +98,7 @@ impl TransformContext {
             record_components: HashMap::new(),
             sample_options: SampleOptions::default(),
             sequence_style_cache: SequenceStyleCache::with_capacity(),
+            regex_command_typings: HashMap::new(),
             temp_counter: 0,
             pool_state: None,
             when_strategies: Vec::new(),
@@ -238,6 +241,16 @@ impl TransformContext {
                             .cloned()
                     })
             })
+    }
+
+    pub fn register_regex_command_typing(&mut self, span: &Span, info: RegexCommandLoweringInfo) {
+        let key = SpanKey::from(span);
+        self.regex_command_typings.insert(key, info);
+    }
+
+    pub fn regex_command_typing(&self, span: &Span) -> Option<&RegexCommandLoweringInfo> {
+        let key = SpanKey::from(span);
+        self.regex_command_typings.get(&key)
     }
 
     fn record_type_keys(type_name: &str) -> Vec<String> {
@@ -995,6 +1008,9 @@ fn set_expression_type(expr: &mut IrExpression, java_type: JavaType) {
         | IrExpression::Super { java_type: ty, .. } => {
             *ty = java_type;
         }
+        IrExpression::RegexCommand(command) => {
+            command.java_type = java_type;
+        }
         IrExpression::Cast { target_type, .. } => {
             *target_type = java_type;
         }
@@ -1032,6 +1048,7 @@ impl Clone for TransformContext {
             record_components: self.record_components.clone(),
             sample_options: self.sample_options.clone(),
             sequence_style_cache: self.sequence_style_cache.clone(),
+            regex_command_typings: self.regex_command_typings.clone(),
             temp_counter: self.temp_counter,
             pool_state: self
                 .pool_state
@@ -1167,6 +1184,14 @@ impl SequenceStyleCache {
         self.array_elements.clear();
         self.call_arguments.clear();
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct RegexCommandLoweringInfo {
+    pub mode: RegexCommandMode,
+    pub guard_strategy: RegexGuardStrategy,
+    pub java_type: JavaType,
+    pub requires_stream_materialization: bool,
 }
 
 #[derive(Debug)]

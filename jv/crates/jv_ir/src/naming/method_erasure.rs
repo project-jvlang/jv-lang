@@ -1,7 +1,7 @@
 use crate::context::{RegisteredMethodCall, RegisteredMethodDeclaration, TransformContext};
 use crate::types::{
-    IrCatchClause, IrExpression, IrResolvedMethodTarget, IrResource, IrStatement, IrSwitchCase,
-    JavaType, JavaWildcardKind,
+    IrCatchClause, IrExpression, IrRegexReplacement, IrRegexTemplateSegment,
+    IrResolvedMethodTarget, IrResource, IrStatement, IrSwitchCase, JavaType, JavaWildcardKind,
 };
 use hex::encode;
 use jv_ast::Span;
@@ -637,6 +637,26 @@ fn apply_expression(expr: &mut IrExpression, resolution: &MethodResolution) {
                 apply_resource(resource, resolution);
             }
             apply_expression(body, resolution);
+        }
+        IrExpression::RegexCommand(command) => {
+            apply_expression(&mut command.subject, resolution);
+            apply_expression(&mut command.pattern, resolution);
+            match &mut command.replacement {
+                IrRegexReplacement::None => {}
+                IrRegexReplacement::Literal(literal) => {
+                    for segment in &mut literal.segments {
+                        if let IrRegexTemplateSegment::Expression(expr) = segment {
+                            apply_expression(expr, resolution);
+                        }
+                    }
+                }
+                IrRegexReplacement::Lambda(lambda) => {
+                    apply_expression(&mut lambda.body, resolution);
+                }
+                IrRegexReplacement::Expression(expr) => {
+                    apply_expression(expr, resolution);
+                }
+            }
         }
         IrExpression::SequencePipeline { .. }
         | IrExpression::Literal(..)

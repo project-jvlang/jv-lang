@@ -247,6 +247,8 @@ pub enum IrExpression {
         java_type: JavaType,
         span: Span,
     },
+    /// Concise regular expression command covering replace/match/split/results modes.
+    RegexCommand(IrRegexCommand),
 
     // String formatting (from string interpolation)
     StringFormat {
@@ -278,6 +280,67 @@ pub enum IrExpression {
         java_type: JavaType,
         span: Span,
     },
+}
+
+/// IR node capturing concise regex command expressions.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct IrRegexCommand {
+    pub mode: RegexCommandMode,
+    pub subject: Box<IrExpression>,
+    pub pattern: Box<IrExpression>,
+    #[serde(default)]
+    pub replacement: IrRegexReplacement,
+    #[serde(default)]
+    pub flags: Vec<RegexFlag>,
+    #[serde(default)]
+    pub raw_flags: Option<String>,
+    pub guard_strategy: RegexGuardStrategy,
+    pub java_type: JavaType,
+    #[serde(default)]
+    pub requires_stream_materialization: bool,
+    pub span: Span,
+}
+
+/// Replacement description for regex commands.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum IrRegexReplacement {
+    None,
+    Literal(IrRegexLiteralReplacement),
+    Lambda(IrRegexLambdaReplacement),
+    Expression(Box<IrExpression>),
+}
+
+impl Default for IrRegexReplacement {
+    fn default() -> Self {
+        IrRegexReplacement::None
+    }
+}
+
+/// Literal replacement expanded into template segments.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct IrRegexLiteralReplacement {
+    pub raw: String,
+    pub normalized: String,
+    #[serde(default)]
+    pub segments: Vec<IrRegexTemplateSegment>,
+    pub span: Span,
+}
+
+/// Lambda replacement metadata lowered for IR consumption.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct IrRegexLambdaReplacement {
+    pub param_names: Vec<String>,
+    pub param_types: Vec<JavaType>,
+    pub body: Box<IrExpression>,
+    pub span: Span,
+}
+
+/// Template segment within a literal replacement.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum IrRegexTemplateSegment {
+    Text(String),
+    BackReference(u32),
+    Expression(Box<IrExpression>),
 }
 
 /// IR node representing a char-to-string conversion operation.
@@ -431,6 +494,7 @@ impl IrExpression {
             | IrExpression::VirtualThread { span, .. }
             | IrExpression::TryWithResources { span, .. } => span.clone(),
             IrExpression::CharToString(conversion) => conversion.span.clone(),
+            IrExpression::RegexCommand(command) => command.span.clone(),
         }
     }
 }

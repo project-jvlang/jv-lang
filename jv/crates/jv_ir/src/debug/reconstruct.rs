@@ -1,13 +1,16 @@
 use std::borrow::Cow;
 
 use crate::types::{
-    IrCommentKind, IrExpression, IrImportDetail, IrModifiers, IrParameter, IrProgram, IrStatement,
-    IrVisibility, JavaType, JavaWildcardKind,
+    IrCommentKind, IrExpression, IrImportDetail, IrModifiers, IrParameter, IrProgram,
+    IrRegexLambdaReplacement, IrRegexLiteralReplacement, IrRegexReplacement,
+    IrRegexTemplateSegment, IrStatement, IrVisibility, JavaType, JavaWildcardKind,
 };
 use jv_ast::{
     Argument, BinaryMetadata, BinaryOp, CallArgumentMetadata, CommentKind, CommentStatement,
-    CommentVisibility, Expression, Literal, Modifiers, Program, RegexLiteral, Span, Statement,
-    StringPart, TypeAnnotation, ValBindingOrigin, Visibility,
+    CommentVisibility, Expression, Literal, Modifiers, Parameter, ParameterModifiers, Program,
+    RegexCommand, RegexCommandModeOrigin, RegexLambdaReplacement, RegexLiteral,
+    RegexLiteralReplacement, RegexReplacement, RegexTemplateSegment, Span, Statement, StringPart,
+    TypeAnnotation, ValBindingOrigin, Visibility,
 };
 
 fn render_type_annotation(annotation: TypeAnnotation) -> String {
@@ -614,6 +617,11 @@ impl<'a> ReconstructionContext<'a> {
                     span: span.clone(),
                 }
             }
+            IrExpression::RegexCommand(command) => {
+                let expression = self.convert_regex_command(command)?;
+                self.record_success();
+                expression
+            }
             IrExpression::StringFormat {
                 format_string,
                 args,
@@ -674,6 +682,164 @@ impl<'a> ReconstructionContext<'a> {
         };
 
         Ok(expression)
+    }
+
+    fn convert_regex_command(
+        &mut self,
+        command: &crate::types::IrRegexCommand,
+    ) -> Result<Expression, ReconstructionError> {
+        let subject =
+            self.with_segment("subject", |ctx| ctx.convert_expression(&command.subject))?;
+        let pattern_literal = self.convert_ir_regex_literal(&command.pattern);
+        let replacement = self.with_segment("replacement", |ctx| {
+            ctx.convert_ir_regex_replacement(&command.replacement)
+        })?;
+        let mode_origin = self.derive_regex_mode_origin(command, replacement.as_ref());
+
+        Ok(Expression::RegexCommand(Box::new(RegexCommand {
+            mode: command.mode,
+            mode_origin,
+            subject: Box::new(subject),
+            pattern: pattern_literal,
+            replacement,
+            flags: command.flags.clone(),
+            raw_flags: command.raw_flags.clone(),
+            span: command.span.clone(),
+        })))
+    }
+
+    fn convert_ir_regex_literal(&mut self, expr: &IrExpression) -> RegexLiteral {
+        if let IrExpression::RegexPattern { pattern, span, .. } = expr {
+            let escaped = pattern.replace('/', "\\/");
+            RegexLiteral {
+                pattern: pattern.clone(),
+                raw: format!("/{}/", escaped),
+                span: span.clone(),
+            }
+        } else {
+            let span = extract_expr_span(expr);
+            self.emit_warning(
+                WarningKind::UnsupportedNode,
+                Some(span.clone()),
+                "Regex パターンを復元できなかったため、空のパターンを使用します",
+            );
+            RegexLiteral {
+                pattern: String::new(),
+                raw: "//".to_string(),
+                span,
+            }
+        }
+    }
+
+    fn convert_ir_regex_replacement(
+        &mut self,
+        replacement: &IrRegexReplacement,
+    ) -> Result<Option<RegexReplacement>, ReconstructionError> {
+        match replacement {
+            IrRegexReplacement::None => Ok(None),
+            IrRegexReplacement::Literal(literal) => {
+                let converted = self.with_segment("literal", |ctx| {
+                    ctx.convert_ir_regex_literal_replacement(literal)
+                })?;
+                Ok(Some(RegexReplacement::Literal(converted)))
+            }
+            IrRegexReplacement::Lambda(lambda) => {
+                let converted = self.with_segment("lambda", |ctx| {
+                    ctx.convert_ir_regex_lambda_replacement(lambda)
+                })?;
+                Ok(Some(RegexReplacement::Lambda(converted)))
+            }
+            IrRegexReplacement::Expression(expr) => {
+                let converted =
+                    self.with_segment("expression", |ctx| ctx.convert_expression(expr))?;
+                Ok(Some(RegexReplacement::Expression(converted)))
+            }
+        }
+    }
+
+    fn convert_ir_regex_literal_replacement(
+        &mut self,
+        literal: &IrRegexLiteralReplacement,
+    ) -> Result<RegexLiteralReplacement, ReconstructionError> {
+        let segments = literal
+            .segments
+            .iter()
+            .enumerate()
+            .map(|(idx, segment)| {
+                self.with_segment(format!("segment[{idx}]"), |ctx| {
+                    ctx.convert_ir_regex_template_segment(segment)
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(RegexLiteralReplacement {
+            raw: literal.raw.clone(),
+            normalized: literal.normalized.clone(),
+            template_segments: segments,
+            span: literal.span.clone(),
+        })
+    }
+
+    fn convert_ir_regex_template_segment(
+        &mut self,
+        segment: &IrRegexTemplateSegment,
+    ) -> Result<RegexTemplateSegment, ReconstructionError> {
+        match segment {
+            IrRegexTemplateSegment::Text(text) => Ok(RegexTemplateSegment::Text(text.clone())),
+            IrRegexTemplateSegment::BackReference(index) => {
+                Ok(RegexTemplateSegment::BackReference(*index))
+            }
+            IrRegexTemplateSegment::Expression(expr) => {
+                let converted = self.with_segment("expr", |ctx| ctx.convert_expression(expr))?;
+                Ok(RegexTemplateSegment::Expression(converted))
+            }
+        }
+    }
+
+    fn convert_ir_regex_lambda_replacement(
+        &mut self,
+        lambda: &IrRegexLambdaReplacement,
+    ) -> Result<RegexLambdaReplacement, ReconstructionError> {
+        let params = lambda
+            .param_names
+            .iter()
+            .enumerate()
+            .map(|(idx, name)| {
+                let type_annotation = lambda
+                    .param_types
+                    .get(idx)
+                    .map(|ty| self.convert_java_type(ty));
+                Parameter {
+                    name: name.clone(),
+                    type_annotation,
+                    default_value: None,
+                    modifiers: ParameterModifiers::default(),
+                    span: lambda.span.clone(),
+                }
+            })
+            .collect::<Vec<_>>();
+
+        let body = self.with_segment("body", |ctx| ctx.convert_expression(&lambda.body))?;
+
+        Ok(RegexLambdaReplacement {
+            params,
+            body: Box::new(body),
+            span: lambda.span.clone(),
+        })
+    }
+
+    fn derive_regex_mode_origin(
+        &self,
+        command: &crate::types::IrRegexCommand,
+        replacement: Option<&RegexReplacement>,
+    ) -> RegexCommandModeOrigin {
+        if replacement.is_some() {
+            RegexCommandModeOrigin::DefaultReplacement
+        } else if matches!(command.mode, jv_ast::RegexCommandMode::Match) {
+            RegexCommandModeOrigin::DefaultMatch
+        } else {
+            RegexCommandModeOrigin::ExplicitToken
+        }
     }
 
     fn convert_parameter(
@@ -864,6 +1030,7 @@ fn extract_expr_span(expr: &IrExpression) -> Span {
         | IrExpression::RegexPattern { span, .. }
         | IrExpression::RegexMatch { span, .. }
         | IrExpression::SequencePipeline { span, .. } => span.clone(),
+        IrExpression::RegexCommand(command) => command.span.clone(),
         IrExpression::CharToString(conversion) => conversion.span.clone(),
     }
 }

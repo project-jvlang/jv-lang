@@ -100,6 +100,7 @@ fn convert_annotation_value(value: &AnnotationValue) -> IrAnnotationValue {
 pub(crate) fn extract_java_type(expr: &IrExpression) -> Option<JavaType> {
     match expr {
         IrExpression::Literal(literal, _, _) => Some(literal_to_java_type(literal)),
+        IrExpression::RegexCommand(command) => Some(command.java_type.clone()),
         IrExpression::RegexPattern { java_type, .. }
         | IrExpression::Identifier { java_type, .. }
         | IrExpression::MethodCall { java_type, .. }
@@ -176,6 +177,7 @@ pub(crate) fn ir_expression_span(expr: &IrExpression) -> Span {
         | IrExpression::CompletableFuture { span, .. }
         | IrExpression::VirtualThread { span, .. }
         | IrExpression::TryWithResources { span, .. } => span.clone(),
+        IrExpression::RegexCommand(command) => command.span.clone(),
         IrExpression::CharToString(conversion) => conversion.span.clone(),
     }
 }

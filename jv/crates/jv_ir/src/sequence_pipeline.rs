@@ -3,7 +3,10 @@ use crate::error::TransformError;
 use crate::transform::{
     extract_java_type, normalize_whitespace_array_elements, transform_expression,
 };
-use crate::types::{IrExpression, IrProgram, IrResolvedMethodTarget, IrStatement, JavaType};
+use crate::types::{
+    IrExpression, IrProgram, IrRegexReplacement, IrRegexTemplateSegment, IrResolvedMethodTarget,
+    IrStatement, JavaType,
+};
 use jv_ast::{
     Argument, BinaryOp, CallArgumentMetadata, CallArgumentStyle, Expression, SequenceDelimiter,
     Span, types::PrimitiveTypeName,
@@ -2336,6 +2339,26 @@ impl ListTerminalEnforcer {
             } => {
                 self.visit_expression(subject, None);
                 self.visit_expression(pattern, None);
+            }
+            IrExpression::RegexCommand(command) => {
+                self.visit_expression(&mut command.subject, None);
+                self.visit_expression(&mut command.pattern, None);
+                match &mut command.replacement {
+                    IrRegexReplacement::None => {}
+                    IrRegexReplacement::Literal(literal) => {
+                        for segment in &mut literal.segments {
+                            if let IrRegexTemplateSegment::Expression(expr) = segment {
+                                self.visit_expression(expr, None);
+                            }
+                        }
+                    }
+                    IrRegexReplacement::Lambda(lambda) => {
+                        self.visit_expression(&mut lambda.body, None);
+                    }
+                    IrRegexReplacement::Expression(expr) => {
+                        self.visit_expression(expr, None);
+                    }
+                }
             }
             IrExpression::Unary { operand, .. } => {
                 self.visit_expression(operand, None);

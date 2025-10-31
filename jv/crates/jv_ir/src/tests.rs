@@ -1,6 +1,9 @@
 #[cfg(test)]
 mod tests {
-    use crate::context::{RegisteredMethodCall, RegisteredMethodDeclaration, SequenceStyleCache};
+    use crate::context::{
+        RegexCommandLoweringInfo, RegisteredMethodCall, RegisteredMethodDeclaration,
+        SequenceStyleCache,
+    };
     use crate::types::{CharToStringConversion, RawStringFlavor};
     use crate::{
         CompletableFutureOp, DataFormat, IrCaseLabel, IrDeconstructionComponent,
@@ -310,6 +313,177 @@ mod tests {
                 other => panic!("expected capture guard, found {:?}", other),
             },
             other => panic!("expected regex match IR expression, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn transform_regex_command_literal_replacement_lowering() {
+        let span = dummy_span();
+        let command = RegexCommand {
+            mode: RegexCommandMode::All,
+            mode_origin: RegexCommandModeOrigin::DefaultReplacement,
+            subject: Box::new(Expression::Identifier("input".to_string(), span.clone())),
+            pattern: RegexLiteral {
+                pattern: "\\d+".to_string(),
+                raw: "/\\d+/".to_string(),
+                span: span.clone(),
+            },
+            replacement: Some(RegexReplacement::Literal(RegexLiteralReplacement {
+                raw: "$1-text".to_string(),
+                normalized: "$1-text".to_string(),
+                template_segments: vec![
+                    RegexTemplateSegment::BackReference(1),
+                    RegexTemplateSegment::Text("-".to_string()),
+                    RegexTemplateSegment::Expression(Expression::Literal(
+                        Literal::String("text".to_string()),
+                        span.clone(),
+                    )),
+                ],
+                span: span.clone(),
+            })),
+            flags: vec![RegexFlag::CaseInsensitive],
+            raw_flags: Some("i".to_string()),
+            span: span.clone(),
+        };
+
+        let expr = Expression::RegexCommand(Box::new(command));
+
+        let mut context = TransformContext::new();
+        context.add_variable("input".to_string(), JavaType::string());
+        context.register_regex_command_typing(
+            &span,
+            RegexCommandLoweringInfo {
+                mode: RegexCommandMode::All,
+                guard_strategy: RegexGuardStrategy::None,
+                java_type: JavaType::string(),
+                requires_stream_materialization: false,
+            },
+        );
+
+        let lowered =
+            transform_expression(expr, &mut context).expect("regex command lowering succeeds");
+
+        match lowered {
+            IrExpression::RegexCommand(ir_command) => {
+                assert_eq!(ir_command.mode, RegexCommandMode::All);
+                assert_eq!(ir_command.java_type, JavaType::string());
+                assert!(matches!(
+                    ir_command.guard_strategy,
+                    RegexGuardStrategy::None
+                ));
+                assert_eq!(ir_command.flags, vec![RegexFlag::CaseInsensitive]);
+
+                match ir_command.subject.as_ref() {
+                    IrExpression::Identifier { name, .. } => assert_eq!(name, "input"),
+                    other => panic!("expected identifier subject, got {:?}", other),
+                }
+
+                match ir_command.pattern.as_ref() {
+                    IrExpression::RegexPattern { pattern, .. } => assert_eq!(pattern, "\\d+"),
+                    other => panic!("expected regex pattern expression, got {:?}", other),
+                }
+
+                match ir_command.replacement {
+                    crate::types::IrRegexReplacement::Literal(literal) => {
+                        assert_eq!(literal.raw, "$1-text");
+                        assert_eq!(literal.normalized, "$1-text");
+                        assert_eq!(literal.segments.len(), 3);
+
+                        assert!(matches!(
+                            literal.segments[0],
+                            crate::types::IrRegexTemplateSegment::BackReference(1)
+                        ));
+
+                        match &literal.segments[1] {
+                            crate::types::IrRegexTemplateSegment::Text(value) => {
+                                assert_eq!(value, "-")
+                            }
+                            other => panic!("expected text segment, got {:?}", other),
+                        }
+
+                        match &literal.segments[2] {
+                            crate::types::IrRegexTemplateSegment::Expression(expr) => {
+                                match expr.as_ref() {
+                                    IrExpression::Literal(Literal::String(value), _, _) => {
+                                        assert_eq!(value, "text")
+                                    }
+                                    other => panic!(
+                                        "expected literal replacement expression, got {:?}",
+                                        other
+                                    ),
+                                }
+                            }
+                            other => panic!("expected expression segment, got {:?}", other),
+                        }
+                    }
+                    other => panic!("expected literal replacement, got {:?}", other),
+                }
+            }
+            other => panic!("expected regex command IR expression, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn transform_regex_command_iterate_assigns_guard_name() {
+        let span = dummy_span();
+        let command = RegexCommand {
+            mode: RegexCommandMode::Iterate,
+            mode_origin: RegexCommandModeOrigin::DefaultMatch,
+            subject: Box::new(Expression::Identifier("input".to_string(), span.clone())),
+            pattern: RegexLiteral {
+                pattern: "[a-z]+".to_string(),
+                raw: "/[a-z]+/".to_string(),
+                span: span.clone(),
+            },
+            replacement: None,
+            flags: vec![],
+            raw_flags: None,
+            span: span.clone(),
+        };
+
+        let expr = Expression::RegexCommand(Box::new(command));
+
+        let mut context = TransformContext::new();
+        context.add_variable("input".to_string(), JavaType::string());
+        context.register_regex_command_typing(
+            &span,
+            RegexCommandLoweringInfo {
+                mode: RegexCommandMode::Iterate,
+                guard_strategy: RegexGuardStrategy::CaptureAndGuard { temp_name: None },
+                java_type: JavaType::Reference {
+                    name: "java.util.stream.Stream".to_string(),
+                    generic_args: vec![JavaType::Reference {
+                        name: "java.util.regex.MatchResult".to_string(),
+                        generic_args: vec![],
+                    }],
+                },
+                requires_stream_materialization: true,
+            },
+        );
+
+        let lowered =
+            transform_expression(expr, &mut context).expect("regex command iterate lowering");
+
+        match lowered {
+            IrExpression::RegexCommand(ir_command) => {
+                assert_eq!(ir_command.mode, RegexCommandMode::Iterate);
+                assert!(ir_command.requires_stream_materialization);
+                match ir_command.guard_strategy {
+                    RegexGuardStrategy::CaptureAndGuard { temp_name } => {
+                        let name = temp_name.expect("temp name assigned for iterate guard");
+                        assert!(
+                            name.starts_with("__jvRegexSubject_"),
+                            "expected generated guard identifier, got {name}"
+                        );
+                    }
+                    other => panic!("expected capture guard strategy, got {:?}", other),
+                }
+                assert!(matches!(
+                    ir_command.replacement,
+                    crate::types::IrRegexReplacement::None
+                ));
+            }
+            other => panic!("expected regex command IR expression, got {:?}", other),
         }
     }
 
