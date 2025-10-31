@@ -2,6 +2,7 @@ use crate::lowering::{lower_program, LoweringDiagnosticSeverity, LoweringResult}
 use crate::parser::parse;
 use crate::verification::StatementKindKey;
 use crate::{JvLanguage, ParseBuilder, SyntaxKind};
+use crate::frontend::RowanPipeline;
 use jv_ast::strings::MultilineKind;
 use jv_ast::{
     expression::{Argument, Parameter, ParameterProperty, StringPart},
@@ -1438,13 +1439,17 @@ fn lowering_reports_unimplemented_for_labeled_statement() {
     let result = lower_source(source);
     assert!(
         result.diagnostics.is_empty(),
-        "現時点ではラベル付きステートメントはローワリング対象外のため診断は空のはずです: {:?}",
+        "ラベル付きステートメントで診断が発生しないことを期待しました: {:?}",
         result.diagnostics
     );
-    assert!(
-        result.statements.is_empty(),
-        "未対応のラベル付きステートメントはローワリング結果に含まれるべきではありません"
-    );
+    let Statement::ForIn(for_in) = result
+        .statements
+        .first()
+        .expect("ラベル付き for 文がローワリングされるはずです")
+    else {
+        panic!("期待した ForIn ステートメントではありません: {:?}", result.statements);
+    };
+    assert_eq!(for_in.label.as_deref(), Some("outer"));
 }
 
 #[test]
@@ -1460,18 +1465,325 @@ fn lowering_result_for_labeled_trailing_lambda_is_placeholder() {
         "トレーリングラムダで新たな診断が発生しないことを期待しました: {:?}",
         result.diagnostics
     );
-    assert!(
-        result.statements.len() == 1,
-        "トレーリングラムダ付き式は単一の式ステートメントとしてローワリングされるはずです: {:?}",
-        result.statements
-    );
-    match &result.statements[0] {
-        Statement::Expression { .. } => {}
-        other => panic!(
+    let Statement::Expression { expr, .. } = result
+        .statements
+        .first()
+        .expect("式ステートメントが生成されるはずです")
+    else {
+        panic!(
             "式ステートメントとして扱われることを期待しましたが {:?} でした",
-            other
-        ),
+            result.statements
+        );
+    };
+    if let Expression::Call { args, .. } = expr {
+        let Argument::Positional(Expression::Lambda { label, .. }) = args
+            .last()
+            .expect("ラムダ引数が存在するはずです")
+        else {
+            panic!("最後の引数がラムダ式ではありません: {:?}", args);
+        };
+        assert_eq!(label.as_deref(), Some("finish"));
+    } else {
+        panic!("呼び出し式としてローワリングされるはずです: {:?}", expr);
     }
+}
+
+#[test]
+fn lowering_when_branch_preserves_labeled_control_flow() {
+    let source = r#"
+        val collection = {
+            "users": [
+                { "name": "A" "active": true },
+                { "name": "B" "active": false }
+            ]
+        }
+
+        #outer for (user in collection.users) {
+            when {
+                !user.active -> {
+                    println(user.name)
+                    continue #outer
+                }
+                else -> {
+                    println(user.name)
+                    break #outer
+                }
+            }
+        }
+    "#;
+    let result = lower_source(source);
+    assert!(
+        result.diagnostics.is_empty(),
+        "ラベル付き when ブランチで診断が発生しない想定です: {:?}",
+        result.diagnostics
+    );
+    let Statement::ForIn(for_in) = result
+        .statements
+        .iter()
+        .find(|stmt| matches!(stmt, Statement::ForIn(_)))
+        .expect("ラベル付き for-in 文が生成されるはずです")
+    else {
+        panic!("ForIn ステートメントが見つかりません: {:?}", result.statements);
+    };
+    assert_eq!(
+        for_in.label.as_deref(),
+        Some("outer"),
+        "for-in ラベルが保持されるべきです"
+    );
+    let Expression::Block { statements, .. } = for_in.body.as_ref() else {
+        panic!("for-in 本体はブロック式であるべきです: {:?}", for_in.body);
+    };
+    assert!(
+        !statements.is_empty(),
+        "ブロック内にステートメントが存在するべきです"
+    );
+    let Statement::Expression { expr, .. } = &statements[0] else {
+        panic!("ブロック先頭は式ステートメントのはずです: {:?}", statements[0]);
+    };
+    let Expression::When { arms, else_arm, .. } = expr else {
+        panic!("when 式がローワリングされるべきです: {:?}", expr);
+    };
+    assert_eq!(arms.len(), 1, "when 式の条件分岐は1件の想定です");
+    fn extract_statements(expr: &Expression) -> &Vec<Statement> {
+        match expr {
+            Expression::Block { statements, .. } => statements,
+            Expression::Lambda { body, .. } => match body.as_ref() {
+                Expression::Block { statements, .. } => statements,
+                other => panic!("ラムダ本体がブロックではありません: {:?}", other),
+            },
+            other => panic!("ブロックまたはラムダ式が必要です: {:?}", other),
+        }
+    }
+    let first_arm = extract_statements(&arms[0].body);
+    let continue_label = first_arm
+        .iter()
+        .find_map(|stmt| match stmt {
+            Statement::Continue { label, .. } => Some(label),
+            _ => None,
+        })
+        .expect("continue ステートメントが存在するべきです");
+    assert_eq!(
+        continue_label.as_deref(),
+        Some("outer"),
+        "continue ラベルが保持されるべきです"
+    );
+    let else_arm_expr = else_arm
+        .as_ref()
+        .expect("else 分岐が存在するべきです");
+    let second_arm = extract_statements(else_arm_expr.as_ref());
+    let break_label = second_arm
+        .iter()
+        .find_map(|stmt| match stmt {
+            Statement::Break { label, .. } => Some(label),
+            _ => None,
+        })
+        .expect("break ステートメントが存在するべきです");
+    assert_eq!(
+        break_label.as_deref(),
+        Some("outer"),
+        "break ラベルが保持されるべきです"
+    );
+}
+
+#[test]
+fn lowering_hash_label_example_retains_labels() {
+    let path =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/hash_label_flow.jv");
+    let source = std::fs::read_to_string(&path).expect("ハッシュラベル例の読み込みに失敗しました");
+    let result = lower_source(&source);
+    assert!(
+        result.diagnostics.is_empty(),
+        "ハッシュラベル例のローワリングで診断が発生しました: {:?}",
+        result.diagnostics
+    );
+    let main_body = result
+        .statements
+        .iter()
+        .find_map(|stmt| {
+            if let Statement::FunctionDeclaration { name, body, .. } = stmt {
+                if name == "main" {
+                    return Some(body.as_ref());
+                }
+            }
+            None
+        })
+        .expect("例内に main 関数が存在するはずです");
+    let Expression::Block { statements: main_statements, .. } = main_body else {
+        panic!("main 関数の本体はブロック式であるべきです: {:?}", main_body);
+    };
+    println!("main_statements = {:#?}", main_statements);
+    let for_in_stmt = main_statements
+        .iter()
+        .find_map(|stmt| {
+            if let Statement::ForIn(data) = stmt {
+                Some(data)
+            } else {
+                None
+            }
+        })
+        .expect("main 関数内に for-in 文が含まれるはずです");
+    assert_eq!(
+        for_in_stmt.label.as_deref(),
+        Some("outer"),
+        "例の for-in ラベルが保持されるべきです"
+    );
+    fn extract_statements(expr: &Expression) -> &Vec<Statement> {
+        match expr {
+            Expression::Block { statements, .. } => statements,
+            Expression::Lambda { body, .. } => match body.as_ref() {
+                Expression::Block { statements, .. } => statements,
+                other => panic!("ラムダ本体がブロックではありません: {:?}", other),
+            },
+            other => panic!("ブロックまたはラムダ式が必要です: {:?}", other),
+        }
+    }
+    let loop_statements = extract_statements(for_in_stmt.body.as_ref());
+    let when_expr = loop_statements.iter().find_map(|stmt| {
+        if let Statement::Expression { expr, .. } = stmt {
+            if matches!(expr, Expression::When { .. }) {
+                return Some(expr);
+            }
+        }
+        None
+    });
+    let when_expr = when_expr.expect("ループ内に when 式が存在するべきです");
+    let Expression::When { arms, else_arm, .. } = when_expr else {
+        panic!("when 式が期待されます: {:?}", when_expr);
+    };
+    assert!(
+        !arms.is_empty(),
+        "when 式には少なくとも1件の分岐が必要です"
+    );
+    let first_arm_statements = extract_statements(&arms[0].body);
+    let continue_label = first_arm_statements
+        .iter()
+        .find_map(|stmt| match stmt {
+            Statement::Continue { label, .. } => Some(label),
+            _ => None,
+        })
+        .expect("when の最初の分岐に continue が存在するべきです");
+    assert_eq!(
+        continue_label.as_deref(),
+        Some("outer"),
+        "continue ラベルが保持されるべきです"
+    );
+    let else_arm_expr = else_arm
+        .as_ref()
+        .expect("when 式に else 分岐が存在するべきです");
+    let else_statements = extract_statements(else_arm_expr.as_ref());
+    let break_label = else_statements
+        .iter()
+        .find_map(|stmt| match stmt {
+            Statement::Break { label, .. } => Some(label),
+            _ => None,
+        })
+        .expect("when の else 分岐に break が存在するべきです");
+    assert_eq!(
+        break_label.as_deref(),
+        Some("outer"),
+        "break ラベルが保持されるべきです"
+    );
+}
+
+#[test]
+fn pipeline_output_retains_hash_label_when_expression() {
+    let path =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/hash_label_flow.jv");
+    let source = std::fs::read_to_string(&path).expect("ハッシュラベル例の読み込みに失敗しました");
+    let pipeline = RowanPipeline::new();
+    let debug = pipeline
+        .execute_with_debug(&source)
+        .expect("Rowan パイプラインの実行に失敗しました");
+    let program = debug.artifacts().program();
+    let main_body = program
+        .statements
+        .iter()
+        .find_map(|stmt| {
+            if let Statement::FunctionDeclaration { name, body, .. } = stmt {
+                if name == "main" {
+                    return Some(body.as_ref());
+                }
+            }
+            None
+        })
+        .expect("main 関数が存在するべきです");
+    let Expression::Block { statements: main_statements, .. } = main_body else {
+        panic!("main 関数の本体はブロック式であるべきです: {:?}", main_body);
+    };
+    fn find_fallback_identifier(expr: &Expression) -> Option<String> {
+        match expr {
+            Expression::Identifier(name, _) if name.contains("when{") => Some(name.clone()),
+            Expression::Block { statements, .. } => statements
+                .iter()
+                .find_map(find_fallback_identifier_in_statement),
+            Expression::Lambda { body, .. } => find_fallback_identifier(body),
+            Expression::When { expr: subject, arms, else_arm, .. } => subject
+                .as_deref()
+                .and_then(find_fallback_identifier)
+                .or_else(|| arms.iter().find_map(|arm| find_fallback_identifier(&arm.body)))
+                .or_else(|| else_arm.as_deref().and_then(find_fallback_identifier)),
+            Expression::Call { function, args, .. } => find_fallback_identifier(function)
+                .or_else(|| {
+                    args.iter().find_map(|arg| match arg {
+                        Argument::Positional(expr) => find_fallback_identifier(expr),
+                        Argument::Named { value, .. } => find_fallback_identifier(value),
+                    })
+                }),
+            Expression::Binary { left, right, .. } => find_fallback_identifier(left)
+                .or_else(|| find_fallback_identifier(right)),
+            Expression::Unary { operand, .. } => find_fallback_identifier(operand),
+            Expression::JsonLiteral(literal) => find_fallback_in_json_value(&literal.value),
+            _ => None,
+        }
+    }
+
+    fn find_fallback_in_json_value(value: &JsonValue) -> Option<String> {
+        match value {
+            JsonValue::Object { entries, .. } => entries
+                .iter()
+                .find_map(|entry| find_fallback_in_json_value(&entry.value)),
+            JsonValue::Array { elements, .. } => elements
+                .iter()
+                .find_map(find_fallback_in_json_value),
+            _ => None,
+        }
+    }
+
+    fn find_fallback_identifier_in_statement(statement: &Statement) -> Option<String> {
+        match statement {
+            Statement::Expression { expr, .. } => find_fallback_identifier(expr),
+            Statement::ForIn(for_in) => find_fallback_identifier(&for_in.body),
+            Statement::Return { value, .. } => value
+                .as_ref()
+                .and_then(find_fallback_identifier),
+            Statement::ValDeclaration { initializer, .. } => find_fallback_identifier(initializer),
+            Statement::VarDeclaration {
+                initializer: Some(initializer),
+                ..
+            } => find_fallback_identifier(initializer),
+            Statement::FunctionDeclaration { body, .. } => find_fallback_identifier(body),
+            _ => None,
+        }
+    }
+
+    let fallback_lowering = debug
+        .statements()
+        .iter()
+        .find_map(find_fallback_identifier_in_statement);
+    assert!(
+        fallback_lowering.is_none(),
+        "ローワリング済みステートメントにフォールバック識別子が存在します: {:?}",
+        fallback_lowering
+    );
+
+    let fallback = main_statements
+        .iter()
+        .find_map(find_fallback_identifier_in_statement);
+    assert!(
+        fallback.is_none(),
+        "セマンティクス後のプログラムで when 式が識別子にフォールバックしています: {:?}",
+        fallback
+    );
 }
 
 #[test]

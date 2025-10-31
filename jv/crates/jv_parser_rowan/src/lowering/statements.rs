@@ -148,6 +148,7 @@ fn is_top_level_statement(kind: SyntaxKind) -> bool {
             | SyntaxKind::SpawnStatement
             | SyntaxKind::AssignmentStatement
             | SyntaxKind::Expression
+            | SyntaxKind::LabeledStatement
     )
 }
 
@@ -220,6 +221,7 @@ fn lower_single_statement(
         SyntaxKind::WhenStatement | SyntaxKind::Expression => {
             lower_expression_statement(context, node, diagnostics)
         }
+        SyntaxKind::LabeledStatement => lower_labeled_statement(context, node, diagnostics),
         kind => Err(LoweringDiagnostic::new(
             LoweringDiagnosticSeverity::Error,
             format!(
@@ -230,6 +232,81 @@ fn lower_single_statement(
             kind,
             first_identifier_text(node),
             collect_annotation_texts(node),
+        )),
+    }
+}
+
+fn lower_labeled_statement(
+    context: &LoweringContext<'_>,
+    node: &JvSyntaxNode,
+    diagnostics: &mut Vec<LoweringDiagnostic>,
+) -> Result<Statement, LoweringDiagnostic> {
+    let Some(label) = extract_hash_label_text(node) else {
+        return Err(LoweringDiagnostic::new(
+            LoweringDiagnosticSeverity::Error,
+            "ハッシュラベルの解析に失敗しました",
+            context.span_for(node),
+            node.kind(),
+            first_identifier_text(node),
+            collect_annotation_texts(node),
+        ));
+    };
+
+    let Some(target) = node
+        .children()
+        .find(|child| !child.kind().is_token())
+    else {
+        return Err(LoweringDiagnostic::new(
+            LoweringDiagnosticSeverity::Error,
+            "ハッシュラベルに対応するステートメントが見つかりません",
+            context.span_for(node),
+            node.kind(),
+            first_identifier_text(node),
+            collect_annotation_texts(node),
+        ));
+    };
+
+    match target.kind() {
+        SyntaxKind::ForStatement => {
+            let statement = lower_for(context, &target, diagnostics)?;
+            match statement {
+                Statement::ForIn(mut for_in) => {
+                    for_in.label = Some(label);
+                    Ok(Statement::ForIn(for_in))
+                }
+                _unexpected => Err(LoweringDiagnostic::new(
+                    LoweringDiagnosticSeverity::Error,
+                    "for 文のローワリング結果が予期しない型です",
+                    context.span_for(&target),
+                    target.kind(),
+                    first_identifier_text(&target),
+                    collect_annotation_texts(&target),
+                )),
+            }
+        }
+        SyntaxKind::WhenStatement | SyntaxKind::Expression => {
+            let expr = lower_expression(context, &target)?;
+            let labeled = apply_label_to_expression(expr, label);
+            Ok(Statement::Expression {
+                expr: labeled,
+                span: context.span_for(&target).unwrap_or_else(Span::dummy),
+            })
+        }
+        SyntaxKind::Block => {
+            let expr = lower_block_expression(context, &target, diagnostics);
+            let labeled = apply_label_to_expression(expr, label);
+            Ok(Statement::Expression {
+                expr: labeled,
+                span: context.span_for(&target).unwrap_or_else(Span::dummy),
+            })
+        }
+        kind => Err(LoweringDiagnostic::new(
+            LoweringDiagnosticSeverity::Error,
+            format!("ハッシュラベルは {:?} に適用できません", kind),
+            context.span_for(&target),
+            kind,
+            first_identifier_text(&target),
+            collect_annotation_texts(&target),
         )),
     }
 }
@@ -841,7 +918,11 @@ fn lower_expression_from_tokens(
     let filtered: Vec<&Token> = tokens
         .iter()
         .copied()
-        .filter(|token| !is_trivia_token(token) && !matches!(token.token_type, TokenType::Eof))
+        .filter(|token| {
+            !is_trivia_token(token)
+                && !matches!(token.token_type, TokenType::Eof)
+                && !matches!(token.token_type, TokenType::LayoutComma)
+        })
         .collect();
 
     if filtered.is_empty() {
@@ -1176,8 +1257,8 @@ mod expression_parser {
                 expr = self.parse_postfix(expr, kind)?;
             }
 
-            if self.peek_token().is_some() {
-                let span = self.span_at(self.pos);
+            if let Some((_, index)) = self.peek_non_trivia_with_index() {
+                let span = self.span_at(index);
                 return Err(ExpressionError::new(
                     "式の末尾に解釈できないトークンがあります",
                     span,
@@ -1710,27 +1791,69 @@ mod expression_parser {
 
             let absolute_end = absolute_start + slice.len();
             let span = span_for_range(self.tokens, absolute_start, absolute_end);
-            let first = slice[0];
+            let filtered: Vec<&Token> = slice
+                .iter()
+                .copied()
+                .filter(|token| !matches!(token.token_type, TokenType::LayoutComma))
+                .collect();
+
+            if filtered.is_empty() {
+                return Err(ExpressionError::new(
+                    "レイアウトのみのステートメントは解釈できません",
+                    Some(span.clone()),
+                ));
+            }
+
+            let first = filtered[0];
 
             match first.token_type {
                 TokenType::Val => self.parse_val_statement(slice, absolute_start),
                 TokenType::Return => {
-                    let expr_slice = &slice[1..];
-                    let value = if expr_slice.is_empty() {
+                    let mut index = 1usize;
+                    let mut label: Option<String> = None;
+
+                    while index < filtered.len()
+                        && matches!(filtered[index].token_type, TokenType::LayoutComma)
+                    {
+                        index += 1;
+                    }
+
+                    if index < filtered.len() {
+                        if let TokenType::HashLabel(text) = &filtered[index].token_type {
+                            label = Some(text.clone());
+                            index += 1;
+                            while index < filtered.len()
+                                && matches!(filtered[index].token_type, TokenType::LayoutComma)
+                            {
+                                index += 1;
+                            }
+                        }
+                    }
+
+                    let value_tokens = &filtered[index..];
+                    let value = if value_tokens.is_empty() {
                         None
                     } else {
-                        Some(Self::parse_nested_expression(expr_slice)?.expr)
+                        Some(Self::parse_nested_expression(value_tokens)?.expr)
                     };
                     Ok(Statement::Return {
-                        label: None,
+                        label,
                         value,
                         span,
                     })
                 }
+                TokenType::Break => {
+                    let label = Self::parse_control_flow_label(slice, "break")?;
+                    Ok(Statement::Break { label, span })
+                }
+                TokenType::Continue => {
+                    let label = Self::parse_control_flow_label(filtered.as_slice(), "continue")?;
+                    Ok(Statement::Continue { label, span })
+                }
                 _ => {
-                    if let Some(assign_index) = Self::find_top_level_assign(slice) {
-                        let target_tokens = &slice[..assign_index];
-                        let value_tokens = &slice[assign_index + 1..];
+                    if let Some(assign_index) = Self::find_top_level_assign(filtered.as_slice()) {
+                        let target_tokens = &filtered[..assign_index];
+                        let value_tokens = &filtered[assign_index + 1..];
                         if target_tokens.is_empty() || value_tokens.is_empty() {
                             return Err(ExpressionError::new(
                                 "代入ステートメントの構文が不正です",
@@ -1746,7 +1869,7 @@ mod expression_parser {
                             span,
                         })
                     } else {
-                        let expr = Self::parse_nested_expression(slice)?.expr;
+                        let expr = Self::parse_nested_expression(filtered.as_slice())?.expr;
                         Ok(Statement::Expression { expr, span })
                     }
                 }
@@ -1834,6 +1957,42 @@ mod expression_parser {
                 origin: ValBindingOrigin::ExplicitKeyword,
                 span,
             })
+        }
+
+        fn parse_control_flow_label(
+            slice: &[&Token],
+            keyword: &str,
+        ) -> Result<Option<String>, ExpressionError> {
+            let mut label: Option<String> = None;
+            let mut index = 1;
+            while index < slice.len() {
+                match &slice[index].token_type {
+                    TokenType::Whitespace(_)
+                    | TokenType::Newline
+                    | TokenType::LineComment(_)
+                    | TokenType::BlockComment(_)
+                    | TokenType::JavaDocComment(_) => {
+                        index += 1;
+                    }
+                    TokenType::HashLabel(text) => {
+                        if label.is_some() {
+                            return Err(ExpressionError::new(
+                                format!("`{}` 文に複数のラベルは指定できません", keyword),
+                                Some(span_from_token(slice[index])),
+                            ));
+                        }
+                        label = Some(text.clone());
+                        index += 1;
+                    }
+                    _ => {
+                        return Err(ExpressionError::new(
+                            format!("`{}` 文にラベル以外の要素は記述できません", keyword),
+                            Some(span_from_token(slice[index])),
+                        ));
+                    }
+                }
+            }
+            Ok(label)
         }
 
         fn find_top_level_assign(slice: &[&Token]) -> Option<usize> {
@@ -1986,7 +2145,12 @@ mod expression_parser {
 
                     let slice = &self.tokens[self.pos..closing_index];
                     let parsed_body = {
-                        let mut nested = ExpressionParser::new(slice);
+                        let filtered_slice: Vec<&Token> = slice
+                            .iter()
+                            .copied()
+                            .filter(|token| !matches!(token.token_type, TokenType::LayoutComma))
+                            .collect();
+                        let mut nested = ExpressionParser::new(filtered_slice.as_slice());
                         match nested.parse_expression_bp(0) {
                             Ok(parsed) => parsed,
                             Err(err) => {
@@ -2069,7 +2233,12 @@ mod expression_parser {
 
                 let slice = &self.tokens[self.pos..closing_index];
                 let parsed_body = {
-                    let mut nested = ExpressionParser::new(slice);
+                    let filtered_slice: Vec<&Token> = slice
+                        .iter()
+                        .copied()
+                        .filter(|token| !matches!(token.token_type, TokenType::LayoutComma))
+                        .collect();
+                    let mut nested = ExpressionParser::new(filtered_slice.as_slice());
                     match nested.parse_expression_bp(0) {
                         Ok(parsed) => parsed,
                         Err(err) => {
@@ -2525,6 +2694,7 @@ mod expression_parser {
             left: ParsedExpr,
             kind: PostfixKind,
         ) -> Result<ParsedExpr, ExpressionError> {
+            self.skip_trivia_tokens();
             match kind {
                 PostfixKind::MemberAccess => self.parse_member_access(left),
                 PostfixKind::NullSafeMemberAccess => self.parse_null_safe_member(left),
@@ -2791,6 +2961,15 @@ mod expression_parser {
             &mut self,
             left: ParsedExpr,
         ) -> Result<ParsedExpr, ExpressionError> {
+            let mut label: Option<String> = None;
+            if let Some(token) = self.peek_token() {
+                if let TokenType::HashLabel(text) = &token.token_type {
+                    label = Some(text.clone());
+                    self.pos += 1;
+                    self.skip_trivia_tokens();
+                }
+            }
+
             let lambda_parsed = self.parse_brace_expression()?;
             let lambda_end = lambda_parsed.end;
             let raw_lambda_expr = lambda_parsed.expr;
@@ -2798,13 +2977,23 @@ mod expression_parser {
             let call_span = span_for_range(self.tokens, start, lambda_end);
             let base_expr = left.expr;
             let lambda_expr = match raw_lambda_expr {
-                Expression::Lambda { .. } => raw_lambda_expr,
+                Expression::Lambda {
+                    parameters,
+                    body,
+                    span,
+                    ..
+                } => Expression::Lambda {
+                    parameters,
+                    body,
+                    label: label.clone(),
+                    span,
+                },
                 other => {
                     let span = other.span().clone();
                     Expression::Lambda {
                         parameters: Vec::new(),
                         body: Box::new(other),
-                        label: None,
+                        label: label.clone(),
                         span,
                     }
                 }
@@ -3265,8 +3454,10 @@ mod expression_parser {
         }
 
         fn peek_postfix_kind(&self) -> Option<PostfixKind> {
-            let token = self.peek_token()?;
-            if matches!(token.token_type, TokenType::Less) && self.can_parse_type_arguments() {
+            let (token, index) = self.peek_non_trivia_with_index()?;
+            if matches!(token.token_type, TokenType::Less)
+                && self.can_parse_type_arguments_from(index)
+            {
                 return Some(PostfixKind::TypeArguments);
             }
             match token.token_type {
@@ -3274,10 +3465,7 @@ mod expression_parser {
                 TokenType::NullSafe => Some(PostfixKind::NullSafeMemberAccess),
                 TokenType::LeftBracket => Some(PostfixKind::Index),
                 TokenType::Question => {
-                    if matches!(
-                        self.tokens.get(self.pos + 1).map(|token| &token.token_type),
-                        Some(TokenType::LeftBracket)
-                    ) {
+                    if matches!(self.next_significant_kind(index), Some(TokenType::LeftBracket)) {
                         Some(PostfixKind::NullSafeIndex)
                     } else {
                         None
@@ -3285,12 +3473,22 @@ mod expression_parser {
                 }
                 TokenType::LeftParen => Some(PostfixKind::Call),
                 TokenType::LeftBrace => Some(PostfixKind::TrailingLambda),
+                TokenType::HashLabel(_) => {
+                    if matches!(
+                        self.next_significant_kind(index),
+                        Some(TokenType::LeftBrace)
+                    ) {
+                        Some(PostfixKind::TrailingLambda)
+                    } else {
+                        None
+                    }
+                }
                 _ => None,
             }
         }
 
-        fn can_parse_type_arguments(&self) -> bool {
-            match self.extract_type_argument_ranges(self.pos) {
+        fn can_parse_type_arguments_from(&self, start_index: usize) -> bool {
+            match self.extract_type_argument_ranges(start_index) {
                 Ok((end_index, ranges)) => {
                     if ranges.is_empty() {
                         return false;
@@ -3549,7 +3747,12 @@ mod expression_parser {
         }
 
         fn parse_nested_expression(tokens: &[&Token]) -> Result<ParsedExpr, ExpressionError> {
-            let mut nested = ExpressionParser::new(tokens);
+            let filtered: Vec<&Token> = tokens
+                .iter()
+                .copied()
+                .filter(|token| !matches!(token.token_type, TokenType::LayoutComma))
+                .collect();
+            let mut nested = ExpressionParser::new(filtered.as_slice());
             let parsed = nested.parse_expression_bp(0)?;
             nested
                 .consume_postfix_if_any(parsed)
@@ -3566,6 +3769,34 @@ mod expression_parser {
 
         fn peek_with_index(&self) -> Option<(&Token, usize)> {
             self.tokens.get(self.pos).map(|token| (*token, self.pos))
+        }
+
+        fn peek_non_trivia_with_index(&self) -> Option<(&Token, usize)> {
+            let mut index = self.pos;
+            while let Some(token) = self.tokens.get(index) {
+                match token.token_type {
+                    TokenType::Whitespace(_)
+                    | TokenType::Newline
+                    | TokenType::LineComment(_)
+                    | TokenType::BlockComment(_)
+                    | TokenType::JavaDocComment(_) => index += 1,
+                    _ => return Some((*token, index)),
+                }
+            }
+            None
+        }
+
+        fn skip_trivia_tokens(&mut self) {
+            while let Some(token) = self.tokens.get(self.pos) {
+                match token.token_type {
+                    TokenType::Whitespace(_)
+                    | TokenType::Newline
+                    | TokenType::LineComment(_)
+                    | TokenType::BlockComment(_)
+                    | TokenType::JavaDocComment(_) => self.pos += 1,
+                    _ => break,
+                }
+            }
         }
 
         fn advance_with_index(&mut self) -> Option<(&Token, usize)> {
@@ -5147,7 +5378,7 @@ fn lower_return(
         .transpose()?;
 
     Ok(Statement::Return {
-        label: None,
+        label: extract_hash_label_text(node),
         value,
         span: context.span_for(node).unwrap_or_else(Span::dummy),
     })
@@ -5179,7 +5410,7 @@ fn lower_break(
     node: &JvSyntaxNode,
 ) -> Result<Statement, LoweringDiagnostic> {
     Ok(Statement::Break {
-        label: None,
+        label: extract_hash_label_text(node),
         span: context.span_for(node).unwrap_or_else(Span::dummy),
     })
 }
@@ -5210,7 +5441,7 @@ fn lower_continue(
     node: &JvSyntaxNode,
 ) -> Result<Statement, LoweringDiagnostic> {
     Ok(Statement::Continue {
-        label: None,
+        label: extract_hash_label_text(node),
         span: context.span_for(node).unwrap_or_else(Span::dummy),
     })
 }
@@ -5232,6 +5463,62 @@ fn extract_identifier(tokens: &[&Token]) -> Option<String> {
         TokenType::Identifier(text) => Some(text.clone()),
         _ => None,
     })
+}
+
+fn extract_hash_label_text(node: &JvSyntaxNode) -> Option<String> {
+    node.children_with_tokens().find_map(|child| {
+        child.as_token().and_then(|token| {
+            if token.kind() == SyntaxKind::HashLabel {
+                Some(token.text().trim_start_matches('#').to_string())
+            } else {
+                None
+            }
+        })
+    })
+}
+
+fn apply_label_to_expression(
+    expr: Expression,
+    label: String,
+) -> Expression {
+    match expr {
+        Expression::When {
+            expr: subject,
+            arms,
+            else_arm,
+            implicit_end,
+            span,
+            ..
+        } => Expression::When {
+            expr: subject,
+            arms,
+            else_arm,
+            implicit_end,
+            label: Some(label),
+            span,
+        },
+        Expression::Block {
+            statements,
+            span,
+            ..
+        } => Expression::Block {
+            statements,
+            label: Some(label),
+            span,
+        },
+        Expression::Lambda {
+            parameters,
+            body,
+            span,
+            ..
+        } => Expression::Lambda {
+            parameters,
+            body,
+            label: Some(label),
+            span,
+        },
+        other => other,
+    }
 }
 
 fn lower_parameter_modifiers(
