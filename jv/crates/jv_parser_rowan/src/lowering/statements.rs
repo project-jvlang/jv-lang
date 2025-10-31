@@ -762,15 +762,32 @@ fn lower_type_annotation_container(
     let expr = match child_node(container_node, SyntaxKind::Expression) {
         Some(expr) => expr,
         None => {
-            diagnostics.push(LoweringDiagnostic::new(
-                LoweringDiagnosticSeverity::Error,
-                "型注釈の式が見つかりません",
-                context.span_for(container_node),
-                container_node.kind(),
-                first_identifier_text(owner),
-                collect_annotation_texts(owner),
-            ));
-            return None;
+            if let Some(unit_node) = child_node(container_node, SyntaxKind::UnitTypeAnnotation) {
+                match child_node(&unit_node, SyntaxKind::Expression) {
+                    Some(expr) => expr,
+                    None => {
+                        diagnostics.push(LoweringDiagnostic::new(
+                            LoweringDiagnosticSeverity::Error,
+                            "型注釈の式が見つかりません",
+                            context.span_for(container_node),
+                            container_node.kind(),
+                            first_identifier_text(owner),
+                            collect_annotation_texts(owner),
+                        ));
+                        return None;
+                    }
+                }
+            } else {
+                diagnostics.push(LoweringDiagnostic::new(
+                    LoweringDiagnosticSeverity::Error,
+                    "型注釈の式が見つかりません",
+                    context.span_for(container_node),
+                    container_node.kind(),
+                    first_identifier_text(owner),
+                    collect_annotation_texts(owner),
+                ));
+                return None;
+            }
         }
     };
 

@@ -96,6 +96,7 @@ pub(crate) struct ParserContext<'tokens> {
     recovered: bool,
     block_depth: usize,
     expression_states: Vec<ExpressionState>,
+    unit_type_annotation_depth: usize,
 }
 
 impl<'tokens> ParserContext<'tokens> {
@@ -109,6 +110,7 @@ impl<'tokens> ParserContext<'tokens> {
             recovered: false,
             block_depth: 0,
             expression_states: Vec::new(),
+            unit_type_annotation_depth: 0,
         }
     }
 
@@ -427,8 +429,7 @@ impl<'tokens> ParserContext<'tokens> {
 
         self.start_node(SyntaxKind::TypeAnnotation);
         self.bump_raw(); // colon
-        self.start_node(SyntaxKind::Expression);
-        self.parse_type_expression_until(&[
+        let terminators = [
             TokenKind::Assign,
             TokenKind::LeftBrace,
             TokenKind::Semicolon,
@@ -436,8 +437,23 @@ impl<'tokens> ParserContext<'tokens> {
             TokenKind::Comma,
             TokenKind::RightParen,
             TokenKind::WhereKw,
-        ]);
-        self.finish_node();
+        ];
+        let unit_suffix = self.preview_unit_type_annotation_suffix(&terminators);
+
+        if let Some(descriptor) = unit_suffix {
+            self.start_node(SyntaxKind::UnitTypeAnnotation);
+            self.unit_type_annotation_depth = self.unit_type_annotation_depth.saturating_add(1);
+            self.start_node(SyntaxKind::Expression);
+            self.parse_type_expression_until(&terminators);
+            self.finish_node();
+            self.unit_type_annotation_depth = self.unit_type_annotation_depth.saturating_sub(1);
+            self.parse_unit_type_annotation_suffix(descriptor);
+            self.finish_node();
+        } else {
+            self.start_node(SyntaxKind::Expression);
+            self.parse_type_expression_until(&terminators);
+            self.finish_node();
+        }
         self.finish_node();
         true
     }
@@ -549,6 +565,22 @@ impl<'tokens> ParserContext<'tokens> {
             let at_top_level = depth_paren == 0 && depth_brace == 0 && depth_bracket == 0;
             if at_top_level && terminators.contains(&kind) {
                 break;
+            }
+            if self.unit_type_annotation_depth > 0
+                && last_significant_kind.is_some()
+                && at_top_level
+                && depth_angle == 0
+            {
+                if kind == TokenKind::At {
+                    break;
+                }
+                if kind == TokenKind::Whitespace {
+                    if let Some((_, next_kind)) = self.peek_significant_kind_from(self.cursor + 1) {
+                        if matches!(next_kind, TokenKind::Identifier | TokenKind::LeftBracket) {
+                            break;
+                        }
+                    }
+                }
             }
             let mut should_break_on_sync = false;
             if respect_statement_boundaries && at_top_level {
@@ -716,12 +748,6 @@ impl<'tokens> ParserContext<'tokens> {
             }
 
             let mut started_when_block = false;
-                            if let Some(token) = self.current_token() {
-                                debug_assert!(
-                                    TokenKind::from_token(token) == TokenKind::At,
-                                    "角括弧付き単位の前には `@` トークンが必要です"
-                                );
-                            }
             if respect_statement_boundaries && at_top_level && kind == TokenKind::LeftBrace {
                 if let Some(state) = self.expression_states.last_mut() {
                     if state.has_pending_when() {
@@ -1000,6 +1026,20 @@ impl<'tokens> ParserContext<'tokens> {
         None
     }
 
+    fn peek_significant_kind_from(&self, start_index: usize) -> Option<(usize, TokenKind)> {
+        let mut index = start_index;
+        while index < self.tokens.len() {
+            let token = &self.tokens[index];
+            let kind = TokenKind::from_token(token);
+            if kind.is_trivia() {
+                index += 1;
+                continue;
+            }
+            return Some((index, kind));
+        }
+        None
+    }
+
     /// 指定インデックスの `@` トークン直後にホワイトスペースが存在するかを判定する。
     fn detect_unit_suffix(&self, literal_index: usize) -> Option<UnitSuffixDescriptor> {
         let mut index = literal_index.saturating_add(1);
@@ -1109,6 +1149,192 @@ impl<'tokens> ParserContext<'tokens> {
     #[allow(dead_code)]
     pub(crate) fn cursor_has_whitespace_after_at(&self) -> bool {
         self.has_whitespace_after_at(self.cursor)
+    }
+
+    fn preview_unit_type_annotation_suffix(
+        &self,
+        terminators: &[TokenKind],
+    ) -> Option<UnitSuffixDescriptor> {
+        let mut index = self.cursor;
+        let len = self.tokens.len();
+        let mut depth_paren = 0usize;
+        let mut depth_brace = 0usize;
+        let mut depth_bracket = 0usize;
+        let mut depth_angle = 0usize;
+        let mut saw_significant = false;
+        let mut pending_whitespace = false;
+
+        while index < len {
+            let token = &self.tokens[index];
+            let kind = TokenKind::from_token(token);
+
+            if kind.is_trivia() {
+                if saw_significant
+                    && matches!(kind, TokenKind::Whitespace)
+                    && depth_paren == 0
+                    && depth_brace == 0
+                    && depth_bracket == 0
+                    && depth_angle == 0
+                {
+                    pending_whitespace = true;
+                }
+                if saw_significant
+                    && matches!(kind, TokenKind::Newline)
+                    && depth_paren == 0
+                    && depth_brace == 0
+                    && depth_bracket == 0
+                    && depth_angle == 0
+                {
+                    break;
+                }
+                index += 1;
+                continue;
+            }
+
+            if depth_paren == 0
+                && depth_brace == 0
+                && depth_bracket == 0
+                && depth_angle == 0
+                && terminators.contains(&kind)
+            {
+                break;
+            }
+
+            if depth_paren == 0
+                && depth_brace == 0
+                && depth_bracket == 0
+                && depth_angle == 0
+                && saw_significant
+            {
+                if kind == TokenKind::At {
+                    let lookahead = self.peek_significant_kind_from(index + 1);
+                    match lookahead.map(|(_, next_kind)| next_kind) {
+                        Some(TokenKind::Identifier) => {
+                            return Some(UnitSuffixDescriptor::SimpleWithAt)
+                        }
+                        Some(TokenKind::LeftBracket) => {
+                            return Some(UnitSuffixDescriptor::BracketWithAt)
+                        }
+                        _ => return None,
+                    }
+                } else if pending_whitespace {
+                    return match kind {
+                        TokenKind::Identifier => Some(UnitSuffixDescriptor::SimpleWithoutAt),
+                        TokenKind::LeftBracket => Some(UnitSuffixDescriptor::BracketWithoutAt),
+                        _ => None,
+                    };
+                }
+            }
+
+            match kind {
+                TokenKind::LeftParen => depth_paren = depth_paren.saturating_add(1),
+                TokenKind::RightParen => {
+                    if depth_paren == 0 {
+                        break;
+                    }
+                    depth_paren = depth_paren.saturating_sub(1);
+                }
+                TokenKind::LeftBrace => depth_brace = depth_brace.saturating_add(1),
+                TokenKind::RightBrace => {
+                    if depth_brace == 0 {
+                        break;
+                    }
+                    depth_brace = depth_brace.saturating_sub(1);
+                }
+                TokenKind::LeftBracket => depth_bracket = depth_bracket.saturating_add(1),
+                TokenKind::RightBracket => {
+                    if depth_bracket == 0 {
+                        break;
+                    }
+                    depth_bracket = depth_bracket.saturating_sub(1);
+                }
+                TokenKind::Less => depth_angle = depth_angle.saturating_add(1),
+                TokenKind::Greater => {
+                    if depth_angle > 0 {
+                        depth_angle = depth_angle.saturating_sub(1);
+                    }
+                }
+                _ => {}
+            }
+
+            saw_significant = true;
+            pending_whitespace = false;
+            index += 1;
+        }
+
+        None
+    }
+
+    fn parse_unit_type_annotation_suffix(&mut self, descriptor: UnitSuffixDescriptor) -> bool {
+        let start = self.cursor;
+        let _ = self.consume_inline_whitespace();
+
+        match descriptor {
+            UnitSuffixDescriptor::SimpleWithAt => {
+                if !self.bump_expected(TokenKind::At, "`@` で単位名を示してください") {
+                    return false;
+                }
+                let _ = self.consume_inline_whitespace();
+                if !self.bump_expected(
+                    TokenKind::Identifier,
+                    "単位名として識別子を指定してください",
+                ) {
+                    return false;
+                }
+                true
+            }
+            UnitSuffixDescriptor::SimpleWithoutAt => {
+                if !self.bump_expected(
+                    TokenKind::Identifier,
+                    "単位名として識別子を指定してください",
+                ) {
+                    return false;
+                }
+                true
+            }
+            UnitSuffixDescriptor::BracketWithAt => {
+                if !self.bump_expected(TokenKind::At, "`@` で単位名を示してください") {
+                    return false;
+                }
+                let _ = self.consume_inline_whitespace();
+                self.consume_unit_bracket_symbol(start)
+            }
+            UnitSuffixDescriptor::BracketWithoutAt => self.consume_unit_bracket_symbol(start),
+        }
+    }
+
+    fn consume_unit_bracket_symbol(&mut self, start: usize) -> bool {
+        if !self.bump_expected(TokenKind::LeftBracket, "単位記号は `[` で開始してください")
+        {
+            return false;
+        }
+        let mut depth = 1usize;
+        while let Some(token) = self.current_token() {
+            let kind = TokenKind::from_token(token);
+            self.bump_raw();
+            match kind {
+                TokenKind::LeftBracket => depth = depth.saturating_add(1),
+                TokenKind::RightBracket => {
+                    depth = depth.saturating_sub(1);
+                    if depth == 0 {
+                        return true;
+                    }
+                }
+                TokenKind::Newline | TokenKind::Eof => {
+                    let end = self.cursor;
+                    self.report_error(
+                        "単位記号は同じ行で `]` を記述して閉じてください",
+                        start,
+                        end,
+                    );
+                    return false;
+                }
+                _ => {}
+            }
+        }
+        let end = self.cursor;
+        self.report_error("単位記号は `]` で閉じる必要があります", start, end);
+        false
     }
 
     /// EoF かどうか。
@@ -1333,5 +1559,92 @@ mod tests {
         ctx.bump_raw(); // whitespace
         assert!(ctx.cursor_has_whitespace_after_at());
         assert!(ctx.has_whitespace_after_at(ctx.position()));
+    }
+
+    #[test]
+    fn 型注釈でアット付き単位を検出できる() {
+        let tokens = vec![
+            make_token(TokenType::Identifier("Int".into()), "Int"),
+            make_token(TokenType::At, "@"),
+            make_token(TokenType::Identifier("m".into()), "m"),
+        ];
+        let ctx = ParserContext::new(tokens.as_slice());
+        let descriptor = ctx.preview_unit_type_annotation_suffix(&[
+            TokenKind::Assign,
+            TokenKind::LeftBrace,
+            TokenKind::Semicolon,
+            TokenKind::RightBrace,
+            TokenKind::Comma,
+            TokenKind::RightParen,
+            TokenKind::WhereKw,
+        ]);
+        assert!(matches!(
+            descriptor,
+            Some(UnitSuffixDescriptor::SimpleWithAt)
+        ));
+    }
+
+    #[test]
+    fn 型注釈でスペース区切り単位を検出できる() {
+        let tokens = vec![
+            make_token(TokenType::Identifier("Int".into()), "Int"),
+            make_token(TokenType::Whitespace(" ".into()), " "),
+            make_token(TokenType::Identifier("m".into()), "m"),
+        ];
+        let ctx = ParserContext::new(tokens.as_slice());
+        let descriptor = ctx.preview_unit_type_annotation_suffix(&[
+            TokenKind::Assign,
+            TokenKind::LeftBrace,
+            TokenKind::Semicolon,
+            TokenKind::RightBrace,
+            TokenKind::Comma,
+            TokenKind::RightParen,
+            TokenKind::WhereKw,
+        ]);
+        assert!(matches!(
+            descriptor,
+            Some(UnitSuffixDescriptor::SimpleWithoutAt)
+        ));
+    }
+
+    #[test]
+    fn 型注釈で角括弧付き単位を検出できる() {
+        let tokens = vec![
+            make_token(TokenType::Identifier("Int".into()), "Int"),
+            make_token(TokenType::Whitespace(" ".into()), " "),
+            make_token(TokenType::LeftBracket, "["),
+            make_token(TokenType::Identifier("degC".into()), "degC"),
+            make_token(TokenType::RightBracket, "]"),
+        ];
+        let ctx = ParserContext::new(tokens.as_slice());
+        let descriptor = ctx.preview_unit_type_annotation_suffix(&[
+            TokenKind::Assign,
+            TokenKind::LeftBrace,
+            TokenKind::Semicolon,
+            TokenKind::RightBrace,
+            TokenKind::Comma,
+            TokenKind::RightParen,
+            TokenKind::WhereKw,
+        ]);
+        assert!(matches!(
+            descriptor,
+            Some(UnitSuffixDescriptor::BracketWithoutAt)
+        ));
+    }
+
+    #[test]
+    fn 型注釈で単位がない場合は検出しない() {
+        let tokens = vec![make_token(TokenType::Identifier("Int".into()), "Int")];
+        let ctx = ParserContext::new(tokens.as_slice());
+        let descriptor = ctx.preview_unit_type_annotation_suffix(&[
+            TokenKind::Assign,
+            TokenKind::LeftBrace,
+            TokenKind::Semicolon,
+            TokenKind::RightBrace,
+            TokenKind::Comma,
+            TokenKind::RightParen,
+            TokenKind::WhereKw,
+        ]);
+        assert!(descriptor.is_none());
     }
 }

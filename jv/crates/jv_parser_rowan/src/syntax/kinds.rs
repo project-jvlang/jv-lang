@@ -36,6 +36,8 @@ pub enum SyntaxKind {
     BindingTuplePattern,
     /// 型注釈。
     TypeAnnotation,
+    /// 単位付き型注釈。
+    UnitTypeAnnotation,
     /// 初期化子。
     InitializerClause,
     /// アノテーションの並び。
@@ -674,6 +676,7 @@ mod tests {
         ("BindingListPattern", SyntaxKind::BindingListPattern),
         ("BindingTuplePattern", SyntaxKind::BindingTuplePattern),
         ("TypeAnnotation", SyntaxKind::TypeAnnotation),
+        ("UnitTypeAnnotation", SyntaxKind::UnitTypeAnnotation),
         ("InitializerClause", SyntaxKind::InitializerClause),
         ("AnnotationList", SyntaxKind::AnnotationList),
         ("Annotation", SyntaxKind::Annotation),
@@ -741,6 +744,8 @@ mod tests {
         ("RightParen", SyntaxKind::RightParen),
         ("LeftBrace", SyntaxKind::LeftBrace),
         ("RightBrace", SyntaxKind::RightBrace),
+        ("LeftBracket", SyntaxKind::LeftBracket),
+        ("RightBracket", SyntaxKind::RightBracket),
         ("Less", SyntaxKind::Less),
         ("Greater", SyntaxKind::Greater),
         ("Arrow", SyntaxKind::Arrow),
