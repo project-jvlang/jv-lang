@@ -4,7 +4,7 @@ use crate::{
     CommentCarryOverMetadata, JsonCommentTrivia, JsonCommentTriviaKind, LexError,
     SourceCommentKind, SourceCommentTrivia, TokenTrivia, TokenType,
     pipeline::{
-        context::LexerContext,
+        context::{LexerContext, RegexCommandScanState},
         pipeline::CharScannerStage,
         pipeline::DEFAULT_LOOKAHEAD_LIMIT,
         types::{RawToken, RawTokenKind, ScannerPosition, Span},
@@ -945,6 +945,196 @@ impl CharScanner {
         })
     }
 
+    fn should_force_regex_command_pattern(&self, ctx: &LexerContext<'_>) -> bool {
+        let Some(state) = ctx.regex_command_state() else {
+            return false;
+        };
+        self.cursor == state.pattern_start()
+    }
+
+    fn try_activate_regex_command<'source>(
+        &mut self,
+        ctx: &mut LexerContext<'source>,
+        source: &'source str,
+    ) -> bool {
+        if ctx.regex_command_state().is_some() {
+            return false;
+        }
+
+        match Self::detect_regex_command_at(source, self.cursor) {
+            Some(state) => {
+                ctx.set_regex_command_state(Some(state));
+                true
+            }
+            None => false,
+        }
+    }
+
+    fn detect_regex_command_at(source: &str, cursor: usize) -> Option<RegexCommandScanState> {
+        if cursor >= source.len() || !source[cursor..].starts_with('/') {
+            return None;
+        }
+
+        let mut idx = cursor + 1;
+        let len = source.len();
+
+        while idx < len {
+            let (ch, size) = Self::next_char(source, idx)?;
+            if ch == '\n' || ch == '\r' {
+                return None;
+            }
+            if ch.is_whitespace() {
+                idx += size;
+                continue;
+            }
+            break;
+        }
+
+        if idx >= len {
+            return None;
+        }
+
+        let subject_start = idx;
+        let pattern_start = Self::scan_regex_command_subject(source, idx)?;
+
+        if pattern_start <= subject_start {
+            return None;
+        }
+
+        let subject_slice = source.get(subject_start..pattern_start)?;
+        if subject_slice.trim().is_empty() {
+            return None;
+        }
+
+        let pattern_end = Self::find_regex_literal_end_in_slice(source, pattern_start)?;
+        Some(RegexCommandScanState::new(pattern_start, pattern_end))
+    }
+
+    fn scan_regex_command_subject(source: &str, mut idx: usize) -> Option<usize> {
+        let len = source.len();
+        let mut depth_paren = 0usize;
+        let mut depth_bracket = 0usize;
+        let mut depth_brace = 0usize;
+        let mut in_string: Option<char> = None;
+        let mut in_triple: Option<char> = None;
+        let mut escaped = false;
+        let mut escaping = false;
+
+        while idx < len {
+            let (ch, size) = Self::next_char(source, idx)?;
+
+            if let Some(delim) = in_triple {
+                let triple = Self::triple_sequence(delim)?;
+                if source[idx..].starts_with(triple) {
+                    idx += triple.len();
+                    in_triple = None;
+                    continue;
+                }
+                idx += size;
+                continue;
+            }
+
+            if let Some(delim) = in_string {
+                if escaped {
+                    escaped = false;
+                } else if ch == '\\' {
+                    escaped = true;
+                } else if ch == delim {
+                    in_string = None;
+                }
+                idx += size;
+                continue;
+            }
+
+            if escaping {
+                escaping = false;
+                idx += size;
+                continue;
+            }
+
+            if ch == '\\' {
+                escaping = true;
+                idx += size;
+                continue;
+            }
+
+            match ch {
+                '/' if depth_paren == 0 && depth_bracket == 0 && depth_brace == 0 => {
+                    return Some(idx);
+                }
+                '"' | '\'' | '`' => {
+                    if let Some(triple) = Self::triple_sequence(ch) {
+                        if source[idx..].starts_with(triple) {
+                            in_triple = Some(ch);
+                            idx += triple.len();
+                            continue;
+                        }
+                    }
+                    in_string = Some(ch);
+                }
+                '(' => depth_paren = depth_paren.saturating_add(1),
+                ')' => depth_paren = depth_paren.saturating_sub(1),
+                '[' => depth_bracket = depth_bracket.saturating_add(1),
+                ']' => depth_bracket = depth_bracket.saturating_sub(1),
+                '{' => depth_brace = depth_brace.saturating_add(1),
+                '}' => depth_brace = depth_brace.saturating_sub(1),
+                '\n' | '\r' => return None,
+                _ => {}
+            }
+
+            idx += size;
+        }
+
+        None
+    }
+
+    fn find_regex_literal_end_in_slice(source: &str, start: usize) -> Option<usize> {
+        let len = source.len();
+        if start >= len || !source[start..].starts_with('/') {
+            return None;
+        }
+
+        let mut idx = start + 1;
+        let mut escaped = false;
+
+        while idx < len {
+            let (ch, size) = Self::next_char(source, idx)?;
+
+            if ch == '\n' || ch == '\r' || ch == '\t' {
+                return None;
+            }
+
+            if escaped {
+                escaped = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else if ch == '/' {
+                idx += size;
+                return Some(idx);
+            }
+
+            idx += size;
+        }
+
+        None
+    }
+
+    fn next_char(source: &str, index: usize) -> Option<(char, usize)> {
+        source.get(index..)?.chars().next().map(|ch| {
+            let size = ch.len_utf8();
+            (ch, size)
+        })
+    }
+
+    fn triple_sequence(delim: char) -> Option<&'static str> {
+        match delim {
+            '"' => Some("\"\"\""),
+            '\'' => Some("'''"),
+            '`' => Some("```"),
+            _ => None,
+        }
+    }
+
     fn push_comment_trivia(&mut self, trivia: TokenTrivia) {
         if let Some(existing) = &mut self.pending_comment_trivia {
             Self::merge_trivia(existing, trivia);
@@ -1289,9 +1479,27 @@ impl CharScannerStage for CharScanner {
             self.read_identifier(source)?
         } else if current_char.is_ascii_digit() {
             self.read_number(source)?
-        } else if current_char == '/' && Self::can_start_regex(ctx) {
-            kind_override = Some(RawTokenKind::RegexCandidate);
-            self.read_regex_literal(source)?
+        } else if current_char == '/' {
+            if self.should_force_regex_command_pattern(ctx) {
+                kind_override = Some(RawTokenKind::RegexCandidate);
+                match self.read_regex_literal(source) {
+                    Ok(slice) => {
+                        ctx.clear_regex_command_state();
+                        slice
+                    }
+                    Err(err) => {
+                        ctx.clear_regex_command_state();
+                        return Err(err);
+                    }
+                }
+            } else if self.try_activate_regex_command(ctx, source) {
+                self.read_symbol(source)?
+            } else if Self::can_start_regex(ctx) {
+                kind_override = Some(RawTokenKind::RegexCandidate);
+                self.read_regex_literal(source)?
+            } else {
+                self.read_symbol(source)?
+            }
         } else if matches!(current_char, '"' | '\'' | '`') {
             self.read_string_literal(source)?
         } else {

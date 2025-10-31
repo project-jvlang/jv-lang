@@ -1507,6 +1507,87 @@ fn regex_literal_basic_tokenization() {
 }
 
 #[test]
+fn regex_command_with_mode_produces_regex_literal_segment() {
+    let mut lexer = Lexer::new("i/text/\\d+/".to_string());
+    let tokens = lexer
+        .tokenize()
+        .expect("tokenize regex command with explicit mode");
+
+    let token_types: Vec<TokenType> = tokens
+        .iter()
+        .map(|token| token.token_type.clone())
+        .collect();
+    assert_eq!(
+        token_types,
+        vec![
+            TokenType::Identifier("i".to_string()),
+            TokenType::Divide,
+            TokenType::Identifier("text".to_string()),
+            TokenType::RegexLiteral("\\d+".to_string()),
+            TokenType::Eof
+        ]
+    );
+
+    let regex_token = tokens
+        .iter()
+        .find(|token| matches!(token.token_type, TokenType::RegexLiteral(_)))
+        .expect("expected regex literal token for pattern segment");
+
+    let metadata = regex_token
+        .metadata
+        .iter()
+        .find_map(|meta| match meta {
+            TokenMetadata::RegexLiteral { raw, pattern } => Some((raw, pattern)),
+            _ => None,
+        })
+        .expect("regex metadata should be attached");
+
+    assert_eq!(regex_token.lexeme, "\\d+");
+    assert_eq!(metadata.0, "/\\d+/");
+    assert_eq!(metadata.1, "\\d+");
+}
+
+#[test]
+fn regex_command_without_mode_detects_pattern_segment() {
+    let mut lexer = Lexer::new("/subject/\\w+/".to_string());
+    let tokens = lexer
+        .tokenize()
+        .expect("tokenize regex command without explicit mode");
+
+    let token_types: Vec<TokenType> = tokens
+        .iter()
+        .map(|token| token.token_type.clone())
+        .collect();
+    assert_eq!(
+        token_types,
+        vec![
+            TokenType::Divide,
+            TokenType::Identifier("subject".to_string()),
+            TokenType::RegexLiteral("\\w+".to_string()),
+            TokenType::Eof
+        ]
+    );
+
+    let regex_token = tokens
+        .iter()
+        .find(|token| matches!(token.token_type, TokenType::RegexLiteral(_)))
+        .expect("expected regex literal token for command pattern");
+
+    let metadata = regex_token
+        .metadata
+        .iter()
+        .find_map(|meta| match meta {
+            TokenMetadata::RegexLiteral { raw, pattern } => Some((raw, pattern)),
+            _ => None,
+        })
+        .expect("regex metadata should be present for command pattern");
+
+    assert_eq!(regex_token.lexeme, "\\w+");
+    assert_eq!(metadata.0, "/\\w+/");
+    assert_eq!(metadata.1, "\\w+");
+}
+
+#[test]
 fn regex_literal_preserves_escaped_slash() {
     let mut lexer = Lexer::new("val pattern = /a\\/b/".to_string());
     let tokens = lexer.tokenize().unwrap();

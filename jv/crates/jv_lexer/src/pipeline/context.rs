@@ -4,6 +4,29 @@ use super::types::ScannerPosition;
 
 /// パイプライン全体で共有されるコンテキスト情報。
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RegexCommandScanState {
+    pattern_start: usize,
+    pattern_end: usize,
+}
+
+impl RegexCommandScanState {
+    pub fn new(pattern_start: usize, pattern_end: usize) -> Self {
+        Self {
+            pattern_start,
+            pattern_end,
+        }
+    }
+
+    pub fn pattern_start(&self) -> usize {
+        self.pattern_start
+    }
+
+    pub fn pattern_end(&self) -> usize {
+        self.pattern_end
+    }
+}
+
 #[derive(Debug)]
 pub struct LexerContext<'source> {
     pub source: &'source str,
@@ -12,6 +35,7 @@ pub struct LexerContext<'source> {
     pub emitted_tokens: usize,
     pub errors: Vec<LexError>,
     pub last_token_type: Option<TokenType>,
+    regex_command_state: Option<RegexCommandScanState>,
     layout_stack: Vec<LayoutSequenceKind>,
     layout_mode: LayoutMode,
 }
@@ -29,6 +53,7 @@ impl<'source> LexerContext<'source> {
             emitted_tokens: 0,
             errors: Vec::new(),
             last_token_type: None,
+            regex_command_state: None,
             layout_stack: Vec::new(),
             layout_mode,
         }
@@ -71,6 +96,18 @@ impl<'source> LexerContext<'source> {
             return;
         }
         self.layout_stack.push(kind);
+    }
+
+    pub fn regex_command_state(&self) -> Option<RegexCommandScanState> {
+        self.regex_command_state
+    }
+
+    pub fn set_regex_command_state(&mut self, state: Option<RegexCommandScanState>) {
+        self.regex_command_state = state;
+    }
+
+    pub fn clear_regex_command_state(&mut self) {
+        self.regex_command_state = None;
     }
 
     pub fn pop_layout_sequence(&mut self, kind: LayoutSequenceKind) {
