@@ -500,6 +500,7 @@ fn example1_program() -> IrProgram {
         strategy_description: Some(
             "strategy=Switch arms=3 guards=0 default=true exhaustive=false".to_string(),
         ),
+        label: None,
         span: dummy_span(),
     };
 
@@ -580,6 +581,7 @@ fn example2_program() -> IrProgram {
         strategy_description: Some(
             "strategy=Switch arms=4 guards=3 default=true exhaustive=false".to_string(),
         ),
+        label: None,
         span: dummy_span(),
     };
 
@@ -777,6 +779,7 @@ fn example5_program() -> IrProgram {
         strategy_description: Some(
             "strategy=Switch arms=2 guards=0 default=true exhaustive=true".to_string(),
         ),
+        label: None,
         span: dummy_span(),
     };
 

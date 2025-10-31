@@ -477,7 +477,54 @@ impl JavaCodeGenerator {
             );
         }
 
-        if Self::switch_requires_boolean_fallback(discriminant, cases) {
+        if self.should_fallback_boolean_switch_expression(discriminant, cases) {
+            if let Some((true_case, false_case, default_case)) = self.extract_boolean_cases(cases) {
+                let contains_expression_statement = [
+                    true_case.as_ref(),
+                    false_case.as_ref(),
+                    default_case.as_ref(),
+                ]
+                .iter()
+                .flatten()
+                .any(|stmt| matches!(stmt, IrStatement::Expression { .. }));
+                if contains_expression_statement {
+                    return self.render_switch_expression_java21(
+                        discriminant,
+                        cases,
+                        java_type,
+                        implicit_end,
+                        strategy_description,
+                        span,
+                    );
+                }
+                let condition = self.generate_expression(discriminant)?;
+                let mut builder = self.builder();
+                if let Some(description) = strategy_description {
+                    builder.push_line(&format!("// {}", description));
+                }
+                builder.push_line("{");
+                builder.indent();
+                builder.push_line(&format!("if ({condition}) {{"));
+                builder.indent();
+                if let Some(stmt) = true_case.as_ref() {
+                    let body_code = self.generate_statement(stmt)?;
+                    Self::push_lines(&mut builder, &body_code);
+                }
+                builder.dedent();
+                if let Some(else_stmt) = false_case.as_ref().or(default_case.as_ref()) {
+                    builder.push_line("} else {");
+                    builder.indent();
+                    let else_code = self.generate_statement(else_stmt)?;
+                    Self::push_lines(&mut builder, &else_code);
+                    builder.dedent();
+                    builder.push_line("}");
+                } else {
+                    builder.push_line("}");
+                }
+                builder.dedent();
+                builder.push_line("}");
+                return Ok(builder.build());
+            }
             return self.render_switch_expression_java21(
                 discriminant,
                 cases,
@@ -549,32 +596,6 @@ impl JavaCodeGenerator {
         }
 
         Ok(None)
-    }
-
-    fn switch_requires_boolean_fallback(
-        discriminant: &IrExpression,
-        cases: &[IrSwitchCase],
-    ) -> bool {
-        if !Self::expression_java_type(discriminant)
-            .map(Self::is_boolean_switch_type)
-            .unwrap_or(false)
-        {
-            return false;
-        }
-
-        cases.iter().any(|case| {
-            case.labels
-                .iter()
-                .any(|label| matches!(label, IrCaseLabel::Literal(Literal::Boolean(_))))
-        })
-    }
-
-    fn is_boolean_switch_type(java_type: &JavaType) -> bool {
-        match java_type {
-            JavaType::Primitive(name) => name == "boolean",
-            JavaType::Reference { name, .. } => name == "Boolean" || name == "java.lang.Boolean",
-            _ => false,
-        }
     }
 
     fn java21_incompatibility_error(

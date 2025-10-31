@@ -68,6 +68,8 @@ impl JavaCodeGenerator {
                 })
                 .collect::<Vec<_>>();
 
+            self.register_sample_record_components(&descriptor.name, &components, as_static_nested);
+
             let record_statement = IrStatement::RecordDeclaration {
                 name: descriptor.name.clone(),
                 type_parameters: Vec::new(),
@@ -86,6 +88,25 @@ impl JavaCodeGenerator {
         }
 
         Ok(records)
+    }
+
+    fn register_sample_record_components(
+        &mut self,
+        record_name: &str,
+        components: &[IrRecordComponent],
+        as_static_nested: bool,
+    ) {
+        let mut enclosing = Vec::new();
+        if as_static_nested {
+            let script_name = self
+                .script_class_simple_name
+                .clone()
+                .unwrap_or_else(|| self.config.script_main_class.clone());
+            if !script_name.is_empty() {
+                enclosing.push(script_name);
+            }
+        }
+        self.add_record_components(record_name, components, &enclosing);
     }
 
     fn build_descriptor_lookup(

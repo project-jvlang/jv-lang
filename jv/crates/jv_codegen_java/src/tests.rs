@@ -3170,13 +3170,18 @@ fn hash_label_flow_generates_switch_for_labeled_when() {
     let end_pos = (labeled_pos + 220).min(source.len());
     let snippet = &source[labeled_pos..end_pos];
     assert!(
-        snippet.contains("switch (user.active)"),
-        "ラベル付き when が switch 文として出力されるべきです:\n{}",
+        snippet.contains("if (user.active())"),
+        "ラベル付き when は if/else にフォールバックするべきです:\n{}",
         snippet
     );
     assert!(
-        snippet.contains("case false:"),
-        "false 分岐がラベル付き switch で生成されるべきです:\n{}",
+        source.contains("} else {"),
+        "ラベル付き when フォールバックでは else ブロックを生成するべきです:\n{}",
+        source
+    );
+    assert!(
+        !snippet.contains("switch ("),
+        "ラベル付き when フォールバックでは switch 文を生成しないはずです:\n{}",
         snippet
     );
     assert!(
@@ -3191,8 +3196,108 @@ fn hash_label_flow_generates_switch_for_labeled_when() {
     );
     assert!(
         !snippet.contains("->"),
-        "ラベル付き when は switch 式ではなく従来の switch 文として出力されるべきです:\n{}",
+        "ラベル付き when フォールバックでは switch 式の記号を含めるべきではありません:\n{}",
         snippet
+    );
+}
+
+#[test]
+fn hash_label_flow_generates_records_and_lambda_guard() {
+    let program = parse_program(include_str!("../../../examples/hash_label_flow.jv"));
+    let unit = generate_java_code(&program).expect("hash_label_flow の Java 生成に失敗しました");
+    let source = unit.to_source(&JavaCodeGenConfig::for_target(JavaTarget::Java25));
+
+    assert!(
+        source.contains("public static record MemberUserSample(boolean active, String name) {}"),
+        "MemberUserSample の record 宣言が出力されていません:\n{}",
+        source
+    );
+    assert!(
+        source.contains(
+            "public static record MemberSample(java.util.List<MemberUserSample> users) {}"
+        ),
+        "MemberSample の record 宣言が出力されていません:\n{}",
+        source
+    );
+    assert!(
+        source.contains("public static class MemberSampleData {"),
+        "MemberSampleData クラスが生成されていません:\n{}",
+        source
+    );
+
+    let record_pos = source
+        .find("public static record MemberUserSample")
+        .expect("MemberUserSample の record 宣言が見つかりません");
+    let main_pos = source
+        .find("public static void main")
+        .expect("main メソッドが見つかりません");
+    let record_snippet_end = std::cmp::min(record_pos + 120, source.len());
+    assert!(
+        record_pos < main_pos,
+        "record 宣言は main メソッドより前で宣言されるべきです (抜粋: {} ...)",
+        &source[record_pos..record_snippet_end]
+    );
+
+    assert!(
+        source.contains("var members = MemberSampleData.MEMBERS;"),
+        "members 変数の初期化が MemberSampleData.MEMBERS を参照していません:\n{}",
+        source
+    );
+    assert!(
+        source.contains("outer: for (MemberUserSample user : members.users()) {"),
+        "for-each ループが型付きで生成されるべきです:\n{}",
+        source
+    );
+
+    let lambda_pos = source
+        .find("(members.users()).stream().forEach")
+        .expect("forEach ラムダが見つかりません");
+    let lambda_end = std::cmp::min(lambda_pos + 240, source.len());
+    let lambda_snippet = &source[lambda_pos..lambda_end];
+    assert!(
+        lambda_snippet.contains("if (true && user.active)"),
+        "forEach ラムダが if ブロックへローワリングされていません:\n{}",
+        lambda_snippet
+    );
+    assert!(
+        lambda_snippet.contains("return;"),
+        "return #scan は return; に展開されるべきです:\n{}",
+        lambda_snippet
+    );
+    assert!(
+        !lambda_snippet.contains('?'),
+        "forEach ラムダが三項演算子を含んでいます:\n{}",
+        lambda_snippet
+    );
+    assert!(
+        !source.contains("switch (members.users().isEmpty())"),
+        "members.users().isEmpty() の when は switch 文へフォールバックすべきではありません:\n{}",
+        source
+    );
+    let boolean_when_pos = source
+        .find("if (members.users().isEmpty()) {")
+        .expect("members.users().isEmpty() を条件とする if ブロックが生成されるべきです");
+    let boolean_when_end = std::cmp::min(boolean_when_pos + 240, source.len());
+    let boolean_when_snippet = &source[boolean_when_pos..boolean_when_end];
+    assert!(
+        boolean_when_snippet.contains("if (members.users().isEmpty()) {"),
+        "members.users().isEmpty() を条件とする if ブロックが生成されていません:\n{}",
+        boolean_when_snippet
+    );
+    assert!(
+        boolean_when_snippet.contains("} else {"),
+        "boolean when のフォールバックでは else ブロックを生成するべきです:\n{}",
+        boolean_when_snippet
+    );
+    assert!(
+        boolean_when_snippet.contains("System.out.println(\"会員リストは空です\")"),
+        "true ケースで期待するログが出力されていません:\n{}",
+        boolean_when_snippet
+    );
+    assert!(
+        boolean_when_snippet.contains("System.out.println(\"会員リストは利用可能です\")"),
+        "false ケースで期待するログが出力されていません:\n{}",
+        boolean_when_snippet
     );
 }
 

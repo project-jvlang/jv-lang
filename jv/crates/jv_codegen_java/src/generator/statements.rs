@@ -313,7 +313,10 @@ impl JavaCodeGenerator {
         };
         builder.push_line(&header);
         builder.indent();
-        let body_code = self.generate_statement(body)?;
+        let body_code =
+            self.with_local_type_override(variable, item_type.clone(), |generator| {
+                generator.generate_statement(body)
+            })?;
         Self::push_lines(&mut builder, &body_code);
         builder.dedent();
         builder.push_line("}");
@@ -349,7 +352,10 @@ impl JavaCodeGenerator {
         };
         builder.push_line(&header);
         builder.indent();
-        let body_code = self.generate_statement(body)?;
+        let body_code =
+            self.with_local_type_override(variable, resolved_type.clone(), |generator| {
+                generator.generate_statement(body)
+            })?;
         Self::push_lines(&mut builder, &body_code);
         builder.dedent();
         builder.push_line("}");
@@ -391,7 +397,56 @@ impl JavaCodeGenerator {
             }
         }
 
+        if let Some(component_type) = self.resolve_record_component_iterable_type(iterable) {
+            if let Some(element) = Self::iterable_element_type(&component_type) {
+                return element;
+            }
+            return component_type;
+        }
+
         declared_type.clone()
+    }
+
+    fn resolve_record_component_iterable_type(&self, iterable: &IrExpression) -> Option<JavaType> {
+        if let IrExpression::FieldAccess {
+            receiver,
+            field_name,
+            ..
+        } = iterable
+        {
+            let owner_type = Self::expression_java_type(receiver)?;
+            if let JavaType::Reference { name, .. } = owner_type {
+                return self.lookup_record_component_type(name, field_name);
+            }
+        }
+        None
+    }
+
+    fn lookup_record_component_type(&self, owner_name: &str, component: &str) -> Option<JavaType> {
+        if let Some(map) = self.record_component_types.get(owner_name) {
+            if let Some(java_type) = map.get(component) {
+                return Some(java_type.clone());
+            }
+        }
+        if let Some(simple) = owner_name.rsplit('.').next() {
+            if simple != owner_name {
+                if let Some(map) = self.record_component_types.get(simple) {
+                    if let Some(java_type) = map.get(component) {
+                        return Some(java_type.clone());
+                    }
+                }
+            }
+        }
+        if let Some(simple) = owner_name.rsplit('$').next() {
+            if simple != owner_name {
+                if let Some(map) = self.record_component_types.get(simple) {
+                    if let Some(java_type) = map.get(component) {
+                        return Some(java_type.clone());
+                    }
+                }
+            }
+        }
+        None
     }
 
     fn iterable_element_type(java_type: &JavaType) -> Option<JavaType> {
@@ -528,6 +583,10 @@ impl JavaCodeGenerator {
         discriminant: &IrExpression,
         cases: &[IrSwitchCase],
     ) -> Result<String, CodeGenError> {
+        if let Some(boolean_fallback) = self.render_boolean_switch_statement(discriminant, cases)? {
+            return Ok(boolean_fallback);
+        }
+
         let mut builder = self.builder();
         builder.push_line(&format!(
             "switch ({}) {{",
@@ -559,21 +618,73 @@ impl JavaCodeGenerator {
         Ok(builder.build())
     }
 
-    fn expression_to_statement(expr: &IrExpression) -> IrStatement {
-        match expr {
-            IrExpression::Block {
-                statements, span, ..
-            } => IrStatement::Block {
-                label: None,
-                statements: statements.clone(),
-                span: span.clone(),
-            },
-            IrExpression::Lambda { body, .. } => Self::expression_to_statement(body),
-            other => IrStatement::Expression {
-                expr: other.clone(),
-                span: other.span(),
-            },
+    fn render_boolean_switch_statement(
+        &mut self,
+        discriminant: &IrExpression,
+        cases: &[IrSwitchCase],
+    ) -> Result<Option<String>, CodeGenError> {
+        let Some((true_case, false_case, default_case)) = self.extract_boolean_cases(cases) else {
+            return Ok(None);
+        };
+
+        let discriminant_type = self.expression_java_type_with_overrides(discriminant);
+        let is_boolean = discriminant_type
+            .as_ref()
+            .map(Self::is_boolean_like_type)
+            .unwrap_or(true);
+
+        if !is_boolean {
+            return Ok(None);
         }
+
+        let condition = self.generate_expression(discriminant)?;
+        let mut builder = self.builder();
+
+        if let Some(stmt) = true_case.as_ref() {
+            builder.push_line(&format!("if ({condition}) {{"));
+            builder.indent();
+            let body_code = self.generate_statement(stmt)?;
+            Self::push_lines(&mut builder, &body_code);
+            builder.dedent();
+            if let Some(else_stmt) = false_case.as_ref().or(default_case.as_ref()) {
+                builder.push_line("} else {");
+                builder.indent();
+                let else_code = self.generate_statement(else_stmt)?;
+                Self::push_lines(&mut builder, &else_code);
+                builder.dedent();
+                builder.push_line("}");
+            } else {
+                builder.push_line("}");
+            }
+            return Ok(Some(builder.build()));
+        }
+
+        if let Some(stmt) = false_case.as_ref() {
+            builder.push_line(&format!("if (!({condition})) {{"));
+            builder.indent();
+            let body_code = self.generate_statement(stmt)?;
+            Self::push_lines(&mut builder, &body_code);
+            builder.dedent();
+            if let Some(default_stmt) = default_case.as_ref() {
+                builder.push_line("} else {");
+                builder.indent();
+                let else_code = self.generate_statement(default_stmt)?;
+                Self::push_lines(&mut builder, &else_code);
+                builder.dedent();
+                builder.push_line("}");
+            } else {
+                builder.push_line("}");
+            }
+            return Ok(Some(builder.build()));
+        }
+
+        if let Some(stmt) = default_case.as_ref() {
+            let body_code = self.generate_statement(stmt)?;
+            Self::push_lines(&mut builder, &body_code);
+            return Ok(Some(builder.build()));
+        }
+
+        Ok(None)
     }
 
     fn case_body_needs_break(stmt: &IrStatement) -> bool {

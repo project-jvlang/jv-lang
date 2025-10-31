@@ -724,6 +724,92 @@ fn cli_examples_build_without_java_errors() {
     );
 }
 
+#[test]
+fn hash_label_flow_example_compiles_and_runs() {
+    let cli_path = match cli_binary_path() {
+        Ok(path) => path,
+        Err(reason) => {
+            eprintln!(
+                "hash_label_flow.jv をスキップします: CLI バイナリ取得に失敗しました ({reason})"
+            );
+            return;
+        }
+    };
+
+    if javac_command_for_target(JavaTarget::Java25).is_none() {
+        eprintln!("hash_label_flow.jv をスキップします: Java 25 向け javac が見つかりません");
+        return;
+    }
+    if java_command_for_target(JavaTarget::Java25).is_none() {
+        eprintln!("hash_label_flow.jv をスキップします: Java 25 向け java 実行環境が見つかりません");
+        return;
+    }
+
+    let source = workspace_file("examples/hash_label_flow.jv");
+    assert!(
+        source.is_file(),
+        "examples/hash_label_flow.jv が見つかりません (確認パス: {})",
+        source.display()
+    );
+
+    let label = "hash_label_flow.jv";
+    build_script_example(cli_path.as_path(), &source, label).unwrap_or_else(|err| {
+        panic!("hash_label_flow.jv のビルドに失敗しました:\n{}", err);
+    });
+
+    let sanitized = sanitize_label(label);
+    let relative_output = PathBuf::from(format!(
+        "target/test-cli-examples/scripts/{}",
+        sanitized
+    ));
+    let workdir = source
+        .parent()
+        .expect("hash_label_flow.jv の親ディレクトリを取得できませんでした");
+    let output_root = workdir.join(&relative_output);
+    let java_dir = output_root.join("java25");
+    let classes_dir = java_dir.join("classes");
+    assert!(
+        classes_dir.is_dir(),
+        "javac が生成したクラスディレクトリが存在しません: {}",
+        classes_dir.display()
+    );
+
+    let mut java_cmd =
+        java_command_for_target(JavaTarget::Java25).expect("Java 実行ファイルが取得できませんでした");
+    java_cmd.arg("-cp").arg(&classes_dir).arg("HashLabelFlow");
+    let output = java_cmd
+        .output()
+        .expect("java コマンドの実行に失敗しました");
+    assert!(
+        output.status.success(),
+        "HashLabelFlow の実行が失敗しました:\n標準出力: {}\n標準エラー: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("最初のアクティブ会員: Alice"),
+        "期待するログが含まれていません (最初のアクティブ会員):\n{}",
+        stdout
+    );
+    assert!(
+        stdout.contains("探索結果: Alice"),
+        "期待するログが含まれていません (探索結果):\n{}",
+        stdout
+    );
+    assert!(
+        stdout.contains("会員リストは利用可能です"),
+        "期待するログが含まれていません (会員リスト):\n{}",
+        stdout
+    );
+    assert!(
+        stdout.contains("確認済み: Alice"),
+        "期待するログが含まれていません (確認済み):\n{}",
+        stdout
+    );
+}
+
 struct ExampleFixture {
     label: String,
     kind: ExampleKind,

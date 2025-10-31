@@ -47,6 +47,8 @@ pub struct JavaCodeGenerator {
     current_return_type: Option<JavaType>,
     mutable_captures: HashSet<String>,
     record_components: HashMap<String, HashSet<String>>,
+    record_component_types: HashMap<String, HashMap<String, JavaType>>,
+    local_type_overrides: Vec<HashMap<String, JavaType>>,
 }
 
 impl JavaCodeGenerator {
@@ -75,6 +77,8 @@ impl JavaCodeGenerator {
             current_return_type: None,
             mutable_captures: HashSet::new(),
             record_components: HashMap::new(),
+            record_component_types: HashMap::new(),
+            local_type_overrides: Vec::new(),
         }
     }
 
@@ -1058,6 +1062,8 @@ impl JavaCodeGenerator {
         self.current_return_type = None;
         self.mutable_captures.clear();
         self.record_components.clear();
+        self.record_component_types.clear();
+        self.local_type_overrides.clear();
     }
 
     fn register_record_components_from_declarations(
@@ -1138,9 +1144,18 @@ impl JavaCodeGenerator {
                 continue;
             }
             self.record_components
-                .entry(key)
+                .entry(key.clone())
                 .or_insert_with(HashSet::new)
                 .extend(component_names.iter().cloned());
+            let type_entry = self
+                .record_component_types
+                .entry(key.clone())
+                .or_insert_with(HashMap::new);
+            for component in components {
+                type_entry
+                    .entry(component.name.clone())
+                    .or_insert_with(|| component.java_type.clone());
+            }
         }
     }
 
@@ -1671,32 +1686,236 @@ impl JavaCodeGenerator {
     }
 
     fn is_known_record_component(&self, receiver: &IrExpression, field_name: &str) -> bool {
+        if let Some(overridden) = self.overridden_type(receiver) {
+            if self.record_component_type_matches(overridden, field_name) {
+                return true;
+            }
+        }
+
         let Some(java_type) = Self::expression_java_type(receiver) else {
             return false;
         };
 
+        self.record_component_type_matches(java_type, field_name)
+    }
+
+    fn overridden_type(&self, expr: &IrExpression) -> Option<&JavaType> {
+        if let IrExpression::Identifier { name, .. } = expr {
+            for scope in self.local_type_overrides.iter().rev() {
+                if let Some(java_type) = scope.get(name) {
+                    return Some(java_type);
+                }
+            }
+        }
+        None
+    }
+
+    fn record_component_type_matches(&self, java_type: &JavaType, field_name: &str) -> bool {
         let JavaType::Reference { name, .. } = java_type else {
             return false;
         };
+        self.record_component_type_lookup(name, field_name)
+            .is_some()
+    }
 
+    fn record_component_type_lookup(&self, type_name: &str, field_name: &str) -> Option<JavaType> {
         let mut candidates = Vec::new();
-        candidates.push(name.as_str());
-        if let Some(simple) = name.rsplit('.').next() {
+        candidates.push(type_name);
+        if let Some(simple) = type_name.rsplit('.').next() {
             candidates.push(simple);
         }
-        if let Some(simple) = name.rsplit('$').next() {
+        if let Some(simple) = type_name.rsplit('$').next() {
             candidates.push(simple);
         }
 
         for candidate in candidates {
-            if let Some(components) = self.record_components.get(candidate) {
-                if components.contains(field_name) {
-                    return true;
+            if let Some(components) = self.record_component_types.get(candidate) {
+                if let Some(java_type) = components.get(field_name) {
+                    return Some(java_type.clone());
                 }
             }
         }
 
-        false
+        None
+    }
+
+    fn with_local_type_override<F, R>(
+        &mut self,
+        variable: &str,
+        ty: JavaType,
+        f: F,
+    ) -> Result<R, CodeGenError>
+    where
+        F: FnOnce(&mut Self) -> Result<R, CodeGenError>,
+    {
+        let mut scope = HashMap::new();
+        scope.insert(variable.to_string(), ty);
+        self.local_type_overrides.push(scope);
+        let result = f(self);
+        self.local_type_overrides.pop();
+        result
+    }
+
+    fn field_access_component_type(
+        &self,
+        receiver: &IrExpression,
+        field_name: &str,
+    ) -> Option<JavaType> {
+        let receiver_type = self.expression_java_type_with_overrides(receiver)?;
+        let JavaType::Reference { name, .. } = receiver_type else {
+            return None;
+        };
+        self.record_component_type_lookup(&name, field_name)
+    }
+
+    fn expression_java_type_with_overrides(&self, expr: &IrExpression) -> Option<JavaType> {
+        let base_type = Self::expression_java_type(expr).cloned();
+
+        if let Some(overridden) = self.overridden_type(expr) {
+            if base_type
+                .as_ref()
+                .map_or(true, |ty| Self::is_object_reference(ty))
+            {
+                return Some(overridden.clone());
+            }
+        }
+
+        if let Some(java_type) = base_type {
+            if let IrExpression::FieldAccess {
+                receiver,
+                field_name,
+                ..
+            } = expr
+            {
+                if Self::is_object_reference(&java_type) {
+                    if let Some(component) = self.field_access_component_type(receiver, field_name)
+                    {
+                        return Some(component);
+                    }
+                }
+            }
+            return Some(java_type);
+        }
+
+        if let IrExpression::FieldAccess {
+            receiver,
+            field_name,
+            ..
+        } = expr
+        {
+            return self.field_access_component_type(receiver, field_name);
+        }
+
+        None
+    }
+
+    fn is_object_reference(java_type: &JavaType) -> bool {
+        matches!(
+            java_type,
+            JavaType::Reference { name, .. }
+                if name == "java.lang.Object" || name == "Object"
+        )
+    }
+
+    fn is_boolean_like_type(java_type: &JavaType) -> bool {
+        match java_type {
+            JavaType::Primitive(name) => name == "boolean",
+            JavaType::Reference { name, .. } => matches!(
+                name.as_str(),
+                "Boolean" | "java.lang.Boolean" | "Object" | "java.lang.Object"
+            ),
+            _ => false,
+        }
+    }
+
+    fn should_fallback_boolean_switch_expression(
+        &self,
+        discriminant: &IrExpression,
+        cases: &[IrSwitchCase],
+    ) -> bool {
+        if self.extract_boolean_cases(cases).is_none() {
+            return false;
+        }
+
+        match self.expression_java_type_with_overrides(discriminant) {
+            Some(java_type) => Self::is_boolean_like_type(&java_type),
+            None => true,
+        }
+    }
+
+    fn extract_boolean_cases(
+        &self,
+        cases: &[IrSwitchCase],
+    ) -> Option<(
+        Option<IrStatement>,
+        Option<IrStatement>,
+        Option<IrStatement>,
+    )> {
+        let mut true_case = None;
+        let mut false_case = None;
+        let mut default_case = None;
+
+        for case in cases {
+            if case.guard.is_some() {
+                return None;
+            }
+            if Self::is_default_only_case(case) {
+                if default_case.is_some() {
+                    return None;
+                }
+                default_case = Some(Self::expression_to_statement(&case.body));
+                continue;
+            }
+
+            let mut handled = false;
+            for label in &case.labels {
+                match label {
+                    IrCaseLabel::Literal(Literal::Boolean(value)) => {
+                        let stmt = Self::expression_to_statement(&case.body);
+                        if *value {
+                            if true_case.is_some() {
+                                return None;
+                            }
+                            true_case = Some(stmt);
+                        } else {
+                            if false_case.is_some() {
+                                return None;
+                            }
+                            false_case = Some(stmt);
+                        }
+                        handled = true;
+                    }
+                    _ => return None,
+                }
+            }
+
+            if !handled {
+                return None;
+            }
+        }
+
+        if true_case.is_none() && false_case.is_none() && default_case.is_none() {
+            return None;
+        }
+
+        Some((true_case, false_case, default_case))
+    }
+
+    fn expression_to_statement(expr: &IrExpression) -> IrStatement {
+        match expr {
+            IrExpression::Block {
+                statements, span, ..
+            } => IrStatement::Block {
+                label: None,
+                statements: statements.clone(),
+                span: span.clone(),
+            },
+            IrExpression::Lambda { body, .. } => Self::expression_to_statement(body),
+            other => IrStatement::Expression {
+                expr: other.clone(),
+                span: other.span(),
+            },
+        }
     }
 
     fn collect_mutable_captures_in_statement(
