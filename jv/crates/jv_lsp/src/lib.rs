@@ -8,7 +8,8 @@ pub use highlight::tokens::{HighlightKind, HighlightToken};
 use jv_ast::types::TypeLevelExpr;
 use jv_ast::{
     Argument, ConstParameter, Expression, GenericParameter, GenericSignature, Program,
-    RegexLiteral, Span, Statement, StringPart, TypeAnnotation,
+    RegexLambdaReplacement, RegexLiteral, RegexReplacement, Span, Statement, StringPart,
+    TypeAnnotation,
 };
 use jv_build::BuildConfig;
 use jv_build::metadata::{
@@ -1898,6 +1899,12 @@ fn collect_call_diagnostics_from_expression(
                 }
             }
         }
+        Expression::RegexCommand(command) => {
+            collect_call_diagnostics_from_expression(&command.subject, tokens, diagnostics);
+            if let Some(replacement) = &command.replacement {
+                collect_call_diagnostics_from_regex_replacement(replacement, tokens, diagnostics);
+            }
+        }
         Expression::MultilineString(_)
         | Expression::Literal(_, _)
         | Expression::RegexLiteral(_)
@@ -1905,6 +1912,35 @@ fn collect_call_diagnostics_from_expression(
         | Expression::This(_)
         | Expression::Super(_) => {}
     }
+}
+
+fn collect_call_diagnostics_from_regex_replacement(
+    replacement: &RegexReplacement,
+    tokens: &[Token],
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    match replacement {
+        RegexReplacement::Literal(_) => {}
+        RegexReplacement::Expression(expr) => {
+            collect_call_diagnostics_from_expression(expr, tokens, diagnostics);
+        }
+        RegexReplacement::Lambda(lambda) => {
+            collect_call_diagnostics_from_regex_lambda(lambda, tokens, diagnostics);
+        }
+    }
+}
+
+fn collect_call_diagnostics_from_regex_lambda(
+    lambda: &RegexLambdaReplacement,
+    tokens: &[Token],
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    for param in &lambda.params {
+        if let Some(default) = &param.default_value {
+            collect_call_diagnostics_from_expression(default, tokens, diagnostics);
+        }
+    }
+    collect_call_diagnostics_from_expression(&lambda.body, tokens, diagnostics);
 }
 
 fn build_call_argument_diagnostic(span: &Span) -> Diagnostic {

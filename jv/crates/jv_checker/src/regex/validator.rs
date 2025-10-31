@@ -2,7 +2,8 @@ use crate::CheckError;
 use crate::diagnostics::{self, DiagnosticSeverity, EnhancedDiagnostic};
 use jv_ast::{
     Argument, ConcurrencyConstruct, Expression, ForInStatement, LoopStrategy, NumericRangeLoop,
-    Program, RegexLiteral, ResourceManagement, Span, Statement, StringPart, TryCatchClause,
+    Program, RegexLambdaReplacement, RegexLiteral, RegexReplacement, ResourceManagement, Span,
+    Statement, StringPart, TryCatchClause,
 };
 use std::time::Instant;
 
@@ -268,6 +269,12 @@ impl<'a> RegexValidationVisitor<'a> {
                     self.visit_expression(element);
                 }
             }
+            Expression::RegexCommand(command) => {
+                self.visit_expression(&command.subject);
+                if let Some(replacement) = &command.replacement {
+                    self.visit_regex_replacement(replacement);
+                }
+            }
             Expression::Lambda {
                 parameters, body, ..
             } => {
@@ -329,6 +336,23 @@ impl<'a> RegexValidationVisitor<'a> {
                 }
             }
         }
+    }
+
+    fn visit_regex_replacement(&mut self, replacement: &RegexReplacement) {
+        match replacement {
+            RegexReplacement::Literal(_) => {}
+            RegexReplacement::Expression(expr) => self.visit_expression(expr),
+            RegexReplacement::Lambda(lambda) => self.visit_regex_lambda(lambda),
+        }
+    }
+
+    fn visit_regex_lambda(&mut self, lambda: &RegexLambdaReplacement) {
+        for param in &lambda.params {
+            if let Some(default) = &param.default_value {
+                self.visit_expression(default);
+            }
+        }
+        self.visit_expression(&lambda.body);
     }
 }
 

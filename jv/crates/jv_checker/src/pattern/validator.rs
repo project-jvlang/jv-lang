@@ -4,8 +4,8 @@ use super::{
 use crate::CheckError;
 use jv_ast::{
     Argument, ConcurrencyConstruct, Expression, ForInStatement, Literal, LoopStrategy,
-    NumericRangeLoop, Pattern, Program, Property, ResourceManagement, Span, Statement, StringPart,
-    TypeAnnotation, WhenArm,
+    NumericRangeLoop, Pattern, Program, Property, RegexLambdaReplacement, RegexReplacement,
+    ResourceManagement, Span, Statement, StringPart, TypeAnnotation, WhenArm,
 };
 
 pub(super) fn validate_program(
@@ -156,6 +156,12 @@ impl<'a> WhenUsageValidator<'a> {
                     }
                 }
             }
+            Expression::RegexCommand(command) => {
+                self.visit_expression(&command.subject, true);
+                if let Some(replacement) = &command.replacement {
+                    self.visit_regex_replacement(replacement);
+                }
+            }
             Expression::MultilineString { .. } | Expression::JsonLiteral { .. } => {}
             Expression::Array { elements, .. } => {
                 for element in elements {
@@ -232,6 +238,23 @@ impl<'a> WhenUsageValidator<'a> {
                 self.analyze_when_expression(expression, span, expects_value, has_subject);
             }
         }
+    }
+
+    fn visit_regex_replacement(&mut self, replacement: &RegexReplacement) {
+        match replacement {
+            RegexReplacement::Literal(_) => {}
+            RegexReplacement::Expression(expr) => self.visit_expression(expr, true),
+            RegexReplacement::Lambda(lambda) => self.visit_regex_lambda(lambda),
+        }
+    }
+
+    fn visit_regex_lambda(&mut self, lambda: &RegexLambdaReplacement) {
+        for param in &lambda.params {
+            if let Some(default) = &param.default_value {
+                self.visit_expression(default, true);
+            }
+        }
+        self.visit_expression(&lambda.body, true);
     }
 
     fn visit_when_arm(&mut self, arm: &WhenArm, expects_value: bool) {

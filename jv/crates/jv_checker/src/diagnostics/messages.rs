@@ -73,3 +73,37 @@ pub fn regex_pattern_error_message(ty_desc: &str) -> String {
         ),
     )
 }
+
+/// モード `m` とフラグ `m` の混同に関する情報メッセージ。
+pub fn regex_mode_flag_confusion_message() -> String {
+    "JV_REGEX_I001: フラグ `m` (MULTILINE) とモード `m` (matches) が混同されやすいため、モード指定を省略するか `[match]` を明示して区別してください。".to_string()
+}
+
+/// 置換目的が不明な構文に関する情報メッセージ。
+pub fn regex_ambiguous_mode_message() -> String {
+    "JV_REGEX_I002: 置換意図か判定意図か判別できません。モード `m` を明示するか、置換部 `//` を追加してください。".to_string()
+}
+
+/// 未知フラグ検出時のエラーメッセージ。
+pub fn regex_unknown_flag_message(flag: char) -> String {
+    format!(
+        "JV_REGEX_E101: 未知のフラグ `{}` が指定されました。有効なフラグは `i`, `m`, `s`, `u`, `d`, `x`, `l`, `c` です。",
+        flag
+    )
+}
+
+/// 排他的なフラグ組み合わせに関するエラーメッセージ。
+pub fn regex_flag_conflict_message(primary: char, secondary: char) -> String {
+    format!(
+        "JV_REGEX_E103: フラグ `{}` と `{}` は同時に使用できません。どちらか一方のみを残してください。",
+        primary, secondary
+    )
+}
+
+/// ラムダ置換の戻り値型が String でない場合のエラーメッセージ。
+pub fn regex_lambda_return_mismatch_message(actual: &str) -> String {
+    format!(
+        "JV_REGEX_E102: ラムダ置換の戻り値型が `String` ではありません（現在の型: `{}`）。`toString()` で文字列化するか `String.valueOf(...)` を利用してください。",
+        actual
+    )
+}

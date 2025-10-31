@@ -6,7 +6,7 @@
 //! 単一化ソルバが決定的で借用しやすい API を通じて推論状態へアクセスできる。
 
 use crate::inference::conversions::ConversionHelperCatalog;
-use crate::inference::regex::RegexMatchTyping;
+use crate::inference::regex::{RegexCommandTyping, RegexMatchTyping};
 use crate::inference::types::{TypeId, TypeKind};
 use crate::inference::utils::TypeIdGenerator;
 use std::collections::{HashMap, HashSet};
@@ -51,6 +51,7 @@ pub struct TypeEnvironment {
     instantiation_origins: HashMap<TypeId, TypeId>,
     conversion_catalog: Option<Arc<ConversionHelperCatalog>>,
     regex_typings: Vec<RegexMatchTyping>,
+    regex_command_typings: Vec<RegexCommandTyping>,
 }
 
 impl TypeEnvironment {
@@ -62,6 +63,7 @@ impl TypeEnvironment {
             instantiation_origins: HashMap::new(),
             conversion_catalog: None,
             regex_typings: Vec::new(),
+            regex_command_typings: Vec::new(),
         }
     }
 
@@ -173,6 +175,16 @@ impl TypeEnvironment {
     /// 収集済みの正規表現マッチング情報を返す。
     pub fn regex_typings(&self) -> &[RegexMatchTyping] {
         &self.regex_typings
+    }
+
+    /// 正規表現コマンド式の型解析結果を追加する。
+    pub fn push_regex_command_typing(&mut self, typing: RegexCommandTyping) {
+        self.regex_command_typings.push(typing);
+    }
+
+    /// 収集済みの正規表現コマンド情報を返す。
+    pub fn regex_command_typings(&self) -> &[RegexCommandTyping] {
+        &self.regex_command_typings
     }
 
     /// 環境全体で自由な型変数を収集する。

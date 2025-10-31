@@ -7,7 +7,7 @@ use crate::pattern::{
 use jv_ast::expression::{Parameter, StringPart};
 use jv_ast::statement::Property;
 use jv_ast::types::TypeAnnotation;
-use jv_ast::{Expression, Program, Statement};
+use jv_ast::{Expression, Program, RegexLambdaReplacement, RegexReplacement, Statement};
 use jv_inference::types::TypeVariant as FactsTypeVariant;
 use std::collections::HashMap;
 
@@ -208,6 +208,13 @@ impl PatternFactsBridge {
                 }
                 outcome
             }
+            Expression::RegexCommand(command) => {
+                let mut outcome = self.visit_expression(&command.subject, service, context);
+                if let Some(replacement) = &command.replacement {
+                    outcome.merge(self.visit_regex_replacement(replacement, service, context));
+                }
+                outcome
+            }
             Expression::Lambda {
                 parameters, body, ..
             } => {
@@ -320,6 +327,37 @@ impl PatternFactsBridge {
             | Expression::This(_)
             | Expression::Super(_) => BridgeOutcome::default(),
         }
+    }
+
+    fn visit_regex_replacement(
+        &mut self,
+        replacement: &RegexReplacement,
+        service: &mut PatternMatchService,
+        context: &mut NullSafetyContext,
+    ) -> BridgeOutcome {
+        match replacement {
+            RegexReplacement::Literal(_) => BridgeOutcome::default(),
+            RegexReplacement::Expression(expr) => self.visit_expression(expr, service, context),
+            RegexReplacement::Lambda(lambda) => {
+                self.visit_regex_lambda(lambda, service, context)
+            }
+        }
+    }
+
+    fn visit_regex_lambda(
+        &mut self,
+        lambda: &RegexLambdaReplacement,
+        service: &mut PatternMatchService,
+        context: &mut NullSafetyContext,
+    ) -> BridgeOutcome {
+        let mut outcome = BridgeOutcome::default();
+        for param in &lambda.params {
+            if let Some(default) = &param.default_value {
+                outcome.merge(self.visit_expression(default, service, context));
+            }
+        }
+        outcome.merge(self.visit_expression(&lambda.body, service, context));
+        outcome
     }
 
     fn build_parameter_scope(

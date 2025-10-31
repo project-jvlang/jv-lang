@@ -20,7 +20,7 @@ pub use regex::RegexAnalysis;
 
 use crate::imports::ResolvedImport;
 use binding::{BindingResolution, BindingUsageSummary, LateInitManifest, resolve_bindings};
-use inference::RegexMatchTyping;
+use inference::{RegexCommandTyping, RegexMatchTyping};
 use inference::conversions::{AppliedConversion, ConversionKind, HelperSpec, NullableGuard};
 use jv_ast::{Program, Span};
 use jv_build::metadata::SymbolIndex;
@@ -66,6 +66,7 @@ pub struct InferenceSnapshot {
     facts: TypeFactsSnapshot,
     pattern_facts: HashMap<(u64, PatternTarget), PatternMatchFacts>,
     regex_typings: Vec<RegexMatchTyping>,
+    regex_command_typings: Vec<RegexCommandTyping>,
     regex_analyses: Vec<RegexAnalysis>,
     late_init_manifest: LateInitManifest,
     context_adaptations: Vec<ContextAdaptation>,
@@ -83,6 +84,7 @@ impl InferenceSnapshot {
         let function_schemes = engine.function_schemes().clone();
         let result_type = engine.result_type().cloned();
         let regex_typings = environment.regex_typings().to_vec();
+        let regex_command_typings = environment.regex_command_typings().to_vec();
 
         let facts = build_type_facts(
             &environment,
@@ -99,6 +101,7 @@ impl InferenceSnapshot {
             facts,
             pattern_facts,
             regex_typings,
+            regex_command_typings,
             regex_analyses,
             late_init_manifest,
             context_adaptations: engine.context_adaptations().to_vec(),
@@ -123,6 +126,10 @@ impl InferenceSnapshot {
 
     pub fn regex_typings(&self) -> &[RegexMatchTyping] {
         &self.regex_typings
+    }
+
+    pub fn regex_command_typings(&self) -> &[RegexCommandTyping] {
+        &self.regex_command_typings
     }
 
     pub fn binding_scheme(&self, name: &str) -> Option<&TypeScheme> {

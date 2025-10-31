@@ -6,8 +6,8 @@ use std::sync::{Arc, OnceLock};
 
 use anyhow::{Result, anyhow};
 use jv_ast::{
-    Argument, CallArgumentMetadata, Expression, JsonLiteral, JsonValue, Program, Statement,
-    StringPart, Visibility,
+    Argument, CallArgumentMetadata, Expression, JsonLiteral, JsonValue, Program, RegexCommand,
+    RegexLambdaReplacement, RegexReplacement, Statement, StringPart, Visibility,
     types::{Kind, Pattern},
 };
 use jv_build::{JavaTarget, metadata::SymbolIndex};
@@ -312,6 +312,7 @@ fn rewrite_expression(expression: &mut Expression) {
             }
         }
         Expression::MultilineString(_) => {}
+        Expression::RegexCommand(command) => rewrite_regex_command(command),
         Expression::JsonLiteral(JsonLiteral { value, .. }) => {
             rewrite_json_value(value);
         }
@@ -387,6 +388,30 @@ fn rewrite_expression(expression: &mut Expression) {
             }
         }
     }
+}
+
+fn rewrite_regex_command(command: &mut RegexCommand) {
+    rewrite_expression(command.subject.as_mut());
+    if let Some(replacement) = command.replacement.as_mut() {
+        rewrite_regex_replacement(replacement);
+    }
+}
+
+fn rewrite_regex_replacement(replacement: &mut RegexReplacement) {
+    match replacement {
+        RegexReplacement::Literal(_) => {}
+        RegexReplacement::Expression(expr) => rewrite_expression(expr),
+        RegexReplacement::Lambda(lambda) => rewrite_regex_lambda(lambda),
+    }
+}
+
+fn rewrite_regex_lambda(lambda: &mut RegexLambdaReplacement) {
+    for param in &mut lambda.params {
+        if let Some(default) = &mut param.default_value {
+            rewrite_expression(default);
+        }
+    }
+    rewrite_expression(lambda.body.as_mut());
 }
 
 fn rewrite_argument(argument: &mut Argument) {
@@ -694,6 +719,7 @@ impl<'a, 'b> ProgramUsageDetector<'a, 'b> {
                     }
                 }
             }
+            Expression::RegexCommand(command) => self.visit_regex_command(command),
             Expression::When {
                 expr,
                 arms,
@@ -771,6 +797,30 @@ impl<'a, 'b> ProgramUsageDetector<'a, 'b> {
             | Expression::This(_)
             | Expression::Super(_) => {}
         }
+    }
+
+    fn visit_regex_command(&mut self, command: &RegexCommand) {
+        self.visit_expression(&command.subject);
+        if let Some(replacement) = &command.replacement {
+            self.visit_regex_replacement(replacement);
+        }
+    }
+
+    fn visit_regex_replacement(&mut self, replacement: &RegexReplacement) {
+        match replacement {
+            RegexReplacement::Literal(_) => {}
+            RegexReplacement::Expression(expr) => self.visit_expression(expr),
+            RegexReplacement::Lambda(lambda) => self.visit_regex_lambda(lambda),
+        }
+    }
+
+    fn visit_regex_lambda(&mut self, lambda: &RegexLambdaReplacement) {
+        for param in &lambda.params {
+            if let Some(default) = &param.default_value {
+                self.visit_expression(default);
+            }
+        }
+        self.visit_expression(&lambda.body);
     }
 }
 

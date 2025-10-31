@@ -3,7 +3,8 @@
 //! 型推論フェーズで収集したガード戦略や警告を保持し、後続の null 安全解析や
 //! IR ローワリングで再利用できるようにする。
 
-use jv_ast::{RegexGuardStrategy, Span};
+use crate::inference::types::TypeKind;
+use jv_ast::{RegexCommandMode, RegexGuardStrategy, Span};
 
 /// `is /pattern/` 判定に関する型解析結果。
 #[derive(Debug, Clone, PartialEq)]
@@ -40,6 +41,68 @@ impl RegexMatchTyping {
 pub struct RegexMatchWarning {
     pub code: String,
     pub message: String,
+}
+
+/// 正規表現コマンド式に関する型解析結果。
+#[derive(Debug, Clone, PartialEq)]
+pub struct RegexCommandTyping {
+    /// 式全体を示すスパン。
+    pub span: Span,
+    /// 推論済みモード。
+    pub mode: RegexCommandMode,
+    /// 推論された主題の型。
+    pub subject_type: TypeKind,
+    /// 戻り値型。
+    pub return_type: TypeKind,
+    /// Optional 主題向けのガード戦略。
+    pub guard_strategy: RegexGuardStrategy,
+    /// Stream をリスト化すべきかどうかのヒント。
+    pub requires_stream_materialization: bool,
+    /// 付随する診断一覧。
+    pub diagnostics: Vec<RegexCommandIssue>,
+}
+
+impl RegexCommandTyping {
+    /// 空の診断リストで `RegexCommandTyping` を構築する。
+    pub fn new(
+        span: Span,
+        mode: RegexCommandMode,
+        subject_type: TypeKind,
+        return_type: TypeKind,
+        guard_strategy: RegexGuardStrategy,
+    ) -> Self {
+        Self {
+            span,
+            mode,
+            subject_type,
+            return_type,
+            guard_strategy,
+            requires_stream_materialization: false,
+            diagnostics: Vec::new(),
+        }
+    }
+
+    /// 診断を追加する。
+    pub fn push_diagnostic(&mut self, diagnostic: RegexCommandIssue) {
+        self.diagnostics.push(diagnostic);
+    }
+}
+
+/// `RegexCommand` に付随する診断情報。
+#[derive(Debug, Clone, PartialEq)]
+pub struct RegexCommandIssue {
+    pub code: String,
+    pub message: String,
+}
+
+impl RegexCommandIssue {
+    /// コードとメッセージから診断を生成する。
+    pub fn new(code: impl Into<String>, message: impl Into<String>) -> Self {
+        Self {
+            code: code.into(),
+            message: message.into(),
+        }
+    }
 }
 
 impl RegexMatchWarning {

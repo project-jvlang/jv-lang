@@ -7,8 +7,8 @@
 use crate::CheckError;
 use jv_ast::types::Span;
 use jv_ast::{
-    BinaryOp, Expression, Literal, Program, Statement, TypeAnnotation, UnaryOp,
-    expression::Argument,
+    BinaryOp, Expression, Literal, Program, RegexLambdaReplacement, RegexReplacement, Statement,
+    TypeAnnotation, UnaryOp, expression::Argument,
 };
 use std::collections::HashMap;
 
@@ -300,6 +300,13 @@ impl NullabilityAnalyzer {
                 }
                 Nullability::NonNull
             }
+            Expression::RegexCommand(command) => {
+                self.evaluate_expression(&command.subject);
+                if let Some(replacement) = &command.replacement {
+                    self.evaluate_regex_replacement(replacement);
+                }
+                Nullability::NonNull
+            }
             Expression::When {
                 expr: scrutinee,
                 arms,
@@ -391,6 +398,25 @@ impl NullabilityAnalyzer {
             Expression::JsonLiteral(_) => Nullability::NonNull,
             Expression::This(_) | Expression::Super(_) => Nullability::NonNull,
         }
+    }
+
+    fn evaluate_regex_replacement(&mut self, replacement: &RegexReplacement) {
+        match replacement {
+            RegexReplacement::Literal(_) => {}
+            RegexReplacement::Expression(expr) => {
+                self.evaluate_expression(expr);
+            }
+            RegexReplacement::Lambda(lambda) => self.evaluate_regex_lambda(lambda),
+        }
+    }
+
+    fn evaluate_regex_lambda(&mut self, lambda: &RegexLambdaReplacement) {
+        for param in &lambda.params {
+            if let Some(default) = &param.default_value {
+                self.evaluate_expression(default);
+            }
+        }
+        self.evaluate_expression(&lambda.body);
     }
 
     fn evaluate_binary(

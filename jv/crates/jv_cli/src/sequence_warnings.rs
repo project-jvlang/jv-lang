@@ -1,6 +1,6 @@
 use jv_ast::{
-    Argument, Expression, JsonLiteral, JsonValue, Parameter, Pattern, Program, SequenceDelimiter,
-    Span, Statement,
+    Argument, Expression, JsonLiteral, JsonValue, Parameter, Pattern, Program,
+    RegexLambdaReplacement, RegexReplacement, SequenceDelimiter, Span, Statement,
 };
 
 pub fn collect_sequence_warnings(program: &Program) -> Vec<String> {
@@ -207,6 +207,12 @@ impl SequenceWarningCollector {
                     }
                 }
             }
+            Expression::RegexCommand(command) => {
+                self.visit_expression(&command.subject);
+                if let Some(replacement) = &command.replacement {
+                    self.visit_regex_replacement(replacement);
+                }
+            }
             Expression::MultilineString(_) => {}
             Expression::JsonLiteral(literal) => self.visit_json_literal(literal),
             Expression::When {
@@ -284,6 +290,23 @@ impl SequenceWarningCollector {
                 }
             }
         }
+    }
+
+    fn visit_regex_replacement(&mut self, replacement: &RegexReplacement) {
+        match replacement {
+            RegexReplacement::Literal(_) => {}
+            RegexReplacement::Expression(expr) => self.visit_expression(expr),
+            RegexReplacement::Lambda(lambda) => self.visit_regex_lambda(lambda),
+        }
+    }
+
+    fn visit_regex_lambda(&mut self, lambda: &RegexLambdaReplacement) {
+        for param in &lambda.params {
+            if let Some(default) = &param.default_value {
+                self.visit_expression(default);
+            }
+        }
+        self.visit_expression(&lambda.body);
     }
 
     fn visit_argument(&mut self, argument: &Argument) {

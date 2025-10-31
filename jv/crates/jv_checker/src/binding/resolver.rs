@@ -4,7 +4,8 @@ use crate::CheckError;
 use jv_ast::Span;
 use jv_ast::{
     Argument, ConcurrencyConstruct, Expression, ExtensionFunction, IsTestKind, Modifiers, Program,
-    ResourceManagement, Statement, TryCatchClause, ValBindingOrigin,
+    RegexCommand, RegexLambdaReplacement, RegexReplacement, ResourceManagement, Statement,
+    TryCatchClause, ValBindingOrigin,
 };
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -601,6 +602,9 @@ impl BindingResolver {
                 delimiter,
                 span,
             },
+            Expression::RegexCommand(command) => Expression::RegexCommand(Box::new(
+                self.resolve_regex_command(*command),
+            )),
             Expression::Lambda {
                 parameters,
                 body,
@@ -653,6 +657,52 @@ impl BindingResolver {
             | Expression::This(_)
             | Expression::Super(_) => expression,
         }
+    }
+
+    fn resolve_regex_command(&mut self, mut command: RegexCommand) -> RegexCommand {
+        command.subject = Box::new(self.resolve_expression(*command.subject));
+        if let Some(replacement) = command.replacement.take() {
+            command.replacement = Some(self.resolve_regex_replacement(replacement));
+        }
+        command
+    }
+
+    fn resolve_regex_replacement(&mut self, replacement: RegexReplacement) -> RegexReplacement {
+        match replacement {
+            RegexReplacement::Literal(literal) => RegexReplacement::Literal(literal),
+            RegexReplacement::Expression(expr) => {
+                RegexReplacement::Expression(self.resolve_expression(expr))
+            }
+            RegexReplacement::Lambda(lambda) => {
+                self.resolve_regex_lambda(lambda)
+            }
+        }
+    }
+
+    fn resolve_regex_lambda(&mut self, mut lambda: RegexLambdaReplacement) -> RegexReplacement {
+        let mut parameters = Vec::with_capacity(lambda.params.len());
+        for mut param in lambda.params.into_iter() {
+            if let Some(default) = param.default_value.take() {
+                param.default_value = Some(self.resolve_expression(default));
+            }
+            parameters.push(param);
+        }
+
+        self.enter_scope();
+        for param in &parameters {
+            self.declare_immutable(
+                param.name.clone(),
+                ValBindingOrigin::ExplicitKeyword,
+                param.span.clone(),
+                false,
+            );
+        }
+        let body = Box::new(self.resolve_expression(*lambda.body));
+        self.exit_scope();
+
+        lambda.params = parameters;
+        lambda.body = body;
+        RegexReplacement::Lambda(lambda)
     }
 
     fn resolve_argument(&mut self, argument: Argument) -> Argument {

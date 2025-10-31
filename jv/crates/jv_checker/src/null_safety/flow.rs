@@ -1,8 +1,8 @@
 use std::collections::{HashMap, VecDeque};
 
 use jv_ast::{
-    BinaryMetadata, BinaryOp, Expression, IsTestKind, Program, Statement, TryCatchClause, WhenArm,
-    expression::Argument,
+    BinaryMetadata, BinaryOp, Expression, IsTestKind, Program, RegexLambdaReplacement,
+    RegexReplacement, Statement, TryCatchClause, WhenArm, expression::Argument,
     types::{Literal, Modifiers, Span},
 };
 
@@ -964,6 +964,15 @@ fn classify_expression(
             }
             info
         }
+        Expression::RegexCommand(command) => {
+            let subject_info = classify_expression(builder, &command.subject);
+            let replacement_info = command
+                .replacement
+                .as_ref()
+                .map(|replacement| classify_regex_replacement(builder, replacement))
+                .unwrap_or_else(|| ExpressionInfo::new(NullabilityKind::NonNull));
+            subject_info.join(&replacement_info)
+        }
         Expression::Lambda { .. }
         | Expression::Array { .. }
         | Expression::StringInterpolation { .. }
@@ -1004,6 +1013,29 @@ fn classify_statement_expression(
             .unwrap_or_else(|| ExpressionInfo::new(NullabilityKind::Unknown)),
         _ => ExpressionInfo::new(NullabilityKind::Unknown),
     }
+}
+
+fn classify_regex_replacement(
+    builder: &mut FlowGraphBuilder<'_, '_, '_>,
+    replacement: &RegexReplacement,
+) -> ExpressionInfo {
+    match replacement {
+        RegexReplacement::Literal(_) => ExpressionInfo::new(NullabilityKind::NonNull),
+        RegexReplacement::Expression(expr) => classify_expression(builder, expr),
+        RegexReplacement::Lambda(lambda) => classify_regex_lambda(builder, lambda),
+    }
+}
+
+fn classify_regex_lambda(
+    builder: &mut FlowGraphBuilder<'_, '_, '_>,
+    lambda: &RegexLambdaReplacement,
+) -> ExpressionInfo {
+    for param in &lambda.params {
+        if let Some(default) = &param.default_value {
+            let _ = classify_expression(builder, default);
+        }
+    }
+    classify_expression(builder, &lambda.body)
 }
 
 fn apply_edge_kind(kind: &FlowEdgeKind, state: &mut FlowStateSnapshot) {

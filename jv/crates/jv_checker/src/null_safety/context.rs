@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use super::annotations::{JavaNullabilityHint, lookup_nullability_hint};
 use crate::binding::LateInitManifest;
-use crate::inference::regex::RegexMatchTyping;
+use crate::inference::regex::{RegexCommandTyping, RegexMatchTyping};
 use crate::inference::{TypeEnvironment, TypeKind as CheckerTypeKind, TypeScheme};
 use crate::pattern::{PatternMatchFacts, PatternTarget};
 use crate::{InferenceSnapshot, TypeInferenceService};
@@ -333,6 +333,7 @@ pub struct NullSafetyContext<'facts> {
     java_metadata: HashMap<String, JavaSymbolMetadata>,
     pattern_facts: HashMap<u64, PatternMatchFacts>,
     regex_typings: Vec<RegexMatchTyping>,
+    regex_command_typings: Vec<RegexCommandTyping>,
 }
 
 impl<'facts> NullSafetyContext<'facts> {
@@ -385,6 +386,9 @@ impl<'facts> NullSafetyContext<'facts> {
         let regex_typings = environment
             .map(|env| env.regex_typings().to_vec())
             .unwrap_or_default();
+        let regex_command_typings = environment
+            .map(|env| env.regex_command_typings().to_vec())
+            .unwrap_or_default();
 
         let late_init = LateInitRegistry::new(&lattice, manifest);
         let late_init_contracts = LateInitContracts::new(&lattice, manifest);
@@ -399,6 +403,7 @@ impl<'facts> NullSafetyContext<'facts> {
             java_metadata,
             pattern_facts: HashMap::new(),
             regex_typings,
+            regex_command_typings,
         }
     }
 
@@ -413,6 +418,7 @@ impl<'facts> NullSafetyContext<'facts> {
             java_metadata: HashMap::new(),
             pattern_facts: HashMap::new(),
             regex_typings: Vec::new(),
+            regex_command_typings: Vec::new(),
         }
     }
 
@@ -485,6 +491,16 @@ impl<'facts> NullSafetyContext<'facts> {
 
     pub fn regex_typing_for_span(&self, span: &Span) -> Option<&RegexMatchTyping> {
         self.regex_typings
+            .iter()
+            .find(|typing| typing.span == *span)
+    }
+
+    pub fn regex_command_typings(&self) -> &[RegexCommandTyping] {
+        &self.regex_command_typings
+    }
+
+    pub fn regex_command_typing_for_span(&self, span: &Span) -> Option<&RegexCommandTyping> {
+        self.regex_command_typings
             .iter()
             .find(|typing| typing.span == *span)
     }

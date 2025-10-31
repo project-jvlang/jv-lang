@@ -33,7 +33,7 @@ pub use engine::{InferenceEngine, InferenceError, InferenceResult};
 pub use environment::{TypeEnvironment, TypeScheme};
 pub use iteration::LoopClassification;
 pub use nullability::NullabilityAnalyzer;
-pub use regex::{RegexMatchTyping, RegexMatchWarning};
+pub use regex::{RegexCommandIssue, RegexCommandTyping, RegexMatchTyping, RegexMatchWarning};
 pub use type_factory::TypeFactory;
 pub use types::{
     PrimitiveType, TypeBinding, TypeError, TypeId, TypeKind, TypeVariable, TypeVariableKind,

@@ -7,8 +7,10 @@ use crate::regex::RegexValidator;
 use fastrand::Rng;
 use jv_ast::{
     Annotation, AnnotationName, BinaryMetadata, BinaryOp, Expression, IsTestKind, IsTestMetadata,
-    Literal, Modifiers, Parameter, ParameterModifiers, Pattern, Program, RegexGuardStrategy,
-    RegexLiteral, Span, Statement, TypeAnnotation, ValBindingOrigin, WhenArm,
+    Literal, Modifiers, Parameter, ParameterModifiers, Pattern, Program, RegexCommand,
+    RegexCommandMode, RegexCommandModeOrigin, RegexFlag, RegexGuardStrategy, RegexLambdaReplacement,
+    RegexLiteral, RegexLiteralReplacement, RegexReplacement, Span, Statement, TypeAnnotation,
+    ValBindingOrigin, WhenArm,
 };
 use jv_inference::TypeFacts;
 use jv_inference::types::{NullabilityFlag, TypeVariant as FactsTypeVariant};
@@ -82,6 +84,50 @@ fn program_with_optional_regex(span: &Span) -> Program {
         package: None,
         imports: Vec::new(),
         statements: vec![text_decl, matched_decl],
+        span: span.clone(),
+    }
+}
+
+fn make_regex_command(
+    span: &Span,
+    mode: RegexCommandMode,
+    mode_origin: RegexCommandModeOrigin,
+    replacement: Option<RegexReplacement>,
+    raw_flags: Option<&str>,
+    flags: Vec<RegexFlag>,
+) -> RegexCommand {
+    RegexCommand {
+        mode,
+        mode_origin,
+        subject: Box::new(Expression::Literal(
+            Literal::String("input".into()),
+            span.clone(),
+        )),
+        pattern: RegexLiteral {
+            pattern: "\\w+".into(),
+            raw: "/\\w+/".into(),
+            span: span.clone(),
+        },
+        replacement,
+        flags,
+        raw_flags: raw_flags.map(|value| value.to_string()),
+        span: span.clone(),
+    }
+}
+
+fn program_with_regex_command(command: RegexCommand, span: &Span) -> Program {
+    Program {
+        package: None,
+        imports: Vec::new(),
+        statements: vec![Statement::ValDeclaration {
+            name: "result".into(),
+            binding: None,
+            type_annotation: None,
+            initializer: Expression::RegexCommand(Box::new(command)),
+            modifiers: default_modifiers(),
+            origin: ValBindingOrigin::ExplicitKeyword,
+            span: span.clone(),
+        }],
         span: span.clone(),
     }
 }
@@ -1446,6 +1492,123 @@ fn regex_literal_infers_pattern_type() {
     assert_eq!(analyses.len(), 1);
     assert!(analyses[0].diagnostics.is_empty());
     assert_eq!(analyses[0].pattern, "\\d+");
+}
+
+#[test]
+fn regex_command_replace_all_infers_string() {
+    let span = dummy_span();
+    let replacement = RegexReplacement::Literal(RegexLiteralReplacement {
+        raw: "x".into(),
+        normalized: "x".into(),
+        template_segments: Vec::new(),
+        span: span.clone(),
+    });
+    let command = make_regex_command(
+        &span,
+        RegexCommandMode::All,
+        RegexCommandModeOrigin::ExplicitToken,
+        Some(replacement),
+        None,
+        Vec::new(),
+    );
+    let program = program_with_regex_command(command, &span);
+
+    let mut checker = TypeChecker::new();
+    let result = checker.check_program(&program);
+    assert!(
+        result.is_ok(),
+        "正規表現コマンドの replaceAll が型推論に失敗しました: {result:?}"
+    );
+
+    let snapshot = checker
+        .inference_snapshot()
+        .expect("replaceAll の推論結果が存在する必要があります");
+    let scheme = snapshot
+        .binding_scheme("result")
+        .expect("result の型スキームを取得できる必要があります");
+    assert_eq!(
+        scheme.ty,
+        TypeKind::reference("java.lang.String"),
+        "replaceAll は String を返す必要があります"
+    );
+    let typings = snapshot.regex_command_typings();
+    assert_eq!(typings.len(), 1, "RegexCommandTyping が記録される想定です");
+    let typing = &typings[0];
+    assert_eq!(
+        typing.return_type,
+        TypeKind::reference("java.lang.String"),
+        "戻り値型が String として記録される必要があります"
+    );
+    assert!(
+        typing.diagnostics.is_empty(),
+        "正常ケースでは診断が発生しない想定です: {:?}",
+        typing.diagnostics
+    );
+}
+
+#[test]
+fn regex_command_unknown_flag_reports_error() {
+    let span = dummy_span();
+    let command = make_regex_command(
+        &span,
+        RegexCommandMode::Match,
+        RegexCommandModeOrigin::ExplicitToken,
+        None,
+        Some("z"),
+        Vec::new(),
+    );
+    let program = program_with_regex_command(command, &span);
+
+    let mut checker = TypeChecker::new();
+    let result = checker.check_program(&program);
+    assert!(result.is_err(), "未知フラグはエラーになる想定です");
+    let errors = result.err().unwrap();
+    assert!(errors.iter().any(|error| matches!(
+        error,
+        CheckError::TypeError(message) if message.contains("JV_REGEX_E101")
+    )), "JV_REGEX_E101 エラーが報告される必要があります: {errors:?}");
+    assert!(
+        checker.inference_snapshot().is_none(),
+        "エラー時は推論スナップショットが生成されない想定です"
+    );
+}
+
+#[test]
+fn regex_command_lambda_must_return_string() {
+    let span = dummy_span();
+    let lambda = RegexLambdaReplacement {
+        params: vec![Parameter {
+            name: "match".into(),
+            type_annotation: None,
+            default_value: None,
+            modifiers: ParameterModifiers::default(),
+            span: span.clone(),
+        }],
+        body: Box::new(Expression::Literal(
+            Literal::Number("1".into()),
+            span.clone(),
+        )),
+        span: span.clone(),
+    };
+    let replacement = RegexReplacement::Lambda(lambda);
+    let command = make_regex_command(
+        &span,
+        RegexCommandMode::All,
+        RegexCommandModeOrigin::ExplicitToken,
+        Some(replacement),
+        None,
+        Vec::new(),
+    );
+    let program = program_with_regex_command(command, &span);
+
+    let mut checker = TypeChecker::new();
+    let result = checker.check_program(&program);
+    assert!(result.is_err(), "String 以外を返すラムダはエラーになる想定です");
+    let errors = result.err().unwrap();
+    assert!(errors.iter().any(|error| matches!(
+        error,
+        CheckError::TypeError(message) if message.contains("JV_REGEX_E102")
+    )), "JV_REGEX_E102 エラーが必要です: {errors:?}");
 }
 
 #[test]

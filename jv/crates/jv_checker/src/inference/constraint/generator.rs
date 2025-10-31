@@ -14,7 +14,9 @@ use crate::inference::imports::ImportRegistry;
 use crate::inference::iteration::{
     LoopClassification, classify_loop, expression_can_yield_iterable,
 };
-use crate::inference::regex::{RegexMatchTyping, RegexMatchWarning};
+use crate::inference::regex::{
+    RegexCommandIssue, RegexCommandTyping, RegexMatchTyping, RegexMatchWarning,
+};
 use crate::inference::type_factory::TypeFactory;
 use crate::inference::types::{PrimitiveType, TypeError, TypeId, TypeKind};
 use crate::pattern::{
@@ -23,10 +25,11 @@ use crate::pattern::{
 };
 use jv_ast::{
     Argument, BinaryMetadata, BinaryOp, Expression, ForInStatement, IsTestKind, IsTestMetadata,
-    Literal, Parameter, Program, RegexGuardStrategy, Span, Statement, TypeAnnotation, UnaryOp,
+    Literal, Parameter, Program, RegexCommand, RegexCommandMode, RegexCommandModeOrigin,
+    RegexFlag, RegexGuardStrategy, RegexReplacement, Span, Statement, TypeAnnotation, UnaryOp,
 };
 use jv_inference::types::NullabilityFlag;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 /// AST から制約を抽出するジェネレータ。
 #[derive(Debug)]
@@ -314,6 +317,7 @@ impl<'env, 'ext, 'imp> ConstraintGenerator<'env, 'ext, 'imp> {
     fn infer_expression(&mut self, expr: &Expression) -> TypeKind {
         match expr {
             Expression::RegexLiteral(_) => TypeKind::reference("java.util.regex.Pattern"),
+            Expression::RegexCommand(command) => self.infer_regex_command(command),
             Expression::Literal(literal, _) => self.type_from_literal(literal),
             Expression::Identifier(name, _) => {
                 if let Some(scheme) = self.env.lookup(name).cloned() {
@@ -848,6 +852,284 @@ impl<'env, 'ext, 'imp> ConstraintGenerator<'env, 'ext, 'imp> {
         }
 
         self.env.push_regex_typing(typing);
+    }
+
+    fn infer_regex_command(&mut self, command: &RegexCommand) -> TypeKind {
+        let subject_ty = self.infer_expression(&command.subject);
+        let subject_span = expression_span(&command.subject);
+        let mut guard_strategy = RegexGuardStrategy::None;
+        let mut diagnostics: Vec<RegexCommandIssue> = Vec::new();
+
+        let char_sequence_ty = TypeKind::reference("java.lang.CharSequence");
+        let optional_char_sequence_ty = TypeKind::optional(char_sequence_ty.clone());
+        let subject_message = self.regex_subject_error_message(&subject_ty);
+
+        let subject_ok = if matches!(subject_ty, TypeKind::Optional(_)) {
+            guard_strategy = RegexGuardStrategy::CaptureAndGuard { temp_name: None };
+            self.push_regex_constraint(
+                subject_ty.clone(),
+                optional_char_sequence_ty,
+                subject_span,
+                subject_message,
+                true,
+            )
+        } else {
+            self.push_regex_constraint(
+                subject_ty.clone(),
+                char_sequence_ty,
+                subject_span,
+                subject_message,
+                false,
+            )
+        };
+
+        if !subject_ok {
+            return TypeKind::Unknown;
+        }
+
+        let return_type = self.resolve_regex_command_return_type(command);
+
+        if let Some(replacement) = &command.replacement {
+            self.verify_regex_replacement(replacement, &mut diagnostics);
+        }
+
+        self.collect_flag_diagnostics(command, &mut diagnostics);
+
+        if self.detect_mode_flag_confusion(command) {
+            diagnostics.push(RegexCommandIssue::new(
+                "JV_REGEX_I001",
+                messages::regex_mode_flag_confusion_message(),
+            ));
+        }
+
+        if matches!(command.mode_origin, RegexCommandModeOrigin::DefaultMatch) {
+            diagnostics.push(RegexCommandIssue::new(
+                "JV_REGEX_I002",
+                messages::regex_ambiguous_mode_message(),
+            ));
+        }
+
+        let mut typing = RegexCommandTyping::new(
+            command.span.clone(),
+            command.mode,
+            subject_ty.clone(),
+            return_type.clone(),
+            guard_strategy,
+        );
+
+        typing.requires_stream_materialization =
+            matches!(command.mode, RegexCommandMode::Iterate) && command.replacement.is_none();
+
+        for diag in diagnostics {
+            typing.push_diagnostic(diag);
+        }
+
+        self.env.push_regex_command_typing(typing);
+        return_type
+    }
+
+    fn resolve_regex_command_return_type(&self, command: &RegexCommand) -> TypeKind {
+        match command.mode {
+            RegexCommandMode::All | RegexCommandMode::First => {
+                TypeKind::reference("java.lang.String")
+            }
+            RegexCommandMode::Match => TypeKind::boxed(PrimitiveType::Boolean),
+            RegexCommandMode::Split => TypeKind::reference("java.lang.String[]"),
+            RegexCommandMode::Iterate => {
+                if command.replacement.is_some() {
+                    TypeKind::reference("java.lang.String")
+                } else {
+                    TypeKind::reference("java.util.stream.Stream")
+                }
+            }
+        }
+    }
+
+    fn verify_regex_replacement(
+        &mut self,
+        replacement: &RegexReplacement,
+        diagnostics: &mut Vec<RegexCommandIssue>,
+    ) {
+        match replacement {
+            RegexReplacement::Literal(_) => {}
+            RegexReplacement::Expression(expr) => {
+                let expr_ty = self.infer_expression(expr);
+                let span = expression_span(expr);
+                self.ensure_string_output(expr_ty, span, diagnostics, None);
+            }
+            RegexReplacement::Lambda(lambda) => {
+                self.env.enter_scope();
+                for param in &lambda.params {
+                    let ty = param
+                        .type_annotation
+                        .as_ref()
+                        .map(|ann| self.type_from_annotation(ann))
+                        .unwrap_or_else(|| {
+                            TypeKind::reference("java.util.regex.MatchResult")
+                        });
+
+                    self.env
+                        .define_scheme(param.name.clone(), TypeScheme::monotype(ty.clone()));
+
+                    if let Some(default_expr) = &param.default_value {
+                        let default_ty = self.infer_expression(default_expr);
+                        self.push_constraint(
+                            ConstraintKind::Equal(ty.clone(), default_ty),
+                            Some("ラムダ引数の既定値は宣言された型と一致する必要があります"),
+                        );
+                    }
+                }
+
+                let body_ty = self.infer_expression(&lambda.body);
+                let body_span = expression_span(&lambda.body);
+                self.env.leave_scope();
+
+                self.ensure_string_output(body_ty, body_span, diagnostics, Some("JV_REGEX_E102"));
+            }
+        }
+    }
+
+    fn ensure_string_output(
+        &mut self,
+        actual: TypeKind,
+        span: Option<&Span>,
+        diagnostics: &mut Vec<RegexCommandIssue>,
+        diag_code: Option<&'static str>,
+    ) {
+        let expected = TypeKind::reference("java.lang.String");
+        let note = "正規表現の置換結果は String 型である必要があります";
+        let actual_desc = actual.describe();
+
+        match CompatibilityChecker::analyze(self.env, &actual, &expected) {
+            ConversionOutcome::Identity => {
+                self.push_constraint_with_span(
+                    ConstraintKind::Equal(actual, expected),
+                    Some(note),
+                    span,
+                );
+            }
+            ConversionOutcome::Allowed(_) => {
+                if let Some(code) = diag_code {
+                    let message = self.regex_replacement_error_message(code, &actual_desc);
+                    diagnostics.push(RegexCommandIssue::new(code, message.clone()));
+                    self.report_type_error(TypeError::custom(message));
+                } else {
+                    self.push_constraint_with_span(
+                        ConstraintKind::Convertible {
+                            from: actual,
+                            to: expected,
+                        },
+                        Some(note),
+                        span,
+                    );
+                }
+            }
+            ConversionOutcome::Rejected(_) => {
+                if let Some(code) = diag_code {
+                    let message = self.regex_replacement_error_message(code, &actual_desc);
+                    diagnostics.push(RegexCommandIssue::new(code, message.clone()));
+                    self.report_type_error(TypeError::custom(message));
+                } else {
+                    let message = format!(
+                        "正規表現の置換結果に String へ変換できない型 `{}` が使用されています。",
+                        actual_desc
+                    );
+                    self.report_type_error(TypeError::custom(message));
+                }
+            }
+        }
+    }
+
+    fn regex_replacement_error_message(&self, code: &str, actual_desc: &str) -> String {
+        match code {
+            "JV_REGEX_E102" => messages::regex_lambda_return_mismatch_message(actual_desc),
+            _ => format!(
+                "{}: 正規表現の置換で想定外の型 `{}` が検出されました。",
+                code, actual_desc
+            ),
+        }
+    }
+
+    fn collect_flag_diagnostics(
+        &mut self,
+        command: &RegexCommand,
+        diagnostics: &mut Vec<RegexCommandIssue>,
+    ) {
+        if let Some(raw_flags) = &command.raw_flags {
+            let mut reported = HashSet::new();
+            for ch in raw_flags.chars() {
+                let normalized = ch.to_ascii_lowercase();
+                if !self.is_known_regex_flag(normalized) && reported.insert(normalized) {
+                    let message = messages::regex_unknown_flag_message(ch);
+                    diagnostics.push(RegexCommandIssue::new(
+                        "JV_REGEX_E101",
+                        message.clone(),
+                    ));
+                    self.report_type_error(TypeError::custom(message));
+                }
+            }
+        }
+
+        if let Some((primary, secondary)) = self.detect_literal_flag_conflict(&command.flags) {
+            let message = messages::regex_flag_conflict_message(primary, secondary);
+            diagnostics.push(RegexCommandIssue::new(
+                "JV_REGEX_E103",
+                message.clone(),
+            ));
+            self.report_type_error(TypeError::custom(message));
+        }
+    }
+
+    fn detect_mode_flag_confusion(&self, command: &RegexCommand) -> bool {
+        if !matches!(command.mode, RegexCommandMode::Match) {
+            return false;
+        }
+
+        if !matches!(command.mode_origin, RegexCommandModeOrigin::ShortMode) {
+            return false;
+        }
+
+        if command
+            .flags
+            .iter()
+            .any(|flag| matches!(flag, RegexFlag::Multiline))
+        {
+            return true;
+        }
+
+        command
+            .raw_flags
+            .as_ref()
+            .is_some_and(|raw| raw.chars().any(|ch| matches!(ch, 'm' | 'M')))
+    }
+
+    fn is_known_regex_flag(&self, ch: char) -> bool {
+        matches!(ch, 'i' | 'm' | 's' | 'u' | 'd' | 'x' | 'l' | 'c')
+    }
+
+    fn detect_literal_flag_conflict(&self, flags: &[RegexFlag]) -> Option<(char, char)> {
+        if !flags.iter().any(|flag| matches!(flag, RegexFlag::Literal)) {
+            return None;
+        }
+
+        let conflicting = flags
+            .iter()
+            .find(|flag| !matches!(flag, RegexFlag::Literal))?;
+
+        Some(('l', self.flag_to_char(conflicting)))
+    }
+
+    fn flag_to_char(&self, flag: &RegexFlag) -> char {
+        match flag {
+            RegexFlag::CaseInsensitive => 'i',
+            RegexFlag::Multiline => 'm',
+            RegexFlag::DotAll => 's',
+            RegexFlag::UnicodeCase => 'u',
+            RegexFlag::UnixLines => 'd',
+            RegexFlag::Comments => 'x',
+            RegexFlag::Literal => 'l',
+            RegexFlag::CanonEq => 'c',
+        }
     }
 
     fn push_regex_constraint(
