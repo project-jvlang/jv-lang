@@ -1,0 +1,24 @@
+// 簡潔な正規表現コマンドの統合サンプル
+fun main(): Unit {
+    val csv = "alice@example.com,bob@example.org,carol@example.net"
+
+    val replacedAll = a/csv/'@example\.(com|org|net)'/'@example.dev'/
+    val firstUpper = f/csv/'\w+'/$ { it.group().toUpperCase() }/
+    val onlyEmails = m/csv/'^([\w.]+@[\w.]+,?)+$'/
+    val parts = s/csv/'[,]\s*'/
+    val matches = i/csv/'([\w.]+)@([\w.]+)'/ as List
+
+    println("replaceAll結果: ${replacedAll}")
+    println("先頭置換: ${firstUpper}")
+    println("全体マッチ: ${onlyEmails}")
+    println("split結果:")
+    for (part in parts) {
+        println("  ${part}")
+    }
+    println("iterate結果:")
+    for (match in matches) {
+        val local = match.group(1)
+        val domain = match.group(2)
+        println("  ${local} -> ${domain}")
+    }
+}
