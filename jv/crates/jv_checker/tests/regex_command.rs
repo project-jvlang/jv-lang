@@ -201,3 +201,110 @@ val rebuilt = i/subject/\d+/"->"/
         "置換付き Iterate では materialization フラグが不要になる想定です"
     );
 }
+
+#[test]
+fn telemetry_records_single_regex_command_metrics() {
+    let source = r#"
+val subject = "value123"
+val replaced = a/subject/\d+/"X"/
+"#;
+
+    let program = parse_program(source);
+    let mut checker = TypeChecker::new();
+    checker
+        .check_program(&program)
+        .expect("RegexCommand を含むプログラムが型検査に成功すること");
+
+    let snapshot = checker
+        .inference_snapshot()
+        .expect("推論スナップショットが存在すること");
+    assert_eq!(
+        snapshot.regex_command_typings().len(),
+        1,
+        "RegexCommand が1件収集される想定です"
+    );
+
+    let telemetry = checker.telemetry();
+    let metrics = &telemetry.regex_command;
+
+    assert_eq!(metrics.total, 1, "RegexCommand の総数が1件になる想定です");
+    assert_eq!(
+        metrics.modes.get("all"),
+        Some(&1),
+        "replaceAll モードが1件記録される想定です"
+    );
+    assert_eq!(
+        metrics.return_types.get("java.lang.String"),
+        Some(&1),
+        "String 戻り値が1件記録される想定です"
+    );
+    assert_eq!(
+        metrics.guard_strategies.get("none"),
+        Some(&1),
+        "非オプショナル subject はガード無しで記録される想定です"
+    );
+    assert_eq!(
+        metrics.materialize_streams, 0,
+        "materialize_streams は replaceAll では 0 の想定です"
+    );
+    assert!(
+        metrics.diagnostics.is_empty(),
+        "正常ケースでは診断メトリクスが空である想定です: {:?}",
+        metrics.diagnostics
+    );
+}
+
+#[test]
+fn telemetry_records_iterate_optional_metrics() {
+    let source = r#"
+val subject: String? = "value123"
+val stream = i/subject/\d+/
+"#;
+
+    let program = parse_program(source);
+    let mut checker = TypeChecker::new();
+    checker
+        .check_program(&program)
+        .expect("Iterate モードの RegexCommand が型検査に成功すること");
+
+    let snapshot = checker
+        .inference_snapshot()
+        .expect("推論スナップショットが存在すること");
+    assert_eq!(
+        snapshot.regex_command_typings().len(),
+        1,
+        "Iterate モードの RegexCommand が1件収集される想定です"
+    );
+
+    let telemetry = checker.telemetry();
+    let metrics = &telemetry.regex_command;
+
+    assert_eq!(
+        metrics.total, 1,
+        "Iterate モードでも RegexCommand の総数は1件になる想定です"
+    );
+    assert_eq!(
+        metrics.modes.get("iterate"),
+        Some(&1),
+        "iterate モードが1件記録される想定です"
+    );
+    assert_eq!(
+        metrics.return_types.get("java.util.stream.Stream"),
+        Some(&1),
+        "Stream 戻り値が1件記録される想定です"
+    );
+    assert_eq!(
+        metrics.guard_strategies.get("capture_and_guard"),
+        Some(&1),
+        "Optional subject は capture_and_guard として記録される想定です"
+    );
+    assert_eq!(
+        metrics.materialize_streams, 1,
+        "materialize_streams は Iterate (置換無し) で 1 になる想定です"
+    );
+    assert!(
+        metrics.diagnostics.is_empty(),
+        "Iterate 正常ケースでは診断メトリクスが空である想定です: {:?}",
+        metrics.diagnostics
+    );
+}

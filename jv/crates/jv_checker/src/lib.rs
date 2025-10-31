@@ -22,7 +22,7 @@ use crate::imports::ResolvedImport;
 use binding::{BindingResolution, BindingUsageSummary, LateInitManifest, resolve_bindings};
 use inference::conversions::{AppliedConversion, ConversionKind, HelperSpec, NullableGuard};
 use inference::{RegexCommandTyping, RegexMatchTyping};
-use jv_ast::{Program, Span};
+use jv_ast::{Program, RegexCommandMode, RegexGuardStrategy, Span};
 use jv_build::metadata::SymbolIndex;
 use null_safety::{JavaLoweringHint, NullSafetyCoordinator};
 use pattern::{
@@ -30,7 +30,7 @@ use pattern::{
 };
 use regex::RegexValidator;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 use thiserror::Error;
 
@@ -291,6 +291,23 @@ impl TypeInferenceService for InferenceSnapshot {
     }
 }
 
+/// RegexCommand 専用テレメトリ。
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct RegexCommandTelemetry {
+    /// 記録された RegexCommand の合計数。
+    pub total: usize,
+    /// モード別の出現回数。
+    pub modes: BTreeMap<String, usize>,
+    /// 戻り値型別の出現回数。
+    pub return_types: BTreeMap<String, usize>,
+    /// ガード戦略別の出現回数。
+    pub guard_strategies: BTreeMap<String, usize>,
+    /// `Stream` を具現化する必要があるケースの数。
+    pub materialize_streams: usize,
+    /// 発生した診断コード別の回数。
+    pub diagnostics: BTreeMap<String, usize>,
+}
+
 /// Telemetry captured during the most recent inference run.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InferenceTelemetry {
@@ -324,6 +341,7 @@ pub struct InferenceTelemetry {
     pub conversion_events: Vec<AppliedConversion>,
     pub nullable_guards: Vec<NullableGuard>,
     pub catalog_hits: Vec<HelperSpec>,
+    pub regex_command: RegexCommandTelemetry,
 }
 
 impl Default for InferenceTelemetry {
@@ -359,6 +377,7 @@ impl Default for InferenceTelemetry {
             conversion_events: Vec::new(),
             nullable_guards: Vec::new(),
             catalog_hits: Vec::new(),
+            regex_command: RegexCommandTelemetry::default(),
         }
     }
 }
@@ -484,6 +503,7 @@ impl TypeChecker {
     pub fn check_program(&mut self, program: &Program) -> Result<(), Vec<CheckError>> {
         self.engine.set_parallel_config(self.parallel_config);
         self.null_safety_hints.clear();
+        self.clear_regex_command_telemetry();
 
         let binding_resolution = resolve_bindings(program);
         let BindingResolution {
@@ -569,6 +589,7 @@ impl TypeChecker {
                     self.update_type_facts_telemetry();
                     return Err(placement_errors);
                 }
+                self.refresh_regex_command_telemetry();
                 Ok(())
             }
             Err(error) => {
@@ -665,6 +686,60 @@ impl TypeChecker {
         let telemetry = self.engine.telemetry_mut();
         telemetry.pattern_cache_hits = metrics.hits;
         telemetry.pattern_cache_misses = metrics.misses;
+    }
+
+    fn refresh_regex_command_telemetry(&mut self) {
+        let typings: Vec<RegexCommandTyping> = if let Some(snapshot) = self.snapshot.as_ref() {
+            snapshot.regex_command_typings().to_vec()
+        } else {
+            self.engine
+                .environment()
+                .regex_command_typings()
+                .to_vec()
+        };
+
+        let mut metrics = RegexCommandTelemetry::default();
+
+        for typing in &typings {
+            metrics.total += 1;
+
+            let mode_key = match typing.mode {
+                RegexCommandMode::All => "all",
+                RegexCommandMode::First => "first",
+                RegexCommandMode::Match => "match",
+                RegexCommandMode::Split => "split",
+                RegexCommandMode::Iterate => "iterate",
+            }
+            .to_string();
+            *metrics.modes.entry(mode_key).or_insert(0) += 1;
+
+            let return_key = typing.return_type.describe();
+            *metrics.return_types.entry(return_key).or_insert(0) += 1;
+
+            let guard_key = match typing.guard_strategy {
+                RegexGuardStrategy::None => "none",
+                RegexGuardStrategy::CaptureAndGuard { .. } => "capture_and_guard",
+            }
+            .to_string();
+            *metrics.guard_strategies.entry(guard_key).or_insert(0) += 1;
+
+            if typing.requires_stream_materialization {
+                metrics.materialize_streams += 1;
+            }
+
+            for diagnostic in &typing.diagnostics {
+                *metrics
+                    .diagnostics
+                    .entry(diagnostic.code.clone())
+                    .or_insert(0) += 1;
+            }
+        }
+
+        self.engine.telemetry_mut().regex_command = metrics;
+    }
+
+    fn clear_regex_command_telemetry(&mut self) {
+        self.engine.telemetry_mut().regex_command = RegexCommandTelemetry::default();
     }
 
     fn update_type_facts_telemetry(&mut self) {

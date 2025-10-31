@@ -449,7 +449,9 @@ pub mod pipeline {
     };
     use jv_checker::inference::regex::RegexCommandTyping;
     use jv_checker::inference::{AppliedConversion, HelperSpec, NullableGuardReason};
-    use jv_checker::{InferenceSnapshot, InferenceTelemetry, TypeChecker, TypeKind};
+    use jv_checker::{
+        InferenceSnapshot, InferenceTelemetry, RegexCommandTelemetry, TypeChecker, TypeKind,
+    };
     use jv_codegen_java::{JavaCodeGenConfig, JavaCodeGenerator};
     use jv_fmt::JavaFormatter;
     use jv_inference::types::TypeVariant;
@@ -1207,6 +1209,7 @@ pub mod pipeline {
         print_conversion_events(telemetry);
         print_nullable_guards(telemetry);
         print_catalog_hits(telemetry);
+        print_regex_command_metrics(&telemetry.regex_command);
 
         if strategies.is_empty() {
             println!(
@@ -1266,6 +1269,48 @@ pub mod pipeline {
         }
     }
 
+    fn print_regex_command_metrics(metrics: &RegexCommandTelemetry) {
+        if metrics.total == 0 {
+            println!("  regex_command: (none recorded)");
+            return;
+        }
+
+        println!("  regex_command.total: {}", metrics.total);
+
+        if !metrics.modes.is_empty() {
+            println!("  regex_command.modes:");
+            for (mode, count) in &metrics.modes {
+                println!("    - {}: {}", mode, count);
+            }
+        }
+
+        if !metrics.return_types.is_empty() {
+            println!("  regex_command.return_types:");
+            for (ty, count) in &metrics.return_types {
+                println!("    - {}: {}", ty, count);
+            }
+        }
+
+        if !metrics.guard_strategies.is_empty() {
+            println!("  regex_command.guard_strategies:");
+            for (strategy, count) in &metrics.guard_strategies {
+                println!("    - {}: {}", strategy, count);
+            }
+        }
+
+        println!(
+            "  regex_command.materialize_streams: {}",
+            metrics.materialize_streams
+        );
+
+        if !metrics.diagnostics.is_empty() {
+            println!("  regex_command.diagnostics:");
+            for (code, count) in &metrics.diagnostics {
+                println!("    - {}: {}", code, count);
+            }
+        }
+    }
+
     fn print_strategy_telemetry(
         entrypoint: &Path,
         strategies: &[StrategySummary],
@@ -1275,6 +1320,7 @@ pub mod pipeline {
         println!("  pattern_cache_hits: n/a");
         println!("  pattern_cache_misses: n/a");
         println!("  pattern_bridge_ms: n/a");
+        println!("  regex_command: n/a");
         if strategies.is_empty() {
             println!("  when_strategies: (none recorded)");
         } else {
@@ -1568,6 +1614,14 @@ pub mod pipeline {
                     .iter()
                     .map(|helper| format_helper_spec(helper))
                     .collect::<Vec<_>>(),
+                "regex_command": {
+                    "total": telemetry.regex_command.total,
+                    "modes": telemetry.regex_command.modes.clone(),
+                    "return_types": telemetry.regex_command.return_types.clone(),
+                    "guard_strategies": telemetry.regex_command.guard_strategies.clone(),
+                    "materialize_streams": telemetry.regex_command.materialize_streams,
+                    "diagnostics": telemetry.regex_command.diagnostics.clone(),
+                },
             })
         });
 
