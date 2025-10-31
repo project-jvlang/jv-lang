@@ -424,6 +424,160 @@ mod tests {
     }
 
     #[test]
+    fn transform_regex_command_first_mode_lowering() {
+        let span = dummy_span();
+        let command = RegexCommand {
+            mode: RegexCommandMode::First,
+            mode_origin: RegexCommandModeOrigin::ShortMode,
+            subject: Box::new(Expression::Identifier("input".to_string(), span.clone())),
+            pattern: RegexLiteral {
+                pattern: "\\w+".to_string(),
+                raw: "/\\w+/".to_string(),
+                span: span.clone(),
+            },
+            replacement: Some(RegexReplacement::Literal(RegexLiteralReplacement {
+                raw: "\"hit\"".to_string(),
+                normalized: "hit".to_string(),
+                template_segments: Vec::new(),
+                span: span.clone(),
+            })),
+            flags: Vec::new(),
+            raw_flags: None,
+            span: span.clone(),
+        };
+        let expr = Expression::RegexCommand(Box::new(command));
+
+        let mut context = TransformContext::new();
+        context.add_variable("input".to_string(), JavaType::string());
+        context.register_regex_command_typing(
+            &span,
+            RegexCommandLoweringInfo {
+                mode: RegexCommandMode::First,
+                guard_strategy: RegexGuardStrategy::None,
+                java_type: JavaType::string(),
+                requires_stream_materialization: false,
+            },
+        );
+
+        let lowered = transform_expression(expr, &mut context)
+            .expect("regex command first lowering succeeds");
+        match lowered {
+            IrExpression::RegexCommand(ir_command) => {
+                assert_eq!(ir_command.mode, RegexCommandMode::First);
+                assert_eq!(ir_command.java_type, JavaType::string());
+                assert!(matches!(
+                    ir_command.replacement,
+                    crate::types::IrRegexReplacement::Literal(_)
+                ));
+            }
+            other => panic!("expected regex command IR expression, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn transform_regex_command_match_mode_uses_boolean_type() {
+        let span = dummy_span();
+        let command = RegexCommand {
+            mode: RegexCommandMode::Match,
+            mode_origin: RegexCommandModeOrigin::ExplicitToken,
+            subject: Box::new(Expression::Identifier("candidate".to_string(), span.clone())),
+            pattern: RegexLiteral {
+                pattern: "^[a-z]+$".to_string(),
+                raw: "/^[a-z]+$/".to_string(),
+                span: span.clone(),
+            },
+            replacement: None,
+            flags: vec![RegexFlag::CaseInsensitive],
+            raw_flags: Some("i".to_string()),
+            span: span.clone(),
+        };
+        let expr = Expression::RegexCommand(Box::new(command));
+
+        let mut context = TransformContext::new();
+        context.add_variable("candidate".to_string(), JavaType::string());
+        context.register_regex_command_typing(
+            &span,
+            RegexCommandLoweringInfo {
+                mode: RegexCommandMode::Match,
+                guard_strategy: RegexGuardStrategy::None,
+                java_type: JavaType::Reference {
+                    name: "java.lang.Boolean".to_string(),
+                    generic_args: vec![],
+                },
+                requires_stream_materialization: false,
+            },
+        );
+
+        let lowered = transform_expression(expr, &mut context)
+            .expect("regex command match lowering succeeds");
+        match lowered {
+            IrExpression::RegexCommand(ir_command) => {
+                assert_eq!(ir_command.mode, RegexCommandMode::Match);
+                assert_eq!(
+                    ir_command.java_type,
+                    JavaType::Reference {
+                        name: "java.lang.Boolean".to_string(),
+                        generic_args: vec![],
+                    }
+                );
+                assert_eq!(ir_command.flags, vec![RegexFlag::CaseInsensitive]);
+            }
+            other => panic!("expected regex command IR expression, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn transform_regex_command_split_mode_lowers_to_array_type() {
+        let span = dummy_span();
+        let command = RegexCommand {
+            mode: RegexCommandMode::Split,
+            mode_origin: RegexCommandModeOrigin::ExplicitToken,
+            subject: Box::new(Expression::Identifier("text".to_string(), span.clone())),
+            pattern: RegexLiteral {
+                pattern: ",\\s*".to_string(),
+                raw: "/,\\s*/".to_string(),
+                span: span.clone(),
+            },
+            replacement: None,
+            flags: Vec::new(),
+            raw_flags: None,
+            span: span.clone(),
+        };
+        let expr = Expression::RegexCommand(Box::new(command));
+
+        let mut context = TransformContext::new();
+        context.add_variable("text".to_string(), JavaType::string());
+        context.register_regex_command_typing(
+            &span,
+            RegexCommandLoweringInfo {
+                mode: RegexCommandMode::Split,
+                guard_strategy: RegexGuardStrategy::None,
+                java_type: JavaType::Array {
+                    element_type: Box::new(JavaType::string()),
+                    dimensions: 1,
+                },
+                requires_stream_materialization: false,
+            },
+        );
+
+        let lowered = transform_expression(expr, &mut context)
+            .expect("regex command split lowering succeeds");
+        match lowered {
+            IrExpression::RegexCommand(ir_command) => {
+                assert_eq!(ir_command.mode, RegexCommandMode::Split);
+                assert_eq!(
+                    ir_command.java_type,
+                    JavaType::Array {
+                        element_type: Box::new(JavaType::string()),
+                        dimensions: 1,
+                    }
+                );
+            }
+            other => panic!("expected regex command IR expression, got {:?}", other),
+        }
+    }
+
+    #[test]
     fn transform_regex_command_iterate_assigns_guard_name() {
         let span = dummy_span();
         let command = RegexCommand {

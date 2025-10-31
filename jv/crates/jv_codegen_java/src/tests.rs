@@ -3301,6 +3301,7 @@ fn switch_expression_java21_mixed_labels_emits_jv3105() {
 
 mod pattern_switch;
 mod regex_is;
+mod regex_command;
 mod target_matrix;
 
 #[test]
