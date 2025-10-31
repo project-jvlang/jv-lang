@@ -2,7 +2,9 @@
 
 use super::*;
 use jv_ast::{RegexCommandMode, RegexFlag, RegexGuardStrategy};
-use jv_ir::{IrRegexCommand, IrRegexLiteralReplacement, IrRegexReplacement, IrRegexTemplateSegment};
+use jv_ir::{
+    IrRegexCommand, IrRegexLiteralReplacement, IrRegexReplacement, IrRegexTemplateSegment,
+};
 use jv_pm::JavaTarget;
 
 fn render_java(program: &IrProgram) -> String {

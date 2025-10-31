@@ -2,10 +2,10 @@
 
 use jv_ast::Program;
 use jv_ast::RegexCommandMode;
-use jv_checker::{TypeChecker, TypeKind};
+use jv_checker::CheckError;
 use jv_checker::inference::regex::RegexCommandTyping;
 use jv_checker::inference::types::PrimitiveType;
-use jv_checker::CheckError;
+use jv_checker::{TypeChecker, TypeKind};
 use jv_parser_frontend::ParserPipeline;
 use jv_parser_rowan::frontend::RowanPipeline;
 
@@ -104,7 +104,10 @@ val matched = m/subject/^\d+$/m
         "matches モードは java.lang.Boolean を返す想定です"
     );
     assert!(
-        typing.diagnostics.iter().all(|diag| diag.code != "JV_REGEX_E101"),
+        typing
+            .diagnostics
+            .iter()
+            .all(|diag| diag.code != "JV_REGEX_E101"),
         "未知フラグ診断が誤って発生しないことを確認します: {:?}",
         typing.diagnostics
     );
@@ -171,7 +174,9 @@ val stream = i/subject/\d+/
     let snapshot = checker.inference_snapshot().cloned();
     let diagnostics = checker.check_null_safety(&program, snapshot.as_ref());
     assert!(
-        diagnostics.iter().all(|diag| !matches!(diag, CheckError::NullSafetyError(_))),
+        diagnostics
+            .iter()
+            .all(|diag| !matches!(diag, CheckError::NullSafetyError(_))),
         "Iterate モードは null safety エラーを引き起こさない想定です: {diagnostics:?}"
     );
 }

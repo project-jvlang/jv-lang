@@ -118,7 +118,10 @@ val parts = s/text/\s+/
     let command = extract_regex_command(source);
 
     assert_eq!(command.mode, RegexCommandMode::Split);
-    assert!(command.replacement.is_none(), "Split モードでは置換が不要です");
+    assert!(
+        command.replacement.is_none(),
+        "Split モードでは置換が不要です"
+    );
     assert_eq!(
         command.pattern.pattern, "\\s+",
         "パターンの正規化結果が保持されること"

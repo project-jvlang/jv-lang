@@ -480,7 +480,10 @@ mod tests {
         let command = RegexCommand {
             mode: RegexCommandMode::Match,
             mode_origin: RegexCommandModeOrigin::ExplicitToken,
-            subject: Box::new(Expression::Identifier("candidate".to_string(), span.clone())),
+            subject: Box::new(Expression::Identifier(
+                "candidate".to_string(),
+                span.clone(),
+            )),
             pattern: RegexLiteral {
                 pattern: "^[a-z]+$".to_string(),
                 raw: "/^[a-z]+$/".to_string(),

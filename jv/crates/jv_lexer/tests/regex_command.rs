@@ -4,9 +4,7 @@ use jv_lexer::{Lexer, Token, TokenMetadata, TokenType};
 
 fn tokenize(source: &str) -> Vec<Token> {
     let mut lexer = Lexer::new(source.to_string());
-    lexer
-        .tokenize()
-        .expect("正規表現コマンドが lex できること")
+    lexer.tokenize().expect("正規表現コマンドが lex できること")
 }
 
 fn extract_regex_token(tokens: &[Token]) -> &Token {
@@ -49,11 +47,15 @@ fn all_mode_with_literal_replacement_and_flags() {
     assert_eq!(pattern, "\\d+");
 
     assert!(
-        tokens.iter().any(|token| matches!(&token.token_type, TokenType::String(value) if value == "X")),
+        tokens
+            .iter()
+            .any(|token| matches!(&token.token_type, TokenType::String(value) if value == "X")),
         "置換部の文字列が String トークンとして lex されることを期待しました: {tokens:?}"
     );
     assert!(
-        tokens.iter().any(|token| matches!(&token.token_type, TokenType::Identifier(value) if value == "im")),
+        tokens.iter().any(
+            |token| matches!(&token.token_type, TokenType::Identifier(value) if value == "im")
+        ),
         "フラグ列 `im` が Identifier として保持されることを期待しました: {tokens:?}"
     );
 }
@@ -72,11 +74,15 @@ fn first_mode_without_replacement_preserves_subject_expression() {
         .map(|token| token.token_type.clone())
         .collect();
     assert!(
-        subject_tokens.iter().any(|token| matches!(token, TokenType::Identifier(name) if name == "subject")),
+        subject_tokens
+            .iter()
+            .any(|token| matches!(token, TokenType::Identifier(name) if name == "subject")),
         "subject の識別子が識別子トークンとして残る想定です: {subject_tokens:?}"
     );
     assert!(
-        subject_tokens.iter().any(|token| matches!(token, TokenType::Identifier(name) if name == "trim")),
+        subject_tokens
+            .iter()
+            .any(|token| matches!(token, TokenType::Identifier(name) if name == "trim")),
         "メソッド呼び出しの識別子 `trim` が保持される必要があります: {subject_tokens:?}"
     );
 
@@ -94,7 +100,9 @@ fn iterate_mode_with_lambda_replacement_keeps_pattern_literal() {
 
     // ラムダ置換の先頭トークン（`${`）が tokenize 済みであることを簡易的に確認する。
     assert!(
-        tokens.iter().any(|token| matches!(&token.token_type, TokenType::Identifier(value) if value == "it")),
+        tokens.iter().any(
+            |token| matches!(&token.token_type, TokenType::Identifier(value) if value == "it")
+        ),
         "ラムダ本体内の `it` が通常の識別子として lex される想定です: {tokens:?}"
     );
 }
