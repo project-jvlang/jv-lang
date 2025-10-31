@@ -360,6 +360,14 @@ impl JavaCodeGenerator {
             span,
         } = switch
         {
+            if Self::is_void_like(java_type) {
+                return self.render_switch_expression_void(
+                    discriminant,
+                    cases,
+                    implicit_end.as_ref(),
+                    strategy_description.as_ref(),
+                );
+            }
             if self.targeting.supports_pattern_switch() {
                 self.render_switch_expression_java25(
                     discriminant,
@@ -385,6 +393,56 @@ impl JavaCodeGenerator {
                 span: None,
             })
         }
+    }
+
+    fn render_switch_expression_void(
+        &mut self,
+        discriminant: &IrExpression,
+        cases: &[IrSwitchCase],
+        implicit_end: Option<&IrImplicitWhenEnd>,
+        strategy_description: Option<&String>,
+    ) -> Result<String, CodeGenError> {
+        let mut statement_cases = cases
+            .iter()
+            .cloned()
+            .map(|mut case| {
+                case.body = match case.body {
+                    IrExpression::Lambda { body, .. } => *body,
+                    other => other,
+                };
+                case
+            })
+            .collect::<Vec<_>>();
+        if let Some(end) = implicit_end {
+            if !Self::has_default_case(cases) {
+                match end {
+                    IrImplicitWhenEnd::Unit { span } => {
+                        statement_cases.push(IrSwitchCase {
+                            labels: vec![IrCaseLabel::Default],
+                            guard: None,
+                            body: IrExpression::Block {
+                                statements: Vec::new(),
+                                java_type: JavaType::void(),
+                                span: span.clone(),
+                            },
+                            span: span.clone(),
+                        });
+                    }
+                }
+            }
+        }
+
+        let mut builder = self.builder();
+        builder.push_line("{");
+        builder.indent();
+        if let Some(description) = strategy_description {
+            builder.push_line(&format!("// {}", description));
+        }
+        let switch_stmt = self.generate_switch_statement(discriminant, &statement_cases)?;
+        Self::push_lines(&mut builder, &switch_stmt);
+        builder.dedent();
+        builder.push_line("}");
+        Ok(builder.build())
     }
 
     fn render_switch_expression_java25(

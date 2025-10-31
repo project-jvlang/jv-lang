@@ -36,6 +36,7 @@ pub struct WhenLoweringPlanner {
     implicit_end: Option<ImplicitWhenEnd>,
     span: Span,
     analysis: PatternAnalysisSummary,
+    has_label: bool,
 }
 
 impl WhenLoweringPlanner {
@@ -44,6 +45,7 @@ impl WhenLoweringPlanner {
         arms: Vec<WhenArm>,
         else_arm: Option<Box<Expression>>,
         implicit_end: Option<ImplicitWhenEnd>,
+        label: Option<String>,
         span: Span,
     ) -> Self {
         Self {
@@ -53,6 +55,7 @@ impl WhenLoweringPlanner {
             implicit_end,
             span,
             analysis: PatternAnalysisSummary::default(),
+            has_label: label.is_some(),
         }
     }
 
@@ -64,6 +67,7 @@ impl WhenLoweringPlanner {
             implicit_end,
             span,
             analysis,
+            has_label,
         } = self;
 
         match subject {
@@ -74,11 +78,18 @@ impl WhenLoweringPlanner {
                 implicit_end,
                 span,
                 analysis,
+                has_label,
                 context,
             ),
-            None => {
-                Self::plan_without_subject(arms, else_arm, implicit_end, span, analysis, context)
-            }
+            None => Self::plan_without_subject(
+                arms,
+                else_arm,
+                implicit_end,
+                span,
+                analysis,
+                has_label,
+                context,
+            ),
         }
     }
 
@@ -89,6 +100,7 @@ impl WhenLoweringPlanner {
         implicit_end: Option<ImplicitWhenEnd>,
         span: Span,
         analysis: PatternAnalysisSummary,
+        has_label: bool,
         context: &mut TransformContext,
     ) -> Result<WhenLoweringPlan, TransformError> {
         let mut implicit_ir_end = implicit_end.map(convert_implicit_end);
@@ -191,9 +203,13 @@ impl WhenLoweringPlanner {
             });
         }
 
-        let resolved_result_type = result_type.clone().unwrap_or_else(JavaType::object);
+        let resolved_result_type = if has_label {
+            JavaType::void()
+        } else {
+            result_type.clone().unwrap_or_else(JavaType::object)
+        };
         let exhaustive = describe_exhaustiveness(&analysis);
-        if requires_boolean_if_chain(&discriminant_type, &cases) {
+        if !has_label && requires_boolean_if_chain(&discriminant_type, &cases) {
             if let Some(ir) = build_boolean_if_chain(
                 discriminant.clone(),
                 cases.clone(),
@@ -238,6 +254,7 @@ impl WhenLoweringPlanner {
         implicit_end: Option<ImplicitWhenEnd>,
         span: Span,
         analysis: PatternAnalysisSummary,
+        _has_label: bool,
         context: &mut TransformContext,
     ) -> Result<WhenLoweringPlan, TransformError> {
         let mut arms = arms;

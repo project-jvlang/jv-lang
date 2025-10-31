@@ -527,7 +527,7 @@ impl JavaCodeGenerator {
         None
     }
 
-    fn generate_switch_statement(
+    pub(super) fn generate_switch_statement(
         &mut self,
         discriminant: &IrExpression,
         cases: &[IrSwitchCase],

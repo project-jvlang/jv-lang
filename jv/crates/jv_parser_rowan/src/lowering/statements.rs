@@ -252,10 +252,7 @@ fn lower_labeled_statement(
         ));
     };
 
-    let Some(target) = node
-        .children()
-        .find(|child| !child.kind().is_token())
-    else {
+    let Some(target) = node.children().find(|child| !child.kind().is_token()) else {
         return Err(LoweringDiagnostic::new(
             LoweringDiagnosticSeverity::Error,
             "ハッシュラベルに対応するステートメントが見つかりません",
@@ -1836,11 +1833,7 @@ mod expression_parser {
                     } else {
                         Some(Self::parse_nested_expression(value_tokens)?.expr)
                     };
-                    Ok(Statement::Return {
-                        label,
-                        value,
-                        span,
-                    })
+                    Ok(Statement::Return { label, value, span })
                 }
                 TokenType::Break => {
                     let label = Self::parse_control_flow_label(slice, "break")?;
@@ -3465,7 +3458,10 @@ mod expression_parser {
                 TokenType::NullSafe => Some(PostfixKind::NullSafeMemberAccess),
                 TokenType::LeftBracket => Some(PostfixKind::Index),
                 TokenType::Question => {
-                    if matches!(self.next_significant_kind(index), Some(TokenType::LeftBracket)) {
+                    if matches!(
+                        self.next_significant_kind(index),
+                        Some(TokenType::LeftBracket)
+                    ) {
                         Some(PostfixKind::NullSafeIndex)
                     } else {
                         None
@@ -5477,10 +5473,7 @@ fn extract_hash_label_text(node: &JvSyntaxNode) -> Option<String> {
     })
 }
 
-fn apply_label_to_expression(
-    expr: Expression,
-    label: String,
-) -> Expression {
+fn apply_label_to_expression(expr: Expression, label: String) -> Expression {
     match expr {
         Expression::When {
             expr: subject,
@@ -5498,9 +5491,7 @@ fn apply_label_to_expression(
             span,
         },
         Expression::Block {
-            statements,
-            span,
-            ..
+            statements, span, ..
         } => Expression::Block {
             statements,
             label: Some(label),

@@ -35,7 +35,7 @@ pub use crate::types::{
 pub use concurrency::{
     desugar_async_expression, desugar_await_expression, desugar_spawn_expression,
 };
-pub use control_flow::desugar_when_expression;
+pub use control_flow::{desugar_when_expression, desugar_when_expression_with_label};
 pub use declarations::{
     desugar_data_class, desugar_extension_function, desugar_val_declaration,
     desugar_var_declaration,
@@ -845,9 +845,18 @@ pub fn transform_expression(
             arms,
             else_arm,
             implicit_end,
+            label,
             span,
             ..
-        } => desugar_when_expression(subject, arms, else_arm, implicit_end, span, context),
+        } => desugar_when_expression_with_label(
+            subject,
+            arms,
+            else_arm,
+            implicit_end,
+            label,
+            span,
+            context,
+        ),
         _ => Ok(IrExpression::Literal(Literal::Null, Span::default())),
     }
 }

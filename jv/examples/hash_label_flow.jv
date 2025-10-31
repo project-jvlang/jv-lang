@@ -13,28 +13,25 @@ fun main(): Unit {
     var firstActive = "未検出"
 
     #outer for (user in members.users) {
-        when {
-            !user.active -> {
+        #statusCheck when (user.active) {
+            false -> {
                 println("非アクティブ: ${user.name}")
-                continue #outer
+                break #statusCheck
             }
-            else -> {
+            true -> {
                 firstActive = user.name
                 println("最初のアクティブ会員: ${user.name}")
                 break #outer
             }
         }
+        continue #outer
     }
 
     println("探索結果: ${firstActive}")
 
-    members.users.forEach #scan { user ->
-        when {
-            user.active -> {
-                println("確認済み: ${user.name}")
-                return #scan
-            }
-            else -> println("スキップ: ${user.name}")
-        }
+    #statusCheck when (members.users.isEmpty()) {
+        true -> println("会員リストは空です")
+        false -> println("会員リストは利用可能です")
     }
+
 }

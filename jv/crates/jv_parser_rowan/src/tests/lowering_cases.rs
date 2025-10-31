@@ -1,8 +1,8 @@
+use crate::frontend::RowanPipeline;
 use crate::lowering::{lower_program, LoweringDiagnosticSeverity, LoweringResult};
 use crate::parser::parse;
 use crate::verification::StatementKindKey;
 use crate::{JvLanguage, ParseBuilder, SyntaxKind};
-use crate::frontend::RowanPipeline;
 use jv_ast::strings::MultilineKind;
 use jv_ast::{
     expression::{Argument, Parameter, ParameterProperty, StringPart},
@@ -1447,7 +1447,10 @@ fn lowering_reports_unimplemented_for_labeled_statement() {
         .first()
         .expect("ラベル付き for 文がローワリングされるはずです")
     else {
-        panic!("期待した ForIn ステートメントではありません: {:?}", result.statements);
+        panic!(
+            "期待した ForIn ステートメントではありません: {:?}",
+            result.statements
+        );
     };
     assert_eq!(for_in.label.as_deref(), Some("outer"));
 }
@@ -1476,9 +1479,8 @@ fn lowering_result_for_labeled_trailing_lambda_is_placeholder() {
         );
     };
     if let Expression::Call { args, .. } = expr {
-        let Argument::Positional(Expression::Lambda { label, .. }) = args
-            .last()
-            .expect("ラムダ引数が存在するはずです")
+        let Argument::Positional(Expression::Lambda { label, .. }) =
+            args.last().expect("ラムダ引数が存在するはずです")
         else {
             panic!("最後の引数がラムダ式ではありません: {:?}", args);
         };
@@ -1523,7 +1525,10 @@ fn lowering_when_branch_preserves_labeled_control_flow() {
         .find(|stmt| matches!(stmt, Statement::ForIn(_)))
         .expect("ラベル付き for-in 文が生成されるはずです")
     else {
-        panic!("ForIn ステートメントが見つかりません: {:?}", result.statements);
+        panic!(
+            "ForIn ステートメントが見つかりません: {:?}",
+            result.statements
+        );
     };
     assert_eq!(
         for_in.label.as_deref(),
@@ -1538,7 +1543,10 @@ fn lowering_when_branch_preserves_labeled_control_flow() {
         "ブロック内にステートメントが存在するべきです"
     );
     let Statement::Expression { expr, .. } = &statements[0] else {
-        panic!("ブロック先頭は式ステートメントのはずです: {:?}", statements[0]);
+        panic!(
+            "ブロック先頭は式ステートメントのはずです: {:?}",
+            statements[0]
+        );
     };
     let Expression::When { arms, else_arm, .. } = expr else {
         panic!("when 式がローワリングされるべきです: {:?}", expr);
@@ -1567,9 +1575,7 @@ fn lowering_when_branch_preserves_labeled_control_flow() {
         Some("outer"),
         "continue ラベルが保持されるべきです"
     );
-    let else_arm_expr = else_arm
-        .as_ref()
-        .expect("else 分岐が存在するべきです");
+    let else_arm_expr = else_arm.as_ref().expect("else 分岐が存在するべきです");
     let second_arm = extract_statements(else_arm_expr.as_ref());
     let break_label = second_arm
         .iter()
@@ -1608,7 +1614,11 @@ fn lowering_hash_label_example_retains_labels() {
             None
         })
         .expect("例内に main 関数が存在するはずです");
-    let Expression::Block { statements: main_statements, .. } = main_body else {
+    let Expression::Block {
+        statements: main_statements,
+        ..
+    } = main_body
+    else {
         panic!("main 関数の本体はブロック式であるべきです: {:?}", main_body);
     };
     println!("main_statements = {:#?}", main_statements);
@@ -1650,10 +1660,7 @@ fn lowering_hash_label_example_retains_labels() {
     let Expression::When { arms, else_arm, .. } = when_expr else {
         panic!("when 式が期待されます: {:?}", when_expr);
     };
-    assert!(
-        !arms.is_empty(),
-        "when 式には少なくとも1件の分岐が必要です"
-    );
+    assert!(!arms.is_empty(), "when 式には少なくとも1件の分岐が必要です");
     let first_arm_statements = extract_statements(&arms[0].body);
     let continue_label = first_arm_statements
         .iter()
@@ -1707,7 +1714,11 @@ fn pipeline_output_retains_hash_label_when_expression() {
             None
         })
         .expect("main 関数が存在するべきです");
-    let Expression::Block { statements: main_statements, .. } = main_body else {
+    let Expression::Block {
+        statements: main_statements,
+        ..
+    } = main_body
+    else {
         panic!("main 関数の本体はブロック式であるべきです: {:?}", main_body);
     };
     fn find_fallback_identifier(expr: &Expression) -> Option<String> {
@@ -1717,20 +1728,30 @@ fn pipeline_output_retains_hash_label_when_expression() {
                 .iter()
                 .find_map(find_fallback_identifier_in_statement),
             Expression::Lambda { body, .. } => find_fallback_identifier(body),
-            Expression::When { expr: subject, arms, else_arm, .. } => subject
+            Expression::When {
+                expr: subject,
+                arms,
+                else_arm,
+                ..
+            } => subject
                 .as_deref()
                 .and_then(find_fallback_identifier)
-                .or_else(|| arms.iter().find_map(|arm| find_fallback_identifier(&arm.body)))
-                .or_else(|| else_arm.as_deref().and_then(find_fallback_identifier)),
-            Expression::Call { function, args, .. } => find_fallback_identifier(function)
                 .or_else(|| {
+                    arms.iter()
+                        .find_map(|arm| find_fallback_identifier(&arm.body))
+                })
+                .or_else(|| else_arm.as_deref().and_then(find_fallback_identifier)),
+            Expression::Call { function, args, .. } => {
+                find_fallback_identifier(function).or_else(|| {
                     args.iter().find_map(|arg| match arg {
                         Argument::Positional(expr) => find_fallback_identifier(expr),
                         Argument::Named { value, .. } => find_fallback_identifier(value),
                     })
-                }),
-            Expression::Binary { left, right, .. } => find_fallback_identifier(left)
-                .or_else(|| find_fallback_identifier(right)),
+                })
+            }
+            Expression::Binary { left, right, .. } => {
+                find_fallback_identifier(left).or_else(|| find_fallback_identifier(right))
+            }
             Expression::Unary { operand, .. } => find_fallback_identifier(operand),
             Expression::JsonLiteral(literal) => find_fallback_in_json_value(&literal.value),
             _ => None,
@@ -1742,9 +1763,9 @@ fn pipeline_output_retains_hash_label_when_expression() {
             JsonValue::Object { entries, .. } => entries
                 .iter()
                 .find_map(|entry| find_fallback_in_json_value(&entry.value)),
-            JsonValue::Array { elements, .. } => elements
-                .iter()
-                .find_map(find_fallback_in_json_value),
+            JsonValue::Array { elements, .. } => {
+                elements.iter().find_map(find_fallback_in_json_value)
+            }
             _ => None,
         }
     }
@@ -1753,9 +1774,7 @@ fn pipeline_output_retains_hash_label_when_expression() {
         match statement {
             Statement::Expression { expr, .. } => find_fallback_identifier(expr),
             Statement::ForIn(for_in) => find_fallback_identifier(&for_in.body),
-            Statement::Return { value, .. } => value
-                .as_ref()
-                .and_then(find_fallback_identifier),
+            Statement::Return { value, .. } => value.as_ref().and_then(find_fallback_identifier),
             Statement::ValDeclaration { initializer, .. } => find_fallback_identifier(initializer),
             Statement::VarDeclaration {
                 initializer: Some(initializer),

@@ -3098,6 +3098,34 @@ fn switch_expression_with_boolean_literals_does_not_require_preview() {
 }
 
 #[test]
+fn hash_label_flow_generates_switch_for_labeled_when() {
+    let program = parse_program(include_str!("../../../examples/hash_label_flow.jv"));
+    let unit = generate_java_code(&program).expect("hash_label_flow の Java 生成に失敗しました");
+    let source = unit.to_source(&JavaCodeGenConfig::for_target(JavaTarget::Java25));
+
+    let switch_pos = source
+        .find("switch (members.users.isEmpty())")
+        .expect("ラベル付き when が switch へ変換されるべきです");
+    let end_pos = (switch_pos + 200).min(source.len());
+    let snippet = &source[switch_pos..end_pos];
+    assert!(
+        snippet.contains("case true"),
+        "true 分岐が switch ケースとして出力されるべきです:\n{}",
+        snippet
+    );
+    assert!(
+        snippet.contains("case false"),
+        "false 分岐が switch ケースとして出力されるべきです:\n{}",
+        snippet
+    );
+    assert!(
+        !snippet.contains("?"),
+        "ラベル付き when は三項演算子にフォールバックすべきではありません:\n{}",
+        snippet
+    );
+}
+
+#[test]
 fn switch_expression_nested_destructuring_java25_and_java21() {
     let outer_type = JavaType::Reference {
         name: "Outer".to_string(),
