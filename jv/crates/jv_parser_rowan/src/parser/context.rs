@@ -933,7 +933,7 @@ impl<'tokens> ParserContext<'tokens> {
         consumed
     }
 
-    fn consume_inline_whitespace(&mut self) -> bool {
+    pub(crate) fn consume_inline_whitespace(&mut self) -> bool {
         let mut consumed = false;
         while let Some(token) = self.current_token() {
             if TokenKind::from_token(token) == TokenKind::Whitespace {

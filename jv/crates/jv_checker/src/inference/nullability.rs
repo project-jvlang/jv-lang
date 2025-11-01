@@ -9,6 +9,7 @@ use jv_ast::types::Span;
 use jv_ast::{
     BinaryOp, Expression, Literal, Program, Statement, TypeAnnotation, UnaryOp,
     expression::Argument,
+    statement::{UnitTypeDefinition, UnitTypeMember},
 };
 use std::collections::HashMap;
 
@@ -234,6 +235,10 @@ impl NullabilityAnalyzer {
                 }
                 None
             }
+            Statement::UnitTypeDefinition(definition) => {
+                self.visit_unit_definition(definition);
+                None
+            }
             Statement::DataClassDeclaration { .. }
             | Statement::Import { .. }
             | Statement::Package { .. }
@@ -241,6 +246,26 @@ impl NullabilityAnalyzer {
             | Statement::Break(_)
             | Statement::Continue(_)
             | Statement::Comment(_) => None,
+        }
+    }
+
+    fn visit_unit_definition(&mut self, definition: &UnitTypeDefinition) {
+        for member in &definition.members {
+            match member {
+                UnitTypeMember::Dependency(dependency) => {
+                    if let Some(expr) = dependency.value.as_ref() {
+                        self.evaluate_expression(expr);
+                    }
+                }
+                UnitTypeMember::Conversion(block) => {
+                    for statement in &block.body {
+                        self.visit_statement(statement);
+                    }
+                }
+                UnitTypeMember::NestedStatement(statement) => {
+                    self.visit_statement(statement);
+                }
+            }
         }
     }
 
@@ -355,6 +380,7 @@ impl NullabilityAnalyzer {
                 }
                 Nullability::NonNull
             }
+            Expression::UnitLiteral { value, .. } => self.evaluate_expression(value),
             Expression::Lambda {
                 body, parameters, ..
             } => {

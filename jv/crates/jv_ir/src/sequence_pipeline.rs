@@ -2062,6 +2062,7 @@ fn expression_span(expr: &Expression) -> Span {
         | Expression::StringInterpolation { span, .. }
         | Expression::Array { span, .. }
         | Expression::Lambda { span, .. }
+        | Expression::UnitLiteral { span, .. }
         | Expression::Block { span, .. }
         | Expression::When { span, .. }
         | Expression::If { span, .. }

@@ -36,6 +36,7 @@ pub fn expression_span(expr: &Expression) -> Span {
         Expression::Try { span, .. } => span.clone(),
         Expression::This(span) => span.clone(),
         Expression::Super(span) => span.clone(),
+        Expression::UnitLiteral { span, .. } => span.clone(),
     }
 }
 
@@ -59,6 +60,7 @@ pub fn statement_span(stmt: &Statement) -> Span {
         Statement::Continue(span) => span.clone(),
         Statement::Package { span, .. } => span.clone(),
         Statement::Comment(comment) => comment.span.clone(),
+        Statement::UnitTypeDefinition(definition) => definition.span.clone(),
         Statement::Concurrency(concurrency) => match concurrency {
             ConcurrencyConstruct::Spawn { span, .. } => span.clone(),
             ConcurrencyConstruct::Async { span, .. } => span.clone(),

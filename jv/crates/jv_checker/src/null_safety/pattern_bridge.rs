@@ -5,7 +5,7 @@ use crate::pattern::{
     PatternTarget,
 };
 use jv_ast::expression::{Parameter, StringPart};
-use jv_ast::statement::Property;
+use jv_ast::statement::{Property, UnitTypeDefinition, UnitTypeMember};
 use jv_ast::types::TypeAnnotation;
 use jv_ast::{Expression, Program, Statement};
 use jv_inference::types::TypeVariant as FactsTypeVariant;
@@ -98,6 +98,9 @@ impl PatternFactsBridge {
             Statement::ExtensionFunction(extension) => {
                 self.visit_statement(&extension.function, service, context)
             }
+            Statement::UnitTypeDefinition(definition) => {
+                self.visit_unit_definition(definition, service, context)
+            }
             Statement::Expression { expr, .. } => self.visit_expression(expr, service, context),
             Statement::Return { value, .. } => value
                 .as_ref()
@@ -161,6 +164,33 @@ impl PatternFactsBridge {
         outcome
     }
 
+    fn visit_unit_definition(
+        &mut self,
+        definition: &UnitTypeDefinition,
+        service: &mut PatternMatchService,
+        context: &mut NullSafetyContext,
+    ) -> BridgeOutcome {
+        let mut outcome = BridgeOutcome::default();
+        for member in &definition.members {
+            match member {
+                UnitTypeMember::Dependency(dependency) => {
+                    if let Some(expr) = dependency.value.as_ref() {
+                        outcome.merge(self.visit_expression(expr, service, context));
+                    }
+                }
+                UnitTypeMember::Conversion(block) => {
+                    for statement in &block.body {
+                        outcome.merge(self.visit_statement(statement, service, context));
+                    }
+                }
+                UnitTypeMember::NestedStatement(statement) => {
+                    outcome.merge(self.visit_statement(statement, service, context));
+                }
+            }
+        }
+        outcome
+    }
+
     fn visit_expression(
         &mut self,
         expression: &Expression,
@@ -201,6 +231,9 @@ impl PatternFactsBridge {
                 outcome
             }
             Expression::TypeCast { expr, .. } => self.visit_expression(expr, service, context),
+            Expression::UnitLiteral { value, .. } => {
+                self.visit_expression(value, service, context)
+            }
             Expression::Array { elements, .. } => {
                 let mut outcome = BridgeOutcome::default();
                 for element in elements {

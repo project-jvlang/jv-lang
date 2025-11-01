@@ -1,4 +1,5 @@
 use jv_ast::{
+    statement::{UnitTypeDefinition, UnitTypeMember},
     Argument, Expression, JsonLiteral, JsonValue, Parameter, Pattern, Program, SequenceDelimiter,
     Span, Statement,
 };
@@ -114,6 +115,9 @@ impl SequenceWarningCollector {
             }
             Statement::Concurrency(construct) => self.visit_concurrency(construct),
             Statement::ResourceManagement(resource) => self.visit_resource_management(resource),
+            Statement::UnitTypeDefinition(definition) => {
+                self.visit_unit_definition(definition);
+            }
             Statement::Import { .. }
             | Statement::Package { .. }
             | Statement::Break(_)
@@ -136,6 +140,26 @@ impl SequenceWarningCollector {
                 self.visit_expression(body);
             }
             jv_ast::ResourceManagement::Defer { body, .. } => self.visit_expression(body),
+        }
+    }
+
+    fn visit_unit_definition(&mut self, definition: &UnitTypeDefinition) {
+        for member in &definition.members {
+            match member {
+                UnitTypeMember::Dependency(dependency) => {
+                    if let Some(expr) = dependency.value.as_ref() {
+                        self.visit_expression(expr);
+                    }
+                }
+                UnitTypeMember::Conversion(block) => {
+                    for statement in &block.body {
+                        self.visit_statement(statement);
+                    }
+                }
+                UnitTypeMember::NestedStatement(statement) => {
+                    self.visit_statement(statement);
+                }
+            }
         }
     }
 
@@ -200,6 +224,7 @@ impl SequenceWarningCollector {
                 self.visit_expression(index);
             }
             Expression::TypeCast { expr, .. } => self.visit_expression(expr),
+            Expression::UnitLiteral { value, .. } => self.visit_expression(value),
             Expression::StringInterpolation { parts, .. } => {
                 for part in parts {
                     if let jv_ast::StringPart::Expression(expr) = part {

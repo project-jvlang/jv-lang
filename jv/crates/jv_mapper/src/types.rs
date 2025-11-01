@@ -149,6 +149,7 @@ fn lower_type_annotation(annotation: &TypeAnnotation) -> BoundTypeReference {
         TypeAnnotation::Array(element_type) => {
             BoundTypeReference::Array(Box::new(lower_type_annotation(element_type)))
         }
+        TypeAnnotation::Unit { base, .. } => lower_type_annotation(base),
     }
 }
 

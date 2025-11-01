@@ -5,6 +5,7 @@ use handlers::imports::build_imports_response;
 pub use handlers::imports::{ImportItem, ImportsParams, ImportsResponse};
 use jv_ast::types::TypeLevelExpr;
 use jv_ast::{
+    statement::{UnitTypeDefinition, UnitTypeMember},
     Argument, ConstParameter, Expression, GenericParameter, GenericSignature, Program,
     RegexLiteral, Span, Statement, StringPart, TypeAnnotation,
 };
@@ -1709,6 +1710,9 @@ fn collect_call_diagnostics_from_statement(
             collect_call_diagnostics_from_expression(&for_in.iterable, tokens, diagnostics);
             collect_call_diagnostics_from_expression(&for_in.body, tokens, diagnostics);
         }
+        Statement::UnitTypeDefinition(definition) => {
+            collect_call_diagnostics_from_unit_definition(definition, tokens, diagnostics);
+        }
         Statement::Concurrency(construct) => match construct {
             jv_ast::ConcurrencyConstruct::Spawn { body, .. }
             | jv_ast::ConcurrencyConstruct::Async { body, .. } => {
@@ -1843,6 +1847,9 @@ fn collect_call_diagnostics_from_expression(
                 collect_call_diagnostics_from_expression(finally_block, tokens, diagnostics);
             }
         }
+        Expression::UnitLiteral { value, .. } => {
+            collect_call_diagnostics_from_expression(value, tokens, diagnostics);
+        }
         Expression::JsonLiteral(_) => {}
         Expression::StringInterpolation { parts, .. } => {
             for part in parts {
@@ -1857,6 +1864,30 @@ fn collect_call_diagnostics_from_expression(
         | Expression::Identifier(_, _)
         | Expression::This(_)
         | Expression::Super(_) => {}
+    }
+}
+
+fn collect_call_diagnostics_from_unit_definition(
+    definition: &UnitTypeDefinition,
+    tokens: &[Token],
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    for member in &definition.members {
+        match member {
+            UnitTypeMember::Dependency(dependency) => {
+                if let Some(expr) = dependency.value.as_ref() {
+                    collect_call_diagnostics_from_expression(expr, tokens, diagnostics);
+                }
+            }
+            UnitTypeMember::Conversion(block) => {
+                for statement in &block.body {
+                    collect_call_diagnostics_from_statement(statement, tokens, diagnostics);
+                }
+            }
+            UnitTypeMember::NestedStatement(statement) => {
+                collect_call_diagnostics_from_statement(statement, tokens, diagnostics);
+            }
+        }
     }
 }
 

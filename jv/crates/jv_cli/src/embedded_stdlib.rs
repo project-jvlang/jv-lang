@@ -6,6 +6,7 @@ use std::sync::{Arc, OnceLock};
 
 use anyhow::{anyhow, Result};
 use jv_ast::{
+    statement::{UnitTypeDefinition, UnitTypeMember},
     types::{Kind, Pattern},
     Argument, CallArgumentMetadata, Expression, JsonLiteral, JsonValue, Program, Statement,
     StringPart, Visibility,
@@ -135,13 +136,46 @@ fn promote_visibility(statement: &mut Statement) {
         | Statement::Import { .. }
         | Statement::Package { .. }
         | Statement::Break(_)
-        | Statement::Continue(_) => {}
+        | Statement::Continue(_) => {},
+        Statement::UnitTypeDefinition(definition) => promote_unit_definition(definition),
     }
 }
 
 fn promote_modifiers(modifiers: &mut jv_ast::Modifiers) {
     if matches!(modifiers.visibility, Visibility::Private) {
         modifiers.visibility = Visibility::Public;
+    }
+}
+
+fn promote_unit_definition(definition: &mut UnitTypeDefinition) {
+    for member in &mut definition.members {
+        match member {
+            UnitTypeMember::Conversion(block) => {
+                for statement in &mut block.body {
+                    promote_visibility(statement);
+                }
+            }
+            UnitTypeMember::NestedStatement(statement) => promote_visibility(statement),
+            UnitTypeMember::Dependency(_) => {}
+        }
+    }
+}
+
+fn rewrite_unit_definition(definition: &mut UnitTypeDefinition) {
+    for member in &mut definition.members {
+        match member {
+            UnitTypeMember::Dependency(dependency) => {
+                if let Some(expr) = &mut dependency.value {
+                    rewrite_expression(expr);
+                }
+            }
+            UnitTypeMember::Conversion(block) => {
+                for statement in &mut block.body {
+                    rewrite_statement(statement);
+                }
+            }
+            UnitTypeMember::NestedStatement(statement) => rewrite_statement(statement),
+        }
     }
 }
 
@@ -226,6 +260,7 @@ fn rewrite_statement(statement: &mut Statement) {
             rewrite_expression(target);
             rewrite_expression(value);
         }
+        Statement::UnitTypeDefinition(definition) => rewrite_unit_definition(definition),
         Statement::ForIn(statement) => {
             rewrite_expression(&mut statement.iterable);
             rewrite_expression(statement.body.as_mut());
@@ -304,6 +339,7 @@ fn rewrite_expression(expression: &mut Expression) {
             rewrite_expression(index.as_mut());
         }
         Expression::TypeCast { expr, .. } => rewrite_expression(expr.as_mut()),
+        Expression::UnitLiteral { value, .. } => rewrite_expression(value.as_mut()),
         Expression::StringInterpolation { parts, .. } => {
             for part in parts {
                 if let StringPart::Expression(expr) = part {
@@ -600,6 +636,9 @@ impl<'a, 'b> ProgramUsageDetector<'a, 'b> {
             }
             Statement::Concurrency(construct) => self.visit_concurrency(construct),
             Statement::ResourceManagement(resource) => self.visit_resource_management(resource),
+            Statement::UnitTypeDefinition(definition) => {
+                self.visit_unit_definition(definition);
+            }
             Statement::DataClassDeclaration { .. }
             | Statement::Import { .. }
             | Statement::Package { .. }
@@ -624,6 +663,26 @@ impl<'a, 'b> ProgramUsageDetector<'a, 'b> {
                 self.visit_expression(body);
             }
             jv_ast::ResourceManagement::Defer { body, .. } => self.visit_expression(body),
+        }
+    }
+
+    fn visit_unit_definition(&mut self, definition: &UnitTypeDefinition) {
+        for member in &definition.members {
+            match member {
+                UnitTypeMember::Dependency(dependency) => {
+                    if let Some(expr) = dependency.value.as_ref() {
+                        self.visit_expression(expr);
+                    }
+                }
+                UnitTypeMember::Conversion(block) => {
+                    for statement in &block.body {
+                        self.visit_statement(statement);
+                    }
+                }
+                UnitTypeMember::NestedStatement(statement) => {
+                    self.visit_statement(statement);
+                }
+            }
         }
     }
 
@@ -679,6 +738,7 @@ impl<'a, 'b> ProgramUsageDetector<'a, 'b> {
                 self.visit_expression(index);
             }
             Expression::TypeCast { expr, .. } => self.visit_expression(expr),
+            Expression::UnitLiteral { value, .. } => self.visit_expression(value),
             Expression::StringInterpolation { parts, .. } => {
                 for part in parts {
                     if let StringPart::Expression(expr) = part {
@@ -813,7 +873,25 @@ impl<'a> MetadataCollector<'a> {
             Statement::DataClassDeclaration { name, .. } => {
                 self.metadata.type_names.insert(name.clone());
             }
+            Statement::UnitTypeDefinition(definition) => {
+                self.metadata
+                    .type_names
+                    .insert(definition.name.name.clone());
+                self.visit_unit_definition(definition);
+            }
             _ => {}
+        }
+    }
+
+    fn visit_unit_definition(&mut self, definition: &UnitTypeDefinition) {
+        for member in &definition.members {
+            if let UnitTypeMember::NestedStatement(statement) = member {
+                self.visit_statement(statement);
+            } else if let UnitTypeMember::Conversion(block) = member {
+                for statement in &block.body {
+                    self.visit_statement(statement);
+                }
+            }
         }
     }
 }

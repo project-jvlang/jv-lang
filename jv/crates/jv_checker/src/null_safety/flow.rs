@@ -881,6 +881,7 @@ fn classify_expression(
             ExpressionInfo::new(apply_operator_outcome(builder, outcome))
         }
         Expression::TypeCast { expr, .. } => classify_expression(builder, expr),
+        Expression::UnitLiteral { value, .. } => classify_expression(builder, value),
         Expression::Binary {
             left,
             op,

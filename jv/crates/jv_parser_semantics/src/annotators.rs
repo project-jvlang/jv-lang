@@ -83,6 +83,7 @@ fn annotate_statement_for_primitives(statement: &mut Statement, tokens: &[Token]
         | Statement::Package { .. }
         | Statement::Comment(_)
         | Statement::Concurrency(_)
+        | Statement::UnitTypeDefinition(_)
         | Statement::ResourceManagement(_) => {}
     }
 }
@@ -248,6 +249,7 @@ fn annotate_statement_for_directives(statement: &mut Statement, tokens: &[Token]
         | Statement::Package { .. }
         | Statement::Comment(_)
         | Statement::Concurrency(_)
+        | Statement::UnitTypeDefinition(_)
         | Statement::ResourceManagement(_) => {}
     }
 }
