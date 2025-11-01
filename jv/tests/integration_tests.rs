@@ -629,13 +629,21 @@ fn cli_build_quick_tour_script_compiles() {
     };
 
     let temp_dir = TempDirGuard::new("cli-quick-tour").expect("create temp dir");
-    let output_dir = temp_dir.path().join("out");
     let quick_tour = workspace_file("examples/quick-tour.jv");
 
+    let script_dir = temp_dir.path().join("quick-tour");
+    fs::create_dir_all(&script_dir)
+        .expect("Quick Tour 用の一時ディレクトリを作成できませんでした");
+    let script_path = script_dir.join("quick-tour.jv");
+    fs::copy(&quick_tour, &script_path)
+        .expect("Quick Tour サンプルを一時ディレクトリへコピーできませんでした");
+
+    let output_dir = script_dir.join("out");
+
     let status = Command::new(&cli_path)
-        .current_dir(temp_dir.path())
+        .current_dir(&script_dir)
         .arg("build")
-        .arg(&quick_tour)
+        .arg(&script_path)
         .arg("--java-only")
         .arg("-o")
         .arg(&output_dir)
@@ -646,6 +654,19 @@ fn cli_build_quick_tour_script_compiles() {
         status.success(),
         "jv build failed for quick-tour example: {:?}",
         status
+    );
+
+    let java_dir = output_dir.join("java25");
+    assert!(
+        java_dir.is_dir(),
+        "Quick Tour の Java 出力ディレクトリが生成されていません: {}",
+        java_dir.display()
+    );
+
+    let java_files = collect_java_sources(&java_dir);
+    assert!(
+        !java_files.is_empty(),
+        "Quick Tour の Java ソースが生成されていません"
     );
 }
 
@@ -1615,15 +1636,17 @@ fn cli_all_subcommands_smoke_test() {
         .output()
         .expect("Failed to run jv build");
     assert!(build_output.status.success());
-    let generated_java: Vec<_> = fs::read_dir(&output_dir)
-        .expect("Failed to read build output")
-        .filter_map(|entry| entry.ok())
-        .map(|entry| entry.path())
-        .filter(|path| path.extension().and_then(|ext| ext.to_str()) == Some("java"))
-        .collect();
+    let java_dir = output_dir.join("java25");
+    assert!(
+        java_dir.is_dir(),
+        "java25 出力ディレクトリが見つかりません: {}",
+        java_dir.display()
+    );
+
+    let generated_java = collect_java_sources(&java_dir);
     assert!(
         !generated_java.is_empty(),
-        "Expected generated Java files, build stdout: {}",
+        "Java ソースが生成されていません。build stdout: {}",
         String::from_utf8_lossy(&build_output.stdout)
     );
 
@@ -1633,7 +1656,18 @@ fn cli_all_subcommands_smoke_test() {
             .arg(&main_path)
             .output()
             .expect("Failed to run jv run");
-        assert!(run_output.status.success());
+        if !run_output.status.success() {
+            let stderr_text = String::from_utf8_lossy(&run_output.stderr);
+            if stderr_text.contains("JDK not available") || stderr_text.contains("JDK not found") {
+                eprintln!("JDK が利用できないため jv run をスキップします: {stderr_text}");
+            } else {
+                panic!(
+                    "jv run が失敗しました。\nstdout: {}\nstderr: {}",
+                    String::from_utf8_lossy(&run_output.stdout),
+                    stderr_text
+                );
+            }
+        }
     } else {
         eprintln!("Skipping jv run command: java runtime or javac missing");
     }
