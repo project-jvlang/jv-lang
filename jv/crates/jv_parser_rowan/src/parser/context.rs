@@ -927,6 +927,21 @@ impl<'tokens> ParserContext<'tokens> {
                     idx += 1;
                 }
             }
+        } else if idx < len {
+            while idx < len && collected[idx].1 != TokenKind::Slash {
+                idx += 1;
+            }
+
+            if idx >= len {
+                self.cursor = original_cursor;
+                return None;
+            }
+
+            idx += 1;
+
+            if idx < len && flag_token_content(collected[idx].2).is_some() {
+                idx += 1;
+            }
         }
 
         let consumed = idx;

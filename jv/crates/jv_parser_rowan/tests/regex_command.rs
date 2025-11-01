@@ -4,7 +4,7 @@ use jv_ast::{
     Expression, RegexCommand, RegexCommandMode, RegexCommandModeOrigin, RegexFlag, Statement,
 };
 use jv_parser_frontend::ParserPipeline;
-use jv_parser_rowan::frontend::RowanPipeline;
+use jv_parser_rowan::{frontend::RowanPipeline, syntax::TokenKind};
 
 fn extract_regex_command(source: &str) -> RegexCommand {
     let program = RowanPipeline::default()
@@ -30,6 +30,34 @@ fn extract_regex_command(source: &str) -> RegexCommand {
     }
 
     panic!("対象となる式を検出できませんでした: {source}");
+}
+
+fn expression_variant(expr: &Expression) -> &'static str {
+    match expr {
+        Expression::Literal(_, _) => "Literal",
+        Expression::RegexLiteral(_) => "RegexLiteral",
+        Expression::RegexCommand(_) => "RegexCommand",
+        Expression::Identifier(_, _) => "Identifier",
+        Expression::Binary { .. } => "Binary",
+        Expression::Unary { .. } => "Unary",
+        Expression::Call { .. } => "Call",
+        Expression::MemberAccess { .. } => "MemberAccess",
+        Expression::NullSafeMemberAccess { .. } => "NullSafeMemberAccess",
+        Expression::IndexAccess { .. } => "IndexAccess",
+        Expression::NullSafeIndexAccess { .. } => "NullSafeIndexAccess",
+        Expression::TypeCast { .. } => "TypeCast",
+        Expression::StringInterpolation { .. } => "StringInterpolation",
+        Expression::MultilineString(_) => "MultilineString",
+        Expression::JsonLiteral(_) => "JsonLiteral",
+        Expression::When { .. } => "When",
+        Expression::If { .. } => "If",
+        Expression::Block { .. } => "Block",
+        Expression::Array { .. } => "Array",
+        Expression::Lambda { .. } => "Lambda",
+        Expression::Try { .. } => "Try",
+        Expression::This(_) => "This",
+        Expression::Super(_) => "Super",
+    }
 }
 
 #[test]
@@ -176,4 +204,112 @@ val joined = i/text/\w+/{ match -> match.group(1).toUpperCase() }/
         }
         other => panic!("ラムダ置換を期待しました: {other:?}"),
     }
+}
+
+#[test]
+fn unit_main_allows_consecutive_regex_commands() {
+    let source = r#"
+fun main(): Unit {
+    val text = "abc"
+    val masked = a/text/'a'/"b"/
+    val first = f/text/'a'/"c"/
+}
+"#;
+
+    let debug = RowanPipeline::default()
+        .execute_with_debug(source)
+        .expect("正規表現コマンド付き関数が構文解析できること");
+
+    let tokens_snapshot: Vec<(usize, usize, TokenKind, String)> = debug
+        .artifacts()
+        .tokens()
+        .iter()
+        .filter(|token| {
+            (3..=5).contains(&token.line) && !TokenKind::from_token(token).is_trivia()
+        })
+        .map(|token| {
+            (
+                token.line,
+                token.column,
+                TokenKind::from_token(token),
+                token.lexeme.clone(),
+            )
+        })
+        .collect();
+
+    let lowered_summary: Vec<String> = debug
+        .statements()
+        .iter()
+        .map(|statement| format!("{statement:?}"))
+        .collect();
+
+    assert!(
+        debug.parser_diagnostics().is_empty(),
+        "parser diagnostics: {:?}",
+        debug.parser_diagnostics()
+    );
+
+    let artifacts = debug.into_artifacts();
+    let program = artifacts.program;
+
+    let body_expr = program
+        .statements
+        .iter()
+        .find_map(|statement| match statement {
+            Statement::FunctionDeclaration { name, body, .. } if name == "main" => Some(body),
+            _ => None,
+        })
+        .expect("main 関数を検出できること");
+
+    let Expression::Block { statements, .. } = body_expr.as_ref() else {
+        panic!("関数本体はブロック式である想定です: {body_expr:?}");
+    };
+
+    let initializer_summary: Vec<(String, &'static str)> = statements
+        .iter()
+        .filter_map(|statement| match statement {
+            Statement::ValDeclaration { name, initializer, .. } => {
+                Some((name.clone(), expression_variant(initializer)))
+            }
+            _ => None,
+        })
+        .collect();
+
+    let statement_summary: Vec<String> = statements
+        .iter()
+        .map(|statement| match statement {
+            Statement::ValDeclaration { name, initializer, .. } => {
+                format!("val {name} = {}", expression_variant(initializer))
+            }
+            other => format!("{other:?}"),
+        })
+        .collect();
+
+    let commands: Vec<&RegexCommand> = statements
+        .iter()
+        .filter_map(|statement| match statement {
+            Statement::ValDeclaration { initializer, .. } => match initializer {
+                Expression::RegexCommand(command) => Some(command.as_ref()),
+                _ => None,
+            },
+            _ => None,
+        })
+        .collect();
+
+    assert_eq!(
+        commands.len(),
+        2,
+        "連続する RegexCommand が2件とも検出されること: {initializer_summary:?} / {statement_summary:?} / {tokens_snapshot:?} / {lowered_summary:?}"
+    );
+
+    assert!(
+        matches!(commands[0].mode, RegexCommandMode::All),
+        "先頭の短縮モード `a/` は RegexCommandMode::All へ解決される想定です: {:?}",
+        commands[0].mode
+    );
+    assert!(
+        matches!(commands[1].mode, RegexCommandMode::First),
+        "2件目の `f/` は RegexCommandMode::First として扱われる想定です: {:?}",
+        commands[1].mode
+    );
 }

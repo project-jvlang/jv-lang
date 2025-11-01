@@ -1160,6 +1160,7 @@ mod tests {
 
 mod expression_parser {
     use super::*;
+    use crate::syntax::TokenKind;
 
     #[derive(Debug)]
     #[allow(dead_code)]
@@ -1205,6 +1206,29 @@ mod expression_parser {
         flags_index: Option<usize>,
         end_index: usize,
     }
+
+    const STATEMENT_BOUNDARY_KINDS: &[TokenKind] = &[
+        TokenKind::Semicolon,
+        TokenKind::Newline,
+        TokenKind::RightBrace,
+        TokenKind::PackageKw,
+        TokenKind::ImportKw,
+        TokenKind::ValKw,
+        TokenKind::VarKw,
+        TokenKind::FunKw,
+        TokenKind::ClassKw,
+        TokenKind::DataKw,
+        TokenKind::WhenKw,
+        TokenKind::ForKw,
+        TokenKind::ReturnKw,
+        TokenKind::ThrowKw,
+        TokenKind::BreakKw,
+        TokenKind::ContinueKw,
+        TokenKind::UseKw,
+        TokenKind::DeferKw,
+        TokenKind::SpawnKw,
+        TokenKind::Eof,
+    ];
 
     #[derive(Clone)]
     struct ParsedExpr {
@@ -1421,7 +1445,17 @@ mod expression_parser {
                 expr = self.parse_postfix(expr, kind)?;
             }
 
-            if self.peek_token().is_some() {
+            while let Some(token) = self.peek_token() {
+                let kind = TokenKind::from_token(token);
+                if kind.is_trivia() {
+                    self.pos += 1;
+                    continue;
+                }
+
+                if STATEMENT_BOUNDARY_KINDS.contains(&kind) {
+                    return Ok(expr.expr);
+                }
+
                 let span = self.span_at(self.pos);
                 return Err(ExpressionError::new(
                     "式の末尾に解釈できないトークンがあります",
