@@ -1239,8 +1239,9 @@ mod tests {
 
     #[test]
     fn labeled_boolean_when_skips_conditional_fallback() {
-        let expr =
-            parse_when_expression("#status when (flag) { true -> \"on\" false -> \"off\" }\n");
+        let expr = parse_when_expression(
+            "#status when (flag) {\n    true -> \"on\"\n    false -> \"off\"\n}\n",
+        );
 
         let Expression::When {
             expr: subject,
