@@ -28,6 +28,8 @@ const SYNC_TOKENS: &[TokenKind] = &[
     TokenKind::Eof,
 ];
 
+const FORBIDDEN_IF_DIAGNOSTIC: &str = "JV3103: if expressions are not supported; use when instead.\nJV3103: if式はサポートされていません。when式を使用してください。\nQuick Fix: when.convert.if -> when { 条件 -> 真分岐; else -> 偽分岐 } (例: if (x > 0) a else b => when { x > 0 -> a; else -> b })\nQuick Fix: when.convert.if -> when { condition -> thenBranch; else -> elseBranch } (Example: if (x > 0) a else b => when { x > 0 -> a; else -> b })";
+
 #[derive(Default)]
 struct WhenBlockState {
     brace_depth: usize,
@@ -728,6 +730,18 @@ impl<'tokens> ParserContext<'tokens> {
                 _ => {}
             }
 
+            if at_top_level && kind == TokenKind::IfKw {
+                let span = TokenSpan::new(self.cursor, self.cursor.saturating_add(1));
+                self.push_diagnostic(ParserDiagnostic::new(
+                    FORBIDDEN_IF_DIAGNOSTIC,
+                    DiagnosticSeverity::Error,
+                    span,
+                ));
+                self.consume_forbidden_if_expression(terminators, respect_statement_boundaries);
+                self.reset_active_expression_state();
+                break;
+            }
+
             if respect_statement_boundaries && kind == TokenKind::LeftBrace && !started_when_block {
                 if let Some(state) = self.expression_states.last_mut() {
                     state.on_left_brace();
@@ -748,6 +762,74 @@ impl<'tokens> ParserContext<'tokens> {
         consumed
     }
 
+    fn consume_forbidden_if_expression(
+        &mut self,
+        terminators: &[TokenKind],
+        respect_statement_boundaries: bool,
+    ) {
+        if self.peek_significant_kind() != Some(TokenKind::IfKw) {
+            return;
+        }
+
+        self.bump_raw(); // 'if'
+
+        let mut depth_paren = 0usize;
+        let mut depth_brace = 0usize;
+        let mut depth_bracket = 0usize;
+
+        while let Some(token) = self.current_token() {
+            let kind = TokenKind::from_token(token);
+
+            if kind == TokenKind::Eof {
+                self.bump_raw();
+                break;
+            }
+
+            if kind.is_trivia() {
+                self.bump_raw();
+                continue;
+            }
+
+            let at_top_level = depth_paren == 0 && depth_brace == 0 && depth_bracket == 0;
+
+            if at_top_level && terminators.contains(&kind) {
+                break;
+            }
+
+            if respect_statement_boundaries && at_top_level && SYNC_TOKENS.contains(&kind) {
+                break;
+            }
+
+            match kind {
+                TokenKind::LeftParen => depth_paren = depth_paren.saturating_add(1),
+                TokenKind::RightParen => {
+                    if depth_paren > 0 {
+                        depth_paren -= 1;
+                    }
+                }
+                TokenKind::LeftBrace => depth_brace = depth_brace.saturating_add(1),
+                TokenKind::RightBrace => {
+                    if depth_brace > 0 {
+                        depth_brace -= 1;
+                    } else {
+                        break;
+                    }
+                }
+                TokenKind::LeftBracket => depth_bracket = depth_bracket.saturating_add(1),
+                TokenKind::RightBracket => {
+                    if depth_bracket > 0 {
+                        depth_bracket -= 1;
+                    } else {
+                        break;
+                    }
+                }
+                _ => {}
+            }
+
+            self.bump_raw();
+        }
+    }
+
     fn try_start_regex_command_node(&mut self) -> Option<(usize, TokenKind, Option<TokenKind>)> {
         let original_cursor = self.cursor;
         let mut collected: Vec<(usize, TokenKind, &Token)> = Vec::new();
@@ -760,17 +842,17 @@ impl<'tokens> ParserContext<'tokens> {
                 break;
             }
 
-            if !kind.is_trivia() {
-                if !collected.is_empty()
-                    && matches!(
-                        kind,
-                        TokenKind::Semicolon | TokenKind::Newline | TokenKind::RightBrace
-                    )
-                {
-                    break;
-                }
-                collected.push((raw_index, kind, token));
+            if kind.is_trivia() {
+                raw_index += 1;
+                continue;
             }
+
+            if !collected.is_empty() && matches!(kind, TokenKind::Semicolon | TokenKind::RightBrace)
+            {
+                break;
+            }
+
+            collected.push((raw_index, kind, token));
 
             raw_index += 1;
         }

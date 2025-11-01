@@ -1,9 +1,12 @@
 use jv_lexer::Lexer;
 use rowan::SyntaxNode;
 
+use crate::frontend::RowanPipeline;
 use crate::parser::parse;
 use crate::syntax::SyntaxKind;
 use crate::{JvLanguage, ParseBuilder, ParseEvent};
+use jv_ast::Statement;
+use jv_parser_frontend::ParserPipeline;
 
 fn lex(input: &str) -> Vec<jv_lexer::Token> {
     let mut lexer = Lexer::new(input.to_string());
@@ -135,6 +138,153 @@ fn function_without_parentheses_forms_empty_parameter_list() {
             .children()
             .any(|child| child.kind() == SyntaxKind::FunctionParameter),
         "parameter list should be empty when parentheses are omitted"
+    );
+}
+
+#[test]
+fn parses_if_expression_in_val_initializer() {
+    let source = r#"
+        fun main() {
+            val value = if (true) 1 else 0
+        }
+    "#;
+
+    let tokens = lex(source);
+    let output = parse(&tokens);
+
+    assert!(
+        output
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("JV3103")),
+        "expected JV3103 diagnostic for if expression initializer, got {:?}",
+        output.diagnostics
+    );
+    assert!(
+        !output.recovered,
+        "parser should not need recovery for if expression initializer"
+    );
+}
+
+#[test]
+fn regex_command_example_first_statement_is_regex_command() {
+    let source = include_str!("../../../../examples/regex-command.jv");
+    let pipeline = RowanPipeline::default();
+    let output = pipeline.parse(source).expect("example should parse");
+    let program = output.into_program();
+    let function_body = match program
+        .statements
+        .iter()
+        .find(|statement| matches!(statement, Statement::FunctionDeclaration { name, .. } if name == "main"))
+    {
+        Some(Statement::FunctionDeclaration { body, .. }) => body,
+        other => panic!("expected function declaration, found {:?}", other),
+    };
+
+    let block_statements = match function_body.as_ref() {
+        jv_ast::Expression::Block { statements, .. } => statements,
+        other => panic!("expected function body block, found {:?}", other),
+    };
+
+    let initializer = block_statements
+        .iter()
+        .find_map(|statement| match statement {
+            Statement::ValDeclaration { initializer, .. } => match initializer {
+                jv_ast::Expression::RegexCommand(_) => Some(initializer),
+                _ => None,
+            },
+            _ => None,
+        })
+        .expect("example should include a regex command val declaration");
+
+    if !matches!(initializer, jv_ast::Expression::RegexCommand(_)) {
+        panic!(
+            "expected regex command initializer, found {:?}",
+            initializer
+        );
+    }
+}
+
+#[test]
+fn short_mode_regex_command_with_flags_parses() {
+    let source = r#"
+        fun main() {
+            val auditLog = "USER=Akira ACTION=login"
+            // comment preceding regex command
+            val masked = a/auditLog/'ip=\d+'/"mask"/ims
+        }
+    "#;
+
+    let pipeline = RowanPipeline::default();
+    let output = pipeline.parse(source).expect("snippet should parse");
+    let program = output.into_program();
+    let function = match program
+        .statements
+        .iter()
+        .find(|statement| matches!(statement, Statement::FunctionDeclaration { .. }))
+    {
+        Some(Statement::FunctionDeclaration { body, .. }) => body,
+        other => panic!("expected function declaration, found {:?}", other),
+    };
+
+    let block = match function.as_ref() {
+        jv_ast::Expression::Block { statements, .. } => statements,
+        other => panic!("expected function body block, found {:?}", other),
+    };
+
+    let declaration = match block.iter().find(
+        |statement| matches!(statement, Statement::ValDeclaration { name, .. } if name == "masked"),
+    ) {
+        Some(Statement::ValDeclaration { initializer, .. }) => initializer,
+        other => panic!("expected val declaration, found {:?}", other),
+    };
+
+    assert!(
+        matches!(declaration, jv_ast::Expression::RegexCommand(_)),
+        "short mode regex command should parse"
+    );
+}
+
+#[test]
+fn regex_command_allows_trivia_between_segments() {
+    let source = r#"
+        fun main() {
+            val subject = "USER=Akira ACTION=login"
+            val result = a
+                /subject
+                // コメントでセグメントを区切っても認識されることを確認
+                /'USER=\w+'/"USER=***"
+                /ims
+        }
+    "#;
+
+    let pipeline = RowanPipeline::default();
+    let output = pipeline.parse(source).expect("snippet should parse");
+    let program = output.into_program();
+    let function_body = match program
+        .statements
+        .iter()
+        .find(|statement| matches!(statement, Statement::FunctionDeclaration { .. }))
+    {
+        Some(Statement::FunctionDeclaration { body, .. }) => body,
+        other => panic!("expected function declaration, found {:?}", other),
+    };
+
+    let block_statements = match function_body.as_ref() {
+        jv_ast::Expression::Block { statements, .. } => statements,
+        other => panic!("expected block expression, found {:?}", other),
+    };
+
+    let initializer = match block_statements.iter().find(
+        |statement| matches!(statement, Statement::ValDeclaration { name, .. } if name == "result"),
+    ) {
+        Some(Statement::ValDeclaration { initializer, .. }) => initializer,
+        other => panic!("expected val declaration named result, found {:?}", other),
+    };
+
+    assert!(
+        matches!(initializer, jv_ast::Expression::RegexCommand(_)),
+        "regex command with コメント・改行を挟んだケースが正しく解析されるべき"
     );
 }
 
