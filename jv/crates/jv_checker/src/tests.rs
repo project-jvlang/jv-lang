@@ -9,9 +9,9 @@ use fastrand::Rng;
 use jv_ast::{
     Annotation, AnnotationName, BinaryMetadata, BinaryOp, Expression, IsTestKind, IsTestMetadata,
     Literal, Modifiers, Parameter, ParameterModifiers, Pattern, Program, RegexCommand,
-    RegexCommandMode, RegexCommandModeOrigin, RegexFlag, RegexGuardStrategy, SequenceDelimiter,
-    RegexLambdaReplacement, RegexLiteral, RegexLiteralReplacement, RegexReplacement, Span,
-    Statement, TypeAnnotation, ValBindingOrigin, WhenArm,
+    RegexCommandMode, RegexCommandModeOrigin, RegexFlag, RegexGuardStrategy,
+    RegexLambdaReplacement, RegexLiteral, RegexLiteralReplacement, RegexReplacement,
+    SequenceDelimiter, Span, Statement, TypeAnnotation, ValBindingOrigin, WhenArm,
 };
 use jv_inference::TypeFacts;
 use jv_inference::types::{NullabilityFlag, TypeVariant as FactsTypeVariant};
@@ -312,11 +312,16 @@ fn normalized_program_preserves_whitespace_arrays() {
         .expect("normalized program should contain the declaration");
 
     let Statement::ValDeclaration { initializer, .. } = statement else {
-        panic!("expected val declaration in normalized program, found {:?}", statement);
+        panic!(
+            "expected val declaration in normalized program, found {:?}",
+            statement
+        );
     };
 
     let Expression::Array {
-        elements, delimiter, ..
+        elements,
+        delimiter,
+        ..
     } = initializer
     else {
         panic!(

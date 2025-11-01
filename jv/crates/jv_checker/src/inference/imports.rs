@@ -2,6 +2,7 @@ use crate::imports::{ResolvedImport, ResolvedImportKind};
 use crate::inference::environment::{TypeEnvironment, TypeScheme};
 use crate::inference::type_factory::TypeFactory;
 use crate::inference::types::TypeKind;
+use crate::symbol_index::java::{fallback_fqcn, fallback_fqcn_in_package};
 use jv_build::metadata::{JavaMethodSignature, StaticMemberKind, SymbolIndex};
 use jv_ir::types::JavaType;
 use std::collections::{HashMap, HashSet};
@@ -40,7 +41,8 @@ impl ImportRegistry {
                 ResolvedImportKind::Type { fqcn } => {
                     let alias = import
                         .alias
-                        .clone()
+                        .as_deref()
+                        .map(normalize_alias)
                         .unwrap_or_else(|| simple_name(&import.original_path).to_string());
                     self.register_type_alias(env, alias, fqcn.clone());
                 }
@@ -102,9 +104,21 @@ impl ImportRegistry {
     }
 
     fn register_type_alias(&mut self, env: &mut TypeEnvironment, alias: String, fqcn: String) {
+        self.register_reference_alias(env, alias, fqcn);
+    }
+
+    fn register_reference_alias(
+        &mut self,
+        env: &mut TypeEnvironment,
+        alias: impl Into<String>,
+        fqcn: impl Into<String>,
+    ) -> TypeKind {
+        let alias = alias.into();
+        let fqcn = fqcn.into();
         self.type_aliases.insert(alias.clone(), fqcn.clone());
         let ty = TypeKind::reference(fqcn);
-        env.define_scheme(alias, TypeScheme::monotype(ty));
+        env.define_scheme(alias, TypeScheme::monotype(ty.clone()));
+        ty
     }
 
     fn resolve_type_from_wildcard(
@@ -115,13 +129,18 @@ impl ImportRegistry {
         for package in &self.package_wildcards {
             let candidate = format!("{package}.{name}");
             if self.symbol_index.lookup_type(&candidate).is_some() {
-                let ty = TypeKind::reference(candidate.clone());
-                self.type_aliases
-                    .insert(name.to_string(), candidate.clone());
-                env.define_scheme(name.to_string(), TypeScheme::monotype(ty.clone()));
-                return Some(ty);
+                return Some(self.register_reference_alias(env, name, candidate));
+            }
+
+            if let Some(fallback) = fallback_fqcn_in_package(package, name) {
+                return Some(self.register_reference_alias(env, name, fallback));
             }
         }
+
+        if let Some(fqcn) = fallback_fqcn(name) {
+            return Some(self.register_reference_alias(env, name, fqcn));
+        }
+
         None
     }
 
@@ -209,6 +228,27 @@ fn java_type_to_type_kind(java_type: &JavaType) -> TypeKind {
 
 fn simple_name(path: &str) -> &str {
     path.rsplit('.').next().unwrap_or(path)
+}
+
+fn normalize_alias(alias: &str) -> String {
+    let trimmed = alias.trim();
+    if let Some(rest) = trimmed.strip_prefix("as ") {
+        return rest.trim().to_string();
+    }
+
+    if trimmed.len() > 2 && trimmed.starts_with("as") {
+        let remainder = trimmed[2..].trim_start();
+        if remainder
+            .chars()
+            .next()
+            .map(|ch| ch.is_ascii_uppercase())
+            .unwrap_or(false)
+        {
+            return remainder.to_string();
+        }
+    }
+
+    trimmed.to_string()
 }
 
 #[cfg(test)]

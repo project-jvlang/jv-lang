@@ -8,6 +8,7 @@ pub mod java;
 pub mod null_safety;
 pub mod pattern;
 pub mod regex;
+pub mod symbol_index;
 pub mod telemetry;
 
 pub use inference::{
@@ -692,10 +693,7 @@ impl TypeChecker {
         let typings: Vec<RegexCommandTyping> = if let Some(snapshot) = self.snapshot.as_ref() {
             snapshot.regex_command_typings().to_vec()
         } else {
-            self.engine
-                .environment()
-                .regex_command_typings()
-                .to_vec()
+            self.engine.environment().regex_command_typings().to_vec()
         };
 
         let mut metrics = RegexCommandTelemetry::default();

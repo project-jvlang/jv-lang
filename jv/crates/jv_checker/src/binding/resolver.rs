@@ -8,6 +8,56 @@ use jv_ast::{
     TryCatchClause, ValBindingOrigin,
 };
 
+pub fn normalize_import_aliases(program: &mut Program) {
+    let mut new_statements = Vec::with_capacity(program.statements.len());
+    let mut import_index = 0usize;
+    let original_statements = std::mem::take(&mut program.statements);
+
+    for statement in original_statements {
+        match statement {
+            Statement::Import { .. } => {
+                import_index += 1;
+                new_statements.push(statement);
+            }
+            Statement::Expression { expr, span }
+                if matches!(expr, Expression::Identifier(_, _)) && import_index > 0 =>
+            {
+                let alias_candidate = match &expr {
+                    Expression::Identifier(name, _) => extract_alias(name),
+                    _ => None,
+                };
+
+                if let Some(alias_name) = alias_candidate {
+                    if let Some(Statement::Import { alias, .. }) =
+                        program.imports.get_mut(import_index - 1)
+                    {
+                        if alias.is_none() && !alias_name.is_empty() {
+                            *alias = Some(alias_name);
+                            continue;
+                        }
+                    }
+                }
+
+                new_statements.push(Statement::Expression { expr, span });
+            }
+            other => new_statements.push(other),
+        }
+    }
+
+    program.statements = new_statements;
+}
+
+fn extract_alias(identifier: &str) -> Option<String> {
+    let trimmed = identifier.trim();
+    if let Some(remainder) = trimmed.strip_prefix("as") {
+        let alias = remainder.trim();
+        if !alias.is_empty() {
+            return Some(alias.to_string());
+        }
+    }
+    None
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct BindingUsageSummary {
     pub explicit: usize,
@@ -93,11 +143,13 @@ impl BindingResolver {
 
     fn resolve(mut self, program: &Program) -> BindingResolution {
         let mut normalized = program.clone();
+        normalize_import_aliases(&mut normalized);
         self.enter_scope();
-        for import in &program.imports {
+        for import in &normalized.imports {
             self.register_import_binding(import);
         }
-        normalized.statements = self.resolve_statements(program.statements.clone());
+        let resolved_statements = self.resolve_statements(normalized.statements.clone());
+        normalized.statements = resolved_statements;
         self.exit_scope();
 
         BindingResolution {
