@@ -3,9 +3,9 @@ use crate::constraint::CapabilityResolutionError;
 use crate::kind::solver::describe_kind;
 use crate::solver::GenericSolverDiagnostic;
 use crate::types::{BoundPredicate, CapabilityBound, SymbolId, TypeId, TypeKind};
-use jv_ast::types::Kind;
 use jv_ast::Span;
-use jv_support::{load_catalog, LocaleCode};
+use jv_ast::types::Kind;
+use jv_support::{LocaleCode, load_catalog};
 use std::collections::HashMap;
 
 /// Human-readable diagnostic entry describing issues discovered while resolving
@@ -491,10 +491,12 @@ mod tests {
         assert!(translated.message.contains("Int"));
         assert!(translated.message.contains("String"));
         assert_eq!(translated.span, Some(candidate_span));
-        assert!(translated
-            .notes
-            .iter()
-            .any(|note| note.contains("--explain JV2001")));
+        assert!(
+            translated
+                .notes
+                .iter()
+                .any(|note| note.contains("--explain JV2001"))
+        );
     }
 
     #[test]
@@ -509,9 +511,11 @@ mod tests {
         };
 
         let translated = translate_solver_diagnostic(LocaleCode::En, &diagnostic);
-        assert!(translated
-            .message
-            .contains("Multiple candidates were inferred"));
+        assert!(
+            translated
+                .message
+                .contains("Multiple candidates were inferred")
+        );
     }
 
     #[test]

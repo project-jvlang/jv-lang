@@ -3,8 +3,8 @@ use std::time::Instant;
 
 use jv_build::metadata::{ConversionCatalog, JavaMethodSignature, SymbolIndex, TypeEntry};
 use jv_checker::inference::{
-    conversions::ConversionHelperCatalog, Constraint, ConstraintKind, ConstraintSet,
-    ConstraintSolver, PrimitiveType, TypeKind,
+    Constraint, ConstraintKind, ConstraintSet, ConstraintSolver, PrimitiveType, TypeKind,
+    conversions::ConversionHelperCatalog,
 };
 
 const BASELINE_MS: f64 = 80.0;

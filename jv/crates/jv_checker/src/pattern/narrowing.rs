@@ -2,8 +2,8 @@ use super::expression_span;
 use super::facts::{
     ArmId, NarrowedBinding, NarrowedNullability, NarrowingFacts, NarrowingSnapshot,
 };
-use jv_ast::expression::ImplicitWhenEnd;
 use jv_ast::Span;
+use jv_ast::expression::ImplicitWhenEnd;
 use jv_ast::{Expression, Literal, Pattern};
 
 /// Produces branch-level narrowing snapshots for a `when` expression.

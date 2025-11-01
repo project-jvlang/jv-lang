@@ -559,11 +559,7 @@ impl ReturnTypeAccumulator {
     }
 
     fn into_option(self) -> Option<JavaType> {
-        if self.conflicted {
-            None
-        } else {
-            self.value
-        }
+        if self.conflicted { None } else { self.value }
     }
 }
 

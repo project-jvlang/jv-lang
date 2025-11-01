@@ -129,7 +129,7 @@ pub type ReconstructionResult<T = ReconstructedAst> = Result<T, ReconstructionEr
 
 pub use diagnostics::{DiagnosticsSummary, WarningSummary};
 pub use emit::AstArtifactWriter;
-pub use loader::{load_ir_program, IrArtifactSource};
+pub use loader::{IrArtifactSource, load_ir_program};
 
 /// Errors that can occur while attempting to rebuild an AST from IR data.
 #[derive(Debug, Error)]

@@ -4,6 +4,7 @@
 //! `TypeScheme` として公開する。タスク5では特に関数パラメータ・デフォルト値・
 //! return 経路を制約に反映し、解決結果から曖昧なシグネチャを検出する。
 
+use crate::InferenceTelemetry;
 use crate::imports::ResolvedImport;
 use crate::inference::constraint::ConstraintGenerator;
 use crate::inference::conversions::ConversionHelperCatalog;
@@ -12,7 +13,6 @@ use crate::inference::imports::ImportRegistry;
 use crate::inference::prelude;
 use crate::inference::types::{TypeBinding, TypeId, TypeKind};
 use crate::inference::unify::{ConstraintSolver, SolveError, SolveResult};
-use crate::InferenceTelemetry;
 use jv_ast::{Program, Statement};
 use jv_build::metadata::{ConversionCatalogCache, SymbolIndex};
 use jv_inference::ParallelInferenceConfig;

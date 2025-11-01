@@ -1,6 +1,6 @@
 use std::io::Write;
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use jv_parser_frontend::ParserPipeline;
 use jv_parser_rowan::frontend::RowanPipeline;
 
@@ -179,8 +179,10 @@ mod tests {
 
     #[test]
     fn extension_function_mentions_utilities() {
-        assert!(LESSONS[1]
-            .java_output
-            .contains("public final class StringExtensions"));
+        assert!(
+            LESSONS[1]
+                .java_output
+                .contains("public final class StringExtensions")
+        );
     }
 }

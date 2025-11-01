@@ -6,18 +6,18 @@ use std::process::Command;
 use anyhow::{Context, Result};
 use jv_ast::{BinaryOp, CallArgumentStyle, Literal, Span};
 use jv_checker::{
-    diagnostics::{
-        collect_raw_type_diagnostics, from_check_error, from_parse_error, from_transform_error,
-        DiagnosticStrategy,
-    },
     CheckError, TypeChecker,
+    diagnostics::{
+        DiagnosticStrategy, collect_raw_type_diagnostics, from_check_error, from_parse_error,
+        from_transform_error,
+    },
 };
 use jv_cli::format_tooling_diagnostic;
 use jv_codegen_java::{JavaCodeGenConfig, JavaCodeGenerator};
 use jv_ir::{
-    transform_program, IrCaseLabel, IrDeconstructionComponent, IrDeconstructionPattern,
-    IrExpression, IrModifiers, IrParameter, IrProgram, IrRecordComponent, IrStatement,
-    IrSwitchCase, IrVisibility, JavaType,
+    IrCaseLabel, IrDeconstructionComponent, IrDeconstructionPattern, IrExpression, IrModifiers,
+    IrParameter, IrProgram, IrRecordComponent, IrStatement, IrSwitchCase, IrVisibility, JavaType,
+    transform_program,
 };
 use jv_parser_frontend::ParserPipeline;
 use jv_parser_rowan::frontend::RowanPipeline;

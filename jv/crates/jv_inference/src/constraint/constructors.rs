@@ -273,8 +273,8 @@ fn should_record_empty(input: &ConstructorConstraintInput) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::constraint::incremental::IncrementalConstraintBuilder as IncrBuilder;
     use crate::constraint::ConstraintGraph;
+    use crate::constraint::incremental::IncrementalConstraintBuilder as IncrBuilder;
     use crate::diagnostics::ConstructorDiagnosticKind;
     use crate::types::{TypeId, TypeKind, TypeVariant};
 

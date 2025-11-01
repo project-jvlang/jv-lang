@@ -8,28 +8,28 @@ use jv_ast::{
     Argument, ConstParameter, Expression, GenericParameter, GenericSignature, Program,
     RegexLiteral, Span, Statement, StringPart, TypeAnnotation,
 };
+use jv_build::BuildConfig;
 use jv_build::metadata::{
     BuildContext as SymbolBuildContext, SymbolIndexBuilder, SymbolIndexCache,
 };
-use jv_build::BuildConfig;
 use jv_checker::diagnostics::{
+    DiagnosticSeverity as ToolingSeverity, DiagnosticStrategy, EnhancedDiagnostic,
     collect_raw_type_diagnostics, from_check_error, from_frontend_diagnostics, from_parse_error,
-    from_transform_error, DiagnosticSeverity as ToolingSeverity, DiagnosticStrategy,
-    EnhancedDiagnostic,
+    from_transform_error,
 };
 use jv_checker::imports::{
-    diagnostics as import_diagnostics, ImportResolutionService, ResolvedImport, ResolvedImportKind,
+    ImportResolutionService, ResolvedImport, ResolvedImportKind, diagnostics as import_diagnostics,
 };
 use jv_checker::regex::RegexValidator;
 use jv_checker::{CheckError, RegexAnalysis, TypeChecker};
 use jv_inference::{
+    ParallelInferenceConfig, TypeFacts,
     service::{TypeFactsSnapshot, TypeLevelValue},
     solver::Variance,
     types::{SymbolId, TypeId},
-    ParallelInferenceConfig, TypeFacts,
 };
 use jv_ir::types::{IrImport, IrImportDetail};
-use jv_ir::{transform_program_with_context, TransformContext};
+use jv_ir::{TransformContext, transform_program_with_context};
 use jv_lexer::{Token, TokenMetadata, TokenType};
 use jv_parser_frontend::ParserPipeline;
 use jv_parser_rowan::frontend::RowanPipeline;
@@ -1163,10 +1163,16 @@ fn enrich_generic_diagnostics(
         }
 
         let suggestion = match code {
-            "JV2008" => "型引数のkind注釈か部分適用を調整し、推論されたkindと一致させてください。ホバーで期待kindを確認できます。",
-            "JV3101" => "型レベル式の入力とconstパラメータを見直し、評価が収束するように境界やデフォルト値を修正してください。",
+            "JV2008" => {
+                "型引数のkind注釈か部分適用を調整し、推論されたkindと一致させてください。ホバーで期待kindを確認できます。"
+            }
+            "JV3101" => {
+                "型レベル式の入力とconstパラメータを見直し、評価が収束するように境界やデフォルト値を修正してください。"
+            }
             "JV3102" => "型レベル式の上下限・比較対象を揃え、同じ型に統一してください。",
-            "JV3202" => "raw型を避けるようにconstパラメータや境界を補い、安全な型情報を提供してください。",
+            "JV3202" => {
+                "raw型を避けるようにconstパラメータや境界を補い、安全な型情報を提供してください。"
+            }
             _ => continue,
         };
 
