@@ -5,7 +5,7 @@
 //! Chumsky ベースのローワラーは既存の `TypeAnnotation` から同じインターフェースで
 //! 型情報を取得できる。
 
-use jv_ast::{Span, TypeAnnotation};
+use jv_ast::{types::UnitSymbol, Span, TypeAnnotation};
 use jv_lexer::{Token, TokenType};
 use std::borrow::Cow;
 use thiserror::Error;
@@ -217,6 +217,14 @@ impl<'a> TypeAnnotationParser<'a> {
             self.parse_named_type()?
         };
 
+        if let Some((unit_symbol, implicit)) = self.try_parse_unit_suffix()? {
+            ty = TypeAnnotation::Unit {
+                base: Box::new(ty),
+                unit: unit_symbol,
+                implicit,
+            };
+        }
+
         while self
             .consume_if(|kind| matches!(kind, TokenType::LeftBracket))
             .is_some()
@@ -274,6 +282,104 @@ impl<'a> TypeAnnotationParser<'a> {
         } else {
             Ok(TypeAnnotation::Simple(name))
         }
+    }
+
+    fn try_parse_unit_suffix(&mut self) -> Result<Option<(UnitSymbol, bool)>, ParseError> {
+        if self.peek_is(|kind| matches!(kind, TokenType::At)) {
+            self.advance();
+            if self.peek_is(|kind| matches!(kind, TokenType::LeftBracket))
+                && self.peek_n_is(1, |kind| matches!(kind, TokenType::RightBracket))
+            {
+                return Err(ParseError::new(
+                    "単位注釈に識別子が指定されていません",
+                    self.peek().map(span_from_token),
+                ));
+            }
+
+            let symbol = if self.peek_is(|kind| matches!(kind, TokenType::Identifier(_))) {
+                self.parse_identifier_symbol()?
+            } else if self.peek_is(|kind| matches!(kind, TokenType::LeftBracket)) {
+                self.parse_bracket_symbol()?
+            } else {
+                return Err(ParseError::new(
+                    "単位注釈の形式が正しくありません",
+                    self.peek().map(span_from_token),
+                ));
+            };
+
+            return Ok(Some((symbol, false)));
+        }
+
+        if self.peek_is(|kind| matches!(kind, TokenType::Identifier(_))) {
+            let symbol = self.parse_identifier_symbol()?;
+            return Ok(Some((symbol, true)));
+        }
+
+        if self.peek_is(|kind| matches!(kind, TokenType::LeftBracket))
+            && !self.peek_n_is(1, |kind| matches!(kind, TokenType::RightBracket))
+        {
+            let symbol = self.parse_bracket_symbol()?;
+            return Ok(Some((symbol, true)));
+        }
+
+        Ok(None)
+    }
+
+    fn parse_identifier_symbol(&mut self) -> Result<UnitSymbol, ParseError> {
+        let ident = self.expect_identifier()?;
+        let mut name = identifier_text(ident)
+            .map(str::to_string)
+            .ok_or_else(|| {
+                ParseError::new(
+                    "単位注釈の識別子が取得できませんでした",
+                    Some(span_from_token(ident)),
+                )
+            })?;
+        let mut span = span_from_token(ident);
+        let mut has_default_marker = false;
+
+        if self.peek_is(|kind| matches!(kind, TokenType::Not)) {
+            let bang = self.advance().unwrap();
+            name.push_str(bang.lexeme.as_str());
+            let bang_span = span_from_token(bang);
+            span = merge_spans(&span, &bang_span);
+            has_default_marker = true;
+        }
+
+        Ok(UnitSymbol {
+            name,
+            is_bracketed: false,
+            has_default_marker,
+            span,
+        })
+    }
+
+    fn parse_bracket_symbol(&mut self) -> Result<UnitSymbol, ParseError> {
+        let open = self.expect(|kind| matches!(kind, TokenType::LeftBracket), "`[`")?;
+        let mut text = open.lexeme.clone();
+        let mut span = span_from_token(open);
+        let mut has_default_marker = false;
+
+        loop {
+            let token = self.advance().ok_or_else(|| {
+                ParseError::new("単位注釈の括弧が閉じていません", Some(span.clone()))
+            })?;
+            text.push_str(token.lexeme.as_str());
+            let token_span = span_from_token(token);
+            span = merge_spans(&span, &token_span);
+            match token.token_type {
+                TokenType::RightBracket => break,
+                TokenType::Not => has_default_marker = true,
+                _ => {}
+            }
+        }
+
+        Ok(UnitSymbol {
+            name: text,
+            is_bracketed: true,
+            has_default_marker,
+            span,
+        })
     }
 
     fn parse_type_arguments(&mut self) -> Result<Vec<TypeAnnotation>, ParseError> {
@@ -371,6 +477,16 @@ impl<'a> TypeAnnotationParser<'a> {
         F: Fn(&TokenType) -> bool,
     {
         self.peek()
+            .map(|token| predicate(&token.token_type))
+            .unwrap_or(false)
+    }
+
+    fn peek_n_is<F>(&self, offset: usize, predicate: F) -> bool
+    where
+        F: Fn(&TokenType) -> bool,
+    {
+        self.tokens
+            .get(self.position + offset)
             .map(|token| predicate(&token.token_type))
             .unwrap_or(false)
     }
@@ -504,6 +620,46 @@ mod tests {
                         TypeAnnotation::Simple("Error".into())
                     ]
                 );
+            }
+            other => panic!("unexpected annotation: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn lower_unit_type_annotation_with_at() {
+        let tokens = vec![
+            token(TokenType::Identifier("Double".into()), "Double"),
+            token(TokenType::At, "@"),
+            token(TokenType::Identifier("km".into()), "km"),
+        ];
+        let lowered = lower_type_annotation_from_tokens(&tokens).expect("should lower");
+        match lowered.annotation() {
+            TypeAnnotation::Unit { base, unit, implicit } => {
+                assert!(!implicit);
+                assert_eq!(*base, TypeAnnotation::Simple("Double".into()));
+                assert_eq!(unit.name, "km");
+                assert!(!unit.is_bracketed);
+                assert!(!unit.has_default_marker);
+            }
+            other => panic!("unexpected annotation: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn lower_unit_type_annotation_with_bracket() {
+        let tokens = vec![
+            token(TokenType::Identifier("Double".into()), "Double"),
+            token(TokenType::LeftBracket, "["),
+            token(TokenType::Identifier("℃".into()), "℃"),
+            token(TokenType::RightBracket, "]"),
+        ];
+        let lowered = lower_type_annotation_from_tokens(&tokens).expect("should lower");
+        match lowered.annotation() {
+            TypeAnnotation::Unit { base, unit, implicit } => {
+                assert!(implicit);
+                assert_eq!(*base, TypeAnnotation::Simple("Double".into()));
+                assert_eq!(unit.name, "[℃]");
+                assert!(unit.is_bracketed);
             }
             other => panic!("unexpected annotation: {:?}", other),
         }

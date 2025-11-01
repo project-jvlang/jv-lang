@@ -6,8 +6,11 @@ use jv_ast::strings::MultilineKind;
 use jv_ast::{
     expression::{Argument, Parameter, ParameterProperty, StringPart},
     json::{JsonLiteral, JsonValue},
-    statement::{ConcurrencyConstruct, LoopStrategy, ResourceManagement, ValBindingOrigin},
-    types::{BinaryOp, Literal, Modifiers, Pattern, TypeAnnotation},
+    statement::{
+        ConcurrencyConstruct, LoopStrategy, ResourceManagement, UnitConversionKind,
+        UnitRelation, UnitTypeDefinition, UnitTypeMember, ValBindingOrigin,
+    },
+    types::{BinaryOp, Literal, Modifiers, Pattern, TypeAnnotation, UnitSymbol},
     BindingPatternKind, Expression, Statement,
 };
 use jv_lexer::{Lexer, Token, TokenTrivia, TokenType};
@@ -25,6 +28,154 @@ fn make_token(column: &mut usize, token_type: TokenType, lexeme: &str) -> Token 
     };
     *column += lexeme.len().max(1);
     token
+}
+
+#[test]
+fn 単位定義をloweringできる() {
+    let source = r#"
+@ 長さ(Double) km! {
+    基本 := 1000
+    基準 -> m
+    @Conversion {
+        val 結果 = 値
+    }
+}
+"#;
+
+    let result = lower_source(source);
+    assert!(
+        result.diagnostics.is_empty(),
+        "unexpected diagnostics: {:?}",
+        result.diagnostics
+    );
+
+    assert_eq!(result.statements.len(), 1);
+    match &result.statements[0] {
+        Statement::UnitTypeDefinition(UnitTypeDefinition {
+            category,
+            base_type,
+            name,
+            members,
+            ..
+        }) => {
+            assert_eq!(category, "長さ");
+            assert!(
+                matches!(base_type, TypeAnnotation::Simple(t) if t == "Double"),
+                "基底型が Double ではありません: {:?}",
+                base_type
+            );
+            assert_eq!(name.name, "km");
+            assert!(name.has_default_marker);
+            assert!(!name.is_bracketed);
+            assert_eq!(members.len(), 3);
+
+            match &members[0] {
+                UnitTypeMember::Dependency(dependency) => {
+                    assert_eq!(dependency.name, "基本");
+                    assert!(matches!(
+                        dependency.relation,
+                        UnitRelation::DefinitionAssign
+                    ));
+                    assert!(dependency.target.is_none());
+                    match dependency.value {
+                        Some(Expression::Literal(Literal::Number(ref value), _)) => {
+                            assert_eq!(value, "1000");
+                        }
+                        other => panic!("依存関係の値が数値リテラルではありません: {:?}", other),
+                    }
+                }
+                other => panic!("最初のメンバーが依存関係ではありません: {:?}", other),
+            }
+
+            match &members[1] {
+                UnitTypeMember::Dependency(dependency) => {
+                    assert_eq!(dependency.name, "基準");
+                    assert!(matches!(
+                        dependency.relation,
+                        UnitRelation::ConversionArrow
+                    ));
+                    assert!(dependency.value.is_none());
+                    assert_eq!(dependency.target.as_deref(), Some("m"));
+                }
+                other => panic!("二番目のメンバーが変換指定ではありません: {:?}", other),
+            }
+
+            match &members[2] {
+                UnitTypeMember::Conversion(block) => {
+                    assert!(matches!(block.kind, UnitConversionKind::Conversion));
+                    assert_eq!(block.body.len(), 1);
+                    match &block.body[0] {
+                        Statement::ValDeclaration { name, .. } => assert_eq!(name, "結果"),
+                        other => panic!("変換ブロック内の最初の文が val ではありません: {:?}", other),
+                    }
+                }
+                other => panic!("三番目のメンバーが変換ブロックではありません: {:?}", other),
+            }
+        }
+        other => panic!("単位定義が生成されていません: {:?}", other),
+    }
+}
+
+#[test]
+fn 単位リテラルをloweringできる() {
+    let source = "val 距離 = 42 @ km";
+    let result = lower_source(source);
+    assert!(
+        result.diagnostics.is_empty(),
+        "unexpected diagnostics: {:?}",
+        result.diagnostics
+    );
+
+    assert_eq!(result.statements.len(), 1);
+    match &result.statements[0] {
+        Statement::ValDeclaration {
+            initializer: Expression::UnitLiteral {
+                value,
+                unit,
+                spacing,
+                ..
+            },
+            ..
+        } => {
+            match value.as_ref() {
+                Expression::Literal(Literal::Number(value), _) => assert_eq!(value, "42"),
+                other => panic!("単位リテラルの値が数値ではありません: {:?}", other),
+            }
+            assert_eq!(unit.name, "km");
+            assert!(!unit.is_bracketed);
+            assert!(!unit.has_default_marker);
+            assert!(spacing.space_before_at, "期待通りに `@` の前に空白が検出されていません");
+            assert!(spacing.space_after_at, "期待通りに `@` の後に空白が検出されていません");
+        }
+        other => panic!("val 宣言が単位リテラルを保持していません: {:?}", other),
+    }
+}
+
+#[test]
+fn 単位型注釈をloweringできる() {
+    let source = "val 温度: Double@[℃] = 0";
+    let result = lower_source(source);
+    assert!(
+        result.diagnostics.is_empty(),
+        "unexpected diagnostics: {:?}",
+        result.diagnostics
+    );
+
+    assert_eq!(result.statements.len(), 1);
+    match &result.statements[0] {
+        Statement::ValDeclaration {
+            type_annotation: Some(TypeAnnotation::Unit { base, unit, implicit }),
+            initializer: Expression::Literal(Literal::Number(value), _),
+            ..
+        } => {
+            assert_eq!(value, "0");
+            assert_eq!(**base, TypeAnnotation::Simple("Double".into()));
+            assert!(!implicit);
+            assert_eq!(unit.name, "[℃]");
+            assert!(unit.is_bracketed);
+        }
+        other => panic!("単位型注釈が生成されていません: {:?}", other),
+    }
 }
 
 fn build_tree(

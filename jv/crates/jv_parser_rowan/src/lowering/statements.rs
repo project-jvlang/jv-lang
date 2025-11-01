@@ -9,19 +9,20 @@ use crate::syntax::SyntaxKind;
 use jv_ast::comments::{CommentKind, CommentStatement, CommentVisibility};
 use jv_ast::expression::{
     Argument, CallArgumentMetadata, CallArgumentStyle, Parameter, ParameterModifiers,
-    ParameterProperty, StringPart, WhenArm,
+    ParameterProperty, StringPart, UnitSpacingStyle, WhenArm,
 };
 use jv_ast::json::{
     JsonComment, JsonCommentKind, JsonEntry, JsonLiteral, JsonValue, NumberGrouping,
 };
 use jv_ast::statement::{
     ConcurrencyConstruct, ExtensionFunction, ForInStatement, LoopBinding, LoopStrategy,
-    NumericRangeLoop, Property, ResourceManagement, ValBindingOrigin,
+    NumericRangeLoop, Property, ResourceManagement, UnitConversionBlock, UnitConversionKind,
+    UnitDependency, UnitRelation, UnitTypeDefinition, UnitTypeMember, ValBindingOrigin,
 };
 use jv_ast::strings::{MultilineKind, MultilineStringLiteral};
 use jv_ast::types::{
     BinaryOp, GenericParameter, GenericSignature, Literal, Modifiers, Pattern, TypeAnnotation,
-    UnaryOp, VarianceMarker,
+    UnaryOp, UnitSymbol, VarianceMarker,
 };
 use jv_ast::{BindingPatternKind, Expression, SequenceDelimiter, Span, Statement};
 use jv_lexer::{
@@ -135,6 +136,7 @@ fn is_top_level_statement(kind: SyntaxKind) -> bool {
             | SyntaxKind::CommentStatement
             | SyntaxKind::ValDeclaration
             | SyntaxKind::VarDeclaration
+            | SyntaxKind::UnitTypeDefinition
             | SyntaxKind::FunctionDeclaration
             | SyntaxKind::ClassDeclaration
             | SyntaxKind::WhenStatement
@@ -208,6 +210,7 @@ fn lower_single_statement(
         SyntaxKind::ValDeclaration => lower_value(context, node, true, diagnostics),
         SyntaxKind::VarDeclaration => lower_value(context, node, false, diagnostics),
         SyntaxKind::FunctionDeclaration => lower_function(context, node, diagnostics),
+        SyntaxKind::UnitTypeDefinition => lower_unit_type_definition(context, node, diagnostics),
         SyntaxKind::ClassDeclaration => lower_class(context, node, diagnostics),
         SyntaxKind::ForStatement => lower_for(context, node, diagnostics),
         SyntaxKind::ReturnStatement => lower_return(context, node, diagnostics),
@@ -831,6 +834,23 @@ fn lower_expression(
     context: &LoweringContext<'_>,
     node: &JvSyntaxNode,
 ) -> Result<Expression, LoweringDiagnostic> {
+    if node.kind() == SyntaxKind::UnitLiteral {
+        return lower_unit_literal_expression(context, node);
+    }
+
+    if node.kind() == SyntaxKind::Expression {
+        let mut non_token_children: Vec<JvSyntaxNode> = node
+            .children()
+            .filter(|child| !child.kind().is_token())
+            .collect();
+        if non_token_children.len() == 1
+            && non_token_children[0].kind() == SyntaxKind::UnitLiteral
+        {
+            let unit_node = non_token_children.remove(0);
+            return lower_unit_literal_expression(context, &unit_node);
+        }
+    }
+
     let tokens = context.tokens_for(node);
     lower_expression_from_tokens(context, node, tokens)
 }
@@ -895,6 +915,143 @@ fn lower_expression_from_tokens(
     }
 }
 
+fn lower_unit_literal_expression(
+    context: &LoweringContext<'_>,
+    node: &JvSyntaxNode,
+) -> Result<Expression, LoweringDiagnostic> {
+    let tokens = context.tokens_for(node);
+    if tokens.is_empty() {
+        return Err(LoweringDiagnostic::new(
+            LoweringDiagnosticSeverity::Error,
+            "単位リテラルの構成要素が不足しています",
+            context.span_for(node),
+            node.kind(),
+            first_identifier_text(node),
+            collect_annotation_texts(node),
+        ));
+    }
+
+    let value_token = tokens[0];
+    let value_span = span_from_token(value_token);
+    let value_expr = match &value_token.token_type {
+        TokenType::Number(value) => {
+            Expression::Literal(Literal::Number(value.clone()), value_span.clone())
+        }
+        TokenType::String(value) => {
+            Expression::Literal(Literal::String(value.clone()), value_span.clone())
+        }
+        TokenType::Character(ch) => {
+            Expression::Literal(Literal::Character(*ch), value_span.clone())
+        }
+        _ => {
+            return Err(LoweringDiagnostic::new(
+                LoweringDiagnosticSeverity::Error,
+                "単位リテラルの値部分を解釈できませんでした",
+                context.span_for(node),
+                node.kind(),
+                first_identifier_text(node),
+                collect_annotation_texts(node),
+            ))
+        }
+    };
+
+    let mut index = 1usize;
+    let mut whitespace_after_value = false;
+    let mut at_index: Option<usize> = None;
+
+    while index < tokens.len() {
+        match tokens[index].token_type {
+            TokenType::Whitespace(_) => {
+                whitespace_after_value = true;
+                index += 1;
+            }
+            TokenType::At => {
+                at_index = Some(index);
+                index += 1;
+                break;
+            }
+            _ => break,
+        }
+    }
+
+    let mut space_after_at = false;
+    if at_index.is_some() {
+        while index < tokens.len() && matches!(tokens[index].token_type, TokenType::Whitespace(_))
+        {
+            space_after_at = true;
+            index += 1;
+        }
+    }
+
+    while index < tokens.len() && matches!(tokens[index].token_type, TokenType::Whitespace(_)) {
+        index += 1;
+    }
+
+    let mut symbol_tokens: Vec<&Token> = tokens.iter().skip(index).copied().collect();
+    while matches!(
+        symbol_tokens.first().map(|token| &token.token_type),
+        Some(TokenType::Whitespace(_))
+    ) {
+        symbol_tokens.remove(0);
+    }
+    while matches!(
+        symbol_tokens.last().map(|token| &token.token_type),
+        Some(TokenType::Whitespace(_))
+    ) {
+        symbol_tokens.pop();
+    }
+
+    if symbol_tokens.is_empty() {
+        return Err(LoweringDiagnostic::new(
+            LoweringDiagnosticSeverity::Error,
+            "単位リテラルの単位表記が見つかりません",
+            context.span_for(node),
+            node.kind(),
+            first_identifier_text(node),
+            collect_annotation_texts(node),
+        ));
+    }
+
+    let mut symbol_text = String::new();
+    let mut symbol_span_opt: Option<Span> = None;
+    let mut is_bracketed = false;
+    let mut has_default_marker = false;
+
+    for token in &symbol_tokens {
+        match token.token_type {
+            TokenType::LeftBracket => is_bracketed = true,
+            TokenType::Not => has_default_marker = true,
+            _ => {}
+        }
+        symbol_text.push_str(&token.lexeme);
+        let token_span = span_from_token(token);
+        symbol_span_opt = Some(match symbol_span_opt {
+            Some(current) => merge_spans(&current, &token_span),
+            None => token_span,
+        });
+    }
+
+    let symbol_span = symbol_span_opt.unwrap_or_else(Span::dummy);
+    let unit_symbol = UnitSymbol {
+        name: symbol_text,
+        is_bracketed,
+        has_default_marker,
+        span: symbol_span,
+    };
+
+    let spacing = UnitSpacingStyle {
+        space_before_at: at_index.is_some() && whitespace_after_value,
+        space_after_at,
+    };
+
+    Ok(Expression::UnitLiteral {
+        value: Box::new(value_expr),
+        unit: unit_symbol,
+        spacing,
+        span: context.span_for(node).unwrap_or_else(Span::dummy),
+    })
+}
+
 fn qualified_name_segments(
     context: &LoweringContext<'_>,
     node: &JvSyntaxNode,
@@ -946,6 +1103,17 @@ fn join_tokens(tokens: &[&Token]) -> String {
         .iter()
         .map(|token| token.lexeme.as_str())
         .collect::<String>()
+}
+
+fn identifier_texts(context: &LoweringContext<'_>, node: &JvSyntaxNode) -> Vec<String> {
+    context
+        .tokens_for(node)
+        .into_iter()
+        .filter_map(|token| match &token.token_type {
+            TokenType::Identifier(value) => Some(value.clone()),
+            _ => None,
+        })
+        .collect()
 }
 
 fn token_requires_followup(token_type: &TokenType) -> bool {
@@ -4877,6 +5045,321 @@ fn lower_function(
     } else {
         Ok(function_statement)
     }
+}
+
+fn lower_unit_type_definition(
+    context: &LoweringContext<'_>,
+    node: &JvSyntaxNode,
+    diagnostics: &mut Vec<LoweringDiagnostic>,
+) -> Result<Statement, LoweringDiagnostic> {
+    let header = child_node(node, SyntaxKind::UnitHeader).ok_or_else(|| {
+        missing_child_diagnostic(
+            context,
+            node,
+            "単位定義のヘッダーが不足しています",
+            SyntaxKind::UnitHeader,
+        )
+    })?;
+
+    let category_node = child_node(&header, SyntaxKind::UnitCategory).ok_or_else(|| {
+        missing_child_diagnostic(
+            context,
+            &header,
+            "単位分類の識別子が見つかりません",
+            SyntaxKind::UnitCategory,
+        )
+    })?;
+    let category = first_identifier_text(&category_node).ok_or_else(|| {
+        LoweringDiagnostic::new(
+            LoweringDiagnosticSeverity::Error,
+            "単位分類の識別子が取得できません",
+            context.span_for(&category_node),
+            category_node.kind(),
+            first_identifier_text(&category_node),
+            collect_annotation_texts(&category_node),
+        )
+    })?;
+
+    let base_type_node = child_node(&header, SyntaxKind::UnitBaseType).ok_or_else(|| {
+        missing_child_diagnostic(
+            context,
+            &header,
+            "単位の基底型が不足しています",
+            SyntaxKind::UnitBaseType,
+        )
+    })?;
+    let base_expr_node = child_node(&base_type_node, SyntaxKind::Expression).ok_or_else(|| {
+        missing_child_diagnostic(
+            context,
+            &base_type_node,
+            "単位の基底型に対応する式が見つかりません",
+            SyntaxKind::Expression,
+        )
+    })?;
+    let base_tokens = context.tokens_for(&base_expr_node);
+    let owned_base_tokens: Vec<Token> = base_tokens.into_iter().cloned().collect();
+    let base_type = match lower_type_annotation_from_tokens(&owned_base_tokens) {
+        Ok(lowered) => lowered.into_annotation(),
+        Err(error) => {
+            return Err(LoweringDiagnostic::new(
+                LoweringDiagnosticSeverity::Error,
+                error.message().to_string(),
+                error
+                    .span()
+                    .cloned()
+                    .or_else(|| context.span_for(&base_expr_node))
+                    .or_else(|| context.span_for(&base_type_node))
+                    .or_else(|| context.span_for(node)),
+                base_type_node.kind(),
+                first_identifier_text(&base_type_node),
+                collect_annotation_texts(&base_type_node),
+            ))
+        }
+    };
+
+    let name_node = child_node(&header, SyntaxKind::UnitName).ok_or_else(|| {
+        missing_child_diagnostic(
+            context,
+            &header,
+            "単位名が指定されていません",
+            SyntaxKind::UnitName,
+        )
+    })?;
+    let unit_name = first_identifier_text(&name_node).ok_or_else(|| {
+        LoweringDiagnostic::new(
+            LoweringDiagnosticSeverity::Error,
+            "単位名の識別子が取得できません",
+            context.span_for(&name_node),
+            name_node.kind(),
+            first_identifier_text(&name_node),
+            collect_annotation_texts(&name_node),
+        )
+    })?;
+
+    let default_marker_node = child_node(&header, SyntaxKind::UnitDefaultMarker);
+    let mut symbol_span = context.span_for(&name_node);
+    if let Some(marker) = &default_marker_node {
+        if let Some(marker_span) = context.span_for(marker) {
+            symbol_span = match symbol_span {
+                Some(name_span) => Some(merge_spans(&name_span, &marker_span)),
+                None => Some(marker_span),
+            };
+        }
+    }
+    let unit_symbol = UnitSymbol {
+        name: unit_name,
+        is_bracketed: false,
+        has_default_marker: default_marker_node.is_some(),
+        span: symbol_span.unwrap_or_else(Span::dummy),
+    };
+
+    let body_node = child_node(node, SyntaxKind::UnitBody).ok_or_else(|| {
+        missing_child_diagnostic(
+            context,
+            node,
+            "単位定義に本体が存在しません",
+            SyntaxKind::UnitBody,
+        )
+    })?;
+    let members = lower_unit_members(context, &body_node, diagnostics);
+
+    let definition = UnitTypeDefinition {
+        category,
+        base_type,
+        name: unit_symbol,
+        members,
+        span: context.span_for(node).unwrap_or_else(Span::dummy),
+    };
+
+    Ok(Statement::UnitTypeDefinition(definition))
+}
+
+fn lower_unit_members(
+    context: &LoweringContext<'_>,
+    body: &JvSyntaxNode,
+    diagnostics: &mut Vec<LoweringDiagnostic>,
+) -> Vec<UnitTypeMember> {
+    let mut members = Vec::new();
+
+    for child in body.children() {
+        if child.kind().is_token() {
+            continue;
+        }
+        match child.kind() {
+            SyntaxKind::UnitDependency => {
+                if let Some(member) = lower_unit_dependency_member(context, &child, diagnostics) {
+                    members.push(member);
+                }
+            }
+            SyntaxKind::UnitRelation => {
+                if let Some(member) = lower_unit_relation_member(context, &child, diagnostics) {
+                    members.push(member);
+                }
+            }
+            SyntaxKind::UnitConversionBlock | SyntaxKind::UnitReverseConversionBlock => {
+                if let Some(member) =
+                    lower_unit_conversion_block_member(context, &child, diagnostics)
+                {
+                    members.push(member);
+                }
+            }
+            SyntaxKind::StatementList => {
+                for stmt in child.children() {
+                    if stmt.kind().is_token() {
+                        continue;
+                    }
+                    match lower_single_statement(context, &stmt, diagnostics) {
+                        Ok(statement) => members.push(UnitTypeMember::NestedStatement(Box::new(
+                            statement,
+                        ))),
+                        Err(diag) => diagnostics.push(diag),
+                    }
+                }
+            }
+            other => {
+                push_diagnostic(
+                    diagnostics,
+                    LoweringDiagnosticSeverity::Warning,
+                    format!(
+                        "単位定義内で処理できない構文 {:?} を検出しました",
+                        other
+                    ),
+                    context,
+                    &child,
+                );
+            }
+        }
+    }
+
+    members
+}
+
+fn lower_unit_dependency_member(
+    context: &LoweringContext<'_>,
+    node: &JvSyntaxNode,
+    diagnostics: &mut Vec<LoweringDiagnostic>,
+) -> Option<UnitTypeMember> {
+    let mut identifiers = identifier_texts(context, node).into_iter();
+    let name = match identifiers.next() {
+        Some(value) => value,
+        None => {
+            push_diagnostic(
+                diagnostics,
+                LoweringDiagnosticSeverity::Error,
+                "単位依存の識別子を取得できませんでした",
+                context,
+                node,
+            );
+            return None;
+        }
+    };
+
+    let expr_node = match child_node(node, SyntaxKind::Expression) {
+        Some(expr_node) => expr_node,
+        None => {
+            push_diagnostic(
+                diagnostics,
+                LoweringDiagnosticSeverity::Error,
+                "単位依存の右辺が不足しています",
+                context,
+                node,
+            );
+            return None;
+        }
+    };
+
+    let value = match lower_expression(context, &expr_node) {
+        Ok(expr) => expr,
+        Err(diag) => {
+            diagnostics.push(diag);
+            return None;
+        }
+    };
+
+    Some(UnitTypeMember::Dependency(UnitDependency {
+        name,
+        relation: UnitRelation::DefinitionAssign,
+        value: Some(value),
+        target: None,
+        span: context.span_for(node).unwrap_or_else(Span::dummy),
+    }))
+}
+
+fn lower_unit_relation_member(
+    context: &LoweringContext<'_>,
+    node: &JvSyntaxNode,
+    diagnostics: &mut Vec<LoweringDiagnostic>,
+) -> Option<UnitTypeMember> {
+    let mut identifiers = identifier_texts(context, node).into_iter();
+    let source = match identifiers.next() {
+        Some(value) => value,
+        None => {
+            push_diagnostic(
+                diagnostics,
+                LoweringDiagnosticSeverity::Error,
+                "単位変換の元単位を取得できませんでした",
+                context,
+                node,
+            );
+            return None;
+        }
+    };
+    let target = match identifiers.next() {
+        Some(value) => value,
+        None => {
+            push_diagnostic(
+                diagnostics,
+                LoweringDiagnosticSeverity::Error,
+                "単位変換の変換先が不足しています",
+                context,
+                node,
+            );
+            return None;
+        }
+    };
+
+    Some(UnitTypeMember::Dependency(UnitDependency {
+        name: source,
+        relation: UnitRelation::ConversionArrow,
+        value: None,
+        target: Some(target),
+        span: context.span_for(node).unwrap_or_else(Span::dummy),
+    }))
+}
+
+fn lower_unit_conversion_block_member(
+    context: &LoweringContext<'_>,
+    node: &JvSyntaxNode,
+    diagnostics: &mut Vec<LoweringDiagnostic>,
+) -> Option<UnitTypeMember> {
+    let block_node = match child_node(node, SyntaxKind::Block) {
+        Some(block) => block,
+        None => {
+            push_diagnostic(
+                diagnostics,
+                LoweringDiagnosticSeverity::Error,
+                "単位変換ブロックに処理本体が含まれていません",
+                context,
+                node,
+            );
+            return None;
+        }
+    };
+
+    let mut statements = Vec::new();
+    collect_statements_from_children(context, &block_node, &mut statements, diagnostics);
+
+    let kind = if node.kind() == SyntaxKind::UnitReverseConversionBlock {
+        UnitConversionKind::ReverseConversion
+    } else {
+        UnitConversionKind::Conversion
+    };
+
+    Some(UnitTypeMember::Conversion(UnitConversionBlock {
+        kind,
+        body: statements,
+        span: context.span_for(node).unwrap_or_else(Span::dummy),
+    }))
 }
 
 fn lower_class(
