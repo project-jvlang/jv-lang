@@ -1192,6 +1192,40 @@ fn pipeline_compile_produces_artifacts() {
 }
 
 #[test]
+fn pipeline_regex_command_unit_main_compiles() {
+    let temp_dir = TempDirGuard::new("regex-command-unit-main")
+        .expect("create temp directory for regex command fixture");
+    let fixture_path = temp_dir
+        .path()
+        .join("regex_command_unit_main_scope_error.jv");
+
+    fs::write(
+        &fixture_path,
+        r#"fun main(): Unit {
+    val text = "abc"
+    val masked = a/text/'a'/"b"/
+    val first = f/text/'a'/"c"/
+    println(masked)
+    println(first)
+}
+"#,
+    )
+    .expect("write regex command unit main fixture");
+
+    let plan = compose_plan_from_fixture(
+        temp_dir.path(),
+        &fixture_path,
+        CliOverrides {
+            java_only: true,
+            format: true,
+            ..CliOverrides::default()
+        },
+    );
+
+    compile(&plan).expect("regex command program should compile without scope errors");
+}
+
+#[test]
 fn pipeline_preserves_annotations_in_java_output() {
     let temp_dir = TempDirGuard::new("pipeline-annotations").expect("create temp dir");
     let input = workspace_file("tests/fixtures/java_annotations/pass_through.jv");

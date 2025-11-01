@@ -1,81 +1,27 @@
-// concise-regex-syntax の主要ケースを網羅するデモ
-fun main {
-    val auditLog = "USER=Akira ACTION=login ip=192.168.0.10\nUSER=tom ACTION=LOGIN ip=10.0.0.5"
+// concise-regex-syntax の主要モードをコンパクトに体験するサンプル
+fun main(): Unit {
+    val auditLog = """
+USER=Akira ACTION=login ip=192.168.0.10
+USER=Tom ACTION=LOGIN ip=10.0.0.5
+""".trim()
 
-    // mode: a (replaceAll) + フラグ ims
-    val masked = a/auditLog/'ip=\d{1,3}(\.\d{1,3}){3}'/"ip=***.***.***.***"/ims
-    println("IPマスク結果:\n${masked}\n")
-
-    // mode: f (replaceFirst) + ラムダ補間 (`${ ... }`)
-    val firstUserUpper = f/auditLog/'USER=\w+'/$ { (it.group() ?: "").toUpperCase() }/
-    println("先頭ユーザーを大文字化:\n${firstUserUpper}\n")
-
-    // JV 言語仕様では `if` を使用せず、条件分岐は `when` で表現する
-    // mode: default match (省略形) + フラグ mi を併用
-    val hasCaseInsensitiveLogin = /auditLog/'^user=\w+\saction=login$'/mi
-    println("小文字モードでも login 行が存在するか: ${hasCaseInsensitiveLogin}\n")
-
-    // mode: [match] 長形式でフラグ `m` と区別
-    val firstLineIsMatch = [match]/auditLog/'^USER='/m
-    println("先頭行が USER= で始まるか: ${firstLineIsMatch}\n")
-
-    // mode: s (split) 短形式
-    val parts = s/auditLog/"\\s+"
-    println("split 結果:")
-    for (part in parts) {
-        println(" - ${part}")
-    }
-
-    // mode: [split] 長形式の例（改行で区切る）
-    val lines = [split]/auditLog/"\n"/
-    println("[split] 長形式の結果:")
-    var lineNumber = 1
-    for (line in lines) {
-        println(" ${lineNumber}: ${line}")
-        lineNumber = lineNumber + 1
-    }
-
-    // Optional subject + iterate mode (Stream) を as List で具現化
-    val optionalAudit: String? = auditLog
-    val actions = i/optionalAudit/'ACTION=(\w+)'/ as List
-    println("iterate (as List) の結果:")
-    for (match in actions) {
-        val action = match.group(1) ?: "(unknown)"
-        println(" - ACTION=${action}")
-    }
-
-    // 改行・空白・= を用いて動的に Map<String, String> を構築
-    var recordMaps = java.util.ArrayList<java.util.Map<String, String>>()
-    for (line in lines) {
-        when (line.trim().isEmpty()) {
-            true -> {}
-            else -> {
-                val record = java.util.LinkedHashMap<String, String>()
-                val kvMatches = i/line/'(\w+)=([^\s]+)'/ as List
-                for (pair in kvMatches) {
-                    val key = pair.group(1) ?: ""
-                    val value = pair.group(2) ?: ""
-                    record.put(key, value)
-                }
-                when (record.isEmpty()) {
-                    true -> {}
-                    else -> recordMaps.add(record)
-                }
-            }
-        }
-    }
-    println("Map<List> への変換結果:")
-    for (record in recordMaps) {
-        println(" - ${record}")
-    }
-
-    // iterate モードでラムダ補間を用い、結果文字列を組み立て
-    val csvIds = "id=10;id=25;id=64"
-    val joinedIds = i/csvIds/'id=(\d+)'/$ {
-        when (val matchId = it.group(1)) {
-            null -> "#?"
-            else -> "#${matchId}"
+    val masked = a/auditLog/ip=\d{1,3}(\.\d{1,3}){3}/"ip=***.***.***.***"/ims
+    val firstTagged = f/auditLog/USER=\w+/{ match ->
+        when (match.group()) {
+            null -> ""
+            else -> "[FIRST-${match.group()}]"
         }
     }/
-    println("\niterate + ラムダ置換の結果: ${joinedIds}")
+    val hasLogin = [match]/auditLog/^USER=\w+\sACTION=LOGIN$/
+
+    println("[a] IP マスク:")
+    println(masked)
+    println("")
+
+    println("[f] 先頭ユーザーのタグ付け:")
+    println(firstTagged)
+    println("")
+
+    println("[match] login 行 (大文字一致):")
+    println(hasLogin)
 }
