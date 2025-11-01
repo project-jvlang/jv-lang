@@ -179,12 +179,6 @@ fn toolchain_java_home(target: JavaTarget) -> Option<PathBuf> {
     }
 }
 
-fn java_home_from_env(var: &str) -> Option<PathBuf> {
-    env::var_os(var)
-        .map(PathBuf::from)
-        .filter(|home| home.join("bin").join(java_executable()).exists())
-}
-
 fn jdk_info_for_target(target: JavaTarget) -> Option<&'static JdkInfo> {
     ensure_toolchain_envs();
 
@@ -201,9 +195,34 @@ fn jdk_info_for_target(target: JavaTarget) -> Option<&'static JdkInfo> {
         }
     }
 
-    cache_for(target)
-        .get_or_init(|| find_jdk_for_target(target))
-        .as_ref()
+    let info = cache_for(target)
+        .get_or_init(|| find_jdk_for_target(target));
+
+    if let Some(info) = info.as_ref() {
+        ensure_java_home_env(info);
+    }
+
+    info.as_ref()
+}
+
+fn java_home_from_env(var: &str) -> Option<PathBuf> {
+    env::var_os(var)
+        .map(PathBuf::from)
+        .filter(|home| home.join("bin").join(java_executable()).exists())
+}
+
+fn ensure_java_home_env(info: &JdkInfo) {
+    if java_home_from_env("JAVA_HOME").is_none() {
+        unsafe {
+            env::set_var("JAVA_HOME", &info.java_home);
+        }
+    }
+
+    if java_home_from_env("JDK_HOME").is_none() {
+        unsafe {
+            env::set_var("JDK_HOME", &info.java_home);
+        }
+    }
 }
 
 fn find_jdk_for_target(target: JavaTarget) -> Option<JdkInfo> {
@@ -252,14 +271,37 @@ fn jdk_info_from_home(home: PathBuf, expected_major: u32) -> Option<JdkInfo> {
     let javac = home.join("bin").join(javac_executable());
     if !javac.exists() {
         eprintln!(
-            "Missing javac at {} for configured JAVA_HOME={}",
-            javac.display(),
-            home.display()
+            "JAVA_HOME={} に javac が見つかりません (確認したパス: {})",
+            home.display(),
+            javac.display()
         );
         return None;
     }
 
+    let javac_major = match detect_javac_major_version(&home) {
+        Ok(value) => value,
+        Err(message) => {
+            eprintln!(
+                "JAVA_HOME={} の javac -version 実行に失敗しました: {}",
+                home.display(),
+                message
+            );
+            return None;
+        }
+    };
+
     let major = detect_major_version(&home)?;
+
+    if javac_major != major {
+        eprintln!(
+            "JAVA_HOME={} の javac と java のメジャーバージョンが一致しません (javac: {}, java: {})",
+            home.display(),
+            javac_major,
+            major
+        );
+        return None;
+    }
+
     if major != expected_major {
         eprintln!(
             "Skipping JAVA_HOME={} because its major version {} != expected {}",
@@ -277,18 +319,21 @@ fn jdk_info_from_home(home: PathBuf, expected_major: u32) -> Option<JdkInfo> {
     })
 }
 
-fn detect_major_version(home: &Path) -> Option<u32> {
-    let java_bin = home.join("bin").join(java_executable());
-    if !java_bin.exists() {
-        return None;
+fn detect_javac_major_version(home: &Path) -> Result<u32, &'static str> {
+    let javac_bin = home.join("bin").join(javac_executable());
+    if !javac_bin.exists() {
+        return Err("javac 実行ファイルが存在しません");
     }
 
-    let output = Command::new(&java_bin).arg("-version").output().ok()?;
-    let mut version_text = String::from_utf8_lossy(&output.stderr).to_string();
-    if version_text.trim().is_empty() {
-        version_text = String::from_utf8_lossy(&output.stdout).to_string();
+    match detect_tool_major_version(&javac_bin, &["-version"]) {
+        Some(version) => Ok(version),
+        None => Err("javac -version の結果からバージョン番号を取得できませんでした"),
     }
-    parse_major_version(&version_text)
+}
+
+fn detect_major_version(home: &Path) -> Option<u32> {
+    let java_bin = home.join("bin").join(java_executable());
+    detect_tool_major_version(&java_bin, &["-version"])
 }
 
 fn parse_major_version(output: &str) -> Option<u32> {
@@ -302,9 +347,44 @@ fn parse_major_version(output: &str) -> Option<u32> {
                     return Some(value);
                 }
             }
+        } else {
+            for token in line.split_whitespace() {
+                let digits: String = token
+                    .chars()
+                    .take_while(|ch| ch.is_ascii_digit())
+                    .collect();
+                if digits.is_empty() {
+                    continue;
+                }
+                if let Ok(value) = digits.parse::<u32>() {
+                    return Some(value);
+                }
+            }
         }
     }
     None
+}
+
+fn detect_tool_major_version(executable: &Path, args: &[&str]) -> Option<u32> {
+    if !executable.exists() {
+        return None;
+    }
+
+    let output = Command::new(executable).args(args).output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+
+    let mut version_text = String::from_utf8_lossy(&output.stderr).to_string();
+    if version_text.trim().is_empty() {
+        version_text = String::from_utf8_lossy(&output.stdout).to_string();
+    }
+
+    if version_text.trim().is_empty() {
+        return None;
+    }
+
+    parse_major_version(&version_text)
 }
 
 fn javac_executable() -> &'static str {
