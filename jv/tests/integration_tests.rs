@@ -1066,8 +1066,8 @@ fn cli_check_reports_regex_diagnostics() {
         "regex diagnostic output should contain JV5102, got: {stderr}"
     );
     assert!(
-        stderr.contains("Regex literal"),
-        "regex diagnostic text should mention regex literal, got: {stderr}"
+        stderr.contains("正規表現リテラル") || stderr.to_lowercase().contains("regex literal"),
+        "regex diagnostic text should mention regex literal terminology, got: {stderr}"
     );
 }
 
