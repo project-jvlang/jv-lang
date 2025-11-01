@@ -169,7 +169,25 @@ impl PatternFactsBridge {
     ) -> BridgeOutcome {
         match expression {
             Expression::RegexLiteral(_) => BridgeOutcome::default(),
-            Expression::Literal(_, _) | Expression::Identifier(_, _) => BridgeOutcome::default(),
+            Expression::Literal(_, _) => BridgeOutcome::default(),
+            Expression::Identifier(name, _) => {
+                let mut outcome = BridgeOutcome::default();
+                if let Some(fallback) = parse_fallback_when(name) {
+                    if fallback.has_null_branch
+                        && matches!(
+                            context.lattice().get(fallback.subject.as_str()),
+                            Some(NullabilityKind::NonNull)
+                        )
+                    {
+                        outcome
+                            .diagnostics
+                            .push(CheckError::NullSafetyError(conflict_message(
+                                &fallback.subject,
+                            )));
+                    }
+                }
+                outcome
+            }
             Expression::Unary { operand, .. } => self.visit_expression(operand, service, context),
             Expression::Binary { left, right, .. } => {
                 let mut outcome = self.visit_expression(left, service, context);
@@ -438,6 +456,109 @@ fn conflict_message(variable: &str) -> String {
     format!(
         "JV3108: `{variable}` は non-null と推論されていますが、when 分岐で null と比較されています。分岐を削除するか型を nullable に変更してください。\nJV3108: `{variable}` is inferred as non-null but the when expression compares it against null. Remove the branch or update the type to be nullable.\nQuick Fix: when.remove.null-branch -> `{variable}` の null 分岐を削除\nQuick Fix: when.remove.null-branch -> remove the null arm for `{variable}` or declare the type as nullable"
     )
+}
+
+#[derive(Debug)]
+struct FallbackWhenInfo {
+    subject: String,
+    has_null_branch: bool,
+}
+
+fn parse_fallback_when(source: &str) -> Option<FallbackWhenInfo> {
+    let mut rest = source.strip_prefix("when")?;
+    rest = rest.trim_start();
+
+    let (subject, remaining) = if let Some(stripped) = rest.strip_prefix('(') {
+        let mut depth = 1usize;
+        let mut end = None;
+        for (idx, ch) in stripped.char_indices() {
+            match ch {
+                '(' => depth += 1,
+                ')' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        end = Some(idx);
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+        let end_idx = end?;
+        let subject = stripped[..end_idx].trim();
+        let rest_after = &stripped[end_idx + 1..];
+        (subject.to_string(), rest_after)
+    } else {
+        let mut end_idx = 0usize;
+        for ch in rest.chars() {
+            if ch.is_whitespace() || ch == '{' {
+                break;
+            }
+            end_idx += ch.len_utf8();
+        }
+        if end_idx == 0 {
+            return None;
+        }
+        let subject = rest[..end_idx].trim();
+        let rest_after = &rest[end_idx..];
+        (subject.to_string(), rest_after)
+    };
+
+    let mut body = remaining.trim_start();
+    if !body.starts_with('{') {
+        return None;
+    }
+    body = &body[1..];
+
+    let mut depth = 0isize;
+    let mut closing_index = None;
+    for (idx, ch) in body.char_indices() {
+        match ch {
+            '{' => depth += 1,
+            '}' => {
+                if depth == 0 {
+                    closing_index = Some(idx);
+                    break;
+                }
+                depth -= 1;
+            }
+            _ => {}
+        }
+    }
+    let end_idx = closing_index.unwrap_or_else(|| body.len());
+    let content = &body[..end_idx];
+
+    let mut has_null_branch = false;
+    let mut brace_depth = 0isize;
+    let mut idx = 0usize;
+    while idx < content.len() {
+        match content.as_bytes()[idx] as char {
+            '{' => brace_depth += 1,
+            '}' => {
+                if brace_depth > 0 {
+                    brace_depth -= 1;
+                }
+            }
+            _ => {
+                if brace_depth == 0 && content[idx..].starts_with("null") {
+                    let mut j = idx + 4;
+                    while j < content.len() && content.as_bytes()[j].is_ascii_whitespace() {
+                        j += 1;
+                    }
+                    if j + 1 < content.len() && &content[j..j + 2] == "->" {
+                        has_null_branch = true;
+                        break;
+                    }
+                }
+            }
+        }
+        idx += 1;
+    }
+
+    Some(FallbackWhenInfo {
+        subject,
+        has_null_branch,
+    })
 }
 
 fn state_from_annotation(annotation: &TypeAnnotation) -> NullabilityKind {

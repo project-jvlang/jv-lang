@@ -480,6 +480,9 @@ fn hydrate_from_facts(
     for (name, ty) in facts.environment().values().iter() {
         let symbol = name.to_string();
         let state = NullabilityKind::from_facts_type(ty);
+        if should_skip_fact_update(&lattice, &symbol, state) {
+            continue;
+        }
         lattice.insert(symbol.clone(), state);
 
         if matches!(state, NullabilityKind::NonNull) {
@@ -490,12 +493,26 @@ fn hydrate_from_facts(
     for (name, scheme) in facts.all_schemes() {
         let symbol = name.to_string();
         let state = NullabilityKind::from_facts_type(scheme.body());
+        if should_skip_fact_update(&lattice, &symbol, state) {
+            continue;
+        }
         lattice.insert(symbol.clone(), state);
 
         if matches!(state, NullabilityKind::NonNull) {
             contracts.insert(symbol, NonNullContractOrigin::InferenceScheme);
         }
     }
+}
+
+fn should_skip_fact_update(
+    lattice: &NullabilityLattice,
+    symbol: &str,
+    state: NullabilityKind,
+) -> bool {
+    matches!(
+        (lattice.get(symbol), state),
+        (Some(NullabilityKind::NonNull), NullabilityKind::Unknown)
+    )
 }
 
 fn hydrate_java_annotations(
@@ -608,6 +625,7 @@ impl JavaSymbolMetadata {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::TypeChecker;
     use crate::binding::{LateInitManifest, LateInitSeed};
     use crate::inference::PrimitiveType;
     use crate::inference::TypeEnvironment;
@@ -616,6 +634,8 @@ mod tests {
     use jv_inference::service::TypeFactsBuilder;
     use jv_inference::service::TypeScheme as FactsTypeScheme;
     use jv_inference::types::{NullabilityFlag, TypeKind as FactsTypeKind, TypeVariant};
+    use jv_parser_frontend::ParserPipeline;
+    use jv_parser_rowan::frontend::RowanPipeline;
 
     fn checker_optional(inner: &'static str) -> TypeKind {
         let base =
@@ -700,6 +720,60 @@ mod tests {
         assert_eq!(
             context.lattice().get("external"),
             Some(NullabilityKind::Platform)
+        );
+    }
+
+    #[test]
+    fn preserves_existing_non_null_when_facts_are_unknown() {
+        let mut env = TypeEnvironment::new();
+        env.define_monotype("token", TypeKind::reference("java.lang.String"));
+
+        let mut builder = TypeFactsBuilder::new();
+        builder.environment_entry(
+            "token",
+            FactsTypeKind::new(TypeVariant::Unknown).with_nullability(NullabilityFlag::Unknown),
+        );
+        let facts = builder.build();
+
+        let context = NullSafetyContext::from_parts(Some(&facts), Some(&env), None);
+        assert_eq!(
+            context.lattice().get("token"),
+            Some(NullabilityKind::NonNull)
+        );
+    }
+
+    #[test]
+    fn hydrate_preserves_non_null_for_guarded_when_program() {
+        let source = r#"
+fun isPositive(value: String): Boolean = true
+
+val token: String = "hello"
+val label = when (token) {
+    null -> "none"
+    is String && isPositive(token) -> token
+    else -> token
+}
+"#;
+
+        let program = RowanPipeline::default()
+            .parse(source)
+            .expect("source should parse")
+            .into_program();
+
+        let mut checker = TypeChecker::new();
+        checker
+            .check_program(&program)
+            .expect("program should type-check");
+
+        let snapshot = checker
+            .inference_snapshot()
+            .cloned()
+            .expect("expected inference snapshot present");
+
+        let context = NullSafetyContext::hydrate(Some(&snapshot));
+        assert_eq!(
+            context.lattice().get("token"),
+            Some(NullabilityKind::NonNull)
         );
     }
 

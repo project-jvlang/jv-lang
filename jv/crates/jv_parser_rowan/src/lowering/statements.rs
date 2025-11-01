@@ -1725,6 +1725,37 @@ mod expression_parser {
             })
         }
 
+        fn normalize_when_branch_body(expr: Expression) -> Expression {
+            match expr {
+                Expression::Lambda {
+                    parameters,
+                    body,
+                    label: None,
+                    span,
+                } if parameters.is_empty() => match *body {
+                    Expression::Block {
+                        statements, label, ..
+                    } => Expression::Block {
+                        statements,
+                        label,
+                        span,
+                    },
+                    inner => {
+                        let stmt_span = expression_span(&inner);
+                        Expression::Block {
+                            statements: vec![Statement::Expression {
+                                expr: inner,
+                                span: stmt_span,
+                            }],
+                            label: None,
+                            span,
+                        }
+                    }
+                },
+                other => other,
+            }
+        }
+
         fn split_lambda_body_statements(tokens: &[&Token]) -> Vec<(usize, usize)> {
             let mut ranges = Vec::new();
             let mut start = 0usize;
@@ -2178,7 +2209,7 @@ mod expression_parser {
                             self.span_at(self.pos),
                         ));
                     }
-                    let body_expr = parsed_body.expr;
+                    let body_expr = Self::normalize_when_branch_body(parsed_body.expr);
                     else_arm = Some(body_expr);
                     self.pos += parsed_body.end;
                     while self.pos < closing_index
@@ -2266,7 +2297,7 @@ mod expression_parser {
                         self.span_at(self.pos),
                     ));
                 }
-                let body_expr = parsed_body.expr;
+                let body_expr = Self::normalize_when_branch_body(parsed_body.expr);
                 let body_end = self.pos + parsed_body.end;
                 let body_span = expression_span(&body_expr);
                 let arm_span = merge_spans(&pattern_span, &body_span);

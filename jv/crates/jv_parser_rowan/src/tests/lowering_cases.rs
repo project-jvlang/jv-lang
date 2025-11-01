@@ -2171,6 +2171,65 @@ fn expression_lowering_handles_when_with_subject_and_guard() {
 }
 
 #[test]
+fn expression_lowering_treats_when_branch_block_as_block_expression() {
+    let source = r#"
+    package demo
+
+    fun consume(value: String): Int = value.length
+    fun provide(): String? = null
+
+    val maybe = provide()
+    val result = when (maybe) {
+        is String -> {
+            val inner = maybe
+            consume(inner)
+        }
+        else -> 0
+    }
+    "#;
+
+    let result = lower_source(source);
+    assert!(
+        result.diagnostics.is_empty(),
+        "unexpected diagnostics: {:?}",
+        result.diagnostics
+    );
+
+    let when_expr = result
+        .statements
+        .iter()
+        .find_map(|statement| match statement {
+            Statement::ValDeclaration {
+                name, initializer, ..
+            } if name == "result" => Some(initializer),
+            _ => None,
+        })
+        .expect("expected `result` declaration with when initializer");
+
+    let (arms, else_branch) = match when_expr {
+        Expression::When { arms, else_arm, .. } => (arms, else_arm),
+        other => panic!("expected when expression, got {:?}", other),
+    };
+
+    assert_eq!(arms.len(), 1, "expected single pattern arm for `is String`");
+    let first_body = &arms[0].body;
+    match first_body {
+        Expression::Block { statements, .. } => {
+            assert!(
+                !statements.is_empty(),
+                "block branch should contain lowered statements"
+            );
+        }
+        other => panic!("expected block expression body, got {:?}", other),
+    }
+
+    match else_branch.as_ref().map(|expr| expr.as_ref()) {
+        Some(Expression::Literal(Literal::Number(value), _)) => assert_eq!(value, "0"),
+        other => panic!("expected integer literal in else branch, got {:?}", other),
+    }
+}
+
+#[test]
 fn expression_lowering_handles_subjectless_when_expression() {
     let source = r#"
     package demo
