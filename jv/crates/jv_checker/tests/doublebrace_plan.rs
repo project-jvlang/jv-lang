@@ -1,0 +1,191 @@
+use jv_ast::expression::{CallArgumentMetadata, CallArgumentStyle, DoublebraceInit};
+use jv_ast::{Argument, Expression, Literal, Span, Statement};
+use jv_build::metadata::{JavaMethodSignature, SymbolIndex, TypeEntry};
+use jv_checker::TypeKind;
+use jv_checker::java::{
+    CopySource, DoublebracePlan, DoublebracePlanError, MutationStep, PlanBase,
+    plan_doublebrace_application,
+};
+use jv_ir::types::JavaType;
+
+fn span() -> Span {
+    Span::dummy()
+}
+
+#[test]
+fn mutate_plan_for_mutable_receiver() {
+    // 可変クラスではフィールド代入とメソッド呼び出しがミューテーションとして扱われること。
+    let span = span();
+    let statements = vec![
+        Statement::Assignment {
+            target: Expression::Identifier("value".into(), span.clone()),
+            binding_pattern: None,
+            value: Expression::Literal(Literal::Number("42".into()), span.clone()),
+            span: span.clone(),
+        },
+        Statement::Expression {
+            expr: Expression::Call {
+                function: Box::new(Expression::Identifier("push".into(), span.clone())),
+                args: vec![Argument::Positional(Expression::Literal(
+                    Literal::Number("1".into()),
+                    span.clone(),
+                ))],
+                type_arguments: Vec::new(),
+                argument_metadata: CallArgumentMetadata::with_style(CallArgumentStyle::Whitespace),
+                span: span.clone(),
+            },
+            span: span.clone(),
+        },
+    ];
+
+    let init = DoublebraceInit {
+        base: Some(Box::new(Expression::Identifier(
+            "source".into(),
+            span.clone(),
+        ))),
+        receiver_hint: None,
+        statements: statements.clone(),
+        span: span.clone(),
+    };
+
+    let mut index = SymbolIndex::new(Some(25));
+    let mut entry = TypeEntry::new("com.example.Mutable".into(), "com.example".into(), None);
+    entry.add_instance_field("value".into());
+    entry.add_instance_method(
+        "push".into(),
+        JavaMethodSignature {
+            parameters: Vec::new(),
+            return_type: JavaType::Void,
+        },
+    );
+    index.add_type(entry);
+
+    let target_ty = TypeKind::reference("com.example.Mutable");
+    let base_ty = Some(TypeKind::reference("com.example.Mutable"));
+    let plan = plan_doublebrace_application(base_ty.as_ref(), &target_ty, &init, Some(&index))
+        .expect("ミューテーションプランの構築に成功する");
+
+    match plan {
+        DoublebracePlan::Mutate(mutate) => {
+            assert_eq!(mutate.base, PlanBase::ExistingInstance);
+            assert_eq!(mutate.receiver, target_ty);
+            assert_eq!(mutate.steps.len(), 2);
+
+            match &mutate.steps[0] {
+                MutationStep::FieldAssignment(update) => {
+                    assert_eq!(update.name, "value");
+                }
+                other => panic!("フィールド代入が必要ですが {:?} が返されました", other),
+            }
+
+            match &mutate.steps[1] {
+                MutationStep::MethodCall(call) => {
+                    assert_eq!(call.name, "push");
+                    assert_eq!(call.arguments.len(), 1);
+                    assert_eq!(call.metadata.style, CallArgumentStyle::Whitespace);
+                }
+                other => panic!("メソッド呼び出しが必要ですが {:?} が返されました", other),
+            }
+        }
+        other => panic!("ミューテーションプランが返るべきですが {:?}", other),
+    }
+}
+
+#[test]
+fn copy_plan_for_immutable_receiver() {
+    // 不変クラスではコピー戦略が選択され、フィールド更新が収集されること。
+    let span = span();
+    let statements = vec![Statement::Assignment {
+        target: Expression::Identifier("name".into(), span.clone()),
+        binding_pattern: None,
+        value: Expression::Literal(Literal::String("Alice".into()), span.clone()),
+        span: span.clone(),
+    }];
+
+    let init = DoublebraceInit {
+        base: Some(Box::new(Expression::Identifier(
+            "original".into(),
+            span.clone(),
+        ))),
+        receiver_hint: None,
+        statements: statements.clone(),
+        span: span.clone(),
+    };
+
+    let mut index = SymbolIndex::new(Some(25));
+    let mut entry = TypeEntry::new("com.example.Immutable".into(), "com.example".into(), None);
+    entry.add_instance_method(
+        "copy".into(),
+        JavaMethodSignature {
+            parameters: Vec::new(),
+            return_type: JavaType::Reference {
+                name: "com.example.Immutable".into(),
+                generic_args: Vec::new(),
+            },
+        },
+    );
+    index.add_type(entry);
+
+    let target_ty = TypeKind::reference("com.example.Immutable");
+    let base_ty = Some(TypeKind::reference("com.example.Immutable"));
+
+    let plan = plan_doublebrace_application(base_ty.as_ref(), &target_ty, &init, Some(&index))
+        .expect("コピー計画の構築に成功する");
+
+    match plan {
+        DoublebracePlan::Copy(copy) => {
+            assert_eq!(copy.source, CopySource::ExistingInstance);
+            assert_eq!(copy.receiver, target_ty);
+            assert_eq!(copy.updates.len(), 1);
+            assert_eq!(copy.updates[0].name, "name");
+        }
+        other => panic!("コピー計画が返るべきですが {:?}", other),
+    }
+}
+
+#[test]
+fn copy_plan_requires_existing_base() {
+    // コピー元が無い場合はエラーとして扱われること。
+    let span = span();
+    let statements = vec![Statement::Assignment {
+        target: Expression::Identifier("name".into(), span.clone()),
+        binding_pattern: None,
+        value: Expression::Literal(Literal::String("Alice".into()), span.clone()),
+        span: span.clone(),
+    }];
+
+    let init = DoublebraceInit {
+        base: None,
+        receiver_hint: None,
+        statements: statements.clone(),
+        span: span.clone(),
+    };
+
+    let mut index = SymbolIndex::new(Some(25));
+    let mut entry = TypeEntry::new("com.example.Immutable".into(), "com.example".into(), None);
+    entry.add_instance_method(
+        "copy".into(),
+        JavaMethodSignature {
+            parameters: Vec::new(),
+            return_type: JavaType::Reference {
+                name: "com.example.Immutable".into(),
+                generic_args: Vec::new(),
+            },
+        },
+    );
+    index.add_type(entry);
+
+    let target_ty = TypeKind::reference("com.example.Immutable");
+
+    let result = plan_doublebrace_application(None, &target_ty, &init, Some(&index));
+
+    match result {
+        Err(DoublebracePlanError::CopyUnavailable { reason, .. }) => {
+            assert!(
+                reason.contains("既存インスタンス"),
+                "エラーメッセージがコピー元不足を指摘するべきですが: {reason}"
+            );
+        }
+        other => panic!("エラーが返るべきですが {:?}", other),
+    }
+}
