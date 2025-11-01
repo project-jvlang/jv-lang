@@ -619,12 +619,15 @@ impl BindingResolver {
                 then_branch,
                 else_branch,
                 span,
-            } => Expression::If {
-                condition: Box::new(self.resolve_expression(*condition)),
-                then_branch: Box::new(self.resolve_expression(*then_branch)),
-                else_branch: else_branch.map(|expr| Box::new(self.resolve_expression(*expr))),
-                span,
-            },
+            } => {
+                self.record_forbidden_if(&span);
+                Expression::If {
+                    condition: Box::new(self.resolve_expression(*condition)),
+                    then_branch: Box::new(self.resolve_expression(*then_branch)),
+                    else_branch: else_branch.map(|expr| Box::new(self.resolve_expression(*expr))),
+                    span,
+                }
+            }
             Expression::Block {
                 statements,
                 span,
@@ -953,6 +956,14 @@ impl BindingResolver {
                 self.report_validation_error(label_undefined_message(name), Some(span.clone()));
             }
         }
+    }
+
+    fn record_forbidden_if(&mut self, span: &Span) {
+        let message = "JV3103: `if` expressions are not supported / `if` 式はサポートされていません。条件分岐は `when` 式を使用してください。".to_string();
+        self.diagnostics.push(CheckError::ValidationError {
+            message,
+            span: Some(span.clone()),
+        });
     }
 
     fn report_validation_error(&mut self, message: String, span: Option<Span>) {

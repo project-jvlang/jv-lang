@@ -200,6 +200,7 @@ impl<'a> WhenUsageValidator<'a> {
                 span,
                 ..
             } => {
+                self.record_forbidden_if(span);
                 self.visit_expression(condition, true);
                 self.visit_expression(then_branch, expects_value);
                 if let Some(else_expr) = else_branch {
@@ -315,6 +316,14 @@ impl<'a> WhenUsageValidator<'a> {
 
     fn record_missing_else(&mut self, span: &Span) {
         let message = "E_WHEN_002: when expression used as a value must declare an `else` branch. 値コンテキストでは `else` を追加し、docs/language-guide.md#when-expression / docs/language-guide-en.md#when-expression を参照してください.".to_string();
+        self.errors.push(CheckError::ValidationError {
+            message,
+            span: Some(span.clone()),
+        });
+    }
+
+    fn record_forbidden_if(&mut self, span: &Span) {
+        let message = "JV3103: `if` expressions are not supported / `if` 式はサポートされていません。条件分岐は `when` 式を使用してください。".to_string();
         self.errors.push(CheckError::ValidationError {
             message,
             span: Some(span.clone()),
