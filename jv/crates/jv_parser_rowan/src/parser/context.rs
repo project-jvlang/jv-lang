@@ -1,6 +1,9 @@
 use jv_lexer::Token;
 
-use crate::syntax::{SyntaxKind, TokenKind};
+use crate::{
+    frontend::DIAGNOSTIC_JV_UNIT_005_DEFAULT_MARKER_FORBIDDEN,
+    syntax::{SyntaxKind, TokenKind},
+};
 
 use super::{strategies, DiagnosticSeverity, ParseEvent, ParseOutput, ParserDiagnostic, TokenSpan};
 
@@ -1026,6 +1029,11 @@ impl<'tokens> ParserContext<'tokens> {
         None
     }
 
+    pub(crate) fn peek_significant_token_n(&self, n: usize) -> Option<&'tokens Token> {
+        self.peek_significant_kind_n(n)
+            .and_then(|(index, _)| self.tokens.get(index))
+    }
+
     fn peek_significant_kind_from(&self, start_index: usize) -> Option<(usize, TokenKind)> {
         let mut index = start_index;
         while index < self.tokens.len() {
@@ -1269,7 +1277,7 @@ impl<'tokens> ParserContext<'tokens> {
         let start = self.cursor;
         let _ = self.consume_inline_whitespace();
 
-        match descriptor {
+        let parsed = match descriptor {
             UnitSuffixDescriptor::SimpleWithAt => {
                 if !self.bump_expected(TokenKind::At, "`@` で単位名を示してください") {
                     return false;
@@ -1300,7 +1308,13 @@ impl<'tokens> ParserContext<'tokens> {
                 self.consume_unit_bracket_symbol(start)
             }
             UnitSuffixDescriptor::BracketWithoutAt => self.consume_unit_bracket_symbol(start),
+        };
+
+        if parsed {
+            self.report_forbidden_unit_default_marker_if_present();
         }
+
+        parsed
     }
 
     fn consume_unit_bracket_symbol(&mut self, start: usize) -> bool {
@@ -1335,6 +1349,29 @@ impl<'tokens> ParserContext<'tokens> {
         let end = self.cursor;
         self.report_error("単位記号は `]` で閉じる必要があります", start, end);
         false
+    }
+
+    fn report_forbidden_unit_default_marker_if_present(&mut self) {
+        let mut index = self.cursor;
+        while index < self.tokens.len() {
+            let token = &self.tokens[index];
+            let kind = TokenKind::from_token(token);
+            if kind == TokenKind::Whitespace {
+                index += 1;
+                continue;
+            }
+            if kind == TokenKind::Newline {
+                break;
+            }
+            if kind == TokenKind::Bang {
+                self.report_error(
+                    DIAGNOSTIC_JV_UNIT_005_DEFAULT_MARKER_FORBIDDEN,
+                    index,
+                    index + 1,
+                );
+            }
+            break;
+        }
     }
 
     /// EoF かどうか。
