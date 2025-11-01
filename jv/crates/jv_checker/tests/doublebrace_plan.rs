@@ -1,10 +1,13 @@
 use jv_ast::expression::{CallArgumentMetadata, CallArgumentStyle, DoublebraceInit};
-use jv_ast::{Argument, Expression, Literal, Span, Statement};
+use jv_ast::{
+    Argument, Expression, Literal, Modifiers, Program, Span, Statement, ValBindingOrigin,
+};
 use jv_build::metadata::{JavaMethodSignature, SymbolIndex, TypeEntry};
 use jv_checker::TypeKind;
+use jv_checker::inference::environment::TypeEnvironment;
 use jv_checker::java::{
     CopySource, DoublebracePlan, DoublebracePlanError, MutationStep, PlanBase,
-    plan_doublebrace_application,
+    plan_doublebrace_application, plan_doublebrace_in_program, span_key,
 };
 use jv_ir::types::JavaType;
 
@@ -188,4 +191,52 @@ fn copy_plan_requires_existing_base() {
         }
         other => panic!("エラーが返るべきですが {:?}", other),
     }
+}
+
+#[test]
+fn planner_collects_plan_for_val_declaration() {
+    let span = span();
+    let doublebrace = DoublebraceInit {
+        base: None,
+        receiver_hint: None,
+        statements: vec![Statement::Expression {
+            expr: Expression::Call {
+                function: Box::new(Expression::Identifier("add".into(), span.clone())),
+                args: vec![Argument::Positional(Expression::Literal(
+                    Literal::Number("1".into()),
+                    span.clone(),
+                ))],
+                type_arguments: Vec::new(),
+                argument_metadata: CallArgumentMetadata::with_style(CallArgumentStyle::Whitespace),
+                span: span.clone(),
+            },
+            span: span.clone(),
+        }],
+        span: span.clone(),
+    };
+
+    let program = Program {
+        package: None,
+        imports: Vec::new(),
+        statements: vec![Statement::ValDeclaration {
+            name: "items".into(),
+            binding: None,
+            type_annotation: None,
+            initializer: Expression::DoublebraceInit(doublebrace),
+            modifiers: Modifiers::default(),
+            origin: ValBindingOrigin::ExplicitKeyword,
+            span: span.clone(),
+        }],
+        span: span.clone(),
+    };
+
+    let mut environment = TypeEnvironment::new();
+    environment.define_monotype("items", TypeKind::reference("java.util.ArrayList"));
+
+    let plans =
+        plan_doublebrace_in_program(&program, &environment, None).expect("planning succeeds");
+    assert!(
+        plans.contains_key(&span_key(&span)),
+        "doublebrace plan should be recorded"
+    );
 }

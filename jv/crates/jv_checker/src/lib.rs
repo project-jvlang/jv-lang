@@ -21,6 +21,7 @@ pub use regex::RegexAnalysis;
 use crate::imports::ResolvedImport;
 use binding::{BindingResolution, BindingUsageSummary, LateInitManifest, resolve_bindings};
 use inference::conversions::{AppliedConversion, ConversionKind, HelperSpec, NullableGuard};
+use java::{DoublebracePlan, plan_doublebrace_in_program};
 use jv_ast::{Program, Span};
 use jv_build::metadata::SymbolIndex;
 use null_safety::{JavaLoweringHint, NullSafetyCoordinator};
@@ -387,6 +388,7 @@ pub struct TypeChecker {
     normalized_program: Option<Program>,
     binding_usage: BindingUsageSummary,
     late_init_manifest: LateInitManifest,
+    doublebrace_plans: HashMap<String, DoublebracePlan>,
 }
 
 impl TypeChecker {
@@ -410,6 +412,7 @@ impl TypeChecker {
             normalized_program: None,
             binding_usage: BindingUsageSummary::default(),
             late_init_manifest: LateInitManifest::default(),
+            doublebrace_plans: HashMap::new(),
         }
     }
 
@@ -463,6 +466,7 @@ impl TypeChecker {
     pub fn check_program(&mut self, program: &Program) -> Result<(), Vec<CheckError>> {
         self.engine.set_parallel_config(self.parallel_config);
         self.null_safety_hints.clear();
+        self.doublebrace_plans.clear();
 
         let binding_resolution = resolve_bindings(program);
         let BindingResolution {
@@ -545,8 +549,28 @@ impl TypeChecker {
                 if !placement_errors.is_empty() {
                     self.snapshot = None;
                     self.merged_facts = None;
+                    self.doublebrace_plans.clear();
                     self.update_type_facts_telemetry();
                     return Err(placement_errors);
+                }
+
+                if let Some(normalized_program) = self.normalized_program.as_ref() {
+                    match plan_doublebrace_in_program(
+                        normalized_program,
+                        self.engine.environment(),
+                        self.engine.symbol_index().map(|arc| arc.as_ref()),
+                    ) {
+                        Ok(map) => self.doublebrace_plans = map,
+                        Err(errors) => {
+                            self.snapshot = None;
+                            self.merged_facts = None;
+                            self.doublebrace_plans.clear();
+                            self.update_type_facts_telemetry();
+                            return Err(errors);
+                        }
+                    }
+                } else {
+                    self.doublebrace_plans.clear();
                 }
                 Ok(())
             }
@@ -562,6 +586,7 @@ impl TypeChecker {
                 );
                 self.snapshot = None;
                 self.merged_facts = Some(facts);
+                self.doublebrace_plans.clear();
                 self.update_type_facts_telemetry();
                 Err(vec![CheckError::TypeError(error.to_string())])
             }
@@ -628,6 +653,16 @@ impl TypeChecker {
     /// 推論スナップショットを引き渡し、内部状態からは破棄する。
     pub fn take_inference_snapshot(&mut self) -> Option<InferenceSnapshot> {
         self.snapshot.take()
+    }
+
+    /// Doublebrace 初期化式のプランを取得する。
+    pub fn doublebrace_plans(&self) -> &HashMap<String, DoublebracePlan> {
+        &self.doublebrace_plans
+    }
+
+    /// Doublebrace プランを取り出し、内部状態から破棄する。
+    pub fn take_doublebrace_plans(&mut self) -> HashMap<String, DoublebracePlan> {
+        std::mem::take(&mut self.doublebrace_plans)
     }
 
     /// Check for forbidden Java syntax or patterns.

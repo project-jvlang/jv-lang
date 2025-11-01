@@ -1,9 +1,11 @@
 //! Java 型システムに依存するヘルパ API 群。
 
+pub mod builder;
 pub mod doublebrace_plan;
 pub mod member_resolver;
 pub mod primitive;
 
+pub use builder::{plan_doublebrace_in_program, span_key};
 pub use doublebrace_plan::{
     CopyPlan, CopySource, DoublebracePlan, DoublebracePlanError, FieldUpdate, MethodInvocation,
     MutatePlan, MutationStep, PlanBase, plan_doublebrace_application,

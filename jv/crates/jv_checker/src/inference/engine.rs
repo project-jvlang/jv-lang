@@ -115,6 +115,11 @@ impl InferenceEngine {
         self.active_conversion_catalog = None;
     }
 
+    /// 現在設定されている SymbolIndex を取得する。
+    pub fn symbol_index(&self) -> Option<&Arc<SymbolIndex>> {
+        self.import_index.as_ref()
+    }
+
     /// AST 全体に対する推論を実行し、各種結果を内部状態へ保持する。
     pub fn infer_program(&mut self, program: &Program) -> InferenceResult<()> {
         let mut environment = TypeEnvironment::new();
