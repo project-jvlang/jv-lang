@@ -24,6 +24,7 @@ impl Expression {
             Expression::When { span, .. } => span,
             Expression::If { span, .. } => span,
             Expression::Block { span, .. } => span,
+            Expression::DoublebraceInit(node) => &node.span,
             Expression::Array { span, .. } => span,
             Expression::Lambda { span, .. } => span,
             Expression::Try { span, .. } => span,
@@ -73,6 +74,11 @@ pub fn requires_null_safety_check(expr: &Expression) -> bool {
         Expression::MemberAccess { object, .. } | Expression::IndexAccess { object, .. } => {
             requires_null_safety_check(object)
         }
+        Expression::DoublebraceInit(node) => node
+            .base
+            .as_ref()
+            .map(|expr| requires_null_safety_check(expr.as_ref()))
+            .unwrap_or(false),
         Expression::Call { function, .. } => requires_null_safety_check(function),
         _ => false,
     }
@@ -93,6 +99,11 @@ pub fn analyze_null_safety(expr: &Expression) -> bool {
                     Argument::Named { value, .. } => analyze_null_safety(value),
                 })
         }
+        Expression::DoublebraceInit(node) => node
+            .base
+            .as_ref()
+            .map(|expr| analyze_null_safety(expr.as_ref()))
+            .unwrap_or(false),
         _ => false, // Conservative: assume other expressions are not null-safe
     }
 }
@@ -125,6 +136,11 @@ pub fn resolve_scope(expr: &Expression) -> String {
             // Function calls have the scope of the function being called
             resolve_scope(function)
         }
+        Expression::DoublebraceInit(node) => node
+            .base
+            .as_ref()
+            .map(|expr| resolve_scope(expr))
+            .unwrap_or_else(|| "expression".to_string()),
         Expression::This(_) => "instance".to_string(),
         _ => "expression".to_string(), // Other expressions don't have meaningful scope
     }

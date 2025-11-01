@@ -26,6 +26,25 @@ fn build_sample_annotation() -> Annotation {
     }
 }
 
+fn build_doublebrace_expression() -> Expression {
+    let span = Span::new(2, 4, 4, 2);
+    let base_span = Span::new(2, 4, 2, 12);
+    let statement_span = Span::new(3, 8, 3, 18);
+
+    Expression::DoublebraceInit(DoublebraceInit {
+        base: Some(Box::new(Expression::Identifier(
+            "受信対象".to_string(),
+            base_span.clone(),
+        ))),
+        receiver_hint: Some(TypeAnnotation::Simple("MutableList<Int>".to_string())),
+        statements: vec![Statement::Expression {
+            expr: Expression::Identifier("要素追加".to_string(), statement_span.clone()),
+            span: statement_span,
+        }],
+        span,
+    })
+}
+
 #[test]
 fn annotation_roundtrips_through_serde_with_modifiers() {
     let mut modifiers = Modifiers {
@@ -144,9 +163,11 @@ fn reserved_annotation_lookup_and_conflict_detection() {
     let binding = [sample_primary, sample_duplicate, sample_shadow];
     let conflicts = detect_reserved_conflicts(&binding);
 
-    assert!(conflicts
-        .iter()
-        .any(|conflict| matches!(conflict.kind, ReservedConflictKind::DuplicateUsage)));
+    assert!(
+        conflicts
+            .iter()
+            .any(|conflict| matches!(conflict.kind, ReservedConflictKind::DuplicateUsage))
+    );
     assert!(conflicts.iter().any(|conflict| matches!(
         conflict.kind,
         ReservedConflictKind::NameShadowing { reserved } if reserved == "Sample"
@@ -272,4 +293,60 @@ fn val_declaration_origin_roundtrips_through_serde() {
         }
         other => panic!("expected val declaration, got {:?}", other),
     }
+}
+
+#[test]
+fn doublebrace_expression_roundtrips_through_serde() {
+    let expr = build_doublebrace_expression();
+    let json = serde_json::to_string(&expr).unwrap();
+    let decoded: Expression = serde_json::from_str(&json).unwrap();
+
+    assert_eq!(decoded, expr);
+}
+
+#[test]
+fn doublebrace_initializer_helpers_extract_data() {
+    let expr = build_doublebrace_expression();
+
+    let val_statement = Statement::ValDeclaration {
+        name: "リスト".to_string(),
+        binding: None,
+        type_annotation: None,
+        initializer: expr.clone(),
+        modifiers: Modifiers::default(),
+        origin: ValBindingOrigin::ExplicitKeyword,
+        span: Span::dummy(),
+    };
+
+    let node = val_statement
+        .doublebrace_initializer()
+        .expect("Doublebrace 初期化子が見つかるはずです");
+    assert!(matches!(
+        node.receiver_hint.as_ref(),
+        Some(TypeAnnotation::Simple(name)) if name == "MutableList<Int>"
+    ));
+    assert_eq!(node.statements.len(), 1);
+
+    let mut var_statement = Statement::VarDeclaration {
+        name: "項目".to_string(),
+        binding: None,
+        type_annotation: None,
+        initializer: Some(expr.clone()),
+        modifiers: Modifiers::default(),
+        span: Span::dummy(),
+    };
+    assert!(var_statement.doublebrace_initializer_mut().is_some());
+
+    let mut property = Property {
+        name: "プロパティ".to_string(),
+        type_annotation: None,
+        initializer: Some(expr),
+        is_mutable: false,
+        modifiers: Modifiers::default(),
+        getter: None,
+        setter: None,
+        span: Span::dummy(),
+    };
+    assert!(property.doublebrace_initializer().is_some());
+    assert!(property.doublebrace_initializer_mut().is_some());
 }

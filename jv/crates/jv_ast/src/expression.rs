@@ -114,6 +114,9 @@ pub enum Expression {
         span: Span,
     },
 
+    /// Doublebrace 初期化式。
+    DoublebraceInit(DoublebraceInit),
+
     // Array literals
     Array {
         elements: Vec<Expression>,
@@ -141,6 +144,18 @@ pub enum Expression {
     // This/super references
     This(Span),
     Super(Span),
+}
+
+/// Doublebrace 初期化式のASTノード。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DoublebraceInit {
+    #[serde(default)]
+    pub base: Option<Box<Expression>>,
+    #[serde(default)]
+    pub receiver_hint: Option<TypeAnnotation>,
+    #[serde(default)]
+    pub statements: Vec<crate::Statement>,
+    pub span: Span,
 }
 
 /// Delimiter metadata describing how a sequence literal separated its elements.
@@ -353,4 +368,22 @@ pub struct TryCatchClause {
     pub parameter: Option<Parameter>,
     pub body: Box<Expression>,
     pub span: Span,
+}
+
+impl Expression {
+    /// Doublebrace 初期化式であれば参照を返す。
+    pub fn as_doublebrace_init(&self) -> Option<&DoublebraceInit> {
+        match self {
+            Expression::DoublebraceInit(node) => Some(node),
+            _ => None,
+        }
+    }
+
+    /// Doublebrace 初期化式であれば可変参照を返す。
+    pub fn as_doublebrace_init_mut(&mut self) -> Option<&mut DoublebraceInit> {
+        match self {
+            Expression::DoublebraceInit(node) => Some(node),
+            _ => None,
+        }
+    }
 }

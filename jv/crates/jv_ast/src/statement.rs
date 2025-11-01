@@ -253,3 +253,45 @@ pub struct Program {
     pub statements: Vec<Statement>,
     pub span: Span,
 }
+
+impl Statement {
+    /// 宣言が Doublebrace 初期化式を持つ場合に参照を返す。
+    pub fn doublebrace_initializer(&self) -> Option<&DoublebraceInit> {
+        match self {
+            Statement::ValDeclaration { initializer, .. } => initializer.as_doublebrace_init(),
+            Statement::VarDeclaration {
+                initializer: Some(expr),
+                ..
+            } => expr.as_doublebrace_init(),
+            _ => None,
+        }
+    }
+
+    /// 宣言が Doublebrace 初期化式を持つ場合に可変参照を返す。
+    pub fn doublebrace_initializer_mut(&mut self) -> Option<&mut DoublebraceInit> {
+        match self {
+            Statement::ValDeclaration { initializer, .. } => initializer.as_doublebrace_init_mut(),
+            Statement::VarDeclaration {
+                initializer: Some(expr),
+                ..
+            } => expr.as_doublebrace_init_mut(),
+            _ => None,
+        }
+    }
+}
+
+impl Property {
+    /// プロパティ初期化子が Doublebrace を用いる場合に参照を返す。
+    pub fn doublebrace_initializer(&self) -> Option<&DoublebraceInit> {
+        self.initializer
+            .as_ref()
+            .and_then(Expression::as_doublebrace_init)
+    }
+
+    /// プロパティ初期化子が Doublebrace を用いる場合に可変参照を返す。
+    pub fn doublebrace_initializer_mut(&mut self) -> Option<&mut DoublebraceInit> {
+        self.initializer
+            .as_mut()
+            .and_then(Expression::as_doublebrace_init_mut)
+    }
+}
