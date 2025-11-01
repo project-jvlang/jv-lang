@@ -11,6 +11,7 @@ pub mod diagnostics;
 pub mod environment;
 pub mod generalize;
 pub mod kind;
+pub mod registry;
 pub mod service;
 pub mod solver;
 pub mod type_level;
@@ -25,6 +26,10 @@ pub use cache::{
 };
 pub use config::ParallelInferenceConfig;
 pub use constraint::CompactConstraintGraph;
+pub use registry::default_impl::{
+    DefaultImplementationRegistry, DefaultImplementationSource, RegistryEntryOrigin,
+    RegistryLoadError,
+};
 pub use service::{
     FactSpan, SchemaCache, TypeFacts, TypeFactsTelemetry, TypeLevelValue, json_literal_to_schema,
     sanitize_java_identifier, snake_to_camel,

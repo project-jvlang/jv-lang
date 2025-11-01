@@ -2068,6 +2068,7 @@ fn expression_span(expr: &Expression) -> Span {
         | Expression::Try { span, .. }
         | Expression::This(span)
         | Expression::Super(span) => span.clone(),
+        Expression::DoublebraceInit(node) => node.span.clone(),
         Expression::RegexLiteral(regex) => regex.span.clone(),
         Expression::JsonLiteral(literal) => literal.span.clone(),
         Expression::MultilineString(literal) => literal.span.clone(),
