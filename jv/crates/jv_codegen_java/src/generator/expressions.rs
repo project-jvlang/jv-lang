@@ -2481,17 +2481,26 @@ impl JavaCodeGenerator {
         pattern: &IrExpression,
         flags: &[RegexFlag],
     ) -> Result<String, CodeGenError> {
-        if flags.is_empty() {
-            return self.generate_expression(pattern);
-        }
-
         if let IrExpression::RegexPattern { pattern: value, .. } = pattern {
             self.add_import("java.util.regex.Pattern");
             let escaped = Self::escape_string(value);
-            let flag_mask = self.render_regex_flag_mask(flags);
-            Ok(format!("Pattern.compile(\"{escaped}\", {flag_mask})"))
+            if flags.is_empty() {
+                Ok(format!("Pattern.compile(\"{escaped}\")"))
+            } else {
+                let flag_mask = self.render_regex_flag_mask(flags);
+                Ok(format!("Pattern.compile(\"{escaped}\", {flag_mask})"))
+            }
         } else {
-            self.generate_expression(pattern)
+            if flags.is_empty() {
+                self.generate_expression(pattern)
+            } else {
+                let pattern_expr = self.generate_expression(pattern)?;
+                let flag_mask = self.render_regex_flag_mask(flags);
+                Ok(format!(
+                    "Pattern.compile({pattern_expr}, {flag_mask})",
+                    pattern_expr = pattern_expr
+                ))
+            }
         }
     }
 
