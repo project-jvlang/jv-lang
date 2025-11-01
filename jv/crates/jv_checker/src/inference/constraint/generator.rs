@@ -712,8 +712,36 @@ impl<'env, 'ext, 'imp> ConstraintGenerator<'env, 'ext, 'imp> {
         let right_ty = self.infer_expression(right);
 
         match op {
-            Add | Subtract | Multiply | Divide | Modulo | PlusAssign | MinusAssign
-            | MultiplyAssign | DivideAssign => {
+            Add | PlusAssign => {
+                if self.should_use_string_concatenation(&left_ty, &right_ty) {
+                    let string_ty = TypeKind::reference("java.lang.String");
+                    self.push_constraint_with_span(
+                        ConstraintKind::Convertible {
+                            from: left_ty.clone(),
+                            to: string_ty.clone(),
+                        },
+                        Some("string concatenation requires operands convertible to java.lang.String"),
+                        expression_span(left),
+                    );
+                    self.push_constraint_with_span(
+                        ConstraintKind::Convertible {
+                            from: right_ty.clone(),
+                            to: string_ty.clone(),
+                        },
+                        Some("string concatenation requires operands convertible to java.lang.String"),
+                        expression_span(right),
+                    );
+                    string_ty
+                } else {
+                    self.push_constraint(
+                        ConstraintKind::Equal(left_ty.clone(), right_ty.clone()),
+                        Some("arithmetic operands must share the same type"),
+                    );
+                    left_ty
+                }
+            }
+            Subtract | Multiply | Divide | Modulo | MinusAssign | MultiplyAssign
+            | DivideAssign => {
                 self.push_constraint(
                     ConstraintKind::Equal(left_ty.clone(), right_ty.clone()),
                     Some("arithmetic operands must share the same type"),
@@ -1038,6 +1066,19 @@ impl<'env, 'ext, 'imp> ConstraintGenerator<'env, 'ext, 'imp> {
         }
     }
 
+    fn should_use_string_concatenation(&self, left: &TypeKind, right: &TypeKind) -> bool {
+        self.is_explicit_string(left) || self.is_explicit_string(right)
+    }
+
+    fn is_explicit_string(&self, ty: &TypeKind) -> bool {
+        match ty {
+            TypeKind::Reference(name) => {
+                matches!(name.as_str(), "java.lang.String" | "String")
+            }
+            TypeKind::Optional(inner) => self.is_explicit_string(inner),
+            _ => false,
+        }
+    }
     fn regex_replacement_error_message(&self, code: &str, actual_desc: &str) -> String {
         match code {
             "JV_REGEX_E102" => messages::regex_lambda_return_mismatch_message(actual_desc),

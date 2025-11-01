@@ -17,6 +17,7 @@ use jv_cli::pipeline::project::{
 };
 use jv_cli::pipeline::{compile, BuildOptionsFactory, CliOverrides};
 use jv_ir::types::IrImportDetail;
+use serde_json::Value;
 
 struct TempDirGuard {
     path: PathBuf,
@@ -1237,6 +1238,23 @@ fn pipeline_emit_types_produces_type_facts_json() {
     assert!(
         json.contains("message"),
         "expected binding entry in json: {json}"
+    );
+
+    let facts: Value =
+        serde_json::from_str(&json).expect("type facts JSON should be well-formed");
+    let bindings = facts
+        .get("bindings")
+        .and_then(|value| value.as_array())
+        .expect("type facts should include binding entries");
+    let has_list_binding = bindings.iter().any(|entry| {
+        entry
+            .as_str()
+            .map(|value| value.contains("java.util.List"))
+            .unwrap_or(false)
+    });
+    assert!(
+        has_list_binding,
+        "expected regex/sequence derived bindings to record java.util.List usage: {json}"
     );
 }
 
