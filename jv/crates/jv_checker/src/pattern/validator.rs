@@ -139,6 +139,14 @@ impl<'a> WhenUsageValidator<'a> {
                     }
                 }
             }
+            Expression::DoublebraceInit(init) => {
+                if let Some(base) = &init.base {
+                    self.visit_expression(base, true);
+                }
+                for statement in &init.statements {
+                    self.visit_statement(statement, false);
+                }
+            }
             Expression::MemberAccess { object, .. }
             | Expression::NullSafeMemberAccess { object, .. } => {
                 self.visit_expression(object, true);

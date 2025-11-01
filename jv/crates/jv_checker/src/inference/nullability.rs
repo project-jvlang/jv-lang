@@ -323,6 +323,17 @@ impl NullabilityAnalyzer {
                 }
                 result
             }
+            Expression::DoublebraceInit(init) => {
+                if let Some(base) = &init.base {
+                    self.evaluate_expression(base);
+                }
+                self.enter_scope();
+                for statement in &init.statements {
+                    self.visit_statement(statement);
+                }
+                self.leave_scope();
+                Nullability::NonNull
+            }
             Expression::If {
                 condition,
                 then_branch,

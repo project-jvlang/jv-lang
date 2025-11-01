@@ -8,11 +8,13 @@ pub mod cache;
 pub mod config;
 pub mod constraint;
 pub mod diagnostics;
+pub mod doublebrace;
 pub mod environment;
 pub mod generalize;
 pub mod kind;
 pub mod registry;
 pub mod service;
+pub mod session;
 pub mod solver;
 pub mod type_level;
 pub mod types;
@@ -26,6 +28,7 @@ pub use cache::{
 };
 pub use config::ParallelInferenceConfig;
 pub use constraint::CompactConstraintGraph;
+pub use doublebrace::DoublebraceHeuristics;
 pub use registry::default_impl::{
     DefaultImplementationRegistry, DefaultImplementationSource, RegistryEntryOrigin,
     RegistryLoadError,
@@ -34,6 +37,7 @@ pub use service::{
     FactSpan, SchemaCache, TypeFacts, TypeFactsTelemetry, TypeLevelValue, json_literal_to_schema,
     sanitize_java_identifier, snake_to_camel,
 };
+pub use session::InferenceSession;
 pub use type_level::{
     EvaluationContext, EvaluationDependencies, TerminationConfig, TerminationError,
     TypeLevelBinding, TypeLevelDiagnostic, TypeLevelEvaluationOutcome, TypeLevelEvaluator,

@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use crate::CheckError;
+use jv_ast::DoublebraceInit;
 use jv_ast::Span;
 use jv_ast::{
     Argument, ConcurrencyConstruct, Expression, ExtensionFunction, Modifiers, Program,
@@ -576,6 +577,24 @@ impl BindingResolver {
                 let statements = self.resolve_statements(statements);
                 self.exit_scope();
                 Expression::Block { statements, span }
+            }
+            Expression::DoublebraceInit(init) => {
+                let resolved_base = init
+                    .base
+                    .map(|expr| Box::new(self.resolve_expression(*expr)));
+                self.enter_scope();
+                let statements = init
+                    .statements
+                    .into_iter()
+                    .map(|stmt| self.resolve_statement(stmt))
+                    .collect();
+                self.exit_scope();
+                Expression::DoublebraceInit(DoublebraceInit {
+                    base: resolved_base,
+                    receiver_hint: init.receiver_hint,
+                    statements,
+                    span: init.span,
+                })
             }
             Expression::Array {
                 elements,

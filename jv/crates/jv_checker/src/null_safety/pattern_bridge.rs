@@ -258,6 +258,16 @@ impl PatternFactsBridge {
                 }
                 outcome
             }
+            Expression::DoublebraceInit(init) => {
+                let mut outcome = BridgeOutcome::default();
+                if let Some(base) = &init.base {
+                    outcome.merge(self.visit_expression(base, service, context));
+                }
+                for statement in &init.statements {
+                    outcome.merge(self.visit_statement(statement, service, context));
+                }
+                outcome
+            }
             Expression::Block { statements, .. } => {
                 let mut outcome = BridgeOutcome::default();
                 for statement in statements {

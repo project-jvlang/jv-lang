@@ -861,6 +861,7 @@ fn classify_expression(
         Expression::Identifier(name, _) => {
             ExpressionInfo::with_symbol(NullabilityKind::Unknown, Some(name.clone()))
         }
+        Expression::DoublebraceInit(_) => ExpressionInfo::new(NullabilityKind::NonNull),
         Expression::NullSafeMemberAccess { object, span, .. } => {
             let object_info = classify_expression(builder, object);
             let outcome = OperatorSemantics::null_safe_member_access(

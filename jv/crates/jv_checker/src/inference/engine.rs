@@ -139,8 +139,12 @@ impl InferenceEngine {
         });
         environment.set_conversion_catalog(conversion_catalog.clone());
         self.active_conversion_catalog = conversion_catalog.clone();
-        let generator =
-            ConstraintGenerator::new(&mut environment, &extensions, import_registry.as_mut());
+        let generator = ConstraintGenerator::new(
+            &mut environment,
+            &extensions,
+            import_registry.as_mut(),
+            self.import_index.clone(),
+        );
         let constraints = generator.generate(program);
         let constraint_count = constraints.len();
         let inference_start = Instant::now();
