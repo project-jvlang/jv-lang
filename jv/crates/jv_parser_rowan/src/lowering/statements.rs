@@ -23,6 +23,7 @@ use jv_ast::types::{
     BinaryOp, GenericParameter, GenericSignature, Literal, Modifiers, Pattern, TypeAnnotation,
     UnaryOp, VarianceMarker,
 };
+use jv_ast::DoublebraceInit;
 use jv_ast::{BindingPatternKind, Expression, SequenceDelimiter, Span, Statement};
 use jv_lexer::{
     JsonCommentTrivia, JsonCommentTriviaKind, JsonConfidence, LayoutMode, Lexer,
@@ -705,7 +706,7 @@ fn lower_value(
         None => None,
     };
 
-    let initializer = if is_val {
+    let mut initializer = if is_val {
         Some(initializer_result.ok_or_else(|| {
             LoweringDiagnostic::new(
                 LoweringDiagnosticSeverity::Error,
@@ -720,6 +721,14 @@ fn lower_value(
         initializer_result
     };
 
+    if let Some(annotation) = &type_annotation {
+        if let Some(expr) = initializer.as_mut() {
+            if let Expression::DoublebraceInit(init) = expr {
+                init.receiver_hint = Some(annotation.clone());
+            }
+        }
+    }
+
     let span = context.span_for(node).unwrap_or_else(jv_ast::Span::dummy);
     let modifiers = Modifiers::default();
 
@@ -728,7 +737,7 @@ fn lower_value(
             name,
             binding: Some(binding_pattern.clone()),
             type_annotation,
-            initializer: initializer.unwrap(),
+            initializer: initializer.expect("val initializers must exist"),
             modifiers,
             origin: ValBindingOrigin::ExplicitKeyword,
             span,
@@ -820,7 +829,12 @@ fn lower_doublebrace_block_expression(
     let mut statements = Vec::new();
     collect_statements_from_children(context, &statement_list, &mut statements, diagnostics);
 
-    Ok(Expression::Block { statements, span })
+    Ok(Expression::DoublebraceInit(DoublebraceInit {
+        base: None,
+        receiver_hint: None,
+        statements,
+        span,
+    }))
 }
 
 fn lower_initializer_clause_expression(
@@ -1272,7 +1286,9 @@ mod expression_parser {
                     })
                 }
                 TokenType::LeftBrace => {
-                    if has_high_json_confidence(token) {
+                    if self.is_doublebrace_start(index) {
+                        self.parse_doublebrace_block(None)
+                    } else if has_high_json_confidence(token) {
                         self.parse_json_object_expression(index)
                     } else {
                         self.parse_brace_expression()
@@ -1667,6 +1683,25 @@ mod expression_parser {
 
             let span = span_for_range(self.tokens, body_start, body_start + body_tokens.len());
             Ok(Expression::Block { statements, span })
+        }
+
+        fn parse_doublebrace_statements(
+            &self,
+            body_tokens: &[&'a Token],
+            body_start: usize,
+        ) -> Result<Vec<Statement>, ExpressionError> {
+            let mut statements = Vec::new();
+            let ranges = Self::split_lambda_body_statements(body_tokens);
+            for (rel_start, rel_end) in ranges {
+                if rel_start >= rel_end {
+                    continue;
+                }
+                let slice = &body_tokens[rel_start..rel_end];
+                let absolute_start = body_start + rel_start;
+                let statement = self.parse_lambda_statement(slice, absolute_start)?;
+                statements.push(statement);
+            }
+            Ok(statements)
         }
 
         fn split_lambda_body_statements(tokens: &[&Token]) -> Vec<(usize, usize)> {
@@ -2550,6 +2585,7 @@ mod expression_parser {
                 PostfixKind::TypeArguments => self.parse_type_arguments_postfix(left),
                 PostfixKind::Call => self.parse_parenthesized_call(left),
                 PostfixKind::TrailingLambda => self.parse_trailing_lambda_call(left),
+                PostfixKind::Doublebrace => self.parse_doublebrace_block(Some(left)),
             }
         }
 
@@ -2862,6 +2898,68 @@ mod expression_parser {
                 expr,
                 start,
                 end: lambda_end,
+            })
+        }
+
+        fn parse_doublebrace_block(
+            &mut self,
+            base: Option<ParsedExpr>,
+        ) -> Result<ParsedExpr, ExpressionError> {
+            let (base_expr, start_index) = match base {
+                Some(parsed) => (Some(parsed.expr), parsed.start),
+                None => (None, self.pos),
+            };
+
+            let (outer_token, _outer_index) = self.advance_with_index_or_error("'{' が必要です")?;
+            if !matches!(outer_token.token_type, TokenType::LeftBrace) {
+                return Err(ExpressionError::new(
+                    "Doublebrace ブロックの開始に '{' が必要です",
+                    Some(span_from_token(outer_token)),
+                ));
+            }
+
+            self.skip_trivia_tokens();
+
+            let (inner_token, inner_index) = self.advance_with_index_or_error("'{' が必要です")?;
+            if !matches!(inner_token.token_type, TokenType::LeftBrace) {
+                return Err(ExpressionError::new(
+                    "Doublebrace ブロックには 2 つ目の '{' が必要です",
+                    Some(span_from_token(inner_token)),
+                ));
+            }
+
+            let inner_close_index = self.find_matching_brace(inner_index).ok_or_else(|| {
+                ExpressionError::new(
+                    "Doublebrace ブロックの内部を閉じる '}' が必要です",
+                    self.span_at(inner_index),
+                )
+            })?;
+
+            let body_tokens = &self.tokens[inner_index + 1..inner_close_index];
+            let statements = self.parse_doublebrace_statements(body_tokens, inner_index + 1)?;
+
+            self.pos = inner_close_index + 1;
+            self.skip_trivia_tokens();
+
+            let (outer_close_token, outer_close_index) =
+                self.advance_with_index_or_error("Doublebrace ブロックを閉じる '}' が必要です")?;
+            if !matches!(outer_close_token.token_type, TokenType::RightBrace) {
+                return Err(ExpressionError::new(
+                    "Doublebrace ブロックを閉じる '}' が必要です",
+                    Some(span_from_token(outer_close_token)),
+                ));
+            }
+
+            let span = span_for_range(self.tokens, start_index, outer_close_index + 1);
+            Ok(ParsedExpr {
+                expr: Expression::DoublebraceInit(DoublebraceInit {
+                    base: base_expr.map(Box::new),
+                    receiver_hint: None,
+                    statements,
+                    span: span.clone(),
+                }),
+                start: start_index,
+                end: outer_close_index + 1,
             })
         }
 
@@ -3300,7 +3398,13 @@ mod expression_parser {
                     }
                 }
                 TokenType::LeftParen => Some(PostfixKind::Call),
-                TokenType::LeftBrace => Some(PostfixKind::TrailingLambda),
+                TokenType::LeftBrace => {
+                    if self.is_doublebrace_start(self.pos) {
+                        Some(PostfixKind::Doublebrace)
+                    } else {
+                        Some(PostfixKind::TrailingLambda)
+                    }
+                }
                 _ => None,
             }
         }
@@ -3412,6 +3516,46 @@ mod expression_parser {
                 }
             }
             None
+        }
+
+        fn is_doublebrace_start(&self, index: usize) -> bool {
+            let Some(first) = self.tokens.get(index) else {
+                return false;
+            };
+            if !matches!(first.token_type, TokenType::LeftBrace) {
+                return false;
+            }
+
+            let mut lookahead = index + 1;
+            while let Some(token) = self.tokens.get(lookahead) {
+                match token.token_type {
+                    TokenType::Whitespace(_)
+                    | TokenType::Newline
+                    | TokenType::LayoutComma
+                    | TokenType::LineComment(_)
+                    | TokenType::BlockComment(_)
+                    | TokenType::JavaDocComment(_) => {
+                        lookahead += 1;
+                    }
+                    TokenType::LeftBrace => return true,
+                    _ => return false,
+                }
+            }
+            false
+        }
+
+        fn skip_trivia_tokens(&mut self) {
+            while let Some(token) = self.tokens.get(self.pos) {
+                match token.token_type {
+                    TokenType::Whitespace(_)
+                    | TokenType::Newline
+                    | TokenType::LayoutComma
+                    | TokenType::LineComment(_)
+                    | TokenType::BlockComment(_)
+                    | TokenType::JavaDocComment(_) => self.pos += 1,
+                    _ => break,
+                }
+            }
         }
 
         fn peek_is_as_keyword(&self) -> bool {
@@ -3693,6 +3837,7 @@ mod expression_parser {
         TypeArguments,
         Call,
         TrailingLambda,
+        Doublebrace,
     }
 
     const PREFIX_PRECEDENCE: u8 = 8;

@@ -31,6 +31,7 @@ pub fn expression_span(expr: &Expression) -> Span {
         Expression::NullSafeIndexAccess { span, .. } => span.clone(),
         Expression::TypeCast { span, .. } => span.clone(),
         Expression::Block { span, .. } => span.clone(),
+        Expression::DoublebraceInit(node) => node.span.clone(),
         Expression::Array { span, .. } => span.clone(),
         Expression::Lambda { span, .. } => span.clone(),
         Expression::Try { span, .. } => span.clone(),

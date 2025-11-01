@@ -1611,7 +1611,7 @@ fn expression_lowering_handles_trailing_lambda_call() {
 }
 
 #[test]
-fn doublebrace_initializer_lowered_to_block_expression() {
+fn doublebrace_initializer_lowered_to_doublebrace_expression() {
     let source = r#"
         val list = {{
             add(1)
@@ -1631,14 +1631,14 @@ fn doublebrace_initializer_lowered_to_block_expression() {
 
     match statement {
         Statement::ValDeclaration { initializer, .. } => match initializer {
-            Expression::Block { statements, .. } => {
+            Expression::DoublebraceInit(init) => {
                 assert!(
-                    !statements.is_empty(),
+                    !init.statements.is_empty(),
                     "doublebrace block should preserve inner statements"
                 );
             }
             other => panic!(
-                "doublebrace initializer should lower to block expression for now, got {:?}",
+                "doublebrace initializer should lower to DoublebraceInit expression, got {:?}",
                 other
             ),
         },
