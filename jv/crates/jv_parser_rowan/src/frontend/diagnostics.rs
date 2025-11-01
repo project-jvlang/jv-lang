@@ -29,6 +29,10 @@ pub(crate) const DIAGNOSTIC_JV_UNIT_003_DEPENDENCY_MISSING_RHS: &str =
 /// 単位系構文: 未知の単位変換ディレクティブ。
 pub(crate) const DIAGNOSTIC_JV_UNIT_004_UNKNOWN_DIRECTIVE: &str =
     "JV_UNIT_004: `@Conversion` か `@ReverseConversion` のみをサポートしています";
+#[allow(dead_code)]
+/// 単位系構文: デフォルト単位マーカー誤用。
+pub(crate) const DIAGNOSTIC_JV_UNIT_005_DEFAULT_MARKER_FORBIDDEN: &str =
+    "JV_UNIT_005: デフォルト単位マーカー（`!`）は単位定義内でのみ使用できます";
 
 pub(crate) fn compose_frontend_diagnostics(
     tokens: &[Token],
