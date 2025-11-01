@@ -920,10 +920,10 @@ fn missing_branch_closing_brace_recovers_with_block_error() {
 }
 
 #[test]
-fn unsupported_if_statement_reports_error() {
+fn unsupported_while_statement_reports_error() {
     let source = r#"
         fun demo() {
-            if (true) {
+            while (true) {
                 return
             }
         }
@@ -936,8 +936,8 @@ fn unsupported_if_statement_reports_error() {
         output
             .diagnostics
             .iter()
-            .any(|diag| diag.message.contains("`if`")),
-        "expected diagnostic about unsupported if statement, got {:?}",
+            .any(|diag| diag.message.contains("`while`")),
+        "expected diagnostic about unsupported while statement, got {:?}",
         output.diagnostics
     );
 

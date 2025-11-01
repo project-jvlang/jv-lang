@@ -23,7 +23,6 @@ impl StatementStrategy for ControlStrategy {
                 | TokenKind::ThrowKw
                 | TokenKind::BreakKw
                 | TokenKind::ContinueKw
-                | TokenKind::IfKw
                 | TokenKind::WhileKw
                 | TokenKind::DoKw
         )
@@ -37,7 +36,6 @@ impl StatementStrategy for ControlStrategy {
             Some(TokenKind::ThrowKw) => parse_throw(ctx),
             Some(TokenKind::BreakKw) => parse_break(ctx),
             Some(TokenKind::ContinueKw) => parse_continue(ctx),
-            Some(TokenKind::IfKw) => report_unsupported_control(ctx, TokenKind::IfKw),
             Some(TokenKind::WhileKw) => report_unsupported_control(ctx, TokenKind::WhileKw),
             Some(TokenKind::DoKw) => report_unsupported_control(ctx, TokenKind::DoKw),
             _ => false,
@@ -229,7 +227,6 @@ fn parse_continue(ctx: &mut ParserContext<'_>) -> bool {
 
 fn report_unsupported_control(ctx: &mut ParserContext<'_>, keyword: TokenKind) -> bool {
     let message = match keyword {
-        TokenKind::IfKw => "jv 言語では `if`/`else` ステートメントは使用できません。`when` を使用してください。",
         TokenKind::WhileKw | TokenKind::DoKw => {
             "jv 言語では `while`/`do-while` ステートメントは使用できません。`for` によるループ表現へ書き換えてください。"
         }

@@ -1328,6 +1328,7 @@ mod expression_parser {
                 }
                 TokenType::LeftBracket => self.parse_array_expression(index),
                 TokenType::When => self.parse_when_expression(),
+                TokenType::If => self.parse_if_expression(),
                 _ => self.parse_primary(),
             }
         }
@@ -1399,6 +1400,15 @@ mod expression_parser {
                     let span = span_from_token(token);
                     Ok(ParsedExpr {
                         expr: Expression::Literal(Literal::Character(*value), span.clone()),
+                        start: index,
+                        end: index + 1,
+                    })
+                }
+                TokenType::RegexLiteral(_) => {
+                    let span = span_from_token(token);
+                    let literal = regex_literal_from_token(token, span.clone());
+                    Ok(ParsedExpr {
+                        expr: Expression::RegexLiteral(literal),
                         start: index,
                         end: index + 1,
                     })
@@ -1725,7 +1735,7 @@ mod expression_parser {
             })
         }
 
-        fn normalize_when_branch_body(expr: Expression) -> Expression {
+        fn normalize_branch_body(expr: Expression) -> Expression {
             match expr {
                 Expression::Lambda {
                     parameters,
@@ -1751,6 +1761,34 @@ mod expression_parser {
                             span,
                         }
                     }
+                },
+                other => other,
+            }
+        }
+
+        fn lower_block_branch(
+            &self,
+            block_start: usize,
+            block_close: usize,
+        ) -> Result<Expression, ExpressionError> {
+            let block_tokens = if block_close > block_start + 1 {
+                &self.tokens[block_start + 1..block_close]
+            } else {
+                &[]
+            };
+            let block_expr = self.parse_lambda_body_as_block(block_tokens, block_start + 1)?;
+            let span = span_for_range(self.tokens, block_start, block_close + 1);
+            Ok(Self::apply_block_span(block_expr, span))
+        }
+
+        fn apply_block_span(expr: Expression, span: Span) -> Expression {
+            match expr {
+                Expression::Block {
+                    statements, label, ..
+                } => Expression::Block {
+                    statements,
+                    label,
+                    span,
                 },
                 other => other,
             }
@@ -2048,12 +2086,7 @@ mod expression_parser {
             })?;
             let when_span = span_from_token(when_token);
 
-            while matches!(
-                self.peek_token().map(|token| &token.token_type),
-                Some(TokenType::LayoutComma)
-            ) {
-                self.pos += 1;
-            }
+            self.skip_layout_tokens();
 
             let mut subject_expr: Option<Expression> = None;
 
@@ -2097,12 +2130,7 @@ mod expression_parser {
                 self.pos = brace_index;
             }
 
-            while matches!(
-                self.peek_token().map(|token| &token.token_type),
-                Some(TokenType::LayoutComma)
-            ) {
-                self.pos += 1;
-            }
+            self.skip_layout_tokens();
 
             let brace_index = self.pos;
             let brace_token = self.peek_token().ok_or_else(|| {
@@ -2130,9 +2158,9 @@ mod expression_parser {
             let mut else_arm: Option<Expression> = None;
 
             while self.pos < closing_index {
-                if matches!(self.tokens[self.pos].token_type, TokenType::LayoutComma) {
-                    self.pos += 1;
-                    continue;
+                self.skip_layout_tokens();
+                if self.pos >= closing_index {
+                    break;
                 }
 
                 if matches!(self.tokens[self.pos].token_type, TokenType::Else) {
@@ -2153,12 +2181,7 @@ mod expression_parser {
                     }
                     self.pos += 1;
 
-                    while matches!(
-                        self.tokens.get(self.pos).map(|token| &token.token_type),
-                        Some(TokenType::LayoutComma)
-                    ) {
-                        self.pos += 1;
-                    }
+                    self.skip_layout_tokens();
 
                     if self.pos >= closing_index {
                         return Err(ExpressionError::new(
@@ -2167,56 +2190,42 @@ mod expression_parser {
                         ));
                     }
 
-                    let slice = &self.tokens[self.pos..closing_index];
-                    let parsed_body = {
-                        let filtered_slice: Vec<&Token> = slice
-                            .iter()
-                            .copied()
-                            .filter(|token| !matches!(token.token_type, TokenType::LayoutComma))
-                            .collect();
-                        let mut nested = ExpressionParser::new(filtered_slice.as_slice());
-                        match nested.parse_expression_bp(0) {
-                            Ok(parsed) => parsed,
-                            Err(err) => {
-                                if matches!(
-                                    slice.first().map(|token| &token.token_type),
-                                    Some(TokenType::LeftBrace)
-                                ) {
-                                    let body_close =
-                                        self.find_matching_brace(self.pos).ok_or_else(|| {
-                                            ExpressionError::new(
-                                                "'}' が必要です",
-                                                self.span_at(self.pos),
-                                            )
-                                        })?;
-                                    let block_tokens = &self.tokens[self.pos + 1..body_close];
-                                    let block_expr = self
-                                        .parse_lambda_body_as_block(block_tokens, self.pos + 1)?;
-                                    ParsedExpr {
-                                        expr: block_expr,
-                                        start: 0,
-                                        end: body_close - self.pos + 1,
-                                    }
-                                } else {
-                                    return Err(err);
-                                }
-                            }
-                        }
-                    };
-                    if parsed_body.end == 0 {
+                    let body_start = self.pos;
+                    let body_end = self.find_when_body_end(body_start, closing_index);
+                    if body_end == body_start {
                         return Err(ExpressionError::new(
                             "`else` 分岐の式が必要です",
                             self.span_at(self.pos),
                         ));
                     }
-                    let body_expr = Self::normalize_when_branch_body(parsed_body.expr);
+
+                    let slice = &self.tokens[body_start..body_end];
+                    let body_expr = match Self::parse_expression_from_tokens(slice) {
+                        Ok(expr) => Self::normalize_branch_body(expr),
+                        Err(err) => {
+                            if matches!(
+                                slice.first().map(|token| &token.token_type),
+                                Some(TokenType::LeftBrace)
+                            ) {
+                                let body_close =
+                                    self.find_matching_brace(self.pos).ok_or_else(|| {
+                                        ExpressionError::new(
+                                            "'}' が必要です",
+                                            self.span_at(self.pos),
+                                        )
+                                    })?;
+                                let block_tokens = &self.tokens[self.pos + 1..body_close];
+                                let block_expr =
+                                    self.parse_lambda_body_as_block(block_tokens, self.pos + 1)?;
+                                block_expr
+                            } else {
+                                return Err(err);
+                            }
+                        }
+                    };
                     else_arm = Some(body_expr);
-                    self.pos += parsed_body.end;
-                    while self.pos < closing_index
-                        && matches!(self.tokens[self.pos].token_type, TokenType::LayoutComma)
-                    {
-                        self.pos += 1;
-                    }
+                    self.pos = body_end;
+                    self.skip_layout_tokens();
                     continue;
                 }
 
@@ -2241,12 +2250,7 @@ mod expression_parser {
                     Self::parse_when_pattern(pattern_tokens, subject_expr.is_some())?;
                 self.pos = arrow_index + 1;
 
-                while matches!(
-                    self.tokens.get(self.pos).map(|token| &token.token_type),
-                    Some(TokenType::LayoutComma)
-                ) {
-                    self.pos += 1;
-                }
+                self.skip_layout_tokens();
 
                 if self.pos >= closing_index {
                     return Err(ExpressionError::new(
@@ -2255,50 +2259,34 @@ mod expression_parser {
                     ));
                 }
 
-                let slice = &self.tokens[self.pos..closing_index];
-                let parsed_body = {
-                    let filtered_slice: Vec<&Token> = slice
-                        .iter()
-                        .copied()
-                        .filter(|token| !matches!(token.token_type, TokenType::LayoutComma))
-                        .collect();
-                    let mut nested = ExpressionParser::new(filtered_slice.as_slice());
-                    match nested.parse_expression_bp(0) {
-                        Ok(parsed) => parsed,
-                        Err(err) => {
-                            if matches!(
-                                slice.first().map(|token| &token.token_type),
-                                Some(TokenType::LeftBrace)
-                            ) {
-                                let body_close =
-                                    self.find_matching_brace(self.pos).ok_or_else(|| {
-                                        ExpressionError::new(
-                                            "'}' が必要です",
-                                            self.span_at(self.pos),
-                                        )
-                                    })?;
-                                let block_tokens = &self.tokens[self.pos + 1..body_close];
-                                let block_expr =
-                                    self.parse_lambda_body_as_block(block_tokens, self.pos + 1)?;
-                                ParsedExpr {
-                                    expr: block_expr,
-                                    start: 0,
-                                    end: body_close - self.pos + 1,
-                                }
-                            } else {
-                                return Err(err);
-                            }
-                        }
-                    }
-                };
-                if parsed_body.end == 0 {
+                let body_start = self.pos;
+                let body_end = self.find_when_body_end(body_start, closing_index);
+                if body_end == body_start {
                     return Err(ExpressionError::new(
                         "`when` 分岐の式が必要です",
                         self.span_at(self.pos),
                     ));
                 }
-                let body_expr = Self::normalize_when_branch_body(parsed_body.expr);
-                let body_end = self.pos + parsed_body.end;
+
+                let slice = &self.tokens[body_start..body_end];
+                let body_expr = match Self::parse_expression_from_tokens(slice) {
+                    Ok(expr) => Self::normalize_branch_body(expr),
+                    Err(err) => {
+                        if matches!(
+                            slice.first().map(|token| &token.token_type),
+                            Some(TokenType::LeftBrace)
+                        ) {
+                            let body_close =
+                                self.find_matching_brace(self.pos).ok_or_else(|| {
+                                    ExpressionError::new("'}' が必要です", self.span_at(self.pos))
+                                })?;
+                            let block_tokens = &self.tokens[self.pos + 1..body_close];
+                            self.parse_lambda_body_as_block(block_tokens, self.pos + 1)?
+                        } else {
+                            return Err(err);
+                        }
+                    }
+                };
                 let body_span = expression_span(&body_expr);
                 let arm_span = merge_spans(&pattern_span, &body_span);
 
@@ -2310,11 +2298,7 @@ mod expression_parser {
                 });
 
                 self.pos = body_end;
-                while self.pos < closing_index
-                    && matches!(self.tokens[self.pos].token_type, TokenType::LayoutComma)
-                {
-                    self.pos += 1;
-                }
+                self.skip_layout_tokens();
             }
 
             if arms.is_empty() && else_arm.is_none() {
@@ -2340,6 +2324,132 @@ mod expression_parser {
                 start: when_index,
                 end: closing_index + 1,
             })
+        }
+
+        fn parse_if_expression(&mut self) -> Result<ParsedExpr, ExpressionError> {
+            let (if_token, if_index) = self.advance_with_index().ok_or_else(|| {
+                ExpressionError::new("`if` 式の先頭トークンを取得できませんでした", None)
+            })?;
+            let if_span = span_from_token(if_token);
+
+            self.skip_layout_tokens();
+
+            let condition = if matches!(
+                self.peek_token().map(|token| &token.token_type),
+                Some(TokenType::LeftParen)
+            ) {
+                let open_index = self.pos;
+                let close_index = self.find_matching_paren(open_index).ok_or_else(|| {
+                    ExpressionError::new(
+                        "`if` 条件を閉じる ')' が必要です",
+                        self.span_at(open_index),
+                    )
+                })?;
+                let inner_tokens = &self.tokens[open_index + 1..close_index];
+                if inner_tokens.is_empty() {
+                    return Err(ExpressionError::new(
+                        "`if` 条件式が必要です",
+                        self.span_at(open_index),
+                    ));
+                }
+                let parsed = Self::parse_nested_expression(inner_tokens)?;
+                self.pos = close_index + 1;
+                parsed
+            } else {
+                return Err(ExpressionError::new(
+                    "`if` 条件は括弧で囲む必要があります",
+                    self.span_at(self.pos),
+                ));
+            };
+
+            self.skip_layout_tokens();
+
+            let then_start = self.pos;
+            let then_end = self.find_when_body_end(then_start, self.tokens.len());
+            if then_end == then_start {
+                return Err(ExpressionError::new(
+                    "`if` 本体の式が必要です",
+                    self.span_at(self.pos),
+                ));
+            }
+
+            let then_tokens = &self.tokens[then_start..then_end];
+            let raw_then = match Self::parse_expression_from_tokens(then_tokens) {
+                Ok(expr) => expr,
+                Err(err) => {
+                    if matches!(
+                        then_tokens.first().map(|token| &token.token_type),
+                        Some(TokenType::LeftBrace)
+                    ) {
+                        let body_close = self.find_matching_brace(then_start).ok_or_else(|| {
+                            ExpressionError::new("'}' が必要です", self.span_at(then_start))
+                        })?;
+                        self.lower_block_branch(then_start, body_close)?
+                    } else {
+                        return Err(err);
+                    }
+                }
+            };
+            let then_expr = Self::normalize_branch_body(raw_then);
+            self.pos = then_end;
+
+            self.skip_layout_tokens();
+
+            let mut else_branch = None;
+            if matches!(
+                self.peek_token().map(|token| &token.token_type),
+                Some(TokenType::Else)
+            ) {
+                self.pos += 1;
+                self.skip_layout_tokens();
+
+                let raw_else = if matches!(
+                    self.peek_token().map(|token| &token.token_type),
+                    Some(TokenType::LeftBrace)
+                ) {
+                    let body_close = self.find_matching_brace(self.pos).ok_or_else(|| {
+                        ExpressionError::new("'}' が必要です", self.span_at(self.pos))
+                    })?;
+                    let block_expr = self.lower_block_branch(self.pos, body_close)?;
+                    self.pos = body_close + 1;
+                    block_expr
+                } else {
+                    let parsed_else = self.parse_expression_bp(0)?;
+                    let expr = self.consume_postfix_if_any(parsed_else)?;
+                    expr
+                };
+
+                let normalized = Self::normalize_branch_body(raw_else);
+                self.skip_layout_tokens();
+                else_branch = Some(normalized);
+            }
+
+            let span = match else_branch.as_ref() {
+                Some(expr) => merge_spans(&if_span, &expression_span(expr)),
+                None => merge_spans(&if_span, &expression_span(&then_expr)),
+            };
+
+            Ok(ParsedExpr {
+                expr: Expression::If {
+                    condition: Box::new(condition.expr),
+                    then_branch: Box::new(then_expr),
+                    else_branch: else_branch.map(Box::new),
+                    span: span.clone(),
+                },
+                start: if_index,
+                end: self.pos,
+            })
+        }
+
+        fn skip_layout_tokens(&mut self) {
+            while let Some(token) = self.tokens.get(self.pos) {
+                match token.token_type {
+                    TokenType::LayoutComma | TokenType::Whitespace(_) | TokenType::Newline => {
+                        self.pos += 1
+                    }
+                    _ => break,
+                }
+            }
         }
 
         fn find_next_left_brace(&self, start: usize) -> Option<usize> {
@@ -2391,6 +2501,76 @@ mod expression_parser {
                 }
             }
             None
+        }
+
+        fn find_when_body_end(&self, start: usize, limit: usize) -> usize {
+            let mut index = start;
+            let mut depth_paren = 0usize;
+            let mut depth_brace = 0usize;
+            let mut depth_bracket = 0usize;
+
+            while index < limit {
+                let token = &self.tokens[index];
+
+                if index > start && depth_paren == 0 && depth_brace == 0 && depth_bracket == 0 {
+                    match token.token_type {
+                        TokenType::Arrow | TokenType::Else => break,
+                        _ => {
+                            if has_layout_break(token) {
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                match token.token_type {
+                    TokenType::LeftParen => depth_paren += 1,
+                    TokenType::RightParen => {
+                        if depth_paren > 0 {
+                            depth_paren -= 1;
+                        }
+                    }
+                    TokenType::LeftBrace => depth_brace += 1,
+                    TokenType::RightBrace => {
+                        if depth_brace == 0 && depth_paren == 0 && depth_bracket == 0 {
+                            break;
+                        }
+                        if depth_brace > 0 {
+                            depth_brace -= 1;
+                        }
+                    }
+                    TokenType::LeftBracket => depth_bracket += 1,
+                    TokenType::RightBracket => {
+                        if depth_bracket > 0 {
+                            depth_bracket -= 1;
+                        }
+                    }
+                    _ => {}
+                }
+
+                index += 1;
+            }
+
+            index
+        }
+
+        fn parse_expression_from_tokens(
+            tokens: &[&'a Token],
+        ) -> Result<Expression, ExpressionError> {
+            let filtered: Vec<&Token> = tokens
+                .iter()
+                .copied()
+                .filter(|token| {
+                    !matches!(
+                        token.token_type,
+                        TokenType::LayoutComma | TokenType::Whitespace(_) | TokenType::Newline
+                    )
+                })
+                .collect();
+
+            let mut nested = ExpressionParser::new(filtered.as_slice());
+            let parsed = nested.parse_expression_bp(0)?;
+            nested.consume_postfix_if_any(parsed)
         }
 
         fn parse_when_pattern(
@@ -2709,7 +2889,12 @@ mod expression_parser {
             tokens
                 .iter()
                 .copied()
-                .filter(|token| !matches!(token.token_type, TokenType::LayoutComma))
+                .filter(|token| {
+                    !matches!(
+                        token.token_type,
+                        TokenType::LayoutComma | TokenType::Whitespace(_) | TokenType::Newline
+                    )
+                })
                 .collect()
         }
 

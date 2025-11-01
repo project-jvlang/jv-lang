@@ -36,10 +36,18 @@ struct WhenBlockState {
     brace_depth: usize,
 }
 
-#[derive(Default)]
 struct ExpressionState {
     pending_when: bool,
     when_blocks: Vec<WhenBlockState>,
+}
+
+impl Default for ExpressionState {
+    fn default() -> Self {
+        Self {
+            pending_when: false,
+            when_blocks: Vec::new(),
+        }
+    }
 }
 
 impl ExpressionState {
@@ -70,10 +78,6 @@ impl ExpressionState {
                 block.brace_depth -= 1;
             }
         }
-    }
-
-    fn is_in_when_context(&self) -> bool {
-        self.pending_when || !self.when_blocks.is_empty()
     }
 
     fn reset(&mut self) {
@@ -623,6 +627,7 @@ impl<'tokens> ParserContext<'tokens> {
                                 | TokenKind::NullSafe
                                 | TokenKind::DoubleColon
                                 | TokenKind::Arrow => true,
+                                TokenKind::ElseKw => last_significant_kind.is_some(),
                                 _ => false,
                             });
                             if !continuation {
@@ -634,18 +639,12 @@ impl<'tokens> ParserContext<'tokens> {
                 if depth_angle == 0 && kind == TokenKind::Comma {
                     should_break_on_sync = true;
                 }
+                if kind == TokenKind::ElseKw && last_significant_kind.is_none() {
+                    should_break_on_sync = true;
+                }
                 if kind == TokenKind::WhenKw {
                     if let Some(state) = self.expression_states.last_mut() {
                         state.register_when();
-                    }
-                } else if kind == TokenKind::ElseKw {
-                    let inside_when = self
-                        .expression_states
-                        .last()
-                        .map(ExpressionState::is_in_when_context)
-                        .unwrap_or(false);
-                    if !inside_when {
-                        should_break_on_sync = true;
                     }
                 } else if matches!(
                     kind,

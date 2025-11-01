@@ -41,7 +41,7 @@ fn pipeline_produces_frontend_output_for_basic_program() {
 fn pipeline_reports_parser_error_with_stage_context() {
     let source = r#"
         fun demo() {
-            if (true) {
+            while (true) {
                 return
             }
         }

@@ -23,7 +23,6 @@ impl StatementStrategy for ExpressionStrategy {
                 | TokenKind::FunKw
                 | TokenKind::ClassKw
                 | TokenKind::DataKw
-                | TokenKind::IfKw
                 | TokenKind::ElseKw
                 | TokenKind::WhenKw
                 | TokenKind::ForKw

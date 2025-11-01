@@ -2230,6 +2230,80 @@ fn expression_lowering_treats_when_branch_block_as_block_expression() {
 }
 
 #[test]
+fn expression_lowering_handles_pattern_routing_example() {
+    let source = r#"
+    package demo
+
+    data Event(val label: String, val priority: Int)
+
+    fun describe(value: Any): String {
+        return when (value) {
+            is Int && value % 2 == 0 -> "${value} is even"
+            is String && value.startsWith("jv") -> "${value} looks like a namespace"
+            is Event -> "Event ${value.label} (${value.priority})"
+            else -> "Unhandled sample: ${value}"
+        }
+    }
+    "#;
+
+    let result = lower_source(source);
+    assert!(
+        result.diagnostics.is_empty(),
+        "unexpected diagnostics: {:?}",
+        result.diagnostics
+    );
+
+    let when_expr = result
+        .statements
+        .iter()
+        .find_map(|statement| {
+            if let Statement::FunctionDeclaration { name, body, .. } = statement {
+                if name == "describe" {
+                    if let Expression::Block { statements, .. } = body.as_ref() {
+                        return statements.iter().find_map(|stmt| {
+                            if let Statement::Return {
+                                value: Some(expr), ..
+                            } = stmt
+                            {
+                                Some(expr)
+                            } else {
+                                None
+                            }
+                        });
+                    }
+                }
+            }
+            None
+        })
+        .expect("expected return when expression");
+
+    let (arms, else_branch) = match when_expr {
+        Expression::When { arms, else_arm, .. } => (arms, else_arm),
+        other => panic!("expected when expression, got {:?}", other),
+    };
+
+    assert_eq!(arms.len(), 3, "expected three explicit pattern arms");
+    for arm in arms {
+        match (&arm.pattern, &arm.body) {
+            (Pattern::Constructor { .. }, Expression::StringInterpolation { .. }) => {}
+            (Pattern::Constructor { .. }, Expression::Literal(_, _)) => {}
+            (Pattern::Constructor { .. }, Expression::Block { .. }) => {}
+            (Pattern::Literal(Literal::Null, _), _) => {}
+            (pattern, body) => panic!("unexpected arm combination: {:?} -> {:?}", pattern, body),
+        }
+    }
+
+    assert!(
+        matches!(
+            else_branch.as_deref(),
+            Some(Expression::StringInterpolation { .. } | Expression::Literal(_, _))
+        ),
+        "expected literal or interpolation else branch, got {:?}",
+        else_branch
+    );
+}
+
+#[test]
 fn expression_lowering_handles_subjectless_when_expression() {
     let source = r#"
     package demo
@@ -2301,6 +2375,287 @@ fn expression_lowering_handles_subjectless_when_expression() {
     match else_expr {
         Expression::Literal(Literal::String(text), _) => assert_eq!(text, "small"),
         other => panic!("unexpected else branch {:?}", other),
+    }
+}
+
+// Checks: literal branches stay literals and else presence is honored.
+#[test]
+fn expression_lowering_handles_if_expression() {
+    let source = r#"
+    package demo
+
+    fun main(): Int = if (true) 1 else 0
+    "#;
+
+    let result = lower_source(source);
+    assert!(
+        result.diagnostics.is_empty(),
+        "unexpected diagnostics: {:?}",
+        result.diagnostics
+    );
+
+    let func_body = result
+        .statements
+        .iter()
+        .find_map(|statement| match statement {
+            Statement::FunctionDeclaration { name, body, .. } if name == "main" => {
+                Some(body.as_ref())
+            }
+            _ => None,
+        })
+        .expect("expected main function body");
+
+    if let Expression::If {
+        condition,
+        then_branch,
+        else_branch,
+        ..
+    } = func_body
+    {
+        match condition.as_ref() {
+            Expression::Literal(Literal::Boolean(true), _) => {}
+            other => panic!("expected boolean literal condition, got {:?}", other),
+        }
+        match then_branch.as_ref() {
+            Expression::Literal(Literal::Number(value), _) => assert_eq!(value, "1"),
+            other => panic!("expected numeric literal then branch, got {:?}", other),
+        }
+        match else_branch.as_deref() {
+            Some(Expression::Literal(Literal::Number(value), _)) => assert_eq!(value, "0"),
+            other => panic!("expected numeric literal else branch, got {:?}", other),
+        }
+    } else {
+        panic!("expected if expression, got {:?}", func_body);
+    }
+}
+
+// Checks: block-structured branches lower to Expression::Block with statements preserved.
+#[test]
+fn expression_lowering_converts_if_blocks_into_block_expressions() {
+    let source = r#"
+    package demo
+
+    fun choose(flag: Boolean): Int = if (flag) {
+        val base = 10
+        base + 2
+    } else {
+        val alt = 20
+        alt
+    }
+    "#;
+
+    let result = lower_source(source);
+    assert!(
+        result.diagnostics.is_empty(),
+        "unexpected diagnostics: {:?}",
+        result.diagnostics
+    );
+
+    let if_expr = result
+        .statements
+        .iter()
+        .find_map(|statement| match statement {
+            Statement::FunctionDeclaration { name, body, .. } if name == "choose" => {
+                Some(body.as_ref())
+            }
+            _ => None,
+        })
+        .expect("expected choose function body");
+
+    let (then_statements, else_statements) = match if_expr {
+        Expression::If {
+            then_branch,
+            else_branch: Some(else_branch),
+            ..
+        } => {
+            let then_block_statements = match then_branch.as_ref() {
+                Expression::Block { statements, .. } => statements,
+                other => panic!("expected block then branch, got {:?}", other),
+            };
+            let else_block_statements = match else_branch.as_ref() {
+                Expression::Block { statements, .. } => statements,
+                other => panic!("expected block else branch, got {:?}", other),
+            };
+            (then_block_statements, else_block_statements)
+        }
+        other => panic!("expected if expression, got {:?}", other),
+    };
+
+    assert_eq!(
+        then_statements.len(),
+        2,
+        "then branch should lower two statements"
+    );
+    match &then_statements[0] {
+        Statement::ValDeclaration { name, .. } => assert_eq!(name, "base"),
+        other => panic!("unexpected first then statement {:?}", other),
+    }
+    match &then_statements[1] {
+        Statement::Expression { .. } => {}
+        other => panic!("unexpected second then statement {:?}", other),
+    }
+
+    assert_eq!(
+        else_statements.len(),
+        2,
+        "else branch should lower two statements"
+    );
+    match &else_statements[0] {
+        Statement::ValDeclaration { name, .. } => assert_eq!(name, "alt"),
+        other => panic!("unexpected first else statement {:?}", other),
+    }
+    match &else_statements[1] {
+        Statement::Expression { .. } => {}
+        other => panic!("unexpected second else statement {:?}", other),
+    }
+}
+
+// Checks: else-if cascades nest Expression::If for chaining semantics.
+#[test]
+fn expression_lowering_handles_else_if_chain() {
+    let source = r#"
+    package demo
+
+    fun describe(n: Int): String =
+        if (n > 0) "positive"
+        else if (n < 0) "negative"
+        else "zero"
+    "#;
+
+    let result = lower_source(source);
+    assert!(
+        result.diagnostics.is_empty(),
+        "unexpected diagnostics: {:?}",
+        result.diagnostics
+    );
+
+    let if_expr = result
+        .statements
+        .iter()
+        .find_map(|statement| match statement {
+            Statement::FunctionDeclaration { name, body, .. } if name == "describe" => {
+                Some(body.as_ref())
+            }
+            _ => None,
+        })
+        .expect("expected describe function body");
+
+    let Expression::If {
+        condition,
+        then_branch,
+        else_branch: Some(outer_else),
+        ..
+    } = if_expr
+    else {
+        panic!("expected top-level if expression, got {:?}", if_expr);
+    };
+
+    match condition.as_ref() {
+        Expression::Binary { op, .. } => assert_eq!(*op, BinaryOp::Greater),
+        other => panic!("unexpected top-level condition {:?}", other),
+    }
+    match then_branch.as_ref() {
+        Expression::Literal(Literal::String(value), _) => assert_eq!(value, "positive"),
+        other => panic!("unexpected then branch {:?}", other),
+    }
+
+    let Expression::If {
+        condition: inner_condition,
+        then_branch: inner_then,
+        else_branch: inner_else,
+        ..
+    } = outer_else.as_ref()
+    else {
+        panic!(
+            "expected nested if expression in else branch, got {:?}",
+            outer_else
+        );
+    };
+
+    match inner_condition.as_ref() {
+        Expression::Binary { op, .. } => assert_eq!(*op, BinaryOp::Less),
+        other => panic!("unexpected nested condition {:?}", other),
+    }
+    match inner_then.as_ref() {
+        Expression::Literal(Literal::String(value), _) => assert_eq!(value, "negative"),
+        other => panic!("unexpected nested then branch {:?}", other),
+    }
+    match inner_else.as_deref() {
+        Some(Expression::Literal(Literal::String(value), _)) => assert_eq!(value, "zero"),
+        other => panic!("unexpected final else branch {:?}", other),
+    }
+}
+
+// Checks: when else block lowers to Expression::Block and branch counts stay intact.
+#[test]
+fn expression_lowering_promotes_when_else_blocks_to_block_expressions() {
+    let source = r#"
+    package demo
+
+    fun fallback(value: Int): Int {
+        return when (value) {
+            in 1..5 -> value * 2
+            else -> {
+                val doubled = value * 4
+                doubled
+            }
+        }
+    }
+    "#;
+
+    let result = lower_source(source);
+    assert!(
+        result.diagnostics.is_empty(),
+        "unexpected diagnostics: {:?}",
+        result.diagnostics
+    );
+
+    let when_expr = result
+        .statements
+        .iter()
+        .find_map(|statement| match statement {
+            Statement::FunctionDeclaration { name, body, .. } if name == "fallback" => {
+                match body.as_ref() {
+                    Expression::Block { statements, .. } => statements.iter().find_map(|stmt| {
+                        if let Statement::Return {
+                            value: Some(expr), ..
+                        } = stmt
+                        {
+                            Some(expr)
+                        } else {
+                            None
+                        }
+                    }),
+                    other => panic!("expected block body, got {:?}", other),
+                }
+            }
+            _ => None,
+        })
+        .expect("expected return when expression");
+
+    let Expression::When { arms, else_arm, .. } = when_expr else {
+        panic!("expected when expression, got {:?}", when_expr);
+    };
+
+    assert_eq!(arms.len(), 1, "expected single range arm");
+    match &arms[0].pattern {
+        Pattern::Range { .. } => {}
+        other => panic!("unexpected pattern for range arm {:?}", other),
+    }
+
+    let else_expression = else_arm
+        .as_ref()
+        .expect("expected else branch for when expression")
+        .as_ref();
+    match else_expression {
+        Expression::Block { statements, .. } => {
+            assert_eq!(
+                statements.len(),
+                2,
+                "else block should retain two lowered statements"
+            );
+        }
+        other => panic!("expected else block expression, got {:?}", other),
     }
 }
 
