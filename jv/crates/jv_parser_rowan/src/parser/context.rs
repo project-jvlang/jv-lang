@@ -254,6 +254,114 @@ impl<'tokens> ParserContext<'tokens> {
         true
     }
 
+    fn has_doublebrace_at(&self, index: usize) -> bool {
+        if index >= self.tokens.len() {
+            return false;
+        }
+
+        let first_kind = TokenKind::from_token(&self.tokens[index]);
+        if first_kind != TokenKind::LeftBrace {
+            return false;
+        }
+
+        let mut next_index = index + 1;
+        while next_index < self.tokens.len() {
+            let next_kind = TokenKind::from_token(&self.tokens[next_index]);
+            if next_kind.is_trivia() {
+                next_index += 1;
+                continue;
+            }
+            return next_kind == TokenKind::LeftBrace;
+        }
+
+        false
+    }
+
+    fn parse_doublebrace_block(&mut self) {
+        let _ = self.parse_doublebrace_block_collect();
+    }
+
+    fn parse_doublebrace_block_collect(&mut self) -> Vec<(TokenKind, usize)> {
+        let mut consumed = Vec::new();
+        let start = self.cursor;
+
+        self.start_node(SyntaxKind::DoublebraceBlock);
+
+        if let Some(token) = self.bump_raw() {
+            let kind = TokenKind::from_token(token);
+            if !kind.is_trivia() {
+                consumed.push((kind, token.line));
+            }
+        } else {
+            self.report_error(
+                "Doublebrace ブロックの開始に '{' が必要です",
+                start,
+                self.cursor,
+            );
+            self.finish_node();
+            return consumed;
+        }
+
+        self.consume_trivia();
+        if self.peek_significant_kind() != Some(TokenKind::LeftBrace) {
+            self.report_error(
+                "Doublebrace ブロックには 2 つ目の '{' が必要です",
+                start,
+                self.cursor,
+            );
+            self.finish_node();
+            return consumed;
+        }
+
+        if let Some(token) = self.bump_raw() {
+            let kind = TokenKind::from_token(token);
+            if !kind.is_trivia() {
+                consumed.push((kind, token.line));
+            }
+        }
+
+        self.block_depth = self.block_depth.saturating_add(1);
+        self.start_node(SyntaxKind::StatementList);
+        self.parse_statement_list(Some(TokenKind::RightBrace));
+        self.finish_node(); // StatementList
+
+        self.consume_trivia();
+        if self.peek_significant_kind() == Some(TokenKind::RightBrace) {
+            if let Some(token) = self.bump_raw() {
+                let kind = TokenKind::from_token(token);
+                if !kind.is_trivia() {
+                    consumed.push((kind, token.line));
+                }
+            }
+        } else {
+            self.report_error(
+                "Doublebrace ブロックの内部を閉じる '}' が必要です",
+                start,
+                self.cursor,
+            );
+        }
+        self.block_depth = self.block_depth.saturating_sub(1);
+
+        self.consume_trivia();
+        if self.peek_significant_kind() == Some(TokenKind::RightBrace) {
+            if let Some(token) = self.bump_raw() {
+                let kind = TokenKind::from_token(token);
+                if !kind.is_trivia() {
+                    consumed.push((kind, token.line));
+                }
+            }
+        } else {
+            self.report_error(
+                "Doublebrace ブロックを閉じる '}' が必要です",
+                start,
+                self.cursor,
+            );
+        }
+
+        self.finish_node();
+        consumed
+    }
+
     /// バインディングパターンを解析する。
     pub(crate) fn parse_binding_pattern(&mut self) -> bool {
         self.consume_trivia();
@@ -447,14 +555,19 @@ impl<'tokens> ParserContext<'tokens> {
 
         self.start_node(SyntaxKind::InitializerClause);
         self.bump_raw(); // '='
-        self.parse_expression_until(
-            &[
-                TokenKind::Semicolon,
-                TokenKind::Newline,
-                TokenKind::RightBrace,
-            ],
-            true,
-        );
+        self.consume_trivia();
+        if self.has_doublebrace_at(self.cursor) {
+            self.parse_doublebrace_block();
+        } else {
+            self.parse_expression_until(
+                &[
+                    TokenKind::Semicolon,
+                    TokenKind::Newline,
+                    TokenKind::RightBrace,
+                ],
+                true,
+            );
+        }
         self.consume_trivia();
         self.finish_node();
         true
@@ -469,14 +582,19 @@ impl<'tokens> ParserContext<'tokens> {
 
         self.start_node(SyntaxKind::InitializerClause);
         self.bump_raw(); // '='
-        self.parse_expression_until(
-            &[
-                TokenKind::Comma,
-                TokenKind::LayoutComma,
-                TokenKind::RightParen,
-            ],
-            false,
-        );
+        self.consume_trivia();
+        if self.has_doublebrace_at(self.cursor) {
+            self.parse_doublebrace_block();
+        } else {
+            self.parse_expression_until(
+                &[
+                    TokenKind::Comma,
+                    TokenKind::LayoutComma,
+                    TokenKind::RightParen,
+                ],
+                false,
+            );
+        }
         self.consume_trivia();
         self.finish_node();
         true
@@ -539,6 +657,22 @@ impl<'tokens> ParserContext<'tokens> {
                 break;
             }
             let at_top_level = depth_paren == 0 && depth_brace == 0 && depth_bracket == 0;
+            if depth_brace == 0
+                && kind == TokenKind::LeftBrace
+                && self.has_doublebrace_at(self.cursor)
+            {
+                let consumed = self.parse_doublebrace_block_collect();
+                for (consumed_kind, line) in consumed {
+                    if !consumed_kind.is_trivia() {
+                        if let Some(previous) = last_significant_kind {
+                            second_last_significant_kind = Some(previous);
+                        }
+                        last_significant_kind = Some(consumed_kind);
+                        last_line = Some(line);
+                    }
+                }
+                continue;
+            }
             if at_top_level && terminators.contains(&kind) {
                 break;
             }

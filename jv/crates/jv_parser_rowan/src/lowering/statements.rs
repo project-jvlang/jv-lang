@@ -696,25 +696,17 @@ fn lower_value(
 
     let initializer_clause = child_node(node, SyntaxKind::InitializerClause);
 
-    let initializer = match initializer_clause {
-        Some(clause) => match child_node(&clause, SyntaxKind::Expression) {
-            Some(expr_node) => Some(lower_expression(context, &expr_node)?),
-            None => {
-                return Err(LoweringDiagnostic::new(
-                    LoweringDiagnosticSeverity::Error,
-                    "初期化子の解析に失敗しました",
-                    context.span_for(&clause),
-                    clause.kind(),
-                    first_identifier_text(&clause),
-                    collect_annotation_texts(&clause),
-                ))
-            }
-        },
+    let initializer_result = match initializer_clause {
+        Some(clause) => Some(lower_initializer_clause_expression(
+            context,
+            &clause,
+            diagnostics,
+        )?),
         None => None,
     };
 
     let initializer = if is_val {
-        Some(initializer.ok_or_else(|| {
+        Some(initializer_result.ok_or_else(|| {
             LoweringDiagnostic::new(
                 LoweringDiagnosticSeverity::Error,
                 "val 宣言には初期化子が必要です",
@@ -725,7 +717,7 @@ fn lower_value(
             )
         })?)
     } else {
-        initializer
+        initializer_result
     };
 
     let span = context.span_for(node).unwrap_or_else(jv_ast::Span::dummy);
@@ -808,6 +800,48 @@ fn lower_block_expression(
     let mut statements = Vec::new();
     collect_statements_from_children(context, block, &mut statements, diagnostics);
     Expression::Block { statements, span }
+}
+
+fn lower_doublebrace_block_expression(
+    context: &LoweringContext<'_>,
+    node: &JvSyntaxNode,
+    diagnostics: &mut Vec<LoweringDiagnostic>,
+) -> Result<Expression, LoweringDiagnostic> {
+    let span = context.span_for(node).unwrap_or_else(Span::dummy);
+    let statement_list = child_node(node, SyntaxKind::StatementList).ok_or_else(|| {
+        missing_child_diagnostic(
+            context,
+            node,
+            "Doublebrace ブロックのステートメント列が見つかりません",
+            SyntaxKind::StatementList,
+        )
+    })?;
+
+    let mut statements = Vec::new();
+    collect_statements_from_children(context, &statement_list, &mut statements, diagnostics);
+
+    Ok(Expression::Block { statements, span })
+}
+
+fn lower_initializer_clause_expression(
+    context: &LoweringContext<'_>,
+    clause: &JvSyntaxNode,
+    diagnostics: &mut Vec<LoweringDiagnostic>,
+) -> Result<Expression, LoweringDiagnostic> {
+    if let Some(expr_node) = child_node(clause, SyntaxKind::Expression) {
+        lower_expression(context, &expr_node)
+    } else if let Some(block) = child_node(clause, SyntaxKind::DoublebraceBlock) {
+        lower_doublebrace_block_expression(context, &block, diagnostics)
+    } else {
+        Err(LoweringDiagnostic::new(
+            LoweringDiagnosticSeverity::Error,
+            "初期化子の解析に失敗しました",
+            context.span_for(clause),
+            clause.kind(),
+            first_identifier_text(clause),
+            collect_annotation_texts(clause),
+        ))
+    }
 }
 
 fn lower_expression(
@@ -5023,10 +5057,12 @@ fn lower_property(
         lower_type_annotation_container(context, &type_node, node, diagnostics)
     });
 
-    let initializer = match child_node(node, SyntaxKind::InitializerClause)
-        .and_then(|clause| child_node(&clause, SyntaxKind::Expression))
-    {
-        Some(expr) => Some(lower_expression(context, &expr)?),
+    let initializer = match child_node(node, SyntaxKind::InitializerClause) {
+        Some(clause) => Some(lower_initializer_clause_expression(
+            context,
+            &clause,
+            diagnostics,
+        )?),
         None => None,
     };
 

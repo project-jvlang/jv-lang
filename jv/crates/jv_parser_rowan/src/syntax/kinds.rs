@@ -80,6 +80,8 @@ pub enum SyntaxKind {
     ClassBody,
     /// ブロック文。
     Block,
+    /// Doublebrace 初期化ブロック。
+    DoublebraceBlock,
     /// ブロック内部のステートメント列。
     StatementList,
     /// 代入ステートメント。
@@ -692,6 +694,7 @@ mod tests {
         ("ClassDeclaration", SyntaxKind::ClassDeclaration),
         ("ClassBody", SyntaxKind::ClassBody),
         ("Block", SyntaxKind::Block),
+        ("DoublebraceBlock", SyntaxKind::DoublebraceBlock),
         ("WhenStatement", SyntaxKind::WhenStatement),
         ("WhenBranch", SyntaxKind::WhenBranch),
         ("ForStatement", SyntaxKind::ForStatement),

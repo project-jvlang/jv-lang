@@ -1477,6 +1477,7 @@ fn expression_lowering_respects_operator_precedence() {
                         }
                     }
                 }
+
                 other => panic!("expected multiplicative rhs, got {:?}", other),
             }
         }
@@ -1606,6 +1607,42 @@ fn expression_lowering_handles_trailing_lambda_call() {
             }
         }
         other => panic!("expected call expression, got {:?}", other),
+    }
+}
+
+#[test]
+fn doublebrace_initializer_lowered_to_block_expression() {
+    let source = r#"
+        val list = {{
+            add(1)
+        }}
+    "#;
+    let result = lower_source(source);
+
+    assert!(
+        result.diagnostics.is_empty(),
+        "doublebrace initializer lowering should succeed, got {:?}",
+        result.diagnostics
+    );
+    let statement = result
+        .statements
+        .first()
+        .expect("lowering should produce at least one statement");
+
+    match statement {
+        Statement::ValDeclaration { initializer, .. } => match initializer {
+            Expression::Block { statements, .. } => {
+                assert!(
+                    !statements.is_empty(),
+                    "doublebrace block should preserve inner statements"
+                );
+            }
+            other => panic!(
+                "doublebrace initializer should lower to block expression for now, got {:?}",
+                other
+            ),
+        },
+        other => panic!("expected val declaration, got {:?}", other),
     }
 }
 

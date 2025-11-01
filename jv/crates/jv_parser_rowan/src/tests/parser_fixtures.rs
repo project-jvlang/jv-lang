@@ -96,6 +96,104 @@ fn function_parameters_accept_default_values() {
 }
 
 #[test]
+fn doublebrace_initializer_emits_dedicated_node() {
+    let source = r#"
+        val list = {{
+            add(1)
+        }}
+    "#;
+
+    let tokens = lex(source);
+    let output = parse(&tokens);
+
+    assert!(
+        output.diagnostics.is_empty(),
+        "doublebrace initializer should parse without diagnostics, got {:?}",
+        output.diagnostics
+    );
+    assert!(
+        !output.recovered,
+        "parser should not require recovery for doublebrace initializer"
+    );
+
+    let tree: SyntaxNode<JvLanguage> =
+        SyntaxNode::new_root(ParseBuilder::build_from_events(&output.events, &tokens));
+    let statement_list = tree
+        .children()
+        .find(|node| node.kind() == SyntaxKind::StatementList)
+        .expect("parsed tree should contain a StatementList node");
+    let val_decl = statement_list
+        .children()
+        .find(|node| node.kind() == SyntaxKind::ValDeclaration)
+        .expect("val declaration should be emitted");
+    let initializer_clause = val_decl
+        .children()
+        .find(|node| node.kind() == SyntaxKind::InitializerClause)
+        .expect("doublebrace initializer should produce InitializerClause");
+
+    let doublebrace_node = initializer_clause
+        .children()
+        .find(|child| child.kind() == SyntaxKind::DoublebraceBlock)
+        .expect("DoublebraceBlock node should exist under InitializerClause");
+    assert!(
+        !initializer_clause
+            .children()
+            .any(|child| child.kind() == SyntaxKind::Expression),
+        "doublebrace initializer should not wrap contents in an Expression node"
+    );
+    assert!(
+        doublebrace_node
+            .children()
+            .any(|child| child.kind() == SyntaxKind::StatementList),
+        "DoublebraceBlock should contain StatementList for inner statements"
+    );
+}
+
+#[test]
+fn doublebrace_with_receiver_retains_expression_node() {
+    let source = r#"
+        val items = LinkedList() {{
+            add(42)
+        }}
+    "#;
+
+    let tokens = lex(source);
+    let output = parse(&tokens);
+
+    assert!(
+        output.diagnostics.is_empty(),
+        "doublebrace with receiver should parse cleanly, got {:?}",
+        output.diagnostics
+    );
+
+    let tree: SyntaxNode<JvLanguage> =
+        SyntaxNode::new_root(ParseBuilder::build_from_events(&output.events, &tokens));
+    let statement_list = tree
+        .children()
+        .find(|node| node.kind() == SyntaxKind::StatementList)
+        .expect("parsed tree should contain a StatementList node");
+    let val_decl = statement_list
+        .children()
+        .find(|node| node.kind() == SyntaxKind::ValDeclaration)
+        .expect("val declaration should be emitted");
+    let initializer_clause = val_decl
+        .children()
+        .find(|node| node.kind() == SyntaxKind::InitializerClause)
+        .expect("initializer clause should be present");
+
+    let expression_node = initializer_clause
+        .children()
+        .find(|child| child.kind() == SyntaxKind::Expression)
+        .expect("receiver form should still wrap contents in an Expression node");
+    assert!(
+        expression_node
+            .descendants()
+            .any(|desc| desc.kind() == SyntaxKind::DoublebraceBlock),
+        "Expression node should contain DoublebraceBlock descendant"
+    );
+}
+
+#[test]
 fn function_without_parentheses_forms_empty_parameter_list() {
     let source = r#"
         fun main {
