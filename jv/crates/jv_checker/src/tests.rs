@@ -1,4 +1,5 @@
 use super::*;
+use crate::binding::resolve_bindings;
 use crate::inference::environment::{TypeEnvironment, TypeScheme};
 use crate::inference::types::TypeBinding;
 use crate::inference::{PrimitiveType, TypeKind};
@@ -8,12 +9,13 @@ use fastrand::Rng;
 use jv_ast::{
     Annotation, AnnotationName, BinaryMetadata, BinaryOp, Expression, IsTestKind, IsTestMetadata,
     Literal, Modifiers, Parameter, ParameterModifiers, Pattern, Program, RegexCommand,
-    RegexCommandMode, RegexCommandModeOrigin, RegexFlag, RegexGuardStrategy,
+    RegexCommandMode, RegexCommandModeOrigin, RegexFlag, RegexGuardStrategy, SequenceDelimiter,
     RegexLambdaReplacement, RegexLiteral, RegexLiteralReplacement, RegexReplacement, Span,
     Statement, TypeAnnotation, ValBindingOrigin, WhenArm,
 };
 use jv_inference::TypeFacts;
 use jv_inference::types::{NullabilityFlag, TypeVariant as FactsTypeVariant};
+use jv_lexer::{Lexer, TokenType};
 use jv_parser_frontend::ParserPipeline;
 use jv_parser_rowan::frontend::RowanPipeline;
 use std::collections::HashMap;
@@ -147,6 +149,192 @@ fn parse_program(source: &str) -> Program {
         .parse(source)
         .expect("source snippet should parse")
         .into_program()
+}
+
+#[test]
+fn normalized_program_preserves_whitespace_arrays() {
+    let source = r#"
+        val numbers = [1 2 3 4 5]
+    "#;
+
+    let mut lexer = Lexer::new(source.to_string());
+    let tokens = lexer.tokenize().expect("lexing whitespace array");
+    assert!(
+        tokens
+            .iter()
+            .any(|token| matches!(token.token_type, TokenType::LeftBracket)),
+        "lexer should emit '[' token for array literal, got: {:?}",
+        tokens
+    );
+    assert!(
+        tokens
+            .iter()
+            .filter(|token| matches!(token.token_type, TokenType::Number(_)))
+            .count()
+            >= 5,
+        "lexer should emit numeric tokens for each element, got: {:?}",
+        tokens
+    );
+
+    let debug = RowanPipeline::default()
+        .execute_with_debug(source)
+        .expect("rowan pipeline should parse whitespace array source");
+    let lowered_statements = debug.statements().to_vec();
+    let artifacts = debug.into_artifacts();
+    let (program, _pipeline_tokens, _diagnostics) = artifacts.into_parts();
+    let lowered_statement = lowered_statements
+        .first()
+        .expect("lowering should produce a val declaration");
+    let Statement::ValDeclaration {
+        initializer: lowered_initializer,
+        ..
+    } = lowered_statement
+    else {
+        panic!(
+            "expected val declaration after lowering, found {:?}",
+            lowered_statement
+        );
+    };
+
+    let Expression::Array {
+        elements: lowered_elements,
+        delimiter: lowered_delimiter,
+        ..
+    } = lowered_initializer
+    else {
+        panic!(
+            "lowering should preserve whitespace array, found {:?}",
+            lowered_initializer
+        );
+    };
+
+    assert_eq!(
+        *lowered_delimiter,
+        SequenceDelimiter::Whitespace,
+        "lowering should keep whitespace delimiter"
+    );
+    assert_eq!(
+        lowered_elements.len(),
+        5,
+        "lowering should retain each array element"
+    );
+
+    let original_statement = program
+        .statements
+        .first()
+        .expect("parsed program should include the declaration");
+    let Statement::ValDeclaration {
+        initializer: original_initializer,
+        ..
+    } = original_statement
+    else {
+        panic!(
+            "expected val declaration in parsed program, found {:?}",
+            original_statement
+        );
+    };
+
+    let Expression::Array {
+        elements: original_elements,
+        delimiter: original_delimiter,
+        ..
+    } = original_initializer
+    else {
+        panic!(
+            "parser should produce whitespace array initializer, found {:?}",
+            original_initializer
+        );
+    };
+
+    assert_eq!(
+        *original_delimiter,
+        SequenceDelimiter::Whitespace,
+        "parser should preserve whitespace delimiter"
+    );
+    assert_eq!(
+        original_elements.len(),
+        5,
+        "parser should produce each array element separately"
+    );
+
+    let binding_resolution = resolve_bindings(&program);
+    let normalized_from_bindings = binding_resolution.program;
+    let binding_statement = normalized_from_bindings
+        .statements
+        .first()
+        .expect("binding resolution should yield the declaration");
+
+    let Statement::ValDeclaration {
+        initializer: binding_initializer,
+        ..
+    } = binding_statement
+    else {
+        panic!(
+            "expected val declaration from binding resolution, found {:?}",
+            binding_statement
+        );
+    };
+
+    let Expression::Array {
+        elements: binding_elements,
+        delimiter: binding_delimiter,
+        ..
+    } = binding_initializer
+    else {
+        panic!(
+            "binding resolver should preserve whitespace array, found {:?}",
+            binding_initializer
+        );
+    };
+
+    assert_eq!(
+        *binding_delimiter,
+        SequenceDelimiter::Whitespace,
+        "binding resolver should keep whitespace delimiter"
+    );
+    assert_eq!(
+        binding_elements.len(),
+        5,
+        "binding resolver should keep individual elements"
+    );
+
+    let mut checker = TypeChecker::new();
+    checker
+        .check_program(&program)
+        .expect("whitespace array program should type-check");
+
+    let normalized = checker
+        .take_normalized_program()
+        .expect("type checker should produce normalized program");
+    let statement = normalized
+        .statements
+        .first()
+        .expect("normalized program should contain the declaration");
+
+    let Statement::ValDeclaration { initializer, .. } = statement else {
+        panic!("expected val declaration in normalized program, found {:?}", statement);
+    };
+
+    let Expression::Array {
+        elements, delimiter, ..
+    } = initializer
+    else {
+        panic!(
+            "expected whitespace array initializer, found {:?}",
+            initializer
+        );
+    };
+
+    assert_eq!(
+        *delimiter,
+        SequenceDelimiter::Whitespace,
+        "normalized program should preserve whitespace delimiter"
+    );
+    assert_eq!(
+        elements.len(),
+        5,
+        "normalized program should preserve individual array elements"
+    );
 }
 
 fn random_identifier(rng: &mut Rng) -> String {

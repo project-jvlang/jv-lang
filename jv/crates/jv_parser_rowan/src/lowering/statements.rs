@@ -1189,10 +1189,11 @@ mod expression_parser {
         pending_type_arguments: Option<Vec<TypeAnnotation>>,
     }
 
-    #[derive(Clone, Copy)]
+    #[derive(Clone)]
     enum ParsedMode {
         Short(RegexCommandMode),
         Explicit(RegexCommandMode),
+        ExplicitUnknown { raw: String, span: Span },
     }
 
     #[derive(Clone)]
@@ -1278,6 +1279,12 @@ mod expression_parser {
             let (mode, origin) = match segments.mode {
                 Some(ParsedMode::Short(mode)) => (mode, RegexCommandModeOrigin::ShortMode),
                 Some(ParsedMode::Explicit(mode)) => (mode, RegexCommandModeOrigin::ExplicitToken),
+                Some(ParsedMode::ExplicitUnknown { raw, span }) => {
+                    return Err(ExpressionError::new(
+                        format!("未知の正規表現モード `{raw}` です"),
+                        Some(span),
+                    ));
+                }
                 None => {
                     if segments.replacement_range.is_some() {
                         (
@@ -4209,8 +4216,8 @@ mod expression_parser {
         if let Some(short_mode) = parse_short_mode_token(tokens[idx]) {
             mode = Some(ParsedMode::Short(short_mode));
             idx += 1;
-        } else if let Some((explicit_mode, next_idx)) = parse_explicit_mode(tokens, idx)? {
-            mode = Some(ParsedMode::Explicit(explicit_mode));
+        } else if let Some((parsed_mode, next_idx)) = parse_explicit_mode(tokens, idx)? {
+            mode = Some(parsed_mode);
             idx = next_idx;
         } else if !matches!(tokens[idx].token_type, TokenType::Divide) {
             return Ok(None);
@@ -4320,7 +4327,7 @@ mod expression_parser {
     fn parse_explicit_mode(
         tokens: &[&Token],
         start: usize,
-    ) -> Result<Option<(RegexCommandMode, usize)>, ExpressionError> {
+    ) -> Result<Option<(ParsedMode, usize)>, ExpressionError> {
         let len = tokens.len();
         if start >= len || !matches!(tokens[start].token_type, TokenType::LeftBracket) {
             return Ok(None);
@@ -4352,25 +4359,21 @@ mod expression_parser {
             ));
         }
 
+        let raw = buffer.trim().to_string();
         let normalized = buffer
             .replace(|c: char| c == '-' || c == '_' || c == ' ', "")
             .to_lowercase();
-        let mode = match normalized.as_str() {
-            "replace" | "replaceall" | "all" => RegexCommandMode::All,
-            "first" | "replacefirst" => RegexCommandMode::First,
-            "match" | "matches" => RegexCommandMode::Match,
-            "split" => RegexCommandMode::Split,
-            "iterate" | "results" => RegexCommandMode::Iterate,
-            other => {
-                let span = span_from_token(tokens[start]);
-                return Err(ExpressionError::new(
-                    format!("未知の正規表現モード `{other}` です"),
-                    Some(span),
-                ));
-            }
+        let span = span_from_token(tokens[start]);
+        let parsed_mode = match normalized.as_str() {
+            "replace" | "replaceall" | "all" => ParsedMode::Explicit(RegexCommandMode::All),
+            "first" | "replacefirst" => ParsedMode::Explicit(RegexCommandMode::First),
+            "match" | "matches" => ParsedMode::Explicit(RegexCommandMode::Match),
+            "split" => ParsedMode::Explicit(RegexCommandMode::Split),
+            "iterate" | "results" => ParsedMode::Explicit(RegexCommandMode::Iterate),
+            _ => ParsedMode::ExplicitUnknown { raw, span },
         };
 
-        Ok(Some((mode, idx + 1)))
+        Ok(Some((parsed_mode, idx + 1)))
     }
 
     fn extract_flag_string(token: &Token) -> Option<String> {
