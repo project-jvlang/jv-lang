@@ -1525,7 +1525,7 @@ mod expression_parser {
                     })
                 }
                 TokenType::LeftBrace => {
-                    if has_high_json_confidence(token) {
+                    if has_high_json_confidence(token) && !self.brace_contains_lambda_arrow(index) {
                         self.parse_json_object_expression(index)
                     } else {
                         self.parse_brace_expression()
@@ -1892,6 +1892,30 @@ mod expression_parser {
 
             self.pos = closing_index + 1;
             Ok(parsed)
+        }
+
+        fn brace_contains_lambda_arrow(&self, start_index: usize) -> bool {
+            let Some(end_index) = self.find_matching_brace(start_index) else {
+                return false;
+            };
+
+            let mut depth = 0isize;
+            for token in &self.tokens[start_index + 1..end_index] {
+                match token.token_type {
+                    TokenType::LeftBrace | TokenType::LeftParen | TokenType::LeftBracket => {
+                        depth += 1;
+                    }
+                    TokenType::RightBrace | TokenType::RightParen | TokenType::RightBracket => {
+                        depth = (depth - 1).max(0);
+                    }
+                    TokenType::Arrow | TokenType::FatArrow if depth == 0 => {
+                        return true;
+                    }
+                    _ => {}
+                }
+            }
+
+            false
         }
 
         fn parse_lambda_body_as_block(

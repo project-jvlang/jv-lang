@@ -224,9 +224,7 @@ fun main(): Unit {
         .artifacts()
         .tokens()
         .iter()
-        .filter(|token| {
-            (3..=5).contains(&token.line) && !TokenKind::from_token(token).is_trivia()
-        })
+        .filter(|token| (3..=5).contains(&token.line) && !TokenKind::from_token(token).is_trivia())
         .map(|token| {
             (
                 token.line,
@@ -268,9 +266,9 @@ fun main(): Unit {
     let initializer_summary: Vec<(String, &'static str)> = statements
         .iter()
         .filter_map(|statement| match statement {
-            Statement::ValDeclaration { name, initializer, .. } => {
-                Some((name.clone(), expression_variant(initializer)))
-            }
+            Statement::ValDeclaration {
+                name, initializer, ..
+            } => Some((name.clone(), expression_variant(initializer))),
             _ => None,
         })
         .collect();
@@ -278,7 +276,9 @@ fun main(): Unit {
     let statement_summary: Vec<String> = statements
         .iter()
         .map(|statement| match statement {
-            Statement::ValDeclaration { name, initializer, .. } => {
+            Statement::ValDeclaration {
+                name, initializer, ..
+            } => {
                 format!("val {name} = {}", expression_variant(initializer))
             }
             other => format!("{other:?}"),
@@ -312,4 +312,78 @@ fun main(): Unit {
         "2件目の `f/` は RegexCommandMode::First として扱われる想定です: {:?}",
         commands[1].mode
     );
+}
+
+#[test]
+fn unit_main_allows_regex_commands_with_lambda_replacement() {
+    let source = r#"
+fun main(): Unit {
+    val auditLog = """
+USER=Akira ACTION=login ip=192.168.0.10
+USER=Tom ACTION=LOGIN ip=10.0.0.5
+""".trim()
+
+    val masked = a/auditLog/'ip=\d{1,3}(\.\d{1,3}){3}'/"ip=***.***.***.***"/ims
+    val firstTagged = f/auditLog/'USER=\w+'/{ match ->
+        match.group() ?: ""
+    }/
+}
+"#;
+
+    let debug = RowanPipeline::default()
+        .execute_with_debug(source)
+        .expect("ラムダ置換を含む RegexCommand が構文解析できること");
+
+    assert!(
+        debug.parser_diagnostics().is_empty(),
+        "parser diagnostics: {:?}",
+        debug.parser_diagnostics()
+    );
+
+    let artifacts = debug.into_artifacts();
+    let program = artifacts.program;
+
+    let body_expr = program
+        .statements
+        .iter()
+        .find_map(|statement| match statement {
+            Statement::FunctionDeclaration { name, body, .. } if name == "main" => Some(body),
+            _ => None,
+        })
+        .expect("main 関数が存在すること");
+
+    let Expression::Block { statements, .. } = body_expr.as_ref() else {
+        panic!("関数本体はブロック式の想定です: {body_expr:?}");
+    };
+
+    let mut commands = Vec::new();
+    for statement in statements {
+        if let Statement::ValDeclaration {
+            initializer, name, ..
+        } = statement
+        {
+            if let Expression::RegexCommand(command) = initializer {
+                commands.push((name.as_str(), command.as_ref()));
+            }
+        }
+    }
+
+    assert_eq!(
+        commands.len(),
+        2,
+        "RegexCommand が2件とも検出される想定です: {commands:?}"
+    );
+
+    let (first_name, first_command) = &commands[0];
+    assert_eq!(*first_name, "masked");
+    assert!(matches!(first_command.mode, RegexCommandMode::All));
+
+    let (second_name, second_command) = &commands[1];
+    assert_eq!(*second_name, "firstTagged");
+    assert!(matches!(second_command.mode, RegexCommandMode::First));
+    let replacement = second_command
+        .replacement
+        .as_ref()
+        .expect("ラムダ置換が保持されること");
+    assert!(matches!(replacement, jv_ast::RegexReplacement::Lambda(_)));
 }

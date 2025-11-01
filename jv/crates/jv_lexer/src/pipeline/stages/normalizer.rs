@@ -328,7 +328,19 @@ impl Normalizer {
             });
         }
 
-        let inner = &lexeme[1..lexeme.len() - 1];
+        let inner_full = &lexeme[1..lexeme.len() - 1];
+        let inner = if inner_full.len() >= 2 {
+            if (inner_full.starts_with('\'') && inner_full.ends_with('\''))
+                || (inner_full.starts_with('"') && inner_full.ends_with('"'))
+            {
+                &inner_full[1..inner_full.len() - 1]
+            } else {
+                inner_full
+            }
+        } else {
+            inner_full
+        };
+
         let mut pattern = String::with_capacity(inner.len());
         let mut chars = inner.chars();
         let mut escaped = false;

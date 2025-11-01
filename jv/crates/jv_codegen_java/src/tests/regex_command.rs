@@ -222,3 +222,32 @@ fn iterate_with_replacement_delegates_to_replace_all() {
         "置換付き Iterate では matcher(...).results() が生成されない想定です:\n{java}"
     );
 }
+
+#[test]
+fn adds_char_sequence_guard_for_object_subjects() {
+    let mut command = base_command(RegexCommandMode::All);
+    command.subject = Box::new(ir_identifier("text", &JavaType::object()));
+    command.replacement = literal_replacement("MASK", &command.span);
+    command.guard_strategy = RegexGuardStrategy::CaptureAndGuard {
+        temp_name: Some("__guard".to_string()),
+    };
+
+    let mut program = regex_command_program(command);
+    if let IrStatement::ClassDeclaration { methods, .. } = program
+        .type_declarations
+        .first_mut()
+        .expect("クラス宣言が存在すること")
+    {
+        if let IrStatement::MethodDeclaration { parameters, .. } =
+            methods.first_mut().expect("メソッド宣言が存在すること")
+        {
+            parameters[0].java_type = JavaType::object();
+        }
+    }
+
+    let java = render_java(&program);
+    assert!(
+        java.contains("instanceof java.lang.CharSequence"),
+        "Object 型の subject には CharSequence ガードを挿入する想定です:\n{java}"
+    );
+}

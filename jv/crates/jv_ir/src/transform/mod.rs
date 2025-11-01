@@ -924,11 +924,28 @@ fn lower_regex_command(
             ),
             None => (
                 ast_mode,
-                RegexGuardStrategy::None,
+                RegexGuardStrategy::CaptureAndGuard { temp_name: None },
                 default_regex_command_java_type(ast_mode, has_replacement),
                 matches!(ast_mode, RegexCommandMode::Iterate) && !has_replacement,
             ),
         };
+
+    let subject_ir = transform_expression(*subject, context)?;
+    let subject_needs_guard = match extract_java_type(&subject_ir) {
+        Some(JavaType::Reference { name, .. }) => {
+            let simple = name.rsplit('.').next().unwrap_or(&name);
+            !matches!(
+                simple,
+                "String" | "CharSequence" | "StringBuilder" | "StringBuffer"
+            )
+        }
+        Some(JavaType::Primitive(_)) | Some(JavaType::Array { .. }) | Some(JavaType::Void) => true,
+        _ => true,
+    };
+
+    if subject_needs_guard && matches!(guard_strategy, RegexGuardStrategy::None) {
+        guard_strategy = RegexGuardStrategy::CaptureAndGuard { temp_name: None };
+    }
 
     guard_strategy = match guard_strategy {
         RegexGuardStrategy::CaptureAndGuard { temp_name } => RegexGuardStrategy::CaptureAndGuard {
@@ -938,8 +955,6 @@ fn lower_regex_command(
         },
         RegexGuardStrategy::None => RegexGuardStrategy::None,
     };
-
-    let subject_ir = transform_expression(*subject, context)?;
     let pattern_ir = IrExpression::RegexPattern {
         pattern: pattern.pattern.clone(),
         java_type: JavaType::pattern(),
