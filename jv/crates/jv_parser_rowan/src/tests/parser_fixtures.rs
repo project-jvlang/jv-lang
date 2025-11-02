@@ -326,9 +326,10 @@ fn build_tree_from_events_handles_deep_nesting() {
     assert_eq!(tree.kind(), SyntaxKind::Root, "root node kind mismatch");
 
     // Root should contain at least one StatementList node.
-    assert!(tree
-        .descendants()
-        .any(|node| node.kind() == SyntaxKind::StatementList));
+    assert!(
+        tree.descendants()
+            .any(|node| node.kind() == SyntaxKind::StatementList)
+    );
 
     // Verify nested control flow constructs remain beneath the function declaration.
     let when_node = tree
@@ -951,6 +952,99 @@ fn data_class_constructor_recovers_from_missing_parameter() {
             |event| matches!(event, ParseEvent::StartNode { kind } if *kind == SyntaxKind::Error)
         ),
         "expected error node when constructor parameter is missing"
+    );
+}
+
+#[test]
+fn log_block_expression_preserves_statement_order() {
+    let source = r#"
+        fun main {
+            LOG {
+                val user = loadUser()
+                TRACE {
+                    "nested"
+                }
+                "done"
+            }
+        }
+    "#;
+
+    let tokens = lex(source);
+    let output = parse(&tokens);
+    assert!(
+        output.diagnostics.is_empty(),
+        "log block should parse without diagnostics, got {:?}",
+        output.diagnostics
+    );
+
+    let tree: SyntaxNode<JvLanguage> =
+        SyntaxNode::new_root(ParseBuilder::build_from_events(&output.events, &tokens));
+
+    let log_expr = tree
+        .descendants()
+        .find(|node| node.kind() == SyntaxKind::LogBlockExpression)
+        .expect("expected to locate a LogBlockExpression node");
+    let block = log_expr
+        .children()
+        .find(|child| child.kind() == SyntaxKind::Block)
+        .expect("log block expression should wrap a Block node");
+    let statement_list = block
+        .children()
+        .find(|child| child.kind() == SyntaxKind::StatementList)
+        .expect("block should contain a StatementList");
+
+    let statements: Vec<_> = statement_list.children().collect();
+    assert_eq!(
+        statements.len(),
+        3,
+        "log block body should produce three statements"
+    );
+    assert_eq!(
+        statements[0].kind(),
+        SyntaxKind::ValDeclaration,
+        "first log item should be the val declaration"
+    );
+    assert_eq!(
+        statements[1].kind(),
+        SyntaxKind::Expression,
+        "second log item should remain an expression statement (nested log block)"
+    );
+    assert_eq!(
+        statements[2].kind(),
+        SyntaxKind::Expression,
+        "third log item should capture the trailing expression"
+    );
+
+    assert!(
+        statements[1]
+            .descendants()
+            .any(|node| node.kind() == SyntaxKind::LogBlockExpression),
+        "nested log block should remain nested within the parent log block"
+    );
+}
+
+#[test]
+fn log_block_emits_diagnostic_for_excessive_nesting() {
+    let source = r#"
+        fun main {
+            LOG {
+                TRACE {
+                    DEBUG {
+                        "too deep"
+                    }
+                }
+            }
+        }
+    "#;
+
+    let tokens = lex(source);
+    let output = parse(&tokens);
+    assert!(
+        output.diagnostics.iter().any(|diagnostic| diagnostic
+            .message
+            .contains("ログブロックのネストは1段までです")),
+        "expected nesting diagnostic, got {:?}",
+        output.diagnostics
     );
 }
 

@@ -42,6 +42,12 @@ pub enum TokenType {
     Null,
     Package,
     Import,
+    Log,
+    Trace,
+    Debug,
+    Info,
+    Warn,
+    Error,
 
     // Operators
     Assign,         // =
