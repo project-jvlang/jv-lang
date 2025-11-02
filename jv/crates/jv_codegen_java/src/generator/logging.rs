@@ -1,4 +1,5 @@
 use super::*;
+use crate::log_message::LogMessageInterpolator;
 
 pub(super) fn emit_log_plan(
     generator: &mut JavaCodeGenerator,
@@ -280,66 +281,59 @@ fn emit_placeholder_call(
     message: &LogMessage,
     style: PlaceholderStyle,
 ) -> Result<String, CodeGenError> {
-    match analyze_message(message) {
-        MessageFormat::Literal(text) => Ok(format!(
+    let interpolator = LogMessageInterpolator::new(message);
+
+    if let Some(text) = interpolator.literal_text() {
+        return Ok(format!(
             "{logger}.{method}(\"{literal}\");",
             logger = logger_name,
             method = method,
-            literal = JavaCodeGenerator::escape_string(&text)
-        )),
-        MessageFormat::Interpolated {
-            format,
-            segments,
-            args,
-        } => {
-            if args.is_empty() {
-                return Ok(format!(
-                    "{logger}.{method}(\"{literal}\");",
-                    logger = logger_name,
-                    method = method,
-                    literal = JavaCodeGenerator::escape_string(&segments[0])
-                ));
-            }
+            literal = JavaCodeGenerator::escape_string(text)
+        ));
+    }
 
-            let pattern = match style {
-                PlaceholderStyle::Braces => build_brace_pattern(&segments, args.len()),
-                PlaceholderStyle::Percent => format.clone(),
-            };
-            let escaped_pattern = JavaCodeGenerator::escape_string(&pattern);
-            let mut invocation = format!(
-                "{logger}.{method}(\"{pattern}\"",
-                logger = logger_name,
-                method = method,
-                pattern = escaped_pattern
-            );
-            let mut rendered_args = Vec::with_capacity(args.len());
-            for arg in args {
-                rendered_args.push(generator.generate_expression(arg)?);
-            }
-            if !rendered_args.is_empty() {
-                invocation.push_str(", ");
-                invocation.push_str(&rendered_args.join(", "));
-            }
-            invocation.push_str(");");
-            Ok(invocation)
+    let placeholder = match style {
+        PlaceholderStyle::Braces => interpolator.braces_pattern(),
+        PlaceholderStyle::Percent => interpolator.percent_pattern(),
+    };
+
+    if let Some(result) = placeholder {
+        let escaped_pattern = JavaCodeGenerator::escape_string(result.pattern());
+        let mut invocation = format!(
+            "{logger}.{method}(\"{pattern}\"",
+            logger = logger_name,
+            method = method,
+            pattern = escaped_pattern
+        );
+        let mut rendered_args = Vec::with_capacity(result.args().len());
+        for arg in result.args() {
+            rendered_args.push(generator.generate_expression(arg)?);
         }
-        MessageFormat::Expression(expr) => {
-            let rendered = generator.generate_expression(expr)?;
-            match style {
-                PlaceholderStyle::Percent => Ok(format!(
-                    "{logger}.{method}(\"%s\", {value});",
-                    logger = logger_name,
-                    method = method,
-                    value = rendered
-                )),
-                PlaceholderStyle::Braces => Ok(format!(
-                    "{logger}.{method}(\"{{}}\", {value});",
-                    logger = logger_name,
-                    method = method,
-                    value = rendered
-                )),
-            }
+        if !rendered_args.is_empty() {
+            invocation.push_str(", ");
+            invocation.push_str(&rendered_args.join(", "));
         }
+        invocation.push_str(");");
+        return Ok(invocation);
+    }
+
+    let expr = interpolator
+        .expression()
+        .expect("ログメッセージの式が必要です");
+    let rendered = generator.generate_expression(expr)?;
+    match style {
+        PlaceholderStyle::Percent => Ok(format!(
+            "{logger}.{method}(\"%s\", {value});",
+            logger = logger_name,
+            method = method,
+            value = rendered
+        )),
+        PlaceholderStyle::Braces => Ok(format!(
+            "{logger}.{method}(\"{{}}\", {value});",
+            logger = logger_name,
+            method = method,
+            value = rendered
+        )),
     }
 }
 
@@ -349,15 +343,18 @@ fn emit_concatenated_call(
     method: &str,
     message: &LogMessage,
 ) -> Result<String, CodeGenError> {
-    let expression = match analyze_message(message) {
-        MessageFormat::Literal(text) => format!("\"{}\"", JavaCodeGenerator::escape_string(&text)),
-        MessageFormat::Interpolated { segments, args, .. } => {
-            build_concatenation(generator, &segments, &args)?
-        }
-        MessageFormat::Expression(expr) => {
-            let rendered = generator.generate_expression(expr)?;
-            ensure_string_value(generator, expr, rendered)
-        }
+    let interpolator = LogMessageInterpolator::new(message);
+
+    let expression = if let Some(text) = interpolator.literal_text() {
+        format!("\"{}\"", JavaCodeGenerator::escape_string(text))
+    } else if let Some(segments) = interpolator.concatenation_segments() {
+        build_concatenation(generator, segments.segments(), segments.args())?
+    } else {
+        let expr = interpolator
+            .expression()
+            .expect("ログメッセージの式が必要です");
+        let rendered = generator.generate_expression(expr)?;
+        ensure_string_value(generator, expr, rendered)
     };
     Ok(format!(
         "{logger}.{method}({expr});",
@@ -376,141 +373,48 @@ fn emit_jul_log_call(
     let level_const = jul_level_constant(level);
     generator.add_import("java.util.logging.Level");
 
-    match analyze_message(message) {
-        MessageFormat::Literal(text) => Ok(format!(
+    let interpolator = LogMessageInterpolator::new(message);
+
+    if let Some(text) = interpolator.literal_text() {
+        return Ok(format!(
             "{logger}.log({level}, \"{literal}\");",
             logger = logger_name,
             level = level_const,
-            literal = JavaCodeGenerator::escape_string(&text)
-        )),
-        MessageFormat::Interpolated { segments, args, .. } => {
-            if args.is_empty() {
-                return Ok(format!(
-                    "{logger}.log({level}, \"{literal}\");",
-                    logger = logger_name,
-                    level = level_const,
-                    literal = JavaCodeGenerator::escape_string(&segments[0])
-                ));
-            }
-            let pattern = build_numbered_pattern(&segments, args.len());
-            let escaped = JavaCodeGenerator::escape_string(&pattern);
-            let mut invocation = format!(
-                "{logger}.log({level}, \"{pattern}\"",
-                logger = logger_name,
-                level = level_const,
-                pattern = escaped
-            );
-            let mut rendered_args = Vec::with_capacity(args.len());
-            for arg in args {
-                rendered_args.push(generator.generate_expression(arg)?);
-            }
+            literal = JavaCodeGenerator::escape_string(text)
+        ));
+    }
+
+    if let Some(result) = interpolator.numbered_pattern() {
+        let escaped = JavaCodeGenerator::escape_string(result.pattern());
+        let mut invocation = format!(
+            "{logger}.log({level}, \"{pattern}\"",
+            logger = logger_name,
+            level = level_const,
+            pattern = escaped
+        );
+        let mut rendered_args = Vec::with_capacity(result.args().len());
+        for arg in result.args() {
+            rendered_args.push(generator.generate_expression(arg)?);
+        }
+        if !rendered_args.is_empty() {
             invocation.push_str(", ");
             invocation.push_str(&rendered_args.join(", "));
-            invocation.push_str(");");
-            Ok(invocation)
         }
-        MessageFormat::Expression(expr) => {
-            let rendered = generator.generate_expression(expr)?;
-            let wrapped = ensure_string_value(generator, expr, rendered);
-            Ok(format!(
-                "{logger}.log({level}, {value});",
-                logger = logger_name,
-                level = level_const,
-                value = wrapped
-            ))
-        }
+        invocation.push_str(");");
+        return Ok(invocation);
     }
-}
 
-enum MessageFormat<'a> {
-    Literal(String),
-    Interpolated {
-        format: String,
-        segments: Vec<String>,
-        args: Vec<&'a IrExpression>,
-    },
-    Expression(&'a IrExpression),
-}
-
-fn analyze_message(message: &LogMessage) -> MessageFormat<'_> {
-    let expr = &message.expression;
-    match expr {
-        IrExpression::Literal(Literal::String(text), _) => MessageFormat::Literal(text.clone()),
-        IrExpression::StringFormat {
-            format_string,
-            args,
-            ..
-        } => {
-            if let Some(segments) = split_format_segments(format_string, args.len()) {
-                MessageFormat::Interpolated {
-                    format: format_string.clone(),
-                    segments,
-                    args: args.iter().collect(),
-                }
-            } else {
-                MessageFormat::Expression(expr)
-            }
-        }
-        _ => MessageFormat::Expression(expr),
-    }
-}
-
-fn split_format_segments(format: &str, arg_count: usize) -> Option<Vec<String>> {
-    let mut segments = Vec::new();
-    let mut remaining = format;
-    let mut placeholders = 0usize;
-
-    while let Some(index) = remaining.find("%s") {
-        let (prefix, rest) = remaining.split_at(index);
-        segments.push(unescape_percent(prefix));
-        remaining = &rest[2..];
-        placeholders += 1;
-    }
-    segments.push(unescape_percent(remaining));
-
-    if placeholders == arg_count {
-        Some(segments)
-    } else {
-        None
-    }
-}
-
-fn unescape_percent(segment: &str) -> String {
-    let mut result = String::with_capacity(segment.len());
-    let mut chars = segment.chars().peekable();
-    while let Some(ch) = chars.next() {
-        if ch == '%' {
-            if matches!(chars.peek(), Some('%')) {
-                chars.next();
-                result.push('%');
-                continue;
-            }
-        }
-        result.push(ch);
-    }
-    result
-}
-
-fn build_brace_pattern(segments: &[String], arg_count: usize) -> String {
-    let mut pattern = String::new();
-    for index in 0..arg_count {
-        pattern.push_str(&segments[index]);
-        pattern.push_str("{}");
-    }
-    pattern.push_str(&segments[arg_count]);
-    pattern
-}
-
-fn build_numbered_pattern(segments: &[String], arg_count: usize) -> String {
-    let mut pattern = String::new();
-    for index in 0..arg_count {
-        pattern.push_str(&segments[index]);
-        pattern.push('{');
-        pattern.push_str(&index.to_string());
-        pattern.push('}');
-    }
-    pattern.push_str(&segments[arg_count]);
-    pattern
+    let expr = interpolator
+        .expression()
+        .expect("ログメッセージの式が必要です");
+    let rendered = generator.generate_expression(expr)?;
+    let wrapped = ensure_string_value(generator, expr, rendered);
+    Ok(format!(
+        "{logger}.log({level}, {value});",
+        logger = logger_name,
+        level = level_const,
+        value = wrapped
+    ))
 }
 
 fn build_concatenation(
