@@ -424,6 +424,65 @@ mod tests {
     }
 
     #[test]
+    fn transform_regex_command_propagates_additional_flags() {
+        let span = dummy_span();
+        let command = RegexCommand {
+            mode: RegexCommandMode::All,
+            mode_origin: RegexCommandModeOrigin::DefaultReplacement,
+            subject: Box::new(Expression::Identifier("input".to_string(), span.clone())),
+            pattern: RegexLiteral {
+                pattern: "\\w+".to_string(),
+                raw: "/\\w+/".to_string(),
+                span: span.clone(),
+            },
+            replacement: None,
+            flags: vec![
+                RegexFlag::UnicodeCase,
+                RegexFlag::UnixLines,
+                RegexFlag::Comments,
+                RegexFlag::Literal,
+                RegexFlag::CanonEq,
+            ],
+            raw_flags: Some("udxLc".to_string()),
+            span: span.clone(),
+        };
+
+        let expr = Expression::RegexCommand(Box::new(command));
+
+        let mut context = TransformContext::new();
+        context.add_variable("input".to_string(), JavaType::string());
+        context.register_regex_command_typing(
+            &span,
+            RegexCommandLoweringInfo {
+                mode: RegexCommandMode::All,
+                guard_strategy: RegexGuardStrategy::None,
+                java_type: JavaType::string(),
+                requires_stream_materialization: false,
+            },
+        );
+
+        let lowered =
+            transform_expression(expr, &mut context).expect("regex command lowering succeeds");
+
+        match lowered {
+            IrExpression::RegexCommand(ir_command) => {
+                assert_eq!(
+                    ir_command.flags,
+                    vec![
+                        RegexFlag::UnicodeCase,
+                        RegexFlag::UnixLines,
+                        RegexFlag::Comments,
+                        RegexFlag::Literal,
+                        RegexFlag::CanonEq,
+                    ]
+                );
+                assert_eq!(ir_command.raw_flags.as_deref(), Some("udxLc"));
+            }
+            other => panic!("expected regex command IR expression, got {:?}", other),
+        }
+    }
+
+    #[test]
     fn transform_regex_command_first_mode_lowering() {
         let span = dummy_span();
         let command = RegexCommand {

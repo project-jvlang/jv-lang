@@ -147,6 +147,38 @@ fn renders_replace_all_for_all_mode() {
 }
 
 #[test]
+fn renders_additional_flag_mask() {
+    let mut command = base_command(RegexCommandMode::All);
+    command.replacement = literal_replacement("X", &command.span);
+    command.flags = vec![
+        RegexFlag::UnicodeCase,
+        RegexFlag::UnixLines,
+        RegexFlag::Comments,
+        RegexFlag::Literal,
+        RegexFlag::CanonEq,
+    ];
+    command.raw_flags = Some("udxLc".to_string());
+
+    let java = render_java(&regex_command_program(command));
+    assert!(
+        java.contains(r#"Pattern.compile("\\d+", "#),
+        "Pattern.compile 呼び出しに追加フラグが含まれる想定です:\n{java}"
+    );
+    for constant in [
+        "Pattern.UNICODE_CASE",
+        "Pattern.UNIX_LINES",
+        "Pattern.COMMENTS",
+        "Pattern.LITERAL",
+        "Pattern.CANON_EQ",
+    ] {
+        assert!(
+            java.contains(constant),
+            "{constant} が Pattern.compile のビットマスクに含まれる想定です:\n{java}"
+        );
+    }
+}
+
+#[test]
 fn renders_replace_first_for_first_mode() {
     let mut command = base_command(RegexCommandMode::First);
     command.replacement = literal_replacement("FOUND", &command.span);

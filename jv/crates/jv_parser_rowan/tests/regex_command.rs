@@ -109,6 +109,27 @@ val replaced = a/sub/\d+/"X"/ims
 }
 
 #[test]
+fn parses_additional_flags() {
+    let source = r#"
+val replaced = a/text/\w+/"X"/udxLc
+"#;
+
+    let command = extract_regex_command(source);
+
+    assert_eq!(
+        command.flags,
+        vec![
+            RegexFlag::UnicodeCase,
+            RegexFlag::UnixLines,
+            RegexFlag::Comments,
+            RegexFlag::Literal,
+            RegexFlag::CanonEq,
+        ]
+    );
+    assert_eq!(command.raw_flags.as_deref(), Some("udxLc"));
+}
+
+#[test]
 fn first_mode_literal_replacement_is_preserved() {
     let source = r#"
 val once = f/text/\d+/"first"/
