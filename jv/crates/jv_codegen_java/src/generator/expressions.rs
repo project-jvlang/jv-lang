@@ -1,4 +1,5 @@
 use super::*;
+mod doublebrace;
 use jv_ast::{Span, types::PrimitiveTypeName};
 use jv_ir::PipelineShape;
 use jv_ir::{
@@ -180,6 +181,13 @@ impl JavaCodeGenerator {
                 builder.push_line("}");
                 Ok(builder.build())
             }
+            IrExpression::DoublebraceInit {
+                base,
+                receiver_type,
+                plan,
+                span,
+                ..
+            } => self.generate_doublebrace_expression(base, receiver_type, plan, span),
             IrExpression::ArrayCreation {
                 element_type,
                 dimensions,

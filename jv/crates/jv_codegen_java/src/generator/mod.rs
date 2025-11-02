@@ -6,12 +6,13 @@ use jv_ast::{BinaryOp, CallArgumentStyle, Literal, SequenceDelimiter, Span, Unar
 use jv_build::metadata::SymbolIndex;
 use jv_ir::{
     CompletableFutureOp, ConversionHelper, ConversionKind, ConversionMetadata, IrCaseLabel,
-    IrCatchClause, IrDeconstructionComponent, IrDeconstructionPattern, IrExpression, IrForEachKind,
-    IrForLoopMetadata, IrGenericMetadata, IrImplicitWhenEnd, IrImport, IrImportDetail, IrModifiers,
-    IrNumericRangeLoop, IrParameter, IrProgram, IrRecordComponent, IrResource, IrSampleDeclaration,
-    IrStatement, IrSwitchCase, IrTypeParameter, IrVariance, IrVisibility, JavaType, MethodOverload,
-    NullableGuard, NullableGuardReason, SequencePipeline, SequenceSource, SequenceStage,
-    SequenceTerminalKind, UtilityClass, VirtualThreadOp,
+    IrCatchClause, IrDeconstructionComponent, IrDeconstructionPattern, IrDoublebraceMutation,
+    IrDoublebracePlan, IrExpression, IrForEachKind, IrForLoopMetadata, IrGenericMetadata,
+    IrImplicitWhenEnd, IrImport, IrImportDetail, IrModifiers, IrNumericRangeLoop, IrParameter,
+    IrProgram, IrRecordComponent, IrResource, IrSampleDeclaration, IrStatement, IrSwitchCase,
+    IrTypeParameter, IrVariance, IrVisibility, JavaType, MethodOverload, NullableGuard,
+    NullableGuardReason, SequencePipeline, SequenceSource, SequenceStage, SequenceTerminalKind,
+    UtilityClass, VirtualThreadOp,
 };
 use jv_mapper::{
     JavaPosition, JavaSpan, MappingCategory, MappingError, SourceMap, SourceMapBuilder,
@@ -47,6 +48,7 @@ pub struct JavaCodeGenerator {
     current_return_type: Option<JavaType>,
     mutable_captures: HashSet<String>,
     record_components: HashMap<String, HashSet<String>>,
+    temp_counter: usize,
 }
 
 impl JavaCodeGenerator {
@@ -75,6 +77,7 @@ impl JavaCodeGenerator {
             current_return_type: None,
             mutable_captures: HashSet::new(),
             record_components: HashMap::new(),
+            temp_counter: 0,
         }
     }
 
@@ -299,6 +302,7 @@ impl JavaCodeGenerator {
         self.current_return_type = None;
         self.mutable_captures.clear();
         self.record_components.clear();
+        self.temp_counter = 0;
     }
 
     fn register_record_components_from_declarations(
@@ -471,10 +475,19 @@ impl JavaCodeGenerator {
         expr: &IrExpression,
         locals: &mut HashSet<String>,
     ) {
-        if let IrExpression::Block { statements, .. } = expr {
-            for statement in statements {
-                self.collect_method_locals_from_statement(statement, locals);
+        match expr {
+            IrExpression::Block { statements, .. } => {
+                for statement in statements {
+                    self.collect_method_locals_from_statement(statement, locals);
+                }
             }
+            IrExpression::DoublebraceInit { base, plan, .. } => {
+                if let Some(inner) = base.as_deref() {
+                    self.collect_method_locals_from_expression(inner, locals);
+                }
+                self.collect_method_locals_from_doublebrace(plan, locals);
+            }
+            _ => {}
         }
     }
 
@@ -598,6 +611,39 @@ impl JavaCodeGenerator {
         }
     }
 
+    fn collect_method_locals_from_doublebrace(
+        &self,
+        plan: &IrDoublebracePlan,
+        locals: &mut HashSet<String>,
+    ) {
+        match plan {
+            IrDoublebracePlan::Mutate(mutate) => {
+                for step in &mutate.steps {
+                    match step {
+                        IrDoublebraceMutation::FieldAssignment(update) => {
+                            self.collect_method_locals_from_expression(&update.value, locals);
+                        }
+                        IrDoublebraceMutation::MethodCall(call) => {
+                            for arg in &call.arguments {
+                                self.collect_method_locals_from_expression(arg, locals);
+                            }
+                        }
+                        IrDoublebraceMutation::Statement(statements) => {
+                            for statement in statements {
+                                self.collect_method_locals_from_statement(statement, locals);
+                            }
+                        }
+                    }
+                }
+            }
+            IrDoublebracePlan::Copy(copy) => {
+                for update in &copy.updates {
+                    self.collect_method_locals_from_expression(&update.value, locals);
+                }
+            }
+        }
+    }
+
     fn collect_mutable_captures_in_expression(
         &self,
         expr: &IrExpression,
@@ -663,6 +709,22 @@ impl JavaCodeGenerator {
                         scope_locals,
                     );
                 }
+            }
+            IrExpression::DoublebraceInit { base, plan, .. } => {
+                if let Some(inner) = base.as_deref() {
+                    self.collect_mutable_captures_in_expression(
+                        inner,
+                        method_locals,
+                        captures,
+                        scope_locals,
+                    );
+                }
+                self.collect_mutable_captures_in_doublebrace(
+                    plan,
+                    method_locals,
+                    captures,
+                    scope_locals,
+                );
             }
             IrExpression::Binary { left, right, .. } => {
                 self.collect_mutable_captures_in_expression(
@@ -756,6 +818,62 @@ impl JavaCodeGenerator {
             | IrExpression::StringFormat { .. }
             | IrExpression::InstanceOf { .. }
             | IrExpression::Cast { .. } => {}
+        }
+    }
+
+    fn collect_mutable_captures_in_doublebrace(
+        &self,
+        plan: &IrDoublebracePlan,
+        method_locals: &HashSet<String>,
+        captures: &mut HashSet<String>,
+        scope_locals: &HashSet<String>,
+    ) {
+        match plan {
+            IrDoublebracePlan::Mutate(mutate) => {
+                for step in &mutate.steps {
+                    match step {
+                        IrDoublebraceMutation::FieldAssignment(update) => {
+                            self.collect_mutable_captures_in_expression(
+                                &update.value,
+                                method_locals,
+                                captures,
+                                scope_locals,
+                            );
+                        }
+                        IrDoublebraceMutation::MethodCall(call) => {
+                            for arg in &call.arguments {
+                                self.collect_mutable_captures_in_expression(
+                                    arg,
+                                    method_locals,
+                                    captures,
+                                    scope_locals,
+                                );
+                            }
+                        }
+                        IrDoublebraceMutation::Statement(statements) => {
+                            let mut nested_scope = scope_locals.clone();
+                            for statement in statements {
+                                nested_scope = self.collect_mutable_captures_in_statement(
+                                    statement,
+                                    method_locals,
+                                    captures,
+                                    &nested_scope,
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+            IrDoublebracePlan::Copy(copy) => {
+                for update in &copy.updates {
+                    self.collect_mutable_captures_in_expression(
+                        &update.value,
+                        method_locals,
+                        captures,
+                        scope_locals,
+                    );
+                }
+            }
         }
     }
 
@@ -1260,6 +1378,12 @@ impl JavaCodeGenerator {
 
     fn symbol_index(&self) -> Option<&SymbolIndex> {
         self.symbol_index.as_deref()
+    }
+
+    fn fresh_identifier(&mut self, prefix: &str) -> String {
+        let name = format!("{}{}", prefix, self.temp_counter);
+        self.temp_counter += 1;
+        name
     }
 
     fn metadata_lookup_key(&self) -> Option<String> {
