@@ -404,7 +404,7 @@ fn lower_comment(
                 node.kind(),
                 None,
                 Vec::new(),
-            ))
+            ));
         }
     };
 
@@ -612,7 +612,7 @@ fn lower_assignment_target(
                 node.kind(),
                 None,
                 Vec::new(),
-            ))
+            ));
         }
     };
 
@@ -645,7 +645,7 @@ fn lower_assignment_target(
                             node.kind(),
                             None,
                             Vec::new(),
-                        ))
+                        ));
                     }
                 };
 
@@ -669,7 +669,7 @@ fn lower_assignment_target(
                     node.kind(),
                     None,
                     Vec::new(),
-                ))
+                ));
             }
         }
     }
@@ -710,7 +710,7 @@ fn lower_value(
                     clause.kind(),
                     first_identifier_text(&clause),
                     collect_annotation_texts(&clause),
-                ))
+                ));
             }
         },
         None => None,
@@ -1156,6 +1156,36 @@ mod tests {
             other => panic!("expected regex command expression, got {:?}", other),
         }
     }
+
+    #[test]
+    fn regex_command_short_mode_expression_parses() {
+        let expr = parse_expression_from_source("m/text/'pattern'/");
+        match expr {
+            Expression::RegexCommand(command) => {
+                assert!(
+                    matches!(command.mode, RegexCommandMode::Match),
+                    "短縮 `m/` は Match モードへ解決される想定です: {:?}",
+                    command.mode
+                );
+            }
+            other => panic!("expected regex command expression, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn regex_command_explicit_match_expression_parses() {
+        let expr = parse_expression_from_source("[match]/text/'pattern'/");
+        match expr {
+            Expression::RegexCommand(command) => {
+                assert!(
+                    matches!(command.mode, RegexCommandMode::Match),
+                    "`[match]` モードは Match として扱われる想定です: {:?}",
+                    command.mode
+                );
+            }
+            other => panic!("expected regex command expression, got {:?}", other),
+        }
+    }
 }
 
 mod expression_parser {
@@ -1207,6 +1237,11 @@ mod expression_parser {
         end_index: usize,
     }
 
+    fn is_type_cast_keyword(token: &Token) -> bool {
+        matches!(TokenKind::from_token(token), TokenKind::Identifier)
+            && token.lexeme.eq_ignore_ascii_case("as")
+    }
+
     const STATEMENT_BOUNDARY_KINDS: &[TokenKind] = &[
         TokenKind::Semicolon,
         TokenKind::Newline,
@@ -1229,6 +1264,17 @@ mod expression_parser {
         TokenKind::SpawnKw,
         TokenKind::Eof,
     ];
+
+    fn token_starts_new_statement(token: &Token) -> bool {
+        let kind = TokenKind::from_token(token);
+        if kind == TokenKind::RightBrace {
+            return false;
+        }
+        if token.leading_trivia.newlines > 0 && token.column == 1 {
+            return true;
+        }
+        STATEMENT_BOUNDARY_KINDS.contains(&kind)
+    }
 
     #[derive(Clone)]
     struct ParsedExpr {
@@ -1420,6 +1466,57 @@ mod expression_parser {
                 let span = span_from_token(token);
                 let literal = build_regex_literal_replacement(token, span)?;
                 return Ok(RegexReplacement::Literal(literal));
+            }
+
+            if slice.len() >= 3
+                && TokenKind::from_token(slice[0]) == TokenKind::Unknown
+                && slice[0].lexeme == "$"
+                && TokenKind::from_token(slice[1]) == TokenKind::LeftBrace
+            {
+                let mut depth = 1usize;
+                let mut idx = 2usize;
+                while idx < slice.len() {
+                    match TokenKind::from_token(slice[idx]) {
+                        TokenKind::LeftBrace => depth = depth.saturating_add(1),
+                        TokenKind::RightBrace => {
+                            depth = depth.saturating_sub(1);
+                            if depth == 0 {
+                                let body_tokens = &slice[2..idx];
+                                let body_expr = if body_tokens.is_empty() {
+                                    Expression::Literal(
+                                        Literal::String(String::new()),
+                                        span_from_token(slice[idx]),
+                                    )
+                                } else {
+                                    parse_expression(body_tokens)?
+                                };
+                                let lambda_span = merge_spans(
+                                    &span_from_token(slice[0]),
+                                    &span_from_token(slice[idx]),
+                                );
+                                let param = Parameter {
+                                    name: "it".to_string(),
+                                    type_annotation: None,
+                                    default_value: None,
+                                    modifiers: ParameterModifiers::default(),
+                                    span: span_from_token(slice[0]),
+                                };
+                                return Ok(RegexReplacement::Lambda(RegexLambdaReplacement {
+                                    params: vec![param],
+                                    body: Box::new(body_expr),
+                                    span: lambda_span,
+                                }));
+                            }
+                        }
+                        _ => {}
+                    }
+                    idx += 1;
+                }
+
+                return Err(ExpressionError::new(
+                    "`${...}` 形式の置換が閉じられていません",
+                    Some(span_from_token(slice[0])),
+                ));
             }
 
             let expr = parse_expression(slice)?;
@@ -2063,7 +2160,7 @@ mod expression_parser {
                     return Err(ExpressionError::new(
                         "`val` 宣言には識別子が必要です",
                         Some(span_from_token(name_token)),
-                    ))
+                    ));
                 }
             };
 
@@ -2089,7 +2186,7 @@ mod expression_parser {
                             return Err(ExpressionError::new(
                                 error.message().to_string(),
                                 error.span().cloned(),
-                            ))
+                            ));
                         }
                     }
                 }
@@ -2572,7 +2669,7 @@ mod expression_parser {
                             return Err(ExpressionError::new(
                                 "`is` パターンには識別子が必要です",
                                 Some(span_from_token(type_token)),
-                            ))
+                            ));
                         }
                     };
                     let span = merge_spans(&span_from_token(first), &span_from_token(type_token));
@@ -2876,7 +2973,7 @@ mod expression_parser {
                     return Err(ExpressionError::new(
                         "メンバーアクセスには識別子が必要です",
                         Some(span_from_token(token)),
-                    ))
+                    ));
                 }
             };
 
@@ -2905,7 +3002,7 @@ mod expression_parser {
                     return Err(ExpressionError::new(
                         "メンバーアクセスには識別子が必要です",
                         Some(span_from_token(token)),
-                    ))
+                    ));
                 }
             };
 
@@ -3285,7 +3382,7 @@ mod expression_parser {
                         return Err(ExpressionError::new(
                             "名前付き引数には識別子が必要です",
                             Some(span_from_token(name_token)),
-                        ))
+                        ));
                     }
                 };
                 let value_tokens = &slice[idx + 1..];
@@ -3482,7 +3579,7 @@ mod expression_parser {
                     return Err(ExpressionError::new(
                         "パラメータ名には識別子が必要です",
                         Some(span_from_token(name_token)),
-                    ))
+                    ));
                 }
             };
 
@@ -4312,46 +4409,190 @@ mod expression_parser {
         let mut end_index = pattern_index + 1;
         let mut replacement_range = None;
         let mut flags_index = None;
+        let boundary_due_to_layout = |index: usize| -> bool {
+            if index >= len {
+                return false;
+            }
+            let token = tokens[index];
+            if token.leading_trivia.newlines > 0 && token.column == 1 {
+                let next_is_slash =
+                    index + 1 < len && matches!(tokens[index + 1].token_type, TokenType::Divide);
+                return !next_is_slash;
+            }
+            false
+        };
 
-        if end_index < len && matches!(tokens[end_index].token_type, TokenType::Divide) {
+        if end_index < len
+            && !boundary_due_to_layout(end_index)
+            && matches!(tokens[end_index].token_type, TokenType::Divide)
+        {
             end_index += 1;
             let replacement_start = end_index;
+            let mut brace_depth = 0usize;
+            let mut paren_depth = 0usize;
+            let mut bracket_depth = 0usize;
+            let mut ended_by_type_cast = false;
 
-            while end_index < len && !matches!(tokens[end_index].token_type, TokenType::Divide) {
+            while end_index < len {
+                let token = tokens[end_index];
+
+                if brace_depth == 0 && paren_depth == 0 && bracket_depth == 0 {
+                    if matches!(token.token_type, TokenType::Divide) {
+                        break;
+                    }
+                    if boundary_due_to_layout(end_index) {
+                        break;
+                    }
+                    if token_starts_new_statement(token) {
+                        break;
+                    }
+                    if is_type_cast_keyword(token) {
+                        ended_by_type_cast = true;
+                        break;
+                    }
+                }
+
+                match &token.token_type {
+                    TokenType::LeftBrace => {
+                        brace_depth += 1;
+                    }
+                    TokenType::RightBrace => {
+                        if brace_depth == 0 {
+                            break;
+                        }
+                        brace_depth -= 1;
+                    }
+                    TokenType::LeftParen => {
+                        paren_depth += 1;
+                    }
+                    TokenType::RightParen => {
+                        if paren_depth == 0 {
+                            break;
+                        }
+                        paren_depth -= 1;
+                    }
+                    TokenType::LeftBracket => {
+                        bracket_depth += 1;
+                    }
+                    TokenType::RightBracket => {
+                        if bracket_depth == 0 {
+                            break;
+                        }
+                        bracket_depth -= 1;
+                    }
+                    _ => {}
+                }
+
                 end_index += 1;
             }
 
-            if end_index >= len {
+            if ended_by_type_cast {
+                if replacement_start < end_index {
+                    replacement_range = Some((replacement_start, end_index));
+                }
+            } else {
+                if end_index >= len || boundary_due_to_layout(end_index) {
+                    replacement_range = Some((replacement_start, end_index));
+                    return Ok(Some(RegexCommandSegments {
+                        mode,
+                        subject_range: (subject_start, pattern_index),
+                        pattern_index,
+                        replacement_range,
+                        flags_index: None,
+                        end_index,
+                    }));
+                }
+
                 replacement_range = Some((replacement_start, end_index));
-                return Ok(Some(RegexCommandSegments {
-                    mode,
-                    subject_range: (subject_start, pattern_index),
-                    pattern_index,
-                    replacement_range,
-                    flags_index: None,
-                    end_index,
-                }));
-            }
-
-            replacement_range = Some((replacement_start, end_index));
-            end_index += 1;
-
-            if end_index < len && extract_flag_string(tokens[end_index]).is_some() {
-                flags_index = Some(end_index);
                 end_index += 1;
+
+                if end_index < len
+                    && !boundary_due_to_layout(end_index)
+                    && !token_starts_new_statement(tokens[end_index])
+                    && !is_type_cast_keyword(tokens[end_index])
+                    && extract_flag_string(tokens[end_index]).is_some()
+                {
+                    flags_index = Some(end_index);
+                    end_index += 1;
+                }
             }
-        } else if end_index < len {
+        } else if end_index < len
+            && !boundary_due_to_layout(end_index)
+            && !token_starts_new_statement(tokens[end_index])
+            && !is_type_cast_keyword(tokens[end_index])
+        {
             // Replacement without an explicit preceding slash (e.g. short mode commands).
             let replacement_start = end_index;
-            while end_index < len && !matches!(tokens[end_index].token_type, TokenType::Divide) {
+            let mut brace_depth = 0usize;
+            let mut paren_depth = 0usize;
+            let mut bracket_depth = 0usize;
+            let mut ended_by_closing_slash = false;
+
+            while end_index < len {
+                let token = tokens[end_index];
+
+                if brace_depth == 0 && paren_depth == 0 && bracket_depth == 0 {
+                    if matches!(token.token_type, TokenType::Divide) {
+                        ended_by_closing_slash = true;
+                        break;
+                    }
+                    if boundary_due_to_layout(end_index) {
+                        break;
+                    }
+                    if token_starts_new_statement(token) {
+                        break;
+                    }
+                    if is_type_cast_keyword(token) {
+                        break;
+                    }
+                }
+
+                match &token.token_type {
+                    TokenType::LeftBrace => {
+                        brace_depth += 1;
+                    }
+                    TokenType::RightBrace => {
+                        if brace_depth == 0 {
+                            break;
+                        }
+                        brace_depth -= 1;
+                    }
+                    TokenType::LeftParen => {
+                        paren_depth += 1;
+                    }
+                    TokenType::RightParen => {
+                        if paren_depth == 0 {
+                            break;
+                        }
+                        paren_depth -= 1;
+                    }
+                    TokenType::LeftBracket => {
+                        bracket_depth += 1;
+                    }
+                    TokenType::RightBracket => {
+                        if bracket_depth == 0 {
+                            break;
+                        }
+                        bracket_depth -= 1;
+                    }
+                    _ => {}
+                }
+
                 end_index += 1;
             }
 
-            replacement_range = Some((replacement_start, end_index));
+            if replacement_start < end_index {
+                replacement_range = Some((replacement_start, end_index));
+            }
 
-            if end_index < len && matches!(tokens[end_index].token_type, TokenType::Divide) {
+            if ended_by_closing_slash {
                 end_index += 1;
-                if end_index < len && extract_flag_string(tokens[end_index]).is_some() {
+                if end_index < len
+                    && !boundary_due_to_layout(end_index)
+                    && !token_starts_new_statement(tokens[end_index])
+                    && !is_type_cast_keyword(tokens[end_index])
+                    && extract_flag_string(tokens[end_index]).is_some()
+                {
                     flags_index = Some(end_index);
                     end_index += 1;
                 }
@@ -4837,7 +5078,7 @@ mod expression_parser {
                     return Err(ExpressionError::new(
                         "JSON オブジェクトのキーは識別子または文字列である必要があります",
                         Some(span_from_token(key_token)),
-                    ))
+                    ));
                 }
             };
 
@@ -6205,7 +6446,7 @@ fn lower_identifier_binding(
                 node.kind(),
                 first_identifier_text(node),
                 collect_annotation_texts(node),
-            ))
+            ));
         }
     };
 

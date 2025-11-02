@@ -834,6 +834,9 @@ impl<'tokens> ParserContext<'tokens> {
         let original_cursor = self.cursor;
         let mut collected: Vec<(usize, TokenKind, &Token)> = Vec::new();
         let mut raw_index = self.cursor;
+        let mut brace_depth = 0usize;
+        let mut paren_depth = 0usize;
+        let mut bracket_depth = 0usize;
 
         while raw_index < self.tokens.len() && collected.len() < 64 {
             let token = &self.tokens[raw_index];
@@ -847,12 +850,30 @@ impl<'tokens> ParserContext<'tokens> {
                 continue;
             }
 
-            if !collected.is_empty() && matches!(kind, TokenKind::Semicolon | TokenKind::RightBrace)
-            {
-                break;
+            if !collected.is_empty() {
+                if kind == TokenKind::Semicolon
+                    && brace_depth == 0
+                    && paren_depth == 0
+                    && bracket_depth == 0
+                {
+                    break;
+                }
+                if kind == TokenKind::RightBrace && brace_depth == 0 {
+                    break;
+                }
             }
 
             collected.push((raw_index, kind, token));
+
+            match kind {
+                TokenKind::LeftBrace => brace_depth = brace_depth.saturating_add(1),
+                TokenKind::RightBrace => brace_depth = brace_depth.saturating_sub(1),
+                TokenKind::LeftParen => paren_depth = paren_depth.saturating_add(1),
+                TokenKind::RightParen => paren_depth = paren_depth.saturating_sub(1),
+                TokenKind::LeftBracket => bracket_depth = bracket_depth.saturating_add(1),
+                TokenKind::RightBracket => bracket_depth = bracket_depth.saturating_sub(1),
+                _ => {}
+            }
 
             raw_index += 1;
         }
@@ -863,6 +884,47 @@ impl<'tokens> ParserContext<'tokens> {
 
         let len = collected.len();
         let mut idx = 0usize;
+        let token_starts_new_statement = |kind: TokenKind| -> bool {
+            matches!(
+                kind,
+                TokenKind::ValKw
+                    | TokenKind::VarKw
+                    | TokenKind::FunKw
+                    | TokenKind::ClassKw
+                    | TokenKind::WhenKw
+                    | TokenKind::ForKw
+                    | TokenKind::ReturnKw
+                    | TokenKind::ThrowKw
+                    | TokenKind::BreakKw
+                    | TokenKind::ContinueKw
+                    | TokenKind::UseKw
+                    | TokenKind::DeferKw
+                    | TokenKind::SpawnKw
+                    | TokenKind::PackageKw
+                    | TokenKind::ImportKw
+                    | TokenKind::Semicolon
+                    | TokenKind::Eof
+            )
+        };
+        let token_is_type_cast = |index: usize| -> bool {
+            index < len
+                && matches!(collected[index].1, TokenKind::Identifier)
+                && collected[index].2.lexeme.eq_ignore_ascii_case("as")
+        };
+        let boundary_due_to_layout = |index: usize| -> bool {
+            if index >= len {
+                return false;
+            }
+            let (_, kind, token) = collected[index];
+            if kind == TokenKind::RightBrace {
+                return false;
+            }
+            if token.leading_trivia.newlines > 0 && token.column == 1 {
+                let next_is_slash = index + 1 < len && collected[index + 1].1 == TokenKind::Slash;
+                return !next_is_slash;
+            }
+            false
+        };
 
         if let Some((_, kind, token)) = collected.get(idx) {
             if *kind == TokenKind::Identifier && is_short_mode_identifier(token) {
@@ -910,37 +972,143 @@ impl<'tokens> ParserContext<'tokens> {
 
         idx = pattern_index + 1;
 
-        if idx < len && collected[idx].1 == TokenKind::Slash {
+        if idx >= len
+            || boundary_due_to_layout(idx)
+            || token_starts_new_statement(collected[idx].1)
+            || token_is_type_cast(idx)
+        {
+            // command terminates immediately after pattern
+        } else if collected[idx].1 == TokenKind::Slash {
             idx += 1;
             let mut replacement_end = idx;
-            while replacement_end < len && collected[replacement_end].1 != TokenKind::Slash {
+            let mut brace_depth = 0usize;
+            let mut paren_depth = 0usize;
+            let mut bracket_depth = 0usize;
+            let mut ended_by_closing_slash = false;
+
+            while replacement_end < len {
+                let (_, kind, _) = collected[replacement_end];
+
+                if brace_depth == 0 && paren_depth == 0 && bracket_depth == 0 {
+                    if kind == TokenKind::Slash {
+                        ended_by_closing_slash = true;
+                        break;
+                    }
+                    if boundary_due_to_layout(replacement_end) {
+                        break;
+                    }
+                    if token_starts_new_statement(kind) {
+                        break;
+                    }
+                    if token_is_type_cast(replacement_end) {
+                        break;
+                    }
+                }
+
+                match kind {
+                    TokenKind::LeftBrace => brace_depth = brace_depth.saturating_add(1),
+                    TokenKind::RightBrace => {
+                        if brace_depth == 0 {
+                            break;
+                        }
+                        brace_depth -= 1;
+                    }
+                    TokenKind::LeftParen => paren_depth = paren_depth.saturating_add(1),
+                    TokenKind::RightParen => {
+                        if paren_depth == 0 {
+                            break;
+                        }
+                        paren_depth -= 1;
+                    }
+                    TokenKind::LeftBracket => bracket_depth = bracket_depth.saturating_add(1),
+                    TokenKind::RightBracket => {
+                        if bracket_depth == 0 {
+                            break;
+                        }
+                        bracket_depth -= 1;
+                    }
+                    _ => {}
+                }
+
                 replacement_end += 1;
             }
-            if replacement_end >= len {
-                self.cursor = original_cursor;
-                return None;
-            }
-            idx = replacement_end + 1;
 
-            if idx < len {
-                if flag_token_content(collected[idx].2).is_some() {
+            if ended_by_closing_slash {
+                idx = replacement_end + 1;
+
+                if idx < len
+                    && !boundary_due_to_layout(idx)
+                    && !token_starts_new_statement(collected[idx].1)
+                    && !token_is_type_cast(idx)
+                    && flag_token_content(collected[idx].2).is_some()
+                {
                     idx += 1;
                 }
+            } else {
+                idx = replacement_end;
             }
         } else if idx < len {
-            while idx < len && collected[idx].1 != TokenKind::Slash {
+            let mut brace_depth = 0usize;
+            let mut paren_depth = 0usize;
+            let mut bracket_depth = 0usize;
+
+            while idx < len {
+                let (_, kind, _) = collected[idx];
+
+                if brace_depth == 0 && paren_depth == 0 && bracket_depth == 0 {
+                    if kind == TokenKind::Slash {
+                        break;
+                    }
+                    if boundary_due_to_layout(idx) {
+                        break;
+                    }
+                    if token_starts_new_statement(kind) {
+                        break;
+                    }
+                    if token_is_type_cast(idx) {
+                        break;
+                    }
+                }
+
+                match kind {
+                    TokenKind::LeftBrace => brace_depth = brace_depth.saturating_add(1),
+                    TokenKind::RightBrace => {
+                        if brace_depth == 0 {
+                            break;
+                        }
+                        brace_depth -= 1;
+                    }
+                    TokenKind::LeftParen => paren_depth = paren_depth.saturating_add(1),
+                    TokenKind::RightParen => {
+                        if paren_depth == 0 {
+                            break;
+                        }
+                        paren_depth -= 1;
+                    }
+                    TokenKind::LeftBracket => bracket_depth = bracket_depth.saturating_add(1),
+                    TokenKind::RightBracket => {
+                        if bracket_depth == 0 {
+                            break;
+                        }
+                        bracket_depth -= 1;
+                    }
+                    _ => {}
+                }
+
                 idx += 1;
             }
 
-            if idx >= len {
-                self.cursor = original_cursor;
-                return None;
-            }
-
-            idx += 1;
-
-            if idx < len && flag_token_content(collected[idx].2).is_some() {
+            if idx < len && collected[idx].1 == TokenKind::Slash {
                 idx += 1;
+
+                if idx < len
+                    && !boundary_due_to_layout(idx)
+                    && !token_starts_new_statement(collected[idx].1)
+                    && !token_is_type_cast(idx)
+                    && flag_token_content(collected[idx].2).is_some()
+                {
+                    idx += 1;
+                }
             }
         }
 
