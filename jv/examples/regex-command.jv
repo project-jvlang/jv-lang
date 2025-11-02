@@ -88,7 +88,7 @@ USER=Chie ACTION=RESULT ip=172.16.0.77
 
     println("")
     println("=== Pattern 型推論と定数化テレメトリ ===")
-    val literalPatter = /\d{3}-\d{4}/
+    val literalPattern = /\d{3}-\d{4}/
     // Pattern 型として扱われる値は静的フィールドへ昇格し、複数箇所から再利用される
     val cachedPatterns = [
         literalPattern
