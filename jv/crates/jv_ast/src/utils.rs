@@ -24,6 +24,7 @@ impl Expression {
             Expression::When { span, .. } => span,
             Expression::If { span, .. } => span,
             Expression::Block { span, .. } => span,
+            Expression::LogBlock(block) => &block.span,
             Expression::Array { span, .. } => span,
             Expression::Lambda { span, .. } => span,
             Expression::Try { span, .. } => span,
@@ -74,6 +75,7 @@ pub fn requires_null_safety_check(expr: &Expression) -> bool {
             requires_null_safety_check(object)
         }
         Expression::Call { function, .. } => requires_null_safety_check(function),
+        Expression::LogBlock(_) => false,
         _ => false,
     }
 }
@@ -93,6 +95,7 @@ pub fn analyze_null_safety(expr: &Expression) -> bool {
                     Argument::Named { value, .. } => analyze_null_safety(value),
                 })
         }
+        Expression::LogBlock(_) => false,
         _ => false, // Conservative: assume other expressions are not null-safe
     }
 }
@@ -126,6 +129,7 @@ pub fn resolve_scope(expr: &Expression) -> String {
             resolve_scope(function)
         }
         Expression::This(_) => "instance".to_string(),
+        Expression::LogBlock(_) => "expression".to_string(),
         _ => "expression".to_string(), // Other expressions don't have meaningful scope
     }
 }
