@@ -1,5 +1,8 @@
 use crate::registry::default_impl::DefaultImplementationRegistry;
+use crate::session::InferenceSession;
+use jv_ast::expression::DoublebraceInit;
 use jv_ast::{Expression, Statement};
+use jv_build::metadata::{SymbolIndex, TypeEntry};
 use std::collections::HashSet;
 
 /// ヒューリスティクスベースで Doublebrace 初期化ブロックのレシーバー型を推測するユーティリティ。
@@ -185,6 +188,286 @@ const LIST_METHODS: &[&str] = &[
 ];
 
 const COLLECTION_METHODS: &[&str] = &["forEach", "stream", "isEmpty", "size", "toArray"];
+
+/// Doublebrace 初期化ブロック内で検出される制御フロー違反の種別。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ControlFlowViolation {
+    Return,
+    Break,
+    Continue,
+}
+
+/// レシーバー型の決定に利用した情報を示す。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReceiverResolution {
+    ReceiverHint,
+    ExpectedType,
+    BaseExpression,
+    Heuristic,
+    ObjectFallback,
+    Unknown,
+}
+
+/// Doublebrace 推論で扱う文脈情報。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct DoublebraceContext<'a> {
+    pub base_type: Option<&'a str>,
+    pub expected_type: Option<&'a str>,
+    pub receiver_hint: Option<&'a str>,
+}
+
+/// Doublebrace 推論の結果を保持する。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DoublebraceInferenceResult {
+    pub resolved_type: Option<String>,
+    pub resolution: ReceiverResolution,
+    pub control_flow: Option<ControlFlowViolation>,
+}
+
+impl DoublebraceInferenceResult {
+    pub fn is_error(&self) -> bool {
+        matches!(self.resolution, ReceiverResolution::Unknown) && self.resolved_type.is_none()
+    }
+}
+
+/// Doublebrace ステートメントから抽出したメンバー検証結果。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DoublebraceMemberCheck {
+    pub missing: Vec<String>,
+    pub candidates: Vec<String>,
+}
+
+/// Doublebrace 初期化ブロックのレシーバー型を推論し、制御フロー違反を検出する。
+pub fn infer_doublebrace(
+    expr: &DoublebraceInit,
+    ctx: DoublebraceContext<'_>,
+    session: &InferenceSession,
+) -> DoublebraceInferenceResult {
+    let control_flow = detect_control_flow_violation(&expr.statements);
+    let symbol_index = session.symbol_index();
+    let receiver = resolve_receiver(ctx, &expr.statements, symbol_index);
+
+    DoublebraceInferenceResult {
+        resolved_type: receiver.resolved_type,
+        resolution: receiver.resolution,
+        control_flow,
+    }
+}
+
+/// Doublebrace ブロックで利用されたメンバーに対し、存在確認と候補提示を行う。
+pub fn evaluate_member_usage(
+    symbol_index: Option<&SymbolIndex>,
+    receiver: &str,
+    statements: &[Statement],
+    limit: usize,
+) -> DoublebraceMemberCheck {
+    let mut missing = Vec::new();
+    let mut candidates = Vec::new();
+
+    if let Some(index) = symbol_index {
+        if let Some(entry) = index.lookup_type(receiver) {
+            let mut seen = HashSet::new();
+            for name in DoublebraceHeuristics::collect_method_names(statements) {
+                if !seen.insert(name.clone()) {
+                    continue;
+                }
+
+                if !entry.has_field(&name) && !entry.has_instance_method(&name) {
+                    missing.push(name);
+                }
+            }
+
+            candidates = collect_candidate_members(entry, limit);
+        }
+    }
+
+    DoublebraceMemberCheck {
+        missing,
+        candidates,
+    }
+}
+
+/// Doublebrace ブロック内の制御フロー違反を検出する。
+pub fn detect_control_flow_violation(statements: &[Statement]) -> Option<ControlFlowViolation> {
+    for statement in statements {
+        match statement {
+            Statement::Return { .. } => return Some(ControlFlowViolation::Return),
+            Statement::Break(_) => return Some(ControlFlowViolation::Break),
+            Statement::Continue(_) => return Some(ControlFlowViolation::Continue),
+            Statement::Expression { expr, .. } => {
+                if let Some(code) = detect_control_flow_in_expression(expr) {
+                    return Some(code);
+                }
+            }
+            Statement::Assignment { value, .. } => {
+                if let Some(code) = detect_control_flow_in_expression(value) {
+                    return Some(code);
+                }
+            }
+            Statement::ForIn(for_in) => {
+                if let Some(code) = detect_control_flow_in_expression(&for_in.body) {
+                    return Some(code);
+                }
+            }
+            Statement::FunctionDeclaration { body, .. } => {
+                if let Some(code) = detect_control_flow_in_expression(body) {
+                    return Some(code);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+fn detect_control_flow_in_expression(expr: &Expression) -> Option<ControlFlowViolation> {
+    match expr {
+        Expression::Block { statements, .. } => detect_control_flow_violation(statements),
+        Expression::If {
+            then_branch,
+            else_branch,
+            ..
+        } => detect_control_flow_in_expression(then_branch).or_else(|| {
+            else_branch
+                .as_deref()
+                .and_then(detect_control_flow_in_expression)
+        }),
+        Expression::When { arms, else_arm, .. } => {
+            for arm in arms {
+                if let Some(code) = detect_control_flow_in_expression(&arm.body) {
+                    return Some(code);
+                }
+            }
+            if let Some(else_expr) = else_arm.as_deref() {
+                return detect_control_flow_in_expression(else_expr);
+            }
+            None
+        }
+        Expression::DoublebraceInit(inner) => detect_control_flow_violation(&inner.statements),
+        _ => None,
+    }
+}
+
+struct ReceiverSelection {
+    resolved_type: Option<String>,
+    resolution: ReceiverResolution,
+}
+
+fn resolve_receiver(
+    ctx: DoublebraceContext<'_>,
+    statements: &[Statement],
+    symbol_index: Option<&SymbolIndex>,
+) -> ReceiverSelection {
+    if let Some(hint) = normalize_candidate(ctx.receiver_hint) {
+        let resolved = apply_registry(&hint, symbol_index);
+        return ReceiverSelection {
+            resolved_type: Some(resolved),
+            resolution: ReceiverResolution::ReceiverHint,
+        };
+    }
+
+    let base = normalize_candidate(ctx.base_type);
+    let expected = normalize_candidate(ctx.expected_type);
+
+    if let (Some(base_ty), Some(expected_ty)) = (&base, &expected) {
+        let base_resolved = apply_registry(base_ty, symbol_index);
+        let expected_resolved = apply_registry(expected_ty, symbol_index);
+
+        if base_resolved == expected_resolved {
+            return ReceiverSelection {
+                resolved_type: Some(base_resolved),
+                resolution: ReceiverResolution::ExpectedType,
+            };
+        }
+
+        if expected_resolved != "java.lang.Object" {
+            return ReceiverSelection {
+                resolved_type: Some(expected_resolved),
+                resolution: ReceiverResolution::ExpectedType,
+            };
+        }
+
+        return ReceiverSelection {
+            resolved_type: Some(base_resolved),
+            resolution: ReceiverResolution::BaseExpression,
+        };
+    }
+
+    if let Some(expected_ty) = expected {
+        let resolved = apply_registry(&expected_ty, symbol_index);
+        return ReceiverSelection {
+            resolved_type: Some(resolved),
+            resolution: ReceiverResolution::ExpectedType,
+        };
+    }
+
+    if let Some(base_ty) = base {
+        let resolved = apply_registry(&base_ty, symbol_index);
+        return ReceiverSelection {
+            resolved_type: Some(resolved),
+            resolution: ReceiverResolution::BaseExpression,
+        };
+    }
+
+    if let Some(interface) = DoublebraceHeuristics::infer_interface(statements) {
+        let resolved = apply_registry(&interface, symbol_index);
+        return ReceiverSelection {
+            resolved_type: Some(resolved),
+            resolution: ReceiverResolution::Heuristic,
+        };
+    }
+
+    if statements.is_empty() {
+        return ReceiverSelection {
+            resolved_type: Some("java.lang.Object".to_string()),
+            resolution: ReceiverResolution::ObjectFallback,
+        };
+    }
+
+    ReceiverSelection {
+        resolved_type: None,
+        resolution: ReceiverResolution::Unknown,
+    }
+}
+
+fn normalize_candidate(candidate: Option<&str>) -> Option<String> {
+    candidate
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .and_then(|value| {
+            if value.eq_ignore_ascii_case("unknown") {
+                None
+            } else {
+                Some(value.to_string())
+            }
+        })
+}
+
+fn apply_registry(candidate: &str, symbol_index: Option<&SymbolIndex>) -> String {
+    if let Some(default_impl) = DoublebraceHeuristics::resolve_default_implementation(candidate) {
+        return default_impl;
+    }
+
+    let registry = DefaultImplementationRegistry::shared();
+    if let Some(abstract_impl) = registry.resolve_abstract(candidate, symbol_index) {
+        return abstract_impl.target().to_string();
+    }
+
+    candidate.to_string()
+}
+
+fn collect_candidate_members(entry: &TypeEntry, limit: usize) -> Vec<String> {
+    let mut names: Vec<String> = entry.instance_fields.iter().cloned().collect();
+    names.extend(entry.instance_methods.keys().cloned());
+    if names.len() > 1 {
+        names.sort();
+        names.dedup();
+    }
+    if names.len() > limit {
+        names.truncate(limit);
+    }
+    names
+}
 
 #[cfg(test)]
 mod tests {

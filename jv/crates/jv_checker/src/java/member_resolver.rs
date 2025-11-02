@@ -22,13 +22,7 @@ impl MemberResolver {
 
     /// レシーバー型が指定メンバーを持たない場合、そのメンバー名を返す。
     pub fn missing_members(&self, receiver: &TypeKind, members: &[String]) -> Vec<String> {
-        let Some(index) = self.symbol_index.as_ref() else {
-            return Vec::new();
-        };
-        let Some(fqcn) = Self::receiver_fqcn(receiver) else {
-            return Vec::new();
-        };
-        let Some(entry) = index.lookup_type(&fqcn) else {
+        let Some(entry) = self.type_entry(receiver) else {
             return Vec::new();
         };
 
@@ -37,6 +31,30 @@ impl MemberResolver {
             .filter(|name| !Self::has_member(entry, name))
             .cloned()
             .collect()
+    }
+
+    /// レシーバー型が公開しているメンバー名を取得する（診断候補用、重複除去済み）。
+    pub fn member_candidates(&self, receiver: &TypeKind, limit: usize) -> Vec<String> {
+        let Some(entry) = self.type_entry(receiver) else {
+            return Vec::new();
+        };
+
+        let mut names: Vec<String> = entry.instance_fields.iter().cloned().collect();
+        names.extend(entry.instance_methods.keys().cloned());
+        if names.len() > 1 {
+            names.sort();
+            names.dedup();
+        }
+        if names.len() > limit {
+            names.truncate(limit);
+        }
+        names
+    }
+
+    fn type_entry(&self, receiver: &TypeKind) -> Option<&TypeEntry> {
+        let index = self.symbol_index.as_ref()?;
+        let fqcn = Self::receiver_fqcn(receiver)?;
+        index.lookup_type(&fqcn)
     }
 
     fn receiver_fqcn(ty: &TypeKind) -> Option<String> {

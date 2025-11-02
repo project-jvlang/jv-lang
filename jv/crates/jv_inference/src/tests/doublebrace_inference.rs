@@ -1,7 +1,12 @@
-use crate::doublebrace::DoublebraceHeuristics;
-
-use jv_ast::expression::{CallArgumentMetadata, CallArgumentStyle};
+use crate::doublebrace::{
+    ControlFlowViolation, DoublebraceContext, DoublebraceHeuristics, ReceiverResolution,
+    detect_control_flow_violation, evaluate_member_usage, infer_doublebrace,
+};
+use crate::session::InferenceSession;
+use jv_ast::expression::{CallArgumentMetadata, CallArgumentStyle, DoublebraceInit};
 use jv_ast::{Argument, Expression, Literal, Span, Statement};
+use jv_build::metadata::{JavaMethodSignature, SymbolIndex, TypeEntry};
+use jv_ir::types::JavaType;
 
 fn call_statement(name: &str) -> Statement {
     let span = Span::dummy();
@@ -52,5 +57,113 @@ fn registry_resolves_default_queue_implementation() {
         resolved.as_deref(),
         Some("java.util.ArrayDeque"),
         "Queue のデフォルト実装は java.util.ArrayDeque のはず"
+    );
+}
+
+fn sample_init(statements: Vec<Statement>) -> DoublebraceInit {
+    DoublebraceInit {
+        base: None,
+        receiver_hint: None,
+        statements,
+        span: Span::dummy(),
+    }
+}
+
+#[test]
+fn infer_uses_base_type_when_expected_missing() {
+    let session = InferenceSession::new();
+    let init = sample_init(vec![call_statement("touch")]);
+    let ctx = DoublebraceContext {
+        base_type: Some("com.example.MutableBean"),
+        expected_type: None,
+        receiver_hint: None,
+    };
+
+    let result = infer_doublebrace(&init, ctx, &session);
+
+    assert_eq!(
+        result.resolved_type.as_deref(),
+        Some("com.example.MutableBean")
+    );
+    assert_eq!(result.resolution, ReceiverResolution::BaseExpression);
+    assert!(result.control_flow.is_none());
+}
+
+#[test]
+fn infer_prefers_expected_type_when_available() {
+    let session = InferenceSession::new();
+    let init = sample_init(vec![call_statement("add")]);
+    let ctx = DoublebraceContext {
+        base_type: None,
+        expected_type: Some("java.util.List"),
+        receiver_hint: None,
+    };
+
+    let result = infer_doublebrace(&init, ctx, &session);
+
+    assert_eq!(result.resolved_type.as_deref(), Some("java.util.ArrayList"));
+    assert_eq!(result.resolution, ReceiverResolution::ExpectedType);
+}
+
+#[test]
+fn infer_prefers_receiver_hint_over_other_sources() {
+    let session = InferenceSession::new();
+    let init = sample_init(Vec::new());
+    let ctx = DoublebraceContext {
+        base_type: Some("java.util.List"),
+        expected_type: Some("java.util.Collection"),
+        receiver_hint: Some("java.util.LinkedList"),
+    };
+
+    let result = infer_doublebrace(&init, ctx, &session);
+
+    assert_eq!(
+        result.resolved_type.as_deref(),
+        Some("java.util.LinkedList")
+    );
+    assert_eq!(result.resolution, ReceiverResolution::ReceiverHint);
+}
+
+#[test]
+fn detect_control_flow_reports_return() {
+    let span = Span::dummy();
+    let statements = vec![Statement::Return {
+        value: None,
+        span: span.clone(),
+    }];
+
+    let violation = detect_control_flow_violation(&statements);
+    assert_eq!(violation, Some(ControlFlowViolation::Return));
+}
+
+#[test]
+fn member_usage_reports_missing_and_candidates() {
+    let mut index = SymbolIndex::new(Some(16));
+    let mut entry = TypeEntry::new("com.example.Widget".into(), "com.example".into(), None);
+    entry.add_instance_field("status".into());
+    entry.add_instance_method(
+        "initialize".into(),
+        JavaMethodSignature {
+            parameters: Vec::new(),
+            return_type: JavaType::Void,
+        },
+    );
+    entry.add_instance_method(
+        "reset".into(),
+        JavaMethodSignature {
+            parameters: Vec::new(),
+            return_type: JavaType::Void,
+        },
+    );
+    index.add_type(entry);
+
+    let statements = vec![call_statement("configure")];
+    let check = evaluate_member_usage(Some(&index), "com.example.Widget", &statements, 8);
+
+    assert_eq!(check.missing, vec!["configure".to_string()]);
+    assert!(
+        check.candidates.contains(&"initialize".to_string())
+            || check.candidates.contains(&"reset".to_string()),
+        "候補一覧は既存メンバーを含むはず"
     );
 }

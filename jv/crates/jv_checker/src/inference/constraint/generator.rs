@@ -708,11 +708,18 @@ impl<'env, 'ext, 'imp> ConstraintGenerator<'env, 'ext, 'imp> {
                 if !missing.is_empty() {
                     let joined = missing.join(", ");
                     let receiver_label = resolved.describe();
+                    let candidates = resolver.member_candidates(&resolved, 8);
+                    let candidate_text = if candidates.is_empty() {
+                        "-".to_string()
+                    } else {
+                        candidates.join(", ")
+                    };
                     let note = doublebrace_message(
                         "doublebrace.member.invalid",
                         &[
                             ("receiver", receiver_label.clone()),
                             ("members", joined.clone()),
+                            ("candidates", candidate_text),
                         ],
                     );
                     self.constraints.push(
@@ -1232,7 +1239,8 @@ mod tests {
     use super::*;
     use jv_ast::expression::{CallArgumentMetadata, CallArgumentStyle, DoublebraceInit};
     use jv_ast::{Modifiers, Pattern, Span, ValBindingOrigin, WhenArm};
-    use jv_build::metadata::TypeEntry;
+    use jv_build::metadata::{JavaMethodSignature, TypeEntry};
+    use jv_ir::types::JavaType;
     use jv_parser_frontend::ParserPipeline;
     use jv_parser_rowan::frontend::RowanPipeline;
 
@@ -1780,7 +1788,14 @@ val result = when (maybe) {
         };
 
         let mut index = SymbolIndex::new(Some(25));
-        let entry = TypeEntry::new("com.example.Widget".into(), "com.example".into(), None);
+        let mut entry = TypeEntry::new("com.example.Widget".into(), "com.example".into(), None);
+        entry.add_instance_method(
+            "initialize".into(),
+            JavaMethodSignature {
+                parameters: Vec::new(),
+                return_type: JavaType::Void,
+            },
+        );
         index.add_type(entry);
 
         let mut env = TypeEnvironment::new();
@@ -1798,7 +1813,9 @@ val result = when (maybe) {
                         && constraint
                             .note
                             .as_deref()
-                            .map(|note| note.contains("configure"))
+                            .map(|note| {
+                                note.contains("configure") && note.contains("initialize")
+                            })
                             .unwrap_or(false)
             )
         }));

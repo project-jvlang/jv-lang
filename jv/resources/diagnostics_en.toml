@@ -74,4 +74,4 @@ unsupported = "Control-flow statements are not allowed in doublebrace initialize
 missing = "The doublebrace initializer's receiver type could not be inferred. Specify it with a `receiver:` annotation or a concrete base expression."
 
 [doublebrace.member]
-invalid = "Members {members} do not exist on receiver type `{receiver}`. Verify the method names and visibility modifiers."
+invalid = "Members {members} do not exist on receiver type `{receiver}`. Verify the method names and visibility modifiers. Candidates: {candidates}."
