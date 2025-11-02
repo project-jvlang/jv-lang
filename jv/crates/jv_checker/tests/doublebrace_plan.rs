@@ -1,4 +1,5 @@
 use jv_ast::expression::{CallArgumentMetadata, CallArgumentStyle, CallKind, DoublebraceInit};
+use jv_ast::types::{BinaryOp, TypeAnnotation, UnaryOp};
 use jv_ast::{
     Argument, Expression, Literal, Modifiers, Program, Span, Statement, ValBindingOrigin,
 };
@@ -96,6 +97,96 @@ fn mutate_plan_for_mutable_receiver() {
 }
 
 #[test]
+fn whitespace_arguments_with_unary_minus_are_normalized() {
+    let span = span();
+    let statements = vec![Statement::Expression {
+        expr: Expression::Call {
+            function: Box::new(Expression::Identifier("get".into(), span.clone())),
+            args: vec![
+                Argument::Positional(Expression::Call {
+                    function: Box::new(Expression::Identifier("size".into(), span.clone())),
+                    args: Vec::new(),
+                    type_arguments: Vec::new(),
+                    argument_metadata: CallArgumentMetadata::with_style(CallArgumentStyle::Comma),
+                    call_kind: CallKind::Function,
+                    span: span.clone(),
+                }),
+                Argument::Positional(Expression::Unary {
+                    op: UnaryOp::Minus,
+                    operand: Box::new(Expression::Literal(
+                        Literal::Number("1".into()),
+                        span.clone(),
+                    )),
+                    span: span.clone(),
+                }),
+            ],
+            type_arguments: Vec::new(),
+            argument_metadata: CallArgumentMetadata::with_style(CallArgumentStyle::Whitespace),
+            call_kind: CallKind::Function,
+            span: span.clone(),
+        },
+        span: span.clone(),
+    }];
+
+    let init = DoublebraceInit {
+        base: Some(Box::new(Expression::Identifier(
+            "items".into(),
+            span.clone(),
+        ))),
+        receiver_hint: None,
+        statements,
+        span: span.clone(),
+    };
+
+    let mut index = SymbolIndex::new(Some(16));
+    let mut entry = TypeEntry::new("com.example.Menu".into(), "com.example".into(), None);
+    entry.add_instance_method(
+        "get".into(),
+        JavaMethodSignature {
+            parameters: vec![JavaType::Primitive("int".into())],
+            return_type: JavaType::Reference {
+                name: "java.lang.Object".into(),
+                generic_args: Vec::new(),
+            },
+        },
+    );
+    entry.add_instance_method(
+        "size".into(),
+        JavaMethodSignature {
+            parameters: Vec::new(),
+            return_type: JavaType::Primitive("int".into()),
+        },
+    );
+    index.add_type(entry);
+
+    let target_ty = TypeKind::reference("com.example.Menu");
+    let base_ty = Some(TypeKind::reference("com.example.Menu"));
+
+    let plan = plan_doublebrace_application(base_ty.as_ref(), &target_ty, &init, Some(&index))
+        .expect("normalize whitespace arguments");
+
+    match plan {
+        DoublebracePlan::Mutate(mutate) => {
+            assert_eq!(mutate.steps.len(), 1);
+            match &mutate.steps[0] {
+                MutationStep::MethodCall(call) => {
+                    assert_eq!(call.metadata.style, CallArgumentStyle::Comma);
+                    assert_eq!(call.arguments.len(), 1);
+                    match &call.arguments[0] {
+                        Argument::Positional(Expression::Binary { op, .. }) => {
+                            assert_eq!(op, &BinaryOp::Subtract);
+                        }
+                        other => panic!("expected binary argument, got {:?}", other),
+                    }
+                }
+                other => panic!("expected method call, got {:?}", other),
+            }
+        }
+        other => panic!("expected mutate plan, got {:?}", other),
+    }
+}
+
+#[test]
 fn constructor_base_uses_synthesized_plan() {
     let span = span();
     let init = DoublebraceInit {
@@ -119,8 +210,7 @@ fn constructor_base_uses_synthesized_plan() {
                     span.clone(),
                 ))],
                 type_arguments: Vec::new(),
-                argument_metadata:
-                    CallArgumentMetadata::with_style(CallArgumentStyle::Whitespace),
+                argument_metadata: CallArgumentMetadata::with_style(CallArgumentStyle::Whitespace),
                 call_kind: CallKind::Function,
                 span: span.clone(),
             },
@@ -289,4 +379,129 @@ fn planner_collects_plan_for_val_declaration() {
         plans.contains_key(&span_key(&span)),
         "doublebrace plan should be recorded"
     );
+}
+
+#[test]
+fn fallback_planner_recovers_constructor_generics() {
+    let span_menu = Span::new(0, 0, 0, 4);
+    let span_copy = Span::new(1, 0, 1, 4);
+
+    let constructor_call = Expression::Call {
+        function: Box::new(Expression::Identifier(
+            "ArrayList".into(),
+            span_menu.clone(),
+        )),
+        args: Vec::new(),
+        type_arguments: vec![TypeAnnotation::Simple("String".into())],
+        argument_metadata: CallArgumentMetadata::with_style(CallArgumentStyle::Comma),
+        call_kind: CallKind::Constructor {
+            type_name: "ArrayList".into(),
+            fqcn: Some("java.util.ArrayList".into()),
+        },
+        span: span_menu.clone(),
+    };
+
+    let add_statement = Statement::Expression {
+        expr: Expression::Call {
+            function: Box::new(Expression::Identifier("add".into(), span_menu.clone())),
+            args: vec![Argument::Positional(Expression::Literal(
+                Literal::String("季節のスープ".into()),
+                span_menu.clone(),
+            ))],
+            type_arguments: Vec::new(),
+            argument_metadata: CallArgumentMetadata::with_style(CallArgumentStyle::Whitespace),
+            call_kind: CallKind::Function,
+            span: span_menu.clone(),
+        },
+        span: span_menu.clone(),
+    };
+
+    let menu_doublebrace = DoublebraceInit {
+        base: Some(Box::new(constructor_call)),
+        receiver_hint: None,
+        statements: vec![add_statement],
+        span: span_menu.clone(),
+    };
+
+    let copy_doublebrace = DoublebraceInit {
+        base: Some(Box::new(Expression::Identifier(
+            "menu".into(),
+            span_copy.clone(),
+        ))),
+        receiver_hint: None,
+        statements: Vec::new(),
+        span: span_copy.clone(),
+    };
+
+    let program = Program {
+        package: None,
+        imports: Vec::new(),
+        statements: vec![
+            Statement::ValDeclaration {
+                name: "menu".into(),
+                binding: None,
+                type_annotation: None,
+                initializer: Expression::DoublebraceInit(menu_doublebrace),
+                modifiers: Modifiers::default(),
+                origin: ValBindingOrigin::ExplicitKeyword,
+                span: span_menu.clone(),
+            },
+            Statement::ValDeclaration {
+                name: "copy".into(),
+                binding: None,
+                type_annotation: None,
+                initializer: Expression::DoublebraceInit(copy_doublebrace),
+                modifiers: Modifiers::default(),
+                origin: ValBindingOrigin::ExplicitKeyword,
+                span: span_copy.clone(),
+            },
+        ],
+        span: Span::new(0, 0, 1, 4),
+    };
+
+    let environment = TypeEnvironment::new();
+    let plans =
+        plan_doublebrace_in_program(&program, &environment, None).expect("fallback planning");
+
+    let menu_plan = plans
+        .get(&span_key(&span_menu))
+        .expect("menu doublebrace should be planned");
+    match menu_plan {
+        DoublebracePlan::Mutate(plan) => {
+            assert_eq!(
+                plan.receiver.describe(),
+                "java.util.ArrayList<java.lang.String>",
+                "constructor generics should be retained"
+            );
+            assert_eq!(
+                plan.base,
+                PlanBase::SynthesizedInstance,
+                "constructor base should synthesize an instance"
+            );
+        }
+        other => panic!("expected mutate plan for menu doublebrace, got {:?}", other),
+    }
+
+    let copy_plan = plans
+        .get(&span_key(&span_copy))
+        .expect("copy doublebrace should be planned");
+    match copy_plan {
+        DoublebracePlan::Mutate(plan) => {
+            assert_eq!(
+                plan.receiver.describe(),
+                "java.util.ArrayList<java.lang.String>",
+                "registered bindings should provide generic receiver info"
+            );
+            assert_eq!(
+                plan.base,
+                PlanBase::ExistingInstance,
+                "identifier base should reuse existing instance"
+            );
+            assert!(
+                plan.steps.is_empty(),
+                "empty doublebrace should not record mutation steps"
+            );
+        }
+        other => panic!("expected mutate plan for copy doublebrace, got {:?}", other),
+    }
 }

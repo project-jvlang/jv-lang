@@ -155,6 +155,60 @@ fn ダブルブレース_ミューテーション変換() {
 }
 
 #[test]
+fn ダブルブレース_IRはジェネリック受信型を保持する() {
+    let span = ダミーのスパン();
+    let init = DoublebraceInit {
+        base: None,
+        receiver_hint: None,
+        statements: Vec::new(),
+        span: span.clone(),
+    };
+
+    let plan = DoublebraceLoweringPlan {
+        receiver_fqcn: "java.util.ArrayList<java.lang.String>".into(),
+        kind: DoublebraceLoweringKind::Mutate(DoublebraceLoweringMutatePlan {
+            base: DoublebraceBaseStrategy::SynthesizedInstance,
+            steps: Vec::new(),
+        }),
+    };
+
+    let mut context = TransformContext::new();
+    context.insert_doublebrace_plan(&span, plan);
+
+    let expression = Expression::DoublebraceInit(init);
+    let ir = transform_expression(expression, &mut context)
+        .expect("Doublebrace のジェネリック変換が成功するはずです");
+
+    match ir {
+        IrExpression::DoublebraceInit { receiver_type, .. } => match receiver_type {
+            JavaType::Reference { name, generic_args } => {
+                if generic_args.is_empty() {
+                    assert!(
+                        name.contains("<java.lang.String>"),
+                        "受信型 `{name}` にジェネリック情報が含まれること"
+                    );
+                } else {
+                    assert_eq!(name, "java.util.ArrayList");
+                    assert_eq!(
+                        generic_args.len(),
+                        1,
+                        "ジェネリック引数が 1 件保持されること"
+                    );
+                    match &generic_args[0] {
+                        JavaType::Reference { name, .. } => {
+                            assert_eq!(name, "java.lang.String");
+                        }
+                        other => panic!("ジェネリックは参照型であるべきですが {:?}", other),
+                    }
+                }
+            }
+            other => panic!("参照型が必要ですが {:?}", other),
+        },
+        other => panic!("DoublebraceInit が生成されるべきですが {:?}", other),
+    }
+}
+
+#[test]
 fn ダブルブレース_コピー変換() {
     let span = ダミーのスパン();
     let statements = vec![Statement::Assignment {

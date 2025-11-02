@@ -505,7 +505,16 @@ fn normalize_candidate(candidate: Option<&str>) -> Option<String> {
         })
 }
 
-fn apply_registry(candidate: &str, symbol_index: Option<&SymbolIndex>) -> String {
+fn split_type_name(candidate: &str) -> (&str, Option<&str>) {
+    if let Some(start) = candidate.find('<') {
+        let (base, generics) = candidate.split_at(start);
+        (base.trim(), Some(generics.trim()))
+    } else {
+        (candidate.trim(), None)
+    }
+}
+
+fn resolve_base_type(candidate: &str, symbol_index: Option<&SymbolIndex>) -> String {
     if let Some(default_impl) = DoublebraceHeuristics::resolve_default_implementation(candidate) {
         return default_impl;
     }
@@ -514,8 +523,27 @@ fn apply_registry(candidate: &str, symbol_index: Option<&SymbolIndex>) -> String
     if let Some(abstract_impl) = registry.resolve_abstract(candidate, symbol_index) {
         return abstract_impl.target().to_string();
     }
+    if let Some(interface_impl) = registry.resolve_interface(candidate) {
+        return interface_impl.target().to_string();
+    }
 
     candidate.to_string()
+}
+
+fn apply_registry(candidate: &str, symbol_index: Option<&SymbolIndex>) -> String {
+    let (base, generics) = split_type_name(candidate);
+    let resolved = resolve_base_type(base, symbol_index);
+    if let Some(args) = generics {
+        if args.is_empty() {
+            resolved
+        } else if resolved.contains('<') {
+            resolved
+        } else {
+            format!("{resolved}{args}")
+        }
+    } else {
+        resolved
+    }
 }
 
 fn collect_candidate_members(entry: &TypeEntry, limit: usize) -> Vec<String> {

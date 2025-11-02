@@ -14,7 +14,7 @@ use crate::inference::iteration::{
 };
 use crate::inference::type_factory::TypeFactory;
 use crate::inference::types::{PrimitiveType, TypeError, TypeId, TypeKind};
-use crate::java::MemberResolver;
+use crate::java::primitive::JavaPrimitive;
 use crate::pattern::{
     NarrowedBinding, NarrowedNullability, NarrowingSnapshot, PatternMatchService, PatternTarget,
 };
@@ -23,10 +23,13 @@ use jv_ast::{
     Statement, TypeAnnotation, UnaryOp,
 };
 use jv_build::metadata::SymbolIndex;
+use jv_inference::InferenceSession;
+use jv_inference::doublebrace::{
+    ControlFlowViolation, DoublebraceContext, evaluate_member_usage, infer_doublebrace,
+};
 use jv_inference::types::NullabilityFlag;
-use jv_inference::{DefaultImplementationRegistry, DoublebraceHeuristics};
 use jv_support::i18n::{LocaleCode, catalog};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::Arc;
 
 /// AST から制約を抽出するジェネレータ。
@@ -39,6 +42,8 @@ pub struct ConstraintGenerator<'env, 'ext, 'imp> {
     pattern_service: PatternMatchService,
     type_var_usage: HashMap<TypeId, usize>,
     symbol_index: Option<Arc<SymbolIndex>>,
+    session: InferenceSession,
+    expected_stack: Vec<Option<TypeKind>>,
 }
 
 const DIAG_RANGE_BOUNDS: &str = "E_LOOP_002: numeric range bounds must resolve to the same type";
@@ -61,6 +66,8 @@ impl<'env, 'ext, 'imp> ConstraintGenerator<'env, 'ext, 'imp> {
         imports: Option<&'imp mut ImportRegistry>,
         symbol_index: Option<Arc<SymbolIndex>>,
     ) -> Self {
+        let session = InferenceSession::with_symbol_index(symbol_index.clone());
+
         Self {
             env,
             constraints: ConstraintSet::new(),
@@ -69,6 +76,8 @@ impl<'env, 'ext, 'imp> ConstraintGenerator<'env, 'ext, 'imp> {
             pattern_service: PatternMatchService::new(),
             type_var_usage: HashMap::new(),
             symbol_index,
+            session,
+            expected_stack: Vec::new(),
         }
     }
 
@@ -109,7 +118,10 @@ impl<'env, 'ext, 'imp> ConstraintGenerator<'env, 'ext, 'imp> {
                 initializer,
                 ..
             } => {
-                let init_ty = self.infer_expression(initializer);
+                let expected = type_annotation
+                    .as_ref()
+                    .map(|ann| self.type_from_annotation(ann));
+                let init_ty = self.infer_expression_with_expected(initializer, expected.clone());
                 self.bind_symbol(name, type_annotation.as_ref(), Some(init_ty));
             }
             Statement::VarDeclaration {
@@ -118,7 +130,12 @@ impl<'env, 'ext, 'imp> ConstraintGenerator<'env, 'ext, 'imp> {
                 initializer,
                 ..
             } => {
-                let init_ty = initializer.as_ref().map(|expr| self.infer_expression(expr));
+                let annotation_ty = type_annotation
+                    .as_ref()
+                    .map(|ann| self.type_from_annotation(ann));
+                let init_ty = initializer
+                    .as_ref()
+                    .map(|expr| self.infer_expression_with_expected(expr, annotation_ty.clone()));
                 self.bind_symbol(name, type_annotation.as_ref(), init_ty);
             }
             Statement::Expression { expr, .. } => {
@@ -126,7 +143,7 @@ impl<'env, 'ext, 'imp> ConstraintGenerator<'env, 'ext, 'imp> {
             }
             Statement::Assignment { target, value, .. } => {
                 let target_ty = self.infer_expression(target);
-                let value_ty = self.infer_expression(value);
+                let value_ty = self.infer_expression_with_expected(value, Some(target_ty.clone()));
                 self.push_assignability_constraint(
                     value_ty,
                     target_ty,
@@ -173,7 +190,8 @@ impl<'env, 'ext, 'imp> ConstraintGenerator<'env, 'ext, 'imp> {
                         .define_scheme(&param.name, TypeScheme::monotype(param_ty.clone()));
 
                     if let Some(default_expr) = &param.default_value {
-                        let default_ty = self.infer_expression(default_expr);
+                        let default_ty = self
+                            .infer_expression_with_expected(default_expr, Some(param_ty.clone()));
                         self.push_assignability_constraint(
                             default_ty,
                             param_ty.clone(),
@@ -182,7 +200,7 @@ impl<'env, 'ext, 'imp> ConstraintGenerator<'env, 'ext, 'imp> {
                     }
                 }
 
-                let body_ty = self.infer_expression(body);
+                let body_ty = self.infer_expression_with_expected(body, Some(return_ty.clone()));
                 self.push_assignability_constraint(
                     body_ty,
                     return_ty.clone(),
@@ -284,6 +302,21 @@ impl<'env, 'ext, 'imp> ConstraintGenerator<'env, 'ext, 'imp> {
     }
 
     fn infer_expression(&mut self, expr: &Expression) -> TypeKind {
+        self.infer_expression_with_expected(expr, None)
+    }
+
+    fn infer_expression_with_expected(
+        &mut self,
+        expr: &Expression,
+        expected: Option<TypeKind>,
+    ) -> TypeKind {
+        self.expected_stack.push(expected);
+        let result = self.infer_expression_internal(expr);
+        self.expected_stack.pop();
+        result
+    }
+
+    fn infer_expression_internal(&mut self, expr: &Expression) -> TypeKind {
         match expr {
             Expression::RegexLiteral(_) => TypeKind::reference("java.util.regex.Pattern"),
             Expression::Literal(literal, _) => self.type_from_literal(literal),
@@ -328,17 +361,15 @@ impl<'env, 'ext, 'imp> ConstraintGenerator<'env, 'ext, 'imp> {
                     );
                     result_ty
                 }
-                CallKind::Constructor { type_name, fqcn } => {
-                    self.infer_constructor_call(
-                        function.as_ref(),
-                        args,
-                        type_arguments,
-                        type_name.as_str(),
-                        fqcn.as_ref(),
-                        span,
-                    )
-                }
-            }
+                CallKind::Constructor { type_name, fqcn } => self.infer_constructor_call(
+                    function.as_ref(),
+                    args,
+                    type_arguments,
+                    type_name.as_str(),
+                    fqcn.as_ref(),
+                    span,
+                ),
+            },
             Expression::TypeCast { expr, target, .. } => {
                 let _ = self.infer_expression(expr);
                 self.type_from_annotation(target)
@@ -680,26 +711,10 @@ impl<'env, 'ext, 'imp> ConstraintGenerator<'env, 'ext, 'imp> {
             .or_else(|| alias_target.map(|value| value.to_string()))
             .unwrap_or_else(|| type_name.to_string());
 
-        self.apply_registry_if_needed(TypeKind::reference(candidate))
+        TypeKind::reference(candidate)
     }
 
     fn infer_doublebrace(&mut self, init: &jv_ast::DoublebraceInit) -> TypeKind {
-        if let Some(code) = self.detect_doublebrace_control_flow(&init.statements) {
-            let key = match code {
-                DIAG_DBLOCK_RETURN => Some("doublebrace.control_flow.return"),
-                DIAG_DBLOCK_BREAK => Some("doublebrace.control_flow.break"),
-                DIAG_DBLOCK_CONTINUE => Some("doublebrace.control_flow.continue"),
-                _ => Some("doublebrace.control_flow.unsupported"),
-            };
-            let note = key
-                .map(|entry| doublebrace_message(entry, &[]))
-                .unwrap_or_else(|| {
-                    "Doublebrace 初期化ブロック内で制御フロー文は使用できません。".to_string()
-                });
-            self.constraints
-                .push(Constraint::new(ConstraintKind::Placeholder(code)).with_note(note));
-        }
-
         let base_ty = init.base.as_ref().map(|expr| self.infer_expression(expr));
         let hint_ty = init
             .receiver_hint
@@ -719,51 +734,60 @@ impl<'env, 'ext, 'imp> ConstraintGenerator<'env, 'ext, 'imp> {
             );
         }
 
-        let mut resolved = self
-            .determine_doublebrace_receiver(init, base_ty.clone(), hint_ty.clone())
-            .or_else(|| {
-                if let Some(hint) = hint_ty.clone() {
-                    if !matches!(hint, TypeKind::Unknown) {
-                        return Some(hint);
-                    }
-                }
-                if let Some(base) = base_ty.clone() {
-                    if !matches!(base, TypeKind::Unknown) {
-                        return Some(base);
-                    }
-                }
-                None
-            })
-            .unwrap_or_else(|| {
-                if init.statements.is_empty() {
-                    hint_ty
-                        .clone()
-                        .unwrap_or_else(|| TypeKind::reference("java.lang.Object"))
-                } else {
-                    let note = doublebrace_message("doublebrace.target.missing", &[]);
-                    self.constraints.push(
-                        Constraint::new(ConstraintKind::Placeholder(DIAG_DBLOCK_NO_TARGET))
-                            .with_note(note),
-                    );
-                    TypeKind::Unknown
-                }
-            });
+        let expected_ty = self
+            .expected_stack
+            .iter()
+            .rev()
+            .find_map(|entry| entry.as_ref())
+            .cloned();
+        let base_fqcn = base_ty.as_ref().and_then(|ty| Self::type_kind_to_fqcn(ty));
+        let hint_fqcn = hint_ty.as_ref().and_then(|ty| Self::type_kind_to_fqcn(ty));
+        let expected_fqcn = expected_ty
+            .as_ref()
+            .and_then(|ty| Self::type_kind_to_fqcn(ty));
 
-        resolved = self.apply_registry_if_needed(resolved);
+        let context = DoublebraceContext {
+            base_type: base_fqcn.as_deref(),
+            expected_type: expected_fqcn.as_deref(),
+            receiver_hint: hint_fqcn.as_deref(),
+        };
 
-        if let TypeKind::Reference(_) | TypeKind::Primitive(_) | TypeKind::Boxed(_) = resolved {
-            let members = self.collect_doublebrace_members(&init.statements);
-            if !members.is_empty() && !resolved.contains_unknown() {
-                let resolver = MemberResolver::new(self.symbol_index.clone());
-                let missing = resolver.missing_members(&resolved, &members);
-                if !missing.is_empty() {
-                    let joined = missing.join(", ");
+        let inference = infer_doublebrace(init, context, &self.session);
+
+        if let Some(violation) = inference.control_flow {
+            self.emit_doublebrace_control_flow(violation);
+        }
+
+        let resolved = if let Some(name) = inference.resolved_type.clone() {
+            TypeKind::reference(name)
+        } else {
+            if init.statements.is_empty() {
+                TypeKind::reference("java.lang.Object")
+            } else {
+                let note = doublebrace_message("doublebrace.target.missing", &[]);
+                self.constraints.push(
+                    Constraint::new(ConstraintKind::Placeholder(DIAG_DBLOCK_NO_TARGET))
+                        .with_note(note),
+                );
+                TypeKind::Unknown
+            }
+        };
+
+        if let Some(receiver_name) = inference.resolved_type.as_deref() {
+            if !resolved.contains_unknown() {
+                let check = evaluate_member_usage(
+                    self.symbol_index.as_deref(),
+                    receiver_name,
+                    &init.statements,
+                    8,
+                );
+                if !check.missing.is_empty() {
+                    let joined = check.missing.join(", ");
                     let receiver_label = resolved.describe();
-                    let candidates = resolver.member_candidates(&resolved, 8);
-                    let candidate_text = if candidates.is_empty() {
+                    let candidate_text = if check.candidates.is_empty() {
                         "-".to_string()
                     } else {
-                        candidates.join(", ")
+                        check.candidates.join(", ")
                     };
                     let note = doublebrace_message(
                         "doublebrace.member.invalid",
@@ -790,209 +814,38 @@ impl<'env, 'ext, 'imp> ConstraintGenerator<'env, 'ext, 'imp> {
         resolved
     }
 
-    fn determine_doublebrace_receiver(
-        &self,
-        init: &jv_ast::DoublebraceInit,
-        base_ty: Option<TypeKind>,
-        hint_ty: Option<TypeKind>,
-    ) -> Option<TypeKind> {
-        if let Some(hint) = hint_ty.and_then(|ty| {
-            if matches!(ty, TypeKind::Unknown) {
-                None
-            } else {
-                Some(ty)
+    fn emit_doublebrace_control_flow(&mut self, violation: ControlFlowViolation) {
+        let (code, key) = match violation {
+            ControlFlowViolation::Return => {
+                (DIAG_DBLOCK_RETURN, Some("doublebrace.control_flow.return"))
             }
-        }) {
-            return Some(self.apply_registry_if_needed(hint));
-        }
-
-        if let Some(base) = base_ty.and_then(|ty| {
-            if matches!(ty, TypeKind::Unknown) {
-                None
-            } else {
-                Some(ty)
+            ControlFlowViolation::Break => {
+                (DIAG_DBLOCK_BREAK, Some("doublebrace.control_flow.break"))
             }
-        }) {
-            return Some(self.apply_registry_if_needed(base));
-        }
+            ControlFlowViolation::Continue => (
+                DIAG_DBLOCK_CONTINUE,
+                Some("doublebrace.control_flow.continue"),
+            ),
+        };
 
-        let interface = DoublebraceHeuristics::infer_interface(&init.statements)?;
-        if let Some(default_impl) =
-            DoublebraceHeuristics::resolve_default_implementation(&interface)
-        {
-            return Some(TypeKind::reference(default_impl));
-        }
-        if let Some(mapped) = self.resolve_registry_target(&interface) {
-            return Some(TypeKind::reference(mapped));
-        }
-        Some(TypeKind::reference(interface))
+        let note = key
+            .map(|entry| doublebrace_message(entry, &[]))
+            .unwrap_or_else(|| {
+                "Doublebrace 初期化ブロック内で制御フロー文は使用できません。".to_string()
+            });
+        self.constraints
+            .push(Constraint::new(ConstraintKind::Placeholder(code)).with_note(note));
     }
 
-    fn resolve_registry_target(&self, fqcn: &str) -> Option<String> {
-        if let Some(default_impl) = DoublebraceHeuristics::resolve_default_implementation(fqcn) {
-            return Some(default_impl);
-        }
-        let registry = DefaultImplementationRegistry::shared();
-        registry
-            .resolve_abstract(fqcn, self.symbol_index.as_deref())
-            .map(|source| source.target().to_string())
-    }
-
-    fn apply_registry_if_needed(&self, ty: TypeKind) -> TypeKind {
+    fn type_kind_to_fqcn(ty: &TypeKind) -> Option<String> {
         match ty {
-            TypeKind::Reference(name) => {
-                if let Some(mapped) = self.resolve_registry_target(&name) {
-                    TypeKind::reference(mapped)
-                } else {
-                    TypeKind::Reference(name)
-                }
+            TypeKind::Reference(name) => Some(name.clone()),
+            TypeKind::Optional(inner) => Self::type_kind_to_fqcn(inner.as_ref()),
+            TypeKind::Primitive(primitive) => {
+                Some(JavaPrimitive::boxed_fqcn(*primitive).to_string())
             }
-            TypeKind::Optional(inner) => TypeKind::optional(self.apply_registry_if_needed(*inner)),
-            other => other,
-        }
-    }
-
-    fn detect_doublebrace_control_flow(&self, statements: &[Statement]) -> Option<&'static str> {
-        for statement in statements {
-            match statement {
-                Statement::Return { .. } => return Some(DIAG_DBLOCK_RETURN),
-                Statement::Break(_) => return Some(DIAG_DBLOCK_BREAK),
-                Statement::Continue(_) => return Some(DIAG_DBLOCK_CONTINUE),
-                Statement::Expression { expr, .. } => {
-                    if let Some(code) = self.detect_control_flow_in_expression(expr) {
-                        return Some(code);
-                    }
-                }
-                Statement::Assignment { value, .. } => {
-                    if let Some(code) = self.detect_control_flow_in_expression(value) {
-                        return Some(code);
-                    }
-                }
-                Statement::ForIn(for_in) => {
-                    if let Some(code) = self.detect_control_flow_in_expression(&for_in.body) {
-                        return Some(code);
-                    }
-                }
-                Statement::FunctionDeclaration { body, .. } => {
-                    if let Some(code) = self.detect_control_flow_in_expression(body) {
-                        return Some(code);
-                    }
-                }
-                _ => {}
-            }
-        }
-        None
-    }
-
-    fn detect_control_flow_in_expression(&self, expr: &Expression) -> Option<&'static str> {
-        match expr {
-            Expression::Block { statements, .. } => {
-                self.detect_doublebrace_control_flow(statements)
-            }
-            Expression::If {
-                then_branch,
-                else_branch,
-                ..
-            } => self
-                .detect_control_flow_in_expression(then_branch)
-                .or_else(|| {
-                    else_branch
-                        .as_deref()
-                        .and_then(|expr| self.detect_control_flow_in_expression(expr))
-                }),
-            Expression::When { arms, else_arm, .. } => {
-                for arm in arms {
-                    if let Some(code) = self.detect_control_flow_in_expression(&arm.body) {
-                        return Some(code);
-                    }
-                }
-                if let Some(else_expr) = else_arm.as_deref() {
-                    return self.detect_control_flow_in_expression(else_expr);
-                }
-                None
-            }
-            Expression::DoublebraceInit(inner) => {
-                self.detect_doublebrace_control_flow(&inner.statements)
-            }
+            TypeKind::Boxed(primitive) => Some(primitive.boxed_fqcn().to_string()),
             _ => None,
-        }
-    }
-
-    fn collect_doublebrace_members(&self, statements: &[Statement]) -> Vec<String> {
-        let mut members = HashSet::new();
-        for statement in statements {
-            self.collect_members_from_statement(statement, &mut members);
-        }
-        let mut list: Vec<String> = members.into_iter().collect();
-        list.sort();
-        list
-    }
-
-    fn collect_members_from_statement(&self, statement: &Statement, acc: &mut HashSet<String>) {
-        match statement {
-            Statement::Expression { expr, .. } => self.collect_members_from_expression(expr, acc),
-            Statement::Assignment { target, value, .. } => {
-                self.collect_members_from_expression(target, acc);
-                self.collect_members_from_expression(value, acc);
-            }
-            Statement::Return {
-                value: Some(expr), ..
-            } => {
-                self.collect_members_from_expression(expr, acc);
-            }
-            Statement::ForIn(for_in) => {
-                self.collect_members_from_expression(&for_in.iterable, acc);
-                self.collect_members_from_expression(&for_in.body, acc);
-            }
-            _ => {}
-        }
-    }
-
-    fn collect_members_from_expression(&self, expr: &Expression, acc: &mut HashSet<String>) {
-        match expr {
-            Expression::Call { function, .. } => match function.as_ref() {
-                Expression::Identifier(name, _) => {
-                    acc.insert(name.clone());
-                }
-                Expression::MemberAccess { property, .. }
-                | Expression::NullSafeMemberAccess { property, .. } => {
-                    acc.insert(property.clone());
-                }
-                _ => {}
-            },
-            Expression::MemberAccess { property, .. }
-            | Expression::NullSafeMemberAccess { property, .. } => {
-                acc.insert(property.clone());
-            }
-            Expression::Block { statements, .. } => {
-                for statement in statements {
-                    self.collect_members_from_statement(statement, acc);
-                }
-            }
-            Expression::If {
-                then_branch,
-                else_branch,
-                ..
-            } => {
-                self.collect_members_from_expression(then_branch, acc);
-                if let Some(else_expr) = else_branch.as_deref() {
-                    self.collect_members_from_expression(else_expr, acc);
-                }
-            }
-            Expression::When { arms, else_arm, .. } => {
-                for arm in arms {
-                    self.collect_members_from_expression(&arm.body, acc);
-                }
-                if let Some(else_expr) = else_arm.as_deref() {
-                    self.collect_members_from_expression(else_expr, acc);
-                }
-            }
-            Expression::DoublebraceInit(inner) => {
-                for statement in &inner.statements {
-                    self.collect_members_from_statement(statement, acc);
-                }
-            }
-            _ => {}
         }
     }
 
@@ -1662,7 +1515,9 @@ val result = when (maybe) {
         let _constraints =
             ConstraintGenerator::new(&mut env, &extensions, None, None).generate(&program);
 
-        let scheme = env.lookup("items").expect("constructor result should be inferred");
+        let scheme = env
+            .lookup("items")
+            .expect("constructor result should be inferred");
         assert_eq!(scheme.ty, TypeKind::reference("java.util.ArrayList"));
     }
 

@@ -209,6 +209,31 @@ fn test_run_command_parsing() {
 }
 
 #[test]
+fn lower_doublebrace_plan_preserves_generic_fqcn() {
+    use jv_checker::java::{DoublebracePlan, MutatePlan, PlanBase};
+
+    let plan = DoublebracePlan::Mutate(MutatePlan {
+        receiver: jv_checker::TypeKind::reference("java.util.ArrayList<String>"),
+        base: PlanBase::ExistingInstance,
+        steps: Vec::new(),
+    });
+
+    let mut plans = std::collections::HashMap::new();
+    plans.insert("sample".to_string(), plan);
+
+    let lowered = lower_doublebrace_plans_for_ir(&plans);
+    let lowered_plan = lowered
+        .get("sample")
+        .expect("lowered plan should exist for key");
+
+    assert_eq!(
+        lowered_plan.receiver_fqcn,
+        "java.util.ArrayList<String>",
+        "Doublebrace lowering should retain generic arguments"
+    );
+}
+
+#[test]
 fn test_fmt_command_parsing() {
     let fmt_args = vec!["jv", "fmt", "file1.jv", "file2.jv"];
     let cli = Cli::try_parse_from(fmt_args).unwrap();

@@ -283,8 +283,7 @@ fn doublebrace_example_generates_plans() {
     use std::path::PathBuf;
 
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let example_path = manifest_dir
-        .join("../../examples/doublebrace-init-block/src/main.jv");
+    let example_path = manifest_dir.join("../../examples/doublebrace-init-block/src/main.jv");
     let source = fs::read_to_string(&example_path)
         .unwrap_or_else(|err| panic!("failed to read example {:?}: {err}", example_path));
 

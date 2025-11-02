@@ -17,6 +17,16 @@ fn java_array_list() -> JavaType {
     }
 }
 
+fn java_array_list_of_string() -> JavaType {
+    JavaType::Reference {
+        name: "java.util.ArrayList".to_string(),
+        generic_args: vec![JavaType::Reference {
+            name: "java.lang.String".to_string(),
+            generic_args: Vec::new(),
+        }],
+    }
+}
+
 fn java_user_type() -> JavaType {
     JavaType::Reference {
         name: "com.example.ImmutableUser".to_string(),
@@ -126,6 +136,44 @@ fn doublebrace_copy_generates_chain_for_multiple_updates() {
 
     let expr = copy_expression_with_updates(updates);
     let expected = "((java.util.function.Supplier<com.example.ImmutableUser>) () -> {\n    com.example.ImmutableUser __db_base0 = user;\n    com.example.ImmutableUser __db_copy1 = __db_base0;\n    __db_copy1 = __db_copy1.withName(\"Alice\");\n    __db_copy1 = __db_copy1.withAge(30);\n    \n    return __db_copy1;\n}).get()";
+
+    assert_eq!(render(&expr, JavaTarget::Java25), expected);
+    assert_eq!(render(&expr, JavaTarget::Java21), expected);
+}
+
+#[test]
+fn doublebrace_mutate_preserves_generic_receiver_in_java() {
+    let span = span();
+    let java_type = java_array_list_of_string();
+    let base = IrExpression::Identifier {
+        name: "list".to_string(),
+        java_type: java_type.clone(),
+        span: span.clone(),
+    };
+
+    let mutation = IrDoublebraceMutation::MethodCall(IrDoublebraceMethodInvocation {
+        name: "add".to_string(),
+        arguments: vec![IrExpression::Literal(
+            Literal::String("herb".to_string()),
+            span.clone(),
+        )],
+        argument_style: CallArgumentStyle::Comma,
+        metadata: CallArgumentMetadata::with_style(CallArgumentStyle::Comma),
+        span: span.clone(),
+    });
+
+    let expr = IrExpression::DoublebraceInit {
+        base: Some(Box::new(base)),
+        receiver_type: java_type.clone(),
+        plan: IrDoublebracePlan::Mutate(IrDoublebraceMutatePlan {
+            base: DoublebraceBaseStrategy::ExistingInstance,
+            steps: vec![mutation],
+        }),
+        java_type: java_type,
+        span,
+    };
+
+    let expected = "((java.util.function.Supplier<java.util.ArrayList<java.lang.String>>) () -> {\n    java.util.ArrayList<java.lang.String> __db_base0 = list;\n    __db_base0.add(\"herb\");\n    \n    return __db_base0;\n}).get()";
 
     assert_eq!(render(&expr, JavaTarget::Java25), expected);
     assert_eq!(render(&expr, JavaTarget::Java21), expected);

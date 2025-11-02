@@ -697,13 +697,18 @@ impl BindingResolver {
         } else {
             None
         };
-        Some(CallKind::Constructor { type_name: simple, fqcn })
+        Some(CallKind::Constructor {
+            type_name: simple,
+            fqcn,
+        })
     }
 
     fn qualified_name(expr: &Expression) -> Option<String> {
         match expr {
             Expression::Identifier(name, _) => Some(name.clone()),
-            Expression::MemberAccess { object, property, .. } => {
+            Expression::MemberAccess {
+                object, property, ..
+            } => {
                 let prefix = Self::qualified_name(object)?;
                 if prefix.is_empty() {
                     None
@@ -845,8 +850,7 @@ impl BindingResolver {
                 false,
             );
             if is_probable_type_name(&binding_name) {
-                self.type_imports
-                    .insert(binding_name.clone(), path.clone());
+                self.type_imports.insert(binding_name.clone(), path.clone());
                 if let Some(values) = self.value_bindings.last_mut() {
                     values.remove(&binding_name);
                 }

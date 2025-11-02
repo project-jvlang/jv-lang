@@ -2,13 +2,15 @@
 
 use super::{DoublebracePlan, DoublebracePlanError, plan_doublebrace_application};
 use crate::CheckError;
-use crate::inference::environment::TypeEnvironment;
+use crate::inference::environment::{TypeEnvironment, TypeScheme};
 use crate::inference::type_factory::TypeFactory;
 use crate::inference::types::{PrimitiveType, TypeKind};
 use jv_ast::expression::{CallKind, DoublebraceInit};
 use jv_ast::{Expression, Program, Statement, TypeAnnotation};
 use jv_build::metadata::SymbolIndex;
-use jv_inference::DoublebraceHeuristics;
+use jv_inference::doublebrace::{DoublebraceContext, DoublebraceHeuristics, infer_doublebrace};
+use jv_inference::session::InferenceSession;
+use jv_inference::registry::default_impl::DefaultImplementationRegistry;
 use std::collections::HashMap;
 
 /// Doublebrace プランのマップでキーとして利用する `Span` の正規化文字列。
@@ -19,13 +21,251 @@ pub fn span_key(span: &jv_ast::Span) -> String {
     )
 }
 
+fn annotation_to_type_kind(annotation: &TypeAnnotation) -> Option<TypeKind> {
+    match annotation {
+        TypeAnnotation::Simple(name) => TypeFactory::from_annotation(name).ok(),
+        TypeAnnotation::Nullable(inner) => {
+            annotation_to_type_kind(inner).map(TypeKind::optional)
+        }
+        TypeAnnotation::Generic { name, type_args } => {
+            let base = TypeFactory::from_annotation(name).ok()?.describe();
+            let args: Option<Vec<String>> = type_args
+                .iter()
+                .map(|arg| annotation_to_type_kind(arg).map(|ty| ty.describe()))
+                .collect();
+            let args = args?;
+            Some(TypeKind::reference(format!("{base}<{}>", args.join(", "))))
+        }
+        TypeAnnotation::Function { .. } => Some(TypeKind::Unknown),
+        TypeAnnotation::Array(inner) => annotation_to_type_kind(inner)
+            .map(|element| TypeKind::reference(format!("Array<{}>", element.describe()))),
+    }
+}
+
+fn resolve_expression_type_in_env(
+    environment: &TypeEnvironment,
+    expr: &Expression,
+) -> Option<TypeKind> {
+    match expr {
+        Expression::Identifier(name, _) => environment
+            .lookup(name)
+            .map(|scheme| scheme.ty.clone()),
+        Expression::This(_) => environment
+            .lookup("this")
+            .map(|scheme| scheme.ty.clone()),
+        Expression::Call {
+            call_kind,
+            type_arguments,
+            ..
+        } => match call_kind {
+            CallKind::Constructor { type_name, fqcn } => {
+                let mut base = fqcn.clone().unwrap_or_else(|| type_name.clone());
+                if !type_arguments.is_empty() {
+                    let generics: Option<Vec<String>> = type_arguments
+                        .iter()
+                        .map(|ann| annotation_to_type_kind(ann).map(|ty| ty.describe()))
+                        .collect();
+                    if let Some(args) = generics {
+                        base = format!("{base}<{}>", args.join(", "));
+                    }
+                }
+                Some(TypeKind::reference(base))
+            }
+            CallKind::Function => None,
+        },
+        Expression::TypeCast { target, .. } => annotation_to_type_kind(target),
+        _ => None,
+    }
+}
+
+fn type_kind_to_reference_name(ty: &TypeKind) -> Option<String> {
+    match ty {
+        TypeKind::Reference(name) => Some(name.clone()),
+        TypeKind::Optional(inner) => type_kind_to_reference_name(inner),
+        TypeKind::Primitive(primitive) => Some(primitive.boxed_fqcn().to_string()),
+        TypeKind::Boxed(primitive) => Some(primitive.boxed_fqcn().to_string()),
+        _ => None,
+    }
+}
+
+fn split_type_name(candidate: &str) -> (&str, Option<&str>) {
+    if let Some(start) = candidate.find('<') {
+        let (base, generics) = candidate.split_at(start);
+        (base.trim(), Some(generics.trim()))
+    } else {
+        (candidate.trim(), None)
+    }
+}
+
+fn resolve_default_reference(candidate: &str, symbol_index: Option<&SymbolIndex>) -> String {
+    let registry = DefaultImplementationRegistry::shared();
+    if let Some(interface) = registry.resolve_interface(candidate) {
+        interface.target().to_string()
+    } else if let Some(abstract_impl) = registry.resolve_abstract(candidate, symbol_index) {
+        abstract_impl.target().to_string()
+    } else {
+        candidate.to_string()
+    }
+}
+
+fn apply_registry_to_reference(candidate: &str, symbol_index: Option<&SymbolIndex>) -> String {
+    let (base, generics) = split_type_name(candidate);
+    let resolved = resolve_default_reference(base, symbol_index);
+    if let Some(args) = generics {
+        if args.is_empty() || resolved.contains('<') {
+            resolved
+        } else {
+            format!("{resolved}{args}")
+        }
+    } else {
+        resolved
+    }
+}
+
+fn apply_registry_to_typekind(ty: &TypeKind, symbol_index: Option<&SymbolIndex>) -> TypeKind {
+    match ty {
+        TypeKind::Reference(name) => {
+            TypeKind::reference(apply_registry_to_reference(name, symbol_index))
+        }
+        TypeKind::Optional(inner) => {
+            TypeKind::optional(apply_registry_to_typekind(inner, symbol_index))
+        }
+        TypeKind::Function(params, ret) => {
+            let mapped_params: Vec<TypeKind> = params
+                .iter()
+                .map(|param| apply_registry_to_typekind(param, symbol_index))
+                .collect();
+            let mapped_ret = apply_registry_to_typekind(ret, symbol_index);
+            TypeKind::function(mapped_params, mapped_ret)
+        }
+        TypeKind::Primitive(_) | TypeKind::Boxed(_) | TypeKind::Variable(_) | TypeKind::Unknown => {
+            ty.clone()
+        }
+    }
+}
+
+fn apply_registry_to_environment(env: &mut TypeEnvironment, symbol_index: Option<&SymbolIndex>) {
+    let bindings = env.flattened_bindings();
+    for (name, scheme) in bindings {
+        let mapped = apply_registry_to_typekind(&scheme.ty, symbol_index);
+        if mapped != scheme.ty {
+            let new_scheme = TypeScheme::new(scheme.quantifiers.clone(), mapped);
+            env.redefine_scheme(name, new_scheme);
+        }
+    }
+}
+
+fn infer_binding_type_for_doublebrace(
+    environment: &TypeEnvironment,
+    init: &DoublebraceInit,
+    annotation: Option<&TypeAnnotation>,
+    symbol_index: Option<&SymbolIndex>,
+) -> Option<TypeKind> {
+    let base_ty = init
+        .base
+        .as_ref()
+        .and_then(|expr| resolve_expression_type_in_env(environment, expr));
+    let hint_ty = init
+        .receiver_hint
+        .as_ref()
+        .and_then(annotation_to_type_kind);
+    let expected_ty = annotation.and_then(annotation_to_type_kind);
+
+    let base_name = base_ty
+        .as_ref()
+        .and_then(|ty| type_kind_to_reference_name(ty));
+    let expected_name = expected_ty
+        .as_ref()
+        .and_then(|ty| type_kind_to_reference_name(ty));
+    let hint_name = hint_ty
+        .as_ref()
+        .and_then(|ty| type_kind_to_reference_name(ty));
+
+    let context = DoublebraceContext {
+        base_type: base_name.as_deref(),
+        expected_type: expected_name.as_deref(),
+        receiver_hint: hint_name.as_deref(),
+    };
+
+    let session = InferenceSession::new();
+    let inference = infer_doublebrace(init, context, &session);
+
+    if let Some(resolved) = inference.resolved_type {
+        return Some(TypeKind::reference(resolved));
+    }
+
+    if let Some(hint) = &hint_ty {
+        return Some(apply_registry_to_typekind(hint, symbol_index));
+    }
+
+    if let Some(expected) = &expected_ty {
+        return Some(apply_registry_to_typekind(expected, symbol_index));
+    }
+
+    base_ty.map(|ty| apply_registry_to_typekind(&ty, symbol_index))
+}
+
+fn prepopulate_doublebrace_bindings(
+    environment: &mut TypeEnvironment,
+    program: &Program,
+    symbol_index: Option<&SymbolIndex>,
+) {
+    for statement in &program.statements {
+        match statement {
+            Statement::ValDeclaration {
+                name,
+                type_annotation,
+                initializer,
+                ..
+            } => {
+                if environment.lookup(name).is_none() {
+                    if let Expression::DoublebraceInit(init) = initializer {
+                        if let Some(ty) = infer_binding_type_for_doublebrace(
+                            environment,
+                            init,
+                            type_annotation.as_ref(),
+                            symbol_index,
+                        ) {
+                            environment.define_monotype(name.clone(), ty);
+                        }
+                    }
+                }
+            }
+            Statement::VarDeclaration {
+                name,
+                type_annotation,
+                initializer: Some(initializer),
+                ..
+            } => {
+                if environment.lookup(name).is_none() {
+                    if let Expression::DoublebraceInit(init) = initializer {
+                        if let Some(ty) = infer_binding_type_for_doublebrace(
+                            environment,
+                            init,
+                            type_annotation.as_ref(),
+                            symbol_index,
+                        ) {
+                            environment.define_monotype(name.clone(), ty);
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
 /// プログラム全体の Doublebrace 初期化式をプランニングする。
 pub fn plan_doublebrace_in_program(
     program: &Program,
     environment: &TypeEnvironment,
     symbol_index: Option<&SymbolIndex>,
 ) -> Result<HashMap<String, DoublebracePlan>, Vec<CheckError>> {
-    let mut planner = DoublebracePlanner::new(environment, symbol_index);
+    let mut prepared_env = environment.clone();
+    apply_registry_to_environment(&mut prepared_env, symbol_index);
+    prepopulate_doublebrace_bindings(&mut prepared_env, program, symbol_index);
+
+    let mut planner = DoublebracePlanner::new(&prepared_env, symbol_index);
     planner.visit_program(program);
     if planner.errors.is_empty() {
         Ok(planner.plans)
@@ -323,39 +563,11 @@ impl<'env> DoublebracePlanner<'env> {
     }
 
     fn resolve_expression_type(&self, expr: &Expression) -> Option<TypeKind> {
-        match expr {
-            Expression::Identifier(name, _) => self
-                .environment
-                .lookup(name)
-                .map(|scheme| scheme.ty.clone()),
-            Expression::This(_) => self
-                .environment
-                .lookup("this")
-                .map(|scheme| scheme.ty.clone()),
-            Expression::Call { call_kind, .. } => match call_kind {
-                CallKind::Constructor { type_name, fqcn } => {
-                    let ty_name = fqcn.clone().unwrap_or_else(|| type_name.clone());
-                    Some(TypeKind::reference(ty_name))
-                }
-                CallKind::Function => None,
-            },
-            _ => None,
-        }
+        resolve_expression_type_in_env(self.environment, expr)
     }
 
     fn annotation_to_type(&self, annotation: Option<&TypeAnnotation>) -> Option<TypeKind> {
-        let annotation = annotation?;
-        match annotation {
-            TypeAnnotation::Simple(name) => TypeFactory::from_annotation(name).ok(),
-            TypeAnnotation::Nullable(inner) => {
-                self.annotation_to_type(Some(inner)).map(TypeKind::optional)
-            }
-            TypeAnnotation::Generic { name, .. } => TypeFactory::from_annotation(name).ok(),
-            TypeAnnotation::Function { .. } => Some(TypeKind::Unknown),
-            TypeAnnotation::Array(inner) => self
-                .annotation_to_type(Some(inner))
-                .map(|element| TypeKind::reference(format!("Array<{}>", element.describe()))),
-        }
+        annotation.and_then(annotation_to_type_kind)
     }
 
     fn heuristic_receiver(&self, init: &DoublebraceInit) -> Option<TypeKind> {

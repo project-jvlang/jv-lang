@@ -7,7 +7,9 @@
 
 use crate::inference::types::TypeKind;
 use crate::java::primitive::JavaPrimitive;
-use jv_ast::expression::{CallArgumentMetadata, CallKind, DoublebraceInit};
+use crate::pattern::expression_span;
+use jv_ast::expression::{CallArgumentMetadata, CallArgumentStyle, CallKind, DoublebraceInit};
+use jv_ast::types::{BinaryOp, UnaryOp};
 use jv_ast::{Argument, ConcurrencyConstruct, Expression, ResourceManagement, Span, Statement};
 use jv_build::metadata::SymbolIndex;
 use std::fmt;
@@ -108,13 +110,15 @@ pub fn plan_doublebrace_application(
     let base_requires_synthesized = init
         .base
         .as_ref()
-        .map(|expr| matches!(
-            expr.as_ref(),
-            Expression::Call {
-                call_kind: CallKind::Constructor { .. },
-                ..
-            }
-        ))
+        .map(|expr| {
+            matches!(
+                expr.as_ref(),
+                Expression::Call {
+                    call_kind: CallKind::Constructor { .. },
+                    ..
+                }
+            )
+        })
         .unwrap_or(false);
     let has_existing_base = base_ty.is_some() && !base_requires_synthesized;
 
@@ -253,10 +257,15 @@ fn collect_mutation_steps(statements: &[Statement]) -> Vec<MutationStep> {
                     ..
                 } => {
                     if let Expression::Identifier(name, _) = function.as_ref() {
+                        let (normalized_args, normalized_metadata) =
+                            normalize_method_call_arguments(
+                                args.clone(),
+                                argument_metadata.clone(),
+                            );
                         MutationStep::MethodCall(MethodInvocation {
                             name: name.clone(),
-                            arguments: args.clone(),
-                            metadata: argument_metadata.clone(),
+                            arguments: normalized_args,
+                            metadata: normalized_metadata,
                             span: span.clone(),
                         })
                     } else {
@@ -268,6 +277,53 @@ fn collect_mutation_steps(statements: &[Statement]) -> Vec<MutationStep> {
             _ => MutationStep::Other(statement.clone()),
         })
         .collect()
+}
+
+fn normalize_method_call_arguments(
+    args: Vec<Argument>,
+    metadata: CallArgumentMetadata,
+) -> (Vec<Argument>, CallArgumentMetadata) {
+    if metadata.style != CallArgumentStyle::Whitespace || args.len() != 2 {
+        return (args, metadata);
+    }
+
+    let left = match &args[0] {
+        Argument::Positional(expr) => expr.clone(),
+        _ => return (args, metadata),
+    };
+
+    let (operand, operand_span) = match &args[1] {
+        Argument::Positional(Expression::Unary { op, operand, span })
+            if matches!(op, UnaryOp::Minus) =>
+        {
+            (operand.as_ref().clone(), span.clone())
+        }
+        _ => return (args, metadata),
+    };
+
+    let left_span = expression_span(&left).cloned();
+    let combined_span = left_span
+        .map(|span| {
+            Span::new(
+                span.start_line,
+                span.start_column,
+                operand_span.end_line,
+                operand_span.end_column,
+            )
+        })
+        .unwrap_or_else(|| operand_span.clone());
+
+    let binary_expr = Expression::Binary {
+        left: Box::new(left),
+        op: BinaryOp::Subtract,
+        right: Box::new(operand),
+        span: combined_span,
+    };
+
+    let new_args = vec![Argument::Positional(binary_expr)];
+    let mut new_metadata = metadata;
+    new_metadata.style = CallArgumentStyle::Comma;
+    (new_args, new_metadata)
 }
 
 fn collect_field_updates(statements: &[Statement]) -> Result<Vec<FieldUpdate>, String> {

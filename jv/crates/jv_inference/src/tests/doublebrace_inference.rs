@@ -126,6 +126,26 @@ fn infer_prefers_receiver_hint_over_other_sources() {
 }
 
 #[test]
+fn infer_applies_registry_to_generic_interfaces() {
+    let session = InferenceSession::new();
+    let init = sample_init(vec![call_statement("add")]);
+    let ctx = DoublebraceContext {
+        base_type: Some("java.util.List<String>"),
+        expected_type: None,
+        receiver_hint: None,
+    };
+
+    let result = infer_doublebrace(&init, ctx, &session);
+
+    assert_eq!(
+        result.resolved_type.as_deref(),
+        Some("java.util.ArrayList<String>"),
+        "default implementation should preserve type arguments"
+    );
+    assert_eq!(result.resolution, ReceiverResolution::BaseExpression);
+}
+
+#[test]
 fn detect_control_flow_reports_return() {
     let span = Span::dummy();
     let statements = vec![Statement::Return {

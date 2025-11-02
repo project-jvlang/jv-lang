@@ -49,9 +49,7 @@ impl TypeFactory {
             }
             "List" | "java.util.List" => Ok(TypeKind::reference("java.util.List")),
             "Map" | "java.util.Map" => Ok(TypeKind::reference("java.util.Map")),
-            "ArrayList" | "java.util.ArrayList" => {
-                Ok(TypeKind::reference("java.util.ArrayList"))
-            }
+            "ArrayList" | "java.util.ArrayList" => Ok(TypeKind::reference("java.util.ArrayList")),
             "LinkedList" | "java.util.LinkedList" => {
                 Ok(TypeKind::reference("java.util.LinkedList"))
             }
