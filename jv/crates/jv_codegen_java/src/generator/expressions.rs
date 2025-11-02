@@ -1,5 +1,5 @@
 use super::*;
-use jv_ast::{types::PrimitiveTypeName, Span};
+use jv_ast::{Span, types::PrimitiveTypeName};
 use jv_ir::PipelineShape;
 use jv_ir::{
     SequencePipeline, SequenceSource, SequenceStage, SequenceTerminal, SequenceTerminalKind,

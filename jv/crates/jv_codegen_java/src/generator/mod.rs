@@ -51,6 +51,7 @@ pub struct JavaCodeGenerator {
     record_components: HashMap<String, HashSet<String>>,
     logging_framework: LoggingFrameworkKind,
     logger_fields: HashMap<LoggerFieldId, LoggerFieldSpec>,
+    trace_context_enabled: bool,
 }
 
 impl JavaCodeGenerator {
@@ -81,6 +82,7 @@ impl JavaCodeGenerator {
             record_components: HashMap::new(),
             logging_framework: LoggingFrameworkKind::default(),
             logger_fields: HashMap::new(),
+            trace_context_enabled: false,
         }
     }
 
@@ -96,6 +98,7 @@ impl JavaCodeGenerator {
         self.package = program.package.clone();
         self.generic_metadata = program.generic_metadata.clone();
         self.logging_framework = program.logging.framework.clone();
+        self.trace_context_enabled = program.logging.trace_context;
         self.logger_fields = program
             .logging
             .logger_fields
@@ -327,6 +330,7 @@ impl JavaCodeGenerator {
         self.record_components.clear();
         self.logging_framework = LoggingFrameworkKind::default();
         self.logger_fields.clear();
+        self.trace_context_enabled = false;
     }
 
     fn register_record_components_from_declarations(

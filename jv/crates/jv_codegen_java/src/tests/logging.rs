@@ -21,6 +21,7 @@ fn slf4j_debug_emits_guard_and_brace_placeholders() {
         plan,
         "org.slf4j.Logger",
         &["value"],
+        false,
     );
 
     assert!(
@@ -34,6 +35,41 @@ fn slf4j_debug_emits_guard_and_brace_placeholders() {
     assert!(
         source.contains("LOGGER.debug(\"value {}\", value);"),
         "expected SLF4J placeholder with braces:\n{source}"
+    );
+}
+
+#[test]
+fn slf4j_trace_context_injects_mdc_when_enabled() {
+    let plan = log_plan(
+        LogLevel::Info,
+        None,
+        vec![statement_value_length("value")],
+        string_format_message("value %s", vec![identifier_expr("value")]),
+    );
+
+    let source = render_logging_program(
+        LoggingFrameworkKind::Slf4j,
+        plan,
+        "org.slf4j.Logger",
+        &["value"],
+        true,
+    );
+
+    assert!(
+        source.contains("Span.current()"),
+        "expected current span acquisition:\n{source}"
+    );
+    assert!(
+        source.contains("MDC.put(\"traceId\""),
+        "expected traceId injection into MDC:\n{source}"
+    );
+    assert!(
+        source.contains("MDC.remove(\"spanId\");"),
+        "expected MDC cleanup for spanId:\n{source}"
+    );
+    assert!(
+        source.contains("} finally {"),
+        "expected try/finally for MDC cleanup:\n{source}"
     );
 }
 
@@ -54,6 +90,7 @@ fn jboss_logging_uses_percent_format_specifiers() {
         plan,
         "org.jboss.logging.Logger",
         &["from", "to"],
+        false,
     );
 
     assert!(
@@ -76,6 +113,7 @@ fn commons_logging_concatenates_strings() {
         plan,
         "org.apache.commons.logging.Log",
         &["name"],
+        false,
     );
 
     assert!(
@@ -101,6 +139,7 @@ fn jul_logging_uses_numbered_placeholders() {
         plan,
         "java.util.logging.Logger",
         &["traceId", "message"],
+        false,
     );
 
     assert!(
@@ -139,6 +178,7 @@ fn render_logging_program(
     plan: LogInvocationPlan,
     field_type_name: &str,
     param_names: &[&str],
+    trace_context: bool,
 ) -> String {
     let logger_field = IrStatement::FieldDeclaration {
         name: "LOGGER".to_string(),
@@ -178,6 +218,7 @@ fn render_logging_program(
             class_id: None,
         }],
         framework,
+        trace_context,
     };
 
     let program = IrProgram {

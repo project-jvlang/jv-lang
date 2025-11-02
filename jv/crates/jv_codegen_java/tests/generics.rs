@@ -1,6 +1,6 @@
 use jv_ast::{
-    types::{Kind, QualifiedName, RawTypeContinuation, RawTypeDirective},
     Literal, Span,
+    types::{Kind, QualifiedName, RawTypeContinuation, RawTypeDirective},
 };
 use jv_codegen_java::{JavaCodeGenConfig, JavaCodeGenerator, JavaTarget};
 use jv_ir::{

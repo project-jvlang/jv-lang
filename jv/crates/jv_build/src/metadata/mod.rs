@@ -11,6 +11,7 @@ mod classfile;
 mod conversion_catalog;
 mod conversion_detector;
 mod index;
+pub mod opentelemetry;
 
 pub use builder::{BuildContext, IndexError, SymbolIndexBuilder};
 pub use cache::{CacheError, CacheMetrics, CacheStoreStats, SymbolIndexCache};

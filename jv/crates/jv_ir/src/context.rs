@@ -539,6 +539,14 @@ impl TransformContext {
         &self.logging_state.framework
     }
 
+    pub fn set_trace_context_enabled(&mut self, enabled: bool) {
+        self.logging_state.trace_context = enabled;
+    }
+
+    pub fn trace_context_enabled(&self) -> bool {
+        self.logging_state.trace_context
+    }
+
     pub fn sequence_style_cache(&self) -> &SequenceStyleCache {
         &self.sequence_style_cache
     }
@@ -1143,6 +1151,7 @@ struct LoggingState {
     next_field_id: u32,
     fields: Vec<LoggerFieldSpec>,
     framework: LoggingFrameworkKind,
+    trace_context: bool,
 }
 
 impl LoggingState {
@@ -1175,6 +1184,7 @@ impl LoggingState {
         LoggingMetadata {
             logger_fields: std::mem::take(&mut self.fields),
             framework: self.framework.clone(),
+            trace_context: self.trace_context,
         }
     }
 }

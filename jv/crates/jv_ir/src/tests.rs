@@ -398,6 +398,7 @@ mod tests {
                 class_id: None,
             }],
             framework: LoggingFrameworkKind::Slf4j,
+            trace_context: false,
         };
 
         let log_plan = LogInvocationPlan {
@@ -539,6 +540,7 @@ mod tests {
                 },
             ],
             framework: LoggingFrameworkKind::Slf4j,
+            trace_context: false,
         };
 
         let make_plan = |logger_field| LogInvocationPlan {
@@ -662,6 +664,7 @@ mod tests {
                 class_id: None,
             }],
             framework: LoggingFrameworkKind::Slf4j,
+            trace_context: false,
         };
 
         let plan = LogInvocationPlan {

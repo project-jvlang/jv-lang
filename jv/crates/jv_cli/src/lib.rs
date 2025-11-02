@@ -487,7 +487,7 @@ pub mod pipeline {
     use jv_fmt::JavaFormatter;
     use jv_inference::types::TypeVariant;
     use jv_ir::context::WhenStrategyRecord;
-    use jv_ir::types::{IrImport, IrImportDetail};
+    use jv_ir::types::{IrImport, IrImportDetail, LogLevel as IrLogLevel, LoggingFrameworkKind};
     use jv_ir::TransformContext;
     use jv_ir::{
         transform_program_with_context, transform_program_with_context_profiled, TransformPools,
@@ -495,6 +495,7 @@ pub mod pipeline {
     };
     use jv_parser_frontend::ParserPipeline;
     use jv_parser_rowan::frontend::RowanPipeline;
+    use jv_pm::{LoggingConfig, LoggingFramework, LogLevel};
     use serde_json::json;
     use std::collections::{BTreeMap, HashSet};
     use std::ffi::OsStr;
@@ -563,6 +564,41 @@ pub mod pipeline {
 
     fn script_main_class(plan: &BuildPlan) -> String {
         compute_script_main_class(&plan.settings.manifest.package.name, plan.entrypoint())
+    }
+
+
+    fn apply_logging_config_to_context(context: &mut TransformContext, config: &LoggingConfig) {
+        context.set_logging_framework(map_framework(&config.framework));
+        {
+            let options = context.logging_options_mut();
+            options.active_level = map_log_level(config.log_level);
+            options.default_level = map_log_level(config.default_level);
+        }
+        let trace_enabled = config.opentelemetry.enabled && config.opentelemetry.trace_context;
+        context.set_trace_context_enabled(trace_enabled);
+    }
+
+    fn map_log_level(level: LogLevel) -> IrLogLevel {
+        match level {
+            LogLevel::Trace => IrLogLevel::Trace,
+            LogLevel::Debug => IrLogLevel::Debug,
+            LogLevel::Info => IrLogLevel::Info,
+            LogLevel::Warn => IrLogLevel::Warn,
+            LogLevel::Error => IrLogLevel::Error,
+        }
+    }
+
+    fn map_framework(framework: &LoggingFramework) -> LoggingFrameworkKind {
+        match framework {
+            LoggingFramework::Slf4j => LoggingFrameworkKind::Slf4j,
+            LoggingFramework::Log4j2 => LoggingFrameworkKind::Log4j2,
+            LoggingFramework::JbossLogging => LoggingFrameworkKind::JbossLogging,
+            LoggingFramework::CommonsLogging => LoggingFrameworkKind::CommonsLogging,
+            LoggingFramework::Jul => LoggingFrameworkKind::Jul,
+            LoggingFramework::Custom(custom) => LoggingFrameworkKind::Custom {
+                identifier: custom.identifier.clone(),
+            },
+        }
     }
 
     fn to_pascal_case(input: &str) -> String {
@@ -903,6 +939,7 @@ pub mod pipeline {
         let mut ir_program = if options.perf {
             let pools = TransformPools::with_chunk_capacity(256 * 1024);
             let mut context = TransformContext::with_pools(pools);
+            apply_logging_config_to_context(&mut context, &plan.logging_config);
             if let Some(facts) = type_facts_snapshot.as_ref() {
                 preload_type_facts_into_context(&mut context, facts);
             }
@@ -942,6 +979,7 @@ pub mod pipeline {
             }
         } else {
             let mut context = TransformContext::new();
+            apply_logging_config_to_context(&mut context, &plan.logging_config);
             if let Some(facts) = type_facts_snapshot.as_ref() {
                 preload_type_facts_into_context(&mut context, facts);
             }

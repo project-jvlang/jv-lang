@@ -426,6 +426,8 @@ pub struct LoggingMetadata {
     pub logger_fields: Vec<LoggerFieldSpec>,
     #[serde(default)]
     pub framework: LoggingFrameworkKind,
+    #[serde(default)]
+    pub trace_context: bool,
 }
 
 /// Metadata describing the resolved target for a method call after name mapping.

@@ -1,5 +1,6 @@
 use super::*;
 use crate::log_message::LogMessageInterpolator;
+use jv_build::metadata::opentelemetry::{self, TraceContextAccessor};
 
 pub(super) fn emit_log_plan(
     generator: &mut JavaCodeGenerator,
@@ -29,6 +30,12 @@ pub(super) fn emit_log_plan(
     let mut builder = generator.builder();
     let mut has_guard = false;
 
+    let trace_accessor = if generator.trace_context_enabled {
+        opentelemetry::trace_context_accessor(&generator.logging_framework)
+    } else {
+        None
+    };
+
     if let Some(kind) = plan.guard_kind {
         if let Some(condition) =
             strategy.guard_condition(generator, &logger_name, plan.level, kind)?
@@ -37,6 +44,10 @@ pub(super) fn emit_log_plan(
             builder.indent();
             has_guard = true;
         }
+    }
+
+    if let Some(accessor) = trace_accessor {
+        emit_trace_context_prefix(generator, &mut builder, accessor);
     }
 
     for item in &plan.items {
@@ -61,6 +72,10 @@ pub(super) fn emit_log_plan(
                 }
             }
         }
+    }
+
+    if let Some(accessor) = trace_accessor {
+        emit_trace_context_suffix(&mut builder, accessor);
     }
 
     if has_guard {
@@ -447,6 +462,75 @@ fn build_concatenation(
         expression.push_str(&part);
     }
     Ok(expression)
+}
+
+fn emit_trace_context_prefix(
+    generator: &mut JavaCodeGenerator,
+    builder: &mut JavaSourceBuilder,
+    accessor: TraceContextAccessor,
+) {
+    generator.add_import(opentelemetry::SPAN_CLASS);
+    generator.add_import(opentelemetry::SPAN_CONTEXT_CLASS);
+    generator.add_import(accessor.import);
+
+    let span_type = simple_type_name(opentelemetry::SPAN_CLASS);
+    let span_context_type = simple_type_name(opentelemetry::SPAN_CONTEXT_CLASS);
+
+    builder.push_line(&format!(
+        "{span_type} __jvSpan = {span_type}.current();",
+        span_type = span_type
+    ));
+    builder.push_line(&format!(
+        "{span_context_type} __jvSpanContext = __jvSpan.getSpanContext();",
+        span_context_type = span_context_type
+    ));
+    builder.push_line("boolean __jvTraceValid = __jvSpanContext.isValid();");
+    builder.push_line("if (__jvTraceValid) {");
+    builder.indent();
+    builder.push_line(&format!(
+        "{accessor}.{put}(\"{key}\", __jvSpanContext.getTraceId());",
+        accessor = accessor.type_name,
+        put = accessor.put_method,
+        key = opentelemetry::TRACE_ID_KEY
+    ));
+    builder.push_line(&format!(
+        "{accessor}.{put}(\"{key}\", __jvSpanContext.getSpanId());",
+        accessor = accessor.type_name,
+        put = accessor.put_method,
+        key = opentelemetry::SPAN_ID_KEY
+    ));
+    builder.dedent();
+    builder.push_line("}");
+    builder.push_line("try {");
+    builder.indent();
+}
+
+fn emit_trace_context_suffix(builder: &mut JavaSourceBuilder, accessor: TraceContextAccessor) {
+    builder.dedent();
+    builder.push_line("} finally {");
+    builder.indent();
+    builder.push_line("if (__jvTraceValid) {");
+    builder.indent();
+    builder.push_line(&format!(
+        "{accessor}.{remove}(\"{key}\");",
+        accessor = accessor.type_name,
+        remove = accessor.remove_method,
+        key = opentelemetry::TRACE_ID_KEY
+    ));
+    builder.push_line(&format!(
+        "{accessor}.{remove}(\"{key}\");",
+        accessor = accessor.type_name,
+        remove = accessor.remove_method,
+        key = opentelemetry::SPAN_ID_KEY
+    ));
+    builder.dedent();
+    builder.push_line("}");
+    builder.dedent();
+    builder.push_line("}");
+}
+
+fn simple_type_name(fqcn: &str) -> &str {
+    fqcn.rsplit('.').next().unwrap_or(fqcn)
 }
 
 fn ensure_string_value(
