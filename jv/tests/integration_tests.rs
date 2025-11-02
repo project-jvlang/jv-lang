@@ -1117,6 +1117,91 @@ fun sample(input: String): Boolean {
 }
 
 #[test]
+fn cli_regex_additional_flags() {
+    ensure_toolchain_envs();
+
+    if !has_javac() || !has_java_runtime() {
+        eprintln!(
+            "Skipping regex additional flags CLI test: missing javac or java runtime"
+        );
+        return;
+    }
+
+    let fixture = workspace_file("tests/fixtures/regex/command_additional_flags.jv");
+    let temp_dir = TempDirGuard::new("cli-regex-flags").expect("create temp dir for regex flags");
+    let plan = compose_plan_from_fixture(
+        temp_dir.path(),
+        &fixture,
+        CliOverrides {
+            java_only: true,
+            ..CliOverrides::default()
+        },
+    );
+
+    let artifacts = compile(&plan).expect("compile regex command fixture");
+    assert!(
+        !artifacts.java_files.is_empty(),
+        "expected generated Java files for regex command fixture"
+    );
+
+    let java_source = read_java_sources(&artifacts.java_files);
+    for constant in [
+        "Pattern.UNICODE_CASE",
+        "Pattern.UNIX_LINES",
+        "Pattern.COMMENTS",
+        "Pattern.LITERAL",
+        "Pattern.CANON_EQ",
+    ] {
+        assert!(
+            java_source.contains(constant),
+            "{constant} missing in generated Java source:\n{java_source}"
+        );
+    }
+
+    let java_dir = plan.options.output_dir.join("java25");
+    let classes_dir = java_dir.join("classes");
+    fs::create_dir_all(&classes_dir).expect("create classes directory for javac");
+
+    let mut javac = javac_command().expect("javac command unavailable");
+    javac.arg("-d").arg(&classes_dir);
+    for file in &artifacts.java_files {
+        javac.arg(file);
+    }
+    let status = javac.status().expect("invoke javac for regex flags fixture");
+    assert!(status.success(), "javac failed for regex flags fixture: {status:?}");
+
+    let mut java_cmd = java_command().expect("java runtime unavailable");
+    let output = java_cmd
+        .arg("-cp")
+        .arg(&classes_dir)
+        .arg(&artifacts.script_main_class)
+        .output()
+        .expect("execute compiled regex flags script");
+
+    assert!(
+        output.status.success(),
+        "java execution failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8(output.stdout).expect("regex flags stdout is UTF-8");
+    let expected_output = [
+        "unicode-case ascii-changed=true unicode-changed=true",
+        "unix-lines baseline-changed=true unix-changed=false",
+        "comments baseline-changed=false flag-changed=true",
+        "literal regex-changed=true flag-changed=false exact-changed=true",
+        "canon-eq baseline-changed=true flag-changed=true",
+    ]
+    .join("\n");
+
+    assert_eq!(
+        stdout.trim(),
+        expected_output,
+        "unexpected regex command flag behaviour"
+    );
+}
+
+#[test]
 fn cli_check_reports_regex_diagnostics() {
     let cli_path = match cli_binary_path() {
         Ok(path) => path,

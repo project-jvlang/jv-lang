@@ -1,0 +1,36 @@
+val kelvin = "K"
+val asciiInsensitive = a/kelvin/'k'/'ASCII'/i
+val unicodeInsensitive = a/kelvin/'k'/'UNICODE'/iu
+val unicodeAsciiChanged = !asciiInsensitive.equals(kelvin)
+val unicodeChanged = !unicodeInsensitive.equals(kelvin)
+println("unicode-case ascii-changed=${unicodeAsciiChanged} unicode-changed=${unicodeChanged}")
+
+val textWithCarriage = "start\rend"
+val multilineMatch = a/textWithCarriage/'^end$'/'MATCH'/m
+val unixLinesMatch = a/textWithCarriage/'^end$'/'MATCH'/dm
+val multilineChanged = !multilineMatch.equals(textWithCarriage)
+val unixLinesChanged = !unixLinesMatch.equals(textWithCarriage)
+println("unix-lines baseline-changed=${multilineChanged} unix-changed=${unixLinesChanged}")
+
+val commentSubject = "foo"
+val commentBaseline = a/commentSubject/'foo # comment'/'OK'
+val commentFlag = a/commentSubject/'foo # comment'/'OK'/x
+val commentBaselineChanged = !commentBaseline.equals(commentSubject)
+val commentFlagChanged = !commentFlag.equals(commentSubject)
+println("comments baseline-changed=${commentBaselineChanged} flag-changed=${commentFlagChanged}")
+
+val literalSubject = "a123b"
+val literalRegex = a/literalSubject/'a.+b'/'OK'
+val literalFlag = a/literalSubject/'a.+b'/'OK'/l
+val literalExact = a/"a.+b"/'a.+b'/'OK'/l
+val literalRegexChanged = !literalRegex.equals(literalSubject)
+val literalFlagChanged = !literalFlag.equals(literalSubject)
+val literalExactChanged = !literalExact.equals("a.+b")
+println("literal regex-changed=${literalRegexChanged} flag-changed=${literalFlagChanged} exact-changed=${literalExactChanged}")
+
+val canonicalSubject = "é"
+val canonicalBaseline = a/canonicalSubject/'é'/'OK'
+val canonicalFlag = a/canonicalSubject/'é'/'OK'/c
+val canonicalBaselineChanged = !canonicalBaseline.equals(canonicalSubject)
+val canonicalFlagChanged = !canonicalFlag.equals(canonicalSubject)
+println("canon-eq baseline-changed=${canonicalBaselineChanged} flag-changed=${canonicalFlagChanged}")

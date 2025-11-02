@@ -5,6 +5,9 @@ use std::process::{Command, Stdio};
 use jv_cli::pipeline::compute_script_main_class;
 use tempfile::tempdir;
 
+const ADDITIONAL_FLAGS_SCRIPT: &str =
+    include_str!("../../../tests/fixtures/regex/command_additional_flags.jv");
+
 fn compiled_main_class(src: &Path) -> (PathBuf, String) {
     let cli_path = PathBuf::from(env!("CARGO_BIN_EXE_jv"));
     let workspace = tempdir().expect("一時ディレクトリ作成");
@@ -206,6 +209,101 @@ Chie:RESULT ip=172.16.0.77\n";
         actual_lines, expected_lines,
         "正規表現モード網羅テストの出力が想定と一致しません"
     );
+}
+
+#[test]
+fn regex_command_additional_flags_produce_expected_output() {
+    if !has_javac() || !has_java_runtime() {
+        eprintln!("javac もしくは java が利用できないためテストをスキップします");
+        return;
+    }
+
+    let mut home_candidate = std::env::var("JAVA25_HOME").ok().or_else(|| std::env::var("JAVA_HOME").ok());
+    let mut inferred_home = None;
+
+    let ensure_home = |path: &Path| {
+        let java_bin = path.join("bin").join("java");
+        java_bin.exists()
+    };
+
+    if let Some(ref home) = home_candidate {
+        if !ensure_home(Path::new(home)) {
+            home_candidate = None;
+        }
+    }
+
+    if home_candidate.is_none() {
+        let javac_path = Command::new("which")
+            .arg("javac")
+            .output()
+            .ok()
+            .and_then(|out| if out.status.success() {
+                let text = String::from_utf8_lossy(&out.stdout).trim().to_string();
+                (!text.is_empty()).then_some(PathBuf::from(text))
+            } else {
+                None
+            });
+
+        if let Some(path) = javac_path {
+            if let Some(bin_dir) = path.parent() {
+                let home = bin_dir.parent().unwrap_or(bin_dir);
+                if ensure_home(home) {
+                    inferred_home = Some(home.to_path_buf());
+                    home_candidate = Some(home.display().to_string());
+                }
+            }
+        }
+    }
+
+    let Some(home_str) = home_candidate else {
+        eprintln!("利用可能な JAVA_HOME が見つからないためテストをスキップします");
+        return;
+    };
+
+    if !ensure_home(Path::new(&home_str)) {
+        eprintln!(
+            "設定済みの JAVA_HOME ({}) に java 実行可能ファイルが存在しないためテストをスキップします",
+            home_str
+        );
+        return;
+    }
+
+    if let Some(home) = inferred_home {
+        unsafe {
+            std::env::set_var("JAVA_HOME", &home);
+            std::env::set_var("JAVA25_HOME", &home);
+        }
+    }
+
+    let workspace = tempdir().expect("一時ディレクトリ作成");
+    let script_path = workspace.path().join("regex_command_flags.jv");
+    fs::write(&script_path, ADDITIONAL_FLAGS_SCRIPT).expect("追加フラグスクリプトを書き込み");
+
+    let (output_dir, main_class) = compiled_main_class(&script_path);
+
+    let run_output = Command::new("java")
+        .arg("-cp")
+        .arg(&output_dir)
+        .arg(&main_class)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .expect("java 実行");
+
+    assert!(
+        run_output.status.success(),
+        "Java 実行が失敗しました: {}",
+        String::from_utf8_lossy(&run_output.stderr)
+    );
+
+    let stdout = String::from_utf8(run_output.stdout).expect("標準出力はUTF-8");
+    let expected = "unicode-case ascii-changed=true unicode-changed=true\n\
+unix-lines baseline-changed=true unix-changed=false\n\
+comments baseline-changed=false flag-changed=true\n\
+literal regex-changed=true flag-changed=false exact-changed=true\n\
+canon-eq baseline-changed=true flag-changed=true\n";
+
+    assert_eq!(stdout, expected, "追加フラグの出力が期待値と一致しません");
 }
 
 #[test]
