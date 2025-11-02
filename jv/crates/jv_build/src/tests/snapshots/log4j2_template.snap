@@ -1,0 +1,23 @@
+---
+source: crates/jv_build/src/tests/logging_artifacts.rs
+assertion_line: 46
+expression: &artifacts[0].contents
+---
+<Configuration status="WARN">
+  <Appenders>
+    <OpenTelemetry name="OTEL" endpoint="https://collector.example.com:4317" protocol="grpc" traceContext="enable">
+      <ResourceAttributes>
+        <Attribute key="service.name" value="order-service"/>
+      </ResourceAttributes>
+      <LogAttributes>
+        <Attribute key="deployment.environment" value="staging"/>
+        <Attribute key="team" value="observability"/>
+      </LogAttributes>
+    </OpenTelemetry>
+  </Appenders>
+  <Loggers>
+    <Root level="DEBUG">
+      <AppenderRef ref="OTEL"/>
+    </Root>
+  </Loggers>
+</Configuration>
