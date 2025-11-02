@@ -199,10 +199,16 @@ mod tests {
         match ir_expr {
             IrExpression::RegexPattern {
                 pattern,
+                flags,
                 java_type,
                 span: ir_span,
+                const_key,
+                static_handle,
             } => {
                 assert_eq!(pattern, "\\d+");
+                assert!(flags.is_empty());
+                assert!(const_key.is_none());
+                assert!(static_handle.is_none());
                 assert_eq!(ir_span, span);
                 match java_type {
                     JavaType::Reference { name, generic_args } => {
@@ -217,6 +223,58 @@ mod tests {
             }
             other => panic!("expected regex pattern ir expression, got {:?}", other),
         }
+    }
+
+    #[test]
+    fn transform_expression_registers_static_handle_for_const_pattern() {
+        let span = dummy_span();
+        let literal = RegexLiteral {
+            pattern: "^[a-z]+$".to_string(),
+            raw: "/^[a-z]+$/".to_string(),
+            span: span.clone(),
+            origin: Some(PatternOrigin::literal(span.clone())),
+            const_key: Some(PatternConstKey::new([1; 16], "^[a-z]+$")),
+        };
+
+        let statement = Statement::Expression {
+            expr: Expression::RegexLiteral(literal.clone()),
+            span: span.clone(),
+        };
+        let program = Program {
+            package: None,
+            imports: Vec::new(),
+            statements: vec![statement],
+            span: span.clone(),
+        };
+
+        let mut context = TransformContext::new();
+        let ir_program = transform_program_with_context(program, &mut context)
+            .expect("regex literal program should lower");
+
+        let mut expr_handles = Vec::new();
+        for stmt in &ir_program.type_declarations {
+            match stmt {
+                IrStatement::Expression { expr, .. } => {
+                    if let IrExpression::RegexPattern { static_handle, .. } = expr {
+                        expr_handles.push(static_handle.clone());
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        assert!(
+            matches!(ir_program.type_declarations.first(),
+                Some(IrStatement::ClassDeclaration { name, .. }) if name == "__JVPatternCache"),
+            "pattern cache class should be generated"
+        );
+
+        assert_eq!(expr_handles.len(), 1, "one regex expression expected");
+        let handle = expr_handles[0]
+            .as_ref()
+            .expect("static handle should be attached");
+        assert_eq!(handle.class_name, "__JVPatternCache");
+        assert_eq!(handle.field_name, "PATTERN_1");
     }
 
     #[test]
@@ -1052,10 +1110,16 @@ mod tests {
         match ir_expr {
             IrExpression::RegexPattern {
                 pattern,
+                flags,
                 java_type,
                 span: ir_span,
+                const_key,
+                static_handle,
             } => {
                 assert_eq!(pattern, "^[a-z]+$");
+                assert!(flags.is_empty());
+                assert!(const_key.is_none());
+                assert!(static_handle.is_none());
                 assert_eq!(ir_span, literal.span);
                 match java_type {
                     JavaType::Reference { name, generic_args } => {

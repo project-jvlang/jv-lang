@@ -115,8 +115,11 @@ fn base_command(mode: RegexCommandMode) -> IrRegexCommand {
         subject: Box::new(ir_identifier("text", &string_type())),
         pattern: Box::new(IrExpression::RegexPattern {
             pattern: "\\d+".to_string(),
+            flags: Vec::new(),
             java_type: JavaType::pattern(),
             span: span.clone(),
+            const_key: None,
+            static_handle: None,
         }),
         replacement: IrRegexReplacement::None,
         flags: Vec::new(),
@@ -210,8 +213,11 @@ fn renders_split_for_split_mode() {
     command.java_type = string_array_type();
     command.pattern = Box::new(IrExpression::RegexPattern {
         pattern: ",\\s*".to_string(),
+        flags: Vec::new(),
         java_type: JavaType::pattern(),
         span: command.span.clone(),
+        const_key: None,
+        static_handle: None,
     });
 
     let java = render_java(&regex_command_program(command));

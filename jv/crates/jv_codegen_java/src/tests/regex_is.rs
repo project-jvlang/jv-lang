@@ -43,8 +43,11 @@ fn regex_literal_match_program() -> IrProgram {
                     subject: Box::new(ir_identifier("text", &string_ty)),
                     pattern: Box::new(IrExpression::RegexPattern {
                         pattern: "\\d+".to_string(),
+                        flags: Vec::new(),
                         java_type: JavaType::pattern(),
                         span: span.clone(),
+                        const_key: None,
+                        static_handle: None,
                     }),
                     guard_strategy: RegexGuardStrategy::None,
                     java_type: JavaType::Primitive("boolean".to_string()),
@@ -120,8 +123,11 @@ fn optional_subject_match_program() -> IrProgram {
                     subject: Box::new(ir_identifier("text", &char_seq_ty)),
                     pattern: Box::new(IrExpression::RegexPattern {
                         pattern: "[a-zA-Z]+".to_string(),
+                        flags: Vec::new(),
                         java_type: JavaType::pattern(),
                         span: span.clone(),
+                        const_key: None,
+                        static_handle: None,
                     }),
                     guard_strategy: RegexGuardStrategy::CaptureAndGuard {
                         temp_name: Some("__guard".to_string()),

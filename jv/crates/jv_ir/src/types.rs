@@ -72,8 +72,13 @@ pub enum IrExpression {
     /// Compiled regular expression pattern handle.
     RegexPattern {
         pattern: String,
+        flags: Vec<RegexFlag>,
         java_type: JavaType,
         span: Span,
+        #[serde(default)]
+        const_key: Option<PatternConstKey>,
+        #[serde(default)]
+        static_handle: Option<PatternStaticFieldHandle>,
     },
     Identifier {
         name: String,
@@ -280,6 +285,13 @@ pub enum IrExpression {
         java_type: JavaType,
         span: Span,
     },
+}
+
+/// 静的に再利用される正規表現フィールドを参照するハンドル。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PatternStaticFieldHandle {
+    pub class_name: String,
+    pub field_name: String,
 }
 
 /// IR node capturing concise regex command expressions.

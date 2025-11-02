@@ -1,7 +1,7 @@
 use super::*;
 use insta::assert_snapshot;
 use jv_ast::{
-    BinaryOp, CallArgumentStyle, Literal, SequenceDelimiter, Span,
+    BinaryOp, CallArgumentStyle, Literal, PatternConstKey, SequenceDelimiter, Span,
     types::{PrimitiveTypeName, PrimitiveTypeReference, PrimitiveTypeSource},
 };
 use jv_ir::TransformContext;
@@ -10,10 +10,11 @@ use jv_ir::{
     CharToStringConversion, DataFormat, IrCaseLabel, IrCommentKind, IrDeconstructionComponent,
     IrDeconstructionPattern, IrExpression, IrImplicitWhenEnd, IrModifiers, IrParameter, IrProgram,
     IrRecordComponent, IrSampleDeclaration, IrStatement, IrSwitchCase, IrTypeParameter,
-    IrVisibility, JavaType, MethodOverload, PipelineShape, PrimitiveReturnMetadata,
-    PrimitiveSpecializationHint, PrimitiveType, RawStringFlavor, SampleMode,
-    SampleRecordDescriptor, SampleRecordField, SampleSourceKind, Schema, SequencePipeline,
-    SequenceSource, SequenceTerminal, SequenceTerminalEvaluation, SequenceTerminalKind,
+    IrVisibility, JavaType, MethodOverload, PatternStaticFieldHandle, PipelineShape,
+    PrimitiveReturnMetadata, PrimitiveSpecializationHint, PrimitiveType, RawStringFlavor,
+    SampleMode, SampleRecordDescriptor, SampleRecordField, SampleSourceKind, Schema,
+    SequencePipeline, SequenceSource, SequenceTerminal, SequenceTerminalEvaluation,
+    SequenceTerminalKind,
 };
 use jv_parser_frontend::ParserPipeline;
 use jv_parser_rowan::frontend::RowanPipeline;
@@ -1563,8 +1564,11 @@ fn regex_pattern_expression_renders_pattern_compile() {
     let mut generator = JavaCodeGenerator::new();
     let expression = IrExpression::RegexPattern {
         pattern: "^[a-z]+$".to_string(),
+        flags: Vec::new(),
         java_type: JavaType::pattern(),
         span: dummy_span(),
+        const_key: None,
+        static_handle: None,
     };
 
     let rendered = generator
@@ -1740,7 +1744,47 @@ fn script_statements_are_wrapped_in_generated_main() {
 fn script_regex_val_is_hoisted_to_static_field() {
     let regex_initializer = IrExpression::RegexPattern {
         pattern: "^[a-z]+$".to_string(),
+        flags: Vec::new(),
         java_type: JavaType::pattern(),
+        span: dummy_span(),
+        const_key: Some(PatternConstKey::new([1; 16], "^[a-z]+$")),
+        static_handle: Some(PatternStaticFieldHandle {
+            class_name: "__JVPatternCache".to_string(),
+            field_name: "PATTERN_1".to_string(),
+        }),
+    };
+
+    let pattern_cache = IrStatement::ClassDeclaration {
+        name: "__JVPatternCache".to_string(),
+        type_parameters: Vec::new(),
+        superclass: None,
+        interfaces: Vec::new(),
+        fields: vec![IrStatement::FieldDeclaration {
+            name: "PATTERN_1".to_string(),
+            java_type: JavaType::pattern(),
+            initializer: Some(IrExpression::RegexPattern {
+                pattern: "^[a-z]+$".to_string(),
+                flags: Vec::new(),
+                java_type: JavaType::pattern(),
+                span: dummy_span(),
+                const_key: None,
+                static_handle: None,
+            }),
+            modifiers: IrModifiers {
+                visibility: IrVisibility::Public,
+                is_static: true,
+                is_final: true,
+                ..IrModifiers::default()
+            },
+            span: dummy_span(),
+        }],
+        methods: Vec::new(),
+        nested_classes: Vec::new(),
+        modifiers: IrModifiers {
+            visibility: IrVisibility::Public,
+            is_final: true,
+            ..IrModifiers::default()
+        },
         span: dummy_span(),
     };
 
@@ -1756,7 +1800,7 @@ fn script_regex_val_is_hoisted_to_static_field() {
     let program = IrProgram {
         package: None,
         imports: vec![],
-        type_declarations: vec![regex_decl],
+        type_declarations: vec![pattern_cache, regex_decl],
         generic_metadata: Default::default(),
         conversion_metadata: Vec::new(),
         span: dummy_span(),
@@ -1766,12 +1810,24 @@ fn script_regex_val_is_hoisted_to_static_field() {
     let source = unit.to_source(&JavaCodeGenConfig::default());
 
     assert!(
+        source.contains("public final class __JVPatternCache"),
+        "pattern cache class should be generated: {source}"
+    );
+    assert!(
+        source.contains("public static final java.util.regex.Pattern PATTERN_1"),
+        "cache class should expose static pattern field: {source}"
+    );
+    assert!(
         source.contains("static final java.util.regex.Pattern usernamePattern"),
         "regex pattern should be hoisted to a static field: {source}"
     );
     assert!(
+        source.contains("__JVPatternCache.PATTERN_1"),
+        "hoisted field should reference cached pattern"
+    );
+    assert!(
         source.contains("Pattern.compile(\"^[a-z]+$\")"),
-        "field initializer should compile pattern"
+        "pattern cache should compile literal once"
     );
     let field_index = source
         .find("static final java.util.regex.Pattern usernamePattern")
@@ -1796,11 +1852,51 @@ fn class_regex_field_is_emitted_as_static_final() {
         java_type: JavaType::pattern(),
         initializer: Some(IrExpression::RegexPattern {
             pattern: "^.+@.+$".to_string(),
+            flags: Vec::new(),
             java_type: JavaType::pattern(),
             span: dummy_span(),
+            const_key: Some(PatternConstKey::new([2; 16], "^.+@.+$")),
+            static_handle: Some(PatternStaticFieldHandle {
+                class_name: "__JVPatternCache".to_string(),
+                field_name: "PATTERN_1".to_string(),
+            }),
         }),
         modifiers: IrModifiers {
             visibility: IrVisibility::Private,
+            is_final: true,
+            ..IrModifiers::default()
+        },
+        span: dummy_span(),
+    };
+
+    let pattern_cache = IrStatement::ClassDeclaration {
+        name: "__JVPatternCache".to_string(),
+        type_parameters: Vec::new(),
+        superclass: None,
+        interfaces: Vec::new(),
+        fields: vec![IrStatement::FieldDeclaration {
+            name: "PATTERN_1".to_string(),
+            java_type: JavaType::pattern(),
+            initializer: Some(IrExpression::RegexPattern {
+                pattern: "^.+@.+$".to_string(),
+                flags: Vec::new(),
+                java_type: JavaType::pattern(),
+                span: dummy_span(),
+                const_key: None,
+                static_handle: None,
+            }),
+            modifiers: IrModifiers {
+                visibility: IrVisibility::Public,
+                is_static: true,
+                is_final: true,
+                ..IrModifiers::default()
+            },
+            span: dummy_span(),
+        }],
+        methods: Vec::new(),
+        nested_classes: Vec::new(),
+        modifiers: IrModifiers {
+            visibility: IrVisibility::Public,
             is_final: true,
             ..IrModifiers::default()
         },
@@ -1825,7 +1921,7 @@ fn class_regex_field_is_emitted_as_static_final() {
     let program = IrProgram {
         package: Some("example.validation".to_string()),
         imports: vec![],
-        type_declarations: vec![class],
+        type_declarations: vec![pattern_cache, class],
         generic_metadata: Default::default(),
         conversion_metadata: Vec::new(),
         span: dummy_span(),
@@ -1835,12 +1931,24 @@ fn class_regex_field_is_emitted_as_static_final() {
     let source = unit.to_source(&JavaCodeGenConfig::default());
 
     assert!(
+        source.contains("public final class __JVPatternCache"),
+        "pattern cache class should be generated"
+    );
+    assert!(
+        source.contains("public static final java.util.regex.Pattern PATTERN_1"),
+        "cache class should expose static pattern field"
+    );
+    assert!(
         source.contains("static final java.util.regex.Pattern EMAIL_PATTERN"),
         "class field should become static final pattern"
     );
     assert!(
+        source.contains("__JVPatternCache.PATTERN_1"),
+        "class field should reference cached pattern"
+    );
+    assert!(
         source.contains("Pattern.compile(\"^.+@.+$\")"),
-        "class field initializer should compile pattern"
+        "pattern cache should compile literal once"
     );
 }
 

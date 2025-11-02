@@ -24,12 +24,24 @@ impl JavaCodeGenerator {
             IrExpression::Literal(literal, raw_flavor, _) => {
                 Ok(Self::literal_to_string(literal, *raw_flavor))
             }
-            IrExpression::RegexPattern { pattern, .. } => {
-                self.add_import("java.util.regex.Pattern");
-                Ok(format!(
-                    "Pattern.compile(\"{}\")",
-                    Self::escape_string(pattern)
-                ))
+            IrExpression::RegexPattern {
+                pattern,
+                flags,
+                static_handle,
+                ..
+            } => {
+                if let Some(handle) = static_handle {
+                    Ok(format!("{}.{}", handle.class_name, handle.field_name))
+                } else {
+                    self.add_import("java.util.regex.Pattern");
+                    let escaped = Self::escape_string(pattern);
+                    if flags.is_empty() {
+                        Ok(format!("Pattern.compile(\"{escaped}\")"))
+                    } else {
+                        let flag_mask = self.render_regex_flag_mask(flags);
+                        Ok(format!("Pattern.compile(\"{escaped}\", {flag_mask})"))
+                    }
+                }
             }
             IrExpression::Identifier { name, .. } => {
                 if self.mutable_captures.contains(name) {
@@ -2485,13 +2497,31 @@ impl JavaCodeGenerator {
         pattern: &IrExpression,
         flags: &[RegexFlag],
     ) -> Result<String, CodeGenError> {
-        if let IrExpression::RegexPattern { pattern: value, .. } = pattern {
+        if let IrExpression::RegexPattern {
+            static_handle: Some(handle),
+            ..
+        } = pattern
+        {
+            return Ok(format!("{}.{}", handle.class_name, handle.field_name));
+        }
+
+        if let IrExpression::RegexPattern {
+            pattern: value,
+            flags: expr_flags,
+            ..
+        } = pattern
+        {
             self.add_import("java.util.regex.Pattern");
             let escaped = Self::escape_string(value);
-            if flags.is_empty() {
+            let effective_flags = if expr_flags.is_empty() {
+                flags
+            } else {
+                expr_flags
+            };
+            if effective_flags.is_empty() {
                 Ok(format!("Pattern.compile(\"{escaped}\")"))
             } else {
-                let flag_mask = self.render_regex_flag_mask(flags);
+                let flag_mask = self.render_regex_flag_mask(effective_flags);
                 Ok(format!("Pattern.compile(\"{escaped}\", {flag_mask})"))
             }
         } else {
@@ -2904,11 +2934,14 @@ mod tests {
             }),
             pattern: Box::new(IrExpression::RegexPattern {
                 pattern: "\\d+".to_string(),
+                flags: Vec::new(),
                 java_type: JavaType::Reference {
                     name: "java.util.regex.Pattern".to_string(),
                     generic_args: Vec::new(),
                 },
                 span: Span::dummy(),
+                const_key: None,
+                static_handle: None,
             }),
             guard_strategy: RegexGuardStrategy::None,
             java_type: JavaType::boolean(),
@@ -2937,11 +2970,14 @@ mod tests {
             }),
             pattern: Box::new(IrExpression::RegexPattern {
                 pattern: "[a-zA-Z]+".to_string(),
+                flags: Vec::new(),
                 java_type: JavaType::Reference {
                     name: "java.util.regex.Pattern".to_string(),
                     generic_args: Vec::new(),
                 },
                 span: Span::dummy(),
+                const_key: None,
+                static_handle: None,
             }),
             guard_strategy: RegexGuardStrategy::CaptureAndGuard {
                 temp_name: Some("__tmp".to_string()),

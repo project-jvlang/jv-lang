@@ -2,11 +2,15 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::Duration;
 
+use crate::transform::PatternConstRegistry;
 use crate::types::{
     DataFormat, IrExpression, IrImport, IrImportDetail, IrResolvedMethodTarget, IrStatement,
-    JavaType, MethodOverload, PrimitiveReturnMetadata, SampleMode, UtilityClass,
+    JavaType, MethodOverload, PatternStaticFieldHandle, PrimitiveReturnMetadata, SampleMode,
+    UtilityClass,
 };
-use jv_ast::{CallArgumentStyle, RegexCommandMode, RegexGuardStrategy, Span};
+use jv_ast::{
+    CallArgumentStyle, PatternConstKey, RegexCommandMode, RegexFlag, RegexGuardStrategy, Span,
+};
 use jv_support::arena::{
     PoolMetrics as TransformPoolMetrics, PoolSessionMetrics as TransformPoolSessionMetrics,
     TransformPools, TransformPoolsGuard,
@@ -55,6 +59,8 @@ pub struct TransformContext {
     planned_imports: Vec<IrImport>,
     /// Alias lookup for resolved import entries
     import_aliases: HashMap<String, JavaType>,
+    /// Registry handling static pattern constant allocation
+    pattern_registry: PatternConstRegistry,
 }
 
 /// Hint describing a function signature sourced from TypeFacts prior to lowering.
@@ -104,6 +110,7 @@ impl TransformContext {
             when_strategies: Vec::new(),
             planned_imports: Vec::new(),
             import_aliases: HashMap::new(),
+            pattern_registry: PatternConstRegistry::new(),
         }
     }
 
@@ -584,6 +591,7 @@ impl TransformContext {
     /// Starts a lowering session, clearing cached state and borrowing pools if available.
     pub fn begin_lowering_session(&mut self) -> Option<TransformPoolsGuard> {
         self.sequence_style_cache.clear();
+        self.pattern_registry.clear();
         self.pool_state.as_mut().map(|state| state.acquire())
     }
 
@@ -634,6 +642,23 @@ impl TransformContext {
     /// Consumes and returns the recorded lowering strategies.
     pub fn take_when_strategies(&mut self) -> Vec<WhenStrategyRecord> {
         std::mem::take(&mut self.when_strategies)
+    }
+
+    pub fn register_static_pattern(
+        &mut self,
+        pattern: &str,
+        flags: &[RegexFlag],
+        key: &PatternConstKey,
+    ) -> PatternStaticFieldHandle {
+        self.pattern_registry.register(pattern, flags, key)
+    }
+
+    pub fn take_pattern_registry_class(&mut self) -> Option<IrStatement> {
+        self.pattern_registry.take_registry_class()
+    }
+
+    pub fn pattern_registry_class_name(&self) -> &str {
+        self.pattern_registry.class_name()
     }
 }
 
@@ -1057,6 +1082,7 @@ impl Clone for TransformContext {
             when_strategies: self.when_strategies.clone(),
             planned_imports: self.planned_imports.clone(),
             import_aliases: self.import_aliases.clone(),
+            pattern_registry: self.pattern_registry.clone(),
         }
     }
 }

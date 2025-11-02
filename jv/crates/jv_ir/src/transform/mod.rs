@@ -11,9 +11,10 @@ use crate::types::{
 use jv_ast::{
     Argument, BinaryMetadata, BinaryOp, BindingPatternKind, CallArgumentMetadata,
     CallArgumentStyle, CommentKind, ConcurrencyConstruct, Expression, IsTestKind, Literal,
-    Modifiers, Program, RegexCommand, RegexCommandMode, RegexGuardStrategy, RegexLambdaReplacement,
-    RegexLiteralReplacement, RegexReplacement, RegexTemplateSegment, ResourceManagement,
-    SequenceDelimiter, Span, Statement, TypeAnnotation, UnaryOp, ValBindingOrigin,
+    Modifiers, Program, RegexCommand, RegexCommandMode, RegexFlag, RegexGuardStrategy,
+    RegexLambdaReplacement, RegexLiteralReplacement, RegexReplacement, RegexTemplateSegment,
+    ResourceManagement, SequenceDelimiter, Span, Statement, TypeAnnotation, UnaryOp,
+    ValBindingOrigin,
 };
 
 mod concurrency;
@@ -22,6 +23,7 @@ mod declarations;
 mod functions;
 mod loops;
 mod null_safety;
+mod pattern_registry;
 mod resources;
 mod sample;
 mod strings;
@@ -50,6 +52,7 @@ pub use functions::{
 pub use null_safety::{
     desugar_elvis_operator, desugar_null_safe_index_access, desugar_null_safe_member_access,
 };
+pub(crate) use pattern_registry::PatternConstRegistry;
 pub use resources::{desugar_defer_expression, desugar_use_expression};
 pub use sample::{fetch_sample_data, infer_json_value_schema, infer_schema};
 pub use strings::desugar_string_interpolation;
@@ -374,6 +377,9 @@ fn lower_program(
 
     let mut type_declarations = attach_trailing_comments(ir_statements);
     apply_method_erasure(&mut type_declarations, context);
+    if let Some(registry_class) = context.take_pattern_registry_class() {
+        type_declarations.insert(0, registry_class);
+    }
 
     let ir_imports = if context.has_resolved_imports() {
         context
@@ -509,19 +515,37 @@ pub fn transform_expression(
     match expr {
         Expression::Literal(lit, span) => {
             if let Literal::Regex(regex) = &lit {
+                let const_key = regex.const_key.clone();
+                let flags: Vec<RegexFlag> = Vec::new();
+                let static_handle = const_key
+                    .as_ref()
+                    .map(|key| context.register_static_pattern(&regex.pattern, &flags, key));
                 return Ok(IrExpression::RegexPattern {
                     pattern: regex.pattern.clone(),
+                    flags,
                     java_type: JavaType::pattern(),
                     span: regex.span.clone(),
+                    const_key,
+                    static_handle,
                 });
             }
             Ok(IrExpression::Literal(lit, None, span))
         }
-        Expression::RegexLiteral(literal) => Ok(IrExpression::RegexPattern {
-            pattern: literal.pattern.clone(),
-            java_type: JavaType::pattern(),
-            span: literal.span.clone(),
-        }),
+        Expression::RegexLiteral(literal) => {
+            let const_key = literal.const_key.clone();
+            let flags: Vec<RegexFlag> = Vec::new();
+            let static_handle = const_key
+                .as_ref()
+                .map(|key| context.register_static_pattern(&literal.pattern, &flags, key));
+            Ok(IrExpression::RegexPattern {
+                pattern: literal.pattern.clone(),
+                flags,
+                java_type: JavaType::pattern(),
+                span: literal.span.clone(),
+                const_key,
+                static_handle,
+            })
+        }
         Expression::RegexCommand(command) => lower_regex_command(*command, context),
         Expression::Identifier(name, span) => {
             if name.is_empty() {
@@ -955,10 +979,18 @@ fn lower_regex_command(
         },
         RegexGuardStrategy::None => RegexGuardStrategy::None,
     };
+    let pattern_flags = flags.clone();
+    let const_key = pattern.const_key.clone();
+    let static_handle = const_key
+        .as_ref()
+        .map(|key| context.register_static_pattern(&pattern.pattern, &pattern_flags, key));
     let pattern_ir = IrExpression::RegexPattern {
         pattern: pattern.pattern.clone(),
+        flags: pattern_flags,
         java_type: JavaType::pattern(),
         span: pattern.span.clone(),
+        const_key,
+        static_handle,
     };
 
     let replacement_ir = lower_regex_replacement(replacement, context)?;
