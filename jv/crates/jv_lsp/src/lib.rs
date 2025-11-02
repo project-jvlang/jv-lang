@@ -1802,8 +1802,13 @@ fn collect_call_diagnostics_from_expression(
             if let Some(base) = &init.base {
                 collect_call_diagnostics_from_expression(base, tokens, diagnostics);
             }
-            for statement in &init.statements {
-                collect_call_diagnostics_from_statement(statement, tokens, diagnostics);
+            let mut stack: Vec<&Statement> = init.statements.iter().collect();
+            let mut visited: HashSet<*const Statement> = HashSet::new();
+            while let Some(statement) = stack.pop() {
+                let ptr = statement as *const Statement;
+                if visited.insert(ptr) {
+                    collect_call_diagnostics_from_statement(statement, tokens, diagnostics);
+                }
             }
         }
         Expression::When {

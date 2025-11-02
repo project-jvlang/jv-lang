@@ -1,8 +1,14 @@
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use tempfile::tempdir;
+
+use jv_cli::pipeline::project::{
+    layout::ProjectLayout, locator::ProjectLocator, manifest::ManifestLoader, output::OutputManager,
+};
+use jv_cli::pipeline::{BuildOptionsFactory, CliOverrides, compile};
+use jv_pm::JavaTarget;
 
 #[test]
 fn doublebrace_control_flow_error_is_reported() {
@@ -25,8 +31,7 @@ fun main(): Unit {
     }}
 }
 "#;
-    fs::write(&source_path, source.trim_start())
-        .expect("Doublebrace 用のサンプルソースを書き込む");
+    fs::write(&source_path, source.trim_start()).expect("Doublebrace 用のサンプルソースを書き込む");
 
     let output = Command::new(cli_path)
         .arg("check")
@@ -53,4 +58,112 @@ fun main(): Unit {
         "日本語メッセージが含まれること: {}",
         combined
     );
+}
+
+#[test]
+fn doublebrace_pipeline_generates_java_without_warnings() {
+    // Doublebrace の mutate/copy パターンが CLI パイプラインで正しく変換されること。
+    let fixture = tempdir().expect("Doublebrace 用の一時ディレクトリを作成する");
+    let root = fixture.path();
+    prepare_manifest(root);
+
+    let src_dir = root.join("src");
+    fs::create_dir_all(&src_dir).expect("ソースディレクトリを作成する");
+    let entrypoint = src_dir.join("main.jv");
+    fs::write(&entrypoint, doublebrace_sample().trim_start())
+        .expect("Doublebrace サンプルコードを書き込む");
+
+    let project_root = ProjectLocator::new()
+        .locate(root)
+        .expect("プロジェクトルートを解決する");
+    let manifest_path = project_root.manifest_path().to_path_buf();
+    let settings = ManifestLoader::load(&manifest_path).expect("manifest を読み込む");
+    let layout =
+        ProjectLayout::from_settings(&project_root, &settings).expect("レイアウトを構築する");
+
+    let mut overrides = CliOverrides::default();
+    overrides.output = Some(project_root.join("dist"));
+    overrides.java_only = true;
+    overrides.check = true;
+    overrides.target = Some(JavaTarget::Java25);
+
+    let plan = BuildOptionsFactory::compose(project_root.clone(), settings, layout, overrides)
+        .expect("ビルドプランを組み立てる");
+
+    let mut prepared = OutputManager::prepare(plan).expect("出力ディレクトリを準備する");
+    let artifacts = compile(prepared.plan()).expect("Doublebrace を含むソースをコンパイルする");
+    prepared.mark_success();
+
+    assert!(
+        artifacts.warnings.is_empty(),
+        "Doublebrace コンパイル時に不要な警告が発生: {:?}",
+        artifacts.warnings
+    );
+    assert!(
+        !artifacts.java_files.is_empty(),
+        "Java 出力が生成されていること"
+    );
+
+    let aggregated = artifacts
+        .java_files
+        .iter()
+        .map(|path| fs::read_to_string(path).expect("Java 出力を読み込む"))
+        .collect::<String>();
+
+    assert!(
+        aggregated.contains("java.util.function.Supplier<java.util.ArrayList>"),
+        "ミューテーション用の Supplier が生成されること:\n{}",
+        aggregated
+    );
+    assert!(
+        aggregated.contains(".withName(\"Alice\")"),
+        "データクラス用 copy フローが生成されること:\n{}",
+        aggregated
+    );
+    assert!(
+        artifacts.compatibility.is_some(),
+        "互換性レポートが生成されていること"
+    );
+}
+
+fn prepare_manifest(root: &Path) {
+    let manifest = r#"[package]
+name = "doublebrace-cli"
+version = "0.1.0"
+
+[package.dependencies]
+
+[project]
+entrypoint = "src/main.jv"
+
+[project.sources]
+include = ["src/**/*.jv"]
+
+[project.output]
+directory = "dist"
+clean = true
+"#;
+    fs::write(root.join("jv.toml"), manifest.trim_start()).expect("manifest を書き込む");
+}
+
+fn doublebrace_sample() -> &'static str {
+    r#"
+import java.util.ArrayList
+
+data User(name: String age: Int)
+
+fun main(): Unit {
+    val numbers = ArrayList<Int>() {{
+        add(10)
+        add(20)
+    }}
+
+    val updated = User("Bob" 30) {{
+        name = "Alice"
+    }}
+
+    println(numbers.size)
+    println(updated.name)
+}
+"#
 }
