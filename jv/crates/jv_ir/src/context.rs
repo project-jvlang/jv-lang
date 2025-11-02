@@ -3,8 +3,9 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use crate::types::{
-    DataFormat, IrExpression, IrImport, IrImportDetail, IrResolvedMethodTarget, IrStatement,
-    JavaType, MethodOverload, PrimitiveReturnMetadata, SampleMode, UtilityClass,
+    DataFormat, DoublebraceLoweringPlan, IrExpression, IrImport, IrImportDetail,
+    IrResolvedMethodTarget, IrStatement, JavaType, MethodOverload, PrimitiveReturnMetadata,
+    SampleMode, UtilityClass,
 };
 use jv_ast::{CallArgumentStyle, Span};
 use jv_support::arena::{
@@ -53,6 +54,8 @@ pub struct TransformContext {
     planned_imports: Vec<IrImport>,
     /// Alias lookup for resolved import entries
     import_aliases: HashMap<String, JavaType>,
+    /// Doublebrace 初期化式に対するプラン情報
+    doublebrace_plans: HashMap<String, DoublebraceLoweringPlan>,
 }
 
 /// Hint describing a function signature sourced from TypeFacts prior to lowering.
@@ -101,6 +104,7 @@ impl TransformContext {
             when_strategies: Vec::new(),
             planned_imports: Vec::new(),
             import_aliases: HashMap::new(),
+            doublebrace_plans: HashMap::new(),
         }
     }
 
@@ -128,6 +132,26 @@ impl TransformContext {
             }
         }
         self.type_info.get(name)
+    }
+
+    /// Doublebrace プラン全体を置き換える。
+    pub fn set_doublebrace_plans(&mut self, plans: HashMap<String, DoublebraceLoweringPlan>) {
+        self.doublebrace_plans = plans;
+    }
+
+    /// 個別の Doublebrace プランを登録する。
+    pub fn insert_doublebrace_plan(&mut self, span: &Span, plan: DoublebraceLoweringPlan) {
+        self.doublebrace_plans.insert(span_key(span), plan);
+    }
+
+    /// 指定スパンに対応する Doublebrace プランを参照する。
+    pub fn doublebrace_plan(&self, span: &Span) -> Option<&DoublebraceLoweringPlan> {
+        self.doublebrace_plans.get(&span_key(span))
+    }
+
+    /// 指定スパンに対応する Doublebrace プランを取り出す。
+    pub fn take_doublebrace_plan(&mut self, span: &Span) -> Option<DoublebraceLoweringPlan> {
+        self.doublebrace_plans.remove(&span_key(span))
     }
 
     pub fn register_function_signature(&mut self, name: String, params: Vec<JavaType>) {
@@ -624,6 +648,13 @@ impl TransformContext {
     }
 }
 
+fn span_key(span: &Span) -> String {
+    format!(
+        "{}:{}-{}:{}",
+        span.start_line, span.start_column, span.end_line, span.end_column
+    )
+}
+
 fn infer_known_method_return_type(
     method_name: &str,
     receiver_type: Option<&JavaType>,
@@ -991,7 +1022,8 @@ fn set_expression_type(expr: &mut IrExpression, java_type: JavaType) {
         | IrExpression::VirtualThread { java_type: ty, .. }
         | IrExpression::TryWithResources { java_type: ty, .. }
         | IrExpression::This { java_type: ty, .. }
-        | IrExpression::Super { java_type: ty, .. } => {
+        | IrExpression::Super { java_type: ty, .. }
+        | IrExpression::DoublebraceInit { java_type: ty, .. } => {
             *ty = java_type;
         }
         IrExpression::Cast { target_type, .. } => {
@@ -1038,6 +1070,7 @@ impl Clone for TransformContext {
             when_strategies: self.when_strategies.clone(),
             planned_imports: self.planned_imports.clone(),
             import_aliases: self.import_aliases.clone(),
+            doublebrace_plans: self.doublebrace_plans.clone(),
         }
     }
 }

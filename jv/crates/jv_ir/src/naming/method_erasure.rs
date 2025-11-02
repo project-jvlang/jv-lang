@@ -1,7 +1,7 @@
 use crate::context::{RegisteredMethodCall, RegisteredMethodDeclaration, TransformContext};
 use crate::types::{
-    IrCatchClause, IrExpression, IrResolvedMethodTarget, IrResource, IrStatement, IrSwitchCase,
-    JavaType, JavaWildcardKind,
+    IrCatchClause, IrDoublebraceMutation, IrDoublebracePlan, IrExpression, IrResolvedMethodTarget,
+    IrResource, IrStatement, IrSwitchCase, JavaType, JavaWildcardKind,
 };
 use hex::encode;
 use jv_ast::Span;
@@ -510,6 +510,38 @@ fn apply_resource(resource: &mut IrResource, resolution: &MethodResolution) {
     apply_expression(&mut resource.initializer, resolution);
 }
 
+fn apply_doublebrace_plan(plan: &mut IrDoublebracePlan, resolution: &MethodResolution) {
+    match plan {
+        IrDoublebracePlan::Mutate(mutate) => {
+            for step in mutate.steps.iter_mut() {
+                match step {
+                    IrDoublebraceMutation::FieldAssignment(update) => {
+                        apply_expression(&mut update.value, resolution);
+                    }
+                    IrDoublebraceMutation::MethodCall(call) => {
+                        if let Some(update) = resolution.call(&call.span) {
+                            call.name = update.java_name.clone();
+                        }
+                        for argument in call.arguments.iter_mut() {
+                            apply_expression(argument, resolution);
+                        }
+                    }
+                    IrDoublebraceMutation::Statement(statements) => {
+                        for statement in statements.iter_mut() {
+                            apply_statement(statement, resolution);
+                        }
+                    }
+                }
+            }
+        }
+        IrDoublebracePlan::Copy(copy) => {
+            for update in copy.updates.iter_mut() {
+                apply_expression(&mut update.value, resolution);
+            }
+        }
+    }
+}
+
 fn apply_expression(expr: &mut IrExpression, resolution: &MethodResolution) {
     match expr {
         IrExpression::MethodCall {
@@ -552,6 +584,12 @@ fn apply_expression(expr: &mut IrExpression, resolution: &MethodResolution) {
         IrExpression::Assignment { target, value, .. } => {
             apply_expression(target, resolution);
             apply_expression(value, resolution);
+        }
+        IrExpression::DoublebraceInit { base, plan, .. } => {
+            if let Some(base_expr) = base {
+                apply_expression(base_expr, resolution);
+            }
+            apply_doublebrace_plan(plan, resolution);
         }
         IrExpression::Conditional {
             condition,

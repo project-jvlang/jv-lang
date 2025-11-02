@@ -57,6 +57,120 @@ pub enum JavaWildcardKind {
     Super,
 }
 
+/// Doublebrace 初期化式のプラン情報（Checker から受け取る生データ）。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DoublebraceLoweringPlan {
+    pub receiver_fqcn: String,
+    pub kind: DoublebraceLoweringKind,
+}
+
+/// Doublebrace 初期化式における処理モード。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum DoublebraceLoweringKind {
+    Mutate(DoublebraceLoweringMutatePlan),
+    Copy(DoublebraceLoweringCopyPlan),
+}
+
+/// Doublebrace ミューテーション戦略の詳細。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DoublebraceLoweringMutatePlan {
+    pub base: DoublebraceBaseStrategy,
+    pub steps: Vec<DoublebraceLoweringStep>,
+}
+
+/// Doublebrace コピー戦略の詳細。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DoublebraceLoweringCopyPlan {
+    pub source: DoublebraceCopySourceStrategy,
+    pub updates: Vec<DoublebraceFieldUpdate>,
+}
+
+/// Doublebrace におけるベースインスタンス確保方針。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DoublebraceBaseStrategy {
+    ExistingInstance,
+    SynthesizedInstance,
+}
+
+/// Doublebrace コピー戦略で用いるコピー元の判定。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DoublebraceCopySourceStrategy {
+    ExistingInstance,
+    SynthesizedInstance,
+}
+
+/// Doublebrace 初期化ブロック内部での操作。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum DoublebraceLoweringStep {
+    FieldAssignment(DoublebraceFieldUpdate),
+    MethodCall(DoublebraceMethodInvocation),
+    Other(Statement),
+}
+
+/// Doublebrace のフィールド更新情報。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DoublebraceFieldUpdate {
+    pub name: String,
+    pub value: Expression,
+    pub span: Span,
+}
+
+/// Doublebrace のメソッド呼び出し情報。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DoublebraceMethodInvocation {
+    pub name: String,
+    pub arguments: Vec<Argument>,
+    pub metadata: CallArgumentMetadata,
+    pub span: Span,
+}
+
+/// Doublebrace 初期化式の IR 表現で利用するプラン情報。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum IrDoublebracePlan {
+    Mutate(IrDoublebraceMutatePlan),
+    Copy(IrDoublebraceCopyPlan),
+}
+
+/// Doublebrace ミューテーション戦略（IR）。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct IrDoublebraceMutatePlan {
+    pub base: DoublebraceBaseStrategy,
+    pub steps: Vec<IrDoublebraceMutation>,
+}
+
+/// Doublebrace コピー戦略（IR）。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct IrDoublebraceCopyPlan {
+    pub source: DoublebraceCopySourceStrategy,
+    pub updates: Vec<IrDoublebraceFieldUpdate>,
+}
+
+/// Doublebrace ブロック内の操作を IR として保持。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum IrDoublebraceMutation {
+    FieldAssignment(IrDoublebraceFieldUpdate),
+    MethodCall(IrDoublebraceMethodInvocation),
+    Statement(Vec<IrStatement>),
+}
+
+/// Doublebrace フィールド更新の IR 表現。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct IrDoublebraceFieldUpdate {
+    pub name: String,
+    pub value: IrExpression,
+    pub span: Span,
+}
+
+/// Doublebrace メソッド呼び出しの IR 表現。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct IrDoublebraceMethodInvocation {
+    pub name: String,
+    pub arguments: Vec<IrExpression>,
+    pub argument_style: CallArgumentStyle,
+    pub metadata: CallArgumentMetadata,
+    pub span: Span,
+}
+
 /// Desugared expressions - all jv sugar removed
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum IrExpression {
@@ -259,6 +373,15 @@ pub enum IrExpression {
         java_type: JavaType,
         span: Span,
     },
+
+    /// Doublebrace 初期化式。
+    DoublebraceInit {
+        base: Option<Box<IrExpression>>,
+        receiver_type: JavaType,
+        plan: IrDoublebracePlan,
+        java_type: JavaType,
+        span: Span,
+    },
 }
 
 /// Metadata describing the resolved target for a method call after name mapping.
@@ -402,7 +525,8 @@ impl IrExpression {
             | IrExpression::StringFormat { span, .. }
             | IrExpression::CompletableFuture { span, .. }
             | IrExpression::VirtualThread { span, .. }
-            | IrExpression::TryWithResources { span, .. } => span.clone(),
+            | IrExpression::TryWithResources { span, .. }
+            | IrExpression::DoublebraceInit { span, .. } => span.clone(),
         }
     }
 }

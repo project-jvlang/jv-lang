@@ -3,7 +3,10 @@ use crate::error::TransformError;
 use crate::transform::{
     extract_java_type, normalize_whitespace_array_elements, transform_expression,
 };
-use crate::types::{IrExpression, IrProgram, IrResolvedMethodTarget, IrStatement, JavaType};
+use crate::types::{
+    IrDoublebraceMutation, IrDoublebracePlan, IrExpression, IrProgram, IrResolvedMethodTarget,
+    IrStatement, JavaType,
+};
 use jv_ast::{
     Argument, BinaryOp, CallArgumentMetadata, CallArgumentStyle, Expression, SequenceDelimiter,
     Span, types::PrimitiveTypeName,
@@ -2309,6 +2312,12 @@ impl ListTerminalEnforcer {
             | IrExpression::InstanceOf { .. }
             | IrExpression::This { .. }
             | IrExpression::Super { .. } => {}
+            IrExpression::DoublebraceInit { base, plan, .. } => {
+                if let Some(base_expr) = base.as_mut() {
+                    self.visit_expression(base_expr, None);
+                }
+                self.visit_doublebrace_plan(plan);
+            }
             IrExpression::MethodCall { receiver, args, .. } => {
                 if let Some(recv) = receiver.as_mut() {
                     self.visit_expression(recv, None);
@@ -2423,6 +2432,35 @@ impl ListTerminalEnforcer {
         match java_type {
             JavaType::Reference { name, .. } => matches!(name.as_str(), "java.util.List" | "List"),
             _ => false,
+        }
+    }
+
+    fn visit_doublebrace_plan(&mut self, plan: &mut IrDoublebracePlan) {
+        match plan {
+            IrDoublebracePlan::Mutate(mutate) => {
+                for step in mutate.steps.iter_mut() {
+                    match step {
+                        IrDoublebraceMutation::FieldAssignment(update) => {
+                            self.visit_expression(&mut update.value, None);
+                        }
+                        IrDoublebraceMutation::MethodCall(call) => {
+                            for argument in call.arguments.iter_mut() {
+                                self.visit_expression(argument, None);
+                            }
+                        }
+                        IrDoublebraceMutation::Statement(statements) => {
+                            for statement in statements.iter_mut() {
+                                self.visit_statement(statement);
+                            }
+                        }
+                    }
+                }
+            }
+            IrDoublebracePlan::Copy(copy) => {
+                for update in copy.updates.iter_mut() {
+                    self.visit_expression(&mut update.value, None);
+                }
+            }
         }
     }
 }

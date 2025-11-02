@@ -4,12 +4,17 @@ use crate::naming::method_erasure::apply_method_erasure;
 use crate::profiling::{PerfMetrics, TransformProfiler};
 use crate::sequence_pipeline;
 use crate::types::{
-    IrCommentKind, IrExpression, IrImport, IrImportDetail, IrProgram, IrStatement, JavaType,
+    DoublebraceBaseStrategy, DoublebraceCopySourceStrategy, DoublebraceFieldUpdate,
+    DoublebraceLoweringKind, DoublebraceLoweringPlan, DoublebraceLoweringStep,
+    DoublebraceMethodInvocation, IrCommentKind, IrDoublebraceCopyPlan, IrDoublebraceFieldUpdate,
+    IrDoublebraceMethodInvocation, IrDoublebraceMutatePlan, IrDoublebraceMutation,
+    IrDoublebracePlan, IrExpression, IrImport, IrImportDetail, IrProgram, IrStatement, JavaType,
 };
 use jv_ast::{
     Argument, BinaryOp, BindingPatternKind, CallArgumentMetadata, CallArgumentStyle, CommentKind,
-    ConcurrencyConstruct, Expression, Literal, Modifiers, Program, ResourceManagement,
-    SequenceDelimiter, Span, Statement, TypeAnnotation, UnaryOp, ValBindingOrigin,
+    ConcurrencyConstruct, DoublebraceInit, Expression, Literal, Modifiers, Program,
+    ResourceManagement, SequenceDelimiter, Span, Statement, TypeAnnotation, UnaryOp,
+    ValBindingOrigin,
 };
 
 mod concurrency;
@@ -598,6 +603,7 @@ pub fn transform_expression(
                 span,
             })
         }
+        Expression::DoublebraceInit(init) => lower_doublebrace_expression(init, context),
         Expression::Array {
             elements,
             delimiter,
@@ -879,6 +885,145 @@ const SYSTEM_IN_METHODS: &[&str] = &[
     "skip",
     "transferto",
 ];
+
+fn lower_doublebrace_expression(
+    init: DoublebraceInit,
+    context: &mut TransformContext,
+) -> Result<IrExpression, TransformError> {
+    let span = init.span.clone();
+    let plan = context
+        .take_doublebrace_plan(&span)
+        .or_else(|| context.doublebrace_plan(&span).cloned())
+        .ok_or_else(|| TransformError::TypeInferenceError {
+            message: "Doublebrace 初期化式のプラン情報が見つかりません".to_string(),
+            span: span.clone(),
+        })?;
+
+    let receiver_type = java_type_from_fqcn(&plan.receiver_fqcn);
+
+    let mut base_ir = match init.base {
+        Some(base_expr) => Some(Box::new(transform_expression(*base_expr, context)?)),
+        None => None,
+    };
+
+    let ir_plan = lower_doublebrace_plan(plan, context)?;
+    let needs_synthesized = match &ir_plan {
+        IrDoublebracePlan::Mutate(mutate) => {
+            matches!(mutate.base, DoublebraceBaseStrategy::SynthesizedInstance)
+        }
+        IrDoublebracePlan::Copy(copy) => {
+            matches!(
+                copy.source,
+                DoublebraceCopySourceStrategy::SynthesizedInstance
+            )
+        }
+    };
+
+    if base_ir.is_none() && needs_synthesized {
+        base_ir = Some(Box::new(synthesize_receiver_instance(
+            &receiver_type,
+            &span,
+        )));
+    }
+
+    Ok(IrExpression::DoublebraceInit {
+        base: base_ir,
+        receiver_type: receiver_type.clone(),
+        plan: ir_plan,
+        java_type: receiver_type,
+        span,
+    })
+}
+
+fn lower_doublebrace_plan(
+    plan: DoublebraceLoweringPlan,
+    context: &mut TransformContext,
+) -> Result<IrDoublebracePlan, TransformError> {
+    match plan.kind {
+        DoublebraceLoweringKind::Mutate(mutate) => {
+            let mut lowered_steps = Vec::with_capacity(mutate.steps.len());
+            for step in mutate.steps {
+                match step {
+                    DoublebraceLoweringStep::FieldAssignment(update) => {
+                        let ir_update = lower_field_update(update, context)?;
+                        lowered_steps.push(IrDoublebraceMutation::FieldAssignment(ir_update));
+                    }
+                    DoublebraceLoweringStep::MethodCall(call) => {
+                        let ir_call = lower_method_invocation(call, context)?;
+                        lowered_steps.push(IrDoublebraceMutation::MethodCall(ir_call));
+                    }
+                    DoublebraceLoweringStep::Other(statement) => {
+                        let statements = transform_statement(statement, context)?;
+                        lowered_steps.push(IrDoublebraceMutation::Statement(statements));
+                    }
+                }
+            }
+            Ok(IrDoublebracePlan::Mutate(IrDoublebraceMutatePlan {
+                base: mutate.base,
+                steps: lowered_steps,
+            }))
+        }
+        DoublebraceLoweringKind::Copy(copy) => {
+            let mut lowered_updates = Vec::with_capacity(copy.updates.len());
+            for update in copy.updates {
+                lowered_updates.push(lower_field_update(update, context)?);
+            }
+            Ok(IrDoublebracePlan::Copy(IrDoublebraceCopyPlan {
+                source: copy.source,
+                updates: lowered_updates,
+            }))
+        }
+    }
+}
+
+fn lower_field_update(
+    update: DoublebraceFieldUpdate,
+    context: &mut TransformContext,
+) -> Result<IrDoublebraceFieldUpdate, TransformError> {
+    let value = transform_expression(update.value, context)?;
+    Ok(IrDoublebraceFieldUpdate {
+        name: update.name,
+        value,
+        span: update.span,
+    })
+}
+
+fn lower_method_invocation(
+    invocation: DoublebraceMethodInvocation,
+    context: &mut TransformContext,
+) -> Result<IrDoublebraceMethodInvocation, TransformError> {
+    let arguments = lower_call_arguments(invocation.arguments, context)?;
+    Ok(IrDoublebraceMethodInvocation {
+        name: invocation.name,
+        arguments,
+        argument_style: invocation.metadata.style,
+        metadata: invocation.metadata,
+        span: invocation.span,
+    })
+}
+
+fn java_type_from_fqcn(fqcn: &str) -> JavaType {
+    JavaType::Reference {
+        name: fqcn.to_string(),
+        generic_args: Vec::new(),
+    }
+}
+
+fn synthesize_receiver_instance(receiver_type: &JavaType, span: &Span) -> IrExpression {
+    match receiver_type {
+        JavaType::Reference { name, generic_args } => {
+            let class_name = name.rsplit('.').next().unwrap_or(name).to_string();
+            IrExpression::ObjectCreation {
+                class_name,
+                generic_args: generic_args.clone(),
+                args: Vec::new(),
+                java_type: receiver_type.clone(),
+                span: span.clone(),
+            }
+        }
+        _ => IrExpression::Literal(Literal::Null, span.clone()),
+    }
+}
 
 fn lower_call_expression(
     function: Expression,
