@@ -17,6 +17,7 @@ use jv_ir::{
     SequencePipeline, SequenceSource, SequenceTerminal, SequenceTerminalEvaluation,
     SequenceTerminalKind,
 };
+use jv_pm::LoggingConfigLayer;
 use std::collections::HashMap;
 
 mod compat;
@@ -265,6 +266,8 @@ fn test_build_plan_applies_apt_overrides() {
             "mapstruct.defaultComponentModel=spring".to_string(),
             "flag".to_string(),
         ],
+        logging_cli: LoggingConfigLayer::default(),
+        logging_env: LoggingConfigLayer::default(),
     };
 
     let plan = pipeline::BuildOptionsFactory::compose(project_root, settings, layout, overrides)
@@ -494,10 +497,8 @@ counter = counter + explicit
         apt_processors: None,
         apt_processorpath: None,
         apt_options: Vec::new(),
-        apt_enabled: false,
-        apt_processors: None,
-        apt_processorpath: None,
-        apt_options: Vec::new(),
+        logging_cli: LoggingConfigLayer::default(),
+        logging_env: LoggingConfigLayer::default(),
     };
 
     let plan = pipeline::BuildOptionsFactory::compose(project_root, settings, layout, overrides)
@@ -566,6 +567,8 @@ include = ["src/**/*.jv"]
         apt_processors: None,
         apt_processorpath: None,
         apt_options: Vec::new(),
+        logging_cli: LoggingConfigLayer::default(),
+        logging_env: LoggingConfigLayer::default(),
     };
 
     let plan = pipeline::BuildOptionsFactory::compose(project_root, settings, layout, overrides)
@@ -660,6 +663,8 @@ include = ["src/**/*.jv"]
         apt_processors: None,
         apt_processorpath: None,
         apt_options: Vec::new(),
+        logging_cli: LoggingConfigLayer::default(),
+        logging_env: LoggingConfigLayer::default(),
     };
 
     let plan = pipeline::BuildOptionsFactory::compose(project_root, settings, layout, overrides)
@@ -769,12 +774,18 @@ include = ["src/**/*.jv"]
             clean: false,
             perf: false,
             emit_types: false,
-            verbose: false,
-            emit_telemetry: false,
-            parallel_inference: false,
-            inference_workers: None,
-            constraint_batch: None,
-        };
+        verbose: false,
+        emit_telemetry: false,
+        parallel_inference: false,
+        inference_workers: None,
+        constraint_batch: None,
+        apt_enabled: false,
+        apt_processors: None,
+        apt_processorpath: None,
+        apt_options: Vec::new(),
+        logging_cli: LoggingConfigLayer::default(),
+        logging_env: LoggingConfigLayer::default(),
+    };
 
         let plan =
             pipeline::BuildOptionsFactory::compose(project_root, settings, layout, overrides)
@@ -978,6 +989,8 @@ clean = false
         apt_processors: None,
         apt_processorpath: None,
         apt_options: Vec::new(),
+        logging_cli: LoggingConfigLayer::default(),
+        logging_env: LoggingConfigLayer::default(),
     };
 
     let plan = pipeline::BuildOptionsFactory::compose(project_root, settings, layout, overrides)
@@ -1083,6 +1096,12 @@ clean = false
         parallel_inference: false,
         inference_workers: None,
         constraint_batch: None,
+        apt_enabled: false,
+        apt_processors: None,
+        apt_processorpath: None,
+        apt_options: Vec::new(),
+        logging_cli: LoggingConfigLayer::default(),
+        logging_env: LoggingConfigLayer::default(),
     };
 
     let plan = pipeline::BuildOptionsFactory::compose(project_root, settings, layout, overrides)

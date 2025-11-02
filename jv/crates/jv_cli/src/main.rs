@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
+use std::str::FromStr;
 
 use jv_checker::diagnostics::{
     DiagnosticSeverity, DiagnosticStrategy, from_frontend_diagnostics, from_parse_error,
@@ -22,14 +23,18 @@ use jv_cli::pipeline::project::{
     manifest::{ManifestLoader, OutputConfig, ProjectSettings, SourceConfig},
 };
 use jv_cli::pipeline::{
-    BuildOptionsFactory, CliOverrides, OutputManager, compile, produce_binary, run_program,
+    BuildOptionsFactory, CliOverrides, OutputManager, compile, produce_binary,
+    report::render_logging_overview, run_program,
 };
 use jv_cli::tour::TourOrchestrator;
 use jv_cli::{
     Cli, Commands, format_resolved_import, get_version, init_project as cli_init_project,
     resolved_imports_header, tooling_failure,
 };
-use jv_pm::{Manifest, PackageInfo, ProjectSection};
+use jv_pm::{
+    LogLevel, LoggingConfig, LoggingConfigLayer, LoggingFramework, Manifest, OpenTelemetryLayer,
+    OtelProtocol, PackageInfo, ProjectSection,
+};
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
@@ -67,6 +72,13 @@ fn main() -> Result<()> {
             parallel_inference,
             inference_workers,
             constraint_batch,
+            log_level,
+            log_framework,
+            log_default_level,
+            otel_enabled,
+            otel_endpoint,
+            otel_protocol,
+            otel_trace_context,
             binary,
             bin_name,
             target,
@@ -115,6 +127,17 @@ fn main() -> Result<()> {
                 check = true;
             }
 
+            let env_logging_layer = read_env_logging_layer()?;
+            let cli_logging_layer = build_cli_logging_layer(
+                log_framework.as_deref(),
+                log_level.as_deref(),
+                log_default_level.as_deref(),
+                otel_enabled.as_deref(),
+                otel_endpoint.as_deref(),
+                otel_protocol.as_deref(),
+                otel_trace_context.as_deref(),
+            )?;
+
             let overrides = CliOverrides {
                 entrypoint: entrypoint_override,
                 output: output.clone().map(PathBuf::from),
@@ -135,6 +158,8 @@ fn main() -> Result<()> {
                 apt_processors: processors.clone(),
                 apt_processorpath: processorpath.clone(),
                 apt_options: apt_options.clone(),
+                logging_cli: cli_logging_layer,
+                logging_env: env_logging_layer,
             };
 
             let plan = BuildOptionsFactory::compose(project_root, settings, layout, overrides)
@@ -192,6 +217,7 @@ fn main() -> Result<()> {
                 "バインディング統計 / Binding usage: explicit val={} implicit val={} implicit typed={} var={}",
                 usage.explicit, usage.implicit, usage.implicit_typed, usage.vars
             );
+            println!("{}", render_logging_overview(&plan.logging_config));
 
             if let Some(perf) = &artifacts.perf_capture {
                 let summary = &perf.report.summary;
@@ -299,6 +325,8 @@ fn main() -> Result<()> {
             let layout = ProjectLayout::from_settings(&project_root, &settings)
                 .map_err(|diagnostic| tooling_failure(&error_path, diagnostic))?;
 
+            let env_logging_layer = read_env_logging_layer()?;
+
             let overrides = CliOverrides {
                 entrypoint: entrypoint_override,
                 output: None,
@@ -319,6 +347,8 @@ fn main() -> Result<()> {
                 apt_processors: None,
                 apt_processorpath: None,
                 apt_options: Vec::new(),
+                logging_cli: LoggingConfigLayer::default(),
+                logging_env: env_logging_layer,
             };
 
             let plan = BuildOptionsFactory::compose(project_root, settings, layout, overrides)
@@ -445,6 +475,7 @@ fn build_ephemeral_run_settings(start_path: &Path) -> Option<(ProjectRoot, Proje
         },
         project: project_section,
         build: None,
+        logging: LoggingConfig::default(),
     };
 
     let settings = ProjectSettings {
@@ -464,6 +495,219 @@ fn build_ephemeral_run_settings(start_path: &Path) -> Option<(ProjectRoot, Proje
     Some((project_root, settings))
 }
 
+fn build_cli_logging_layer(
+    framework: Option<&str>,
+    log_level: Option<&str>,
+    default_level: Option<&str>,
+    otel_enabled: Option<&str>,
+    otel_endpoint: Option<&str>,
+    otel_protocol: Option<&str>,
+    otel_trace_context: Option<&str>,
+) -> Result<LoggingConfigLayer> {
+    let mut layer = LoggingConfigLayer::default();
+
+    if let Some(value) = framework {
+        let trimmed = value.trim();
+        if !trimmed.is_empty() {
+            let parsed = LoggingFramework::from_str(trimmed).map_err(|error| {
+                anyhow::anyhow!(
+                    "--log-framework に無効な値 '{}' が指定されました: {}",
+                    trimmed,
+                    error
+                )
+            })?;
+            layer.framework = Some(parsed);
+        }
+    }
+
+    if let Some(value) = log_level {
+        let trimmed = value.trim();
+        if !trimmed.is_empty() {
+            let parsed = LogLevel::from_str(trimmed).map_err(|error| {
+                anyhow::anyhow!(
+                    "--log-level に無効な値 '{}' が指定されました: {}",
+                    trimmed,
+                    error
+                )
+            })?;
+            layer.log_level = Some(parsed);
+        }
+    }
+
+    if let Some(value) = default_level {
+        let trimmed = value.trim();
+        if !trimmed.is_empty() {
+            let parsed = LogLevel::from_str(trimmed).map_err(|error| {
+                anyhow::anyhow!(
+                    "--log-default-level に無効な値 '{}' が指定されました: {}",
+                    trimmed,
+                    error
+                )
+            })?;
+            layer.default_level = Some(parsed);
+        }
+    }
+
+    let mut otel_layer = OpenTelemetryLayer::default();
+    let mut has_otel_override = false;
+
+    if let Some(value) = otel_enabled {
+        let trimmed = value.trim();
+        if !trimmed.is_empty() {
+            otel_layer.enabled = Some(parse_bool_flag(trimmed, "--otel-enabled")?);
+            has_otel_override = true;
+        }
+    }
+
+    if let Some(value) = otel_endpoint {
+        let endpoint = if value.trim().is_empty() {
+            None
+        } else {
+            Some(value.trim().to_string())
+        };
+        otel_layer.endpoint = Some(endpoint);
+        has_otel_override = true;
+    }
+
+    if let Some(value) = otel_protocol {
+        let trimmed = value.trim();
+        if !trimmed.is_empty() {
+            let parsed = OtelProtocol::from_str(trimmed).map_err(|error| {
+                anyhow::anyhow!(
+                    "--otel-protocol に無効な値 '{}' が指定されました: {}",
+                    trimmed,
+                    error
+                )
+            })?;
+            otel_layer.protocol = Some(parsed);
+            has_otel_override = true;
+        }
+    }
+
+    if let Some(value) = otel_trace_context {
+        let trimmed = value.trim();
+        if !trimmed.is_empty() {
+            otel_layer.trace_context = Some(parse_bool_flag(trimmed, "--otel-trace-context")?);
+            has_otel_override = true;
+        }
+    }
+
+    if has_otel_override {
+        layer.opentelemetry = Some(otel_layer);
+    }
+
+    Ok(layer)
+}
+
+fn read_env_logging_layer() -> Result<LoggingConfigLayer> {
+    let mut layer = LoggingConfigLayer::default();
+
+    if let Ok(value) = std::env::var("JV_LOG_FRAMEWORK") {
+        let trimmed = value.trim();
+        if !trimmed.is_empty() {
+            let parsed = LoggingFramework::from_str(trimmed).map_err(|error| {
+                anyhow::anyhow!(
+                    "環境変数 JV_LOG_FRAMEWORK の値 '{}' は無効です: {}",
+                    trimmed,
+                    error
+                )
+            })?;
+            layer.framework = Some(parsed);
+        }
+    }
+
+    if let Ok(value) = std::env::var("JV_LOG_LEVEL") {
+        let trimmed = value.trim();
+        if !trimmed.is_empty() {
+            let parsed = LogLevel::from_str(trimmed).map_err(|error| {
+                anyhow::anyhow!(
+                    "環境変数 JV_LOG_LEVEL の値 '{}' は無効です: {}",
+                    trimmed,
+                    error
+                )
+            })?;
+            layer.log_level = Some(parsed);
+        }
+    }
+
+    if let Ok(value) = std::env::var("JV_LOG_DEFAULT_LEVEL") {
+        let trimmed = value.trim();
+        if !trimmed.is_empty() {
+            let parsed = LogLevel::from_str(trimmed).map_err(|error| {
+                anyhow::anyhow!(
+                    "環境変数 JV_LOG_DEFAULT_LEVEL の値 '{}' は無効です: {}",
+                    trimmed,
+                    error
+                )
+            })?;
+            layer.default_level = Some(parsed);
+        }
+    }
+
+    let mut otel_layer = OpenTelemetryLayer::default();
+    let mut has_otel_override = false;
+
+    if let Ok(value) = std::env::var("JV_OTEL_ENABLED") {
+        let trimmed = value.trim();
+        if !trimmed.is_empty() {
+            otel_layer.enabled = Some(parse_bool_flag(trimmed, "JV_OTEL_ENABLED")?);
+            has_otel_override = true;
+        }
+    }
+
+    if let Ok(value) = std::env::var("JV_OTEL_ENDPOINT") {
+        let trimmed = value.trim();
+        otel_layer.endpoint = Some(if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_string())
+        });
+        has_otel_override = true;
+    }
+
+    if let Ok(value) = std::env::var("JV_OTEL_PROTOCOL") {
+        let trimmed = value.trim();
+        if !trimmed.is_empty() {
+            let parsed = OtelProtocol::from_str(trimmed).map_err(|error| {
+                anyhow::anyhow!(
+                    "環境変数 JV_OTEL_PROTOCOL の値 '{}' は無効です: {}",
+                    trimmed,
+                    error
+                )
+            })?;
+            otel_layer.protocol = Some(parsed);
+            has_otel_override = true;
+        }
+    }
+
+    if let Ok(value) = std::env::var("JV_OTEL_TRACE_CONTEXT") {
+        let trimmed = value.trim();
+        if !trimmed.is_empty() {
+            otel_layer.trace_context = Some(parse_bool_flag(trimmed, "JV_OTEL_TRACE_CONTEXT")?);
+            has_otel_override = true;
+        }
+    }
+
+    if has_otel_override {
+        layer.opentelemetry = Some(otel_layer);
+    }
+
+    Ok(layer)
+}
+
+fn parse_bool_flag(value: &str, context: &str) -> Result<bool> {
+    let trimmed = value.trim();
+    let normalized = trimmed.to_ascii_lowercase();
+    match normalized.as_str() {
+        "true" | "1" | "yes" | "on" => Ok(true),
+        "false" | "0" | "no" | "off" => Ok(false),
+        _ => anyhow::bail!(
+            "{} には true/false のいずれかを指定してください (指定値: '{}')",
+            context,
+            trimmed
+        ),
+    }
+}
 #[cfg(test)]
 mod tests {
     use super::*;

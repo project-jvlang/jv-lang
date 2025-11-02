@@ -89,6 +89,27 @@ pub enum Commands {
         /// Override constraint batch size for inference
         #[arg(long, value_name = "batch")]
         constraint_batch: Option<usize>,
+        /// ログレベルを上書きする
+        #[arg(long = "log-level", value_name = "level")]
+        log_level: Option<String>,
+        /// ロギングフレームワークを上書きする
+        #[arg(long = "log-framework", value_name = "framework")]
+        log_framework: Option<String>,
+        /// 既定のログレベルを上書きする
+        #[arg(long = "log-default-level", value_name = "level")]
+        log_default_level: Option<String>,
+        /// OpenTelemetry の有効・無効を上書きする
+        #[arg(long = "otel-enabled", value_name = "bool")]
+        otel_enabled: Option<String>,
+        /// OpenTelemetry Collector のエンドポイントを指定する
+        #[arg(long = "otel-endpoint", value_name = "url")]
+        otel_endpoint: Option<String>,
+        /// OpenTelemetry のプロトコルを指定する
+        #[arg(long = "otel-protocol", value_name = "protocol")]
+        otel_protocol: Option<String>,
+        /// TraceContext ヘッダ注入の可否を指定する
+        #[arg(long = "otel-trace-context", value_name = "bool")]
+        otel_trace_context: Option<String>,
         /// Produce a single-file binary artifact: 'jar' or 'native'
         #[arg(long, value_parser = ["jar", "native"])]
         binary: Option<String>,

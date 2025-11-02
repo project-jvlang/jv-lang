@@ -10,6 +10,7 @@ use jv_cli::pipeline::project::{
 };
 use jv_cli::pipeline::{BuildOptionsFactory, BuildPlan, CliOverrides, run_program};
 use jv_cli::tooling_failure;
+use jv_pm::LoggingConfigLayer;
 
 #[derive(Parser)]
 #[command(name = "jvx", about = "Quickly execute a jv file or snippet")]
@@ -100,6 +101,8 @@ fn build_plan_for_input(input_path: &Path) -> Result<BuildPlan> {
         apt_processors: None,
         apt_processorpath: None,
         apt_options: Vec::new(),
+        logging_cli: LoggingConfigLayer::default(),
+        logging_env: LoggingConfigLayer::default(),
     };
 
     BuildOptionsFactory::compose(project_root, settings, layout, overrides)

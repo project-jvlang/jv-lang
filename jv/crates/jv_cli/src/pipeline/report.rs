@@ -4,6 +4,7 @@ use jv_build::{
     CompatibilityEvidence, CompatibilityFinding, CompatibilityReport, CompatibilityStatus,
     DetectedVersion, JavaTarget,
 };
+use jv_pm::LoggingConfig;
 use serde::Serialize;
 use std::fs::File;
 use std::io::{BufWriter, Write};
@@ -18,7 +19,49 @@ pub struct RenderedCompatibilityReport {
     pub target: JavaTarget,
 }
 
-pub fn render(report: &CompatibilityReport, output_dir: &Path) -> Result<RenderedCompatibilityReport> {
+pub fn render_logging_overview(config: &LoggingConfig) -> String {
+    let mut lines = Vec::new();
+    lines.push("ロギング設定 / Logging Configuration".to_string());
+    lines.push(format!("  フレームワーク Framework : {}", config.framework));
+    lines.push(format!("  現在のログレベル Current : {}", config.log_level));
+    lines.push(format!(
+        "  既定ログレベル Default : {}",
+        config.default_level
+    ));
+
+    let otel = &config.opentelemetry;
+    lines.push(format!(
+        "  OpenTelemetry 有効化     : {}",
+        bool_with_label(otel.enabled)
+    ));
+    lines.push(format!(
+        "    endpoint              : {}",
+        otel.endpoint
+            .as_deref()
+            .filter(|value| !value.is_empty())
+            .unwrap_or("-")
+    ));
+    lines.push(format!("    protocol              : {}", otel.protocol));
+    lines.push(format!(
+        "    trace_context         : {}",
+        bool_with_label(otel.trace_context)
+    ));
+    lines.push(format!(
+        "    resource entries      : {}",
+        otel.resource.len()
+    ));
+    lines.push(format!(
+        "    attribute entries     : {}",
+        otel.attributes.len()
+    ));
+
+    lines.join("\n")
+}
+
+pub fn render(
+    report: &CompatibilityReport,
+    output_dir: &Path,
+) -> Result<RenderedCompatibilityReport> {
     let table = render_table(report);
     let summary = render_summary(report);
     let json_path = write_json(report, output_dir)?;
@@ -34,14 +77,8 @@ pub fn render(report: &CompatibilityReport, output_dir: &Path) -> Result<Rendere
 
 fn render_table(report: &CompatibilityReport) -> String {
     let mut lines = Vec::new();
-    lines.push(format!(
-        "ターゲット Target: Java{}",
-        report.target
-    ));
-    lines.push(format!(
-        "検出結果 Findings: {}",
-        report.findings.len()
-    ));
+    lines.push(format!("ターゲット Target: Java{}", report.target));
+    lines.push(format!("検出結果 Findings: {}", report.findings.len()));
     lines.push(String::from(
         "| Artifact / アーティファクト | Version (種別) | Release | Evidence / 根拠 |",
     ));
@@ -50,9 +87,7 @@ fn render_table(report: &CompatibilityReport) -> String {
     ));
 
     if report.findings.is_empty() {
-        lines.push(String::from(
-            "| (no findings) | - | - | - |",
-        ));
+        lines.push(String::from("| (no findings) | - | - | - |"));
     } else {
         for finding in &report.findings {
             lines.push(render_row(finding));
@@ -76,10 +111,7 @@ fn render_row(finding: &CompatibilityFinding) -> String {
     let evidence_label = evidence_label(finding.evidence);
     format!(
         "| {} | {} | {} | {} |",
-        finding.artifact,
-        version_label,
-        release_label,
-        evidence_label
+        finding.artifact, version_label, release_label, evidence_label
     )
 }
 
@@ -88,7 +120,10 @@ fn render_summary(report: &CompatibilityReport) -> String {
     let mut lines = Vec::new();
     lines.push("互換性サマリ / Compatibility Summary".to_string());
     lines.push(format!("  ターゲット Target : Java{}", report.target));
-    lines.push(format!("  ステータス Status : {} ({})", status_jp, status_en));
+    lines.push(format!(
+        "  ステータス Status : {} ({})",
+        status_jp, status_en
+    ));
 
     match report.highest_required_major {
         Some(major) => {
@@ -165,14 +200,18 @@ fn evidence_label(evidence: CompatibilityEvidence) -> &'static str {
 
 fn status_labels(status: CompatibilityStatus) -> (&'static str, &'static str) {
     match status {
-        CompatibilityStatus::Compatible => (
-            "互換性 OK",
-            "Compatible",
-        ),
-        CompatibilityStatus::RequiresHigherTarget { .. } => (
-            "ターゲット不足",
-            "Requires higher target",
-        ),
+        CompatibilityStatus::Compatible => ("互換性 OK", "Compatible"),
+        CompatibilityStatus::RequiresHigherTarget { .. } => {
+            ("ターゲット不足", "Requires higher target")
+        }
+    }
+}
+
+fn bool_with_label(value: bool) -> String {
+    if value {
+        "有効(true)".to_string()
+    } else {
+        "無効(false)".to_string()
     }
 }
 
@@ -191,11 +230,7 @@ struct JsonCompatibilityReport {
 impl From<&CompatibilityReport> for JsonCompatibilityReport {
     fn from(report: &CompatibilityReport) -> Self {
         let status = JsonStatus::from(report.status);
-        let findings = report
-            .findings
-            .iter()
-            .map(JsonFinding::from)
-            .collect();
+        let findings = report.findings.iter().map(JsonFinding::from).collect();
 
         Self {
             target: report.target.to_string(),
@@ -220,10 +255,9 @@ impl From<CompatibilityStatus> for JsonStatus {
     fn from(status: CompatibilityStatus) -> Self {
         let (code, label) = match status {
             CompatibilityStatus::Compatible => ("compatible", "Compatible"),
-            CompatibilityStatus::RequiresHigherTarget { .. } => (
-                "requires_higher_target",
-                "Requires higher target",
-            ),
+            CompatibilityStatus::RequiresHigherTarget { .. } => {
+                ("requires_higher_target", "Requires higher target")
+            }
         };
 
         Self { code, label }

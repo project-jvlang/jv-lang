@@ -10,8 +10,8 @@ use std::fmt;
 use std::str::FromStr;
 
 use jv_pm::{LogLevel, LoggingConfig, LoggingFramework, OtelProtocol};
-use toml::value::Table;
 use toml::Value;
+use toml::value::Table;
 
 /// `[logging]` セクションで許可されるトップレベルキー。
 const LOGGING_KEYS: &[&str] = &["framework", "log_level", "default_level", "opentelemetry"];

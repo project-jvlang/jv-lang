@@ -6,6 +6,7 @@ use jv_checker::{
     diagnostics::{DiagnosticSeverity, DiagnosticStrategy, EnhancedDiagnostic},
     ParallelInferenceConfig,
 };
+use jv_pm::{LoggingConfig, LoggingConfigLayer};
 
 use super::project::{
     layout::ProjectLayout,
@@ -44,6 +45,9 @@ pub struct CliOverrides {
     pub apt_processors: Option<String>,
     pub apt_processorpath: Option<String>,
     pub apt_options: Vec<String>,
+    // ロギング関連の上書き層
+    pub logging_cli: LoggingConfigLayer,
+    pub logging_env: LoggingConfigLayer,
 }
 
 #[derive(Debug, Clone)]
@@ -67,6 +71,7 @@ pub struct BuildPlan {
     pub settings: ProjectSettings,
     pub layout: ProjectLayout,
     pub options: BuildOptions,
+    pub logging_config: LoggingConfig,
     pub build_config: BuildConfig,
 }
 
@@ -96,58 +101,91 @@ impl BuildOptionsFactory {
         layout: ProjectLayout,
         overrides: CliOverrides,
     ) -> Result<BuildPlan, EnhancedDiagnostic> {
-        let entrypoint = resolve_entrypoint(&root, &layout, overrides.entrypoint)?;
-        let output_dir = resolve_output_dir(&root, &settings.output, overrides.output)?;
-        let target = overrides
-            .target
-            .unwrap_or_else(|| settings.manifest.java_target());
+        let CliOverrides {
+            entrypoint: entry_override,
+            output: output_override,
+            java_only,
+            check: check_flag,
+            format: format_flag,
+            target,
+            clean: clean_flag,
+            perf,
+            emit_types: emit_types_flag,
+            verbose,
+            emit_telemetry: emit_telemetry_flag,
+            parallel_inference,
+            inference_workers,
+            constraint_batch,
+            apt_enabled,
+            apt_processors,
+            apt_processorpath,
+            apt_options,
+            logging_cli,
+            logging_env,
+        } = overrides;
+
+        let entrypoint = resolve_entrypoint(&root, &layout, entry_override)?;
+        let output_dir = resolve_output_dir(&root, &settings.output, output_override)?;
+        let target = target.unwrap_or_else(|| settings.manifest.java_target());
 
         let mut build_config = BuildConfig::with_target(target);
         build_config.output_dir = stringify_path(&output_dir);
 
-        let emit_types = overrides.emit_types;
-        let emit_telemetry = overrides.emit_telemetry;
+        let emit_types = emit_types_flag;
+        let emit_telemetry = emit_telemetry_flag;
         let mut parallel_config = ParallelInferenceConfig::default();
-        if overrides.parallel_inference {
+        if parallel_inference {
             parallel_config.module_parallelism = true;
         }
-        if let Some(workers) = overrides.inference_workers {
+        if let Some(workers) = inference_workers {
             parallel_config.worker_threads = workers;
         }
-        if let Some(batch) = overrides.constraint_batch {
+        if let Some(batch) = constraint_batch {
             parallel_config.constraint_batching = batch;
         }
         parallel_config = parallel_config.sanitized();
         let options = BuildOptions {
             entrypoint,
             output_dir,
-            java_only: overrides.java_only,
-            check: overrides.check || emit_types,
-            format: overrides.format,
-            clean: overrides.clean || settings.output.clean,
-            perf: overrides.perf,
+            java_only,
+            check: check_flag || emit_types,
+            format: format_flag,
+            clean: clean_flag || settings.output.clean,
+            perf,
             emit_types,
-            verbose: overrides.verbose,
+            verbose,
             parallel_config,
             emit_telemetry,
         };
+
+        let mut logging_layers = Vec::new();
+        if !logging_env.is_empty() {
+            logging_layers.push(logging_env.clone());
+        }
+        if !logging_cli.is_empty() {
+            logging_layers.push(logging_cli.clone());
+        }
+        let manifest_logging = settings.manifest.logging.clone();
+        let logging_config =
+            LoggingConfig::from_manifest(Some(manifest_logging)).with_layers(&logging_layers);
 
         Ok(BuildPlan {
             root,
             settings,
             layout,
             options,
+            logging_config,
             build_config: {
                 // Apply APT overrides
                 let mut cfg = build_config;
-                if overrides.apt_enabled
-                    || overrides.apt_processors.is_some()
-                    || overrides.apt_processorpath.is_some()
-                    || !overrides.apt_options.is_empty()
+                if apt_enabled
+                    || apt_processors.is_some()
+                    || apt_processorpath.is_some()
+                    || !apt_options.is_empty()
                 {
                     cfg.enable_apt();
                 }
-                if let Some(list) = overrides.apt_processors.as_ref() {
+                if let Some(list) = apt_processors.as_ref() {
                     let processors = list
                         .split(',')
                         .map(|s| s.trim().to_string())
@@ -157,7 +195,7 @@ impl BuildOptionsFactory {
                         cfg.set_apt_processors(processors);
                     }
                 }
-                if let Some(path) = overrides.apt_processorpath.as_ref() {
+                if let Some(path) = apt_processorpath.as_ref() {
                     // Do not try to be smart here; allow user to pass joined path
                     let entries = path
                         .split(if cfg!(windows) { ';' } else { ':' })
@@ -168,8 +206,9 @@ impl BuildOptionsFactory {
                         cfg.set_apt_processorpath(entries);
                     }
                 }
-                for opt in overrides.apt_options {
-                    if !opt.trim().is_empty() {
+                for opt in apt_options {
+                    let trimmed = opt.trim();
+                    if !trimmed.is_empty() {
                         cfg.add_apt_option(opt);
                     }
                 }
@@ -245,7 +284,8 @@ fn guard_extension(path: &Path, expected: &str) -> Result<(), EnhancedDiagnostic
 
     Err(source_diagnostic(format!(
         "エントリポイント '{}' は .{} ファイルではありません。",
-        path.display(), expected
+        path.display(),
+        expected
     )))
 }
 
@@ -272,8 +312,9 @@ fn absolutize(path: &Path) -> Result<PathBuf, EnhancedDiagnostic> {
     if path.is_absolute() {
         Ok(path.to_path_buf())
     } else {
-        let cwd = std::env::current_dir()
-            .map_err(|error| root_diagnostic(format!("カレントディレクトリを取得できません: {}", error)))?;
+        let cwd = std::env::current_dir().map_err(|error| {
+            root_diagnostic(format!("カレントディレクトリを取得できません: {}", error))
+        })?;
         Ok(cwd.join(path))
     }
 }
