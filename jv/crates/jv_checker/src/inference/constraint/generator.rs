@@ -689,8 +689,7 @@ impl<'env, 'ext, 'imp> ConstraintGenerator<'env, 'ext, 'imp> {
                         .clone()
                         .unwrap_or_else(|| TypeKind::reference("java.lang.Object"))
                 } else {
-                    let note =
-                        doublebrace_message("doublebrace.target.missing", &[]);
+                    let note = doublebrace_message("doublebrace.target.missing", &[]);
                     self.constraints.push(
                         Constraint::new(ConstraintKind::Placeholder(DIAG_DBLOCK_NO_TARGET))
                             .with_note(note),

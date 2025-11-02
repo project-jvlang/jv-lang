@@ -480,8 +480,7 @@ fn detect_in_message(message: &str, span: Option<Span>) -> Option<EnhancedDiagno
         message.to_string()
     };
 
-    let (clean_message, suggestions, learning_hint) =
-        extract_tooling_metadata(&normalized_message);
+    let (clean_message, suggestions, learning_hint) = extract_tooling_metadata(&normalized_message);
 
     let mut diagnostic = EnhancedDiagnostic::new(descriptor, clean_message, span);
     if !suggestions.is_empty() {

@@ -497,13 +497,11 @@ impl TypeFactsSnapshot {
             .iter()
             .map(|(name, ty)| (name.clone(), format_type(ty)))
             .collect::<HashMap<_, _>>();
-
         let bindings = self
             .bindings
             .iter()
             .map(|binding| format!("{:?}", binding))
             .collect::<Vec<_>>();
-
         let schemes = self
             .schemes
             .iter()
@@ -535,7 +533,6 @@ impl TypeFactsSnapshot {
                 )
             })
             .collect::<HashMap<_, _>>();
-
         let node_types = self
             .node_types
             .iter()

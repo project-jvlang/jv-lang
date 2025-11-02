@@ -492,7 +492,10 @@ impl StdlibUsage {
                 for package in catalog.packages_for_reference(current) {
                     self.packages.insert(package);
                 }
-                if let Some((prefix, _)) = current.rsplit_once('.') {
+                if let Some((prefix, suffix)) = current.rsplit_once('.') {
+                    for package in catalog.packages_for_reference(suffix) {
+                        self.packages.insert(package);
+                    }
                     current = prefix;
                 } else {
                     break;
