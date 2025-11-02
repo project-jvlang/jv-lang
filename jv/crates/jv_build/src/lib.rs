@@ -2,6 +2,7 @@
 mod compat;
 mod config;
 mod jdk;
+pub mod manifest;
 pub mod metadata;
 
 pub use compat::{
@@ -12,7 +13,7 @@ pub use config::{
     BuildConfig, CliRequirement, JavaTarget, NetworkPolicy, SampleCliDependencies, SampleConfig,
     SampleConfigError, SampleDependency, SampleProtocol,
 };
-pub use jdk::{discover_jdk, JdkInfo};
+pub use jdk::{JdkInfo, discover_jdk};
 
 use anyhow::Result;
 use std::io;
