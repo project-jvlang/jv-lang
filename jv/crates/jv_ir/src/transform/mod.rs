@@ -16,6 +16,7 @@ mod concurrency;
 mod control_flow;
 mod declarations;
 mod functions;
+mod logging;
 mod loops;
 mod null_safety;
 mod resources;
@@ -408,12 +409,15 @@ fn lower_program(
             .collect()
     };
 
+    let logging_metadata = context.take_logging_metadata();
+
     Ok(IrProgram {
         package,
         imports: ir_imports,
         type_declarations,
         generic_metadata: Default::default(),
         conversion_metadata: Vec::new(),
+        logging: logging_metadata,
         span,
     })
 }
@@ -598,6 +602,7 @@ pub fn transform_expression(
                 span,
             })
         }
+        Expression::LogBlock(block) => logging::lower_log_block_expression(block, context),
         Expression::Array {
             elements,
             delimiter,

@@ -83,6 +83,7 @@ fn audited_program() -> IrProgram {
         type_declarations: vec![class],
         generic_metadata: Default::default(),
         conversion_metadata: Vec::new(),
+        logging: Default::default(),
         span: dummy_span(),
     }
 }

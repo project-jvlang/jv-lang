@@ -277,6 +277,7 @@ impl JavaCodeGenerator {
             IrExpression::VirtualThread {
                 operation, args, ..
             } => self.generate_virtual_thread(operation.clone(), args),
+            IrExpression::LogInvocation { .. } => Ok("/* logging */".to_string()),
             IrExpression::TryWithResources {
                 resources, body, ..
             } => self.generate_try_with_resources_expression(resources, body),

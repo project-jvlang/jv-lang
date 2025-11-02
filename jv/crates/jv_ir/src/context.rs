@@ -4,7 +4,8 @@ use std::time::Duration;
 
 use crate::types::{
     DataFormat, IrExpression, IrImport, IrImportDetail, IrResolvedMethodTarget, IrStatement,
-    JavaType, MethodOverload, PrimitiveReturnMetadata, SampleMode, UtilityClass,
+    JavaType, LogLevel, LoggerFieldId, LoggerFieldSpec, LoggingMetadata, MethodOverload,
+    PrimitiveReturnMetadata, SampleMode, UtilityClass,
 };
 use jv_ast::{CallArgumentStyle, Span};
 use jv_support::arena::{
@@ -53,6 +54,8 @@ pub struct TransformContext {
     planned_imports: Vec<IrImport>,
     /// Alias lookup for resolved import entries
     import_aliases: HashMap<String, JavaType>,
+    /// Logging transformation state and configuration
+    logging_state: LoggingState,
 }
 
 /// Hint describing a function signature sourced from TypeFacts prior to lowering.
@@ -101,6 +104,7 @@ impl TransformContext {
             when_strategies: Vec::new(),
             planned_imports: Vec::new(),
             import_aliases: HashMap::new(),
+            logging_state: LoggingState::default(),
         }
     }
 
@@ -505,6 +509,26 @@ impl TransformContext {
 
     pub fn sample_options_mut(&mut self) -> &mut SampleOptions {
         &mut self.sample_options
+    }
+
+    pub fn logging_options(&self) -> &LoggingOptions {
+        self.logging_state.options()
+    }
+
+    pub fn logging_options_mut(&mut self) -> &mut LoggingOptions {
+        self.logging_state.options_mut()
+    }
+
+    pub fn allocate_logger_field(&mut self, owner_hint: Option<String>) -> LoggerFieldId {
+        self.logging_state.allocate_field(owner_hint)
+    }
+
+    pub fn logger_field_spec(&self, id: LoggerFieldId) -> Option<&LoggerFieldSpec> {
+        self.logging_state.field(id)
+    }
+
+    pub fn take_logging_metadata(&mut self) -> LoggingMetadata {
+        self.logging_state.take_metadata()
     }
 
     pub fn sequence_style_cache(&self) -> &SequenceStyleCache {
@@ -990,6 +1014,7 @@ fn set_expression_type(expr: &mut IrExpression, java_type: JavaType) {
         | IrExpression::CompletableFuture { java_type: ty, .. }
         | IrExpression::VirtualThread { java_type: ty, .. }
         | IrExpression::TryWithResources { java_type: ty, .. }
+        | IrExpression::LogInvocation { java_type: ty, .. }
         | IrExpression::This { java_type: ty, .. }
         | IrExpression::Super { java_type: ty, .. } => {
             *ty = java_type;
@@ -1038,6 +1063,7 @@ impl Clone for TransformContext {
             when_strategies: self.when_strategies.clone(),
             planned_imports: self.planned_imports.clone(),
             import_aliases: self.import_aliases.clone(),
+            logging_state: self.logging_state.clone(),
         }
     }
 }
@@ -1086,6 +1112,60 @@ pub struct RegisteredMethodCall {
     pub return_type: JavaType,
     pub argument_style: CallArgumentStyle,
     pub span: Span,
+}
+
+#[derive(Debug, Clone)]
+pub struct LoggingOptions {
+    pub active_level: LogLevel,
+    pub default_level: LogLevel,
+}
+
+impl Default for LoggingOptions {
+    fn default() -> Self {
+        Self {
+            active_level: LogLevel::Info,
+            default_level: LogLevel::Info,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+struct LoggingState {
+    options: LoggingOptions,
+    next_field_id: u32,
+    fields: Vec<LoggerFieldSpec>,
+}
+
+impl LoggingState {
+    fn options(&self) -> &LoggingOptions {
+        &self.options
+    }
+
+    fn options_mut(&mut self) -> &mut LoggingOptions {
+        &mut self.options
+    }
+
+    fn allocate_field(&mut self, owner_hint: Option<String>) -> LoggerFieldId {
+        let id = LoggerFieldId(self.next_field_id);
+        self.next_field_id = self.next_field_id.wrapping_add(1);
+        let spec = LoggerFieldSpec {
+            id,
+            owner_hint,
+            field_name: "LOGGER".to_string(),
+        };
+        self.fields.push(spec);
+        id
+    }
+
+    fn field(&self, id: LoggerFieldId) -> Option<&LoggerFieldSpec> {
+        self.fields.iter().find(|spec| spec.id == id)
+    }
+
+    fn take_metadata(&mut self) -> LoggingMetadata {
+        LoggingMetadata {
+            logger_fields: std::mem::take(&mut self.fields),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]

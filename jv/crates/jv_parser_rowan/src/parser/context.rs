@@ -2,7 +2,7 @@ use jv_lexer::Token;
 
 use crate::syntax::{SyntaxKind, TokenKind};
 
-use super::{DiagnosticSeverity, ParseEvent, ParseOutput, ParserDiagnostic, TokenSpan, strategies};
+use super::{strategies, DiagnosticSeverity, ParseEvent, ParseOutput, ParserDiagnostic, TokenSpan};
 
 /// デフォルトの同期トークン集合。
 const SYNC_TOKENS: &[TokenKind] = &[

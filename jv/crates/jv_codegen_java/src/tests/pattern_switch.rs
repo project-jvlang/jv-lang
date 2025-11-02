@@ -145,6 +145,7 @@ fn example1_program() -> IrProgram {
         type_declarations: vec![class],
         generic_metadata: Default::default(),
         conversion_metadata: Vec::new(),
+        logging: Default::default(),
         span: dummy_span(),
     }
 }
@@ -284,6 +285,7 @@ fn example2_program() -> IrProgram {
         type_declarations: vec![class],
         generic_metadata: Default::default(),
         conversion_metadata: Vec::new(),
+        logging: Default::default(),
         span: dummy_span(),
     }
 }
@@ -424,6 +426,7 @@ fn example5_program() -> IrProgram {
         type_declarations: vec![inner_record, outer_record, example_class],
         generic_metadata: Default::default(),
         conversion_metadata: Vec::new(),
+        logging: Default::default(),
         span: dummy_span(),
     }
 }

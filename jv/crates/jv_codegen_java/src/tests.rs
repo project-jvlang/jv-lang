@@ -289,6 +289,7 @@ fn sample_embed_program() -> IrProgram {
         type_declarations: vec![user_sample_record(), embed_data_class()],
         generic_metadata: Default::default(),
         conversion_metadata: Vec::new(),
+        logging: Default::default(),
         span: dummy_span(),
     }
 }
@@ -380,6 +381,7 @@ fn sample_load_program() -> IrProgram {
         type_declarations: vec![load_helper_class()],
         generic_metadata: Default::default(),
         conversion_metadata: Vec::new(),
+        logging: Default::default(),
         span: dummy_span(),
     }
 }
@@ -606,6 +608,7 @@ fn snapshot_program() -> IrProgram {
         type_declarations: vec![class],
         generic_metadata: Default::default(),
         conversion_metadata: Vec::new(),
+        logging: Default::default(),
         span: dummy_span(),
     }
 }
@@ -1648,6 +1651,7 @@ fn compilation_unit_collects_type_declarations() {
         type_declarations: vec![simple_class()],
         generic_metadata: Default::default(),
         conversion_metadata: Vec::new(),
+        logging: Default::default(),
         span: dummy_span(),
     };
 
@@ -1716,6 +1720,7 @@ fn script_statements_are_wrapped_in_generated_main() {
         ],
         generic_metadata: Default::default(),
         conversion_metadata: Vec::new(),
+        logging: Default::default(),
         span: dummy_span(),
     };
 
@@ -1751,6 +1756,7 @@ fn script_regex_val_is_hoisted_to_static_field() {
         type_declarations: vec![regex_decl],
         generic_metadata: Default::default(),
         conversion_metadata: Vec::new(),
+        logging: Default::default(),
         span: dummy_span(),
     };
 
@@ -1820,6 +1826,7 @@ fn class_regex_field_is_emitted_as_static_final() {
         type_declarations: vec![class],
         generic_metadata: Default::default(),
         conversion_metadata: Vec::new(),
+        logging: Default::default(),
         span: dummy_span(),
     };
 
@@ -2243,6 +2250,7 @@ fn sample_record_generation_emits_expected_record() {
         type_declarations: vec![user_sample_record()],
         generic_metadata: Default::default(),
         conversion_metadata: Vec::new(),
+        logging: Default::default(),
         span: dummy_span(),
     };
 
@@ -2264,6 +2272,7 @@ fn sample_declaration_generates_records_from_descriptors() {
         type_declarations: vec![IrStatement::SampleDeclaration(declaration)],
         generic_metadata: Default::default(),
         conversion_metadata: Vec::new(),
+        logging: Default::default(),
         span: dummy_span(),
     };
 
@@ -2314,6 +2323,7 @@ fn embed_mode_sample_declaration_handles_csv() {
         type_declarations: vec![IrStatement::SampleDeclaration(declaration)],
         generic_metadata: Default::default(),
         conversion_metadata: Vec::new(),
+        logging: Default::default(),
         span: dummy_span(),
     };
 
@@ -2344,6 +2354,7 @@ fn embed_mode_sample_declaration_handles_tsv() {
         type_declarations: vec![IrStatement::SampleDeclaration(declaration)],
         generic_metadata: Default::default(),
         conversion_metadata: Vec::new(),
+        logging: Default::default(),
         span: dummy_span(),
     };
 
@@ -2374,6 +2385,7 @@ fn embed_mode_sample_declaration_produces_helper_class() {
         type_declarations: vec![IrStatement::SampleDeclaration(declaration)],
         generic_metadata: Default::default(),
         conversion_metadata: Vec::new(),
+        logging: Default::default(),
         span: dummy_span(),
     };
 
@@ -2551,6 +2563,7 @@ fn load_mode_sample_declaration_generates_http_fetch_pipeline() {
         type_declarations: vec![IrStatement::SampleDeclaration(declaration)],
         generic_metadata: Default::default(),
         conversion_metadata: Vec::new(),
+        logging: Default::default(),
         span: dummy_span(),
     };
 
@@ -2629,6 +2642,7 @@ fn load_mode_sample_declaration_supports_s3_and_tabular_decoding() {
         type_declarations: vec![IrStatement::SampleDeclaration(declaration)],
         generic_metadata: Default::default(),
         conversion_metadata: Vec::new(),
+        logging: Default::default(),
         span: dummy_span(),
     };
 

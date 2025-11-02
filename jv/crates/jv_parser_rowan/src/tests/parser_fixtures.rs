@@ -326,10 +326,9 @@ fn build_tree_from_events_handles_deep_nesting() {
     assert_eq!(tree.kind(), SyntaxKind::Root, "root node kind mismatch");
 
     // Root should contain at least one StatementList node.
-    assert!(
-        tree.descendants()
-            .any(|node| node.kind() == SyntaxKind::StatementList)
-    );
+    assert!(tree
+        .descendants()
+        .any(|node| node.kind() == SyntaxKind::StatementList));
 
     // Verify nested control flow constructs remain beneath the function declaration.
     let when_node = tree

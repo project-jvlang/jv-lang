@@ -5,19 +5,20 @@ mod tests {
         CompletableFutureOp, DataFormat, IrCaseLabel, IrDeconstructionComponent,
         IrDeconstructionPattern, IrExpression, IrForEachKind, IrForLoopMetadata, IrImplicitWhenEnd,
         IrModifiers, IrNumericRangeLoop, IrParameter, IrResolvedMethodTarget, IrStatement,
-        IrVisibility, JavaType, PipelineShape, SampleMode, SampleSourceKind, Schema,
-        SequencePipeline, SequenceSource, SequenceStage, SequenceTerminal,
-        SequenceTerminalEvaluation, SequenceTerminalKind, TransformContext, TransformError,
-        TransformPools, TransformProfiler, VirtualThreadOp, convert_type_annotation,
-        desugar_async_expression, desugar_await_expression, desugar_data_class,
-        desugar_default_parameters, desugar_defer_expression, desugar_elvis_operator,
-        desugar_extension_function, desugar_named_arguments, desugar_null_safe_index_access,
-        desugar_null_safe_member_access, desugar_spawn_expression, desugar_string_interpolation,
-        desugar_top_level_function, desugar_use_expression, desugar_val_declaration,
-        desugar_var_declaration, desugar_when_expression, generate_extension_class_name,
-        generate_utility_class_name, infer_java_type, naming::method_erasure::apply_method_erasure,
-        transform_expression, transform_program, transform_program_with_context,
-        transform_program_with_context_profiled, transform_statement,
+        IrVisibility, JavaType, LogInvocationItem, LogLevel, PipelineShape, SampleMode,
+        SampleSourceKind, Schema, SequencePipeline, SequenceSource, SequenceStage,
+        SequenceTerminal, SequenceTerminalEvaluation, SequenceTerminalKind, TransformContext,
+        TransformError, TransformPools, TransformProfiler, VirtualThreadOp,
+        convert_type_annotation, desugar_async_expression, desugar_await_expression,
+        desugar_data_class, desugar_default_parameters, desugar_defer_expression,
+        desugar_elvis_operator, desugar_extension_function, desugar_named_arguments,
+        desugar_null_safe_index_access, desugar_null_safe_member_access, desugar_spawn_expression,
+        desugar_string_interpolation, desugar_top_level_function, desugar_use_expression,
+        desugar_val_declaration, desugar_var_declaration, desugar_when_expression,
+        generate_extension_class_name, generate_utility_class_name, infer_java_type,
+        naming::method_erasure::apply_method_erasure, transform_expression, transform_program,
+        transform_program_with_context, transform_program_with_context_profiled,
+        transform_statement,
     };
     use jv_ast::*;
     use jv_parser_frontend::ParserPipeline;
@@ -211,6 +212,176 @@ mod tests {
             }
             other => panic!("expected regex pattern ir expression, got {:?}", other),
         }
+    }
+
+    #[test]
+    fn log_block_lowering_builds_plan() {
+        let span = dummy_span();
+        let inner_span = dummy_span();
+
+        let val_stmt = Statement::ValDeclaration {
+            name: "user".to_string(),
+            binding: None,
+            type_annotation: None,
+            initializer: Expression::Literal(
+                Literal::String("loadUser".to_string()),
+                inner_span.clone(),
+            ),
+            modifiers: Modifiers::default(),
+            origin: ValBindingOrigin::ExplicitKeyword,
+            span: inner_span.clone(),
+        };
+
+        let log_block = LogBlock {
+            level: LogBlockLevel::Default,
+            items: vec![
+                LogItem::Statement(val_stmt),
+                LogItem::Expression(Expression::Literal(
+                    Literal::String("done".to_string()),
+                    inner_span.clone(),
+                )),
+            ],
+            span: inner_span.clone(),
+        };
+
+        let function = Statement::FunctionDeclaration {
+            name: "main".to_string(),
+            type_parameters: Vec::new(),
+            generic_signature: None,
+            where_clause: None,
+            parameters: Vec::new(),
+            return_type: None,
+            primitive_return: None,
+            body: Box::new(Expression::Block {
+                statements: vec![Statement::Expression {
+                    expr: Expression::LogBlock(log_block),
+                    span: inner_span.clone(),
+                }],
+                span: inner_span.clone(),
+            }),
+            modifiers: Modifiers::default(),
+            span: span.clone(),
+        };
+
+        let program = Program {
+            package: None,
+            imports: Vec::new(),
+            statements: vec![function],
+            span: span.clone(),
+        };
+
+        let mut context = TransformContext::new();
+        let ir_program =
+            transform_program_with_context(program, &mut context).expect("lowering succeeds");
+
+        let plan = ir_program
+            .type_declarations
+            .iter()
+            .find_map(|stmt| match stmt {
+                IrStatement::MethodDeclaration {
+                    name,
+                    body: Some(body),
+                    ..
+                } if name == "main" => match body {
+                    IrExpression::Block { statements, .. } => statements.iter().find_map(|stmt| {
+                        if let IrStatement::Expression { expr, .. } = stmt {
+                            if let IrExpression::LogInvocation { plan, .. } = expr {
+                                return Some(plan.as_ref());
+                            }
+                        }
+                        None
+                    }),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .expect("log invocation present");
+
+        assert_eq!(plan.level, LogLevel::Info);
+        assert!(plan.uses_default_level);
+        assert_eq!(plan.guard_kind, None);
+        assert_eq!(plan.items.len(), 2);
+        assert!(matches!(plan.items[0], LogInvocationItem::Statement(_)));
+        assert!(matches!(plan.items[1], LogInvocationItem::Message(_)));
+
+        assert_eq!(ir_program.logging.logger_fields.len(), 1);
+        let field = &ir_program.logging.logger_fields[0];
+        assert_eq!(field.field_name, "LOGGER");
+        assert_eq!(plan.logger_field.raw(), field.id.raw());
+    }
+
+    #[test]
+    fn log_block_filtered_below_threshold() {
+        let span = dummy_span();
+        let inner_span = dummy_span();
+
+        let log_block = LogBlock {
+            level: LogBlockLevel::Debug,
+            items: vec![LogItem::Expression(Expression::Literal(
+                Literal::String("debug".to_string()),
+                inner_span.clone(),
+            ))],
+            span: inner_span.clone(),
+        };
+
+        let function = Statement::FunctionDeclaration {
+            name: "main".to_string(),
+            type_parameters: Vec::new(),
+            generic_signature: None,
+            where_clause: None,
+            parameters: Vec::new(),
+            return_type: None,
+            primitive_return: None,
+            body: Box::new(Expression::Block {
+                statements: vec![Statement::Expression {
+                    expr: Expression::LogBlock(log_block),
+                    span: inner_span.clone(),
+                }],
+                span: inner_span.clone(),
+            }),
+            modifiers: Modifiers::default(),
+            span: span.clone(),
+        };
+
+        let program = Program {
+            package: None,
+            imports: Vec::new(),
+            statements: vec![function],
+            span: span.clone(),
+        };
+
+        let mut context = TransformContext::new();
+        context.logging_options_mut().active_level = LogLevel::Error;
+
+        let ir_program =
+            transform_program_with_context(program, &mut context).expect("lowering succeeds");
+
+        let has_log = ir_program.type_declarations.iter().any(|stmt| {
+            if let IrStatement::MethodDeclaration {
+                name,
+                body: Some(body),
+                ..
+            } = stmt
+            {
+                if name == "main" {
+                    if let IrExpression::Block { statements, .. } = body {
+                        return statements.iter().any(|stmt| {
+                            matches!(
+                                stmt,
+                                IrStatement::Expression {
+                                    expr: IrExpression::LogInvocation { .. },
+                                    ..
+                                }
+                            )
+                        });
+                    }
+                }
+            }
+            false
+        });
+
+        assert!(!has_log, "filtered block should not emit log invocation");
+        assert!(ir_program.logging.logger_fields.is_empty());
     }
 
     #[test]

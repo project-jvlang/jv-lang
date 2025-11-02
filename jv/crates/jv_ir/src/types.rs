@@ -259,6 +259,152 @@ pub enum IrExpression {
         java_type: JavaType,
         span: Span,
     },
+
+    // Logging invocation generated from log blocks.
+    LogInvocation {
+        plan: Box<LogInvocationPlan>,
+        java_type: JavaType,
+        span: Span,
+    },
+}
+
+/// ログレベルの優先度を表す。TRACE < DEBUG < INFO < WARN < ERROR。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub enum LogLevel {
+    Trace,
+    Debug,
+    Info,
+    Warn,
+    Error,
+}
+
+impl LogLevel {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            LogLevel::Trace => "TRACE",
+            LogLevel::Debug => "DEBUG",
+            LogLevel::Info => "INFO",
+            LogLevel::Warn => "WARN",
+            LogLevel::Error => "ERROR",
+        }
+    }
+
+    const fn priority(self) -> u8 {
+        match self {
+            LogLevel::Trace => 0,
+            LogLevel::Debug => 1,
+            LogLevel::Info => 2,
+            LogLevel::Warn => 3,
+            LogLevel::Error => 4,
+        }
+    }
+
+    pub const fn is_enabled(self, threshold: LogLevel) -> bool {
+        self.priority() >= threshold.priority()
+    }
+}
+
+/// ログ出力前に実行するガード種別。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum LogGuardKind {
+    TraceEnabled,
+    DebugEnabled,
+    InfoEnabled,
+    WarnEnabled,
+    ErrorEnabled,
+}
+
+impl LogGuardKind {
+    pub fn for_level(level: LogLevel) -> Option<Self> {
+        match level {
+            LogLevel::Trace => Some(LogGuardKind::TraceEnabled),
+            LogLevel::Debug => Some(LogGuardKind::DebugEnabled),
+            LogLevel::Info => Some(LogGuardKind::InfoEnabled),
+            LogLevel::Warn => Some(LogGuardKind::WarnEnabled),
+            LogLevel::Error => Some(LogGuardKind::ErrorEnabled),
+        }
+    }
+}
+
+/// ロガーフィールドを識別するID。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct LoggerFieldId(pub u32);
+
+impl LoggerFieldId {
+    pub const fn raw(self) -> u32 {
+        self.0
+    }
+}
+
+/// ロガーフィールド挿入要求のメタデータ。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LoggerFieldSpec {
+    pub id: LoggerFieldId,
+    #[serde(default)]
+    pub owner_hint: Option<String>,
+    pub field_name: String,
+}
+
+/// ログメッセージの生データ。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LogMessage {
+    pub expression: IrExpression,
+    pub span: Span,
+}
+
+/// ログ呼び出し内の要素を列挙する。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum LogInvocationItem {
+    Statement(IrStatement),
+    Message(LogMessage),
+    Nested(Box<LogInvocationPlan>),
+}
+
+/// Javaクラスを一意に識別するID。ネスト情報を保持する。
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct ClassId {
+    #[serde(default)]
+    pub package: Option<String>,
+    #[serde(default)]
+    pub local_name: Vec<String>,
+}
+
+impl ClassId {
+    pub fn new(package: Option<String>, simple_name: impl Into<String>) -> Self {
+        Self {
+            package,
+            local_name: vec![simple_name.into()],
+        }
+    }
+
+    pub fn with_nesting(package: Option<String>, nesting: Vec<String>) -> Self {
+        Self {
+            package,
+            local_name: nesting,
+        }
+    }
+}
+
+/// ログブロックのローワリング結果を保持する。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LogInvocationPlan {
+    #[serde(default)]
+    pub class_id: Option<ClassId>,
+    pub logger_field: LoggerFieldId,
+    pub level: LogLevel,
+    #[serde(default)]
+    pub uses_default_level: bool,
+    #[serde(default)]
+    pub guard_kind: Option<LogGuardKind>,
+    pub items: Vec<LogInvocationItem>,
+    pub span: Span,
+}
+
+/// プログラム全体のロギングメタデータ。
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct LoggingMetadata {
+    #[serde(default)]
+    pub logger_fields: Vec<LoggerFieldSpec>,
 }
 
 /// Metadata describing the resolved target for a method call after name mapping.
@@ -402,7 +548,8 @@ impl IrExpression {
             | IrExpression::StringFormat { span, .. }
             | IrExpression::CompletableFuture { span, .. }
             | IrExpression::VirtualThread { span, .. }
-            | IrExpression::TryWithResources { span, .. } => span.clone(),
+            | IrExpression::TryWithResources { span, .. }
+            | IrExpression::LogInvocation { span, .. } => span.clone(),
         }
     }
 }
@@ -1149,6 +1296,8 @@ pub struct IrProgram {
     pub generic_metadata: GenericMetadataMap,
     #[serde(default)]
     pub conversion_metadata: Vec<ConversionMetadataEntry>,
+    #[serde(default)]
+    pub logging: LoggingMetadata,
     pub span: Span,
 }
 
