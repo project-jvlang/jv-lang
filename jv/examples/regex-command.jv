@@ -45,4 +45,44 @@ USER=Chie ACTION=RESULT ip=172.16.0.77
 
     println("=== match (implicit) ===")
     println("Akira を含む?: ${/auditLog/'USER=Akira'/}")
+
+    val kelvin = "K"
+    val asciiInsensitive = a/kelvin/'k'/'ASCII'/i
+    val unicodeInsensitive = a/kelvin/'k'/'UNICODE'/iu
+    println("")
+    println("=== unicode-case フラグ (i / iu) ===")
+    println("CASE_INSENSITIVE の置換結果: ${asciiInsensitive}")
+    println("UNICODE_CASE 併用の置換結果: ${unicodeInsensitive}")
+
+    val carriageSeparated = "start\rend"
+    val multilineMasked = a/carriageSeparated/'^end$'/'MATCH'/m
+    val unixLinesMasked = a/carriageSeparated/'^end$'/'MATCH'/dm
+    println("")
+    println("=== unix-lines フラグ (dm) ===")
+    println("MULTILINE のみ: ${multilineMasked}")
+    println("UNIX_LINES 併用: ${unixLinesMasked}")
+
+    val commentSample = "foo"
+    val commentBaseline = a/commentSample/'foo # note'/'OK'
+    val commentMode = a/commentSample/'foo # note'/'OK'/x
+    println("")
+    println("=== comments フラグ (x) ===")
+    println("コメントをそのまま扱う: ${commentBaseline}")
+    println("コメントを無視: ${commentMode}")
+
+    val literalSubject = "a.+b"
+    val literalRegex = a/literalSubject/'a.+b'/'OK'
+    val literalExact = a/literalSubject/'a.+b'/'OK'/l
+    println("")
+    println("=== literal フラグ (l) ===")
+    println("正規表現として解釈: ${literalRegex}")
+    println("文字列として完全一致: ${literalExact}")
+
+    val canonical = "é" // 'e' + combining acute accent
+    val canonicalBaseline = a/canonical/'é'/'OK'
+    val canonicalEq = a/canonical/'é'/'OK'/c
+    println("")
+    println("=== canon-eq フラグ (c) ===")
+    println("通常一致: ${canonicalBaseline}")
+    println("正規等価 (CANON_EQ): ${canonicalEq}")
 }
