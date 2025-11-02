@@ -21,6 +21,7 @@ mod java_type_names;
 mod sequence_warnings;
 
 pub mod commands;
+pub mod logging_overrides;
 #[derive(Parser, Debug, Clone)]
 #[command(name = "jv")]
 #[command(
@@ -163,6 +164,8 @@ pub enum Commands {
     Tour,
     /// Inspect compiler artifacts for debugging
     Debug(commands::debug::DebugArgs),
+    /// OpenTelemetry の設定検証と疎通確認を実行する
+    Otel(commands::otel::OtelCommand),
 }
 
 pub fn tooling_failure(path: &Path, diagnostic: EnhancedDiagnostic) -> anyhow::Error {
