@@ -136,7 +136,8 @@ fn ensure_toolchain_envs() {
         ] {
             if env::var_os(var).is_none() {
                 if let Some(path) = dir {
-                    env::set_var(var, path);
+                    // SAFETY: テストでは単一スレッドで環境変数を設定し、その後の子プロセス起動に利用するだけなので UB は発生しない。
+                    unsafe { env::set_var(var, path) };
                 }
             }
         }

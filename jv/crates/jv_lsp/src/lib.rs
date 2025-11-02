@@ -1798,6 +1798,14 @@ fn collect_call_diagnostics_from_expression(
                 collect_call_diagnostics_from_statement(statement, tokens, diagnostics);
             }
         }
+        Expression::DoublebraceInit(init) => {
+            if let Some(base) = &init.base {
+                collect_call_diagnostics_from_expression(base, tokens, diagnostics);
+            }
+            for statement in &init.statements {
+                collect_call_diagnostics_from_statement(statement, tokens, diagnostics);
+            }
+        }
         Expression::When {
             expr,
             arms,

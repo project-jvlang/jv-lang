@@ -367,7 +367,8 @@ Java(TM) SE Runtime Environment"#;
 
         fn set_os(key: &'static str, value: &std::ffi::OsStr) -> Self {
             let original = env::var_os(key);
-            env::set_var(key, value);
+            // SAFETY: テスト専用の一時環境変数設定であり、同時に他スレッドからアクセスしないため UB は生じない。
+            unsafe { env::set_var(key, value) };
             Self { key, original }
         }
     }
@@ -375,9 +376,11 @@ Java(TM) SE Runtime Environment"#;
     impl Drop for EnvVarGuard {
         fn drop(&mut self) {
             if let Some(value) = self.original.take() {
-                env::set_var(self.key, value);
+                // SAFETY: 上記と同様にテスト環境内でのみ使用するため安全。
+                unsafe { env::set_var(self.key, value) };
             } else {
-                env::remove_var(self.key);
+                // SAFETY: 同上。
+                unsafe { env::remove_var(self.key) };
             }
         }
     }
