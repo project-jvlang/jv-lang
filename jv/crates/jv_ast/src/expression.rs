@@ -40,6 +40,8 @@ pub enum Expression {
         type_arguments: Vec<TypeAnnotation>,
         #[serde(default, alias = "argument_style")]
         argument_metadata: CallArgumentMetadata,
+        #[serde(default)]
+        call_kind: CallKind,
         span: Span,
     },
 
@@ -238,6 +240,27 @@ pub struct CallArgumentIssue {
     pub message: String,
     #[serde(default)]
     pub span: Option<Span>,
+}
+
+/// Metadata describing how the callee should be interpreted.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum CallKind {
+    /// Regular function invocation.
+    #[serde(alias = "function")]
+    Function,
+    /// Invocation that should be treated as a constructor call.
+    Constructor {
+        #[serde(default)]
+        type_name: String,
+        #[serde(default)]
+        fqcn: Option<String>,
+    },
+}
+
+impl Default for CallKind {
+    fn default() -> Self {
+        CallKind::Function
+    }
 }
 
 impl<'de> Deserialize<'de> for CallArgumentMetadata {

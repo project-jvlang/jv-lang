@@ -30,13 +30,18 @@ impl DoublebraceHeuristics {
 
         // 優先度順に解決する。
         for preferred in [
+            "java.util.NavigableMap",
+            "java.util.SortedMap",
             "java.util.Map",
             "java.util.concurrent.ConcurrentMap",
+            "java.util.NavigableSet",
+            "java.util.SortedSet",
             "java.util.Deque",
             "java.util.Queue",
             "java.util.List",
             "java.util.Set",
             "java.util.Collection",
+            "java.lang.Iterable",
         ] {
             if suggestions.contains(preferred) {
                 return Some(preferred.to_string());
@@ -107,10 +112,18 @@ impl DoublebraceHeuristics {
     fn interface_for_method(name: &str) -> Option<&'static str> {
         let lower = name.to_ascii_lowercase();
         let key = lower.as_str();
-        if MAP_METHODS.contains(&key) {
+        if NAVIGABLE_MAP_METHODS.contains(&key) {
+            Some("java.util.NavigableMap")
+        } else if SORTED_MAP_METHODS.contains(&key) {
+            Some("java.util.SortedMap")
+        } else if MAP_METHODS.contains(&key) {
             Some("java.util.Map")
         } else if CONCURRENT_MAP_METHODS.contains(&key) {
             Some("java.util.concurrent.ConcurrentMap")
+        } else if NAVIGABLE_SET_METHODS.contains(&key) {
+            Some("java.util.NavigableSet")
+        } else if SORTED_SET_METHODS.contains(&key) {
+            Some("java.util.SortedSet")
         } else if DEQUE_METHODS.contains(&key) {
             Some("java.util.Deque")
         } else if QUEUE_METHODS.contains(&key) {
@@ -121,6 +134,8 @@ impl DoublebraceHeuristics {
             Some("java.util.List")
         } else if COLLECTION_METHODS.contains(&key) {
             Some("java.util.Collection")
+        } else if ITERABLE_METHODS.contains(&key) {
+            Some("java.lang.Iterable")
         } else {
             None
         }
@@ -149,6 +164,31 @@ const MAP_METHODS: &[&str] = &[
     "values",
 ];
 
+const SORTED_MAP_METHODS: &[&str] = &[
+    "firstkey",
+    "lastkey",
+    "headmap",
+    "tailmap",
+    "submap",
+    "comparator",
+];
+
+const NAVIGABLE_MAP_METHODS: &[&str] = &[
+    "descendingkeyset",
+    "descendingmap",
+    "navigablekeyset",
+    "floorentry",
+    "ceilingentry",
+    "higherentry",
+    "lowerentry",
+    "floorkey",
+    "ceilingkey",
+    "higherkey",
+    "lowerkey",
+    "pollfirstentry",
+    "polllastentry",
+];
+
 const CONCURRENT_MAP_METHODS: &[&str] = &[
     "putifabsent",
     "compute",
@@ -174,6 +214,26 @@ const QUEUE_METHODS: &[&str] = &["offer", "poll", "peek", "element"];
 
 const SET_METHODS: &[&str] = &["addall", "remove", "contains", "retainall", "clear"];
 
+const SORTED_SET_METHODS: &[&str] = &[
+    "first",
+    "last",
+    "headset",
+    "tailset",
+    "subset",
+    "comparator",
+];
+
+const NAVIGABLE_SET_METHODS: &[&str] = &[
+    "descendingiterator",
+    "descendingset",
+    "floor",
+    "ceiling",
+    "higher",
+    "lower",
+    "pollfirst",
+    "polllast",
+];
+
 const LIST_METHODS: &[&str] = &[
     "add",
     "addall",
@@ -187,7 +247,9 @@ const LIST_METHODS: &[&str] = &[
     "replaceall",
 ];
 
-const COLLECTION_METHODS: &[&str] = &["forEach", "stream", "isEmpty", "size", "toArray"];
+const COLLECTION_METHODS: &[&str] = &["foreach", "stream", "isempty", "size", "toarray"];
+
+const ITERABLE_METHODS: &[&str] = &["iterator", "spliterator", "foreach"];
 
 /// Doublebrace 初期化ブロック内で検出される制御フロー違反の種別。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -472,6 +534,7 @@ fn collect_candidate_members(entry: &TypeEntry, limit: usize) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use jv_ast::CallKind;
     use jv_ast::expression::{CallArgumentMetadata, CallArgumentStyle};
     use jv_ast::{Argument, Literal, Span};
 
@@ -485,6 +548,7 @@ mod tests {
             ))],
             type_arguments: Vec::new(),
             argument_metadata: CallArgumentMetadata::with_style(CallArgumentStyle::Whitespace),
+            call_kind: CallKind::Function,
             span,
         }
     }
@@ -517,5 +581,35 @@ mod tests {
         };
         let inferred = DoublebraceHeuristics::infer_interface(&[stmt]);
         assert_eq!(inferred.as_deref(), Some("java.util.Queue"));
+    }
+
+    #[test]
+    fn infer_sorted_set_interface_from_first() {
+        let stmt = Statement::Expression {
+            expr: call_expr("first"),
+            span: Span::dummy(),
+        };
+        let inferred = DoublebraceHeuristics::infer_interface(&[stmt]);
+        assert_eq!(inferred.as_deref(), Some("java.util.SortedSet"));
+    }
+
+    #[test]
+    fn infer_navigable_map_interface_from_floor_entry() {
+        let stmt = Statement::Expression {
+            expr: call_expr("floorEntry"),
+            span: Span::dummy(),
+        };
+        let inferred = DoublebraceHeuristics::infer_interface(&[stmt]);
+        assert_eq!(inferred.as_deref(), Some("java.util.NavigableMap"));
+    }
+
+    #[test]
+    fn infer_iterable_from_iterator_method() {
+        let stmt = Statement::Expression {
+            expr: call_expr("iterator"),
+            span: Span::dummy(),
+        };
+        let inferred = DoublebraceHeuristics::infer_interface(&[stmt]);
+        assert_eq!(inferred.as_deref(), Some("java.lang.Iterable"));
     }
 }

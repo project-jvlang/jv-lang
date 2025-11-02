@@ -170,6 +170,7 @@ impl SequenceWarningCollector {
                 type_arguments: _,
                 argument_metadata,
                 span,
+                ..
             } => {
                 self.visit_expression(function);
                 for argument in args {

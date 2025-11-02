@@ -1,4 +1,4 @@
-use jv_ast::expression::{CallArgumentMetadata, CallArgumentStyle, DoublebraceInit};
+use jv_ast::expression::{CallArgumentMetadata, CallArgumentStyle, CallKind, DoublebraceInit};
 use jv_ast::{
     Argument, Expression, Literal, Modifiers, Program, Span, Statement, ValBindingOrigin,
 };
@@ -35,6 +35,7 @@ fn mutate_plan_for_mutable_receiver() {
                 ))],
                 type_arguments: Vec::new(),
                 argument_metadata: CallArgumentMetadata::with_style(CallArgumentStyle::Whitespace),
+                call_kind: CallKind::Function,
                 span: span.clone(),
             },
             span: span.clone(),
@@ -91,6 +92,54 @@ fn mutate_plan_for_mutable_receiver() {
             }
         }
         other => panic!("ミューテーションプランが返るべきですが {:?}", other),
+    }
+}
+
+#[test]
+fn constructor_base_uses_synthesized_plan() {
+    let span = span();
+    let init = DoublebraceInit {
+        base: Some(Box::new(Expression::Call {
+            function: Box::new(Expression::Identifier("ArrayList".into(), span.clone())),
+            args: Vec::new(),
+            type_arguments: Vec::new(),
+            argument_metadata: CallArgumentMetadata::with_style(CallArgumentStyle::Comma),
+            call_kind: CallKind::Constructor {
+                type_name: "ArrayList".into(),
+                fqcn: Some("java.util.ArrayList".into()),
+            },
+            span: span.clone(),
+        })),
+        receiver_hint: None,
+        statements: vec![Statement::Expression {
+            expr: Expression::Call {
+                function: Box::new(Expression::Identifier("add".into(), span.clone())),
+                args: vec![Argument::Positional(Expression::Literal(
+                    Literal::String("value".into()),
+                    span.clone(),
+                ))],
+                type_arguments: Vec::new(),
+                argument_metadata:
+                    CallArgumentMetadata::with_style(CallArgumentStyle::Whitespace),
+                call_kind: CallKind::Function,
+                span: span.clone(),
+            },
+            span: span.clone(),
+        }],
+        span: span.clone(),
+    };
+
+    let target_ty = TypeKind::reference("java.util.ArrayList");
+    let base_ty = Some(TypeKind::reference("java.util.ArrayList"));
+
+    let plan = plan_doublebrace_application(base_ty.as_ref(), &target_ty, &init, None)
+        .expect("constructor base should yield mutate plan");
+
+    match plan {
+        DoublebracePlan::Mutate(mutate) => {
+            assert_eq!(mutate.base, PlanBase::SynthesizedInstance);
+        }
+        other => panic!("expected mutate plan, received {:?}", other),
     }
 }
 
@@ -208,6 +257,7 @@ fn planner_collects_plan_for_val_declaration() {
                 ))],
                 type_arguments: Vec::new(),
                 argument_metadata: CallArgumentMetadata::with_style(CallArgumentStyle::Whitespace),
+                call_kind: CallKind::Function,
                 span: span.clone(),
             },
             span: span.clone(),

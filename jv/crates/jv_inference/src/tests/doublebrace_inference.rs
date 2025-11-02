@@ -3,7 +3,7 @@ use crate::doublebrace::{
     detect_control_flow_violation, evaluate_member_usage, infer_doublebrace,
 };
 use crate::session::InferenceSession;
-use jv_ast::expression::{CallArgumentMetadata, CallArgumentStyle, DoublebraceInit};
+use jv_ast::expression::{CallArgumentMetadata, CallArgumentStyle, CallKind, DoublebraceInit};
 use jv_ast::{Argument, Expression, Literal, Span, Statement};
 use jv_build::metadata::{JavaMethodSignature, SymbolIndex, TypeEntry};
 use jv_ir::types::JavaType;
@@ -20,6 +20,7 @@ fn call_statement(name: &str) -> Statement {
             ))],
             type_arguments: Vec::new(),
             argument_metadata: CallArgumentMetadata::with_style(CallArgumentStyle::Whitespace),
+            call_kind: CallKind::Function,
             span: expr_span,
         },
         span: span.clone(),

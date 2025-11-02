@@ -276,3 +276,30 @@ fn lambda_extension_receiver_resolves_sequence_core() {
         "stream binding should not remain Unknown"
     );
 }
+
+#[test]
+fn doublebrace_example_generates_plans() {
+    use std::fs;
+    use std::path::PathBuf;
+
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let example_path = manifest_dir
+        .join("../../examples/doublebrace-init-block/src/main.jv");
+    let source = fs::read_to_string(&example_path)
+        .unwrap_or_else(|err| panic!("failed to read example {:?}: {err}", example_path));
+
+    let program = RowanPipeline::default()
+        .parse(&source)
+        .expect("example program should parse")
+        .into_program();
+
+    let mut checker = TypeChecker::new();
+    checker
+        .check_program(&program)
+        .expect("doublebrace example should type-check");
+
+    assert!(
+        !checker.doublebrace_plans().is_empty(),
+        "type checker should produce doublebrace plans for example"
+    );
+}

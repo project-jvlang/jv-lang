@@ -18,10 +18,18 @@ mod tests {
         generate_utility_class_name, infer_java_type, naming::method_erasure::apply_method_erasure,
         transform_expression, transform_program, transform_program_with_context,
         transform_program_with_context_profiled, transform_statement,
+        DoublebraceBaseStrategy, DoublebraceCopySourceStrategy, DoublebraceLoweringCopyPlan,
+        DoublebraceLoweringKind, DoublebraceLoweringMutatePlan, DoublebraceLoweringPlan,
+        DoublebraceLoweringStep, DoublebraceFieldUpdate as IrFieldUpdate,
+        DoublebraceMethodInvocation as IrMethodInvocation,
     };
     use jv_ast::*;
     use jv_parser_frontend::ParserPipeline;
     use jv_parser_rowan::frontend::RowanPipeline;
+    use jv_checker::java::{
+        DoublebracePlan, MutationStep, PlanBase, CopySource, FieldUpdate, MethodInvocation,
+    };
+    use jv_checker::TypeChecker;
     use sha2::{Digest, Sha256};
     use std::fs;
     use std::path::{Path, PathBuf};
@@ -255,7 +263,8 @@ mod tests {
             ))],
             type_arguments: Vec::new(),
             argument_metadata: CallArgumentMetadata::default(),
-            span: dummy_span(),
+            call_kind: CallKind::Function,
+                        span: dummy_span(),
         };
 
         let ir =
@@ -321,7 +330,8 @@ mod tests {
             args: vec![],
             type_arguments: vec![TypeAnnotation::Simple("String".to_string())],
             argument_metadata: CallArgumentMetadata::default(),
-            span: dummy_span(),
+            call_kind: CallKind::Function,
+                        span: dummy_span(),
         };
         let lambda = Expression::Lambda {
             parameters: vec![lambda_param],
@@ -341,7 +351,8 @@ mod tests {
             ],
             type_arguments: Vec::new(),
             argument_metadata: CallArgumentMetadata::default(),
-            span: dummy_span(),
+            call_kind: CallKind::Function,
+                        span: dummy_span(),
         };
 
         let ir = transform_expression(call_expression, &mut context)
@@ -480,7 +491,8 @@ mod tests {
             args: vec![],
             type_arguments: vec![TypeAnnotation::Simple("String".to_string())],
             argument_metadata: CallArgumentMetadata::default(),
-            span: dummy_span(),
+            call_kind: CallKind::Function,
+                        span: dummy_span(),
         };
         let lambda = Expression::Lambda {
             parameters: vec![],
@@ -500,7 +512,8 @@ mod tests {
             ],
             type_arguments: Vec::new(),
             argument_metadata: CallArgumentMetadata::default(),
-            span: dummy_span(),
+            call_kind: CallKind::Function,
+                        span: dummy_span(),
         };
 
         let ir = transform_expression(call_expression, &mut context)
@@ -1523,7 +1536,8 @@ mod tests {
             ))],
             type_arguments: vec![],
             argument_metadata: CallArgumentMetadata::default(),
-            span: dummy_span(),
+            call_kind: CallKind::Function,
+                        span: dummy_span(),
         };
 
         let string_arm = WhenArm {
@@ -1937,7 +1951,8 @@ mod tests {
                 args: vec![],
                 type_arguments: Vec::new(),
                 argument_metadata: CallArgumentMetadata::with_style(CallArgumentStyle::Comma),
-                span: dummy_span(),
+                call_kind: CallKind::Function,
+                                span: dummy_span(),
             }),
             modifiers: Modifiers::default(),
             span: dummy_span(),
@@ -2005,7 +2020,8 @@ mod tests {
             args: Vec::new(),
             type_arguments: Vec::new(),
             argument_metadata: CallArgumentMetadata::with_style(CallArgumentStyle::Whitespace),
-            span: dummy_span(),
+            call_kind: CallKind::Function,
+                        span: dummy_span(),
         };
 
         let wrapper_decl = Statement::FunctionDeclaration {
@@ -2994,7 +3010,8 @@ mod tests {
             ))],
             type_arguments: Vec::new(),
             argument_metadata: CallArgumentMetadata::default(),
-            span: dummy_span(),
+            call_kind: CallKind::Function,
+                        span: dummy_span(),
         };
 
         let ir = transform_expression(call, &mut context)
@@ -3524,7 +3541,8 @@ mod tests {
             args: vec![],
             type_arguments: vec![TypeAnnotation::Simple("Int".to_string())],
             argument_metadata: CallArgumentMetadata::default(),
-            span: dummy_span(),
+            call_kind: CallKind::Function,
+                        span: dummy_span(),
         };
 
         let ir = transform_expression(call_expression, &mut context)
@@ -3916,7 +3934,8 @@ fun sample(value: Any): Int {
             ))],
             type_arguments: Vec::new(),
             argument_metadata: CallArgumentMetadata::default(),
-            span: dummy_span(),
+            call_kind: CallKind::Function,
+                        span: dummy_span(),
         };
 
         let ir_expr =
@@ -3974,7 +3993,8 @@ fun sample(value: Any): Int {
             args: Vec::new(),
             type_arguments: Vec::new(),
             argument_metadata: CallArgumentMetadata::default(),
-            span: dummy_span(),
+            call_kind: CallKind::Function,
+                        span: dummy_span(),
         };
 
         let ir_expr = transform_expression(expr, &mut context)
@@ -4367,7 +4387,8 @@ fun sample(value: Any): Int {
                     args: vec![],
                     type_arguments: Vec::new(),
                     argument_metadata: CallArgumentMetadata::with_style(CallArgumentStyle::Comma),
-                    span: dummy_span(),
+                    call_kind: CallKind::Function,
+                                        span: dummy_span(),
                 }),
                 body: Box::new(Expression::Lambda {
                     parameters: vec![Parameter {
@@ -4397,6 +4418,7 @@ fun sample(value: Any): Int {
                                     argument_metadata: CallArgumentMetadata::with_style(
                                         CallArgumentStyle::Comma,
                                     ),
+                                    call_kind: CallKind::Function,
                                     span: dummy_span(),
                                 },
                                 span: dummy_span(),
@@ -4416,6 +4438,7 @@ fun sample(value: Any): Int {
                                     argument_metadata: CallArgumentMetadata::with_style(
                                         CallArgumentStyle::Comma,
                                     ),
+                                    call_kind: CallKind::Function,
                                     span: dummy_span(),
                                 }),
                                 span: dummy_span(),
@@ -4729,7 +4752,8 @@ fun sample(value: Any): Int {
             args: vec![Argument::Positional(lambda_expr)],
             type_arguments: Vec::new(),
             argument_metadata: CallArgumentMetadata::default(),
-            span: dummy_span(),
+            call_kind: CallKind::Function,
+                        span: dummy_span(),
         };
 
         let to_list_call = Expression::Call {
@@ -4741,7 +4765,8 @@ fun sample(value: Any): Int {
             args: vec![],
             type_arguments: Vec::new(),
             argument_metadata: CallArgumentMetadata::default(),
-            span: dummy_span(),
+            call_kind: CallKind::Function,
+                        span: dummy_span(),
         };
 
         let result = transform_expression(to_list_call, &mut context)
@@ -6210,7 +6235,23 @@ fun sample(value: Any): Int {
                 .parse(&source)
                 .unwrap_or_else(|err| panic!("Rowan parse failed for {}: {:?}", display, err));
             let program = frontend.into_program();
+            let mut checker = TypeChecker::new();
+            if let Err(errors) = checker.check_program(&program) {
+                let details = errors
+                    .into_iter()
+                    .map(|error| format!("{error:?}"))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                failures.push((display.clone(), format!("TypeChecker error(s): {details}")));
+                continue;
+            }
+
+            let plans = convert_doublebrace_plans(checker.doublebrace_plans());
             let mut context = TransformContext::new();
+            if !plans.is_empty() {
+                context.set_doublebrace_plans(plans);
+            }
+
             if let Err(err) = transform_program_with_context(program, &mut context) {
                 failures.push((display, format!("{err:?}")));
             }
@@ -6225,4 +6266,3 @@ fun sample(value: Any): Int {
             panic!("examples failed to lower:\n{details}");
         }
     }
-}

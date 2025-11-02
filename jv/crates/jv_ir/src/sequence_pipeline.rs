@@ -475,6 +475,7 @@ pub fn try_lower_sequence_call(
                 type_arguments: _,
                 argument_metadata: _,
                 span,
+                ..
             } => {
                 current_function = *function;
                 current_args = args;

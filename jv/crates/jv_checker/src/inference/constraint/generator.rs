@@ -19,8 +19,8 @@ use crate::pattern::{
     NarrowedBinding, NarrowedNullability, NarrowingSnapshot, PatternMatchService, PatternTarget,
 };
 use jv_ast::{
-    Argument, BinaryOp, Expression, ForInStatement, Literal, Parameter, Program, Span, Statement,
-    TypeAnnotation, UnaryOp,
+    Argument, BinaryOp, CallKind, Expression, ForInStatement, Literal, Parameter, Program, Span,
+    Statement, TypeAnnotation, UnaryOp,
 };
 use jv_build::metadata::SymbolIndex;
 use jv_inference::types::NullabilityFlag;
@@ -301,24 +301,43 @@ impl<'env, 'ext, 'imp> ConstraintGenerator<'env, 'ext, 'imp> {
                 left, op, right, ..
             } => self.infer_binary_expression(op, left, right),
             Expression::Unary { op, operand, .. } => self.infer_unary_expression(op, operand),
-            Expression::Call { function, args, .. } => {
-                let fn_ty = self.infer_expression(function);
-                let mut argument_types = Vec::with_capacity(args.len());
-                for arg in args {
-                    let ty = match arg {
-                        Argument::Positional(expr) => self.infer_expression(expr),
-                        Argument::Named { value, .. } => self.infer_expression(value),
-                    };
-                    argument_types.push(ty);
-                }
+            Expression::Call {
+                function,
+                args,
+                type_arguments,
+                argument_metadata: _,
+                call_kind,
+                span,
+            } => match call_kind {
+                CallKind::Function => {
+                    let fn_ty = self.infer_expression(function);
+                    let mut argument_types = Vec::with_capacity(args.len());
+                    for arg in args {
+                        let ty = match arg {
+                            Argument::Positional(expr) => self.infer_expression(expr),
+                            Argument::Named { value, .. } => self.infer_expression(value),
+                        };
+                        argument_types.push(ty);
+                    }
 
-                let result_ty = self.env.fresh_type_variable();
-                let expected_fn = TypeKind::function(argument_types, result_ty.clone());
-                self.push_constraint(
-                    ConstraintKind::Equal(fn_ty, expected_fn),
-                    Some("call target must be compatible with argument list"),
-                );
-                result_ty
+                    let result_ty = self.env.fresh_type_variable();
+                    let expected_fn = TypeKind::function(argument_types, result_ty.clone());
+                    self.push_constraint(
+                        ConstraintKind::Equal(fn_ty, expected_fn),
+                        Some("call target must be compatible with argument list"),
+                    );
+                    result_ty
+                }
+                CallKind::Constructor { type_name, fqcn } => {
+                    self.infer_constructor_call(
+                        function.as_ref(),
+                        args,
+                        type_arguments,
+                        type_name.as_str(),
+                        fqcn.as_ref(),
+                        span,
+                    )
+                }
             }
             Expression::TypeCast { expr, target, .. } => {
                 let _ = self.infer_expression(expr);
@@ -630,6 +649,38 @@ impl<'env, 'ext, 'imp> ConstraintGenerator<'env, 'ext, 'imp> {
         }
         self.env.leave_scope();
         last
+    }
+
+    fn infer_constructor_call(
+        &mut self,
+        _function: &Expression,
+        args: &[Argument],
+        _type_arguments: &[TypeAnnotation],
+        type_name: &str,
+        fqcn: Option<&String>,
+        _span: &Span,
+    ) -> TypeKind {
+        for argument in args {
+            match argument {
+                Argument::Positional(expr) => {
+                    self.infer_expression(expr);
+                }
+                Argument::Named { value, .. } => {
+                    self.infer_expression(value);
+                }
+            }
+        }
+
+        let alias_target = self
+            .imports
+            .as_ref()
+            .and_then(|registry| registry.resolve_type_alias(type_name));
+        let candidate = fqcn
+            .map(|value| value.clone())
+            .or_else(|| alias_target.map(|value| value.to_string()))
+            .unwrap_or_else(|| type_name.to_string());
+
+        self.apply_registry_if_needed(TypeKind::reference(candidate))
     }
 
     fn infer_doublebrace(&mut self, init: &jv_ast::DoublebraceInit) -> TypeKind {
@@ -1237,7 +1288,7 @@ fn doublebrace_message(key: &str, args: &[(&str, String)]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use jv_ast::expression::{CallArgumentMetadata, CallArgumentStyle, DoublebraceInit};
+    use jv_ast::expression::{CallArgumentMetadata, CallArgumentStyle, CallKind, DoublebraceInit};
     use jv_ast::{Modifiers, Pattern, Span, ValBindingOrigin, WhenArm};
     use jv_build::metadata::{JavaMethodSignature, TypeEntry};
     use jv_ir::types::JavaType;
@@ -1543,6 +1594,7 @@ val result = when (maybe) {
                     argument_metadata: CallArgumentMetadata::with_style(
                         CallArgumentStyle::Whitespace,
                     ),
+                    call_kind: CallKind::Function,
                     span: span.clone(),
                 },
                 span: span.clone(),
@@ -1576,6 +1628,45 @@ val result = when (maybe) {
     }
 
     #[test]
+    fn constructor_call_infers_reference_type() {
+        let span = dummy_span();
+        let constructor = Expression::Call {
+            function: Box::new(Expression::Identifier("ArrayList".into(), span.clone())),
+            args: Vec::new(),
+            type_arguments: Vec::new(),
+            argument_metadata: CallArgumentMetadata::with_style(CallArgumentStyle::Comma),
+            call_kind: CallKind::Constructor {
+                type_name: "ArrayList".into(),
+                fqcn: Some("java.util.ArrayList".into()),
+            },
+            span: span.clone(),
+        };
+
+        let program = Program {
+            package: None,
+            imports: Vec::new(),
+            statements: vec![Statement::ValDeclaration {
+                name: "items".into(),
+                binding: None,
+                type_annotation: None,
+                initializer: constructor,
+                modifiers: default_modifiers(),
+                origin: ValBindingOrigin::ExplicitKeyword,
+                span: span.clone(),
+            }],
+            span,
+        };
+
+        let mut env = TypeEnvironment::new();
+        let extensions = ExtensionRegistry::new();
+        let _constraints =
+            ConstraintGenerator::new(&mut env, &extensions, None, None).generate(&program);
+
+        let scheme = env.lookup("items").expect("constructor result should be inferred");
+        assert_eq!(scheme.ty, TypeKind::reference("java.util.ArrayList"));
+    }
+
+    #[test]
     fn doublebrace_methods_map_to_map_interface() {
         let span = dummy_span();
         let init = Expression::DoublebraceInit(DoublebraceInit {
@@ -1598,6 +1689,7 @@ val result = when (maybe) {
                     argument_metadata: CallArgumentMetadata::with_style(
                         CallArgumentStyle::Whitespace,
                     ),
+                    call_kind: CallKind::Function,
                     span: span.clone(),
                 },
                 span: span.clone(),
@@ -1685,6 +1777,7 @@ val result = when (maybe) {
                     argument_metadata: CallArgumentMetadata::with_style(
                         CallArgumentStyle::Whitespace,
                     ),
+                    call_kind: CallKind::Function,
                     span: span.clone(),
                 },
                 span: span.clone(),
@@ -1765,6 +1858,7 @@ val result = when (maybe) {
                     argument_metadata: CallArgumentMetadata::with_style(
                         CallArgumentStyle::Whitespace,
                     ),
+                    call_kind: CallKind::Function,
                     span: span.clone(),
                 },
                 span: span.clone(),

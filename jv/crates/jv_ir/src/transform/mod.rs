@@ -11,8 +11,8 @@ use crate::types::{
     IrDoublebracePlan, IrExpression, IrImport, IrImportDetail, IrProgram, IrStatement, JavaType,
 };
 use jv_ast::{
-    Argument, BinaryOp, BindingPatternKind, CallArgumentMetadata, CallArgumentStyle, CommentKind,
-    ConcurrencyConstruct, DoublebraceInit, Expression, Literal, Modifiers, Program,
+    Argument, BinaryOp, BindingPatternKind, CallArgumentMetadata, CallArgumentStyle, CallKind,
+    CommentKind, ConcurrencyConstruct, DoublebraceInit, Expression, Literal, Modifiers, Program,
     ResourceManagement, SequenceDelimiter, Span, Statement, TypeAnnotation, UnaryOp,
     ValBindingOrigin,
 };
@@ -790,6 +790,7 @@ pub fn transform_expression(
             args,
             type_arguments,
             argument_metadata,
+            call_kind,
             span,
         } => {
             if let Some(sequence_expr) = sequence_pipeline::try_lower_sequence_call(
@@ -807,6 +808,7 @@ pub fn transform_expression(
                 args,
                 type_arguments,
                 argument_metadata,
+                call_kind,
                 span,
                 context,
             )
@@ -1030,11 +1032,47 @@ fn lower_call_expression(
     args: Vec<Argument>,
     type_arguments: Vec<TypeAnnotation>,
     argument_metadata: CallArgumentMetadata,
+    call_kind: CallKind,
     span: Span,
     context: &mut TransformContext,
 ) -> Result<IrExpression, TransformError> {
+    let _ = &call_kind;
     let argument_style = argument_metadata.style;
     let mut ir_args = lower_call_arguments(args, context)?;
+
+    if let CallKind::Constructor { type_name, fqcn } = &call_kind {
+        let resolved_fqcn = fqcn.clone().or_else(|| {
+            context.lookup_variable(type_name).and_then(|ty| match ty {
+                JavaType::Reference { name, .. } => Some(name.clone()),
+                _ => None,
+            })
+        });
+        let fqcn = resolved_fqcn.unwrap_or_else(|| type_name.clone());
+        let class_name = fqcn
+            .rsplit('.')
+            .next()
+            .unwrap_or(type_name.as_str())
+            .to_string();
+        let generic_args = type_arguments
+            .iter()
+            .map(|annotation| {
+                let java = type_system::convert_type_annotation(annotation.clone())?;
+                Ok(boxed_java_type(&java))
+            })
+            .collect::<Result<Vec<_>, TransformError>>()?;
+        let java_type = JavaType::Reference {
+            name: fqcn,
+            generic_args: generic_args.clone(),
+        };
+
+        return Ok(IrExpression::ObjectCreation {
+            class_name,
+            generic_args,
+            args: ir_args,
+            java_type,
+            span,
+        });
+    }
 
     match function {
         Expression::Identifier(name, fn_span) => {
@@ -1178,18 +1216,63 @@ fn lower_call_expression(
         }
         other => {
             let function_expr = transform_expression(other, context)?;
-            let mut call = IrExpression::MethodCall {
-                receiver: Some(Box::new(function_expr)),
-                method_name: "call".to_string(),
-                java_name: None,
-                resolved_target: None,
-                args: ir_args,
-                argument_style,
-                java_type: JavaType::object(),
-                span,
-            };
-            register_call_metadata(context, &mut call, None);
-            Ok(call)
+            match function_expr {
+                IrExpression::FieldAccess {
+                    receiver,
+                    field_name,
+                    ..
+                } => {
+                    let mut call = IrExpression::MethodCall {
+                        receiver: Some(receiver),
+                        method_name: field_name,
+                        java_name: None,
+                        resolved_target: None,
+                        args: ir_args,
+                        argument_style,
+                        java_type: JavaType::object(),
+                        span,
+                    };
+                    register_call_metadata(context, &mut call, None);
+                    Ok(call)
+                }
+                IrExpression::MethodCall {
+                    receiver,
+                    method_name,
+                    java_name,
+                    resolved_target,
+                    args: existing_args,
+                    argument_style: existing_style,
+                    java_type,
+                    span: inner_span,
+                } if ir_args.is_empty() && existing_args.is_empty() => {
+                    let mut call = IrExpression::MethodCall {
+                        receiver,
+                        method_name,
+                        java_name,
+                        resolved_target,
+                        args: existing_args,
+                        argument_style: existing_style,
+                        java_type,
+                        span: inner_span,
+                    };
+                    register_call_metadata(context, &mut call, None);
+                    Ok(call)
+                }
+                _ => {
+                    let mut call = IrExpression::MethodCall {
+                        receiver: Some(Box::new(function_expr)),
+                        method_name: "call".to_string(),
+                        java_name: None,
+                        resolved_target: None,
+                        args: ir_args,
+                        argument_style,
+                        java_type: JavaType::object(),
+                        span,
+                    };
+                    register_call_metadata(context, &mut call, None);
+                    Ok(call)
+                }
+            }
         }
     }
 }

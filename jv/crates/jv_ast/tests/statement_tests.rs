@@ -502,6 +502,7 @@ fn test_concurrency_await() {
         args: vec![],
         type_arguments: Vec::new(),
         argument_metadata: CallArgumentMetadata::with_style(CallArgumentStyle::Comma),
+        call_kind: CallKind::Function,
         span: dummy_span(),
     };
     let construct = ConcurrencyConstruct::Await {
@@ -522,6 +523,7 @@ fn test_resource_use() {
         args: vec![],
         type_arguments: Vec::new(),
         argument_metadata: CallArgumentMetadata::with_style(CallArgumentStyle::Comma),
+        call_kind: CallKind::Function,
         span: dummy_span(),
     };
     let body = Expression::Block {
@@ -546,6 +548,7 @@ fn test_resource_defer() {
         args: vec![],
         type_arguments: Vec::new(),
         argument_metadata: CallArgumentMetadata::with_style(CallArgumentStyle::Comma),
+        call_kind: CallKind::Function,
         span: dummy_span(),
     };
     let construct = ResourceManagement::Defer {

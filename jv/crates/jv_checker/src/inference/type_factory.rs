@@ -49,6 +49,28 @@ impl TypeFactory {
             }
             "List" | "java.util.List" => Ok(TypeKind::reference("java.util.List")),
             "Map" | "java.util.Map" => Ok(TypeKind::reference("java.util.Map")),
+            "ArrayList" | "java.util.ArrayList" => {
+                Ok(TypeKind::reference("java.util.ArrayList"))
+            }
+            "LinkedList" | "java.util.LinkedList" => {
+                Ok(TypeKind::reference("java.util.LinkedList"))
+            }
+            "HashMap" | "java.util.HashMap" => Ok(TypeKind::reference("java.util.HashMap")),
+            "LinkedHashMap" | "java.util.LinkedHashMap" => {
+                Ok(TypeKind::reference("java.util.LinkedHashMap"))
+            }
+            "TreeMap" | "java.util.TreeMap" => Ok(TypeKind::reference("java.util.TreeMap")),
+            "HashSet" | "java.util.HashSet" => Ok(TypeKind::reference("java.util.HashSet")),
+            "LinkedHashSet" | "java.util.LinkedHashSet" => {
+                Ok(TypeKind::reference("java.util.LinkedHashSet"))
+            }
+            "TreeSet" | "java.util.TreeSet" => Ok(TypeKind::reference("java.util.TreeSet")),
+            "ArrayDeque" | "java.util.ArrayDeque" => {
+                Ok(TypeKind::reference("java.util.ArrayDeque"))
+            }
+            "ConcurrentHashMap" | "java.util.concurrent.ConcurrentHashMap" => Ok(
+                TypeKind::reference("java.util.concurrent.ConcurrentHashMap"),
+            ),
             other => Ok(TypeKind::reference(other.to_string())),
         }
     }

@@ -107,6 +107,11 @@ impl ImportRegistry {
         env.define_scheme(alias, TypeScheme::monotype(ty));
     }
 
+    /// Returns the fully qualified class name registered for a type alias, if any.
+    pub fn resolve_type_alias(&self, alias: &str) -> Option<&str> {
+        self.type_aliases.get(alias).map(|value| value.as_str())
+    }
+
     fn resolve_type_from_wildcard(
         &mut self,
         env: &mut TypeEnvironment,

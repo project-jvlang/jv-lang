@@ -34,6 +34,7 @@ tracing.workspace = true
 criterion = "0.5"
 jv_parser_frontend.workspace = true
 jv_parser_rowan.workspace = true
+jv_checker.workspace = true
 
 [[bench]]
 name = "basic_syntax_sugar"

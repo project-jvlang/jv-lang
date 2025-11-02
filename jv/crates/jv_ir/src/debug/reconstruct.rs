@@ -5,9 +5,9 @@ use crate::types::{
     IrVisibility, JavaType, JavaWildcardKind,
 };
 use jv_ast::{
-    Argument, CallArgumentMetadata, CommentKind, CommentStatement, CommentVisibility, Expression,
-    Literal, Modifiers, Program, RegexLiteral, Span, Statement, StringPart, TypeAnnotation,
-    ValBindingOrigin, Visibility,
+    Argument, CallArgumentMetadata, CallKind, CommentKind, CommentStatement, CommentVisibility,
+    Expression, Literal, Modifiers, Program, RegexLiteral, Span, Statement, StringPart,
+    TypeAnnotation, ValBindingOrigin, Visibility,
 };
 
 fn render_type_annotation(annotation: TypeAnnotation) -> String {
@@ -505,6 +505,7 @@ impl<'a> ReconstructionContext<'a> {
                     args,
                     type_arguments: Vec::new(),
                     argument_metadata: CallArgumentMetadata::with_style(*argument_style),
+                    call_kind: CallKind::Function,
                     span: span.clone(),
                 }
             }

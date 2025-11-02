@@ -6,8 +6,8 @@ use std::sync::{Arc, OnceLock};
 
 use anyhow::{Result, anyhow};
 use jv_ast::{
-    Argument, CallArgumentMetadata, Expression, JsonLiteral, JsonValue, Program, Statement,
-    StringPart, Visibility,
+    Argument, CallArgumentMetadata, CallKind, Expression, JsonLiteral, JsonValue, Program,
+    Statement, StringPart, Visibility,
     types::{Kind, Pattern},
 };
 use jv_build::{JavaTarget, metadata::SymbolIndex};
@@ -293,6 +293,7 @@ fn rewrite_expression(expression: &mut Expression) {
                     args: Vec::new(),
                     type_arguments: Vec::new(),
                     argument_metadata: CallArgumentMetadata::default(),
+                    call_kind: CallKind::Function,
                     span: span.clone(),
                 };
             }

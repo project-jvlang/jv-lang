@@ -5,7 +5,7 @@ use crate::CheckError;
 use crate::inference::environment::TypeEnvironment;
 use crate::inference::type_factory::TypeFactory;
 use crate::inference::types::{PrimitiveType, TypeKind};
-use jv_ast::expression::DoublebraceInit;
+use jv_ast::expression::{CallKind, DoublebraceInit};
 use jv_ast::{Expression, Program, Statement, TypeAnnotation};
 use jv_build::metadata::SymbolIndex;
 use jv_inference::DoublebraceHeuristics;
@@ -332,6 +332,13 @@ impl<'env> DoublebracePlanner<'env> {
                 .environment
                 .lookup("this")
                 .map(|scheme| scheme.ty.clone()),
+            Expression::Call { call_kind, .. } => match call_kind {
+                CallKind::Constructor { type_name, fqcn } => {
+                    let ty_name = fqcn.clone().unwrap_or_else(|| type_name.clone());
+                    Some(TypeKind::reference(ty_name))
+                }
+                CallKind::Function => None,
+            },
             _ => None,
         }
     }

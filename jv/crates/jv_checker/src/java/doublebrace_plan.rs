@@ -7,7 +7,7 @@
 
 use crate::inference::types::TypeKind;
 use crate::java::primitive::JavaPrimitive;
-use jv_ast::expression::{CallArgumentMetadata, DoublebraceInit};
+use jv_ast::expression::{CallArgumentMetadata, CallKind, DoublebraceInit};
 use jv_ast::{Argument, ConcurrencyConstruct, Expression, ResourceManagement, Span, Statement};
 use jv_build::metadata::SymbolIndex;
 use std::fmt;
@@ -105,11 +105,24 @@ pub fn plan_doublebrace_application(
         }
     })?;
 
+    let base_requires_synthesized = init
+        .base
+        .as_ref()
+        .map(|expr| matches!(
+            expr.as_ref(),
+            Expression::Call {
+                call_kind: CallKind::Constructor { .. },
+                ..
+            }
+        ))
+        .unwrap_or(false);
+    let has_existing_base = base_ty.is_some() && !base_requires_synthesized;
+
     let category = classify_receiver(symbol_index, &receiver_name);
     match category {
         ReceiverCategory::Mutable | ReceiverCategory::Unknown => {
             let steps = collect_mutation_steps(&init.statements);
-            let base = if base_ty.is_some() {
+            let base = if has_existing_base {
                 PlanBase::ExistingInstance
             } else {
                 PlanBase::SynthesizedInstance
@@ -128,7 +141,7 @@ pub fn plan_doublebrace_application(
                 });
             }
 
-            if base_ty.is_none() {
+            if !has_existing_base {
                 return Err(DoublebracePlanError::CopyUnavailable {
                     receiver: receiver_name,
                     reason: "コピー元となる既存インスタンスが存在しません。".into(),

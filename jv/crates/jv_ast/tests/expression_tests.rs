@@ -67,6 +67,7 @@ fn test_expression_call() {
         args: vec![arg],
         type_arguments: Vec::new(),
         argument_metadata: CallArgumentMetadata::with_style(CallArgumentStyle::Comma),
+        call_kind: CallKind::Function,
         span: dummy_span(),
     };
     match expr {
@@ -300,6 +301,7 @@ fn test_expression_try() {
         args: vec![],
         type_arguments: Vec::new(),
         argument_metadata: CallArgumentMetadata::with_style(CallArgumentStyle::Comma),
+        call_kind: CallKind::Function,
         span: dummy_span(),
     };
     let catch_clause = TryCatchClause {

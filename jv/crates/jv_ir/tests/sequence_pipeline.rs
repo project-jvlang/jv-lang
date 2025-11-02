@@ -1,8 +1,8 @@
 use jv_ast::expression::ParameterModifiers;
 use jv_ast::types::PrimitiveTypeName;
 use jv_ast::{
-    Argument, BinaryOp, CallArgumentStyle, Expression, Literal, Parameter, SequenceDelimiter, Span,
-    StringPart,
+    Argument, BinaryOp, CallArgumentStyle, CallKind, Expression, Literal, Parameter,
+    SequenceDelimiter, Span, StringPart,
 };
 use jv_ir::context::{RegisteredMethodCall, RegisteredMethodDeclaration};
 use jv_ir::naming::method_erasure::apply_method_erasure;
@@ -120,6 +120,7 @@ fn call_method(receiver: Expression, method: &str, args: Vec<Argument>) -> Expre
         args,
         type_arguments: Vec::new(),
         argument_metadata: jv_ast::CallArgumentMetadata::default(),
+        call_kind: CallKind::Function,
         span: dummy_span(),
     }
 }
@@ -139,6 +140,7 @@ fn map_pipeline(source: Expression) -> Expression {
         args: vec![Argument::Positional(lambda_expr)],
         type_arguments: Vec::new(),
         argument_metadata: jv_ast::CallArgumentMetadata::default(),
+        call_kind: CallKind::Function,
         span: dummy_span(),
     }
 }
@@ -274,6 +276,7 @@ fn reduce_expression() -> Expression {
         args: vec![Argument::Positional(reduce_lambda)],
         type_arguments: Vec::new(),
         argument_metadata: jv_ast::CallArgumentMetadata::default(),
+        call_kind: CallKind::Function,
         span: dummy_span(),
     }
 }
@@ -302,6 +305,7 @@ fn fold_expression() -> Expression {
         ],
         type_arguments: Vec::new(),
         argument_metadata: jv_ast::CallArgumentMetadata::default(),
+        call_kind: CallKind::Function,
         span: dummy_span(),
     }
 }
@@ -317,6 +321,7 @@ fn count_expression() -> Expression {
         args: vec![],
         type_arguments: Vec::new(),
         argument_metadata: jv_ast::CallArgumentMetadata::default(),
+        call_kind: CallKind::Function,
         span: dummy_span(),
     }
 }

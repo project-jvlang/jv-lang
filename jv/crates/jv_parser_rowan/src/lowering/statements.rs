@@ -8,7 +8,7 @@ use crate::support::{
 use crate::syntax::SyntaxKind;
 use jv_ast::comments::{CommentKind, CommentStatement, CommentVisibility};
 use jv_ast::expression::{
-    Argument, CallArgumentMetadata, CallArgumentStyle, Parameter, ParameterModifiers,
+    Argument, CallArgumentMetadata, CallArgumentStyle, CallKind, Parameter, ParameterModifiers,
     ParameterProperty, StringPart, WhenArm,
 };
 use jv_ast::json::{
@@ -2830,6 +2830,7 @@ mod expression_parser {
                 args: arguments,
                 type_arguments,
                 argument_metadata: metadata,
+                call_kind: CallKind::Function,
                 span: call_span.clone(),
             };
 
@@ -2876,6 +2877,7 @@ mod expression_parser {
                     args,
                     type_arguments,
                     argument_metadata,
+                    call_kind: CallKind::Function,
                     span: call_span.clone(),
                 };
                 return Ok(ParsedExpr {
@@ -2892,6 +2894,7 @@ mod expression_parser {
                 args: vec![Argument::Positional(lambda_expr)],
                 type_arguments: Vec::new(),
                 argument_metadata: metadata,
+                call_kind: CallKind::Function,
                 span: call_span.clone(),
             };
             Ok(ParsedExpr {

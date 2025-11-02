@@ -1,6 +1,7 @@
 use jv_ast::expression::DoublebraceInit;
 use jv_ast::{
-    Argument, CallArgumentMetadata, CallArgumentStyle, Expression, Literal, Span, Statement,
+    Argument, CallArgumentMetadata, CallArgumentStyle, CallKind, Expression, Literal, Span,
+    Statement,
 };
 use jv_ir::{
     DoublebraceBaseStrategy, DoublebraceCopySourceStrategy, DoublebraceFieldUpdate,
@@ -40,6 +41,7 @@ fn ダブルブレース_ミューテーション変換() {
                 ))],
                 type_arguments: Vec::new(),
                 argument_metadata: CallArgumentMetadata::with_style(CallArgumentStyle::Whitespace),
+                call_kind: CallKind::Function,
                 span: span.clone(),
             },
             span: span.clone(),

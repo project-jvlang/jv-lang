@@ -448,7 +448,7 @@ pub mod pipeline {
     use super::*;
     use anyhow::{Context, anyhow, bail};
     use generics::apply_type_facts;
-    use jv_ast::{Argument, CallArgumentMetadata, Expression, Literal, Span, Statement};
+    use jv_ast::{Argument, CallArgumentMetadata, CallKind, Expression, Literal, Span, Statement};
     use jv_build::BuildSystem;
     use jv_build::metadata::{
         BuildContext as SymbolBuildContext, SymbolIndexBuilder, SymbolIndexCache,
@@ -846,6 +846,7 @@ pub mod pipeline {
                     ],
                     type_arguments: Vec::new(),
                     argument_metadata: CallArgumentMetadata::default(),
+                    call_kind: CallKind::Function,
                     span: probe_span.clone(),
                 };
                 let render_probe = Expression::Call {
@@ -856,6 +857,7 @@ pub mod pipeline {
                     args: vec![Argument::Positional(module_call)],
                     type_arguments: Vec::new(),
                     argument_metadata: CallArgumentMetadata::default(),
+                    call_kind: CallKind::Function,
                     span: probe_span.clone(),
                 };
                 trimmed_program.statements.push(Statement::Expression {

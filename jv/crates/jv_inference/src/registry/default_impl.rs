@@ -272,12 +272,17 @@ fn path_to_string(path: &Path) -> String {
 }
 
 const BUILTIN_INTERFACE_DEFAULTS: &[(&str, &str)] = &[
+    ("java.lang.Iterable", "java.util.ArrayList"),
     ("java.util.Collection", "java.util.ArrayList"),
     ("java.util.List", "java.util.ArrayList"),
     ("java.util.Set", "java.util.LinkedHashSet"),
     ("java.util.Map", "java.util.LinkedHashMap"),
     ("java.util.Queue", "java.util.ArrayDeque"),
     ("java.util.Deque", "java.util.ArrayDeque"),
+    ("java.util.SortedSet", "java.util.TreeSet"),
+    ("java.util.NavigableSet", "java.util.TreeSet"),
+    ("java.util.SortedMap", "java.util.TreeMap"),
+    ("java.util.NavigableMap", "java.util.TreeMap"),
     (
         "java.util.concurrent.ConcurrentMap",
         "java.util.concurrent.ConcurrentHashMap",
@@ -290,6 +295,7 @@ const BUILTIN_ABSTRACT_DEFAULTS: &[(&str, &str)] = &[
     ("java.util.AbstractSequentialList", "java.util.LinkedList"),
     ("java.util.AbstractSet", "java.util.LinkedHashSet"),
     ("java.util.AbstractMap", "java.util.LinkedHashMap"),
+    ("java.util.AbstractQueue", "java.util.ArrayDeque"),
 ];
 
 #[cfg(test)]
@@ -305,6 +311,15 @@ mod tests {
             .expect("List のデフォルト実装が見つかるはず");
         assert_eq!(record.target(), "java.util.ArrayList");
         assert!(matches!(record.origin(), RegistryEntryOrigin::BuiltIn));
+    }
+
+    #[test]
+    fn builtin_navigable_map_resolves_to_tree_map() {
+        let registry = DefaultImplementationRegistry::load(None);
+        let record = registry
+            .resolve_interface("java.util.NavigableMap")
+            .expect("NavigableMap のデフォルト実装が見つかるはず");
+        assert_eq!(record.target(), "java.util.TreeMap");
     }
 
     #[test]

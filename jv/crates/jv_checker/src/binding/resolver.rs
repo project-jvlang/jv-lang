@@ -1,10 +1,10 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::CheckError;
 use jv_ast::DoublebraceInit;
 use jv_ast::Span;
 use jv_ast::{
-    Argument, ConcurrencyConstruct, Expression, ExtensionFunction, Modifiers, Program,
+    Argument, CallKind, ConcurrencyConstruct, Expression, ExtensionFunction, Modifiers, Program,
     ResourceManagement, Statement, TryCatchClause, ValBindingOrigin,
 };
 
@@ -65,6 +65,8 @@ pub fn resolve_bindings(program: &Program) -> BindingResolution {
 
 struct BindingResolver {
     scopes: Vec<HashMap<String, BindingKind>>,
+    value_bindings: Vec<HashSet<String>>,
+    type_imports: HashMap<String, String>,
     diagnostics: Vec<CheckError>,
     usage: BindingUsageSummary,
     late_init_seeds: HashMap<String, LateInitSeed>,
@@ -85,6 +87,8 @@ impl BindingResolver {
     fn new() -> Self {
         Self {
             scopes: vec![HashMap::new()],
+            value_bindings: vec![HashSet::new()],
+            type_imports: HashMap::new(),
             diagnostics: Vec::new(),
             usage: BindingUsageSummary::default(),
             late_init_seeds: HashMap::new(),
@@ -470,17 +474,28 @@ impl BindingResolver {
                 args,
                 type_arguments,
                 argument_metadata,
+                call_kind,
                 span,
-            } => Expression::Call {
-                function: Box::new(self.resolve_expression(*function)),
-                args: args
-                    .into_iter()
-                    .map(|arg| self.resolve_argument(arg))
-                    .collect(),
-                type_arguments,
-                argument_metadata,
-                span,
-            },
+            } => {
+                let resolved_function = self.resolve_expression(*function);
+                let mut kind = call_kind;
+                if matches!(kind, CallKind::Function) {
+                    if let Some(constructor) = self.detect_constructor_call(&resolved_function) {
+                        kind = constructor;
+                    }
+                }
+                Expression::Call {
+                    function: Box::new(resolved_function),
+                    args: args
+                        .into_iter()
+                        .map(|arg| self.resolve_argument(arg))
+                        .collect(),
+                    type_arguments,
+                    argument_metadata,
+                    call_kind: kind,
+                    span,
+                }
+            }
             Expression::MemberAccess {
                 object,
                 property,
@@ -662,6 +677,44 @@ impl BindingResolver {
         }
     }
 
+    fn detect_constructor_call(&self, function: &Expression) -> Option<CallKind> {
+        let qualified = Self::qualified_name(function)?;
+        let simple = qualified
+            .rsplit('.')
+            .next()
+            .unwrap_or(&qualified)
+            .to_string();
+        if !is_probable_type_name(&simple) {
+            return None;
+        }
+        if self.has_value_binding(&simple) {
+            return None;
+        }
+        let fqcn = if let Some(mapped) = self.type_imports.get(&simple) {
+            Some(mapped.clone())
+        } else if qualified.contains('.') {
+            Some(qualified)
+        } else {
+            None
+        };
+        Some(CallKind::Constructor { type_name: simple, fqcn })
+    }
+
+    fn qualified_name(expr: &Expression) -> Option<String> {
+        match expr {
+            Expression::Identifier(name, _) => Some(name.clone()),
+            Expression::MemberAccess { object, property, .. } => {
+                let prefix = Self::qualified_name(object)?;
+                if prefix.is_empty() {
+                    None
+                } else {
+                    Some(format!("{prefix}.{property}"))
+                }
+            }
+            _ => None,
+        }
+    }
+
     fn resolve_argument(&mut self, argument: Argument) -> Argument {
         match argument {
             Argument::Positional(expr) => Argument::Positional(self.resolve_expression(expr)),
@@ -739,6 +792,9 @@ impl BindingResolver {
                 },
             );
         }
+        if let Some(values) = self.value_bindings.last_mut() {
+            values.insert(name.clone());
+        }
         if count_usage {
             match origin {
                 ValBindingOrigin::ExplicitKeyword => self.usage.explicit += 1,
@@ -751,6 +807,9 @@ impl BindingResolver {
     fn declare_mutable(&mut self, name: String, span: Span, count_usage: bool) {
         if let Some(scope) = self.scopes.last_mut() {
             scope.insert(name.clone(), BindingKind::Mutable { _span: span });
+        }
+        if let Some(values) = self.value_bindings.last_mut() {
+            values.insert(name.clone());
         }
         if count_usage {
             self.usage.vars += 1;
@@ -780,11 +839,18 @@ impl BindingResolver {
             }
 
             self.declare_immutable(
-                binding_name,
+                binding_name.clone(),
                 ValBindingOrigin::Implicit,
                 span.clone(),
                 false,
             );
+            if is_probable_type_name(&binding_name) {
+                self.type_imports
+                    .insert(binding_name.clone(), path.clone());
+                if let Some(values) = self.value_bindings.last_mut() {
+                    values.remove(&binding_name);
+                }
+            }
         }
     }
 
@@ -797,12 +863,21 @@ impl BindingResolver {
         None
     }
 
+    fn has_value_binding(&self, name: &str) -> bool {
+        self.value_bindings
+            .iter()
+            .rev()
+            .any(|scope| scope.contains(name))
+    }
+
     fn enter_scope(&mut self) {
         self.scopes.push(HashMap::new());
+        self.value_bindings.push(HashSet::new());
     }
 
     fn exit_scope(&mut self) {
         self.scopes.pop();
+        self.value_bindings.pop();
     }
 
     fn is_self_reference(&self, name: &str, expr: &Expression) -> bool {
@@ -817,6 +892,16 @@ fn has_late_init_annotation(modifiers: &Modifiers) -> bool {
             .simple_name()
             .eq_ignore_ascii_case("LateInit")
     })
+}
+
+fn is_probable_type_name(name: &str) -> bool {
+    let mut chars = name.chars();
+    match chars.next() {
+        Some(first) if first.is_ascii_uppercase() => {
+            chars.all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '$')
+        }
+        _ => false,
+    }
 }
 
 fn reassignment_message(name: &str) -> String {
