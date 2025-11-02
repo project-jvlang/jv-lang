@@ -888,7 +888,18 @@ impl CharScanner {
         }
     }
 
-    fn can_start_regex(ctx: &LexerContext<'_>) -> bool {
+    fn can_start_regex<'source>(&self, ctx: &LexerContext<'source>, source: &'source str) -> bool {
+        if ctx.trivia_newlines() > 0 {
+            if let Some('/') = self.peek_char_from(source) {
+                let next_index = self.cursor + '/'.len_utf8();
+                match Self::next_char(source, next_index) {
+                    Some((next_char, _)) if next_char.is_whitespace() => return false,
+                    Some(_) => {}
+                    None => return false,
+                }
+            }
+            return true;
+        }
         match ctx.last_token_type() {
             None => true,
             Some(token) => !Self::regex_cannot_follow(token),
@@ -1376,6 +1387,7 @@ impl CharScannerStage for CharScanner {
 
         let source = ctx.source;
         let trivia = self.consume_trivia(source)?;
+        ctx.set_trivia_newlines(trivia.as_ref().map_or(0, |info| info.newlines));
 
         if self.cursor >= source.len() {
             let span = Span::empty(self.position);
@@ -1494,7 +1506,7 @@ impl CharScannerStage for CharScanner {
                 }
             } else if self.try_activate_regex_command(ctx, source) {
                 self.read_symbol(source)?
-            } else if Self::can_start_regex(ctx) {
+            } else if self.can_start_regex(ctx, source) {
                 kind_override = Some(RawTokenKind::RegexCandidate);
                 self.read_regex_literal(source)?
             } else {

@@ -38,6 +38,7 @@ pub struct LexerContext<'source> {
     regex_command_state: Option<RegexCommandScanState>,
     layout_stack: Vec<LayoutSequenceKind>,
     layout_mode: LayoutMode,
+    trivia_newlines: u16,
 }
 
 impl<'source> LexerContext<'source> {
@@ -56,6 +57,7 @@ impl<'source> LexerContext<'source> {
             regex_command_state: None,
             layout_stack: Vec::new(),
             layout_mode,
+            trivia_newlines: 0,
         }
     }
 
@@ -144,5 +146,13 @@ impl<'source> LexerContext<'source> {
 
     pub fn is_layout_disabled(&self) -> bool {
         !self.is_layout_enabled()
+    }
+
+    pub fn set_trivia_newlines(&mut self, count: u16) {
+        self.trivia_newlines = count;
+    }
+
+    pub fn trivia_newlines(&self) -> u16 {
+        self.trivia_newlines
     }
 }

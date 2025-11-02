@@ -1604,6 +1604,45 @@ fn regex_literal_preserves_escaped_slash() {
 }
 
 #[test]
+fn regex_literal_after_layout_separator_in_array() {
+    let source = "val items = [\n    literalPattern\n    /ACTION=\\w+/\n]\n";
+    let mut lexer = Lexer::new(source.to_string());
+    let tokens = lexer
+        .tokenize()
+        .expect("regex literals in layout arrays should lex");
+
+    let regex_token = tokens
+        .iter()
+        .find(|token| matches!(token.token_type, TokenType::RegexLiteral(_)))
+        .expect("expected regex literal token in array");
+
+    assert_eq!(
+        regex_token.token_type,
+        TokenType::RegexLiteral("ACTION=\\w+".to_string())
+    );
+}
+
+#[test]
+fn division_operator_after_line_break_is_not_regex() {
+    let source = "val ratio = total\n    / denominator\n";
+    let mut lexer = Lexer::new(source.to_string());
+    let tokens = lexer
+        .tokenize()
+        .expect("division should lex without regex literal");
+
+    assert!(
+        tokens
+            .iter()
+            .any(|token| matches!(token.token_type, TokenType::Divide))
+    );
+    assert!(
+        tokens
+            .iter()
+            .all(|token| !matches!(token.token_type, TokenType::RegexLiteral(_)))
+    );
+}
+
+#[test]
 fn regex_literal_reports_unterminated_pattern() {
     let mut lexer = Lexer::new("/abc".to_string());
     let error = lexer
