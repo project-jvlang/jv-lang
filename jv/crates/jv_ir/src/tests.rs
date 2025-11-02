@@ -5,8 +5,9 @@ mod tests {
         CompletableFutureOp, DataFormat, IrCaseLabel, IrDeconstructionComponent,
         IrDeconstructionPattern, IrExpression, IrForEachKind, IrForLoopMetadata, IrImplicitWhenEnd,
         IrModifiers, IrNumericRangeLoop, IrParameter, IrResolvedMethodTarget, IrStatement,
-        IrVisibility, JavaType, LogInvocationItem, LogLevel, PipelineShape, SampleMode,
-        SampleSourceKind, Schema, SequencePipeline, SequenceSource, SequenceStage,
+        IrVisibility, JavaType, LogInvocationItem, LogInvocationPlan, LogLevel, LogMessage,
+        LoggerFieldId, LoggerFieldSpec, LoggingFrameworkKind, LoggingMetadata, PipelineShape,
+        SampleMode, SampleSourceKind, Schema, SequencePipeline, SequenceSource, SequenceStage,
         SequenceTerminal, SequenceTerminalEvaluation, SequenceTerminalKind, TransformContext,
         TransformError, TransformPools, TransformProfiler, VirtualThreadOp,
         convert_type_annotation, desugar_async_expression, desugar_await_expression,
@@ -382,6 +383,345 @@ mod tests {
 
         assert!(!has_log, "filtered block should not emit log invocation");
         assert!(ir_program.logging.logger_fields.is_empty());
+    }
+
+    #[test]
+    fn logger_field_injection_adds_field_and_metadata() {
+        let span = dummy_span();
+        let logger_id = LoggerFieldId(0);
+
+        let mut metadata = LoggingMetadata {
+            logger_fields: vec![LoggerFieldSpec {
+                id: logger_id,
+                owner_hint: None,
+                field_name: "LOGGER".to_string(),
+                class_id: None,
+            }],
+            framework: LoggingFrameworkKind::Slf4j,
+        };
+
+        let log_plan = LogInvocationPlan {
+            class_id: None,
+            logger_field: logger_id,
+            level: LogLevel::Info,
+            uses_default_level: false,
+            guard_kind: None,
+            items: vec![LogInvocationItem::Message(LogMessage {
+                expression: IrExpression::Literal(
+                    Literal::String("hello".to_string()),
+                    span.clone(),
+                ),
+                span: span.clone(),
+            })],
+            span: span.clone(),
+        };
+
+        let method = IrStatement::MethodDeclaration {
+            name: "doIt".to_string(),
+            java_name: None,
+            type_parameters: Vec::new(),
+            parameters: Vec::new(),
+            primitive_return: None,
+            return_type: JavaType::void(),
+            body: Some(IrExpression::LogInvocation {
+                plan: Box::new(log_plan),
+                java_type: JavaType::void(),
+                span: span.clone(),
+            }),
+            modifiers: IrModifiers::default(),
+            throws: Vec::new(),
+            span: span.clone(),
+        };
+
+        let class_stmt = IrStatement::ClassDeclaration {
+            name: "Example".to_string(),
+            type_parameters: Vec::new(),
+            superclass: None,
+            interfaces: Vec::new(),
+            fields: Vec::new(),
+            methods: vec![method],
+            nested_classes: Vec::new(),
+            modifiers: IrModifiers::default(),
+            span: span.clone(),
+        };
+
+        let mut declarations = vec![class_stmt];
+
+        crate::model::class::attach_logger_fields(None, &mut declarations, &mut metadata)
+            .expect("logger field injection succeeds");
+
+        let (fields, methods) = match &declarations[0] {
+            IrStatement::ClassDeclaration {
+                fields, methods, ..
+            } => (fields, methods),
+            _ => panic!("expected class declaration"),
+        };
+
+        assert_eq!(fields.len(), 1, "logger field inserted");
+        let field = match &fields[0] {
+            IrStatement::FieldDeclaration {
+                name,
+                initializer,
+                modifiers,
+                ..
+            } => {
+                assert_eq!(name, "LOGGER");
+                assert!(modifiers.is_static && modifiers.is_final);
+                initializer
+            }
+            other => panic!("unexpected field statement: {other:?}"),
+        };
+
+        let init_call = match field {
+            Some(IrExpression::MethodCall {
+                receiver: Some(receiver),
+                method_name,
+                ..
+            }) => {
+                assert_eq!(method_name, "getLogger");
+                receiver
+            }
+            other => panic!("unexpected initializer: {other:?}"),
+        };
+
+        match init_call.as_ref() {
+            IrExpression::Identifier { name, .. } => {
+                assert_eq!(name, "org.slf4j.LoggerFactory");
+            }
+            other => panic!("unexpected receiver: {other:?}"),
+        }
+
+        let plan = match &methods[0] {
+            IrStatement::MethodDeclaration {
+                body: Some(IrExpression::LogInvocation { plan, .. }),
+                ..
+            } => plan.as_ref(),
+            other => panic!("unexpected method body: {other:?}"),
+        };
+
+        let class_id = plan.class_id.as_ref().expect("class id assigned");
+        assert!(class_id.package.is_none());
+        assert_eq!(class_id.local_name, vec!["Example".to_string()]);
+        assert_eq!(plan.logger_field, logger_id);
+
+        assert_eq!(metadata.logger_fields.len(), 1);
+        let spec = &metadata.logger_fields[0];
+        assert_eq!(spec.id, logger_id);
+        assert!(spec.owner_hint.as_deref() == Some("Example"));
+        assert!(
+            spec.class_id
+                .as_ref()
+                .map(|cid| cid.local_name.clone())
+                .unwrap_or_default()
+                == vec!["Example".to_string()]
+        );
+    }
+
+    #[test]
+    fn logger_field_injection_deduplicates_multiple_plans() {
+        let span = dummy_span();
+        let id_primary = LoggerFieldId(1);
+        let id_secondary = LoggerFieldId(2);
+
+        let mut metadata = LoggingMetadata {
+            logger_fields: vec![
+                LoggerFieldSpec {
+                    id: id_primary,
+                    owner_hint: None,
+                    field_name: "LOGGER".to_string(),
+                    class_id: None,
+                },
+                LoggerFieldSpec {
+                    id: id_secondary,
+                    owner_hint: None,
+                    field_name: "LOGGER".to_string(),
+                    class_id: None,
+                },
+            ],
+            framework: LoggingFrameworkKind::Slf4j,
+        };
+
+        let make_plan = |logger_field| LogInvocationPlan {
+            class_id: None,
+            logger_field,
+            level: LogLevel::Info,
+            uses_default_level: false,
+            guard_kind: None,
+            items: vec![LogInvocationItem::Message(LogMessage {
+                expression: IrExpression::Literal(Literal::String("msg".to_string()), span.clone()),
+                span: span.clone(),
+            })],
+            span: span.clone(),
+        };
+
+        let block = IrExpression::Block {
+            statements: vec![
+                IrStatement::Expression {
+                    expr: IrExpression::LogInvocation {
+                        plan: Box::new(make_plan(id_primary)),
+                        java_type: JavaType::void(),
+                        span: span.clone(),
+                    },
+                    span: span.clone(),
+                },
+                IrStatement::Expression {
+                    expr: IrExpression::LogInvocation {
+                        plan: Box::new(make_plan(id_secondary)),
+                        java_type: JavaType::void(),
+                        span: span.clone(),
+                    },
+                    span: span.clone(),
+                },
+            ],
+            java_type: JavaType::void(),
+            span: span.clone(),
+        };
+
+        let method = IrStatement::MethodDeclaration {
+            name: "action".to_string(),
+            java_name: None,
+            type_parameters: Vec::new(),
+            parameters: Vec::new(),
+            primitive_return: None,
+            return_type: JavaType::void(),
+            body: Some(block),
+            modifiers: IrModifiers::default(),
+            throws: Vec::new(),
+            span: span.clone(),
+        };
+
+        let class_stmt = IrStatement::ClassDeclaration {
+            name: "Dup".to_string(),
+            type_parameters: Vec::new(),
+            superclass: None,
+            interfaces: Vec::new(),
+            fields: Vec::new(),
+            methods: vec![method],
+            nested_classes: Vec::new(),
+            modifiers: IrModifiers::default(),
+            span: span.clone(),
+        };
+
+        let mut declarations = vec![class_stmt];
+
+        crate::model::class::attach_logger_fields(None, &mut declarations, &mut metadata)
+            .expect("deduplication succeeds");
+
+        let (_, methods) = match &declarations[0] {
+            IrStatement::ClassDeclaration {
+                fields, methods, ..
+            } => {
+                assert_eq!(fields.len(), 1, "logger field inserted once");
+                (fields, methods)
+            }
+            other => panic!("unexpected declaration: {other:?}"),
+        };
+
+        let method_body = match &methods[0] {
+            IrStatement::MethodDeclaration {
+                body: Some(body), ..
+            } => body,
+            other => panic!("unexpected method: {other:?}"),
+        };
+
+        let statements = match method_body {
+            IrExpression::Block { statements, .. } => statements,
+            other => panic!("expected block, got {other:?}"),
+        };
+
+        let mut seen_ids = Vec::new();
+        for stmt in statements {
+            if let IrStatement::Expression {
+                expr: IrExpression::LogInvocation { plan, .. },
+                ..
+            } = stmt
+            {
+                let plan = plan.as_ref();
+                seen_ids.push(plan.logger_field);
+                let cid = plan.class_id.as_ref().expect("class id exists");
+                assert_eq!(cid.local_name, vec!["Dup".to_string()]);
+            }
+        }
+
+        assert_eq!(seen_ids.len(), 2);
+        assert!(seen_ids.iter().all(|id| *id == id_primary));
+        assert_eq!(metadata.logger_fields.len(), 1);
+        assert_eq!(metadata.logger_fields[0].id, id_primary);
+    }
+
+    #[test]
+    fn logger_field_injection_detects_conflict() {
+        let span = dummy_span();
+        let logger_id = LoggerFieldId(7);
+
+        let mut metadata = LoggingMetadata {
+            logger_fields: vec![LoggerFieldSpec {
+                id: logger_id,
+                owner_hint: None,
+                field_name: "LOGGER".to_string(),
+                class_id: None,
+            }],
+            framework: LoggingFrameworkKind::Slf4j,
+        };
+
+        let plan = LogInvocationPlan {
+            class_id: None,
+            logger_field: logger_id,
+            level: LogLevel::Info,
+            uses_default_level: false,
+            guard_kind: None,
+            items: Vec::new(),
+            span: span.clone(),
+        };
+
+        let method = IrStatement::MethodDeclaration {
+            name: "conflict".to_string(),
+            java_name: None,
+            type_parameters: Vec::new(),
+            parameters: Vec::new(),
+            primitive_return: None,
+            return_type: JavaType::void(),
+            body: Some(IrExpression::LogInvocation {
+                plan: Box::new(plan),
+                java_type: JavaType::void(),
+                span: span.clone(),
+            }),
+            modifiers: IrModifiers::default(),
+            throws: Vec::new(),
+            span: span.clone(),
+        };
+
+        let existing_field = IrStatement::FieldDeclaration {
+            name: "LOGGER".to_string(),
+            java_type: JavaType::Primitive("int".to_string()),
+            initializer: None,
+            modifiers: IrModifiers::default(),
+            span: span.clone(),
+        };
+
+        let class_stmt = IrStatement::ClassDeclaration {
+            name: "Clash".to_string(),
+            type_parameters: Vec::new(),
+            superclass: None,
+            interfaces: Vec::new(),
+            fields: vec![existing_field],
+            methods: vec![method],
+            nested_classes: Vec::new(),
+            modifiers: IrModifiers::default(),
+            span: span.clone(),
+        };
+
+        let mut declarations = vec![class_stmt];
+
+        let result =
+            crate::model::class::attach_logger_fields(None, &mut declarations, &mut metadata);
+
+        match result {
+            Err(TransformError::ScopeError { message, .. }) => {
+                assert!(message.contains("LOGGER"));
+            }
+            other => panic!("expected conflict error, got {other:?}"),
+        }
     }
 
     #[test]

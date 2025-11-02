@@ -409,7 +409,12 @@ fn lower_program(
             .collect()
     };
 
-    let logging_metadata = context.take_logging_metadata();
+    let mut logging_metadata = context.take_logging_metadata();
+    crate::model::class::attach_logger_fields(
+        package.as_deref(),
+        &mut type_declarations,
+        &mut logging_metadata,
+    )?;
 
     Ok(IrProgram {
         package,

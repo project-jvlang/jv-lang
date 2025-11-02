@@ -326,6 +326,23 @@ impl LogGuardKind {
     }
 }
 
+/// 利用するロギングフレームワーク種別。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum LoggingFrameworkKind {
+    Slf4j,
+    Log4j2,
+    JbossLogging,
+    CommonsLogging,
+    Jul,
+    Custom { identifier: Option<String> },
+}
+
+impl Default for LoggingFrameworkKind {
+    fn default() -> Self {
+        LoggingFrameworkKind::Slf4j
+    }
+}
+
 /// ロガーフィールドを識別するID。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct LoggerFieldId(pub u32);
@@ -343,6 +360,8 @@ pub struct LoggerFieldSpec {
     #[serde(default)]
     pub owner_hint: Option<String>,
     pub field_name: String,
+    #[serde(default)]
+    pub class_id: Option<ClassId>,
 }
 
 /// ログメッセージの生データ。
@@ -405,6 +424,8 @@ pub struct LogInvocationPlan {
 pub struct LoggingMetadata {
     #[serde(default)]
     pub logger_fields: Vec<LoggerFieldSpec>,
+    #[serde(default)]
+    pub framework: LoggingFrameworkKind,
 }
 
 /// Metadata describing the resolved target for a method call after name mapping.

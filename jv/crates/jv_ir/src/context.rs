@@ -4,8 +4,8 @@ use std::time::Duration;
 
 use crate::types::{
     DataFormat, IrExpression, IrImport, IrImportDetail, IrResolvedMethodTarget, IrStatement,
-    JavaType, LogLevel, LoggerFieldId, LoggerFieldSpec, LoggingMetadata, MethodOverload,
-    PrimitiveReturnMetadata, SampleMode, UtilityClass,
+    JavaType, LogLevel, LoggerFieldId, LoggerFieldSpec, LoggingFrameworkKind, LoggingMetadata,
+    MethodOverload, PrimitiveReturnMetadata, SampleMode, UtilityClass,
 };
 use jv_ast::{CallArgumentStyle, Span};
 use jv_support::arena::{
@@ -529,6 +529,14 @@ impl TransformContext {
 
     pub fn take_logging_metadata(&mut self) -> LoggingMetadata {
         self.logging_state.take_metadata()
+    }
+
+    pub fn set_logging_framework(&mut self, framework: LoggingFrameworkKind) {
+        self.logging_state.framework = framework;
+    }
+
+    pub fn logging_framework(&self) -> &LoggingFrameworkKind {
+        &self.logging_state.framework
     }
 
     pub fn sequence_style_cache(&self) -> &SequenceStyleCache {
@@ -1134,6 +1142,7 @@ struct LoggingState {
     options: LoggingOptions,
     next_field_id: u32,
     fields: Vec<LoggerFieldSpec>,
+    framework: LoggingFrameworkKind,
 }
 
 impl LoggingState {
@@ -1152,6 +1161,7 @@ impl LoggingState {
             id,
             owner_hint,
             field_name: "LOGGER".to_string(),
+            class_id: None,
         };
         self.fields.push(spec);
         id
@@ -1164,6 +1174,7 @@ impl LoggingState {
     fn take_metadata(&mut self) -> LoggingMetadata {
         LoggingMetadata {
             logger_fields: std::mem::take(&mut self.fields),
+            framework: self.framework.clone(),
         }
     }
 }
