@@ -1,4 +1,4 @@
-use jv_ast::{AnnotationName, Literal, Span, types::Kind};
+use jv_ast::{types::Kind, AnnotationName, Literal, Span};
 use jv_codegen_java::JavaCodeGenerator;
 use jv_ir::{
     IrAnnotation, IrAnnotationArgument, IrAnnotationValue, IrGenericMetadata, IrModifiers,
@@ -96,14 +96,12 @@ fn annotations_render_with_arguments_and_generate_imports() {
         .generate_compilation_unit(&program)
         .expect("compilation unit");
 
-    assert!(
-        unit.imports
-            .contains(&"com.example.security.Audited".to_string())
-    );
-    assert!(
-        unit.imports
-            .contains(&"com.example.meta.Author".to_string())
-    );
+    assert!(unit
+        .imports
+        .contains(&"com.example.security.Audited".to_string()));
+    assert!(unit
+        .imports
+        .contains(&"com.example.meta.Author".to_string()));
 
     let class_source = &unit.type_declarations[0];
     assert!(class_source.contains("@Audited"));
@@ -223,6 +221,7 @@ fn field_annotations_render_and_imports() {
         type_declarations: vec![class],
         generic_metadata: Default::default(),
         conversion_metadata: Vec::new(),
+        logging: Default::default(),
         span,
     };
 
@@ -332,6 +331,7 @@ fn parameter_annotations_render_in_signature_and_imports() {
         type_declarations: vec![class],
         generic_metadata: Default::default(),
         conversion_metadata: Vec::new(),
+        logging: Default::default(),
         span,
     };
 

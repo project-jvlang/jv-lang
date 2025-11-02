@@ -1,11 +1,11 @@
 use super::*;
 use insta::assert_snapshot;
 use jv_ast::{
-    BinaryOp, CallArgumentStyle, Literal, SequenceDelimiter, Span,
     types::{PrimitiveTypeName, PrimitiveTypeReference, PrimitiveTypeSource},
+    BinaryOp, CallArgumentStyle, Literal, SequenceDelimiter, Span,
 };
-use jv_ir::TransformContext;
 use jv_ir::transform::transform_program_with_context;
+use jv_ir::TransformContext;
 use jv_ir::{
     DataFormat, IrCaseLabel, IrCommentKind, IrDeconstructionComponent, IrDeconstructionPattern,
     IrExpression, IrImplicitWhenEnd, IrModifiers, IrParameter, IrProgram, IrRecordComponent,
@@ -859,6 +859,7 @@ fn record_extension_method_is_emitted_as_instance_method() {
         type_declarations: vec![record_declaration, extension_method],
         generic_metadata: Default::default(),
         conversion_metadata: Vec::new(),
+        logging: Default::default(),
         span,
     };
 
@@ -922,6 +923,7 @@ fn top_level_records_drop_private_visibility() {
         type_declarations: vec![record_declaration],
         generic_metadata: Default::default(),
         conversion_metadata: Vec::new(),
+        logging: Default::default(),
         span,
     };
 
@@ -1059,6 +1061,7 @@ fn record_field_access_is_lowered_to_accessor_calls() {
         type_declarations: vec![record_declaration, renderer_class],
         generic_metadata: Default::default(),
         conversion_metadata: Vec::new(),
+        logging: Default::default(),
         span,
     };
 
@@ -1146,6 +1149,7 @@ fn class_extension_method_is_emitted_as_instance_method() {
         type_declarations: vec![class_declaration, extension_method],
         generic_metadata: Default::default(),
         conversion_metadata: Vec::new(),
+        logging: Default::default(),
         span,
     };
 
@@ -1288,6 +1292,7 @@ fn primitive_specialized_pipeline_renders_character_casts() {
         type_declarations: vec![class],
         generic_metadata: Default::default(),
         conversion_metadata: Vec::new(),
+        logging: Default::default(),
         span,
     };
 
@@ -1496,6 +1501,7 @@ fn external_extension_method_remains_static_utility() {
         type_declarations: vec![method],
         generic_metadata: Default::default(),
         conversion_metadata: Vec::new(),
+        logging: Default::default(),
         span,
     };
 
@@ -3243,6 +3249,7 @@ fn switch_expression_java21_mixed_labels_emits_jv3105() {
     }
 }
 
+mod logging;
 mod pattern_switch;
 mod target_matrix;
 

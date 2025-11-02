@@ -9,9 +9,10 @@ use jv_ir::{
     IrCatchClause, IrDeconstructionComponent, IrDeconstructionPattern, IrExpression, IrForEachKind,
     IrForLoopMetadata, IrGenericMetadata, IrImplicitWhenEnd, IrImport, IrImportDetail, IrModifiers,
     IrNumericRangeLoop, IrParameter, IrProgram, IrRecordComponent, IrResource, IrSampleDeclaration,
-    IrStatement, IrSwitchCase, IrTypeParameter, IrVariance, IrVisibility, JavaType, MethodOverload,
-    NullableGuard, NullableGuardReason, SequencePipeline, SequenceSource, SequenceStage,
-    SequenceTerminalKind, UtilityClass, VirtualThreadOp,
+    IrStatement, IrSwitchCase, IrTypeParameter, IrVariance, IrVisibility, JavaType, LogGuardKind,
+    LogInvocationItem, LogInvocationPlan, LogLevel, LogMessage, LoggerFieldId, LoggerFieldSpec,
+    LoggingFrameworkKind, MethodOverload, NullableGuard, NullableGuardReason, SequencePipeline,
+    SequenceSource, SequenceStage, SequenceTerminalKind, UtilityClass, VirtualThreadOp,
 };
 use jv_mapper::{
     JavaPosition, JavaSpan, MappingCategory, MappingError, SourceMap, SourceMapBuilder,
@@ -22,6 +23,7 @@ use std::sync::Arc;
 mod declarations;
 mod expressions;
 mod formatting;
+mod logging;
 mod sample;
 mod statements;
 mod types;
@@ -47,6 +49,8 @@ pub struct JavaCodeGenerator {
     current_return_type: Option<JavaType>,
     mutable_captures: HashSet<String>,
     record_components: HashMap<String, HashSet<String>>,
+    logging_framework: LoggingFrameworkKind,
+    logger_fields: HashMap<LoggerFieldId, LoggerFieldSpec>,
 }
 
 impl JavaCodeGenerator {
@@ -75,6 +79,8 @@ impl JavaCodeGenerator {
             current_return_type: None,
             mutable_captures: HashSet::new(),
             record_components: HashMap::new(),
+            logging_framework: LoggingFrameworkKind::default(),
+            logger_fields: HashMap::new(),
         }
     }
 
@@ -89,6 +95,13 @@ impl JavaCodeGenerator {
         self.reset();
         self.package = program.package.clone();
         self.generic_metadata = program.generic_metadata.clone();
+        self.logging_framework = program.logging.framework.clone();
+        self.logger_fields = program
+            .logging
+            .logger_fields
+            .iter()
+            .map(|spec| (spec.id, spec.clone()))
+            .collect();
         self.metadata_path.clear();
         self.conversion_metadata.clear();
         self.register_record_components_from_declarations(&program.type_declarations, &[]);
@@ -281,6 +294,19 @@ impl JavaCodeGenerator {
         JavaSourceBuilder::new(self.config.indent.clone())
     }
 
+    fn resolve_logger_field_name(&self, id: LoggerFieldId) -> Option<&str> {
+        self.logger_fields
+            .get(&id)
+            .map(|spec| spec.field_name.as_str())
+    }
+
+    fn generate_log_invocation(
+        &mut self,
+        plan: &LogInvocationPlan,
+    ) -> Result<String, CodeGenError> {
+        logging::emit_log_plan(self, plan)
+    }
+
     fn add_import(&mut self, import_path: &str) {
         self.imports
             .insert(import_path.to_string(), import_path.to_string());
@@ -299,6 +325,8 @@ impl JavaCodeGenerator {
         self.current_return_type = None;
         self.mutable_captures.clear();
         self.record_components.clear();
+        self.logging_framework = LoggingFrameworkKind::default();
+        self.logger_fields.clear();
     }
 
     fn register_record_components_from_declarations(
@@ -686,6 +714,14 @@ impl JavaCodeGenerator {
                     scope_locals,
                 );
             }
+            IrExpression::LogInvocation { plan, .. } => {
+                self.collect_mutable_captures_in_log_plan(
+                    plan,
+                    method_locals,
+                    captures,
+                    scope_locals,
+                );
+            }
             IrExpression::Conditional {
                 condition,
                 then_expr,
@@ -756,6 +792,43 @@ impl JavaCodeGenerator {
             | IrExpression::StringFormat { .. }
             | IrExpression::InstanceOf { .. }
             | IrExpression::Cast { .. } => {}
+        }
+    }
+
+    fn collect_mutable_captures_in_log_plan(
+        &self,
+        plan: &LogInvocationPlan,
+        method_locals: &HashSet<String>,
+        captures: &mut HashSet<String>,
+        scope_locals: &HashSet<String>,
+    ) {
+        for item in &plan.items {
+            match item {
+                LogInvocationItem::Statement(statement) => {
+                    self.collect_mutable_captures_in_statement(
+                        statement,
+                        method_locals,
+                        captures,
+                        scope_locals,
+                    );
+                }
+                LogInvocationItem::Message(message) => {
+                    self.collect_mutable_captures_in_expression(
+                        &message.expression,
+                        method_locals,
+                        captures,
+                        scope_locals,
+                    );
+                }
+                LogInvocationItem::Nested(nested) => {
+                    self.collect_mutable_captures_in_log_plan(
+                        nested,
+                        method_locals,
+                        captures,
+                        scope_locals,
+                    );
+                }
+            }
         }
     }
 
@@ -1013,8 +1086,8 @@ impl JavaCodeGenerator {
                     captures,
                     scope_locals,
                 );
-                let mut then_scope = scope_locals.clone();
-                then_scope = self.collect_mutable_captures_in_statement(
+                let then_scope = scope_locals.clone();
+                let _ = self.collect_mutable_captures_in_statement(
                     then_stmt,
                     method_locals,
                     captures,

@@ -128,13 +128,16 @@ impl JavaCodeGenerator {
                 }
                 builder.build()
             }
-            IrStatement::Expression { expr, .. } => {
-                let mut line = self.generate_expression(expr)?;
-                if !line.ends_with(';') {
-                    line.push(';');
+            IrStatement::Expression { expr, .. } => match expr {
+                IrExpression::LogInvocation { plan, .. } => self.generate_log_invocation(plan)?,
+                _ => {
+                    let mut line = self.generate_expression(expr)?;
+                    if !line.ends_with(';') {
+                        line.push(';');
+                    }
+                    line
                 }
-                line
-            }
+            },
             IrStatement::Return { value, .. } => match value {
                 Some(expr) => {
                     let expr_code = self.generate_expression(expr)?;

@@ -1,5 +1,5 @@
 use super::*;
-use jv_ast::{Span, types::PrimitiveTypeName};
+use jv_ast::{types::PrimitiveTypeName, Span};
 use jv_ir::PipelineShape;
 use jv_ir::{
     SequencePipeline, SequenceSource, SequenceStage, SequenceTerminal, SequenceTerminalKind,
@@ -277,7 +277,10 @@ impl JavaCodeGenerator {
             IrExpression::VirtualThread {
                 operation, args, ..
             } => self.generate_virtual_thread(operation.clone(), args),
-            IrExpression::LogInvocation { .. } => Ok("/* logging */".to_string()),
+            IrExpression::LogInvocation { span, .. } => Err(CodeGenError::UnsupportedConstruct {
+                construct: "Log invocation used in expression context".to_string(),
+                span: Some(span.clone()),
+            }),
             IrExpression::TryWithResources {
                 resources, body, ..
             } => self.generate_try_with_resources_expression(resources, body),
