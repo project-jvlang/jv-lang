@@ -16,6 +16,7 @@ use crate::inference::iteration::{
 };
 use crate::inference::regex::{
     RegexCommandIssue, RegexCommandTyping, RegexMatchTyping, RegexMatchWarning,
+    pattern_type::PatternTypeBinder,
 };
 use crate::inference::type_factory::TypeFactory;
 use crate::inference::types::{PrimitiveType, TypeError, TypeId, TypeKind};
@@ -40,6 +41,7 @@ pub struct ConstraintGenerator<'env, 'ext, 'imp> {
     imports: Option<&'imp mut ImportRegistry>,
     pattern_service: PatternMatchService,
     type_var_usage: HashMap<TypeId, usize>,
+    return_expectations: Vec<TypeKind>,
 }
 
 const DIAG_RANGE_BOUNDS: &str = "E_LOOP_002: numeric range bounds must resolve to the same type";
@@ -63,6 +65,7 @@ impl<'env, 'ext, 'imp> ConstraintGenerator<'env, 'ext, 'imp> {
             imports,
             pattern_service: PatternMatchService::new(),
             type_var_usage: HashMap::new(),
+            return_expectations: Vec::new(),
         }
     }
 
@@ -121,13 +124,16 @@ impl<'env, 'ext, 'imp> ConstraintGenerator<'env, 'ext, 'imp> {
                 initializer,
                 ..
             } => {
+                let annotation_ty = type_annotation
+                    .as_ref()
+                    .map(|ann| self.type_from_annotation(ann));
+
+                if let Some(expected) = annotation_ty.as_ref() {
+                    PatternTypeBinder::seed_expectation(self.env, expected, initializer);
+                }
+
                 let init_ty = self.infer_expression(initializer);
-                self.bind_symbol(
-                    name,
-                    type_annotation.as_ref(),
-                    Some(initializer),
-                    Some(init_ty),
-                );
+                self.bind_symbol(name, annotation_ty, Some(initializer), Some(init_ty));
             }
             Statement::VarDeclaration {
                 name,
@@ -135,19 +141,29 @@ impl<'env, 'ext, 'imp> ConstraintGenerator<'env, 'ext, 'imp> {
                 initializer,
                 ..
             } => {
-                let init_ty = initializer.as_ref().map(|expr| self.infer_expression(expr));
-                self.bind_symbol(
-                    name,
-                    type_annotation.as_ref(),
-                    initializer.as_ref(),
-                    init_ty,
-                );
+                let annotation_ty = type_annotation
+                    .as_ref()
+                    .map(|ann| self.type_from_annotation(ann));
+
+                let init_ty = if let Some(expr) = initializer.as_ref() {
+                    if let Some(expected) = annotation_ty.as_ref() {
+                        PatternTypeBinder::seed_expectation(self.env, expected, expr);
+                    }
+                    Some(self.infer_expression(expr))
+                } else {
+                    None
+                };
+
+                self.bind_symbol(name, annotation_ty, initializer.as_ref(), init_ty);
             }
             Statement::Expression { expr, .. } => {
                 self.infer_expression(expr);
             }
             Statement::Assignment { target, value, .. } => {
                 let target_ty = self.infer_expression(target);
+                if PatternTypeBinder::is_pattern_type(&target_ty) {
+                    PatternTypeBinder::seed_expectation(self.env, &target_ty, value);
+                }
                 let value_ty = self.infer_expression(value);
                 self.push_assignability_constraint(
                     value_ty,
@@ -161,6 +177,9 @@ impl<'env, 'ext, 'imp> ConstraintGenerator<'env, 'ext, 'imp> {
             }
             Statement::Return { value, .. } => {
                 if let Some(expr) = value {
+                    if let Some(expected) = self.return_expectations.last() {
+                        PatternTypeBinder::seed_expectation(self.env, expected, expr);
+                    }
                     self.infer_expression(expr);
                 }
             }
@@ -186,11 +205,14 @@ impl<'env, 'ext, 'imp> ConstraintGenerator<'env, 'ext, 'imp> {
                     .map(|ann| self.type_from_annotation(ann))
                     .unwrap_or_else(|| self.env.fresh_type_variable());
 
+                PatternTypeBinder::seed_expectation(self.env, &return_ty, body);
+
                 let function_type = TypeKind::function(param_types.clone(), return_ty.clone());
                 self.env
                     .define_scheme(name.clone(), TypeScheme::monotype(function_type));
 
                 self.env.enter_scope();
+                self.return_expectations.push(return_ty.clone());
                 for (param, param_ty) in parameters.iter().zip(param_types.iter()) {
                     self.env
                         .define_scheme(&param.name, TypeScheme::monotype(param_ty.clone()));
@@ -214,6 +236,7 @@ impl<'env, 'ext, 'imp> ConstraintGenerator<'env, 'ext, 'imp> {
                     expression_span(body),
                 );
 
+                self.return_expectations.pop();
                 self.env.leave_scope();
             }
             _ => {
@@ -276,23 +299,23 @@ impl<'env, 'ext, 'imp> ConstraintGenerator<'env, 'ext, 'imp> {
     fn bind_symbol(
         &mut self,
         name: &str,
-        annotation: Option<&TypeAnnotation>,
+        annotation_ty: Option<TypeKind>,
         initializer_expr: Option<&Expression>,
         initializer_ty: Option<TypeKind>,
     ) {
         let symbol_ty = self.env.fresh_type_variable();
         let mut representative = initializer_ty.clone().unwrap_or_else(|| TypeKind::Unknown);
-        let mut annotated_ty: Option<TypeKind> = None;
+        let mut annotated_ty = annotation_ty;
 
-        if let Some(ann) = annotation {
-            let annotated = self.type_from_annotation(ann);
+        if let Some(annotated) = annotated_ty.clone() {
             if !matches!(annotated, TypeKind::Unknown) {
                 self.push_constraint(
                     ConstraintKind::Equal(symbol_ty.clone(), annotated.clone()),
                     Some("declaration annotation must match symbol"),
                 );
                 representative = annotated.clone();
-                annotated_ty = Some(annotated);
+            } else {
+                annotated_ty = None;
             }
         }
 
@@ -316,8 +339,15 @@ impl<'env, 'ext, 'imp> ConstraintGenerator<'env, 'ext, 'imp> {
 
     fn infer_expression(&mut self, expr: &Expression) -> TypeKind {
         match expr {
-            Expression::RegexLiteral(_) => TypeKind::reference("java.util.regex.Pattern"),
-            Expression::RegexCommand(command) => self.infer_regex_command(command),
+            Expression::RegexLiteral(literal) => {
+                let mut binder = PatternTypeBinder::new(self.env);
+                binder.bind_literal(literal)
+            }
+            Expression::RegexCommand(command) => {
+                let inferred = self.infer_regex_command(command);
+                let mut binder = PatternTypeBinder::new(self.env);
+                binder.resolve_command_type(command, inferred)
+            }
             Expression::Literal(literal, _) => self.type_from_literal(literal),
             Expression::Identifier(name, _) => {
                 if let Some(scheme) = self.env.lookup(name).cloned() {
@@ -686,6 +716,9 @@ impl<'env, 'ext, 'imp> ConstraintGenerator<'env, 'ext, 'imp> {
                 }
                 Statement::Return { value, .. } => {
                     if let Some(expr) = value {
+                        if let Some(expected) = self.return_expectations.last() {
+                            PatternTypeBinder::seed_expectation(self.env, expected, expr);
+                        }
                         last = self.infer_expression(expr);
                     }
                 }

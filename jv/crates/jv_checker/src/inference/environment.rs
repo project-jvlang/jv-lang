@@ -6,9 +6,13 @@
 //! 単一化ソルバが決定的で借用しやすい API を通じて推論状態へアクセスできる。
 
 use crate::inference::conversions::ConversionHelperCatalog;
-use crate::inference::regex::{RegexCommandTyping, RegexMatchTyping};
+use crate::inference::regex::{
+    RegexCommandTyping, RegexMatchTyping,
+    pattern_type::{PatternTypeBinding, TypeExpectation},
+};
 use crate::inference::types::{TypeId, TypeKind};
 use crate::inference::utils::TypeIdGenerator;
+use jv_ast::Span;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
@@ -52,6 +56,8 @@ pub struct TypeEnvironment {
     conversion_catalog: Option<Arc<ConversionHelperCatalog>>,
     regex_typings: Vec<RegexMatchTyping>,
     regex_command_typings: Vec<RegexCommandTyping>,
+    pattern_type_bindings: Vec<PatternTypeBinding>,
+    type_expectations: Vec<TypeExpectation>,
 }
 
 impl TypeEnvironment {
@@ -64,6 +70,8 @@ impl TypeEnvironment {
             conversion_catalog: None,
             regex_typings: Vec::new(),
             regex_command_typings: Vec::new(),
+            pattern_type_bindings: Vec::new(),
+            type_expectations: Vec::new(),
         }
     }
 
@@ -185,6 +193,33 @@ impl TypeEnvironment {
     /// 収集済みの正規表現コマンド情報を返す。
     pub fn regex_command_typings(&self) -> &[RegexCommandTyping] {
         &self.regex_command_typings
+    }
+
+    /// `Pattern` 型として解釈された式のメタデータを追加する。
+    pub fn push_pattern_type_binding(&mut self, binding: PatternTypeBinding) {
+        self.pattern_type_bindings.push(binding);
+    }
+
+    /// 収集済みの `Pattern` 型バインディングを返す。
+    pub fn pattern_type_bindings(&self) -> &[PatternTypeBinding] {
+        &self.pattern_type_bindings
+    }
+
+    /// 型期待値を登録する。
+    pub fn push_type_expectation(&mut self, expectation: TypeExpectation) {
+        self.type_expectations.push(expectation);
+    }
+
+    /// 登録済みの型期待値を返す。
+    pub fn type_expectations(&self) -> &[TypeExpectation] {
+        &self.type_expectations
+    }
+
+    /// 指定スパンに特定型の期待値が登録されているか判定する。
+    pub fn has_type_expectation(&self, span: &Span, ty: &TypeKind) -> bool {
+        self.type_expectations
+            .iter()
+            .any(|expectation| expectation.span == *span && expectation.expected == *ty)
     }
 
     /// 環境全体で自由な型変数を収集する。

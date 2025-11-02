@@ -1,10 +1,15 @@
-//! 正規表現 `is` 演算子の型解析結果を共有する補助データ構造を定義する。
+//! 正規表現に関する型解析メタデータを管理するモジュール群。
 //!
-//! 型推論フェーズで収集したガード戦略や警告を保持し、後続の null 安全解析や
-//! IR ローワリングで再利用できるようにする。
+//! `PatternTypeBinder` がパターン型推論の期待値と結果を橋渡しし、
+//! 既存の `RegexMatchTyping` / `RegexCommandTyping` とあわせて null
+//! 安全解析や IR ローワリングで共有できる情報を提供する。
+
+pub mod pattern_type;
 
 use crate::inference::types::TypeKind;
 use jv_ast::{RegexCommandMode, RegexGuardStrategy, Span};
+
+pub use pattern_type::{PatternOrigin, PatternTypeBinder, PatternTypeBinding, TypeExpectation};
 
 /// `is /pattern/` 判定に関する型解析結果。
 #[derive(Debug, Clone, PartialEq)]
