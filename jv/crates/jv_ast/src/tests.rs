@@ -229,6 +229,8 @@ fn regex_literal_roundtrips_through_serde() {
         pattern: "a/b".to_string(),
         raw: "/a\\/b/".to_string(),
         span: span.clone(),
+        origin: Some(PatternOrigin::literal(span.clone())),
+        const_key: None,
     };
 
     let variant = Literal::Regex(literal.clone());

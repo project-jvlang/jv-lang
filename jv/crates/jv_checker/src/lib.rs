@@ -23,13 +23,16 @@ use crate::imports::ResolvedImport;
 use binding::{BindingResolution, BindingUsageSummary, LateInitManifest, resolve_bindings};
 use inference::conversions::{AppliedConversion, ConversionKind, HelperSpec, NullableGuard};
 use inference::{RegexCommandTyping, RegexMatchTyping};
-use jv_ast::{Program, RegexCommandMode, RegexGuardStrategy, Span};
+use jv_ast::{
+    Argument, Expression, PatternConstKey, PatternOrigin, Program, RegexCommandMode, RegexFlag,
+    RegexGuardStrategy, RegexLiteral, RegexReplacement, Span, Statement, StringPart,
+};
 use jv_build::metadata::SymbolIndex;
 use null_safety::{JavaLoweringHint, NullSafetyCoordinator};
 use pattern::{
     NarrowedNullability, PatternCacheMetrics, PatternMatchFacts, PatternMatchService, PatternTarget,
 };
-use regex::RegexValidator;
+use regex::{PatternConstAnalyzer, PatternConstKind, RegexValidator};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
@@ -42,6 +45,13 @@ use jv_inference::types::{
     TypeVariant as FactsTypeVariant,
 };
 use jv_pm::JavaTarget;
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct PatternConstRecord {
+    pub origin: PatternOrigin,
+    pub kind: PatternConstKind,
+    pub key: Option<PatternConstKey>,
+}
 
 #[derive(Error, Debug)]
 pub enum CheckError {
@@ -428,6 +438,7 @@ pub struct TypeChecker {
     normalized_program: Option<Program>,
     binding_usage: BindingUsageSummary,
     late_init_manifest: LateInitManifest,
+    pattern_const_records: Vec<PatternConstRecord>,
 }
 
 impl TypeChecker {
@@ -451,6 +462,7 @@ impl TypeChecker {
             normalized_program: None,
             binding_usage: BindingUsageSummary::default(),
             late_init_manifest: LateInitManifest::default(),
+            pattern_const_records: Vec::new(),
         }
     }
 
@@ -493,6 +505,10 @@ impl TypeChecker {
         &self.late_init_manifest
     }
 
+    pub fn pattern_const_records(&self) -> &[PatternConstRecord] {
+        &self.pattern_const_records
+    }
+
     pub fn set_imports(&mut self, symbol_index: Arc<SymbolIndex>, imports: Vec<ResolvedImport>) {
         self.engine.set_imports(symbol_index, imports);
     }
@@ -508,13 +524,14 @@ impl TypeChecker {
 
         let binding_resolution = resolve_bindings(program);
         let BindingResolution {
-            program: normalized,
+            program: mut normalized,
             diagnostics,
             usage,
             late_init_manifest,
         } = binding_resolution;
 
         self.binding_usage = usage;
+        self.analyze_pattern_consts(&mut normalized);
         self.normalized_program = Some(normalized);
         self.late_init_manifest = late_init_manifest;
 
@@ -689,6 +706,12 @@ impl TypeChecker {
         telemetry.pattern_cache_misses = metrics.misses;
     }
 
+    fn analyze_pattern_consts(&mut self, program: &mut Program) {
+        let mut records = Vec::new();
+        visit_program_for_pattern_consts(program, &mut records);
+        self.pattern_const_records = records;
+    }
+
     fn refresh_regex_command_telemetry(&mut self) {
         let typings: Vec<RegexCommandTyping> = if let Some(snapshot) = self.snapshot.as_ref() {
             snapshot.regex_command_typings().to_vec()
@@ -850,3 +873,292 @@ impl Default for TypeChecker {
 
 #[cfg(test)]
 mod tests;
+fn visit_program_for_pattern_consts(program: &mut Program, records: &mut Vec<PatternConstRecord>) {
+    for statement in &mut program.statements {
+        visit_statement_for_pattern_consts(statement, records);
+    }
+}
+
+fn visit_statement_for_pattern_consts(
+    statement: &mut Statement,
+    records: &mut Vec<PatternConstRecord>,
+) {
+    match statement {
+        Statement::ValDeclaration { initializer, .. } => {
+            visit_expression_for_pattern_consts(initializer, records);
+        }
+        Statement::VarDeclaration {
+            initializer: Some(expr),
+            ..
+        } => {
+            visit_expression_for_pattern_consts(expr, records);
+        }
+        Statement::VarDeclaration {
+            initializer: None, ..
+        } => {}
+        Statement::FunctionDeclaration {
+            parameters, body, ..
+        } => {
+            for parameter in parameters {
+                if let Some(default) = &mut parameter.default_value {
+                    visit_expression_for_pattern_consts(default, records);
+                }
+            }
+            visit_expression_for_pattern_consts(body, records);
+        }
+        Statement::ClassDeclaration {
+            properties,
+            methods,
+            ..
+        }
+        | Statement::InterfaceDeclaration {
+            properties,
+            methods,
+            ..
+        } => {
+            for property in properties {
+                if let Some(initializer) = &mut property.initializer {
+                    visit_expression_for_pattern_consts(initializer, records);
+                }
+                if let Some(getter) = &mut property.getter {
+                    visit_expression_for_pattern_consts(getter, records);
+                }
+                if let Some(setter) = &mut property.setter {
+                    visit_expression_for_pattern_consts(setter, records);
+                }
+            }
+            for method in methods {
+                visit_statement_for_pattern_consts(method, records);
+            }
+        }
+        Statement::DataClassDeclaration { parameters, .. } => {
+            for parameter in parameters {
+                if let Some(default) = &mut parameter.default_value {
+                    visit_expression_for_pattern_consts(default, records);
+                }
+            }
+        }
+        Statement::ExtensionFunction(extension) => {
+            visit_statement_for_pattern_consts(&mut extension.function, records);
+        }
+        Statement::Expression { expr, .. } => visit_expression_for_pattern_consts(expr, records),
+        Statement::Return {
+            value: Some(expr), ..
+        } => {
+            visit_expression_for_pattern_consts(expr, records);
+        }
+        Statement::Return { value: None, .. } => {}
+        Statement::Throw { expr, .. } => visit_expression_for_pattern_consts(expr, records),
+        Statement::Assignment { target, value, .. } => {
+            visit_expression_for_pattern_consts(target, records);
+            visit_expression_for_pattern_consts(value, records);
+        }
+        Statement::ForIn(for_in) => {
+            visit_expression_for_pattern_consts(&mut for_in.iterable, records);
+            visit_expression_for_pattern_consts(&mut for_in.body, records);
+        }
+        Statement::Comment(_)
+        | Statement::Break(_)
+        | Statement::Continue(_)
+        | Statement::Import { .. }
+        | Statement::Package { .. }
+        | Statement::Concurrency(_)
+        | Statement::ResourceManagement(_) => {}
+    }
+}
+
+fn visit_regex_replacement(
+    replacement: &mut RegexReplacement,
+    records: &mut Vec<PatternConstRecord>,
+) {
+    match replacement {
+        RegexReplacement::Literal(_) => {}
+        RegexReplacement::Expression(expr) => visit_expression_for_pattern_consts(expr, records),
+        RegexReplacement::Lambda(lambda) => {
+            for param in &mut lambda.params {
+                if let Some(default) = &mut param.default_value {
+                    visit_expression_for_pattern_consts(default, records);
+                }
+            }
+            visit_expression_for_pattern_consts(&mut lambda.body, records);
+        }
+    }
+}
+
+fn visit_expression_for_pattern_consts(
+    expr: &mut Expression,
+    records: &mut Vec<PatternConstRecord>,
+) {
+    match expr {
+        Expression::Literal(literal, _) => {
+            if let jv_ast::Literal::Regex(regex_literal) = literal {
+                record_regex_literal(regex_literal, &[], records);
+            }
+        }
+        Expression::RegexLiteral(literal) => record_regex_literal(literal, &[], records),
+        Expression::RegexCommand(command) => {
+            record_regex_literal(&mut command.pattern, &command.flags, records);
+            visit_expression_for_pattern_consts(&mut command.subject, records);
+            if let Some(replacement) = &mut command.replacement {
+                visit_regex_replacement(replacement, records);
+            }
+        }
+        Expression::Binary { left, right, .. } => {
+            visit_expression_for_pattern_consts(left, records);
+            visit_expression_for_pattern_consts(right, records);
+        }
+        Expression::Unary { operand, .. } => visit_expression_for_pattern_consts(operand, records),
+        Expression::Call { function, args, .. } => {
+            visit_expression_for_pattern_consts(function, records);
+            for arg in args {
+                match arg {
+                    Argument::Positional(expr) => {
+                        visit_expression_for_pattern_consts(expr, records)
+                    }
+                    Argument::Named { value, .. } => {
+                        visit_expression_for_pattern_consts(value, records)
+                    }
+                }
+            }
+        }
+        Expression::MemberAccess { object, .. }
+        | Expression::NullSafeMemberAccess { object, .. } => {
+            visit_expression_for_pattern_consts(object, records)
+        }
+        Expression::IndexAccess { object, index, .. }
+        | Expression::NullSafeIndexAccess { object, index, .. } => {
+            visit_expression_for_pattern_consts(object, records);
+            visit_expression_for_pattern_consts(index, records);
+        }
+        Expression::TypeCast { expr, .. } => visit_expression_for_pattern_consts(expr, records),
+        Expression::StringInterpolation { parts, .. } => {
+            for part in parts {
+                if let StringPart::Expression(value) = part {
+                    visit_expression_for_pattern_consts(value, records);
+                }
+            }
+        }
+        Expression::JsonLiteral(_) => {}
+        Expression::When {
+            expr: subject,
+            arms,
+            else_arm,
+            ..
+        } => {
+            if let Some(scrutinee) = subject {
+                visit_expression_for_pattern_consts(scrutinee, records);
+            }
+            for arm in arms {
+                visit_pattern_for_pattern_consts(&mut arm.pattern, records);
+                if let Some(guard) = &mut arm.guard {
+                    visit_expression_for_pattern_consts(guard, records);
+                }
+                visit_expression_for_pattern_consts(&mut arm.body, records);
+            }
+            if let Some(else_expr) = else_arm {
+                visit_expression_for_pattern_consts(else_expr, records);
+            }
+        }
+        Expression::If {
+            condition,
+            then_branch,
+            else_branch,
+            ..
+        } => {
+            visit_expression_for_pattern_consts(condition, records);
+            visit_expression_for_pattern_consts(then_branch, records);
+            if let Some(else_expr) = else_branch {
+                visit_expression_for_pattern_consts(else_expr, records);
+            }
+        }
+        Expression::Block { statements, .. } => {
+            for statement in statements {
+                visit_statement_for_pattern_consts(statement, records);
+            }
+        }
+        Expression::Array { elements, .. } => {
+            for element in elements {
+                visit_expression_for_pattern_consts(element, records);
+            }
+        }
+        Expression::Lambda {
+            parameters, body, ..
+        } => {
+            for param in parameters {
+                if let Some(default) = &mut param.default_value {
+                    visit_expression_for_pattern_consts(default, records);
+                }
+            }
+            visit_expression_for_pattern_consts(body, records);
+        }
+        Expression::Try {
+            body,
+            catch_clauses,
+            finally_block,
+            ..
+        } => {
+            visit_expression_for_pattern_consts(body, records);
+            for clause in catch_clauses {
+                visit_expression_for_pattern_consts(&mut clause.body, records);
+            }
+            if let Some(finally_expr) = finally_block {
+                visit_expression_for_pattern_consts(finally_expr, records);
+            }
+        }
+        Expression::This(_)
+        | Expression::Super(_)
+        | Expression::Identifier(_, _)
+        | Expression::MultilineString(_) => {}
+    }
+}
+
+fn record_regex_literal(
+    literal: &mut RegexLiteral,
+    flags: &[RegexFlag],
+    records: &mut Vec<PatternConstRecord>,
+) {
+    let origin = literal
+        .origin
+        .get_or_insert_with(|| PatternOrigin::literal(literal.span.clone()))
+        .clone();
+    let kind = PatternConstAnalyzer::classify(literal, &origin);
+    let key = if matches!(kind, PatternConstKind::Static) {
+        let computed = PatternConstAnalyzer::build_key(literal, flags);
+        literal.const_key = Some(computed.clone());
+        Some(computed)
+    } else {
+        literal.const_key = None;
+        None
+    };
+    records.push(PatternConstRecord { origin, kind, key });
+}
+fn visit_pattern_for_pattern_consts(
+    pattern: &mut jv_ast::Pattern,
+    records: &mut Vec<PatternConstRecord>,
+) {
+    match pattern {
+        jv_ast::Pattern::Literal(literal, _) => {
+            if let jv_ast::Literal::Regex(regex_literal) = literal {
+                record_regex_literal(regex_literal, &[], records);
+            }
+        }
+        jv_ast::Pattern::Constructor { patterns, .. } => {
+            for nested in patterns {
+                visit_pattern_for_pattern_consts(nested, records);
+            }
+        }
+        jv_ast::Pattern::Range { start, end, .. } => {
+            visit_expression_for_pattern_consts(start, records);
+            visit_expression_for_pattern_consts(end, records);
+        }
+        jv_ast::Pattern::Guard {
+            pattern: inner,
+            condition,
+            ..
+        } => {
+            visit_pattern_for_pattern_consts(inner, records);
+            visit_expression_for_pattern_consts(condition, records);
+        }
+        jv_ast::Pattern::Identifier(_, _) | jv_ast::Pattern::Wildcard(_) => {}
+    }
+}

@@ -9,7 +9,8 @@ pub mod pattern_type;
 use crate::inference::types::TypeKind;
 use jv_ast::{RegexCommandMode, RegexGuardStrategy, Span};
 
-pub use pattern_type::{PatternOrigin, PatternTypeBinder, PatternTypeBinding, TypeExpectation};
+pub use jv_ast::PatternOrigin;
+pub use pattern_type::{PatternTypeBinder, PatternTypeBinding, TypeExpectation};
 
 /// `is /pattern/` 判定に関する型解析結果。
 #[derive(Debug, Clone, PartialEq)]

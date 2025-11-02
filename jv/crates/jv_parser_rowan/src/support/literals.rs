@@ -24,5 +24,7 @@ pub fn regex_literal_from_token(token: &Token, span: Span) -> RegexLiteral {
         pattern,
         raw,
         span: computed_span,
+        origin: None,
+        const_key: None,
     }
 }

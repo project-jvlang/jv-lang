@@ -9,8 +9,8 @@ pub use handlers::imports::{ImportItem, ImportsParams, ImportsResponse};
 pub use highlight::tokens::{HighlightKind, HighlightToken};
 use jv_ast::types::TypeLevelExpr;
 use jv_ast::{
-    Argument, ConstParameter, Expression, GenericParameter, GenericSignature, Program,
-    RegexLambdaReplacement, RegexLiteral, RegexReplacement, Span, Statement, StringPart,
+    Argument, ConstParameter, Expression, GenericParameter, GenericSignature, PatternOrigin,
+    Program, RegexLambdaReplacement, RegexLiteral, RegexReplacement, Span, Statement, StringPart,
     TypeAnnotation,
 };
 use jv_build::BuildConfig;
@@ -1003,6 +1003,8 @@ impl JvLanguageServer {
                         pattern: pattern.clone(),
                         raw: raw.clone(),
                         span: span.clone(),
+                        origin: Some(PatternOrigin::literal(span.clone())),
+                        const_key: None,
                     };
                     statements.push(Statement::Expression {
                         expr: Expression::RegexLiteral(literal),

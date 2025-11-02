@@ -20,6 +20,7 @@ jv_pm = { workspace = true }
 jv_support = { workspace = true }
 jv_mapper = { workspace = true }
 once_cell = { workspace = true }
+sha2 = "0.10"
 
 [dev-dependencies]
 serde_json = { workspace = true }

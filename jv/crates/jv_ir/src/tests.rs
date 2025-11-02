@@ -189,6 +189,8 @@ mod tests {
             pattern: "\\d+".to_string(),
             raw: "/\\d+/".to_string(),
             span: span.clone(),
+            origin: Some(PatternOrigin::literal(span.clone())),
+            const_key: None,
         };
         let mut context = TransformContext::new();
         let ir_expr = transform_expression(Expression::RegexLiteral(literal.clone()), &mut context)
@@ -224,6 +226,8 @@ mod tests {
             pattern: "[a-z]+".to_string(),
             raw: "/[a-z]+/".to_string(),
             span: span.clone(),
+            origin: Some(PatternOrigin::literal(span.clone())),
+            const_key: None,
         };
 
         let metadata = BinaryMetadata {
@@ -279,6 +283,8 @@ mod tests {
             pattern: "\\d+".to_string(),
             raw: "/\\d+/".to_string(),
             span: span.clone(),
+            origin: Some(PatternOrigin::literal(span.clone())),
+            const_key: None,
         };
 
         let metadata = BinaryMetadata {
@@ -327,6 +333,8 @@ mod tests {
                 pattern: "\\d+".to_string(),
                 raw: "/\\d+/".to_string(),
                 span: span.clone(),
+                origin: Some(PatternOrigin::command(span.clone())),
+                const_key: None,
             },
             replacement: Some(RegexReplacement::Literal(RegexLiteralReplacement {
                 raw: "$1-text".to_string(),
@@ -434,6 +442,8 @@ mod tests {
                 pattern: "\\w+".to_string(),
                 raw: "/\\w+/".to_string(),
                 span: span.clone(),
+                origin: Some(PatternOrigin::command(span.clone())),
+                const_key: None,
             },
             replacement: None,
             flags: vec![
@@ -493,6 +503,8 @@ mod tests {
                 pattern: "\\w+".to_string(),
                 raw: "/\\w+/".to_string(),
                 span: span.clone(),
+                origin: Some(PatternOrigin::command(span.clone())),
+                const_key: None,
             },
             replacement: Some(RegexReplacement::Literal(RegexLiteralReplacement {
                 raw: "\"hit\"".to_string(),
@@ -547,6 +559,8 @@ mod tests {
                 pattern: "^[a-z]+$".to_string(),
                 raw: "/^[a-z]+$/".to_string(),
                 span: span.clone(),
+                origin: Some(PatternOrigin::command(span.clone())),
+                const_key: None,
             },
             replacement: None,
             flags: vec![RegexFlag::CaseInsensitive],
@@ -599,6 +613,8 @@ mod tests {
                 pattern: ",\\s*".to_string(),
                 raw: "/,\\s*/".to_string(),
                 span: span.clone(),
+                origin: Some(PatternOrigin::command(span.clone())),
+                const_key: None,
             },
             replacement: None,
             flags: Vec::new(),
@@ -650,6 +666,8 @@ mod tests {
                 pattern: "[a-z]+".to_string(),
                 raw: "/[a-z]+/".to_string(),
                 span: span.clone(),
+                origin: Some(PatternOrigin::command(span.clone())),
+                const_key: None,
             },
             replacement: None,
             flags: vec![],
@@ -1021,6 +1039,8 @@ mod tests {
             pattern: "^[a-z]+$".to_string(),
             raw: "/^[a-z]+$/".to_string(),
             span: span.clone(),
+            origin: Some(PatternOrigin::literal(span.clone())),
+            const_key: None,
         };
         let mut context = TransformContext::new();
         let ir_expr = transform_expression(

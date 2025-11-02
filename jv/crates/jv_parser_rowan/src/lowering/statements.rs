@@ -22,8 +22,8 @@ use jv_ast::statement::{
 };
 use jv_ast::strings::{MultilineKind, MultilineStringLiteral, RawStringFlavor};
 use jv_ast::types::{
-    BinaryOp, GenericParameter, GenericSignature, Literal, Modifiers, Pattern, RegexLiteral,
-    TypeAnnotation, UnaryOp, VarianceMarker,
+    BinaryOp, GenericParameter, GenericSignature, Literal, Modifiers, Pattern, PatternOrigin,
+    RegexLiteral, TypeAnnotation, UnaryOp, VarianceMarker,
 };
 use jv_ast::{BindingPatternKind, Expression, SequenceDelimiter, Span, Statement};
 use jv_lexer::{
@@ -1331,7 +1331,7 @@ mod expression_parser {
 
             let pattern_token = self.tokens[segments.pattern_index];
             let pattern_span = span_from_token(pattern_token);
-            let regex_literal = regex_literal_from_token(pattern_token, pattern_span);
+            let mut regex_literal = regex_literal_from_token(pattern_token, pattern_span);
 
             let replacement = if let Some(range) = segments.replacement_range.clone() {
                 Some(self.parse_regex_replacement(range)?)
@@ -1377,6 +1377,8 @@ mod expression_parser {
                 .min(self.tokens.len().saturating_sub(1));
             let end_span = span_from_token(self.tokens[end_index]);
             let span = merge_spans(&start_span, &end_span);
+
+            regex_literal.origin = Some(PatternOrigin::command(span.clone()));
 
             let command = RegexCommand {
                 mode,
@@ -1726,7 +1728,8 @@ mod expression_parser {
                 ),
                 TokenType::RegexLiteral(_) => {
                     let span = span_from_token(token);
-                    let literal = regex_literal_from_token(token, span.clone());
+                    let mut literal = regex_literal_from_token(token, span.clone());
+                    literal.origin = Some(PatternOrigin::literal(span.clone()));
                     Ok(ParsedExpr {
                         expr: Expression::RegexLiteral(literal),
                         start: index,
@@ -2740,7 +2743,8 @@ mod expression_parser {
                 }
                 TokenType::RegexLiteral(_) => {
                     let span = span_from_token(first);
-                    let literal = regex_literal_from_token(first, span.clone());
+                    let mut literal = regex_literal_from_token(first, span.clone());
+                    literal.origin = Some(PatternOrigin::literal(span.clone()));
                     let literal_span = literal.span.clone();
                     Ok(Pattern::Literal(Literal::Regex(literal), literal_span))
                 }

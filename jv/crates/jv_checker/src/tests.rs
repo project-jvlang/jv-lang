@@ -8,8 +8,8 @@ use crate::regex::RegexValidator;
 use fastrand::Rng;
 use jv_ast::{
     Annotation, AnnotationName, BinaryMetadata, BinaryOp, Expression, IsTestKind, IsTestMetadata,
-    Literal, Modifiers, Parameter, ParameterModifiers, Pattern, Program, RegexCommand,
-    RegexCommandMode, RegexCommandModeOrigin, RegexFlag, RegexGuardStrategy,
+    Literal, Modifiers, Parameter, ParameterModifiers, Pattern, PatternOrigin, Program,
+    RegexCommand, RegexCommandMode, RegexCommandModeOrigin, RegexFlag, RegexGuardStrategy,
     RegexLambdaReplacement, RegexLiteral, RegexLiteralReplacement, RegexReplacement,
     SequenceDelimiter, Span, Statement, TypeAnnotation, ValBindingOrigin, WhenArm,
 };
@@ -41,6 +41,8 @@ fn program_with_optional_regex(span: &Span) -> Program {
         pattern: "\\d+".into(),
         raw: "/\\d+/".into(),
         span: span.clone(),
+        origin: Some(PatternOrigin::literal(span.clone())),
+        const_key: None,
     };
     let metadata = BinaryMetadata {
         is_test: Some(IsTestMetadata {
@@ -109,6 +111,8 @@ fn make_regex_command(
             pattern: "\\w+".into(),
             raw: "/\\w+/".into(),
             span: span.clone(),
+            origin: Some(PatternOrigin::command(span.clone())),
+            const_key: None,
         },
         replacement,
         flags,
@@ -1646,6 +1650,8 @@ fn regex_literal_infers_pattern_type() {
         pattern: "\\d+".into(),
         raw: "/\\d+/".into(),
         span: span.clone(),
+        origin: Some(PatternOrigin::literal(span.clone())),
+        const_key: None,
     };
     let program = Program {
         package: None,
@@ -1881,6 +1887,8 @@ fn regex_is_reports_non_char_sequence_subject() {
         pattern: "\\d+".into(),
         raw: "/\\d+/".into(),
         span: span.clone(),
+        origin: Some(PatternOrigin::literal(span.clone())),
+        const_key: None,
     };
     let metadata = BinaryMetadata {
         is_test: Some(IsTestMetadata {
@@ -2021,6 +2029,8 @@ fn regex_validator_reports_unsupported_escape() {
         pattern: "abc\\q".into(),
         raw: "/abc\\q/".into(),
         span: span.clone(),
+        origin: Some(PatternOrigin::literal(span.clone())),
+        const_key: None,
     };
     let program = Program {
         package: None,
@@ -2055,6 +2065,8 @@ fn regex_validator_reports_unbalanced_groups() {
         pattern: "(abc".into(),
         raw: "/(abc/".into(),
         span: span.clone(),
+        origin: Some(PatternOrigin::literal(span.clone())),
+        const_key: None,
     };
     let program = Program {
         package: None,
@@ -2088,6 +2100,8 @@ fn build_regex_program(pattern: &str) -> Program {
         pattern: pattern.to_string(),
         raw: format!("/{pattern}/"),
         span: span.clone(),
+        origin: Some(PatternOrigin::literal(span.clone())),
+        const_key: None,
     };
     Program {
         package: None,

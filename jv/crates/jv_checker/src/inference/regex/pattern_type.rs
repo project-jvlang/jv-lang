@@ -7,16 +7,9 @@
 use crate::inference::environment::TypeEnvironment;
 use crate::inference::types::TypeKind;
 use crate::pattern::expression_span;
-use jv_ast::{Expression, RegexCommand, RegexLiteral, Span, Statement};
+use jv_ast::{Expression, PatternOrigin, RegexCommand, RegexLiteral, Span, Statement};
 
 const JAVA_PATTERN_FQCN: &str = "java.util.regex.Pattern";
-
-/// 正規表現式の由来。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PatternOrigin {
-    RegexLiteral,
-    RegexCommand,
-}
 
 /// `Pattern` 型として解釈された式のメタデータ。
 #[derive(Debug, Clone, PartialEq)]
@@ -59,11 +52,11 @@ impl<'env> PatternTypeBinder<'env> {
     /// 正規表現リテラルを `Pattern` 型として束縛する。
     pub fn bind_literal(&mut self, literal: &RegexLiteral) -> TypeKind {
         let ty = Self::pattern_type();
-        let binding = PatternTypeBinding::new(
-            literal.span.clone(),
-            PatternOrigin::RegexLiteral,
-            ty.clone(),
-        );
+        let origin = literal
+            .origin
+            .clone()
+            .unwrap_or_else(|| PatternOrigin::literal(literal.span.clone()));
+        let binding = PatternTypeBinding::new(literal.span.clone(), origin, ty.clone());
         self.env.push_pattern_type_binding(binding);
         ty
     }
@@ -75,11 +68,12 @@ impl<'env> PatternTypeBinder<'env> {
             .has_type_expectation(&command.span, &Self::pattern_type())
         {
             let ty = Self::pattern_type();
-            let binding = PatternTypeBinding::new(
-                command.span.clone(),
-                PatternOrigin::RegexCommand,
-                ty.clone(),
-            );
+            let origin = command
+                .pattern
+                .origin
+                .clone()
+                .unwrap_or_else(|| PatternOrigin::command(command.span.clone()));
+            let binding = PatternTypeBinding::new(command.span.clone(), origin, ty.clone());
             self.env.push_pattern_type_binding(binding);
             ty
         } else {
