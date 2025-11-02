@@ -47,6 +47,8 @@ pub(super) fn emit_log_plan(
     }
 
     if let Some(accessor) = trace_accessor {
+        builder.push_line("{");
+        builder.indent();
         emit_trace_context_prefix(generator, &mut builder, accessor);
     }
 
@@ -76,6 +78,8 @@ pub(super) fn emit_log_plan(
 
     if let Some(accessor) = trace_accessor {
         emit_trace_context_suffix(&mut builder, accessor);
+        builder.dedent();
+        builder.push_line("}");
     }
 
     if has_guard {

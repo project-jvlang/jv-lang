@@ -74,6 +74,43 @@ fn slf4j_trace_context_injects_mdc_when_enabled() {
 }
 
 #[test]
+fn slf4j_trace_context_scopes_variables_per_invocation() {
+    let plan_a = log_plan(
+        LogLevel::Info,
+        None,
+        Vec::new(),
+        string_format_message("first {}", vec![identifier_expr("value")]),
+    );
+    let plan_b = log_plan(
+        LogLevel::Warn,
+        None,
+        Vec::new(),
+        string_format_message("second {}", vec![identifier_expr("value")]),
+    );
+
+    let source = render_logging_program_with_plans(
+        LoggingFrameworkKind::Slf4j,
+        vec![plan_a, plan_b],
+        "org.slf4j.Logger",
+        &["value"],
+        true,
+    );
+
+    let span_occurrences = source.matches("Span __jvSpan = Span.current();").count();
+    assert_eq!(
+        span_occurrences, 2,
+        "各ログ呼び出しが個別のSpan初期化を生成する必要があります:\n{source}"
+    );
+
+    let scoped_block = "        {\n            Span __jvSpan = Span.current();";
+    let block_occurrences = source.matches(scoped_block).count();
+    assert_eq!(
+        block_occurrences, 2,
+        "各ログ呼び出しが独立したスコープ内でトレースコンテキストを設定する必要があります:\n{source}"
+    );
+}
+
+#[test]
 fn jboss_logging_uses_percent_format_specifiers() {
     let plan = log_plan(
         LogLevel::Error,
@@ -180,6 +217,22 @@ fn render_logging_program(
     param_names: &[&str],
     trace_context: bool,
 ) -> String {
+    render_logging_program_with_plans(
+        framework,
+        vec![plan],
+        field_type_name,
+        param_names,
+        trace_context,
+    )
+}
+
+fn render_logging_program_with_plans(
+    framework: LoggingFrameworkKind,
+    plans: Vec<LogInvocationPlan>,
+    field_type_name: &str,
+    param_names: &[&str],
+    trace_context: bool,
+) -> String {
     let logger_field = IrStatement::FieldDeclaration {
         name: "LOGGER".to_string(),
         java_type: reference_type(field_type_name),
@@ -193,7 +246,7 @@ fn render_logging_program(
         span: dummy_span(),
     };
 
-    let method = log_method(plan, param_names);
+    let method = build_log_method(plans, param_names);
 
     let class = IrStatement::ClassDeclaration {
         name: "LoggingSample".to_string(),
@@ -238,18 +291,21 @@ fn render_logging_program(
     unit.to_source(&JavaCodeGenConfig::default())
 }
 
-fn log_method(plan: LogInvocationPlan, param_names: &[&str]) -> IrStatement {
-    let log_expression = IrExpression::LogInvocation {
-        plan: Box::new(plan),
-        java_type: JavaType::void(),
-        span: dummy_span(),
-    };
+fn build_log_method(plans: Vec<LogInvocationPlan>, param_names: &[&str]) -> IrStatement {
+    let statements: Vec<IrStatement> = plans
+        .into_iter()
+        .map(|plan| IrStatement::Expression {
+            expr: IrExpression::LogInvocation {
+                plan: Box::new(plan),
+                java_type: JavaType::void(),
+                span: dummy_span(),
+            },
+            span: dummy_span(),
+        })
+        .collect();
 
     let body = IrExpression::Block {
-        statements: vec![IrStatement::Expression {
-            expr: log_expression,
-            span: dummy_span(),
-        }],
+        statements,
         java_type: JavaType::void(),
         span: dummy_span(),
     };

@@ -1,11 +1,11 @@
 use super::*;
 use insta::assert_snapshot;
 use jv_ast::{
-    BinaryOp, CallArgumentStyle, Literal, SequenceDelimiter, Span,
     types::{PrimitiveTypeName, PrimitiveTypeReference, PrimitiveTypeSource},
+    BinaryOp, CallArgumentStyle, Literal, SequenceDelimiter, Span,
 };
-use jv_ir::TransformContext;
 use jv_ir::transform::transform_program_with_context;
+use jv_ir::TransformContext;
 use jv_ir::{
     DataFormat, IrCaseLabel, IrCommentKind, IrDeconstructionComponent, IrDeconstructionPattern,
     IrExpression, IrImplicitWhenEnd, IrModifiers, IrParameter, IrProgram, IrRecordComponent,
@@ -2207,6 +2207,11 @@ fn snapshot_ir_program() {
   ],
   "generic_metadata": {},
   "conversion_metadata": [],
+  "logging": {
+    "logger_fields": [],
+    "framework": "Slf4j",
+    "trace_context": false
+  },
   "span": {
     "start_line": 0,
     "start_column": 0,
