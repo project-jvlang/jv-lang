@@ -1,4 +1,11 @@
 // jv_pm - Package Manager functionality
+pub mod config;
+
+pub use config::logging::{
+    CustomLoggingFramework, LogLevel, LoggingConfig, LoggingConfigError, LoggingConfigLayer,
+    LoggingFramework, OpenTelemetryConfig, OpenTelemetryLayer, OtelProtocol,
+};
+
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt;
@@ -173,6 +180,8 @@ pub struct Manifest {
     #[serde(default)]
     pub project: ProjectSection,
     pub build: Option<BuildInfo>,
+    #[serde(default)]
+    pub logging: LoggingConfig,
 }
 
 impl Manifest {

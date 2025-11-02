@@ -52,6 +52,7 @@ fn test_manifest_creation() {
         package,
         project: ProjectSection::default(),
         build: Some(build_info),
+        logging: LoggingConfig::default(),
     };
 
     assert_eq!(manifest.package.name, "test");
@@ -76,9 +77,11 @@ fn test_package_error_display() {
 
     assert!(not_found.to_string().contains("Package not found"));
     assert!(version_conflict.to_string().contains("Version conflict"));
-    assert!(invalid_manifest
-        .to_string()
-        .contains("Invalid package manifest"));
+    assert!(
+        invalid_manifest
+            .to_string()
+            .contains("Invalid package manifest")
+    );
     assert!(network_error.to_string().contains("Network error"));
 }
 
@@ -119,6 +122,7 @@ fn test_resolve_dependencies_placeholder() {
         },
         project: ProjectSection::default(),
         build: None,
+        logging: LoggingConfig::default(),
     };
 
     let result = pm.resolve_dependencies(&manifest);
@@ -166,6 +170,27 @@ java_version = "25"
 
     let manifest = Manifest::load_from_path(&path).expect("load manifest without dependencies");
     assert!(manifest.package.dependencies.is_empty());
+
+    let _ = fs::remove_file(path);
+}
+
+#[test]
+fn manifest_defaults_logging_section() {
+    let path = manifest_path("logging-default");
+    fs::write(
+        &path,
+        r#"[package]
+name = "logging-default"
+version = "0.1.0"
+"#,
+    )
+    .unwrap();
+
+    let manifest = Manifest::load_from_path(&path).expect("load manifest with default logging");
+    assert_eq!(manifest.logging.framework, LoggingFramework::Slf4j);
+    assert_eq!(manifest.logging.log_level, LogLevel::Info);
+    assert_eq!(manifest.logging.default_level, LogLevel::Info);
+    assert!(!manifest.logging.opentelemetry.enabled);
 
     let _ = fs::remove_file(path);
 }
