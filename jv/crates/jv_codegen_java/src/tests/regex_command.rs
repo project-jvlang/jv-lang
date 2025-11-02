@@ -147,6 +147,14 @@ fn renders_replace_all_for_all_mode() {
         java.contains("Pattern.compile"),
         "Pattern.compile 呼び出しが生成される想定です:\n{java}"
     );
+    assert!(
+        java.contains("JvPatternGuard.compile"),
+        "RuntimePatternGuard により Pattern.compile 呼び出しがラップされる想定です:\n{java}"
+    );
+    assert!(
+        java.contains("final class JvPatternGuard"),
+        "RuntimePatternGuard ヘルパークラスが生成される想定です:\n{java}"
+    );
 }
 
 #[test]

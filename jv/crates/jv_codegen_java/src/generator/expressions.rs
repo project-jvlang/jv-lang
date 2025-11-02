@@ -35,12 +35,14 @@ impl JavaCodeGenerator {
                 } else {
                     self.add_import("java.util.regex.Pattern");
                     let escaped = Self::escape_string(pattern);
-                    if flags.is_empty() {
-                        Ok(format!("Pattern.compile(\"{escaped}\")"))
+                    let base = if flags.is_empty() {
+                        format!("Pattern.compile(\"{escaped}\")")
                     } else {
                         let flag_mask = self.render_regex_flag_mask(flags);
-                        Ok(format!("Pattern.compile(\"{escaped}\", {flag_mask})"))
-                    }
+                        format!("Pattern.compile(\"{escaped}\", {flag_mask})")
+                    };
+                    let span = expr.span();
+                    Ok(self.wrap_pattern_compile_with_guard(base, &span))
                 }
             }
             IrExpression::Identifier { name, .. } => {
@@ -2518,22 +2520,26 @@ impl JavaCodeGenerator {
             } else {
                 expr_flags
             };
-            if effective_flags.is_empty() {
-                Ok(format!("Pattern.compile(\"{escaped}\")"))
+            let base = if effective_flags.is_empty() {
+                format!("Pattern.compile(\"{escaped}\")")
             } else {
                 let flag_mask = self.render_regex_flag_mask(effective_flags);
-                Ok(format!("Pattern.compile(\"{escaped}\", {flag_mask})"))
-            }
+                format!("Pattern.compile(\"{escaped}\", {flag_mask})")
+            };
+            let span = pattern.span();
+            Ok(self.wrap_pattern_compile_with_guard(base, &span))
         } else {
             if flags.is_empty() {
                 self.generate_expression(pattern)
             } else {
                 let pattern_expr = self.generate_expression(pattern)?;
                 let flag_mask = self.render_regex_flag_mask(flags);
-                Ok(format!(
+                let base = format!(
                     "Pattern.compile({pattern_expr}, {flag_mask})",
                     pattern_expr = pattern_expr
-                ))
+                );
+                let span = pattern.span();
+                Ok(self.wrap_pattern_compile_with_guard(base, &span))
             }
         }
     }
@@ -2954,7 +2960,7 @@ mod tests {
 
         assert_eq!(
             rendered,
-            "(Pattern.compile(\"\\\\d+\")).matcher(text).matches()"
+            "(JvPatternGuard.compile(() -> Pattern.compile(\"\\\\d+\"), 1, 1, \"\", \"JVPG0001\")).matcher(text).matches()"
         );
     }
 
@@ -2992,7 +2998,7 @@ mod tests {
 
         assert_eq!(
             rendered,
-            "((userInput) instanceof java.lang.CharSequence __tmp && (Pattern.compile(\"[a-zA-Z]+\")).matcher(__tmp).matches())"
+            "((userInput) instanceof java.lang.CharSequence __tmp && (JvPatternGuard.compile(() -> Pattern.compile(\"[a-zA-Z]+\"), 1, 1, \"\", \"JVPG0001\")).matcher(__tmp).matches())"
         );
     }
 }

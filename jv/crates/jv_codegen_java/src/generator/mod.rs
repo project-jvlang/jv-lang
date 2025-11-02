@@ -36,6 +36,7 @@ pub struct JavaCodeGenerator {
     variance_stack: Vec<HashMap<String, IrVariance>>,
     type_parameter_stack: Vec<HashMap<String, IrTypeParameter>>,
     sequence_helper: Option<String>,
+    runtime_pattern_guard_helper: Option<String>,
     generic_metadata: BTreeMap<String, IrGenericMetadata>,
     metadata_path: Vec<String>,
     package: Option<String>,
@@ -48,6 +49,8 @@ pub struct JavaCodeGenerator {
     current_return_type: Option<JavaType>,
     mutable_captures: HashSet<String>,
     record_components: HashMap<String, HashSet<String>>,
+    codegen_diagnostics: CodegenDiagnostics,
+    pattern_guard_counter: usize,
 }
 
 impl JavaCodeGenerator {
@@ -64,6 +67,7 @@ impl JavaCodeGenerator {
             variance_stack: Vec::new(),
             type_parameter_stack: Vec::new(),
             sequence_helper: None,
+            runtime_pattern_guard_helper: None,
             generic_metadata: BTreeMap::new(),
             metadata_path: Vec::new(),
             package: None,
@@ -76,6 +80,8 @@ impl JavaCodeGenerator {
             current_return_type: None,
             mutable_captures: HashSet::new(),
             record_components: HashMap::new(),
+            codegen_diagnostics: CodegenDiagnostics::default(),
+            pattern_guard_counter: 0,
         }
     }
 
@@ -270,6 +276,10 @@ impl JavaCodeGenerator {
             unit.type_declarations.push(helper);
         }
 
+        if let Some(helper) = self.runtime_pattern_guard_helper.take() {
+            unit.type_declarations.push(helper);
+        }
+
         let mut inferred = self.imports.values().cloned().collect::<Vec<_>>();
         inferred.sort();
         inferred.dedup();
@@ -293,6 +303,7 @@ impl JavaCodeGenerator {
         self.imports.clear();
         self.variance_stack.clear();
         self.sequence_helper = None;
+        self.runtime_pattern_guard_helper = None;
         self.metadata_path.clear();
         self.instance_extension_methods.clear();
         self.script_method_names.clear();
@@ -302,6 +313,8 @@ impl JavaCodeGenerator {
         self.current_return_type = None;
         self.mutable_captures.clear();
         self.record_components.clear();
+        self.codegen_diagnostics = CodegenDiagnostics::default();
+        self.pattern_guard_counter = 0;
     }
 
     fn register_record_components_from_declarations(
@@ -1401,6 +1414,87 @@ impl JavaCodeGenerator {
         self.sequence_helper = Some(builder.build());
     }
 
+    pub fn take_codegen_diagnostics(&mut self) -> CodegenDiagnostics {
+        std::mem::take(&mut self.codegen_diagnostics)
+    }
+
+    pub(super) fn ensure_runtime_pattern_guard_helper(&mut self) {
+        if self.runtime_pattern_guard_helper.is_some() {
+            return;
+        }
+
+        let mut builder = self.builder();
+        builder.push_line("final class JvPatternGuard {");
+        builder.indent();
+        builder.push_line("private JvPatternGuard() {}");
+        builder.push_line(
+            "static java.util.regex.Pattern compile(java.util.function.Supplier<java.util.regex.Pattern> supplier, int line, int column, String locationHint, String token) {",
+        );
+        builder.indent();
+        builder.push_line("try {");
+        builder.indent();
+        builder.push_line("return supplier.get();");
+        builder.dedent();
+        builder.push_line("} catch (java.util.regex.PatternSyntaxException ex) {");
+        builder.indent();
+        builder.push_line("String origin = locationHint.isEmpty()");
+        builder.indent();
+        builder.push_line("? String.format(\".jv %d行%d列付近\", line, column)");
+        builder.push_line(": String.format(\"%s:%d:%d\", locationHint, line, column);");
+        builder.dedent();
+        builder.push_line("String guidance = \"動的パターンは try/catch で明示的に検証し、入力値をサニタイズしてください。定数化できる場合は PatternConstRegistry による静的再利用を検討してください。\";");
+        builder.push_line(
+            "String message = ex.getDescription() + \" — \" + origin + \"。\" + guidance + \" [JVPG:\" + token + \"]\";",
+        );
+        builder.push_line(
+            "throw new java.util.regex.PatternSyntaxException(message, ex.getPattern(), ex.getIndex());",
+        );
+        builder.dedent();
+        builder.push_line("}");
+        builder.dedent();
+        builder.push_line("}");
+        builder.dedent();
+        builder.push_line("}");
+
+        self.runtime_pattern_guard_helper = Some(builder.build());
+    }
+
+    pub(super) fn wrap_pattern_compile_with_guard(
+        &mut self,
+        compile_expr: String,
+        span: &Span,
+    ) -> String {
+        self.ensure_runtime_pattern_guard_helper();
+        let (token, location_hint) = self.register_runtime_pattern_guard(span);
+        let escaped_hint = Self::escape_string(&location_hint);
+        let escaped_token = Self::escape_string(&token);
+        let line = span.start_line.max(1);
+        let column = span.start_column.max(1);
+        format!(
+            "JvPatternGuard.compile(() -> {expr}, {line}, {column}, \"{hint}\", \"{token}\")",
+            expr = compile_expr,
+            line = line,
+            column = column,
+            hint = escaped_hint,
+            token = escaped_token
+        )
+    }
+
+    fn register_runtime_pattern_guard(&mut self, span: &Span) -> (String, String) {
+        self.pattern_guard_counter += 1;
+        let token = format!("JVPG{:04}", self.pattern_guard_counter);
+        let location_hint = self.metadata_lookup_key().unwrap_or_default();
+        self.codegen_diagnostics
+            .runtime_pattern_guards
+            .push(RuntimePatternGuardDiagnostic {
+                token: token.clone(),
+                span: span.clone(),
+                location_hint: location_hint.clone(),
+                guidance: "Pattern.compile の実行時検証に失敗しました。正規表現と入力値を確認し、必要に応じて定数化またはガードを追加してください。".to_string(),
+            });
+        (token, location_hint)
+    }
+
     pub(super) fn variance_scope_len(&self) -> usize {
         self.variance_stack.len()
     }
@@ -1739,4 +1833,17 @@ impl From<&Span> for SpanKey {
             end_column: span.end_column,
         }
     }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct CodegenDiagnostics {
+    pub runtime_pattern_guards: Vec<RuntimePatternGuardDiagnostic>,
+}
+
+#[derive(Debug, Clone)]
+pub struct RuntimePatternGuardDiagnostic {
+    pub token: String,
+    pub span: Span,
+    pub location_hint: String,
+    pub guidance: String,
 }

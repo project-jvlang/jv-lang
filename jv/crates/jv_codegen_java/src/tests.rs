@@ -1575,7 +1575,44 @@ fn regex_pattern_expression_renders_pattern_compile() {
         .generate_expression(&expression)
         .expect("regex expression should render");
 
-    assert_eq!(rendered, "Pattern.compile(\"^[a-z]+$\")");
+    assert_eq!(
+        rendered,
+        "JvPatternGuard.compile(() -> Pattern.compile(\"^[a-z]+$\"), 1, 1, \"\", \"JVPG0001\")"
+    );
+}
+
+#[test]
+fn runtime_pattern_guard_records_diagnostic_entry() {
+    let mut generator = JavaCodeGenerator::new();
+    let expression = IrExpression::RegexPattern {
+        pattern: "[0-9]+".to_string(),
+        flags: Vec::new(),
+        java_type: JavaType::pattern(),
+        span: Span::new(5, 3, 5, 12),
+        const_key: None,
+        static_handle: None,
+    };
+
+    let rendered = generator
+        .generate_expression(&expression)
+        .expect("regex expression should render");
+
+    assert!(
+        rendered.contains("JvPatternGuard.compile"),
+        "生成コードがランタイムガードを利用すること"
+    );
+
+    let diagnostics = generator.take_codegen_diagnostics();
+    assert_eq!(
+        diagnostics.runtime_pattern_guards.len(),
+        1,
+        "CodegenDiagnostics にランタイムガードの情報が記録されること"
+    );
+    let entry = &diagnostics.runtime_pattern_guards[0];
+    assert_eq!(entry.token, "JVPG0001");
+    assert_eq!(entry.span.start_line, 5);
+    assert_eq!(entry.span.start_column, 3);
+    assert_eq!(entry.location_hint, "");
 }
 
 #[test]

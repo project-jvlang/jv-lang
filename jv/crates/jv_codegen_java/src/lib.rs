@@ -8,7 +8,7 @@ pub mod types;
 pub use builder::{JavaCompilationUnit, JavaSourceBuilder};
 pub use config::JavaCodeGenConfig;
 pub use error::CodeGenError;
-pub use generator::JavaCodeGenerator;
+pub use generator::{CodegenDiagnostics, JavaCodeGenerator};
 pub use jv_pm::JavaTarget;
 pub use target_version::TargetedJavaEmitter;
 pub use types::{
