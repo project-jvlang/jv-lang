@@ -1117,6 +1117,89 @@ fun sample(input: String): Boolean {
 }
 
 #[test]
+fn cli_regex_pattern_cache_reuse_compiles_with_javac() {
+    ensure_toolchain_envs();
+
+    if !has_javac() || !has_java_runtime() {
+        eprintln!(
+            "Skipping regex pattern cache reuse test: missing javac or java runtime"
+        );
+        return;
+    }
+
+    let fixture = workspace_file("tests/fixtures/regex/pattern_cache_reuse.jv");
+    let temp_dir = TempDirGuard::new("cli-regex-cache").expect("create temp dir for regex cache");
+    let plan = compose_plan_from_fixture(
+        temp_dir.path(),
+        &fixture,
+        CliOverrides {
+            java_only: true,
+            ..CliOverrides::default()
+        },
+    );
+
+    let artifacts = compile(&plan).expect("compile regex cache fixture");
+    assert!(
+        !artifacts.java_files.is_empty(),
+        "regex cache fixture should generate Java sources"
+    );
+
+    let java_source = read_java_sources(&artifacts.java_files);
+    assert!(
+        java_source.contains("__JVPatternCache.PATTERN_1"),
+        "generated Java should reference cached pattern handle:\n{java_source}"
+    );
+    assert!(
+        java_source.matches("Pattern.compile(").count() == 1,
+        "cached pattern should compile exactly once:\n{java_source}"
+    );
+    assert!(
+        java_source.contains("static final java.util.regex.Pattern cached"),
+        "top-level binding should become static final pattern:\n{java_source}"
+    );
+    assert!(
+        java_source.matches("JvPatternGuard.compile").count() == 1,
+        "cached pattern should emit a single guard wrapper:\n{java_source}"
+    );
+
+    let java_dir = plan.options.output_dir.join("java25");
+    let classes_dir = java_dir.join("classes");
+    fs::create_dir_all(&classes_dir).expect("create classes directory for javac");
+
+    let mut javac = javac_command().expect("javac command unavailable");
+    javac.arg("-d").arg(&classes_dir);
+    for file in &artifacts.java_files {
+        javac.arg(file);
+    }
+    let status = javac
+        .status()
+        .expect("invoke javac for regex pattern cache fixture");
+    assert!(
+        status.success(),
+        "javac failed for regex pattern cache fixture: {status:?}"
+    );
+
+    let mut java_cmd = java_command().expect("java runtime unavailable");
+    let output = java_cmd
+        .arg("-cp")
+        .arg(&classes_dir)
+        .arg(&artifacts.script_main_class)
+        .output()
+        .expect("execute compiled regex cache script");
+    assert!(
+        output.status.success(),
+        "java execution failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).expect("regex cache stdout should be UTF-8");
+    assert_eq!(
+        stdout.trim(),
+        "true",
+        "runtime output should confirm cache-backed pattern works"
+    );
+}
+
+#[test]
 fn cli_regex_additional_flags() {
     ensure_toolchain_envs();
 

@@ -278,6 +278,103 @@ mod tests {
     }
 
     #[test]
+    fn transform_reuses_static_handle_for_duplicate_literals() {
+        let span = dummy_span();
+        let literal_a = RegexLiteral {
+            pattern: "^[A-Z]{2}-\\d{4}$".to_string(),
+            raw: "/^[A-Z]{2}-\\d{4}$/".to_string(),
+            span: span.clone(),
+            origin: Some(PatternOrigin::literal(span.clone())),
+            const_key: Some(PatternConstKey::new([7; 16], "^[A-Z]{2}-\\d{4}$")),
+        };
+        let literal_b = RegexLiteral {
+            pattern: "^[A-Z]{2}-\\d{4}$".to_string(),
+            raw: "/^[A-Z]{2}-\\d{4}$/".to_string(),
+            span: span.clone(),
+            origin: Some(PatternOrigin::literal(span.clone())),
+            const_key: Some(PatternConstKey::new([7; 16], "^[A-Z]{2}-\\d{4}$")),
+        };
+
+        let program = Program {
+            package: None,
+            imports: Vec::new(),
+            statements: vec![
+                Statement::ValDeclaration {
+                    name: "first".to_string(),
+                    binding: None,
+                    type_annotation: None,
+                    initializer: Expression::RegexLiteral(literal_a),
+                    modifiers: Modifiers::default(),
+                    origin: ValBindingOrigin::ExplicitKeyword,
+                    span: span.clone(),
+                },
+                Statement::ValDeclaration {
+                    name: "second".to_string(),
+                    binding: None,
+                    type_annotation: None,
+                    initializer: Expression::RegexLiteral(literal_b),
+                    modifiers: Modifiers::default(),
+                    origin: ValBindingOrigin::ExplicitKeyword,
+                    span: span.clone(),
+                },
+            ],
+            span: span.clone(),
+        };
+
+        let mut context = TransformContext::new();
+        let ir_program = transform_program_with_context(program, &mut context)
+            .expect("duplicate regex literals should lower");
+
+        let mut handles = Vec::new();
+        for stmt in &ir_program.type_declarations {
+            if let IrStatement::VariableDeclaration { initializer, .. } = stmt {
+                if let Some(IrExpression::RegexPattern { static_handle, .. }) = initializer {
+                    handles.push(static_handle.clone());
+                }
+            }
+        }
+
+        assert_eq!(
+            handles.len(),
+            2,
+            "both variable declarations should lower to regex patterns"
+        );
+
+        let first = handles[0]
+            .as_ref()
+            .expect("first regex should have static handle");
+        let second = handles[1]
+            .as_ref()
+            .expect("second regex should reuse static handle");
+        assert_eq!(
+            first.class_name, second.class_name,
+            "static cache class should be shared"
+        );
+        assert_eq!(
+            first.field_name, second.field_name,
+            "duplicate literals should map to the same static field"
+        );
+
+        let cache_class = ir_program
+            .type_declarations
+            .iter()
+            .find_map(|stmt| match stmt {
+                IrStatement::ClassDeclaration { name, fields, .. }
+                    if name == "__JVPatternCache" =>
+                {
+                    Some(fields)
+                }
+                _ => None,
+            })
+            .expect("pattern cache class should be emitted");
+        assert_eq!(
+            cache_class.len(),
+            1,
+            "cache class should only define a single static field"
+        );
+    }
+
+    #[test]
     fn transform_regex_is_literal_produces_regex_match() {
         let span = dummy_span();
         let literal = RegexLiteral {

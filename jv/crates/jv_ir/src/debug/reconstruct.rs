@@ -7,10 +7,11 @@ use crate::types::{
 };
 use jv_ast::{
     Argument, BinaryMetadata, BinaryOp, CallArgumentMetadata, CommentKind, CommentStatement,
-    CommentVisibility, Expression, Literal, Modifiers, Parameter, ParameterModifiers, Program,
-    RegexCommand, RegexCommandModeOrigin, RegexLambdaReplacement, RegexLiteral,
-    RegexLiteralReplacement, RegexReplacement, RegexTemplateSegment, Span, Statement, StringPart,
-    TypeAnnotation, ValBindingOrigin, Visibility,
+    CommentVisibility, Expression, Literal, Modifiers, Parameter, ParameterModifiers,
+    PatternOrigin, PatternOriginKind, Program, RegexCommand, RegexCommandModeOrigin,
+    RegexLambdaReplacement, RegexLiteral, RegexLiteralReplacement, RegexReplacement,
+    RegexTemplateSegment, Span, Statement, StringPart, TypeAnnotation, ValBindingOrigin,
+    Visibility,
 };
 
 fn render_type_annotation(annotation: TypeAnnotation) -> String {
@@ -428,14 +429,10 @@ impl<'a> ReconstructionContext<'a> {
                 self.record_success();
                 Expression::Literal(literal.clone(), span.clone())
             }
-            IrExpression::RegexPattern { pattern, span, .. } => {
+            IrExpression::RegexPattern { .. } => {
+                let literal = self.convert_ir_regex_literal(expr, PatternOriginKind::RegexLiteral);
                 self.record_success();
-                let escaped = pattern.replace('/', "\\/");
-                Expression::RegexLiteral(RegexLiteral {
-                    pattern: pattern.clone(),
-                    raw: format!("/{}/", escaped),
-                    span: span.clone(),
-                })
+                Expression::RegexLiteral(literal)
             }
             IrExpression::Identifier { name, span, .. } => {
                 self.record_success();
@@ -690,7 +687,8 @@ impl<'a> ReconstructionContext<'a> {
     ) -> Result<Expression, ReconstructionError> {
         let subject =
             self.with_segment("subject", |ctx| ctx.convert_expression(&command.subject))?;
-        let pattern_literal = self.convert_ir_regex_literal(&command.pattern);
+        let pattern_literal =
+            self.convert_ir_regex_literal(&command.pattern, PatternOriginKind::RegexCommand);
         let replacement = self.with_segment("replacement", |ctx| {
             ctx.convert_ir_regex_replacement(&command.replacement)
         })?;
@@ -708,13 +706,29 @@ impl<'a> ReconstructionContext<'a> {
         })))
     }
 
-    fn convert_ir_regex_literal(&mut self, expr: &IrExpression) -> RegexLiteral {
-        if let IrExpression::RegexPattern { pattern, span, .. } = expr {
+    fn convert_ir_regex_literal(
+        &mut self,
+        expr: &IrExpression,
+        origin_kind: PatternOriginKind,
+    ) -> RegexLiteral {
+        if let IrExpression::RegexPattern {
+            pattern,
+            span,
+            const_key,
+            ..
+        } = expr
+        {
             let escaped = pattern.replace('/', "\\/");
+            let origin = match origin_kind {
+                PatternOriginKind::RegexLiteral => PatternOrigin::literal(span.clone()),
+                PatternOriginKind::RegexCommand => PatternOrigin::command(span.clone()),
+            };
             RegexLiteral {
                 pattern: pattern.clone(),
                 raw: format!("/{}/", escaped),
                 span: span.clone(),
+                origin: Some(origin),
+                const_key: const_key.clone(),
             }
         } else {
             let span = extract_expr_span(expr);
@@ -723,10 +737,16 @@ impl<'a> ReconstructionContext<'a> {
                 Some(span.clone()),
                 "Regex パターンを復元できなかったため、空のパターンを使用します",
             );
+            let origin = match origin_kind {
+                PatternOriginKind::RegexLiteral => PatternOrigin::literal(span.clone()),
+                PatternOriginKind::RegexCommand => PatternOrigin::command(span.clone()),
+            };
             RegexLiteral {
                 pattern: String::new(),
                 raw: "//".to_string(),
                 span,
+                origin: Some(origin),
+                const_key: None,
             }
         }
     }

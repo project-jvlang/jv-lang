@@ -1990,6 +1990,102 @@ fn class_regex_field_is_emitted_as_static_final() {
 }
 
 #[test]
+fn shared_pattern_handle_reuses_cache_entry() {
+    let handle = PatternStaticFieldHandle {
+        class_name: "__JVPatternCache".to_string(),
+        field_name: "PATTERN_1".to_string(),
+    };
+
+    let cache_initializer = IrExpression::RegexPattern {
+        pattern: "^[A-Z]{2}-\\d{4}$".to_string(),
+        flags: Vec::new(),
+        java_type: JavaType::pattern(),
+        span: dummy_span(),
+        const_key: None,
+        static_handle: None,
+    };
+
+    let pattern_cache = IrStatement::ClassDeclaration {
+        name: "__JVPatternCache".to_string(),
+        type_parameters: Vec::new(),
+        superclass: None,
+        interfaces: Vec::new(),
+        fields: vec![IrStatement::FieldDeclaration {
+            name: "PATTERN_1".to_string(),
+            java_type: JavaType::pattern(),
+            initializer: Some(cache_initializer),
+            modifiers: IrModifiers {
+                visibility: IrVisibility::Public,
+                is_static: true,
+                is_final: true,
+                ..IrModifiers::default()
+            },
+            span: dummy_span(),
+        }],
+        methods: Vec::new(),
+        nested_classes: Vec::new(),
+        modifiers: IrModifiers {
+            visibility: IrVisibility::Public,
+            is_final: true,
+            ..IrModifiers::default()
+        },
+        span: dummy_span(),
+    };
+
+    let make_binding = |name: &str| IrStatement::VariableDeclaration {
+        name: name.to_string(),
+        java_type: JavaType::pattern(),
+        initializer: Some(IrExpression::RegexPattern {
+            pattern: "^[A-Z]{2}-\\d{4}$".to_string(),
+            flags: Vec::new(),
+            java_type: JavaType::pattern(),
+            span: dummy_span(),
+            const_key: Some(PatternConstKey::new([3; 16], "^[A-Z]{2}-\\d{4}$")),
+            static_handle: Some(handle.clone()),
+        }),
+        is_final: true,
+        modifiers: IrModifiers::default(),
+        span: dummy_span(),
+    };
+
+    let program = IrProgram {
+        package: None,
+        imports: vec![],
+        type_declarations: vec![
+            pattern_cache,
+            make_binding("firstPattern"),
+            make_binding("secondPattern"),
+        ],
+        generic_metadata: Default::default(),
+        conversion_metadata: Vec::new(),
+        span: dummy_span(),
+    };
+
+    let unit = generate_java_code(&program).expect("shared handle lowering");
+    let source = unit.to_source(&JavaCodeGenConfig::default());
+
+    let cache_field_count = source
+        .match_indices("static final java.util.regex.Pattern PATTERN_1")
+        .count();
+    assert_eq!(
+        cache_field_count, 1,
+        "pattern cache should declare static field only once:\n{source}"
+    );
+
+    let compile_count = source.match_indices("Pattern.compile(").count();
+    assert_eq!(
+        compile_count, 1,
+        "shared handle should compile literal exactly once:\n{source}"
+    );
+
+    let handle_usage = source.match_indices("__JVPatternCache.PATTERN_1").count();
+    assert_eq!(
+        handle_usage, 2,
+        "both bindings should reference the cached pattern:\n{source}"
+    );
+}
+
+#[test]
 fn method_overload_generation_wraps_body() {
     let mut generator = JavaCodeGenerator::new();
     let overload = MethodOverload {

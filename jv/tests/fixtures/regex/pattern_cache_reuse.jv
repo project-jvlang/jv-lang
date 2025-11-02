@@ -1,0 +1,13 @@
+import java.util.regex.Pattern
+
+val cached = /[A-Z]{2}-\d{4}/
+
+fun build(): Pattern = cached
+
+fun matches(input: String): Boolean {
+    return cached.matcher(input).matches()
+}
+
+fun main() {
+    println(matches("AB-1234"))
+}

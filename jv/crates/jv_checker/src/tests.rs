@@ -1,4 +1,6 @@
 use super::*;
+
+mod regex_pattern_type;
 use crate::binding::resolve_bindings;
 use crate::inference::environment::{TypeEnvironment, TypeScheme};
 use crate::inference::types::TypeBinding;
