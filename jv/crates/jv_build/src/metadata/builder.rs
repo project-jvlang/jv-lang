@@ -14,6 +14,7 @@ use zip::ZipArchive;
 use zip::result::ZipError;
 
 const LOG_TARGET: &str = "jv::build::symbol_index";
+const MAX_CLASS_BYTES: u64 = 5 * 1024 * 1024;
 
 #[derive(Debug, Clone)]
 pub struct BuildContext {
@@ -386,7 +387,24 @@ impl<'a> SymbolIndexBuilder<'a> {
                 continue;
             }
 
+            let entry_size = entry.size();
+            if entry_size > MAX_CLASS_BYTES {
+                warn!(
+                    target: LOG_TARGET,
+                    %name,
+                    size = entry_size,
+                    limit = MAX_CLASS_BYTES,
+                    "クラスエントリのサイズが上限を超えたためスキップしました"
+                );
+                continue;
+            }
+
             buffer.clear();
+            if let Ok(expected) = usize::try_from(entry_size) {
+                if buffer.capacity() < expected {
+                    buffer.reserve(expected - buffer.capacity());
+                }
+            }
             entry
                 .read_to_end(&mut buffer)
                 .map_err(|source| IndexError::Io {
@@ -411,7 +429,25 @@ impl<'a> SymbolIndexBuilder<'a> {
             path: path.to_path_buf(),
             source,
         })?;
+        let metadata = file.metadata().map_err(|source| IndexError::Io {
+            path: path.to_path_buf(),
+            source,
+        })?;
+        if metadata.len() > MAX_CLASS_BYTES {
+            warn!(
+                target: LOG_TARGET,
+                path = %path.display(),
+                size = metadata.len(),
+                limit = MAX_CLASS_BYTES,
+                "単体クラスファイルのサイズが上限を超えたためスキップしました"
+            );
+            return Ok(());
+        }
         let mut buffer = Vec::new();
+        let expected = usize::try_from(metadata.len()).unwrap_or(0);
+        if expected > 0 {
+            buffer.reserve(expected);
+        }
         file.read_to_end(&mut buffer)
             .map_err(|source| IndexError::Io {
                 path: path.to_path_buf(),
