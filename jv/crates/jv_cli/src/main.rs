@@ -294,7 +294,7 @@ fn main() -> Result<()> {
                 entrypoint: entrypoint_override,
                 output: None,
                 java_only: false,
-                check: false,
+                check: true,
                 format: false,
                 target: None,
                 clean: false,

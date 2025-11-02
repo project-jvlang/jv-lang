@@ -12,11 +12,14 @@ use jv_checker::diagnostics::{
 };
 use jv_checker::inference::conversions::HelperSpec;
 use jv_checker::inference::diagnostics::conversion_diagnostic;
-use jv_ir::transform_program;
+use jv_ir::{TransformContext, transform_program_with_context};
 use jv_parser_frontend::ParserPipeline;
 use jv_parser_rowan::frontend::RowanPipeline;
 
-use crate::{format_tooling_diagnostic, tooling_failure};
+use crate::{
+    collect_doublebrace_lowering_plans, configure_transform_context, format_tooling_diagnostic,
+    tooling_failure,
+};
 
 /// Execute the `jv check` workflow against a single input file.
 pub fn run(input: &str) -> Result<()> {
@@ -98,20 +101,38 @@ pub fn run(input: &str) -> Result<()> {
         }
     }
 
-    let normalized_program = type_checker.take_normalized_program().unwrap_or(program);
     let telemetry_snapshot = type_checker.telemetry().clone();
-    let ir_program = match transform_program(normalized_program) {
-        Ok(ir) => ir,
-        Err(error) => {
-            if let Some(diagnostic) = from_transform_error(&error) {
-                return Err(tooling_failure(
-                    Path::new(input),
-                    diagnostic.with_strategy(DiagnosticStrategy::Deferred),
-                ));
+    let inference_snapshot = type_checker.take_inference_snapshot();
+    let doublebrace_plans = collect_doublebrace_lowering_plans(
+        &type_checker,
+        inference_snapshot.as_ref(),
+        type_checker.normalized_program(),
+        None,
+    );
+    let normalized_program = type_checker.take_normalized_program().unwrap_or(program);
+    let type_fact_hint = inference_snapshot
+        .as_ref()
+        .map(|snapshot| snapshot.type_facts());
+    let mut transform_context = TransformContext::new();
+    configure_transform_context(
+        &mut transform_context,
+        type_fact_hint,
+        &[],
+        &doublebrace_plans,
+    );
+    let ir_program =
+        match transform_program_with_context(normalized_program, &mut transform_context) {
+            Ok(ir) => ir,
+            Err(error) => {
+                if let Some(diagnostic) = from_transform_error(&error) {
+                    return Err(tooling_failure(
+                        Path::new(input),
+                        diagnostic.with_strategy(DiagnosticStrategy::Deferred),
+                    ));
+                }
+                return Err(anyhow::anyhow!("IR transformation error: {:?}", error));
             }
-            return Err(anyhow::anyhow!("IR transformation error: {:?}", error));
-        }
-    };
+        };
 
     let raw_type_diagnostics = collect_raw_type_diagnostics(&ir_program);
     if !raw_type_diagnostics.is_empty() {

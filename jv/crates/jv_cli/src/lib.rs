@@ -2,19 +2,33 @@
 use anyhow::Result;
 use clap::Parser;
 use jv_ir::{
-    sequence_pipeline,
-    types::{IrImport, IrImportDetail},
+    TransformContext, sequence_pipeline,
+    types::{
+        DoublebraceBaseStrategy, DoublebraceCopySourceStrategy, DoublebraceFieldUpdate,
+        DoublebraceLoweringCopyPlan, DoublebraceLoweringKind, DoublebraceLoweringMutatePlan,
+        DoublebraceLoweringPlan, DoublebraceLoweringStep, DoublebraceMethodInvocation, IrImport,
+        IrImportDetail,
+    },
 };
 use jv_support::i18n::{LocaleCode, catalog};
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 
+use crate::pipeline::type_facts_bridge;
+use jv_ast::{Expression, Program, Statement};
+use jv_build::metadata::SymbolIndex;
 use jv_checker::diagnostics::{
     DiagnosticSeverity, DiagnosticStrategy, EnhancedDiagnostic, from_check_error,
     from_frontend_diagnostics, from_parse_error, from_transform_error,
 };
+use jv_checker::java::{
+    CopySource, DoublebracePlan, FieldUpdate, MethodInvocation, MutationStep, PlanBase,
+    plan_doublebrace_in_program,
+};
+use jv_checker::{InferenceSnapshot, TypeChecker, TypeInferenceService};
 use jv_pm::JavaTarget;
+use tracing::{debug, warn};
 
 mod embedded_stdlib;
 mod java_type_names;
@@ -467,7 +481,6 @@ pub mod pipeline {
     use std::sync::Arc;
     use std::time::Instant;
     use tracing::debug;
-    use type_facts_bridge::preload_type_facts_into_context;
 
     /// Resulting artifacts and diagnostics from the build pipeline.
     #[derive(Debug, Default, Clone)]
@@ -787,6 +800,12 @@ pub mod pipeline {
         };
 
         let binding_usage = type_checker.binding_usage().clone();
+        let doublebrace_plans_for_ir = collect_doublebrace_lowering_plans(
+            &type_checker,
+            inference_snapshot.as_ref(),
+            type_checker.normalized_program(),
+            Some(symbol_index.as_ref()),
+        );
 
         let mut type_facts_snapshot = type_facts_snapshot;
         let requires_probe = type_facts_snapshot
@@ -867,12 +886,12 @@ pub mod pipeline {
         let mut ir_program = if options.perf {
             let pools = TransformPools::with_chunk_capacity(256 * 1024);
             let mut context = TransformContext::with_pools(pools);
-            if let Some(facts) = type_facts_snapshot.as_ref() {
-                preload_type_facts_into_context(&mut context, facts);
-            }
-            if !import_plan.is_empty() {
-                context.set_resolved_imports(import_plan.clone());
-            }
+            configure_transform_context(
+                &mut context,
+                type_facts_snapshot.as_ref(),
+                &import_plan,
+                &doublebrace_plans_for_ir,
+            );
             let mut profiler = TransformProfiler::new();
             let lowering_result = transform_program_with_context_profiled(
                 program_holder
@@ -906,12 +925,12 @@ pub mod pipeline {
             }
         } else {
             let mut context = TransformContext::new();
-            if let Some(facts) = type_facts_snapshot.as_ref() {
-                preload_type_facts_into_context(&mut context, facts);
-            }
-            if !import_plan.is_empty() {
-                context.set_resolved_imports(import_plan.clone());
-            }
+            configure_transform_context(
+                &mut context,
+                type_facts_snapshot.as_ref(),
+                &import_plan,
+                &doublebrace_plans_for_ir,
+            );
             let lowering_result = transform_program_with_context(
                 program_holder
                     .take()
@@ -1588,6 +1607,441 @@ pub mod pipeline {
             }
             other => bail!("Unsupported binary target '{}'.", other),
         }
+    }
+}
+
+/// DoublebraceプランをIR向けのローワリングプランへ変換する。
+pub(crate) fn lower_doublebrace_plans_for_ir(
+    plans: &HashMap<String, DoublebracePlan>,
+) -> HashMap<String, DoublebraceLoweringPlan> {
+    plans
+        .iter()
+        .map(|(key, plan)| (key.clone(), lower_doublebrace_plan(plan)))
+        .collect()
+}
+
+/// TypeChecker から得た Doublebrace プランを IR 向けに整形し、必要に応じてフォールバックを試みる。
+pub(crate) fn collect_doublebrace_lowering_plans(
+    type_checker: &TypeChecker,
+    inference_snapshot: Option<&InferenceSnapshot>,
+    normalized_program: Option<&Program>,
+    symbol_index: Option<&SymbolIndex>,
+) -> HashMap<String, DoublebraceLoweringPlan> {
+    let mut lowering_plans = lower_doublebrace_plans_for_ir(type_checker.doublebrace_plans());
+    if let Some(program) = normalized_program {
+        let expected_count = count_doublebrace_in_program(program);
+        if expected_count > lowering_plans.len() {
+            if let Some(snapshot) = inference_snapshot {
+                if let Ok(fallback) =
+                    plan_doublebrace_in_program(program, snapshot.environment(), symbol_index)
+                {
+                    debug!(
+                        target: "jv::doublebrace",
+                        plans = fallback.len(),
+                        "supplemented Doublebrace plans from inference snapshot"
+                    );
+                    merge_lowered_plans(
+                        &mut lowering_plans,
+                        lower_doublebrace_plans_for_ir(&fallback),
+                    );
+                }
+                if lowering_plans.len() < expected_count {
+                    if let Ok(fallback) =
+                        plan_doublebrace_in_program(program, snapshot.environment(), None)
+                    {
+                        debug!(
+                            target: "jv::doublebrace",
+                            plans = fallback.len(),
+                            "retrying Doublebrace fallback without symbol index"
+                        );
+                        merge_lowered_plans(
+                            &mut lowering_plans,
+                            lower_doublebrace_plans_for_ir(&fallback),
+                        );
+                    }
+                }
+            }
+
+            if lowering_plans.len() < expected_count {
+                let environment = type_checker.type_environment();
+                if let Ok(fallback) =
+                    plan_doublebrace_in_program(program, environment, symbol_index)
+                {
+                    debug!(
+                        target: "jv::doublebrace",
+                        plans = fallback.len(),
+                        "recovered Doublebrace plans from checker environment"
+                    );
+                    merge_lowered_plans(
+                        &mut lowering_plans,
+                        lower_doublebrace_plans_for_ir(&fallback),
+                    );
+                } else if let Ok(fallback) = plan_doublebrace_in_program(program, environment, None)
+                {
+                    debug!(
+                        target: "jv::doublebrace",
+                        plans = fallback.len(),
+                        "recovered Doublebrace plans from checker environment without symbol index"
+                    );
+                    merge_lowered_plans(
+                        &mut lowering_plans,
+                        lower_doublebrace_plans_for_ir(&fallback),
+                    );
+                }
+            }
+
+            if lowering_plans.len() < expected_count && expected_count > 0 {
+                warn!(
+                    target: "jv::doublebrace",
+                    expected = expected_count,
+                    actual = lowering_plans.len(),
+                    "Doublebrace plans remain incomplete after applying fallbacks"
+                );
+            }
+        }
+    }
+    lowering_plans
+}
+
+/// TransformContext に型ファクトと Doublebrace プラン、解決済み import を流し込む。
+pub(crate) fn configure_transform_context(
+    context: &mut TransformContext,
+    type_facts_snapshot: Option<&type_facts_bridge::TypeFactsSnapshot>,
+    import_plan: &[IrImport],
+    doublebrace_plans: &HashMap<String, DoublebraceLoweringPlan>,
+) {
+    if let Some(facts) = type_facts_snapshot {
+        type_facts_bridge::preload_type_facts_into_context(context, facts);
+    }
+    if !import_plan.is_empty() {
+        context.set_resolved_imports(import_plan.to_vec());
+    }
+    if !doublebrace_plans.is_empty() {
+        context.set_doublebrace_plans(doublebrace_plans.clone());
+    }
+}
+
+fn merge_lowered_plans(
+    target: &mut HashMap<String, DoublebraceLoweringPlan>,
+    fallback: HashMap<String, DoublebraceLoweringPlan>,
+) {
+    for (key, plan) in fallback {
+        target.entry(key).or_insert(plan);
+    }
+}
+
+fn count_doublebrace_in_program(program: &Program) -> usize {
+    program
+        .statements
+        .iter()
+        .map(count_doublebrace_in_statement)
+        .sum()
+}
+
+fn count_doublebrace_in_statement(statement: &Statement) -> usize {
+    match statement {
+        Statement::ValDeclaration { initializer, .. } => {
+            count_doublebrace_in_expression(initializer)
+        }
+        Statement::VarDeclaration {
+            initializer: Some(expr),
+            ..
+        } => count_doublebrace_in_expression(expr),
+        Statement::VarDeclaration { .. } => 0,
+        Statement::FunctionDeclaration {
+            body, parameters, ..
+        } => {
+            parameters
+                .iter()
+                .map(|param| {
+                    param
+                        .default_value
+                        .as_ref()
+                        .map(count_doublebrace_in_expression)
+                        .unwrap_or(0)
+                })
+                .sum::<usize>()
+                + count_doublebrace_in_expression(body)
+        }
+        Statement::ClassDeclaration {
+            methods,
+            properties,
+            ..
+        }
+        | Statement::InterfaceDeclaration {
+            methods,
+            properties,
+            ..
+        } => {
+            let method_total = methods
+                .iter()
+                .map(|method| count_doublebrace_in_statement(method.as_ref()))
+                .sum::<usize>();
+            let property_total = properties
+                .iter()
+                .map(|property| {
+                    property
+                        .initializer
+                        .as_ref()
+                        .map(count_doublebrace_in_expression)
+                        .unwrap_or(0)
+                })
+                .sum::<usize>();
+            method_total + property_total
+        }
+        Statement::DataClassDeclaration { parameters, .. } => parameters
+            .iter()
+            .map(|param| {
+                param
+                    .default_value
+                    .as_ref()
+                    .map(count_doublebrace_in_expression)
+                    .unwrap_or(0)
+            })
+            .sum(),
+        Statement::ExtensionFunction(extension) => {
+            count_doublebrace_in_statement(extension.function.as_ref())
+        }
+        Statement::Expression { expr, .. } => count_doublebrace_in_expression(expr),
+        Statement::Return {
+            value: Some(expr), ..
+        } => count_doublebrace_in_expression(expr),
+        Statement::Return { .. } => 0,
+        Statement::Throw { expr, .. } => count_doublebrace_in_expression(expr),
+        Statement::Assignment { target, value, .. } => {
+            count_doublebrace_in_expression(target) + count_doublebrace_in_expression(value)
+        }
+        Statement::ForIn(for_in) => {
+            count_doublebrace_in_expression(&for_in.iterable)
+                + count_doublebrace_in_expression(for_in.body.as_ref())
+        }
+        Statement::Concurrency(construct) => match construct {
+            jv_ast::ConcurrencyConstruct::Spawn { body, .. }
+            | jv_ast::ConcurrencyConstruct::Async { body, .. } => {
+                count_doublebrace_in_expression(body)
+            }
+            jv_ast::ConcurrencyConstruct::Await { expr, .. } => {
+                count_doublebrace_in_expression(expr)
+            }
+        },
+        Statement::ResourceManagement(resource) => match resource {
+            jv_ast::ResourceManagement::Use { resource, body, .. } => {
+                count_doublebrace_in_expression(resource) + count_doublebrace_in_expression(body)
+            }
+            jv_ast::ResourceManagement::Defer { body, .. } => count_doublebrace_in_expression(body),
+        },
+        Statement::Comment(_)
+        | Statement::Break(_)
+        | Statement::Continue(_)
+        | Statement::Import { .. }
+        | Statement::Package { .. } => 0,
+    }
+}
+
+fn count_doublebrace_in_expression(expression: &Expression) -> usize {
+    match expression {
+        Expression::DoublebraceInit(init) => {
+            let base_total = init
+                .base
+                .as_ref()
+                .map(|base| count_doublebrace_in_expression(base))
+                .unwrap_or(0);
+            let statement_total = init
+                .statements
+                .iter()
+                .map(count_doublebrace_in_statement)
+                .sum::<usize>();
+            1 + base_total + statement_total
+        }
+        Expression::Block { statements, .. } => statements
+            .iter()
+            .map(count_doublebrace_in_statement)
+            .sum::<usize>(),
+        Expression::If {
+            condition,
+            then_branch,
+            else_branch,
+            ..
+        } => {
+            count_doublebrace_in_expression(condition)
+                + count_doublebrace_in_expression(then_branch)
+                + else_branch
+                    .as_ref()
+                    .map(|expr| count_doublebrace_in_expression(expr))
+                    .unwrap_or(0)
+        }
+        Expression::When {
+            expr,
+            arms,
+            else_arm,
+            ..
+        } => {
+            let subject_total = expr
+                .as_ref()
+                .map(|subject| count_doublebrace_in_expression(subject))
+                .unwrap_or(0);
+            let arms_total = arms
+                .iter()
+                .map(|arm| {
+                    arm.guard
+                        .as_ref()
+                        .map(count_doublebrace_in_expression)
+                        .unwrap_or(0)
+                        + count_doublebrace_in_expression(&arm.body)
+                })
+                .sum::<usize>();
+            let else_total = else_arm
+                .as_ref()
+                .map(|expr| count_doublebrace_in_expression(expr))
+                .unwrap_or(0);
+            subject_total + arms_total + else_total
+        }
+        Expression::Call { function, args, .. } => {
+            count_doublebrace_in_expression(function)
+                + args
+                    .iter()
+                    .map(|arg| match arg {
+                        jv_ast::Argument::Positional(expr) => count_doublebrace_in_expression(expr),
+                        jv_ast::Argument::Named { value, .. } => {
+                            count_doublebrace_in_expression(value)
+                        }
+                    })
+                    .sum::<usize>()
+        }
+        Expression::Lambda {
+            parameters, body, ..
+        } => {
+            let defaults = parameters
+                .iter()
+                .map(|param| {
+                    param
+                        .default_value
+                        .as_ref()
+                        .map(count_doublebrace_in_expression)
+                        .unwrap_or(0)
+                })
+                .sum::<usize>();
+            defaults + count_doublebrace_in_expression(body)
+        }
+        Expression::Array { elements, .. } => elements
+            .iter()
+            .map(count_doublebrace_in_expression)
+            .sum::<usize>(),
+        Expression::Unary { operand, .. } => count_doublebrace_in_expression(operand),
+        Expression::Binary { left, right, .. } => {
+            count_doublebrace_in_expression(left) + count_doublebrace_in_expression(right)
+        }
+        Expression::TypeCast { expr, .. } => count_doublebrace_in_expression(expr),
+        Expression::MemberAccess { object, .. }
+        | Expression::NullSafeMemberAccess { object, .. } => {
+            count_doublebrace_in_expression(object)
+        }
+        Expression::IndexAccess { object, index, .. }
+        | Expression::NullSafeIndexAccess { object, index, .. } => {
+            count_doublebrace_in_expression(object) + count_doublebrace_in_expression(index)
+        }
+        Expression::Try {
+            body,
+            catch_clauses,
+            finally_block,
+            ..
+        } => {
+            let body_total = count_doublebrace_in_expression(body);
+            let catches_total = catch_clauses
+                .iter()
+                .map(|clause| {
+                    clause
+                        .parameter
+                        .as_ref()
+                        .and_then(|param| param.default_value.as_ref())
+                        .map(count_doublebrace_in_expression)
+                        .unwrap_or(0)
+                        + count_doublebrace_in_expression(&clause.body)
+                })
+                .sum::<usize>();
+            let finally_total = finally_block
+                .as_ref()
+                .map(|expr| count_doublebrace_in_expression(expr))
+                .unwrap_or(0);
+            body_total + catches_total + finally_total
+        }
+        Expression::StringInterpolation { parts, .. } => parts
+            .iter()
+            .map(|part| match part {
+                jv_ast::StringPart::Expression(expr) => count_doublebrace_in_expression(expr),
+                _ => 0,
+            })
+            .sum::<usize>(),
+        Expression::MultilineString(literal) => literal
+            .parts
+            .iter()
+            .map(|part| match part {
+                jv_ast::StringPart::Expression(expr) => count_doublebrace_in_expression(expr),
+                _ => 0,
+            })
+            .sum(),
+        Expression::Identifier(_, _)
+        | Expression::Literal(_, _)
+        | Expression::RegexLiteral(_)
+        | Expression::JsonLiteral(_)
+        | Expression::This(_)
+        | Expression::Super(_) => 0,
+    }
+}
+
+fn lower_doublebrace_plan(plan: &DoublebracePlan) -> DoublebraceLoweringPlan {
+    match plan {
+        DoublebracePlan::Mutate(mutate) => DoublebraceLoweringPlan {
+            receiver_fqcn: mutate.receiver.describe(),
+            kind: DoublebraceLoweringKind::Mutate(DoublebraceLoweringMutatePlan {
+                base: match mutate.base {
+                    PlanBase::ExistingInstance => DoublebraceBaseStrategy::ExistingInstance,
+                    PlanBase::SynthesizedInstance => DoublebraceBaseStrategy::SynthesizedInstance,
+                },
+                steps: mutate.steps.iter().map(lower_mutation_step).collect(),
+            }),
+        },
+        DoublebracePlan::Copy(copy) => DoublebraceLoweringPlan {
+            receiver_fqcn: copy.receiver.describe(),
+            kind: DoublebraceLoweringKind::Copy(DoublebraceLoweringCopyPlan {
+                source: match copy.source {
+                    CopySource::ExistingInstance => DoublebraceCopySourceStrategy::ExistingInstance,
+                    CopySource::SynthesizedInstance => {
+                        DoublebraceCopySourceStrategy::SynthesizedInstance
+                    }
+                },
+                updates: copy.updates.iter().map(lower_field_update).collect(),
+            }),
+        },
+    }
+}
+
+fn lower_mutation_step(step: &MutationStep) -> DoublebraceLoweringStep {
+    match step {
+        MutationStep::FieldAssignment(update) => {
+            DoublebraceLoweringStep::FieldAssignment(lower_field_update(update))
+        }
+        MutationStep::MethodCall(call) => {
+            DoublebraceLoweringStep::MethodCall(lower_method_invocation(call))
+        }
+        MutationStep::Other(statement) => DoublebraceLoweringStep::Other(statement.clone()),
+    }
+}
+
+fn lower_field_update(update: &FieldUpdate) -> DoublebraceFieldUpdate {
+    DoublebraceFieldUpdate {
+        name: update.name.clone(),
+        value: update.value.clone(),
+        span: update.span.clone(),
+    }
+}
+
+fn lower_method_invocation(call: &MethodInvocation) -> DoublebraceMethodInvocation {
+    DoublebraceMethodInvocation {
+        name: call.name.clone(),
+        arguments: call.arguments.clone(),
+        metadata: call.metadata.clone(),
+        span: call.span.clone(),
     }
 }
 

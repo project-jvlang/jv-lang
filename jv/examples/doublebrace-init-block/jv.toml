@@ -1,0 +1,15 @@
+[package]
+name = "doublebrace-init-block"
+version = "0.1.0"
+
+[project]
+entrypoint = "src/main.jv"
+
+[project.sources]
+include = ["src/**/*.jv"]
+
+[project.output]
+directory = "dist"
+
+[build]
+java_version = "25"

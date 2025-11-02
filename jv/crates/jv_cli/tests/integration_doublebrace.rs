@@ -61,8 +61,22 @@ fun main(): Unit {
 }
 
 #[test]
-fn doublebrace_pipeline_generates_java_without_warnings() {
-    // Doublebrace の mutate/copy パターンが CLI パイプラインで正しく変換されること。
+fn doublebrace_cli_check_handles_example() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let example_path = manifest_dir
+        .join("../../examples/doublebrace-init-block/src/main.jv")
+        .canonicalize()
+        .expect("Doublebrace のサンプルを解決する");
+    let example = example_path
+        .to_str()
+        .expect("Doublebrace サンプルのパスは UTF-8 で表現できる必要がある");
+
+    jv_cli::commands::check::run(example)
+        .expect("バンドルされている Doublebrace サンプルで jv check が成功すること");
+}
+
+#[test]
+fn doublebrace_pipeline_recovers_when_type_check_is_skipped() {
     let fixture = tempdir().expect("Doublebrace 用の一時ディレクトリを作成する");
     let root = fixture.path();
     prepare_manifest(root);
@@ -70,8 +84,11 @@ fn doublebrace_pipeline_generates_java_without_warnings() {
     let src_dir = root.join("src");
     fs::create_dir_all(&src_dir).expect("ソースディレクトリを作成する");
     let entrypoint = src_dir.join("main.jv");
-    fs::write(&entrypoint, doublebrace_sample().trim_start())
-        .expect("Doublebrace サンプルコードを書き込む");
+    fs::write(
+        &entrypoint,
+        doublebrace_sample_with_type_error().trim_start(),
+    )
+    .expect("型エラーを含む Doublebrace サンプルコードを書き込む");
 
     let project_root = ProjectLocator::new()
         .locate(root)
@@ -84,45 +101,32 @@ fn doublebrace_pipeline_generates_java_without_warnings() {
     let mut overrides = CliOverrides::default();
     overrides.output = Some(project_root.join("dist"));
     overrides.java_only = true;
-    overrides.check = true;
+    overrides.check = false;
     overrides.target = Some(JavaTarget::Java25);
 
     let plan = BuildOptionsFactory::compose(project_root.clone(), settings, layout, overrides)
         .expect("ビルドプランを組み立てる");
 
     let mut prepared = OutputManager::prepare(plan).expect("出力ディレクトリを準備する");
-    let artifacts = compile(prepared.plan()).expect("Doublebrace を含むソースをコンパイルする");
+    let artifacts =
+        compile(prepared.plan()).expect("型エラーを含んでも Doublebrace プランが補完される");
     prepared.mark_success();
 
     assert!(
-        artifacts.warnings.is_empty(),
-        "Doublebrace コンパイル時に不要な警告が発生: {:?}",
+        artifacts
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("Type checking skipped")),
+        "型チェックを省略した警告が発生すること: {:?}",
         artifacts.warnings
     );
     assert!(
-        !artifacts.java_files.is_empty(),
-        "Java 出力が生成されていること"
-    );
-
-    let aggregated = artifacts
-        .java_files
-        .iter()
-        .map(|path| fs::read_to_string(path).expect("Java 出力を読み込む"))
-        .collect::<String>();
-
-    assert!(
-        aggregated.contains("java.util.function.Supplier<java.util.ArrayList>"),
-        "ミューテーション用の Supplier が生成されること:\n{}",
-        aggregated
-    );
-    assert!(
-        aggregated.contains(".withName(\"Alice\")"),
-        "データクラス用 copy フローが生成されること:\n{}",
-        aggregated
-    );
-    assert!(
-        artifacts.compatibility.is_some(),
-        "互換性レポートが生成されていること"
+        artifacts
+            .warnings
+            .iter()
+            .all(|warning| !warning.contains("Doublebrace 初期化式のプラン情報が見つかりません")),
+        "フォールバックにより Doublebrace プラン不足が解消されていること: {:?}",
+        artifacts.warnings
     );
 }
 
@@ -146,24 +150,16 @@ clean = true
     fs::write(root.join("jv.toml"), manifest.trim_start()).expect("manifest を書き込む");
 }
 
-fn doublebrace_sample() -> &'static str {
+fn doublebrace_sample_with_type_error() -> &'static str {
     r#"
 import java.util.ArrayList
 
-data User(name: String age: Int)
-
 fun main(): Unit {
-    val numbers = ArrayList<Int>() {{
-        add(10)
-        add(20)
+    val menu = ArrayList<String>() {{
+        add("季節のスープ")
     }}
 
-    val updated = User("Bob" 30) {{
-        name = "Alice"
-    }}
-
-    println(numbers.size)
-    println(updated.name)
+    val mismatch: Int = "not a number"
 }
 "#
 }

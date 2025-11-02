@@ -1,0 +1,55 @@
+import java.util.ArrayList
+
+fun showMenu(title: String, items: ArrayList<String>): Unit {
+    println("=== ${title} ===")
+    for (item in items) {
+        println("提供予定: ${item}")
+    }
+    println()
+}
+
+fun main(): Unit {
+    println("Doublebrace 初期化ブロックのデモを開始します。")
+
+    val menu: ArrayList<String> = ArrayList<String>() {{
+        add("季節のスープ")
+        add("ハーブチキン")
+        add("自家製デザート")
+    }}
+
+    println("登録メニュー数: ${menu.size()}")
+    showMenu("登録メニュー", menu)
+
+    val seasonalMenu: ArrayList<String> = menu {{
+        add("シェフのおすすめ")
+    }}
+
+    println("更新後メニュー数: ${seasonalMenu.size()}")
+    showMenu("季節メニュー", seasonalMenu)
+
+    val chefMenu: ArrayList<String> = seasonalMenu {{
+        add("山椒香るラムステーキ")
+    }}
+
+    println("シェフ特製メニュー数: ${chefMenu.size()}")
+    val highlighted: String = chefMenu.get(chefMenu.size() - 1)
+    println("追加メニュー: ${highlighted}")
+
+    // 期待される出力例:
+    // Doublebrace 初期化ブロックのデモを開始します。
+    // 登録メニュー数: 3
+    // === 登録メニュー ===
+    // 提供予定: 季節のスープ
+    // 提供予定: ハーブチキン
+    // 提供予定: 自家製デザート
+    //
+    // 更新後メニュー数: 4
+    // === 季節メニュー ===
+    // 提供予定: 季節のスープ
+    // 提供予定: ハーブチキン
+    // 提供予定: 自家製デザート
+    // 提供予定: シェフのおすすめ
+    //
+    // シェフ特製メニュー数: 5
+    // 追加メニュー: 山椒香るラムステーキ
+}

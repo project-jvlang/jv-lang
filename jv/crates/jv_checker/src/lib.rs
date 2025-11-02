@@ -560,7 +560,9 @@ impl TypeChecker {
                         self.engine.environment(),
                         self.engine.symbol_index().map(|arc| arc.as_ref()),
                     ) {
-                        Ok(map) => self.doublebrace_plans = map,
+                        Ok(map) => {
+                            self.doublebrace_plans = map;
+                        }
                         Err(errors) => {
                             self.snapshot = None;
                             self.merged_facts = None;
@@ -641,6 +643,11 @@ impl TypeChecker {
         self.merged_facts
             .as_ref()
             .or_else(|| self.snapshot.as_ref().map(|snapshot| snapshot.type_facts()))
+    }
+
+    /// 現在の型環境へアクセスする。推論が失敗した場合でも、途中まで構築された環境を参照できる。
+    pub fn type_environment(&self) -> &TypeEnvironment {
+        self.engine.environment()
     }
 
     /// Regex analysis results gathered during the last checker run.

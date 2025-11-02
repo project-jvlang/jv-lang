@@ -1,4 +1,4 @@
-use jv_inference::service::TypeFactsSnapshot;
+pub use jv_inference::service::TypeFactsSnapshot;
 use jv_inference::types::{TypeId, TypeKind, TypeVariant};
 use jv_inference::TypeFacts;
 use jv_ir::types::JavaType;
