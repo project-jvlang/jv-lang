@@ -218,7 +218,9 @@ fn regex_command_additional_flags_produce_expected_output() {
         return;
     }
 
-    let mut home_candidate = std::env::var("JAVA25_HOME").ok().or_else(|| std::env::var("JAVA_HOME").ok());
+    let mut home_candidate = std::env::var("JAVA25_HOME")
+        .ok()
+        .or_else(|| std::env::var("JAVA_HOME").ok());
     let mut inferred_home = None;
 
     let ensure_home = |path: &Path| {
@@ -237,11 +239,13 @@ fn regex_command_additional_flags_produce_expected_output() {
             .arg("javac")
             .output()
             .ok()
-            .and_then(|out| if out.status.success() {
-                let text = String::from_utf8_lossy(&out.stdout).trim().to_string();
-                (!text.is_empty()).then_some(PathBuf::from(text))
-            } else {
-                None
+            .and_then(|out| {
+                if out.status.success() {
+                    let text = String::from_utf8_lossy(&out.stdout).trim().to_string();
+                    (!text.is_empty()).then_some(PathBuf::from(text))
+                } else {
+                    None
+                }
             });
 
         if let Some(path) = javac_path {
@@ -379,5 +383,49 @@ iterate結果:
         stdout.trim(),
         expected.trim(),
         "サンプル実行結果が想定と一致しません"
+    );
+}
+
+#[test]
+fn regex_command_example_generates_supplier_guarded_java() {
+    if !has_javac() || !has_java_runtime() {
+        eprintln!("javac もしくは java が利用できないためテストをスキップします");
+        return;
+    }
+
+    let example_src = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/regex-command.jv");
+    assert!(
+        example_src.exists(),
+        "examples/regex-command.jv が存在する必要があります"
+    );
+
+    let (output_dir, main_class) = compiled_main_class(&example_src);
+
+    let class_path = output_dir.join(format!("{}.class", main_class));
+    assert!(
+        class_path.exists(),
+        "{} が生成されていません",
+        class_path.display()
+    );
+
+    let java_path = output_dir.join(format!("{}.java", main_class));
+    assert!(
+        java_path.exists(),
+        "{} が生成されていません",
+        java_path.display()
+    );
+
+    let java_source = fs::read_to_string(&java_path).expect("生成された Java ソースを読み込む");
+    assert!(
+        java_source.contains("java.util.function.Supplier"),
+        "生成された Java は Supplier ベースのガードを含む必要があります:\n{java_source}"
+    );
+    assert!(
+        java_source.contains("if (__jvRegexSubject_"),
+        "生成された Java は if ブロックによる instanceof ガードを使用する必要があります:\n{java_source}"
+    );
+    assert!(
+        !java_source.contains("? __jvRegexSubject_"),
+        "旧来の三項演算子ベースの instanceof ガードが残っています:\n{java_source}"
     );
 }

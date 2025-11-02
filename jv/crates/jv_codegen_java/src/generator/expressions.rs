@@ -3,8 +3,8 @@ use jv_ast::{RegexCommandMode, RegexFlag, RegexGuardStrategy, Span, types::Primi
 use jv_ir::PipelineShape;
 use jv_ir::{
     IrRegexCommand, IrRegexLambdaReplacement, IrRegexLiteralReplacement, IrRegexReplacement,
-    IrRegexTemplateSegment, RawStringFlavor, SequencePipeline, SequenceSource, SequenceStage,
-    SequenceTerminal, SequenceTerminalKind,
+    IrRegexTemplateSegment, JavaType, RawStringFlavor, SequencePipeline, SequenceSource,
+    SequenceStage, SequenceTerminal, SequenceTerminalKind,
 };
 use std::fmt::Write;
 
@@ -2316,6 +2316,7 @@ impl JavaCodeGenerator {
             &command.subject,
             &command.guard_strategy,
             "\"\"",
+            &command.java_type,
             move |subject_ref| {
                 Ok(format!(
                     "{pattern}.matcher({subject}).{method}({replacement})",
@@ -2339,6 +2340,7 @@ impl JavaCodeGenerator {
             &command.subject,
             &command.guard_strategy,
             "false",
+            &command.java_type,
             move |subject_ref| {
                 Ok(format!(
                     "{pattern}.matcher({subject}).matches()",
@@ -2360,6 +2362,7 @@ impl JavaCodeGenerator {
             &command.subject,
             &command.guard_strategy,
             "new String[0]",
+            &command.java_type,
             move |subject_ref| {
                 Ok(format!(
                     "{pattern}.split({subject}, -1)",
@@ -2383,6 +2386,7 @@ impl JavaCodeGenerator {
                 &command.subject,
                 &command.guard_strategy,
                 "Stream.empty()",
+                &command.java_type,
                 move |subject_ref| {
                     Ok(format!(
                         "{pattern}.matcher({subject}).results()",
@@ -2533,29 +2537,45 @@ impl JavaCodeGenerator {
         subject: &IrExpression,
         strategy: &RegexGuardStrategy,
         fallback: &str,
+        result_type: &JavaType,
         build: F,
     ) -> Result<String, CodeGenError>
     where
         F: FnOnce(&str) -> Result<String, CodeGenError>,
     {
         let subject_code = self.generate_expression(subject)?;
-        let guarded_subject = format!("({})", subject_code);
         match strategy {
             RegexGuardStrategy::None => build(&subject_code),
             RegexGuardStrategy::CaptureAndGuard { temp_name } => {
+                self.add_import("java.util.function.Supplier");
                 let temp = temp_name
                     .clone()
                     .unwrap_or_else(|| "__jvRegexSubject_guard".to_string());
+                let supplier_type = self.guard_supplier_type(result_type)?;
                 let body = build(&temp)?;
+                let source_var = format!("{temp}_source");
+                let subject_expr = format!("({})", subject_code);
                 Ok(format!(
-                    "(({subject}) instanceof java.lang.CharSequence {temp} ? {body} : {fallback})",
-                    subject = guarded_subject,
+                    "((java.util.function.Supplier<{supplier_type}>) () -> {{\n    final Object {source_var} = {subject_expr};\n    if ({source_var} instanceof java.lang.CharSequence {temp}) {{\n        return {body};\n    }} else {{\n        return {fallback};\n    }}\n}}).get()",
+                    supplier_type = supplier_type,
+                    source_var = source_var,
+                    subject_expr = subject_expr,
                     temp = temp,
                     body = body,
                     fallback = fallback,
                 ))
             }
         }
+    }
+
+    fn guard_supplier_type(&self, result_type: &JavaType) -> Result<String, CodeGenError> {
+        Ok(match result_type {
+            JavaType::Primitive(name) => primitive_info_by_primitive(name)
+                .map(|info| info.wrapper.to_string())
+                .unwrap_or_else(|| "java.lang.Object".to_string()),
+            JavaType::Void => "java.lang.Void".to_string(),
+            _ => self.generate_type(result_type)?,
+        })
     }
 
     // === Expression Helpers (moved from helpers.rs) ===

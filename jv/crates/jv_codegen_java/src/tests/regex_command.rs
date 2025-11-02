@@ -282,4 +282,16 @@ fn adds_char_sequence_guard_for_object_subjects() {
         java.contains("instanceof java.lang.CharSequence"),
         "Object 型の subject には CharSequence ガードを挿入する想定です:\n{java}"
     );
+    assert!(
+        java.contains("java.util.function.Supplier"),
+        "CharSequence ガードでは java.util.function.Supplier を利用した遅延評価ラッパーを生成する想定です:\n{java}"
+    );
+    assert!(
+        java.contains("final Object __guard_source ="),
+        "ガード実装では事前に Object 変数へ代入する想定です:\n{java}"
+    );
+    assert!(
+        java.contains("if (__guard_source instanceof java.lang.CharSequence __guard)"),
+        "ガードは if ブロックで instanceof バインディングを行う想定です:\n{java}"
+    );
 }

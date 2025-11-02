@@ -1202,6 +1202,84 @@ fn cli_regex_additional_flags() {
 }
 
 #[test]
+fn cli_regex_command_java25_uses_supplier_guard() {
+    ensure_toolchain_envs();
+
+    if !has_javac() || !has_java_runtime() {
+        eprintln!(
+            "Skipping regex command supplier guard test: missing javac or java runtime"
+        );
+        return;
+    }
+
+    let fixture = workspace_file("examples/regex-command.jv");
+    let temp_dir = TempDirGuard::new("cli-regex-command-guard")
+        .expect("create temp dir for regex command guard test");
+    let plan = compose_plan_from_fixture(
+        temp_dir.path(),
+        &fixture,
+        CliOverrides {
+            java_only: true,
+            ..CliOverrides::default()
+        },
+    );
+
+    let artifacts = compile(&plan).expect("compile regex command example");
+    assert!(
+        !artifacts.java_files.is_empty(),
+        "expected generated Java sources for regex command example"
+    );
+
+    let java_source = read_java_sources(&artifacts.java_files);
+    assert!(
+        java_source.contains("java.util.function.Supplier"),
+        "generated Java should use Supplier-based guard:\n{java_source}"
+    );
+    assert!(
+        java_source.contains("if (__jvRegexSubject_"),
+        "generated Java should guard with an if-block:\n{java_source}"
+    );
+    assert!(
+        !java_source.contains("? __jvRegexSubject_"),
+        "legacy ternary-based guard remains in generated Java:\n{java_source}"
+    );
+
+    let classes_dir = plan.options.output_dir.join("java25").join("classes_guard");
+    fs::create_dir_all(&classes_dir).expect("create guard test classes directory");
+
+    let mut javac = javac_command().expect("javac command unavailable");
+    javac.arg("-d").arg(&classes_dir);
+    for file in &artifacts.java_files {
+        javac.arg(file);
+    }
+    let status = javac.status().expect("invoke javac for regex command example");
+    assert!(
+        status.success(),
+        "javac failed for regex command example: {status:?}"
+    );
+
+    let class_emitted = fs::read_dir(&classes_dir)
+        .map(|mut entries| {
+            entries.any(|entry| {
+                entry
+                    .ok()
+                    .and_then(|e| e
+                        .path()
+                        .extension()
+                        .and_then(|ext| ext.to_str())
+                        .map(|ext| ext == "class"))
+                    .unwrap_or(false)
+            })
+        })
+        .unwrap_or(false);
+    assert!(
+        class_emitted,
+        "javac should emit at least one .class file into {}",
+        classes_dir.display()
+    );
+}
+
+#[test]
 fn cli_check_reports_regex_diagnostics() {
     let cli_path = match cli_binary_path() {
         Ok(path) => path,
