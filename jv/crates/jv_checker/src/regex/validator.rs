@@ -1,9 +1,10 @@
+use super::{PatternConstAnalyzer, PatternConstKind};
 use crate::CheckError;
-use crate::diagnostics::{self, DiagnosticSeverity, EnhancedDiagnostic};
+use crate::diagnostics::{self, DiagnosticSeverity, EnhancedDiagnostic, messages};
 use jv_ast::{
     Argument, ConcurrencyConstruct, Expression, ForInStatement, LoopStrategy, NumericRangeLoop,
-    Program, RegexLambdaReplacement, RegexLiteral, RegexReplacement, ResourceManagement, Span,
-    Statement, StringPart, TryCatchClause,
+    PatternConstKey, PatternOrigin, Program, RegexLambdaReplacement, RegexLiteral,
+    RegexReplacement, ResourceManagement, Span, Statement, StringPart, TryCatchClause,
 };
 use std::time::Instant;
 
@@ -14,6 +15,9 @@ pub struct RegexAnalysis {
     pub span: Span,
     pub diagnostics: Vec<EnhancedDiagnostic>,
     pub validation_duration_ms: f64,
+    pub origin: PatternOrigin,
+    pub const_kind: PatternConstKind,
+    pub const_key: Option<PatternConstKey>,
 }
 
 #[derive(Debug, Default)]
@@ -48,14 +52,23 @@ impl RegexValidator {
     fn analyze_literal(&mut self, literal: &RegexLiteral, errors: &mut Vec<CheckError>) {
         let start = Instant::now();
         let mut diagnostics = Vec::new();
+        let origin = literal
+            .origin
+            .clone()
+            .unwrap_or_else(|| PatternOrigin::literal(literal.span.clone()));
+        let const_kind = PatternConstAnalyzer::classify(literal, &origin);
+        let const_key = literal.const_key.clone();
 
-        if let Some(mut diagnostic) = detect_missing_delimiter(literal) {
+        if let Some(diagnostic) = detect_missing_delimiter(literal) {
+            let mut diagnostic = adapt_const_diagnostic(literal, diagnostic, const_kind);
             self.record_issue(literal, &mut diagnostics, errors, &mut diagnostic);
         }
-        if let Some(mut diagnostic) = detect_unbalanced_groups(literal) {
+        if let Some(diagnostic) = detect_unbalanced_groups(literal) {
+            let mut diagnostic = adapt_const_diagnostic(literal, diagnostic, const_kind);
             self.record_issue(literal, &mut diagnostics, errors, &mut diagnostic);
         }
-        if let Some(mut diagnostic) = detect_unsupported_escape(literal) {
+        if let Some(diagnostic) = detect_unsupported_escape(literal) {
+            let mut diagnostic = adapt_const_diagnostic(literal, diagnostic, const_kind);
             self.record_issue(literal, &mut diagnostics, errors, &mut diagnostic);
         }
 
@@ -70,6 +83,9 @@ impl RegexValidator {
             span: literal.span.clone(),
             diagnostics,
             validation_duration_ms: duration_ms,
+            origin,
+            const_kind,
+            const_key,
         });
     }
 
@@ -354,6 +370,47 @@ impl<'a> RegexValidationVisitor<'a> {
         }
         self.visit_expression(&lambda.body);
     }
+}
+
+fn adapt_const_diagnostic(
+    literal: &RegexLiteral,
+    diagnostic: EnhancedDiagnostic,
+    const_kind: PatternConstKind,
+) -> EnhancedDiagnostic {
+    if diagnostic.severity != DiagnosticSeverity::Error {
+        return diagnostic;
+    }
+    if !matches!(const_kind, PatternConstKind::Static) {
+        return diagnostic;
+    }
+    let Some(descriptor) = diagnostics::descriptor("JV_REGEX_E220") else {
+        return diagnostic;
+    };
+
+    let const_message = format!(
+        "{}\n{}",
+        messages::regex_const_validation_failure_message(diagnostic.code),
+        diagnostic.message
+    );
+
+    let mut promoted =
+        EnhancedDiagnostic::new(descriptor, const_message, Some(literal.span.clone()));
+    if !diagnostic.suggestions.is_empty() {
+        promoted.suggestions = diagnostic.suggestions.clone();
+    }
+    if !diagnostic.help.is_empty()
+        && !promoted
+            .suggestions
+            .iter()
+            .any(|entry| entry == diagnostic.help)
+    {
+        promoted.suggestions.push(diagnostic.help.to_string());
+    }
+    promoted.related_locations = diagnostic.related_locations.clone();
+    if let Some(hint) = diagnostic.learning_hints.clone() {
+        promoted.learning_hints = Some(hint);
+    }
+    promoted
 }
 
 fn detect_missing_delimiter(literal: &RegexLiteral) -> Option<EnhancedDiagnostic> {

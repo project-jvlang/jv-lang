@@ -348,6 +348,18 @@ const DIAGNOSTICS: &[DiagnosticDescriptor] = &[
         severity: DiagnosticSeverity::Error,
     },
     DiagnosticDescriptor {
+        code: "JV_REGEX_E210",
+        title: "`Pattern` 型が期待と一致しません / Pattern type expectation mismatch",
+        help: "この位置では `java.util.regex.Pattern` 型が必要です。型注釈や変数宣言を調整して `Pattern` を受け取るようにしてください。/ A value of type `java.util.regex.Pattern` is required here. Update the annotation or declaration so it accepts a Pattern. (--explain JV_REGEX_E210)",
+        severity: DiagnosticSeverity::Error,
+    },
+    DiagnosticDescriptor {
+        code: "JV_REGEX_E220",
+        title: "定数正規表現の静的検証に失敗しました / Constant regex static validation failed",
+        help: "`Pattern.compile` と同等のチェックを通過できるようパターンを修正するか、動的評価へ切り替えてください。/ Update the regex so it passes the equivalent of `Pattern.compile`, or fall back to runtime compilation. (--explain JV_REGEX_E220)",
+        severity: DiagnosticSeverity::Error,
+    },
+    DiagnosticDescriptor {
         code: "JV_REGEX_I001",
         title: "正規表現リテラルのモードとフラグが混同されています / Regex literal mode is confused with a flag",
         help: "正規表現リテラルのモード記号 `[match]` はフラグ `m` (MULTILINE) と似ています。モードを省略するか `[match]` を明示して区別してください。/ The regex literal mode prefix `[match]` resembles the `m` (MULTILINE) flag. Omit the mode or spell out `[match]` to keep them distinct.",

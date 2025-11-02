@@ -136,3 +136,10 @@ pub fn regex_lambda_return_mismatch_message(actual: &str) -> String {
         ),
     )
 }
+
+/// 定数化された正規表現の静的検証失敗メッセージ。
+pub fn regex_const_validation_failure_message(trigger_code: &str) -> String {
+    format!(
+        "定数化された正規表現の静的検証が `{trigger_code}` を原因として失敗しました。`Pattern.compile` 相当のチェックを通過できるようパターンを修正してください。\nConstant regex static validation failed because `{trigger_code}` was reported. Update the pattern so it passes the equivalent of `Pattern.compile`."
+    )
+}

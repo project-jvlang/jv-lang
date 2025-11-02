@@ -24,8 +24,9 @@ use binding::{BindingResolution, BindingUsageSummary, LateInitManifest, resolve_
 use inference::conversions::{AppliedConversion, ConversionKind, HelperSpec, NullableGuard};
 use inference::{RegexCommandTyping, RegexMatchTyping};
 use jv_ast::{
-    Argument, Expression, PatternConstKey, PatternOrigin, Program, RegexCommandMode, RegexFlag,
-    RegexGuardStrategy, RegexLiteral, RegexReplacement, Span, Statement, StringPart,
+    Argument, Expression, PatternConstKey, PatternOrigin, PatternOriginKind, Program,
+    RegexCommandMode, RegexFlag, RegexGuardStrategy, RegexLiteral, RegexReplacement, Span,
+    Statement, StringPart,
 };
 use jv_build::metadata::SymbolIndex;
 use null_safety::{JavaLoweringHint, NullSafetyCoordinator};
@@ -319,6 +320,25 @@ pub struct RegexCommandTelemetry {
     pub diagnostics: BTreeMap<String, usize>,
 }
 
+/// 正規表現定数化のテレメトリ。
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct PatternConstTelemetry {
+    /// 記録されたパターンの総数。
+    pub total: usize,
+    /// 静的に昇格できたパターン数。
+    pub static_count: usize,
+    /// 実行時コンパイルが必要なパターン数。
+    pub dynamic_count: usize,
+    /// リテラル起源で静的に昇格したパターン数。
+    pub literal_static: usize,
+    /// リテラル起源で動的処理になったパターン数。
+    pub literal_dynamic: usize,
+    /// Regex コマンド起源で静的に昇格したパターン数。
+    pub command_static: usize,
+    /// Regex コマンド起源で動的処理になったパターン数。
+    pub command_dynamic: usize,
+}
+
 /// Telemetry captured during the most recent inference run.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InferenceTelemetry {
@@ -353,6 +373,7 @@ pub struct InferenceTelemetry {
     pub nullable_guards: Vec<NullableGuard>,
     pub catalog_hits: Vec<HelperSpec>,
     pub regex_command: RegexCommandTelemetry,
+    pub pattern_const: PatternConstTelemetry,
 }
 
 impl Default for InferenceTelemetry {
@@ -389,6 +410,7 @@ impl Default for InferenceTelemetry {
             nullable_guards: Vec::new(),
             catalog_hits: Vec::new(),
             regex_command: RegexCommandTelemetry::default(),
+            pattern_const: PatternConstTelemetry::default(),
         }
     }
 }
@@ -709,6 +731,27 @@ impl TypeChecker {
     fn analyze_pattern_consts(&mut self, program: &mut Program) {
         let mut records = Vec::new();
         visit_program_for_pattern_consts(program, &mut records);
+        let mut telemetry = PatternConstTelemetry::default();
+        telemetry.total = records.len();
+        for record in &records {
+            match record.kind {
+                PatternConstKind::Static => {
+                    telemetry.static_count += 1;
+                    match record.origin.kind {
+                        PatternOriginKind::RegexLiteral => telemetry.literal_static += 1,
+                        PatternOriginKind::RegexCommand => telemetry.command_static += 1,
+                    }
+                }
+                PatternConstKind::Dynamic => {
+                    telemetry.dynamic_count += 1;
+                    match record.origin.kind {
+                        PatternOriginKind::RegexLiteral => telemetry.literal_dynamic += 1,
+                        PatternOriginKind::RegexCommand => telemetry.command_dynamic += 1,
+                    }
+                }
+            }
+        }
+        self.engine.telemetry_mut().pattern_const = telemetry;
         self.pattern_const_records = records;
     }
 

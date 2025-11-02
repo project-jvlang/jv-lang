@@ -10,8 +10,8 @@ pub use highlight::tokens::{HighlightKind, HighlightToken};
 use jv_ast::types::TypeLevelExpr;
 use jv_ast::{
     Argument, ConstParameter, Expression, GenericParameter, GenericSignature, PatternOrigin,
-    Program, RegexLambdaReplacement, RegexLiteral, RegexReplacement, Span, Statement, StringPart,
-    TypeAnnotation,
+    PatternOriginKind, Program, RegexLambdaReplacement, RegexLiteral, RegexReplacement, Span,
+    Statement, StringPart, TypeAnnotation,
 };
 use jv_build::BuildConfig;
 use jv_build::metadata::{
@@ -25,7 +25,7 @@ use jv_checker::diagnostics::{
 use jv_checker::imports::{
     ImportResolutionService, ResolvedImport, ResolvedImportKind, diagnostics as import_diagnostics,
 };
-use jv_checker::regex::RegexValidator;
+use jv_checker::regex::{PatternConstKind, RegexValidator};
 use jv_checker::{CheckError, RegexAnalysis, TypeChecker};
 use jv_inference::{
     ParallelInferenceConfig, TypeFacts,
@@ -2082,6 +2082,35 @@ fn format_hover_contents(analysis: &RegexAnalysis) -> String {
         format!("Raw literal: `{raw}`"),
         format!("Validation time: {:.2} ms", analysis.validation_duration_ms),
     ];
+
+    let origin_line = match analysis.origin.kind {
+        PatternOriginKind::RegexLiteral => "Origin / 由来: regex literal".to_string(),
+        PatternOriginKind::RegexCommand => "Origin / 由来: regex command".to_string(),
+    };
+    lines.push(origin_line);
+
+    match analysis.const_kind {
+        PatternConstKind::Static => {
+            lines.push(
+                "Const promotion: emitted as static final Pattern / 定数化: static final Pattern に昇格".to_string(),
+            );
+            if let Some(key) = &analysis.const_key {
+                let preview = sanitize_for_inline(&key.preview, HOVER_TEXT_MAX_LENGTH);
+                let hash_hex: String = key
+                    .hash
+                    .iter()
+                    .map(|byte| format!("{:02x}", byte))
+                    .collect();
+                lines.push(format!("Const key preview / プレビュー: `{preview}`"));
+                lines.push(format!("Const key hash / ハッシュ: {hash_hex}"));
+            }
+        }
+        PatternConstKind::Dynamic => {
+            lines.push(
+                "Const promotion: compiled at runtime via Pattern.compile / 定数化: 実行時に Pattern.compile を実行".to_string(),
+            );
+        }
+    }
 
     if analysis.diagnostics.is_empty() {
         lines.push("Validation: passed".to_string());
