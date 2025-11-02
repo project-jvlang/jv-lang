@@ -7,9 +7,9 @@ use jv_ast::{
 use jv_ir::context::{RegisteredMethodCall, RegisteredMethodDeclaration};
 use jv_ir::naming::method_erasure::apply_method_erasure;
 use jv_ir::{
-    transform_expression, IrExpression, IrModifiers, IrParameter, IrStatement, JavaType,
-    PipelineShape, PrimitiveSpecializationHint, SequencePipeline, SequenceSource, SequenceStage,
-    SequenceTerminal, SequenceTerminalEvaluation, SequenceTerminalKind, TransformContext,
+    IrExpression, IrModifiers, IrParameter, IrStatement, JavaType, PipelineShape,
+    PrimitiveSpecializationHint, SequencePipeline, SequenceSource, SequenceStage, SequenceTerminal,
+    SequenceTerminalEvaluation, SequenceTerminalKind, TransformContext, transform_expression,
 };
 
 fn dummy_span() -> Span {

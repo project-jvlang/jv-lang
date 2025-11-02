@@ -1,5 +1,5 @@
-use super::raw_types::{RawTypeAnalyzer, RawTypeEvent};
 use super::SolverTelemetry;
+use super::raw_types::{RawTypeAnalyzer, RawTypeEvent};
 use crate::constraint::{
     CapabilityDictionaryResolver, CapabilityResolutionError, GenericConstraint,
     GenericConstraintKind,
@@ -9,8 +9,8 @@ use crate::types::{
     BoundPredicate, CapabilityBound, CapabilitySolution, GenericSignature,
     PrimitiveBoundConstraint, SymbolId, TypeId, TypeKind, TypeVariant,
 };
-use jv_ast::types::Kind;
 use jv_ast::Span;
+use jv_ast::types::Kind;
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 

@@ -138,10 +138,12 @@ fn portfolio_generation_creates_artifacts_from_summary() -> Result<()> {
     }
 
     let summary = tracker.summary();
-    assert!(summary
-        .sections
-        .iter()
-        .all(|display| display.status == SectionStatus::Completed));
+    assert!(
+        summary
+            .sections
+            .iter()
+            .all(|display| display.status == SectionStatus::Completed)
+    );
     assert!(!summary.certificates.is_empty());
     assert!(!summary.achievements.is_empty());
     assert!(summary.achievements.len() >= 4);

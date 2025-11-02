@@ -1,9 +1,9 @@
-use jv_ast::{types::PrimitiveReturnMetadata, GenericSignature, Program, Span, Statement};
+use jv_ast::{GenericSignature, Program, Span, Statement, types::PrimitiveReturnMetadata};
 use jv_lexer::{Token, TokenType};
 
 use super::{
-    metadata::{collect_raw_directives_from_trivia, primitive_reference_from_segments},
     SemanticsContext, SemanticsPass, SemanticsStatus,
+    metadata::{collect_raw_directives_from_trivia, primitive_reference_from_segments},
 };
 
 #[derive(Default)]

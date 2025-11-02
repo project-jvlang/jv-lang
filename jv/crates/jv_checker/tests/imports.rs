@@ -1,8 +1,8 @@
 use jv_ast::{Span, Statement};
 use jv_build::metadata::{JavaMethodSignature, ModuleEntry, PackageEntry, SymbolIndex, TypeEntry};
 use jv_checker::imports::{
-    from_error as import_diagnostic_from_error, missing_module, ImportError,
-    ImportResolutionService, ResolvedImportKind,
+    ImportError, ImportResolutionService, ResolvedImportKind,
+    from_error as import_diagnostic_from_error, missing_module,
 };
 use jv_ir::types::JavaType;
 use jv_pm::JavaTarget;
@@ -168,10 +168,12 @@ fn unknown_import_diagnostic_contains_candidates() {
     assert_eq!(diagnostic.code, "JV4100");
     assert_eq!(diagnostic.span, Some(span));
     assert!(diagnostic.message.contains("foo.BarBaz"));
-    assert!(diagnostic
-        .suggestions
-        .iter()
-        .any(|suggestion| suggestion.contains("import foo.BarBaz")));
+    assert!(
+        diagnostic
+            .suggestions
+            .iter()
+            .any(|suggestion| suggestion.contains("import foo.BarBaz"))
+    );
 }
 
 #[test]
@@ -197,9 +199,11 @@ fn ambiguous_import_diagnostic_lists_candidates() {
     let error = service.resolve(&stmt).expect_err("expected ambiguity");
     match &error {
         ImportError::AmbiguousSymbol { candidates, .. } => {
-            assert!(candidates
-                .iter()
-                .any(|entry| entry == "com.example.logging.Logger"));
+            assert!(
+                candidates
+                    .iter()
+                    .any(|entry| entry == "com.example.logging.Logger")
+            );
             assert!(candidates.iter().any(|entry| entry == "org.slf4j.Logger"));
         }
         other => panic!("unexpected error: {other:?}"),
@@ -209,10 +213,12 @@ fn ambiguous_import_diagnostic_lists_candidates() {
     assert_eq!(diagnostic.code, "JV4101");
     assert_eq!(diagnostic.span, Some(span));
     assert!(diagnostic.message.contains("org.slf4j.Logger"));
-    assert!(diagnostic
-        .suggestions
-        .iter()
-        .any(|suggestion| suggestion.contains("import com.example.logging.Logger")));
+    assert!(
+        diagnostic
+            .suggestions
+            .iter()
+            .any(|suggestion| suggestion.contains("import com.example.logging.Logger"))
+    );
 }
 
 #[test]
@@ -222,8 +228,10 @@ fn missing_module_diagnostic_suggests_add_modules() {
 
     assert_eq!(diagnostic.code, "JV4102");
     assert_eq!(diagnostic.span, Some(span));
-    assert!(diagnostic
-        .suggestions
-        .iter()
-        .any(|suggestion| suggestion.contains("--add-modules java.sql")));
+    assert!(
+        diagnostic
+            .suggestions
+            .iter()
+            .any(|suggestion| suggestion.contains("--add-modules java.sql"))
+    );
 }

@@ -1,6 +1,6 @@
 use crate::types::{SymbolId, TypeId};
-use jv_ast::types::{Kind, KindConstraint as AstKindConstraint};
 use jv_ast::Span;
+use jv_ast::types::{Kind, KindConstraint as AstKindConstraint};
 use std::collections::HashMap;
 
 /// Kind information registered for a generic parameter or constructor symbol.

@@ -8,7 +8,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use jv_cli::pipeline::project::{
     layout::ProjectLayout, locator::ProjectLocator, manifest::ManifestLoader,
 };
-use jv_cli::pipeline::{run_program, BuildOptionsFactory, BuildPlan, CliOverrides};
+use jv_cli::pipeline::{BuildOptionsFactory, BuildPlan, CliOverrides, run_program};
 use jv_cli::tooling_failure;
 
 #[derive(Parser)]
