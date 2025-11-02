@@ -452,7 +452,8 @@ pub mod pipeline {
     use jv_checker::inference::regex::RegexCommandTyping;
     use jv_checker::inference::{AppliedConversion, HelperSpec, NullableGuardReason};
     use jv_checker::{
-        InferenceSnapshot, InferenceTelemetry, RegexCommandTelemetry, TypeChecker, TypeKind,
+        InferenceSnapshot, InferenceTelemetry, PatternConstTelemetry, RegexCommandTelemetry,
+        TypeChecker, TypeKind,
     };
     use jv_codegen_java::{JavaCodeGenConfig, JavaCodeGenerator};
     use jv_fmt::JavaFormatter;
@@ -1221,6 +1222,7 @@ pub mod pipeline {
         print_nullable_guards(telemetry);
         print_catalog_hits(telemetry);
         print_regex_command_metrics(&telemetry.regex_command);
+        print_pattern_const_metrics(&telemetry.pattern_const);
 
         if strategies.is_empty() {
             println!(
@@ -1320,6 +1322,30 @@ pub mod pipeline {
                 println!("    - {}: {}", code, count);
             }
         }
+    }
+
+    fn print_pattern_const_metrics(metrics: &PatternConstTelemetry) {
+        if metrics.total == 0 {
+            println!("  pattern_const: (none recorded)");
+            return;
+        }
+
+        let static_ratio = (metrics.static_count as f64 / metrics.total as f64) * 100.0;
+
+        println!("  pattern_const.total: {}", metrics.total);
+        println!("  pattern_const.static: {}", metrics.static_count);
+        println!("  pattern_const.dynamic: {}", metrics.dynamic_count);
+        println!("  pattern_const.static_ratio: {:.1}%", static_ratio);
+        println!("  pattern_const.literal.static: {}", metrics.literal_static);
+        println!(
+            "  pattern_const.literal.dynamic: {}",
+            metrics.literal_dynamic
+        );
+        println!("  pattern_const.command.static: {}", metrics.command_static);
+        println!(
+            "  pattern_const.command.dynamic: {}",
+            metrics.command_dynamic
+        );
     }
 
     fn print_strategy_telemetry(
@@ -1567,6 +1593,13 @@ pub mod pipeline {
             .collect::<Vec<_>>();
 
         let telemetry_json = telemetry.map(|telemetry| {
+            let pattern_const = &telemetry.pattern_const;
+            let pattern_static_ratio = if pattern_const.total == 0 {
+                0.0
+            } else {
+                pattern_const.static_count as f64 / pattern_const.total as f64
+            };
+
             json!({
                 "constraints_emitted": telemetry.constraints_emitted,
                 "bindings_resolved": telemetry.bindings_resolved,
@@ -1632,6 +1665,20 @@ pub mod pipeline {
                     "guard_strategies": telemetry.regex_command.guard_strategies.clone(),
                     "materialize_streams": telemetry.regex_command.materialize_streams,
                     "diagnostics": telemetry.regex_command.diagnostics.clone(),
+                },
+                "pattern_const": {
+                    "total": pattern_const.total,
+                    "static": pattern_const.static_count,
+                    "dynamic": pattern_const.dynamic_count,
+                    "static_ratio": pattern_static_ratio,
+                    "literal": {
+                        "static": pattern_const.literal_static,
+                        "dynamic": pattern_const.literal_dynamic,
+                    },
+                    "command": {
+                        "static": pattern_const.command_static,
+                        "dynamic": pattern_const.command_dynamic,
+                    },
                 },
             })
         });

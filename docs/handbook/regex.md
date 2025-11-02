@@ -5,6 +5,23 @@
 - `regex-is-operator` を補完し、置換（`a`/`f`）、マッチ判定（`m`）、分割（`s`）、逐次処理（`i`）を1行で記述できる。
 - 型推論・診断は `docs/design/java-aware-type-inference.md` に従って `String` / `Boolean` / `String[]` / `Stream<MatchResult>` を安全に扱う。
 
+## Pattern 型推論と定数化戦略
+- `/.../` リテラルや簡潔構文が生成する正規表現は、型推論フェーズで自動的に `java.util.regex.Pattern` へ昇格する。`val pattern = /\d+/` のような宣言は追加のアノテーションなしで `Pattern` として扱われ、`List<Pattern>` や `Map<String, Pattern>` の型変数にも伝播する。
+- 型判定は `PatternTypeBinder` が担い、推論環境へ `TypeKind::Reference("java.util.regex.Pattern")` を注入するため、関数戻り値やプロパティ初期化でも `Pattern` 型が維持される。
+- 定数判定に合格したパターンは `PatternConstRegistry` を経由して `static final Pattern` フィールドへ集約される。同一ソースのパターンは1度だけ `Pattern.compile` され、CLI でも共有フィールド名が報告される。
+- 動的に評価されるパターンは `RuntimePatternGuard` で `PatternSyntaxException` を捕捉し、`.jv` のファイル名・行情報付きで再スローされる。
+
+```jv
+import java.util.regex.Pattern
+
+val patterns: List<Pattern> = listOf(
+    /\d{3}-\d{4}/,
+    i/users/"([\w.]+)@example.com"/
+)
+
+fun provideValidator(): Pattern = /[A-Z]{2}\d{6}/
+```
+
 ## モード早見表
 | モード | 意味 | 典型的な戻り値 | 生成されるJava呼び出し |
 | --- | --- | --- | --- |
@@ -68,6 +85,11 @@ iterate結果:
   bob -> example.org
   carol -> example.net
 ```
+
+## テレメトリ
+- `jv check --telemetry` を有効にすると、`pattern_const.static_ratio` が出力され、定数化できたパターンの割合を把握できる。
+- `pattern_const.total` / `static` / `dynamic` に加え、`literal_*` と `command_*` の内訳でリテラル起源と簡潔構文起源を区別できる。
+- 正規表現関連の実行統計は `regex_command.*` と併せて確認し、キャッシュヒット率や動的コンパイルの発生状況を継続的に監視する。
 
 ## 関連資料
 - `.spec-workflow/specs/concise-regex-syntax/requirements.md`
