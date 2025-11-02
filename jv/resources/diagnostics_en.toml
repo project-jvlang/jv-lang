@@ -63,3 +63,15 @@ summary = "Alias: {alias}"
 
 [imports.plan.module_dependency]
 summary = "Module dependency: {module}"
+
+[doublebrace.control_flow]
+return = "`return` statements are not allowed inside a doublebrace initializer. Finish configuring the receiver by calling its methods instead."
+break = "`break` statements are not allowed in doublebrace initializers. Perform loop control outside of the initializer block."
+continue = "`continue` statements are not allowed in doublebrace initializers. Restructure the control flow instead of skipping iterations."
+unsupported = "Control-flow statements are not allowed in doublebrace initializers. Remove `return`, `break`, and `continue`."
+
+[doublebrace.target]
+missing = "The doublebrace initializer's receiver type could not be inferred. Specify it with a `receiver:` annotation or a concrete base expression."
+
+[doublebrace.member]
+invalid = "Members {members} do not exist on receiver type `{receiver}`. Verify the method names and visibility modifiers."

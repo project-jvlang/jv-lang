@@ -25,6 +25,7 @@ use jv_ast::{
 use jv_build::metadata::SymbolIndex;
 use jv_inference::types::NullabilityFlag;
 use jv_inference::{DefaultImplementationRegistry, DoublebraceHeuristics};
+use jv_support::i18n::{LocaleCode, catalog};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
@@ -633,14 +634,17 @@ impl<'env, 'ext, 'imp> ConstraintGenerator<'env, 'ext, 'imp> {
 
     fn infer_doublebrace(&mut self, init: &jv_ast::DoublebraceInit) -> TypeKind {
         if let Some(code) = self.detect_doublebrace_control_flow(&init.statements) {
-            let note = match code {
-                DIAG_DBLOCK_RETURN => "Doublebrace 初期化ブロック内で return 文は使用できません。",
-                DIAG_DBLOCK_BREAK => "Doublebrace 初期化ブロック内で break 文は使用できません。",
-                DIAG_DBLOCK_CONTINUE => {
-                    "Doublebrace 初期化ブロック内で continue 文は使用できません。"
-                }
-                _ => "Doublebrace 初期化ブロック内で制御フロー文は使用できません。",
+            let key = match code {
+                DIAG_DBLOCK_RETURN => Some("doublebrace.control_flow.return"),
+                DIAG_DBLOCK_BREAK => Some("doublebrace.control_flow.break"),
+                DIAG_DBLOCK_CONTINUE => Some("doublebrace.control_flow.continue"),
+                _ => Some("doublebrace.control_flow.unsupported"),
             };
+            let note = key
+                .map(|entry| doublebrace_message(entry, &[]))
+                .unwrap_or_else(|| {
+                    "Doublebrace 初期化ブロック内で制御フロー文は使用できません。".to_string()
+                });
             self.constraints
                 .push(Constraint::new(ConstraintKind::Placeholder(code)).with_note(note));
         }
@@ -685,9 +689,11 @@ impl<'env, 'ext, 'imp> ConstraintGenerator<'env, 'ext, 'imp> {
                         .clone()
                         .unwrap_or_else(|| TypeKind::reference("java.lang.Object"))
                 } else {
+                    let note =
+                        doublebrace_message("doublebrace.target.missing", &[]);
                     self.constraints.push(
                         Constraint::new(ConstraintKind::Placeholder(DIAG_DBLOCK_NO_TARGET))
-                            .with_note("Doublebrace 初期化ブロックの型を推論できません。レシーバー型を明示してください。"),
+                            .with_note(note),
                     );
                     TypeKind::Unknown
                 }
@@ -703,9 +709,12 @@ impl<'env, 'ext, 'imp> ConstraintGenerator<'env, 'ext, 'imp> {
                 if !missing.is_empty() {
                     let joined = missing.join(", ");
                     let receiver_label = resolved.describe();
-                    let note = format!(
-                        "レシーバー型 `{}` に存在しないメンバー: {}",
-                        receiver_label, joined
+                    let note = doublebrace_message(
+                        "doublebrace.member.invalid",
+                        &[
+                            ("receiver", receiver_label.clone()),
+                            ("members", joined.clone()),
+                        ],
                     );
                     self.constraints.push(
                         Constraint::new(ConstraintKind::Placeholder(DIAG_DBLOCK_INVALID_MEMBER))
@@ -1201,6 +1210,21 @@ fn ensure_optional_type(ty: TypeKind) -> TypeKind {
     match ty {
         TypeKind::Optional(_) => ty,
         other => TypeKind::Optional(Box::new(other)),
+    }
+}
+
+fn doublebrace_message(key: &str, args: &[(&str, String)]) -> String {
+    let mut map = HashMap::with_capacity(args.len());
+    for (name, value) in args {
+        map.insert(*name, value.clone());
+    }
+    let ja = catalog(LocaleCode::Ja).render(key, &map);
+    let en = catalog(LocaleCode::En).render(key, &map);
+    match (ja, en) {
+        (Some(ja), Some(en)) => format!("{ja}\n{en}"),
+        (Some(ja), None) => ja,
+        (None, Some(en)) => en,
+        (None, None) => format!("{key}"),
     }
 }
 

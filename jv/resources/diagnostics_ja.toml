@@ -63,3 +63,15 @@ summary = "別名: {alias}"
 
 [imports.plan.module_dependency]
 summary = "モジュール依存: {module}"
+
+[doublebrace.control_flow]
+return = "Doublebrace 初期化ブロックでは `return` 文を使用できません。レシーバーの初期化処理をメソッド呼び出しなどで完了してください。"
+break = "Doublebrace 初期化ブロックでは `break` 文を使用できません。ループ制御はブロック外の構造で行ってください。"
+continue = "Doublebrace 初期化ブロックでは `continue` 文を使用できません。反復をスキップする必要がある場合は制御フローを再設計してください。"
+unsupported = "Doublebrace 初期化ブロックでは制御フロー文を使用できません。`return`・`break`・`continue` を取り除いてください。"
+
+[doublebrace.target]
+missing = "Doublebrace 初期化ブロックの対象型を推論できません。`receiver:` 注釈または base 式でレシーバー型を明示してください。"
+
+[doublebrace.member]
+invalid = "レシーバー型 `{receiver}` にはメンバー {members} が存在しません。メソッド名やアクセス修飾子を確認してください。"

@@ -322,6 +322,36 @@ const DIAGNOSTICS: &[DiagnosticDescriptor] = &[
         help: "深度11以上の分解パターンや複合ガードは段階的に提供されます。サポート済みの構文へ書き換えるか今後のアップデートをお待ちください。/ Deep destructuring (depth ≥ 11) and complex guards are still rolling out. Rewrite the pattern using supported constructs or wait for a forthcoming update. (--explain JV3199)",
         severity: DiagnosticSeverity::Error,
     },
+    DiagnosticDescriptor {
+        code: "E-DBLOCK-RETURN",
+        title: "Doublebrace 初期化ブロックで return は使用不可 / `return` not allowed in doublebrace initializer",
+        help: "Doublebrace 初期化ブロックはレシーバーの初期化に専念する必要があります。`return` の代わりにレシーバーのメソッド呼び出しで処理を完了してください。/ Doublebrace initializers must focus on configuring the receiver. Finish the workflow by invoking receiver methods instead of returning early.",
+        severity: DiagnosticSeverity::Error,
+    },
+    DiagnosticDescriptor {
+        code: "E-DBLOCK-BREAK",
+        title: "Doublebrace 初期化ブロックで break は使用不可 / `break` not allowed in doublebrace initializer",
+        help: "ループ制御は Doublebrace 初期化ブロックの外で行い、ブロック内部では `break` を使用しないでください。/ Perform loop control outside the doublebrace block and avoid using `break` within it.",
+        severity: DiagnosticSeverity::Error,
+    },
+    DiagnosticDescriptor {
+        code: "E-DBLOCK-CONTINUE",
+        title: "Doublebrace 初期化ブロックで continue は使用不可 / `continue` not allowed in doublebrace initializer",
+        help: "Doublebrace 初期化ブロックでは反復をスキップできません。制御フローを再設計して `continue` を取り除いてください。/ Doublebrace initializers cannot skip iterations. Restructure the control flow and remove `continue`.",
+        severity: DiagnosticSeverity::Error,
+    },
+    DiagnosticDescriptor {
+        code: "E-DBLOCK-NO-TARGET",
+        title: "Doublebrace レシーバー型を推論できません / Unable to infer doublebrace receiver type",
+        help: "`receiver:` 注釈を追加するか、base 式を具体的なオブジェクトに変更してレシーバー型を明示してください。/ Add a `receiver:` annotation or supply a concrete base expression so the receiver type is explicit.",
+        severity: DiagnosticSeverity::Error,
+    },
+    DiagnosticDescriptor {
+        code: "E-DBLOCK-INVALID-MEMBER",
+        title: "レシーバーに存在しないメンバーを参照 / Referenced member missing on receiver",
+        help: "メソッド名・プロパティ名・アクセス修飾子がシンボルインデックスと一致しているか確認してください。/ Ensure the member name and visibility match what is available in the symbol index.",
+        severity: DiagnosticSeverity::Error,
+    },
 ];
 
 const FRONTEND_GENERIC_DESCRIPTOR: DiagnosticDescriptor = DiagnosticDescriptor {
@@ -412,13 +442,46 @@ pub fn from_transform_error(error: &TransformError) -> Option<EnhancedDiagnostic
     }
 }
 
+fn extract_placeholder_note(message: &str) -> Option<(&str, String)> {
+    const PREFIX: &str = "encountered placeholder constraint: ";
+    let rest = message.strip_prefix(PREFIX)?;
+    if let Some(idx) = rest.find(" (") {
+        let code = rest[..idx].trim();
+        if code.is_empty() {
+            return None;
+        }
+        let note_section = rest[idx + 2..].trim_end();
+        let trimmed = note_section.strip_suffix(')').unwrap_or(note_section);
+        let note = trimmed.trim().to_string();
+        Some((code, note))
+    } else {
+        let code = rest.trim();
+        if code.is_empty() {
+            None
+        } else {
+            Some((code, String::new()))
+        }
+    }
+}
+
 fn detect_in_message(message: &str, span: Option<Span>) -> Option<EnhancedDiagnostic> {
     let descriptor = DIAGNOSTICS
         .iter()
         .chain(crate::compat::diagnostics::ENTRIES.iter())
         .find(|descriptor| message.contains(descriptor.code))?;
 
-    let (clean_message, suggestions, learning_hint) = extract_tooling_metadata(message);
+    let normalized_message = if let Some((code, note)) = extract_placeholder_note(message) {
+        if descriptor.code == code && !note.is_empty() {
+            note
+        } else {
+            message.to_string()
+        }
+    } else {
+        message.to_string()
+    };
+
+    let (clean_message, suggestions, learning_hint) =
+        extract_tooling_metadata(&normalized_message);
 
     let mut diagnostic = EnhancedDiagnostic::new(descriptor, clean_message, span);
     if !suggestions.is_empty() {
