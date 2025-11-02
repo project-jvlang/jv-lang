@@ -1,3 +1,5 @@
+import java.util.regex.Pattern
+
 fun main(): Unit {
     // concise-regex-syntax の主要モードと主なオプションを一括で体験するサンプル
     val auditLog = """
@@ -100,7 +102,6 @@ USER=Chie ACTION=RESULT ip=172.16.0.77
     }
 
     val actionToken = "LOGIN"
-    val actionPattern = "ACTION=${actionToken}"
+    val actionPattern = /ACTION=${actionToken}/
     println("動的補間パターンの一致結果: ${m/auditLog/actionPattern/}")
-    println("※ `cargo run --bin jv_cli -- check --telemetry jv/examples/regex-command.jv` で pattern_const.* 指標の静的化率を確認できます。")
 }
