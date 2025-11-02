@@ -386,6 +386,14 @@ fn rewrite_expression(expression: &mut Expression) {
                 rewrite_expression(finally_block.as_mut());
             }
         }
+        Expression::DoublebraceInit(init) => {
+            if let Some(base) = init.base.as_mut() {
+                rewrite_expression(base);
+            }
+            for statement in init.statements.iter_mut() {
+                rewrite_statement(statement);
+            }
+        }
     }
 }
 
@@ -754,6 +762,14 @@ impl<'a, 'b> ProgramUsageDetector<'a, 'b> {
                 }
                 if let Some(finally_block) = finally_block {
                     self.visit_expression(finally_block);
+                }
+            }
+            Expression::DoublebraceInit(init) => {
+                if let Some(base) = &init.base {
+                    self.visit_expression(base);
+                }
+                for statement in &init.statements {
+                    self.visit_statement(statement);
                 }
             }
             Expression::JsonLiteral(_)

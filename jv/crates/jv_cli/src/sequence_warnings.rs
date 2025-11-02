@@ -283,6 +283,14 @@ impl SequenceWarningCollector {
                     self.visit_expression(finally);
                 }
             }
+            Expression::DoublebraceInit(init) => {
+                if let Some(base) = &init.base {
+                    self.visit_expression(base);
+                }
+                for statement in &init.statements {
+                    self.visit_statement(statement);
+                }
+            }
         }
     }
 

@@ -56,16 +56,23 @@ fn mutate_expression() -> IrExpression {
 }
 
 fn copy_expression() -> IrExpression {
+    copy_expression_with_updates(vec![make_name_update()])
+}
+
+fn make_name_update() -> IrDoublebraceFieldUpdate {
+    let span = span();
+    IrDoublebraceFieldUpdate {
+        name: "name".to_string(),
+        value: IrExpression::Literal(Literal::String("Alice".to_string()), span.clone()),
+        span,
+    }
+}
+
+fn copy_expression_with_updates(updates: Vec<IrDoublebraceFieldUpdate>) -> IrExpression {
     let span = span();
     let base = IrExpression::Identifier {
         name: "user".to_string(),
         java_type: java_user_type(),
-        span: span.clone(),
-    };
-
-    let update = IrDoublebraceFieldUpdate {
-        name: "name".to_string(),
-        value: IrExpression::Literal(Literal::String("Alice".to_string()), span.clone()),
         span: span.clone(),
     };
 
@@ -74,7 +81,7 @@ fn copy_expression() -> IrExpression {
         receiver_type: java_user_type(),
         plan: IrDoublebracePlan::Copy(IrDoublebraceCopyPlan {
             source: DoublebraceCopySourceStrategy::ExistingInstance,
-            updates: vec![update],
+            updates,
         }),
         java_type: java_user_type(),
         span,
@@ -101,6 +108,24 @@ fn doublebrace_mutate_generates_block_expression() {
 fn doublebrace_copy_generates_method_chain() {
     let expr = copy_expression();
     let expected = "((java.util.function.Supplier<com.example.ImmutableUser>) () -> {\n    com.example.ImmutableUser __db_base0 = user;\n    com.example.ImmutableUser __db_copy1 = __db_base0;\n    __db_copy1 = __db_copy1.withName(\"Alice\");\n    \n    return __db_copy1;\n}).get()";
+
+    assert_eq!(render(&expr, JavaTarget::Java25), expected);
+    assert_eq!(render(&expr, JavaTarget::Java21), expected);
+}
+
+#[test]
+fn doublebrace_copy_generates_chain_for_multiple_updates() {
+    let span = span();
+    let mut updates = Vec::new();
+    updates.push(make_name_update());
+    updates.push(IrDoublebraceFieldUpdate {
+        name: "age".to_string(),
+        value: IrExpression::Literal(Literal::Number("30".to_string()), span.clone()),
+        span: span.clone(),
+    });
+
+    let expr = copy_expression_with_updates(updates);
+    let expected = "((java.util.function.Supplier<com.example.ImmutableUser>) () -> {\n    com.example.ImmutableUser __db_base0 = user;\n    com.example.ImmutableUser __db_copy1 = __db_base0;\n    __db_copy1 = __db_copy1.withName(\"Alice\");\n    __db_copy1 = __db_copy1.withAge(30);\n    \n    return __db_copy1;\n}).get()";
 
     assert_eq!(render(&expr, JavaTarget::Java25), expected);
     assert_eq!(render(&expr, JavaTarget::Java21), expected);

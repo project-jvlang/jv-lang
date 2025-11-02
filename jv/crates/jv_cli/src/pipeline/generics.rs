@@ -5,9 +5,9 @@ use jv_inference::service::{TypeFacts, TypeFactsSnapshot, TypeLevelValue};
 use jv_inference::solver::Variance;
 use jv_inference::types::{BoundPredicate, GenericBounds, SymbolId, TypeId, TypeKind, TypeVariant};
 use jv_ir::{
-    GenericMetadataMap, IrExpression, IrGenericMetadata, IrModifiers, IrProgram, IrStatement,
-    IrTypeLevelValue, IrTypeParameter, IrVariance, JavaType, PrimitiveSpecializationHint,
-    SequencePipeline, SequenceSource, SequenceStage,
+    GenericMetadataMap, IrDoublebraceMutation, IrDoublebracePlan, IrExpression, IrGenericMetadata,
+    IrModifiers, IrProgram, IrStatement, IrTypeLevelValue, IrTypeParameter, IrVariance, JavaType,
+    PrimitiveSpecializationHint, SequencePipeline, SequenceSource, SequenceStage,
 };
 
 /// Enriches the generated IR program with generic metadata sourced from type inference facts.
@@ -438,6 +438,12 @@ fn apply_hint_to_expression(expr: &mut IrExpression, hint: &PrimitiveSpecializat
             apply_hint_to_expression(array, hint);
             apply_hint_to_expression(index, hint);
         }
+        IrExpression::DoublebraceInit { base, plan, .. } => {
+            if let Some(base_expr) = base.as_mut() {
+                apply_hint_to_expression(base_expr, hint);
+            }
+            apply_hint_to_doublebrace_plan(plan, hint);
+        }
         IrExpression::Binary { left, right, .. } => {
             apply_hint_to_expression(left, hint);
             apply_hint_to_expression(right, hint);
@@ -524,6 +530,35 @@ fn apply_hint_to_expression(expr: &mut IrExpression, hint: &PrimitiveSpecializat
         | IrExpression::Identifier { .. }
         | IrExpression::This { .. }
         | IrExpression::Super { .. } => {}
+    }
+}
+
+fn apply_hint_to_doublebrace_plan(plan: &mut IrDoublebracePlan, hint: &PrimitiveSpecializationHint) {
+    match plan {
+        IrDoublebracePlan::Mutate(mutate) => {
+            for step in mutate.steps.iter_mut() {
+                match step {
+                    IrDoublebraceMutation::FieldAssignment(update) => {
+                        apply_hint_to_expression(&mut update.value, hint);
+                    }
+                    IrDoublebraceMutation::MethodCall(call) => {
+                        for argument in call.arguments.iter_mut() {
+                            apply_hint_to_expression(argument, hint);
+                        }
+                    }
+                    IrDoublebraceMutation::Statement(statements) => {
+                        for statement in statements.iter_mut() {
+                            apply_hint_to_statement(statement, hint);
+                        }
+                    }
+                }
+            }
+        }
+        IrDoublebracePlan::Copy(copy) => {
+            for update in copy.updates.iter_mut() {
+                apply_hint_to_expression(&mut update.value, hint);
+            }
+        }
     }
 }
 

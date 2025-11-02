@@ -844,6 +844,7 @@ fn extract_expr_span(expr: &IrExpression) -> Span {
         | IrExpression::VirtualThread { span, .. }
         | IrExpression::TryWithResources { span, .. }
         | IrExpression::RegexPattern { span, .. }
-        | IrExpression::SequencePipeline { span, .. } => span.clone(),
+        | IrExpression::SequencePipeline { span, .. }
+        | IrExpression::DoublebraceInit { span, .. } => span.clone(),
     }
 }
