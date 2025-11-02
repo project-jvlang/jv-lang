@@ -133,11 +133,13 @@ impl JavaCodeGenerator {
             }
         }
 
-        let mut hoisted_regex_fields = Vec::new();
+        let mut hoisted_script_fields = Vec::new();
         let mut retained_statements = Vec::new();
         for statement in script_statements.drain(..) {
             if let Some(field) = Self::hoist_regex_pattern_field(&statement) {
-                hoisted_regex_fields.push(field);
+                hoisted_script_fields.push(field);
+            } else if let Some(field) = Self::hoist_script_variable_field(&statement) {
+                hoisted_script_fields.push(field);
             } else {
                 retained_statements.push(statement);
             }
@@ -149,7 +151,7 @@ impl JavaCodeGenerator {
 
         if !script_statements.is_empty()
             || !script_methods.is_empty()
-            || !hoisted_regex_fields.is_empty()
+            || !hoisted_script_fields.is_empty()
         {
             let script_class = self.config.script_main_class.clone();
 
@@ -168,8 +170,8 @@ impl JavaCodeGenerator {
             builder.push_line(&format!("public final class {} {{", script_class));
             builder.indent();
 
-            if !hoisted_regex_fields.is_empty() {
-                for field in &hoisted_regex_fields {
+            if !hoisted_script_fields.is_empty() {
+                for field in &hoisted_script_fields {
                     let code = self.generate_statement(field)?;
                     Self::push_lines(&mut builder, &code);
                 }
@@ -1550,6 +1552,42 @@ impl JavaCodeGenerator {
                     }
                 }
                 None
+            }
+            _ => None,
+        }
+    }
+
+    fn hoist_script_variable_field(statement: &IrStatement) -> Option<IrStatement> {
+        match statement {
+            IrStatement::Commented {
+                statement,
+                comment,
+                kind,
+                comment_span,
+            } => Self::hoist_script_variable_field(statement).map(|inner| IrStatement::Commented {
+                statement: Box::new(inner),
+                comment: comment.clone(),
+                kind: kind.clone(),
+                comment_span: comment_span.clone(),
+            }),
+            IrStatement::VariableDeclaration {
+                name,
+                java_type,
+                initializer,
+                is_final,
+                modifiers,
+                span,
+            } => {
+                let mut field_modifiers = modifiers.clone();
+                field_modifiers.is_static = true;
+                field_modifiers.is_final = *is_final;
+                Some(IrStatement::FieldDeclaration {
+                    name: name.clone(),
+                    java_type: java_type.clone(),
+                    initializer: initializer.clone(),
+                    modifiers: field_modifiers,
+                    span: span.clone(),
+                })
             }
             _ => None,
         }

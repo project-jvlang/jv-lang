@@ -1,5 +1,5 @@
-// concise-regex-syntax の主要モードと主なオプションを一括で体験するサンプル
 fun main(): Unit {
+    // concise-regex-syntax の主要モードと主なオプションを一括で体験するサンプル
     val auditLog = """
 USER=Akira ACTION=login ip=192.168.0.10
 USER=Tom ACTION=LOGIN ip=10.0.0.5
@@ -39,9 +39,7 @@ USER=Chie ACTION=RESULT ip=172.16.0.77
 
     println("=== iterate (i) ラムダ置換 ===")
     println(i/auditLog/'USER=(\w+)\sACTION=(\w+)'/{ match ->
-        val user = match.group(1)
-        val action = match.group(2)
-        "${user}:${action}"
+        "${match.group(1)}:${match.group(2)}"
     }/)
     println("")
 

@@ -740,8 +740,7 @@ impl<'env, 'ext, 'imp> ConstraintGenerator<'env, 'ext, 'imp> {
                     left_ty
                 }
             }
-            Subtract | Multiply | Divide | Modulo | MinusAssign | MultiplyAssign
-            | DivideAssign => {
+            Subtract | Multiply | Divide | Modulo | MinusAssign | MultiplyAssign | DivideAssign => {
                 self.push_constraint(
                     ConstraintKind::Equal(left_ty.clone(), right_ty.clone()),
                     Some("arithmetic operands must share the same type"),
