@@ -5,7 +5,7 @@ use crate::pattern::{
     PatternTarget,
 };
 use jv_ast::expression::{Parameter, StringPart};
-use jv_ast::statement::Property;
+use jv_ast::statement::{Property, TestDataset};
 use jv_ast::types::TypeAnnotation;
 use jv_ast::{Expression, Program, Statement};
 use jv_inference::types::TypeVariant as FactsTypeVariant;
@@ -76,6 +76,14 @@ impl PatternFactsBridge {
                 self.scopes.pop();
                 outcome
             }
+            Statement::TestDeclaration(test) => {
+                let mut outcome = BridgeOutcome::default();
+                if let Some(dataset) = &test.dataset {
+                    outcome.merge(self.visit_test_dataset(dataset, service, context));
+                }
+                outcome.merge(self.visit_expression(&test.body, service, context));
+                outcome
+            }
             Statement::ClassDeclaration {
                 properties,
                 methods,
@@ -139,6 +147,26 @@ impl PatternFactsBridge {
             | Statement::Import { .. }
             | Statement::Package { .. }
             | Statement::Comment(_) => BridgeOutcome::default(),
+        }
+    }
+
+    fn visit_test_dataset(
+        &mut self,
+        dataset: &TestDataset,
+        service: &mut PatternMatchService,
+        context: &mut NullSafetyContext,
+    ) -> BridgeOutcome {
+        match dataset {
+            TestDataset::InlineArray { rows, .. } => {
+                let mut outcome = BridgeOutcome::default();
+                for row in rows {
+                    for value in &row.values {
+                        outcome.merge(self.visit_expression(value, service, context));
+                    }
+                }
+                outcome
+            }
+            TestDataset::Sample(_) => BridgeOutcome::default(),
         }
     }
 

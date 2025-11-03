@@ -3,6 +3,7 @@ use crate::diagnostics::{self, DiagnosticSeverity, EnhancedDiagnostic};
 use jv_ast::{
     Argument, ConcurrencyConstruct, Expression, ForInStatement, LoopStrategy, NumericRangeLoop,
     Program, RegexLiteral, ResourceManagement, Span, Statement, StringPart, TryCatchClause,
+    statement::TestDataset,
 };
 use std::time::Instant;
 
@@ -122,6 +123,12 @@ impl<'a> RegexValidationVisitor<'a> {
                 }
                 self.visit_expression(body);
             }
+            Statement::TestDeclaration(test) => {
+                if let Some(dataset) = &test.dataset {
+                    self.visit_test_dataset(dataset);
+                }
+                self.visit_expression(&test.body);
+            }
             Statement::ClassDeclaration {
                 properties,
                 methods,
@@ -180,6 +187,16 @@ impl<'a> RegexValidationVisitor<'a> {
             | Statement::Continue(_)
             | Statement::Import { .. }
             | Statement::Package { .. } => {}
+        }
+    }
+
+    fn visit_test_dataset(&mut self, dataset: &TestDataset) {
+        if let TestDataset::InlineArray { rows, .. } = dataset {
+            for row in rows {
+                for value in &row.values {
+                    self.visit_expression(value);
+                }
+            }
         }
     }
 

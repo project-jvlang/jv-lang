@@ -5,6 +5,8 @@ use jv_ast::Span;
 use jv_ast::{
     Argument, ConcurrencyConstruct, Expression, ExtensionFunction, Modifiers, Program,
     ResourceManagement, Statement, TryCatchClause, ValBindingOrigin,
+    binding_pattern::BindingPatternKind,
+    statement::{TestDataset, TestParameter},
 };
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -237,6 +239,16 @@ impl BindingResolver {
                     modifiers,
                     span,
                 }
+            }
+            Statement::TestDeclaration(mut test) => {
+                if let Some(dataset) = test.dataset.as_mut() {
+                    self.resolve_test_dataset(dataset);
+                }
+                self.enter_scope();
+                self.declare_test_parameters(&test.parameters);
+                test.body = self.resolve_expression(test.body);
+                self.exit_scope();
+                Statement::TestDeclaration(test)
             }
             Statement::ClassDeclaration {
                 name,
@@ -701,6 +713,40 @@ impl BindingResolver {
                 body: Box::new(self.resolve_expression(*body)),
                 span,
             },
+        }
+    }
+
+    fn resolve_test_dataset(&mut self, dataset: &mut TestDataset) {
+        if let TestDataset::InlineArray { rows, .. } = dataset {
+            for row in rows {
+                for value in &mut row.values {
+                    *value = self.resolve_expression(value.clone());
+                }
+            }
+        }
+    }
+
+    fn declare_test_parameters(&mut self, parameters: &[TestParameter]) {
+        for parameter in parameters {
+            self.declare_test_parameter_pattern(&parameter.pattern);
+        }
+    }
+
+    fn declare_test_parameter_pattern(&mut self, pattern: &BindingPatternKind) {
+        match pattern {
+            BindingPatternKind::Identifier { name, span } => self.declare_immutable(
+                name.clone(),
+                ValBindingOrigin::ExplicitKeyword,
+                span.clone(),
+                false,
+            ),
+            BindingPatternKind::Tuple { elements, .. }
+            | BindingPatternKind::List { elements, .. } => {
+                for element in elements {
+                    self.declare_test_parameter_pattern(element);
+                }
+            }
+            BindingPatternKind::Wildcard { .. } => {}
         }
     }
 

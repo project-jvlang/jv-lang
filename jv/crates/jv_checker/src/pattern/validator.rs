@@ -5,7 +5,7 @@ use crate::CheckError;
 use jv_ast::{
     Argument, ConcurrencyConstruct, Expression, ForInStatement, Literal, LoopStrategy,
     NumericRangeLoop, Pattern, Program, Property, ResourceManagement, Span, Statement, StringPart,
-    TypeAnnotation, WhenArm,
+    TypeAnnotation, WhenArm, statement::TestDataset,
 };
 
 pub(super) fn validate_program(
@@ -63,6 +63,12 @@ impl<'a> WhenUsageValidator<'a> {
                     .unwrap_or(false);
                 self.visit_expression(body, body_expects_value);
             }
+            Statement::TestDeclaration(test) => {
+                if let Some(dataset) = &test.dataset {
+                    self.visit_test_dataset(dataset);
+                }
+                self.visit_expression(&test.body, false);
+            }
             Statement::ClassDeclaration {
                 properties,
                 methods,
@@ -113,6 +119,16 @@ impl<'a> WhenUsageValidator<'a> {
             | Statement::Break(_)
             | Statement::Continue(_)
             | Statement::Comment(_) => {}
+        }
+    }
+
+    fn visit_test_dataset(&mut self, dataset: &TestDataset) {
+        if let TestDataset::InlineArray { rows, .. } = dataset {
+            for row in rows {
+                for value in &row.values {
+                    self.visit_expression(value, true);
+                }
+            }
         }
     }
 

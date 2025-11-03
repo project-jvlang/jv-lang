@@ -8,7 +8,7 @@ use crate::CheckError;
 use jv_ast::types::Span;
 use jv_ast::{
     BinaryOp, Expression, Literal, Program, Statement, TypeAnnotation, UnaryOp,
-    expression::Argument,
+    expression::Argument, statement::TestDataset,
 };
 use std::collections::HashMap;
 
@@ -186,6 +186,15 @@ impl NullabilityAnalyzer {
                 self.leave_scope();
                 // Signal misuse if any parameter default caused an error.
                 Some(Nullability::Unknown).map(|_| Nullability::Unknown)
+            }
+            Statement::TestDeclaration(test) => {
+                self.enter_scope();
+                if let Some(dataset) = &test.dataset {
+                    self.visit_test_dataset(dataset);
+                }
+                self.evaluate_expression(&test.body);
+                self.leave_scope();
+                None
             }
             Statement::Concurrency(construct) => {
                 match construct {
@@ -455,6 +464,19 @@ impl NullabilityAnalyzer {
                 scope.insert(name.to_string(), nullability);
                 return;
             }
+        }
+    }
+
+    fn visit_test_dataset(&mut self, dataset: &TestDataset) {
+        match dataset {
+            TestDataset::InlineArray { rows, .. } => {
+                for row in rows {
+                    for value in &row.values {
+                        self.evaluate_expression(value);
+                    }
+                }
+            }
+            TestDataset::Sample(_) => {}
         }
     }
 
