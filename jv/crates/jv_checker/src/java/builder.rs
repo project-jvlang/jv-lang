@@ -9,8 +9,8 @@ use jv_ast::expression::{CallKind, DoublebraceInit};
 use jv_ast::{Expression, Program, Statement, TypeAnnotation};
 use jv_build::metadata::SymbolIndex;
 use jv_inference::doublebrace::{DoublebraceContext, DoublebraceHeuristics, infer_doublebrace};
-use jv_inference::session::InferenceSession;
 use jv_inference::registry::default_impl::DefaultImplementationRegistry;
+use jv_inference::session::InferenceSession;
 use std::collections::HashMap;
 
 /// Doublebrace プランのマップでキーとして利用する `Span` の正規化文字列。
@@ -24,9 +24,7 @@ pub fn span_key(span: &jv_ast::Span) -> String {
 fn annotation_to_type_kind(annotation: &TypeAnnotation) -> Option<TypeKind> {
     match annotation {
         TypeAnnotation::Simple(name) => TypeFactory::from_annotation(name).ok(),
-        TypeAnnotation::Nullable(inner) => {
-            annotation_to_type_kind(inner).map(TypeKind::optional)
-        }
+        TypeAnnotation::Nullable(inner) => annotation_to_type_kind(inner).map(TypeKind::optional),
         TypeAnnotation::Generic { name, type_args } => {
             let base = TypeFactory::from_annotation(name).ok()?.describe();
             let args: Option<Vec<String>> = type_args
@@ -47,12 +45,8 @@ fn resolve_expression_type_in_env(
     expr: &Expression,
 ) -> Option<TypeKind> {
     match expr {
-        Expression::Identifier(name, _) => environment
-            .lookup(name)
-            .map(|scheme| scheme.ty.clone()),
-        Expression::This(_) => environment
-            .lookup("this")
-            .map(|scheme| scheme.ty.clone()),
+        Expression::Identifier(name, _) => environment.lookup(name).map(|scheme| scheme.ty.clone()),
+        Expression::This(_) => environment.lookup("this").map(|scheme| scheme.ty.clone()),
         Expression::Call {
             call_kind,
             type_arguments,

@@ -227,8 +227,7 @@ fn lower_doublebrace_plan_preserves_generic_fqcn() {
         .expect("lowered plan should exist for key");
 
     assert_eq!(
-        lowered_plan.receiver_fqcn,
-        "java.util.ArrayList<String>",
+        lowered_plan.receiver_fqcn, "java.util.ArrayList<String>",
         "Doublebrace lowering should retain generic arguments"
     );
 }

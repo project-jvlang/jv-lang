@@ -2,7 +2,10 @@
 mod tests {
     use crate::context::{RegisteredMethodCall, RegisteredMethodDeclaration, SequenceStyleCache};
     use crate::{
-        CompletableFutureOp, DataFormat, IrCaseLabel, IrDeconstructionComponent,
+        CompletableFutureOp, DataFormat, DoublebraceBaseStrategy, DoublebraceCopySourceStrategy,
+        DoublebraceFieldUpdate, DoublebraceLoweringCopyPlan, DoublebraceLoweringKind,
+        DoublebraceLoweringMutatePlan, DoublebraceLoweringPlan, DoublebraceLoweringStep,
+        DoublebraceMethodInvocation, IrCaseLabel, IrDeconstructionComponent,
         IrDeconstructionPattern, IrExpression, IrForEachKind, IrForLoopMetadata, IrImplicitWhenEnd,
         IrModifiers, IrNumericRangeLoop, IrParameter, IrResolvedMethodTarget, IrStatement,
         IrVisibility, JavaType, PipelineShape, SampleMode, SampleSourceKind, Schema,
@@ -18,20 +21,17 @@ mod tests {
         generate_utility_class_name, infer_java_type, naming::method_erasure::apply_method_erasure,
         transform_expression, transform_program, transform_program_with_context,
         transform_program_with_context_profiled, transform_statement,
-        DoublebraceBaseStrategy, DoublebraceCopySourceStrategy, DoublebraceLoweringCopyPlan,
-        DoublebraceLoweringKind, DoublebraceLoweringMutatePlan, DoublebraceLoweringPlan,
-        DoublebraceLoweringStep, DoublebraceFieldUpdate, DoublebraceMethodInvocation,
     };
     use jv_ast::*;
+    use jv_checker::TypeChecker;
+    use jv_checker::java::{
+        CopySource, DoublebracePlan, FieldUpdate, MethodInvocation, MutationStep, PlanBase,
+    };
     use jv_parser_frontend::ParserPipeline;
     use jv_parser_rowan::frontend::RowanPipeline;
-    use jv_checker::java::{
-        DoublebracePlan, MutationStep, PlanBase, CopySource, FieldUpdate, MethodInvocation,
-    };
-    use jv_checker::TypeChecker;
     use sha2::{Digest, Sha256};
-    use std::fs;
     use std::collections::HashMap;
+    use std::fs;
     use std::path::{Path, PathBuf};
     use std::time::Duration;
     use tempfile::tempdir;
@@ -264,7 +264,7 @@ mod tests {
             type_arguments: Vec::new(),
             argument_metadata: CallArgumentMetadata::default(),
             call_kind: CallKind::Function,
-                        span: dummy_span(),
+            span: dummy_span(),
         };
 
         let ir =
@@ -331,7 +331,7 @@ mod tests {
             type_arguments: vec![TypeAnnotation::Simple("String".to_string())],
             argument_metadata: CallArgumentMetadata::default(),
             call_kind: CallKind::Function,
-                        span: dummy_span(),
+            span: dummy_span(),
         };
         let lambda = Expression::Lambda {
             parameters: vec![lambda_param],
@@ -352,7 +352,7 @@ mod tests {
             type_arguments: Vec::new(),
             argument_metadata: CallArgumentMetadata::default(),
             call_kind: CallKind::Function,
-                        span: dummy_span(),
+            span: dummy_span(),
         };
 
         let ir = transform_expression(call_expression, &mut context)
@@ -492,7 +492,7 @@ mod tests {
             type_arguments: vec![TypeAnnotation::Simple("String".to_string())],
             argument_metadata: CallArgumentMetadata::default(),
             call_kind: CallKind::Function,
-                        span: dummy_span(),
+            span: dummy_span(),
         };
         let lambda = Expression::Lambda {
             parameters: vec![],
@@ -513,7 +513,7 @@ mod tests {
             type_arguments: Vec::new(),
             argument_metadata: CallArgumentMetadata::default(),
             call_kind: CallKind::Function,
-                        span: dummy_span(),
+            span: dummy_span(),
         };
 
         let ir = transform_expression(call_expression, &mut context)
@@ -1537,7 +1537,7 @@ mod tests {
             type_arguments: vec![],
             argument_metadata: CallArgumentMetadata::default(),
             call_kind: CallKind::Function,
-                        span: dummy_span(),
+            span: dummy_span(),
         };
 
         let string_arm = WhenArm {
@@ -1952,7 +1952,7 @@ mod tests {
                 type_arguments: Vec::new(),
                 argument_metadata: CallArgumentMetadata::with_style(CallArgumentStyle::Comma),
                 call_kind: CallKind::Function,
-                                span: dummy_span(),
+                span: dummy_span(),
             }),
             modifiers: Modifiers::default(),
             span: dummy_span(),
@@ -2021,7 +2021,7 @@ mod tests {
             type_arguments: Vec::new(),
             argument_metadata: CallArgumentMetadata::with_style(CallArgumentStyle::Whitespace),
             call_kind: CallKind::Function,
-                        span: dummy_span(),
+            span: dummy_span(),
         };
 
         let wrapper_decl = Statement::FunctionDeclaration {
@@ -3011,7 +3011,7 @@ mod tests {
             type_arguments: Vec::new(),
             argument_metadata: CallArgumentMetadata::default(),
             call_kind: CallKind::Function,
-                        span: dummy_span(),
+            span: dummy_span(),
         };
 
         let ir = transform_expression(call, &mut context)
@@ -3542,7 +3542,7 @@ mod tests {
             type_arguments: vec![TypeAnnotation::Simple("Int".to_string())],
             argument_metadata: CallArgumentMetadata::default(),
             call_kind: CallKind::Function,
-                        span: dummy_span(),
+            span: dummy_span(),
         };
 
         let ir = transform_expression(call_expression, &mut context)
@@ -3935,7 +3935,7 @@ fun sample(value: Any): Int {
             type_arguments: Vec::new(),
             argument_metadata: CallArgumentMetadata::default(),
             call_kind: CallKind::Function,
-                        span: dummy_span(),
+            span: dummy_span(),
         };
 
         let ir_expr =
@@ -3994,7 +3994,7 @@ fun sample(value: Any): Int {
             type_arguments: Vec::new(),
             argument_metadata: CallArgumentMetadata::default(),
             call_kind: CallKind::Function,
-                        span: dummy_span(),
+            span: dummy_span(),
         };
 
         let ir_expr = transform_expression(expr, &mut context)
@@ -4388,7 +4388,7 @@ fun sample(value: Any): Int {
                     type_arguments: Vec::new(),
                     argument_metadata: CallArgumentMetadata::with_style(CallArgumentStyle::Comma),
                     call_kind: CallKind::Function,
-                                        span: dummy_span(),
+                    span: dummy_span(),
                 }),
                 body: Box::new(Expression::Lambda {
                     parameters: vec![Parameter {
@@ -4753,7 +4753,7 @@ fun sample(value: Any): Int {
             type_arguments: Vec::new(),
             argument_metadata: CallArgumentMetadata::default(),
             call_kind: CallKind::Function,
-                        span: dummy_span(),
+            span: dummy_span(),
         };
 
         let to_list_call = Expression::Call {
@@ -4766,7 +4766,7 @@ fun sample(value: Any): Int {
             type_arguments: Vec::new(),
             argument_metadata: CallArgumentMetadata::default(),
             call_kind: CallKind::Function,
-                        span: dummy_span(),
+            span: dummy_span(),
         };
 
         let result = transform_expression(to_list_call, &mut context)
@@ -6287,11 +6287,7 @@ fun sample(value: Any): Int {
                             DoublebraceBaseStrategy::SynthesizedInstance
                         }
                     },
-                    steps: mutate
-                        .steps
-                        .iter()
-                        .map(lower_mutation_step)
-                        .collect(),
+                    steps: mutate.steps.iter().map(lower_mutation_step).collect(),
                 }),
             },
             DoublebracePlan::Copy(copy) => DoublebraceLoweringPlan {
@@ -6305,11 +6301,7 @@ fun sample(value: Any): Int {
                             DoublebraceCopySourceStrategy::SynthesizedInstance
                         }
                     },
-                    updates: copy
-                        .updates
-                        .iter()
-                        .map(lower_field_update)
-                        .collect(),
+                    updates: copy.updates.iter().map(lower_field_update).collect(),
                 }),
             },
         }
@@ -6343,5 +6335,4 @@ fun sample(value: Any): Int {
             span: call.span.clone(),
         }
     }
-
 }
