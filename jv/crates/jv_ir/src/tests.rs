@@ -2,22 +2,26 @@
 mod tests {
     use crate::context::{RegisteredMethodCall, RegisteredMethodDeclaration, SequenceStyleCache};
     use crate::{
-        convert_type_annotation, desugar_async_expression, desugar_await_expression,
-        desugar_data_class, desugar_default_parameters, desugar_defer_expression,
-        desugar_elvis_operator, desugar_extension_function, desugar_named_arguments,
-        desugar_null_safe_index_access, desugar_null_safe_member_access, desugar_spawn_expression,
-        desugar_string_interpolation, desugar_top_level_function, desugar_use_expression,
-        desugar_val_declaration, desugar_var_declaration, desugar_when_expression,
-        generate_extension_class_name, generate_utility_class_name, infer_java_type,
-        naming::method_erasure::apply_method_erasure, transform_expression, transform_program,
-        transform_program_with_context, transform_program_with_context_profiled,
-        transform_statement, CompletableFutureOp, DataFormat, IrCaseLabel,
-        IrDeconstructionComponent, IrDeconstructionPattern, IrExpression, IrForEachKind,
-        IrForLoopMetadata, IrImplicitWhenEnd, IrModifiers, IrNumericRangeLoop, IrParameter,
-        IrResolvedMethodTarget, IrStatement, IrVisibility, JavaType, PipelineShape, SampleMode,
-        SampleSourceKind, Schema, SequencePipeline, SequenceSource, SequenceStage,
-        SequenceTerminal, SequenceTerminalEvaluation, SequenceTerminalKind, TransformContext,
-        TransformError, TransformPools, TransformProfiler, VirtualThreadOp,
+        CompletableFutureOp, DataFormat, IrCaseLabel, IrDeconstructionComponent,
+        IrDeconstructionPattern, IrExpression, IrForEachKind, IrForLoopMetadata, IrImplicitWhenEnd,
+        IrModifiers, IrNumericRangeLoop, IrParameter, IrResolvedMethodTarget, IrStatement,
+        IrVisibility, JavaType, PipelineShape, SampleMode, SampleSourceKind, Schema,
+        SequencePipeline, SequenceSource, SequenceStage, SequenceTerminal,
+        SequenceTerminalEvaluation, SequenceTerminalKind, TransformContext, TransformError,
+        TransformPools, TransformProfiler, VirtualThreadOp, convert_type_annotation,
+        desugar_async_expression, desugar_await_expression, desugar_data_class,
+        desugar_default_parameters, desugar_defer_expression, desugar_elvis_operator,
+        desugar_extension_function, desugar_named_arguments, desugar_null_safe_index_access,
+        desugar_null_safe_member_access, desugar_spawn_expression, desugar_string_interpolation,
+        desugar_top_level_function, desugar_use_expression, desugar_val_declaration,
+        desugar_var_declaration, desugar_when_expression, generate_extension_class_name,
+        generate_utility_class_name, infer_java_type,
+        naming::{
+            method_erasure::apply_method_erasure,
+            test_identifiers::{normalize_dataset, normalize_method},
+        },
+        transform_expression, transform_program, transform_program_with_context,
+        transform_program_with_context_profiled, transform_statement,
     };
     use jv_ast::*;
     use jv_parser_frontend::ParserPipeline;
@@ -211,6 +215,54 @@ mod tests {
             }
             other => panic!("expected regex pattern ir expression, got {:?}", other),
         }
+    }
+
+    #[test]
+    fn normalize_method_converts_display_name_to_snake_case() {
+        let span = Span::new(12, 4, 12, 20);
+        let normalized = normalize_method("Crème brûlée #1", &span);
+
+        assert_eq!(normalized.base(), "test_creme_brulee_1");
+        assert_eq!(
+            normalized.identifier(),
+            format!("{}{}", normalized.base(), normalized.hash_suffix())
+        );
+        assert_eq!(normalized.hash_suffix().len(), 9);
+        assert!(normalized.hash_suffix().starts_with('_'));
+    }
+
+    #[test]
+    fn normalize_method_and_dataset_share_hash_suffix() {
+        let span = Span::new(5, 1, 5, 10);
+        let method = normalize_method("Shared dataset", &span);
+        let dataset = normalize_dataset("Shared dataset", &span);
+
+        assert_eq!(method.hash_suffix(), dataset.hash_suffix());
+        assert_eq!(dataset.base(), "test_shared_dataset_source");
+        assert_eq!(
+            dataset.identifier(),
+            format!("{}{}", dataset.base(), dataset.hash_suffix())
+        );
+    }
+
+    #[test]
+    fn normalize_method_uses_span_for_hash_variation() {
+        let span_a = Span::new(1, 1, 1, 15);
+        let span_b = Span::new(2, 1, 2, 15);
+
+        let normalized_a = normalize_method("Identical name", &span_a);
+        let normalized_b = normalize_method("Identical name", &span_b);
+
+        assert_eq!(normalized_a.base(), normalized_b.base());
+        assert_ne!(normalized_a.hash_suffix(), normalized_b.hash_suffix());
+    }
+
+    #[test]
+    fn normalize_method_inserts_leading_underscore_for_digits() {
+        let span = Span::new(30, 2, 30, 15);
+        let normalized = normalize_method("123 ready", &span);
+
+        assert_eq!(normalized.base(), "test__123_ready");
     }
 
     #[test]
@@ -795,10 +847,12 @@ mod tests {
                 assert_eq!(declaration.format, DataFormat::Json);
                 assert_eq!(declaration.mode, SampleMode::Embed);
                 assert_eq!(declaration.source_kind, SampleSourceKind::Inline);
-                assert!(declaration
-                    .embedded_data
-                    .as_ref()
-                    .is_some_and(|data| !data.is_empty()));
+                assert!(
+                    declaration
+                        .embedded_data
+                        .as_ref()
+                        .is_some_and(|data| !data.is_empty())
+                );
                 assert!(!declaration.records.is_empty());
 
                 let registered = context
@@ -3741,12 +3795,14 @@ fun sample(value: Any): Int {
             .expect("implicit assignment lowering should succeed");
 
         match lowered.as_slice() {
-            [IrStatement::VariableDeclaration {
-                name,
-                is_final,
-                java_type,
-                ..
-            }] => {
+            [
+                IrStatement::VariableDeclaration {
+                    name,
+                    is_final,
+                    java_type,
+                    ..
+                },
+            ] => {
                 assert_eq!(name, "greeting");
                 assert!(is_final, "implicit val declarations must be final");
                 assert_eq!(java_type, &JavaType::string());
@@ -3803,10 +3859,12 @@ fun sample(value: Any): Int {
             transform_statement(stmt, &mut context).expect("assignment lowering should succeed");
 
         match lowered.as_slice() {
-            [IrStatement::Expression {
-                expr: IrExpression::Assignment { .. },
-                ..
-            }] => {}
+            [
+                IrStatement::Expression {
+                    expr: IrExpression::Assignment { .. },
+                    ..
+                },
+            ] => {}
             other => panic!("expected assignment expression, got {:?}", other),
         }
     }
@@ -4466,9 +4524,11 @@ fun sample(value: Any): Int {
             construct: "goto statement".to_string(),
             span: span.clone(),
         };
-        assert!(unsupported_error
-            .to_string()
-            .contains("Unsupported construct"));
+        assert!(
+            unsupported_error
+                .to_string()
+                .contains("Unsupported construct")
+        );
 
         let pattern_error = TransformError::InvalidPattern {
             message: "Invalid range pattern".to_string(),

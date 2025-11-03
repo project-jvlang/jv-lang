@@ -269,6 +269,26 @@ pub fn generate_extension_class_name(receiver_type: &TypeAnnotation) -> String {
     class_name
 }
 
+pub(crate) fn identifier_components(raw: &str) -> Vec<String> {
+    let mut components = Vec::new();
+    let mut current = String::new();
+
+    for ch in raw.chars() {
+        if ch.is_alphanumeric() {
+            current.push(ch);
+        } else if !current.is_empty() {
+            components.push(current);
+            current = String::new();
+        }
+    }
+
+    if !current.is_empty() {
+        components.push(current);
+    }
+
+    components
+}
+
 fn type_annotation_base_name(annotation: &TypeAnnotation) -> String {
     match annotation {
         TypeAnnotation::Simple(name) => simple_type_name(name),
@@ -285,19 +305,9 @@ fn simple_type_name(name: &str) -> String {
 
 fn sanitize_type_identifier(raw: &str) -> String {
     let mut result = String::new();
-    let mut current = String::new();
 
-    for ch in raw.chars() {
-        if ch.is_alphanumeric() {
-            current.push(ch);
-        } else if !current.is_empty() {
-            push_component(&mut result, &current);
-            current.clear();
-        }
-    }
-
-    if !current.is_empty() {
-        push_component(&mut result, &current);
+    for component in identifier_components(raw) {
+        push_component(&mut result, &component);
     }
 
     if result.is_empty() {

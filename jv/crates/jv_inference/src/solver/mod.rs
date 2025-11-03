@@ -16,7 +16,7 @@ pub use generic::{
 };
 pub use null_safety_bridge::NullSafetyBridge;
 pub use raw_types::{
-    RawTypeAnalyzer, RawTypeEvent, RawTypeMitigation, RawTypePolicyPlan, RAW_TYPE_TELEMETRY_KEY,
+    RAW_TYPE_TELEMETRY_KEY, RawTypeAnalyzer, RawTypeEvent, RawTypeMitigation, RawTypePolicyPlan,
 };
 pub use variance::{Variance, VarianceAnalyzer, VariancePosition, VarianceTable};
 

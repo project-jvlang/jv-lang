@@ -22,7 +22,7 @@ mod resources;
 mod sample;
 mod strings;
 mod type_system;
-mod utils;
+pub(crate) mod utils;
 mod when_lowering_planner;
 
 use self::utils::boxed_java_type;

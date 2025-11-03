@@ -1,11 +1,11 @@
 use jv_build::metadata::{ConversionCatalog, JavaMethodSignature, SymbolIndex, TypeEntry};
+use jv_checker::InferenceTelemetry;
 use jv_checker::inference::conversions::ConversionHelperCatalog;
 use jv_checker::inference::{
     AppliedConversion, CompatibilityChecker, Constraint, ConstraintKind, ConstraintSet,
     ConstraintSolver, ConversionKind, ConversionOutcome, ConversionRulesEngine,
     NullableGuardReason, PrimitiveType, TypeEnvironment, TypeError, TypeFactory, TypeKind,
 };
-use jv_checker::InferenceTelemetry;
 use jv_ir::types::JavaType;
 use std::sync::Arc;
 

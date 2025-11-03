@@ -1,6 +1,6 @@
 use std::io::Write;
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use jv_parser_frontend::ParserPipeline;
 use jv_parser_rowan::frontend::RowanPipeline;
 
@@ -96,8 +96,7 @@ const LESSONS: [LessonExample; 3] = [
     },
     LessonExample {
         title: "パターンマッチでレスポンスを解析",
-        description:
-            "データクラスと is パターンを組み合わせて成功・失敗レスポンスを安全に分類します。",
+        description: "データクラスと is パターンを組み合わせて成功・失敗レスポンスを安全に分類します。",
         takeaways: &[
             "`is Type` パターンで型ごとの分岐が書ける",
             "ガード条件に追加のブール式（例: `&&`）を組み合わせて詳細な条件を表現できる",
