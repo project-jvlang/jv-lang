@@ -11,21 +11,17 @@ fun showMenu(title: String, items: ArrayList<String>): Unit {
 fun main(): Unit {
     println("Doublebrace 初期化ブロックのデモを開始します。")
 
-    val menu: ArrayList<String> = ArrayList<String>() {{
-        add("季節のスープ")
-        add("ハーブチキン")
-        add("自家製デザート")
-    }}
+    val menu = ["季節のスープ" "ハーブチキン" "自家製デザート"]
 
     println("登録メニュー数: ${menu.size()}")
-    showMenu("登録メニュー", menu)
+    showMenu("登録メニュー" menu)
 
     val seasonalMenu: ArrayList<String> = menu {{
         add("シェフのおすすめ")
     }}
 
     println("更新後メニュー数: ${seasonalMenu.size()}")
-    showMenu("季節メニュー", seasonalMenu)
+    showMenu("季節メニュー" seasonalMenu)
 
     val chefMenu: ArrayList<String> = seasonalMenu {{
         add("山椒香るラムステーキ")
@@ -34,6 +30,25 @@ fun main(): Unit {
     println("シェフ特製メニュー数: ${chefMenu.size()}")
     val highlighted: String = chefMenu.get(chefMenu.size() - 1)
     println("追加メニュー: ${highlighted}")
+
+    val spiceSet : set = ["ローズマリー" "バジル"]
+    println("スパイス候補: ${spiceSet}")
+
+    val seasonalSpiceSet = spiceSet {{
+        add("タイム")
+    }}
+    println("季節のスパイス: ${seasonalSpiceSet}")
+
+    val priceMap : map = {
+        "季節のスープ" : 780,
+        "ハーブチキン" : 1280
+    }
+    println("価格表: ${priceMap}")
+
+    val updatedPriceMap:  = priceMap {{
+        put("山椒香るラムステーキ", 1680)
+    }}
+    println("更新後の価格表: ${updatedPriceMap}")
 
     // 期待される出力例:
     // Doublebrace 初期化ブロックのデモを開始します。
