@@ -5,7 +5,6 @@ use jv_ast::{types::RawTypeContinuation, Span};
 use jv_ir::{
     error::TransformError,
     types::{IrProgram, IrStatement},
-    LoggingMetadata,
 };
 use jv_parser_frontend::{
     Diagnostic as FrontendDiagnostic, DiagnosticSeverity as FrontendSeverity, ParseError,

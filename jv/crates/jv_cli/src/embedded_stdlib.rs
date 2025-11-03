@@ -8,8 +8,7 @@ use anyhow::{anyhow, Result};
 use jv_ast::{
     types::{Kind, Pattern},
     Argument, CallArgumentMetadata, Expression, JsonLiteral, JsonValue, LogBlock, LogItem, Program,
-    Statement,
-    StringPart, Visibility,
+    Statement, StringPart, Visibility,
 };
 use jv_build::{metadata::SymbolIndex, JavaTarget};
 use jv_checker::diagnostics::{
@@ -783,7 +782,7 @@ impl<'a, 'b> ProgramUsageDetector<'a, 'b> {
             | Expression::Literal(_, _)
             | Expression::RegexLiteral(_)
             | Expression::This(_)
-            | Expression::Super(_) => {},
+            | Expression::Super(_) => {}
             Expression::LogBlock(block) => self.visit_log_block(block),
         }
     }
@@ -1600,7 +1599,7 @@ mod tests {
     use super::*;
     use jv_ast::Span;
     use jv_checker::imports::resolution::{ResolvedImport, ResolvedImportKind};
-    use jv_ir::{IrModifiers, IrStatement};
+    use jv_ir::{IrModifiers, IrStatement, LoggingMetadata};
 
     use std::{
         fs,
@@ -1760,6 +1759,7 @@ mod tests {
             type_declarations: vec![class_decl],
             generic_metadata: BTreeMap::new(),
             conversion_metadata: Vec::new(),
+            logging: LoggingMetadata::default(),
             span,
         };
 

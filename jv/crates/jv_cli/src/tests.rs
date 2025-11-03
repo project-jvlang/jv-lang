@@ -13,9 +13,9 @@ use jv_inference::types::{
 };
 use jv_ir::{
     IrExpression, IrModifiers, IrParameter, IrProgram, IrStatement, IrTypeLevelValue,
-    IrTypeParameter, IrVariance, JavaType, PipelineShape, PrimitiveSpecializationHint,
-    SequencePipeline, SequenceSource, SequenceTerminal, SequenceTerminalEvaluation,
-    SequenceTerminalKind,
+    IrTypeParameter, IrVariance, JavaType, LoggingMetadata, PipelineShape,
+    PrimitiveSpecializationHint, SequencePipeline, SequenceSource, SequenceTerminal,
+    SequenceTerminalEvaluation, SequenceTerminalKind,
 };
 use jv_pm::LoggingConfigLayer;
 use std::collections::HashMap;
@@ -209,10 +209,7 @@ fn test_build_command_parsing_with_apt() {
             ..
         }) => {
             assert!(apt, "--apt should enable annotation processing");
-            assert_eq!(
-                processors.as_deref(),
-                Some("org.example.Proc1,Proc2")
-            );
+            assert_eq!(processors.as_deref(), Some("org.example.Proc1,Proc2"));
             assert_eq!(processorpath.as_deref(), Some("libs/anno.jar"));
             assert!(apt_options.iter().any(|o| o.contains("mapstruct")));
             assert!(apt_options.iter().any(|o| o == "flag"));
@@ -238,11 +235,10 @@ fn test_build_plan_applies_apt_overrides() {
         root_path.to_path_buf(),
         manifest_path.clone(),
     );
-    let settings = pipeline::project::manifest::ManifestLoader::load(&manifest_path)
-        .expect("manifest loads");
-    let layout =
-        pipeline::project::layout::ProjectLayout::from_settings(&project_root, &settings)
-            .expect("layout resolves");
+    let settings =
+        pipeline::project::manifest::ManifestLoader::load(&manifest_path).expect("manifest loads");
+    let layout = pipeline::project::layout::ProjectLayout::from_settings(&project_root, &settings)
+        .expect("layout resolves");
 
     let overrides = pipeline::CliOverrides {
         entrypoint: Some(entrypoint.clone()),
@@ -274,7 +270,10 @@ fn test_build_plan_applies_apt_overrides() {
         .expect("compose");
     let apt = &plan.build_config.apt;
     assert!(apt.enabled);
-    assert_eq!(apt.processors, vec!["org.example.Proc1".to_string(), "Proc2".to_string()]);
+    assert_eq!(
+        apt.processors,
+        vec!["org.example.Proc1".to_string(), "Proc2".to_string()]
+    );
     assert_eq!(apt.processorpath, vec!["libs/anno.jar".to_string()]);
     assert!(apt.options.iter().any(|o| o.contains("mapstruct")));
     assert!(apt.options.iter().any(|o| o == "flag"));
@@ -451,7 +450,7 @@ entrypoint = "src/main.jv"
 
 [project.sources]
 include = ["src/**/*.jv"]
-"#",
+"#,
     )
     .expect("write manifest");
 
@@ -774,18 +773,18 @@ include = ["src/**/*.jv"]
             clean: false,
             perf: false,
             emit_types: false,
-        verbose: false,
-        emit_telemetry: false,
-        parallel_inference: false,
-        inference_workers: None,
-        constraint_batch: None,
-        apt_enabled: false,
-        apt_processors: None,
-        apt_processorpath: None,
-        apt_options: Vec::new(),
-        logging_cli: LoggingConfigLayer::default(),
-        logging_env: LoggingConfigLayer::default(),
-    };
+            verbose: false,
+            emit_telemetry: false,
+            parallel_inference: false,
+            inference_workers: None,
+            constraint_batch: None,
+            apt_enabled: false,
+            apt_processors: None,
+            apt_processorpath: None,
+            apt_options: Vec::new(),
+            logging_cli: LoggingConfigLayer::default(),
+            logging_env: LoggingConfigLayer::default(),
+        };
 
         let plan =
             pipeline::BuildOptionsFactory::compose(project_root, settings, layout, overrides)
@@ -878,6 +877,12 @@ include = ["src/**/*.jv"]
             parallel_inference: false,
             inference_workers: None,
             constraint_batch: None,
+            apt_enabled: false,
+            apt_processors: None,
+            apt_processorpath: None,
+            apt_options: Vec::new(),
+            logging_cli: LoggingConfigLayer::default(),
+            logging_env: LoggingConfigLayer::default(),
         };
 
         let plan =
@@ -942,7 +947,7 @@ include = ["src/**/*.jv"]
 [project.output]
 directory = "target"
 clean = false
-"#",
+"#,
     )
     .expect("write manifest");
 
@@ -1280,6 +1285,7 @@ fn apply_type_facts_enriches_class_metadata() {
         }],
         generic_metadata: Default::default(),
         conversion_metadata: Vec::new(),
+        logging: LoggingMetadata::default(),
         span,
     };
 
@@ -1395,6 +1401,7 @@ fn apply_type_facts_records_nested_metadata() {
         }],
         generic_metadata: Default::default(),
         conversion_metadata: Vec::new(),
+        logging: LoggingMetadata::default(),
         span,
     };
 
@@ -1458,6 +1465,7 @@ fn apply_type_facts_records_metadata_without_generics() {
         type_declarations: vec![class],
         generic_metadata: Default::default(),
         conversion_metadata: Vec::new(),
+        logging: LoggingMetadata::default(),
         span,
     };
 
@@ -1572,6 +1580,7 @@ fn apply_type_facts_sets_sequence_specialization_hint() {
         type_declarations: vec![class],
         generic_metadata: Default::default(),
         conversion_metadata: Vec::new(),
+        logging: LoggingMetadata::default(),
         span,
     };
 
@@ -1695,6 +1704,7 @@ fn where_constraints_flow_into_ir_bounds() {
         }],
         generic_metadata: Default::default(),
         conversion_metadata: Vec::new(),
+        logging: LoggingMetadata::default(),
         span: span.clone(),
     };
 

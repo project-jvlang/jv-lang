@@ -230,7 +230,10 @@ fn parse_logging_table(table: &Table) -> Result<LoggingConfig, LoggingManifestEr
     ensure_allowed_keys(table, LOGGING_KEYS, "logging")?;
     validate_logging_items(table)?;
 
-    let value = Value::Table(table.clone());
+    let mut normalized = table.clone();
+    normalize_logging_table(&mut normalized)?;
+
+    let value = Value::Table(normalized);
     let config: LoggingConfig = value
         .try_into()
         .map_err(|err| LoggingManifestError::deserialize(err.to_string()))?;
@@ -248,6 +251,18 @@ fn parse_logging_table(table: &Table) -> Result<LoggingConfig, LoggingManifestEr
     }
 
     Ok(config)
+}
+
+fn normalize_logging_table(table: &mut Table) -> Result<(), LoggingManifestError> {
+    if let Some(Value::Table(otel)) = table.get_mut("opentelemetry") {
+        if let Some(value) = otel.get_mut("resource") {
+            flatten_string_map_value(value, "logging.opentelemetry.resource")?;
+        }
+        if let Some(value) = otel.get_mut("attributes") {
+            flatten_string_map_value(value, "logging.opentelemetry.attributes")?;
+        }
+    }
+    Ok(())
 }
 
 fn validate_logging_items(table: &Table) -> Result<(), LoggingManifestError> {
@@ -380,10 +395,58 @@ fn ensure_allowed_keys(
 
 fn ensure_string_map(table: &Table, field: &'static str) -> Result<(), LoggingManifestError> {
     for (key, value) in table {
-        if !value.is_str() {
-            return Err(LoggingManifestError::invalid_map_value(field, key));
+        match value {
+            Value::String(_) => {}
+            Value::Table(nested) => ensure_string_map(nested, field)?,
+            _ => {
+                return Err(LoggingManifestError::invalid_map_value(field, key));
+            }
         }
     }
+    Ok(())
+}
+
+fn flatten_string_map_value(
+    value: &mut Value,
+    field: &'static str,
+) -> Result<(), LoggingManifestError> {
+    let table = value
+        .as_table()
+        .ok_or_else(|| LoggingManifestError::invalid_type(field, "テーブル"))?
+        .clone();
+
+    let mut flattened = Table::new();
+    flatten_string_map_recursive(&table, "", &mut flattened, field)?;
+    *value = Value::Table(flattened);
+    Ok(())
+}
+
+fn flatten_string_map_recursive(
+    table: &Table,
+    prefix: &str,
+    out: &mut Table,
+    field: &'static str,
+) -> Result<(), LoggingManifestError> {
+    for (key, value) in table {
+        let full_key = if prefix.is_empty() {
+            key.clone()
+        } else {
+            format!("{prefix}.{key}")
+        };
+
+        match value {
+            Value::String(s) => {
+                out.insert(full_key, Value::String(s.clone()));
+            }
+            Value::Table(nested) => {
+                flatten_string_map_recursive(nested, &full_key, out, field)?;
+            }
+            _ => {
+                return Err(LoggingManifestError::invalid_map_value(field, full_key));
+            }
+        }
+    }
+
     Ok(())
 }
 
