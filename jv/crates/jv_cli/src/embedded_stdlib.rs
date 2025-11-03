@@ -7,7 +7,8 @@ use std::sync::{Arc, OnceLock};
 use anyhow::{anyhow, Result};
 use jv_ast::{
     types::{Kind, Pattern},
-    Argument, CallArgumentMetadata, Expression, JsonLiteral, JsonValue, Program, Statement,
+    Argument, CallArgumentMetadata, Expression, JsonLiteral, JsonValue, LogBlock, LogItem, Program,
+    Statement,
     StringPart, Visibility,
 };
 use jv_build::{metadata::SymbolIndex, JavaTarget};
@@ -386,6 +387,17 @@ fn rewrite_expression(expression: &mut Expression) {
                 rewrite_expression(finally_block.as_mut());
             }
         }
+        Expression::LogBlock(block) => rewrite_log_block(block),
+    }
+}
+
+fn rewrite_log_block(block: &mut LogBlock) {
+    for item in &mut block.items {
+        match item {
+            LogItem::Statement(statement) => rewrite_statement(statement),
+            LogItem::Expression(expr) => rewrite_expression(expr),
+            LogItem::Nested(nested) => rewrite_log_block(nested),
+        }
     }
 }
 
@@ -627,6 +639,16 @@ impl<'a, 'b> ProgramUsageDetector<'a, 'b> {
         }
     }
 
+    fn visit_log_block(&mut self, block: &LogBlock) {
+        for item in &block.items {
+            match item {
+                LogItem::Statement(statement) => self.visit_statement(statement),
+                LogItem::Expression(expr) => self.visit_expression(expr),
+                LogItem::Nested(nested) => self.visit_log_block(nested),
+            }
+        }
+    }
+
     fn visit_argument(&mut self, argument: &Argument) {
         match argument {
             Argument::Positional(expr) => self.visit_expression(expr),
@@ -761,7 +783,8 @@ impl<'a, 'b> ProgramUsageDetector<'a, 'b> {
             | Expression::Literal(_, _)
             | Expression::RegexLiteral(_)
             | Expression::This(_)
-            | Expression::Super(_) => {}
+            | Expression::Super(_) => {},
+            Expression::LogBlock(block) => self.visit_log_block(block),
         }
     }
 }

@@ -1,6 +1,6 @@
 use jv_ast::{
-    Argument, Expression, JsonLiteral, JsonValue, Parameter, Pattern, Program, SequenceDelimiter,
-    Span, Statement,
+    Argument, Expression, JsonLiteral, JsonValue, LogBlock, LogItem, Parameter, Pattern, Program,
+    SequenceDelimiter, Span, Statement,
 };
 
 pub fn collect_sequence_warnings(program: &Program) -> Vec<String> {
@@ -136,6 +136,16 @@ impl SequenceWarningCollector {
                 self.visit_expression(body);
             }
             jv_ast::ResourceManagement::Defer { body, .. } => self.visit_expression(body),
+        }
+    }
+
+    fn visit_log_block(&mut self, block: &LogBlock) {
+        for item in &block.items {
+            match item {
+                LogItem::Statement(statement) => self.visit_statement(statement),
+                LogItem::Expression(expr) => self.visit_expression(expr),
+                LogItem::Nested(nested) => self.visit_log_block(nested),
+            }
         }
     }
 
@@ -283,6 +293,7 @@ impl SequenceWarningCollector {
                     self.visit_expression(finally);
                 }
             }
+            Expression::LogBlock(block) => self.visit_log_block(block),
         }
     }
 

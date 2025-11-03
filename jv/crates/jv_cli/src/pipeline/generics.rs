@@ -6,8 +6,8 @@ use jv_inference::solver::Variance;
 use jv_inference::types::{BoundPredicate, GenericBounds, SymbolId, TypeId, TypeKind, TypeVariant};
 use jv_ir::{
     GenericMetadataMap, IrExpression, IrGenericMetadata, IrModifiers, IrProgram, IrStatement,
-    IrTypeLevelValue, IrTypeParameter, IrVariance, JavaType, PrimitiveSpecializationHint,
-    SequencePipeline, SequenceSource, SequenceStage,
+    IrTypeLevelValue, IrTypeParameter, IrVariance, JavaType, LogInvocationItem, LogInvocationPlan,
+    PrimitiveSpecializationHint, SequencePipeline, SequenceSource, SequenceStage,
 };
 
 /// Enriches the generated IR program with generic metadata sourced from type inference facts.
@@ -523,7 +523,20 @@ fn apply_hint_to_expression(expr: &mut IrExpression, hint: &PrimitiveSpecializat
         | IrExpression::Literal(..)
         | IrExpression::Identifier { .. }
         | IrExpression::This { .. }
-        | IrExpression::Super { .. } => {}
+        | IrExpression::Super { .. } => {},
+        IrExpression::LogInvocation { plan, .. } => apply_hint_to_log_plan(plan.as_mut(), hint),
+    }
+}
+
+fn apply_hint_to_log_plan(plan: &mut LogInvocationPlan, hint: &PrimitiveSpecializationHint) {
+    for item in plan.items.iter_mut() {
+        match item {
+            LogInvocationItem::Statement(statement) => apply_hint_to_statement(statement, hint),
+            LogInvocationItem::Message(message) => {
+                apply_hint_to_expression(&mut message.expression, hint)
+            }
+            LogInvocationItem::Nested(nested) => apply_hint_to_log_plan(nested.as_mut(), hint),
+        }
     }
 }
 
