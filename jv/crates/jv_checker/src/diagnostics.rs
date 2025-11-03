@@ -324,6 +324,12 @@ const DIAGNOSTICS: &[DiagnosticDescriptor] = &[
         severity: DiagnosticSeverity::Error,
     },
     DiagnosticDescriptor {
+        code: "JV_REGEX_E204",
+        title: "正規表現リテラルに許可されない文字が含まれています / Regex literal contains a disallowed character",
+        help: "制御文字や水平方向タブなどは正規表現リテラルから削除するか適切にエスケープしてください。参照: https://docs.oracle.com/en/java/javase/25/docs/api/java.base/java/util/regex/Pattern.html / Remove control characters such as horizontal tabs from the regex literal or escape them appropriately. Reference: https://docs.oracle.com/en/java/javase/25/docs/api/java.base/java/util/regex/Pattern.html",
+        severity: DiagnosticSeverity::Error,
+    },
+    DiagnosticDescriptor {
         code: "JV_REGEX_W301",
         title: "Java互換性が不確かな正規表現です / Regex may not behave identically on Java",
         help: "パターンを Java の `Pattern.compile` で検証し、互換性の高い構文へ書き換えてください。参照: https://docs.oracle.com/en/java/javase/25/docs/api/java.base/java/util/regex/Pattern.html / Validate the pattern with Java `Pattern.compile` or rewrite it using portable constructs. Reference: https://docs.oracle.com/en/java/javase/25/docs/api/java.base/java/util/regex/Pattern.html",
@@ -498,15 +504,41 @@ pub fn from_parse_error(error: &ParseError) -> Option<EnhancedDiagnostic> {
 }
 
 fn lex_error_to_diagnostic(error: &LexError) -> Option<EnhancedDiagnostic> {
+    fn span_from(line: usize, column: usize) -> Span {
+        Span::new(line, column, line, column.saturating_add(1))
+    }
+
     match error {
         LexError::UnterminatedRawString { line, column } => {
             let descriptor = lookup("JV4300")?;
-            let message = format!(
-                "JV4300: 生文字列リテラルが閉じられていません（{}行{}列）。' または ''' で閉じてください。\nJV4300: Raw string literal is unterminated at line {}, column {}. Add the matching closing quote sequence.",
-                line, column, line, column
-            );
-            let span = Span::new(*line, *column, *line, column.saturating_add(1));
-            Some(EnhancedDiagnostic::new(descriptor, message, Some(span)))
+            let message = messages::raw_string_unterminated_message(*line, *column);
+            Some(EnhancedDiagnostic::new(
+                descriptor,
+                message,
+                Some(span_from(*line, *column)),
+            ))
+        }
+        LexError::UnterminatedRegex { line, column } => {
+            let descriptor = lookup("JV_REGEX_E201")?;
+            let message = messages::regex_unterminated_literal_message();
+            Some(EnhancedDiagnostic::new(
+                descriptor,
+                message,
+                Some(span_from(*line, *column)),
+            ))
+        }
+        LexError::InvalidRegexCharacter {
+            character,
+            line,
+            column,
+        } => {
+            let descriptor = lookup("JV_REGEX_E204")?;
+            let message = messages::regex_invalid_character_message(*character);
+            Some(EnhancedDiagnostic::new(
+                descriptor,
+                message,
+                Some(span_from(*line, *column)),
+            ))
         }
         _ => None,
     }
@@ -809,11 +841,16 @@ fn build_raw_type_diagnostic(
 
 #[cfg(test)]
 mod tests {
-    use super::{DiagnosticSeverity, collect_raw_type_diagnostics, extract_tooling_metadata};
+    use super::{
+        DiagnosticSeverity, collect_raw_type_diagnostics, extract_tooling_metadata,
+        lex_error_to_diagnostic,
+    };
+    use crate::diagnostics::messages;
     use jv_ast::{Literal, Span};
     use jv_ir::types::{
         IrCommentKind, IrExpression, IrModifiers, IrProgram, IrStatement, JavaType,
     };
+    use jv_lexer::LexError;
 
     #[test]
     fn extract_metadata_captures_quick_fix_and_learning_hint() {
@@ -891,6 +928,44 @@ mod tests {
         let diagnostic = &diagnostics[0];
         assert_eq!(diagnostic.code, "JV3203");
         assert_eq!(diagnostic.severity, DiagnosticSeverity::Information);
+    }
+
+    #[test]
+    fn lex_error_for_unterminated_regex_includes_span() {
+        let diagnostic =
+            lex_error_to_diagnostic(&LexError::UnterminatedRegex { line: 4, column: 7 })
+                .expect("diagnostic expected");
+        assert_eq!(diagnostic.code, "JV_REGEX_E201");
+        let span = diagnostic
+            .span
+            .expect("Span should be present for LexError diagnostics");
+        assert_eq!(span.start_line, 4);
+        assert_eq!(span.start_column, 7);
+        assert_eq!(span.end_line, 4);
+        assert_eq!(span.end_column, 8);
+        assert!(
+            diagnostic.message.contains(messages::JAVA_REGEX_DOC_URL),
+            "message should reference Java regex documentation"
+        );
+    }
+
+    #[test]
+    fn lex_error_for_invalid_character_uses_bilingual_message() {
+        let diagnostic = lex_error_to_diagnostic(&LexError::InvalidRegexCharacter {
+            character: '\t',
+            line: 2,
+            column: 3,
+        })
+        .expect("diagnostic expected");
+        assert_eq!(diagnostic.code, "JV_REGEX_E204");
+        assert!(
+            diagnostic
+                .message
+                .contains("Regex literal contains a disallowed character")
+        );
+        let span = diagnostic.span.expect("Span should be present");
+        assert_eq!(span.start_line, 2);
+        assert_eq!(span.start_column, 3);
     }
 }
 

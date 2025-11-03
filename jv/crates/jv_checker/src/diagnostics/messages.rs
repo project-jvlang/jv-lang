@@ -47,6 +47,21 @@ fn regex_message(code: &str, ja: impl Into<String>, en: impl Into<String>) -> St
     bilingual_message(code, ja, en)
 }
 
+/// 生文字列リテラルが未終端の場合のエラーメッセージ。
+pub fn raw_string_unterminated_message(line: usize, column: usize) -> String {
+    bilingual_message(
+        "JV4300",
+        format!(
+            "生文字列リテラルが閉じられていません（{}行{}列）。' または ''' で閉じてください。参考: docs/language/raw-strings.md",
+            line, column
+        ),
+        format!(
+            "Raw string literal is unterminated at line {}, column {}. Close it with ' or '''. See: docs/language/raw-strings.md",
+            line, column
+        ),
+    )
+}
+
 /// Optional 左辺に対する正規表現 `is` 警告メッセージ。
 pub fn regex_optional_warning_message() -> String {
     regex_message(
@@ -211,6 +226,20 @@ pub fn regex_invalid_escape_sequence_message(sequence: &str) -> String {
         ),
         format!(
             "Unsupported escape sequence `{sequence}` detected. Use a Java-compatible escape such as `\\n`, `\\t`, or `\\\\`."
+        ),
+    )
+}
+
+/// 無効な文字が含まれる場合のエラーメッセージ。
+pub fn regex_invalid_character_message(character: char) -> String {
+    let display = character.escape_default().collect::<String>();
+    regex_message(
+        "JV_REGEX_E204",
+        format!(
+            "正規表現リテラルに許可されていない文字 `{display}` が含まれています。制御文字は削除するか適切にエスケープしてください。"
+        ),
+        format!(
+            "Regex literal contains a disallowed character `{display}`. Remove control characters or escape it appropriately."
         ),
     )
 }
