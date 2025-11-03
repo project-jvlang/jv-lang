@@ -389,6 +389,7 @@ mod tests {
             span: span.clone(),
             origin: Some(PatternOrigin::literal(span.clone())),
             const_key: None,
+            template_segments: Vec::new(),
         };
 
         let metadata = BinaryMetadata {
@@ -446,6 +447,7 @@ mod tests {
             span: span.clone(),
             origin: Some(PatternOrigin::literal(span.clone())),
             const_key: None,
+            template_segments: Vec::new(),
         };
 
         let metadata = BinaryMetadata {
@@ -496,6 +498,7 @@ mod tests {
                 span: span.clone(),
                 origin: Some(PatternOrigin::command(span.clone())),
                 const_key: None,
+                template_segments: Vec::new(),
             },
             pattern_expr: None,
             replacement: Some(RegexReplacement::Literal(RegexLiteralReplacement {
@@ -606,6 +609,7 @@ mod tests {
                 span: span.clone(),
                 origin: Some(PatternOrigin::command(span.clone())),
                 const_key: None,
+                template_segments: Vec::new(),
             },
             pattern_expr: None,
             replacement: None,
@@ -668,6 +672,7 @@ mod tests {
                 span: span.clone(),
                 origin: Some(PatternOrigin::command(span.clone())),
                 const_key: None,
+                template_segments: Vec::new(),
             },
             pattern_expr: None,
             replacement: Some(RegexReplacement::Literal(RegexLiteralReplacement {
@@ -725,6 +730,7 @@ mod tests {
                 span: span.clone(),
                 origin: Some(PatternOrigin::command(span.clone())),
                 const_key: None,
+                template_segments: Vec::new(),
             },
             pattern_expr: None,
             replacement: None,
@@ -780,6 +786,7 @@ mod tests {
                 span: span.clone(),
                 origin: Some(PatternOrigin::command(span.clone())),
                 const_key: None,
+                template_segments: Vec::new(),
             },
             pattern_expr: None,
             replacement: None,
@@ -834,6 +841,7 @@ mod tests {
                 span: span.clone(),
                 origin: Some(PatternOrigin::command(span.clone())),
                 const_key: None,
+                template_segments: Vec::new(),
             },
             pattern_expr: None,
             replacement: None,
@@ -1208,6 +1216,7 @@ mod tests {
             span: span.clone(),
             origin: Some(PatternOrigin::literal(span.clone())),
             const_key: None,
+            template_segments: Vec::new(),
         };
         let mut context = TransformContext::new();
         let ir_expr = transform_expression(
