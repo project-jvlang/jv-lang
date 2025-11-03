@@ -34,19 +34,21 @@
             if [ -x "$installer" ]; then
               "$installer" "$repo_root"
             else
-              echo "[devShell] Missing $installer; JDK toolchains not installed" >&2
+              echo "[devShell] Missing $installer; JDK/Maven toolchains not installed" >&2
             fi
 
             export JAVA21_HOME="$repo_root/toolchains/jdk21"
             export JAVA25_HOME="$repo_root/toolchains/jdk25"
-            export PATH="$JAVA25_HOME/bin:$JAVA21_HOME/bin:$PATH"
+            export MAVEN_HOME="$repo_root/toolchains/maven"
+            export PATH="$MAVEN_HOME/bin:$JAVA25_HOME/bin:$JAVA21_HOME/bin:$PATH"
 
             cat <<'INSTRUCTIONS'
-JDK setup:
-  * toolchains/jdk21 and toolchains/jdk25 are auto-synced when entering nix develop.
+JDK/Maven setup:
+  * toolchains/jdk21, toolchains/jdk25, and toolchains/maven are auto-synced when entering nix develop.
   * Default PATH prefers Java 25, override per-run via:
       JAVA_HOME=$JAVA25_HOME cargo test        # Java 25 compliance
       JAVA_HOME=$JAVA21_HOME cargo test        # Java 21 compatibility
+  * Maven 3.9.x is available via $MAVEN_HOME (mvn on PATH).
   * Delete toolchains/ to force a re-download on next shell entry.
 INSTRUCTIONS
           '';
