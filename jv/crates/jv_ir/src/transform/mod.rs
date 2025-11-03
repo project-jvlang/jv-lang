@@ -9,6 +9,7 @@ use crate::types::{
     DoublebraceMethodInvocation, IrCommentKind, IrDoublebraceCopyPlan, IrDoublebraceFieldUpdate,
     IrDoublebraceMethodInvocation, IrDoublebraceMutatePlan, IrDoublebraceMutation,
     IrDoublebracePlan, IrExpression, IrImport, IrImportDetail, IrProgram, IrStatement, JavaType,
+    JavaWildcardKind,
 };
 use jv_ast::{
     Argument, BinaryOp, BindingPatternKind, CallArgumentMetadata, CallArgumentStyle, CallKind,
@@ -1005,18 +1006,15 @@ fn lower_method_invocation(
 }
 
 fn java_type_from_fqcn(fqcn: &str) -> JavaType {
-    JavaType::Reference {
-        name: fqcn.to_string(),
-        generic_args: Vec::new(),
-    }
+    parse_java_type(fqcn.trim())
 }
 
 fn synthesize_receiver_instance(receiver_type: &JavaType, span: &Span) -> IrExpression {
     match receiver_type {
         JavaType::Reference { name, generic_args } => {
-            let class_name = name.rsplit('.').next().unwrap_or(name).to_string();
+            let instantiation = preferred_doublebrace_instantiation(name).unwrap_or(name);
             IrExpression::ObjectCreation {
-                class_name,
+                class_name: instantiation.to_string(),
                 generic_args: generic_args.clone(),
                 args: Vec::new(),
                 java_type: receiver_type.clone(),
@@ -1025,6 +1023,158 @@ fn synthesize_receiver_instance(receiver_type: &JavaType, span: &Span) -> IrExpr
         }
         _ => IrExpression::Literal(Literal::Null, span.clone()),
     }
+}
+
+fn preferred_doublebrace_instantiation(name: &str) -> Option<&'static str> {
+    let simple = name.rsplit('.').next().unwrap_or(name);
+    match simple {
+        "Iterable" | "Collection" | "List" => Some("java.util.ArrayList"),
+        "Set" => Some("java.util.LinkedHashSet"),
+        "SortedSet" | "NavigableSet" => Some("java.util.TreeSet"),
+        "Queue" | "Deque" => Some("java.util.ArrayDeque"),
+        "Map" => Some("java.util.LinkedHashMap"),
+        "SortedMap" | "NavigableMap" => Some("java.util.TreeMap"),
+        _ => None,
+    }
+}
+
+fn parse_java_type(spec: &str) -> JavaType {
+    let mut base = spec.trim().to_string();
+    if base.is_empty() {
+        return JavaType::object();
+    }
+
+    let mut dimensions = 0;
+    while base.ends_with("[]") {
+        dimensions += 1;
+        base.truncate(base.len().saturating_sub(2));
+        base = base.trim_end().to_string();
+    }
+
+    let core = if dimensions > 0 { base.trim() } else { &base };
+    let mut ty = parse_non_array_type(core);
+
+    if dimensions > 0 {
+        ty = JavaType::Array {
+            element_type: Box::new(ty),
+            dimensions,
+        };
+    }
+
+    ty
+}
+
+fn parse_non_array_type(spec: &str) -> JavaType {
+    let trimmed = spec.trim();
+    if trimmed.is_empty() {
+        return JavaType::object();
+    }
+
+    if trimmed == "void" {
+        return JavaType::Void;
+    }
+
+    if trimmed.starts_with('?') {
+        return parse_wildcard_type(trimmed);
+    }
+
+    if let Some(start) = trimmed.find('<') {
+        let base = trimmed[..start].trim();
+        let args_section = trimmed[start + 1..]
+            .rsplit_once('>')
+            .map(|(inner, _)| inner)
+            .unwrap_or_default();
+        let args = split_generic_arguments(args_section);
+        let parsed_args = args
+            .into_iter()
+            .map(parse_java_type)
+            .collect::<Vec<_>>();
+        return JavaType::Reference {
+            name: base.to_string(),
+            generic_args: parsed_args,
+        };
+    }
+
+    if is_primitive_name(trimmed) {
+        return JavaType::Primitive(trimmed.to_string());
+    }
+
+    JavaType::Reference {
+        name: trimmed.to_string(),
+        generic_args: Vec::new(),
+    }
+}
+
+fn parse_wildcard_type(spec: &str) -> JavaType {
+    let remainder = spec.trim_start_matches('?').trim();
+    if remainder.is_empty() {
+        return JavaType::Wildcard {
+            kind: JavaWildcardKind::Unbounded,
+            bound: None,
+        };
+    }
+
+    if let Some(rest) = remainder.strip_prefix("extends") {
+        let bound = parse_java_type(rest);
+        return JavaType::Wildcard {
+            kind: JavaWildcardKind::Extends,
+            bound: Some(Box::new(bound)),
+        };
+    }
+
+    if let Some(rest) = remainder.strip_prefix("super") {
+        let bound = parse_java_type(rest);
+        return JavaType::Wildcard {
+            kind: JavaWildcardKind::Super,
+            bound: Some(Box::new(bound)),
+        };
+    }
+
+    JavaType::Wildcard {
+        kind: JavaWildcardKind::Unbounded,
+        bound: None,
+    }
+}
+
+fn split_generic_arguments(spec: &str) -> Vec<&str> {
+    let mut args = Vec::new();
+    let mut depth = 0;
+    let mut last = 0;
+
+    for (idx, ch) in spec.char_indices() {
+        match ch {
+            '<' => depth += 1,
+            '>' => {
+                if depth > 0 {
+                    depth -= 1;
+                }
+            }
+            ',' if depth == 0 => {
+                let part = spec[last..idx].trim();
+                if !part.is_empty() {
+                    args.push(part);
+                }
+                last = idx + ch.len_utf8();
+            }
+            _ => {}
+        }
+    }
+
+    if last < spec.len() {
+        let part = spec[last..].trim();
+        if !part.is_empty() {
+            args.push(part);
+        }
+    }
+
+    args
+}
+
+fn is_primitive_name(name: &str) -> bool {
+    matches!(
+        name,
+        "boolean" | "byte" | "short" | "int" | "long" | "float" | "double" | "char"
+    )
 }
 
 fn lower_call_expression(

@@ -1,4 +1,5 @@
 use super::*;
+use jv_build::metadata::JavaMethodSignature;
 use jv_ir::{
     IrDoublebraceCopyPlan, IrDoublebraceMutatePlan, IrDoublebraceMutation, IrDoublebracePlan,
 };
@@ -164,13 +165,19 @@ impl JavaCodeGenerator {
         match receiver_type {
             JavaType::Reference { name, .. } => {
                 if let Some(index) = self.symbol_index() {
-                    index
-                        .lookup_type(name)
-                        .filter(|entry| entry.has_instance_method(&method_name))
-                        .map(|_| method_name)
-                } else {
-                    Some(method_name)
+                    let base_name = strip_type_arguments(name);
+                    if let Some(entry) = index.lookup_type(base_name) {
+                        if let Some(signature) = entry.instance_methods.get(&method_name) {
+                            if returns_same_type(signature, base_name) {
+                                return Some(method_name);
+                            } else {
+                                return None;
+                            }
+                        }
+                        return None;
+                    }
                 }
+                Some(method_name)
             }
             _ => None,
         }
@@ -196,4 +203,27 @@ fn to_pascal_case(value: &str) -> String {
     } else {
         result
     }
+}
+
+fn strip_type_arguments(name: &str) -> &str {
+    name.split('<').next().unwrap_or(name).trim()
+}
+
+fn returns_same_type(signature: &JavaMethodSignature, expected: &str) -> bool {
+    match &signature.return_type {
+        JavaType::Reference { name, .. } => type_name_matches(name, expected),
+        _ => false,
+    }
+}
+
+fn type_name_matches(actual: &str, expected: &str) -> bool {
+    let actual_base = strip_type_arguments(actual);
+    let expected_base = strip_type_arguments(expected);
+    if actual_base == expected_base {
+        return true;
+    }
+
+    let actual_simple = actual_base.rsplit('.').next().unwrap_or(actual_base);
+    let expected_simple = expected_base.rsplit('.').next().unwrap_or(expected_base);
+    actual_simple == expected_simple
 }

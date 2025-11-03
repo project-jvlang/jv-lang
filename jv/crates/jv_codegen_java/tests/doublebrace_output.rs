@@ -1,10 +1,12 @@
 use jv_ast::{CallArgumentMetadata, CallArgumentStyle, Literal, Span};
-use jv_codegen_java::{JavaCodeGenConfig, JavaCodeGenerator, JavaTarget};
+use jv_build::metadata::{JavaMethodSignature, SymbolIndex, TypeEntry};
+use jv_codegen_java::{CodeGenError, JavaCodeGenConfig, JavaCodeGenerator, JavaTarget};
 use jv_ir::{
     DoublebraceBaseStrategy, DoublebraceCopySourceStrategy, IrDoublebraceCopyPlan,
     IrDoublebraceFieldUpdate, IrDoublebraceMethodInvocation, IrDoublebraceMutatePlan,
     IrDoublebraceMutation, IrDoublebracePlan, IrExpression, JavaType,
 };
+use std::sync::Arc;
 
 fn span() -> Span {
     Span::dummy()
@@ -139,6 +141,85 @@ fn doublebrace_copy_generates_chain_for_multiple_updates() {
 
     assert_eq!(render(&expr, JavaTarget::Java25), expected);
     assert_eq!(render(&expr, JavaTarget::Java21), expected);
+}
+
+#[test]
+fn doublebrace_copy_resolves_with_method_with_symbol_index() {
+    let expr = copy_expression();
+    let expected = "((java.util.function.Supplier<com.example.ImmutableUser>) () -> {\n    com.example.ImmutableUser __db_base0 = user;\n    com.example.ImmutableUser __db_copy1 = __db_base0;\n    __db_copy1 = __db_copy1.withName(\"Alice\");\n    \n    return __db_copy1;\n}).get()";
+
+    let mut generator =
+        JavaCodeGenerator::with_config(JavaCodeGenConfig::for_target(JavaTarget::Java25));
+
+    let mut index = SymbolIndex::new(Some(25));
+    let mut entry = TypeEntry::new(
+        "com.example.ImmutableUser".into(),
+        "com.example".into(),
+        None,
+    );
+    entry.add_instance_method(
+        "withName".into(),
+        JavaMethodSignature {
+            parameters: vec![JavaType::Reference {
+                name: "java.lang.String".into(),
+                generic_args: Vec::new(),
+            }],
+            return_type: JavaType::Reference {
+                name: "com.example.ImmutableUser".into(),
+                generic_args: Vec::new(),
+            },
+        },
+    );
+    index.add_type(entry);
+    generator.set_symbol_index(Some(Arc::new(index)));
+
+    let output = generator
+        .generate_expression(&expr)
+        .expect("SymbolIndex を利用した with* 解決に成功するはずです");
+    assert_eq!(output, expected);
+}
+
+#[test]
+fn doublebrace_copy_errors_when_with_method_returns_other_type() {
+    let expr = copy_expression();
+    let mut generator =
+        JavaCodeGenerator::with_config(JavaCodeGenConfig::for_target(JavaTarget::Java25));
+
+    let mut index = SymbolIndex::new(Some(25));
+    let mut entry = TypeEntry::new(
+        "com.example.ImmutableUser".into(),
+        "com.example".into(),
+        None,
+    );
+    entry.add_instance_method(
+        "withName".into(),
+        JavaMethodSignature {
+            parameters: vec![JavaType::Reference {
+                name: "java.lang.String".into(),
+                generic_args: Vec::new(),
+            }],
+            return_type: JavaType::Reference {
+                name: "com.example.ImmutableUserBuilder".into(),
+                generic_args: Vec::new(),
+            },
+        },
+    );
+    index.add_type(entry);
+    generator.set_symbol_index(Some(Arc::new(index)));
+
+    let err = generator
+        .generate_expression(&expr)
+        .expect_err("異なる戻り値型ではエラーになるはずです");
+    match err {
+        CodeGenError::UnsupportedConstruct { construct, .. } => {
+            assert!(
+                construct.contains("with* メソッドが見つかりません"),
+                "戻り値が一致しない場合は UnsupportedConstruct が返ること: {}",
+                construct
+            );
+        }
+        other => panic!("UnsupportedConstruct が必要ですが {:?}", other),
+    }
 }
 
 #[test]

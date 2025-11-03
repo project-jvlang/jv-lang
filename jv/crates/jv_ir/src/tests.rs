@@ -20,8 +20,7 @@ mod tests {
         transform_program_with_context_profiled, transform_statement,
         DoublebraceBaseStrategy, DoublebraceCopySourceStrategy, DoublebraceLoweringCopyPlan,
         DoublebraceLoweringKind, DoublebraceLoweringMutatePlan, DoublebraceLoweringPlan,
-        DoublebraceLoweringStep, DoublebraceFieldUpdate as IrFieldUpdate,
-        DoublebraceMethodInvocation as IrMethodInvocation,
+        DoublebraceLoweringStep, DoublebraceFieldUpdate, DoublebraceMethodInvocation,
     };
     use jv_ast::*;
     use jv_parser_frontend::ParserPipeline;
@@ -32,6 +31,7 @@ mod tests {
     use jv_checker::TypeChecker;
     use sha2::{Digest, Sha256};
     use std::fs;
+    use std::collections::HashMap;
     use std::path::{Path, PathBuf};
     use std::time::Duration;
     use tempfile::tempdir;
@@ -6266,3 +6266,82 @@ fun sample(value: Any): Int {
             panic!("examples failed to lower:\n{details}");
         }
     }
+
+    fn convert_doublebrace_plans(
+        plans: &HashMap<String, DoublebracePlan>,
+    ) -> HashMap<String, DoublebraceLoweringPlan> {
+        plans
+            .iter()
+            .map(|(key, plan)| (key.clone(), lower_doublebrace_plan(plan)))
+            .collect()
+    }
+
+    fn lower_doublebrace_plan(plan: &DoublebracePlan) -> DoublebraceLoweringPlan {
+        match plan {
+            DoublebracePlan::Mutate(mutate) => DoublebraceLoweringPlan {
+                receiver_fqcn: mutate.receiver.describe(),
+                kind: DoublebraceLoweringKind::Mutate(DoublebraceLoweringMutatePlan {
+                    base: match mutate.base {
+                        PlanBase::ExistingInstance => DoublebraceBaseStrategy::ExistingInstance,
+                        PlanBase::SynthesizedInstance => {
+                            DoublebraceBaseStrategy::SynthesizedInstance
+                        }
+                    },
+                    steps: mutate
+                        .steps
+                        .iter()
+                        .map(lower_mutation_step)
+                        .collect(),
+                }),
+            },
+            DoublebracePlan::Copy(copy) => DoublebraceLoweringPlan {
+                receiver_fqcn: copy.receiver.describe(),
+                kind: DoublebraceLoweringKind::Copy(DoublebraceLoweringCopyPlan {
+                    source: match copy.source {
+                        CopySource::ExistingInstance => {
+                            DoublebraceCopySourceStrategy::ExistingInstance
+                        }
+                        CopySource::SynthesizedInstance => {
+                            DoublebraceCopySourceStrategy::SynthesizedInstance
+                        }
+                    },
+                    updates: copy
+                        .updates
+                        .iter()
+                        .map(lower_field_update)
+                        .collect(),
+                }),
+            },
+        }
+    }
+
+    fn lower_mutation_step(step: &MutationStep) -> DoublebraceLoweringStep {
+        match step {
+            MutationStep::FieldAssignment(update) => {
+                DoublebraceLoweringStep::FieldAssignment(lower_field_update(update))
+            }
+            MutationStep::MethodCall(call) => {
+                DoublebraceLoweringStep::MethodCall(lower_method_invocation(call))
+            }
+            MutationStep::Other(statement) => DoublebraceLoweringStep::Other(statement.clone()),
+        }
+    }
+
+    fn lower_field_update(update: &FieldUpdate) -> DoublebraceFieldUpdate {
+        DoublebraceFieldUpdate {
+            name: update.name.clone(),
+            value: update.value.clone(),
+            span: update.span.clone(),
+        }
+    }
+
+    fn lower_method_invocation(call: &MethodInvocation) -> DoublebraceMethodInvocation {
+        DoublebraceMethodInvocation {
+            name: call.name.clone(),
+            arguments: call.arguments.clone(),
+            metadata: call.metadata.clone(),
+            span: call.span.clone(),
+        }
+    }
+
+}

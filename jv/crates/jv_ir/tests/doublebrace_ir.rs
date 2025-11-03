@@ -180,14 +180,33 @@ fn ダブルブレース_IRはジェネリック受信型を保持する() {
         .expect("Doublebrace のジェネリック変換が成功するはずです");
 
     match ir {
-        IrExpression::DoublebraceInit { receiver_type, .. } => match receiver_type {
-            JavaType::Reference { name, generic_args } => {
-                if generic_args.is_empty() {
-                    assert!(
-                        name.contains("<java.lang.String>"),
-                        "受信型 `{name}` にジェネリック情報が含まれること"
+        IrExpression::DoublebraceInit {
+            base,
+            receiver_type,
+            ..
+        } => {
+            let base_expr = base.expect("Synthesized インスタンスが生成されるはずです");
+            match *base_expr {
+                IrExpression::ObjectCreation {
+                    ref class_name,
+                    ref generic_args,
+                    ..
+                } => {
+                    assert_eq!(
+                        class_name, "java.util.ArrayList",
+                        "既定の具象クラスが使用されること"
                     );
-                } else {
+                    assert_eq!(
+                        generic_args.len(),
+                        1,
+                        "生成時にもジェネリック引数が保持されること"
+                    );
+                }
+                other => panic!("ObjectCreation が必要ですが {:?}", other),
+            }
+
+            match receiver_type {
+                JavaType::Reference { name, generic_args } => {
                     assert_eq!(name, "java.util.ArrayList");
                     assert_eq!(
                         generic_args.len(),
@@ -201,9 +220,60 @@ fn ダブルブレース_IRはジェネリック受信型を保持する() {
                         other => panic!("ジェネリックは参照型であるべきですが {:?}", other),
                     }
                 }
+                other => panic!("参照型が必要ですが {:?}", other),
             }
-            other => panic!("参照型が必要ですが {:?}", other),
-        },
+        }
+        other => panic!("DoublebraceInit が生成されるべきですが {:?}", other),
+    }
+}
+
+#[test]
+fn ダブルブレース_標準インタフェースにはデフォルト具象を使用する() {
+    let span = ダミーのスパン();
+    let init = DoublebraceInit {
+        base: None,
+        receiver_hint: None,
+        statements: Vec::new(),
+        span: span.clone(),
+    };
+
+    let plan = DoublebraceLoweringPlan {
+        receiver_fqcn: "java.util.Map<java.lang.String, java.lang.Integer>".into(),
+        kind: DoublebraceLoweringKind::Mutate(DoublebraceLoweringMutatePlan {
+            base: DoublebraceBaseStrategy::SynthesizedInstance,
+            steps: Vec::new(),
+        }),
+    };
+
+    let mut context = TransformContext::new();
+    context.insert_doublebrace_plan(&span, plan);
+
+    let expression = Expression::DoublebraceInit(init);
+    let ir = transform_expression(expression, &mut context)
+        .expect("Doublebrace のデフォルト具象生成が成功するはずです");
+
+    match ir {
+        IrExpression::DoublebraceInit { base, .. } => {
+            let base_expr = base.expect("Synthesized インスタンスが必要です");
+            match *base_expr {
+                IrExpression::ObjectCreation {
+                    ref class_name,
+                    ref generic_args,
+                    ..
+                } => {
+                    assert_eq!(
+                        class_name, "java.util.LinkedHashMap",
+                        "Map インタフェースには LinkedHashMap が利用されること"
+                    );
+                    assert_eq!(
+                        generic_args.len(),
+                        2,
+                        "Map 生成時にキー・値双方の型引数が保持されること"
+                    );
+                }
+                other => panic!("ObjectCreation が必要ですが {:?}", other),
+            }
+        }
         other => panic!("DoublebraceInit が生成されるべきですが {:?}", other),
     }
 }
