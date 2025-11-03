@@ -17,6 +17,7 @@ use jv_cli::pipeline::project::{
 };
 use jv_cli::pipeline::{compile, BuildOptionsFactory, CliOverrides};
 use jv_ir::types::IrImportDetail;
+use jv_pm::{LogLevel, LoggingFramework};
 
 struct TempDirGuard {
     path: PathBuf,
@@ -343,11 +344,7 @@ fn discover_cli_binary() -> Option<PathBuf> {
 
     if let Ok(entries) = fs::read_dir(&target_dir) {
         for entry in entries.flatten() {
-            if entry
-                .file_type()
-                .map(|ty| ty.is_dir())
-                .unwrap_or(false)
-            {
+            if entry.file_type().map(|ty| ty.is_dir()).unwrap_or(false) {
                 candidates.push(entry.path().join("debug").join(binary_name));
                 candidates.push(entry.path().join("release").join(binary_name));
             }
@@ -357,11 +354,7 @@ fn discover_cli_binary() -> Option<PathBuf> {
     if let Some(toolchains_dir) = toolchains_root() {
         if let Ok(entries) = fs::read_dir(&toolchains_dir) {
             for entry in entries.flatten() {
-                if !entry
-                    .file_type()
-                    .map(|ty| ty.is_dir())
-                    .unwrap_or(false)
-                {
+                if !entry.file_type().map(|ty| ty.is_dir()).unwrap_or(false) {
                     continue;
                 }
                 let root = entry.path();
@@ -369,11 +362,7 @@ fn discover_cli_binary() -> Option<PathBuf> {
                 candidates.push(root.join("bin").join(binary_name));
                 if let Ok(subentries) = fs::read_dir(&root) {
                     for sub in subentries.flatten() {
-                        if sub
-                            .file_type()
-                            .map(|ty| ty.is_dir())
-                            .unwrap_or(false)
-                        {
+                        if sub.file_type().map(|ty| ty.is_dir()).unwrap_or(false) {
                             candidates.push(sub.path().join(binary_name));
                             candidates.push(sub.path().join("bin").join(binary_name));
                         }
@@ -399,7 +388,10 @@ fn cli_binary_path() -> Result<PathBuf, String> {
         return Ok(path);
     }
 
-    Err("CLI binary not available; run `cargo build -p jv_cli --bin jv` before executing this test".to_string())
+    Err(
+        "CLI binary not available; run `cargo build -p jv_cli --bin jv` before executing this test"
+            .to_string(),
+    )
 }
 
 fn default_java_target() -> JavaTarget {
@@ -690,25 +682,11 @@ fn cli_examples_build_without_java_errors() {
 
         match result {
             Ok(()) => {
-                println!(
-                    "[OK] {} -> {}",
-                    label,
-                    jv_file.display()
-                );
+                println!("[OK] {} -> {}", label, jv_file.display());
             }
             Err(err) => {
-                println!(
-                    "[FAIL] {} -> {}\n{}",
-                    label,
-                    jv_file.display(),
-                    err
-                );
-                failures.push(format!(
-                    "{} -> {}:\n{}",
-                    label,
-                    jv_file.display(),
-                    err
-                ));
+                println!("[FAIL] {} -> {}\n{}", label, jv_file.display(), err);
+                failures.push(format!("{} -> {}:\n{}", label, jv_file.display(), err));
             }
         }
     }
@@ -758,11 +736,7 @@ fn discover_examples(root: &Path) -> Vec<ExampleFixture> {
     fixtures
 }
 
-fn build_script_example(
-    cli_path: &Path,
-    source: &Path,
-    label: &str,
-) -> Result<(), String> {
+fn build_script_example(cli_path: &Path, source: &Path, label: &str) -> Result<(), String> {
     let workdir = source
         .parent()
         .map(Path::to_path_buf)
@@ -803,11 +777,7 @@ fn build_script_example(
     verify_java_artifacts(&absolute_output, label)
 }
 
-fn build_project_example(
-    cli_path: &Path,
-    root: &Path,
-    label: &str,
-) -> Result<(), String> {
+fn build_project_example(cli_path: &Path, root: &Path, label: &str) -> Result<(), String> {
     let relative_output = PathBuf::from("target/test-cli-examples");
     let absolute_output = root.join(&relative_output);
     let _ = fs::remove_dir_all(&absolute_output);
@@ -859,8 +829,8 @@ fn verify_java_artifacts(output_root: &Path, label: &str) -> Result<(), String> 
     fs::create_dir_all(&classes_dir)
         .map_err(|err| format!("javac 出力ディレクトリを作成できませんでした: {err}"))?;
 
-    let mut javac =
-        javac_command_for_target(JavaTarget::Java25).ok_or_else(|| "javac command unavailable".to_string())?;
+    let mut javac = javac_command_for_target(JavaTarget::Java25)
+        .ok_or_else(|| "javac command unavailable".to_string())?;
     javac.arg("-d").arg(&classes_dir);
     for source in &java_sources {
         javac.arg(source);
@@ -1132,6 +1102,67 @@ fn pipeline_preserves_annotations_in_java_output() {
     assert!(java_source
         .contains("@RequestMapping(path = {\"/ping\"}, produces = {\"application/json\"})"));
     assert!(java_source.contains("@Nullable"));
+}
+
+#[test]
+fn logging_integration_emits_logger_calls_and_trace_context() {
+    let temp_dir =
+        TempDirGuard::new("logging-integration").expect("一時ディレクトリの作成に失敗しました");
+    let input = workspace_file("tests/fixtures/logging/basic.jv");
+
+    let mut plan = compose_plan_from_fixture(
+        temp_dir.path(),
+        &input,
+        CliOverrides {
+            java_only: true,
+            ..CliOverrides::default()
+        },
+    );
+
+    plan.logging_config.framework = LoggingFramework::Slf4j;
+    plan.logging_config.log_level = LogLevel::Trace;
+    plan.logging_config.default_level = LogLevel::Info;
+    plan.logging_config.opentelemetry.enabled = true;
+    plan.logging_config.opentelemetry.trace_context = true;
+
+    let artifacts = compile(&plan).expect("ロギング統合ビルドが成功するべきです");
+
+    assert!(
+        !artifacts.java_files.is_empty(),
+        "少なくとも1つの Java ファイルが生成される必要があります"
+    );
+
+    let mut aggregated = String::new();
+    for java_path in &artifacts.java_files {
+        let source = fs::read_to_string(java_path).unwrap_or_else(|error| {
+            panic!(
+                "生成された Java ファイル ({}) の読み込みに失敗しました: {error}",
+                java_path.display()
+            )
+        });
+        aggregated.push_str(&source);
+    }
+
+    assert!(
+        aggregated.contains("private static final org.slf4j.Logger LOGGER"),
+        "Slf4j 用のロガーフィールドが生成されるべきです: {aggregated}"
+    );
+    assert!(
+        aggregated.contains("LOGGER.info(\"開始\");"),
+        "LOG ブロックが INFO レベルの呼び出しへ展開されるべきです: {aggregated}"
+    );
+    assert!(
+        aggregated.contains("MDC.put(\"traceId\""),
+        "TraceId を MDC へ投入するコードが必要です: {aggregated}"
+    );
+    assert!(
+        aggregated.contains("MDC.remove(\"traceId\")"),
+        "traceId を MDC から除去するコードが必要です: {aggregated}"
+    );
+    assert!(
+        aggregated.contains("MDC.remove(\"spanId\")"),
+        "spanId を MDC から除去するコードが必要です: {aggregated}"
+    );
 }
 
 #[test]
@@ -1808,10 +1839,8 @@ fn sequence_stream_casts_compile_successfully() {
         return;
     }
 
-    let fixture =
-        workspace_file("tests/fixtures/sequence/sequence_stream_cast_failure.jv");
-    let temp_dir =
-        TempDirGuard::new("sequence-stream-cast-regression").expect("create temp dir");
+    let fixture = workspace_file("tests/fixtures/sequence/sequence_stream_cast_failure.jv");
+    let temp_dir = TempDirGuard::new("sequence-stream-cast-regression").expect("create temp dir");
     let plan = compose_plan_from_fixture(
         temp_dir.path(),
         &fixture,
@@ -2079,8 +2108,8 @@ fn sequence_map_materialization_casts_streams_to_lists() {
         "Doubled ints: [2, 4, 6, 8, 10]\nDoubled floats: [2.0, 4.0, 6.0, 8.0, 10.0]";
 
     for target in [JavaTarget::Java25, JavaTarget::Java21] {
-        let temp_dir =
-            TempDirGuard::new("sequence-map-materialization").expect("create temp directory for fixture");
+        let temp_dir = TempDirGuard::new("sequence-map-materialization")
+            .expect("create temp directory for fixture");
         let plan = compose_plan_from_fixture(
             temp_dir.path(),
             &fixture,
