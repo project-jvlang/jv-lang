@@ -1,16 +1,32 @@
 data Event(val label: String, val priority: Int)
 
 fun describe(value: Any): String {
-    return when (value) {
-        is Int && value % 2 == 0 -> "${value} is even"
-        is String && value.startsWith("jv") -> "${value} looks like a namespace"
-        is Event -> "Event ${value.label} (${value.priority})"
-        else -> "Unhandled sample: ${value}"
+    return when {
+        value is Int && (value as Int) % 2 == 0 -> describeEven(value as Int)
+        value is String && (value as String).startsWith("jv") -> describeNamespace(value as String)
+        value is Event -> describeEvent(value as Event)
+        else -> describeFallback(value)
     }
 }
 
+fun describeEven(number: Int): String {
+    return "${number} is even"
+}
+
+fun describeNamespace(text: String): String {
+    return "${text} looks like a namespace"
+}
+
+fun describeEvent(event: Event): String {
+    return "Event ${event.label} (${event.priority})"
+}
+
+fun describeFallback(value: Any): String {
+    return "Unhandled sample: ${value}"
+}
+
 fun main(): Unit {
-    println(describe(10))
-    println(describe("jv.tour"))
-    println(describe(Event("checkpoint" 2)))
+    println(describe(10 as Any))
+    println(describe("jv.tour" as Any))
+    println(describe(Event("checkpoint" 2) as Any))
 }

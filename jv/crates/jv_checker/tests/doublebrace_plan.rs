@@ -234,6 +234,37 @@ fn constructor_base_uses_synthesized_plan() {
 }
 
 #[test]
+fn factory_base_with_registry_match_prefers_synthesized_instance() {
+    let span = span();
+    let init = DoublebraceInit {
+        base: Some(Box::new(Expression::Call {
+            function: Box::new(Expression::Identifier("factory".into(), span.clone())),
+            args: Vec::new(),
+            type_arguments: Vec::new(),
+            argument_metadata: CallArgumentMetadata::with_style(CallArgumentStyle::Comma),
+            call_kind: CallKind::Function,
+            span: span.clone(),
+        })),
+        receiver_hint: None,
+        statements: Vec::new(),
+        span: span.clone(),
+    };
+
+    let target_ty = TypeKind::reference("java.util.ArrayList<java.lang.String>");
+    let base_ty = Some(TypeKind::reference("java.util.List<java.lang.String>"));
+
+    let plan = plan_doublebrace_application(base_ty.as_ref(), &target_ty, &init, None)
+        .expect("factory base should still yield a mutate plan");
+
+    match plan {
+        DoublebracePlan::Mutate(mutate) => {
+            assert_eq!(mutate.base, PlanBase::SynthesizedInstance);
+        }
+        other => panic!("expected mutate plan, received {:?}", other),
+    }
+}
+
+#[test]
 fn copy_plan_for_immutable_receiver() {
     // 不変クラスではコピー戦略が選択され、フィールド更新が収集されること。
     let span = span();

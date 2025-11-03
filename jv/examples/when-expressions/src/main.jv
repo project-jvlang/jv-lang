@@ -1,17 +1,33 @@
 fun describe(value: Any): String {
-    return when (value) {
-        is Int && value % 2 == 0 -> "${value} is an even Int"
-        is String && value.length > 5 -> "Long text (${value.length} chars)"
-        is Boolean -> when (value) {
-            true -> "Flag is set"
-            false -> "Flag is off"
-        }
-        else -> "Unknown sample: ${value}"
+    return when {
+        value is Int && (value as Int) % 2 == 0 -> describeEvenInt(value as Int)
+        value is String && (value as String).length > 5 -> describeLongText(value as String)
+        value is Boolean -> describeFlag(value as Boolean)
+        else -> describeUnknown(value)
     }
 }
 
+fun describeEvenInt(number: Int): String {
+    return "${number} is an even Int"
+}
+
+fun describeLongText(text: String): String {
+    return "Long text (${text.length} chars)"
+}
+
+fun describeFlag(flag: Boolean): String {
+    return when (flag) {
+        true -> "Flag is set"
+        false -> "Flag is off"
+    }
+}
+
+fun describeUnknown(value: Any): String {
+    return "Unknown sample: ${value}"
+}
+
 fun main(): Unit {
-    println(describe(42))
-    println(describe("companion notebook"))
-    println(describe(false))
+    println(describe(42 as Any))
+    println(describe("companion notebook" as Any))
+    println(describe(false as Any))
 }

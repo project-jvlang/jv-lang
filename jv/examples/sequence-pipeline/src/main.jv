@@ -12,6 +12,7 @@ fun main(): Unit {
         modules
             .map { value -> value + "-module" }
             .filter { candidate -> candidate.length >= 7 }
+            .toList()
     ) as List
 
     println("Cast with as List: ${highlightedCast}")
@@ -19,6 +20,7 @@ fun main(): Unit {
     val highlightedImplicit: List = modules
         .map { value -> value + "-module" }
         .filter { candidate -> candidate.length >= 7 }
+        .toList()
 
     println("Implicit List via type: ${highlightedImplicit}")
 
@@ -44,19 +46,19 @@ fun main(): Unit {
 
     val numbers = [1 2 3 4 5]
     // Map
-    doubled = numbers.map { i -> i * 2 } as List
+    val doubled = numbers.map { i -> i * 2 }.toList()
     println("Doubled: ${doubled}")
 
     // Filter
-    evens = numbers.filter { i -> i % 2 == 0 }.toList()
+    val evens = numbers.filter { i -> i % 2 == 0 }.toList()
     println("Evens: ${evens}")
 
     // Reduce
-    sum = numbers.reduce {(acc x) -> acc + x }
+    val sum = numbers.reduce {(acc x) -> acc + x }
     println("Sum: ${sum}")
 
     // Combined pipeline (map → filter → reduce)
-    combined = numbers
+    val combined = numbers
         .map { value -> value * 3 }
         .filter { value -> value > 6 }
         .reduce {(acc value) -> acc + value }

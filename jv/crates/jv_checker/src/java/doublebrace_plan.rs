@@ -12,6 +12,7 @@ use jv_ast::expression::{CallArgumentMetadata, CallArgumentStyle, CallKind, Doub
 use jv_ast::types::{BinaryOp, UnaryOp};
 use jv_ast::{Argument, ConcurrencyConstruct, Expression, ResourceManagement, Span, Statement};
 use jv_build::metadata::SymbolIndex;
+use jv_inference::{DefaultImplementationRegistry, DoublebraceHeuristics, ImplementationVariant};
 use std::fmt;
 use thiserror::Error;
 
@@ -126,11 +127,13 @@ pub fn plan_doublebrace_application(
     match category {
         ReceiverCategory::Mutable | ReceiverCategory::Unknown => {
             let steps = collect_mutation_steps(&init.statements);
-            let base = if has_existing_base {
-                PlanBase::ExistingInstance
-            } else {
-                PlanBase::SynthesizedInstance
-            };
+            let base = determine_base_strategy(
+                base_ty,
+                init,
+                &receiver_name,
+                base_requires_synthesized,
+                symbol_index,
+            );
             Ok(DoublebracePlan::Mutate(MutatePlan {
                 receiver: receiver_ty,
                 base,
@@ -227,6 +230,103 @@ fn classify_receiver(symbol_index: Option<&SymbolIndex>, fqcn: &str) -> Receiver
     }
 
     ReceiverCategory::Unknown
+}
+
+fn determine_base_strategy(
+    base_ty: Option<&TypeKind>,
+    init: &DoublebraceInit,
+    receiver_name: &str,
+    base_requires_synthesized: bool,
+    symbol_index: Option<&SymbolIndex>,
+) -> PlanBase {
+    if base_requires_synthesized {
+        return PlanBase::SynthesizedInstance;
+    }
+
+    let Some(base_expr) = init.base.as_deref() else {
+        return PlanBase::SynthesizedInstance;
+    };
+
+    let Some(base_ty) = base_ty else {
+        return PlanBase::SynthesizedInstance;
+    };
+
+    let Some(base_fqcn) = receiver_fqcn(base_ty) else {
+        return PlanBase::ExistingInstance;
+    };
+
+    let normalized_receiver = receiver_name.trim();
+    let normalized_base = base_fqcn.trim();
+
+    if normalized_base == normalized_receiver {
+        return PlanBase::ExistingInstance;
+    }
+
+    if is_factory_like_expression(base_expr) {
+        let (base_raw, generics) = split_type_name(normalized_base);
+        let resolved = resolve_mutable_reference_with_generics(base_raw, generics, symbol_index);
+        if resolved.trim() == normalized_receiver {
+            return PlanBase::SynthesizedInstance;
+        }
+    }
+
+    PlanBase::ExistingInstance
+}
+
+fn resolve_mutable_reference_with_generics(
+    candidate: &str,
+    generics: Option<&str>,
+    symbol_index: Option<&SymbolIndex>,
+) -> String {
+    if let Some(default) = DoublebraceHeuristics::resolve_default_implementation(
+        candidate,
+        ImplementationVariant::Mutable,
+    ) {
+        return append_generics(&default, generics);
+    }
+
+    let registry = DefaultImplementationRegistry::shared();
+    if let Some(interface_impl) =
+        registry.resolve_interface_variant(candidate, ImplementationVariant::Mutable)
+    {
+        return append_generics(interface_impl.target(), generics);
+    }
+    if let Some(abstract_impl) = registry.resolve_abstract(candidate, symbol_index) {
+        return append_generics(abstract_impl.target(), generics);
+    }
+
+    append_generics(candidate, generics)
+}
+
+fn append_generics(base: &str, generics: Option<&str>) -> String {
+    if let Some(args) = generics {
+        if args.is_empty() || base.contains('<') {
+            base.to_string()
+        } else {
+            format!("{base}{args}")
+        }
+    } else {
+        base.to_string()
+    }
+}
+
+fn split_type_name(candidate: &str) -> (&str, Option<&str>) {
+    if let Some(start) = candidate.find('<') {
+        let (base, generics) = candidate.split_at(start);
+        (base.trim(), Some(generics.trim()))
+    } else {
+        (candidate.trim(), None)
+    }
+}
+
+fn is_factory_like_expression(expr: &Expression) -> bool {
+    matches!(
+        expr,
+        Expression::Call { .. }
+            | Expression::Array { .. }
+            | Expression::JsonLiteral(_)
+            | Expression::DoublebraceInit(_)
+    )
 }
 
 fn collect_mutation_steps(statements: &[Statement]) -> Vec<MutationStep> {

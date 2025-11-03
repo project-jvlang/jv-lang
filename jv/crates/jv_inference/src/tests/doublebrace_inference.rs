@@ -171,6 +171,27 @@ fn infer_applies_registry_to_generic_interfaces() {
 }
 
 #[test]
+fn infer_accepts_registry_equivalent_mismatch_between_base_and_expected() {
+    let session = InferenceSession::new();
+    let init = sample_init(vec![call_statement("add")]);
+    let ctx = DoublebraceContext {
+        base_type: Some("java.util.List<java.lang.String>"),
+        expected_type: Some("java.util.Collection<java.lang.String>"),
+        receiver_hint: None,
+        binding_kind: DoublebraceBindingKind::Var,
+    };
+
+    let result = infer_doublebrace(&init, ctx, &session);
+
+    assert_eq!(
+        result.resolved_type.as_deref(),
+        Some("java.util.ArrayList<java.lang.String>"),
+        "registry-resolved concrete types should align even when base and expected differ"
+    );
+    assert_eq!(result.resolution, ReceiverResolution::ExpectedType);
+}
+
+#[test]
 fn detect_control_flow_reports_return() {
     let span = Span::dummy();
     let statements = vec![Statement::Return {
