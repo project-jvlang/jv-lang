@@ -152,6 +152,15 @@ make check          # lint + fmt + unit tests + docs validation
 make test-lowmem    # メモリ制限下でのフィクスチャ検証（CI同等）
 ```
 
+テストを実行する際は Java 25 の JDK を指す `JAVA_HOME` の設定が必須です。リポジトリ直下には開発用の `toolchains/jdk25` が同梱されているため、以下のように環境変数を指定してから `cargo test` を実行してください。
+
+```bash
+export JAVA_HOME="$(pwd)/toolchains/jdk25"
+cargo test
+```
+
+CLI や LSP の統合テストも同じ設定で再現可能です。
+
 ### AST→IR性能ハーネス
 
 - ローカルでの回帰検知: `cargo test --package jv_ir --lib` と `cargo test --package jv_ir -- --ignored perf_phase1`

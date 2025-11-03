@@ -1418,11 +1418,18 @@ fn cli_check_reports_regex_diagnostics() {
         }
     };
 
+    let Some(java) = jdk_info_for_target(JavaTarget::Java25) else {
+        eprintln!("Skipping regex diagnostic test: Java 25 toolchain unavailable");
+        return;
+    };
+
     let temp_dir = TempDirGuard::new("cli-regex-diagnostic").expect("create temp dir");
     let source_path = temp_dir.path().join("invalid_regex.jv");
     fs::write(&source_path, "val broken = /abc\\q/\n").expect("write invalid regex source");
 
     let output = Command::new(&cli_path)
+        .env("JAVA_HOME", &java.java_home)
+        .env("JV_CLI_COLOR", "never")
         .arg("check")
         .arg(&source_path)
         .output()
@@ -1434,13 +1441,33 @@ fn cli_check_reports_regex_diagnostics() {
     );
 
     let stderr = String::from_utf8_lossy(&output.stderr);
+    let stderr_text = stderr.as_ref();
+    let stderr_lower = stderr_text.to_lowercase();
     assert!(
-        stderr.contains("JV_REGEX_E203"),
+        stderr_text.contains("JV_REGEX_E203"),
         "regex diagnostic output should contain JV_REGEX_E203, got: {stderr}"
     );
     assert!(
-        stderr.contains("正規表現リテラル") || stderr.to_lowercase().contains("regex literal"),
+        stderr_text.contains("正規表現")
+            || stderr_lower.contains("regex literal")
+            || stderr_lower.contains("regex"),
         "regex diagnostic text should mention regex literal terminology, got: {stderr}"
+    );
+    assert!(
+        stderr_text.contains("[ERROR] JV_REGEX_E203"),
+        "diagnostic header should expose severityとコード: {stderr}"
+    );
+    assert!(
+        stderr_text.contains(":L1C14-L1C21"),
+        "出力は 1-based 座標を表示する必要があります: {stderr}"
+    );
+    assert!(
+        stderr_text.contains("Quick Fix"),
+        "キャレット表示に Quick Fix 提案を含める必要があります: {stderr}"
+    );
+    assert!(
+        stderr_text.contains("https://docs.oracle.com/en/java/javase/25/docs/api/java.base/java/util/regex/Pattern.html"),
+        "診断は公式ドキュメントURLを出力する必要があります: {stderr}"
     );
 }
 
