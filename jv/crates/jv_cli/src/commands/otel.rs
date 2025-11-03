@@ -127,6 +127,7 @@ struct EndpointInfo {
     url: Url,
     original: String,
     inferred_scheme: bool,
+    explicit_port: Option<u16>,
 }
 
 enum IssueSeverity {
@@ -366,33 +367,49 @@ fn resolve_endpoint(config: &OpenTelemetryConfig) -> Result<EndpointInfo> {
 }
 
 fn normalize_endpoint(raw: &str, protocol: OtelProtocol) -> Result<EndpointInfo> {
-    match Url::parse(raw) {
-        Ok(url) => Ok(EndpointInfo {
-            url,
-            original: raw.to_string(),
-            inferred_scheme: false,
-        }),
-        Err(ParseError::RelativeUrlWithoutBase) => {
-            let default_scheme = match protocol {
-                OtelProtocol::Grpc => "http",
-                OtelProtocol::Http => "http",
-            };
+    let default_scheme = match protocol {
+        OtelProtocol::Grpc => "http",
+        OtelProtocol::Http => "http",
+    };
+
+    let (url, inferred_scheme, explicit_port) = match Url::parse(raw) {
+        Ok(url) if !url.cannot_be_a_base() && url.host_str().is_some() => {
+            let port = url.port();
+            (url, false, port)
+        }
+        Ok(_) | Err(ParseError::RelativeUrlWithoutBase) => {
             let candidate = format!("{default_scheme}://{raw}");
-            let url = Url::parse(&candidate).with_context(|| {
+            let mut url = Url::parse(&candidate).with_context(|| {
                 format!("endpoint '{}' を URL として解釈できませんでした。", raw)
             })?;
-            Ok(EndpointInfo {
-                url,
-                original: raw.to_string(),
-                inferred_scheme: true,
-            })
+            let explicit_port = url.port();
+            if explicit_port.is_some() {
+                let _ = url.set_port(None);
+            }
+            (url, true, explicit_port)
         }
-        Err(err) => Err(anyhow!(
-            "endpoint '{}' を URL として解釈できませんでした: {}",
-            raw,
-            err
-        )),
+        Err(err) => {
+            return Err(anyhow!(
+                "endpoint '{}' を URL として解釈できませんでした: {}",
+                raw,
+                err
+            ))
+        }
+    };
+
+    if url.host_str().is_none() {
+        bail!(
+            "endpoint '{}' にはホスト名を含めてください (例: collector.example.com)。",
+            raw
+        );
     }
+
+    Ok(EndpointInfo {
+        url,
+        original: raw.to_string(),
+        inferred_scheme,
+        explicit_port,
+    })
 }
 
 fn collect_endpoint_warnings(
@@ -426,7 +443,9 @@ fn collect_endpoint_warnings(
         }
     }
 
-    let port = endpoint.url.port();
+    let port = endpoint
+        .explicit_port
+        .or_else(|| endpoint.url.port());
     if port.is_none() {
         let recommendation = recommended_port(protocol);
         issues.push(ValidationIssue {
@@ -476,8 +495,8 @@ fn collect_endpoint_warnings(
 
 fn determine_port(endpoint: &EndpointInfo, protocol: OtelProtocol) -> u16 {
     endpoint
-        .url
-        .port()
+        .explicit_port
+        .or_else(|| endpoint.url.port())
         .or_else(|| endpoint.url.port_or_known_default())
         .unwrap_or_else(|| recommended_port(protocol))
 }

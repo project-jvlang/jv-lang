@@ -26,6 +26,7 @@ mod project_locator;
 mod project_output;
 
 use jv_build::{BuildConfig, BuildSystem, JavaTarget};
+use std::ffi::OsStr;
 use std::fs;
 use std::fs::File;
 use std::io::Write;
@@ -702,19 +703,28 @@ fn compile_repository_fixtures_without_interpolation() {
     let mut compiled = 0usize;
     let mut failures = Vec::new();
     for path in files {
-        if path.to_string_lossy().contains("/pattern/") {
-            continue;
-        }
-        if path.to_string_lossy().contains("/java_annotations/") {
-            continue;
-        }
         if path
-            .to_string_lossy()
-            .contains("package/complex_stdlib_pattern.jv")
+            .components()
+            .any(|component| component.as_os_str() == OsStr::new("pattern"))
         {
             continue;
         }
-        if path.to_string_lossy().contains("/pattern/neg-") {
+        if path
+            .components()
+            .any(|component| component.as_os_str() == OsStr::new("java_annotations"))
+        {
+            continue;
+        }
+        if path.file_name() == Some(OsStr::new("complex_stdlib_pattern.jv"))
+            && path
+                .parent()
+                .map(|parent| {
+                    parent
+                        .components()
+                        .any(|component| component.as_os_str() == OsStr::new("package"))
+                })
+                .unwrap_or(false)
+        {
             continue;
         }
         let source = match fs::read_to_string(&path) {
