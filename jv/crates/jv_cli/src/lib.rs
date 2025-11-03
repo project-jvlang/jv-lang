@@ -1,14 +1,19 @@
 // jv_cli - CLI functionality (library interface for testing)
 use anyhow::Result;
 use clap::Parser;
+use jv_ast::Span;
 use jv_ir::{
     sequence_pipeline,
     types::{IrImport, IrImportDetail},
 };
 use jv_support::i18n::{LocaleCode, catalog};
 use std::collections::HashMap;
+use std::env;
 use std::fs;
+use std::io::IsTerminal;
 use std::path::Path;
+#[cfg(test)]
+use std::sync::Mutex;
 
 use jv_checker::binding::normalize_import_aliases;
 use jv_checker::diagnostics::{
@@ -23,6 +28,9 @@ mod java_type_names;
 mod sequence_warnings;
 
 pub mod commands;
+
+#[cfg(test)]
+static COLOR_OVERRIDE: Mutex<Option<bool>> = Mutex::new(None);
 #[derive(Parser, Debug, Clone)]
 #[command(name = "jv")]
 #[command(
@@ -139,47 +147,319 @@ pub fn tooling_failure(path: &Path, diagnostic: EnhancedDiagnostic) -> anyhow::E
 }
 
 pub fn format_tooling_diagnostic(path: &Path, diagnostic: &EnhancedDiagnostic) -> String {
-    let location = diagnostic
-        .span
-        .as_ref()
-        .map(|span| {
-            format!(
-                " (L{}C{}-L{}C{})",
-                span.start_line, span.start_column, span.end_line, span.end_column
-            )
-        })
-        .unwrap_or_default();
+    let use_color = color_enabled();
+    let (prefix, suffix) = if use_color {
+        severity_color_codes(diagnostic.severity)
+    } else {
+        ("", "")
+    };
+    let severity = severity_label(diagnostic.severity);
+    let mut lines = Vec::new();
 
-    format!(
-        "[{severity:?}] {code}: {title}{location}\n  戦略: {strategy:?}\n  ファイル: {file}\n  詳細: {detail}\n  対処: {help}{suggestions}{hint}",
-        severity = diagnostic.severity,
+    lines.push(format!(
+        "{prefix}[{severity}] {code}: {title}{suffix}",
         code = diagnostic.code,
         title = diagnostic.title,
-        strategy = diagnostic.strategy,
-        file = path.display(),
-        detail = diagnostic.message,
-        help = diagnostic.help,
-        suggestions = format_suggestions(&diagnostic.suggestions),
-        hint = format_learning_hint(diagnostic.learning_hints.as_deref()),
-    )
-}
+    ));
 
-fn format_suggestions(suggestions: &[String]) -> String {
-    if suggestions.is_empty() {
-        return String::new();
+    if let Some(span) = diagnostic.span.as_ref() {
+        lines.push(format!(
+            "  --> {}:L{}C{}-L{}C{}",
+            path.display(),
+            span.start_line,
+            span.start_column,
+            span.end_line,
+            span.end_column
+        ));
+
+        match render_source_snippet(path, span) {
+            Ok(snippet_lines) if !snippet_lines.is_empty() => {
+                lines.push("  ソース:".to_string());
+                lines.extend(snippet_lines);
+            }
+            Ok(_) => {}
+            Err(message) => lines.push(format!("  ソース: <{}>", message)),
+        }
+    } else {
+        lines.push(format!("  ファイル: {}", path.display()));
+        lines.push("  位置情報: 提供されません".to_string());
     }
 
-    let joined = suggestions
-        .iter()
-        .map(|suggestion| format!("\n  提案: {suggestion}"))
-        .collect::<String>();
-    joined
+    lines.push(format!("  詳細: {}", diagnostic.message));
+    lines.push(format!("  対処: {}", diagnostic.help));
+    lines.push(format!("  戦略: {:?}", diagnostic.strategy));
+
+    if !diagnostic.categories.is_empty() {
+        lines.push(format!("  カテゴリ: {}", diagnostic.categories.join(", ")));
+    }
+
+    for suggestion in &diagnostic.suggestions {
+        lines.push(format!("  提案: {}", suggestion));
+    }
+
+    if let Some(hint) = diagnostic.learning_hints.as_deref() {
+        lines.push(format!("  学習ヒント: {}", hint));
+    }
+
+    lines.join("\n")
 }
 
-fn format_learning_hint(hint: Option<&str>) -> String {
-    match hint {
-        Some(value) => format!("\n  学習ヒント: {value}"),
-        None => String::new(),
+fn color_enabled() -> bool {
+    #[cfg(test)]
+    {
+        if let Some(value) = *COLOR_OVERRIDE
+            .lock()
+            .expect("color override mutex poisoned")
+        {
+            return value;
+        }
+    }
+
+    match env::var("JV_CLI_COLOR") {
+        Ok(value) if value.eq_ignore_ascii_case("always") => return true,
+        Ok(value) if value.eq_ignore_ascii_case("never") => return false,
+        _ => {}
+    }
+
+    if env::var_os("NO_COLOR").is_some() {
+        return false;
+    }
+
+    std::io::stdout().is_terminal() || std::io::stderr().is_terminal()
+}
+
+fn severity_label(severity: DiagnosticSeverity) -> &'static str {
+    match severity {
+        DiagnosticSeverity::Error => "ERROR",
+        DiagnosticSeverity::Warning => "WARNING",
+        DiagnosticSeverity::Information => "INFO",
+        DiagnosticSeverity::Hint => "HINT",
+    }
+}
+
+fn severity_color_codes(severity: DiagnosticSeverity) -> (&'static str, &'static str) {
+    match severity {
+        DiagnosticSeverity::Error => ("\u{1b}[31m", "\u{1b}[0m"),
+        DiagnosticSeverity::Warning => ("\u{1b}[33m", "\u{1b}[0m"),
+        DiagnosticSeverity::Information => ("\u{1b}[36m", "\u{1b}[0m"),
+        DiagnosticSeverity::Hint => ("\u{1b}[32m", "\u{1b}[0m"),
+    }
+}
+
+fn render_source_snippet(path: &Path, span: &Span) -> Result<Vec<String>, String> {
+    let source =
+        fs::read_to_string(path).map_err(|err| format!("ファイルを読み込めません: {err}"))?;
+
+    let mut raw_lines: Vec<&str> = source.lines().collect();
+    if source.ends_with('\n') {
+        raw_lines.push("");
+    }
+
+    if raw_lines.is_empty() {
+        return Err("ソースコードが空です".to_string());
+    }
+
+    let start_line = span.start_line.max(1);
+    if start_line > raw_lines.len() {
+        return Err("スパンがファイル範囲外です".to_string());
+    }
+
+    let mut end_line = span.end_line.max(start_line);
+    if end_line > raw_lines.len() {
+        end_line = raw_lines.len();
+    }
+
+    let start_index = start_line - 1;
+    let end_index = end_line - 1;
+    let width = end_line.to_string().len();
+
+    let mut snippet = Vec::new();
+    snippet.push("  |".to_string());
+
+    for index in start_index..=end_index {
+        let line_number = index + 1;
+        let text = raw_lines
+            .get(index)
+            .copied()
+            .unwrap_or_default()
+            .trim_end_matches('\r');
+        snippet.push(format!("  {line_number:>width$} | {text}"));
+
+        let caret = caret_line(text, span, index, start_index, end_index);
+        if !caret.is_empty() {
+            snippet.push(format!(
+                "  {padding} | {caret}",
+                padding = " ".repeat(width)
+            ));
+        }
+    }
+
+    snippet.push("  |".to_string());
+    Ok(snippet)
+}
+
+fn caret_line(
+    line: &str,
+    span: &Span,
+    current_index: usize,
+    start_index: usize,
+    end_index: usize,
+) -> String {
+    let chars: Vec<char> = line.chars().collect();
+    let len = chars.len();
+    let mut start_col = 0usize;
+    let mut end_col = len;
+
+    if current_index == start_index {
+        start_col = span.start_column.saturating_sub(1).min(len);
+    }
+    if current_index == end_index {
+        end_col = span.end_column.saturating_sub(1).min(len);
+    }
+
+    if current_index == start_index && current_index == end_index {
+        if end_col <= start_col {
+            end_col = (start_col + 1).min(len.max(start_col + 1));
+        }
+    } else if current_index == start_index {
+        end_col = len;
+    } else if current_index == end_index {
+        if end_col <= start_col {
+            end_col = start_col.saturating_add(1).min(len.max(start_col + 1));
+        }
+    } else {
+        start_col = 0;
+        end_col = len;
+    }
+
+    if len == 0 {
+        return "^".to_string();
+    }
+
+    if end_col <= start_col {
+        let highlight_end = (start_col + 1).min(len);
+        return caret_from_cols(&chars, start_col.min(len), highlight_end);
+    }
+
+    caret_from_cols(&chars, start_col, end_col)
+}
+
+fn caret_from_cols(chars: &[char], start: usize, end: usize) -> String {
+    let mut caret = String::new();
+    for ch in chars.iter().take(start) {
+        caret.push(if *ch == '\t' { '\t' } else { ' ' });
+    }
+
+    let highlight_len = end.saturating_sub(start).max(1);
+    caret.extend(std::iter::repeat('^').take(highlight_len));
+    caret
+}
+
+#[cfg(test)]
+mod formatting_tests {
+    use super::*;
+    use jv_checker::diagnostics;
+    use std::io::Write;
+    use tempfile::NamedTempFile;
+
+    fn sample_diagnostic(span: Span) -> EnhancedDiagnostic {
+        let descriptor = diagnostics::descriptor("JV_REGEX_E101").expect("descriptor exists");
+        let mut diagnostic =
+            EnhancedDiagnostic::new(descriptor, "未知のフラグです".to_string(), Some(span));
+        diagnostic
+            .suggestions
+            .push("Quick Fix: regex.flag.remove -> remove unknown flag".to_string());
+        diagnostic.learning_hints =
+            Some("Java 公式ドキュメントでフラグ一覧を再確認してください".to_string());
+        diagnostic.categories = vec!["regex.flag"];
+        diagnostic
+    }
+
+    fn write_sample_file() -> NamedTempFile {
+        let mut file = NamedTempFile::new().expect("create temp file");
+        writeln!(file, "val subject = \"value123\"").unwrap();
+        writeln!(file, "val matched = m/subject/\\d+/m").unwrap();
+        file
+    }
+
+    #[test]
+    fn formats_diagnostic_with_snippet_without_color() {
+        let _guard = ColorOverrideGuard::set(Some(false));
+        let file = write_sample_file();
+        let span = Span::new(2, 14, 2, 27);
+        let diagnostic = sample_diagnostic(span);
+
+        assert!(
+            !super::color_enabled(),
+            "color override should disable coloring in tests"
+        );
+
+        let rendered = format_tooling_diagnostic(file.path(), &diagnostic);
+
+        assert!(
+            rendered.contains("[ERROR] JV_REGEX_E101"),
+            "header should include severity and code: {rendered}"
+        );
+        assert!(
+            rendered.contains("  -->"),
+            "location arrow should be present: {rendered}"
+        );
+        assert!(
+            rendered.contains("2 | val matched = m/subject/\\d+/m"),
+            "source line should be rendered: {rendered}"
+        );
+        assert!(
+            rendered.contains("^"),
+            "caret indicators should be present: {rendered}"
+        );
+        assert!(
+            rendered.contains("  提案: Quick Fix: regex.flag.remove"),
+            "suggestions should be listed: {rendered}"
+        );
+        assert!(
+            rendered.contains("  カテゴリ: regex.flag"),
+            "categories should be printed: {rendered}"
+        );
+        assert!(
+            !rendered.contains('\u{1b}'),
+            "color codes should be absent by default: {rendered}"
+        );
+    }
+
+    struct ColorOverrideGuard;
+
+    impl ColorOverrideGuard {
+        fn set(value: Option<bool>) -> Self {
+            let mut guard = super::COLOR_OVERRIDE
+                .lock()
+                .expect("color override mutex poisoned");
+            *guard = value;
+            Self
+        }
+    }
+
+    impl Drop for ColorOverrideGuard {
+        fn drop(&mut self) {
+            let mut guard = super::COLOR_OVERRIDE
+                .lock()
+                .expect("color override mutex poisoned");
+            *guard = None;
+        }
+    }
+
+    #[test]
+    fn formats_with_color_when_forced() {
+        let _guard = ColorOverrideGuard::set(Some(true));
+        let file = write_sample_file();
+        let span = Span::new(2, 14, 2, 27);
+        let diagnostic = sample_diagnostic(span);
+
+        let rendered = format_tooling_diagnostic(file.path(), &diagnostic);
+
+        assert!(
+            rendered.starts_with("\u{1b}[31m[ERROR]"),
+            "forced color should prefix the header: {rendered}"
+        );
     }
 }
 
