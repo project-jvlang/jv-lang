@@ -1,10 +1,11 @@
 pub mod messages;
 
 use crate::CheckError;
-use jv_ast::{Span, types::RawTypeContinuation};
+use jv_ast::{types::RawTypeContinuation, Span};
 use jv_ir::{
     error::TransformError,
     types::{IrProgram, IrStatement},
+    LoggingMetadata,
 };
 use jv_parser_frontend::{
     Diagnostic as FrontendDiagnostic, DiagnosticSeverity as FrontendSeverity, ParseError,
@@ -680,10 +681,10 @@ fn build_raw_type_diagnostic(
 
 #[cfg(test)]
 mod tests {
-    use super::{DiagnosticSeverity, collect_raw_type_diagnostics, extract_tooling_metadata};
+    use super::{collect_raw_type_diagnostics, extract_tooling_metadata, DiagnosticSeverity};
     use jv_ast::{Literal, Span};
     use jv_ir::types::{
-        IrCommentKind, IrExpression, IrModifiers, IrProgram, IrStatement, JavaType,
+        IrCommentKind, IrExpression, IrModifiers, IrProgram, IrStatement, JavaType, LoggingMetadata,
     };
 
     #[test]
@@ -735,6 +736,7 @@ mod tests {
             type_declarations: vec![statement],
             generic_metadata: Default::default(),
             conversion_metadata: Vec::new(),
+            logging: LoggingMetadata::default(),
             span,
         }
     }

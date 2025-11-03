@@ -17,7 +17,7 @@ use jv_cli::pipeline::project::{
 };
 use jv_cli::pipeline::{compile, BuildOptionsFactory, CliOverrides};
 use jv_ir::types::IrImportDetail;
-use jv_pm::{LogLevel, LoggingFramework};
+use jv_pm::{LogLevel, LoggingConfigLayer, LoggingFramework};
 
 struct TempDirGuard {
     path: PathBuf,
@@ -137,7 +137,8 @@ fn ensure_toolchain_envs() {
         ] {
             if env::var_os(var).is_none() {
                 if let Some(path) = dir {
-                    env::set_var(var, path);
+                    // プロセス開始時に一度だけ実行されるため、安全に環境変数を設定できる。
+                    unsafe { env::set_var(var, path) };
                 }
             }
         }
@@ -415,10 +416,12 @@ fn java_command_for_target(target: JavaTarget) -> Option<Command> {
     })
 }
 
+#[allow(dead_code)]
 fn javac_command() -> Option<Command> {
     javac_command_for_target(default_java_target())
 }
 
+#[allow(dead_code)]
 fn java_command() -> Option<Command> {
     java_command_for_target(default_java_target())
 }
@@ -1037,6 +1040,8 @@ fn pipeline_compile_produces_artifacts() {
             apt_processors: None,
             apt_processorpath: None,
             apt_options: Vec::new(),
+            logging_cli: LoggingConfigLayer::default(),
+            logging_env: LoggingConfigLayer::default(),
         },
     );
 
@@ -1080,6 +1085,8 @@ fn pipeline_preserves_annotations_in_java_output() {
             apt_processors: None,
             apt_processorpath: None,
             apt_options: Vec::new(),
+            logging_cli: LoggingConfigLayer::default(),
+            logging_env: LoggingConfigLayer::default(),
         },
     );
 
@@ -1233,6 +1240,8 @@ fn pipeline_emit_types_produces_type_facts_json() {
             apt_processors: None,
             apt_processorpath: None,
             apt_options: Vec::new(),
+            logging_cli: LoggingConfigLayer::default(),
+            logging_env: LoggingConfigLayer::default(),
         },
     );
 
@@ -1280,6 +1289,8 @@ fn type_inference_snapshot_emitted_with_emit_types() {
             apt_processors: None,
             apt_processorpath: None,
             apt_options: Vec::new(),
+            logging_cli: LoggingConfigLayer::default(),
+            logging_env: LoggingConfigLayer::default(),
         },
     );
 
@@ -1325,6 +1336,8 @@ fn type_inference_snapshot_tracks_program_changes() {
             apt_processors: None,
             apt_processorpath: None,
             apt_options: Vec::new(),
+            logging_cli: LoggingConfigLayer::default(),
+            logging_env: LoggingConfigLayer::default(),
         },
     );
 
@@ -1387,6 +1400,8 @@ fn null_safety_warnings_survive_pipeline() {
             apt_processors: None,
             apt_processorpath: None,
             apt_options: Vec::new(),
+            logging_cli: LoggingConfigLayer::default(),
+            logging_env: LoggingConfigLayer::default(),
         },
     );
 
@@ -1425,6 +1440,8 @@ fn ambiguous_function_causes_type_error() {
             apt_processors: None,
             apt_processorpath: None,
             apt_options: Vec::new(),
+            logging_cli: LoggingConfigLayer::default(),
+            logging_env: LoggingConfigLayer::default(),
         },
     );
 
@@ -1471,6 +1488,8 @@ fn pipeline_reports_missing_else_in_value_when() {
             apt_processors: None,
             apt_processorpath: None,
             apt_options: Vec::new(),
+            logging_cli: LoggingConfigLayer::default(),
+            logging_env: LoggingConfigLayer::default(),
         },
     );
 
@@ -1514,6 +1533,8 @@ fn pipeline_runs_javac_when_available() {
             apt_processors: None,
             apt_processorpath: None,
             apt_options: Vec::new(),
+            logging_cli: LoggingConfigLayer::default(),
+            logging_env: LoggingConfigLayer::default(),
         },
     );
 

@@ -6,8 +6,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use jv_cli::pipeline::project::{
     layout::ProjectLayout, locator::ProjectLocator, manifest::ManifestLoader,
 };
-use jv_cli::pipeline::{BuildOptionsFactory, CliOverrides, OutputManager, compile};
-use jv_pm::JavaTarget;
+use jv_cli::pipeline::{compile, BuildOptionsFactory, CliOverrides, OutputManager};
+use jv_pm::{JavaTarget, LoggingConfigLayer};
 
 const SAMPLE_MAIN: &str = r#"
 val message = "integration"
@@ -160,6 +160,8 @@ fn project_pipeline_supports_multi_target_builds() {
         apt_processors: None,
         apt_processorpath: None,
         apt_options: Vec::new(),
+        logging_cli: LoggingConfigLayer::default(),
+        logging_env: LoggingConfigLayer::default(),
     };
 
     let plan21 = BuildOptionsFactory::compose(
@@ -202,6 +204,8 @@ fn project_pipeline_supports_multi_target_builds() {
         apt_processors: None,
         apt_processorpath: None,
         apt_options: Vec::new(),
+        logging_cli: LoggingConfigLayer::default(),
+        logging_env: LoggingConfigLayer::default(),
     };
 
     let plan25 = BuildOptionsFactory::compose(project_root, settings, layout, overrides25)
@@ -256,6 +260,8 @@ fn clean_option_removes_stale_target_artifacts() {
         apt_processors: None,
         apt_processorpath: None,
         apt_options: Vec::new(),
+        logging_cli: LoggingConfigLayer::default(),
+        logging_env: LoggingConfigLayer::default(),
     };
 
     let plan_initial = BuildOptionsFactory::compose(
