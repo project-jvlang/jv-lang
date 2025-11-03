@@ -138,6 +138,7 @@ impl ProjectLocator {
             related_locations: Vec::new(),
             suggestions: Vec::new(),
             learning_hints: None,
+            categories: Vec::new(),
         }
     }
 
@@ -157,6 +158,7 @@ impl ProjectLocator {
             related_locations: Vec::new(),
             suggestions: Vec::new(),
             learning_hints: None,
+            categories: Vec::new(),
         }
     }
 

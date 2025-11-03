@@ -201,6 +201,7 @@ fn no_sources_diagnostic(
         related_locations: Vec::new(),
         suggestions: Vec::new(),
         learning_hints: None,
+        categories: Vec::new(),
     }
 }
 
@@ -219,6 +220,7 @@ fn entrypoint_not_found_diagnostic(entrypoint: &Path) -> EnhancedDiagnostic {
         related_locations: Vec::new(),
         suggestions: Vec::new(),
         learning_hints: None,
+        categories: Vec::new(),
     }
 }
 
@@ -235,6 +237,7 @@ fn entrypoint_inference_failed() -> EnhancedDiagnostic {
         related_locations: Vec::new(),
         suggestions: Vec::new(),
         learning_hints: None,
+        categories: Vec::new(),
     }
 }
 
@@ -259,6 +262,7 @@ fn io_diagnostic(root: &Path, path: &Path, error: Option<std::io::Error>) -> Enh
         related_locations: Vec::new(),
         suggestions: Vec::new(),
         learning_hints: None,
+        categories: Vec::new(),
     }
 }
 

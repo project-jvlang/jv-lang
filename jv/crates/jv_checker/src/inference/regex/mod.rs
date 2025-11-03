@@ -6,11 +6,20 @@
 
 pub mod pattern_type;
 
-use crate::inference::types::TypeKind;
+use crate::{
+    diagnostics::{DiagnosticSeverity, messages::JAVA_REGEX_DOC_URL},
+    inference::types::TypeKind,
+};
 use jv_ast::{RegexCommandMode, RegexGuardStrategy, Span};
 
 pub use jv_ast::PatternOrigin;
 pub use pattern_type::{PatternTypeBinder, PatternTypeBinding, TypeExpectation};
+
+/// Regex コマンド診断で利用する共通カテゴリ。
+pub const CATEGORY_REGEX_FLAG: &str = "regex.flag";
+pub const CATEGORY_REGEX_MODE: &str = "regex.mode";
+pub const CATEGORY_REGEX_REPLACEMENT: &str = "regex.replacement";
+pub const CATEGORY_REGEX_GENERAL: &str = "regex.general";
 
 /// `is /pattern/` 判定に関する型解析結果。
 #[derive(Debug, Clone, PartialEq)]
@@ -99,15 +108,53 @@ impl RegexCommandTyping {
 pub struct RegexCommandIssue {
     pub code: String,
     pub message: String,
+    pub span: Span,
+    pub severity: DiagnosticSeverity,
+    pub category: String,
+    pub suggestions: Vec<String>,
+    pub documentation_url: Option<String>,
 }
 
 impl RegexCommandIssue {
-    /// コードとメッセージから診断を生成する。
-    pub fn new(code: impl Into<String>, message: impl Into<String>) -> Self {
+    /// コード・メッセージ・メタデータから診断を生成する。
+    pub fn new(
+        code: impl Into<String>,
+        message: impl Into<String>,
+        span: Span,
+        severity: DiagnosticSeverity,
+        category: impl Into<String>,
+    ) -> Self {
         Self {
             code: code.into(),
             message: message.into(),
+            span,
+            severity,
+            category: category.into(),
+            suggestions: Vec::new(),
+            documentation_url: Some(JAVA_REGEX_DOC_URL.to_string()),
         }
+    }
+
+    /// Quick Fix 候補をまとめて設定する。
+    pub fn with_suggestions<I, S>(mut self, suggestions: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.suggestions = suggestions.into_iter().map(Into::into).collect();
+        self
+    }
+
+    /// ドキュメントURLを上書きまたは無効化する。
+    pub fn with_documentation_url(mut self, url: Option<impl Into<String>>) -> Self {
+        self.documentation_url = url.map(Into::into);
+        self
+    }
+
+    /// Quick Fix を1件追記する。
+    pub fn add_suggestion(mut self, suggestion: impl Into<String>) -> Self {
+        self.suggestions.push(suggestion.into());
+        self
     }
 }
 

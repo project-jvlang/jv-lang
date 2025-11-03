@@ -108,5 +108,6 @@ fn io_diagnostic(path: &Path, action: &str, error: std::io::Error) -> EnhancedDi
         related_locations: Vec::new(),
         suggestions: Vec::new(),
         learning_hints: None,
+        categories: Vec::new(),
     }
 }

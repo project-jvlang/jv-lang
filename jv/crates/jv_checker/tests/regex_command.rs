@@ -1,11 +1,10 @@
 //! RegexCommand の型推論と診断結果を統合的に検証するテスト。
 
-use jv_ast::Program;
-use jv_ast::RegexCommandMode;
-use jv_checker::CheckError;
-use jv_checker::inference::regex::RegexCommandTyping;
+use jv_ast::{Program, RegexCommandMode};
+use jv_checker::diagnostics::{DiagnosticSeverity, messages::JAVA_REGEX_DOC_URL};
+use jv_checker::inference::regex::{CATEGORY_REGEX_MODE, RegexCommandTyping};
 use jv_checker::inference::types::PrimitiveType;
-use jv_checker::{TypeChecker, TypeKind};
+use jv_checker::{CheckError, TypeChecker, TypeKind};
 use jv_parser_frontend::ParserPipeline;
 use jv_parser_rowan::frontend::RowanPipeline;
 
@@ -111,6 +110,37 @@ val matched = m/subject/^\d+$/m
         "未知フラグ診断が誤って発生しないことを確認します: {:?}",
         typing.diagnostics
     );
+    let confusion = typing
+        .diagnostics
+        .iter()
+        .find(|diag| diag.code == "JV_REGEX_I001")
+        .expect("モードとフラグの混同を検出する情報診断が必要です");
+    assert_eq!(
+        confusion.severity,
+        DiagnosticSeverity::Information,
+        "JV_REGEX_I001 は情報レベルの診断である必要があります"
+    );
+    assert_eq!(
+        confusion.category, CATEGORY_REGEX_MODE,
+        "JV_REGEX_I001 は regex.mode カテゴリに属する必要があります"
+    );
+    assert_eq!(
+        confusion.span, typing.span,
+        "モード混同診断はコマンド全体のスパンを指し示す必要があります"
+    );
+    assert_eq!(
+        confusion.documentation_url.as_deref(),
+        Some(JAVA_REGEX_DOC_URL),
+        "診断には Java 正規表現ドキュメントへのリンクが含まれる必要があります"
+    );
+    assert!(
+        confusion
+            .suggestions
+            .iter()
+            .any(|entry| entry.contains("Quick Fix")),
+        "診断には Quick Fix 案内が含まれる必要があります: {:?}",
+        confusion.suggestions
+    );
 }
 
 #[test]
@@ -130,6 +160,37 @@ val matched = /subject/\d+/
             .any(|diag| diag.code == "JV_REGEX_I002"),
         "モード省略時には JV_REGEX_I002 が提示される想定です: {:?}",
         typing.diagnostics
+    );
+    let intent = typing
+        .diagnostics
+        .iter()
+        .find(|diag| diag.code == "JV_REGEX_I002")
+        .expect("モード省略診断が存在する必要があります");
+    assert_eq!(
+        intent.severity,
+        DiagnosticSeverity::Information,
+        "JV_REGEX_I002 は情報レベルである必要があります"
+    );
+    assert_eq!(
+        intent.category, CATEGORY_REGEX_MODE,
+        "JV_REGEX_I002 は regex.mode カテゴリに分類される必要があります"
+    );
+    assert_eq!(
+        intent.span, typing.span,
+        "モード省略診断はコマンド式全体を指す必要があります"
+    );
+    assert_eq!(
+        intent.documentation_url.as_deref(),
+        Some(JAVA_REGEX_DOC_URL),
+        "診断には Java 正規表現ドキュメントへのリンクが含まれる必要があります"
+    );
+    assert!(
+        intent
+            .suggestions
+            .iter()
+            .any(|entry| entry.contains("Quick Fix")),
+        "診断には Quick Fix 案内が含まれる必要があります: {:?}",
+        intent.suggestions
     );
 }
 

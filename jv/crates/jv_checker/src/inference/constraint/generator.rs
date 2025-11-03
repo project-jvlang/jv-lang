@@ -3,7 +3,7 @@
 //! `ConstraintGenerator` はスコープ管理を `TypeEnvironment` に委ねつつ、
 //! val/var 宣言や代表的な式から型整合性と null 許容性の制約を収集する。
 
-use crate::diagnostics::messages;
+use crate::diagnostics::{DiagnosticSeverity, messages};
 use crate::inference::compatibility::CompatibilityChecker;
 use crate::inference::constraint::{Constraint, ConstraintKind, ConstraintSet};
 use crate::inference::context_adaptation;
@@ -15,8 +15,8 @@ use crate::inference::iteration::{
     LoopClassification, classify_loop, expression_can_yield_iterable,
 };
 use crate::inference::regex::{
-    RegexCommandIssue, RegexCommandTyping, RegexMatchTyping, RegexMatchWarning,
-    pattern_type::PatternTypeBinder,
+    CATEGORY_REGEX_FLAG, CATEGORY_REGEX_MODE, CATEGORY_REGEX_REPLACEMENT, RegexCommandIssue,
+    RegexCommandTyping, RegexMatchTyping, RegexMatchWarning, pattern_type::PatternTypeBinder,
 };
 use crate::inference::type_factory::TypeFactory;
 use crate::inference::types::{PrimitiveType, TypeError, TypeId, TypeKind};
@@ -950,23 +950,37 @@ impl<'env, 'ext, 'imp> ConstraintGenerator<'env, 'ext, 'imp> {
         let return_type = self.resolve_regex_command_return_type(command);
 
         if let Some(replacement) = &command.replacement {
-            self.verify_regex_replacement(replacement, &mut diagnostics);
+            self.verify_regex_replacement(replacement, &command.span, &mut diagnostics);
         }
 
         self.collect_flag_diagnostics(command, &mut diagnostics);
 
         if self.detect_mode_flag_confusion(command) {
-            diagnostics.push(RegexCommandIssue::new(
+            let issue = RegexCommandIssue::new(
                 "JV_REGEX_I001",
                 messages::regex_mode_flag_confusion_message(),
-            ));
+                command.span.clone(),
+                DiagnosticSeverity::Information,
+                CATEGORY_REGEX_MODE,
+            )
+            .add_suggestion(
+                "Quick Fix: regex.mode.normalize -> `[match]` モードを明示するか、`m` フラグの重複指定を解消してください / Explicitly spell `[match]` or remove the redundant `m` flag to clarify intent.",
+            );
+            diagnostics.push(issue);
         }
 
         if matches!(command.mode_origin, RegexCommandModeOrigin::DefaultMatch) {
-            diagnostics.push(RegexCommandIssue::new(
+            let issue = RegexCommandIssue::new(
                 "JV_REGEX_I002",
                 messages::regex_ambiguous_mode_message(),
-            ));
+                command.span.clone(),
+                DiagnosticSeverity::Information,
+                CATEGORY_REGEX_MODE,
+            )
+            .add_suggestion(
+                "Quick Fix: regex.mode.explicit -> `/[match]` や短縮モード記法を使って意図したモードを明示してください / Use `/[match]` or the short-mode prefix to state the intended mode explicitly.",
+            );
+            diagnostics.push(issue);
         }
 
         let mut typing = RegexCommandTyping::new(
@@ -1008,6 +1022,7 @@ impl<'env, 'ext, 'imp> ConstraintGenerator<'env, 'ext, 'imp> {
     fn verify_regex_replacement(
         &mut self,
         replacement: &RegexReplacement,
+        command_span: &Span,
         diagnostics: &mut Vec<RegexCommandIssue>,
     ) {
         match replacement {
@@ -1015,7 +1030,7 @@ impl<'env, 'ext, 'imp> ConstraintGenerator<'env, 'ext, 'imp> {
             RegexReplacement::Expression(expr) => {
                 let expr_ty = self.infer_expression(expr);
                 let span = expression_span(expr);
-                self.ensure_string_output(expr_ty, span, diagnostics, None);
+                self.ensure_string_output(expr_ty, span, command_span, diagnostics, None);
             }
             RegexReplacement::Lambda(lambda) => {
                 self.env.enter_scope();
@@ -1042,7 +1057,13 @@ impl<'env, 'ext, 'imp> ConstraintGenerator<'env, 'ext, 'imp> {
                 let body_span = expression_span(&lambda.body);
                 self.env.leave_scope();
 
-                self.ensure_string_output(body_ty, body_span, diagnostics, Some("JV_REGEX_E102"));
+                self.ensure_string_output(
+                    body_ty,
+                    body_span,
+                    &lambda.span,
+                    diagnostics,
+                    Some("JV_REGEX_E102"),
+                );
             }
         }
     }
@@ -1051,6 +1072,7 @@ impl<'env, 'ext, 'imp> ConstraintGenerator<'env, 'ext, 'imp> {
         &mut self,
         actual: TypeKind,
         span: Option<&Span>,
+        fallback_span: &Span,
         diagnostics: &mut Vec<RegexCommandIssue>,
         diag_code: Option<&'static str>,
     ) {
@@ -1069,7 +1091,18 @@ impl<'env, 'ext, 'imp> ConstraintGenerator<'env, 'ext, 'imp> {
             ConversionOutcome::Allowed(_) => {
                 if let Some(code) = diag_code {
                     let message = self.regex_replacement_error_message(code, &actual_desc);
-                    diagnostics.push(RegexCommandIssue::new(code, message.clone()));
+                    let issue_span = span.cloned().unwrap_or_else(|| fallback_span.clone());
+                    let issue = RegexCommandIssue::new(
+                        code,
+                        message.clone(),
+                        issue_span,
+                        DiagnosticSeverity::Error,
+                        CATEGORY_REGEX_REPLACEMENT,
+                    )
+                    .add_suggestion(
+                        "Quick Fix: regex.replacement.string -> 置換式が `String` を返すように型変換または `.toString()` 呼び出しを追加してください / Ensure the replacement returns a `String`, for example by converting the value or calling `.toString()`.",
+                    );
+                    diagnostics.push(issue);
                     self.report_type_error(TypeError::custom(message));
                 } else {
                     self.push_constraint_with_span(
@@ -1085,7 +1118,18 @@ impl<'env, 'ext, 'imp> ConstraintGenerator<'env, 'ext, 'imp> {
             ConversionOutcome::Rejected(_) => {
                 if let Some(code) = diag_code {
                     let message = self.regex_replacement_error_message(code, &actual_desc);
-                    diagnostics.push(RegexCommandIssue::new(code, message.clone()));
+                    let issue_span = span.cloned().unwrap_or_else(|| fallback_span.clone());
+                    let issue = RegexCommandIssue::new(
+                        code,
+                        message.clone(),
+                        issue_span,
+                        DiagnosticSeverity::Error,
+                        CATEGORY_REGEX_REPLACEMENT,
+                    )
+                    .add_suggestion(
+                        "Quick Fix: regex.replacement.convert -> 置換式を `String` へ変換するか、テンプレート文字列を利用してください / Convert the replacement expression to a `String` or switch to a template literal.",
+                    );
+                    diagnostics.push(issue);
                     self.report_type_error(TypeError::custom(message));
                 } else {
                     let message = format!(
@@ -1132,7 +1176,18 @@ impl<'env, 'ext, 'imp> ConstraintGenerator<'env, 'ext, 'imp> {
                 let normalized = ch.to_ascii_lowercase();
                 if !self.is_known_regex_flag(normalized) && reported.insert(normalized) {
                     let message = messages::regex_unknown_flag_message(ch);
-                    diagnostics.push(RegexCommandIssue::new("JV_REGEX_E101", message.clone()));
+                    let issue = RegexCommandIssue::new(
+                        "JV_REGEX_E101",
+                        message.clone(),
+                        command.span.clone(),
+                        DiagnosticSeverity::Error,
+                        CATEGORY_REGEX_FLAG,
+                    )
+                    .add_suggestion(format!(
+                        "Quick Fix: regex.flag.remove -> 未知のフラグ `{}` を削除してください / Remove the unknown regex flag `{}`.",
+                        ch, ch
+                    ));
+                    diagnostics.push(issue);
                     self.report_type_error(TypeError::custom(message));
                 }
             }
@@ -1140,7 +1195,18 @@ impl<'env, 'ext, 'imp> ConstraintGenerator<'env, 'ext, 'imp> {
 
         if let Some((primary, secondary)) = self.detect_literal_flag_conflict(&command.flags) {
             let message = messages::regex_flag_conflict_message(primary, secondary);
-            diagnostics.push(RegexCommandIssue::new("JV_REGEX_E103", message.clone()));
+            let issue = RegexCommandIssue::new(
+                "JV_REGEX_E103",
+                message.clone(),
+                command.span.clone(),
+                DiagnosticSeverity::Error,
+                CATEGORY_REGEX_FLAG,
+            )
+            .add_suggestion(format!(
+                "Quick Fix: regex.flag.resolve -> `{}` と `{}` のどちらかを削除してフラグ競合を解消してください / Remove either `{}` or `{}` to resolve the flag conflict.",
+                primary, secondary, primary, secondary
+            ));
+            diagnostics.push(issue);
             self.report_type_error(TypeError::custom(message));
         }
     }

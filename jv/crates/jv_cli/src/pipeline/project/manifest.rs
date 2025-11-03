@@ -213,6 +213,7 @@ impl ManifestLoader {
             related_locations: Vec::new(),
             suggestions: Vec::new(),
             learning_hints: None,
+            categories: Vec::new(),
         }
     }
 }

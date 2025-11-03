@@ -275,6 +275,7 @@ fn plan_diagnostic_with(
         related_locations: Vec::new(),
         suggestions: Vec::new(),
         learning_hints: None,
+        categories: Vec::new(),
     }
 }
 
