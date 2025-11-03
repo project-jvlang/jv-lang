@@ -3,7 +3,10 @@ use crate::error::TransformError;
 use crate::transform::{
     extract_java_type, normalize_whitespace_array_elements, transform_expression,
 };
-use crate::types::{IrExpression, IrProgram, IrResolvedMethodTarget, IrStatement, JavaType};
+use crate::types::{
+    IrExpression, IrModifiers, IrProgram, IrResolvedMethodTarget, IrStatement, IrVisibility,
+    JavaType,
+};
 use jv_ast::{
     Argument, BinaryOp, CallArgumentMetadata, CallArgumentStyle, Expression, SequenceDelimiter,
     Span, types::PrimitiveTypeName,
@@ -541,6 +544,74 @@ pub fn try_lower_sequence_call(
         java_type,
         span,
     }))
+}
+
+/// Plans the set of IR statements required to represent a single test suite.
+#[derive(Debug, Clone)]
+pub struct TestSuitePlanner {
+    class_name: String,
+    span: Span,
+    modifiers: IrModifiers,
+    fields: Vec<IrStatement>,
+    methods: Vec<IrStatement>,
+    nested_classes: Vec<IrStatement>,
+    samples: Vec<IrStatement>,
+}
+
+impl TestSuitePlanner {
+    pub fn new(class_name: impl Into<String>, span: Span) -> Self {
+        Self {
+            class_name: class_name.into(),
+            span,
+            modifiers: IrModifiers {
+                visibility: IrVisibility::Public,
+                is_final: true,
+                ..IrModifiers::default()
+            },
+            fields: Vec::new(),
+            methods: Vec::new(),
+            nested_classes: Vec::new(),
+            samples: Vec::new(),
+        }
+    }
+
+    pub fn modifiers_mut(&mut self) -> &mut IrModifiers {
+        &mut self.modifiers
+    }
+
+    pub fn push_field(&mut self, field: IrStatement) {
+        self.fields.push(field);
+    }
+
+    pub fn push_method(&mut self, method: IrStatement) {
+        self.methods.push(method);
+    }
+
+    pub fn push_nested_class(&mut self, class: IrStatement) {
+        self.nested_classes.push(class);
+    }
+
+    pub fn push_sample(&mut self, sample: IrStatement) {
+        self.samples.push(sample);
+    }
+
+    pub fn build(self) -> Vec<IrStatement> {
+        let class_decl = IrStatement::ClassDeclaration {
+            name: self.class_name,
+            type_parameters: Vec::new(),
+            superclass: None,
+            interfaces: Vec::new(),
+            fields: self.fields,
+            methods: self.methods,
+            nested_classes: self.nested_classes,
+            modifiers: self.modifiers,
+            span: self.span,
+        };
+
+        let mut statements = self.samples;
+        statements.push(class_decl);
+        statements
+    }
 }
 
 fn lower_sequence_source(

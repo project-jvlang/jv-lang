@@ -1,10 +1,11 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::time::Duration;
 
 use crate::types::{
-    DataFormat, IrExpression, IrImport, IrImportDetail, IrResolvedMethodTarget, IrStatement,
-    JavaType, MethodOverload, PrimitiveReturnMetadata, SampleMode, UtilityClass,
+    DataFormat, IrExpression, IrImport, IrImportDetail, IrResolvedMethodTarget,
+    IrSampleDeclaration, IrStatement, JavaType, MethodOverload, PrimitiveReturnMetadata,
+    SampleMode, UtilityClass,
 };
 use jv_ast::{CallArgumentStyle, Span};
 use jv_support::arena::{
@@ -53,6 +54,10 @@ pub struct TransformContext {
     planned_imports: Vec<IrImport>,
     /// Alias lookup for resolved import entries
     import_aliases: HashMap<String, JavaType>,
+    /// Cached test sample declarations keyed by source path (@Sample)
+    pub(crate) test_sample_cache: HashMap<String, IrSampleDeclaration>,
+    /// Tracks which cached samples were already emitted into the IR stream
+    emitted_test_samples: HashSet<String>,
 }
 
 /// Hint describing a function signature sourced from TypeFacts prior to lowering.
@@ -101,6 +106,8 @@ impl TransformContext {
             when_strategies: Vec::new(),
             planned_imports: Vec::new(),
             import_aliases: HashMap::new(),
+            test_sample_cache: HashMap::new(),
+            emitted_test_samples: HashSet::new(),
         }
     }
 
@@ -551,6 +558,26 @@ impl TransformContext {
     /// Takes ownership of the planned imports, leaving the context empty.
     pub fn take_resolved_imports(&mut self) -> Vec<IrImport> {
         std::mem::take(&mut self.planned_imports)
+    }
+
+    /// Retrieves a cached @Sample declaration used in test lowering, if present.
+    pub fn test_sample(&self, key: &str) -> Option<&IrSampleDeclaration> {
+        self.test_sample_cache.get(key)
+    }
+
+    /// Inserts a cached @Sample declaration for reuse across tests.
+    pub fn insert_test_sample(&mut self, key: String, declaration: IrSampleDeclaration) {
+        self.test_sample_cache.insert(key, declaration);
+    }
+
+    /// Marks that a cached sample declaration has already been emitted into the IR stream.
+    pub fn mark_sample_emitted(&mut self, key: &str) {
+        self.emitted_test_samples.insert(key.to_string());
+    }
+
+    /// Checks whether the given cached sample declaration has been emitted.
+    pub fn is_sample_emitted(&self, key: &str) -> bool {
+        self.emitted_test_samples.contains(key)
     }
 
     /// Enables pooling for an existing context.
@@ -1038,6 +1065,8 @@ impl Clone for TransformContext {
             when_strategies: self.when_strategies.clone(),
             planned_imports: self.planned_imports.clone(),
             import_aliases: self.import_aliases.clone(),
+            test_sample_cache: self.test_sample_cache.clone(),
+            emitted_test_samples: self.emitted_test_samples.clone(),
         }
     }
 }

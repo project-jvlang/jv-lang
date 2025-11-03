@@ -4549,6 +4549,7 @@ fun sample(value: Any): Int {
             body: None,
             modifiers: IrModifiers::default(),
             throws: vec![],
+            assertion_patterns: Vec::new(),
             span: dummy_span(),
         };
 
@@ -4587,6 +4588,114 @@ fun sample(value: Any): Int {
         let restored: IrExpression = serde_json::from_str(&json).expect("call should deserialize");
 
         assert_eq!(restored, call);
+    }
+
+    #[test]
+    fn lower_simple_test_produces_class_and_assertion() {
+        let source = r#"
+            test "simple equality" {
+                sum = 1 + 1
+                sum == 2
+            }
+        "#;
+
+        let program = parse_program(source);
+        let mut context = TransformContext::new();
+        let ir_program =
+            transform_program_with_context(program, &mut context).expect("lowering succeeds");
+
+        assert_eq!(ir_program.type_declarations.len(), 1);
+        let class = ir_program.type_declarations.first().expect("class present");
+        match class {
+            IrStatement::ClassDeclaration { methods, .. } => {
+                assert_eq!(methods.len(), 1);
+                match &methods[0] {
+                    IrStatement::MethodDeclaration {
+                        modifiers,
+                        assertion_patterns,
+                        ..
+                    } => {
+                        let annotation_names = modifiers
+                            .annotations
+                            .iter()
+                            .map(|ann| ann.name.simple_name().to_string())
+                            .collect::<Vec<_>>();
+                        assert!(annotation_names.contains(&"Test".to_string()));
+                        assert!(annotation_names.contains(&"DisplayName".to_string()));
+                        assert_eq!(assertion_patterns.len(), 1);
+                    }
+                    other => panic!("expected method declaration, got {other:?}"),
+                }
+            }
+            other => panic!("expected class declaration, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn lower_parameterized_test_emits_dataset_provider() {
+        let source = r#"
+            test "addition dataset" [
+                [1 2]
+                [3 4]
+            ] (lhs: Int, rhs: Int) {
+                (lhs + rhs) == (rhs + lhs)
+            }
+        "#;
+
+        let program = parse_program(source);
+        let mut context = TransformContext::new();
+        let ir_program =
+            transform_program_with_context(program, &mut context).expect("lowering succeeds");
+
+        let class = ir_program
+            .type_declarations
+            .first()
+            .expect("class declaration present");
+        match class {
+            IrStatement::ClassDeclaration { methods, .. } => {
+                assert_eq!(methods.len(), 2, "expected test + provider methods");
+                let (test_method, provider_method) =
+                    if let IrStatement::MethodDeclaration { modifiers, .. } = &methods[0] {
+                        if modifiers.is_static {
+                            (&methods[1], &methods[0])
+                        } else {
+                            (&methods[0], &methods[1])
+                        }
+                    } else {
+                        (&methods[0], &methods[1])
+                    };
+
+                match test_method {
+                    IrStatement::MethodDeclaration { modifiers, .. } => {
+                        let names = modifiers
+                            .annotations
+                            .iter()
+                            .map(|ann| ann.name.simple_name().to_string())
+                            .collect::<Vec<_>>();
+                        assert!(names.contains(&"ParameterizedTest".to_string()));
+                        assert!(names.contains(&"MethodSource".to_string()));
+                    }
+                    other => panic!("expected method declaration, got {other:?}"),
+                }
+
+                match provider_method {
+                    IrStatement::MethodDeclaration {
+                        modifiers,
+                        return_type,
+                        ..
+                    } => {
+                        assert!(modifiers.is_static, "provider should be static");
+                        if let JavaType::Reference { name, .. } = return_type {
+                            assert_eq!(name, "java.util.stream.Stream");
+                        } else {
+                            panic!("expected Stream return type, got {return_type:?}");
+                        }
+                    }
+                    other => panic!("expected method declaration, got {other:?}"),
+                }
+            }
+            other => panic!("expected class declaration, got {other:?}"),
+        }
     }
 
     // Integration test for IR node structure validation
@@ -5736,6 +5845,7 @@ fun sample(value: Any): Int {
             body: None,
             modifiers: static_modifiers(true),
             throws: vec![],
+            assertion_patterns: Vec::new(),
             span: span_decl_one.clone(),
         };
 
@@ -5754,6 +5864,7 @@ fun sample(value: Any): Int {
             body: None,
             modifiers: static_modifiers(true),
             throws: vec![],
+            assertion_patterns: Vec::new(),
             span: span_decl_two.clone(),
         };
 
@@ -5981,6 +6092,7 @@ fun sample(value: Any): Int {
             body: None,
             modifiers: modifiers(true),
             throws: vec![],
+            assertion_patterns: Vec::new(),
             span: span_decl_one.clone(),
         };
 
@@ -6002,6 +6114,7 @@ fun sample(value: Any): Int {
             body: None,
             modifiers: modifiers(true),
             throws: vec![],
+            assertion_patterns: Vec::new(),
             span: span_decl_two.clone(),
         };
 

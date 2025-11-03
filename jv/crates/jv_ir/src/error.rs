@@ -44,6 +44,13 @@ pub enum TransformError {
         found: String,
         span: Span,
     },
+
+    #[error("{code}: {message}")]
+    TestLoweringError {
+        code: &'static str,
+        message: String,
+        span: Span,
+    },
 }
 
 impl TransformError {
@@ -60,7 +67,8 @@ impl TransformError {
             | TransformError::ResourceManagementError { span, .. }
             | TransformError::SampleAnnotationError { span, .. }
             | TransformError::SampleProcessingError { span, .. }
-            | TransformError::WhitespaceSequenceTypeMismatch { span, .. } => span,
+            | TransformError::WhitespaceSequenceTypeMismatch { span, .. }
+            | TransformError::TestLoweringError { span, .. } => span,
         }
     }
 }

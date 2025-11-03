@@ -752,6 +752,25 @@ pub struct IrImport {
     pub span: Span,
 }
 
+/// Patterns recognised inside test bodies that can be mapped to JUnit assertions.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum AssertionPattern {
+    Equals {
+        actual: IrExpression,
+        expected: IrExpression,
+        span: Span,
+    },
+    NotEquals {
+        actual: IrExpression,
+        expected: IrExpression,
+        span: Span,
+    },
+    Truthy {
+        expr: IrExpression,
+        span: Span,
+    },
+}
+
 /// Desugared statements
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum IrStatement {
@@ -797,6 +816,8 @@ pub enum IrStatement {
         body: Option<IrExpression>, // None for abstract methods
         modifiers: IrModifiers,
         throws: Vec<String>, // Exception types
+        #[serde(default)]
+        assertion_patterns: Vec<AssertionPattern>,
         span: Span,
     },
 
