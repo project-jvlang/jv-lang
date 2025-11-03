@@ -279,6 +279,102 @@ fn ダブルブレース_標準インタフェースにはデフォルト具象�
 }
 
 #[test]
+fn ダブルブレース_インタフェースコンストラクタは具象クラスで生成される() {
+    let span = ダミーのスパン();
+    let base_call = Expression::Call {
+        function: Box::new(Expression::Identifier("Map".into(), span.clone())),
+        args: vec![Argument::Positional(Expression::Identifier(
+            "existing".into(),
+            span.clone(),
+        ))],
+        type_arguments: Vec::new(),
+        argument_metadata: CallArgumentMetadata::with_style(CallArgumentStyle::Comma),
+        call_kind: CallKind::Constructor {
+            type_name: "Map".into(),
+            fqcn: Some("java.util.Map".into()),
+        },
+        span: span.clone(),
+    };
+
+    let init = DoublebraceInit {
+        base: Some(Box::new(base_call)),
+        receiver_hint: None,
+        statements: Vec::new(),
+        span: span.clone(),
+    };
+
+    let plan = DoublebraceLoweringPlan {
+        receiver_fqcn: "java.util.LinkedHashMap<java.lang.String, java.lang.Integer>".into(),
+        kind: DoublebraceLoweringKind::Mutate(DoublebraceLoweringMutatePlan {
+            base: DoublebraceBaseStrategy::SynthesizedInstance,
+            steps: Vec::new(),
+        }),
+    };
+
+    let mut context = TransformContext::new();
+    context.add_variable(
+        "existing".into(),
+        JavaType::Reference {
+            name: "java.util.Map".into(),
+            generic_args: Vec::new(),
+        },
+    );
+    context.insert_doublebrace_plan(&span, plan);
+
+    let expression = Expression::DoublebraceInit(init);
+    let ir = transform_expression(expression, &mut context)
+        .expect("Doublebrace インタフェースコンストラクタの具象化に成功するはずです");
+
+    match ir {
+        IrExpression::DoublebraceInit {
+            base,
+            receiver_type,
+            ..
+        } => {
+            let base_expr = base.expect("Synthesized インスタンスが生成されること");
+            match *base_expr {
+                IrExpression::ObjectCreation {
+                    ref class_name,
+                    ref args,
+                    ref generic_args,
+                    ..
+                } => {
+                    assert_eq!(
+                        class_name, "java.util.LinkedHashMap",
+                        "Map コンストラクタから LinkedHashMap が生成されること"
+                    );
+                    assert_eq!(generic_args.len(), 2, "キーと値の型引数が保持されること");
+                    assert_eq!(args.len(), 1, "元の引数が保持されること");
+                    match &args[0] {
+                        IrExpression::Identifier { name, .. } => {
+                            assert_eq!(name, "existing", "引数識別子が変換後も保持されること")
+                        }
+                        other => panic!("Identifier が必要ですが {:?}", other),
+                    }
+                }
+                other => panic!("ObjectCreation が必要ですが {:?}", other),
+            }
+
+            match receiver_type {
+                JavaType::Reference { name, generic_args } => {
+                    assert_eq!(
+                        name, "java.util.LinkedHashMap",
+                        "レシーバー型が既定具象へ変換されること"
+                    );
+                    assert_eq!(
+                        generic_args.len(),
+                        2,
+                        "レシーバー型にも型引数が保持されること"
+                    );
+                }
+                other => panic!("参照型が必要ですが {:?}", other),
+            }
+        }
+        other => panic!("DoublebraceInit が生成されるべきですが {:?}", other),
+    }
+}
+
+#[test]
 fn ダブルブレース_コピー変換() {
     let span = ダミーのスパン();
     let statements = vec![Statement::Assignment {

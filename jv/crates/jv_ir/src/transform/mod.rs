@@ -894,6 +894,7 @@ fn lower_doublebrace_expression(
     context: &mut TransformContext,
 ) -> Result<IrExpression, TransformError> {
     let span = init.span.clone();
+    let base_expression = init.base.map(|expr| *expr);
     let plan = context
         .take_doublebrace_plan(&span)
         .or_else(|| context.doublebrace_plan(&span).cloned())
@@ -903,11 +904,6 @@ fn lower_doublebrace_expression(
         })?;
 
     let receiver_type = java_type_from_fqcn(&plan.receiver_fqcn);
-
-    let mut base_ir = match init.base {
-        Some(base_expr) => Some(Box::new(transform_expression(*base_expr, context)?)),
-        None => None,
-    };
 
     let ir_plan = lower_doublebrace_plan(plan, context)?;
     let needs_synthesized = match &ir_plan {
@@ -920,6 +916,18 @@ fn lower_doublebrace_expression(
                 DoublebraceCopySourceStrategy::SynthesizedInstance
             )
         }
+    };
+
+    let mut base_ir = match base_expression {
+        Some(base_expr) => {
+            let lowered = if needs_synthesized {
+                lower_doublebrace_synthesized_base(base_expr, &receiver_type, context)?
+            } else {
+                transform_expression(base_expr, context)?
+            };
+            Some(Box::new(lowered))
+        }
+        None => None,
     };
 
     if base_ir.is_none() && needs_synthesized {
@@ -1025,6 +1033,49 @@ fn synthesize_receiver_instance(receiver_type: &JavaType, span: &Span) -> IrExpr
     }
 }
 
+fn lower_doublebrace_synthesized_base(
+    base_expr: Expression,
+    receiver_type: &JavaType,
+    context: &mut TransformContext,
+) -> Result<IrExpression, TransformError> {
+    match base_expr {
+        Expression::Call {
+            function,
+            args,
+            type_arguments,
+            argument_metadata,
+            call_kind,
+            span,
+        } => {
+            if let CallKind::Constructor { .. } = &call_kind {
+                if let JavaType::Reference { name, generic_args } = receiver_type {
+                    let instantiation =
+                        preferred_doublebrace_instantiation(name).unwrap_or(name.as_str());
+                    let ir_args = lower_call_arguments(args, context)?;
+                    return Ok(IrExpression::ObjectCreation {
+                        class_name: instantiation.to_string(),
+                        generic_args: generic_args.clone(),
+                        args: ir_args,
+                        java_type: receiver_type.clone(),
+                        span,
+                    });
+                }
+            }
+
+            lower_call_expression(
+                *function,
+                args,
+                type_arguments,
+                argument_metadata,
+                call_kind,
+                span,
+                context,
+            )
+        }
+        other => transform_expression(other, context),
+    }
+}
+
 fn preferred_doublebrace_instantiation(name: &str) -> Option<&'static str> {
     let simple = name.rsplit('.').next().unwrap_or(name);
     match simple {
@@ -1085,10 +1136,7 @@ fn parse_non_array_type(spec: &str) -> JavaType {
             .map(|(inner, _)| inner)
             .unwrap_or_default();
         let args = split_generic_arguments(args_section);
-        let parsed_args = args
-            .into_iter()
-            .map(parse_java_type)
-            .collect::<Vec<_>>();
+        let parsed_args = args.into_iter().map(parse_java_type).collect::<Vec<_>>();
         return JavaType::Reference {
             name: base.to_string(),
             generic_args: parsed_args,
