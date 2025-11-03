@@ -2,6 +2,7 @@ use super::*;
 
 mod java_target_matrix;
 mod logging_artifacts;
+mod logging_dependencies;
 
 #[test]
 fn test_build_config_default() {
