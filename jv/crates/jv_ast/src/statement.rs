@@ -1,4 +1,5 @@
 // jv_ast/statement - Statement types and program structure
+use crate::annotation::{Annotation, AnnotationArgument};
 use crate::binding_pattern::BindingPatternKind;
 use crate::comments::*;
 use crate::expression::*;
@@ -93,6 +94,74 @@ pub enum LoopStrategy {
     Unknown,
 }
 
+/// テスト宣言。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TestDeclaration {
+    /// 表示名。
+    pub display_name: String,
+    /// ローワリング後に設定される正規化識別子。
+    #[serde(default)]
+    pub normalized: Option<String>,
+    /// データセット。
+    #[serde(default)]
+    pub dataset: Option<TestDataset>,
+    /// パラメータ一覧。
+    #[serde(default)]
+    pub parameters: Vec<TestParameter>,
+    /// 宣言に付与されたアノテーション。
+    #[serde(default)]
+    pub annotations: Vec<Annotation>,
+    /// テスト本体。
+    pub body: Expression,
+    /// 宣言全体のスパン。
+    pub span: Span,
+}
+
+/// テストデータセット。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum TestDataset {
+    /// インライン配列形式のデータ。
+    InlineArray {
+        rows: Vec<TestDatasetRow>,
+        span: Span,
+    },
+    /// `@Sample` による外部データ参照。
+    Sample(TestSampleMetadata),
+}
+
+/// インラインデータセットの 1 行。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TestDatasetRow {
+    /// 行内の値。
+    pub values: Vec<Expression>,
+    /// 行全体のスパン。
+    pub span: Span,
+}
+
+/// サンプルデータ参照のメタデータ。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TestSampleMetadata {
+    /// 参照元ファイル。
+    pub source: String,
+    /// 追加引数。
+    #[serde(default)]
+    pub arguments: Vec<AnnotationArgument>,
+    /// アノテーションのスパン。
+    pub span: Span,
+}
+
+/// テストパラメータ。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TestParameter {
+    /// バインディングパターン。
+    pub pattern: BindingPatternKind,
+    /// 型注釈。
+    #[serde(default)]
+    pub type_annotation: Option<TypeAnnotation>,
+    /// パラメータ全体のスパン。
+    pub span: Span,
+}
+
 /// Structured representation of a `for-in` loop.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ForInStatement {
@@ -147,6 +216,9 @@ pub enum Statement {
         modifiers: Modifiers,
         span: Span,
     },
+
+    // Test declarations
+    TestDeclaration(TestDeclaration),
 
     // Class declarations
     ClassDeclaration {

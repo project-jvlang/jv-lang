@@ -144,9 +144,11 @@ fn reserved_annotation_lookup_and_conflict_detection() {
     let binding = [sample_primary, sample_duplicate, sample_shadow];
     let conflicts = detect_reserved_conflicts(&binding);
 
-    assert!(conflicts
-        .iter()
-        .any(|conflict| matches!(conflict.kind, ReservedConflictKind::DuplicateUsage)));
+    assert!(
+        conflicts
+            .iter()
+            .any(|conflict| matches!(conflict.kind, ReservedConflictKind::DuplicateUsage))
+    );
     assert!(conflicts.iter().any(|conflict| matches!(
         conflict.kind,
         ReservedConflictKind::NameShadowing { reserved } if reserved == "Sample"
@@ -238,6 +240,61 @@ fn regex_literal_roundtrips_through_serde() {
     let expr_decoded: Expression =
         serde_json::from_str(&expr_serialized).expect("deserialize regex expression");
     assert_eq!(expr_decoded, expr);
+}
+
+#[test]
+fn test_declaration_roundtrips_through_serde() {
+    let annotation_span = Span::new(1, 0, 1, 7);
+    let annotations = vec![Annotation {
+        name: AnnotationName::new(vec!["Sample".to_string()], annotation_span.clone()),
+        arguments: Vec::new(),
+        span: annotation_span.clone(),
+    }];
+
+    let parameter_span = Span::new(2, 4, 2, 10);
+    let parameter = TestParameter {
+        pattern: BindingPatternKind::identifier("input", parameter_span.clone()),
+        type_annotation: Some(TypeAnnotation::Simple("Int".to_string())),
+        span: parameter_span.clone(),
+    };
+
+    let value_span = Span::new(3, 8, 3, 9);
+    let dataset_row = TestDatasetRow {
+        values: vec![Expression::Literal(
+            Literal::Number("1".to_string()),
+            value_span.clone(),
+        )],
+        span: Span::new(3, 4, 3, 11),
+    };
+
+    let dataset = TestDataset::InlineArray {
+        rows: vec![dataset_row],
+        span: Span::new(3, 2, 4, 3),
+    };
+
+    let block_span = Span::new(5, 2, 7, 3);
+    let body = Expression::Block {
+        statements: Vec::new(),
+        span: block_span.clone(),
+    };
+
+    let declaration = TestDeclaration {
+        display_name: "サンプルケース".to_string(),
+        normalized: None,
+        dataset: Some(dataset),
+        parameters: vec![parameter],
+        annotations,
+        body,
+        span: Span::new(1, 0, 7, 3),
+    };
+
+    let statement = Statement::TestDeclaration(declaration);
+    let serialized =
+        serde_json::to_string(&statement).expect("テスト宣言のシリアライズに失敗しました");
+    let decoded: Statement =
+        serde_json::from_str(&serialized).expect("テスト宣言のデシリアライズに失敗しました");
+
+    assert_eq!(decoded, statement);
 }
 
 #[test]

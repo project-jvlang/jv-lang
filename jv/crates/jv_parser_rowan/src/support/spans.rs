@@ -45,6 +45,7 @@ pub fn statement_span(stmt: &Statement) -> Span {
         Statement::ValDeclaration { span, .. } => span.clone(),
         Statement::VarDeclaration { span, .. } => span.clone(),
         Statement::FunctionDeclaration { span, .. } => span.clone(),
+        Statement::TestDeclaration(decl) => decl.span.clone(),
         Statement::DataClassDeclaration { span, .. } => span.clone(),
         Statement::Expression { span, .. } => span.clone(),
         Statement::Return { span, .. } => span.clone(),

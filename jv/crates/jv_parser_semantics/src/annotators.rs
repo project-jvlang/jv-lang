@@ -1,9 +1,9 @@
-use jv_ast::{types::PrimitiveReturnMetadata, GenericSignature, Program, Span, Statement};
+use jv_ast::{GenericSignature, Program, Span, Statement, types::PrimitiveReturnMetadata};
 use jv_lexer::{Token, TokenType};
 
 use super::{
-    metadata::{collect_raw_directives_from_trivia, primitive_reference_from_segments},
     SemanticsContext, SemanticsPass, SemanticsStatus,
+    metadata::{collect_raw_directives_from_trivia, primitive_reference_from_segments},
 };
 
 #[derive(Default)]
@@ -83,7 +83,8 @@ fn annotate_statement_for_primitives(statement: &mut Statement, tokens: &[Token]
         | Statement::Package { .. }
         | Statement::Comment(_)
         | Statement::Concurrency(_)
-        | Statement::ResourceManagement(_) => {}
+        | Statement::ResourceManagement(_)
+        | Statement::TestDeclaration(_) => {}
     }
 }
 
@@ -248,7 +249,8 @@ fn annotate_statement_for_directives(statement: &mut Statement, tokens: &[Token]
         | Statement::Package { .. }
         | Statement::Comment(_)
         | Statement::Concurrency(_)
-        | Statement::ResourceManagement(_) => {}
+        | Statement::ResourceManagement(_)
+        | Statement::TestDeclaration(_) => {}
     }
 }
 

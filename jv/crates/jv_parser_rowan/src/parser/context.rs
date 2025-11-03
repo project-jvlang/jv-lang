@@ -859,6 +859,29 @@ impl<'tokens> ParserContext<'tokens> {
         None
     }
 
+    pub(crate) fn peek_significant_token(&self) -> Option<&'tokens Token> {
+        self.peek_significant_token_n(0)
+    }
+
+    pub(crate) fn peek_significant_token_n(&self, n: usize) -> Option<&'tokens Token> {
+        let mut index = self.cursor;
+        let mut skipped = 0usize;
+        while index < self.tokens.len() {
+            let token = &self.tokens[index];
+            let kind = TokenKind::from_token(token);
+            if kind.is_trivia() {
+                index += 1;
+                continue;
+            }
+            if skipped == n {
+                return Some(token);
+            }
+            skipped += 1;
+            index += 1;
+        }
+        None
+    }
+
     /// EoF かどうか。
     pub(crate) fn is_eof(&self) -> bool {
         self.peek_significant_kind()

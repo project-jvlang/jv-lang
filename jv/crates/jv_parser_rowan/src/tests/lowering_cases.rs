@@ -2,11 +2,15 @@ use crate::lowering::{lower_program, LoweringDiagnosticSeverity, LoweringResult}
 use crate::parser::parse;
 use crate::verification::StatementKindKey;
 use crate::{JvLanguage, ParseBuilder, SyntaxKind};
+use jv_ast::annotation::{AnnotationArgument, AnnotationValue};
 use jv_ast::strings::MultilineKind;
 use jv_ast::{
     expression::{Argument, Parameter, ParameterProperty, StringPart},
     json::{JsonLiteral, JsonValue},
-    statement::{ConcurrencyConstruct, LoopStrategy, ResourceManagement, ValBindingOrigin},
+    statement::{
+        ConcurrencyConstruct, LoopStrategy, ResourceManagement, TestDataset, TestSampleMetadata,
+        ValBindingOrigin,
+    },
     types::{BinaryOp, Literal, Modifiers, Pattern, TypeAnnotation},
     BindingPatternKind, Expression, Statement,
 };
@@ -51,6 +55,107 @@ fn lower_source(source: &str) -> LoweringResult {
     let green = ParseBuilder::build_from_events(&parse_output.events, &tokens);
     let syntax: SyntaxNode<JvLanguage> = SyntaxNode::new_root(green);
     lower_program(&syntax, &tokens)
+}
+
+#[test]
+fn lower_test_declaration_with_inline_dataset() {
+    let source = r#"
+        test "行列加算" [ [1 2], [3 4] ] (lhs: Int, rhs: Int) {
+            val sum = lhs + rhs
+        }
+    "#;
+
+    let result = lower_source(source);
+    assert!(
+        result.is_success(),
+        "ローワリング診断が発生しました: {:?}",
+        result.diagnostics
+    );
+
+    let declaration = result
+        .statements
+        .iter()
+        .find_map(|statement| match statement {
+            Statement::TestDeclaration(decl) => Some(decl),
+            _ => None,
+        })
+        .expect("TestDeclaration がローワリングされていません");
+
+    assert_eq!(declaration.display_name, "行列加算");
+    match &declaration.dataset {
+        Some(TestDataset::InlineArray { rows, .. }) => {
+            assert_eq!(rows.len(), 2, "データセット行は2件の想定です");
+            assert_eq!(rows[0].values.len(), 2, "最初の行の値数が期待と異なります");
+        }
+        other => panic!("インラインデータセットを期待しましたが {:?} でした", other),
+    }
+
+    assert_eq!(
+        declaration.parameters.len(),
+        2,
+        "パラメータ数が2件ではありません"
+    );
+    match &declaration.body {
+        Expression::Block { .. } => {}
+        other => panic!("ブロック式の本体を期待しましたが {:?} でした", other),
+    }
+}
+
+#[test]
+fn lower_test_declaration_with_sample_dataset() {
+    let source = r#"
+        test "外部ケース" [@Sample("cases.json", mode = SampleMode.Load)] (row) {
+            println(row)
+        }
+    "#;
+
+    let result = lower_source(source);
+    assert!(
+        result.is_success(),
+        "ローワリング診断が発生しました: {:?}",
+        result.diagnostics
+    );
+
+    let declaration = result
+        .statements
+        .iter()
+        .find_map(|statement| match statement {
+            Statement::TestDeclaration(decl) => Some(decl),
+            _ => None,
+        })
+        .expect("TestDeclaration がローワリングされていません");
+
+    match &declaration.dataset {
+        Some(TestDataset::Sample(TestSampleMetadata {
+            source, arguments, ..
+        })) => {
+            assert_eq!(source, "cases.json");
+            assert_eq!(arguments.len(), 1, "mode 引数が期待どおりではありません");
+            match &arguments[0] {
+                AnnotationArgument::Named { name, value, .. } => {
+                    assert_eq!(name, "mode");
+                    match value {
+                        AnnotationValue::EnumConstant {
+                            type_path,
+                            constant,
+                        } => {
+                            assert_eq!(type_path, &vec!["SampleMode".to_string()]);
+                            assert_eq!(constant, "Load");
+                        }
+                        other => panic!("列挙定数の注釈値を期待しましたが {:?} でした", other),
+                    }
+                }
+                other => panic!("名前付き注釈引数を期待しましたが {:?} でした", other),
+            }
+        }
+        other => panic!("@Sample データセットを期待しましたが {:?} でした", other),
+    }
+
+    assert_eq!(
+        declaration.parameters.len(),
+        1,
+        "パラメータ数が1件ではありません"
+    );
 }
 
 fn sample_package_val() -> (SyntaxNode<JvLanguage>, Vec<Token>) {

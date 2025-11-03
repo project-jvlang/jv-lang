@@ -39,6 +39,7 @@ impl Statement {
             Statement::ValDeclaration { span, .. } => span,
             Statement::VarDeclaration { span, .. } => span,
             Statement::FunctionDeclaration { span, .. } => span,
+            Statement::TestDeclaration(decl) => &decl.span,
             Statement::ClassDeclaration { span, .. } => span,
             Statement::DataClassDeclaration { span, .. } => span,
             Statement::InterfaceDeclaration { span, .. } => span,

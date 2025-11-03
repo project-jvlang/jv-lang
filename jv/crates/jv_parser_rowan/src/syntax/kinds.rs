@@ -60,6 +60,8 @@ pub enum SyntaxKind {
     Error,
     /// 関数宣言。
     FunctionDeclaration,
+    /// テスト宣言。
+    TestDeclaration,
     /// 型パラメータリスト。
     TypeParameterList,
     /// 単一の型パラメータ。
@@ -68,12 +70,20 @@ pub enum SyntaxKind {
     FunctionParameterList,
     /// 関数パラメータ。
     FunctionParameter,
+    /// テストパラメータリスト。
+    TestParameterList,
+    /// テストパラメータ。
+    TestParameter,
     /// 関数戻り値型注釈。
     FunctionReturnType,
     /// `where` 句。
     WhereClause,
     /// `where` 句の述語。
     WherePredicate,
+    /// テストデータセット。
+    TestDataset,
+    /// テストデータセット行。
+    TestDatasetRow,
     /// クラス宣言。
     ClassDeclaration,
     /// クラスボディ。
@@ -680,8 +690,11 @@ mod tests {
         ("ModifierList", SyntaxKind::ModifierList),
         ("Modifier", SyntaxKind::Modifier),
         ("FunctionDeclaration", SyntaxKind::FunctionDeclaration),
+        ("TestDeclaration", SyntaxKind::TestDeclaration),
         ("FunctionParameterList", SyntaxKind::FunctionParameterList),
         ("FunctionParameter", SyntaxKind::FunctionParameter),
+        ("TestParameterList", SyntaxKind::TestParameterList),
+        ("TestParameter", SyntaxKind::TestParameter),
         ("ParameterModifierList", SyntaxKind::ParameterModifierList),
         ("ParameterModifier", SyntaxKind::ParameterModifier),
         ("FunctionReturnType", SyntaxKind::FunctionReturnType),
@@ -689,6 +702,8 @@ mod tests {
         ("TypeParameter", SyntaxKind::TypeParameter),
         ("WhereClause", SyntaxKind::WhereClause),
         ("WherePredicate", SyntaxKind::WherePredicate),
+        ("TestDataset", SyntaxKind::TestDataset),
+        ("TestDatasetRow", SyntaxKind::TestDatasetRow),
         ("ClassDeclaration", SyntaxKind::ClassDeclaration),
         ("ClassBody", SyntaxKind::ClassBody),
         ("Block", SyntaxKind::Block),
@@ -723,6 +738,7 @@ mod tests {
         ("WhenKw", SyntaxKind::WhenKw),
         ("ForKw", SyntaxKind::ForKw),
         ("InKw", SyntaxKind::InKw),
+        ("StringLiteral", SyntaxKind::StringLiteral),
         ("WhereKw", SyntaxKind::WhereKw),
         ("LineComment", SyntaxKind::LineComment),
         ("BlockComment", SyntaxKind::BlockComment),
@@ -738,6 +754,8 @@ mod tests {
         ("RightParen", SyntaxKind::RightParen),
         ("LeftBrace", SyntaxKind::LeftBrace),
         ("RightBrace", SyntaxKind::RightBrace),
+        ("LeftBracket", SyntaxKind::LeftBracket),
+        ("RightBracket", SyntaxKind::RightBracket),
         ("Less", SyntaxKind::Less),
         ("Greater", SyntaxKind::Greater),
         ("Arrow", SyntaxKind::Arrow),

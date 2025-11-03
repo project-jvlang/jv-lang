@@ -6,6 +6,7 @@ mod function;
 mod import;
 mod package;
 mod resource;
+mod test;
 mod variable;
 
 use crate::syntax::TokenKind;
@@ -34,6 +35,7 @@ static STRATEGIES: &[StrategyRef] = &[
     &import::IMPORT_STRATEGY,
     &variable::VAL_STRATEGY,
     &variable::VAR_STRATEGY,
+    &test::TEST_STRATEGY,
     &function::FUNCTION_STRATEGY,
     &class::CLASS_STRATEGY,
     &control::CONTROL_STRATEGY,

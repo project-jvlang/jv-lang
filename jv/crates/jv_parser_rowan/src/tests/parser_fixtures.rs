@@ -180,6 +180,86 @@ fn recovers_from_invalid_val() {
 }
 
 #[test]
+fn parses_test_declaration_with_inline_dataset() {
+    let source = r#"
+        test "加算結果を確認" [ [1 2], [3 4] ] (lhs: Int, rhs: Int) {
+            val result = lhs + rhs
+        }
+    "#;
+
+    let tokens = lex(source);
+    let output = parse(&tokens);
+
+    assert!(
+        output.diagnostics.is_empty(),
+        "パーサ診断は空であるべきですが {:?} が報告されました",
+        output.diagnostics
+    );
+
+    let started: Vec<SyntaxKind> = output
+        .events
+        .iter()
+        .filter_map(|event| match event {
+            ParseEvent::StartNode { kind } => Some(*kind),
+            _ => None,
+        })
+        .collect();
+
+    assert!(
+        started.contains(&SyntaxKind::TestDeclaration),
+        "TestDeclaration ノードが生成されていません"
+    );
+    assert!(
+        started.contains(&SyntaxKind::TestDataset),
+        "TestDataset ノードが生成されていません"
+    );
+    assert!(
+        started.contains(&SyntaxKind::TestParameterList),
+        "TestParameterList ノードが生成されていません"
+    );
+}
+
+#[test]
+fn parses_test_declaration_with_sample_dataset() {
+    let source = r#"
+        test "外部ケースを検証" [@Sample("cases.json", mode = SampleMode.Load)] (row) {
+            println(row)
+        }
+    "#;
+
+    let tokens = lex(source);
+    let output = parse(&tokens);
+
+    assert!(
+        output.diagnostics.is_empty(),
+        "パーサ診断は空であるべきですが {:?} が報告されました",
+        output.diagnostics
+    );
+
+    let started: Vec<SyntaxKind> = output
+        .events
+        .iter()
+        .filter_map(|event| match event {
+            ParseEvent::StartNode { kind } => Some(*kind),
+            _ => None,
+        })
+        .collect();
+
+    assert!(
+        started.contains(&SyntaxKind::TestDeclaration),
+        "TestDeclaration ノードが生成されていません"
+    );
+    assert!(
+        started.contains(&SyntaxKind::TestDatasetRow),
+        "TestDatasetRow ノードが生成されていません"
+    );
+    assert!(
+        started.contains(&SyntaxKind::Annotation),
+        "データセット内に Annotation ノードが生成されていません"
+    );
+}
+
+#[test]
 fn parses_deeply_nested_constructs() {
     let source = r#"
         package deep.example.core
