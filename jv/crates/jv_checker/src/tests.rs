@@ -6,9 +6,9 @@ use crate::pattern::{self, PatternTarget};
 use crate::regex::RegexValidator;
 use fastrand::Rng;
 use jv_ast::{
-    Annotation, AnnotationName, BinaryOp, Expression, Literal, Modifiers, Parameter,
-    ParameterModifiers, Pattern, Program, RegexLiteral, Span, Statement, TypeAnnotation,
-    ValBindingOrigin, WhenArm,
+    Annotation, AnnotationName, Argument, BinaryOp, CallArgumentMetadata, CallArgumentStyle,
+    CallKind, DoublebraceInit, Expression, Literal, Modifiers, Parameter, ParameterModifiers,
+    Pattern, Program, RegexLiteral, Span, Statement, TypeAnnotation, ValBindingOrigin, WhenArm,
 };
 use jv_inference::TypeFacts;
 use jv_inference::types::{NullabilityFlag, TypeVariant as FactsTypeVariant};
@@ -111,6 +111,146 @@ fn convert_type_kind_preserves_optional_nullability() {
     } else {
         panic!("expected optional variant");
     }
+}
+
+#[test]
+fn doublebrace_val_collection_reports_mutation() {
+    let span = Span::dummy();
+    let init = Expression::DoublebraceInit(DoublebraceInit {
+        base: None,
+        receiver_hint: None,
+        statements: vec![Statement::Expression {
+            expr: Expression::Call {
+                function: Box::new(Expression::Identifier("add".into(), span.clone())),
+                args: vec![Argument::Positional(Expression::Literal(
+                    Literal::String("pepper".into()),
+                    span.clone(),
+                ))],
+                type_arguments: Vec::new(),
+                argument_metadata: CallArgumentMetadata::with_style(CallArgumentStyle::Whitespace),
+                call_kind: CallKind::Function,
+                span: span.clone(),
+            },
+            span: span.clone(),
+        }],
+        span: span.clone(),
+    });
+
+    let program = Program {
+        package: None,
+        imports: Vec::new(),
+        statements: vec![
+            Statement::ValDeclaration {
+                name: "spiceSet".into(),
+                binding: None,
+                type_annotation: Some(TypeAnnotation::Simple("java.util.List".into())),
+                initializer: init,
+                modifiers: default_modifiers(),
+                origin: ValBindingOrigin::ExplicitKeyword,
+                span: span.clone(),
+            },
+            Statement::Expression {
+                expr: Expression::Call {
+                    function: Box::new(Expression::MemberAccess {
+                        object: Box::new(Expression::Identifier("spiceSet".into(), span.clone())),
+                        property: "add".into(),
+                        span: span.clone(),
+                    }),
+                    args: vec![Argument::Positional(Expression::Literal(
+                        Literal::String("thyme".into()),
+                        span.clone(),
+                    ))],
+                    type_arguments: Vec::new(),
+                    argument_metadata: CallArgumentMetadata::with_style(
+                        CallArgumentStyle::Whitespace,
+                    ),
+                    call_kind: CallKind::Function,
+                    span: span.clone(),
+                },
+                span: span.clone(),
+            },
+        ],
+        span,
+    };
+
+    let env = TypeEnvironment::new();
+    let errors = plan_doublebrace_in_program(&program, &env, None)
+        .expect_err("immutable collection mutation should be rejected");
+
+    assert!(
+        errors.iter().any(|error| match error {
+            CheckError::ValidationError { message, .. } => {
+                message.contains("E-DBLOCK-IMMUTABLE-MUTATION")
+            }
+            _ => false,
+        }),
+        "expected immutable mutation diagnostic, got: {:?}",
+        errors
+    );
+}
+
+#[test]
+fn doublebrace_var_collection_allows_mutation() {
+    let span = Span::dummy();
+    let init = Expression::DoublebraceInit(DoublebraceInit {
+        base: None,
+        receiver_hint: None,
+        statements: vec![Statement::Expression {
+            expr: Expression::Call {
+                function: Box::new(Expression::Identifier("add".into(), span.clone())),
+                args: vec![Argument::Positional(Expression::Literal(
+                    Literal::String("pepper".into()),
+                    span.clone(),
+                ))],
+                type_arguments: Vec::new(),
+                argument_metadata: CallArgumentMetadata::with_style(CallArgumentStyle::Whitespace),
+                call_kind: CallKind::Function,
+                span: span.clone(),
+            },
+            span: span.clone(),
+        }],
+        span: span.clone(),
+    });
+
+    let program = Program {
+        package: None,
+        imports: Vec::new(),
+        statements: vec![
+            Statement::VarDeclaration {
+                name: "workingSet".into(),
+                binding: None,
+                type_annotation: Some(TypeAnnotation::Simple("java.util.List".into())),
+                initializer: Some(init),
+                modifiers: default_modifiers(),
+                span: span.clone(),
+            },
+            Statement::Expression {
+                expr: Expression::Call {
+                    function: Box::new(Expression::MemberAccess {
+                        object: Box::new(Expression::Identifier("workingSet".into(), span.clone())),
+                        property: "add".into(),
+                        span: span.clone(),
+                    }),
+                    args: vec![Argument::Positional(Expression::Literal(
+                        Literal::String("thyme".into()),
+                        span.clone(),
+                    ))],
+                    type_arguments: Vec::new(),
+                    argument_metadata: CallArgumentMetadata::with_style(
+                        CallArgumentStyle::Whitespace,
+                    ),
+                    call_kind: CallKind::Function,
+                    span: span.clone(),
+                },
+                span: span.clone(),
+            },
+        ],
+        span,
+    };
+
+    let env = TypeEnvironment::new();
+    plan_doublebrace_in_program(&program, &env, None)
+        .expect("mutable collection should allow post-doublebrace mutation");
 }
 
 #[test]

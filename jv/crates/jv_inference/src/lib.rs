@@ -30,8 +30,8 @@ pub use config::ParallelInferenceConfig;
 pub use constraint::CompactConstraintGraph;
 pub use doublebrace::DoublebraceHeuristics;
 pub use registry::default_impl::{
-    DefaultImplementationRegistry, DefaultImplementationSource, RegistryEntryOrigin,
-    RegistryLoadError,
+    DefaultImplementationRegistry, DefaultImplementationSource, ImplementationVariant,
+    RegistryEntryOrigin, RegistryLoadError,
 };
 pub use service::{
     FactSpan, SchemaCache, TypeFacts, TypeFactsTelemetry, TypeLevelValue, json_literal_to_schema,

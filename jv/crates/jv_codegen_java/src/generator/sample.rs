@@ -820,7 +820,7 @@ impl JavaCodeGenerator {
         )
     }
 
-    fn embed_helper_class_name(&self, declaration: &IrSampleDeclaration) -> String {
+    pub(super) fn embed_helper_class_name(&self, declaration: &IrSampleDeclaration) -> String {
         if let Some(root) = &declaration.root_record_name {
             return format!("{}Data", root);
         }
@@ -853,7 +853,7 @@ impl JavaCodeGenerator {
         result
     }
 
-    fn load_helper_class_name(&self, declaration: &IrSampleDeclaration) -> String {
+    pub(super) fn load_helper_class_name(&self, declaration: &IrSampleDeclaration) -> String {
         if let Some(root) = &declaration.root_record_name {
             return format!("{}Loader", root);
         }
@@ -886,7 +886,7 @@ impl JavaCodeGenerator {
         result
     }
 
-    fn load_method_name(&self, declaration: &IrSampleDeclaration) -> String {
+    pub(super) fn load_method_name(&self, declaration: &IrSampleDeclaration) -> String {
         let mut result = String::from("load");
         let mut uppercase_next = true;
         for ch in declaration.variable_name.chars() {

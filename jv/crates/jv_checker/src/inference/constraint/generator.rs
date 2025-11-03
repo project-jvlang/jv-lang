@@ -25,8 +25,10 @@ use jv_ast::{
 use jv_build::metadata::SymbolIndex;
 use jv_inference::InferenceSession;
 use jv_inference::doublebrace::{
-    ControlFlowViolation, DoublebraceContext, evaluate_member_usage, infer_doublebrace,
+    ControlFlowViolation, DoublebraceBindingKind, DoublebraceContext, evaluate_member_usage,
+    infer_doublebrace,
 };
+use jv_inference::registry::default_impl::{DefaultImplementationRegistry, ImplementationVariant};
 use jv_inference::types::NullabilityFlag;
 use jv_support::i18n::{LocaleCode, catalog};
 use std::collections::HashMap;
@@ -44,6 +46,7 @@ pub struct ConstraintGenerator<'env, 'ext, 'imp> {
     symbol_index: Option<Arc<SymbolIndex>>,
     session: InferenceSession,
     expected_stack: Vec<Option<TypeKind>>,
+    binding_stack: Vec<DoublebraceBindingKind>,
 }
 
 const DIAG_RANGE_BOUNDS: &str = "E_LOOP_002: numeric range bounds must resolve to the same type";
@@ -78,6 +81,7 @@ impl<'env, 'ext, 'imp> ConstraintGenerator<'env, 'ext, 'imp> {
             symbol_index,
             session,
             expected_stack: Vec::new(),
+            binding_stack: Vec::new(),
         }
     }
 
@@ -121,7 +125,9 @@ impl<'env, 'ext, 'imp> ConstraintGenerator<'env, 'ext, 'imp> {
                 let expected = type_annotation
                     .as_ref()
                     .map(|ann| self.type_from_annotation(ann));
+                self.binding_stack.push(DoublebraceBindingKind::Val);
                 let init_ty = self.infer_expression_with_expected(initializer, expected.clone());
+                self.binding_stack.pop();
                 self.bind_symbol(name, type_annotation.as_ref(), Some(init_ty));
             }
             Statement::VarDeclaration {
@@ -133,9 +139,12 @@ impl<'env, 'ext, 'imp> ConstraintGenerator<'env, 'ext, 'imp> {
                 let annotation_ty = type_annotation
                     .as_ref()
                     .map(|ann| self.type_from_annotation(ann));
-                let init_ty = initializer
-                    .as_ref()
-                    .map(|expr| self.infer_expression_with_expected(expr, annotation_ty.clone()));
+                let init_ty = initializer.as_ref().map(|expr| {
+                    self.binding_stack.push(DoublebraceBindingKind::Var);
+                    let ty = self.infer_expression_with_expected(expr, annotation_ty.clone());
+                    self.binding_stack.pop();
+                    ty
+                });
                 self.bind_symbol(name, type_annotation.as_ref(), init_ty);
             }
             Statement::Expression { expr, .. } => {
@@ -276,8 +285,20 @@ impl<'env, 'ext, 'imp> ConstraintGenerator<'env, 'ext, 'imp> {
         let mut representative = initializer_ty.clone().unwrap_or_else(|| TypeKind::Unknown);
 
         if let Some(ann) = annotation {
-            let annotated = self.type_from_annotation(ann);
+            let mut annotated = self.type_from_annotation(ann);
             if !matches!(annotated, TypeKind::Unknown) {
+                if let Some(TypeKind::Reference(init_name)) = initializer_ty.as_ref() {
+                    if let TypeKind::Reference(ann_name) = &annotated {
+                        let registry = DefaultImplementationRegistry::shared();
+                        if let Some(default_impl) = registry
+                            .resolve_interface_variant(ann_name, ImplementationVariant::Mutable)
+                        {
+                            if default_impl.target() == init_name {
+                                annotated = TypeKind::reference(init_name.clone());
+                            }
+                        }
+                    }
+                }
                 self.push_constraint(
                     ConstraintKind::Equal(symbol_ty.clone(), annotated.clone()),
                     Some("declaration annotation must match symbol"),
@@ -746,10 +767,17 @@ impl<'env, 'ext, 'imp> ConstraintGenerator<'env, 'ext, 'imp> {
             .as_ref()
             .and_then(|ty| Self::type_kind_to_fqcn(ty));
 
+        let binding_kind = self
+            .binding_stack
+            .last()
+            .copied()
+            .unwrap_or(DoublebraceBindingKind::Anonymous);
+
         let context = DoublebraceContext {
             base_type: base_fqcn.as_deref(),
             expected_type: expected_fqcn.as_deref(),
             receiver_hint: hint_fqcn.as_deref(),
+            binding_kind,
         };
 
         let inference = infer_doublebrace(init, context, &self.session);
@@ -1477,7 +1505,7 @@ val result = when (maybe) {
             ConstraintGenerator::new(&mut env, &extensions, None, None).generate(&program);
 
         let scheme = env.lookup("items").expect("items binding must exist");
-        assert_eq!(scheme.ty, TypeKind::reference("java.util.ArrayList"));
+        assert_eq!(scheme.ty, TypeKind::reference("java.util.List"));
     }
 
     #[test]
@@ -1574,7 +1602,7 @@ val result = when (maybe) {
             ConstraintGenerator::new(&mut env, &extensions, None, None).generate(&program);
 
         let scheme = env.lookup("mapping").expect("mapping binding must exist");
-        assert_eq!(scheme.ty, TypeKind::reference("java.util.LinkedHashMap"));
+        assert_eq!(scheme.ty, TypeKind::reference("java.util.Map"));
     }
 
     #[test]

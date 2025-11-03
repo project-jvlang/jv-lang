@@ -108,14 +108,26 @@ impl JavaCodeGenerator {
             IrStatement::RecordDeclaration { .. } => self.generate_record(stmt)?,
             IrStatement::SampleDeclaration(declaration) => {
                 let artifacts = self.generate_sample_declaration_artifacts(declaration)?;
-                let mut builder = self.builder();
-                for (index, code) in artifacts.iter().enumerate() {
-                    if index > 0 {
-                        builder.push_line("");
+                self.extra_type_declarations.extend(artifacts);
+
+                let java_type = self.generate_type(&declaration.java_type)?;
+                let initializer = match declaration.mode {
+                    SampleMode::Embed => {
+                        let helper = self.embed_helper_class_name(declaration);
+                        let constant = declaration.variable_name.to_ascii_uppercase();
+                        format!("{}.{}", helper, constant)
                     }
-                    Self::push_lines(&mut builder, code);
-                }
-                builder.build()
+                    SampleMode::Load => {
+                        let helper = self.load_helper_class_name(declaration);
+                        let method = self.load_method_name(declaration);
+                        format!("{}.{method}()", helper)
+                    }
+                };
+
+                format!(
+                    "final {} {} = {};",
+                    java_type, declaration.variable_name, initializer
+                )
             }
             IrStatement::Expression { expr, .. } => {
                 let mut line = self.generate_expression(expr)?;

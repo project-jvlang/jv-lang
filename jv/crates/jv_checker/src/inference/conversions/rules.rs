@@ -4,6 +4,7 @@ use super::{
 };
 use crate::inference::types::{PrimitiveType, TypeError, TypeKind};
 use crate::java::JavaBoxingTable;
+use jv_inference::registry::default_impl::{DefaultImplementationRegistry, ImplementationVariant};
 
 /// 型変換規則を判定するエンジン。
 #[derive(Debug, Default)]
@@ -85,6 +86,39 @@ impl ConversionRulesEngine {
             }
             (TypeKind::Reference(left), TypeKind::Reference(right)) if left == right => {
                 ConversionOutcome::Identity
+            }
+            (TypeKind::Reference(left), TypeKind::Reference(right)) => {
+                let registry = DefaultImplementationRegistry::shared();
+                if let Some(default_impl) =
+                    registry.resolve_interface_variant(right, ImplementationVariant::Mutable)
+                {
+                    if default_impl.target() == left {
+                        return ConversionOutcome::Identity;
+                    }
+                }
+                if let Some(default_impl) =
+                    registry.resolve_interface_variant(right, ImplementationVariant::Immutable)
+                {
+                    if default_impl.target() == left {
+                        return ConversionOutcome::Identity;
+                    }
+                }
+                if let Some(default_impl) = registry.resolve_abstract(right, None) {
+                    if default_impl.target() == left {
+                        return ConversionOutcome::Identity;
+                    }
+                }
+                if let Some(default_impl) =
+                    registry.resolve_interface_variant(left, ImplementationVariant::Mutable)
+                {
+                    if default_impl.target() == right {
+                        return ConversionOutcome::Identity;
+                    }
+                }
+                ConversionOutcome::Rejected(TypeError::incompatible_conversion(
+                    from.describe(),
+                    to.describe(),
+                ))
             }
             _ => {
                 if let Some(lookup) = catalog {

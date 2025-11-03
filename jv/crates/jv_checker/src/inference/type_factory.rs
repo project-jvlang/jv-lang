@@ -40,6 +40,43 @@ impl TypeFactory {
             return Ok(TypeKind::primitive(primitive));
         }
 
+        match normalized_lower.as_str() {
+            "string" => return Ok(TypeKind::reference("java.lang.String")),
+            "iterable" | "java.lang.iterable" => {
+                return Ok(TypeKind::reference("java.lang.Iterable"));
+            }
+            "iterator" | "java.util.iterator" => {
+                return Ok(TypeKind::reference("java.util.Iterator"));
+            }
+            "stream" | "java.util.stream.stream" => {
+                return Ok(TypeKind::reference("java.util.stream.Stream"));
+            }
+            "collection" | "java.util.collection" => {
+                return Ok(TypeKind::reference("java.util.Collection"));
+            }
+            "list" | "java.util.list" => return Ok(TypeKind::reference("java.util.List")),
+            "set" | "java.util.set" => return Ok(TypeKind::reference("java.util.Set")),
+            "map" | "java.util.map" => return Ok(TypeKind::reference("java.util.Map")),
+            "queue" | "java.util.queue" => return Ok(TypeKind::reference("java.util.Queue")),
+            "deque" | "java.util.deque" => return Ok(TypeKind::reference("java.util.Deque")),
+            "navigableset" | "java.util.navigableset" => {
+                return Ok(TypeKind::reference("java.util.NavigableSet"));
+            }
+            "sortedset" | "java.util.sortedset" => {
+                return Ok(TypeKind::reference("java.util.SortedSet"));
+            }
+            "navigablemap" | "java.util.navigablemap" => {
+                return Ok(TypeKind::reference("java.util.NavigableMap"));
+            }
+            "sortedmap" | "java.util.sortedmap" => {
+                return Ok(TypeKind::reference("java.util.SortedMap"));
+            }
+            "concurrentmap" | "java.util.concurrentmap" => {
+                return Ok(TypeKind::reference("java.util.concurrent.ConcurrentMap"));
+            }
+            _ => {}
+        }
+
         match normalized {
             "String" => Ok(TypeKind::reference("java.lang.String")),
             "Iterable" | "java.lang.Iterable" => Ok(TypeKind::reference("java.lang.Iterable")),

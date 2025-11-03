@@ -1,4 +1,4 @@
-use crate::registry::default_impl::DefaultImplementationRegistry;
+use crate::registry::default_impl::{DefaultImplementationRegistry, ImplementationVariant};
 use crate::session::InferenceSession;
 use jv_ast::expression::DoublebraceInit;
 use jv_ast::{Expression, Statement};
@@ -56,10 +56,13 @@ impl DoublebraceHeuristics {
     }
 
     /// レジストリからインターフェースに対応する具象クラスを取得する。
-    pub fn resolve_default_implementation(interface: &str) -> Option<String> {
+    pub fn resolve_default_implementation(
+        interface: &str,
+        variant: ImplementationVariant,
+    ) -> Option<String> {
         let registry = DefaultImplementationRegistry::shared();
         registry
-            .resolve_interface(interface)
+            .resolve_interface_variant(interface, variant)
             .map(|source| source.target().to_string())
     }
 
@@ -271,11 +274,31 @@ pub enum ReceiverResolution {
 }
 
 /// Doublebrace 推論で扱う文脈情報。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DoublebraceContext<'a> {
     pub base_type: Option<&'a str>,
     pub expected_type: Option<&'a str>,
     pub receiver_hint: Option<&'a str>,
+    pub binding_kind: DoublebraceBindingKind,
+}
+
+impl<'a> Default for DoublebraceContext<'a> {
+    fn default() -> Self {
+        Self {
+            base_type: None,
+            expected_type: None,
+            receiver_hint: None,
+            binding_kind: DoublebraceBindingKind::Anonymous,
+        }
+    }
+}
+
+/// Doublebrace の束縛先の種別を示す。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DoublebraceBindingKind {
+    Anonymous,
+    Val,
+    Var,
 }
 
 /// Doublebrace 推論の結果を保持する。
@@ -420,8 +443,15 @@ fn resolve_receiver(
     statements: &[Statement],
     symbol_index: Option<&SymbolIndex>,
 ) -> ReceiverSelection {
+    let variant = match ctx.binding_kind {
+        DoublebraceBindingKind::Val => ImplementationVariant::Immutable,
+        DoublebraceBindingKind::Var | DoublebraceBindingKind::Anonymous => {
+            ImplementationVariant::Mutable
+        }
+    };
+
     if let Some(hint) = normalize_candidate(ctx.receiver_hint) {
-        let resolved = apply_registry(&hint, symbol_index);
+        let resolved = apply_registry(&hint, symbol_index, variant);
         return ReceiverSelection {
             resolved_type: Some(resolved),
             resolution: ReceiverResolution::ReceiverHint,
@@ -432,8 +462,8 @@ fn resolve_receiver(
     let expected = normalize_candidate(ctx.expected_type);
 
     if let (Some(base_ty), Some(expected_ty)) = (&base, &expected) {
-        let base_resolved = apply_registry(base_ty, symbol_index);
-        let expected_resolved = apply_registry(expected_ty, symbol_index);
+        let base_resolved = apply_registry(base_ty, symbol_index, variant);
+        let expected_resolved = apply_registry(expected_ty, symbol_index, variant);
 
         if base_resolved == expected_resolved {
             return ReceiverSelection {
@@ -456,7 +486,7 @@ fn resolve_receiver(
     }
 
     if let Some(expected_ty) = expected {
-        let resolved = apply_registry(&expected_ty, symbol_index);
+        let resolved = apply_registry(&expected_ty, symbol_index, variant);
         return ReceiverSelection {
             resolved_type: Some(resolved),
             resolution: ReceiverResolution::ExpectedType,
@@ -464,7 +494,7 @@ fn resolve_receiver(
     }
 
     if let Some(base_ty) = base {
-        let resolved = apply_registry(&base_ty, symbol_index);
+        let resolved = apply_registry(&base_ty, symbol_index, variant);
         return ReceiverSelection {
             resolved_type: Some(resolved),
             resolution: ReceiverResolution::BaseExpression,
@@ -472,7 +502,7 @@ fn resolve_receiver(
     }
 
     if let Some(interface) = DoublebraceHeuristics::infer_interface(statements) {
-        let resolved = apply_registry(&interface, symbol_index);
+        let resolved = apply_registry(&interface, symbol_index, variant);
         return ReceiverSelection {
             resolved_type: Some(resolved),
             resolution: ReceiverResolution::Heuristic,
@@ -514,8 +544,14 @@ fn split_type_name(candidate: &str) -> (&str, Option<&str>) {
     }
 }
 
-fn resolve_base_type(candidate: &str, symbol_index: Option<&SymbolIndex>) -> String {
-    if let Some(default_impl) = DoublebraceHeuristics::resolve_default_implementation(candidate) {
+fn resolve_base_type(
+    candidate: &str,
+    symbol_index: Option<&SymbolIndex>,
+    variant: ImplementationVariant,
+) -> String {
+    if let Some(default_impl) =
+        DoublebraceHeuristics::resolve_default_implementation(candidate, variant)
+    {
         return default_impl;
     }
 
@@ -523,16 +559,20 @@ fn resolve_base_type(candidate: &str, symbol_index: Option<&SymbolIndex>) -> Str
     if let Some(abstract_impl) = registry.resolve_abstract(candidate, symbol_index) {
         return abstract_impl.target().to_string();
     }
-    if let Some(interface_impl) = registry.resolve_interface(candidate) {
+    if let Some(interface_impl) = registry.resolve_interface_variant(candidate, variant) {
         return interface_impl.target().to_string();
     }
 
     candidate.to_string()
 }
 
-fn apply_registry(candidate: &str, symbol_index: Option<&SymbolIndex>) -> String {
+fn apply_registry(
+    candidate: &str,
+    symbol_index: Option<&SymbolIndex>,
+    variant: ImplementationVariant,
+) -> String {
     let (base, generics) = split_type_name(candidate);
-    let resolved = resolve_base_type(base, symbol_index);
+    let resolved = resolve_base_type(base, symbol_index, variant);
     if let Some(args) = generics {
         if args.is_empty() {
             resolved

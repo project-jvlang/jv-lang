@@ -8,8 +8,10 @@ use crate::inference::types::{PrimitiveType, TypeKind};
 use jv_ast::expression::{CallKind, DoublebraceInit};
 use jv_ast::{Expression, Program, Statement, TypeAnnotation};
 use jv_build::metadata::SymbolIndex;
-use jv_inference::doublebrace::{DoublebraceContext, DoublebraceHeuristics, infer_doublebrace};
-use jv_inference::registry::default_impl::DefaultImplementationRegistry;
+use jv_inference::doublebrace::{
+    DoublebraceBindingKind, DoublebraceContext, DoublebraceHeuristics, infer_doublebrace,
+};
+use jv_inference::registry::default_impl::{DefaultImplementationRegistry, ImplementationVariant};
 use jv_inference::session::InferenceSession;
 use std::collections::HashMap;
 
@@ -82,6 +84,26 @@ fn type_kind_to_reference_name(ty: &TypeKind) -> Option<String> {
     }
 }
 
+fn classify_collection_interface(ty: &TypeKind) -> Option<CollectionInterface> {
+    let name = type_kind_to_reference_name(ty)?;
+    let base = name.split('<').next().unwrap_or(name.as_str()).trim();
+    match base {
+        "java.util.List" => Some(CollectionInterface::List),
+        "java.util.Collection" => Some(CollectionInterface::Iterable),
+        "java.util.Set" => Some(CollectionInterface::Set),
+        "java.util.Map" => Some(CollectionInterface::Map),
+        "java.util.Queue" => Some(CollectionInterface::Queue),
+        "java.util.Deque" => Some(CollectionInterface::Deque),
+        "java.util.SortedSet" => Some(CollectionInterface::SortedSet),
+        "java.util.NavigableSet" => Some(CollectionInterface::NavigableSet),
+        "java.util.SortedMap" => Some(CollectionInterface::SortedMap),
+        "java.util.NavigableMap" => Some(CollectionInterface::NavigableMap),
+        "java.util.concurrent.ConcurrentMap" => Some(CollectionInterface::ConcurrentMap),
+        "java.lang.Iterable" => Some(CollectionInterface::Iterable),
+        _ => None,
+    }
+}
+
 fn split_type_name(candidate: &str) -> (&str, Option<&str>) {
     if let Some(start) = candidate.find('<') {
         let (base, generics) = candidate.split_at(start);
@@ -91,9 +113,13 @@ fn split_type_name(candidate: &str) -> (&str, Option<&str>) {
     }
 }
 
-fn resolve_default_reference(candidate: &str, symbol_index: Option<&SymbolIndex>) -> String {
+fn resolve_default_reference(
+    candidate: &str,
+    symbol_index: Option<&SymbolIndex>,
+    variant: ImplementationVariant,
+) -> String {
     let registry = DefaultImplementationRegistry::shared();
-    if let Some(interface) = registry.resolve_interface(candidate) {
+    if let Some(interface) = registry.resolve_interface_variant(candidate, variant) {
         interface.target().to_string()
     } else if let Some(abstract_impl) = registry.resolve_abstract(candidate, symbol_index) {
         abstract_impl.target().to_string()
@@ -102,9 +128,13 @@ fn resolve_default_reference(candidate: &str, symbol_index: Option<&SymbolIndex>
     }
 }
 
-fn apply_registry_to_reference(candidate: &str, symbol_index: Option<&SymbolIndex>) -> String {
+fn apply_registry_to_reference(
+    candidate: &str,
+    symbol_index: Option<&SymbolIndex>,
+    variant: ImplementationVariant,
+) -> String {
     let (base, generics) = split_type_name(candidate);
-    let resolved = resolve_default_reference(base, symbol_index);
+    let resolved = resolve_default_reference(base, symbol_index, variant);
     if let Some(args) = generics {
         if args.is_empty() || resolved.contains('<') {
             resolved
@@ -116,20 +146,24 @@ fn apply_registry_to_reference(candidate: &str, symbol_index: Option<&SymbolInde
     }
 }
 
-fn apply_registry_to_typekind(ty: &TypeKind, symbol_index: Option<&SymbolIndex>) -> TypeKind {
+fn apply_registry_to_typekind(
+    ty: &TypeKind,
+    symbol_index: Option<&SymbolIndex>,
+    variant: ImplementationVariant,
+) -> TypeKind {
     match ty {
         TypeKind::Reference(name) => {
-            TypeKind::reference(apply_registry_to_reference(name, symbol_index))
+            TypeKind::reference(apply_registry_to_reference(name, symbol_index, variant))
         }
         TypeKind::Optional(inner) => {
-            TypeKind::optional(apply_registry_to_typekind(inner, symbol_index))
+            TypeKind::optional(apply_registry_to_typekind(inner, symbol_index, variant))
         }
         TypeKind::Function(params, ret) => {
             let mapped_params: Vec<TypeKind> = params
                 .iter()
-                .map(|param| apply_registry_to_typekind(param, symbol_index))
+                .map(|param| apply_registry_to_typekind(param, symbol_index, variant))
                 .collect();
-            let mapped_ret = apply_registry_to_typekind(ret, symbol_index);
+            let mapped_ret = apply_registry_to_typekind(ret, symbol_index, variant);
             TypeKind::function(mapped_params, mapped_ret)
         }
         TypeKind::Primitive(_) | TypeKind::Boxed(_) | TypeKind::Variable(_) | TypeKind::Unknown => {
@@ -141,7 +175,8 @@ fn apply_registry_to_typekind(ty: &TypeKind, symbol_index: Option<&SymbolIndex>)
 fn apply_registry_to_environment(env: &mut TypeEnvironment, symbol_index: Option<&SymbolIndex>) {
     let bindings = env.flattened_bindings();
     for (name, scheme) in bindings {
-        let mapped = apply_registry_to_typekind(&scheme.ty, symbol_index);
+        let mapped =
+            apply_registry_to_typekind(&scheme.ty, symbol_index, ImplementationVariant::Mutable);
         if mapped != scheme.ty {
             let new_scheme = TypeScheme::new(scheme.quantifiers.clone(), mapped);
             env.redefine_scheme(name, new_scheme);
@@ -153,6 +188,7 @@ fn infer_binding_type_for_doublebrace(
     environment: &TypeEnvironment,
     init: &DoublebraceInit,
     annotation: Option<&TypeAnnotation>,
+    binding_kind: DoublebraceBindingKind,
     symbol_index: Option<&SymbolIndex>,
 ) -> Option<TypeKind> {
     let base_ty = init
@@ -175,10 +211,18 @@ fn infer_binding_type_for_doublebrace(
         .as_ref()
         .and_then(|ty| type_kind_to_reference_name(ty));
 
+    let variant = match binding_kind {
+        DoublebraceBindingKind::Val => ImplementationVariant::Immutable,
+        DoublebraceBindingKind::Var | DoublebraceBindingKind::Anonymous => {
+            ImplementationVariant::Mutable
+        }
+    };
+
     let context = DoublebraceContext {
         base_type: base_name.as_deref(),
         expected_type: expected_name.as_deref(),
         receiver_hint: hint_name.as_deref(),
+        binding_kind,
     };
 
     let session = InferenceSession::new();
@@ -189,14 +233,14 @@ fn infer_binding_type_for_doublebrace(
     }
 
     if let Some(hint) = &hint_ty {
-        return Some(apply_registry_to_typekind(hint, symbol_index));
+        return Some(apply_registry_to_typekind(hint, symbol_index, variant));
     }
 
     if let Some(expected) = &expected_ty {
-        return Some(apply_registry_to_typekind(expected, symbol_index));
+        return Some(apply_registry_to_typekind(expected, symbol_index, variant));
     }
 
-    base_ty.map(|ty| apply_registry_to_typekind(&ty, symbol_index))
+    base_ty.map(|ty| apply_registry_to_typekind(&ty, symbol_index, variant))
 }
 
 fn prepopulate_doublebrace_bindings(
@@ -218,6 +262,7 @@ fn prepopulate_doublebrace_bindings(
                             environment,
                             init,
                             type_annotation.as_ref(),
+                            DoublebraceBindingKind::Val,
                             symbol_index,
                         ) {
                             environment.define_monotype(name.clone(), ty);
@@ -237,6 +282,7 @@ fn prepopulate_doublebrace_bindings(
                             environment,
                             init,
                             type_annotation.as_ref(),
+                            DoublebraceBindingKind::Var,
                             symbol_index,
                         ) {
                             environment.define_monotype(name.clone(), ty);
@@ -273,6 +319,123 @@ struct DoublebracePlanner<'env> {
     symbol_index: Option<&'env SymbolIndex>,
     plans: HashMap<String, DoublebracePlan>,
     errors: Vec<CheckError>,
+    binding_context: Option<BindingContext>,
+    immutable_bindings: HashMap<String, CollectionInterface>,
+    inside_doublebrace: usize,
+}
+
+#[derive(Debug, Clone)]
+struct BindingContext {
+    name: Option<String>,
+    kind: DoublebraceBindingKind,
+    expected: Option<TypeKind>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CollectionInterface {
+    List,
+    Set,
+    Map,
+    Queue,
+    Deque,
+    SortedSet,
+    NavigableSet,
+    SortedMap,
+    NavigableMap,
+    ConcurrentMap,
+    Iterable,
+}
+
+const LIST_MUTATIONS: &[&str] = &[
+    "add",
+    "addall",
+    "clear",
+    "remove",
+    "removeat",
+    "insert",
+    "set",
+    "replaceall",
+    "sort",
+];
+
+const SET_MUTATIONS: &[&str] = &["add", "addall", "clear", "remove", "retainall"];
+
+const MAP_MUTATIONS: &[&str] = &[
+    "put",
+    "putall",
+    "putifabsent",
+    "remove",
+    "removevalue",
+    "compute",
+    "computeifabsent",
+    "computeifpresent",
+    "merge",
+    "replace",
+    "replaceall",
+    "clear",
+];
+
+const QUEUE_MUTATIONS: &[&str] = &["add", "offer", "poll", "remove", "clear"];
+
+const DEQUE_MUTATIONS: &[&str] = &[
+    "add",
+    "offer",
+    "poll",
+    "remove",
+    "clear",
+    "push",
+    "pop",
+    "addfirst",
+    "addlast",
+    "offerfirst",
+    "offerlast",
+    "removefirst",
+    "removelast",
+];
+
+const NAVIGABLE_SET_MUTATIONS: &[&str] = &[
+    "add",
+    "addall",
+    "clear",
+    "remove",
+    "retainall",
+    "pollfirst",
+    "polllast",
+];
+
+const NAVIGABLE_MAP_MUTATIONS: &[&str] = &[
+    "put",
+    "putall",
+    "putifabsent",
+    "remove",
+    "removevalue",
+    "compute",
+    "computeifabsent",
+    "computeifpresent",
+    "merge",
+    "replace",
+    "replaceall",
+    "clear",
+    "pollfirstentry",
+    "polllastentry",
+];
+
+fn is_mutating_method(interface: CollectionInterface, method: &str) -> bool {
+    let lower = method.to_ascii_lowercase();
+    let key = lower.as_str();
+    match interface {
+        CollectionInterface::List => LIST_MUTATIONS.contains(&key),
+        CollectionInterface::Set => SET_MUTATIONS.contains(&key),
+        CollectionInterface::Map => MAP_MUTATIONS.contains(&key),
+        CollectionInterface::Queue => QUEUE_MUTATIONS.contains(&key),
+        CollectionInterface::Deque => DEQUE_MUTATIONS.contains(&key),
+        CollectionInterface::SortedSet => SET_MUTATIONS.contains(&key),
+        CollectionInterface::NavigableSet => NAVIGABLE_SET_MUTATIONS.contains(&key),
+        CollectionInterface::SortedMap => MAP_MUTATIONS.contains(&key),
+        CollectionInterface::NavigableMap => NAVIGABLE_MAP_MUTATIONS.contains(&key),
+        CollectionInterface::ConcurrentMap => MAP_MUTATIONS.contains(&key),
+        CollectionInterface::Iterable => false,
+    }
 }
 
 impl<'env> DoublebracePlanner<'env> {
@@ -282,6 +445,9 @@ impl<'env> DoublebracePlanner<'env> {
             symbol_index,
             plans: HashMap::new(),
             errors: Vec::new(),
+            binding_context: None,
+            immutable_bindings: HashMap::new(),
+            inside_doublebrace: 0,
         }
     }
 
@@ -300,7 +466,14 @@ impl<'env> DoublebracePlanner<'env> {
                 ..
             } => {
                 let expected = self.resolve_binding_type(name, type_annotation.as_ref());
+                let context = BindingContext {
+                    name: Some(name.clone()),
+                    kind: DoublebraceBindingKind::Val,
+                    expected: expected.clone(),
+                };
+                let previous = self.binding_context.replace(context);
                 self.visit_expression(initializer, expected.as_ref());
+                self.binding_context = previous;
             }
             Statement::VarDeclaration {
                 name,
@@ -309,7 +482,14 @@ impl<'env> DoublebracePlanner<'env> {
                 ..
             } => {
                 let expected = self.resolve_binding_type(name, type_annotation.as_ref());
+                let context = BindingContext {
+                    name: Some(name.clone()),
+                    kind: DoublebraceBindingKind::Var,
+                    expected: expected.clone(),
+                };
+                let previous = self.binding_context.replace(context);
                 self.visit_expression(initializer, expected.as_ref());
+                self.binding_context = previous;
             }
             Statement::VarDeclaration {
                 initializer: None, ..
@@ -402,7 +582,23 @@ impl<'env> DoublebracePlanner<'env> {
     fn visit_expression(&mut self, expression: &Expression, expected: Option<&TypeKind>) {
         match expression {
             Expression::DoublebraceInit(init) => {
-                self.plan_doublebrace(init, expected.cloned());
+                let binding_kind = self
+                    .binding_context
+                    .as_ref()
+                    .map(|ctx| ctx.kind)
+                    .unwrap_or(DoublebraceBindingKind::Anonymous);
+                let binding_name = self
+                    .binding_context
+                    .as_ref()
+                    .and_then(|ctx| ctx.name.clone());
+                let expected_type = expected.cloned().or_else(|| {
+                    self.binding_context
+                        .as_ref()
+                        .and_then(|ctx| ctx.expected.clone())
+                });
+                self.inside_doublebrace += 1;
+                self.plan_doublebrace(init, expected_type, binding_kind, binding_name);
+                self.inside_doublebrace = self.inside_doublebrace.saturating_sub(1);
             }
             Expression::Block { statements, .. } => {
                 for statement in statements {
@@ -440,8 +636,29 @@ impl<'env> DoublebracePlanner<'env> {
                     self.visit_expression(expr, expected);
                 }
             }
-            Expression::Call { function, args, .. } => {
+            Expression::Call {
+                function,
+                args,
+                span,
+                ..
+            } => {
                 self.visit_expression(function, None);
+                if self.inside_doublebrace == 0 {
+                    if let Some((name, method)) = Self::call_target(function) {
+                        if let Some(interface) = self.immutable_bindings.get(&name) {
+                            if is_mutating_method(*interface, method) {
+                                let message = format!(
+                                    "E-DBLOCK-IMMUTABLE-MUTATION: Doublebrace 初期化で読み取り専用として扱われる `val {}` に対して `{}` は使用できません。`var` にするか mutable 型注釈を指定してください。",
+                                    name, method
+                                );
+                                self.errors.push(CheckError::ValidationError {
+                                    message,
+                                    span: Some(span.clone()),
+                                });
+                            }
+                        }
+                    }
+                }
                 for arg in args {
                     match arg {
                         jv_ast::Argument::Positional(expr) => self.visit_expression(expr, None),
@@ -508,14 +725,26 @@ impl<'env> DoublebracePlanner<'env> {
         }
     }
 
-    fn plan_doublebrace(&mut self, init: &DoublebraceInit, expected: Option<TypeKind>) {
+    fn plan_doublebrace(
+        &mut self,
+        init: &DoublebraceInit,
+        expected: Option<TypeKind>,
+        binding_kind: DoublebraceBindingKind,
+        binding_name: Option<String>,
+    ) {
+        let variant = match binding_kind {
+            DoublebraceBindingKind::Val => ImplementationVariant::Immutable,
+            DoublebraceBindingKind::Var | DoublebraceBindingKind::Anonymous => {
+                ImplementationVariant::Mutable
+            }
+        };
         let target_type = expected
             .or_else(|| {
                 init.receiver_hint
                     .as_ref()
                     .and_then(|hint| self.annotation_to_type(Some(hint)))
             })
-            .or_else(|| self.heuristic_receiver(init));
+            .or_else(|| self.heuristic_receiver(init, variant));
 
         let Some(target_type) = target_type else {
             self.errors.push(CheckError::ValidationError {
@@ -529,6 +758,14 @@ impl<'env> DoublebracePlanner<'env> {
             .base
             .as_ref()
             .and_then(|expr| self.resolve_expression_type(expr));
+
+        if matches!(binding_kind, DoublebraceBindingKind::Val) {
+            if let Some(name) = binding_name {
+                if let Some(interface) = classify_collection_interface(&target_type) {
+                    self.immutable_bindings.insert(name, interface);
+                }
+            }
+        }
 
         match plan_doublebrace_application(
             base_type.as_ref(),
@@ -564,10 +801,37 @@ impl<'env> DoublebracePlanner<'env> {
         annotation.and_then(annotation_to_type_kind)
     }
 
-    fn heuristic_receiver(&self, init: &DoublebraceInit) -> Option<TypeKind> {
+    fn identifier_name(expr: &Expression) -> Option<String> {
+        match expr {
+            Expression::Identifier(name, _) => Some(name.clone()),
+            Expression::This(_) => Some("this".into()),
+            _ => None,
+        }
+    }
+
+    fn call_target(function: &Expression) -> Option<(String, &str)> {
+        match function {
+            Expression::MemberAccess {
+                object, property, ..
+            }
+            | Expression::NullSafeMemberAccess {
+                object, property, ..
+            } => {
+                let name = Self::identifier_name(object.as_ref())?;
+                Some((name, property.as_str()))
+            }
+            _ => None,
+        }
+    }
+
+    fn heuristic_receiver(
+        &self,
+        init: &DoublebraceInit,
+        variant: ImplementationVariant,
+    ) -> Option<TypeKind> {
         let interface = DoublebraceHeuristics::infer_interface(&init.statements)?;
         if let Some(default_impl) =
-            DoublebraceHeuristics::resolve_default_implementation(&interface)
+            DoublebraceHeuristics::resolve_default_implementation(&interface, variant)
         {
             return Some(TypeKind::reference(default_impl));
         }

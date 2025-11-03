@@ -69,34 +69,80 @@ pub fn convert_type_annotation(
 }
 
 fn convert_simple_type(name: &str) -> JavaType {
-    match name {
-        "Any" => JavaType::Reference {
+    let trimmed = name.trim();
+    let lower = trimmed.to_ascii_lowercase();
+    match lower.as_str() {
+        "any" | "object" => JavaType::Reference {
             name: "Object".to_string(),
             generic_args: vec![],
         },
-        "Int" | "int" => JavaType::Primitive("int".to_string()),
-        "Boolean" | "boolean" => JavaType::Primitive("boolean".to_string()),
-        "Double" | "double" => JavaType::Primitive("double".to_string()),
-        "Float" | "float" => JavaType::Primitive("float".to_string()),
-        "Long" | "long" => JavaType::Primitive("long".to_string()),
-        "Char" | "char" => JavaType::Primitive("char".to_string()),
-        "Byte" | "byte" => JavaType::Primitive("byte".to_string()),
-        "Short" | "short" => JavaType::Primitive("short".to_string()),
-        "Unit" => JavaType::Void,
-        "String" => JavaType::Reference {
+        "int" => JavaType::Primitive("int".to_string()),
+        "boolean" => JavaType::Primitive("boolean".to_string()),
+        "double" => JavaType::Primitive("double".to_string()),
+        "float" => JavaType::Primitive("float".to_string()),
+        "long" => JavaType::Primitive("long".to_string()),
+        "char" => JavaType::Primitive("char".to_string()),
+        "byte" => JavaType::Primitive("byte".to_string()),
+        "short" => JavaType::Primitive("short".to_string()),
+        "unit" => JavaType::Void,
+        "string" | "java.lang.string" => JavaType::Reference {
             name: "String".to_string(),
             generic_args: vec![],
         },
-        "Iterator" => JavaType::Reference {
+        "iterator" | "java.util.iterator" => JavaType::Reference {
             name: "java.util.Iterator".to_string(),
             generic_args: vec![],
         },
-        "Iterable" => JavaType::Reference {
+        "iterable" | "java.lang.iterable" => JavaType::Reference {
             name: "java.lang.Iterable".to_string(),
             generic_args: vec![],
         },
+        "collection" | "java.util.collection" => JavaType::Reference {
+            name: "java.util.Collection".to_string(),
+            generic_args: vec![],
+        },
+        "list" | "java.util.list" => JavaType::Reference {
+            name: "java.util.List".to_string(),
+            generic_args: vec![],
+        },
+        "set" | "java.util.set" => JavaType::Reference {
+            name: "java.util.Set".to_string(),
+            generic_args: vec![],
+        },
+        "map" | "java.util.map" => JavaType::Reference {
+            name: "java.util.Map".to_string(),
+            generic_args: vec![],
+        },
+        "queue" | "java.util.queue" => JavaType::Reference {
+            name: "java.util.Queue".to_string(),
+            generic_args: vec![],
+        },
+        "deque" | "java.util.deque" => JavaType::Reference {
+            name: "java.util.Deque".to_string(),
+            generic_args: vec![],
+        },
+        "navigableset" | "java.util.navigableset" => JavaType::Reference {
+            name: "java.util.NavigableSet".to_string(),
+            generic_args: vec![],
+        },
+        "sortedset" | "java.util.sortedset" => JavaType::Reference {
+            name: "java.util.SortedSet".to_string(),
+            generic_args: vec![],
+        },
+        "navigablemap" | "java.util.navigablemap" => JavaType::Reference {
+            name: "java.util.NavigableMap".to_string(),
+            generic_args: vec![],
+        },
+        "sortedmap" | "java.util.sortedmap" => JavaType::Reference {
+            name: "java.util.SortedMap".to_string(),
+            generic_args: vec![],
+        },
+        "concurrentmap" | "java.util.concurrentmap" => JavaType::Reference {
+            name: "java.util.concurrent.ConcurrentMap".to_string(),
+            generic_args: vec![],
+        },
         _ => JavaType::Reference {
-            name: name.to_string(),
+            name: trimmed.to_string(),
             generic_args: vec![],
         },
     }

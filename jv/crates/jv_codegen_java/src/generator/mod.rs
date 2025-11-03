@@ -11,8 +11,8 @@ use jv_ir::{
     IrImplicitWhenEnd, IrImport, IrImportDetail, IrModifiers, IrNumericRangeLoop, IrParameter,
     IrProgram, IrRecordComponent, IrResource, IrSampleDeclaration, IrStatement, IrSwitchCase,
     IrTypeParameter, IrVariance, IrVisibility, JavaType, MethodOverload, NullableGuard,
-    NullableGuardReason, SequencePipeline, SequenceSource, SequenceStage, SequenceTerminalKind,
-    UtilityClass, VirtualThreadOp,
+    NullableGuardReason, SampleMode, SequencePipeline, SequenceSource, SequenceStage,
+    SequenceTerminalKind, UtilityClass, VirtualThreadOp,
 };
 use jv_mapper::{
     JavaPosition, JavaSpan, MappingCategory, MappingError, SourceMap, SourceMapBuilder,
@@ -49,6 +49,7 @@ pub struct JavaCodeGenerator {
     mutable_captures: HashSet<String>,
     record_components: HashMap<String, HashSet<String>>,
     temp_counter: usize,
+    extra_type_declarations: Vec<String>,
 }
 
 impl JavaCodeGenerator {
@@ -78,6 +79,7 @@ impl JavaCodeGenerator {
             mutable_captures: HashSet::new(),
             record_components: HashMap::new(),
             temp_counter: 0,
+            extra_type_declarations: Vec::new(),
         }
     }
 
@@ -270,6 +272,11 @@ impl JavaCodeGenerator {
             unit.type_declarations.push(helper);
         }
 
+        if !self.extra_type_declarations.is_empty() {
+            unit.type_declarations
+                .extend(self.extra_type_declarations.drain(..));
+        }
+
         let mut inferred = self.imports.values().cloned().collect::<Vec<_>>();
         inferred.sort();
         inferred.dedup();
@@ -303,6 +310,7 @@ impl JavaCodeGenerator {
         self.mutable_captures.clear();
         self.record_components.clear();
         self.temp_counter = 0;
+        self.extra_type_declarations.clear();
     }
 
     fn register_record_components_from_declarations(

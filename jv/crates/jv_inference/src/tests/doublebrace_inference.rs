@@ -1,7 +1,8 @@
 use crate::doublebrace::{
-    ControlFlowViolation, DoublebraceContext, DoublebraceHeuristics, ReceiverResolution,
-    detect_control_flow_violation, evaluate_member_usage, infer_doublebrace,
+    ControlFlowViolation, DoublebraceBindingKind, DoublebraceContext, DoublebraceHeuristics,
+    ReceiverResolution, detect_control_flow_violation, evaluate_member_usage, infer_doublebrace,
 };
+use crate::registry::default_impl::ImplementationVariant;
 use crate::session::InferenceSession;
 use jv_ast::expression::{CallArgumentMetadata, CallArgumentStyle, CallKind, DoublebraceInit};
 use jv_ast::{Argument, Expression, Literal, Span, Statement};
@@ -53,7 +54,10 @@ fn heuristics_returns_none_for_empty_block() {
 #[test]
 fn registry_resolves_default_queue_implementation() {
     // ヒューリスティクスで Queue が検出された場合、デフォルト実装が ArrayDeque になること。
-    let resolved = DoublebraceHeuristics::resolve_default_implementation("java.util.Queue");
+    let resolved = DoublebraceHeuristics::resolve_default_implementation(
+        "java.util.Queue",
+        ImplementationVariant::Mutable,
+    );
     assert_eq!(
         resolved.as_deref(),
         Some("java.util.ArrayDeque"),
@@ -78,6 +82,7 @@ fn infer_uses_base_type_when_expected_missing() {
         base_type: Some("com.example.MutableBean"),
         expected_type: None,
         receiver_hint: None,
+        binding_kind: DoublebraceBindingKind::Anonymous,
     };
 
     let result = infer_doublebrace(&init, ctx, &session);
@@ -98,11 +103,29 @@ fn infer_prefers_expected_type_when_available() {
         base_type: None,
         expected_type: Some("java.util.List"),
         receiver_hint: None,
+        binding_kind: DoublebraceBindingKind::Anonymous,
     };
 
     let result = infer_doublebrace(&init, ctx, &session);
 
     assert_eq!(result.resolved_type.as_deref(), Some("java.util.ArrayList"));
+    assert_eq!(result.resolution, ReceiverResolution::ExpectedType);
+}
+
+#[test]
+fn infer_preserves_interface_for_val_binding() {
+    let session = InferenceSession::new();
+    let init = sample_init(vec![call_statement("add")]);
+    let ctx = DoublebraceContext {
+        base_type: None,
+        expected_type: Some("java.util.List"),
+        receiver_hint: None,
+        binding_kind: DoublebraceBindingKind::Val,
+    };
+
+    let result = infer_doublebrace(&init, ctx, &session);
+
+    assert_eq!(result.resolved_type.as_deref(), Some("java.util.List"));
     assert_eq!(result.resolution, ReceiverResolution::ExpectedType);
 }
 
@@ -114,6 +137,7 @@ fn infer_prefers_receiver_hint_over_other_sources() {
         base_type: Some("java.util.List"),
         expected_type: Some("java.util.Collection"),
         receiver_hint: Some("java.util.LinkedList"),
+        binding_kind: DoublebraceBindingKind::Anonymous,
     };
 
     let result = infer_doublebrace(&init, ctx, &session);
@@ -133,6 +157,7 @@ fn infer_applies_registry_to_generic_interfaces() {
         base_type: Some("java.util.List<String>"),
         expected_type: None,
         receiver_hint: None,
+        binding_kind: DoublebraceBindingKind::Anonymous,
     };
 
     let result = infer_doublebrace(&init, ctx, &session);

@@ -18,10 +18,42 @@ const DEFAULT_OVERRIDE_RELATIVE: &str = ".config/jv/internal/defaults.toml";
 
 static SHARED: OnceCell<DefaultImplementationRegistry> = OnceCell::new();
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ImplementationVariant {
+    Mutable,
+    Immutable,
+}
+
+impl ImplementationVariant {}
+
+#[derive(Debug, Clone, Default)]
+struct InterfaceImplementationEntry {
+    mutable: Option<DefaultImplementationSource>,
+    immutable: Option<DefaultImplementationSource>,
+}
+
+impl InterfaceImplementationEntry {
+    fn insert(&mut self, source: DefaultImplementationSource, variant: ImplementationVariant) {
+        match variant {
+            ImplementationVariant::Mutable => self.mutable = Some(source),
+            ImplementationVariant::Immutable => self.immutable = Some(source),
+        }
+    }
+
+    fn get(&self, variant: ImplementationVariant) -> Option<&DefaultImplementationSource> {
+        match variant {
+            ImplementationVariant::Mutable => self.mutable.as_ref(),
+            ImplementationVariant::Immutable => {
+                self.immutable.as_ref().or_else(|| self.mutable.as_ref())
+            }
+        }
+    }
+}
+
 /// 登録済みのデフォルト実装を参照するためのレジストリ。
 #[derive(Debug, Clone)]
 pub struct DefaultImplementationRegistry {
-    interface_defaults: HashMap<String, DefaultImplementationSource>,
+    interface_defaults: HashMap<String, InterfaceImplementationEntry>,
     abstract_defaults: HashMap<String, DefaultImplementationSource>,
     load_errors: Vec<RegistryLoadError>,
 }
@@ -58,8 +90,17 @@ impl DefaultImplementationRegistry {
 
     /// 指定インターフェースに対する既定の具象クラスを返す。
     pub fn resolve_interface(&self, fqcn: &str) -> Option<&DefaultImplementationSource> {
+        self.resolve_interface_variant(fqcn, ImplementationVariant::Mutable)
+    }
+
+    /// 指定インターフェースに対するバリアント付きの具象クラスを返す。
+    pub fn resolve_interface_variant(
+        &self,
+        fqcn: &str,
+        variant: ImplementationVariant,
+    ) -> Option<&DefaultImplementationSource> {
         let key = normalize_fqcn(fqcn);
-        self.interface_defaults.get(&key)
+        self.interface_defaults.get(&key)?.get(variant)
     }
 
     /// 指定抽象クラスに対する既定候補を返す。`SymbolIndex` が与えられた場合は存在確認も行う。
@@ -92,10 +133,20 @@ impl DefaultImplementationRegistry {
             load_errors: Vec::new(),
         };
 
-        for (iface, impl_fqcn) in BUILTIN_INTERFACE_DEFAULTS.iter() {
-            registry.insert_interface(
+        for (iface, impl_fqcn) in BUILTIN_INTERFACE_MUTABLE_DEFAULTS.iter() {
+            registry.insert_interface_variant(
                 iface.to_string(),
                 impl_fqcn.to_string(),
+                ImplementationVariant::Mutable,
+                RegistryEntryOrigin::BuiltIn,
+            );
+        }
+
+        for (iface, impl_fqcn) in BUILTIN_INTERFACE_IMMUTABLE_DEFAULTS.iter() {
+            registry.insert_interface_variant(
+                iface.to_string(),
+                impl_fqcn.to_string(),
+                ImplementationVariant::Immutable,
                 RegistryEntryOrigin::BuiltIn,
             );
         }
@@ -115,9 +166,30 @@ impl DefaultImplementationRegistry {
         match self.load_override_file(path) {
             Ok(overrides) => {
                 for (iface, target) in overrides.interfaces {
-                    self.insert_interface(
+                    self.insert_interface_variant(
                         iface,
                         target,
+                        ImplementationVariant::Mutable,
+                        RegistryEntryOrigin::Override {
+                            source: path_to_string(path),
+                        },
+                    );
+                }
+                for (iface, target) in overrides.interfaces_mutable {
+                    self.insert_interface_variant(
+                        iface,
+                        target,
+                        ImplementationVariant::Mutable,
+                        RegistryEntryOrigin::Override {
+                            source: path_to_string(path),
+                        },
+                    );
+                }
+                for (iface, target) in overrides.interfaces_immutable {
+                    self.insert_interface_variant(
+                        iface,
+                        target,
+                        ImplementationVariant::Immutable,
                         RegistryEntryOrigin::Override {
                             source: path_to_string(path),
                         },
@@ -159,7 +231,13 @@ impl DefaultImplementationRegistry {
         }
     }
 
-    fn insert_interface(&mut self, iface: String, target: String, origin: RegistryEntryOrigin) {
+    fn insert_interface_variant(
+        &mut self,
+        iface: String,
+        target: String,
+        variant: ImplementationVariant,
+        origin: RegistryEntryOrigin,
+    ) {
         if iface.trim().is_empty() || target.trim().is_empty() {
             self.load_errors.push(RegistryLoadError::new(
                 "空の FQCN は登録できません".to_string(),
@@ -168,10 +246,12 @@ impl DefaultImplementationRegistry {
             return;
         }
 
-        self.interface_defaults.insert(
-            normalize_fqcn(&iface),
-            DefaultImplementationSource::new(target, origin),
-        );
+        let key = normalize_fqcn(&iface);
+        let entry = self
+            .interface_defaults
+            .entry(key)
+            .or_insert_with(InterfaceImplementationEntry::default);
+        entry.insert(DefaultImplementationSource::new(target, origin), variant);
     }
 
     fn insert_abstract(
@@ -199,6 +279,10 @@ impl DefaultImplementationRegistry {
 struct OverrideFile {
     #[serde(default)]
     interfaces: HashMap<String, String>,
+    #[serde(default)]
+    interfaces_mutable: HashMap<String, String>,
+    #[serde(default)]
+    interfaces_immutable: HashMap<String, String>,
     #[serde(default, alias = "abstracts")]
     abstract_classes: HashMap<String, String>,
 }
@@ -271,7 +355,7 @@ fn path_to_string(path: &Path) -> String {
     path.to_string_lossy().to_string()
 }
 
-const BUILTIN_INTERFACE_DEFAULTS: &[(&str, &str)] = &[
+const BUILTIN_INTERFACE_MUTABLE_DEFAULTS: &[(&str, &str)] = &[
     ("java.lang.Iterable", "java.util.ArrayList"),
     ("java.util.Collection", "java.util.ArrayList"),
     ("java.util.List", "java.util.ArrayList"),
@@ -287,6 +371,21 @@ const BUILTIN_INTERFACE_DEFAULTS: &[(&str, &str)] = &[
         "java.util.concurrent.ConcurrentMap",
         "java.util.concurrent.ConcurrentHashMap",
     ),
+];
+
+const BUILTIN_INTERFACE_IMMUTABLE_DEFAULTS: &[(&str, &str)] = &[
+    ("java.lang.Iterable", "java.util.List"),
+    ("java.util.Collection", "java.util.Collection"),
+    ("java.util.List", "java.util.List"),
+    ("java.util.Set", "java.util.Set"),
+    ("java.util.Map", "java.util.Map"),
+    ("java.util.Queue", "java.util.Collection"),
+    ("java.util.Deque", "java.util.Collection"),
+    ("java.util.SortedSet", "java.util.SortedSet"),
+    ("java.util.NavigableSet", "java.util.NavigableSet"),
+    ("java.util.SortedMap", "java.util.SortedMap"),
+    ("java.util.NavigableMap", "java.util.NavigableMap"),
+    ("java.util.concurrent.ConcurrentMap", "java.util.Map"),
 ];
 
 const BUILTIN_ABSTRACT_DEFAULTS: &[(&str, &str)] = &[
@@ -311,6 +410,15 @@ mod tests {
             .expect("List のデフォルト実装が見つかるはず");
         assert_eq!(record.target(), "java.util.ArrayList");
         assert!(matches!(record.origin(), RegistryEntryOrigin::BuiltIn));
+    }
+
+    #[test]
+    fn immutable_variant_preserves_interface_name() {
+        let registry = DefaultImplementationRegistry::load(None);
+        let record = registry
+            .resolve_interface_variant("java.util.List", ImplementationVariant::Immutable)
+            .expect("List のイミュータブル実装が見つかるはず");
+        assert_eq!(record.target(), "java.util.List");
     }
 
     #[test]
