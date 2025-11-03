@@ -21,7 +21,7 @@ name = "java.util.stream.Stream"
 start_line = 1
 start_column = 1
 end_line = 1
-end_column = 35
+end_column = 31
 
 [[expect.statements]]
 index = 1
@@ -47,7 +47,7 @@ name = "main"
 [expect.statements.span]
 start_line = 7
 start_column = 1
-end_line = 20
+end_line = 21
 end_column = 2
 
 [expect.statements.block]
