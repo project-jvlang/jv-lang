@@ -2306,6 +2306,47 @@ fn inline_json_sample_generates_payload_records() {
 }
 
 #[test]
+fn inline_json_sample_emits_helper_via_extra_type_declarations() {
+    let source = r#"
+        fun main(): Unit {
+            val priceMap = {
+                "soup": 780,
+                "steak": 1280
+            }
+            println(priceMap)
+        }
+    "#;
+
+    let ir = parse_program(source);
+    let unit =
+        generate_java_code(&ir).expect("generate Java for inline JSON sample helper emission");
+
+    assert!(
+        unit.type_declarations.len() > 1,
+        "helper classes should be emitted alongside script class"
+    );
+
+    let helper_entries: Vec<_> = unit
+        .type_declarations
+        .iter()
+        .filter(|decl| decl.contains("class PricemapSampleData"))
+        .collect();
+    assert_eq!(
+        helper_entries.len(),
+        1,
+        "expected exactly one helper class declaration, found {}",
+        helper_entries.len()
+    );
+
+    let script_decl = &unit.type_declarations[0];
+    assert!(
+        !script_decl.contains("class PricemapSampleData"),
+        "helper class should not be embedded inside the script class body: {}",
+        script_decl
+    );
+}
+
+#[test]
 fn embed_mode_sample_declaration_handles_csv() {
     let declaration = sample_declaration_csv();
     let program = IrProgram {

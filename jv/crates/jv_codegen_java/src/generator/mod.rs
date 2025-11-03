@@ -231,7 +231,7 @@ impl JavaCodeGenerator {
         for declaration in remaining_declarations {
             if let IrStatement::SampleDeclaration(sample) = Self::base_statement(&declaration) {
                 let artifacts = self.generate_sample_declaration_artifacts(sample)?;
-                unit.type_declarations.extend(artifacts);
+                self.extra_type_declarations.extend(artifacts);
                 continue;
             }
 
