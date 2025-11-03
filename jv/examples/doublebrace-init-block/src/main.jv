@@ -39,16 +39,24 @@ fun main(): Unit {
     }}
     println("季節のスパイス: ${seasonalSpiceSet}")
 
-    val priceMap : map = {
+    val priceMap = {
         "季節のスープ" : 780,
         "ハーブチキン" : 1280
     }
     println("価格表: ${priceMap}")
 
-    val updatedPriceMap:  = priceMap {{
+    val updatedPriceMap = priceMap {{
         put("山椒香るラムステーキ", 1680)
     }}
     println("更新後の価格表: ${updatedPriceMap}")
+
+    var prepQueue: deque = {{
+        offer("ハーブティー")
+        offer("季節のジュース")
+    }}
+
+    prepQueue.offer("フルーツソーダ")
+    println("キッチンキュー: ${prepQueue}")
 
     // 期待される出力例:
     // Doublebrace 初期化ブロックのデモを開始します。
