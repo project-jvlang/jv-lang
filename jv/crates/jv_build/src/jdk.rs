@@ -367,7 +367,9 @@ Java(TM) SE Runtime Environment"#;
 
         fn set_os(key: &'static str, value: &std::ffi::OsStr) -> Self {
             let original = env::var_os(key);
-            env::set_var(key, value);
+            // SAFETY: all test callers hold `ENV_MUTEX`, ensuring exclusive mutation of process
+            // environment variables before invoking the unsafe std APIs.
+            unsafe { env::set_var(key, value) };
             Self { key, original }
         }
     }
@@ -375,9 +377,11 @@ Java(TM) SE Runtime Environment"#;
     impl Drop for EnvVarGuard {
         fn drop(&mut self) {
             if let Some(value) = self.original.take() {
-                env::set_var(self.key, value);
+                // SAFETY: drop also runs under the same ENV_MUTEX guard.
+                unsafe { env::set_var(self.key, value) };
             } else {
-                env::remove_var(self.key);
+                // SAFETY: drop also runs under the same ENV_MUTEX guard.
+                unsafe { env::remove_var(self.key) };
             }
         }
     }
