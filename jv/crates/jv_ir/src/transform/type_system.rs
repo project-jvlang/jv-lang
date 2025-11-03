@@ -141,6 +141,46 @@ fn convert_simple_type(name: &str) -> JavaType {
             name: "java.util.concurrent.ConcurrentMap".to_string(),
             generic_args: vec![],
         },
+        "arraylist" | "java.util.arraylist" => JavaType::Reference {
+            name: "java.util.ArrayList".to_string(),
+            generic_args: vec![],
+        },
+        "linkedlist" | "java.util.linkedlist" => JavaType::Reference {
+            name: "java.util.LinkedList".to_string(),
+            generic_args: vec![],
+        },
+        "hashmap" | "java.util.hashmap" => JavaType::Reference {
+            name: "java.util.HashMap".to_string(),
+            generic_args: vec![],
+        },
+        "linkedhashmap" | "java.util.linkedhashmap" => JavaType::Reference {
+            name: "java.util.LinkedHashMap".to_string(),
+            generic_args: vec![],
+        },
+        "treemap" | "java.util.treemap" => JavaType::Reference {
+            name: "java.util.TreeMap".to_string(),
+            generic_args: vec![],
+        },
+        "hashset" | "java.util.hashset" => JavaType::Reference {
+            name: "java.util.HashSet".to_string(),
+            generic_args: vec![],
+        },
+        "linkedhashset" | "java.util.linkedhashset" => JavaType::Reference {
+            name: "java.util.LinkedHashSet".to_string(),
+            generic_args: vec![],
+        },
+        "treeset" | "java.util.treeset" => JavaType::Reference {
+            name: "java.util.TreeSet".to_string(),
+            generic_args: vec![],
+        },
+        "arraydeque" | "java.util.arraydeque" => JavaType::Reference {
+            name: "java.util.ArrayDeque".to_string(),
+            generic_args: vec![],
+        },
+        "concurrenthashmap" | "java.util.concurrenthashmap" => JavaType::Reference {
+            name: "java.util.concurrent.ConcurrentHashMap".to_string(),
+            generic_args: vec![],
+        },
         _ => JavaType::Reference {
             name: trimmed.to_string(),
             generic_args: vec![],
@@ -356,5 +396,37 @@ fn describe_java_type(java_type: &JavaType) -> String {
             }
         },
         JavaType::Void => "void".to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn 小文字コレクション名をfqcnへ正規化できる() {
+        let deque = convert_simple_type("deque");
+        if let JavaType::Reference { name, .. } = deque {
+            assert_eq!(name, "java.util.Deque");
+        } else {
+            panic!("deque は参照型として扱われるべき");
+        }
+
+        let array_list = convert_simple_type("arraylist");
+        if let JavaType::Reference { name, .. } = array_list {
+            assert_eq!(name, "java.util.ArrayList");
+        } else {
+            panic!("arraylist は参照型として扱われるべき");
+        }
+    }
+
+    #[test]
+    fn fqcn風表記も正規化できる() {
+        let result = convert_simple_type("java.util.concurrenthashmap");
+        if let JavaType::Reference { name, .. } = result {
+            assert_eq!(name, "java.util.concurrent.ConcurrentHashMap");
+        } else {
+            panic!("ConcurrentHashMap は参照型として扱われるべき");
+        }
     }
 }

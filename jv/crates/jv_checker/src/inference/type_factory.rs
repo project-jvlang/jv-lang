@@ -74,6 +74,38 @@ impl TypeFactory {
             "concurrentmap" | "java.util.concurrentmap" => {
                 return Ok(TypeKind::reference("java.util.concurrent.ConcurrentMap"));
             }
+            "arraylist" | "java.util.arraylist" => {
+                return Ok(TypeKind::reference("java.util.ArrayList"));
+            }
+            "linkedlist" | "java.util.linkedlist" => {
+                return Ok(TypeKind::reference("java.util.LinkedList"));
+            }
+            "hashmap" | "java.util.hashmap" => {
+                return Ok(TypeKind::reference("java.util.HashMap"));
+            }
+            "linkedhashmap" | "java.util.linkedhashmap" => {
+                return Ok(TypeKind::reference("java.util.LinkedHashMap"));
+            }
+            "treemap" | "java.util.treemap" => {
+                return Ok(TypeKind::reference("java.util.TreeMap"));
+            }
+            "hashset" | "java.util.hashset" => {
+                return Ok(TypeKind::reference("java.util.HashSet"));
+            }
+            "linkedhashset" | "java.util.linkedhashset" => {
+                return Ok(TypeKind::reference("java.util.LinkedHashSet"));
+            }
+            "treeset" | "java.util.treeset" => {
+                return Ok(TypeKind::reference("java.util.TreeSet"));
+            }
+            "arraydeque" | "java.util.arraydeque" => {
+                return Ok(TypeKind::reference("java.util.ArrayDeque"));
+            }
+            "concurrenthashmap" | "java.util.concurrenthashmap" => {
+                return Ok(TypeKind::reference(
+                    "java.util.concurrent.ConcurrentHashMap",
+                ));
+            }
             _ => {}
         }
 

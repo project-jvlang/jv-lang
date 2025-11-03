@@ -57,6 +57,31 @@ fn primitive_type_mappings() {
 }
 
 #[test]
+fn collection_annotation_normalization() {
+    let deque_kind =
+        TypeFactory::from_annotation("deque").expect("deque は java.util.Deque へ正規化されるはず");
+    assert_eq!(deque_kind, TypeKind::reference("java.util.Deque"));
+
+    let array_list_kind = TypeFactory::from_annotation("arraylist")
+        .expect("arraylist は java.util.ArrayList へ正規化されるはず");
+    assert_eq!(array_list_kind, TypeKind::reference("java.util.ArrayList"));
+
+    let linked_hash_set_kind = TypeFactory::from_annotation("linkedhashset")
+        .expect("linkedhashset は java.util.LinkedHashSet へ正規化されるはず");
+    assert_eq!(
+        linked_hash_set_kind,
+        TypeKind::reference("java.util.LinkedHashSet")
+    );
+
+    let concurrent_hash_map_kind = TypeFactory::from_annotation("java.util.concurrenthashmap")
+        .expect("java.util.concurrenthashmap も FQCN へ正規化されるはず");
+    assert_eq!(
+        concurrent_hash_map_kind,
+        TypeKind::reference("java.util.concurrent.ConcurrentHashMap")
+    );
+}
+
+#[test]
 fn conversion_rules_detects_widening() {
     let outcome = ConversionRulesEngine::analyze(
         &TypeKind::primitive(PrimitiveType::Int),
@@ -86,6 +111,34 @@ fn conversion_rules_optional_requires_guard() {
             assert_eq!(guard.reason, NullableGuardReason::OptionalLift);
         }
         other => panic!("expected optional guard metadata, got {other:?}"),
+    }
+}
+
+#[test]
+fn conversion_rules_allow_collections_sharing_defaults() {
+    let source = TypeKind::reference("java.util.List");
+    let target = TypeKind::reference("java.util.Collection");
+    let outcome = ConversionRulesEngine::analyze(&source, &target);
+    assert!(
+        matches!(outcome, ConversionOutcome::Identity),
+        "List と Collection は共通の具象クラスを共有するため許容されるべき"
+    );
+}
+
+#[test]
+fn conversion_rules_reject_conflicting_collection_defaults() {
+    let source = TypeKind::reference("java.util.List");
+    let target = TypeKind::reference("java.util.Set");
+    let outcome = ConversionRulesEngine::analyze(&source, &target);
+    match outcome {
+        ConversionOutcome::Rejected(error) => {
+            let message = error.to_string();
+            assert!(
+                message.contains("List") && message.contains("Set"),
+                "List → Set の不整合診断が含まれるべき"
+            );
+        }
+        other => panic!("List → Set は拒否されるべきだが {other:?} が返却された"),
     }
 }
 

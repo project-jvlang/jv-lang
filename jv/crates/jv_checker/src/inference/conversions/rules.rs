@@ -5,6 +5,7 @@ use super::{
 use crate::inference::types::{PrimitiveType, TypeError, TypeKind};
 use crate::java::JavaBoxingTable;
 use jv_inference::registry::default_impl::{DefaultImplementationRegistry, ImplementationVariant};
+use std::collections::BTreeSet;
 
 /// 型変換規則を判定するエンジン。
 #[derive(Debug, Default)]
@@ -84,36 +85,9 @@ impl ConversionRulesEngine {
                     .with_helper(HelperSpec::instance(owner, "toString"));
                 ConversionOutcome::Allowed(metadata)
             }
-            (TypeKind::Reference(left), TypeKind::Reference(right)) if left == right => {
-                ConversionOutcome::Identity
-            }
             (TypeKind::Reference(left), TypeKind::Reference(right)) => {
-                let registry = DefaultImplementationRegistry::shared();
-                if let Some(default_impl) =
-                    registry.resolve_interface_variant(right, ImplementationVariant::Mutable)
-                {
-                    if default_impl.target() == left {
-                        return ConversionOutcome::Identity;
-                    }
-                }
-                if let Some(default_impl) =
-                    registry.resolve_interface_variant(right, ImplementationVariant::Immutable)
-                {
-                    if default_impl.target() == left {
-                        return ConversionOutcome::Identity;
-                    }
-                }
-                if let Some(default_impl) = registry.resolve_abstract(right, None) {
-                    if default_impl.target() == left {
-                        return ConversionOutcome::Identity;
-                    }
-                }
-                if let Some(default_impl) =
-                    registry.resolve_interface_variant(left, ImplementationVariant::Mutable)
-                {
-                    if default_impl.target() == right {
-                        return ConversionOutcome::Identity;
-                    }
+                if Self::references_are_compatible(left, right) {
+                    return ConversionOutcome::Identity;
                 }
                 ConversionOutcome::Rejected(TypeError::incompatible_conversion(
                     from.describe(),
@@ -150,6 +124,44 @@ impl ConversionRulesEngine {
                 TypeKind::primitive(to).describe(),
             ))
         }
+    }
+
+    fn references_are_compatible(left: &str, right: &str) -> bool {
+        let registry = DefaultImplementationRegistry::shared();
+        let left_targets = Self::collect_registry_targets(left, registry);
+        let right_targets = Self::collect_registry_targets(right, registry);
+        if !left_targets.is_disjoint(&right_targets) {
+            return true;
+        }
+        false
+    }
+
+    fn collect_registry_targets(
+        name: &str,
+        registry: &DefaultImplementationRegistry,
+    ) -> BTreeSet<String> {
+        let mut targets = BTreeSet::new();
+        targets.insert(Self::normalize_reference_name(name));
+
+        if let Some(entry) =
+            registry.resolve_interface_variant(name, ImplementationVariant::Mutable)
+        {
+            targets.insert(entry.target().to_string());
+        }
+        if let Some(entry) =
+            registry.resolve_interface_variant(name, ImplementationVariant::Immutable)
+        {
+            targets.insert(entry.target().to_string());
+        }
+        if let Some(entry) = registry.resolve_abstract(name, None) {
+            targets.insert(entry.target().to_string());
+        }
+
+        targets
+    }
+
+    fn normalize_reference_name(name: &str) -> String {
+        name.trim().replace('/', ".")
     }
 
     fn string_helper_owner(ty: &TypeKind) -> String {
