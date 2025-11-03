@@ -182,11 +182,15 @@ include = ["src/**/*.jv"]
         fs::write(root.join("jv.toml"), manifest).expect("write manifest");
 
         let plan = build_plan_for_input(&entrypoint).expect("plan");
-        let canonical_entrypoint =
+        let actual_entrypoint =
+            fs::canonicalize(plan.entrypoint()).expect("canonical plan entrypoint resolves");
+        let expected_entrypoint =
             fs::canonicalize(&entrypoint).expect("canonical entrypoint resolves");
-        let canonical_root = fs::canonicalize(root).expect("canonical root resolves");
+        let actual_root =
+            fs::canonicalize(plan.root.root_dir()).expect("canonical plan root resolves");
+        let expected_root = fs::canonicalize(root).expect("canonical root resolves");
 
-        assert_eq!(plan.entrypoint(), canonical_entrypoint.as_path());
-        assert_eq!(plan.root.root_dir(), canonical_root.as_path());
+        assert_eq!(actual_entrypoint, expected_entrypoint);
+        assert_eq!(actual_root, expected_root);
     }
 }
