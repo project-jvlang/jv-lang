@@ -1533,6 +1533,70 @@ fn expression_lowering_handles_lambda_literal() {
 }
 
 #[test]
+fn whitespace_argument_with_binary_expression_is_single_argument() {
+    let source = r#"
+        fun demo(menu: ArrayList<String>) {
+            val highlighted = menu.get(menu.size() - 1)
+        }
+    "#;
+    let result = lower_source(source);
+    assert!(
+        result.diagnostics.is_empty(),
+        "unexpected diagnostics: {:?}",
+        result.diagnostics
+    );
+
+    let function_body = result
+        .statements
+        .iter()
+        .find_map(|statement| match statement {
+            Statement::FunctionDeclaration { body, .. } => Some(body),
+            _ => None,
+        })
+        .expect("expected function declaration");
+
+    let block_statements = match function_body.as_ref() {
+        Expression::Block { statements, .. } => statements,
+        other => panic!("expected block expression body, got {:?}", other),
+    };
+
+    let initializer = block_statements
+        .iter()
+        .find_map(|statement| match statement {
+            Statement::ValDeclaration {
+                name, initializer, ..
+            } if name == "highlighted" => Some(initializer),
+            _ => None,
+        })
+        .expect("expected highlighted declaration");
+
+    let argument = match initializer {
+        Expression::Call { args, .. } => {
+            assert_eq!(
+                args.len(),
+                1,
+                "menu.get should preserve a single argument, got {:?}",
+                args
+            );
+            args.first().expect("single argument")
+        }
+        other => panic!("expected call expression initializer, got {:?}", other),
+    };
+
+    match argument {
+        Argument::Positional(expression) => match expression {
+            Expression::Binary { op, .. } => assert_eq!(
+                op,
+                &BinaryOp::Subtract,
+                "expected subtraction expression to remain intact"
+            ),
+            other => panic!("expected binary subtract expression, got {:?}", other),
+        },
+        other => panic!("expected positional argument, got {:?}", other),
+    }
+}
+
+#[test]
 fn expression_lowering_handles_trailing_lambda_call() {
     let result = lower_source("val mapped = items.map { value -> value + 1 }");
     assert!(

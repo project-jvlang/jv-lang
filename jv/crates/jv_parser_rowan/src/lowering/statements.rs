@@ -1484,7 +1484,9 @@ mod expression_parser {
                     && token.leading_trivia.spaces > 0
                 {
                     if let Some(prev_token) = inner.get(offset - 1) {
-                        if !token_requires_followup(&prev_token.token_type) {
+                        if !token_requires_followup(&prev_token.token_type)
+                            && !token_requires_followup(&token.token_type)
+                        {
                             parts.push(&inner[start..offset]);
                             separators.push(SeparatorKind::Layout);
                             start = offset;
@@ -3066,6 +3068,13 @@ mod expression_parser {
                 match separator {
                     SeparatorKind::Comma => saw_comma = true,
                     SeparatorKind::Layout => saw_layout = true,
+                }
+            }
+
+            if !saw_comma && saw_layout && arguments.len() > 1 {
+                if let Ok(parsed) = Self::parse_nested_expression(inner) {
+                    arguments = vec![Argument::Positional(parsed.expr)];
+                    saw_layout = false;
                 }
             }
 
