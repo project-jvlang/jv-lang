@@ -6,8 +6,7 @@ use crate::inference::environment::{TypeEnvironment, TypeScheme};
 use crate::inference::types::TypeBinding;
 use crate::inference::{PrimitiveType, TypeKind};
 use crate::pattern::{self, PatternTarget};
-use crate::regex::const_fold::PatternConstKind;
-use crate::regex::{RegexValidator, const_fold::PatternConstAnalyzer};
+use crate::regex::{PatternConstAnalyzer, PatternConstKind, RegexValidator};
 use fastrand::Rng;
 use jv_ast::{
     Annotation, AnnotationName, BinaryMetadata, BinaryOp, Expression, IsTestKind, IsTestMetadata,
