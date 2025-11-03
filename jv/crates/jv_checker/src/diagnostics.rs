@@ -53,6 +53,7 @@ pub struct EnhancedDiagnostic {
     pub related_locations: Vec<Span>,
     pub suggestions: Vec<String>,
     pub learning_hints: Option<String>,
+    pub categories: Vec<&'static str>,
 }
 
 impl EnhancedDiagnostic {
@@ -72,11 +73,27 @@ impl EnhancedDiagnostic {
             related_locations: Vec::new(),
             suggestions: Vec::new(),
             learning_hints: None,
+            categories: Vec::new(),
         }
     }
 
     pub fn with_strategy(mut self, strategy: DiagnosticStrategy) -> Self {
         self.strategy = strategy;
+        self
+    }
+
+    pub fn with_categories<I>(mut self, categories: I) -> Self
+    where
+        I: IntoIterator<Item = &'static str>,
+    {
+        self.categories = categories.into_iter().collect();
+        self
+    }
+
+    pub fn add_category(mut self, category: &'static str) -> Self {
+        if !self.categories.iter().any(|existing| existing == &category) {
+            self.categories.push(category);
+        }
         self
     }
 

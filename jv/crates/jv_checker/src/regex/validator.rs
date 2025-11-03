@@ -8,6 +8,11 @@ use jv_ast::{
 };
 use std::time::Instant;
 
+const CATEGORY_REGEX_LITERAL_SYNTAX: &str = "regex.literal.syntax";
+const CATEGORY_REGEX_LITERAL_STRUCTURE: &str = "regex.literal.structure";
+const CATEGORY_REGEX_LITERAL_ESCAPE: &str = "regex.literal.escape";
+const CATEGORY_REGEX_PERFORMANCE: &str = "regex.performance";
+
 #[derive(Debug, Clone)]
 pub struct RegexAnalysis {
     pub pattern: String,
@@ -73,7 +78,7 @@ impl RegexValidator {
         }
 
         let duration_ms = start.elapsed().as_secs_f64() * 1_000.0;
-        if let Some(mut diagnostic) = detect_complexity_warning(duration_ms) {
+        if let Some(mut diagnostic) = detect_complexity_warning(literal, duration_ms) {
             self.record_issue(literal, &mut diagnostics, errors, &mut diagnostic);
         }
 
@@ -96,7 +101,9 @@ impl RegexValidator {
         errors: &mut Vec<CheckError>,
         diagnostic: &mut EnhancedDiagnostic,
     ) {
-        diagnostic.span = Some(literal.span.clone());
+        if diagnostic.span.is_none() {
+            diagnostic.span = Some(literal.span.clone());
+        }
         if diagnostic.severity == DiagnosticSeverity::Error {
             errors.push(CheckError::ValidationError {
                 message: format_enhanced_message(diagnostic),
@@ -398,6 +405,9 @@ fn adapt_const_diagnostic(
     if !diagnostic.suggestions.is_empty() {
         promoted.suggestions = diagnostic.suggestions.clone();
     }
+    if !diagnostic.categories.is_empty() {
+        promoted.categories = diagnostic.categories.clone();
+    }
     if !diagnostic.help.is_empty()
         && !promoted
             .suggestions
@@ -419,17 +429,20 @@ fn detect_missing_delimiter(literal: &RegexLiteral) -> Option<EnhancedDiagnostic
     }
     let descriptor = diagnostics::descriptor("JV_REGEX_E201")?;
     let message = messages::regex_unterminated_literal_message();
-    Some(
-        EnhancedDiagnostic::new(descriptor, message, None)
-            .with_suggestions(["Add a closing `/` to finish the literal."]),
-    )
+    let mut diagnostic = EnhancedDiagnostic::new(descriptor, message, Some(literal.span.clone()));
+    diagnostic.categories.push(CATEGORY_REGEX_LITERAL_SYNTAX);
+    diagnostic.suggestions.push(
+        "末尾に`/`を追加してリテラルを閉じてください / Add a closing `/` to finish the literal."
+            .to_string(),
+    );
+    Some(diagnostic)
 }
 
 fn detect_unbalanced_groups(literal: &RegexLiteral) -> Option<EnhancedDiagnostic> {
     let descriptor = diagnostics::descriptor("JV_REGEX_E202")?;
-    let mut stack: Vec<(char, usize)> = Vec::new();
+    let mut stack: Vec<(char, usize, char)> = Vec::new();
     let mut escaped = false;
-    for (index, ch) in literal.pattern.char_indices() {
+    for (byte_index, ch) in literal.pattern.char_indices() {
         if escaped {
             escaped = false;
             continue;
@@ -439,56 +452,64 @@ fn detect_unbalanced_groups(literal: &RegexLiteral) -> Option<EnhancedDiagnostic
             continue;
         }
         match ch {
-            '(' => stack.push((')', index)),
-            '[' => stack.push((']', index)),
-            '{' => stack.push(('}', index)),
+            '(' => stack.push((')', byte_index, '(')),
+            '[' => stack.push((']', byte_index, '[')),
+            '{' => stack.push(('}', byte_index, '{')),
             ')' | ']' | '}' => {
-                if let Some((expected, open_index)) = stack.pop() {
+                if let Some((expected, _open_byte_index, _open_char)) = stack.pop() {
                     if ch != expected {
-                        return Some(unbalanced_group_diagnostic(
-                            descriptor,
-                            expected,
-                            Some((ch, open_index)),
+                        let message =
+                            messages::regex_group_balance_message(Some(expected), Some(ch));
+                        let suggestion = format!(
+                            "閉じ括弧 `{}` を `{}` に置き換えて括弧の対応を修正してください / Replace `{}` with `{}` to balance the grouping.",
+                            ch, expected, ch, expected
+                        );
+                        let span = pattern_span_from_byte_range(
+                            literal,
+                            byte_index,
+                            byte_index + ch.len_utf8(),
+                        );
+                        return Some(group_diagnostic(
+                            literal, descriptor, message, span, suggestion,
                         ));
                     }
                 } else {
-                    return Some(stray_closer_diagnostic(descriptor, ch));
+                    let message = messages::regex_group_balance_message(None, Some(ch));
+                    let suggestion = format!(
+                        "余分な閉じ括弧 `{}` を削除するか対応する開き括弧を追加してください / Remove the stray `{}` or add the matching opening bracket.",
+                        ch, ch
+                    );
+                    let span = pattern_span_from_byte_range(
+                        literal,
+                        byte_index,
+                        byte_index + ch.len_utf8(),
+                    );
+                    return Some(group_diagnostic(
+                        literal, descriptor, message, span, suggestion,
+                    ));
                 }
             }
             _ => {}
         }
     }
 
-    if let Some((expected, _)) = stack.pop() {
-        return Some(unbalanced_group_diagnostic(descriptor, expected, None));
+    if let Some((expected, open_byte_index, open_char)) = stack.pop() {
+        let message = messages::regex_group_balance_message(Some(expected), None);
+        let suggestion = format!(
+            "対応する閉じ括弧 `{}` を追加してグループを閉じてください / Add the missing `{}` to close the grouping.",
+            expected, expected
+        );
+        let span = pattern_span_from_byte_range(
+            literal,
+            open_byte_index,
+            open_byte_index + open_char.len_utf8(),
+        );
+        return Some(group_diagnostic(
+            literal, descriptor, message, span, suggestion,
+        ));
     }
 
     None
-}
-
-fn unbalanced_group_diagnostic(
-    descriptor: &'static diagnostics::DiagnosticDescriptor,
-    expected: char,
-    mismatched: Option<(char, usize)>,
-) -> EnhancedDiagnostic {
-    let message = if let Some((found, _open_index)) = mismatched {
-        messages::regex_group_balance_message(Some(expected), Some(found))
-    } else {
-        messages::regex_group_balance_message(Some(expected), None)
-    };
-
-    EnhancedDiagnostic::new(descriptor, message, None)
-        .with_suggestions([format!("Add `{expected}` to balance the regex literal.")])
-}
-
-fn stray_closer_diagnostic(
-    descriptor: &'static diagnostics::DiagnosticDescriptor,
-    ch: char,
-) -> EnhancedDiagnostic {
-    let message = messages::regex_group_balance_message(None, Some(ch));
-    EnhancedDiagnostic::new(descriptor, message, None).with_suggestions([format!(
-        "Remove `{ch}` or introduce the corresponding opening bracket."
-    )])
 }
 
 fn detect_unsupported_escape(literal: &RegexLiteral) -> Option<EnhancedDiagnostic> {
@@ -499,7 +520,7 @@ fn detect_unsupported_escape(literal: &RegexLiteral) -> Option<EnhancedDiagnosti
             continue;
         }
         let Some((next_index, next_ch)) = iter.next() else {
-            return Some(trailing_escape_diagnostic(descriptor));
+            return Some(trailing_escape_diagnostic(literal, descriptor, index));
         };
 
         if next_ch == 'u' {
@@ -509,8 +530,11 @@ fn detect_unsupported_escape(literal: &RegexLiteral) -> Option<EnhancedDiagnosti
                 4,
                 next_index + next_ch.len_utf8(),
             ) {
-                let sequence = &literal.pattern[index..next_index + next_ch.len_utf8()];
-                return Some(invalid_escape_diagnostic(descriptor, sequence));
+                let end = next_index + next_ch.len_utf8();
+                let sequence = &literal.pattern[index..end];
+                return Some(invalid_escape_diagnostic(
+                    literal, descriptor, index, end, sequence,
+                ));
             }
             continue;
         }
@@ -522,8 +546,11 @@ fn detect_unsupported_escape(literal: &RegexLiteral) -> Option<EnhancedDiagnosti
                 2,
                 next_index + next_ch.len_utf8(),
             ) {
-                let sequence = &literal.pattern[index..next_index + next_ch.len_utf8()];
-                return Some(invalid_escape_diagnostic(descriptor, sequence));
+                let end = next_index + next_ch.len_utf8();
+                let sequence = &literal.pattern[index..end];
+                return Some(invalid_escape_diagnostic(
+                    literal, descriptor, index, end, sequence,
+                ));
             }
             continue;
         }
@@ -531,7 +558,9 @@ fn detect_unsupported_escape(literal: &RegexLiteral) -> Option<EnhancedDiagnosti
         if !is_allowed_simple_escape(next_ch) {
             let end = next_index + next_ch.len_utf8();
             let sequence = &literal.pattern[index..end];
-            return Some(invalid_escape_diagnostic(descriptor, sequence));
+            return Some(invalid_escape_diagnostic(
+                literal, descriptor, index, end, sequence,
+            ));
         }
     }
 
@@ -615,24 +644,175 @@ fn is_allowed_simple_escape(ch: char) -> bool {
 }
 
 fn trailing_escape_diagnostic(
+    literal: &RegexLiteral,
     descriptor: &'static diagnostics::DiagnosticDescriptor,
+    start_byte: usize,
 ) -> EnhancedDiagnostic {
     let message = messages::regex_trailing_escape_message();
-    EnhancedDiagnostic::new(descriptor, message, None)
-        .with_suggestions(["Remove the trailing backslash or escape a character after it."])
+    let span = pattern_span_from_byte_range(literal, start_byte, start_byte + '\\'.len_utf8());
+    let mut diagnostic = EnhancedDiagnostic::new(
+        descriptor,
+        message,
+        span.or_else(|| Some(literal.span.clone())),
+    );
+    diagnostic.categories.push(CATEGORY_REGEX_LITERAL_ESCAPE);
+    diagnostic.suggestions.push(
+        "末尾のバックスラッシュを削除するか、次の文字をエスケープしてください / Remove the trailing backslash or escape the following character.".
+            to_string(),
+    );
+    diagnostic
 }
 
 fn invalid_escape_diagnostic(
+    literal: &RegexLiteral,
     descriptor: &'static diagnostics::DiagnosticDescriptor,
+    start_byte: usize,
+    end_byte: usize,
     sequence: &str,
 ) -> EnhancedDiagnostic {
     let message = messages::regex_invalid_escape_sequence_message(sequence);
-    EnhancedDiagnostic::new(descriptor, message, None).with_suggestions([format!(
-        "Replace `{sequence}` with a supported escape such as `\\n`, `\\t`, or remove the backslash."
-    )])
+    let span = pattern_span_from_byte_range(literal, start_byte, end_byte);
+    let mut diagnostic = EnhancedDiagnostic::new(
+        descriptor,
+        message,
+        span.or_else(|| Some(literal.span.clone())),
+    );
+    diagnostic.categories.push(CATEGORY_REGEX_LITERAL_ESCAPE);
+    diagnostic.suggestions.push(
+        format!(
+            "`{sequence}` を Java 互換のエスケープ（例: `\\n`, `\\t`）へ置き換えてください / Replace `{sequence}` with a Java-compatible escape such as `\\n` or `\\t`."
+        ),
+    );
+    diagnostic
 }
 
-fn detect_complexity_warning(duration_ms: f64) -> Option<EnhancedDiagnostic> {
+fn group_diagnostic(
+    literal: &RegexLiteral,
+    descriptor: &'static diagnostics::DiagnosticDescriptor,
+    message: String,
+    span: Option<Span>,
+    suggestion: String,
+) -> EnhancedDiagnostic {
+    let mut diagnostic = EnhancedDiagnostic::new(
+        descriptor,
+        message,
+        span.or_else(|| Some(literal.span.clone())),
+    );
+    diagnostic.categories.push(CATEGORY_REGEX_LITERAL_STRUCTURE);
+    diagnostic.suggestions.push(suggestion);
+    diagnostic
+}
+
+fn pattern_span_from_byte_range(
+    literal: &RegexLiteral,
+    start_byte: usize,
+    end_byte: usize,
+) -> Option<Span> {
+    if start_byte > end_byte || end_byte > literal.pattern.len() {
+        return None;
+    }
+    let start_chars = literal.pattern[..start_byte].chars().count();
+    let end_chars = literal.pattern[..end_byte].chars().count();
+    pattern_span_from_char_range(literal, start_chars, end_chars)
+}
+
+fn pattern_span_from_char_range(
+    literal: &RegexLiteral,
+    start_chars: usize,
+    end_chars: usize,
+) -> Option<Span> {
+    let (pattern_start_char, pattern_end_char) = locate_pattern_bounds(&literal.raw)?;
+    let raw_start = pattern_start_char + start_chars;
+    let raw_end = pattern_start_char + end_chars;
+    if let Some(end_boundary) = pattern_end_char {
+        if raw_start > end_boundary || raw_end > end_boundary {
+            return None;
+        }
+    }
+    raw_span_from_char_range(literal, raw_start, raw_end)
+}
+
+fn locate_pattern_bounds(raw: &str) -> Option<(usize, Option<usize>)> {
+    let chars: Vec<char> = raw.chars().collect();
+    let first_slash = chars.iter().position(|ch| *ch == '/')?;
+    let mut escaped = false;
+    for (index, ch) in chars.iter().enumerate().skip(first_slash + 1) {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        if *ch == '\\' {
+            escaped = true;
+            continue;
+        }
+        if *ch == '/' {
+            return Some((first_slash + 1, Some(index)));
+        }
+    }
+    Some((first_slash + 1, None))
+}
+
+fn raw_span_from_char_range(
+    literal: &RegexLiteral,
+    start_char: usize,
+    end_char: usize,
+) -> Option<Span> {
+    if start_char > end_char {
+        return None;
+    }
+    let chars: Vec<char> = literal.raw.chars().collect();
+    let total_chars = chars.len();
+    if start_char > total_chars || end_char > total_chars {
+        return None;
+    }
+
+    let mut current_line = literal.span.start_line;
+    let mut current_column = literal.span.start_column;
+    let mut start_line = None;
+    let mut start_column = None;
+    let mut end_line = None;
+    let mut end_column = None;
+
+    for (index, ch) in chars.iter().enumerate() {
+        if index == start_char && start_line.is_none() {
+            start_line = Some(current_line);
+            start_column = Some(current_column);
+        }
+        if index == end_char {
+            end_line = Some(current_line);
+            end_column = Some(current_column);
+            break;
+        }
+
+        if *ch == '\n' {
+            current_line += 1;
+            current_column = 1;
+        } else {
+            current_column += 1;
+        }
+    }
+
+    if start_char == total_chars && start_line.is_none() {
+        start_line = Some(current_line);
+        start_column = Some(current_column);
+    }
+    if end_char == total_chars && end_line.is_none() {
+        end_line = Some(current_line);
+        end_column = Some(current_column);
+    }
+
+    Some(Span::new(
+        start_line.unwrap_or(current_line),
+        start_column.unwrap_or(current_column),
+        end_line.unwrap_or(current_line),
+        end_column.unwrap_or(current_column),
+    ))
+}
+
+fn detect_complexity_warning(
+    literal: &RegexLiteral,
+    duration_ms: f64,
+) -> Option<EnhancedDiagnostic> {
     if duration_ms <= 10.0 {
         return None;
     }
@@ -640,11 +820,13 @@ fn detect_complexity_warning(duration_ms: f64) -> Option<EnhancedDiagnostic> {
     let message = format!(
         "正規表現の検証に時間がかかっています ({duration_ms:.2}ms)。\nRegex validation exceeded the interactive budget ({duration_ms:.2}ms).\n参考資料: https://docs.oracle.com/en/java/javase/25/docs/api/java.base/java/util/regex/Pattern.html\nReference: https://docs.oracle.com/en/java/javase/25/docs/api/java.base/java/util/regex/Pattern.html"
     );
-    Some(
-        EnhancedDiagnostic::new(descriptor, message, None).with_suggestions([
-            "Simplify the pattern or split it into smaller expressions.".to_string(),
-        ]),
-    )
+    let mut diagnostic = EnhancedDiagnostic::new(descriptor, message, Some(literal.span.clone()));
+    diagnostic.categories.push(CATEGORY_REGEX_PERFORMANCE);
+    diagnostic.suggestions.push(
+        "パターンを簡素化するか小さな表現に分割してください / Simplify the pattern or split it into smaller expressions.".
+            to_string(),
+    );
+    Some(diagnostic)
 }
 
 fn format_enhanced_message(diagnostic: &EnhancedDiagnostic) -> String {
@@ -663,4 +845,87 @@ fn format_enhanced_message(diagnostic: &EnhancedDiagnostic) -> String {
         lines.push(hint.clone());
     }
     lines.join("\n")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_literal(raw: &str, pattern: &str) -> RegexLiteral {
+        let span = Span::new(1, 1, 1, 1 + raw.chars().count());
+        RegexLiteral {
+            pattern: pattern.to_string(),
+            raw: raw.to_string(),
+            span,
+            origin: None,
+            const_key: None,
+            template_segments: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn missing_delimiter_sets_span_and_category() {
+        let literal = make_literal("/abc", "abc");
+        let diagnostic = detect_missing_delimiter(&literal).expect("should emit diagnostic");
+        assert_eq!(diagnostic.span, Some(literal.span.clone()));
+        assert!(
+            diagnostic
+                .categories
+                .contains(&CATEGORY_REGEX_LITERAL_SYNTAX)
+        );
+        assert!(!diagnostic.suggestions.is_empty());
+    }
+
+    #[test]
+    fn unbalanced_group_highlights_closing_bracket() {
+        let literal = make_literal("/(abc]/", "(abc]");
+        let diagnostic = detect_unbalanced_groups(&literal).expect("should emit diagnostic");
+        let span = diagnostic.span.expect("span must be present");
+        assert_eq!(
+            span.start_column,
+            literal.span.start_column + 5,
+            "closing bracket should be highlighted",
+        );
+        assert_eq!(
+            span.end_column,
+            literal.span.start_column + 6,
+            "span should cover the offending bracket",
+        );
+        assert!(
+            diagnostic
+                .categories
+                .contains(&CATEGORY_REGEX_LITERAL_STRUCTURE)
+        );
+    }
+
+    #[test]
+    fn invalid_escape_highlights_sequence() {
+        let literal = make_literal("/\\q/", "\\q");
+        let diagnostic = detect_unsupported_escape(&literal).expect("should emit diagnostic");
+        let span = diagnostic.span.expect("span must be present");
+        assert_eq!(
+            span.start_column,
+            literal.span.start_column + 1,
+            "escape should start at the backslash",
+        );
+        assert_eq!(
+            span.end_column,
+            literal.span.start_column + 3,
+            "span should cover two characters (\\ and q)",
+        );
+        assert!(
+            diagnostic
+                .categories
+                .contains(&CATEGORY_REGEX_LITERAL_ESCAPE)
+        );
+    }
+
+    #[test]
+    fn complexity_warning_uses_performance_category() {
+        let literal = make_literal("/abc/", "abc");
+        let diagnostic =
+            detect_complexity_warning(&literal, 15.0).expect("should emit warning diagnostic");
+        assert_eq!(diagnostic.span, Some(literal.span.clone()));
+        assert!(diagnostic.categories.contains(&CATEGORY_REGEX_PERFORMANCE));
+    }
 }
