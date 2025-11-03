@@ -360,6 +360,7 @@ mod formatting_tests {
     use super::*;
     use jv_checker::diagnostics;
     use std::io::Write;
+    use std::sync::{Mutex, MutexGuard, OnceLock};
     use tempfile::NamedTempFile;
 
     fn sample_diagnostic(span: Span) -> EnhancedDiagnostic {
@@ -426,15 +427,26 @@ mod formatting_tests {
         );
     }
 
-    struct ColorOverrideGuard;
+    struct ColorOverrideGuard {
+        _lock: MutexGuard<'static, ()>,
+    }
+
+    fn color_test_mutex() -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+    }
 
     impl ColorOverrideGuard {
         fn set(value: Option<bool>) -> Self {
+            let lock = color_test_mutex()
+                .lock()
+                .expect("color test mutex poisoned");
             let mut guard = super::COLOR_OVERRIDE
                 .lock()
                 .expect("color override mutex poisoned");
             *guard = value;
-            Self
+            drop(guard);
+            Self { _lock: lock }
         }
     }
 
