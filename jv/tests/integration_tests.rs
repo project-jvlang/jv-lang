@@ -1435,8 +1435,8 @@ fn cli_check_reports_regex_diagnostics() {
 
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        stderr.contains("JV5102"),
-        "regex diagnostic output should contain JV5102, got: {stderr}"
+        stderr.contains("JV_REGEX_E203"),
+        "regex diagnostic output should contain JV_REGEX_E203, got: {stderr}"
     );
     assert!(
         stderr.contains("正規表現リテラル") || stderr.to_lowercase().contains("regex literal"),

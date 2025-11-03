@@ -417,8 +417,8 @@ fn detect_missing_delimiter(literal: &RegexLiteral) -> Option<EnhancedDiagnostic
     if literal.raw.starts_with('/') && literal.raw.ends_with('/') {
         return None;
     }
-    let descriptor = diagnostics::descriptor("JV5101")?;
-    let message = "正規表現リテラルが `/` で閉じられていません。\nRegex literal is missing its closing `/` delimiter.";
+    let descriptor = diagnostics::descriptor("JV_REGEX_E201")?;
+    let message = messages::regex_unterminated_literal_message();
     Some(
         EnhancedDiagnostic::new(descriptor, message, None)
             .with_suggestions(["Add a closing `/` to finish the literal."]),
@@ -426,7 +426,7 @@ fn detect_missing_delimiter(literal: &RegexLiteral) -> Option<EnhancedDiagnostic
 }
 
 fn detect_unbalanced_groups(literal: &RegexLiteral) -> Option<EnhancedDiagnostic> {
-    let descriptor = diagnostics::descriptor("JV5101")?;
+    let descriptor = diagnostics::descriptor("JV_REGEX_E202")?;
     let mut stack: Vec<(char, usize)> = Vec::new();
     let mut escaped = false;
     for (index, ch) in literal.pattern.char_indices() {
@@ -472,13 +472,9 @@ fn unbalanced_group_diagnostic(
     mismatched: Option<(char, usize)>,
 ) -> EnhancedDiagnostic {
     let message = if let Some((found, _open_index)) = mismatched {
-        format!(
-            "開き括弧と閉じ括弧の対応が取れていません (`{found}` が想定外です)。\nUnbalanced regex group: `{found}` does not match the expected closing `{expected}`."
-        )
+        messages::regex_group_balance_message(Some(expected), Some(found))
     } else {
-        format!(
-            "開き括弧に対応する閉じ括弧 `{expected}` が不足しています。\nRegex group is missing its closing `{expected}`."
-        )
+        messages::regex_group_balance_message(Some(expected), None)
     };
 
     EnhancedDiagnostic::new(descriptor, message, None)
@@ -489,16 +485,14 @@ fn stray_closer_diagnostic(
     descriptor: &'static diagnostics::DiagnosticDescriptor,
     ch: char,
 ) -> EnhancedDiagnostic {
-    let message = format!(
-        "対応する開き括弧がない閉じ括弧 `{ch}` が存在します。\nRegex literal contains an unmatched closing `{ch}`."
-    );
+    let message = messages::regex_group_balance_message(None, Some(ch));
     EnhancedDiagnostic::new(descriptor, message, None).with_suggestions([format!(
         "Remove `{ch}` or introduce the corresponding opening bracket."
     )])
 }
 
 fn detect_unsupported_escape(literal: &RegexLiteral) -> Option<EnhancedDiagnostic> {
-    let descriptor = diagnostics::descriptor("JV5102")?;
+    let descriptor = diagnostics::descriptor("JV_REGEX_E203")?;
     let mut iter = literal.pattern.char_indices().peekable();
     while let Some((index, ch)) = iter.next() {
         if ch != '\\' {
@@ -623,7 +617,7 @@ fn is_allowed_simple_escape(ch: char) -> bool {
 fn trailing_escape_diagnostic(
     descriptor: &'static diagnostics::DiagnosticDescriptor,
 ) -> EnhancedDiagnostic {
-    let message = "バックスラッシュで終わるエスケープは無効です。\nRegex literal cannot end with a standalone escape sequence.";
+    let message = messages::regex_trailing_escape_message();
     EnhancedDiagnostic::new(descriptor, message, None)
         .with_suggestions(["Remove the trailing backslash or escape a character after it."])
 }
@@ -632,9 +626,7 @@ fn invalid_escape_diagnostic(
     descriptor: &'static diagnostics::DiagnosticDescriptor,
     sequence: &str,
 ) -> EnhancedDiagnostic {
-    let message = format!(
-        "サポートされないエスケープシーケンス `{sequence}` が含まれています。\nUnsupported escape sequence `{sequence}` detected in regex literal."
-    );
+    let message = messages::regex_invalid_escape_sequence_message(sequence);
     EnhancedDiagnostic::new(descriptor, message, None).with_suggestions([format!(
         "Replace `{sequence}` with a supported escape such as `\\n`, `\\t`, or remove the backslash."
     )])
@@ -644,9 +636,9 @@ fn detect_complexity_warning(duration_ms: f64) -> Option<EnhancedDiagnostic> {
     if duration_ms <= 10.0 {
         return None;
     }
-    let descriptor = diagnostics::descriptor("JV5104")?;
+    let descriptor = diagnostics::descriptor("JV_REGEX_I401")?;
     let message = format!(
-        "正規表現の検証に時間がかかっています ({duration_ms:.2}ms)。\nRegex validation exceeded the interactive budget ({duration_ms:.2}ms)."
+        "正規表現の検証に時間がかかっています ({duration_ms:.2}ms)。\nRegex validation exceeded the interactive budget ({duration_ms:.2}ms).\n参考資料: https://docs.oracle.com/en/java/javase/25/docs/api/java.base/java/util/regex/Pattern.html\nReference: https://docs.oracle.com/en/java/javase/25/docs/api/java.base/java/util/regex/Pattern.html"
     );
     Some(
         EnhancedDiagnostic::new(descriptor, message, None).with_suggestions([

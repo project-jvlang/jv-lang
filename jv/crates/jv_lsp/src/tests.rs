@@ -445,7 +445,7 @@ fn surfaces_regex_diagnostics_from_validator() {
     assert!(
         diagnostics
             .iter()
-            .any(|diag| diag.code.as_deref() == Some("JV5102"))
+            .any(|diag| diag.code.as_deref() == Some("JV_REGEX_E203"))
     );
 
     let metadata = server

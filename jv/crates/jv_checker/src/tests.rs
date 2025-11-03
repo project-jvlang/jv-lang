@@ -2063,7 +2063,7 @@ fn regex_validator_reports_unsupported_escape() {
     let errors = result.err().unwrap();
     assert!(errors.iter().any(|error| matches!(
         error,
-        CheckError::ValidationError { message, .. } if message.contains("JV5102")
+        CheckError::ValidationError { message, .. } if message.contains("JV_REGEX_E203")
     )));
 }
 
@@ -2100,7 +2100,7 @@ fn regex_validator_reports_unbalanced_groups() {
     let errors = result.err().unwrap();
     assert!(errors.iter().any(|error| matches!(
         error,
-        CheckError::ValidationError { message, .. } if message.contains("JV5101")
+        CheckError::ValidationError { message, .. } if message.contains("JV_REGEX_E202")
     )));
 }
 
@@ -2220,9 +2220,9 @@ fn regex_validator_fuzzes_invalid_escape_detection() {
         assert!(
             errors.iter().any(|error| matches!(
                 error,
-                CheckError::ValidationError { message, .. } if message.contains("JV5102")
+                CheckError::ValidationError { message, .. } if message.contains("JV_REGEX_E203")
             )),
-            "iteration {iteration}: expected JV5102 for pattern {pattern:?}, got {errors:?}"
+            "iteration {iteration}: expected JV_REGEX_E203 for pattern {pattern:?}, got {errors:?}"
         );
     }
 }

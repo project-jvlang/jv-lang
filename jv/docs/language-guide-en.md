@@ -526,11 +526,11 @@ public static boolean isNumber(String input) {
 
 ### Syntax Rules and Diagnostics
 - Escape the closing delimiter with `\/`. A trailing standalone backslash is rejected and produces
-  diagnostic `JV5102`.
+  diagnostic `JV_REGEX_E203`.
 - Control characters such as newlines or tabs are disallowed inside the literal. For these cases use
   a regular string literal and call `Pattern.compile` explicitly.
 - The built-in `RegexValidator` performs static analysis; unmatched brackets or unsupported escapes
-  surface as `JV5101`/`JV5103` diagnostics.
+  surface as `JV_REGEX_E201`/`JV_REGEX_E202` diagnostics.
 - Ordinary string literals like `"/not/regex/"` continue to tokenize as `TokenType::String` and are
   never reinterpreted as regex literals.
 - No additional runtime dependencies are introduced. The compiler only targets

@@ -264,7 +264,7 @@ private static final Pattern PATTERN = Pattern.compile("\\d{3}-\\d{4}");
 ```
 
 - Static hoisting ensures the pattern is compiled once per class.
-- Unsupported escapes or unbalanced groups surface as checker diagnostics (`JV5101`–`JV5104`) so
+- Unsupported escapes or unbalanced groups surface as checker diagnostics (`JV_REGEX_E201`–`JV_REGEX_E203`, `JV_REGEX_I401`) so
   invalid patterns never reach the Java backend.
 - String literals with slashes remain untouched; only the `/.../` form without quotes is recognized.
 
