@@ -1,11 +1,11 @@
 use super::*;
 use insta::assert_snapshot;
 use jv_ast::{
-    types::{PrimitiveTypeName, PrimitiveTypeReference, PrimitiveTypeSource},
     BinaryOp, CallArgumentStyle, Literal, SequenceDelimiter, Span,
+    types::{PrimitiveTypeName, PrimitiveTypeReference, PrimitiveTypeSource},
 };
-use jv_ir::transform::transform_program_with_context;
 use jv_ir::TransformContext;
+use jv_ir::transform::transform_program_with_context;
 use jv_ir::{
     DataFormat, IrCaseLabel, IrCommentKind, IrDeconstructionComponent, IrDeconstructionPattern,
     IrExpression, IrImplicitWhenEnd, IrModifiers, IrParameter, IrProgram, IrRecordComponent,

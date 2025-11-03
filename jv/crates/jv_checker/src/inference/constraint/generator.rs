@@ -18,8 +18,8 @@ use crate::pattern::{
     NarrowedBinding, NarrowedNullability, NarrowingSnapshot, PatternMatchService, PatternTarget,
 };
 use jv_ast::{
-    Argument, BinaryOp, Expression, ForInStatement, Literal, Parameter, Program, Span, Statement,
-    TypeAnnotation, UnaryOp,
+    Argument, BinaryOp, Expression, ForInStatement, Literal, LogBlock, LogItem, Parameter, Program,
+    Span, Statement, TypeAnnotation, UnaryOp,
 };
 use jv_inference::types::NullabilityFlag;
 use std::collections::HashMap;
@@ -312,6 +312,7 @@ impl<'env, 'ext, 'imp> ConstraintGenerator<'env, 'ext, 'imp> {
                 self.type_from_annotation(target)
             }
             Expression::Block { statements, .. } => self.infer_block(statements),
+            Expression::LogBlock(block) => self.infer_log_block(block),
             Expression::If {
                 condition,
                 then_branch,
@@ -616,6 +617,23 @@ impl<'env, 'ext, 'imp> ConstraintGenerator<'env, 'ext, 'imp> {
         }
         self.env.leave_scope();
         last
+    }
+
+    fn infer_log_block(&mut self, block: &LogBlock) -> TypeKind {
+        self.env.enter_scope();
+        for item in &block.items {
+            match item {
+                LogItem::Statement(statement) => self.visit_statement(statement),
+                LogItem::Expression(expr) => {
+                    let _ = self.infer_expression(expr);
+                }
+                LogItem::Nested(nested) => {
+                    let _ = self.infer_log_block(nested);
+                }
+            }
+        }
+        self.env.leave_scope();
+        TypeKind::reference("Unit")
     }
 
     fn infer_binary_expression(

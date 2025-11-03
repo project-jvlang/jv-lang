@@ -1,8 +1,9 @@
 use crate::CheckError;
 use crate::diagnostics::{self, DiagnosticSeverity, EnhancedDiagnostic};
 use jv_ast::{
-    Argument, ConcurrencyConstruct, Expression, ForInStatement, LoopStrategy, NumericRangeLoop,
-    Program, RegexLiteral, ResourceManagement, Span, Statement, StringPart, TryCatchClause,
+    Argument, ConcurrencyConstruct, Expression, ForInStatement, LogBlock, LogItem, LoopStrategy,
+    NumericRangeLoop, Program, RegexLiteral, ResourceManagement, Span, Statement, StringPart,
+    TryCatchClause,
 };
 use std::time::Instant;
 
@@ -314,6 +315,7 @@ impl<'a> RegexValidationVisitor<'a> {
                     self.visit_statement(statement);
                 }
             }
+            Expression::LogBlock(block) => self.visit_log_block(block),
             Expression::Try {
                 body,
                 catch_clauses,
@@ -327,6 +329,16 @@ impl<'a> RegexValidationVisitor<'a> {
                 if let Some(finally) = finally_block {
                     self.visit_expression(finally);
                 }
+            }
+        }
+    }
+
+    fn visit_log_block(&mut self, block: &LogBlock) {
+        for item in &block.items {
+            match item {
+                LogItem::Statement(statement) => self.visit_statement(statement),
+                LogItem::Expression(expr) => self.visit_expression(expr),
+                LogItem::Nested(nested) => self.visit_log_block(nested),
             }
         }
     }

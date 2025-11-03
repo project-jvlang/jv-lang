@@ -1,4 +1,4 @@
-use crate::deps::{collect_opentelemetry_dependencies, MavenDependency};
+use crate::deps::{MavenDependency, collect_opentelemetry_dependencies};
 use jv_pm::{LoggingConfig, LoggingFramework, OpenTelemetryConfig, OtelProtocol};
 
 const OTEL_VERSION: &str = "1.32.0";
@@ -22,7 +22,11 @@ fn slf4j_includes_logback_appender() {
     let expected = vec![
         MavenDependency::new("io.opentelemetry", "opentelemetry-api", OTEL_VERSION),
         MavenDependency::new("io.opentelemetry", "opentelemetry-sdk", OTEL_VERSION),
-        MavenDependency::new("io.opentelemetry", "opentelemetry-exporter-otlp", OTEL_VERSION),
+        MavenDependency::new(
+            "io.opentelemetry",
+            "opentelemetry-exporter-otlp",
+            OTEL_VERSION,
+        ),
         MavenDependency::new(
             "io.opentelemetry.instrumentation",
             "opentelemetry-logback-appender-1.0",
@@ -41,7 +45,11 @@ fn log4j2_includes_log4j_appender() {
     let expected = vec![
         MavenDependency::new("io.opentelemetry", "opentelemetry-api", OTEL_VERSION),
         MavenDependency::new("io.opentelemetry", "opentelemetry-sdk", OTEL_VERSION),
-        MavenDependency::new("io.opentelemetry", "opentelemetry-exporter-otlp", OTEL_VERSION),
+        MavenDependency::new(
+            "io.opentelemetry",
+            "opentelemetry-exporter-otlp",
+            OTEL_VERSION,
+        ),
         MavenDependency::new(
             "io.opentelemetry.instrumentation",
             "opentelemetry-log4j-appender-2.17",
@@ -60,7 +68,11 @@ fn jul_includes_java_util_appender() {
     let expected = vec![
         MavenDependency::new("io.opentelemetry", "opentelemetry-api", OTEL_VERSION),
         MavenDependency::new("io.opentelemetry", "opentelemetry-sdk", OTEL_VERSION),
-        MavenDependency::new("io.opentelemetry", "opentelemetry-exporter-otlp", OTEL_VERSION),
+        MavenDependency::new(
+            "io.opentelemetry",
+            "opentelemetry-exporter-otlp",
+            OTEL_VERSION,
+        ),
         MavenDependency::new(
             "io.opentelemetry.instrumentation",
             "opentelemetry-logging-appender",
@@ -79,7 +91,11 @@ fn custom_framework_uses_base_dependencies_only() {
     let expected = vec![
         MavenDependency::new("io.opentelemetry", "opentelemetry-api", OTEL_VERSION),
         MavenDependency::new("io.opentelemetry", "opentelemetry-sdk", OTEL_VERSION),
-        MavenDependency::new("io.opentelemetry", "opentelemetry-exporter-otlp", OTEL_VERSION),
+        MavenDependency::new(
+            "io.opentelemetry",
+            "opentelemetry-exporter-otlp",
+            OTEL_VERSION,
+        ),
     ];
 
     assert_eq!(dependencies, expected);

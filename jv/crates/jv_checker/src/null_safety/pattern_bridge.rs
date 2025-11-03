@@ -7,7 +7,7 @@ use crate::pattern::{
 use jv_ast::expression::{Parameter, StringPart};
 use jv_ast::statement::Property;
 use jv_ast::types::TypeAnnotation;
-use jv_ast::{Expression, Program, Statement};
+use jv_ast::{Expression, LogBlock, LogItem, Program, Statement};
 use jv_inference::types::TypeVariant as FactsTypeVariant;
 use std::collections::HashMap;
 
@@ -142,6 +142,29 @@ impl PatternFactsBridge {
         }
     }
 
+    fn visit_log_block(
+        &mut self,
+        block: &LogBlock,
+        service: &mut PatternMatchService,
+        context: &mut NullSafetyContext,
+    ) -> BridgeOutcome {
+        let mut outcome = BridgeOutcome::default();
+        for item in &block.items {
+            match item {
+                LogItem::Statement(statement) => {
+                    outcome.merge(self.visit_statement(statement, service, context));
+                }
+                LogItem::Expression(expr) => {
+                    outcome.merge(self.visit_expression(expr, service, context));
+                }
+                LogItem::Nested(nested) => {
+                    outcome.merge(self.visit_log_block(nested, service, context));
+                }
+            }
+        }
+        outcome
+    }
+
     fn visit_property(
         &mut self,
         property: &Property,
@@ -221,6 +244,7 @@ impl PatternFactsBridge {
                     self.visit_expression(body, service, context)
                 }
             }
+            Expression::LogBlock(block) => self.visit_log_block(block, service, context),
             Expression::Try {
                 body,
                 catch_clauses,

@@ -7,7 +7,7 @@
 use crate::CheckError;
 use jv_ast::types::Span;
 use jv_ast::{
-    BinaryOp, Expression, Literal, Program, Statement, TypeAnnotation, UnaryOp,
+    BinaryOp, Expression, Literal, LogBlock, LogItem, Program, Statement, TypeAnnotation, UnaryOp,
     expression::Argument,
 };
 use std::collections::HashMap;
@@ -300,6 +300,7 @@ impl NullabilityAnalyzer {
                 }
                 Nullability::NonNull
             }
+            Expression::LogBlock(block) => self.evaluate_log_block(block),
             Expression::When {
                 expr: scrutinee,
                 arms,
@@ -391,6 +392,23 @@ impl NullabilityAnalyzer {
             Expression::JsonLiteral(_) => Nullability::NonNull,
             Expression::This(_) | Expression::Super(_) => Nullability::NonNull,
         }
+    }
+
+    fn evaluate_log_block(&mut self, block: &LogBlock) -> Nullability {
+        for item in &block.items {
+            match item {
+                LogItem::Statement(statement) => {
+                    let _ = self.visit_statement(statement);
+                }
+                LogItem::Expression(expr) => {
+                    let _ = self.evaluate_expression(expr);
+                }
+                LogItem::Nested(nested) => {
+                    let _ = self.evaluate_log_block(nested);
+                }
+            }
+        }
+        Nullability::NonNull
     }
 
     fn evaluate_binary(

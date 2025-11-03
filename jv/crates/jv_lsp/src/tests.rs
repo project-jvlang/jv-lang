@@ -237,9 +237,83 @@ fn test_completions_include_new_templates() {
     let completions = server.get_completions("file:///test.jv", position);
 
     assert!(!completions.is_empty());
-    assert!(completions.contains(&"name = value".to_string()));
-    assert!(completions.contains(&"var name = value".to_string()));
-    assert!(completions.contains(&"data Point(x y)".to_string()));
+    let labels: Vec<&str> = completions.iter().map(|item| item.label.as_str()).collect();
+    assert!(labels.contains(&"name = value"));
+    assert!(labels.contains(&"var name = value"));
+    assert!(labels.contains(&"data Point(x y)"));
+}
+
+#[test]
+fn logging_snippet_completion_inserts_snippet() {
+    let mut server = JvLanguageServer::new();
+    let uri = "file:///logging.jv".to_string();
+    server.open_document(uri.clone(), "LOG".to_string());
+
+    let completions = server.get_completions(
+        &uri,
+        Position {
+            line: 0,
+            character: 3,
+        },
+    );
+
+    let snippet = completions
+        .iter()
+        .find(|item| item.label.starts_with("LOG { \"メッセージ\" }"));
+    assert!(
+        snippet.is_some(),
+        "期待するLOGスニペット補完が見つかりません"
+    );
+    let snippet = snippet.unwrap();
+    assert!(snippet.is_snippet);
+    assert!(
+        snippet
+            .insert_text
+            .as_deref()
+            .unwrap_or_default()
+            .contains("$0")
+    );
+}
+
+#[test]
+fn manifest_logging_key_completions_include_expected_keys() {
+    let mut server = JvLanguageServer::new();
+    let uri = "file:///jv.toml".to_string();
+    let source = "[logging]\n";
+    server.open_document(uri.clone(), source.to_string());
+
+    let completions = server.get_completions(
+        &uri,
+        Position {
+            line: 1,
+            character: 0,
+        },
+    );
+
+    let labels: Vec<&str> = completions.iter().map(|item| item.label.as_str()).collect();
+    assert!(labels.contains(&"framework"));
+    assert!(labels.contains(&"log_level"));
+    assert!(labels.contains(&"opentelemetry"));
+}
+
+#[test]
+fn manifest_logging_framework_value_completions() {
+    let mut server = JvLanguageServer::new();
+    let uri = "file:///jv.toml".to_string();
+    let source = "[logging]\nframework = ";
+    server.open_document(uri.clone(), source.to_string());
+
+    let completions = server.get_completions(
+        &uri,
+        Position {
+            line: 1,
+            character: 12,
+        },
+    );
+
+    let labels: Vec<&str> = completions.iter().map(|item| item.label.as_str()).collect();
+    assert!(labels.contains(&"slf4j"));
+    assert!(labels.contains(&"log4j2"));
 }
 
 #[test]
@@ -322,6 +396,52 @@ fn reports_type_error_for_ambiguous_function() {
             .any(|diag| diag.message.contains("ambiguous function signature"))
     );
     assert!(server.type_facts(&uri).is_none());
+}
+
+#[test]
+fn logging_diagnostics_flag_deeply_nested_blocks() {
+    let mut server = JvLanguageServer::new();
+    let uri = "file:///logging-nested.jv".to_string();
+    let source = r#"
+        fun main {
+            LOG {
+                TRACE {
+                    DEBUG {
+                        "too deep"
+                    }
+                }
+            }
+        }
+    "#;
+    server.open_document(uri.clone(), source.to_string());
+
+    let diagnostics = server.get_diagnostics(&uri);
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diag| diag.code.as_deref() == Some("JV4601"))
+    );
+}
+
+#[test]
+fn logging_diagnostics_warn_when_message_missing() {
+    let mut server = JvLanguageServer::new();
+    let uri = "file:///logging-missing-message.jv".to_string();
+    let source = r#"
+        fun main {
+            LOG {
+                val result = compute()
+            }
+        }
+    "#;
+    server.open_document(uri.clone(), source.to_string());
+
+    let diagnostics = server.get_diagnostics(&uri);
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diag| diag.code.as_deref() == Some("JV4602"))
+    );
 }
 
 #[test]

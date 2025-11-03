@@ -26,7 +26,11 @@ const OTEL_INSTRUMENTATION_VERSION: &str = "1.32.0-alpha";
 const BASE_DEPENDENCIES: &[MavenDependency] = &[
     MavenDependency::new("io.opentelemetry", "opentelemetry-api", OTEL_VERSION),
     MavenDependency::new("io.opentelemetry", "opentelemetry-sdk", OTEL_VERSION),
-    MavenDependency::new("io.opentelemetry", "opentelemetry-exporter-otlp", OTEL_VERSION),
+    MavenDependency::new(
+        "io.opentelemetry",
+        "opentelemetry-exporter-otlp",
+        OTEL_VERSION,
+    ),
 ];
 
 const LOGBACK_APPENDER: MavenDependency = MavenDependency::new(
