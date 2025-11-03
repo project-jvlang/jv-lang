@@ -794,6 +794,14 @@ impl JavaCodeGenerator {
                     captures,
                     scope_locals,
                 );
+                if let Some(pattern_expr) = &command.pattern_expr {
+                    self.collect_mutable_captures_in_expression(
+                        pattern_expr,
+                        method_locals,
+                        captures,
+                        scope_locals,
+                    );
+                }
 
                 match &command.replacement {
                     IrRegexReplacement::None => {}

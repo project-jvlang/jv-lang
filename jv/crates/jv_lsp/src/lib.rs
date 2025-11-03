@@ -1005,6 +1005,7 @@ impl JvLanguageServer {
                         span: span.clone(),
                         origin: Some(PatternOrigin::literal(span.clone())),
                         const_key: None,
+                        template_segments: Vec::new(),
                     };
                     statements.push(Statement::Expression {
                         expr: Expression::RegexLiteral(literal),

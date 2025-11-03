@@ -26,5 +26,6 @@ pub fn regex_literal_from_token(token: &Token, span: Span) -> RegexLiteral {
         span: computed_span,
         origin: None,
         const_key: None,
+        template_segments: Vec::new(),
     }
 }

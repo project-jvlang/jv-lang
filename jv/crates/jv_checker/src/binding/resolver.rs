@@ -716,6 +716,30 @@ impl BindingResolver {
         if let Some(replacement) = command.replacement.take() {
             command.replacement = Some(self.resolve_regex_replacement(replacement));
         }
+
+        if command.pattern.template_segments.is_empty() {
+            let pattern_name = command.pattern.pattern.as_str();
+            let raw_literal = command.pattern.raw.as_str();
+            let looks_like_identifier = pattern_name
+                .chars()
+                .next()
+                .map(|ch| ch == '_' || ch.is_ascii_alphabetic())
+                .unwrap_or(false)
+                && pattern_name
+                    .chars()
+                    .all(|ch| ch == '_' || ch.is_ascii_alphanumeric());
+            let uses_slash_literal = raw_literal.starts_with('/') && raw_literal.ends_with('/');
+
+            if looks_like_identifier && uses_slash_literal {
+                if let Some(_binding) = self.lookup(pattern_name) {
+                    let span = command.pattern.span.clone();
+                    command.pattern_expr = Some(Box::new(Expression::Identifier(
+                        pattern_name.to_string(),
+                        span,
+                    )));
+                }
+            }
+        }
         command
     }
 

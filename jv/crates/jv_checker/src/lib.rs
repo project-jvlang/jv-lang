@@ -1040,8 +1040,13 @@ fn visit_expression_for_pattern_consts(
         }
         Expression::RegexLiteral(literal) => record_regex_literal(literal, &[], records),
         Expression::RegexCommand(command) => {
-            record_regex_literal(&mut command.pattern, &command.flags, records);
+            if command.pattern_expr.is_none() {
+                record_regex_literal(&mut command.pattern, &command.flags, records);
+            }
             visit_expression_for_pattern_consts(&mut command.subject, records);
+            if let Some(pattern_expr) = &mut command.pattern_expr {
+                visit_expression_for_pattern_consts(pattern_expr, records);
+            }
             if let Some(replacement) = &mut command.replacement {
                 visit_regex_replacement(replacement, records);
             }

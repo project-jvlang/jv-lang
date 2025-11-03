@@ -1,4 +1,7 @@
-use jv_ast::{PatternConstKey, PatternOrigin, PatternOriginKind, RegexFlag, RegexLiteral};
+use jv_ast::{
+    PatternConstKey, PatternOrigin, PatternOriginKind, RegexFlag, RegexLiteral,
+    RegexTemplateSegment,
+};
 use sha2::{Digest, Sha256};
 
 /// 正規表現パターンが定数として扱えるかどうかの分類。
@@ -17,6 +20,14 @@ pub struct PatternConstAnalyzer;
 impl PatternConstAnalyzer {
     /// 正規表現リテラルとその生成元に基づいて定数性を分類する。
     pub fn classify(literal: &RegexLiteral, origin: &PatternOrigin) -> PatternConstKind {
+        if literal
+            .template_segments
+            .iter()
+            .any(|segment| matches!(segment, RegexTemplateSegment::Expression(_)))
+        {
+            return PatternConstKind::Dynamic;
+        }
+
         match origin.kind {
             PatternOriginKind::RegexLiteral | PatternOriginKind::RegexCommand => {
                 if literal.pattern.is_empty() {

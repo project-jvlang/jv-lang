@@ -1331,7 +1331,7 @@ mod expression_parser {
 
             let pattern_token = self.tokens[segments.pattern_index];
             let pattern_span = span_from_token(pattern_token);
-            let mut regex_literal = regex_literal_from_token(pattern_token, pattern_span);
+            let mut regex_literal = build_regex_literal(pattern_token, pattern_span.clone())?;
 
             let replacement = if let Some(range) = segments.replacement_range.clone() {
                 Some(self.parse_regex_replacement(range)?)
@@ -1385,6 +1385,7 @@ mod expression_parser {
                 mode_origin: origin,
                 subject: Box::new(subject_expr),
                 pattern: regex_literal,
+                pattern_expr: None,
                 replacement,
                 flags,
                 raw_flags,
@@ -1728,7 +1729,7 @@ mod expression_parser {
                 ),
                 TokenType::RegexLiteral(_) => {
                     let span = span_from_token(token);
-                    let mut literal = regex_literal_from_token(token, span.clone());
+                    let mut literal = build_regex_literal(token, span.clone())?;
                     literal.origin = Some(PatternOrigin::literal(span.clone()));
                     Ok(ParsedExpr {
                         expr: Expression::RegexLiteral(literal),
@@ -2743,7 +2744,7 @@ mod expression_parser {
                 }
                 TokenType::RegexLiteral(_) => {
                     let span = span_from_token(first);
-                    let mut literal = regex_literal_from_token(first, span.clone());
+                    let mut literal = build_regex_literal(first, span.clone())?;
                     literal.origin = Some(PatternOrigin::literal(span.clone()));
                     let literal_span = literal.span.clone();
                     Ok(Pattern::Literal(Literal::Regex(literal), literal_span))
@@ -4742,6 +4743,43 @@ mod expression_parser {
         }
 
         (seen, content)
+    }
+
+    fn build_regex_literal(token: &Token, span: Span) -> Result<RegexLiteral, ExpressionError> {
+        let mut literal = regex_literal_from_token(token, span.clone());
+
+        let interpolation = token.metadata.iter().find_map(|meta| match meta {
+            TokenMetadata::StringInterpolation { segments } => Some(segments.clone()),
+            _ => None,
+        });
+
+        if let Some(segments) = interpolation {
+            let mut template_segments = Vec::new();
+            let mut aggregated = String::new();
+
+            for segment in segments {
+                match segment {
+                    StringInterpolationSegment::Literal(text) => {
+                        if !text.is_empty() {
+                            aggregated.push_str(&text);
+                            template_segments.push(RegexTemplateSegment::Text(text));
+                        }
+                    }
+                    StringInterpolationSegment::Expression(expr_source) => {
+                        let (expr, _) = parse_expression_from_text(&expr_source, span.clone())?;
+                        template_segments.push(RegexTemplateSegment::Expression(expr));
+                    }
+                }
+            }
+
+            // 保守的に集約したリテラル部分のみを pattern として保持し、動的セグメントは template_segments から生成する。
+            if !template_segments.is_empty() {
+                literal.pattern = aggregated;
+                literal.template_segments = template_segments;
+            }
+        }
+
+        Ok(literal)
     }
 
     fn build_regex_literal_replacement(

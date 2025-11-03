@@ -6,14 +6,16 @@ use crate::inference::environment::{TypeEnvironment, TypeScheme};
 use crate::inference::types::TypeBinding;
 use crate::inference::{PrimitiveType, TypeKind};
 use crate::pattern::{self, PatternTarget};
-use crate::regex::RegexValidator;
+use crate::regex::const_fold::PatternConstKind;
+use crate::regex::{RegexValidator, const_fold::PatternConstAnalyzer};
 use fastrand::Rng;
 use jv_ast::{
     Annotation, AnnotationName, BinaryMetadata, BinaryOp, Expression, IsTestKind, IsTestMetadata,
     Literal, Modifiers, Parameter, ParameterModifiers, Pattern, PatternOrigin, Program,
     RegexCommand, RegexCommandMode, RegexCommandModeOrigin, RegexFlag, RegexGuardStrategy,
     RegexLambdaReplacement, RegexLiteral, RegexLiteralReplacement, RegexReplacement,
-    SequenceDelimiter, Span, Statement, TypeAnnotation, ValBindingOrigin, WhenArm,
+    RegexTemplateSegment, SequenceDelimiter, Span, Statement, TypeAnnotation, ValBindingOrigin,
+    WhenArm,
 };
 use jv_inference::TypeFacts;
 use jv_inference::types::{NullabilityFlag, TypeVariant as FactsTypeVariant};
@@ -45,6 +47,7 @@ fn program_with_optional_regex(span: &Span) -> Program {
         span: span.clone(),
         origin: Some(PatternOrigin::literal(span.clone())),
         const_key: None,
+        template_segments: Vec::new(),
     };
     let metadata = BinaryMetadata {
         is_test: Some(IsTestMetadata {
@@ -115,7 +118,9 @@ fn make_regex_command(
             span: span.clone(),
             origin: Some(PatternOrigin::command(span.clone())),
             const_key: None,
+            template_segments: Vec::new(),
         },
+        pattern_expr: None,
         replacement,
         flags,
         raw_flags: raw_flags.map(|value| value.to_string()),
@@ -1654,6 +1659,7 @@ fn regex_literal_infers_pattern_type() {
         span: span.clone(),
         origin: Some(PatternOrigin::literal(span.clone())),
         const_key: None,
+        template_segments: Vec::new(),
     };
     let program = Program {
         package: None,
@@ -1891,6 +1897,7 @@ fn regex_is_reports_non_char_sequence_subject() {
         span: span.clone(),
         origin: Some(PatternOrigin::literal(span.clone())),
         const_key: None,
+        template_segments: Vec::new(),
     };
     let metadata = BinaryMetadata {
         is_test: Some(IsTestMetadata {
@@ -2033,6 +2040,7 @@ fn regex_validator_reports_unsupported_escape() {
         span: span.clone(),
         origin: Some(PatternOrigin::literal(span.clone())),
         const_key: None,
+        template_segments: Vec::new(),
     };
     let program = Program {
         package: None,
@@ -2069,6 +2077,7 @@ fn regex_validator_reports_unbalanced_groups() {
         span: span.clone(),
         origin: Some(PatternOrigin::literal(span.clone())),
         const_key: None,
+        template_segments: Vec::new(),
     };
     let program = Program {
         package: None,
@@ -2104,6 +2113,7 @@ fn build_regex_program(pattern: &str) -> Program {
         span: span.clone(),
         origin: Some(PatternOrigin::literal(span.clone())),
         const_key: None,
+        template_segments: Vec::new(),
     };
     Program {
         package: None,
@@ -2216,4 +2226,29 @@ fn regex_validator_fuzzes_invalid_escape_detection() {
             "iteration {iteration}: expected JV5102 for pattern {pattern:?}, got {errors:?}"
         );
     }
+}
+
+#[test]
+fn pattern_const_analyzer_marks_interpolated_literal_dynamic() {
+    let span = Span::new(1, 1, 1, 20);
+    let literal = RegexLiteral {
+        pattern: "ACTION=".to_string(),
+        raw: "/ACTION=${token}/".to_string(),
+        span: span.clone(),
+        origin: Some(PatternOrigin::literal(span.clone())),
+        const_key: None,
+        template_segments: vec![
+            RegexTemplateSegment::Text("ACTION=".to_string()),
+            RegexTemplateSegment::Expression(Expression::Identifier(
+                "token".to_string(),
+                span.clone(),
+            )),
+        ],
+    };
+
+    let origin = PatternOrigin::literal(span);
+    assert_eq!(
+        PatternConstAnalyzer::classify(&literal, &origin),
+        PatternConstKind::Dynamic
+    );
 }

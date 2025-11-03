@@ -3,8 +3,8 @@ use jv_ast::{RegexCommandMode, RegexFlag, RegexGuardStrategy, Span, types::Primi
 use jv_ir::PipelineShape;
 use jv_ir::{
     IrRegexCommand, IrRegexLambdaReplacement, IrRegexLiteralReplacement, IrRegexReplacement,
-    IrRegexTemplateSegment, JavaType, RawStringFlavor, SequencePipeline, SequenceSource,
-    SequenceStage, SequenceTerminal, SequenceTerminalKind,
+    IrRegexTemplateSegment, JavaType, RawStringFlavor, RegexPatternTemplateSegment,
+    SequencePipeline, SequenceSource, SequenceStage, SequenceTerminal, SequenceTerminalKind,
 };
 use std::fmt::Write;
 
@@ -24,27 +24,7 @@ impl JavaCodeGenerator {
             IrExpression::Literal(literal, raw_flavor, _) => {
                 Ok(Self::literal_to_string(literal, *raw_flavor))
             }
-            IrExpression::RegexPattern {
-                pattern,
-                flags,
-                static_handle,
-                ..
-            } => {
-                if let Some(handle) = static_handle {
-                    Ok(format!("{}.{}", handle.class_name, handle.field_name))
-                } else {
-                    self.add_import("java.util.regex.Pattern");
-                    let escaped = Self::escape_string(pattern);
-                    let base = if flags.is_empty() {
-                        format!("Pattern.compile(\"{escaped}\")")
-                    } else {
-                        let flag_mask = self.render_regex_flag_mask(flags);
-                        format!("Pattern.compile(\"{escaped}\", {flag_mask})")
-                    };
-                    let span = expr.span();
-                    Ok(self.wrap_pattern_compile_with_guard(base, &span))
-                }
-            }
+            IrExpression::RegexPattern { .. } => self.render_regex_pattern_expr(expr, &[]),
             IrExpression::Identifier { name, .. } => {
                 if self.mutable_captures.contains(name) {
                     Ok(format!("{}.get()", name))
@@ -2322,8 +2302,11 @@ impl JavaCodeGenerator {
         command: &IrRegexCommand,
         method: &str,
     ) -> Result<String, CodeGenError> {
-        let pattern_code =
-            self.render_regex_pattern_expr(command.pattern.as_ref(), &command.flags)?;
+        let pattern_source = command
+            .pattern_expr
+            .as_deref()
+            .unwrap_or_else(|| command.pattern.as_ref());
+        let pattern_code = self.render_regex_pattern_expr(pattern_source, &command.flags)?;
         let pattern_expr = format!("({pattern_code})", pattern_code = pattern_code);
         let replacement_code = self.render_regex_replacement(&command.replacement)?;
         self.guard_regex_subject(
@@ -2347,8 +2330,11 @@ impl JavaCodeGenerator {
         &mut self,
         command: &IrRegexCommand,
     ) -> Result<String, CodeGenError> {
-        let pattern_code =
-            self.render_regex_pattern_expr(command.pattern.as_ref(), &command.flags)?;
+        let pattern_source = command
+            .pattern_expr
+            .as_deref()
+            .unwrap_or_else(|| command.pattern.as_ref());
+        let pattern_code = self.render_regex_pattern_expr(pattern_source, &command.flags)?;
         let pattern_expr = format!("({pattern_code})", pattern_code = pattern_code);
         self.guard_regex_subject(
             &command.subject,
@@ -2369,8 +2355,11 @@ impl JavaCodeGenerator {
         &mut self,
         command: &IrRegexCommand,
     ) -> Result<String, CodeGenError> {
-        let pattern_code =
-            self.render_regex_pattern_expr(command.pattern.as_ref(), &command.flags)?;
+        let pattern_source = command
+            .pattern_expr
+            .as_deref()
+            .unwrap_or_else(|| command.pattern.as_ref());
+        let pattern_code = self.render_regex_pattern_expr(pattern_source, &command.flags)?;
         let pattern_expr = format!("({pattern_code})", pattern_code = pattern_code);
         self.guard_regex_subject(
             &command.subject,
@@ -2393,8 +2382,11 @@ impl JavaCodeGenerator {
     ) -> Result<String, CodeGenError> {
         if matches!(command.replacement, IrRegexReplacement::None) {
             self.add_import("java.util.stream.Stream");
-            let pattern_code =
-                self.render_regex_pattern_expr(command.pattern.as_ref(), &command.flags)?;
+            let pattern_source = command
+                .pattern_expr
+                .as_deref()
+                .unwrap_or_else(|| command.pattern.as_ref());
+            let pattern_code = self.render_regex_pattern_expr(pattern_source, &command.flags)?;
             let pattern_expr = format!("({pattern_code})", pattern_code = pattern_code);
             return self.guard_regex_subject(
                 &command.subject,
@@ -2494,7 +2486,7 @@ impl JavaCodeGenerator {
         ))
     }
 
-    fn render_regex_pattern_expr(
+    pub(crate) fn render_regex_pattern_expr(
         &mut self,
         pattern: &IrExpression,
         flags: &[RegexFlag],
@@ -2510,21 +2502,32 @@ impl JavaCodeGenerator {
         if let IrExpression::RegexPattern {
             pattern: value,
             flags: expr_flags,
+            template,
             ..
         } = pattern
         {
             self.add_import("java.util.regex.Pattern");
-            let escaped = Self::escape_string(value);
             let effective_flags = if expr_flags.is_empty() {
                 flags
             } else {
                 expr_flags
             };
-            let base = if effective_flags.is_empty() {
-                format!("Pattern.compile(\"{escaped}\")")
+            let base = if template.is_empty() {
+                let escaped = Self::escape_string(value);
+                if effective_flags.is_empty() {
+                    format!("Pattern.compile(\"{escaped}\")")
+                } else {
+                    let flag_mask = self.render_regex_flag_mask(effective_flags);
+                    format!("Pattern.compile(\"{escaped}\", {flag_mask})")
+                }
             } else {
-                let flag_mask = self.render_regex_flag_mask(effective_flags);
-                format!("Pattern.compile(\"{escaped}\", {flag_mask})")
+                let template_expr = self.render_regex_template_string(template)?;
+                if effective_flags.is_empty() {
+                    format!("Pattern.compile({template_expr})")
+                } else {
+                    let flag_mask = self.render_regex_flag_mask(effective_flags);
+                    format!("Pattern.compile({template_expr}, {flag_mask})")
+                }
             };
             let span = pattern.span();
             Ok(self.wrap_pattern_compile_with_guard(base, &span))
@@ -2566,6 +2569,48 @@ impl JavaCodeGenerator {
         } else {
             parts.join(" | ")
         }
+    }
+
+    fn render_regex_template_string(
+        &mut self,
+        template: &[RegexPatternTemplateSegment],
+    ) -> Result<String, CodeGenError> {
+        if template.is_empty() {
+            return Ok("\"\"".to_string());
+        }
+
+        if template.len() == 1 {
+            match &template[0] {
+                RegexPatternTemplateSegment::Text(text) => {
+                    let escaped = Self::escape_string(text);
+                    return Ok(format!("\"{escaped}\""));
+                }
+                RegexPatternTemplateSegment::Expression(expr) => {
+                    let code = self.generate_expression(expr)?;
+                    return Ok(format!("String.valueOf({code})"));
+                }
+            }
+        }
+
+        self.add_import("java.lang.StringBuilder");
+        let mut builder = String::from("new StringBuilder()");
+        for segment in template {
+            match segment {
+                RegexPatternTemplateSegment::Text(text) => {
+                    if text.is_empty() {
+                        continue;
+                    }
+                    let escaped = Self::escape_string(text);
+                    builder.push_str(&format!(".append(\"{escaped}\")"));
+                }
+                RegexPatternTemplateSegment::Expression(expr) => {
+                    let code = self.generate_expression(expr)?;
+                    builder.push_str(&format!(".append(String.valueOf({code}))"));
+                }
+            }
+        }
+        builder.push_str(".toString()");
+        Ok(builder)
     }
 
     fn guard_regex_subject<F>(
@@ -2948,6 +2993,7 @@ mod tests {
                 span: Span::dummy(),
                 const_key: None,
                 static_handle: None,
+                template: Vec::new(),
             }),
             guard_strategy: RegexGuardStrategy::None,
             java_type: JavaType::boolean(),
@@ -2984,6 +3030,7 @@ mod tests {
                 span: Span::dummy(),
                 const_key: None,
                 static_handle: None,
+                template: Vec::new(),
             }),
             guard_strategy: RegexGuardStrategy::CaptureAndGuard {
                 temp_name: Some("__tmp".to_string()),

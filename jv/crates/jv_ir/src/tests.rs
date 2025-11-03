@@ -191,6 +191,7 @@ mod tests {
             span: span.clone(),
             origin: Some(PatternOrigin::literal(span.clone())),
             const_key: None,
+            template_segments: Vec::new(),
         };
         let mut context = TransformContext::new();
         let ir_expr = transform_expression(Expression::RegexLiteral(literal.clone()), &mut context)
@@ -204,11 +205,13 @@ mod tests {
                 span: ir_span,
                 const_key,
                 static_handle,
+                template,
             } => {
                 assert_eq!(pattern, "\\d+");
                 assert!(flags.is_empty());
                 assert!(const_key.is_none());
                 assert!(static_handle.is_none());
+                assert!(template.is_empty());
                 assert_eq!(ir_span, span);
                 match java_type {
                     JavaType::Reference { name, generic_args } => {
@@ -234,6 +237,7 @@ mod tests {
             span: span.clone(),
             origin: Some(PatternOrigin::literal(span.clone())),
             const_key: Some(PatternConstKey::new([1; 16], "^[a-z]+$")),
+            template_segments: Vec::new(),
         };
 
         let statement = Statement::Expression {
@@ -286,6 +290,7 @@ mod tests {
             span: span.clone(),
             origin: Some(PatternOrigin::literal(span.clone())),
             const_key: Some(PatternConstKey::new([7; 16], "^[A-Z]{2}-\\d{4}$")),
+            template_segments: Vec::new(),
         };
         let literal_b = RegexLiteral {
             pattern: "^[A-Z]{2}-\\d{4}$".to_string(),
@@ -293,6 +298,7 @@ mod tests {
             span: span.clone(),
             origin: Some(PatternOrigin::literal(span.clone())),
             const_key: Some(PatternConstKey::new([7; 16], "^[A-Z]{2}-\\d{4}$")),
+            template_segments: Vec::new(),
         };
 
         let program = Program {
@@ -491,6 +497,7 @@ mod tests {
                 origin: Some(PatternOrigin::command(span.clone())),
                 const_key: None,
             },
+            pattern_expr: None,
             replacement: Some(RegexReplacement::Literal(RegexLiteralReplacement {
                 raw: "$1-text".to_string(),
                 normalized: "$1-text".to_string(),
@@ -600,6 +607,7 @@ mod tests {
                 origin: Some(PatternOrigin::command(span.clone())),
                 const_key: None,
             },
+            pattern_expr: None,
             replacement: None,
             flags: vec![
                 RegexFlag::UnicodeCase,
@@ -661,6 +669,7 @@ mod tests {
                 origin: Some(PatternOrigin::command(span.clone())),
                 const_key: None,
             },
+            pattern_expr: None,
             replacement: Some(RegexReplacement::Literal(RegexLiteralReplacement {
                 raw: "\"hit\"".to_string(),
                 normalized: "hit".to_string(),
@@ -717,6 +726,7 @@ mod tests {
                 origin: Some(PatternOrigin::command(span.clone())),
                 const_key: None,
             },
+            pattern_expr: None,
             replacement: None,
             flags: vec![RegexFlag::CaseInsensitive],
             raw_flags: Some("i".to_string()),
@@ -771,6 +781,7 @@ mod tests {
                 origin: Some(PatternOrigin::command(span.clone())),
                 const_key: None,
             },
+            pattern_expr: None,
             replacement: None,
             flags: Vec::new(),
             raw_flags: None,
@@ -824,6 +835,7 @@ mod tests {
                 origin: Some(PatternOrigin::command(span.clone())),
                 const_key: None,
             },
+            pattern_expr: None,
             replacement: None,
             flags: vec![],
             raw_flags: None,
@@ -1212,11 +1224,13 @@ mod tests {
                 span: ir_span,
                 const_key,
                 static_handle,
+                template,
             } => {
                 assert_eq!(pattern, "^[a-z]+$");
                 assert!(flags.is_empty());
                 assert!(const_key.is_none());
                 assert!(static_handle.is_none());
+                assert!(template.is_empty());
                 assert_eq!(ir_span, literal.span);
                 match java_type {
                     JavaType::Reference { name, generic_args } => {

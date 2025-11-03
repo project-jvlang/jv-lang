@@ -113,6 +113,7 @@ fn make_field(entry: &RegistryEntry) -> IrStatement {
         span: Span::dummy(),
         const_key: None,
         static_handle: None,
+        template: Vec::new(),
     };
 
     IrStatement::FieldDeclaration {

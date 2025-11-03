@@ -4,6 +4,7 @@ use super::*;
 use jv_ast::{RegexCommandMode, RegexFlag, RegexGuardStrategy};
 use jv_ir::{
     IrRegexCommand, IrRegexLiteralReplacement, IrRegexReplacement, IrRegexTemplateSegment,
+    RegexPatternTemplateSegment,
 };
 use jv_pm::JavaTarget;
 
@@ -120,7 +121,9 @@ fn base_command(mode: RegexCommandMode) -> IrRegexCommand {
             span: span.clone(),
             const_key: None,
             static_handle: None,
+            template: Vec::new(),
         }),
+        pattern_expr: None,
         replacement: IrRegexReplacement::None,
         flags: Vec::new(),
         raw_flags: None,
@@ -216,6 +219,27 @@ fn renders_matches_for_match_mode() {
 }
 
 #[test]
+fn renders_match_mode_with_pattern_expression_identifier() {
+    let mut command = base_command(RegexCommandMode::Match);
+    command.java_type = match_boolean_type();
+    command.pattern_expr = Some(Box::new(IrExpression::Identifier {
+        name: "actionPattern".to_string(),
+        java_type: JavaType::pattern(),
+        span: command.span.clone(),
+    }));
+
+    let java = render_java(&regex_command_program(command));
+    assert!(
+        java.contains("(actionPattern).matcher"),
+        "Pattern 式を受け取る場合は既存の actionPattern を利用する想定です:\n{java}"
+    );
+    assert!(
+        !java.contains("Pattern.compile(\"actionPattern\")"),
+        "パターン式利用時に Pattern.compile を再実行しない想定です:\n{java}"
+    );
+}
+
+#[test]
 fn renders_split_for_split_mode() {
     let mut command = base_command(RegexCommandMode::Split);
     command.java_type = string_array_type();
@@ -226,6 +250,7 @@ fn renders_split_for_split_mode() {
         span: command.span.clone(),
         const_key: None,
         static_handle: None,
+        template: Vec::new(),
     });
 
     let java = render_java(&regex_command_program(command));
@@ -308,4 +333,40 @@ fn adds_char_sequence_guard_for_object_subjects() {
         java.contains("if (__guard_source instanceof java.lang.CharSequence __guard)"),
         "ガードは if ブロックで instanceof バインディングを行う想定です:\n{java}"
     );
+}
+
+#[test]
+fn dynamic_regex_pattern_with_template_generates_runtime_compile() {
+    let span = dummy_span();
+    let java_string = JavaType::Reference {
+        name: "java.lang.String".to_string(),
+        generic_args: vec![],
+    };
+
+    let pattern_expr = IrExpression::RegexPattern {
+        pattern: "ACTION=".to_string(),
+        flags: Vec::new(),
+        java_type: JavaType::pattern(),
+        span: span.clone(),
+        const_key: None,
+        static_handle: None,
+        template: vec![
+            RegexPatternTemplateSegment::Text("ACTION=".to_string()),
+            RegexPatternTemplateSegment::Expression(Box::new(IrExpression::Identifier {
+                name: "token".to_string(),
+                java_type: java_string,
+                span,
+            })),
+        ],
+    };
+
+    let mut generator = JavaCodeGenerator::new();
+    let rendered = generator
+        .render_regex_pattern_expr(&pattern_expr, &[])
+        .expect("render dynamic regex pattern");
+
+    assert!(rendered.contains("new StringBuilder()"));
+    assert!(rendered.contains(".append(\"ACTION=\")"));
+    assert!(rendered.contains(".append(String.valueOf(token))"));
+    assert!(rendered.contains("Pattern.compile"));
 }

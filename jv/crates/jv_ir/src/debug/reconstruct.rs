@@ -4,6 +4,7 @@ use crate::types::{
     IrCommentKind, IrExpression, IrImportDetail, IrModifiers, IrParameter, IrProgram,
     IrRegexLambdaReplacement, IrRegexLiteralReplacement, IrRegexReplacement,
     IrRegexTemplateSegment, IrStatement, IrVisibility, JavaType, JavaWildcardKind,
+    RegexPatternTemplateSegment,
 };
 use jv_ast::{
     Argument, BinaryMetadata, BinaryOp, CallArgumentMetadata, CommentKind, CommentStatement,
@@ -693,12 +694,18 @@ impl<'a> ReconstructionContext<'a> {
             ctx.convert_ir_regex_replacement(&command.replacement)
         })?;
         let mode_origin = self.derive_regex_mode_origin(command, replacement.as_ref());
+        let pattern_expr = if let Some(expr) = command.pattern_expr.as_ref() {
+            Some(self.with_segment("pattern_expr", |ctx| ctx.convert_expression(expr))?)
+        } else {
+            None
+        };
 
         Ok(Expression::RegexCommand(Box::new(RegexCommand {
             mode: command.mode,
             mode_origin,
             subject: Box::new(subject),
             pattern: pattern_literal,
+            pattern_expr: pattern_expr.map(Box::new),
             replacement,
             flags: command.flags.clone(),
             raw_flags: command.raw_flags.clone(),
@@ -715,6 +722,7 @@ impl<'a> ReconstructionContext<'a> {
             pattern,
             span,
             const_key,
+            template,
             ..
         } = expr
         {
@@ -723,12 +731,39 @@ impl<'a> ReconstructionContext<'a> {
                 PatternOriginKind::RegexLiteral => PatternOrigin::literal(span.clone()),
                 PatternOriginKind::RegexCommand => PatternOrigin::command(span.clone()),
             };
+            let mut segments = Vec::with_capacity(template.len());
+            for (index, segment) in template.iter().enumerate() {
+                match segment {
+                    RegexPatternTemplateSegment::Text(text) => {
+                        segments.push(RegexTemplateSegment::Text(text.clone()));
+                    }
+                    RegexPatternTemplateSegment::Expression(expr) => {
+                        let converted = match self
+                            .with_segment(format!("template[{index}]"), |ctx| {
+                                ctx.convert_expression(expr)
+                            }) {
+                            Ok(expression) => expression,
+                            Err(_) => self
+                                .placeholder_expression(
+                                    span,
+                                    WarningKind::MissingMetadata,
+                                    "テンプレート式を復元できなかったため、null を使用しました",
+                                )
+                                .unwrap_or_else(|_| {
+                                    Expression::Literal(Literal::Null, span.clone())
+                                }),
+                        };
+                        segments.push(RegexTemplateSegment::Expression(converted));
+                    }
+                }
+            }
             RegexLiteral {
                 pattern: pattern.clone(),
                 raw: format!("/{}/", escaped),
                 span: span.clone(),
                 origin: Some(origin),
                 const_key: const_key.clone(),
+                template_segments: segments,
             }
         } else {
             let span = extract_expr_span(expr);
@@ -747,6 +782,7 @@ impl<'a> ReconstructionContext<'a> {
                 span,
                 origin: Some(origin),
                 const_key: None,
+                template_segments: Vec::new(),
             }
         }
     }

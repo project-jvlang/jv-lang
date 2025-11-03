@@ -231,6 +231,7 @@ fn regex_literal_roundtrips_through_serde() {
         span: span.clone(),
         origin: Some(PatternOrigin::literal(span.clone())),
         const_key: None,
+        template_segments: Vec::new(),
     };
 
     let variant = Literal::Regex(literal.clone());

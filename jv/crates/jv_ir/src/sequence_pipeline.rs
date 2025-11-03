@@ -2343,6 +2343,9 @@ impl ListTerminalEnforcer {
             IrExpression::RegexCommand(command) => {
                 self.visit_expression(&mut command.subject, None);
                 self.visit_expression(&mut command.pattern, None);
+                if let Some(pattern_expr) = command.pattern_expr.as_mut() {
+                    self.visit_expression(pattern_expr, None);
+                }
                 match &mut command.replacement {
                     IrRegexReplacement::None => {}
                     IrRegexReplacement::Literal(literal) => {

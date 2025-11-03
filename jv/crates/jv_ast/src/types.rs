@@ -1,5 +1,5 @@
 // jv_ast/types - Basic types, operators, and position information
-use crate::annotation::Annotation;
+use crate::{annotation::Annotation, expression::RegexTemplateSegment};
 use serde::{Deserialize, Serialize};
 
 /// Position information for AST nodes
@@ -38,6 +38,8 @@ pub struct RegexLiteral {
     pub origin: Option<PatternOrigin>,
     #[serde(default)]
     pub const_key: Option<PatternConstKey>,
+    #[serde(default)]
+    pub template_segments: Vec<RegexTemplateSegment>,
 }
 
 /// Literal values

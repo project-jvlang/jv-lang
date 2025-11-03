@@ -1,3 +1,4 @@
+use super::lower_regex_literal_ir;
 use super::transform_expression;
 use super::type_system::convert_type_annotation;
 use super::utils::extract_java_type;
@@ -572,36 +573,14 @@ fn convert_expression_to_ir(
         Err(err) => match expr {
             Expression::Literal(lit, span) => {
                 if let Literal::Regex(regex) = &lit {
-                    let const_key = regex.const_key.clone();
                     let flags: Vec<RegexFlag> = Vec::new();
-                    let static_handle = const_key
-                        .as_ref()
-                        .map(|key| context.register_static_pattern(&regex.pattern, &flags, key));
-                    return Ok(IrExpression::RegexPattern {
-                        pattern: regex.pattern.clone(),
-                        flags,
-                        java_type: JavaType::pattern(),
-                        span: regex.span.clone(),
-                        const_key,
-                        static_handle,
-                    });
+                    return lower_regex_literal_ir(regex, flags, context);
                 }
                 Ok(IrExpression::Literal(lit, None, span))
             }
             Expression::RegexLiteral(literal) => {
-                let const_key = literal.const_key.clone();
                 let flags: Vec<RegexFlag> = Vec::new();
-                let static_handle = const_key
-                    .as_ref()
-                    .map(|key| context.register_static_pattern(&literal.pattern, &flags, key));
-                Ok(IrExpression::RegexPattern {
-                    pattern: literal.pattern.clone(),
-                    flags,
-                    java_type: JavaType::pattern(),
-                    span: literal.span.clone(),
-                    const_key,
-                    static_handle,
-                })
+                lower_regex_literal_ir(&literal, flags, context)
             }
             Expression::Identifier(name, span) => Ok(IrExpression::Identifier {
                 name,

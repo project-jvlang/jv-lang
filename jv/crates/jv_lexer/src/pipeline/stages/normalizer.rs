@@ -380,6 +380,14 @@ impl Normalizer {
                 pattern: pattern.clone(),
             });
 
+        if let Some(segments) = self.collect_interpolation_segments(&pattern, &token.span)? {
+            if !segments.is_empty() {
+                metadata
+                    .provisional_metadata
+                    .push(TokenMetadata::StringInterpolation { segments });
+            }
+        }
+
         Ok(self.finalize_token(token, metadata, pattern))
     }
 

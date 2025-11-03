@@ -1569,6 +1569,7 @@ fn regex_pattern_expression_renders_pattern_compile() {
         span: dummy_span(),
         const_key: None,
         static_handle: None,
+        template: Vec::new(),
     };
 
     let rendered = generator
@@ -1591,6 +1592,7 @@ fn runtime_pattern_guard_records_diagnostic_entry() {
         span: Span::new(5, 3, 5, 12),
         const_key: None,
         static_handle: None,
+        template: Vec::new(),
     };
 
     let rendered = generator
@@ -1789,6 +1791,7 @@ fn script_regex_val_is_hoisted_to_static_field() {
             class_name: "__JVPatternCache".to_string(),
             field_name: "PATTERN_1".to_string(),
         }),
+        template: Vec::new(),
     };
 
     let pattern_cache = IrStatement::ClassDeclaration {
@@ -1806,6 +1809,7 @@ fn script_regex_val_is_hoisted_to_static_field() {
                 span: dummy_span(),
                 const_key: None,
                 static_handle: None,
+                template: Vec::new(),
             }),
             modifiers: IrModifiers {
                 visibility: IrVisibility::Public,
@@ -1897,6 +1901,7 @@ fn class_regex_field_is_emitted_as_static_final() {
                 class_name: "__JVPatternCache".to_string(),
                 field_name: "PATTERN_1".to_string(),
             }),
+            template: Vec::new(),
         }),
         modifiers: IrModifiers {
             visibility: IrVisibility::Private,
@@ -1921,6 +1926,7 @@ fn class_regex_field_is_emitted_as_static_final() {
                 span: dummy_span(),
                 const_key: None,
                 static_handle: None,
+                template: Vec::new(),
             }),
             modifiers: IrModifiers {
                 visibility: IrVisibility::Public,
@@ -2003,6 +2009,7 @@ fn shared_pattern_handle_reuses_cache_entry() {
         span: dummy_span(),
         const_key: None,
         static_handle: None,
+        template: Vec::new(),
     };
 
     let pattern_cache = IrStatement::ClassDeclaration {
@@ -2042,6 +2049,7 @@ fn shared_pattern_handle_reuses_cache_entry() {
             span: dummy_span(),
             const_key: Some(PatternConstKey::new([3; 16], "^[A-Z]{2}-\\d{4}$")),
             static_handle: Some(handle.clone()),
+            template: Vec::new(),
         }),
         is_final: true,
         modifiers: IrModifiers::default(),

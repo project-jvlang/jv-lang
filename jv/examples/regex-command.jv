@@ -103,5 +103,6 @@ USER=Chie ACTION=RESULT ip=172.16.0.77
 
     val actionToken = "LOGIN"
     val actionPattern = /ACTION=${actionToken}/
-    println("動的補間パターンの一致結果: ${m/auditLog/actionPattern/}")
+    val singleLineLog = "ACTION=LOGIN"
+    println("動的補間パターンの一致結果: ${m/singleLineLog/actionPattern/}")
 }

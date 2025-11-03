@@ -156,6 +156,8 @@ pub struct RegexCommand {
     pub subject: Box<Expression>,
     pub pattern: RegexLiteral,
     #[serde(default)]
+    pub pattern_expr: Option<Box<Expression>>,
+    #[serde(default)]
     pub replacement: Option<RegexReplacement>,
     #[serde(default)]
     pub flags: Vec<RegexFlag>,

@@ -79,6 +79,8 @@ pub enum IrExpression {
         const_key: Option<PatternConstKey>,
         #[serde(default)]
         static_handle: Option<PatternStaticFieldHandle>,
+        #[serde(default)]
+        template: Vec<RegexPatternTemplateSegment>,
     },
     Identifier {
         name: String,
@@ -287,6 +289,12 @@ pub enum IrExpression {
     },
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum RegexPatternTemplateSegment {
+    Text(String),
+    Expression(Box<IrExpression>),
+}
+
 /// 静的に再利用される正規表現フィールドを参照するハンドル。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PatternStaticFieldHandle {
@@ -300,6 +308,8 @@ pub struct IrRegexCommand {
     pub mode: RegexCommandMode,
     pub subject: Box<IrExpression>,
     pub pattern: Box<IrExpression>,
+    #[serde(default)]
+    pub pattern_expr: Option<Box<IrExpression>>,
     #[serde(default)]
     pub replacement: IrRegexReplacement,
     #[serde(default)]

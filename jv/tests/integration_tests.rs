@@ -1363,6 +1363,52 @@ fn cli_regex_command_java25_uses_supplier_guard() {
 }
 
 #[test]
+fn cli_regex_command_dynamic_pattern_uses_identifier() {
+    ensure_toolchain_envs();
+
+    if !has_javac() || !has_java_runtime() {
+        eprintln!(
+            "Skipping dynamic pattern rendering test: missing javac or java runtime"
+        );
+        return;
+    }
+
+    let fixture = workspace_file("examples/regex-command.jv");
+    let temp_dir = TempDirGuard::new("cli-regex-command-dynamic")
+        .expect("create temp dir for dynamic pattern test");
+    let plan = compose_plan_from_fixture(
+        temp_dir.path(),
+        &fixture,
+        CliOverrides {
+            java_only: true,
+            ..CliOverrides::default()
+        },
+    );
+
+    let artifacts = compile(&plan).expect("compile regex command example");
+    let java_source = read_java_sources(&artifacts.java_files);
+
+    assert!(
+        java_source.contains("(actionPattern).matcher"),
+        "generated Java should use the precompiled actionPattern variable:\n{java_source}"
+    );
+    assert!(
+        !java_source.contains("Pattern.compile(\"actionPattern\")"),
+        "generated Java should not recompile the actionPattern literal:\n{java_source}"
+    );
+
+    let cache_lines: Vec<&str> = java_source
+        .lines()
+        .filter(|line| line.contains("__JVPatternCache"))
+        .collect();
+    let cache_snapshot = cache_lines.join("\n");
+    assert!(
+        !cache_snapshot.contains("actionPattern"),
+        "pattern cache should not contain an actionPattern literal:\n{cache_snapshot}"
+    );
+}
+
+#[test]
 fn cli_check_reports_regex_diagnostics() {
     let cli_path = match cli_binary_path() {
         Ok(path) => path,

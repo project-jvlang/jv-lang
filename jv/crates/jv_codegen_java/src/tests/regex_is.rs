@@ -48,6 +48,7 @@ fn regex_literal_match_program() -> IrProgram {
                         span: span.clone(),
                         const_key: None,
                         static_handle: None,
+                        template: Vec::new(),
                     }),
                     guard_strategy: RegexGuardStrategy::None,
                     java_type: JavaType::Primitive("boolean".to_string()),
@@ -128,6 +129,7 @@ fn optional_subject_match_program() -> IrProgram {
                         span: span.clone(),
                         const_key: None,
                         static_handle: None,
+                        template: Vec::new(),
                     }),
                     guard_strategy: RegexGuardStrategy::CaptureAndGuard {
                         temp_name: Some("__guard".to_string()),

@@ -641,6 +641,9 @@ fn apply_expression(expr: &mut IrExpression, resolution: &MethodResolution) {
         IrExpression::RegexCommand(command) => {
             apply_expression(&mut command.subject, resolution);
             apply_expression(&mut command.pattern, resolution);
+            if let Some(pattern_expr) = command.pattern_expr.as_mut() {
+                apply_expression(pattern_expr, resolution);
+            }
             match &mut command.replacement {
                 IrRegexReplacement::None => {}
                 IrRegexReplacement::Literal(literal) => {

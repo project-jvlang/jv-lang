@@ -6,15 +6,15 @@ use crate::sequence_pipeline;
 use crate::types::{
     IrCommentKind, IrExpression, IrImport, IrImportDetail, IrProgram, IrRegexCommand,
     IrRegexLambdaReplacement, IrRegexLiteralReplacement, IrRegexReplacement,
-    IrRegexTemplateSegment, IrStatement, JavaType, RawStringFlavor,
+    IrRegexTemplateSegment, IrStatement, JavaType, RawStringFlavor, RegexPatternTemplateSegment,
 };
 use jv_ast::{
     Argument, BinaryMetadata, BinaryOp, BindingPatternKind, CallArgumentMetadata,
     CallArgumentStyle, CommentKind, ConcurrencyConstruct, Expression, IsTestKind, Literal,
     Modifiers, Program, RegexCommand, RegexCommandMode, RegexFlag, RegexGuardStrategy,
-    RegexLambdaReplacement, RegexLiteralReplacement, RegexReplacement, RegexTemplateSegment,
-    ResourceManagement, SequenceDelimiter, Span, Statement, TypeAnnotation, UnaryOp,
-    ValBindingOrigin,
+    RegexLambdaReplacement, RegexLiteral, RegexLiteralReplacement, RegexReplacement,
+    RegexTemplateSegment, ResourceManagement, SequenceDelimiter, Span, Statement, TypeAnnotation,
+    UnaryOp, ValBindingOrigin,
 };
 
 mod concurrency;
@@ -38,6 +38,52 @@ pub use crate::types::{
     SampleFetchResult, SampleMode, SampleRecordDescriptor, SampleRecordField, SampleSourceKind,
     Schema, SchemaError,
 };
+
+pub(super) fn lower_regex_literal_ir(
+    literal: &RegexLiteral,
+    flags: Vec<RegexFlag>,
+    context: &mut TransformContext,
+) -> Result<IrExpression, TransformError> {
+    let mut const_key = literal.const_key.clone();
+    let mut normalized_pattern = literal.pattern.clone();
+    let mut template = Vec::new();
+
+    if !literal.template_segments.is_empty() {
+        normalized_pattern = String::new();
+        for segment in &literal.template_segments {
+            match segment {
+                RegexTemplateSegment::Text(text) => {
+                    normalized_pattern.push_str(text);
+                    template.push(RegexPatternTemplateSegment::Text(text.clone()));
+                }
+                RegexTemplateSegment::Expression(expr) => {
+                    let lowered = transform_expression(expr.clone(), context)?;
+                    template.push(RegexPatternTemplateSegment::Expression(Box::new(lowered)));
+                }
+                RegexTemplateSegment::BackReference(index) => {
+                    let text = format!("${index}");
+                    normalized_pattern.push_str(&text);
+                    template.push(RegexPatternTemplateSegment::Text(text));
+                }
+            }
+        }
+        const_key = None;
+    }
+
+    let static_handle = const_key
+        .as_ref()
+        .map(|key| context.register_static_pattern(&normalized_pattern, &flags, key));
+
+    Ok(IrExpression::RegexPattern {
+        pattern: normalized_pattern,
+        flags,
+        java_type: JavaType::pattern(),
+        span: literal.span.clone(),
+        const_key,
+        static_handle,
+        template,
+    })
+}
 pub use concurrency::{
     desugar_async_expression, desugar_await_expression, desugar_spawn_expression,
 };
@@ -515,36 +561,14 @@ pub fn transform_expression(
     match expr {
         Expression::Literal(lit, span) => {
             if let Literal::Regex(regex) = &lit {
-                let const_key = regex.const_key.clone();
                 let flags: Vec<RegexFlag> = Vec::new();
-                let static_handle = const_key
-                    .as_ref()
-                    .map(|key| context.register_static_pattern(&regex.pattern, &flags, key));
-                return Ok(IrExpression::RegexPattern {
-                    pattern: regex.pattern.clone(),
-                    flags,
-                    java_type: JavaType::pattern(),
-                    span: regex.span.clone(),
-                    const_key,
-                    static_handle,
-                });
+                return lower_regex_literal_ir(regex, flags, context);
             }
             Ok(IrExpression::Literal(lit, None, span))
         }
         Expression::RegexLiteral(literal) => {
-            let const_key = literal.const_key.clone();
             let flags: Vec<RegexFlag> = Vec::new();
-            let static_handle = const_key
-                .as_ref()
-                .map(|key| context.register_static_pattern(&literal.pattern, &flags, key));
-            Ok(IrExpression::RegexPattern {
-                pattern: literal.pattern.clone(),
-                flags,
-                java_type: JavaType::pattern(),
-                span: literal.span.clone(),
-                const_key,
-                static_handle,
-            })
+            lower_regex_literal_ir(&literal, flags, context)
         }
         Expression::RegexCommand(command) => lower_regex_command(*command, context),
         Expression::Identifier(name, span) => {
@@ -929,6 +953,7 @@ fn lower_regex_command(
         mode_origin: _,
         subject,
         pattern,
+        pattern_expr,
         replacement,
         flags,
         raw_flags,
@@ -980,17 +1005,11 @@ fn lower_regex_command(
         RegexGuardStrategy::None => RegexGuardStrategy::None,
     };
     let pattern_flags = flags.clone();
-    let const_key = pattern.const_key.clone();
-    let static_handle = const_key
-        .as_ref()
-        .map(|key| context.register_static_pattern(&pattern.pattern, &pattern_flags, key));
-    let pattern_ir = IrExpression::RegexPattern {
-        pattern: pattern.pattern.clone(),
-        flags: pattern_flags,
-        java_type: JavaType::pattern(),
-        span: pattern.span.clone(),
-        const_key,
-        static_handle,
+    let pattern_ir = lower_regex_literal_ir(&pattern, pattern_flags, context)?;
+    let pattern_expr_ir = if let Some(expr) = pattern_expr {
+        Some(transform_expression(*expr, context)?)
+    } else {
+        None
     };
 
     let replacement_ir = lower_regex_replacement(replacement, context)?;
@@ -1009,6 +1028,7 @@ fn lower_regex_command(
         mode,
         subject: Box::new(subject_ir),
         pattern: Box::new(pattern_ir),
+        pattern_expr: pattern_expr_ir.map(Box::new),
         replacement: replacement_ir,
         flags,
         raw_flags,
