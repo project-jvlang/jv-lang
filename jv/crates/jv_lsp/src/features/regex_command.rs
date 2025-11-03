@@ -5,7 +5,10 @@ use jv_ast::{
     Argument, Expression, Program, RegexCommand, RegexCommandMode, RegexCommandModeOrigin,
     RegexReplacement, RegexTemplateSegment, Span, Statement, StringPart, TryCatchClause,
 };
-use jv_checker::inference::{RegexCommandIssue, RegexCommandTyping};
+use jv_checker::{
+    diagnostics::DiagnosticSeverity,
+    inference::{RegexCommandIssue, RegexCommandTyping},
+};
 use jv_lexer::{Token, TokenType};
 
 #[derive(Clone, Debug, Default)]
@@ -29,7 +32,10 @@ pub struct RegexCommandDiagnostic {
     pub span: Span,
     pub code: String,
     pub message: String,
+    pub severity: DiagnosticSeverity,
+    pub category: String,
     pub suggestions: Vec<String>,
+    pub documentation_url: Option<String>,
 }
 
 impl RegexCommandIndex {
@@ -60,10 +66,13 @@ impl RegexCommandIndex {
         for entry in &self.entries {
             for issue in &entry.issues {
                 diagnostics.push(RegexCommandDiagnostic {
-                    span: entry.span.clone(),
+                    span: issue.span.clone(),
                     code: issue.code.clone(),
                     message: issue.message.clone(),
+                    severity: issue.severity,
+                    category: issue.category.clone(),
                     suggestions: quick_fix_suggestions(entry, &issue.code),
+                    documentation_url: issue.documentation_url.clone(),
                 });
             }
         }

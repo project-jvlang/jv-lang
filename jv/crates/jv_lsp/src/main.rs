@@ -1,5 +1,6 @@
 // jv-lsp - Language Server Protocol server for jv language
 use jv_lsp::{ImportsParams, ImportsResponse, JvLanguageServer};
+use serde_json::to_value;
 use std::collections::HashMap;
 use std::error::Error as StdError;
 use tokio::io::{stdin, stdout};
@@ -42,6 +43,10 @@ impl Backend {
 }
 
 fn map_diagnostic(diag: jv_lsp::Diagnostic) -> Diagnostic {
+    let data = diag
+        .data
+        .as_ref()
+        .and_then(|payload| to_value(payload).ok());
     Diagnostic {
         range: Range {
             start: Position {
@@ -62,6 +67,7 @@ fn map_diagnostic(diag: jv_lsp::Diagnostic) -> Diagnostic {
         message: diag.message,
         source: diag.source.clone(),
         code: diag.code.map(tower_lsp::lsp_types::NumberOrString::String),
+        data,
         ..Default::default()
     }
 }

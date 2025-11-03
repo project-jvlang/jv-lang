@@ -481,7 +481,34 @@ pub struct Diagnostic {
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
     pub suggestions: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub data: Option<DiagnosticData>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub strategy: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct DiagnosticData {
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub categories: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub documentation_urls: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub code_actions: Vec<CodeActionData>,
+}
+
+impl DiagnosticData {
+    fn is_empty(&self) -> bool {
+        self.categories.is_empty()
+            && self.documentation_urls.is_empty()
+            && self.code_actions.is_empty()
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CodeActionData {
+    pub title: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1443,62 +1470,180 @@ fn format_type_level_value(value: &TypeLevelValue) -> String {
 }
 
 fn regex_command_diagnostic_to_lsp(uri: &str, diagnostic: RegexCommandDiagnostic) -> Diagnostic {
-    let descriptor = lookup_descriptor(&diagnostic.code);
-    let (title, severity, help) = if let Some(descriptor) = descriptor {
+    let RegexCommandDiagnostic {
+        span,
+        code,
+        message,
+        severity,
+        category,
+        suggestions,
+        documentation_url,
+    } = diagnostic;
+
+    let descriptor = lookup_descriptor(&code);
+    let (title, help) = if let Some(descriptor) = descriptor {
         (
             descriptor.title.to_string(),
-            Some(map_severity(descriptor.severity)),
             Some(descriptor.help.to_string()),
         )
     } else {
-        (
-            diagnostic.code.clone(),
-            Some(DiagnosticSeverity::Information),
-            None,
-        )
+        (code.clone(), None)
     };
 
+    let mapped_severity = map_severity(severity);
+    let mut categories = if category.is_empty() {
+        Vec::new()
+    } else {
+        vec![category]
+    };
+
+    let mut documentation_urls = Vec::new();
+    if let Some(url) = documentation_url {
+        documentation_urls.push(url);
+    }
+
+    let data = build_diagnostic_data(&mut categories, &mut documentation_urls, &suggestions);
+
     Diagnostic {
-        range: span_to_range(&diagnostic.span),
-        severity,
+        range: span_to_range(&span),
+        severity: Some(mapped_severity),
         message: format!(
             "{code}: {title}\nSource: {uri}\n{detail}",
-            code = diagnostic.code,
+            code = code,
             title = title,
             uri = uri,
-            detail = diagnostic.message,
+            detail = message,
         ),
-        code: Some(diagnostic.code),
+        code: Some(code),
         source: Some("jv-lsp".to_string()),
         help,
-        suggestions: diagnostic.suggestions,
+        suggestions,
+        data,
         strategy: Some("Interactive".to_string()),
     }
 }
 
 fn tooling_diagnostic_to_lsp(uri: &str, diagnostic: EnhancedDiagnostic) -> Diagnostic {
-    let range = diagnostic
-        .span
+    let EnhancedDiagnostic {
+        code,
+        title,
+        message,
+        help,
+        severity,
+        strategy,
+        span,
+        related_locations: _,
+        suggestions,
+        learning_hints,
+        categories,
+    } = diagnostic;
+
+    let range = span
         .as_ref()
         .map(span_to_range)
         .unwrap_or_else(default_range);
 
+    let mut category_values: Vec<String> =
+        categories.iter().map(|value| value.to_string()).collect();
+    let mut documentation_urls = Vec::new();
+    documentation_urls.extend(collect_documentation_urls([message.as_str()]));
+    documentation_urls.extend(collect_documentation_urls([help]));
+    if let Some(hint) = learning_hints.as_deref() {
+        documentation_urls.extend(collect_documentation_urls([hint]));
+    }
+
+    let data = build_diagnostic_data(&mut category_values, &mut documentation_urls, &suggestions);
+
     Diagnostic {
         range,
-        severity: Some(map_severity(diagnostic.severity)),
+        severity: Some(map_severity(severity)),
         message: format!(
             "{code}: {title}\nSource: {uri}\n{detail}",
-            code = diagnostic.code,
-            title = diagnostic.title,
+            code = code,
+            title = title,
             uri = uri,
-            detail = diagnostic.message,
+            detail = message,
         ),
-        code: Some(diagnostic.code.to_string()),
+        code: Some(code.to_string()),
         source: Some("jv-lsp".to_string()),
-        help: Some(diagnostic.help.to_string()),
-        suggestions: diagnostic.suggestions.clone(),
-        strategy: Some(format!("{:?}", diagnostic.strategy)),
+        help: Some(help.to_string()),
+        suggestions,
+        data,
+        strategy: Some(format!("{:?}", strategy)),
     }
+}
+
+fn build_diagnostic_data(
+    categories: &mut Vec<String>,
+    documentation_urls: &mut Vec<String>,
+    suggestions: &[String],
+) -> Option<DiagnosticData> {
+    deduplicate_preserving_order(categories);
+    deduplicate_preserving_order(documentation_urls);
+
+    let mut code_actions = Vec::new();
+    for suggestion in suggestions {
+        let title = suggestion.trim();
+        if title.is_empty() {
+            continue;
+        }
+        if code_actions
+            .iter()
+            .any(|existing: &CodeActionData| existing.title == title)
+        {
+            continue;
+        }
+        code_actions.push(CodeActionData {
+            title: title.to_string(),
+            kind: Some("quickfix".to_string()),
+        });
+    }
+
+    let data = DiagnosticData {
+        categories: categories.clone(),
+        documentation_urls: documentation_urls.clone(),
+        code_actions,
+    };
+
+    if data.is_empty() { None } else { Some(data) }
+}
+
+fn deduplicate_preserving_order(values: &mut Vec<String>) {
+    let mut seen = Vec::new();
+    values.retain(|value| {
+        if seen.iter().any(|existing: &String| existing == value) {
+            false
+        } else {
+            seen.push(value.clone());
+            true
+        }
+    });
+}
+
+fn collect_documentation_urls<const N: usize>(inputs: [&str; N]) -> Vec<String> {
+    let mut urls = Vec::new();
+    for input in inputs {
+        if input.trim().is_empty() {
+            continue;
+        }
+        for token in input.split_whitespace() {
+            let candidate = token.trim_matches(|ch: char| {
+                matches!(
+                    ch,
+                    ',' | ';' | '(' | ')' | '[' | ']' | '{' | '}' | '"' | '\'' | '<' | '>'
+                )
+            });
+            if candidate.starts_with("http://")
+                || candidate.starts_with("https://")
+                || candidate.starts_with("docs/")
+            {
+                if !urls.iter().any(|existing| existing == candidate) {
+                    urls.push(candidate.to_string());
+                }
+            }
+        }
+    }
+    urls
 }
 
 fn fallback_diagnostic(uri: &str, label: &str) -> Diagnostic {
@@ -1511,6 +1656,7 @@ fn fallback_diagnostic(uri: &str, label: &str) -> Diagnostic {
         source: Some("jv-lsp".to_string()),
         help: None,
         suggestions: Vec::new(),
+        data: None,
         strategy: Some("Immediate".to_string()),
     }
 }
@@ -1536,6 +1682,7 @@ fn warning_diagnostic(uri: &str, warning: CheckError) -> Diagnostic {
             source: Some("jv-lsp".to_string()),
             help: None,
             suggestions: Vec::new(),
+            data: None,
             strategy: Some("Deferred".to_string()),
         };
     }
@@ -1548,6 +1695,7 @@ fn warning_diagnostic(uri: &str, warning: CheckError) -> Diagnostic {
         source: Some("jv-lsp".to_string()),
         help: None,
         suggestions: Vec::new(),
+        data: None,
         strategy: Some("Deferred".to_string()),
     }
 }
@@ -1573,6 +1721,7 @@ fn type_error_to_diagnostic(uri: &str, error: CheckError) -> Diagnostic {
             source: Some("jv-lsp".to_string()),
             help: None,
             suggestions: Vec::new(),
+            data: None,
             strategy: Some("Immediate".to_string()),
         }
     }
@@ -1745,6 +1894,7 @@ fn build_raw_comment_diagnostic(mode: RawDirectiveMode, owner: String, span: Spa
         source: Some("jv-lsp".to_string()),
         help: None,
         suggestions: Vec::new(),
+        data: None,
         strategy: Some("Interactive".to_string()),
     }
 }
@@ -2034,6 +2184,7 @@ fn build_call_argument_diagnostic(span: &Span) -> Diagnostic {
         source: Some("jv-lsp".to_string()),
         help: None,
         suggestions: Vec::new(),
+        data: None,
         strategy: Some("Interactive".to_string()),
     }
 }
@@ -2304,18 +2455,27 @@ fn build_sequence_hover(operation: &SequenceOperationDoc) -> String {
 fn sequence_lambda_diagnostics(content: &str) -> Vec<Diagnostic> {
     sequence_lambda_issue_ranges(content)
         .into_iter()
-        .map(|(start, end)| Diagnostic {
-            range: offset_range(content, start, end),
-            severity: Some(DiagnosticSeverity::Error),
-            message: "ラムダ式の引数を明示してください。jvでは暗黙の `it` パラメータはサポートしていません。\n\n例: `{ x -> x > 0 }`"
-                .to_string(),
-            code: Some("E1001".to_string()),
-            source: Some("jv-lsp".to_string()),
-            help: Some("Sequenceチェーンのラムダでは名前付きパラメータを宣言してください。".to_string()),
-            suggestions: vec![
-                "コードアクション: `{ it ->` を `{ value ->` に置き換えてください。".to_string()
-            ],
-            strategy: Some("Immediate".to_string()),
+        .map(|(start, end)| {
+            let range = offset_range(content, start, end);
+            let suggestions = vec![
+                "コードアクション: `{ it ->` を `{ value ->` に置き換えてください。".to_string(),
+            ];
+            let mut categories = Vec::new();
+            let mut documentation_urls = Vec::new();
+            let data = build_diagnostic_data(&mut categories, &mut documentation_urls, &suggestions);
+
+            Diagnostic {
+                range,
+                severity: Some(DiagnosticSeverity::Error),
+                message: "ラムダ式の引数を明示してください。jvでは暗黙の `it` パラメータはサポートしていません。\n\n例: `{ x -> x > 0 }`"
+                    .to_string(),
+                code: Some("E1001".to_string()),
+                source: Some("jv-lsp".to_string()),
+                help: Some("Sequenceチェーンのラムダでは名前付きパラメータを宣言してください。".to_string()),
+                suggestions,
+                data,
+                strategy: Some("Immediate".to_string()),
+            }
         })
         .collect()
 }

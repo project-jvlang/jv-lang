@@ -70,6 +70,7 @@ fn test_diagnostic_creation() {
         source: None,
         help: None,
         suggestions: Vec::new(),
+        data: None,
         strategy: None,
     };
 
@@ -442,10 +443,30 @@ fn surfaces_regex_diagnostics_from_validator() {
     server.open_document(uri.clone(), "val pattern = /\\y/".to_string());
 
     let diagnostics = server.get_diagnostics(&uri);
+    let regex_diag = diagnostics
+        .iter()
+        .find(|diag| diag.code.as_deref() == Some("JV_REGEX_E203"))
+        .expect("JV_REGEX_E203 が報告されること");
+
+    let data = regex_diag
+        .data
+        .as_ref()
+        .expect("Regex リテラル診断には data メタデータが必要です");
     assert!(
-        diagnostics
+        data.categories.is_empty()
+            || data
+                .categories
+                .iter()
+                .all(|category| category.starts_with("regex.")),
+        "カテゴリ metadata は regex.* プレフィックスである必要があります: {:?}",
+        data.categories
+    );
+    assert!(
+        data.documentation_urls
             .iter()
-            .any(|diag| diag.code.as_deref() == Some("JV_REGEX_E203"))
+            .any(|url| url.contains("java/util/regex/Pattern")),
+        "Java Regex ドキュメントリンクが含まれる必要があります: {:?}",
+        data.documentation_urls
     );
 
     let metadata = server
@@ -573,6 +594,32 @@ fn regex_command_diagnostic_includes_quick_fix() {
             .any(|entry| entry.contains("regex.command.replacement.add-empty")),
         "置換部追加のQuick Fixが含まれているべきです: {:?}",
         diagnostic.suggestions
+    );
+
+    let data = diagnostic
+        .data
+        .as_ref()
+        .expect("RegexCommand 診断には data メタデータが必要です");
+    assert!(
+        data.categories
+            .iter()
+            .any(|category| category == "regex.mode"),
+        "カテゴリ metadata が regex.mode を含む必要があります: {:?}",
+        data.categories
+    );
+    assert!(
+        data.documentation_urls
+            .iter()
+            .any(|url| url.contains("java/util/regex/Pattern")),
+        "ドキュメントURLに Java Regex リファレンスが含まれる必要があります: {:?}",
+        data.documentation_urls
+    );
+    assert!(
+        data.code_actions
+            .iter()
+            .any(|action| action.title.contains("regex.command.mode.explicit-match")),
+        "CodeAction が Quick Fix を含む必要があります: {:?}",
+        data.code_actions
     );
 }
 
