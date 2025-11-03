@@ -890,6 +890,14 @@ impl CharScanner {
 
     fn can_start_regex<'source>(&self, ctx: &LexerContext<'source>, source: &'source str) -> bool {
         if ctx.trivia_newlines() > 0 {
+            if matches!(
+                ctx.last_token_type(),
+                Some(TokenType::RegexLiteral(_))
+                    | Some(TokenType::String(_))
+                    | Some(TokenType::StringInterpolation(_))
+            ) {
+                return false;
+            }
             if let Some('/') = self.peek_char_from(source) {
                 let next_index = self.cursor + '/'.len_utf8();
                 match Self::next_char(source, next_index) {
@@ -969,6 +977,10 @@ impl CharScanner {
         source: &'source str,
     ) -> bool {
         if ctx.regex_command_state().is_some() {
+            return false;
+        }
+
+        if matches!(ctx.last_token_type(), Some(TokenType::RegexLiteral(_))) {
             return false;
         }
 
@@ -1089,13 +1101,64 @@ impl CharScanner {
                 ']' => depth_bracket = depth_bracket.saturating_sub(1),
                 '{' => depth_brace = depth_brace.saturating_add(1),
                 '}' => depth_brace = depth_brace.saturating_sub(1),
-                '\n' | '\r' => return None,
+                '\n' | '\r' => {
+                    if depth_paren == 0 && depth_bracket == 0 && depth_brace == 0 {
+                        let after_newline = idx + size;
+                        if let Some(next_slash) =
+                            Self::skip_trivia_until_next_slash(source, after_newline)
+                        {
+                            return Some(next_slash);
+                        }
+                    }
+                    return None;
+                }
                 _ => {}
             }
 
             idx += size;
         }
 
+        None
+    }
+
+    fn skip_trivia_until_next_slash(source: &str, mut idx: usize) -> Option<usize> {
+        let len = source.len();
+        while idx < len {
+            let rest = &source[idx..];
+            if rest.starts_with("//") {
+                idx += 2;
+                while idx < len {
+                    let (ch, size) = Self::next_char(source, idx)?;
+                    idx += size;
+                    if ch == '\n' || ch == '\r' {
+                        break;
+                    }
+                }
+                continue;
+            }
+            if rest.starts_with("/*") {
+                idx += 2;
+                while idx < len {
+                    if source[idx..].starts_with("*/") {
+                        idx += 2;
+                        break;
+                    }
+                    let (_, size) = Self::next_char(source, idx)?;
+                    idx += size;
+                }
+                continue;
+            }
+
+            let (ch, size) = Self::next_char(source, idx)?;
+            if ch.is_whitespace() {
+                idx += size;
+                continue;
+            }
+            if ch == '/' {
+                return Some(idx);
+            }
+            return None;
+        }
         None
     }
 
