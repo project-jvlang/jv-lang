@@ -6,7 +6,7 @@ pub use handlers::imports::{ImportItem, ImportsParams, ImportsResponse};
 use jv_ast::types::TypeLevelExpr;
 use jv_ast::{
     Argument, ConstParameter, Expression, GenericParameter, GenericSignature, Program,
-    RegexLiteral, Span, Statement, StringPart, TypeAnnotation,
+    RegexLiteral, Span, Statement, StringPart, TypeAnnotation, statement::TestDataset,
 };
 use jv_build::BuildConfig;
 use jv_build::metadata::{
@@ -1656,6 +1656,12 @@ fn collect_call_diagnostics_from_statement(
             }
             collect_call_diagnostics_from_expression(body, tokens, diagnostics);
         }
+        Statement::TestDeclaration(test) => {
+            if let Some(dataset) = &test.dataset {
+                collect_call_diagnostics_from_dataset(dataset, tokens, diagnostics);
+            }
+            collect_call_diagnostics_from_expression(&test.body, tokens, diagnostics);
+        }
         Statement::ClassDeclaration {
             properties,
             methods,
@@ -1732,6 +1738,20 @@ fn collect_call_diagnostics_from_statement(
         | Statement::Import { .. }
         | Statement::Package { .. }
         | Statement::Comment(_) => {}
+    }
+}
+
+fn collect_call_diagnostics_from_dataset(
+    dataset: &TestDataset,
+    tokens: &[Token],
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    if let TestDataset::InlineArray { rows, .. } = dataset {
+        for row in rows {
+            for value in &row.values {
+                collect_call_diagnostics_from_expression(value, tokens, diagnostics);
+            }
+        }
     }
 }
 

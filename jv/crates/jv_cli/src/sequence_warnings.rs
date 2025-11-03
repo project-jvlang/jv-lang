@@ -1,6 +1,6 @@
 use jv_ast::{
     Argument, Expression, JsonLiteral, JsonValue, Parameter, Pattern, Program, SequenceDelimiter,
-    Span, Statement,
+    Span, Statement, statement::TestDataset,
 };
 
 pub fn collect_sequence_warnings(program: &Program) -> Vec<String> {
@@ -94,6 +94,12 @@ impl SequenceWarningCollector {
             Statement::ExtensionFunction(extension) => {
                 self.visit_statement(&extension.function);
             }
+            Statement::TestDeclaration(test) => {
+                if let Some(dataset) = &test.dataset {
+                    self.visit_test_dataset(dataset);
+                }
+                self.visit_expression(&test.body);
+            }
             Statement::Expression { expr, .. } => self.visit_expression(expr),
             Statement::Return { value, .. } => {
                 if let Some(expr) = value {
@@ -118,6 +124,16 @@ impl SequenceWarningCollector {
             | Statement::Package { .. }
             | Statement::Break(_)
             | Statement::Continue(_) => {}
+        }
+    }
+
+    fn visit_test_dataset(&mut self, dataset: &TestDataset) {
+        if let TestDataset::InlineArray { rows, .. } = dataset {
+            for row in rows {
+                for value in &row.values {
+                    self.visit_expression(value);
+                }
+            }
         }
     }
 

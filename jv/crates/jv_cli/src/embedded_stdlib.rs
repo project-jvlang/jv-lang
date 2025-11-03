@@ -8,6 +8,7 @@ use anyhow::{Result, anyhow};
 use jv_ast::{
     Argument, CallArgumentMetadata, Expression, JsonLiteral, JsonValue, Program, Statement,
     StringPart, Visibility,
+    statement::TestDataset,
     types::{Kind, Pattern},
 };
 use jv_build::{JavaTarget, metadata::SymbolIndex};
@@ -122,6 +123,7 @@ fn promote_visibility(statement: &mut Statement) {
         Statement::ExtensionFunction(extension) => {
             promote_visibility(extension.function.as_mut());
         }
+        Statement::TestDeclaration(_) => {}
         Statement::Expression { .. }
         | Statement::Return { .. }
         | Statement::Throw { .. }
@@ -213,6 +215,12 @@ fn rewrite_statement(statement: &mut Statement) {
         Statement::ExtensionFunction(extension) => {
             rewrite_statement(extension.function.as_mut());
         }
+        Statement::TestDeclaration(test) => {
+            if let Some(dataset) = &mut test.dataset {
+                rewrite_test_dataset(dataset);
+            }
+            rewrite_expression(&mut test.body);
+        }
         Statement::Expression { expr, .. } => rewrite_expression(expr),
         Statement::Return { value, .. } => {
             if let Some(expr) = value {
@@ -237,6 +245,16 @@ fn rewrite_statement(statement: &mut Statement) {
         | Statement::Package { .. }
         | Statement::Break(_)
         | Statement::Continue(_) => {}
+    }
+}
+
+fn rewrite_test_dataset(dataset: &mut TestDataset) {
+    if let TestDataset::InlineArray { rows, .. } = dataset {
+        for row in rows {
+            for value in &mut row.values {
+                rewrite_expression(value);
+            }
+        }
     }
 }
 
@@ -484,7 +502,10 @@ impl StdlibUsage {
                 for package in catalog.packages_for_reference(current) {
                     self.packages.insert(package);
                 }
-                if let Some((prefix, _)) = current.rsplit_once('.') {
+                if let Some((prefix, suffix)) = current.rsplit_once('.') {
+                    for package in catalog.packages_for_reference(suffix) {
+                        self.packages.insert(package);
+                    }
                     current = prefix;
                 } else {
                     break;
@@ -594,6 +615,12 @@ impl<'a, 'b> ProgramUsageDetector<'a, 'b> {
                     self.visit_expression(expr);
                 }
             }
+            Statement::TestDeclaration(test) => {
+                if let Some(dataset) = &test.dataset {
+                    self.visit_test_dataset(dataset);
+                }
+                self.visit_expression(&test.body);
+            }
             Statement::ForIn(statement) => {
                 self.visit_expression(&statement.iterable);
                 self.visit_expression(&statement.body);
@@ -606,6 +633,16 @@ impl<'a, 'b> ProgramUsageDetector<'a, 'b> {
             | Statement::Break(_)
             | Statement::Continue(_)
             | Statement::Comment(_) => {}
+        }
+    }
+
+    fn visit_test_dataset(&mut self, dataset: &TestDataset) {
+        if let TestDataset::InlineArray { rows, .. } = dataset {
+            for row in rows {
+                for value in &row.values {
+                    self.visit_expression(value);
+                }
+            }
         }
     }
 
