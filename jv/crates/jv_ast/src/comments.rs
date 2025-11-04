@@ -26,3 +26,16 @@ impl CommentStatement {
         matches!(self.visibility, CommentVisibility::Passthrough)
     }
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DocumentationKind {
+    Line,
+    Block,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Documentation {
+    pub kind: DocumentationKind,
+    pub text: String,
+    pub span: Span,
+}

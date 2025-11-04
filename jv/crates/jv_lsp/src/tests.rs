@@ -383,6 +383,50 @@ fn hover_exposes_regex_analysis_summary() {
 }
 
 #[test]
+fn hover_surfaces_declaration_doc_comments() {
+    let mut server = JvLanguageServer::new();
+    let uri = "file:///doc-hover.jv".to_string();
+    let source = "/// Example value\nval sample = 42".to_string();
+    server.open_document(uri.clone(), source);
+
+    let hover = server
+        .get_hover(
+            &uri,
+            Position {
+                line: 1,
+                character: 4,
+            },
+        )
+        .expect("hover should include documentation");
+    assert!(hover.contents.contains("ドキュメント"));
+    assert!(hover.contents.contains("Example value"));
+}
+
+#[test]
+fn hover_surfaces_json_metadata_comments() {
+    let mut server = JvLanguageServer::new();
+    let uri = "file:///json-hover.jv".to_string();
+    let source = r#"val config = {
+  //# version: 1
+  "value": 1
+}"#
+    .to_string();
+    server.open_document(uri.clone(), source);
+
+    let hover = server
+        .get_hover(
+            &uri,
+            Position {
+                line: 1,
+                character: 4,
+            },
+        )
+        .expect("hover should include JSON metadata");
+    assert!(hover.contents.contains("JSONメタデータ"));
+    assert!(hover.contents.contains("version: 1"));
+}
+
+#[test]
 fn regex_completions_include_templates_and_metadata() {
     let mut server = JvLanguageServer::new();
     let uri = "file:///regex-completion.jv".to_string();

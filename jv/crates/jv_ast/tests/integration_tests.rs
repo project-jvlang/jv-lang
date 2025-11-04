@@ -212,7 +212,7 @@ fn test_modifiers_custom() {
         is_static: true,
         is_override: false,
         is_open: true,
-        annotations: Vec::new(),
+        ..Modifiers::default()
     };
     assert_eq!(modifiers.visibility, Visibility::Public);
     assert!(modifiers.is_abstract);

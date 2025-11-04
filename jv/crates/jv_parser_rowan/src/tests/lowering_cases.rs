@@ -203,6 +203,62 @@ fn error_val_tokens() -> (SyntaxNode<JvLanguage>, Vec<Token>) {
     (node, tokens)
 }
 
+#[test]
+fn val_declaration_captures_line_doc_comment() {
+    let result = lower_source(
+        "/// Adds two numbers
+val total = 1 + 2",
+    );
+    assert!(
+        result
+            .statements
+            .iter()
+            .any(|stmt| matches!(stmt, Statement::Comment(_))),
+        "line doc comments should still surface as comment statements"
+    );
+    let modifiers = result
+        .statements
+        .iter()
+        .find_map(|statement| match statement {
+            Statement::ValDeclaration { modifiers, .. } => Some(modifiers),
+            _ => None,
+        })
+        .expect("val declaration should exist");
+    let documentation = modifiers
+        .documentation
+        .as_ref()
+        .expect("documentation metadata should be present");
+    assert_eq!(documentation.text.trim(), "Adds two numbers");
+    assert!(
+        !modifiers.jv_comments.is_empty(),
+        "raw jv-only comments should still be retained"
+    );
+}
+
+#[test]
+fn function_declaration_captures_block_doc_comment() {
+    let result = lower_source(
+        "/** Greets the user. */
+fun greet(name: String): String = \"Hello, ${name}\"",
+    );
+    let modifiers = result
+        .statements
+        .iter()
+        .find_map(|statement| match statement {
+            Statement::FunctionDeclaration { modifiers, .. } => Some(modifiers),
+            _ => None,
+        })
+        .expect("function declaration should be present");
+    let documentation = modifiers
+        .documentation
+        .as_ref()
+        .expect("block doc should be attached");
+    assert!(
+        documentation.text.contains("Greets the user"),
+        "documentation text should retain block content"
+    );
+}
+
 fn function_tokens() -> (SyntaxNode<JvLanguage>, Vec<Token>) {
     let mut column = 0usize;
     let mut tokens = Vec::new();

@@ -6,7 +6,9 @@ use crate::support::{
     spans::{expression_span, merge_spans, span_from_token},
 };
 use crate::syntax::SyntaxKind;
-use jv_ast::comments::{CommentKind, CommentStatement, CommentVisibility};
+use jv_ast::comments::{
+    CommentKind, CommentStatement, CommentVisibility, Documentation, DocumentationKind,
+};
 use jv_ast::expression::{
     Argument, CallArgumentMetadata, CallArgumentStyle, Parameter, ParameterModifiers,
     ParameterProperty, StringPart, WhenArm,
@@ -26,8 +28,9 @@ use jv_ast::types::{
 use jv_ast::{BindingPatternKind, Expression, SequenceDelimiter, Span, Statement};
 use jv_lexer::{
     JsonCommentTrivia, JsonCommentTriviaKind, JsonConfidence, LayoutMode, Lexer,
-    NumberGroupingKind, StringDelimiterKind, StringInterpolationSegment, StringLiteralMetadata,
-    Token, TokenMetadata, TokenTrivia, TokenType,
+    NumberGroupingKind, SourceCommentKind, SourceCommentTrivia, StringDelimiterKind,
+    StringInterpolationSegment, StringLiteralMetadata, Token, TokenMetadata, TokenTrivia,
+    TokenType,
 };
 use jv_type_inference_java::{lower_type_annotation_from_tokens, TypeLoweringErrorKind};
 
@@ -680,6 +683,7 @@ fn lower_value(
     is_val: bool,
     diagnostics: &mut Vec<LoweringDiagnostic>,
 ) -> Result<Statement, LoweringDiagnostic> {
+    let node_tokens = context.tokens_for(node);
     let binding = child_node(node, SyntaxKind::BindingPattern).ok_or_else(|| {
         missing_child_diagnostic(context, node, "バインディング", SyntaxKind::BindingPattern)
     })?;
@@ -729,7 +733,8 @@ fn lower_value(
     };
 
     let span = context.span_for(node).unwrap_or_else(jv_ast::Span::dummy);
-    let modifiers = Modifiers::default();
+    let mut modifiers = Modifiers::default();
+    expression_parser::attach_declaration_comments(&node_tokens, &mut modifiers);
 
     if is_val {
         Ok(Statement::ValDeclaration {
@@ -4004,6 +4009,142 @@ mod expression_parser {
         }
     }
 
+    #[derive(Default)]
+    struct DeclarationCommentInfo {
+        documentation: Option<Documentation>,
+        jv_comments: Vec<CommentStatement>,
+    }
+
+    pub(super) fn attach_declaration_comments(tokens: &[&Token], modifiers: &mut Modifiers) {
+        if tokens.is_empty() {
+            return;
+        }
+        let mut info = declaration_comment_metadata(tokens);
+        if info.documentation.is_some() {
+            modifiers.documentation = info.documentation.take();
+        }
+        if !info.jv_comments.is_empty() {
+            modifiers.jv_comments.extend(info.jv_comments.drain(..));
+        }
+    }
+
+    fn declaration_comment_metadata(tokens: &[&Token]) -> DeclarationCommentInfo {
+        for token in tokens {
+            if let Some(info) = declaration_comment_metadata_from_token(token) {
+                return info;
+            }
+        }
+        DeclarationCommentInfo::default()
+    }
+
+    fn declaration_comment_metadata_from_token(token: &Token) -> Option<DeclarationCommentInfo> {
+        let mut info = DeclarationCommentInfo::default();
+        info.documentation = extract_documentation_from_token(token);
+        if !token.leading_trivia.jv_comments.is_empty() {
+            info.jv_comments = token
+                .leading_trivia
+                .jv_comments
+                .iter()
+                .map(convert_trivia_to_comment)
+                .collect();
+        }
+        if info.documentation.is_none() && info.jv_comments.is_empty() {
+            None
+        } else {
+            Some(info)
+        }
+    }
+
+    fn extract_documentation_from_token(token: &Token) -> Option<Documentation> {
+        if let Some(block) = &token.leading_trivia.doc_comment {
+            return Some(Documentation {
+                kind: DocumentationKind::Block,
+                text: block.clone(),
+                span: fallback_doc_span(token),
+            });
+        }
+
+        let doc_lines: Vec<&SourceCommentTrivia> = token
+            .leading_trivia
+            .jv_comments
+            .iter()
+            .filter(|comment| is_line_doc_comment(&comment.text))
+            .collect();
+        if doc_lines.is_empty() {
+            return None;
+        }
+
+        let text = doc_lines
+            .iter()
+            .map(|comment| normalize_line_doc(&comment.text))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let span = span_for_comment_sequence(&doc_lines);
+        Some(Documentation {
+            kind: DocumentationKind::Line,
+            text,
+            span,
+        })
+    }
+
+    fn convert_trivia_to_comment(trivia: &SourceCommentTrivia) -> CommentStatement {
+        CommentStatement {
+            kind: match trivia.kind {
+                SourceCommentKind::Line => CommentKind::Line,
+                SourceCommentKind::Block => CommentKind::Block,
+            },
+            visibility: CommentVisibility::JvOnly,
+            text: trivia.text.clone(),
+            span: span_from_trivia(trivia),
+        }
+    }
+
+    fn is_line_doc_comment(text: &str) -> bool {
+        text.trim_start().starts_with("///")
+    }
+
+    fn normalize_line_doc(text: &str) -> String {
+        let trimmed = text.trim_start();
+        let without_marker = trimmed.strip_prefix("///").unwrap_or(trimmed).trim_start();
+        without_marker
+            .trim_end_matches(|c| c == '\r' || c == '\n')
+            .to_string()
+    }
+
+    fn span_from_trivia(trivia: &SourceCommentTrivia) -> Span {
+        let mut end_line = trivia.line;
+        let mut end_column = trivia.column;
+        for ch in trivia.text.chars() {
+            match ch {
+                '\n' => {
+                    end_line = end_line.saturating_add(1);
+                    end_column = 1;
+                }
+                '\r' => {
+                    end_column = 1;
+                }
+                _ => {
+                    end_column = end_column.saturating_add(1);
+                }
+            }
+        }
+        Span::new(trivia.line, trivia.column, end_line, end_column)
+    }
+
+    fn span_for_comment_sequence(comments: &[&SourceCommentTrivia]) -> Span {
+        if comments.is_empty() {
+            return Span::dummy();
+        }
+        let start = span_from_trivia(comments[0]);
+        let end = span_from_trivia(comments.last().copied().unwrap());
+        merge_spans(&start, &end)
+    }
+
+    fn fallback_doc_span(token: &Token) -> Span {
+        let start_line = if token.line > 1 { token.line - 1 } else { 1 };
+        Span::new(start_line, 1, token.line, token.column)
+    }
+
     struct JsonParser<'a> {
         tokens: &'a [&'a Token],
         pos: usize,
@@ -4687,6 +4828,8 @@ fn lower_function(
 ) -> Result<Statement, LoweringDiagnostic> {
     let tokens = context.tokens_for(node);
     let span = context.span_for(node).unwrap_or_else(Span::dummy);
+    let mut modifiers = Modifiers::default();
+    expression_parser::attach_declaration_comments(&tokens, &mut modifiers);
 
     let return_type_token_ptrs: Vec<*const Token> =
         child_node(node, SyntaxKind::FunctionReturnType)
@@ -4847,7 +4990,7 @@ fn lower_function(
         return_type,
         primitive_return: None,
         body: Box::new(body),
-        modifiers: Modifiers::default(),
+        modifiers,
         span: span.clone(),
     };
 
@@ -4890,7 +5033,8 @@ fn lower_class(
         .transpose()?
         .unwrap_or_default();
 
-    let modifiers = Modifiers::default();
+    let mut modifiers = Modifiers::default();
+    expression_parser::attach_declaration_comments(&tokens, &mut modifiers);
 
     let is_data = tokens
         .iter()
@@ -4991,6 +5135,7 @@ fn lower_property(
     is_val: bool,
     diagnostics: &mut Vec<LoweringDiagnostic>,
 ) -> Result<Option<Property>, LoweringDiagnostic> {
+    let tokens = context.tokens_for(node);
     let binding = match child_node(node, SyntaxKind::BindingPattern) {
         Some(binding) => binding,
         None => {
@@ -5030,12 +5175,15 @@ fn lower_property(
         None => None,
     };
 
+    let mut modifiers = Modifiers::default();
+    expression_parser::attach_declaration_comments(&tokens, &mut modifiers);
+
     Ok(Some(Property {
         name,
         type_annotation,
         initializer,
         is_mutable: !is_val,
-        modifiers: Modifiers::default(),
+        modifiers,
         getter: None,
         setter: None,
         span,

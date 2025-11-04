@@ -5,8 +5,9 @@ use handlers::imports::build_imports_response;
 pub use handlers::imports::{ImportItem, ImportsParams, ImportsResponse};
 use jv_ast::types::TypeLevelExpr;
 use jv_ast::{
-    Argument, ConstParameter, Expression, GenericParameter, GenericSignature, Program,
-    RegexLiteral, Span, Statement, StringPart, TypeAnnotation,
+    Argument, ConcurrencyConstruct, ConstParameter, Expression, GenericParameter,
+    GenericSignature, JsonComment, JsonCommentKind, JsonLiteral, JsonValue, Modifiers, Program,
+    Property, RegexLiteral, ResourceManagement, Span, Statement, StringPart, TypeAnnotation,
 };
 use jv_build::BuildConfig;
 use jv_build::metadata::{
@@ -899,12 +900,20 @@ impl JvLanguageServer {
         self.type_facts.get(uri)
     }
 
-    pub fn get_hover(&self, uri: &str, position: Position) -> Option<HoverResult> {
+    pub fn get_hover(&mut self, uri: &str, position: Position) -> Option<HoverResult> {
         if let Some(hover) = self.sequence_hover(uri, &position) {
             return Some(hover);
         }
 
         if let Some(hover) = self.generic_hover(uri, &position) {
+            return Some(hover);
+        }
+
+        if let Some(hover) = self.declaration_hover(uri, &position) {
+            return Some(hover);
+        }
+
+        if let Some(hover) = self.json_metadata_hover(uri, &position) {
             return Some(hover);
         }
 
@@ -921,6 +930,44 @@ impl JvLanguageServer {
         self.regex_metadata
             .get(uri)
             .map(|entries| entries.as_slice())
+    }
+
+    fn declaration_hover(&mut self, uri: &str, position: &Position) -> Option<HoverResult> {
+        let program = self.program_for_hover(uri)?;
+        let target = program
+            .statements
+            .iter()
+            .find_map(|statement| declaration_target_from_statement(statement, position))?;
+        let (span, modifiers) = target;
+        let contents = build_declaration_hover(modifiers)?;
+        Some(HoverResult {
+            contents,
+            range: span_to_range(span),
+        })
+    }
+
+    fn json_metadata_hover(&mut self, uri: &str, position: &Position) -> Option<HoverResult> {
+        let program = self.program_for_hover(uri)?;
+        let literal = program
+            .statements
+            .iter()
+            .find_map(|statement| json_target_from_statement(statement, position))?;
+        let contents = build_json_hover(literal)?;
+        Some(HoverResult {
+            contents,
+            range: span_to_range(&literal.span),
+        })
+    }
+
+    fn program_for_hover(&mut self, uri: &str) -> Option<&Program> {
+        if !self.programs.contains_key(uri) {
+            let content = self.documents.get(uri)?;
+            let pipeline = RowanPipeline::default();
+            let parsed = pipeline.parse(content).ok()?;
+            let program = parsed.into_program();
+            self.programs.insert(uri.to_string(), program);
+        }
+        self.programs.get(uri)
     }
 
     fn regex_program_from_tokens(tokens: &[Token]) -> Option<Program> {
@@ -1965,6 +2012,363 @@ fn position_in_range(position: &Position, range: &Range) -> bool {
         return position.character <= range.end.character;
     }
     true
+}
+
+fn declaration_target_from_statement<'a>(
+    statement: &'a Statement,
+    position: &Position,
+) -> Option<(&'a Span, &'a Modifiers)> {
+    match statement {
+        Statement::ValDeclaration {
+            modifiers, span, ..
+        }
+        | Statement::VarDeclaration {
+            modifiers, span, ..
+        }
+        | Statement::DataClassDeclaration {
+            modifiers, span, ..
+        } => target_from_modifiers(span, modifiers, position),
+        Statement::FunctionDeclaration {
+            modifiers, span, ..
+        } => target_from_modifiers(span, modifiers, position),
+        Statement::ClassDeclaration {
+            properties,
+            methods,
+            modifiers,
+            span,
+            ..
+        } => {
+            for property in properties {
+                if let Some(target) = declaration_target_from_property(property, position) {
+                    return Some(target);
+                }
+            }
+            for method in methods {
+                if let Some(target) = declaration_target_from_statement(method, position) {
+                    return Some(target);
+                }
+            }
+            target_from_modifiers(span, modifiers, position)
+        }
+        Statement::InterfaceDeclaration {
+            properties,
+            methods,
+            modifiers,
+            span,
+            ..
+        } => {
+            for property in properties {
+                if let Some(target) = declaration_target_from_property(property, position) {
+                    return Some(target);
+                }
+            }
+            for method in methods {
+                if let Some(target) = declaration_target_from_statement(method, position) {
+                    return Some(target);
+                }
+            }
+            target_from_modifiers(span, modifiers, position)
+        }
+        Statement::ExtensionFunction(ext) => {
+            declaration_target_from_statement(&ext.function, position)
+        }
+        Statement::Expression { .. }
+        | Statement::Return { .. }
+        | Statement::Throw { .. }
+        | Statement::Assignment { .. }
+        | Statement::ForIn(_)
+        | Statement::Break(_)
+        | Statement::Continue(_)
+        | Statement::Import { .. }
+        | Statement::Package { .. }
+        | Statement::Concurrency(_)
+        | Statement::ResourceManagement(_)
+        | Statement::Comment(_) => None,
+    }
+}
+
+fn declaration_target_from_property<'a>(
+    property: &'a Property,
+    position: &Position,
+) -> Option<(&'a Span, &'a Modifiers)> {
+    target_from_modifiers(&property.span, &property.modifiers, position)
+}
+
+fn target_from_modifiers<'a>(
+    span: &'a Span,
+    modifiers: &'a Modifiers,
+    position: &Position,
+) -> Option<(&'a Span, &'a Modifiers)> {
+    if has_declaration_metadata(modifiers) && position_overlaps_span(position, span) {
+        Some((span, modifiers))
+    } else {
+        None
+    }
+}
+
+fn has_declaration_metadata(modifiers: &Modifiers) -> bool {
+    modifiers.documentation.is_some() || !modifiers.jv_comments.is_empty()
+}
+
+fn json_target_from_statement<'a>(
+    statement: &'a Statement,
+    position: &Position,
+) -> Option<&'a JsonLiteral> {
+    match statement {
+        Statement::ValDeclaration { initializer, .. } => {
+            json_target_from_expression(initializer, position)
+        }
+        Statement::VarDeclaration { initializer, .. } => initializer
+            .as_ref()
+            .and_then(|expr| json_target_from_expression(expr, position)),
+        Statement::FunctionDeclaration { body, .. } => json_target_from_expression(body, position),
+        Statement::ClassDeclaration {
+            properties,
+            methods,
+            ..
+        }
+        | Statement::InterfaceDeclaration {
+            properties,
+            methods,
+            ..
+        } => {
+            for property in properties {
+                if let Some(expr) = &property.initializer {
+                    if let Some(target) = json_target_from_expression(expr, position) {
+                        return Some(target);
+                    }
+                }
+            }
+            for method in methods {
+                if let Some(target) = json_target_from_statement(method, position) {
+                    return Some(target);
+                }
+            }
+            None
+        }
+        Statement::ExtensionFunction(ext) => json_target_from_statement(&ext.function, position),
+        Statement::Expression { expr, .. } => json_target_from_expression(expr, position),
+        Statement::Return { value, .. } => value
+            .as_ref()
+            .and_then(|expr| json_target_from_expression(expr, position)),
+        Statement::Throw { expr, .. } => json_target_from_expression(expr, position),
+        Statement::Assignment { value, .. } => json_target_from_expression(value, position),
+        Statement::Concurrency(construct) => match construct {
+            ConcurrencyConstruct::Spawn { body, .. } | ConcurrencyConstruct::Async { body, .. } => {
+                json_target_from_expression(body, position)
+            }
+            ConcurrencyConstruct::Await { expr, .. } => json_target_from_expression(expr, position),
+        },
+        Statement::ResourceManagement(rm) => match rm {
+            ResourceManagement::Use { resource, body, .. } => {
+                json_target_from_expression(resource, position)
+                    .or_else(|| json_target_from_expression(body, position))
+            }
+            ResourceManagement::Defer { body, .. } => json_target_from_expression(body, position),
+        },
+        Statement::ForIn(loop_stmt) => json_target_from_expression(&loop_stmt.iterable, position)
+            .or_else(|| json_target_from_expression(&loop_stmt.body, position)),
+        Statement::DataClassDeclaration { .. }
+        | Statement::Package { .. }
+        | Statement::Import { .. }
+        | Statement::Break(_)
+        | Statement::Continue(_)
+        | Statement::Comment(_) => None,
+    }
+}
+
+fn json_target_from_expression<'a>(
+    expr: &'a Expression,
+    position: &Position,
+) -> Option<&'a JsonLiteral> {
+    match expr {
+        Expression::JsonLiteral(literal) => {
+            if has_json_metadata(literal) && position_overlaps_span(position, &literal.span) {
+                Some(literal)
+            } else {
+                None
+            }
+        }
+        Expression::Literal(_, _)
+        | Expression::RegexLiteral(_)
+        | Expression::Identifier(_, _)
+        | Expression::This(_)
+        | Expression::Super(_) => None,
+        Expression::Binary { left, right, .. } => json_target_from_expression(left, position)
+            .or_else(|| json_target_from_expression(right, position)),
+        Expression::Unary { operand, .. } => json_target_from_expression(operand, position),
+        Expression::Call { function, args, .. } => json_target_from_expression(function, position)
+            .or_else(|| {
+                args.iter().find_map(|arg| match arg {
+                    Argument::Positional(expr) => json_target_from_expression(expr, position),
+                    Argument::Named { value, .. } => json_target_from_expression(value, position),
+                })
+            }),
+        Expression::MemberAccess { object, .. }
+        | Expression::NullSafeMemberAccess { object, .. } => {
+            json_target_from_expression(object, position)
+        }
+        Expression::IndexAccess { object, index, .. }
+        | Expression::NullSafeIndexAccess { object, index, .. } => {
+            json_target_from_expression(object, position)
+                .or_else(|| json_target_from_expression(index, position))
+        }
+        Expression::TypeCast { expr, .. } => json_target_from_expression(expr, position),
+        Expression::StringInterpolation { parts, .. } => parts.iter().find_map(|part| match part {
+            StringPart::Expression(expr) => json_target_from_expression(expr, position),
+            _ => None,
+        }),
+        Expression::MultilineString(literal) => literal.parts.iter().find_map(|part| match part {
+            StringPart::Expression(expr) => json_target_from_expression(expr, position),
+            _ => None,
+        }),
+        Expression::When {
+            expr: subject,
+            arms,
+            else_arm,
+            ..
+        } => {
+            if let Some(subject) = subject {
+                if let Some(target) = json_target_from_expression(subject, position) {
+                    return Some(target);
+                }
+            }
+            for arm in arms {
+                if let Some(guard) = &arm.guard {
+                    if let Some(target) = json_target_from_expression(guard, position) {
+                        return Some(target);
+                    }
+                }
+                if let Some(target) = json_target_from_expression(&arm.body, position) {
+                    return Some(target);
+                }
+            }
+            else_arm
+                .as_ref()
+                .and_then(|expr| json_target_from_expression(expr, position))
+        }
+        Expression::If {
+            condition,
+            then_branch,
+            else_branch,
+            ..
+        } => json_target_from_expression(condition, position)
+            .or_else(|| json_target_from_expression(then_branch, position))
+            .or_else(|| {
+                else_branch
+                    .as_ref()
+                    .and_then(|expr| json_target_from_expression(expr, position))
+            }),
+        Expression::Block { statements, .. } => statements
+            .iter()
+            .find_map(|statement| json_target_from_statement(statement, position)),
+        Expression::Array { elements, .. } => elements
+            .iter()
+            .find_map(|element| json_target_from_expression(element, position)),
+        Expression::Lambda { body, .. } => json_target_from_expression(body, position),
+        Expression::Try {
+            body,
+            catch_clauses,
+            finally_block,
+            ..
+        } => {
+            if let Some(target) = json_target_from_expression(body, position) {
+                return Some(target);
+            }
+            for clause in catch_clauses {
+                if let Some(target) = json_target_from_expression(&clause.body, position) {
+                    return Some(target);
+                }
+            }
+            finally_block
+                .as_ref()
+                .and_then(|expr| json_target_from_expression(expr, position))
+        }
+    }
+}
+
+fn has_json_metadata(literal: &JsonLiteral) -> bool {
+    !gather_json_comments(literal).is_empty()
+}
+
+fn gather_json_comments<'a>(literal: &'a JsonLiteral) -> Vec<&'a JsonComment> {
+    let mut acc: Vec<&JsonComment> = Vec::new();
+    acc.extend(literal.leading_comments.iter());
+    acc.extend(literal.trailing_comments.iter());
+    collect_value_comments(&literal.value, &mut acc);
+    acc
+}
+
+fn collect_value_comments<'a>(value: &'a JsonValue, acc: &mut Vec<&'a JsonComment>) {
+    match value {
+        JsonValue::Object { entries, .. } => {
+            for entry in entries {
+                acc.extend(entry.comments.iter());
+                collect_value_comments(&entry.value, acc);
+            }
+        }
+        JsonValue::Array { elements, .. } => {
+            for element in elements {
+                collect_value_comments(element, acc);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn build_declaration_hover(modifiers: &Modifiers) -> Option<String> {
+    let mut sections = Vec::new();
+    if let Some(doc) = &modifiers.documentation {
+        let content = doc.text.trim();
+        if !content.is_empty() {
+            sections.push(format!("**ドキュメント**\n{}", content));
+        }
+    }
+
+    let mut jv_lines: Vec<String> = modifiers
+        .jv_comments
+        .iter()
+        .filter_map(|comment| {
+            let trimmed = comment.text.trim();
+            if trimmed.is_empty() || trimmed.trim_start().starts_with("///") {
+                return None;
+            }
+            Some(format!("• {}", trimmed))
+        })
+        .collect();
+    if !jv_lines.is_empty() {
+        jv_lines.insert(0, "**JV専用コメント**".to_string());
+        sections.push(jv_lines.join("\n"));
+    }
+
+    if sections.is_empty() {
+        None
+    } else {
+        Some(sections.join("\n\n"))
+    }
+}
+
+fn build_json_hover(literal: &JsonLiteral) -> Option<String> {
+    let comments = gather_json_comments(literal);
+    if comments.is_empty() {
+        return None;
+    }
+
+    let mut lines = Vec::new();
+    for comment in comments {
+        let prefix = match comment.kind {
+            JsonCommentKind::Line => "//#",
+            JsonCommentKind::Block => "/*#",
+        };
+        let text = comment.text.trim();
+        if text.is_empty() {
+            continue;
+        }
+        lines.push(format!("• {} {}", prefix, text));
+    }
+
+    lines.insert(0, "**JSONメタデータ**".to_string());
+    Some(lines.join("\n"))
 }
 
 fn sanitize_regex_preview(raw: &str, pattern: &str) -> String {

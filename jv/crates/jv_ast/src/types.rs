@@ -1,5 +1,6 @@
 // jv_ast/types - Basic types, operators, and position information
 use crate::annotation::Annotation;
+use crate::comments::{CommentStatement, Documentation};
 use serde::{Deserialize, Serialize};
 
 /// Position information for AST nodes
@@ -475,6 +476,10 @@ pub struct Modifiers {
     pub is_open: bool,
     #[serde(default)]
     pub annotations: Vec<Annotation>,
+    #[serde(default)]
+    pub documentation: Option<Documentation>,
+    #[serde(default)]
+    pub jv_comments: Vec<CommentStatement>,
 }
 
 impl Default for Modifiers {
@@ -487,6 +492,8 @@ impl Default for Modifiers {
             is_override: false,
             is_open: false,
             annotations: Vec::new(),
+            documentation: None,
+            jv_comments: Vec::new(),
         }
     }
 }
