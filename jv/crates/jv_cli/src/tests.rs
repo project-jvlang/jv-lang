@@ -1418,6 +1418,7 @@ fn apply_type_facts_sets_sequence_specialization_hint() {
         body: Some(method_body),
         modifiers: IrModifiers::default(),
         throws: Vec::new(),
+        assertion_patterns: Vec::new(),
         span: method_span,
     };
 

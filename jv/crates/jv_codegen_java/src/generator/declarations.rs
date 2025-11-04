@@ -435,6 +435,7 @@ impl JavaCodeGenerator {
                 modifiers,
                 throws,
                 span,
+                assertion_patterns,
             } => {
                 if parameters.is_empty() {
                     return Err(CodeGenError::UnsupportedConstruct {
@@ -466,6 +467,7 @@ impl JavaCodeGenerator {
                     modifiers: instance_modifiers,
                     throws: throws.clone(),
                     span: span.clone(),
+                    assertion_patterns: assertion_patterns.clone(),
                 };
 
                 self.generate_method(&instance_method)

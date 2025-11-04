@@ -967,6 +967,7 @@ fn sequence_flatmap_overloads_receive_stable_java_names() {
         body: None,
         modifiers: static_modifiers(true),
         throws: vec![],
+        assertion_patterns: Vec::new(),
         span: span_decl_iter.clone(),
     };
 
@@ -985,6 +986,7 @@ fn sequence_flatmap_overloads_receive_stable_java_names() {
         body: None,
         modifiers: static_modifiers(true),
         throws: vec![],
+        assertion_patterns: Vec::new(),
         span: span_decl_seq.clone(),
     };
 

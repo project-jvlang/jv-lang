@@ -405,7 +405,8 @@ pub fn from_transform_error(error: &TransformError) -> Option<EnhancedDiagnostic
         | TransformError::ResourceManagementError { message, span }
         | TransformError::SampleAnnotationError { message, span }
         | TransformError::SampleProcessingError { message, span }
-        | TransformError::TypeInferenceError { message, span } => {
+        | TransformError::TypeInferenceError { message, span }
+        | TransformError::TestLoweringError { message, span, .. } => {
             detect_in_message(message, Some(span.clone()))
                 .or_else(|| detect_in_message(&error.to_string(), Some(span.clone())))
         }

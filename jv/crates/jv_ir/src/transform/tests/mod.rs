@@ -7,39 +7,51 @@ use crate::transform::type_system::convert_type_annotation;
 use crate::transform::utils::{convert_modifiers, extract_java_type, ir_expression_span};
 use crate::types::{
     AssertionPattern, IrAnnotation, IrAnnotationArgument, IrAnnotationValue, IrExpression,
-    IrModifiers, IrParameter, IrStatement, IrVisibility, JavaType, Literal,
+    IrModifiers, IrParameter, IrStatement, IrVisibility, JavaType,
 };
 use jv_ast::types::Modifiers;
 use jv_ast::{
-    Annotation, AnnotationArgument, AnnotationName, AnnotationValue, BinaryOp, BindingPatternKind,
-    CallArgumentStyle, Expression, Span, TestDataset, TestDatasetRow, TestDeclaration,
-    TestParameter,
+    Annotation, AnnotationName, BinaryOp, BindingPatternKind, CallArgumentStyle, Expression,
+    Literal, Span, TestDataset, TestDatasetRow, TestDeclaration, TestParameter,
 };
 
 pub fn lower_test_declaration(
     declaration: TestDeclaration,
     context: &mut TransformContext,
 ) -> Result<Vec<IrStatement>, TransformError> {
-    let normalized_method = normalize_method(&declaration.display_name, &declaration.span);
-    let class_name = derive_class_name(&normalized_method, &declaration.span);
-    let mut planner = TestSuitePlanner::new(class_name, declaration.span.clone());
+    let TestDeclaration {
+        display_name,
+        dataset,
+        parameters: ast_parameters,
+        annotations,
+        body,
+        span,
+        ..
+    } = declaration;
 
-    let (parameters, scope_guard) = lower_test_parameters(&declaration.parameters, context)?;
-    let (body_ir, assertion_patterns) = lower_test_body(declaration.body, context)?;
-    drop(scope_guard);
+    let normalized_method = normalize_method(&display_name, &span);
+    let class_name = derive_class_name(&normalized_method, &span);
+    let mut planner = TestSuitePlanner::new(class_name, span.clone());
+
+    let (parameters, body_ir, assertion_patterns) = {
+        context.enter_scope();
+        let result = (|| -> Result<_, TransformError> {
+            let parameters = lower_test_parameters(&ast_parameters, context)?;
+            let (body_ir, assertion_patterns) = lower_test_body(body, context)?;
+            Ok((parameters, body_ir, assertion_patterns))
+        })();
+        context.exit_scope();
+        result?
+    };
 
     let method_name = normalized_method.identifier().to_string();
-    let mut method_modifiers = base_method_modifiers(&declaration.annotations);
+    let mut method_modifiers = base_method_modifiers(&annotations);
     method_modifiers.visibility = IrVisibility::Public;
 
-    let mut annotations = vec![display_name_annotation(
-        &declaration.display_name,
-        &declaration.span,
-    )];
-
-    let dataset = lower_dataset(&declaration, &parameters, context, &method_name)?;
-    annotations.extend(dataset.annotations);
-    method_modifiers.annotations.extend(annotations);
+    let mut method_annotations = vec![display_name_annotation(&display_name, &span)];
+    let dataset = lower_dataset(&dataset, &display_name, &span, &parameters, context)?;
+    method_annotations.extend(dataset.annotations);
+    method_modifiers.annotations.extend(method_annotations);
 
     let method = IrStatement::MethodDeclaration {
         name: method_name,
@@ -52,7 +64,7 @@ pub fn lower_test_declaration(
         modifiers: method_modifiers,
         throws: Vec::new(),
         assertion_patterns,
-        span: declaration.span.clone(),
+        span: span.clone(),
     };
 
     planner.push_method(method);
@@ -73,24 +85,25 @@ struct DatasetArtifacts {
 }
 
 fn lower_dataset(
-    declaration: &TestDeclaration,
+    dataset: &Option<TestDataset>,
+    display_name: &str,
+    span: &Span,
     parameters: &[IrParameter],
     context: &mut TransformContext,
-    method_name: &str,
 ) -> Result<DatasetArtifacts, TransformError> {
-    match &declaration.dataset {
+    match dataset {
         None => {
             if !parameters.is_empty() {
                 return Err(TransformError::TestLoweringError {
                     code: "JV5303",
                     message: "テストパラメータを使用する場合はデータセットを指定してください"
                         .to_string(),
-                    span: declaration.span.clone(),
+                    span: span.clone(),
                 });
             }
 
             Ok(DatasetArtifacts {
-                annotations: vec![test_annotation(&declaration.span)],
+                annotations: vec![test_annotation(span)],
                 provider: None,
                 sample_declaration: None,
             })
@@ -104,15 +117,15 @@ fn lower_dataset(
                 });
             }
 
-            let dataset_name = normalize_dataset(&declaration.display_name, &declaration.span);
+            let dataset_name = normalize_dataset(display_name, span);
             let provider_name = dataset_name.identifier().to_string();
             let provider =
                 build_inline_dataset_provider(rows, parameters, context, &provider_name, span)?;
 
             Ok(DatasetArtifacts {
                 annotations: vec![
-                    parameterized_annotation(&declaration.span),
-                    method_source_annotation(&provider_name, &declaration.span),
+                    parameterized_annotation(span),
+                    method_source_annotation(&provider_name, span),
                 ],
                 provider: Some(provider),
                 sample_declaration: None,
@@ -136,11 +149,10 @@ fn base_method_modifiers(user_annotations: &[Annotation]) -> IrModifiers {
     convert_modifiers(&modifiers)
 }
 
-fn lower_test_parameters<'ctx>(
+fn lower_test_parameters(
     parameters: &[TestParameter],
-    context: &'ctx mut TransformContext,
-) -> Result<(Vec<IrParameter>, ParameterScope<'ctx>), TransformError> {
-    let guard = ParameterScope::new(context);
+    context: &mut TransformContext,
+) -> Result<Vec<IrParameter>, TransformError> {
     let mut ir_parameters = Vec::with_capacity(parameters.len());
 
     for parameter in parameters {
@@ -169,7 +181,7 @@ fn lower_test_parameters<'ctx>(
             None => JavaType::object(),
         };
 
-        guard.context.add_variable(name.clone(), java_type.clone());
+        context.add_variable(name.clone(), java_type.clone());
 
         ir_parameters.push(IrParameter {
             name,
@@ -179,7 +191,7 @@ fn lower_test_parameters<'ctx>(
         });
     }
 
-    Ok((ir_parameters, guard))
+    Ok(ir_parameters)
 }
 
 fn lower_test_body(
@@ -193,7 +205,7 @@ fn lower_test_body(
 fn apply_assertions(expr: IrExpression) -> (IrExpression, Vec<AssertionPattern>) {
     match expr {
         IrExpression::Block {
-            mut statements,
+            statements,
             java_type,
             span,
         } => {
@@ -276,7 +288,7 @@ fn rewrite_assertion_statement(
             }
             other_expr => {
                 let bool_like = extract_java_type(&other_expr)
-                    .map(is_boolean_type)
+                    .map(|java_type| is_boolean_type(&java_type))
                     .unwrap_or(false);
 
                 if bool_like {
@@ -482,7 +494,7 @@ fn stream_identifier(span: &Span) -> IrExpression {
     }
 }
 
-fn derive_class_name(name: &NormalizedName, span: &Span) -> String {
+fn derive_class_name(name: &NormalizedName, _span: &Span) -> String {
     let base = name.base().trim_start_matches("test_");
     let mut pascal = base
         .split('_')
@@ -516,23 +528,6 @@ fn derive_class_name(name: &NormalizedName, span: &Span) -> String {
     }
 
     format!("{pascal}{suffix}Test")
-}
-
-struct ParameterScope<'ctx> {
-    context: &'ctx mut TransformContext,
-}
-
-impl<'ctx> ParameterScope<'ctx> {
-    fn new(context: &'ctx mut TransformContext) -> Self {
-        context.enter_scope();
-        Self { context }
-    }
-}
-
-impl<'ctx> Drop for ParameterScope<'ctx> {
-    fn drop(&mut self) {
-        self.context.exit_scope();
-    }
 }
 
 fn is_boolean_type(java_type: &JavaType) -> bool {

@@ -352,6 +352,7 @@ fn load_users_method() -> IrStatement {
             ..IrModifiers::default()
         },
         throws: vec!["java.io.IOException".to_string()],
+        assertion_patterns: Vec::new(),
         span: dummy_span(),
     }
 }
@@ -451,6 +452,7 @@ fn simple_method() -> IrStatement {
             ..IrModifiers::default()
         },
         throws: vec![],
+        assertion_patterns: Vec::new(),
         span: dummy_span(),
     }
 }
@@ -582,6 +584,7 @@ fn snapshot_program() -> IrProgram {
             ..IrModifiers::default()
         },
         throws: vec![],
+        assertion_patterns: Vec::new(),
         span: dummy_span(),
     };
 
@@ -668,6 +671,7 @@ fn method_generation_renders_generic_type_parameters() {
             ..IrModifiers::default()
         },
         throws: vec![],
+        assertion_patterns: Vec::new(),
         span,
     };
 
@@ -715,6 +719,7 @@ fn primitive_return_methods_receive_specialized_names() {
             ..IrModifiers::default()
         },
         throws: Vec::new(),
+        assertion_patterns: Vec::new(),
         span,
     };
 
@@ -770,6 +775,7 @@ fn method_generation_renders_where_clause_bounds() {
             ..IrModifiers::default()
         },
         throws: vec![],
+        assertion_patterns: Vec::new(),
         span,
     };
 
@@ -847,6 +853,7 @@ fn record_extension_method_is_emitted_as_instance_method() {
         }),
         modifiers: extension_modifiers,
         throws: vec![],
+        assertion_patterns: Vec::new(),
         span: span.clone(),
     };
 
@@ -1012,6 +1019,7 @@ fn record_field_access_is_lowered_to_accessor_calls() {
             ..IrModifiers::default()
         },
         throws: vec![],
+        assertion_patterns: Vec::new(),
         span: span.clone(),
     };
 
@@ -1032,6 +1040,7 @@ fn record_field_access_is_lowered_to_accessor_calls() {
             ..IrModifiers::default()
         },
         throws: vec![],
+        assertion_patterns: Vec::new(),
         span: span.clone(),
     };
 
@@ -1134,6 +1143,7 @@ fn class_extension_method_is_emitted_as_instance_method() {
         }),
         modifiers: extension_modifiers,
         throws: vec![],
+        assertion_patterns: Vec::new(),
         span: span.clone(),
     };
 
@@ -1260,6 +1270,7 @@ fn primitive_specialized_pipeline_renders_character_casts() {
         body: Some(method_body),
         modifiers: method_modifiers,
         throws: vec![],
+        assertion_patterns: Vec::new(),
         span: span.clone(),
     };
 
@@ -1327,7 +1338,7 @@ fn primitive_specialized_pipeline_renders_character_casts() {
 
 #[test]
 fn analyze_mutable_captures_detects_assignments_in_lambda() {
-    let mut generator = JavaCodeGenerator::new();
+    let generator = JavaCodeGenerator::new();
 
     let accumulator_decl = IrStatement::VariableDeclaration {
         name: "accumulator".to_string(),
@@ -1484,6 +1495,7 @@ fn external_extension_method_remains_static_utility() {
         }),
         modifiers,
         throws: vec![],
+        assertion_patterns: Vec::new(),
         span: span.clone(),
     };
 
