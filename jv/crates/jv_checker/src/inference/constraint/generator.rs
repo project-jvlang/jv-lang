@@ -18,9 +18,9 @@ use crate::pattern::{
     NarrowedBinding, NarrowedNullability, NarrowingSnapshot, PatternMatchService, PatternTarget,
 };
 use jv_ast::{
-    statement::{UnitTypeDefinition, UnitTypeMember},
     Argument, BinaryOp, Expression, ForInStatement, Literal, Parameter, Program, Span, Statement,
     TypeAnnotation, UnaryOp,
+    statement::{UnitTypeDefinition, UnitTypeMember},
 };
 use jv_inference::types::NullabilityFlag;
 use std::collections::HashMap;

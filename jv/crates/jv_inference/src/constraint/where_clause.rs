@@ -185,9 +185,7 @@ impl<'a> WhereConstraintResolver<'a> {
                     return_type: Some(Box::new(result)),
                 }
             }
-            TypeAnnotation::Unit { base, .. } => {
-                self.convert_annotation(base, position, variance)
-            }
+            TypeAnnotation::Unit { base, .. } => self.convert_annotation(base, position, variance),
         }
     }
 

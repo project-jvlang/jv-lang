@@ -11,7 +11,7 @@ pub enum Expression {
     // Literals
     Literal(Literal, Span),
 
-/// Regex literal with raw + normalized pattern metadata.
+    /// Regex literal with raw + normalized pattern metadata.
     RegexLiteral(RegexLiteral),
 
     /// 単位付きリテラル。

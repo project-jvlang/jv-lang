@@ -231,9 +231,7 @@ impl PatternFactsBridge {
                 outcome
             }
             Expression::TypeCast { expr, .. } => self.visit_expression(expr, service, context),
-            Expression::UnitLiteral { value, .. } => {
-                self.visit_expression(value, service, context)
-            }
+            Expression::UnitLiteral { value, .. } => self.visit_expression(value, service, context),
             Expression::Array { elements, .. } => {
                 let mut outcome = BridgeOutcome::default();
                 for element in elements {

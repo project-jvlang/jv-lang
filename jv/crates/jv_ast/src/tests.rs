@@ -299,7 +299,8 @@ fn 単位リテラルがシリアライズ往復する() {
         span: 全体スパン.clone(),
     };
 
-    let シリアライズ = serde_json::to_string(&単位式).expect("単位リテラルのシリアライズに成功する");
+    let シリアライズ =
+        serde_json::to_string(&単位式).expect("単位リテラルのシリアライズに成功する");
     let 復元: Expression =
         serde_json::from_str(&シリアライズ).expect("単位リテラルのデシリアライズに成功する");
 
@@ -325,7 +326,11 @@ fn 単位型注釈がシリアライズ往復する() {
         serde_json::from_str(&シリアライズ).expect("単位型注釈のデシリアライズに成功する");
 
     match 復元 {
-        TypeAnnotation::Unit { base, unit, implicit } => {
+        TypeAnnotation::Unit {
+            base,
+            unit,
+            implicit,
+        } => {
             assert!(!implicit);
             assert_eq!(unit.name, "[℃]");
             match *base {

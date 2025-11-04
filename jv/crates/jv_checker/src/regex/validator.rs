@@ -1,9 +1,9 @@
 use crate::CheckError;
 use crate::diagnostics::{self, DiagnosticSeverity, EnhancedDiagnostic};
 use jv_ast::{
-    statement::{UnitTypeDefinition, UnitTypeMember},
     Argument, ConcurrencyConstruct, Expression, ForInStatement, LoopStrategy, NumericRangeLoop,
     Program, RegexLiteral, ResourceManagement, Span, Statement, StringPart, TryCatchClause,
+    statement::{UnitTypeDefinition, UnitTypeMember},
 };
 use std::time::Instant;
 
