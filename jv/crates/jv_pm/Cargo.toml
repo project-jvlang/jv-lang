@@ -11,3 +11,6 @@ thiserror.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 toml.workspace = true
+indexmap.workspace = true
+semver.workspace = true
+once_cell.workspace = true

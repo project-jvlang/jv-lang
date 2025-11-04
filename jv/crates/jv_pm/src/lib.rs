@@ -7,6 +7,15 @@ use std::path::Path;
 use std::str::FromStr;
 use thiserror::Error;
 
+pub mod resolver;
+
+pub use resolver::{
+    DependencyScope, ManifestDependencyProvider, RequestedDependency, ResolutionDiagnostic,
+    ResolutionDiagnosticLevel, ResolutionSource, ResolutionStats, ResolvedDependencies,
+    ResolvedDependency, ResolverDispatcher, ResolverError, ResolverOptions, ResolverStrategy,
+    ResolverStrategyInfo, VersionDecision,
+};
+
 #[derive(Error, Debug)]
 pub enum PackageError {
     #[error("Package not found: {0}")]
