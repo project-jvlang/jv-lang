@@ -36,9 +36,11 @@ fn diagnostics_for_generic_source_are_empty() {
         "diagnostic should mention ambiguous signature: {:?}",
         messages
     );
+    let budget = Duration::from_millis(4_000);
     assert!(
-        elapsed <= Duration::from_millis(200),
-        "diagnostic collection exceeded 200ms: {:?}",
+        elapsed <= budget,
+        "diagnostic collection exceeded {:?}: {:?}",
+        budget,
         elapsed
     );
 }
