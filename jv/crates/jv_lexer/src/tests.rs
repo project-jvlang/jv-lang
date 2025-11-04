@@ -217,6 +217,112 @@ fn layout_comma_metadata_survives_commented_call_arguments() {
 }
 
 #[test]
+fn implicit_params_in_arrays_keep_json_metadata_and_trivia() {
+    let source = "[\"_label\" _2]";
+    let mut lexer = Lexer::new(source.to_string());
+    let tokens = lexer
+        .tokenize()
+        .expect("配列内の暗黙引数を含むソースの字句解析に失敗しました");
+
+    let bracket = tokens
+        .iter()
+        .find(|token| matches!(token.token_type, TokenType::LeftBracket))
+        .expect("開きブラケットが見つかりません");
+    let json_confidence = bracket.metadata.iter().find_map(|metadata| match metadata {
+        TokenMetadata::PotentialJsonStart { confidence } => Some(*confidence),
+        _ => None,
+    });
+    assert!(
+        json_confidence.is_some(),
+        "JSON候補メタデータが欠落しています"
+    );
+
+    let implicit_param = tokens
+        .iter()
+        .find(|token| matches!(token.token_type, TokenType::ImplicitParam(2)))
+        .expect("暗黙引数トークンを取得できません");
+    assert!(
+        implicit_param.leading_trivia.spaces > 0,
+        "暗黙引数直前の空白がトリビアとして保持されていません"
+    );
+    let underscore_info = implicit_param
+        .metadata
+        .iter()
+        .find_map(|meta| match meta {
+            TokenMetadata::UnderscoreInfo(info) => Some(info),
+            _ => None,
+        })
+        .expect("Underscoreメタデータが欠落しています");
+    assert!(underscore_info.is_implicit);
+    assert_eq!(underscore_info.number, Some(2));
+}
+
+#[test]
+fn implicit_params_preserve_comment_trivia_and_metadata() {
+    let source = "// carry\n_7";
+    let mut lexer = Lexer::new(source.to_string());
+    let tokens = lexer
+        .tokenize()
+        .expect("コメント付き暗黙引数の字句解析に失敗しました");
+
+    let implicit_param = tokens
+        .iter()
+        .find(|token| matches!(token.token_type, TokenType::ImplicitParam(7)))
+        .expect("暗黙引数トークンが見つかりません");
+
+    assert!(implicit_param.leading_trivia.comments);
+    assert_eq!(implicit_param.leading_trivia.passthrough_comments.len(), 1);
+    let carry_text = &implicit_param.leading_trivia.passthrough_comments[0].text;
+    assert!(carry_text.contains("carry"));
+
+    let underscore_info = implicit_param
+        .metadata
+        .iter()
+        .find_map(|meta| match meta {
+            TokenMetadata::UnderscoreInfo(info) => Some(info),
+            _ => None,
+        })
+        .expect("暗黙引数メタデータが見つかりません");
+    assert_eq!(underscore_info.line, 2);
+    assert_eq!(underscore_info.column, 1);
+    assert_eq!(underscore_info.number, Some(7));
+}
+
+#[test]
+fn invalid_implicit_param_emits_token_diagnostic() {
+    let source = "_0";
+    let mut lexer = Lexer::new(source.to_string());
+    let tokens = lexer
+        .tokenize()
+        .expect("_0の診断検証用トークナイズに失敗しました");
+
+    let invalid_token = tokens
+        .iter()
+        .find(|token| matches!(&token.token_type, TokenType::Invalid(value) if value == "_0"))
+        .expect("Invalidトークンが見つかりません");
+
+    let diagnostic = invalid_token
+        .diagnostic
+        .as_ref()
+        .expect("診断が添付されていません");
+    match diagnostic {
+        TokenDiagnostic::InvalidImplicitParam { reason, suggested } => {
+            assert_eq!(*reason, InvalidImplicitParamReason::LeadingZero);
+            assert_eq!(suggested.as_deref(), Some("_1"));
+        }
+        other => panic!("想定外の診断: {other:?}"),
+    }
+
+    assert!(
+        invalid_token
+            .metadata
+            .iter()
+            .any(|meta| matches!(meta, TokenMetadata::UnderscoreInfo(_))),
+        "InvalidトークンにUnderscoreメタデータが残っていません"
+    );
+}
+
+#[test]
 fn test_arithmetic_operators_red_phase() {
     // RED: This test should fail
     let mut lexer = Lexer::new("a + b - c * d / e % f".to_string());
