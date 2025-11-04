@@ -1,7 +1,7 @@
 pub mod messages;
 
 use crate::CheckError;
-use jv_ast::{types::RawTypeContinuation, Span};
+use jv_ast::{Span, types::RawTypeContinuation};
 use jv_ir::{
     error::TransformError,
     types::{IrProgram, IrStatement},
@@ -680,7 +680,7 @@ fn build_raw_type_diagnostic(
 
 #[cfg(test)]
 mod tests {
-    use super::{collect_raw_type_diagnostics, extract_tooling_metadata, DiagnosticSeverity};
+    use super::{DiagnosticSeverity, collect_raw_type_diagnostics, extract_tooling_metadata};
     use jv_ast::{Literal, Span};
     use jv_ir::types::{
         IrCommentKind, IrExpression, IrModifiers, IrProgram, IrStatement, JavaType, LoggingMetadata,

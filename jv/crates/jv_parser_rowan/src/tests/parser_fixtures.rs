@@ -1,6 +1,9 @@
+use jv_ast::Statement;
 use jv_lexer::Lexer;
+use jv_parser_frontend::ParserPipeline;
 use rowan::SyntaxNode;
 
+use crate::frontend::RowanPipeline;
 use crate::parser::parse;
 use crate::syntax::SyntaxKind;
 use crate::{JvLanguage, ParseBuilder, ParseEvent};
@@ -136,6 +139,28 @@ fn function_without_parentheses_forms_empty_parameter_list() {
             .any(|child| child.kind() == SyntaxKind::FunctionParameter),
         "parameter list should be empty when parentheses are omitted"
     );
+}
+
+#[test]
+fn import_alias_is_lowered_into_statement() {
+    let source = "import java.time.LocalDate as Date\n";
+    let pipeline = RowanPipeline::default();
+    let program = pipeline
+        .parse(source)
+        .expect("alias source parses")
+        .into_program();
+
+    assert_eq!(
+        program.statements.len(),
+        1,
+        "only import statement expected"
+    );
+    match &program.statements[0] {
+        Statement::Import { alias, .. } => {
+            assert_eq!(alias.as_deref(), Some("Date"), "alias should be captured");
+        }
+        other => panic!("expected import statement, got {:?}", other),
+    }
 }
 
 #[test]

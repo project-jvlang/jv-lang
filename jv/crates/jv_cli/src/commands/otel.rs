@@ -393,7 +393,7 @@ fn normalize_endpoint(raw: &str, protocol: OtelProtocol) -> Result<EndpointInfo>
                 "endpoint '{}' を URL として解釈できませんでした: {}",
                 raw,
                 err
-            ))
+            ));
         }
     };
 
@@ -443,9 +443,7 @@ fn collect_endpoint_warnings(
         }
     }
 
-    let port = endpoint
-        .explicit_port
-        .or_else(|| endpoint.url.port());
+    let port = endpoint.explicit_port.or_else(|| endpoint.url.port());
     if port.is_none() {
         let recommendation = recommended_port(protocol);
         issues.push(ValidationIssue {

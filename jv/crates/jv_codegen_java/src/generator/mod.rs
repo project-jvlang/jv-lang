@@ -148,6 +148,8 @@ impl JavaCodeGenerator {
             }
         }
 
+        let mut hoisted_variable_fields =
+            Self::hoist_script_variable_fields(&mut script_statements);
         let mut hoisted_regex_fields = Vec::new();
         let mut retained_statements = Vec::new();
         for statement in script_statements.drain(..) {
@@ -158,6 +160,7 @@ impl JavaCodeGenerator {
             }
         }
         script_statements = retained_statements;
+        hoisted_variable_fields.append(&mut hoisted_regex_fields);
 
         let has_entry_method = script_methods.iter().any(Self::is_entry_point_method);
         let needs_wrapper = !script_statements.is_empty() || !has_entry_method;
@@ -167,6 +170,26 @@ impl JavaCodeGenerator {
             || !hoisted_regex_fields.is_empty()
         {
             let script_class = self.config.script_main_class.clone();
+            let qualified_script_class = if let Some(pkg) = &program.package {
+                format!("{}.{}", pkg, script_class)
+            } else {
+                script_class.clone()
+            };
+            let script_logger_fields: Vec<String> = program
+                .logging
+                .logger_fields
+                .iter()
+                .filter(|spec| {
+                    spec.class_id
+                        .as_ref()
+                        .and_then(|id| id.local_name.last())
+                        .map(|name| name == &script_class)
+                        .unwrap_or(true)
+                })
+                .filter_map(|spec| {
+                    self.render_script_logger_field(spec, &script_class, &qualified_script_class)
+                })
+                .collect();
 
             self.script_method_names = script_methods
                 .iter()
@@ -183,8 +206,20 @@ impl JavaCodeGenerator {
             builder.push_line(&format!("public final class {} {{", script_class));
             builder.indent();
 
-            if !hoisted_regex_fields.is_empty() {
-                for field in &hoisted_regex_fields {
+            if !script_logger_fields.is_empty() {
+                for field in &script_logger_fields {
+                    builder.push_line(field);
+                }
+                if needs_wrapper
+                    || !script_methods.is_empty()
+                    || !hoisted_variable_fields.is_empty()
+                {
+                    builder.push_line("");
+                }
+            }
+
+            if !hoisted_variable_fields.is_empty() {
+                for field in &hoisted_variable_fields {
                     let code = self.generate_statement(field)?;
                     Self::push_lines(&mut builder, &code);
                 }
@@ -1556,6 +1591,110 @@ impl JavaCodeGenerator {
                 None
             }
             _ => None,
+        }
+    }
+
+    fn hoist_script_variable_fields(statements: &mut Vec<IrStatement>) -> Vec<IrStatement> {
+        let mut hoisted = Vec::new();
+        let mut retained = Vec::new();
+
+        for statement in statements.drain(..) {
+            match statement {
+                IrStatement::VariableDeclaration { .. } => {
+                    hoisted.push(Self::variable_declaration_to_field(statement));
+                }
+                IrStatement::Commented {
+                    statement: inner,
+                    comment,
+                    kind,
+                    comment_span,
+                } => {
+                    if matches!(inner.as_ref(), IrStatement::VariableDeclaration { .. }) {
+                        let field = Self::variable_declaration_to_field(*inner);
+                        hoisted.push(IrStatement::Commented {
+                            statement: Box::new(field),
+                            comment,
+                            kind,
+                            comment_span,
+                        });
+                    } else {
+                        retained.push(IrStatement::Commented {
+                            statement: inner,
+                            comment,
+                            kind,
+                            comment_span,
+                        });
+                    }
+                }
+                other => retained.push(other),
+            }
+        }
+
+        *statements = retained;
+        hoisted
+    }
+
+    fn variable_declaration_to_field(statement: IrStatement) -> IrStatement {
+        match statement {
+            IrStatement::VariableDeclaration {
+                name,
+                java_type,
+                initializer,
+                is_final,
+                mut modifiers,
+                span,
+            } => {
+                if matches!(modifiers.visibility, IrVisibility::Package) {
+                    modifiers.visibility = IrVisibility::Private;
+                }
+                modifiers.is_static = true;
+                modifiers.is_final = is_final;
+                IrStatement::FieldDeclaration {
+                    name,
+                    java_type,
+                    initializer,
+                    modifiers,
+                    span,
+                }
+            }
+            other => other,
+        }
+    }
+
+    fn render_script_logger_field(
+        &self,
+        spec: &LoggerFieldSpec,
+        simple_class: &str,
+        fqcn: &str,
+    ) -> Option<String> {
+        let field_name = &spec.field_name;
+        match &self.logging_framework {
+            LoggingFrameworkKind::Slf4j => Some(format!(
+                "private static final org.slf4j.Logger {name} = org.slf4j.LoggerFactory.getLogger({class}.class);",
+                name = field_name,
+                class = simple_class
+            )),
+            LoggingFrameworkKind::Log4j2 => Some(format!(
+                "private static final org.apache.logging.log4j.Logger {name} = org.apache.logging.log4j.LogManager.getLogger({class}.class);",
+                name = field_name,
+                class = simple_class
+            )),
+            LoggingFrameworkKind::JbossLogging => Some(format!(
+                "private static final org.jboss.logging.Logger {name} = org.jboss.logging.Logger.getLogger({class}.class);",
+                name = field_name,
+                class = simple_class
+            )),
+            LoggingFrameworkKind::CommonsLogging => Some(format!(
+                "private static final org.apache.commons.logging.Log {name} = org.apache.commons.logging.LogFactory.getLog({class}.class);",
+                name = field_name,
+                class = simple_class
+            )),
+            LoggingFrameworkKind::Jul => Some(format!(
+                "private static final java.util.logging.Logger {name} = java.util.logging.Logger.getLogger(\"{fqcn}\");",
+                name = field_name,
+                fqcn = fqcn
+            )),
+            LoggingFrameworkKind::Custom { .. } => None,
         }
     }
 

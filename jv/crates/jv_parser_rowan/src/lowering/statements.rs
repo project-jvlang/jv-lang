@@ -8,8 +8,8 @@ use crate::support::{
 use crate::syntax::SyntaxKind;
 use jv_ast::comments::{CommentKind, CommentStatement, CommentVisibility};
 use jv_ast::expression::{
-    Argument, CallArgumentMetadata, CallArgumentStyle, Parameter, ParameterModifiers,
-    ParameterProperty, StringPart, WhenArm,
+    Argument, CallArgumentMetadata, CallArgumentStyle, LogBlock, LogBlockLevel, LogItem, Parameter,
+    ParameterModifiers, ParameterProperty, StringPart, WhenArm,
 };
 use jv_ast::json::{
     JsonComment, JsonCommentKind, JsonEntry, JsonLiteral, JsonValue, NumberGrouping,
@@ -100,6 +100,7 @@ pub fn lower_program(root: &JvSyntaxNode, tokens: &[Token]) -> LoweringResult {
     let mut diagnostics = Vec::new();
 
     collect_statements_from_children(&context, root, &mut statements, &mut diagnostics);
+    normalize_import_aliases(&mut statements);
 
     LoweringResult {
         statements,
@@ -931,6 +932,63 @@ fn join_tokens(tokens: &[&Token]) -> String {
         .collect::<String>()
 }
 
+fn normalize_import_aliases(statements: &mut Vec<Statement>) {
+    let mut index = 0;
+    while index + 1 < statements.len() {
+        let mut merged = false;
+        {
+            let (head, tail) = statements.split_at_mut(index + 1);
+            if let Statement::Import { alias, span, .. } = &mut head[index] {
+                if alias.is_none() {
+                    if let Statement::Expression {
+                        expr,
+                        span: expr_span,
+                    } = &tail[0]
+                    {
+                        if let Some(alias_name) = extract_alias_from_expression(expr) {
+                            *alias = Some(alias_name);
+                            *span = merge_spans(span, expr_span);
+                            merged = true;
+                        }
+                    }
+                }
+            }
+        }
+
+        if merged {
+            statements.remove(index + 1);
+        } else {
+            index += 1;
+        }
+    }
+}
+
+fn extract_alias_from_expression(expr: &Expression) -> Option<String> {
+    match expr {
+        Expression::Identifier(name, _) if name.len() > 2 && name.starts_with("as") => {
+            let alias = name[2..].trim().to_string();
+            if alias.is_empty() {
+                None
+            } else {
+                Some(alias)
+            }
+        }
+        _ => None,
+    }
+}
+
+fn log_level_from_token_kind(token_type: &TokenType) -> Option<LogBlockLevel> {
+    match token_type {
+        TokenType::Log => Some(LogBlockLevel::Default),
+        TokenType::Trace => Some(LogBlockLevel::Trace),
+        TokenType::Debug => Some(LogBlockLevel::Debug),
+        TokenType::Info => Some(LogBlockLevel::Info),
+        TokenType::Warn => Some(LogBlockLevel::Warn),
+        TokenType::Error => Some(LogBlockLevel::Error),
+        _ => None,
+    }
+}
+
 fn token_requires_followup(token_type: &TokenType) -> bool {
     matches!(
         token_type,
@@ -990,6 +1048,52 @@ mod tests {
             .filter(|token| !matches!(token.token_type, TokenType::Eof))
             .collect();
         expression_parser::parse_expression(&filtered).expect("parse expression")
+    }
+
+    #[test]
+    fn parses_regex_literal_expression() {
+        let expr = parse_expression_from_source("/abc/");
+        match expr {
+            Expression::RegexLiteral(literal) => {
+                assert_eq!(literal.pattern, "abc", "regex pattern should be normalized");
+            }
+            other => panic!("expected regex literal expression, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parses_log_block_expression() {
+        let expr = parse_expression_from_source("LOG { \"start\" }");
+        match expr {
+            Expression::LogBlock(block) => {
+                assert_eq!(block.items.len(), 1);
+                match &block.items[0] {
+                    LogItem::Expression(Expression::Literal(Literal::String(value), _)) => {
+                        assert_eq!(value, "start");
+                    }
+                    other => panic!("expected literal log message, got {:?}", other),
+                }
+            }
+            other => panic!("expected log block expression, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parses_nested_log_block_expression() {
+        let expr = parse_expression_from_source("LOG { TRACE { \"nested\" } }");
+        match expr {
+            Expression::LogBlock(block) => {
+                assert_eq!(block.items.len(), 1);
+                match &block.items[0] {
+                    LogItem::Nested(inner) => {
+                        assert_eq!(inner.level, LogBlockLevel::Trace);
+                        assert_eq!(inner.items.len(), 1);
+                    }
+                    other => panic!("expected nested log block, got {:?}", other),
+                }
+            }
+            other => panic!("expected outer log block expression, got {:?}", other),
+        }
     }
 
     #[test]
@@ -1246,6 +1350,16 @@ mod expression_parser {
                 }
                 TokenType::LeftBracket => self.parse_array_expression(index),
                 TokenType::When => self.parse_when_expression(),
+                TokenType::Log
+                | TokenType::Trace
+                | TokenType::Debug
+                | TokenType::Info
+                | TokenType::Warn
+                | TokenType::Error => {
+                    let level = log_level_from_token_kind(&token.token_type)
+                        .expect("log keyword should map to level");
+                    self.parse_log_block_expression(level, index)
+                }
                 _ => self.parse_primary(),
             }
         }
@@ -1328,6 +1442,15 @@ mod expression_parser {
                     let span = span_from_token(token);
                     Ok(ParsedExpr {
                         expr: Expression::Literal(Literal::Null, span.clone()),
+                        start: index,
+                        end: index + 1,
+                    })
+                }
+                TokenType::RegexLiteral(_) => {
+                    let span = span_from_token(token);
+                    let literal = regex_literal_from_token(token, span.clone());
+                    Ok(ParsedExpr {
+                        expr: Expression::RegexLiteral(literal),
                         start: index,
                         end: index + 1,
                     })
@@ -1541,6 +1664,88 @@ mod expression_parser {
                 start: start_index,
                 end: closing_index + 1,
             })
+        }
+
+        fn parse_log_block_expression(
+            &mut self,
+            level: LogBlockLevel,
+            keyword_index: usize,
+        ) -> Result<ParsedExpr, ExpressionError> {
+            if self.pos < keyword_index + 1 {
+                self.pos = keyword_index + 1;
+            }
+
+            while matches!(
+                self.peek_token().map(|token| &token.token_type),
+                Some(TokenType::LayoutComma)
+            ) {
+                self.pos += 1;
+            }
+
+            let brace_index = self.pos;
+            let brace_token = self.peek_token().ok_or_else(|| {
+                ExpressionError::new("ログブロックには '{' が必要です", self.span_at(brace_index))
+            })?;
+            if brace_token.token_type != TokenType::LeftBrace {
+                return Err(ExpressionError::new(
+                    "ログブロックには '{' が必要です",
+                    Some(span_from_token(brace_token)),
+                ));
+            }
+
+            let closing_index = self.find_matching_brace(brace_index).ok_or_else(|| {
+                ExpressionError::new(
+                    "ログブロックが閉じられていません",
+                    self.span_at(brace_index),
+                )
+            })?;
+            let body_tokens = &self.tokens[brace_index + 1..closing_index];
+            let items = self.parse_log_block_items(body_tokens, brace_index + 1)?;
+            let span = span_for_range(self.tokens, keyword_index, closing_index + 1);
+            self.pos = closing_index + 1;
+
+            Ok(ParsedExpr {
+                expr: Expression::LogBlock(LogBlock {
+                    level,
+                    items,
+                    span: span.clone(),
+                }),
+                start: keyword_index,
+                end: closing_index + 1,
+            })
+        }
+
+        fn parse_log_block_items(
+            &mut self,
+            tokens: &[&'a Token],
+            absolute_start: usize,
+        ) -> Result<Vec<LogItem>, ExpressionError> {
+            if tokens.is_empty() {
+                return Ok(Vec::new());
+            }
+
+            let ranges = Self::split_lambda_body_statements(tokens);
+            if ranges.is_empty() {
+                return Ok(Vec::new());
+            }
+
+            let mut items = Vec::new();
+            for (rel_start, rel_end) in ranges {
+                if rel_start >= rel_end {
+                    continue;
+                }
+                let slice = &tokens[rel_start..rel_end];
+                let statement = self.parse_lambda_statement(slice, absolute_start + rel_start)?;
+                match statement {
+                    Statement::Expression { expr, .. } => match expr {
+                        Expression::LogBlock(block) => items.push(LogItem::Nested(block)),
+                        other => items.push(LogItem::Expression(other)),
+                    },
+                    other => items.push(LogItem::Statement(other)),
+                }
+            }
+
+            Ok(items)
         }
 
         fn parse_brace_expression(&mut self) -> Result<ParsedExpr, ExpressionError> {

@@ -1,4 +1,4 @@
-use super::{add_feature, Feature, MiniProject, ProjectStep};
+use super::{Feature, MiniProject, ProjectStep, add_feature};
 use crate::tour::cli::SectionId;
 
 pub fn create_project() -> MiniProject {
@@ -75,8 +75,12 @@ const CALC_STEPS: [ProjectStep; 3] = [
     ProjectStep {
         title: "演算テーブルと入力パース",
         goal: "演算子マップとコマンド分解ロジックを定義する",
-        walkthrough: &["operations マップを作成し、未知の演算子には警告を出す", "split を用いて '3 + 4' 形式の入力を分解する"],
-        code: Some(r#"data class ParsedCommand(
+        walkthrough: &[
+            "operations マップを作成し、未知の演算子には警告を出す",
+            "split を用いて '3 + 4' 形式の入力を分解する",
+        ],
+        code: Some(
+            r#"data class ParsedCommand(
     val lhs: Double,
     val rhs: Double,
     val operation: (Double, Double) -> Double,
@@ -96,14 +100,19 @@ fun parse(command: String): ParsedCommand? {
     }
     return ParsedCommand(parts[0].toDouble(), parts[2].toDouble(), operation)
 }
-"#),
+"#,
+        ),
         verification: &["printf '3 + 4\n' | jv run tour/projects/calculator/src/main.jv"],
     },
     ProjectStep {
         title: "対話ループと履歴管理",
         goal: "while ループでCLIを構築し、過去の計算を保存する",
-        walkthrough: &["mutableList に計算履歴を追加し、history コマンドで表示", "quit コマンドでアプリを終了"],
-        code: Some(r#"fun repl() {
+        walkthrough: &[
+            "mutableList に計算履歴を追加し、history コマンドで表示",
+            "quit コマンドでアプリを終了",
+        ],
+        code: Some(
+            r#"fun repl() {
     val history = mutableListOf<String>()
     while (true) {
         print("> ")
@@ -122,21 +131,29 @@ fun parse(command: String): ParsedCommand? {
         }
     }
 }
-"#),
+"#,
+        ),
         verification: &["jv run tour/projects/calculator/src/main.jv"],
     },
     ProjectStep {
         title: "バッチ処理とJar化",
         goal: "複数計算をファイルから読み込み、結果をまとめて出力する",
-        walkthrough: &["Files.readAllLines を使用して入力バッチを読み込む", "jv build --binary jar で成果物を生成"],
-        code: Some(r#"fun batch(path: String) {
+        walkthrough: &[
+            "Files.readAllLines を使用して入力バッチを読み込む",
+            "jv build --binary jar で成果物を生成",
+        ],
+        code: Some(
+            r#"fun batch(path: String) {
     val lines = java.nio.file.Files.readAllLines(java.nio.file.Path.of(path))
     val results = evaluateBatch(lines) // List<Double>
     results.forEachIndexed { index, value ->
         println("${index + 1}: ${value}")
     }
 }
-"#),
-        verification: &["jv build --input tour/projects/calculator/src/main.jv --output target/jv/calculator/java --binary jar --bin-name calculator"],
+"#,
+        ),
+        verification: &[
+            "jv build --input tour/projects/calculator/src/main.jv --output target/jv/calculator/java --binary jar --bin-name calculator",
+        ],
     },
 ];

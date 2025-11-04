@@ -978,7 +978,7 @@ fun sample(input: String): Boolean {
         "generated Java should import Pattern: {java_source}"
     );
     assert!(
-        java_source.contains("Pattern.compile(\"\\d+\")"),
+        java_source.contains("Pattern.compile(\"\\\\d+\")"),
         "generated Java should compile the regex literal: {java_source}"
     );
 }
@@ -1014,8 +1014,8 @@ fn cli_check_reports_regex_diagnostics() {
         "regex diagnostic output should contain JV5102, got: {stderr}"
     );
     assert!(
-        stderr.contains("Regex literal"),
-        "regex diagnostic text should mention regex literal, got: {stderr}"
+        stderr.contains("Unsupported regex escape sequence"),
+        "regex diagnostic text should describe the escape error, got: {stderr}"
     );
 }
 
@@ -1706,12 +1706,25 @@ fn cli_all_subcommands_smoke_test() {
         .output()
         .expect("Failed to run jv build");
     assert!(build_output.status.success());
-    let generated_java: Vec<_> = fs::read_dir(&output_dir)
-        .expect("Failed to read build output")
-        .filter_map(|entry| entry.ok())
-        .map(|entry| entry.path())
-        .filter(|path| path.extension().and_then(|ext| ext.to_str()) == Some("java"))
-        .collect();
+    fn collect_java_files(dir: &Path) -> Vec<PathBuf> {
+        let mut java_files = Vec::new();
+        let mut stack = vec![dir.to_path_buf()];
+        while let Some(current) = stack.pop() {
+            if let Ok(entries) = fs::read_dir(&current) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.is_dir() {
+                        stack.push(path);
+                    } else if path.extension().and_then(|ext| ext.to_str()) == Some("java") {
+                        java_files.push(path);
+                    }
+                }
+            }
+        }
+        java_files
+    }
+
+    let generated_java = collect_java_files(&output_dir);
     assert!(
         !generated_java.is_empty(),
         "Expected generated Java files, build stdout: {}",
