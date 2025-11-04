@@ -37,7 +37,7 @@ pub(crate) fn detect_array_confidence(source: &str, offset: usize) -> Option<Jso
     match lookahead.peek() {
         Some(']') | Some('{') | Some('[') | Some('"') => return Some(JsonConfidence::High),
         Some('t') | Some('T') | Some('f') | Some('F') | Some('n') | Some('N') => {
-            return Some(JsonConfidence::Medium)
+            return Some(JsonConfidence::Medium);
         }
         Some('-') => return Some(JsonConfidence::Medium),
         Some(ch) if ch.is_ascii_digit() => return Some(JsonConfidence::Medium),

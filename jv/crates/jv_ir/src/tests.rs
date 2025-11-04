@@ -2,22 +2,22 @@
 mod tests {
     use crate::context::{RegisteredMethodCall, RegisteredMethodDeclaration, SequenceStyleCache};
     use crate::{
-        convert_type_annotation, desugar_async_expression, desugar_await_expression,
-        desugar_data_class, desugar_default_parameters, desugar_defer_expression,
-        desugar_elvis_operator, desugar_extension_function, desugar_named_arguments,
-        desugar_null_safe_index_access, desugar_null_safe_member_access, desugar_spawn_expression,
-        desugar_string_interpolation, desugar_top_level_function, desugar_use_expression,
-        desugar_val_declaration, desugar_var_declaration, desugar_when_expression,
-        generate_extension_class_name, generate_utility_class_name, infer_java_type,
-        naming::method_erasure::apply_method_erasure, transform_expression, transform_program,
-        transform_program_with_context, transform_program_with_context_profiled,
-        transform_statement, CompletableFutureOp, DataFormat, IrCaseLabel,
-        IrDeconstructionComponent, IrDeconstructionPattern, IrExpression, IrForEachKind,
-        IrForLoopMetadata, IrImplicitWhenEnd, IrModifiers, IrNumericRangeLoop, IrParameter,
-        IrResolvedMethodTarget, IrStatement, IrVisibility, JavaType, PipelineShape, SampleMode,
-        SampleSourceKind, Schema, SequencePipeline, SequenceSource, SequenceStage,
-        SequenceTerminal, SequenceTerminalEvaluation, SequenceTerminalKind, TransformContext,
-        TransformError, TransformPools, TransformProfiler, VirtualThreadOp,
+        CompletableFutureOp, DataFormat, IrCaseLabel, IrDeconstructionComponent,
+        IrDeconstructionPattern, IrExpression, IrForEachKind, IrForLoopMetadata, IrImplicitWhenEnd,
+        IrModifiers, IrNumericRangeLoop, IrParameter, IrResolvedMethodTarget, IrStatement,
+        IrVisibility, JavaType, PipelineShape, SampleMode, SampleSourceKind, Schema,
+        SequencePipeline, SequenceSource, SequenceStage, SequenceTerminal,
+        SequenceTerminalEvaluation, SequenceTerminalKind, TransformContext, TransformError,
+        TransformPools, TransformProfiler, VirtualThreadOp, convert_type_annotation,
+        desugar_async_expression, desugar_await_expression, desugar_data_class,
+        desugar_default_parameters, desugar_defer_expression, desugar_elvis_operator,
+        desugar_extension_function, desugar_named_arguments, desugar_null_safe_index_access,
+        desugar_null_safe_member_access, desugar_spawn_expression, desugar_string_interpolation,
+        desugar_top_level_function, desugar_use_expression, desugar_val_declaration,
+        desugar_var_declaration, desugar_when_expression, generate_extension_class_name,
+        generate_utility_class_name, infer_java_type, naming::method_erasure::apply_method_erasure,
+        transform_expression, transform_program, transform_program_with_context,
+        transform_program_with_context_profiled, transform_statement,
     };
     use jv_ast::*;
     use jv_parser_frontend::ParserPipeline;
@@ -795,10 +795,12 @@ mod tests {
                 assert_eq!(declaration.format, DataFormat::Json);
                 assert_eq!(declaration.mode, SampleMode::Embed);
                 assert_eq!(declaration.source_kind, SampleSourceKind::Inline);
-                assert!(declaration
-                    .embedded_data
-                    .as_ref()
-                    .is_some_and(|data| !data.is_empty()));
+                assert!(
+                    declaration
+                        .embedded_data
+                        .as_ref()
+                        .is_some_and(|data| !data.is_empty())
+                );
                 assert!(!declaration.records.is_empty());
 
                 let registered = context
@@ -3741,12 +3743,14 @@ fun sample(value: Any): Int {
             .expect("implicit assignment lowering should succeed");
 
         match lowered.as_slice() {
-            [IrStatement::VariableDeclaration {
-                name,
-                is_final,
-                java_type,
-                ..
-            }] => {
+            [
+                IrStatement::VariableDeclaration {
+                    name,
+                    is_final,
+                    java_type,
+                    ..
+                },
+            ] => {
                 assert_eq!(name, "greeting");
                 assert!(is_final, "implicit val declarations must be final");
                 assert_eq!(java_type, &JavaType::string());
@@ -3803,10 +3807,12 @@ fun sample(value: Any): Int {
             transform_statement(stmt, &mut context).expect("assignment lowering should succeed");
 
         match lowered.as_slice() {
-            [IrStatement::Expression {
-                expr: IrExpression::Assignment { .. },
-                ..
-            }] => {}
+            [
+                IrStatement::Expression {
+                    expr: IrExpression::Assignment { .. },
+                    ..
+                },
+            ] => {}
             other => panic!("expected assignment expression, got {:?}", other),
         }
     }
@@ -4466,9 +4472,11 @@ fun sample(value: Any): Int {
             construct: "goto statement".to_string(),
             span: span.clone(),
         };
-        assert!(unsupported_error
-            .to_string()
-            .contains("Unsupported construct"));
+        assert!(
+            unsupported_error
+                .to_string()
+                .contains("Unsupported construct")
+        );
 
         let pattern_error = TransformError::InvalidPattern {
             message: "Invalid range pattern".to_string(),

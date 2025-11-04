@@ -1,6 +1,6 @@
 use jv_ast::{
-    types::{PrimitiveTypeName, PrimitiveTypeReference, PrimitiveTypeSource, RawTypeContinuation},
     QualifiedName, RawTypeDirective, Span,
+    types::{PrimitiveTypeName, PrimitiveTypeReference, PrimitiveTypeSource, RawTypeContinuation},
 };
 use jv_lexer::{Token, TokenTrivia};
 

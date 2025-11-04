@@ -244,8 +244,8 @@ mod tests {
     use crate::constraint::IncrementalConstraintBuilder;
     use crate::constraint::{ConstraintGraph, GenericConstraintKind};
     use crate::types::{TypeId, TypeKind, TypeVariant};
-    use jv_ast::expression::Parameter;
     use jv_ast::ParameterModifiers;
+    use jv_ast::expression::Parameter;
 
     fn dummy_span(start: usize) -> Span {
         Span::new(start, 0, start, 5)

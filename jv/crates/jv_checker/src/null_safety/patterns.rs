@@ -1,8 +1,8 @@
-use jv_ast::types::Literal;
 use jv_ast::Expression;
 use jv_ast::Pattern;
+use jv_ast::types::Literal;
 
-use super::{graph::BranchAssumption, NullabilityKind};
+use super::{NullabilityKind, graph::BranchAssumption};
 
 /// Captures the nullability assumptions derived from matching a pattern.
 #[derive(Debug, Clone, Default)]

@@ -264,19 +264,11 @@ fn interpret_version_token(token: &str) -> Option<u32> {
 }
 
 fn javac_executable() -> &'static str {
-    if cfg!(windows) {
-        "javac.exe"
-    } else {
-        "javac"
-    }
+    if cfg!(windows) { "javac.exe" } else { "javac" }
 }
 
 fn java_executable() -> &'static str {
-    if cfg!(windows) {
-        "java.exe"
-    } else {
-        "java"
-    }
+    if cfg!(windows) { "java.exe" } else { "java" }
 }
 
 #[cfg(test)]

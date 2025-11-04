@@ -1,6 +1,6 @@
 use std::io::Write;
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use jv_parser_frontend::ParserPipeline;
 use jv_parser_rowan::frontend::RowanPipeline;
 
@@ -69,8 +69,7 @@ fn validate_jv(source: &str) -> Result<()> {
 const LESSONS: [LessonExample; 4] = [
     LessonExample {
         title: "Hello World と関数エントリ",
-        description:
-            "Rust で実装された CLI から jv の最小プログラムを実行するための土台を確認します。",
+        description: "Rust で実装された CLI から jv の最小プログラムを実行するための土台を確認します。",
         takeaways: &[
             "`fun main` がエントリポイントとして扱われる",
             "`println` は Java の `System.out.println` に変換される",
@@ -159,9 +158,11 @@ mod tests {
     #[test]
     fn hello_world_generates_system_out() {
         assert!(validate_jv(LESSONS[0].jv_code).is_ok());
-        assert!(LESSONS[0]
-            .java_output
-            .contains("System.out.println(\"Hello, jv!\");"));
+        assert!(
+            LESSONS[0]
+                .java_output
+                .contains("System.out.println(\"Hello, jv!\");")
+        );
     }
 
     #[test]

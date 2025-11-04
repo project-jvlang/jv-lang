@@ -5,8 +5,8 @@ use crate::transform::{
 };
 use crate::types::{IrExpression, IrProgram, IrResolvedMethodTarget, IrStatement, JavaType};
 use jv_ast::{
-    types::PrimitiveTypeName, Argument, BinaryOp, CallArgumentMetadata, CallArgumentStyle,
-    Expression, SequenceDelimiter, Span,
+    Argument, BinaryOp, CallArgumentMetadata, CallArgumentStyle, Expression, SequenceDelimiter,
+    Span, types::PrimitiveTypeName,
 };
 use serde::{Deserialize, Serialize};
 use std::mem;

@@ -70,13 +70,17 @@ fn test_string_interpolation_red_phase() {
 
     // Look for interpolation-related tokens
     let token_types: Vec<_> = tokens.iter().map(|t| &t.token_type).collect();
-    assert!(token_types
-        .iter()
-        .any(|t| matches!(t, TokenType::StringStart)));
+    assert!(
+        token_types
+            .iter()
+            .any(|t| matches!(t, TokenType::StringStart))
+    );
     assert!(token_types.contains(&&TokenType::Identifier("name".to_string())));
-    assert!(token_types
-        .iter()
-        .any(|t| matches!(t, TokenType::StringEnd)));
+    assert!(
+        token_types
+            .iter()
+            .any(|t| matches!(t, TokenType::StringEnd))
+    );
 }
 
 #[test]
@@ -312,6 +316,8 @@ val keep = 1
 /// drop
 val drop = 2
 //* star
+inside block
+*//
 val star = 3
 ";
     let mut lexer = Lexer::new(source.to_string());
@@ -326,7 +332,7 @@ val star = 3
     assert_eq!(keep_val.leading_trivia.passthrough_comments.len(), 1);
     assert_eq!(
         keep_val.leading_trivia.passthrough_comments[0].text,
-        "// keep"
+        "// keep\n"
     );
     assert!(keep_val.leading_trivia.jv_comments.is_empty());
 
@@ -334,13 +340,15 @@ val star = 3
     assert!(drop_val.leading_trivia.comments);
     assert!(drop_val.leading_trivia.passthrough_comments.is_empty());
     assert_eq!(drop_val.leading_trivia.jv_comments.len(), 1);
-    assert_eq!(drop_val.leading_trivia.jv_comments[0].text, "/// drop");
+    assert_eq!(drop_val.leading_trivia.jv_comments[0].text, "/// drop\n");
 
     let star_val = val_tokens.next().expect("expected third val token");
     assert!(star_val.leading_trivia.comments);
     assert!(star_val.leading_trivia.passthrough_comments.is_empty());
     assert_eq!(star_val.leading_trivia.jv_comments.len(), 1);
-    assert_eq!(star_val.leading_trivia.jv_comments[0].text, "//* star");
+    let block = &star_val.leading_trivia.jv_comments[0].text;
+    assert!(block.starts_with("//* star"));
+    assert!(block.trim_end().ends_with("*//"));
 }
 
 #[test]
@@ -393,7 +401,12 @@ val value = 1";
         .expect("expected val token after comment");
 
     assert!(val_token.leading_trivia.passthrough_comments.is_empty());
-    assert!(val_token.leading_trivia.jv_comments.is_empty());
+    assert_eq!(val_token.leading_trivia.jv_comments.len(), 1);
+    assert!(
+        val_token.leading_trivia.jv_comments[0]
+            .text
+            .contains("line in comment")
+    );
 }
 
 #[test]
@@ -422,15 +435,15 @@ fn test_javadoc_comment_trivia_pass_through() {
         .doc_comment
         .as_ref()
         .expect("javadoc should attach to following token");
-    assert!(doc_comment.starts_with("**"));
     assert!(doc_comment.contains("Sample doc."));
+    assert!(!doc_comment.contains("/**"));
     assert!(val_token.leading_trivia.comments);
     assert!(val_token.leading_trivia.json_comments.is_empty());
 }
 
 #[test]
 fn test_json_comment_trivia_attached_to_following_token() {
-    let source = "{ // user config\n  \"key\": 1 }";
+    let source = "{ //# user config\n  \"key\": 1 }";
     let mut lexer = Lexer::new(source.to_string());
     let tokens = lexer.tokenize().unwrap();
 
@@ -444,7 +457,7 @@ fn test_json_comment_trivia_attached_to_following_token() {
     let trivia = &string_token.leading_trivia.json_comments[0];
     assert_eq!(trivia.kind, JsonCommentTriviaKind::Line);
     assert_eq!(trivia.line, 1);
-    assert_eq!(trivia.text.trim(), "user config");
+    assert_eq!(trivia.text, "user config");
 }
 
 #[test]
@@ -493,9 +506,11 @@ fn test_block_brace_has_no_json_metadata() {
         .map(|token| token.metadata.iter().collect::<Vec<_>>())
         .unwrap_or_default();
 
-    assert!(brace_metadata
-        .iter()
-        .all(|metadata| !matches!(metadata, TokenMetadata::PotentialJsonStart { .. })));
+    assert!(
+        brace_metadata
+            .iter()
+            .all(|metadata| !matches!(metadata, TokenMetadata::PotentialJsonStart { .. }))
+    );
 }
 
 #[test]
@@ -644,12 +659,16 @@ fn test_range_tokens() {
     let mut lexer = Lexer::new(source.to_string());
     let tokens = lexer.tokenize().unwrap();
 
-    assert!(tokens
-        .iter()
-        .any(|t| matches!(t.token_type, TokenType::RangeExclusive)));
-    assert!(tokens
-        .iter()
-        .any(|t| matches!(t.token_type, TokenType::RangeInclusive)));
+    assert!(
+        tokens
+            .iter()
+            .any(|t| matches!(t.token_type, TokenType::RangeExclusive))
+    );
+    assert!(
+        tokens
+            .iter()
+            .any(|t| matches!(t.token_type, TokenType::RangeInclusive))
+    );
 }
 
 #[test]

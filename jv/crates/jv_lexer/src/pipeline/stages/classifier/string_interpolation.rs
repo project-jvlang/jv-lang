@@ -1,9 +1,9 @@
 use crate::{
+    LexError, StringDelimiterKind, TokenMetadata, TokenType,
     pipeline::{
         context::LexerContext,
         types::{EmissionPlan, NormalizedToken, RawTokenKind},
     },
-    LexError, StringDelimiterKind, TokenMetadata, TokenType,
 };
 
 use super::{ClassificationModule, ClassificationState};
