@@ -17,19 +17,19 @@ impl JavaCodeGenerator {
             SampleMode::Embed => self.embed_helper_class_name(declaration),
             SampleMode::Load => self.load_helper_class_name(declaration),
         };
-        let supports_bridge = supports_map_bridge(declaration);
+        let bridge_kinds = collect_bridge_kinds(declaration);
 
         if declaration.mode == SampleMode::Embed {
             let helper =
-                self.generate_sample_embed_helper(declaration, &helper_name, supports_bridge)?;
+                self.generate_sample_embed_helper(declaration, &helper_name, &bridge_kinds)?;
             artifacts.push(helper);
         } else if declaration.mode == SampleMode::Load {
             let helper =
-                self.generate_sample_load_helper(declaration, &helper_name, supports_bridge)?;
+                self.generate_sample_load_helper(declaration, &helper_name, bridge_kinds.clone())?;
             artifacts.push(helper);
         }
 
-        self.register_sample_binding_if_applicable(declaration, &helper_name, supports_bridge);
+        self.register_sample_binding_if_applicable(declaration, &helper_name, &bridge_kinds);
 
         Ok(artifacts)
     }
@@ -83,7 +83,7 @@ impl JavaCodeGenerator {
         &mut self,
         declaration: &IrSampleDeclaration,
         helper_name: &str,
-        include_map_bridge: bool,
+        bridge_kinds: &[SampleBridgeKind],
     ) -> Result<String, CodeGenError> {
         let data_bytes = declaration.embedded_data.as_ref().ok_or_else(|| {
             CodeGenError::UnsupportedConstruct {
@@ -184,11 +184,7 @@ impl JavaCodeGenerator {
         };
 
         let mut methods = Vec::new();
-        if include_map_bridge {
-            if let Some(method) = build_map_bridge_method(declaration) {
-                methods.push(method);
-            }
-        }
+        append_bridge_methods(declaration, bridge_kinds, &mut methods);
 
         let class_statement = IrStatement::ClassDeclaration {
             name: helper_name.to_string(),
@@ -212,7 +208,7 @@ impl JavaCodeGenerator {
         &mut self,
         declaration: &IrSampleDeclaration,
         helper_name: &str,
-        include_map_bridge: bool,
+        bridge_kinds: Vec<SampleBridgeKind>,
     ) -> Result<String, CodeGenError> {
         let descriptor_lookup = Self::build_descriptor_lookup(&declaration.records);
         let object_schema_map = self.build_object_schema_map(
@@ -236,7 +232,7 @@ impl JavaCodeGenerator {
             list_types,
             helper_name.to_string(),
             self.load_method_name(declaration),
-            include_map_bridge,
+            bridge_kinds,
         )?;
 
         generator.build()
@@ -939,9 +935,9 @@ impl JavaCodeGenerator {
         &mut self,
         declaration: &IrSampleDeclaration,
         helper_class: &str,
-        supports_map_bridge: bool,
+        bridge_kinds: &[SampleBridgeKind],
     ) {
-        if !supports_map_bridge {
+        if bridge_kinds.is_empty() {
             return;
         }
 
@@ -949,7 +945,7 @@ impl JavaCodeGenerator {
             declaration.variable_name.clone(),
             SampleBindingInfo {
                 helper_class: helper_class.to_string(),
-                bridge_kind: SampleBridgeKind::Map,
+                bridges: bridge_kinds.to_vec(),
             },
         );
     }
@@ -1128,7 +1124,7 @@ struct LoadHelperGenerator<'a> {
     helper_name: String,
     method_name: String,
     return_type: String,
-    include_map_bridge: bool,
+    bridge_kinds: Vec<SampleBridgeKind>,
 }
 
 impl<'a> LoadHelperGenerator<'a> {
@@ -1140,7 +1136,7 @@ impl<'a> LoadHelperGenerator<'a> {
         list_types: Vec<ListTypeInfo>,
         helper_name: String,
         method_name: String,
-        include_map_bridge: bool,
+        bridge_kinds: Vec<SampleBridgeKind>,
     ) -> Result<Self, CodeGenError> {
         let return_type = generator.generate_type(&declaration.java_type)?;
         let builder = generator.builder();
@@ -1155,7 +1151,7 @@ impl<'a> LoadHelperGenerator<'a> {
             helper_name,
             method_name,
             return_type,
-            include_map_bridge,
+            bridge_kinds,
         })
     }
 
@@ -2192,14 +2188,20 @@ impl<'a> LoadHelperGenerator<'a> {
     }
 
     fn write_bridge_methods(&mut self) -> Result<(), CodeGenError> {
-        if !self.include_map_bridge {
+        if self.bridge_kinds.is_empty() {
             return Ok(());
         }
 
-        if let Some(method) = build_map_bridge_method(self.declaration) {
-            let method_code = self.generator.generate_method(&method)?;
-            self.builder.push_line("");
-            self.builder.push(&method_code);
+        for kind in &self.bridge_kinds {
+            let maybe_method = match kind {
+                SampleBridgeKind::MapFromRecord => build_map_bridge_method(self.declaration),
+                _ => build_collection_bridge_method(self.declaration, *kind),
+            };
+            if let Some(method) = maybe_method {
+                let method_code = self.generator.generate_method(&method)?;
+                self.builder.push_line("");
+                self.builder.push(&method_code);
+            }
         }
 
         Ok(())
@@ -2837,11 +2839,6 @@ impl<'a> LoadHelperGenerator<'a> {
     }
 }
 
-fn supports_map_bridge(declaration: &IrSampleDeclaration) -> bool {
-    matches!(declaration.schema, Schema::Object { .. })
-        && root_record_descriptor(declaration).is_some()
-}
-
 fn root_record_descriptor<'a>(
     declaration: &'a IrSampleDeclaration,
 ) -> Option<&'a SampleRecordDescriptor> {
@@ -2949,6 +2946,137 @@ fn build_map_bridge_method(declaration: &IrSampleDeclaration) -> Option<IrStatem
         throws: Vec::new(),
         span,
     })
+}
+
+fn build_collection_bridge_method(
+    declaration: &IrSampleDeclaration,
+    kind: SampleBridgeKind,
+) -> Option<IrStatement> {
+    let target_class = kind.target_class_name()?;
+    let span = declaration.span.clone();
+    let param_type = declaration.java_type.clone();
+    let return_type = replace_reference_name(&param_type, target_class)?;
+
+    let constructor_arg = IrExpression::Identifier {
+        name: "sample".to_string(),
+        java_type: param_type.clone(),
+        span: span.clone(),
+    };
+
+    let generic_args = match &return_type {
+        JavaType::Reference { generic_args, .. } => generic_args.clone(),
+        _ => Vec::new(),
+    };
+
+    let object_creation = IrExpression::ObjectCreation {
+        class_name: target_class.to_string(),
+        generic_args,
+        args: vec![constructor_arg],
+        java_type: return_type.clone(),
+        span: span.clone(),
+    };
+
+    let statements = vec![IrStatement::Return {
+        value: Some(object_creation),
+        span: span.clone(),
+    }];
+
+    let body = IrExpression::Block {
+        statements,
+        java_type: return_type.clone(),
+        span: span.clone(),
+    };
+
+    Some(IrStatement::MethodDeclaration {
+        name: kind.method_name().to_string(),
+        java_name: None,
+        type_parameters: Vec::new(),
+        parameters: vec![IrParameter {
+            name: "sample".to_string(),
+            java_type: param_type,
+            modifiers: IrModifiers::default(),
+            span: span.clone(),
+        }],
+        primitive_return: None,
+        return_type,
+        body: Some(body),
+        modifiers: IrModifiers {
+            visibility: IrVisibility::Public,
+            is_static: true,
+            ..IrModifiers::default()
+        },
+        throws: Vec::new(),
+        span,
+    })
+}
+
+fn append_bridge_methods(
+    declaration: &IrSampleDeclaration,
+    bridge_kinds: &[SampleBridgeKind],
+    methods: &mut Vec<IrStatement>,
+) {
+    for kind in bridge_kinds {
+        match kind {
+            SampleBridgeKind::MapFromRecord => {
+                if let Some(method) = build_map_bridge_method(declaration) {
+                    methods.push(method);
+                }
+            }
+            _ => {
+                if let Some(method) = build_collection_bridge_method(declaration, *kind) {
+                    methods.push(method);
+                }
+            }
+        }
+    }
+}
+
+fn collect_bridge_kinds(declaration: &IrSampleDeclaration) -> Vec<SampleBridgeKind> {
+    let mut kinds = Vec::new();
+    if matches!(declaration.schema, Schema::Object { .. })
+        && root_record_descriptor(declaration).is_some()
+    {
+        kinds.push(SampleBridgeKind::MapFromRecord);
+    }
+
+    if let Some(kind) = collection_bridge_kind(&declaration.java_type) {
+        kinds.push(kind);
+    }
+
+    kinds
+}
+
+fn collection_bridge_kind(java_type: &JavaType) -> Option<SampleBridgeKind> {
+    let base = reference_base_name(java_type)?;
+    if is_list_like_name(base) {
+        return Some(SampleBridgeKind::ListLike);
+    }
+    if matches!(base, "java.util.Set" | "java.util.LinkedHashSet") {
+        return Some(SampleBridgeKind::SetLike);
+    }
+    if matches!(
+        base,
+        "java.util.SortedSet" | "java.util.NavigableSet" | "java.util.TreeSet"
+    ) {
+        return Some(SampleBridgeKind::SortedSetLike);
+    }
+    if base == "java.util.Queue" {
+        return Some(SampleBridgeKind::QueueLike);
+    }
+    if matches!(base, "java.util.Deque" | "java.util.ArrayDeque") {
+        return Some(SampleBridgeKind::DequeLike);
+    }
+    None
+}
+
+fn replace_reference_name(java_type: &JavaType, new_name: &str) -> Option<JavaType> {
+    match java_type {
+        JavaType::Reference { generic_args, .. } => Some(JavaType::Reference {
+            name: new_name.to_string(),
+            generic_args: generic_args.clone(),
+        }),
+        _ => None,
+    }
 }
 
 fn unwrap_schema_optional<'a>(schema: &'a Schema) -> (&'a Schema, bool) {

@@ -29,6 +29,16 @@ fn java_array_list_of_string() -> JavaType {
     }
 }
 
+fn java_list_of_string() -> JavaType {
+    JavaType::Reference {
+        name: "java.util.List".to_string(),
+        generic_args: vec![JavaType::Reference {
+            name: "java.lang.String".to_string(),
+            generic_args: Vec::new(),
+        }],
+    }
+}
+
 fn java_user_type() -> JavaType {
     JavaType::Reference {
         name: "com.example.ImmutableUser".to_string(),
@@ -258,4 +268,36 @@ fn doublebrace_mutate_preserves_generic_receiver_in_java() {
 
     assert_eq!(render(&expr, JavaTarget::Java25), expected);
     assert_eq!(render(&expr, JavaTarget::Java21), expected);
+}
+
+#[test]
+fn doublebrace_base_wraps_collection_to_expected_receiver() {
+    let span = span();
+    let receiver_type = java_array_list_of_string();
+    let base_expr = IrExpression::Identifier {
+        name: "menu".to_string(),
+        java_type: java_list_of_string(),
+        span: span.clone(),
+    };
+
+    let expr = IrExpression::DoublebraceInit {
+        base: Some(Box::new(base_expr)),
+        receiver_type: receiver_type.clone(),
+        plan: IrDoublebracePlan::Mutate(IrDoublebraceMutatePlan {
+            base: DoublebraceBaseStrategy::ExistingInstance,
+            steps: Vec::new(),
+        }),
+        java_type: receiver_type,
+        span,
+    };
+
+    let mut generator = JavaCodeGenerator::new();
+    let rendered = generator
+        .generate_expression(&expr)
+        .expect("collection base should be converted");
+    assert!(
+        rendered.contains("new java.util.ArrayList"),
+        "doublebrace base should wrap expression in concrete type: {}",
+        rendered
+    );
 }

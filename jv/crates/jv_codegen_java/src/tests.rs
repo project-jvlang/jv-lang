@@ -2375,6 +2375,29 @@ fn inline_json_sample_exposes_map_bridge_method() {
 }
 
 #[test]
+fn sample_declaration_exposes_list_bridge_method() {
+    let declaration = sample_declaration(vec![sample_record_descriptor()]);
+    let program = IrProgram {
+        package: Some("sample.list".to_string()),
+        imports: vec![],
+        type_declarations: vec![IrStatement::SampleDeclaration(declaration)],
+        generic_metadata: Default::default(),
+        conversion_metadata: Vec::new(),
+        span: dummy_span(),
+    };
+
+    let unit = generate_java_code(&program).expect("generate Java for list bridge helper");
+
+    let helper = unit
+        .type_declarations
+        .iter()
+        .find(|decl| decl.contains("toMutableList"))
+        .expect("helper class should expose list bridge");
+
+    assert!(helper.contains("class"), "bridge should live in helper class");
+}
+
+#[test]
 fn embed_mode_sample_declaration_handles_csv() {
     let declaration = sample_declaration_csv();
     let program = IrProgram {

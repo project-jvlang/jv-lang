@@ -21,6 +21,11 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
 const MAP_BRIDGE_METHOD_NAME: &str = "toMutableMap";
+const LIST_BRIDGE_METHOD_NAME: &str = "toMutableList";
+const SET_BRIDGE_METHOD_NAME: &str = "toMutableSet";
+const SORTED_SET_BRIDGE_METHOD_NAME: &str = "toMutableSortedSet";
+const QUEUE_BRIDGE_METHOD_NAME: &str = "toMutableQueue";
+const DEQUE_BRIDGE_METHOD_NAME: &str = "toMutableDeque";
 
 mod declarations;
 mod expressions;
@@ -842,10 +847,15 @@ impl JavaCodeGenerator {
         let rendered = self.generate_expression(expr)?;
         if let Some(name) = Self::sample_identifier_name(expr) {
             if let Some(binding) = self.sample_bindings.get(name) {
-                if binding.should_bridge(receiver_type) {
-                    return Ok(binding.render_bridge_call(&rendered));
+                if let Some(call) = binding.bridge_call(receiver_type, &rendered) {
+                    return Ok(call);
                 }
             }
+        }
+        if let Some(converted) =
+            self.maybe_convert_collection_base(expr, receiver_type, &rendered)?
+        {
+            return Ok(converted);
         }
         Ok(rendered)
     }
@@ -856,6 +866,32 @@ impl JavaCodeGenerator {
         } else {
             None
         }
+    }
+
+    fn maybe_convert_collection_base(
+        &mut self,
+        expr: &IrExpression,
+        receiver_type: &JavaType,
+        base_expr: &str,
+    ) -> Result<Option<String>, CodeGenError> {
+        let Some(target_base) = collection_copy_instantiation(receiver_type) else {
+            return Ok(None);
+        };
+
+        let Some(expr_type) = Self::expression_java_type(expr) else {
+            return Ok(None);
+        };
+
+        if let Some(expr_base) = reference_base_name(expr_type) {
+            if expr_base == target_base {
+                return Ok(None);
+            }
+
+            let rendered_type = self.generate_type(receiver_type)?;
+            return Ok(Some(format!("new {}({})", rendered_type, base_expr)));
+        }
+
+        Ok(None)
     }
 
     fn collect_mutable_captures_in_doublebrace(
@@ -1723,52 +1759,125 @@ impl JavaCodeGenerator {
 #[derive(Debug, Clone)]
 struct SampleBindingInfo {
     helper_class: String,
-    bridge_kind: SampleBridgeKind,
+    bridges: Vec<SampleBridgeKind>,
 }
 
 impl SampleBindingInfo {
-    fn should_bridge(&self, receiver_type: &JavaType) -> bool {
-        match self.bridge_kind {
-            SampleBridgeKind::Map => SampleBridgeKind::is_map_like(receiver_type),
-        }
-    }
-
-    fn render_bridge_call(&self, base_expr: &str) -> String {
-        format!(
-            "{}.{}({})",
-            self.helper_class,
-            self.bridge_kind.method_name(),
-            base_expr
-        )
+    fn bridge_call(&self, receiver_type: &JavaType, base_expr: &str) -> Option<String> {
+        self.bridges
+            .iter()
+            .find(|kind| kind.matches_receiver(receiver_type))
+            .map(|kind| {
+                format!(
+                    "{}.{}({})",
+                    self.helper_class,
+                    kind.method_name(),
+                    base_expr
+                )
+            })
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SampleBridgeKind {
-    Map,
+    MapFromRecord,
+    ListLike,
+    SetLike,
+    SortedSetLike,
+    QueueLike,
+    DequeLike,
 }
 
 impl SampleBridgeKind {
     fn method_name(self) -> &'static str {
-        MAP_BRIDGE_METHOD_NAME
+        match self {
+            SampleBridgeKind::MapFromRecord => MAP_BRIDGE_METHOD_NAME,
+            SampleBridgeKind::ListLike => LIST_BRIDGE_METHOD_NAME,
+            SampleBridgeKind::SetLike => SET_BRIDGE_METHOD_NAME,
+            SampleBridgeKind::SortedSetLike => SORTED_SET_BRIDGE_METHOD_NAME,
+            SampleBridgeKind::QueueLike => QUEUE_BRIDGE_METHOD_NAME,
+            SampleBridgeKind::DequeLike => DEQUE_BRIDGE_METHOD_NAME,
+        }
     }
 
-    fn is_map_like(java_type: &JavaType) -> bool {
-        if let JavaType::Reference { name, .. } = java_type {
-            let base = name.split('<').next().unwrap_or(name.as_str()).trim();
-            matches!(
-                base,
-                "java.util.Map"
-                    | "java.util.LinkedHashMap"
-                    | "java.util.HashMap"
-                    | "java.util.TreeMap"
-                    | "java.util.SortedMap"
-                    | "java.util.NavigableMap"
-                    | "java.util.concurrent.ConcurrentMap"
-            )
+    fn target_class_name(self) -> Option<&'static str> {
+        match self {
+            SampleBridgeKind::MapFromRecord => None,
+            SampleBridgeKind::ListLike => Some("java.util.ArrayList"),
+            SampleBridgeKind::SetLike => Some("java.util.LinkedHashSet"),
+            SampleBridgeKind::SortedSetLike => Some("java.util.TreeSet"),
+            SampleBridgeKind::QueueLike | SampleBridgeKind::DequeLike => {
+                Some("java.util.ArrayDeque")
+            }
+        }
+    }
+
+    fn matches_receiver(self, receiver_type: &JavaType) -> bool {
+        if let Some(base) = reference_base_name(receiver_type) {
+            match self {
+                SampleBridgeKind::MapFromRecord => is_map_like_name(base),
+                SampleBridgeKind::ListLike => is_list_like_name(base),
+                SampleBridgeKind::SetLike => {
+                    base == "java.util.Set" || base == "java.util.LinkedHashSet"
+                }
+                SampleBridgeKind::SortedSetLike => {
+                    base == "java.util.SortedSet"
+                        || base == "java.util.NavigableSet"
+                        || base == "java.util.TreeSet"
+                }
+                SampleBridgeKind::QueueLike => {
+                    base == "java.util.Queue" || base == "java.util.ArrayDeque"
+                }
+                SampleBridgeKind::DequeLike => {
+                    base == "java.util.Deque" || base == "java.util.ArrayDeque"
+                }
+            }
         } else {
             false
         }
+    }
+}
+
+pub(super) fn reference_base_name(java_type: &JavaType) -> Option<&str> {
+    if let JavaType::Reference { name, .. } = java_type {
+        Some(name.split('<').next().unwrap_or(name).trim())
+    } else {
+        None
+    }
+}
+
+pub(super) fn is_map_like_name(base: &str) -> bool {
+    matches!(
+        base,
+        "java.util.Map"
+            | "java.util.LinkedHashMap"
+            | "java.util.HashMap"
+            | "java.util.TreeMap"
+            | "java.util.SortedMap"
+            | "java.util.NavigableMap"
+            | "java.util.concurrent.ConcurrentMap"
+    )
+}
+
+pub(super) fn is_list_like_name(base: &str) -> bool {
+    matches!(
+        base,
+        "java.util.List"
+            | "java.util.ArrayList"
+            | "java.util.LinkedList"
+            | "java.util.Collection"
+            | "java.lang.Iterable"
+    )
+}
+
+fn collection_copy_instantiation(receiver_type: &JavaType) -> Option<&'static str> {
+    let base = reference_base_name(receiver_type)?;
+    match base {
+        "java.util.ArrayList" => Some("java.util.ArrayList"),
+        "java.util.LinkedHashSet" => Some("java.util.LinkedHashSet"),
+        "java.util.LinkedHashMap" => Some("java.util.LinkedHashMap"),
+        "java.util.ArrayDeque" => Some("java.util.ArrayDeque"),
+        _ => None,
     }
 }
 
