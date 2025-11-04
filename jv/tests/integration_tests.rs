@@ -559,8 +559,14 @@ include = ["src/**/*.jv"]
     );
 
     let java_source = fs::read_to_string(&java_files[0]).expect("Failed to read Java output");
-    assert!(java_source.contains("Generated"));
-    assert!(java_source.contains("message"));
+    assert!(
+        java_source.contains("class CliMain"),
+        "generated Java should declare CliMain: {java_source}"
+    );
+    assert!(
+        java_source.contains("Sequence output"),
+        "generated Java should include the formatted message string: {java_source}"
+    );
 }
 
 #[test]
@@ -1911,9 +1917,10 @@ fn sequence_stream_casts_compile_successfully() {
     );
 
     let stdout = String::from_utf8_lossy(&output.stdout);
+    let normalized = stdout.replace("\r\n", "\n");
     let expected = "[lexer-module, parser-module, ast-module, codegen-module]\n[lexer-module, parser-module, ast-module, codegen-module]";
     assert_eq!(
-        stdout.trim(),
+        normalized.trim(),
         expected,
         "unexpected output from sequence stream cast fixture"
     );

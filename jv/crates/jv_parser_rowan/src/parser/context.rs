@@ -601,6 +601,12 @@ impl<'tokens> ParserContext<'tokens> {
             if kind == TokenKind::Eof {
                 break;
             }
+            if kind == TokenKind::IfKw {
+                let message = "JV3103: jv 言語では `if`/`else` 式はサポートされていません。`when` を使用してください。";
+                self.report_error(message, self.cursor, self.cursor + 1);
+                self.bump_raw();
+                break;
+            }
             let at_top_level = depth_paren == 0 && depth_brace == 0 && depth_bracket == 0;
             if at_top_level && terminators.contains(&kind) {
                 break;

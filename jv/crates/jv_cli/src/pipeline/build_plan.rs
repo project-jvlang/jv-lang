@@ -54,6 +54,7 @@ pub struct CliOverrides {
 pub struct BuildOptions {
     pub entrypoint: PathBuf,
     pub output_dir: PathBuf,
+    pub output_override: bool,
     pub java_only: bool,
     pub check: bool,
     pub format: bool,
@@ -87,6 +88,7 @@ impl BuildPlan {
     pub fn with_output_dir(&self, output_dir: PathBuf) -> Self {
         let mut clone = self.clone();
         clone.options.output_dir = output_dir.clone();
+        // Preserve whether the user explicitly overrode the output directory.
         clone.build_config.output_dir = stringify_path(&output_dir);
         clone
     }
@@ -125,7 +127,9 @@ impl BuildOptionsFactory {
         } = overrides;
 
         let entrypoint = resolve_entrypoint(&root, &layout, entry_override)?;
-        let output_dir = resolve_output_dir(&root, &settings.output, output_override)?;
+        let output_override_applied = output_override.is_some();
+        let output_dir =
+            resolve_output_dir(&root, &settings.output, output_override.clone())?;
         let target = target.unwrap_or_else(|| settings.manifest.java_target());
 
         let mut build_config = BuildConfig::with_target(target);
@@ -147,6 +151,7 @@ impl BuildOptionsFactory {
         let options = BuildOptions {
             entrypoint,
             output_dir,
+            output_override: output_override_applied,
             java_only,
             check: check_flag || emit_types,
             format: format_flag,
@@ -242,11 +247,13 @@ fn resolve_output_dir(
     override_path: Option<PathBuf>,
 ) -> Result<PathBuf, EnhancedDiagnostic> {
     let candidate = match override_path {
-        Some(path) => absolutize(&path)?,
+        Some(ref path) => absolutize(path)?,
         None => root.join(&output.directory),
     };
 
-    guard_within_root(root.root_dir(), &candidate)?;
+    if override_path.is_none() {
+        guard_within_root(root.root_dir(), &candidate)?;
+    }
     Ok(candidate)
 }
 
@@ -327,13 +334,25 @@ fn same_file(lhs: &Path, rhs: &Path) -> bool {
 }
 
 fn path_within(root: &Path, candidate: &Path) -> bool {
-    let Ok(root_canonical) = fs::canonicalize(root) else {
+    let Some(root_canonical) = canonicalize_allowing_missing(root) else {
         return false;
     };
+    let Some(candidate_canonical) = canonicalize_allowing_missing(candidate) else {
+        return candidate.starts_with(root);
+    };
+    candidate_canonical.starts_with(&root_canonical)
+}
 
-    match fs::canonicalize(candidate) {
-        Ok(candidate) => candidate.starts_with(&root_canonical),
-        Err(_) => candidate.starts_with(root),
+fn canonicalize_allowing_missing(path: &Path) -> Option<PathBuf> {
+    match fs::canonicalize(path) {
+        Ok(resolved) => Some(resolved),
+        Err(_) => {
+            let parent = path.parent()?;
+            let mut base = canonicalize_allowing_missing(parent)?;
+            let component = path.file_name()?.to_owned();
+            base.push(component);
+            Some(base)
+        }
     }
 }
 
