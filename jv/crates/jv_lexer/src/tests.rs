@@ -1438,6 +1438,8 @@ fn classifier_resolves_keywords_and_identifiers() {
         span: span_with_len(3),
         trivia: None,
         carry_over: None,
+        field_label: None,
+        field_label_issue: None,
     };
     let normalized_keyword = pipeline::NormalizedToken::new(
         raw_keyword,
@@ -1457,6 +1459,8 @@ fn classifier_resolves_keywords_and_identifiers() {
         span: span_with_len(5),
         trivia: None,
         carry_over: None,
+        field_label: None,
+        field_label_issue: None,
     };
     let normalized_identifier = pipeline::NormalizedToken::new(
         raw_identifier,
@@ -1500,6 +1504,8 @@ fn classifier_marks_string_interpolation_plan() {
         span: span_with_len(source.len()),
         trivia: Some(TokenTrivia::default()),
         carry_over: None,
+        field_label: None,
+        field_label_issue: None,
     };
     let normalized = pipeline::NormalizedToken::new(raw, source.to_string(), metadata);
     let classified = classifier
@@ -1538,6 +1544,8 @@ fn emitter_merges_comment_carry_into_trivia() {
         span: span_with_len(5),
         trivia: Some(TokenTrivia::default()),
         carry_over: None,
+        field_label: None,
+        field_label_issue: None,
     };
     let normalized =
         pipeline::NormalizedToken::new(raw, "value".to_string(), pipeline::PreMetadata::default());

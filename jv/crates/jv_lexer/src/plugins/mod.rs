@@ -25,6 +25,8 @@ mod tests {
             span: Span::empty(Default::default()),
             trivia: None,
             carry_over: None,
+            field_label: None,
+            field_label_issue: None,
         }
     }
 

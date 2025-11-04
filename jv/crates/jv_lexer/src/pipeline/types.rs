@@ -1,8 +1,8 @@
 use std::ops::Range;
 
 use crate::{
-    CommentCarryOverMetadata, StringInterpolationSegment, TokenDiagnostic, TokenMetadata,
-    TokenTrivia, TokenType,
+    CommentCarryOverMetadata, FieldNameLabelCandidate, FieldNameLabelIssue,
+    StringInterpolationSegment, TokenDiagnostic, TokenMetadata, TokenTrivia, TokenType,
 };
 
 /// ソース全体に対する位置情報を表す。
@@ -77,6 +77,8 @@ pub struct RawToken<'source> {
     pub span: Span,
     pub trivia: Option<TokenTrivia>,
     pub carry_over: Option<CommentCarryOverMetadata>,
+    pub field_label: Option<FieldNameLabelCandidate>,
+    pub field_label_issue: Option<FieldNameLabelIssue>,
 }
 
 impl<'source> RawToken<'source> {
