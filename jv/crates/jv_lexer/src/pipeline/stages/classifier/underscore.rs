@@ -224,6 +224,30 @@ mod tests {
     }
 
     #[test]
+    fn classifies_minimum_valid_implicit_parameter() {
+        let (token_type, metadata, diagnostics) = classify("_1");
+        assert!(diagnostics.is_empty());
+        assert!(matches!(token_type, Some(TokenType::ImplicitParam(1))));
+        assert!(metadata.iter().any(|meta| matches!(
+            meta,
+            TokenMetadata::UnderscoreInfo(info)
+            if info.is_implicit && info.number == Some(1)
+        )));
+    }
+
+    #[test]
+    fn classifies_three_digit_implicit_parameter() {
+        let (token_type, metadata, diagnostics) = classify("_999");
+        assert!(diagnostics.is_empty());
+        assert!(matches!(token_type, Some(TokenType::ImplicitParam(999))));
+        assert!(metadata.iter().any(|meta| matches!(
+            meta,
+            TokenMetadata::UnderscoreInfo(info)
+            if info.is_implicit && info.number == Some(999)
+        )));
+    }
+
+    #[test]
     fn rejects_leading_zero() {
         let (token_type, metadata, diagnostics) = classify("_0");
         assert!(matches!(token_type, Some(TokenType::Invalid(value)) if value == "_0"));
@@ -253,6 +277,18 @@ mod tests {
                 suggested: None
             }]
         ));
+    }
+
+    #[test]
+    fn ignores_mixed_alphanumeric_pattern() {
+        let (token_type, metadata, diagnostics) = classify("_1value");
+        assert!(token_type.is_none(), "識別子として扱われるべきケース");
+        assert!(
+            metadata
+                .iter()
+                .all(|meta| !matches!(meta, TokenMetadata::UnderscoreInfo(_)))
+        );
+        assert!(diagnostics.is_empty());
     }
 
     #[test]

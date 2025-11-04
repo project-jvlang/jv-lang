@@ -323,6 +323,118 @@ fn invalid_implicit_param_emits_token_diagnostic() {
 }
 
 #[test]
+fn lex_wildcard_and_multiple_implicit_params() {
+    let source = "_ _1 _999";
+    let mut lexer = Lexer::new(source.to_string());
+    let tokens = lexer
+        .tokenize()
+        .expect("暗黙引数の列を含むソースの字句解析に失敗しました");
+
+    let essential: Vec<TokenType> = tokens
+        .iter()
+        .filter_map(|token| match &token.token_type {
+            TokenType::Whitespace(_) | TokenType::Newline => None,
+            other => Some(other.clone()),
+        })
+        .collect();
+
+    assert!(matches!(essential.get(0), Some(TokenType::Underscore)));
+    assert!(matches!(
+        essential.get(1),
+        Some(TokenType::ImplicitParam(1))
+    ));
+    assert!(matches!(
+        essential.get(2),
+        Some(TokenType::ImplicitParam(999))
+    ));
+    assert!(matches!(essential.last(), Some(TokenType::Eof)));
+}
+
+#[test]
+fn alphanumeric_suffix_remains_identifier() {
+    let source = "_1value";
+    let mut lexer = Lexer::new(source.to_string());
+    let tokens = lexer
+        .tokenize()
+        .expect("英数字混合識別子の字句解析に失敗しました");
+
+    let identifier = tokens
+        .iter()
+        .find(|token| matches!(token.token_type, TokenType::Identifier(_)))
+        .expect("識別子トークンが見つかりません");
+    assert!(matches!(identifier.token_type, TokenType::Identifier(ref name) if name == "_1value"));
+    assert!(
+        tokens
+            .iter()
+            .all(|token| !matches!(token.token_type, TokenType::ImplicitParam(_)))
+    );
+}
+
+#[test]
+fn underscores_inside_strings_remain_literals() {
+    let source = "\"prefix _1 suffix\"";
+    let mut lexer = Lexer::new(source.to_string());
+    let tokens = lexer
+        .tokenize()
+        .expect("文字列リテラルの字句解析に失敗しました");
+
+    assert!(tokens.iter().any(|token| {
+        matches!(token.token_type, TokenType::String(ref value) if value.contains("_1"))
+    }));
+    assert!(
+        tokens
+            .iter()
+            .all(|token| !matches!(token.token_type, TokenType::ImplicitParam(_)))
+    );
+}
+
+#[test]
+fn underscores_inside_comments_do_not_emit_tokens() {
+    let source = "// _3は無視\n_4";
+    let mut lexer = Lexer::new(source.to_string());
+    let tokens = lexer
+        .tokenize()
+        .expect("コメントを含むソースの字句解析に失敗しました");
+
+    assert!(tokens.iter().any(|token| matches!(
+        token.token_type,
+        TokenType::LineComment(ref text) if text.contains("_3")
+    )));
+    assert!(
+        tokens
+            .iter()
+            .filter(|token| matches!(token.token_type, TokenType::ImplicitParam(_)))
+            .count()
+            == 1
+    );
+}
+
+#[test]
+fn overflow_implicit_param_emits_diagnostic() {
+    let source = "_4294967296";
+    let mut lexer = Lexer::new(source.to_string());
+    let tokens = lexer
+        .tokenize()
+        .expect("オーバーフロー検証用ソースの字句解析に失敗しました");
+
+    let invalid_token = tokens
+        .iter()
+        .find(|token| matches!(&token.token_type, TokenType::Invalid(value) if value == "_4294967296"))
+        .expect("オーバーフロー診断トークンが見つかりません");
+    let diagnostic = invalid_token
+        .diagnostic
+        .as_ref()
+        .expect("診断が添付されていません");
+    match diagnostic {
+        TokenDiagnostic::InvalidImplicitParam { reason, suggested } => {
+            assert_eq!(*reason, InvalidImplicitParamReason::Overflow);
+            assert!(suggested.is_none());
+        }
+        other => panic!("想定外の診断: {other:?}"),
+    }
+}
+
+#[test]
 fn test_arithmetic_operators_red_phase() {
     // RED: This test should fail
     let mut lexer = Lexer::new("a + b - c * d / e % f".to_string());
