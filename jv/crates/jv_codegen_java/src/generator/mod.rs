@@ -24,6 +24,7 @@ mod expressions;
 mod formatting;
 mod sample;
 mod statements;
+mod tests;
 mod types;
 
 pub use types::ErasurePlan;

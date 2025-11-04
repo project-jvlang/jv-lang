@@ -173,6 +173,115 @@ fn parse_program(source: &str) -> IrProgram {
     transform_program_with_context(program, &mut context).expect("program should lower to IR")
 }
 
+#[test]
+fn generates_junit_imports_for_simple_test_class() {
+    let source = r#"
+        test "basic equality" {
+            sum = 40 + 2
+            sum == 42
+        }
+    "#;
+
+    let ir_program = parse_program(source);
+    let mut generator = JavaCodeGenerator::new();
+    let unit = generator
+        .generate_compilation_unit(&ir_program)
+        .expect("code generation should succeed");
+
+    assert!(
+        unit.imports
+            .iter()
+            .any(|import| import == "org.junit.jupiter.api.*"),
+        "JUnit API import should be present: {:?}",
+        unit.imports
+    );
+    assert!(
+        unit.imports
+            .iter()
+            .all(|import| !import.starts_with("org.junit.jupiter.params")),
+        "Parameterized imports should not be added for simple tests"
+    );
+
+    let java_source = unit.to_source(&JavaCodeGenConfig::default());
+    assert!(
+        java_source.contains("@Test"),
+        "Generated source should include @Test:\n{java_source}"
+    );
+    assert!(
+        java_source.contains("@DisplayName"),
+        "Generated source should include @DisplayName:\n{java_source}"
+    );
+    assert!(
+        java_source.contains("Assertions.assertEquals"),
+        "Assertions should be rendered:\n{java_source}"
+    );
+}
+
+#[test]
+fn generates_parameterized_imports_and_streams() {
+    let source = r#"
+        test "dataset addition" [
+            [1 2]
+            [3 4]
+        ] (lhs: Int, rhs: Int) {
+            (lhs + rhs) == (rhs + lhs)
+        }
+    "#;
+
+    let ir_program = parse_program(source);
+    let mut generator = JavaCodeGenerator::new();
+    let unit = generator
+        .generate_compilation_unit(&ir_program)
+        .expect("code generation should succeed");
+
+    assert!(
+        unit.imports
+            .iter()
+            .any(|import| import == "org.junit.jupiter.api.*"),
+        "JUnit API import missing: {:?}",
+        unit.imports
+    );
+    assert!(
+        unit.imports
+            .iter()
+            .any(|import| import == "org.junit.jupiter.params.*"),
+        "ParameterizedTest import missing: {:?}",
+        unit.imports
+    );
+    assert!(
+        unit.imports
+            .iter()
+            .any(|import| import == "org.junit.jupiter.params.provider.*"),
+        "Provider import missing: {:?}",
+        unit.imports
+    );
+    assert!(
+        unit.imports
+            .iter()
+            .any(|import| import == "java.util.stream.Stream"),
+        "Stream import missing: {:?}",
+        unit.imports
+    );
+
+    let java_source = unit.to_source(&JavaCodeGenConfig::default());
+    assert!(
+        java_source.contains("@ParameterizedTest"),
+        "ParameterizedTest annotation missing:\n{java_source}"
+    );
+    assert!(
+        java_source.contains("@MethodSource"),
+        "MethodSource annotation missing:\n{java_source}"
+    );
+    assert!(
+        java_source.contains("Stream.of"),
+        "Stream usage missing:\n{java_source}"
+    );
+    assert!(
+        java_source.contains("Arguments.of"),
+        "Arguments usage missing:\n{java_source}"
+    );
+}
+
 fn sample_sha256() -> String {
     "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef".to_string()
 }
