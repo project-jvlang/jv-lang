@@ -165,31 +165,33 @@ impl JavaCodeGenerator {
         let has_entry_method = script_methods.iter().any(Self::is_entry_point_method);
         let needs_wrapper = !script_statements.is_empty() || !has_entry_method;
 
+        let script_class = self.config.script_main_class.clone();
+        let qualified_script_class = if let Some(pkg) = &program.package {
+            format!("{}.{}", pkg, script_class)
+        } else {
+            script_class.clone()
+        };
+        let script_logger_fields: Vec<String> = program
+            .logging
+            .logger_fields
+            .iter()
+            .filter(|spec| {
+                spec.class_id
+                    .as_ref()
+                    .and_then(|id| id.local_name.last())
+                    .map(|name| name == &script_class)
+                    .unwrap_or(true)
+            })
+            .filter_map(|spec| {
+                self.render_script_logger_field(spec, &script_class, &qualified_script_class)
+            })
+            .collect();
+
         if !script_statements.is_empty()
             || !script_methods.is_empty()
-            || !hoisted_regex_fields.is_empty()
+            || !hoisted_variable_fields.is_empty()
+            || !script_logger_fields.is_empty()
         {
-            let script_class = self.config.script_main_class.clone();
-            let qualified_script_class = if let Some(pkg) = &program.package {
-                format!("{}.{}", pkg, script_class)
-            } else {
-                script_class.clone()
-            };
-            let script_logger_fields: Vec<String> = program
-                .logging
-                .logger_fields
-                .iter()
-                .filter(|spec| {
-                    spec.class_id
-                        .as_ref()
-                        .and_then(|id| id.local_name.last())
-                        .map(|name| name == &script_class)
-                        .unwrap_or(true)
-                })
-                .filter_map(|spec| {
-                    self.render_script_logger_field(spec, &script_class, &qualified_script_class)
-                })
-                .collect();
 
             self.script_method_names = script_methods
                 .iter()
