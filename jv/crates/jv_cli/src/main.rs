@@ -257,6 +257,9 @@ fn main() -> Result<()> {
 
             prepared_output.mark_success();
         }
+        Some(Commands::Test(args)) => {
+            commands::test::run(args)?;
+        }
         Some(Commands::Run { input, args }) => {
             let cwd = std::env::current_dir()?;
             let start_path = {

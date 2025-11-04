@@ -9,12 +9,13 @@ pub use compat::{
     CompatibilityReport, CompatibilityStatus, DetectedVersion,
 };
 pub use config::{
-    BuildConfig, CliRequirement, JavaTarget, NetworkPolicy, SampleCliDependencies, SampleConfig,
-    SampleConfigError, SampleDependency, SampleProtocol,
+    BuildConfig, CliRequirement, JavaTarget, MavenInvocation, NetworkPolicy, SampleCliDependencies,
+    SampleConfig, SampleConfigError, SampleDependency, SampleProtocol,
 };
 pub use jdk::{JdkInfo, discover_jdk};
 
 use anyhow::Result;
+use std::env;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -221,6 +222,49 @@ impl BuildSystem {
             stderr: output.stderr,
         })
     }
+
+    /// Execute a Maven command (typically `mvn test`) with the provided toolchain settings.
+    pub fn run_maven(&self, invocation: &MavenInvocation) -> Result<(), BuildError> {
+        let mut command = Command::new(&invocation.executable);
+        command.args(&invocation.args);
+        command.current_dir(&invocation.working_dir);
+        command.stdin(Stdio::inherit());
+        command.stdout(Stdio::inherit());
+        command.stderr(Stdio::inherit());
+
+        command.env("JAVA_HOME", &invocation.java_home);
+        if let Some(home) = invocation.maven_home_dir() {
+            command.env("MAVEN_HOME", home);
+        }
+
+        let mut path_entries = vec![invocation.java_home.join("bin")];
+        if let Some(bin_dir) = invocation.maven_bin_dir() {
+            path_entries.push(bin_dir);
+        }
+        let joined_path = compose_path(&path_entries)?;
+        command.env("PATH", joined_path);
+
+        for (key, value) in &invocation.env {
+            command.env(key, value);
+        }
+
+        let status = command
+            .status()
+            .map_err(|error| BuildError::CliSpawnError {
+                command: invocation.executable.to_string_lossy().into_owned(),
+                source: error,
+            })?;
+
+        if !status.success() {
+            return Err(BuildError::CliExecutionError {
+                command: invocation.executable.to_string_lossy().into_owned(),
+                status: status.code(),
+                stderr: "See Maven output above".to_string(),
+            });
+        }
+
+        Ok(())
+    }
 }
 
 const CLI_SPAWN_RETRY_COUNT: usize = 3;
@@ -258,6 +302,19 @@ fn build_cli_command(path: &Path, args: &[&str], current_dir: Option<&Path>) -> 
     command.stdout(Stdio::piped());
     command.stderr(Stdio::piped());
     command
+}
+
+fn compose_path(entries: &[PathBuf]) -> Result<std::ffi::OsString, BuildError> {
+    let mut combined: Vec<PathBuf> = entries.to_vec();
+    if let Some(existing) = env::var_os("PATH") {
+        combined.extend(env::split_paths(&existing));
+    }
+
+    env::join_paths(combined).map_err(|error| {
+        BuildError::ConfigError(format!(
+            "Failed to compose PATH for Maven invocation: {error}"
+        ))
+    })
 }
 
 fn is_text_file_busy(error: &io::Error) -> bool {

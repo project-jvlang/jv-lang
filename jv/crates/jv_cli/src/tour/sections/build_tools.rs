@@ -109,6 +109,22 @@ pub fn render<W: Write>(writer: &mut W) -> Result<()> {
         "- ビルド完了後は `java -cp target/jv/hello-jv-tour/classes:...` でテスト実行が可能です。"
     )?;
 
+    // STEP 6: test command overview
+    writeln!(writer, "\n[STEP 6] JUnitテスト生成と Maven 実行")?;
+    writeln!(writer, "コマンド例: jv test --target 25")?;
+    writeln!(
+        writer,
+        "- テストDSLを JUnit 5 対応の Java ソースへ変換し、`target/generated-tests/java25` に配置します。"
+    )?;
+    writeln!(
+        writer,
+        "- 変換後は toolchains/jdk25 を JAVA_HOME に設定した状態で `mvn test` を呼び出し、Surefire で検証します。"
+    )?;
+    writeln!(
+        writer,
+        "- `--target 21` を指定すると toolchains/jdk21 を利用して Java 21 互換のテストも同じ手順で実行できます。"
+    )?;
+
     writeln!(
         writer,
         "\n✅ これで jv プロジェクトの初期化からビルドまでの流れを把握できました。"

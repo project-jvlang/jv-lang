@@ -108,6 +108,55 @@ fn compiler_options_for(target: JavaTarget) -> Vec<String> {
     vec!["--release".to_string(), target.release_flag().to_string()]
 }
 
+/// Parameters describing how Maven should be invoked for integration tests.
+#[derive(Debug, Clone)]
+pub struct MavenInvocation {
+    pub executable: PathBuf,
+    pub working_dir: PathBuf,
+    pub java_home: PathBuf,
+    pub args: Vec<String>,
+    pub env: Vec<(String, String)>,
+}
+
+impl MavenInvocation {
+    pub fn new(executable: PathBuf, working_dir: PathBuf, java_home: PathBuf) -> Self {
+        Self {
+            executable,
+            working_dir,
+            java_home,
+            args: Vec::new(),
+            env: Vec::new(),
+        }
+    }
+
+    pub fn with_arg(mut self, arg: impl Into<String>) -> Self {
+        self.args.push(arg.into());
+        self
+    }
+
+    pub fn with_env(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
+        self.env.push((key.into(), value.into()));
+        self
+    }
+
+    pub fn push_arg(&mut self, arg: impl Into<String>) {
+        self.args.push(arg.into());
+    }
+
+    pub fn push_env(&mut self, key: impl Into<String>, value: impl Into<String>) {
+        self.env.push((key.into(), value.into()));
+    }
+
+    pub fn maven_bin_dir(&self) -> Option<PathBuf> {
+        self.executable.parent().map(|dir| dir.to_path_buf())
+    }
+
+    pub fn maven_home_dir(&self) -> Option<PathBuf> {
+        self.maven_bin_dir()
+            .and_then(|dir| dir.parent().map(|parent| parent.to_path_buf()))
+    }
+}
+
 impl Default for SampleConfig {
     fn default() -> Self {
         Self {

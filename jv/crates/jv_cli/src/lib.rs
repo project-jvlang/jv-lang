@@ -99,6 +99,8 @@ pub enum Commands {
         #[arg(long, value_name = "java-target")]
         target: Option<JavaTarget>,
     },
+    /// Generate JUnit tests and execute `mvn test`
+    Test(commands::test::TestArgs),
     /// Run a compiled jv program
     Run {
         /// Input .jv file to compile and run
@@ -867,6 +869,7 @@ pub mod pipeline {
         let mut ir_program = if options.perf {
             let pools = TransformPools::with_chunk_capacity(256 * 1024);
             let mut context = TransformContext::with_pools(pools);
+            configure_sample_options(&mut context, plan);
             if let Some(facts) = type_facts_snapshot.as_ref() {
                 preload_type_facts_into_context(&mut context, facts);
             }
@@ -906,6 +909,7 @@ pub mod pipeline {
             }
         } else {
             let mut context = TransformContext::new();
+            configure_sample_options(&mut context, plan);
             if let Some(facts) = type_facts_snapshot.as_ref() {
                 preload_type_facts_into_context(&mut context, facts);
             }
@@ -1589,6 +1593,20 @@ pub mod pipeline {
             other => bail!("Unsupported binary target '{}'.", other),
         }
     }
+}
+
+fn configure_sample_options(
+    context: &mut jv_ir::TransformContext,
+    plan: &crate::pipeline::BuildPlan,
+) {
+    let options = context.sample_options_mut();
+    options.base_dir = Some(plan.root.root_dir().to_path_buf());
+    options.allow_network = plan.build_config.sample.network_allowed();
+    options.cache_dir = plan.build_config.sample.cache_dir.clone();
+    options.timeout = plan.build_config.sample.fetch_timeout;
+    options.embed_max_bytes = plan.build_config.sample.embed_max_bytes;
+    options.aws_cli_path = plan.build_config.sample.cli.aws.override_path.clone();
+    options.git_cli_path = plan.build_config.sample.cli.git.override_path.clone();
 }
 
 #[cfg(test)]
