@@ -3351,6 +3351,7 @@ fn switch_expression_java21_mixed_labels_emits_jv3105() {
     }
 }
 
+mod junit5;
 mod pattern_switch;
 mod target_matrix;
 
