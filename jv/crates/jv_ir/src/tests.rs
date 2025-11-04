@@ -3348,12 +3348,13 @@ mod tests {
         assert_eq!(
             inferred,
             JavaType::Reference {
-                name: "java.util.List".to_string(),
+                name: "java.util.ArrayList".to_string(),
                 generic_args: vec![JavaType::Reference {
                     name: "Integer".to_string(),
                     generic_args: vec![],
                 }],
-            }
+            },
+            "Whitespace arrays now map to the mutable default implementation (ArrayList)"
         );
     }
 
