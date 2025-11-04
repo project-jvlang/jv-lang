@@ -45,7 +45,9 @@ impl JavaCodeGenerator {
                     let mut line = parts.join(" ");
                     line.push_str(" = new AtomicReference<>(");
                     if let Some(expr) = initializer {
-                        line.push_str(&self.generate_expression(expr)?);
+                        line.push_str(
+                            &self.generate_expression_with_target(expr, Some(java_type))?,
+                        );
                     }
                     line.push_str(");");
                     line
@@ -60,7 +62,9 @@ impl JavaCodeGenerator {
                     let mut line = parts.join(" ");
                     if let Some(expr) = initializer {
                         line.push_str(" = ");
-                        line.push_str(&self.generate_expression(expr)?);
+                        line.push_str(
+                            &self.generate_expression_with_target(expr, Some(java_type))?,
+                        );
                     }
                     line.push(';');
                     line
@@ -97,7 +101,7 @@ impl JavaCodeGenerator {
                 let mut line = parts.join(" ");
                 if let Some(expr) = initializer {
                     line.push_str(" = ");
-                    line.push_str(&self.generate_expression(expr)?);
+                    line.push_str(&self.generate_expression_with_target(expr, Some(java_type))?);
                 }
                 line.push(';');
                 line

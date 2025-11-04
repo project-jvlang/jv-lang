@@ -2118,16 +2118,24 @@ impl JavaCodeGenerator {
 
         self.add_import("java.util.List");
 
-        if self.targeting.supports_collection_factories() {
-            Ok(format!("List.of({})", joined))
+        let mut literal = if self.targeting.supports_collection_factories() {
+            format!("List.of({})", joined)
         } else {
             self.add_import("java.util.Arrays");
             if rendered.is_empty() {
-                Ok("Arrays.asList().stream().toList()".to_string())
+                "Arrays.asList().stream().toList()".to_string()
             } else {
-                Ok(format!("Arrays.asList({}).stream().toList()", joined))
+                format!("Arrays.asList({}).stream().toList()", joined)
+            }
+        };
+
+        if let Some(target) = self.current_collection_literal_target() {
+            if let Some(wrapped) = Self::wrap_literal_for_target(target, &literal) {
+                literal = wrapped;
             }
         }
+
+        Ok(literal)
     }
 
     pub(super) fn render_case_labels(

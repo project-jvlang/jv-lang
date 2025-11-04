@@ -2394,7 +2394,10 @@ fn sample_declaration_exposes_list_bridge_method() {
         .find(|decl| decl.contains("toMutableList"))
         .expect("helper class should expose list bridge");
 
-    assert!(helper.contains("class"), "bridge should live in helper class");
+    assert!(
+        helper.contains("class"),
+        "bridge should live in helper class"
+    );
 }
 
 #[test]

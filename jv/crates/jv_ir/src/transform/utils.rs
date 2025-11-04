@@ -218,7 +218,7 @@ fn java_type_from_number_literal(value: &str) -> JavaType {
 
 fn list_type_for(element_type: &JavaType) -> JavaType {
     JavaType::Reference {
-        name: "java.util.List".to_string(),
+        name: "java.util.ArrayList".to_string(),
         generic_args: vec![boxed_java_type(element_type)],
     }
 }

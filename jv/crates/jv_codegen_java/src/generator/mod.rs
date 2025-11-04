@@ -57,6 +57,7 @@ pub struct JavaCodeGenerator {
     record_components: HashMap<String, HashSet<String>>,
     temp_counter: usize,
     extra_type_declarations: Vec<String>,
+    collection_literal_target: Vec<Option<JavaType>>,
     sample_bindings: HashMap<String, SampleBindingInfo>,
 }
 
@@ -88,6 +89,7 @@ impl JavaCodeGenerator {
             record_components: HashMap::new(),
             temp_counter: 0,
             extra_type_declarations: Vec::new(),
+            collection_literal_target: Vec::new(),
             sample_bindings: HashMap::new(),
         }
     }
@@ -320,6 +322,7 @@ impl JavaCodeGenerator {
         self.record_components.clear();
         self.temp_counter = 0;
         self.extra_type_declarations.clear();
+        self.collection_literal_target.clear();
         self.sample_bindings.clear();
     }
 
@@ -868,13 +871,55 @@ impl JavaCodeGenerator {
         }
     }
 
+    fn generate_expression_with_target(
+        &mut self,
+        expr: &IrExpression,
+        target: Option<&JavaType>,
+    ) -> Result<String, CodeGenError> {
+        if let Some(java_type) = target {
+            self.collection_literal_target.push(Some(java_type.clone()));
+            let result = self.generate_expression(expr);
+            self.collection_literal_target.pop();
+            result
+        } else {
+            self.generate_expression(expr)
+        }
+    }
+
+    fn current_collection_literal_target(&self) -> Option<&JavaType> {
+        self.collection_literal_target
+            .last()
+            .and_then(|ty| ty.as_ref())
+    }
+
+    fn wrap_literal_for_target(target: &JavaType, literal: &str) -> Option<String> {
+        let base = reference_base_name(target)?;
+        let wrapped = match base {
+            "java.util.List" | "java.util.ArrayList" => {
+                "new java.util.ArrayList<>(".to_string() + literal + ")"
+            }
+            "java.util.Set" | "java.util.LinkedHashSet" => {
+                "new java.util.LinkedHashSet<>(".to_string() + literal + ")"
+            }
+            "java.util.SortedSet" | "java.util.NavigableSet" | "java.util.TreeSet" => {
+                "new java.util.TreeSet<>(".to_string() + literal + ")"
+            }
+            "java.util.Queue" | "java.util.ArrayDeque" => {
+                "new java.util.ArrayDeque<>(".to_string() + literal + ")"
+            }
+            "java.util.Deque" => "new java.util.ArrayDeque<>(".to_string() + literal + ")",
+            _ => return None,
+        };
+        Some(wrapped)
+    }
+
     fn maybe_convert_collection_base(
         &mut self,
         expr: &IrExpression,
         receiver_type: &JavaType,
         base_expr: &str,
     ) -> Result<Option<String>, CodeGenError> {
-        let Some(target_base) = collection_copy_instantiation(receiver_type) else {
+        let Some(instantiation) = collection_copy_instantiation(receiver_type) else {
             return Ok(None);
         };
 
@@ -883,12 +928,11 @@ impl JavaCodeGenerator {
         };
 
         if let Some(expr_base) = reference_base_name(expr_type) {
-            if expr_base == target_base {
+            if expr_base == instantiation {
                 return Ok(None);
             }
 
-            let rendered_type = self.generate_type(receiver_type)?;
-            return Ok(Some(format!("new {}({})", rendered_type, base_expr)));
+            return Ok(Some(format!("new {}<>({})", instantiation, base_expr)));
         }
 
         Ok(None)
@@ -1873,10 +1917,18 @@ pub(super) fn is_list_like_name(base: &str) -> bool {
 fn collection_copy_instantiation(receiver_type: &JavaType) -> Option<&'static str> {
     let base = reference_base_name(receiver_type)?;
     match base {
-        "java.util.ArrayList" => Some("java.util.ArrayList"),
-        "java.util.LinkedHashSet" => Some("java.util.LinkedHashSet"),
-        "java.util.LinkedHashMap" => Some("java.util.LinkedHashMap"),
-        "java.util.ArrayDeque" => Some("java.util.ArrayDeque"),
+        "java.util.List"
+        | "java.util.ArrayList"
+        | "java.util.Collection"
+        | "java.lang.Iterable" => Some("java.util.ArrayList"),
+        "java.util.Set" | "java.util.LinkedHashSet" => Some("java.util.LinkedHashSet"),
+        "java.util.SortedSet" | "java.util.NavigableSet" | "java.util.TreeSet" => {
+            Some("java.util.TreeSet")
+        }
+        "java.util.Map" | "java.util.LinkedHashMap" => Some("java.util.LinkedHashMap"),
+        "java.util.Queue" | "java.util.Deque" | "java.util.ArrayDeque" => {
+            Some("java.util.ArrayDeque")
+        }
         _ => None,
     }
 }
