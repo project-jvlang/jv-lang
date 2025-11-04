@@ -1,5 +1,17 @@
 use jv_ast::Span;
 
+/// Additional structured context for test lowering diagnostics.
+#[derive(Debug, Clone, PartialEq)]
+pub enum TestLoweringDiagnostic {
+    /// The number of declared parameters does not match dataset columns.
+    DatasetColumnMismatch {
+        parameter_count: usize,
+        column_count: usize,
+    },
+    /// A non-boolean expression needs to be rewritten into an explicit assertion.
+    AssertionRewriteRequired,
+}
+
 // Error types
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
 pub enum TransformError {
@@ -50,6 +62,7 @@ pub enum TransformError {
         code: &'static str,
         message: String,
         span: Span,
+        details: Option<TestLoweringDiagnostic>,
     },
 }
 

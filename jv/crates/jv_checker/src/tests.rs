@@ -1,4 +1,5 @@
 use super::*;
+use crate::diagnostics::from_transform_error;
 use crate::inference::environment::{TypeEnvironment, TypeScheme};
 use crate::inference::types::TypeBinding;
 use crate::inference::{PrimitiveType, TypeKind};
@@ -12,6 +13,7 @@ use jv_ast::{
 };
 use jv_inference::TypeFacts;
 use jv_inference::types::{NullabilityFlag, TypeVariant as FactsTypeVariant};
+use jv_ir::error::{TestLoweringDiagnostic, TransformError};
 use jv_parser_frontend::ParserPipeline;
 use jv_parser_rowan::frontend::RowanPipeline;
 use std::collections::HashMap;
@@ -40,6 +42,57 @@ fn collect_null_safety_messages(errors: &[CheckError]) -> Vec<String> {
             _ => None,
         })
         .collect()
+}
+
+#[test]
+fn dataset_mismatch_transform_error_surfaces_bilingual_diagnostic() {
+    let span = dummy_span();
+    let error = TransformError::TestLoweringError {
+        code: "JV5301",
+        message: "placeholder".to_string(),
+        span: span.clone(),
+        details: Some(TestLoweringDiagnostic::DatasetColumnMismatch {
+            parameter_count: 2,
+            column_count: 3,
+        }),
+    };
+
+    let diagnostic = from_transform_error(&error)
+        .expect("dataset mismatch should translate into tooling diagnostic");
+    assert_eq!(diagnostic.code, "JV5301");
+    assert!(
+        diagnostic.message.contains("2個") && diagnostic.message.contains("Declared 2 parameters"),
+        "diagnostic message should be bilingual: {}",
+        diagnostic.message
+    );
+    assert_eq!(diagnostic.suggestions.len(), 2);
+    assert!(
+        diagnostic
+            .suggestions
+            .iter()
+            .all(|s| s.contains("tests.dataset.align-columns"))
+    );
+}
+
+#[test]
+fn assertion_rewrite_transform_error_includes_quick_fix() {
+    let span = dummy_span();
+    let error = TransformError::TestLoweringError {
+        code: "JV5305",
+        message: "placeholder".to_string(),
+        span: span.clone(),
+        details: Some(TestLoweringDiagnostic::AssertionRewriteRequired),
+    };
+
+    let diagnostic =
+        from_transform_error(&error).expect("assertion rewrite error should surface diagnostic");
+    assert_eq!(diagnostic.code, "JV5305");
+    assert!(
+        diagnostic
+            .suggestions
+            .iter()
+            .any(|s| s.contains("tests.assertion.rewrite"))
+    );
 }
 
 fn parse_program(source: &str) -> Program {

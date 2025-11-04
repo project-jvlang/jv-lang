@@ -185,6 +185,42 @@ const DIAGNOSTICS: &[DiagnosticDescriptor] = &[
         severity: DiagnosticSeverity::Warning,
     },
     DiagnosticDescriptor {
+        code: "JV5301",
+        title: "Dataset columns mismatch / データセット列数が一致しません",
+        help: "テストデータセットの各行は宣言されたパラメータ数と同じ列数でなければなりません。列を追加または削除して整合性を保ってください。/ Each dataset row must expose the same number of columns as the parameter list; add or remove columns to keep them aligned. (--explain JV5301)",
+        severity: DiagnosticSeverity::Error,
+    },
+    DiagnosticDescriptor {
+        code: "JV5302",
+        title: "Unsupported test parameter pattern / 未サポートのテストパラメータパターン",
+        help: "テストパラメータには識別子のみを使用してください。分割代入やワイルドカードは将来のバージョンで提供されます。/ Use simple identifiers for test parameters; destructuring and wildcards are not yet supported. (--explain JV5302)",
+        severity: DiagnosticSeverity::Error,
+    },
+    DiagnosticDescriptor {
+        code: "JV5303",
+        title: "Dataset required for parameterized tests / パラメータ化テストにはデータセットが必要",
+        help: "パラメータを宣言した場合は `[...]` または `@Sample` でデータセットを指定してください。/ Supply a dataset via `[...]` or `@Sample` whenever parameters are declared. (--explain JV5303)",
+        severity: DiagnosticSeverity::Error,
+    },
+    DiagnosticDescriptor {
+        code: "JV5304",
+        title: "Dataset must contain at least one row / データセットに1行以上必要",
+        help: "データセット配列を空にすることはできません。少なくとも1行のテストデータを追加してください。/ Dataset arrays cannot be empty; add at least one row of test data. (--explain JV5304)",
+        severity: DiagnosticSeverity::Error,
+    },
+    DiagnosticDescriptor {
+        code: "JV5305",
+        title: "Expression must be rewritten as an assertion / 式をアサーションに書き換えてください",
+        help: "boolean 以外の式は自動的に JUnit アサーションへ変換できません。`Assertions.assert*` などの明示的な呼び出しへ書き換えてください。/ Non-boolean expressions cannot be converted into assertions automatically; rewrite them using explicit `Assertions.assert*` calls. (--explain JV5305)",
+        severity: DiagnosticSeverity::Error,
+    },
+    DiagnosticDescriptor {
+        code: "JV5306",
+        title: "@Sample dataset lowering unavailable / @Sample データセットのローワリング未実装",
+        help: "このバージョンでは @Sample を利用したテストデータ生成が未実装です。手動でデータセットを記述するか、後続のアップデートをお待ちください。/ @Sample-driven datasets are not available yet; provide inline data or wait for a subsequent release. (--explain JV5306)",
+        severity: DiagnosticSeverity::Error,
+    },
+    DiagnosticDescriptor {
         code: "E_WHEN_002",
         title: "`when` in value position requires `else` / 値コンテキストの`when`には`else`が必要",
         help: "Add an `else` branch or keep the `when` in a Unit context. See docs/language-guide.md#when-expression and docs/language-guide-en.md#when-expression.",
@@ -405,10 +441,29 @@ pub fn from_transform_error(error: &TransformError) -> Option<EnhancedDiagnostic
         | TransformError::ResourceManagementError { message, span }
         | TransformError::SampleAnnotationError { message, span }
         | TransformError::SampleProcessingError { message, span }
-        | TransformError::TypeInferenceError { message, span }
-        | TransformError::TestLoweringError { message, span, .. } => {
+        | TransformError::TypeInferenceError { message, span } => {
             detect_in_message(message, Some(span.clone()))
                 .or_else(|| detect_in_message(&error.to_string(), Some(span.clone())))
+        }
+        TransformError::TestLoweringError {
+            code,
+            message,
+            span,
+            details,
+        } => {
+            if let Some(descriptor) = descriptor(code) {
+                let (formatted_message, suggestions) =
+                    messages::format_test_lowering_message(code, message, details.as_ref());
+                let mut diagnostic =
+                    EnhancedDiagnostic::new(descriptor, formatted_message, Some(span.clone()));
+                if !suggestions.is_empty() {
+                    diagnostic = diagnostic.with_suggestions(suggestions);
+                }
+                Some(diagnostic)
+            } else {
+                detect_in_message(message, Some(span.clone()))
+                    .or_else(|| detect_in_message(&error.to_string(), Some(span.clone())))
+            }
         }
     }
 }
