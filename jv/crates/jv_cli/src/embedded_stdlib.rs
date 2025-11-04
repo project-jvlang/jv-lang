@@ -481,10 +481,9 @@ impl StdlibUsage {
             }
             let mut current = token;
             loop {
-                for package in catalog.packages_for_reference(current) {
-                    self.packages.insert(package);
-                }
-                if let Some((prefix, _)) = current.rsplit_once('.') {
+                self.record_reference(catalog, current);
+                if let Some((prefix, suffix)) = current.rsplit_once('.') {
+                    self.record_reference(catalog, suffix);
                     current = prefix;
                 } else {
                     break;
