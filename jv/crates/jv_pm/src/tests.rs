@@ -76,9 +76,11 @@ fn test_package_error_display() {
 
     assert!(not_found.to_string().contains("Package not found"));
     assert!(version_conflict.to_string().contains("Version conflict"));
-    assert!(invalid_manifest
-        .to_string()
-        .contains("Invalid package manifest"));
+    assert!(
+        invalid_manifest
+            .to_string()
+            .contains("Invalid package manifest")
+    );
     assert!(network_error.to_string().contains("Network error"));
 }
 

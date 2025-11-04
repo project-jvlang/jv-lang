@@ -2277,44 +2277,31 @@ impl<'a> LoadHelperGenerator<'a> {
             (Schema::Primitive(PrimitiveType::Boolean), _) => {
                 Ok(format!("requireBoolean({}, {})", value_expr, path_expr))
             }
-            (Schema::Primitive(PrimitiveType::Integer), _) => {
-                Ok(format!(
-                    "parseInt(requireNumber({}, {}), {})",
-                    value_expr, path_expr, path_expr
-                ))
-            }
-            (Schema::Primitive(PrimitiveType::Long), _) => {
-                Ok(format!(
-                    "parseLong(requireNumber({}, {}), {})",
-                    value_expr, path_expr, path_expr
-                ))
-            }
-            (Schema::Primitive(PrimitiveType::Double), _) => {
-                Ok(format!(
-                    "parseDouble(requireNumber({}, {}), {})",
-                    value_expr, path_expr, path_expr
-                ))
-            }
-            (Schema::Primitive(PrimitiveType::BigInteger), _) => {
-                Ok(format!(
-                    "parseBigInteger(requireNumber({}, {}), {})",
-                    value_expr, path_expr, path_expr
-                ))
-            }
-            (Schema::Primitive(PrimitiveType::BigDecimal), _) => {
-                Ok(format!(
-                    "parseBigDecimal(requireNumber({}, {}), {})",
-                    value_expr, path_expr, path_expr
-                ))
-            }
+            (Schema::Primitive(PrimitiveType::Integer), _) => Ok(format!(
+                "parseInt(requireNumber({}, {}), {})",
+                value_expr, path_expr, path_expr
+            )),
+            (Schema::Primitive(PrimitiveType::Long), _) => Ok(format!(
+                "parseLong(requireNumber({}, {}), {})",
+                value_expr, path_expr, path_expr
+            )),
+            (Schema::Primitive(PrimitiveType::Double), _) => Ok(format!(
+                "parseDouble(requireNumber({}, {}), {})",
+                value_expr, path_expr, path_expr
+            )),
+            (Schema::Primitive(PrimitiveType::BigInteger), _) => Ok(format!(
+                "parseBigInteger(requireNumber({}, {}), {})",
+                value_expr, path_expr, path_expr
+            )),
+            (Schema::Primitive(PrimitiveType::BigDecimal), _) => Ok(format!(
+                "parseBigDecimal(requireNumber({}, {}), {})",
+                value_expr, path_expr, path_expr
+            )),
             (Schema::Array { .. }, JavaType::Reference { .. }) => {
                 let decoder = self.json_list_decoder_name(java_type)?;
                 Ok(format!("{}({}, {})", decoder, value_expr, path_expr))
             }
-            (
-                Schema::Object { .. },
-                JavaType::Reference { name, .. },
-            ) => Ok(format!(
+            (Schema::Object { .. }, JavaType::Reference { name, .. }) => Ok(format!(
                 "{}({}, {})",
                 self.json_record_decoder_name(name),
                 value_expr,
@@ -2326,7 +2313,9 @@ impl<'a> LoadHelperGenerator<'a> {
                     if matches!(variant, Schema::Primitive(PrimitiveType::Null)) {
                         continue;
                     }
-                    variant_exprs.push(self.json_value_expression(value_expr, path_expr, variant, core_type)?);
+                    variant_exprs.push(
+                        self.json_value_expression(value_expr, path_expr, variant, core_type)?,
+                    );
                 }
                 if variant_exprs.is_empty() {
                     return Err(CodeGenError::UnsupportedConstruct {
@@ -2648,7 +2637,7 @@ impl<'a> LoadHelperGenerator<'a> {
                             construct: "CSV/TSVルートはRecordリストのみサポートされています"
                                 .to_string(),
                             span: Some(self.declaration.span.clone()),
-                        })
+                        });
                     }
                 };
                 (method_name, type_str)
@@ -2657,7 +2646,7 @@ impl<'a> LoadHelperGenerator<'a> {
                 return Err(CodeGenError::UnsupportedConstruct {
                     construct: "CSV/TSVルートはList<Record>型である必要があります".to_string(),
                     span: Some(self.declaration.span.clone()),
-                })
+                });
             }
         };
 

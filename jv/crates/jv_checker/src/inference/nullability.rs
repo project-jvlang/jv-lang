@@ -7,8 +7,8 @@
 use crate::CheckError;
 use jv_ast::types::Span;
 use jv_ast::{
-    expression::Argument, BinaryOp, Expression, Literal, Program, Statement, TypeAnnotation,
-    UnaryOp,
+    BinaryOp, Expression, Literal, Program, Statement, TypeAnnotation, UnaryOp,
+    expression::Argument,
 };
 use std::collections::HashMap;
 
@@ -427,7 +427,12 @@ impl NullabilityAnalyzer {
         if matches!(expected, Nullability::NonNull) && matches!(value, Nullability::Optional) {
             let message = format!(
                 "JV3002: 行 {} 列 {} の変数 `{}` は non-null と宣言されていますが Optional な値が代入されています。`?.` や `!!` で明示的に処理してください。\nJV3002: Variable `{}` at line {} column {} is declared non-null but receives an optional value. Handle the optional explicitly using `?.` or `!!`.",
-                span.start_line, span.start_column, subject, subject, span.start_line, span.start_column
+                span.start_line,
+                span.start_column,
+                subject,
+                subject,
+                span.start_line,
+                span.start_column
             );
             self.errors.push(CheckError::NullSafetyError(message));
             Nullability::NonNull
@@ -483,8 +488,8 @@ impl NullabilityAnalyzer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use jv_ast::types::{Modifiers, Visibility};
     use jv_ast::ValBindingOrigin;
+    use jv_ast::types::{Modifiers, Visibility};
 
     fn span() -> Span {
         Span::new(1, 1, 1, 5)

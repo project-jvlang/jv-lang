@@ -4,8 +4,8 @@ use std::fs::{self, File};
 use std::io::{self, BufReader, Read};
 use std::path::{Path, PathBuf};
 use thiserror::Error;
-use zip::read::ZipFile;
 use zip::ZipArchive;
+use zip::read::ZipFile;
 
 #[derive(Debug, Error)]
 pub enum CompatibilityError {
@@ -456,10 +456,12 @@ mod tests {
             CompatibilityStatus::RequiresHigherTarget { required_major: 69 }
         ));
         assert_eq!(report.required_release(), Some(25));
-        assert!(report
-            .findings
-            .iter()
-            .any(|finding| finding.artifact.contains("requires25.jar")));
+        assert!(
+            report
+                .findings
+                .iter()
+                .any(|finding| finding.artifact.contains("requires25.jar"))
+        );
 
         let _ = fs::remove_dir_all(&dir);
     }
@@ -496,10 +498,12 @@ mod tests {
         let report = analyzer.analyze_classpath([class_path.clone()]).unwrap();
 
         assert!(report.is_compatible());
-        assert!(report
-            .highest_required_major
-            .map(|major| major <= 65)
-            .unwrap_or(true));
+        assert!(
+            report
+                .highest_required_major
+                .map(|major| major <= 65)
+                .unwrap_or(true)
+        );
 
         let _ = fs::remove_dir_all(&dir);
     }

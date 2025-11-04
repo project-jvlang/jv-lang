@@ -2,6 +2,7 @@ use super::*;
 
 use crate::pipeline::pipeline::{CharScannerStage, ClassifierStage, EmitterStage, NormalizerStage};
 use fastrand::Rng;
+use serde_json::{from_str, to_string};
 use std::fs;
 use std::path::{Path, PathBuf};
 use test_case::test_case;
@@ -70,13 +71,17 @@ fn test_string_interpolation_red_phase() {
 
     // Look for interpolation-related tokens
     let token_types: Vec<_> = tokens.iter().map(|t| &t.token_type).collect();
-    assert!(token_types
-        .iter()
-        .any(|t| matches!(t, TokenType::StringStart)));
+    assert!(
+        token_types
+            .iter()
+            .any(|t| matches!(t, TokenType::StringStart))
+    );
     assert!(token_types.contains(&&TokenType::Identifier("name".to_string())));
-    assert!(token_types
-        .iter()
-        .any(|t| matches!(t, TokenType::StringEnd)));
+    assert!(
+        token_types
+            .iter()
+            .any(|t| matches!(t, TokenType::StringEnd))
+    );
 }
 
 #[test]
@@ -493,9 +498,11 @@ fn test_block_brace_has_no_json_metadata() {
         .map(|token| token.metadata.iter().collect::<Vec<_>>())
         .unwrap_or_default();
 
-    assert!(brace_metadata
-        .iter()
-        .all(|metadata| !matches!(metadata, TokenMetadata::PotentialJsonStart { .. })));
+    assert!(
+        brace_metadata
+            .iter()
+            .all(|metadata| !matches!(metadata, TokenMetadata::PotentialJsonStart { .. }))
+    );
 }
 
 #[test]
@@ -644,12 +651,16 @@ fn test_range_tokens() {
     let mut lexer = Lexer::new(source.to_string());
     let tokens = lexer.tokenize().unwrap();
 
-    assert!(tokens
-        .iter()
-        .any(|t| matches!(t.token_type, TokenType::RangeExclusive)));
-    assert!(tokens
-        .iter()
-        .any(|t| matches!(t.token_type, TokenType::RangeInclusive)));
+    assert!(
+        tokens
+            .iter()
+            .any(|t| matches!(t.token_type, TokenType::RangeExclusive))
+    );
+    assert!(
+        tokens
+            .iter()
+            .any(|t| matches!(t.token_type, TokenType::RangeInclusive))
+    );
 }
 
 #[test]
@@ -1596,4 +1607,48 @@ fn tokenize_repository_fixtures() {
             .join("\n");
         panic!("lexer failed to tokenize fixtures:\n{details}");
     }
+}
+
+#[test]
+fn token_type_serde_roundtrip_supports_underscore_variants() {
+    let cases = vec![
+        TokenType::Underscore,
+        TokenType::ImplicitParam(42),
+        TokenType::ImplicitParam(u32::MAX),
+    ];
+
+    for token in cases {
+        let json = to_string(&token).expect("serialize token type");
+        let restored: TokenType = from_str(&json).expect("deserialize token type");
+        assert_eq!(restored, token);
+    }
+}
+
+#[test]
+fn token_metadata_roundtrip_preserves_underscore_info() {
+    let metadata = TokenMetadata::UnderscoreInfo(UnderscoreInfoMetadata {
+        raw: "_123".to_string(),
+        is_implicit: true,
+        number: Some(123),
+        line: 12,
+        column: 4,
+        length: 4,
+        in_non_code_region: false,
+    });
+
+    let json = to_string(&metadata).expect("serialize underscore metadata");
+    let restored: TokenMetadata = from_str(&json).expect("deserialize underscore metadata");
+    assert_eq!(restored, metadata);
+}
+
+#[test]
+fn token_diagnostic_roundtrip_covers_invalid_implicit_param() {
+    let diagnostic = TokenDiagnostic::InvalidImplicitParam {
+        reason: InvalidImplicitParamReason::LeadingZero,
+        suggested: Some("_1".to_string()),
+    };
+
+    let json = to_string(&diagnostic).expect("serialize diagnostic");
+    let restored: TokenDiagnostic = from_str(&json).expect("deserialize diagnostic");
+    assert_eq!(restored, diagnostic);
 }

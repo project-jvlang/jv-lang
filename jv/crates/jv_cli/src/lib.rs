@@ -5,14 +5,14 @@ use jv_ir::{
     sequence_pipeline,
     types::{IrImport, IrImportDetail},
 };
-use jv_support::i18n::{catalog, LocaleCode};
+use jv_support::i18n::{LocaleCode, catalog};
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 
 use jv_checker::diagnostics::{
-    from_check_error, from_frontend_diagnostics, from_parse_error, from_transform_error,
-    DiagnosticSeverity, DiagnosticStrategy, EnhancedDiagnostic,
+    DiagnosticSeverity, DiagnosticStrategy, EnhancedDiagnostic, from_check_error,
+    from_frontend_diagnostics, from_parse_error, from_transform_error,
 };
 use jv_pm::JavaTarget;
 
@@ -428,34 +428,34 @@ pub mod pipeline {
     }
 
     pub use build_plan::{BuildOptions, BuildOptionsFactory, BuildPlan, CliOverrides};
-    pub use perf::{persist_single_run_report, PerfCapture};
+    pub use perf::{PerfCapture, persist_single_run_report};
     pub use project::output::{OutputManager, PreparedOutput};
 
     use super::*;
-    use anyhow::{anyhow, bail, Context};
+    use anyhow::{Context, anyhow, bail};
     use generics::apply_type_facts;
     use jv_ast::{Argument, CallArgumentMetadata, Expression, Literal, Span, Statement};
+    use jv_build::BuildSystem;
     use jv_build::metadata::{
         BuildContext as SymbolBuildContext, SymbolIndexBuilder, SymbolIndexCache,
     };
-    use jv_build::BuildSystem;
     use jv_checker::binding::BindingUsageSummary;
     use jv_checker::compat::diagnostics as compat_diagnostics;
     use jv_checker::imports::{
-        diagnostics as import_diagnostics, ImportResolutionService, ResolvedImport,
-        ResolvedImportKind,
+        ImportResolutionService, ResolvedImport, ResolvedImportKind,
+        diagnostics as import_diagnostics,
     };
     use jv_checker::inference::{AppliedConversion, HelperSpec, NullableGuardReason};
     use jv_checker::{InferenceSnapshot, InferenceTelemetry, TypeChecker, TypeKind};
     use jv_codegen_java::{JavaCodeGenConfig, JavaCodeGenerator};
     use jv_fmt::JavaFormatter;
     use jv_inference::types::TypeVariant;
+    use jv_ir::TransformContext;
     use jv_ir::context::WhenStrategyRecord;
     use jv_ir::types::{IrImport, IrImportDetail};
-    use jv_ir::TransformContext;
     use jv_ir::{
-        transform_program_with_context, transform_program_with_context_profiled, TransformPools,
-        TransformProfiler,
+        TransformPools, TransformProfiler, transform_program_with_context,
+        transform_program_with_context_profiled,
     };
     use jv_parser_frontend::ParserPipeline;
     use jv_parser_rowan::frontend::RowanPipeline;

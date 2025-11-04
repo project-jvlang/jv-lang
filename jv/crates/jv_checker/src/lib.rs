@@ -19,7 +19,7 @@ pub use jv_inference::ParallelInferenceConfig;
 pub use regex::RegexAnalysis;
 
 use crate::imports::ResolvedImport;
-use binding::{resolve_bindings, BindingResolution, BindingUsageSummary, LateInitManifest};
+use binding::{BindingResolution, BindingUsageSummary, LateInitManifest, resolve_bindings};
 use inference::conversions::{AppliedConversion, ConversionKind, HelperSpec, NullableGuard};
 use jv_ast::{Program, Span};
 use jv_build::metadata::SymbolIndex;

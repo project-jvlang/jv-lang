@@ -10,7 +10,7 @@ use crate::inference::environment::{TypeEnvironment, TypeScheme};
 use crate::inference::extensions::ExtensionRegistry;
 use crate::inference::imports::ImportRegistry;
 use crate::inference::iteration::{
-    classify_loop, expression_can_yield_iterable, LoopClassification,
+    LoopClassification, classify_loop, expression_can_yield_iterable,
 };
 use crate::inference::type_factory::TypeFactory;
 use crate::inference::types::{PrimitiveType, TypeError, TypeId, TypeKind};

@@ -176,6 +176,10 @@ pub enum SyntaxKind {
     CharacterLiteral,
     /// 識別子。
     Identifier,
+    /// ワイルドカードアンダースコア。
+    Underscore,
+    /// 暗黙引数アンダースコア。
+    ImplicitParam,
     /// コロン。
     Colon,
     /// セミコロン。
@@ -361,6 +365,10 @@ pub enum TokenKind {
     CharacterLiteral,
     /// 識別子。
     Identifier,
+    /// ワイルドカードアンダースコア。
+    Underscore,
+    /// 暗黙引数アンダースコア。
+    ImplicitParam,
     /// コロン。
     Colon,
     /// セミコロン。
@@ -487,6 +495,8 @@ impl TokenKind {
             TokenKind::RegexLiteral => SyntaxKind::RegexLiteral,
             TokenKind::CharacterLiteral => SyntaxKind::CharacterLiteral,
             TokenKind::Identifier => SyntaxKind::Identifier,
+            TokenKind::Underscore => SyntaxKind::Underscore,
+            TokenKind::ImplicitParam => SyntaxKind::ImplicitParam,
             TokenKind::Colon => SyntaxKind::Colon,
             TokenKind::Semicolon => SyntaxKind::Semicolon,
             TokenKind::Assign => SyntaxKind::Assign,
@@ -578,6 +588,8 @@ impl TokenKind {
             TokenType::RegexLiteral(_) => TokenKind::RegexLiteral,
             TokenType::Character(_) => TokenKind::CharacterLiteral,
             TokenType::Identifier(_) => TokenKind::Identifier,
+            TokenType::Underscore => TokenKind::Underscore,
+            TokenType::ImplicitParam(_) => TokenKind::ImplicitParam,
             TokenType::Colon => TokenKind::Colon,
             TokenType::Semicolon => TokenKind::Semicolon,
             TokenType::Assign => TokenKind::Assign,

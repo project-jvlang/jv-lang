@@ -1,11 +1,11 @@
 use crate::{
+    CommentCarryOverMetadata, LexError, Token, TokenDiagnostic, TokenMetadata, TokenTrivia,
+    TokenType,
     pipeline::{
         context::LexerContext,
         pipeline::EmitterStage,
         types::{ClassifiedToken, EmissionPlan},
     },
-    CommentCarryOverMetadata, LexError, Token, TokenDiagnostic, TokenMetadata, TokenTrivia,
-    TokenType,
 };
 
 use crate::{LayoutMode, Lexer, StringInterpolationSegment};
