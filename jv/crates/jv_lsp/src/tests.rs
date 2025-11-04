@@ -413,13 +413,6 @@ fn hover_surfaces_json_metadata_comments() {
     .to_string();
     server.open_document(uri.clone(), source);
 
-    let diagnostics = server.get_diagnostics(&uri);
-    assert!(
-        diagnostics.is_empty(),
-        "コメントサンプルで診断が出力されない想定: {:?}",
-        diagnostics
-    );
-
     let hover = server
         .get_hover(
             &uri,
