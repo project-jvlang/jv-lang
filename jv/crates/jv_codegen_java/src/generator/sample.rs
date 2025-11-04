@@ -3,7 +3,7 @@ use csv::StringRecord;
 use jv_ast::Span;
 use jv_ir::{DataFormat, PrimitiveType, SampleMode, SampleRecordDescriptor, Schema};
 use serde_json::{Map, Number, Value};
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, HashMap};
 use std::io::Cursor;
 use std::str::FromStr;
 
@@ -956,13 +956,18 @@ impl JavaCodeGenerator {
         let (core_type, _) = Self::unwrap_optional_java_type(java_type);
 
         match (core_schema, core_type) {
-            (Schema::Object { fields, required }, JavaType::Reference { name, .. }) => {
+            (
+                Schema::Object {
+                    fields,
+                    required: _,
+                },
+                JavaType::Reference { name, .. },
+            ) => {
                 if !map.contains_key(name) {
                     map.insert(
                         name.clone(),
                         ObjectSchemaInfo {
                             fields: fields.clone(),
-                            required: required.clone(),
                         },
                     );
 
@@ -1067,7 +1072,6 @@ impl JavaCodeGenerator {
 #[derive(Clone)]
 struct ObjectSchemaInfo {
     fields: BTreeMap<String, Schema>,
-    required: BTreeSet<String>,
 }
 
 #[derive(Clone)]

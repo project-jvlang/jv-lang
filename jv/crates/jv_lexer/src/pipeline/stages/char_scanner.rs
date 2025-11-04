@@ -1356,6 +1356,68 @@ mod tests {
     }
 
     #[test]
+    fn json_metadata_comment_respects_indentation() {
+        let mut scanner = CharScanner::new();
+        let source = "    //# priority: high\nval value";
+        let mut ctx = LexerContext::new(source);
+
+        scanner.scan_next_token(&mut ctx).expect("comment");
+        let identifier = scanner.scan_next_token(&mut ctx).expect("identifier");
+        assert_eq!(identifier.kind, RawTokenKind::Identifier);
+        let trivia = identifier.trivia.expect("trivia");
+        assert_eq!(trivia.json_comments.len(), 1);
+        assert_eq!(trivia.json_comments[0].text, "priority: high");
+    }
+
+    #[test]
+    fn json_metadata_comment_inside_block_like_dsl_is_preserved() {
+        let mut scanner = CharScanner::new();
+        let source = r#"builder {
+    //# align: center
+    child()
+}
+"#;
+        let mut ctx = LexerContext::new(source);
+
+        // Consume `builder` identifier and the following symbols until we reach `child`.
+        loop {
+            let token = scanner
+                .scan_next_token(&mut ctx)
+                .expect("token while scanning DSL sample");
+            if token.kind == RawTokenKind::Identifier && token.text == "child" {
+                let trivia = token.trivia.expect("expected trivia for child identifier");
+                assert_eq!(trivia.json_comments.len(), 1);
+                assert_eq!(trivia.json_comments[0].text, "align: center");
+                break;
+            }
+            if token.kind == RawTokenKind::Eof {
+                panic!("child identifier not found in DSL-like snippet");
+            }
+        }
+    }
+
+    #[test]
+    fn javadoc_content_is_normalized_without_leading_asterisks() {
+        let raw = "/**\r\n * API 説明\r\n * - 詳細\r\n */";
+        let normalized = CharScanner::normalize_javadoc_content(raw);
+        assert!(
+            normalized.contains("API 説明"),
+            "正規化後の文字列に本文が含まれているべき: {}",
+            normalized
+        );
+        assert!(
+            normalized.contains("- 詳細"),
+            "箇条書きの行頭装飾が除去されているべき: {}",
+            normalized
+        );
+        assert!(
+            !normalized.contains("*/"),
+            "コメントデリミタは正規化結果から除去されるべき: {}",
+            normalized
+        );
+    }
+
+    #[test]
     fn legacy_hash_comment_is_treated_as_symbol() {
         let mut scanner = CharScanner::new();
         let source = "# legacy\nval";

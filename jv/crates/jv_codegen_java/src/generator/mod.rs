@@ -1013,12 +1013,11 @@ impl JavaCodeGenerator {
                     captures,
                     scope_locals,
                 );
-                let mut then_scope = scope_locals.clone();
-                then_scope = self.collect_mutable_captures_in_statement(
+                self.collect_mutable_captures_in_statement(
                     then_stmt,
                     method_locals,
                     captures,
-                    &then_scope,
+                    scope_locals,
                 );
                 if let Some(else_branch) = else_stmt {
                     let else_scope = scope_locals.clone();

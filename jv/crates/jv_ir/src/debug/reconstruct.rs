@@ -738,6 +738,8 @@ impl<'a> ReconstructionContext<'a> {
             is_override: false,
             is_open: !modifiers.is_final && !modifiers.is_abstract,
             annotations: Vec::new(),
+            documentation: None,
+            jv_comments: Vec::new(),
         }
     }
 

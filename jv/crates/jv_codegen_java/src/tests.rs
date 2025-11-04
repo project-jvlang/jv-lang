@@ -1327,7 +1327,7 @@ fn primitive_specialized_pipeline_renders_character_casts() {
 
 #[test]
 fn analyze_mutable_captures_detects_assignments_in_lambda() {
-    let mut generator = JavaCodeGenerator::new();
+    let generator = JavaCodeGenerator::new();
 
     let accumulator_decl = IrStatement::VariableDeclaration {
         name: "accumulator".to_string(),

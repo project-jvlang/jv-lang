@@ -647,6 +647,64 @@ fn cli_build_quick_tour_script_compiles() {
 }
 
 #[test]
+fn cli_java_output_excludes_jv_specific_comments() {
+    let cli_path = match cli_binary_path() {
+        Ok(path) => path,
+        Err(reason) => {
+            eprintln!("Skipping comment filtering test: {}", reason);
+            return;
+        }
+    };
+
+    let temp_dir = TempDirGuard::new("cli-comment-filter").expect("create temp dir");
+    let output_dir = temp_dir.path().join("out");
+    let fixture = workspace_file("tests/fixtures/comment_metadata_sample.jv");
+
+    let status = Command::new(&cli_path)
+        .current_dir(temp_dir.path())
+        .arg("build")
+        .arg(&fixture)
+        .arg("--java-only")
+        .arg("-o")
+        .arg(&output_dir)
+        .status()
+        .expect("invoke jv build for comment metadata sample");
+
+    assert!(
+        status.success(),
+        "comment metadata sample のビルドに失敗: {:?}",
+        status
+    );
+
+    let java_dir = output_dir.join("java25");
+    let java_files = collect_java_sources(&java_dir);
+    assert!(
+        !java_files.is_empty(),
+        "生成された Java ファイルが {} に存在するべき",
+        java_dir.display()
+    );
+
+    let forbidden = [
+        "CLI サンプルで使用する定数",
+        "CLI固有の補足情報を保持",
+        "stage: beta",
+        "display: cli",
+    ];
+    for file in java_files {
+        let content = fs::read_to_string(&file).expect("read generated Java source");
+        for marker in &forbidden {
+            assert!(
+                !content.contains(marker),
+                "jv専用コメント本文 `{}` が Java 出力 {} に混入してはならない:\n{}",
+                marker,
+                file.display(),
+                content
+            );
+        }
+    }
+}
+
+#[test]
 fn cli_examples_build_without_java_errors() {
     let cli_path = match cli_binary_path() {
         Ok(path) => path,

@@ -1,0 +1,11 @@
+package fixtures.comments
+
+/// CLI サンプルで使用する定数
+//* CLI固有の補足情報を保持
+//# stage: beta
+val answer = 42
+
+fun main(): Unit {
+    //# display: cli
+    println("answer = ${answer}")
+}

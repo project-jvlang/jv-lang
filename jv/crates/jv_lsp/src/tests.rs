@@ -413,6 +413,13 @@ fn hover_surfaces_json_metadata_comments() {
     .to_string();
     server.open_document(uri.clone(), source);
 
+    let diagnostics = server.get_diagnostics(&uri);
+    assert!(
+        diagnostics.is_empty(),
+        "コメントサンプルで診断が出力されない想定: {:?}",
+        diagnostics
+    );
+
     let hover = server
         .get_hover(
             &uri,
@@ -424,6 +431,60 @@ fn hover_surfaces_json_metadata_comments() {
         .expect("hover should include JSON metadata");
     assert!(hover.contents.contains("JSONメタデータ"));
     assert!(hover.contents.contains("version: 1"));
+}
+
+#[test]
+fn hover_orders_doc_section_before_jv_comments() {
+    let mut server = JvLanguageServer::new();
+    let uri = "file:///comment-order.jv".to_string();
+    let source = r#"/** 
+ * 先頭に表示されるべき説明
+ */
+//* JV専用メモ
+表示順序の確認用
+*//
+val annotated = 1
+
+val config = {
+  //# stage: beta
+  "value": annotated
+}
+"#
+    .to_string();
+    server.open_document(uri.clone(), source);
+
+    let hover = server
+        .get_hover(
+            &uri,
+            Position {
+                line: 6,
+                character: 4,
+            },
+        )
+        .expect("doc hover should surface metadata");
+    let doc_index = hover
+        .contents
+        .find("**ドキュメント**")
+        .expect("doc section should exist");
+    let jv_index = hover
+        .contents
+        .find("**JV専用コメント**")
+        .expect("JV section should exist");
+    assert!(
+        doc_index < jv_index,
+        "ドキュメント節がJV専用コメント節より前に表示されるべき: {}",
+        hover.contents
+    );
+    assert!(
+        hover.contents.contains("先頭に表示されるべき説明"),
+        "ブロックドキュメント本文が hover に含まれるべき: {}",
+        hover.contents
+    );
+    assert!(
+        hover.contents.contains("JV専用メモ"),
+        "JV専用コメント本文も hover に含まれるべき: {}",
+        hover.contents
+    );
 }
 
 #[test]
