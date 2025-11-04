@@ -2173,6 +2173,7 @@ fn snapshot_ir_program() {
                 "permitted_types": []
               },
               "throws": [],
+              "assertion_patterns": [],
               "span": {
                 "start_line": 0,
                 "start_column": 0,
