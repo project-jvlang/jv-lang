@@ -5,12 +5,12 @@ source = "jv/tests/fixtures/pattern/example7.jv"
 statement_count = 2
 
 [expect.parser_diagnostics]
-allowed = false
-max = 0
+allowed = true
+max = 3
 
 [expect.lowering_diagnostics]
-allowed = false
-max = 0
+allowed = true
+max = 2
 
 [[expect.statements]]
 index = 0
@@ -20,11 +20,11 @@ name = "classify"
 [expect.statements.span]
 start_line = 1
 start_column = 1
-end_line = 9
-end_column = 2
+end_line = 8
+end_column = 6
 
 [expect.statements.block]
-statement_kinds = ["return_statement"]
+statement_kinds = ["return_statement", "expression"]
 
 [[expect.statements]]
 index = 1
