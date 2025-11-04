@@ -1,0 +1,23 @@
+---
+source: crates/jv_parser/tests/preprocess_layout.rs
+assertion_line: 53
+expression: snapshot
+---
+00: Val `val` comments=false metadata=[]
+01: Identifier("numbers") `numbers` comments=false metadata=[]
+02: Assign `=` comments=false metadata=[]
+03: LeftBracket `[` comments=false metadata=[PotentialJsonStart { confidence: High }]
+04: Number("1") `1` comments=false metadata=[NumberLiteral(NumberLiteralMetadata { grouping: None, original_lexeme: "1", suffix: None })]
+05: Number("2") `2` comments=false metadata=[NumberLiteral(NumberLiteralMetadata { grouping: None, original_lexeme: "2", suffix: None })]
+06: Number("3") `3` comments=false metadata=[NumberLiteral(NumberLiteralMetadata { grouping: None, original_lexeme: "3", suffix: None })]
+07: Number("4") `4` comments=false metadata=[NumberLiteral(NumberLiteralMetadata { grouping: None, original_lexeme: "4", suffix: None })]
+08: RightBracket `]` comments=false metadata=[]
+09: Val `val` comments=false metadata=[]
+10: Identifier("summed") `summed` comments=false metadata=[]
+11: Assign `=` comments=false metadata=[]
+12: Identifier("sum") `sum` comments=false metadata=[]
+13: LeftParen `(` comments=false metadata=[]
+14: Number("1") `1` comments=false metadata=[NumberLiteral(NumberLiteralMetadata { grouping: None, original_lexeme: "1", suffix: None })]
+15: Number("2") `2` comments=true metadata=[NumberLiteral(NumberLiteralMetadata { grouping: None, original_lexeme: "2", suffix: None })]
+16: RightParen `)` comments=false metadata=[]
+17: Eof `` comments=false metadata=[]
