@@ -8,6 +8,7 @@ pub mod java;
 pub mod null_safety;
 pub mod pattern;
 pub mod regex;
+pub mod semantics;
 pub mod telemetry;
 
 pub use inference::{
