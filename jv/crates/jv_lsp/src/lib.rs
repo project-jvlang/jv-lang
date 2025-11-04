@@ -11,7 +11,7 @@ use jv_ast::{
 };
 use jv_build::BuildConfig;
 use jv_build::metadata::{
-    BuildContext as SymbolBuildContext, SymbolIndexBuilder, SymbolIndexCache,
+    BuildContext as SymbolBuildContext, SymbolIndex, SymbolIndexBuilder, SymbolIndexCache,
 };
 use jv_checker::diagnostics::{
     DiagnosticSeverity as ToolingSeverity, DiagnosticStrategy, EnhancedDiagnostic,
@@ -643,6 +643,12 @@ impl JvLanguageServer {
 
         let mut diagnostics = Vec::new();
         let mut regex_analyses: Vec<RegexAnalysis> = Vec::new();
+        let has_regex_literals = tokens.iter().any(|token| {
+            token
+                .metadata
+                .iter()
+                .any(|meta| matches!(meta, TokenMetadata::RegexLiteral { .. }))
+        });
 
         let frontend_diagnostics = from_frontend_diagnostics(diagnostics_view.final_diagnostics());
         for diagnostic in &frontend_diagnostics {
@@ -670,67 +676,74 @@ impl JvLanguageServer {
             GenericDocumentIndex::from_program(&program),
         );
 
-        let build_config = BuildConfig::default();
-        let symbol_context = SymbolBuildContext::from_config(&build_config);
-        let cache = SymbolIndexCache::with_default_location();
-        let builder = SymbolIndexBuilder::new(&symbol_context);
-        let symbol_index = match builder.build_with_cache(&cache) {
-            Ok(index) => Arc::new(index),
-            Err(error) => {
-                diagnostics.push(fallback_diagnostic(
-                    uri,
-                    &format!("Symbol index build failed: {error}"),
-                ));
-                self.type_facts.remove(uri);
-                self.regex_metadata.remove(uri);
-                return diagnostics;
-            }
-        };
-
-        let import_service =
-            ImportResolutionService::new(Arc::clone(&symbol_index), build_config.target);
         let mut resolved_imports = Vec::new();
-        for import_stmt in &program.imports {
-            match import_service.resolve(import_stmt) {
-                Ok(resolved) => resolved_imports.push(resolved),
+        let mut symbol_index: Option<Arc<SymbolIndex>> = None;
+        if !program.imports.is_empty() {
+            let build_config = BuildConfig::default();
+            let symbol_context = SymbolBuildContext::from_config(&build_config);
+            let cache = SymbolIndexCache::with_default_location();
+            let builder = SymbolIndexBuilder::new(&symbol_context);
+            let index = match builder.build_with_cache(&cache) {
+                Ok(index) => Arc::new(index),
                 Err(error) => {
+                    diagnostics.push(fallback_diagnostic(
+                        uri,
+                        &format!("Symbol index build failed: {error}"),
+                    ));
                     self.type_facts.remove(uri);
                     self.regex_metadata.remove(uri);
-                    return vec![match import_diagnostics::from_error(&error) {
-                        Some(diagnostic) => tooling_diagnostic_to_lsp(
-                            uri,
-                            diagnostic.with_strategy(DiagnosticStrategy::Interactive),
-                        ),
-                        None => fallback_diagnostic(uri, "Import resolution error"),
-                    }];
+                    return diagnostics;
+                }
+            };
+            let import_service =
+                ImportResolutionService::new(Arc::clone(&index), build_config.target);
+            for import_stmt in &program.imports {
+                match import_service.resolve(import_stmt) {
+                    Ok(resolved) => resolved_imports.push(resolved),
+                    Err(error) => {
+                        self.type_facts.remove(uri);
+                        self.regex_metadata.remove(uri);
+                        return vec![match import_diagnostics::from_error(&error) {
+                            Some(diagnostic) => tooling_diagnostic_to_lsp(
+                                uri,
+                                diagnostic.with_strategy(DiagnosticStrategy::Interactive),
+                            ),
+                            None => fallback_diagnostic(uri, "Import resolution error"),
+                        }];
+                    }
                 }
             }
+            symbol_index = Some(index);
         }
 
         let import_plan = lowered_import_plan(&resolved_imports);
 
         let mut checker = TypeChecker::with_parallel_config(self.parallel_config);
         if !resolved_imports.is_empty() {
-            checker.set_imports(Arc::clone(&symbol_index), resolved_imports.clone());
+            if let Some(index) = symbol_index.as_ref() {
+                checker.set_imports(Arc::clone(index), resolved_imports.clone());
+            }
         }
         let check_result = checker.check_program(&program);
 
-        if let Some(analyses) = checker.regex_analyses() {
-            regex_analyses = analyses.to_vec();
-        }
+        if has_regex_literals {
+            if let Some(analyses) = checker.regex_analyses() {
+                regex_analyses = analyses.to_vec();
+            }
 
-        if regex_analyses.is_empty() {
-            let mut validator = RegexValidator::new();
-            let regex_program = checker.normalized_program().unwrap_or(&program);
-            let _ = validator.validate_program(regex_program);
-            regex_analyses = validator.take_analyses();
-        }
-
-        if regex_analyses.is_empty() {
-            if let Some(regex_program) = Self::regex_program_from_tokens(&tokens) {
+            if regex_analyses.is_empty() {
                 let mut validator = RegexValidator::new();
-                let _ = validator.validate_program(&regex_program);
+                let regex_program = checker.normalized_program().unwrap_or(&program);
+                let _ = validator.validate_program(regex_program);
                 regex_analyses = validator.take_analyses();
+            }
+
+            if regex_analyses.is_empty() {
+                if let Some(regex_program) = Self::regex_program_from_tokens(&tokens) {
+                    let mut validator = RegexValidator::new();
+                    let _ = validator.validate_program(&regex_program);
+                    regex_analyses = validator.take_analyses();
+                }
             }
         }
 
@@ -756,22 +769,26 @@ impl JvLanguageServer {
             }
             Err(errors) => {
                 self.type_facts.remove(uri);
-                if regex_analyses.is_empty() {
-                    self.regex_metadata.remove(uri);
-                } else {
-                    self.regex_metadata
-                        .insert(uri.to_string(), regex_analyses.clone());
-                }
-
-                for analysis in &regex_analyses {
-                    for diagnostic in &analysis.diagnostics {
-                        diagnostics.push(tooling_diagnostic_to_lsp(
-                            uri,
-                            diagnostic
-                                .clone()
-                                .with_strategy(DiagnosticStrategy::Interactive),
-                        ));
+                if has_regex_literals {
+                    if regex_analyses.is_empty() {
+                        self.regex_metadata.remove(uri);
+                    } else {
+                        self.regex_metadata
+                            .insert(uri.to_string(), regex_analyses.clone());
                     }
+
+                    for analysis in &regex_analyses {
+                        for diagnostic in &analysis.diagnostics {
+                            diagnostics.push(tooling_diagnostic_to_lsp(
+                                uri,
+                                diagnostic
+                                    .clone()
+                                    .with_strategy(DiagnosticStrategy::Interactive),
+                            ));
+                        }
+                    }
+                } else {
+                    self.regex_metadata.remove(uri);
                 }
 
                 diagnostics.extend(
@@ -824,14 +841,16 @@ impl JvLanguageServer {
             diagnostics.extend(fallback_raw_comment_diagnostics(&tokens));
         }
 
-        for analysis in &regex_analyses {
-            for diagnostic in &analysis.diagnostics {
-                diagnostics.push(tooling_diagnostic_to_lsp(
-                    uri,
-                    diagnostic
-                        .clone()
-                        .with_strategy(DiagnosticStrategy::Interactive),
-                ));
+        if has_regex_literals {
+            for analysis in &regex_analyses {
+                for diagnostic in &analysis.diagnostics {
+                    diagnostics.push(tooling_diagnostic_to_lsp(
+                        uri,
+                        diagnostic
+                            .clone()
+                            .with_strategy(DiagnosticStrategy::Interactive),
+                    ));
+                }
             }
         }
 
@@ -840,11 +859,15 @@ impl JvLanguageServer {
             enrich_generic_diagnostics(&mut diagnostics, facts_ref, index);
         }
 
-        if regex_analyses.is_empty() {
-            self.regex_metadata.remove(uri);
+        if has_regex_literals {
+            if regex_analyses.is_empty() {
+                self.regex_metadata.remove(uri);
+            } else {
+                self.regex_metadata
+                    .insert(uri.to_string(), regex_analyses.clone());
+            }
         } else {
-            self.regex_metadata
-                .insert(uri.to_string(), regex_analyses.clone());
+            self.regex_metadata.remove(uri);
         }
 
         if !diagnostics
