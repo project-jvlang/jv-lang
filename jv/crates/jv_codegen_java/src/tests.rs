@@ -7,13 +7,14 @@ use jv_ast::{
 use jv_ir::TransformContext;
 use jv_ir::transform::transform_program_with_context;
 use jv_ir::{
-    DataFormat, IrCaseLabel, IrCommentKind, IrDeconstructionComponent, IrDeconstructionPattern,
-    IrExpression, IrImplicitWhenEnd, IrModifiers, IrParameter, IrProgram, IrRecordComponent,
-    IrSampleDeclaration, IrStatement, IrSwitchCase, IrTypeParameter, IrVisibility, JavaType,
-    MethodOverload, PipelineShape, PrimitiveReturnMetadata, PrimitiveSpecializationHint,
-    PrimitiveType, SampleMode, SampleRecordDescriptor, SampleRecordField, SampleSourceKind, Schema,
-    SequencePipeline, SequenceSource, SequenceTerminal, SequenceTerminalEvaluation,
-    SequenceTerminalKind,
+    DataFormat, DoublebraceBaseStrategy, DoublebraceLoweringKind, DoublebraceLoweringMutatePlan,
+    DoublebraceLoweringPlan, IrCaseLabel, IrCommentKind, IrDeconstructionComponent,
+    IrDeconstructionPattern, IrExpression, IrImplicitWhenEnd, IrModifiers, IrParameter, IrProgram,
+    IrRecordComponent, IrSampleDeclaration, IrStatement, IrSwitchCase, IrTypeParameter,
+    IrVisibility, JavaType, MethodOverload, PipelineShape, PrimitiveReturnMetadata,
+    PrimitiveSpecializationHint, PrimitiveType, SampleMode, SampleRecordDescriptor,
+    SampleRecordField, SampleSourceKind, Schema, SequencePipeline, SequenceSource,
+    SequenceTerminal, SequenceTerminalEvaluation, SequenceTerminalKind,
 };
 use jv_parser_frontend::ParserPipeline;
 use jv_parser_rowan::frontend::RowanPipeline;
@@ -2347,6 +2348,33 @@ fn inline_json_sample_emits_helper_via_extra_type_declarations() {
 }
 
 #[test]
+fn inline_json_sample_exposes_map_bridge_method() {
+    let source = r#"
+        fun main(): Unit {
+            val priceMap = {
+                "soup": 780,
+                "steak": 1280
+            }
+            println(priceMap)
+        }
+    "#;
+
+    let ir = parse_program(source);
+    let unit = generate_java_code(&ir).expect("generate Java for inline JSON map bridge helper");
+
+    let helper = unit
+        .type_declarations
+        .iter()
+        .find(|decl| decl.contains("class PricemapSampleData"))
+        .expect("helper class should exist");
+
+    assert!(
+        helper.contains("public static java.util.Map toMutableMap("),
+        "helper should expose toMutableMap bridge: {helper}"
+    );
+}
+
+#[test]
 fn embed_mode_sample_declaration_handles_csv() {
     let declaration = sample_declaration_csv();
     let program = IrProgram {
@@ -2373,6 +2401,53 @@ fn embed_mode_sample_declaration_handles_csv() {
     assert!(
         source.contains("new UserSample(1, \"Alice\", \"alice@example.com\")"),
         "CSV rows should be materialised as UserSample records: {source}"
+    );
+}
+
+#[test]
+fn doublebrace_uses_map_bridge_for_inline_sample_base() {
+    let source = r#"
+        fun main(): Unit {
+            val priceMap = {
+                "soup": 780,
+                "steak": 1280
+            }
+            val updatedPriceMap = priceMap {{
+                put("dessert", 980)
+            }}
+            println(updatedPriceMap)
+        }
+    "#;
+
+    let ast_program = RowanPipeline::default()
+        .parse(source)
+        .expect("doublebrace program should parse")
+        .into_program();
+
+    let span = Span::new(7, 35, 9, 15);
+
+    let plan = DoublebraceLoweringPlan {
+        receiver_fqcn: "java.util.Map".to_string(),
+        kind: DoublebraceLoweringKind::Mutate(DoublebraceLoweringMutatePlan {
+            base: DoublebraceBaseStrategy::ExistingInstance,
+            steps: Vec::new(),
+        }),
+    };
+
+    let mut context = TransformContext::new();
+    context.insert_doublebrace_plan(&span, plan);
+    let ir = transform_program_with_context(ast_program, &mut context)
+        .expect("program with injected doublebrace plan should lower");
+    let unit = generate_java_code(&ir).expect("generate Java for doublebrace sample bridging");
+
+    let script = unit
+        .type_declarations
+        .first()
+        .expect("script class should exist");
+
+    assert!(
+        script.contains("PricemapSampleData.toMutableMap(priceMap)"),
+        "doublebrace base should invoke map bridge: {script}"
     );
 }
 

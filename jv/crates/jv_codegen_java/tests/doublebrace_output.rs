@@ -213,7 +213,7 @@ fn doublebrace_copy_errors_when_with_method_returns_other_type() {
     match err {
         CodeGenError::UnsupportedConstruct { construct, .. } => {
             assert!(
-                construct.contains("with* メソッドが見つかりません"),
+                construct.contains("`with*` メソッドが見つかりません"),
                 "戻り値が一致しない場合は UnsupportedConstruct が返ること: {}",
                 construct
             );

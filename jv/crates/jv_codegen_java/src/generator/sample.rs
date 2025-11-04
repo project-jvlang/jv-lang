@@ -13,14 +13,23 @@ impl JavaCodeGenerator {
         declaration: &IrSampleDeclaration,
     ) -> Result<Vec<String>, CodeGenError> {
         let mut artifacts = self.generate_sample_declaration_records(declaration)?;
+        let helper_name = match declaration.mode {
+            SampleMode::Embed => self.embed_helper_class_name(declaration),
+            SampleMode::Load => self.load_helper_class_name(declaration),
+        };
+        let supports_bridge = supports_map_bridge(declaration);
 
         if declaration.mode == SampleMode::Embed {
-            let helper = self.generate_sample_embed_helper(declaration)?;
+            let helper =
+                self.generate_sample_embed_helper(declaration, &helper_name, supports_bridge)?;
             artifacts.push(helper);
         } else if declaration.mode == SampleMode::Load {
-            let helper = self.generate_sample_load_helper(declaration)?;
+            let helper =
+                self.generate_sample_load_helper(declaration, &helper_name, supports_bridge)?;
             artifacts.push(helper);
         }
+
+        self.register_sample_binding_if_applicable(declaration, &helper_name, supports_bridge);
 
         Ok(artifacts)
     }
@@ -73,6 +82,8 @@ impl JavaCodeGenerator {
     fn generate_sample_embed_helper(
         &mut self,
         declaration: &IrSampleDeclaration,
+        helper_name: &str,
+        include_map_bridge: bool,
     ) -> Result<String, CodeGenError> {
         let data_bytes = declaration.embedded_data.as_ref().ok_or_else(|| {
             CodeGenError::UnsupportedConstruct {
@@ -81,7 +92,6 @@ impl JavaCodeGenerator {
             }
         })?;
 
-        let helper_name = self.embed_helper_class_name(declaration);
         let raw_field_name = match declaration.format {
             DataFormat::Json => "RAW_JSON".to_string(),
             DataFormat::Csv => "RAW_CSV".to_string(),
@@ -173,13 +183,20 @@ impl JavaCodeGenerator {
             span: declaration.span.clone(),
         };
 
+        let mut methods = Vec::new();
+        if include_map_bridge {
+            if let Some(method) = build_map_bridge_method(declaration) {
+                methods.push(method);
+            }
+        }
+
         let class_statement = IrStatement::ClassDeclaration {
-            name: helper_name,
+            name: helper_name.to_string(),
             type_parameters: Vec::new(),
             superclass: None,
             interfaces: Vec::new(),
             fields: vec![raw_field, data_field],
-            methods: Vec::new(),
+            methods,
             nested_classes: Vec::new(),
             modifiers: IrModifiers {
                 visibility: IrVisibility::Public,
@@ -194,6 +211,8 @@ impl JavaCodeGenerator {
     fn generate_sample_load_helper(
         &mut self,
         declaration: &IrSampleDeclaration,
+        helper_name: &str,
+        include_map_bridge: bool,
     ) -> Result<String, CodeGenError> {
         let descriptor_lookup = Self::build_descriptor_lookup(&declaration.records);
         let object_schema_map = self.build_object_schema_map(
@@ -215,6 +234,9 @@ impl JavaCodeGenerator {
             descriptor_lookup,
             object_schema_map,
             list_types,
+            helper_name.to_string(),
+            self.load_method_name(declaration),
+            include_map_bridge,
         )?;
 
         generator.build()
@@ -913,6 +935,25 @@ impl JavaCodeGenerator {
         result
     }
 
+    fn register_sample_binding_if_applicable(
+        &mut self,
+        declaration: &IrSampleDeclaration,
+        helper_class: &str,
+        supports_map_bridge: bool,
+    ) {
+        if !supports_map_bridge {
+            return;
+        }
+
+        self.sample_bindings.insert(
+            declaration.variable_name.clone(),
+            SampleBindingInfo {
+                helper_class: helper_class.to_string(),
+                bridge_kind: SampleBridgeKind::Map,
+            },
+        );
+    }
+
     fn unwrap_optional_java_type<'a>(java_type: &'a JavaType) -> (&'a JavaType, bool) {
         match java_type {
             JavaType::Reference { name, generic_args }
@@ -1087,6 +1128,7 @@ struct LoadHelperGenerator<'a> {
     helper_name: String,
     method_name: String,
     return_type: String,
+    include_map_bridge: bool,
 }
 
 impl<'a> LoadHelperGenerator<'a> {
@@ -1096,9 +1138,10 @@ impl<'a> LoadHelperGenerator<'a> {
         descriptor_lookup: HashMap<String, SampleRecordDescriptor>,
         object_schema_map: HashMap<String, ObjectSchemaInfo>,
         list_types: Vec<ListTypeInfo>,
+        helper_name: String,
+        method_name: String,
+        include_map_bridge: bool,
     ) -> Result<Self, CodeGenError> {
-        let helper_name = generator.load_helper_class_name(declaration);
-        let method_name = generator.load_method_name(declaration);
         let return_type = generator.generate_type(&declaration.java_type)?;
         let builder = generator.builder();
 
@@ -1112,6 +1155,7 @@ impl<'a> LoadHelperGenerator<'a> {
             helper_name,
             method_name,
             return_type,
+            include_map_bridge,
         })
     }
 
@@ -1124,6 +1168,7 @@ impl<'a> LoadHelperGenerator<'a> {
         self.write_decode_methods()?;
         self.write_fetch_helpers();
         self.write_runtime_helpers();
+        self.write_bridge_methods()?;
         self.close_class();
         let output = std::mem::take(&mut self.builder).build();
         Ok(output)
@@ -2146,6 +2191,20 @@ impl<'a> LoadHelperGenerator<'a> {
         self.builder.push_line("");
     }
 
+    fn write_bridge_methods(&mut self) -> Result<(), CodeGenError> {
+        if !self.include_map_bridge {
+            return Ok(());
+        }
+
+        if let Some(method) = build_map_bridge_method(self.declaration) {
+            let method_code = self.generator.generate_method(&method)?;
+            self.builder.push_line("");
+            self.builder.push(&method_code);
+        }
+
+        Ok(())
+    }
+
     fn write_tabular_parsers(&mut self) {
         self.builder.push_line("private static String normalizeColumn(String value) { return value == null ? \"\" : value.trim(); }");
         self.builder.push_line("private static boolean isEmpty(String value) { return value == null || value.trim().isEmpty(); }");
@@ -2776,6 +2835,120 @@ impl<'a> LoadHelperGenerator<'a> {
         }
         Ok(())
     }
+}
+
+fn supports_map_bridge(declaration: &IrSampleDeclaration) -> bool {
+    matches!(declaration.schema, Schema::Object { .. })
+        && root_record_descriptor(declaration).is_some()
+}
+
+fn root_record_descriptor<'a>(
+    declaration: &'a IrSampleDeclaration,
+) -> Option<&'a SampleRecordDescriptor> {
+    let root = declaration.root_record_name.as_ref()?;
+    declaration
+        .records
+        .iter()
+        .find(|descriptor| &descriptor.name == root)
+}
+
+fn build_map_bridge_method(declaration: &IrSampleDeclaration) -> Option<IrStatement> {
+    let descriptor = root_record_descriptor(declaration)?;
+    let span = declaration.span.clone();
+    let map_type = JavaType::Reference {
+        name: "java.util.Map".to_string(),
+        generic_args: Vec::new(),
+    };
+    let map_var = "__sample_map".to_string();
+    let mut statements = Vec::new();
+
+    statements.push(IrStatement::VariableDeclaration {
+        name: map_var.clone(),
+        java_type: map_type.clone(),
+        initializer: Some(IrExpression::ObjectCreation {
+            class_name: "java.util.LinkedHashMap".to_string(),
+            generic_args: Vec::new(),
+            args: Vec::new(),
+            java_type: map_type.clone(),
+            span: span.clone(),
+        }),
+        is_final: false,
+        modifiers: IrModifiers::default(),
+        span: span.clone(),
+    });
+
+    for field in &descriptor.fields {
+        let key_expr = IrExpression::Literal(Literal::String(field.name.clone()), span.clone());
+        let value_expr = IrExpression::MethodCall {
+            receiver: Some(Box::new(IrExpression::Identifier {
+                name: "sample".to_string(),
+                java_type: declaration.java_type.clone(),
+                span: span.clone(),
+            })),
+            method_name: field.name.clone(),
+            java_name: None,
+            resolved_target: None,
+            args: Vec::new(),
+            argument_style: CallArgumentStyle::Comma,
+            java_type: field.java_type.clone(),
+            span: span.clone(),
+        };
+        let put_call = IrExpression::MethodCall {
+            receiver: Some(Box::new(IrExpression::Identifier {
+                name: map_var.clone(),
+                java_type: map_type.clone(),
+                span: span.clone(),
+            })),
+            method_name: "put".to_string(),
+            java_name: None,
+            resolved_target: None,
+            args: vec![key_expr, value_expr],
+            argument_style: CallArgumentStyle::Comma,
+            java_type: JavaType::object(),
+            span: span.clone(),
+        };
+        statements.push(IrStatement::Expression {
+            expr: put_call,
+            span: span.clone(),
+        });
+    }
+
+    statements.push(IrStatement::Return {
+        value: Some(IrExpression::Identifier {
+            name: map_var,
+            java_type: map_type.clone(),
+            span: span.clone(),
+        }),
+        span: span.clone(),
+    });
+
+    let body = IrExpression::Block {
+        statements,
+        java_type: map_type.clone(),
+        span: span.clone(),
+    };
+
+    Some(IrStatement::MethodDeclaration {
+        name: MAP_BRIDGE_METHOD_NAME.to_string(),
+        java_name: None,
+        type_parameters: Vec::new(),
+        parameters: vec![IrParameter {
+            name: "sample".to_string(),
+            java_type: declaration.java_type.clone(),
+            modifiers: IrModifiers::default(),
+            span: span.clone(),
+        }],
+        primitive_return: None,
+        return_type: map_type,
+        body: Some(body),
+        modifiers: IrModifiers {
+            visibility: IrVisibility::Public,
+            is_static: true,
+            ..IrModifiers::default()
+        },
+        throws: Vec::new(),
+        span,
+    })
 }
 
 fn unwrap_schema_optional<'a>(schema: &'a Schema) -> (&'a Schema, bool) {

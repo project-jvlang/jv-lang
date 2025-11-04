@@ -14,7 +14,7 @@ impl JavaCodeGenerator {
     ) -> Result<String, CodeGenError> {
         let base_expr = base
             .as_ref()
-            .map(|expr| self.generate_expression(expr))
+            .map(|expr| self.render_doublebrace_base(expr, receiver_type))
             .transpose()?;
 
         let base_expr = base_expr.ok_or_else(|| CodeGenError::UnsupportedConstruct {

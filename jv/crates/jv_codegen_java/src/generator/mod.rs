@@ -20,6 +20,8 @@ use jv_mapper::{
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
+const MAP_BRIDGE_METHOD_NAME: &str = "toMutableMap";
+
 mod declarations;
 mod expressions;
 mod formatting;
@@ -50,6 +52,7 @@ pub struct JavaCodeGenerator {
     record_components: HashMap<String, HashSet<String>>,
     temp_counter: usize,
     extra_type_declarations: Vec<String>,
+    sample_bindings: HashMap<String, SampleBindingInfo>,
 }
 
 impl JavaCodeGenerator {
@@ -80,6 +83,7 @@ impl JavaCodeGenerator {
             record_components: HashMap::new(),
             temp_counter: 0,
             extra_type_declarations: Vec::new(),
+            sample_bindings: HashMap::new(),
         }
     }
 
@@ -311,6 +315,7 @@ impl JavaCodeGenerator {
         self.record_components.clear();
         self.temp_counter = 0;
         self.extra_type_declarations.clear();
+        self.sample_bindings.clear();
     }
 
     fn register_record_components_from_declarations(
@@ -826,6 +831,30 @@ impl JavaCodeGenerator {
             | IrExpression::StringFormat { .. }
             | IrExpression::InstanceOf { .. }
             | IrExpression::Cast { .. } => {}
+        }
+    }
+
+    fn render_doublebrace_base(
+        &mut self,
+        expr: &IrExpression,
+        receiver_type: &JavaType,
+    ) -> Result<String, CodeGenError> {
+        let rendered = self.generate_expression(expr)?;
+        if let Some(name) = Self::sample_identifier_name(expr) {
+            if let Some(binding) = self.sample_bindings.get(name) {
+                if binding.should_bridge(receiver_type) {
+                    return Ok(binding.render_bridge_call(&rendered));
+                }
+            }
+        }
+        Ok(rendered)
+    }
+
+    fn sample_identifier_name(expr: &IrExpression) -> Option<&str> {
+        if let IrExpression::Identifier { name, .. } = expr {
+            Some(name.as_str())
+        } else {
+            None
         }
     }
 
@@ -1688,6 +1717,58 @@ impl JavaCodeGenerator {
         self.instance_extension_methods
             .remove(type_name)
             .unwrap_or_default()
+    }
+}
+
+#[derive(Debug, Clone)]
+struct SampleBindingInfo {
+    helper_class: String,
+    bridge_kind: SampleBridgeKind,
+}
+
+impl SampleBindingInfo {
+    fn should_bridge(&self, receiver_type: &JavaType) -> bool {
+        match self.bridge_kind {
+            SampleBridgeKind::Map => SampleBridgeKind::is_map_like(receiver_type),
+        }
+    }
+
+    fn render_bridge_call(&self, base_expr: &str) -> String {
+        format!(
+            "{}.{}({})",
+            self.helper_class,
+            self.bridge_kind.method_name(),
+            base_expr
+        )
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+enum SampleBridgeKind {
+    Map,
+}
+
+impl SampleBridgeKind {
+    fn method_name(self) -> &'static str {
+        MAP_BRIDGE_METHOD_NAME
+    }
+
+    fn is_map_like(java_type: &JavaType) -> bool {
+        if let JavaType::Reference { name, .. } = java_type {
+            let base = name.split('<').next().unwrap_or(name.as_str()).trim();
+            matches!(
+                base,
+                "java.util.Map"
+                    | "java.util.LinkedHashMap"
+                    | "java.util.HashMap"
+                    | "java.util.TreeMap"
+                    | "java.util.SortedMap"
+                    | "java.util.NavigableMap"
+                    | "java.util.concurrent.ConcurrentMap"
+            )
+        } else {
+            false
+        }
     }
 }
 
