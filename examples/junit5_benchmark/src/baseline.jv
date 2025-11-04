@@ -1,0 +1,65 @@
+package benchmarks.junit5
+
+data MatrixRow(label: String, lhs: Int, rhs: Int, expected: Int)
+data DeltaRow(label: String, lhs: Int, rhs: Int, expected: Int)
+
+fun add(lhs: Int, rhs: Int): Int {
+    lhs + rhs
+}
+
+fun diff(lhs: Int, rhs: Int): Int {
+    lhs - rhs
+}
+
+val additionCases = [
+    MatrixRow("cold-start" 2 3 5)
+    MatrixRow("negative" -5 4 -1)
+    MatrixRow("zero" 0 0 0)
+    MatrixRow("carry" 11 17 28)
+    MatrixRow("large" 128 512 640)
+]
+
+val differenceCases = [
+    DeltaRow("standard" 8 3 5)
+    DeltaRow("negative" -5 -2 -3)
+    DeltaRow("wrap" 3 8 -5)
+    DeltaRow("mix" 24 9 15)
+]
+
+val additionLabels = additionCases
+    .map { row -> row.label }
+    .toList()
+
+val differenceLabels = differenceCases
+    .map { row -> row.label }
+    .toList()
+
+fun verifyAddition(rows: List<MatrixRow>): Int {
+    rows
+        .map { row -> add(row.lhs row.rhs) == row.expected }
+        .filter { outcome -> outcome == true }
+        .countElements()
+}
+
+fun verifyDifferences(rows: List<DeltaRow>): Int {
+    rows
+        .map { row -> diff(row.lhs row.rhs) == row.expected }
+        .filter { outcome -> outcome == true }
+        .countElements()
+}
+
+fun renderReport(): String {
+    val additionOk = verifyAddition(additionCases)
+    val diffOk = verifyDifferences(differenceCases)
+    val summary = """
+# Baseline Report
+addition suites = ${additionOk}
+difference suites = ${diffOk}
+labels = ${additionLabels} / ${differenceLabels}
+"""
+    summary
+}
+
+fun main(): Unit {
+    println(renderReport())
+}

@@ -3407,3 +3407,11 @@ fn trailing_comments_remain_inline() {
 
     assert_eq!(rendered, "int age = 25; // mutable");
 }
+
+#[cfg(all(test, feature = "junit5_integration_bench"))]
+mod bench {
+    include!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../jv_ir/benches/junit5_codegen.rs"
+    ));
+}

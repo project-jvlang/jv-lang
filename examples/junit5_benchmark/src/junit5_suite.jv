@@ -1,0 +1,33 @@
+package benchmarks.junit5
+
+data MatrixRow(label: String, lhs: Int, rhs: Int, expected: Int)
+data DeltaRow(label: String, lhs: Int, rhs: Int, expected: Int)
+
+fun add(lhs: Int, rhs: Int): Int {
+    lhs + rhs
+}
+
+fun diff(lhs: Int, rhs: Int): Int {
+    lhs - rhs
+}
+
+test "足し算ケースを検証" [
+    ["cold-start" 2 3 5]
+    ["negative" -5 4 -1]
+    ["zero" 0 0 0]
+    ["carry" 11 17 28]
+    ["large" 128 512 640]
+] (label: String, lhs: Int, rhs: Int, expected: Int) {
+    val result = add(lhs rhs)
+    result == expected
+}
+
+test "減算ケースを検証" [
+    ["standard" 8 3 5]
+    ["negative" -5 -2 -3]
+    ["wrap" 3 8 -5]
+    ["mix" 24 9 15]
+] (name: String, lhs: Int, rhs: Int, expected: Int) {
+    val result = diff(lhs rhs)
+    result == expected
+}

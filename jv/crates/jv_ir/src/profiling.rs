@@ -60,6 +60,17 @@ impl PerfMetrics {
         self.stages.iter().find(|stage| stage.name() == name)
     }
 
+    /// 指定したステージの経過時間（ミリ秒）を返す。
+    pub fn stage_millis(&self, name: &str) -> Option<f64> {
+        self.stage(name).map(|stage| stage.elapsed_millis())
+    }
+
+    /// ステージ計測が存在しない場合は合計時間（ミリ秒）を返す。
+    pub fn stage_millis_or_total(&self, name: &str) -> f64 {
+        self.stage_millis(name)
+            .unwrap_or_else(|| self.total_millis())
+    }
+
     /// Returns cumulative pool metrics captured so far.
     pub fn pool_metrics(&self) -> Option<&TransformPoolMetrics> {
         self.pool_metrics.as_ref()

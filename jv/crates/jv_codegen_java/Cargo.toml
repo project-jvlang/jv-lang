@@ -4,6 +4,10 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[features]
+default = []
+junit5_integration_bench = []
+
 [dependencies]
 jv_ir.workspace = true
 jv_ast.workspace = true
