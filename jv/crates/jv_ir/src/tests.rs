@@ -6646,13 +6646,14 @@ fun sample(value: Any): Int {
         let mut failures = Vec::new();
         for path in files {
             let display = path.display().to_string();
-            if display.contains("/pattern/") {
+            let normalized = display.replace('\\', "/");
+            if normalized.contains("/pattern/") {
                 continue;
             }
-            if display.contains("/java_annotations/") {
+            if normalized.contains("/java_annotations/") {
                 continue;
             }
-            if display.contains("package/complex_stdlib_pattern.jv") {
+            if normalized.contains("package/complex_stdlib_pattern.jv") {
                 continue;
             }
             let source = match fs::read_to_string(&path) {
