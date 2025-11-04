@@ -114,15 +114,19 @@ pub fn render<W: Write>(writer: &mut W) -> Result<()> {
     writeln!(writer, "コマンド例: jv test --target 25")?;
     writeln!(
         writer,
-        "- テストDSLを JUnit 5 対応の Java ソースへ変換し、`target/generated-tests/java25` に配置します。"
+        "- テストDSLを JUnit 5 対応の Java ソースへ変換し、`target/generated-tests/java25` に配置します（21 指定時は `java21`）。"
     )?;
     writeln!(
         writer,
-        "- 変換後は toolchains/jdk25 を JAVA_HOME に設定した状態で `mvn test` を呼び出し、Surefire で検証します。"
+        "- 変換後は toolchains/jdk25 を JAVA_HOME に設定しつつ `JV_GENERATED_TESTS` / `JV_TEST_TARGET` を付与した状態で `mvn test` を実行します。"
     )?;
     writeln!(
         writer,
-        "- `--target 21` を指定すると toolchains/jdk21 を利用して Java 21 互換のテストも同じ手順で実行できます。"
+        "- `--target 21` を指定すると toolchains/jdk21 を利用し、互換性レポートとサンプルキャッシュ (`target/generated-tests/.sample-cache`) も同じワークフローで共有します。"
+    )?;
+    writeln!(
+        writer,
+        "- 詳細な DSL/CLI ガイドは `docs/testing/junit5-integration.md` にまとまっているので、ハンズオン後に読み返すと理解が深まります。"
     )?;
 
     writeln!(

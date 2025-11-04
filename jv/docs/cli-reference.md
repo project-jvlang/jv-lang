@@ -229,6 +229,46 @@ jv build src/main.jv --binary native --bin-name myapp
 5. **Java生成**: 読みやすいJava 25ソースコードを生成
 6. **Javaコンパイル**: `javac`でバイトコードにコンパイル
 
+### `jv test`
+
+テスト DSL を Java へトランスパイルし、Maven Surefire で `mvn test` を実行します。ワークフローの詳細は [`docs/testing/junit5-integration.md`](../docs/testing/junit5-integration.md) を参照してください。
+
+```bash
+jv test [ENTRYPOINT] [OPTIONS]
+```
+
+**主なオプション**
+
+| オプション | 内容 |
+| ---------- | ---- |
+| `--target <21|25>` | Java ターゲットを切り替え（デフォルト 25）。出力先は `target/generated-tests/java<target>`。 |
+| `--clean` | 生成ディレクトリと `.sample-cache` を削除してから再生成。 |
+| `--maven <PATH>` | 既定 (`toolchains/maven/bin/mvn`) 以外の Maven 実行ファイルを使用。 |
+| `--entrypoint <FILE>` | manifest のエントリポイントを無視して単一 `.jv` をテスト対象にする。 |
+| `--sample-network allow|deny` | `@Sample` データ取得時のネットワークポリシー（`jv build` と同じフラグ）。 |
+
+**環境変数と出力**
+- `JAVA_HOME` は `toolchains/jdk25` / `toolchains/jdk21`、もしくは `JAVA25_HOME` / `JAVA21_HOME` から自動設定。
+- `JV_GENERATED_TESTS` と `JV_TEST_TARGET` を Maven プロセスへ付与し、`-Djv.generated.tests=<path>` も自動追加。
+- 生成された Java は `target/generated-tests/java{target}`、サンプルキャッシュは `target/generated-tests/.sample-cache`。
+
+**使用例**
+```bash
+# Java 25 をクリーンビルドしてテストを実行
+jv test --clean
+
+# Java 21 ターゲットでカスタム Maven を利用
+jv test tests/suite.jv --target 21 --maven \"$HOME/.maven/bin/mvn\"
+
+# ネットワーク越しの @Sample を許可
+jv test --sample-network allow
+```
+
+**トラブルシュート**
+- `toolchains/jdk21` / `jdk25` が見つからない → `scripts/setup-toolchains.sh` で取得するか `JAVA21_HOME` / `JAVA25_HOME` を設定。
+- Maven 実行に失敗 → `--maven` で明示的なパスを渡すか、`toolchains/maven/bin` を `PATH` の先頭に追加。
+- `JV5301` / `JV5304` → データセット列数とパラメータ数を一致させる。詳細は上記ドキュメントを参照。
+
 ### `jv run`
 
 コンパイル済みjvプログラムを実行します。
