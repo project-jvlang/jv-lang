@@ -31,6 +31,7 @@ use jv_lexer::{
     TokenType,
 };
 use jv_type_inference_java::{lower_type_annotation_from_tokens, TypeLoweringErrorKind};
+use std::cmp::Ordering;
 
 /// ローワリング結果。
 #[derive(Debug)]
@@ -448,8 +449,11 @@ fn lower_assignment(
         )
     })?;
 
+    let mut pattern_syntax_node: Option<JvSyntaxNode> = None;
+
     let (target, binding_pattern) =
         if let Some(pattern_node) = child_node(&target_node, SyntaxKind::BindingPattern) {
+            pattern_syntax_node = Some(pattern_node.clone());
             let pattern = lower_binding_pattern(context, &pattern_node)?;
             let expr = binding_pattern_primary_expression(&pattern);
             (expr, Some(pattern))
@@ -469,7 +473,61 @@ fn lower_assignment(
             )
         })?;
 
-    let value = lower_expression(context, &value_node)?;
+    let mut value = lower_expression(context, &value_node)?;
+
+    if binding_pattern.is_some() {
+        if let Expression::Tuple {
+            context: tuple_context,
+            ..
+        } = &mut value
+        {
+            tuple_context.in_destructuring_pattern = true;
+        }
+    }
+
+    if let (Some(pattern), Expression::Tuple { elements, fields, .. }) =
+        (binding_pattern.as_ref(), &value)
+    {
+        if let Some(pattern_len) = destructuring_element_count(pattern) {
+            let tuple_len = elements.len();
+            match pattern_len.cmp(&tuple_len) {
+                Ordering::Less => {
+                    let example = tuple_field_example(fields, pattern_len)
+                        .unwrap_or_else(|| format!("{}番目", pattern_len + 1));
+                    let message = format!(
+                        "分割代入の要素が不足しています: パターンは {} 要素ですが、タプルは {} 要素です (例: `{}` が未割り当てです)",
+                        pattern_len, tuple_len, example
+                    );
+                    let diagnostic_node = pattern_syntax_node.as_ref().unwrap_or(node);
+                    push_diagnostic(
+                        diagnostics,
+                        LoweringDiagnosticSeverity::Error,
+                        message,
+                        context,
+                        diagnostic_node,
+                    );
+                }
+                Ordering::Greater => {
+                    let example = pattern_element_example(pattern, tuple_len)
+                        .unwrap_or_else(|| format!("{}番目", tuple_len + 1));
+                    let message = format!(
+                        "分割代入の要素が多すぎます: パターンは {} 要素ですが、タプルは {} 要素です (例: `{}` が余剰です)",
+                        pattern_len, tuple_len, example
+                    );
+                    let diagnostic_node = pattern_syntax_node.as_ref().unwrap_or(node);
+                    push_diagnostic(
+                        diagnostics,
+                        LoweringDiagnosticSeverity::Error,
+                        message,
+                        context,
+                        diagnostic_node,
+                    );
+                }
+                Ordering::Equal => {}
+            }
+        }
+    }
+
     let span = context.span_for(node).unwrap_or_else(Span::dummy);
 
     if let Some(pattern) = binding_pattern.clone() {
@@ -5976,4 +6034,46 @@ fn binding_pattern_primary_expression(pattern: &BindingPatternKind) -> Expressio
     } else {
         Expression::Identifier("_".to_string(), span)
     }
+}
+
+fn destructuring_element_count(pattern: &BindingPatternKind) -> Option<usize> {
+    match pattern {
+        BindingPatternKind::Tuple { elements, .. }
+        | BindingPatternKind::List { elements, .. } => Some(elements.len()),
+        _ => None,
+    }
+}
+
+fn tuple_field_example(fields: &[TupleFieldMeta], index: usize) -> Option<String> {
+    fields.get(index).map(tuple_field_label)
+}
+
+fn tuple_field_label(meta: &TupleFieldMeta) -> String {
+    meta.primary_label
+        .as_ref()
+        .cloned()
+        .or_else(|| meta.identifier_hint.clone())
+        .unwrap_or_else(|| format!("_{}", meta.fallback_index))
+}
+
+fn pattern_element_example(pattern: &BindingPatternKind, index: usize) -> Option<String> {
+    match pattern {
+        BindingPatternKind::Tuple { elements, .. }
+        | BindingPatternKind::List { elements, .. } => elements
+            .get(index)
+            .map(pattern_binding_label),
+        _ => None,
+    }
+}
+
+fn pattern_binding_label(pattern: &BindingPatternKind) -> String {
+    pattern
+        .first_identifier()
+        .map(|text| text.to_string())
+        .unwrap_or_else(|| match pattern {
+            BindingPatternKind::Wildcard { .. } => "_".to_string(),
+            BindingPatternKind::Tuple { .. } => "(...)".to_string(),
+            BindingPatternKind::List { .. } => "[...]".to_string(),
+            BindingPatternKind::Identifier { name, .. } => name.clone(),
+        })
 }
