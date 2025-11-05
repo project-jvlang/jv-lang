@@ -69,10 +69,6 @@ impl ExpressionState {
         }
     }
 
-    fn is_in_when_context(&self) -> bool {
-        self.pending_when || !self.when_blocks.is_empty()
-    }
-
     fn reset(&mut self) {
         self.pending_when = false;
         self.when_blocks.clear();
@@ -569,15 +565,6 @@ impl<'tokens> ParserContext<'tokens> {
                 if kind == TokenKind::WhenKw {
                     if let Some(state) = self.expression_states.last_mut() {
                         state.register_when();
-                    }
-                } else if kind == TokenKind::ElseKw {
-                    let inside_when = self
-                        .expression_states
-                        .last()
-                        .map(ExpressionState::is_in_when_context)
-                        .unwrap_or(false);
-                    if !inside_when {
-                        should_break_on_sync = true;
                     }
                 } else if matches!(
                     kind,

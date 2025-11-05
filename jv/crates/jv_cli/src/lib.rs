@@ -1083,18 +1083,22 @@ pub mod pipeline {
                     .compile_java_files(java_paths)
                     .map_err(|e| anyhow!("Java compilation failed: {}", e))?;
 
-                let entries = fs::read_dir(&options.output_dir).with_context(|| {
-                    format!(
-                        "Failed to enumerate output directory: {}",
-                        options.output_dir.display()
-                    )
-                })?;
-
+                let mut stack = vec![options.output_dir.clone()];
                 let mut class_files = Vec::new();
-                for entry in entries {
-                    let path = entry?.path();
-                    if path.extension().and_then(OsStr::to_str) == Some("class") {
-                        class_files.push(path);
+                while let Some(current) = stack.pop() {
+                    let entries = fs::read_dir(&current).with_context(|| {
+                        format!(
+                            "Failed to enumerate output directory: {}",
+                            current.display()
+                        )
+                    })?;
+                    for entry in entries {
+                        let path = entry?.path();
+                        if path.is_dir() {
+                            stack.push(path);
+                        } else if path.extension().and_then(OsStr::to_str) == Some("class") {
+                            class_files.push(path);
+                        }
                     }
                 }
                 artifacts.class_files = class_files;

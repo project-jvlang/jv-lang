@@ -217,11 +217,9 @@ fn parse_continue(ctx: &mut ParserContext<'_>) -> bool {
 
 fn report_unsupported_control(ctx: &mut ParserContext<'_>, keyword: TokenKind) -> bool {
     let message = match keyword {
-        TokenKind::IfKw => "jv 言語では `if`/`else` ステートメントは使用できません。`when` を使用してください。",
-        TokenKind::WhileKw | TokenKind::DoKw => {
-            "jv 言語では `while`/`do-while` ステートメントは使用できません。`for` によるループ表現へ書き換えてください。"
-        }
-        _ => "この制御構文はサポートされていません。",
+        TokenKind::IfKw => "JV3103: `if` expressions are not supported / `if` 式はサポートされていません。\n条件分岐は `when` 式を使用してください。Quick Fix: when.convert.if. / Use a `when` expression for branching. Quick Fix: when.convert.if. (--explain JV3103)",
+        TokenKind::WhileKw | TokenKind::DoKw => "E_LOOP_001: `while`/`do-while` loops have been removed from the language / `while`/`do-while` ループはサポートされていません。\n`for (item in ...)` ループへ書き換えてください。/ Replace legacy loops with `for (item in ...)`. (--explain E_LOOP_001)",
+        _ => "JVF000: Unsupported control construct encountered.\n指定の制御構文は現在サポートされていません。/ This control construct is not supported.",
     };
     ctx.consume_trivia();
     let start = ctx.position();

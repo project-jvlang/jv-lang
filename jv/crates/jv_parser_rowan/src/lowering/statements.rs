@@ -855,7 +855,7 @@ fn lower_expression_from_tokens(
         Ok(expr) => Ok(expr),
         Err(err) => {
             let expression_parser::ExpressionError { message, span } = err;
-            if message.contains("JV2101") {
+            if message.contains("JV2101") || message.contains("JV3103") {
                 let span = span
                     .or_else(|| context.span_for(span_node))
                     .unwrap_or_else(Span::dummy);
@@ -1324,10 +1324,23 @@ mod expression_parser {
                 TokenType::StringStart => {
                     return self.parse_string_segments(index);
                 }
+                TokenType::If => {
+                    let span = span_from_token(token);
+                    return Err(ExpressionError::new("JV3103: `if` expressions are not supported / `if` 式はサポートされていません。\n条件分岐は `when` 式を使用してください。Quick Fix: when.convert.if. / Use a `when` expression for branching. Quick Fix: when.convert.if. (--explain JV3103)", Some(span)));
+                }
                 TokenType::Null => {
                     let span = span_from_token(token);
                     Ok(ParsedExpr {
                         expr: Expression::Literal(Literal::Null, span.clone()),
+                        start: index,
+                        end: index + 1,
+                    })
+                }
+                TokenType::RegexLiteral(_) => {
+                    let span = span_from_token(token);
+                    let literal = regex_literal_from_token(token, span.clone());
+                    Ok(ParsedExpr {
+                        expr: Expression::RegexLiteral(literal),
                         start: index,
                         end: index + 1,
                     })
