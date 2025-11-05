@@ -7,8 +7,13 @@ use std::path::Path;
 use std::str::FromStr;
 use thiserror::Error;
 
+pub mod registry;
 pub mod resolver;
 
+pub use registry::{
+    ArtifactCoordinates, ArtifactResource, MavenCoordinates, MavenMetadata, MavenRegistry,
+    MetadataParseError, RegistryError, RetryConfig,
+};
 pub use resolver::{
     DependencyScope, ManifestDependencyProvider, RequestedDependency, ResolutionDiagnostic,
     ResolutionDiagnosticLevel, ResolutionSource, ResolutionStats, ResolvedDependencies,
