@@ -323,7 +323,8 @@ fn import_alias_from_tokens(tokens: &[&Token]) -> Option<String> {
             TokenType::Whitespace(_) | TokenType::Newline => continue,
             TokenType::LineComment(_)
             | TokenType::BlockComment(_)
-            | TokenType::JavaDocComment(_) => continue,
+            | TokenType::JavaDocComment(_)
+            | TokenType::FieldNameLabel(_) => continue,
             TokenType::Dot => {
                 previous_was_dot = true;
                 if awaiting_alias_name {
@@ -974,6 +975,7 @@ fn is_trivia_token(token: &Token) -> bool {
             | TokenType::LineComment(_)
             | TokenType::BlockComment(_)
             | TokenType::JavaDocComment(_)
+            | TokenType::FieldNameLabel(_)
     )
 }
 
@@ -2729,7 +2731,8 @@ mod expression_parser {
                     | TokenType::LayoutComma
                     | TokenType::LineComment(_)
                     | TokenType::BlockComment(_)
-                    | TokenType::JavaDocComment(_) => self.pos += 1,
+                    | TokenType::JavaDocComment(_)
+                    | TokenType::FieldNameLabel(_) => self.pos += 1,
                     _ => break,
                 }
             }
@@ -3373,7 +3376,8 @@ mod expression_parser {
                     | TokenType::LayoutComma
                     | TokenType::LineComment(_)
                     | TokenType::BlockComment(_)
-                    | TokenType::JavaDocComment(_) => idx += 1,
+                    | TokenType::JavaDocComment(_)
+                    | TokenType::FieldNameLabel(_) => idx += 1,
                     _ => return Some(&token.token_type),
                 }
             }
@@ -3398,7 +3402,8 @@ mod expression_parser {
                     | TokenType::LayoutComma
                     | TokenType::LineComment(_)
                     | TokenType::BlockComment(_)
-                    | TokenType::JavaDocComment(_) => self.pos += 1,
+                    | TokenType::JavaDocComment(_)
+                    | TokenType::FieldNameLabel(_) => self.pos += 1,
                     _ => break,
                 }
             }
@@ -4256,7 +4261,8 @@ mod expression_parser {
                     | TokenType::Newline
                     | TokenType::LineComment(_)
                     | TokenType::BlockComment(_)
-                    | TokenType::JavaDocComment(_) => self.pos += 1,
+                    | TokenType::JavaDocComment(_)
+                    | TokenType::FieldNameLabel(_) => self.pos += 1,
                     _ => break,
                 }
             }

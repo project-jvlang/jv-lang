@@ -633,6 +633,7 @@ impl TokenKind {
             TokenType::LineComment(_) => TokenKind::LineComment,
             TokenType::BlockComment(_) => TokenKind::BlockComment,
             TokenType::JavaDocComment(_) => TokenKind::DocComment,
+            TokenType::FieldNameLabel(_) => TokenKind::LineComment,
             TokenType::Eof => TokenKind::Eof,
             TokenType::Invalid(_) => TokenKind::Unknown,
         }

@@ -158,6 +158,7 @@ fn is_trivia_token(token: &Token) -> bool {
             | TokenType::LineComment(_)
             | TokenType::BlockComment(_)
             | TokenType::JavaDocComment(_)
+            | TokenType::FieldNameLabel(_)
             | TokenType::LayoutComma
             | TokenType::Eof
     )

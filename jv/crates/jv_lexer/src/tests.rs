@@ -567,6 +567,33 @@ val star = 3
 }
 
 #[test]
+fn lexer_emits_field_name_label_tokens() {
+    let source = "value // result";
+    let mut lexer = Lexer::new(source.to_string());
+    let tokens = lexer.tokenize().expect("tokenize label sample");
+
+    let label_token = tokens
+        .iter()
+        .find(|token| matches!(token.token_type, TokenType::FieldNameLabel(_)))
+        .expect("expected FieldNameLabel token");
+
+    match &label_token.token_type {
+        TokenType::FieldNameLabel(payload) => {
+            assert_eq!(payload.primary.as_deref(), Some("result"));
+            let span = payload
+                .primary_span
+                .as_ref()
+                .expect("primary span should be recorded");
+            assert_eq!(span.name, "result");
+            assert_eq!(span.line, label_token.line);
+            assert_eq!(span.column, label_token.column);
+            assert_eq!(span.kind, FieldNameLabelKind::LineComment);
+        }
+        _ => unreachable!(),
+    }
+}
+
+#[test]
 fn test_block_comment_trivia_passthrough() {
     let source = "/* keep */
 val value = 1";
