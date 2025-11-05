@@ -9,6 +9,7 @@ pub mod null_safety;
 pub mod pattern;
 pub mod regex;
 pub mod telemetry;
+pub mod tuple_planner;
 
 pub use inference::{
     InferenceEngine, InferenceError, InferenceResult, NullabilityAnalyzer, PrimitiveType,
@@ -19,6 +20,7 @@ pub use jv_inference::ParallelInferenceConfig;
 pub use regex::RegexAnalysis;
 
 use crate::imports::ResolvedImport;
+use crate::tuple_planner::{TuplePlanner, TupleRecordPlan};
 use binding::{BindingResolution, BindingUsageSummary, LateInitManifest, resolve_bindings};
 use inference::conversions::{AppliedConversion, ConversionKind, HelperSpec, NullableGuard};
 use jv_ast::{Program, Span};
@@ -66,6 +68,7 @@ pub struct InferenceSnapshot {
     pattern_facts: HashMap<(u64, PatternTarget), PatternMatchFacts>,
     regex_analyses: Vec<RegexAnalysis>,
     late_init_manifest: LateInitManifest,
+    tuple_plans: Vec<TupleRecordPlan>,
 }
 
 impl InferenceSnapshot {
@@ -74,6 +77,7 @@ impl InferenceSnapshot {
         pattern_facts: HashMap<(u64, PatternTarget), PatternMatchFacts>,
         regex_analyses: Vec<RegexAnalysis>,
         late_init_manifest: LateInitManifest,
+        tuple_plans: Vec<TupleRecordPlan>,
     ) -> Self {
         let environment = engine.environment().clone();
         let bindings = engine.bindings().to_vec();
@@ -96,6 +100,7 @@ impl InferenceSnapshot {
             pattern_facts,
             regex_analyses,
             late_init_manifest,
+            tuple_plans,
         }
     }
 
@@ -121,6 +126,10 @@ impl InferenceSnapshot {
 
     pub fn late_init_manifest(&self) -> &LateInitManifest {
         &self.late_init_manifest
+    }
+
+    pub fn tuple_record_plans(&self) -> &[TupleRecordPlan] {
+        &self.tuple_plans
     }
 }
 
@@ -214,6 +223,9 @@ pub trait TypeInferenceService {
     /// Late-init 用メタデータを返す。
     fn late_init_manifest(&self) -> &LateInitManifest;
 
+    /// Planned tuple record definitions inferred for the current program.
+    fn tuple_record_plans(&self) -> &[TupleRecordPlan];
+
     /// Retrieves branch-level nullability flags for a `when` expression.
     ///
     /// The caller must provide the node identifier used by the pattern service,
@@ -252,6 +264,10 @@ impl TypeInferenceService for InferenceSnapshot {
 
     fn late_init_manifest(&self) -> &LateInitManifest {
         &self.late_init_manifest
+    }
+
+    fn tuple_record_plans(&self) -> &[TupleRecordPlan] {
+        &self.tuple_plans
     }
 
     fn when_branch_nullability(
@@ -387,6 +403,7 @@ pub struct TypeChecker {
     normalized_program: Option<Program>,
     binding_usage: BindingUsageSummary,
     late_init_manifest: LateInitManifest,
+    tuple_plans: Vec<TupleRecordPlan>,
 }
 
 impl TypeChecker {
@@ -410,6 +427,7 @@ impl TypeChecker {
             normalized_program: None,
             binding_usage: BindingUsageSummary::default(),
             late_init_manifest: LateInitManifest::default(),
+            tuple_plans: Vec::new(),
         }
     }
 
@@ -452,6 +470,10 @@ impl TypeChecker {
         &self.late_init_manifest
     }
 
+    pub fn tuple_record_plans(&self) -> &[TupleRecordPlan] {
+        &self.tuple_plans
+    }
+
     pub fn set_imports(&mut self, symbol_index: Arc<SymbolIndex>, imports: Vec<ResolvedImport>) {
         self.engine.set_imports(symbol_index, imports);
     }
@@ -463,6 +485,7 @@ impl TypeChecker {
     pub fn check_program(&mut self, program: &Program) -> Result<(), Vec<CheckError>> {
         self.engine.set_parallel_config(self.parallel_config);
         self.null_safety_hints.clear();
+        self.tuple_plans.clear();
 
         let binding_resolution = resolve_bindings(program);
         let BindingResolution {
@@ -523,11 +546,20 @@ impl TypeChecker {
                     self.update_type_facts_telemetry();
                     return Err(validation_errors);
                 }
+                let tuple_plans = {
+                    let normalized_program = self
+                        .normalized_program
+                        .as_ref()
+                        .expect("normalized program should be available");
+                    TuplePlanner::plan_program(normalized_program)
+                };
+                self.tuple_plans = tuple_plans.clone();
                 self.snapshot = Some(InferenceSnapshot::from_engine(
                     &self.engine,
                     pattern_facts,
                     regex_analyses,
                     self.late_init_manifest.clone(),
+                    tuple_plans,
                 ));
                 self.merged_facts = self
                     .snapshot
@@ -546,6 +578,7 @@ impl TypeChecker {
                     self.snapshot = None;
                     self.merged_facts = None;
                     self.update_type_facts_telemetry();
+                    self.tuple_plans.clear();
                     return Err(placement_errors);
                 }
                 Ok(())
