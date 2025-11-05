@@ -878,6 +878,8 @@ fn lower_expression_from_tokens(
                     first_identifier_text(span_node),
                     collect_annotation_texts(span_node),
                 ))
+            } else if let Some(cast) = try_parse_type_cast_fallback(&filtered) {
+                Ok(cast)
             } else {
                 let span = span
                     .or_else(|| context.span_for(span_node))
@@ -887,6 +889,106 @@ fn lower_expression_from_tokens(
             }
         }
     }
+}
+
+fn try_parse_type_cast_fallback(tokens: &[&Token]) -> Option<Expression> {
+    fn parse_expression_slice(tokens: &[&Token]) -> Option<Expression> {
+        if tokens.is_empty() {
+            return None;
+        }
+
+        if let Ok(expr) = expression_parser::parse_expression(tokens) {
+            return Some(expr);
+        }
+
+        if matches!(
+            tokens
+                .first()
+                .map(|token| &token.token_type),
+            Some(TokenType::LeftParen)
+        ) {
+            if let Some(close_index) = find_matching_paren_in_slice(tokens, 0) {
+                if close_index == tokens.len() - 1 {
+                    return parse_expression_slice(&tokens[1..close_index]);
+                }
+            }
+        }
+
+        None
+    }
+
+    fn find_matching_paren_in_slice(tokens: &[&Token], open_index: usize) -> Option<usize> {
+        let mut depth = 0isize;
+        for (idx, token) in tokens.iter().enumerate().skip(open_index) {
+            match token.token_type {
+                TokenType::LeftParen => depth += 1,
+                TokenType::RightParen => {
+                    depth -= 1;
+                    if depth == 0 {
+                        return Some(idx);
+                    }
+                }
+                _ => {}
+            }
+        }
+        None
+    }
+
+    for (index, token) in tokens.iter().enumerate().rev() {
+        if !matches!(
+            token.token_type,
+            TokenType::Identifier(ref value) if value == "as"
+        ) {
+            continue;
+        }
+
+        let left_tokens = &tokens[..index];
+        let right_tokens = &tokens[index + 1..];
+
+        if left_tokens.is_empty() || right_tokens.is_empty() {
+            continue;
+        }
+
+        let left_expr = match parse_expression_slice(left_tokens) {
+            Some(expr) => expr,
+            None => continue,
+        };
+
+        let owned_right: Vec<Token> = right_tokens.iter().map(|token| (*token).clone()).collect();
+        if owned_right.is_empty() {
+            continue;
+        }
+
+        let lowered = match lower_type_annotation_from_tokens(&owned_right) {
+            Ok(result) => result,
+            Err(_) => continue,
+        };
+
+        let annotation_span = lowered
+            .span()
+            .cloned()
+            .or_else(|| {
+                right_tokens.first().map(|first| {
+                    let last = right_tokens.last().unwrap_or(first);
+                    merge_spans(&span_from_token(first), &span_from_token(last))
+                })
+            })
+            .unwrap_or_else(|| expression_span(&left_expr));
+
+        let left_outer_span = left_tokens.first().map(|first| {
+            let last = left_tokens.last().unwrap_or(first);
+            merge_spans(&span_from_token(first), &span_from_token(last))
+        });
+
+        let left_span = left_outer_span.unwrap_or_else(|| expression_span(&left_expr));
+        let span = merge_spans(&left_span, &annotation_span);
+        return Some(Expression::TypeCast {
+            expr: Box::new(left_expr),
+            target: lowered.into_annotation(),
+            span,
+        });
+    }
+    None
 }
 
 fn qualified_name_segments(
@@ -1003,7 +1105,7 @@ fn is_expression_trivia(token: &Token) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use jv_lexer::Lexer;
+    use jv_lexer::{LayoutMode, Lexer};
 
     fn try_parse_expression_from_source(
         source: &str,
@@ -1039,6 +1141,16 @@ mod tests {
             Expression::TypeCast { .. } => {}
             other => panic!("expected type cast expression, got {:?}", other),
         }
+    }
+
+    #[test]
+    fn parses_parenthesized_cast_expression() {
+        let expr = parse_expression_from_source("(value) as Int");
+        assert!(
+            matches!(expr, Expression::TypeCast { .. }),
+            "expected type cast expression, got {:?}",
+            expr
+        );
     }
 
     #[test]
@@ -3738,13 +3850,37 @@ mod expression_parser {
         }
 
         fn peek_is_as_keyword(&self) -> bool {
-            matches!(
-                self.peek_token().map(|token| &token.token_type),
-                Some(TokenType::Identifier(text)) if text == "as"
-            )
+            let mut index = self.pos;
+            while let Some(token) = self.tokens.get(index) {
+                match &token.token_type {
+                    TokenType::Whitespace(_)
+                    | TokenType::Newline
+                    | TokenType::LayoutComma
+                    | TokenType::LineComment(_)
+                    | TokenType::BlockComment(_)
+                    | TokenType::JavaDocComment(_)
+                    | TokenType::FieldNameLabel(_) => index += 1,
+                    TokenType::Identifier(text) if text == "as" => return true,
+                    _ => return false,
+                }
+            }
+            false
         }
 
         fn parse_type_cast(&mut self, left: ParsedExpr) -> Result<ParsedExpr, ExpressionError> {
+            while let Some(token) = self.tokens.get(self.pos) {
+                match token.token_type {
+                    TokenType::Whitespace(_)
+                    | TokenType::Newline
+                    | TokenType::LayoutComma
+                    | TokenType::LineComment(_)
+                    | TokenType::BlockComment(_)
+                    | TokenType::JavaDocComment(_)
+                    | TokenType::FieldNameLabel(_) => self.pos += 1,
+                    _ => break,
+                }
+            }
+
             let (as_token, _as_index) = self.advance_with_index_or_error("`as` が必要です")?;
             let as_span = span_from_token(as_token);
 

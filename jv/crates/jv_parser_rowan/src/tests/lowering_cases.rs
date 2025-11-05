@@ -2,6 +2,7 @@ use crate::lowering::{lower_program, LoweringDiagnosticSeverity, LoweringResult}
 use crate::parser::parse;
 use crate::verification::StatementKindKey;
 use crate::{JvLanguage, ParseBuilder, SyntaxKind};
+use crate::frontend::RowanPipeline;
 use jv_ast::strings::MultilineKind;
 use jv_ast::{
     expression::{Argument, Parameter, ParameterProperty, StringPart},
@@ -2358,4 +2359,105 @@ fn data_class_lowering_produces_constructor_properties() {
         }
         _ => unreachable!("matched in find_map above"),
     }
+}
+
+#[test]
+fn type_cast_allows_trivia_before_keyword() {
+    let source = r#"
+val casted = (
+    42
+)    as Int
+"#;
+
+    let result = lower_source(source);
+    assert!(
+        result.diagnostics.is_empty(),
+        "unexpected lowering diagnostics: {:?}",
+        result.diagnostics
+    );
+
+    let statement = result
+        .statements
+        .first()
+        .expect("expected a single top-level statement");
+
+    match statement {
+        Statement::ValDeclaration { initializer, .. } => match initializer {
+            Expression::TypeCast { .. } => {}
+            other => panic!("expected type cast initializer, got {:?}", other),
+        },
+        other => panic!("expected val declaration, got {:?}", other),
+    }
+}
+
+#[test]
+fn rowan_pipeline_preserves_type_cast_after_parenthetical_sequence() {
+    let source = r#"
+fun main(): Unit {
+    val modules = ["lexer" "parser"]
+    val castList = (
+        modules
+            .map { value -> value + "-module" }
+            .filter { candidate -> candidate.length >= 6 }
+    ) as List
+}
+"#;
+
+    let debug = RowanPipeline::default()
+        .execute_with_debug(source)
+        .expect("pipeline parse succeeds");
+
+    let lexemes: Vec<&str> = debug
+        .artifacts()
+        .tokens()
+        .iter()
+        .map(|token| token.lexeme.as_str())
+        .collect();
+    assert!(
+        lexemes.iter().any(|lexeme| *lexeme == "as"),
+        "expected tokens to contain `as`, got {:?}",
+        lexemes
+    );
+    let as_token = debug
+        .artifacts()
+        .tokens()
+        .iter()
+        .find(|token| token.lexeme == "as")
+        .expect("as token should be present");
+    assert!(
+        matches!(as_token.token_type, TokenType::Identifier(_)),
+        "expected `as` token to be classified as identifier, got {:?}",
+        as_token.token_type
+    );
+
+    let program = debug.artifacts().program();
+    assert_eq!(
+        program.statements.len(),
+        1,
+        "expected single top-level statement"
+    );
+
+    let initializer = match program.statements.first().expect("program should contain main function") {
+        Statement::FunctionDeclaration { body, .. } => match &**body {
+            Expression::Block { statements, .. } => statements
+                .iter()
+                .find_map(|stmt| match stmt {
+                    Statement::ValDeclaration { initializer, name, .. }
+                        if name == "castList" =>
+                    {
+                        Some(initializer)
+                    }
+                    _ => None,
+                })
+                .expect("expected castList declaration"),
+            other => panic!("expected block body, got {:?}", other),
+        },
+        other => panic!("expected function declaration, got {:?}", other),
+    };
+
+    assert!(
+        matches!(initializer, Expression::TypeCast { .. }),
+        "expected type cast expression for castList initializer, got {:?}",
+        initializer
+    );
 }
