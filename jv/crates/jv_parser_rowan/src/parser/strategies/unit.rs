@@ -26,8 +26,14 @@ impl StatementStrategy for UnitTypeDefinitionStrategy {
         }
 
         matches!(
-            (ctx.peek_significant_kind_n(1), ctx.peek_significant_kind_n(2)),
-            (Some((_, TokenKind::Identifier)), Some((_, TokenKind::LeftParen)))
+            (
+                ctx.peek_significant_kind_n(1),
+                ctx.peek_significant_kind_n(2)
+            ),
+            (
+                Some((_, TokenKind::Identifier)),
+                Some((_, TokenKind::LeftParen))
+            )
         )
     }
 
@@ -63,15 +69,14 @@ impl UnitTypeDefinitionStrategy {
 
         let has_space = ctx.consume_inline_whitespace();
         if !has_space {
-            ctx.report_error(
-                DIAGNOSTIC_JV_UNIT_001_MISSING_SPACE,
-                start,
-                ctx.position(),
-            );
+            ctx.report_error(DIAGNOSTIC_JV_UNIT_001_MISSING_SPACE, start, ctx.position());
         }
 
         ctx.start_node(SyntaxKind::UnitCategory);
-        if !ctx.bump_expected(TokenKind::Identifier, "単位カテゴリを識別子で指定してください") {
+        if !ctx.bump_expected(
+            TokenKind::Identifier,
+            "単位カテゴリを識別子で指定してください",
+        ) {
             ctx.finish_node(); // UnitCategory
             ctx.finish_node(); // UnitHeader
             return false;
@@ -81,7 +86,8 @@ impl UnitTypeDefinitionStrategy {
         ctx.consume_inline_whitespace();
 
         ctx.start_node(SyntaxKind::UnitBaseType);
-        if !ctx.bump_expected(TokenKind::LeftParen, "基底型は丸括弧で囲んでください") {
+        if !ctx.bump_expected(TokenKind::LeftParen, "基底型は丸括弧で囲んでください")
+        {
             ctx.finish_node(); // UnitBaseType
             ctx.finish_node(); // UnitHeader
             return false;
@@ -96,7 +102,8 @@ impl UnitTypeDefinitionStrategy {
             ctx.report_error("基底型を表す式が必要です", expr_start, ctx.position());
         }
 
-        if !ctx.bump_expected(TokenKind::RightParen, "基底型の丸括弧が閉じていません") {
+        if !ctx.bump_expected(TokenKind::RightParen, "基底型の丸括弧が閉じていません")
+        {
             ctx.finish_node(); // UnitBaseType
             ctx.finish_node(); // UnitHeader
             return false;
@@ -106,7 +113,8 @@ impl UnitTypeDefinitionStrategy {
         ctx.consume_inline_whitespace();
 
         ctx.start_node(SyntaxKind::UnitName);
-        if !ctx.bump_expected(TokenKind::Identifier, "単位名を識別子で指定してください") {
+        if !ctx.bump_expected(TokenKind::Identifier, "単位名を識別子で指定してください")
+        {
             ctx.finish_node(); // UnitName
             ctx.finish_node(); // UnitHeader
             return false;
@@ -128,7 +136,8 @@ impl UnitTypeDefinitionStrategy {
         ctx.consume_whitespace();
         ctx.start_node(SyntaxKind::UnitBody);
 
-        if !ctx.bump_expected(TokenKind::LeftBrace, "単位定義の本体は `{` で始まります") {
+        if !ctx.bump_expected(TokenKind::LeftBrace, "単位定義の本体は `{` で始まります")
+        {
             ctx.finish_node();
             return false;
         }
@@ -201,12 +210,18 @@ impl UnitTypeDefinitionStrategy {
         let colon_ok =
             ctx.bump_expected(TokenKind::Colon, "単位依存定義には `:=` を使用してください");
         ctx.consume_whitespace();
-        let assign_ok =
-            ctx.bump_expected(TokenKind::Assign, "単位依存定義には `:=` を使用してください");
+        let assign_ok = ctx.bump_expected(
+            TokenKind::Assign,
+            "単位依存定義には `:=` を使用してください",
+        );
         ctx.consume_whitespace();
 
         let has_expression = ctx.parse_expression_until(
-            &[TokenKind::RightBrace, TokenKind::Newline, TokenKind::Semicolon],
+            &[
+                TokenKind::RightBrace,
+                TokenKind::Newline,
+                TokenKind::Semicolon,
+            ],
             true,
         );
         if !has_expression {
@@ -229,8 +244,10 @@ impl UnitTypeDefinitionStrategy {
         let arrow_ok =
             ctx.bump_expected(TokenKind::Arrow, "単位間の関係には `->` を使用してください");
         ctx.consume_whitespace();
-        let rhs_ok =
-            ctx.bump_expected(TokenKind::Identifier, "単位間の関係には右辺の単位名が必要です");
+        let rhs_ok = ctx.bump_expected(
+            TokenKind::Identifier,
+            "単位間の関係には右辺の単位名が必要です",
+        );
 
         ctx.finish_node();
         arrow_ok && rhs_ok
@@ -255,14 +272,22 @@ impl UnitTypeDefinitionStrategy {
         let ident_token = if ctx.peek_significant_kind() == Some(TokenKind::Identifier) {
             ctx.bump_raw()
         } else {
-            ctx.report_error("単位変換ディレクティブ名を指定してください", start, ctx.position());
+            ctx.report_error(
+                "単位変換ディレクティブ名を指定してください",
+                start,
+                ctx.position(),
+            );
             None
         };
 
         if let Some(token) = ident_token {
             let name = token.lexeme.as_str();
             if name != "Conversion" && name != "ReverseConversion" {
-                ctx.report_error(DIAGNOSTIC_JV_UNIT_004_UNKNOWN_DIRECTIVE, start, ctx.position());
+                ctx.report_error(
+                    DIAGNOSTIC_JV_UNIT_004_UNKNOWN_DIRECTIVE,
+                    start,
+                    ctx.position(),
+                );
             }
         } else {
             ctx.finish_node();
@@ -271,7 +296,11 @@ impl UnitTypeDefinitionStrategy {
 
         let block_ok = ctx.parse_block();
         if !block_ok {
-            ctx.report_error("単位変換ブロックは `{}` で囲む必要があります", start, ctx.position());
+            ctx.report_error(
+                "単位変換ブロックは `{}` で囲む必要があります",
+                start,
+                ctx.position(),
+            );
         }
 
         ctx.finish_node();

@@ -44,7 +44,12 @@ fn 単位構文フィクスチャの正常系が診断なしで通過する() {
             let source = load_fixture(&fixture);
             let debug = pipeline
                 .execute_with_debug(&source)
-                .unwrap_or_else(|error| panic!("フィクスチャ {:?} の解析に失敗しました: {:?}", fixture, error));
+                .unwrap_or_else(|error| {
+                    panic!(
+                        "フィクスチャ {:?} の解析に失敗しました: {:?}",
+                        fixture, error
+                    )
+                });
 
             assert!(
                 debug.pipeline_error().is_none(),
@@ -58,7 +63,10 @@ fn 単位構文フィクスチャの正常系が診断なしで通過する() {
                 diagnostics.is_empty(),
                 "フィクスチャ {:?} で想定外の診断が出力されました: {:?}",
                 fixture,
-                diagnostics.iter().map(|diag| diag.message()).collect::<Vec<_>>()
+                diagnostics
+                    .iter()
+                    .map(|diag| diag.message())
+                    .collect::<Vec<_>>()
             );
         }
     }
@@ -90,13 +98,20 @@ fn 単位構文フィクスチャのエラーが期待した診断を報告す�
 
         let debug = pipeline
             .execute_with_debug(&source)
-            .unwrap_or_else(|error| panic!("フィクスチャ {:?} の解析に失敗しました: {:?}", fixture, error));
+            .unwrap_or_else(|error| {
+                panic!(
+                    "フィクスチャ {:?} の解析に失敗しました: {:?}",
+                    fixture, error
+                )
+            });
 
         let diagnostics = debug.artifacts().diagnostics().final_diagnostics();
         let messages: Vec<&str> = diagnostics.iter().map(|diag| diag.message()).collect();
 
         assert!(
-            messages.iter().any(|message| message.contains(expected_code)),
+            messages
+                .iter()
+                .any(|message| message.contains(expected_code)),
             "フィクスチャ {:?} で期待した診断コード {} が見つかりません。実際のメッセージ: {:?}",
             fixture,
             expected_code,

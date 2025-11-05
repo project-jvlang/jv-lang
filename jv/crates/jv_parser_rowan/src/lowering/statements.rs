@@ -843,8 +843,7 @@ fn lower_expression(
             .children()
             .filter(|child| !child.kind().is_token())
             .collect();
-        if non_token_children.len() == 1
-            && non_token_children[0].kind() == SyntaxKind::UnitLiteral
+        if non_token_children.len() == 1 && non_token_children[0].kind() == SyntaxKind::UnitLiteral
         {
             let unit_node = non_token_children.remove(0);
             return lower_unit_literal_expression(context, &unit_node);
@@ -976,8 +975,7 @@ fn lower_unit_literal_expression(
 
     let mut space_after_at = false;
     if at_index.is_some() {
-        while index < tokens.len() && matches!(tokens[index].token_type, TokenType::Whitespace(_))
-        {
+        while index < tokens.len() && matches!(tokens[index].token_type, TokenType::Whitespace(_)) {
             space_after_at = true;
             index += 1;
         }
@@ -5209,9 +5207,9 @@ fn lower_unit_members(
                         continue;
                     }
                     match lower_single_statement(context, &stmt, diagnostics) {
-                        Ok(statement) => members.push(UnitTypeMember::NestedStatement(Box::new(
-                            statement,
-                        ))),
+                        Ok(statement) => {
+                            members.push(UnitTypeMember::NestedStatement(Box::new(statement)))
+                        }
                         Err(diag) => diagnostics.push(diag),
                     }
                 }
@@ -5220,10 +5218,7 @@ fn lower_unit_members(
                 push_diagnostic(
                     diagnostics,
                     LoweringDiagnosticSeverity::Warning,
-                    format!(
-                        "単位定義内で処理できない構文 {:?} を検出しました",
-                        other
-                    ),
+                    format!("単位定義内で処理できない構文 {:?} を検出しました", other),
                     context,
                     &child,
                 );

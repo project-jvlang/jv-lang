@@ -709,7 +709,10 @@ mod tests {
         ("UnitDependency", SyntaxKind::UnitDependency),
         ("UnitRelation", SyntaxKind::UnitRelation),
         ("UnitConversionBlock", SyntaxKind::UnitConversionBlock),
-        ("UnitReverseConversionBlock", SyntaxKind::UnitReverseConversionBlock),
+        (
+            "UnitReverseConversionBlock",
+            SyntaxKind::UnitReverseConversionBlock,
+        ),
         ("InitializerClause", SyntaxKind::InitializerClause),
         ("AnnotationList", SyntaxKind::AnnotationList),
         ("Annotation", SyntaxKind::Annotation),
