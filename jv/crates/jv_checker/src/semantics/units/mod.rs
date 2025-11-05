@@ -5,8 +5,13 @@ use jv_ast::{
 use serde::{Deserialize, Serialize};
 
 pub mod collector;
+pub mod validator;
 
 pub use collector::UnitCatalogCollector;
+pub use validator::{
+    BaseTypeCapability, DefaultUnit, NumericCapability, UnitCategoryKind, UnitCategorySpec,
+    UnitDefinitionValidated, UnitSchemaValidator, ValidatedCatalog,
+};
 
 /// ASTから抽出した単位定義の生データ。
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]

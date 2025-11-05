@@ -1,4 +1,5 @@
 pub mod messages;
+pub mod unit_semantics;
 
 use crate::CheckError;
 use jv_ast::{Span, types::RawTypeContinuation};
@@ -105,6 +106,7 @@ pub fn descriptor(code: &str) -> Option<&'static DiagnosticDescriptor> {
         .chain(crate::inference::diagnostics::CONVERSION_DIAGNOSTICS.iter())
         .chain(crate::compat::diagnostics::ENTRIES.iter())
         .chain(crate::imports::diagnostics::ENTRIES.iter())
+        .chain(crate::diagnostics::unit_semantics::ENTRIES.iter())
         .find(|descriptor| descriptor.code == code)
 }
 
