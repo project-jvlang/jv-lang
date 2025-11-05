@@ -25,6 +25,7 @@ mod project_locator;
 mod project_output;
 
 use jv_build::{BuildConfig, BuildSystem, JavaTarget};
+use std::ffi::OsStr;
 use std::fs;
 use std::fs::File;
 use std::io::Write;
@@ -208,10 +209,7 @@ fn test_build_command_parsing_with_apt() {
             ..
         }) => {
             assert!(apt, "--apt should enable annotation processing");
-            assert_eq!(
-                processors.as_deref(),
-                Some("org.example.Proc1,Proc2")
-            );
+            assert_eq!(processors.as_deref(), Some("org.example.Proc1,Proc2"));
             assert_eq!(processorpath.as_deref(), Some("libs/anno.jar"));
             assert!(apt_options.iter().any(|o| o.contains("mapstruct")));
             assert!(apt_options.iter().any(|o| o == "flag"));
@@ -237,11 +235,10 @@ fn test_build_plan_applies_apt_overrides() {
         root_path.to_path_buf(),
         manifest_path.clone(),
     );
-    let settings = pipeline::project::manifest::ManifestLoader::load(&manifest_path)
-        .expect("manifest loads");
-    let layout =
-        pipeline::project::layout::ProjectLayout::from_settings(&project_root, &settings)
-            .expect("layout resolves");
+    let settings =
+        pipeline::project::manifest::ManifestLoader::load(&manifest_path).expect("manifest loads");
+    let layout = pipeline::project::layout::ProjectLayout::from_settings(&project_root, &settings)
+        .expect("layout resolves");
 
     let overrides = pipeline::CliOverrides {
         entrypoint: Some(entrypoint.clone()),
@@ -271,7 +268,10 @@ fn test_build_plan_applies_apt_overrides() {
         .expect("compose");
     let apt = &plan.build_config.apt;
     assert!(apt.enabled);
-    assert_eq!(apt.processors, vec!["org.example.Proc1".to_string(), "Proc2".to_string()]);
+    assert_eq!(
+        apt.processors,
+        vec!["org.example.Proc1".to_string(), "Proc2".to_string()]
+    );
     assert_eq!(apt.processorpath, vec!["libs/anno.jar".to_string()]);
     assert!(apt.options.iter().any(|o| o.contains("mapstruct")));
     assert!(apt.options.iter().any(|o| o == "flag"));
@@ -448,7 +448,7 @@ entrypoint = "src/main.jv"
 
 [project.sources]
 include = ["src/**/*.jv"]
-"#",
+"#,
     )
     .expect("write manifest");
 
@@ -490,10 +490,6 @@ counter = counter + explicit
         parallel_inference: false,
         inference_workers: None,
         constraint_batch: None,
-        apt_enabled: false,
-        apt_processors: None,
-        apt_processorpath: None,
-        apt_options: Vec::new(),
         apt_enabled: false,
         apt_processors: None,
         apt_processorpath: None,
@@ -660,7 +656,7 @@ include = ["src/**/*.jv"]
         apt_processors: None,
         apt_processorpath: None,
         apt_options: Vec::new(),
-    };
+        };
 
     let plan = pipeline::BuildOptionsFactory::compose(project_root, settings, layout, overrides)
         .expect("plan composition succeeds");
@@ -698,19 +694,28 @@ fn compile_repository_fixtures_without_interpolation() {
     let mut compiled = 0usize;
     let mut failures = Vec::new();
     for path in files {
-        if path.to_string_lossy().contains("/pattern/") {
-            continue;
-        }
-        if path.to_string_lossy().contains("/java_annotations/") {
-            continue;
-        }
         if path
-            .to_string_lossy()
-            .contains("package/complex_stdlib_pattern.jv")
+            .components()
+            .any(|component| component.as_os_str() == OsStr::new("pattern"))
         {
             continue;
         }
-        if path.to_string_lossy().contains("/pattern/neg-") {
+        if path
+            .components()
+            .any(|component| component.as_os_str() == OsStr::new("java_annotations"))
+        {
+            continue;
+        }
+        if path.file_name() == Some(OsStr::new("complex_stdlib_pattern.jv"))
+            && path
+                .parent()
+                .map(|parent| {
+                    parent
+                        .components()
+                        .any(|component| component.as_os_str() == OsStr::new("package"))
+                })
+                .unwrap_or(false)
+        {
             continue;
         }
         let source = match fs::read_to_string(&path) {
@@ -777,7 +782,7 @@ include = ["src/**/*.jv"]
             apt_enabled: false,
             apt_processors: None,
             apt_processorpath: None,
-            apt_options: Vec::new(),
+        apt_options: Vec::new(),
         };
 
         let plan =
@@ -871,11 +876,11 @@ include = ["src/**/*.jv"]
             parallel_inference: false,
             inference_workers: None,
             constraint_batch: None,
-            apt_enabled: false,
-            apt_processors: None,
-            apt_processorpath: None,
-            apt_options: Vec::new(),
-        };
+        apt_enabled: false,
+        apt_processors: None,
+        apt_processorpath: None,
+        apt_options: Vec::new(),
+    };
 
         let plan =
             pipeline::BuildOptionsFactory::compose(project_root, settings, layout, overrides)
@@ -939,7 +944,7 @@ include = ["src/**/*.jv"]
 [project.output]
 directory = "target"
 clean = false
-"#",
+"#,
     )
     .expect("write manifest");
 
