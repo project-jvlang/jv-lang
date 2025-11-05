@@ -25,6 +25,7 @@ impl Expression {
             Expression::If { span, .. } => span,
             Expression::Block { span, .. } => span,
             Expression::Array { span, .. } => span,
+            Expression::Tuple { span, .. } => span,
             Expression::Lambda { span, .. } => span,
             Expression::Try { span, .. } => span,
             Expression::This(span) => span,

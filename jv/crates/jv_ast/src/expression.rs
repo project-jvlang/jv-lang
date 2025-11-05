@@ -121,6 +121,12 @@ pub enum Expression {
         span: Span,
     },
 
+    /// Tuple literals `(a b c)` grouped without commas.
+    Tuple {
+        elements: Vec<Expression>,
+        span: Span,
+    },
+
     // Lambda expressions
     Lambda {
         parameters: Vec<Parameter>,

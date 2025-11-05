@@ -1060,6 +1060,38 @@ mod tests {
             ),
         }
     }
+
+    #[test]
+    fn tuple_literal_with_whitespace_separators_parses() {
+        let expr = parse_expression_from_source("(left right)");
+        match expr {
+            Expression::Tuple { elements, .. } => {
+                assert_eq!(elements.len(), 2);
+                assert!(matches!(elements[0], Expression::Identifier(_, _)));
+                assert!(matches!(elements[1], Expression::Identifier(_, _)));
+            }
+            other => panic!("expected tuple literal, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn tuple_literal_spanning_multiple_lines_parses() {
+        let expr = parse_expression_from_source("(alpha\n beta\n gamma)");
+        match expr {
+            Expression::Tuple { elements, .. } => assert_eq!(elements.len(), 3),
+            other => panic!("expected tuple literal across lines, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parenthesized_single_expression_does_not_become_tuple() {
+        let expr = parse_expression_from_source("(value)");
+        assert!(
+            matches!(expr, Expression::Identifier(_, _)),
+            "single expression must remain grouping: {:?}",
+            expr
+        );
+    }
 }
 
 mod expression_parser {
@@ -1355,6 +1387,10 @@ mod expression_parser {
                     let close_index = self.find_matching_paren(index).ok_or_else(|| {
                         ExpressionError::new("')' が必要です", self.span_at(index))
                     })?;
+                    if let Some(tuple_expr) = self.try_parse_tuple_literal(index, close_index)? {
+                        self.pos = close_index + 1;
+                        return Ok(tuple_expr);
+                    }
                     let inner_tokens = &self.tokens[index + 1..close_index];
                     let expr = Self::parse_nested_expression(inner_tokens)?;
                     self.pos = close_index + 1;
@@ -1552,6 +1588,115 @@ mod expression_parser {
                 start: start_index,
                 end: closing_index + 1,
             })
+        }
+
+        fn try_parse_tuple_literal(
+            &mut self,
+            open_index: usize,
+            close_index: usize,
+        ) -> Result<Option<ParsedExpr>, ExpressionError> {
+            let inner = &self.tokens[open_index + 1..close_index];
+            if inner.is_empty() {
+                return Ok(None);
+            }
+
+            let slices = Self::tuple_candidate_parts(inner);
+            let mut elements = Vec::new();
+
+            for slice in slices {
+                let filtered: Vec<&Token> = slice
+                    .iter()
+                    .copied()
+                    .filter(|token| {
+                        !is_trivia_token(token)
+                            && !matches!(token.token_type, TokenType::LayoutComma)
+                    })
+                    .collect();
+                if filtered.is_empty() {
+                    continue;
+                }
+
+                let parsed = Self::parse_nested_expression(filtered.as_slice())?;
+                elements.push(parsed.expr);
+            }
+
+            if elements.len() < 2 {
+                return Ok(None);
+            }
+
+            let span = span_for_range(self.tokens, open_index, close_index + 1);
+            let expr = Expression::Tuple {
+                elements,
+                span: span.clone(),
+            };
+
+            Ok(Some(ParsedExpr {
+                expr,
+                start: open_index,
+                end: close_index + 1,
+            }))
+        }
+
+        fn tuple_candidate_parts<'slice>(
+            tokens: &'slice [&'slice Token],
+        ) -> Vec<&'slice [&'slice Token]> {
+            if tokens.is_empty() {
+                return Vec::new();
+            }
+
+            let mut parts = Vec::new();
+            let mut start = 0usize;
+            let mut depth_paren = 0usize;
+            let mut depth_brace = 0usize;
+            let mut depth_bracket = 0usize;
+
+            for (offset, token) in tokens.iter().enumerate() {
+                let at_top_level = depth_paren == 0 && depth_brace == 0 && depth_bracket == 0;
+
+                if at_top_level
+                    && has_layout_break(token)
+                    && !matches!(token.token_type, TokenType::Comma | TokenType::LayoutComma)
+                    && start < offset
+                {
+                    parts.push(&tokens[start..offset]);
+                    start = offset;
+                } else if at_top_level
+                    && start < offset
+                    && token.leading_trivia.newlines == 0
+                    && token.leading_trivia.spaces > 0
+                {
+                    if let Some(prev_token) = tokens.get(offset - 1) {
+                        if !token_requires_followup(&prev_token.token_type) {
+                            parts.push(&tokens[start..offset]);
+                            start = offset;
+                            continue;
+                        }
+                    }
+                }
+
+                match token.token_type {
+                    TokenType::LeftParen => depth_paren += 1,
+                    TokenType::RightParen if depth_paren > 0 => depth_paren -= 1,
+                    TokenType::LeftBrace => depth_brace += 1,
+                    TokenType::RightBrace if depth_brace > 0 => depth_brace -= 1,
+                    TokenType::LeftBracket => depth_bracket += 1,
+                    TokenType::RightBracket if depth_bracket > 0 => depth_bracket -= 1,
+                    TokenType::Comma | TokenType::LayoutComma if at_top_level => {
+                        if start != offset {
+                            parts.push(&tokens[start..offset]);
+                        }
+                        start = offset + 1;
+                        continue;
+                    }
+                    _ => {}
+                }
+            }
+
+            if start < tokens.len() {
+                parts.push(&tokens[start..]);
+            }
+
+            parts
         }
 
         fn parse_brace_expression(&mut self) -> Result<ParsedExpr, ExpressionError> {
