@@ -31,6 +31,18 @@ pub const ENTRIES: &[DiagnosticDescriptor] = &[
         help: "`!` マーカー付きの単位を 1 つ追加して暗黙変換の基準を示してください。",
         severity: DiagnosticSeverity::Warning,
     },
+    DiagnosticDescriptor {
+        code: "JV_UNIT_SEM_020",
+        title: "依存先の単位が未定義か自己参照になっています",
+        help: "同じカテゴリ内で参照先の単位を定義し、自己参照を解消してください。",
+        severity: DiagnosticSeverity::Error,
+    },
+    DiagnosticDescriptor {
+        code: "JV_UNIT_SEM_030",
+        title: "単位依存グラフに循環があります",
+        help: "依存がDAGになるように `:=` / `->` の関係を見直してください。",
+        severity: DiagnosticSeverity::Error,
+    },
 ];
 
 pub fn descriptor(code: &str) -> Option<&'static DiagnosticDescriptor> {

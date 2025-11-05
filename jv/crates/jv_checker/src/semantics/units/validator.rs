@@ -6,6 +6,7 @@ use crate::inference::type_factory::TypeFactory;
 use crate::inference::types::{TypeError, TypeKind};
 use jv_ast::{Span, TypeAnnotation};
 use once_cell::sync::Lazy;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt;
 
@@ -34,14 +35,14 @@ pub enum UnitCategoryKind {
 }
 
 /// 数値系能力の内訳。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum NumericCapability {
     Integral,
     Decimal,
 }
 
 /// 単位が要求する基底型の能力。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum BaseTypeCapability {
     Numeric(NumericCapability),
     StringLike,

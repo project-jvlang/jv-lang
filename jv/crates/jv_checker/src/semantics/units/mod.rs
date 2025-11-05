@@ -5,9 +5,16 @@ use jv_ast::{
 use serde::{Deserialize, Serialize};
 
 pub mod collector;
+pub mod graph;
+pub mod registry;
 pub mod validator;
 
 pub use collector::UnitCatalogCollector;
+pub use graph::UnitDependencyGraphBuilder;
+pub use registry::{
+    ReverseMode, UnitCategoryEntry, UnitCategoryId, UnitConversionBody, UnitConversionRef,
+    UnitEdge, UnitEdgeId, UnitEntry, UnitId, UnitRegistry, UnitRegistrySummary,
+};
 pub use validator::{
     BaseTypeCapability, DefaultUnit, NumericCapability, UnitCategoryKind, UnitCategorySpec,
     UnitDefinitionValidated, UnitSchemaValidator, ValidatedCatalog,
@@ -66,10 +73,23 @@ pub struct UnitSymbolRaw {
 
 impl UnitSymbolRaw {
     pub fn from_symbol(symbol: &UnitSymbol) -> Self {
+        let mut normalized = symbol.name.trim().to_string();
+        let mut has_default_marker = symbol.has_default_marker;
+        if normalized.ends_with('!') {
+            normalized.pop();
+            has_default_marker = true;
+        }
+
+        let mut is_bracketed = symbol.is_bracketed;
+        if normalized.starts_with('[') && normalized.ends_with(']') && normalized.len() >= 2 {
+            is_bracketed = true;
+            normalized = normalized[1..normalized.len() - 1].to_string();
+        }
+
         Self {
-            name: symbol.name.clone(),
-            is_bracketed: symbol.is_bracketed,
-            has_default_marker: symbol.has_default_marker,
+            name: normalized,
+            is_bracketed,
+            has_default_marker,
             span: symbol.span.clone(),
         }
     }
