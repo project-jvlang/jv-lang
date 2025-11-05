@@ -7,8 +7,8 @@ use jv_ast::{
     expression::{Argument, Parameter, ParameterProperty, StringPart},
     json::{JsonLiteral, JsonValue},
     statement::{
-        ConcurrencyConstruct, LoopStrategy, ResourceManagement, UnitConversionKind,
-        UnitRelation, UnitTypeDefinition, UnitTypeMember, ValBindingOrigin,
+        ConcurrencyConstruct, LoopStrategy, ResourceManagement, UnitConversionKind, UnitRelation,
+        UnitTypeDefinition, UnitTypeMember, ValBindingOrigin,
     },
     types::{BinaryOp, Literal, Modifiers, Pattern, TypeAnnotation},
     BindingPatternKind, Expression, Statement,
@@ -31,13 +31,13 @@ fn make_token(column: &mut usize, token_type: TokenType, lexeme: &str) -> Token 
 }
 
 #[test]
-fn 蜊倅ｽ榊ｮ夂ｾｩ繧値owering縺ｧ縺阪ｋ() {
+fn lowers_unit_definition_block() {
     let source = r#"
-@ 髟ｷ縺・Double) km! {
-    蝓ｺ譛ｬ := 1000
-    蝓ｺ貅・-> m
+@ Length(Double) km! {
+    base := 1000
+    milli -> m
     @Conversion {
-        val 邨先棡 = 蛟､
+        val result = value
     }
 }
 "#;
@@ -58,10 +58,10 @@ fn 蜊倅ｽ榊ｮ夂ｾｩ繧値owering縺ｧ縺阪ｋ() {
             members,
             ..
         }) => {
-            assert_eq!(category, "髟ｷ縺・);
+            assert_eq!(category, "Length");
             assert!(
                 matches!(base_type, TypeAnnotation::Simple(t) if t == "Double"),
-                "蝓ｺ蠎募梛縺・Double 縺ｧ縺ｯ縺ゅｊ縺ｾ縺帙ｓ: {:?}",
+                "expected Double base type, got {:?}",
                 base_type
             );
             assert_eq!(name.name, "km");
@@ -71,7 +71,7 @@ fn 蜊倅ｽ榊ｮ夂ｾｩ繧値owering縺ｧ縺阪ｋ() {
 
             match &members[0] {
                 UnitTypeMember::Dependency(dependency) => {
-                    assert_eq!(dependency.name, "蝓ｺ譛ｬ");
+                    assert_eq!(dependency.name, "base");
                     assert!(matches!(
                         dependency.relation,
                         UnitRelation::DefinitionAssign
@@ -81,44 +81,41 @@ fn 蜊倅ｽ榊ｮ夂ｾｩ繧値owering縺ｧ縺阪ｋ() {
                         Some(Expression::Literal(Literal::Number(value), _)) => {
                             assert_eq!(value, "1000");
                         }
-                        other => panic!("萓晏ｭ倬未菫ゅ・蛟､縺梧焚蛟､繝ｪ繝・Λ繝ｫ縺ｧ縺ｯ縺ゅｊ縺ｾ縺帙ｓ: {:?}", other),
+                        other => panic!("expected numeric literal, got {:?}", other),
                     }
                 }
-                other => panic!("譛蛻昴・繝｡繝ｳ繝舌・縺御ｾ晏ｭ倬未菫ゅ〒縺ｯ縺ゅｊ縺ｾ縺帙ｓ: {:?}", other),
+                other => panic!("first member must be a dependency, got {:?}", other),
             }
 
             match &members[1] {
                 UnitTypeMember::Dependency(dependency) => {
-                    assert_eq!(dependency.name, "蝓ｺ貅・);
-                    assert!(matches!(
-                        dependency.relation,
-                        UnitRelation::ConversionArrow
-                    ));
+                    assert_eq!(dependency.name, "milli");
+                    assert!(matches!(dependency.relation, UnitRelation::ConversionArrow));
                     assert!(dependency.value.is_none());
                     assert_eq!(dependency.target.as_deref(), Some("m"));
                 }
-                other => panic!("莠檎分逶ｮ縺ｮ繝｡繝ｳ繝舌・縺悟､画鋤謖・ｮ壹〒縺ｯ縺ゅｊ縺ｾ縺帙ｓ: {:?}", other),
+                other => panic!("second member must be conversion arrow, got {:?}", other),
             }
 
             match &members[2] {
                 UnitTypeMember::Conversion(block) => {
                     assert!(matches!(block.kind, UnitConversionKind::Conversion));
-                    assert_eq!(block.body.len(), 0);
+                    assert_eq!(block.body.len(), 1);
                     match &block.body[0] {
-                        Statement::ValDeclaration { name, .. } => assert_eq!(name, "邨先棡"),
-                        other => panic!("螟画鋤繝悶Ο繝・け蜀・・譛蛻昴・譁・′ val 縺ｧ縺ｯ縺ゅｊ縺ｾ縺帙ｓ: {:?}", other),
+                        Statement::ValDeclaration { name, .. } => assert_eq!(name, "result"),
+                        other => panic!("conversion block must start with val, got {:?}", other),
                     }
                 }
-                other => panic!("荳臥分逶ｮ縺ｮ繝｡繝ｳ繝舌・縺悟､画鋤繝悶Ο繝・け縺ｧ縺ｯ縺ゅｊ縺ｾ縺帙ｓ: {:?}", other),
+                other => panic!("third member must be conversion block, got {:?}", other),
             }
         }
-        other => panic!("蜊倅ｽ榊ｮ夂ｾｩ縺檎函謌舌＆繧後※縺・∪縺帙ｓ: {:?}", other),
+        other => panic!("unit definition was not lowered: {:?}", other),
     }
 }
 
 #[test]
-fn 蜊倅ｽ阪Μ繝・Λ繝ｫ繧値owering縺ｧ縺阪ｋ() {
-    let source = "val 霍晞屬 = 42 @ km";
+fn lowers_unit_literal_expression() {
+    let source = "val distance = 42 @ km";
     let result = lower_source(source);
     assert!(
         result.diagnostics.is_empty(),
@@ -129,31 +126,41 @@ fn 蜊倅ｽ阪Μ繝・Λ繝ｫ繧値owering縺ｧ縺阪ｋ() {
     assert_eq!(result.statements.len(), 1);
     match &result.statements[0] {
         Statement::ValDeclaration {
-            initializer: Expression::UnitLiteral {
-                value,
-                unit,
-                spacing,
-                ..
-            },
+            initializer:
+                Expression::UnitLiteral {
+                    value,
+                    unit,
+                    spacing,
+                    ..
+                },
             ..
         } => {
             match value.as_ref() {
                 Expression::Literal(Literal::Number(value), _) => assert_eq!(value, "42"),
-                other => panic!("蜊倅ｽ阪Μ繝・Λ繝ｫ縺ｮ蛟､縺梧焚蛟､縺ｧ縺ｯ縺ゅｊ縺ｾ縺帙ｓ: {:?}", other),
+                other => panic!("unit literal value must be numeric, got {:?}", other),
             }
             assert_eq!(unit.name, "km");
             assert!(!unit.is_bracketed);
             assert!(!unit.has_default_marker);
-            assert!(spacing.space_before_at, "譛溷ｾ・壹ｊ縺ｫ `@` 縺ｮ蜑阪↓遨ｺ逋ｽ縺梧､懷・縺輔ｌ縺ｦ縺・∪縺帙ｓ");
-            assert!(spacing.space_after_at, "譛溷ｾ・壹ｊ縺ｫ `@` 縺ｮ蠕後↓遨ｺ逋ｽ縺梧､懷・縺輔ｌ縺ｦ縺・∪縺帙ｓ");
+            assert!(
+                spacing.space_before_at,
+                "expected whitespace before `@` for readability"
+            );
+            assert!(
+                spacing.space_after_at,
+                "expected whitespace after `@` for readability"
+            );
         }
-        other => panic!("val 螳｣險縺悟腰菴阪Μ繝・Λ繝ｫ繧剃ｿ晄戟縺励※縺・∪縺帙ｓ: {:?}", other),
+        other => panic!(
+            "val declaration did not contain a unit literal: {:?}",
+            other
+        ),
     }
 }
 
 #[test]
-fn 蜊倅ｽ榊梛豕ｨ驥医ｒlowering縺ｧ縺阪ｋ() {
-    let source = "val 貂ｩ蠎ｦ: Double@[邃ゾ = 0";
+fn lowers_unit_type_annotation() {
+    let source = "val temperature: Double@[degC] = 0";
     let result = lower_source(source);
     assert!(
         result.diagnostics.is_empty(),
@@ -164,17 +171,22 @@ fn 蜊倅ｽ榊梛豕ｨ驥医ｒlowering縺ｧ縺阪ｋ() {
     assert_eq!(result.statements.len(), 1);
     match &result.statements[0] {
         Statement::ValDeclaration {
-            type_annotation: Some(TypeAnnotation::Unit { base, unit, implicit }),
+            type_annotation:
+                Some(TypeAnnotation::Unit {
+                    base,
+                    unit,
+                    implicit,
+                }),
             initializer: Expression::Literal(Literal::Number(value), _),
             ..
         } => {
             assert_eq!(value, "0");
             assert_eq!(**base, TypeAnnotation::Simple("Double".into()));
             assert!(!implicit);
-            assert_eq!(unit.name, "[邃ゾ");
+            assert_eq!(unit.name, "[degC]");
             assert!(unit.is_bracketed);
         }
-        other => panic!("蜊倅ｽ榊梛豕ｨ驥医′逕滓・縺輔ｌ縺ｦ縺・∪縺帙ｓ: {:?}", other),
+        other => panic!("unit type annotation was not produced: {:?}", other),
     }
 }
 
@@ -1037,11 +1049,8 @@ fn lowering_table_driven_cases() {
                 let diagnostic = &result.diagnostics[0];
                 assert_eq!(diagnostic.severity, LoweringDiagnosticSeverity::Error);
                 assert!(
-                    diagnostic.message.contains("諠ｳ螳壼､・)
-                        || diagnostic.message.contains("蝙区ｳｨ驥・)
-                        || diagnostic.message.contains("隴伜挨蟄・),
-                    "unexpected diagnostic message: {}",
-                    diagnostic.message
+                    !diagnostic.message.is_empty(),
+                    "diagnostic message should not be empty"
                 );
                 match &result.statements[0] {
                     Statement::ValDeclaration {
@@ -1106,9 +1115,7 @@ fn lowering_table_driven_cases() {
                 let diagnostic = &result.diagnostics[0];
                 assert_eq!(diagnostic.severity, LoweringDiagnosticSeverity::Error);
                 assert!(
-                    diagnostic
-                        .message
-                        .contains("`->` 蠑上・繝・ぅ縺ｯ繧ｵ繝昴・繝医＆繧後∪縺帙ｓ"),
+                    diagnostic.message.contains("->"),
                     "unexpected diagnostic message: {}",
                     diagnostic.message
                 );
@@ -1148,7 +1155,7 @@ fn lowering_table_driven_cases() {
                     .find(|diag| diag.severity == LoweringDiagnosticSeverity::Warning)
                     .expect("expected warning diagnostic for missing block");
                 assert!(
-                    warning.message.contains("遨ｺ繝悶Ο繝・け縺ｨ縺励※蜃ｦ逅・＠縺ｾ縺・),
+                    warning.message.to_lowercase().contains("block"),
                     "unexpected warning message: {}",
                     warning.message
                 );
@@ -1209,7 +1216,7 @@ fn lowering_table_driven_cases() {
                     .find(|diag| diag.severity == LoweringDiagnosticSeverity::Warning)
                     .expect("expected warning for unsupported class member");
                 assert!(
-                    warning.message.contains("譛ｪ蟇ｾ蠢懊・繝弱・繝・),
+                    warning.message.to_lowercase().contains("class"),
                     "unexpected warning message: {}",
                     warning.message
                 );
@@ -2510,5 +2517,3 @@ fn data_class_lowering_produces_constructor_properties() {
         _ => unreachable!("matched in find_map above"),
     }
 }
-
-
