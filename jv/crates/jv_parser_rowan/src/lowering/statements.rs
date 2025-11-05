@@ -8,8 +8,8 @@ use crate::support::{
 use crate::syntax::SyntaxKind;
 use jv_ast::comments::{CommentKind, CommentStatement, CommentVisibility};
 use jv_ast::expression::{
-    Argument, CallArgumentMetadata, CallArgumentStyle, Parameter, ParameterModifiers,
-    ParameterProperty, StringPart, WhenArm,
+    Argument, CallArgumentMetadata, CallArgumentStyle, LabeledSpan as TupleLabelSpan, Parameter,
+    ParameterModifiers, ParameterProperty, StringPart, TupleContextFlags, TupleFieldMeta, WhenArm,
 };
 use jv_ast::json::{
     JsonComment, JsonCommentKind, JsonEntry, JsonLiteral, JsonValue, NumberGrouping,
@@ -25,9 +25,10 @@ use jv_ast::types::{
 };
 use jv_ast::{BindingPatternKind, Expression, SequenceDelimiter, Span, Statement};
 use jv_lexer::{
-    JsonCommentTrivia, JsonCommentTriviaKind, JsonConfidence, LayoutMode, Lexer,
-    NumberGroupingKind, StringDelimiterKind, StringInterpolationSegment, StringLiteralMetadata,
-    Token, TokenMetadata, TokenTrivia, TokenType,
+    FieldNameLabelToken, JsonCommentTrivia, JsonCommentTriviaKind, JsonConfidence,
+    LabeledSpan as LexerLabelSpan, LayoutMode, Lexer, NumberGroupingKind, StringDelimiterKind,
+    StringInterpolationSegment, StringLiteralMetadata, Token, TokenMetadata, TokenTrivia,
+    TokenType,
 };
 use jv_type_inference_java::{lower_type_annotation_from_tokens, TypeLoweringErrorKind};
 
@@ -847,7 +848,7 @@ fn lower_expression_from_tokens(
     let filtered: Vec<&Token> = tokens
         .iter()
         .copied()
-        .filter(|token| !is_trivia_token(token) && !matches!(token.token_type, TokenType::Eof))
+        .filter(|token| !is_expression_trivia(token) && !matches!(token.token_type, TokenType::Eof))
         .collect();
 
     if filtered.is_empty() {
@@ -988,19 +989,36 @@ fn is_trivia_token(token: &Token) -> bool {
     )
 }
 
+fn is_expression_trivia(token: &Token) -> bool {
+    matches!(
+        token.token_type,
+        TokenType::Whitespace(_)
+            | TokenType::Newline
+            | TokenType::LineComment(_)
+            | TokenType::BlockComment(_)
+            | TokenType::JavaDocComment(_)
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use jv_lexer::Lexer;
 
-    fn parse_expression_from_source(source: &str) -> Expression {
+    fn try_parse_expression_from_source(
+        source: &str,
+    ) -> Result<Expression, expression_parser::ExpressionError> {
         let mut lexer = Lexer::with_layout_mode(source.to_string(), LayoutMode::Enabled);
         let tokens = lexer.tokenize().expect("tokenize expression");
         let filtered: Vec<&Token> = tokens
             .iter()
             .filter(|token| !matches!(token.token_type, TokenType::Eof))
             .collect();
-        expression_parser::parse_expression(&filtered).expect("parse expression")
+        expression_parser::parse_expression(&filtered)
+    }
+
+    fn parse_expression_from_source(source: &str) -> Expression {
+        try_parse_expression_from_source(source).expect("parse expression")
     }
 
     #[test]
@@ -1065,8 +1083,11 @@ mod tests {
     fn tuple_literal_with_whitespace_separators_parses() {
         let expr = parse_expression_from_source("(left right)");
         match expr {
-            Expression::Tuple { elements, .. } => {
+            Expression::Tuple {
+                elements, fields, ..
+            } => {
                 assert_eq!(elements.len(), 2);
+                assert_eq!(fields.len(), 2);
                 assert!(matches!(elements[0], Expression::Identifier(_, _)));
                 assert!(matches!(elements[1], Expression::Identifier(_, _)));
             }
@@ -1078,7 +1099,12 @@ mod tests {
     fn tuple_literal_spanning_multiple_lines_parses() {
         let expr = parse_expression_from_source("(alpha\n beta\n gamma)");
         match expr {
-            Expression::Tuple { elements, .. } => assert_eq!(elements.len(), 3),
+            Expression::Tuple {
+                elements, fields, ..
+            } => {
+                assert_eq!(elements.len(), 3);
+                assert_eq!(fields.len(), 3);
+            }
             other => panic!("expected tuple literal across lines, got {:?}", other),
         }
     }
@@ -1090,6 +1116,37 @@ mod tests {
             matches!(expr, Expression::Identifier(_, _)),
             "single expression must remain grouping: {:?}",
             expr
+        );
+    }
+
+    #[test]
+    fn tuple_literal_captures_comment_labels() {
+        let source = "(
+                left // quotient
+                right // remainder
+            )";
+        let expr = parse_expression_from_source(source);
+        match expr {
+            Expression::Tuple { fields, .. } => {
+                assert_eq!(fields.len(), 2);
+                assert_eq!(fields[0].primary_label.as_deref(), Some("quotient"));
+                assert_eq!(fields[0].identifier_hint.as_deref(), Some("left"));
+                assert_eq!(fields[0].fallback_index, 1);
+                assert_eq!(fields[1].primary_label.as_deref(), Some("remainder"));
+                assert_eq!(fields[1].identifier_hint.as_deref(), Some("right"));
+                assert_eq!(fields[1].fallback_index, 2);
+            }
+            other => panic!("expected tuple literal with metadata, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn empty_tuple_literal_reports_error() {
+        let err = try_parse_expression_from_source("()").expect_err("expected parse error");
+        assert!(
+            err.message.contains("空のタプル"),
+            "unexpected error: {}",
+            err.message
         );
     }
 }
@@ -1596,28 +1653,74 @@ mod expression_parser {
             close_index: usize,
         ) -> Result<Option<ParsedExpr>, ExpressionError> {
             let inner = &self.tokens[open_index + 1..close_index];
-            if inner.is_empty() {
-                return Ok(None);
+            if inner.is_empty()
+                || inner
+                    .iter()
+                    .all(|token| Self::is_tuple_separator_or_trivia(token))
+            {
+                let span = span_for_range(self.tokens, open_index, close_index + 1);
+                return Err(ExpressionError::new(
+                    "空のタプルや句読点のみのタプルリテラルはサポートされません",
+                    Some(span),
+                ));
             }
 
             let slices = Self::tuple_candidate_parts(inner);
             let mut elements = Vec::new();
+            let mut field_meta = Vec::new();
+            let mut fallback_counter = 0usize;
+            let mut leading_labels: Vec<&FieldNameLabelToken> = Vec::new();
 
-            for slice in slices {
-                let filtered: Vec<&Token> = slice
-                    .iter()
-                    .copied()
-                    .filter(|token| {
-                        !is_trivia_token(token)
-                            && !matches!(token.token_type, TokenType::LayoutComma)
-                    })
-                    .collect();
+            for slice in slices.iter() {
+                let (labels, filtered) = Self::partition_tuple_slice_tokens(slice);
                 if filtered.is_empty() {
+                    if !labels.is_empty() {
+                        if field_meta.is_empty() {
+                            leading_labels.extend(labels);
+                        } else if let Some(last) = field_meta.last_mut() {
+                            Self::merge_labels_into_meta(last, &labels);
+                        }
+                    }
                     continue;
                 }
 
+                let mut effective_labels: Vec<&FieldNameLabelToken> = Vec::new();
+                if !leading_labels.is_empty() {
+                    effective_labels.extend(leading_labels.drain(..));
+                }
+                effective_labels.extend(labels);
+
                 let parsed = Self::parse_nested_expression(filtered.as_slice())?;
-                elements.push(parsed.expr);
+                let element_span = parsed.span();
+                let ParsedExpr {
+                    expr: element_expr, ..
+                } = parsed;
+                let identifier_hint = match &element_expr {
+                    Expression::Identifier(name, _) => Some(name.clone()),
+                    _ => None,
+                };
+                let (primary_label, secondary_labels) =
+                    Self::collect_tuple_labels(&effective_labels);
+
+                fallback_counter += 1;
+                let meta = TupleFieldMeta {
+                    primary_label,
+                    secondary_labels,
+                    identifier_hint,
+                    fallback_index: fallback_counter,
+                    span: element_span.clone(),
+                };
+
+                field_meta.push(meta);
+                elements.push(element_expr);
+            }
+
+            if elements.is_empty() {
+                let span = span_for_range(self.tokens, open_index, close_index + 1);
+                return Err(ExpressionError::new(
+                    "タプル要素を解析できませんでした。少なくとも1つの式を記述してください",
+                    Some(span),
+                ));
             }
 
             if elements.len() < 2 {
@@ -1627,6 +1730,8 @@ mod expression_parser {
             let span = span_for_range(self.tokens, open_index, close_index + 1);
             let expr = Expression::Tuple {
                 elements,
+                fields: field_meta,
+                context: TupleContextFlags::default(),
                 span: span.clone(),
             };
 
@@ -1697,6 +1802,100 @@ mod expression_parser {
             }
 
             parts
+        }
+
+        fn is_tuple_separator_or_trivia(token: &Token) -> bool {
+            is_expression_trivia(token)
+                || matches!(token.token_type, TokenType::LayoutComma | TokenType::Comma)
+        }
+
+        fn partition_tuple_slice_tokens<'slice>(
+            slice: &'slice [&'slice Token],
+        ) -> (Vec<&'slice FieldNameLabelToken>, Vec<&'slice Token>) {
+            let mut labels = Vec::new();
+            let mut filtered = Vec::new();
+
+            for token in slice.iter().copied() {
+                if let TokenType::FieldNameLabel(payload) = &token.token_type {
+                    labels.push(payload);
+                    continue;
+                }
+
+                if Self::is_tuple_separator_or_trivia(token) {
+                    continue;
+                }
+
+                filtered.push(token);
+            }
+
+            (labels, filtered)
+        }
+
+        fn collect_tuple_labels(
+            labels: &[&FieldNameLabelToken],
+        ) -> (Option<String>, Vec<TupleLabelSpan>) {
+            let mut primary_label: Option<String> = None;
+            let mut secondary = Vec::new();
+
+            for (idx, label) in labels.iter().enumerate() {
+                if idx == 0 {
+                    if let Some(value) = &label.primary {
+                        primary_label = Some(value.clone());
+                    }
+                    Self::push_secondary_labels(&mut secondary, label.secondary.iter());
+                } else {
+                    if let Some(primary_span) = label.primary_span.as_ref() {
+                        secondary.push(Self::convert_label_span(primary_span));
+                    } else if let Some(value) = &label.primary {
+                        secondary.push(Self::virtual_label_from_text(value));
+                    }
+                    Self::push_secondary_labels(&mut secondary, label.secondary.iter());
+                }
+            }
+
+            (primary_label, secondary)
+        }
+
+        fn merge_labels_into_meta(meta: &mut TupleFieldMeta, labels: &[&FieldNameLabelToken]) {
+            if labels.is_empty() {
+                return;
+            }
+
+            let (primary_label, mut secondary_labels) = Self::collect_tuple_labels(labels);
+            if let Some(label) = primary_label {
+                if meta.primary_label.is_none() {
+                    meta.primary_label = Some(label);
+                } else {
+                    meta.secondary_labels
+                        .push(Self::virtual_label_from_text(&label));
+                }
+            }
+
+            meta.secondary_labels.append(&mut secondary_labels);
+        }
+
+        fn push_secondary_labels<'label>(
+            target: &mut Vec<TupleLabelSpan>,
+            spans: impl IntoIterator<Item = &'label LexerLabelSpan>,
+        ) {
+            for span in spans {
+                target.push(Self::convert_label_span(span));
+            }
+        }
+
+        fn convert_label_span(label: &LexerLabelSpan) -> TupleLabelSpan {
+            let end_column = label.column + label.length;
+            TupleLabelSpan {
+                name: label.name.clone(),
+                span: Span::new(label.line, label.column, label.line, end_column),
+            }
+        }
+
+        fn virtual_label_from_text(name: &str) -> TupleLabelSpan {
+            TupleLabelSpan {
+                name: name.to_string(),
+                span: Span::dummy(),
+            }
         }
 
         fn parse_brace_expression(&mut self) -> Result<ParsedExpr, ExpressionError> {

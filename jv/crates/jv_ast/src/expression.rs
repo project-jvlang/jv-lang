@@ -124,6 +124,10 @@ pub enum Expression {
     /// Tuple literals `(a b c)` grouped without commas.
     Tuple {
         elements: Vec<Expression>,
+        #[serde(default)]
+        fields: Vec<TupleFieldMeta>,
+        #[serde(default)]
+        context: TupleContextFlags,
         span: Span,
     },
 
@@ -200,6 +204,48 @@ impl Default for CallArgumentMetadata {
             used_commas: false,
         }
     }
+}
+
+/// Source span metadata for user-provided tuple field labels.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LabeledSpan {
+    pub name: String,
+    pub span: Span,
+}
+
+/// Metadata captured for each tuple element.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TupleFieldMeta {
+    #[serde(default)]
+    pub primary_label: Option<String>,
+    #[serde(default)]
+    pub secondary_labels: Vec<LabeledSpan>,
+    #[serde(default)]
+    pub identifier_hint: Option<String>,
+    pub fallback_index: usize,
+    pub span: Span,
+}
+
+impl TupleFieldMeta {
+    /// Create an empty metadata placeholder for a tuple element.
+    pub fn empty(fallback_index: usize, span: Span) -> Self {
+        Self {
+            primary_label: None,
+            secondary_labels: Vec::new(),
+            identifier_hint: None,
+            fallback_index,
+            span,
+        }
+    }
+}
+
+/// Flags describing how a tuple expression is being used.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct TupleContextFlags {
+    #[serde(default)]
+    pub in_destructuring_pattern: bool,
+    #[serde(default)]
+    pub is_function_return: bool,
 }
 
 impl CallArgumentMetadata {
