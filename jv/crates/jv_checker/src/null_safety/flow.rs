@@ -943,6 +943,7 @@ fn classify_expression(
         }
         Expression::Lambda { .. }
         | Expression::Array { .. }
+        | Expression::Tuple { .. }
         | Expression::StringInterpolation { .. }
         | Expression::MultilineString { .. }
         | Expression::JsonLiteral { .. }

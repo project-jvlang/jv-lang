@@ -208,6 +208,13 @@ impl PatternFactsBridge {
                 }
                 outcome
             }
+            Expression::Tuple { elements, .. } => {
+                let mut outcome = BridgeOutcome::default();
+                for element in elements {
+                    outcome.merge(self.visit_expression(element, service, context));
+                }
+                outcome
+            }
             Expression::Lambda {
                 parameters, body, ..
             } => {

@@ -589,6 +589,20 @@ impl BindingResolver {
                 delimiter,
                 span,
             },
+            Expression::Tuple {
+                elements,
+                fields,
+                context,
+                span,
+            } => Expression::Tuple {
+                elements: elements
+                    .into_iter()
+                    .map(|element| self.resolve_expression(element))
+                    .collect(),
+                fields,
+                context,
+                span,
+            },
             Expression::Lambda {
                 parameters,
                 body,

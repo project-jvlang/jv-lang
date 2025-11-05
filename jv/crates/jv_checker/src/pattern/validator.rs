@@ -162,6 +162,11 @@ impl<'a> WhenUsageValidator<'a> {
                     self.visit_expression(element, true);
                 }
             }
+            Expression::Tuple { elements, .. } => {
+                for element in elements {
+                    self.visit_expression(element, true);
+                }
+            }
             Expression::Lambda {
                 parameters, body, ..
             } => {

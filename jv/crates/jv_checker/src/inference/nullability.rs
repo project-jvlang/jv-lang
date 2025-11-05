@@ -355,6 +355,12 @@ impl NullabilityAnalyzer {
                 }
                 Nullability::NonNull
             }
+            Expression::Tuple { elements, .. } => {
+                for element in elements {
+                    self.evaluate_expression(element);
+                }
+                Nullability::NonNull
+            }
             Expression::Lambda {
                 body, parameters, ..
             } => {

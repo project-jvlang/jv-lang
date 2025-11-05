@@ -359,6 +359,12 @@ impl<'env, 'ext, 'imp> ConstraintGenerator<'env, 'ext, 'imp> {
                 }
                 TypeKind::Unknown
             }
+            Expression::Tuple { elements, .. } => {
+                for element in elements {
+                    self.infer_expression(element);
+                }
+                TypeKind::Unknown
+            }
             Expression::Lambda {
                 parameters, body, ..
             } => self.infer_lambda(parameters, body),
