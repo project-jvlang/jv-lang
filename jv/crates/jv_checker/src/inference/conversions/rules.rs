@@ -125,7 +125,7 @@ impl ConversionRulesEngine {
             }
             TypeKind::Reference(name) => name.clone(),
             TypeKind::Optional(inner) => Self::string_helper_owner(inner),
-            TypeKind::Function(_, _) => "java.lang.Object".to_string(),
+            TypeKind::Function(_, _) | TypeKind::Tuple(_) => "java.lang.Object".to_string(),
             TypeKind::Variable(_) | TypeKind::Unknown => "java.lang.Object".to_string(),
         }
     }

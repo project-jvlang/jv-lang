@@ -274,6 +274,13 @@ fn resolve_type(ty: &TypeKind, substitutions: &HashMap<TypeId, TypeKind>) -> Typ
             let resolved_return = resolve_type(ret, substitutions);
             TypeKind::function(resolved_params, resolved_return)
         }
+        TypeKind::Tuple(elements) => {
+            let resolved = elements
+                .iter()
+                .map(|element| resolve_type(element, substitutions))
+                .collect();
+            TypeKind::tuple(resolved)
+        }
         TypeKind::Unknown => TypeKind::Unknown,
     }
 }

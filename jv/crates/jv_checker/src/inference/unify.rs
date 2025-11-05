@@ -339,6 +339,23 @@ impl ConstraintSolver {
                 let unified_return = self.unify(*ret_a, *ret_b, note)?;
                 Ok(TypeKind::Function(unified_params, Box::new(unified_return)))
             }
+            (TypeKind::Tuple(mut elements_a), TypeKind::Tuple(mut elements_b)) => {
+                if elements_a.len() != elements_b.len() {
+                    return Err(SolveError::TypeMismatch {
+                        left: TypeKind::Tuple(elements_a),
+                        right: TypeKind::Tuple(elements_b),
+                        note,
+                    });
+                }
+
+                let mut unified_elements = Vec::with_capacity(elements_a.len());
+                for (left_elem, right_elem) in elements_a.drain(..).zip(elements_b.drain(..)) {
+                    let unified = self.unify(left_elem, right_elem, note.clone())?;
+                    unified_elements.push(unified);
+                }
+
+                Ok(TypeKind::Tuple(unified_elements))
+            }
             (TypeKind::Optional(left_inner), TypeKind::Optional(right_inner)) => {
                 let unified = self.unify(*left_inner, *right_inner, note)?;
                 Ok(TypeKind::Optional(Box::new(unified)))
@@ -391,6 +408,10 @@ impl ConstraintSolver {
                 }
             }
             TypeKind::Optional(inner) => TypeKind::Optional(Box::new(self.prune(*inner))),
+            TypeKind::Tuple(elements) => {
+                let pruned = elements.into_iter().map(|elem| self.prune(elem)).collect();
+                TypeKind::Tuple(pruned)
+            }
             other => other,
         }
     }
@@ -410,6 +431,7 @@ impl ConstraintSolver {
             TypeKind::Function(params, ret) => {
                 params.iter().any(|param| self.occurs_in(id, param)) || self.occurs_in(id, ret)
             }
+            TypeKind::Tuple(elements) => elements.iter().any(|elem| self.occurs_in(id, elem)),
             TypeKind::Primitive(_)
             | TypeKind::Boxed(_)
             | TypeKind::Reference(_)

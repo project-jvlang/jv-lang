@@ -1369,6 +1369,14 @@ pub mod pipeline {
                     .join(", ");
                 format!("fn({}) -> {}", param_repr, format_type_kind(result))
             }
+            TypeKind::Tuple(elements) => {
+                let items = elements
+                    .iter()
+                    .map(format_type_kind)
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("({items})")
+            }
             TypeKind::Unknown => "unknown".to_string(),
         }
     }

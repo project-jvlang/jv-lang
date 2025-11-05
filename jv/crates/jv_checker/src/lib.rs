@@ -742,6 +742,7 @@ fn convert_type_kind(ty: &TypeKind) -> FactsTypeKind {
             FactsTypeKind::function(converted_params, converted_ret)
                 .with_nullability(NullabilityFlag::NonNull)
         }
+        TypeKind::Tuple(_) => FactsTypeKind::default(),
         TypeKind::Unknown => FactsTypeKind::default(),
     }
 }

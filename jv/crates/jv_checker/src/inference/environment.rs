@@ -228,6 +228,12 @@ fn substitute_type(ty: &TypeKind, subs: &HashMap<TypeId, TypeKind>) -> TypeKind 
                 .collect(),
             Box::new(substitute_type(ret, subs)),
         ),
+        TypeKind::Tuple(elements) => TypeKind::Tuple(
+            elements
+                .iter()
+                .map(|element| substitute_type(element, subs))
+                .collect(),
+        ),
         TypeKind::Unknown => TypeKind::Unknown,
     }
 }
