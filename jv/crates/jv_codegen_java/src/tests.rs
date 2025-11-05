@@ -2208,6 +2208,7 @@ fn snapshot_ir_program() {
   ],
   "generic_metadata": {},
   "conversion_metadata": [],
+  "tuple_record_plans": [],
   "span": {
     "start_line": 0,
     "start_column": 0,
