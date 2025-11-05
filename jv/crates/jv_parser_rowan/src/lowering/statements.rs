@@ -391,6 +391,15 @@ fn lower_comment(
             text: format!("/*{}*/", raw),
             span,
         }),
+        TokenType::FieldNameLabel(_) => {
+            let text = comment_token.lexeme.trim();
+            Statement::Comment(CommentStatement {
+                kind: CommentKind::Line,
+                visibility: CommentVisibility::Passthrough,
+                text: format!("// {}", text),
+                span,
+            })
+        }
         other => {
             return Err(LoweringDiagnostic::new(
                 LoweringDiagnosticSeverity::Error,

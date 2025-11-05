@@ -563,6 +563,10 @@ impl JvLanguageServer {
         }
         let program = frontend_output.into_program();
 
+        if program.imports.is_empty() {
+            return Ok(Vec::new());
+        }
+
         let build_config = BuildConfig::default();
         let symbol_context = SymbolBuildContext::from_config(&build_config);
         let cache = SymbolIndexCache::with_default_location();
@@ -642,6 +646,12 @@ impl JvLanguageServer {
 
         let mut diagnostics = Vec::new();
         let mut regex_analyses: Vec<RegexAnalysis> = Vec::new();
+        let has_regex_literals = tokens.iter().any(|token| {
+            token
+                .metadata
+                .iter()
+                .any(|metadata| matches!(metadata, TokenMetadata::RegexLiteral { .. }))
+        });
 
         let frontend_diagnostics = from_frontend_diagnostics(diagnostics_view.final_diagnostics());
         for diagnostic in &frontend_diagnostics {
@@ -669,48 +679,51 @@ impl JvLanguageServer {
             GenericDocumentIndex::from_program(&program),
         );
 
-        let build_config = BuildConfig::default();
-        let symbol_context = SymbolBuildContext::from_config(&build_config);
-        let cache = SymbolIndexCache::with_default_location();
-        let builder = SymbolIndexBuilder::new(&symbol_context);
-        let symbol_index = match builder.build_with_cache(&cache) {
-            Ok(index) => Arc::new(index),
-            Err(error) => {
-                diagnostics.push(fallback_diagnostic(
-                    uri,
-                    &format!("Symbol index build failed: {error}"),
-                ));
-                self.type_facts.remove(uri);
-                self.regex_metadata.remove(uri);
-                return diagnostics;
-            }
-        };
-
-        let import_service =
-            ImportResolutionService::new(Arc::clone(&symbol_index), build_config.target);
         let mut resolved_imports = Vec::new();
-        for import_stmt in &program.imports {
-            match import_service.resolve(import_stmt) {
-                Ok(resolved) => resolved_imports.push(resolved),
+        let mut symbol_index: Option<Arc<_>> = None;
+        if !program.imports.is_empty() {
+            let build_config = BuildConfig::default();
+            let symbol_context = SymbolBuildContext::from_config(&build_config);
+            let cache = SymbolIndexCache::with_default_location();
+            let builder = SymbolIndexBuilder::new(&symbol_context);
+            let index = match builder.build_with_cache(&cache) {
+                Ok(index) => Arc::new(index),
                 Err(error) => {
+                    diagnostics.push(fallback_diagnostic(
+                        uri,
+                        &format!("Symbol index build failed: {error}"),
+                    ));
                     self.type_facts.remove(uri);
                     self.regex_metadata.remove(uri);
-                    return vec![match import_diagnostics::from_error(&error) {
-                        Some(diagnostic) => tooling_diagnostic_to_lsp(
-                            uri,
-                            diagnostic.with_strategy(DiagnosticStrategy::Interactive),
-                        ),
-                        None => fallback_diagnostic(uri, "Import resolution error"),
-                    }];
+                    return diagnostics;
+                }
+            };
+            let import_service =
+                ImportResolutionService::new(Arc::clone(&index), build_config.target);
+            for import_stmt in &program.imports {
+                match import_service.resolve(import_stmt) {
+                    Ok(resolved) => resolved_imports.push(resolved),
+                    Err(error) => {
+                        self.type_facts.remove(uri);
+                        self.regex_metadata.remove(uri);
+                        return vec![match import_diagnostics::from_error(&error) {
+                            Some(diagnostic) => tooling_diagnostic_to_lsp(
+                                uri,
+                                diagnostic.with_strategy(DiagnosticStrategy::Interactive),
+                            ),
+                            None => fallback_diagnostic(uri, "Import resolution error"),
+                        }];
+                    }
                 }
             }
+            symbol_index = Some(index);
         }
 
         let import_plan = lowered_import_plan(&resolved_imports);
 
         let mut checker = TypeChecker::with_parallel_config(self.parallel_config);
-        if !resolved_imports.is_empty() {
-            checker.set_imports(Arc::clone(&symbol_index), resolved_imports.clone());
+        if let Some(index) = symbol_index.as_ref() {
+            checker.set_imports(Arc::clone(index), resolved_imports.clone());
         }
         let check_result = checker.check_program(&program);
 
@@ -718,14 +731,14 @@ impl JvLanguageServer {
             regex_analyses = analyses.to_vec();
         }
 
-        if regex_analyses.is_empty() {
+        if regex_analyses.is_empty() && has_regex_literals {
             let mut validator = RegexValidator::new();
             let regex_program = checker.normalized_program().unwrap_or(&program);
             let _ = validator.validate_program(regex_program);
             regex_analyses = validator.take_analyses();
         }
 
-        if regex_analyses.is_empty() {
+        if regex_analyses.is_empty() && has_regex_literals {
             if let Some(regex_program) = Self::regex_program_from_tokens(&tokens) {
                 let mut validator = RegexValidator::new();
                 let _ = validator.validate_program(&regex_program);
