@@ -109,6 +109,64 @@ pub enum TypeAnnotation {
     Array(Box<TypeAnnotation>),
 }
 
+/// Represents a single element inside a tuple type annotation, preserving source metadata.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TupleTypeElement {
+    /// Element type as declared in the tuple annotation.
+    pub ty: TypeAnnotation,
+    /// Optional source span covering the element.
+    #[serde(default)]
+    pub span: Option<Span>,
+}
+
+impl TupleTypeElement {
+    /// Creates a new tuple type element descriptor.
+    pub fn new(ty: TypeAnnotation, span: Option<Span>) -> Self {
+        Self { ty, span }
+    }
+}
+
+/// Structured metadata describing a tuple type annotation, including all element types.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TupleTypeDescriptor {
+    /// Number of elements contained in the tuple.
+    pub arity: usize,
+    /// Element descriptors in declaration order.
+    #[serde(default)]
+    pub elements: Vec<TupleTypeElement>,
+    /// Optional span covering the tuple annotation itself (`(A B C)`).
+    #[serde(default)]
+    pub annotation_span: Option<Span>,
+}
+
+impl TupleTypeDescriptor {
+    /// Constructs a descriptor from the provided elements and optional source span.
+    pub fn new(elements: Vec<TupleTypeElement>, annotation_span: Option<Span>) -> Self {
+        let arity = elements.len();
+        Self {
+            arity,
+            elements,
+            annotation_span,
+        }
+    }
+
+    /// Updates the stored elements while keeping the arity in sync.
+    pub fn set_elements(&mut self, elements: Vec<TupleTypeElement>) {
+        self.arity = elements.len();
+        self.elements = elements;
+    }
+
+    /// Returns the number of tuple elements.
+    pub fn arity(&self) -> usize {
+        self.arity
+    }
+
+    /// Indicates whether the tuple descriptor has no elements.
+    pub fn is_empty(&self) -> bool {
+        self.arity == 0
+    }
+}
+
 /// Variance marker used by generic parameters (`out T` / `in T`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum VarianceMarker {

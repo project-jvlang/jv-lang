@@ -485,8 +485,12 @@ fn lower_assignment(
         }
     }
 
-    if let (Some(pattern), Expression::Tuple { elements, fields, .. }) =
-        (binding_pattern.as_ref(), &value)
+    if let (
+        Some(pattern),
+        Expression::Tuple {
+            elements, fields, ..
+        },
+    ) = (binding_pattern.as_ref(), &value)
     {
         if let Some(pattern_len) = destructuring_element_count(pattern) {
             let tuple_len = elements.len();
@@ -960,9 +964,7 @@ fn try_parse_type_cast_fallback(tokens: &[&Token]) -> Option<Expression> {
         }
 
         if matches!(
-            tokens
-                .first()
-                .map(|token| &token.token_type),
+            tokens.first().map(|token| &token.token_type),
             Some(TokenType::LeftParen)
         ) {
             if let Some(close_index) = find_matching_paren_in_slice(tokens, 0) {
@@ -6038,8 +6040,9 @@ fn binding_pattern_primary_expression(pattern: &BindingPatternKind) -> Expressio
 
 fn destructuring_element_count(pattern: &BindingPatternKind) -> Option<usize> {
     match pattern {
-        BindingPatternKind::Tuple { elements, .. }
-        | BindingPatternKind::List { elements, .. } => Some(elements.len()),
+        BindingPatternKind::Tuple { elements, .. } | BindingPatternKind::List { elements, .. } => {
+            Some(elements.len())
+        }
         _ => None,
     }
 }
@@ -6058,10 +6061,9 @@ fn tuple_field_label(meta: &TupleFieldMeta) -> String {
 
 fn pattern_element_example(pattern: &BindingPatternKind, index: usize) -> Option<String> {
     match pattern {
-        BindingPatternKind::Tuple { elements, .. }
-        | BindingPatternKind::List { elements, .. } => elements
-            .get(index)
-            .map(pattern_binding_label),
+        BindingPatternKind::Tuple { elements, .. } | BindingPatternKind::List { elements, .. } => {
+            elements.get(index).map(pattern_binding_label)
+        }
         _ => None,
     }
 }

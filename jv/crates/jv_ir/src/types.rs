@@ -2,7 +2,7 @@
 use crate::sequence_pipeline::SequencePipeline;
 use jv_ast::*;
 
-pub use jv_ast::types::PrimitiveReturnMetadata;
+pub use jv_ast::types::{PrimitiveReturnMetadata, TupleTypeDescriptor, TupleTypeElement};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PrimitiveSpecializationHint {

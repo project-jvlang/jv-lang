@@ -1,8 +1,8 @@
+use crate::frontend::RowanPipeline;
 use crate::lowering::{lower_program, LoweringDiagnosticSeverity, LoweringResult};
 use crate::parser::parse;
 use crate::verification::StatementKindKey;
 use crate::{JvLanguage, ParseBuilder, SyntaxKind};
-use crate::frontend::RowanPipeline;
 use jv_ast::strings::MultilineKind;
 use jv_ast::{
     expression::{Argument, Parameter, ParameterProperty, StringPart},
@@ -2437,16 +2437,18 @@ fun main(): Unit {
         "expected single top-level statement"
     );
 
-    let initializer = match program.statements.first().expect("program should contain main function") {
+    let initializer = match program
+        .statements
+        .first()
+        .expect("program should contain main function")
+    {
         Statement::FunctionDeclaration { body, .. } => match &**body {
             Expression::Block { statements, .. } => statements
                 .iter()
                 .find_map(|stmt| match stmt {
-                    Statement::ValDeclaration { initializer, name, .. }
-                        if name == "castList" =>
-                    {
-                        Some(initializer)
-                    }
+                    Statement::ValDeclaration {
+                        initializer, name, ..
+                    } if name == "castList" => Some(initializer),
                     _ => None,
                 })
                 .expect("expected castList declaration"),
