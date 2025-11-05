@@ -258,6 +258,11 @@ impl SequenceWarningCollector {
                     self.visit_expression(element);
                 }
             }
+            Expression::Tuple { elements, .. } => {
+                for element in elements {
+                    self.visit_expression(element);
+                }
+            }
             Expression::Lambda {
                 parameters, body, ..
             } => {

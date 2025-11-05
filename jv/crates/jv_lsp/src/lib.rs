@@ -1796,6 +1796,11 @@ fn collect_call_diagnostics_from_expression(
                 collect_call_diagnostics_from_expression(element, tokens, diagnostics);
             }
         }
+        Expression::Tuple { elements, .. } => {
+            for element in elements {
+                collect_call_diagnostics_from_expression(element, tokens, diagnostics);
+            }
+        }
         Expression::Lambda {
             parameters, body, ..
         } => {
