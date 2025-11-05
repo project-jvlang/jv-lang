@@ -1,9 +1,9 @@
+use crate::CheckError;
 use crate::null_safety::{NullSafetyContext, NullabilityKind};
 use crate::pattern::{
     self, NarrowedNullability, NarrowingSnapshot, PatternMatchFacts, PatternMatchService,
     PatternTarget,
 };
-use crate::CheckError;
 use jv_ast::expression::{Parameter, StringPart};
 use jv_ast::statement::Property;
 use jv_ast::types::TypeAnnotation;

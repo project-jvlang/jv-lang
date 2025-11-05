@@ -159,9 +159,11 @@ fn test_diagnostics_for_mixed_argument_commas() {
     server.open_document(uri.clone(), source.to_string());
 
     let diagnostics = server.get_diagnostics(&uri);
-    assert!(diagnostics
-        .iter()
-        .any(|diag| { diag.message.contains("JV2102") && diag.code.as_deref() == Some("JV2102") }));
+    assert!(
+        diagnostics.iter().any(|diag| {
+            diag.message.contains("JV2102") && diag.code.as_deref() == Some("JV2102")
+        })
+    );
 }
 
 #[test]
@@ -174,9 +176,11 @@ fn test_diagnostics_for_immutable_reassignment() {
     );
 
     let diagnostics = server.get_diagnostics(&uri);
-    assert!(diagnostics
-        .iter()
-        .any(|diag| { diag.message.contains("JV4201") && diag.code.as_deref() == Some("JV4201") }));
+    assert!(
+        diagnostics.iter().any(|diag| {
+            diag.message.contains("JV4201") && diag.code.as_deref() == Some("JV4201")
+        })
+    );
 }
 
 #[test]
@@ -186,9 +190,11 @@ fn test_diagnostics_for_missing_initializer_self_reference() {
     server.open_document(uri.clone(), "value = value".to_string());
 
     let diagnostics = server.get_diagnostics(&uri);
-    assert!(diagnostics
-        .iter()
-        .any(|diag| { diag.message.contains("JV4202") && diag.code.as_deref() == Some("JV4202") }));
+    assert!(
+        diagnostics.iter().any(|diag| {
+            diag.message.contains("JV4202") && diag.code.as_deref() == Some("JV4202")
+        })
+    );
 }
 
 #[test]
@@ -199,9 +205,11 @@ fn test_diagnostics_for_raw_type_comment() {
     server.open_document(uri.clone(), source.to_string());
 
     let diagnostics = server.get_diagnostics(&uri);
-    assert!(diagnostics
-        .iter()
-        .any(|diag| diag.code.as_deref() == Some("JV3202")));
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diag| diag.code.as_deref() == Some("JV3202"))
+    );
 }
 
 #[test]
@@ -212,9 +220,11 @@ fn test_diagnostics_for_raw_allow_comment() {
     server.open_document(uri.clone(), source.to_string());
 
     let diagnostics = server.get_diagnostics(&uri);
-    assert!(diagnostics
-        .iter()
-        .any(|diag| diag.code.as_deref() == Some("JV3203")));
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diag| diag.code.as_deref() == Some("JV3203"))
+    );
 }
 
 #[test]
@@ -306,9 +316,11 @@ fn reports_type_error_for_ambiguous_function() {
 
     let diagnostics = server.get_diagnostics(&uri);
     assert!(!diagnostics.is_empty());
-    assert!(diagnostics
-        .iter()
-        .any(|diag| diag.message.contains("ambiguous function signature")));
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diag| diag.message.contains("ambiguous function signature"))
+    );
     assert!(server.type_facts(&uri).is_none());
 }
 
@@ -332,9 +344,11 @@ fn surfaces_regex_diagnostics_from_validator() {
     server.open_document(uri.clone(), "val pattern = /\\y/".to_string());
 
     let diagnostics = server.get_diagnostics(&uri);
-    assert!(diagnostics
-        .iter()
-        .any(|diag| diag.code.as_deref() == Some("JV5102")));
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diag| diag.code.as_deref() == Some("JV5102"))
+    );
 
     let metadata = server
         .regex_metadata(&uri)
@@ -383,12 +397,16 @@ fn regex_completions_include_templates_and_metadata() {
         },
     );
 
-    assert!(completions
-        .iter()
-        .any(|item| item.contains("regex template")));
-    assert!(completions
-        .iter()
-        .any(|item| item.contains("regex literal")));
+    assert!(
+        completions
+            .iter()
+            .any(|item| item.contains("regex template"))
+    );
+    assert!(
+        completions
+            .iter()
+            .any(|item| item.contains("regex literal"))
+    );
 }
 
 #[test]

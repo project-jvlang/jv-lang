@@ -186,11 +186,13 @@ fn null_arm_records_narrowing_for_else_branch() {
     let fallback = facts
         .fallback_narrowing()
         .expect("fallback snapshot should exist when null arm present");
-    assert!(fallback
-        .on_match()
-        .iter()
-        .any(|binding| binding.variable == "value"
-            && binding.nullability == NarrowedNullability::NonNull));
+    assert!(
+        fallback
+            .on_match()
+            .iter()
+            .any(|binding| binding.variable == "value"
+                && binding.nullability == NarrowedNullability::NonNull)
+    );
 }
 
 #[test]
@@ -249,12 +251,16 @@ fn analyze_records_facts_for_each_target() {
 
     let recorded = service.recorded_facts();
     assert_eq!(recorded.len(), 2, "facts should be stored per target");
-    assert!(recorded
-        .keys()
-        .any(|(_, target)| *target == PatternTarget::Java25));
-    assert!(recorded
-        .keys()
-        .any(|(_, target)| *target == PatternTarget::Java21));
+    assert!(
+        recorded
+            .keys()
+            .any(|(_, target)| *target == PatternTarget::Java25)
+    );
+    assert!(
+        recorded
+            .keys()
+            .any(|(_, target)| *target == PatternTarget::Java21)
+    );
 }
 
 #[test]
@@ -265,10 +271,12 @@ fn invalidate_target_drops_cached_entries() {
     service.analyze(&expr, PatternTarget::Java21);
 
     service.invalidate_target(PatternTarget::Java25);
-    assert!(service
-        .recorded_facts()
-        .keys()
-        .all(|(_, target)| *target != PatternTarget::Java25));
+    assert!(
+        service
+            .recorded_facts()
+            .keys()
+            .all(|(_, target)| *target != PatternTarget::Java25)
+    );
 }
 
 #[test]

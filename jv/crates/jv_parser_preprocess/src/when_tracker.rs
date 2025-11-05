@@ -115,9 +115,11 @@ mod tests {
         ]);
 
         assert!(matches!(events.as_slice(), [WhenTrackerEvent::None, ..]));
-        assert!(events
-            .last()
-            .is_some_and(|event| *event == WhenTrackerEvent::EnterBlock));
+        assert!(
+            events
+                .last()
+                .is_some_and(|event| *event == WhenTrackerEvent::EnterBlock)
+        );
     }
 
     #[test]
@@ -132,9 +134,11 @@ mod tests {
             TokenType::LeftBrace,
         ]);
 
-        assert!(events
-            .last()
-            .is_some_and(|event| *event == WhenTrackerEvent::EnterBlock));
+        assert!(
+            events
+                .last()
+                .is_some_and(|event| *event == WhenTrackerEvent::EnterBlock)
+        );
     }
 
     #[test]

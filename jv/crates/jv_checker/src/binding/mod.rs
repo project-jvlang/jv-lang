@@ -3,5 +3,5 @@
 mod resolver;
 
 pub use resolver::{
-    resolve_bindings, BindingResolution, BindingUsageSummary, LateInitManifest, LateInitSeed,
+    BindingResolution, BindingUsageSummary, LateInitManifest, LateInitSeed, resolve_bindings,
 };

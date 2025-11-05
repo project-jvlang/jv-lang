@@ -144,9 +144,11 @@ fn reserved_annotation_lookup_and_conflict_detection() {
     let binding = [sample_primary, sample_duplicate, sample_shadow];
     let conflicts = detect_reserved_conflicts(&binding);
 
-    assert!(conflicts
-        .iter()
-        .any(|conflict| matches!(conflict.kind, ReservedConflictKind::DuplicateUsage)));
+    assert!(
+        conflicts
+            .iter()
+            .any(|conflict| matches!(conflict.kind, ReservedConflictKind::DuplicateUsage))
+    );
     assert!(conflicts.iter().any(|conflict| matches!(
         conflict.kind,
         ReservedConflictKind::NameShadowing { reserved } if reserved == "Sample"

@@ -1,5 +1,5 @@
-use crate::diagnostics::{self, DiagnosticSeverity, EnhancedDiagnostic};
 use crate::CheckError;
+use crate::diagnostics::{self, DiagnosticSeverity, EnhancedDiagnostic};
 use jv_ast::{
     Argument, ConcurrencyConstruct, Expression, ForInStatement, LoopStrategy, NumericRangeLoop,
     Program, RegexLiteral, ResourceManagement, Span, Statement, StringPart, TryCatchClause,

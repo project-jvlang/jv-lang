@@ -1,7 +1,7 @@
 use super::*;
 use crate::types::{SymbolId, TypeId};
-use jv_ast::types::Kind;
 use jv_ast::Span;
+use jv_ast::types::Kind;
 
 fn arrow_kind() -> Kind {
     Kind::Arrow {

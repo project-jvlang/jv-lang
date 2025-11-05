@@ -13,7 +13,7 @@ use crate::pattern::PatternMatchService;
 use crate::{CheckError, InferenceSnapshot};
 use boundary::BoundaryChecker;
 use diagnostics::DiagnosticsEmitter;
-use flow::{build_graph, FlowSolver};
+use flow::{FlowSolver, build_graph};
 use jv_ast::Program;
 use jv_inference::service::TypeFactsSnapshot;
 pub use operators::{JavaLoweringHint, JavaLoweringStrategy};

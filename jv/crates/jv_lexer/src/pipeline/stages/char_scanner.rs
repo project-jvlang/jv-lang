@@ -1,14 +1,14 @@
 use std::collections::VecDeque;
 
 use crate::{
+    CommentCarryOverMetadata, JsonCommentTrivia, JsonCommentTriviaKind, LexError,
+    SourceCommentKind, SourceCommentTrivia, TokenTrivia, TokenType,
     pipeline::{
         context::LexerContext,
         pipeline::CharScannerStage,
         pipeline::DEFAULT_LOOKAHEAD_LIMIT,
         types::{RawToken, RawTokenKind, ScannerPosition, Span},
     },
-    CommentCarryOverMetadata, JsonCommentTrivia, JsonCommentTriviaKind, LexError,
-    SourceCommentKind, SourceCommentTrivia, TokenTrivia, TokenType,
 };
 use unicode_ident::{is_xid_continue, is_xid_start};
 

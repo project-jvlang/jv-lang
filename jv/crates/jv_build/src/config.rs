@@ -346,7 +346,9 @@ impl fmt::Display for SampleDependency {
 /// Errors raised while enforcing @Sample configuration security.
 #[derive(Debug, Error)]
 pub enum SampleConfigError {
-    #[error("Network access for @Sample protocol '{protocol}' is disabled. Enable with --sample-network=allow or set sample.allow_network=true in jv.toml.")]
+    #[error(
+        "Network access for @Sample protocol '{protocol}' is disabled. Enable with --sample-network=allow or set sample.allow_network=true in jv.toml."
+    )]
     NetworkNotAllowed { protocol: SampleProtocol },
 
     #[error("CLI dependency '{command}' is not available{hint}.")]

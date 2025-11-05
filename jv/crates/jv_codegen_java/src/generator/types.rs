@@ -1,5 +1,5 @@
 use super::*;
-use jv_ast::{types::RawTypeDirective, Span};
+use jv_ast::{Span, types::RawTypeDirective};
 use jv_ir::{IrVariance, JavaWildcardKind};
 use std::borrow::Cow;
 
