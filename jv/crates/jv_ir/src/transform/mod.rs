@@ -414,6 +414,7 @@ fn lower_program(
         type_declarations,
         generic_metadata: Default::default(),
         conversion_metadata: Vec::new(),
+        tuple_record_plans: Vec::new(),
         span,
     })
 }

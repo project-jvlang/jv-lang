@@ -787,6 +787,7 @@ pub mod pipeline {
         };
 
         let binding_usage = type_checker.binding_usage().clone();
+        let tuple_record_plans = type_checker.tuple_record_plans().to_vec();
 
         let mut type_facts_snapshot = type_facts_snapshot;
         let requires_probe = type_facts_snapshot
@@ -935,6 +936,8 @@ pub mod pipeline {
                 }
             }
         };
+
+        ir_program.tuple_record_plans = tuple_record_plans;
 
         if let Some(facts) = type_facts_snapshot.as_ref() {
             apply_type_facts(&mut ir_program, facts);

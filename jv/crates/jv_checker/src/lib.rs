@@ -20,7 +20,7 @@ pub use jv_inference::ParallelInferenceConfig;
 pub use regex::RegexAnalysis;
 
 use crate::imports::ResolvedImport;
-use crate::tuple_planner::{TuplePlanner, TupleRecordPlan};
+use crate::tuple_planner::TuplePlanner;
 use binding::{BindingResolution, BindingUsageSummary, LateInitManifest, resolve_bindings};
 use inference::conversions::{AppliedConversion, ConversionKind, HelperSpec, NullableGuard};
 use jv_ast::{Program, Span};
@@ -41,6 +41,7 @@ use jv_inference::types::{
     NullabilityFlag, TypeId as FactsTypeId, TypeKind as FactsTypeKind,
     TypeVariant as FactsTypeVariant,
 };
+use jv_ir::TupleRecordPlan;
 use jv_pm::JavaTarget;
 
 #[derive(Error, Debug)]

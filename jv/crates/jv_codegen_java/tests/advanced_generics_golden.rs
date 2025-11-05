@@ -43,6 +43,7 @@ fn build_program() -> IrProgram {
         type_declarations: vec![class],
         generic_metadata: metadata,
         conversion_metadata: Vec::new(),
+        tuple_record_plans: Vec::new(),
         span,
     }
 }

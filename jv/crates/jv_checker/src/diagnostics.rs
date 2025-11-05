@@ -735,6 +735,7 @@ mod tests {
             type_declarations: vec![statement],
             generic_metadata: Default::default(),
             conversion_metadata: Vec::new(),
+            tuple_record_plans: Vec::new(),
             span,
         }
     }

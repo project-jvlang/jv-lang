@@ -1748,6 +1748,7 @@ mod tests {
             type_declarations: vec![class_decl],
             generic_metadata: BTreeMap::new(),
             conversion_metadata: Vec::new(),
+            tuple_record_plans: Vec::new(),
             span,
         };
 

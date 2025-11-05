@@ -1,6 +1,8 @@
 use crate::builder::{JavaCompilationUnit, JavaSourceBuilder};
 use crate::config::JavaCodeGenConfig;
 use crate::error::CodeGenError;
+use crate::java21;
+use crate::record::{self, TupleRecord};
 use crate::target_version::TargetedJavaEmitter;
 use jv_ast::{BinaryOp, CallArgumentStyle, Literal, SequenceDelimiter, Span, UnaryOp};
 use jv_build::metadata::SymbolIndex;
@@ -16,6 +18,7 @@ use jv_ir::{
 use jv_mapper::{
     JavaPosition, JavaSpan, MappingCategory, MappingError, SourceMap, SourceMapBuilder,
 };
+use jv_pm::JavaTarget;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
@@ -223,6 +226,26 @@ impl JavaCodeGenerator {
             unit.type_declarations.push(builder.build());
         }
 
+        let tuple_records = record::collect_tuple_records(&program.tuple_record_plans);
+        let mut emitted_tuple_records: HashSet<String> = HashSet::new();
+        for record in tuple_records {
+            if !emitted_tuple_records.insert(record.name.clone()) {
+                continue;
+            }
+            if self.has_tuple_record_definition(&record.name) {
+                continue;
+            }
+
+            let rendered = if self.targeting.target() == JavaTarget::Java21 {
+                java21::render_tuple_record_java21(&record, &self.config.indent)
+            } else {
+                record::render_tuple_record(&record, &self.config.indent)
+            };
+
+            self.register_tuple_record(&record);
+            unit.type_declarations.push(rendered);
+        }
+
         for declaration in remaining_declarations {
             if let IrStatement::SampleDeclaration(sample) = Self::base_statement(&declaration) {
                 let artifacts = self.generate_sample_declaration_artifacts(sample)?;
@@ -337,6 +360,40 @@ impl JavaCodeGenerator {
                 self.register_record_components_from_declarations(nested_classes, &next_enclosing);
             }
             _ => {}
+        }
+    }
+
+    fn has_tuple_record_definition(&self, name: &str) -> bool {
+        if self.record_components.contains_key(name) {
+            return true;
+        }
+        if let Some(pkg) = &self.package {
+            if !pkg.is_empty() {
+                let fq = format!("{pkg}.{name}");
+                if self.record_components.contains_key(&fq) {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    fn register_tuple_record(&mut self, record: &TupleRecord) {
+        let component_names: Vec<String> = record.component_names();
+
+        self.record_components
+            .entry(record.name.clone())
+            .or_insert_with(HashSet::new)
+            .extend(component_names.iter().cloned());
+
+        if let Some(pkg) = &self.package {
+            if !pkg.is_empty() {
+                let fq = format!("{pkg}.{}", record.name);
+                self.record_components
+                    .entry(fq)
+                    .or_insert_with(HashSet::new)
+                    .extend(component_names.iter().cloned());
+            }
         }
     }
 

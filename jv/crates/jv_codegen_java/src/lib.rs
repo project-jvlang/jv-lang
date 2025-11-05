@@ -2,6 +2,8 @@ pub mod builder;
 pub mod config;
 pub mod error;
 pub mod generator;
+pub mod java21;
+pub mod record;
 pub mod target_version;
 pub mod types;
 

@@ -7,50 +7,15 @@
 //! `TupleN_*` record can be reused.
 
 use crate::inference::type_parser;
-use jv_ast::expression::{Argument, Expression, StringPart, TupleFieldMeta, TryCatchClause, WhenArm};
+use jv_ast::expression::{
+    Argument, Expression, StringPart, TryCatchClause, TupleFieldMeta, WhenArm,
+};
 use jv_ast::types::{Span, TupleTypeDescriptor, TypeAnnotation};
 use jv_ast::{ConcurrencyConstruct, ForInStatement, Program, ResourceManagement, Statement};
+use jv_ir::{TupleRecordPlan, TupleRecordStrategy, TupleUsageContext, TupleUsageKind};
 use std::collections::{HashMap, HashSet};
 
 const UNKNOWN_HINT: &str = "Unknown";
-
-/// Strategy selected for a tuple record.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TupleRecordStrategy {
-    /// Use a dedicated record tied to a specific scope (e.g. function return).
-    Specific,
-    /// Reuse a generic tuple record (e.g. `Tuple2_Int_Int`).
-    Generic,
-}
-
-/// Context where a tuple literal was encountered.
-#[derive(Debug, Clone, PartialEq)]
-pub struct TupleUsageContext {
-    pub kind: TupleUsageKind,
-    pub owner: Option<String>,
-    pub span: Span,
-}
-
-/// Classification of tuple usage.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TupleUsageKind {
-    FunctionReturn,
-    BindingInitializer,
-    AssignmentValue,
-    Expression,
-}
-
-/// Planned record definition for a tuple literal group.
-#[derive(Debug, Clone, PartialEq)]
-pub struct TupleRecordPlan {
-    pub arity: usize,
-    pub strategy: TupleRecordStrategy,
-    pub specific_name: Option<String>,
-    pub generic_name: String,
-    pub fields: Vec<TupleFieldMeta>,
-    pub type_hints: Vec<String>,
-    pub usage_sites: Vec<TupleUsageContext>,
-}
 
 /// Planner responsible for analysing tuple literals inside a program.
 #[derive(Default)]
@@ -124,7 +89,11 @@ impl TuplePlanner {
                 self.visit_expression(body, &ExpressionContext::general());
                 self.function_stack.pop();
             }
-            Statement::ClassDeclaration { properties, methods, .. } => {
+            Statement::ClassDeclaration {
+                properties,
+                methods,
+                ..
+            } => {
                 for property in properties {
                     if let Some(initializer) = &property.initializer {
                         self.visit_expression(initializer, &ExpressionContext::general());
@@ -140,7 +109,11 @@ impl TuplePlanner {
                     self.visit_statement(method);
                 }
             }
-            Statement::InterfaceDeclaration { methods, properties, .. } => {
+            Statement::InterfaceDeclaration {
+                methods,
+                properties,
+                ..
+            } => {
                 for property in properties {
                     if let Some(initializer) = &property.initializer {
                         self.visit_expression(initializer, &ExpressionContext::general());
@@ -157,7 +130,9 @@ impl TuplePlanner {
             Statement::Expression { expr, .. } => {
                 self.visit_expression(expr, &ExpressionContext::general());
             }
-            Statement::Return { value: Some(expr), .. } => {
+            Statement::Return {
+                value: Some(expr), ..
+            } => {
                 if let Some(function) = self.function_stack.last() {
                     let context = ExpressionContext::with_usage(
                         TupleUsageKind::FunctionReturn,
@@ -177,11 +152,7 @@ impl TuplePlanner {
                 self.visit_expression(target, &ExpressionContext::general());
                 self.visit_expression(
                     value,
-                    &ExpressionContext::with_usage(
-                        TupleUsageKind::AssignmentValue,
-                        None,
-                        None,
-                    ),
+                    &ExpressionContext::with_usage(TupleUsageKind::AssignmentValue, None, None),
                 );
             }
             Statement::ForIn(for_in) => self.visit_for_in(for_in),
@@ -198,8 +169,7 @@ impl TuplePlanner {
 
     fn visit_concurrency(&mut self, construct: &ConcurrencyConstruct) {
         match construct {
-            ConcurrencyConstruct::Spawn { body, .. }
-            | ConcurrencyConstruct::Async { body, .. } => {
+            ConcurrencyConstruct::Spawn { body, .. } | ConcurrencyConstruct::Async { body, .. } => {
                 self.visit_expression(body, &ExpressionContext::general());
             }
             ConcurrencyConstruct::Await { expr, .. } => {
@@ -325,7 +295,9 @@ impl TuplePlanner {
                     self.visit_expression(element, &ExpressionContext::general());
                 }
             }
-            Expression::Lambda { parameters, body, .. } => {
+            Expression::Lambda {
+                parameters, body, ..
+            } => {
                 for parameter in parameters {
                     if let Some(default) = &parameter.default_value {
                         self.visit_expression(default, &ExpressionContext::general());
@@ -381,9 +353,7 @@ impl TuplePlanner {
             .or_insert_with(|| TuplePlanAccumulator::new(normalized_fields.clone()));
 
         accumulator.merge_fields(&normalized_fields);
-        let usage_kind = context
-            .usage
-            .unwrap_or(TupleUsageKind::Expression);
+        let usage_kind = context.usage.unwrap_or(TupleUsageKind::Expression);
         accumulator.usage_sites.push(TupleUsageContext {
             kind: usage_kind,
             owner: context.owner.clone(),
@@ -442,14 +412,8 @@ impl TuplePlanner {
         }
 
         plans.sort_by(|lhs, rhs| {
-            let left = lhs
-                .specific_name
-                .as_ref()
-                .unwrap_or(&lhs.generic_name);
-            let right = rhs
-                .specific_name
-                .as_ref()
-                .unwrap_or(&rhs.generic_name);
+            let left = lhs.specific_name.as_ref().unwrap_or(&lhs.generic_name);
+            let right = rhs.specific_name.as_ref().unwrap_or(&rhs.generic_name);
             left.cmp(right)
         });
 
@@ -507,7 +471,11 @@ impl TupleKey {
     fn new(arity: usize, fields: &[TupleFieldMeta]) -> Self {
         let primary_labels = fields
             .iter()
-            .map(|meta| meta.primary_label.as_ref().map(|label| label.trim().to_string()))
+            .map(|meta| {
+                meta.primary_label
+                    .as_ref()
+                    .map(|label| label.trim().to_string())
+            })
             .collect::<Vec<_>>();
         Self {
             arity,
@@ -569,11 +537,7 @@ fn parse_tuple_descriptor(annotation: &TypeAnnotation) -> Option<TupleTypeDescri
     }
 }
 
-fn normalize_fields(
-    fields: &[TupleFieldMeta],
-    arity: usize,
-    span: &Span,
-) -> Vec<TupleFieldMeta> {
+fn normalize_fields(fields: &[TupleFieldMeta], arity: usize, span: &Span) -> Vec<TupleFieldMeta> {
     let mut normalized = Vec::with_capacity(arity);
     for index in 0..arity {
         if let Some(meta) = fields.get(index) {
@@ -587,8 +551,7 @@ fn normalize_fields(
 
 fn annotation_hint(annotation: &TypeAnnotation) -> String {
     let raw = flatten_annotation(annotation);
-    let sanitized = raw
-        .replace([':', '.', '<', '>', ',', '?', '[', ']', '-', ' '], "_");
+    let sanitized = raw.replace([':', '.', '<', '>', ',', '?', '[', ']', '-', ' '], "_");
     to_pascal_case(&sanitized)
 }
 
@@ -713,7 +676,10 @@ mod tests {
         assert_eq!(plan.specific_name.as_deref(), Some("Divmod_Result"));
         assert_eq!(plan.generic_name, "Tuple2_Unknown_Unknown");
         assert_eq!(plan.arity, 2);
-        assert_eq!(plan.type_hints, vec!["Unknown".to_string(), "Unknown".to_string()]);
+        assert_eq!(
+            plan.type_hints,
+            vec!["Unknown".to_string(), "Unknown".to_string()]
+        );
         assert_eq!(plan.usage_sites.len(), 1);
         assert_eq!(plan.usage_sites[0].kind, TupleUsageKind::FunctionReturn);
     }
