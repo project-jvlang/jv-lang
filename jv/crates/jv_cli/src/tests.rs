@@ -774,6 +774,10 @@ include = ["src/**/*.jv"]
             parallel_inference: false,
             inference_workers: None,
             constraint_batch: None,
+            apt_enabled: false,
+            apt_processors: None,
+            apt_processorpath: None,
+            apt_options: Vec::new(),
         };
 
         let plan =
@@ -867,6 +871,10 @@ include = ["src/**/*.jv"]
             parallel_inference: false,
             inference_workers: None,
             constraint_batch: None,
+            apt_enabled: false,
+            apt_processors: None,
+            apt_processorpath: None,
+            apt_options: Vec::new(),
         };
 
         let plan =
@@ -1083,6 +1091,10 @@ clean = false
         parallel_inference: false,
         inference_workers: None,
         constraint_batch: None,
+        apt_enabled: false,
+        apt_processors: None,
+        apt_processorpath: None,
+        apt_options: Vec::new(),
     };
 
     let plan = pipeline::BuildOptionsFactory::compose(project_root, settings, layout, overrides)
