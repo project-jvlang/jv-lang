@@ -134,6 +134,8 @@ pub enum Commands {
         /// Diagnostic code (e.g., JV2001)
         code: String,
     },
+    /// Inspect resolver strategies and metadata
+    Resolver(commands::resolver::ResolverArgs),
     /// Show version information  
     Version,
     /// Start interactive REPL

@@ -12,8 +12,8 @@ pub mod resolver;
 pub use resolver::{
     DependencyScope, ManifestDependencyProvider, RequestedDependency, ResolutionDiagnostic,
     ResolutionDiagnosticLevel, ResolutionSource, ResolutionStats, ResolvedDependencies,
-    ResolvedDependency, ResolverDispatcher, ResolverError, ResolverOptions, ResolverStrategy,
-    ResolverStrategyInfo, VersionDecision,
+    ResolvedDependency, ResolverAlgorithmKind, ResolverDispatcher, ResolverError, ResolverOptions,
+    ResolverStrategy, ResolverStrategyInfo, StrategyStability, VersionDecision,
 };
 
 #[derive(Error, Debug)]

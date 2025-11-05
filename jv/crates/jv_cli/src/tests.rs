@@ -656,7 +656,7 @@ include = ["src/**/*.jv"]
         apt_processors: None,
         apt_processorpath: None,
         apt_options: Vec::new(),
-        };
+    };
 
     let plan = pipeline::BuildOptionsFactory::compose(project_root, settings, layout, overrides)
         .expect("plan composition succeeds");
@@ -782,7 +782,7 @@ include = ["src/**/*.jv"]
             apt_enabled: false,
             apt_processors: None,
             apt_processorpath: None,
-        apt_options: Vec::new(),
+            apt_options: Vec::new(),
         };
 
         let plan =
@@ -876,11 +876,11 @@ include = ["src/**/*.jv"]
             parallel_inference: false,
             inference_workers: None,
             constraint_batch: None,
-        apt_enabled: false,
-        apt_processors: None,
-        apt_processorpath: None,
-        apt_options: Vec::new(),
-    };
+            apt_enabled: false,
+            apt_processors: None,
+            apt_processorpath: None,
+            apt_options: Vec::new(),
+        };
 
         let plan =
             pipeline::BuildOptionsFactory::compose(project_root, settings, layout, overrides)
