@@ -2360,6 +2360,83 @@ fn tuple_generic_record_plan_uses_default_labels() {
 }
 
 #[test]
+fn tuple_literal_respects_plan_field_mapping() {
+    let tuple_span = Span::new(12, 4, 12, 18);
+    let plan = TupleRecordPlan {
+        arity: 2,
+        strategy: TupleRecordStrategy::Specific,
+        specific_name: Some("Divmod_Result".to_string()),
+        generic_name: "Tuple2_Int_Int".to_string(),
+        fields: vec![
+            TupleFieldMeta {
+                primary_label: Some("second".into()),
+                secondary_labels: Vec::new(),
+                identifier_hint: None,
+                fallback_index: 2,
+                span: tuple_span.clone(),
+            },
+            TupleFieldMeta {
+                primary_label: Some("first".into()),
+                secondary_labels: Vec::new(),
+                identifier_hint: None,
+                fallback_index: 1,
+                span: tuple_span.clone(),
+            },
+        ],
+        type_hints: vec!["Int".into(), "Int".into()],
+        usage_sites: vec![TupleUsageContext {
+            kind: TupleUsageKind::Expression,
+            owner: None,
+            span: tuple_span.clone(),
+        }],
+    };
+
+    let program = IrProgram {
+        package: None,
+        imports: vec![],
+        type_declarations: Vec::new(),
+        generic_metadata: Default::default(),
+        conversion_metadata: Vec::new(),
+        tuple_record_plans: vec![plan],
+        span: dummy_span(),
+    };
+
+    let mut generator = JavaCodeGenerator::new();
+    generator
+        .generate_compilation_unit(&program)
+        .expect("populate tuple plan usage");
+
+    let tuple_literal = IrExpression::TupleLiteral {
+        elements: vec![
+            IrExpression::Identifier {
+                name: "left".into(),
+                java_type: JavaType::Primitive("int".into()),
+                span: tuple_span.clone(),
+            },
+            IrExpression::Identifier {
+                name: "right".into(),
+                java_type: JavaType::Primitive("int".into()),
+                span: tuple_span.clone(),
+            },
+        ],
+        java_type: JavaType::Reference {
+            name: "Divmod_Result".into(),
+            generic_args: vec![],
+        },
+        span: tuple_span,
+    };
+
+    let rendered = generator
+        .generate_expression(&tuple_literal)
+        .expect("tuple literal generation");
+
+    assert_eq!(
+        rendered, "new Divmod_Result(right, left)",
+        "tuple literal should align arguments to the record plan"
+    );
+}
+
+#[test]
 fn sample_declaration_generates_records_from_descriptors() {
     let declaration = sample_declaration(vec![sample_record_descriptor()]);
     let program = IrProgram {

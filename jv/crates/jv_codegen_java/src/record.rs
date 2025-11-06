@@ -58,6 +58,13 @@ pub fn collect_tuple_records(plans: &[TupleRecordPlan]) -> Vec<TupleRecord> {
     records
 }
 
+pub fn component_names_for_plan(plan: &TupleRecordPlan) -> Vec<String> {
+    build_components(plan)
+        .into_iter()
+        .map(|component| component.name)
+        .collect()
+}
+
 fn build_components(plan: &TupleRecordPlan) -> Vec<TupleRecordComponent> {
     let mut components = Vec::with_capacity(plan.arity);
     for index in 0..plan.arity {

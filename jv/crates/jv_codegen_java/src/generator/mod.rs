@@ -4,6 +4,7 @@ use crate::error::CodeGenError;
 use crate::java21;
 use crate::record::{self, TupleRecord};
 use crate::target_version::TargetedJavaEmitter;
+use jv_ast::expression::TupleFieldMeta;
 use jv_ast::{BinaryOp, CallArgumentStyle, Literal, SequenceDelimiter, Span, UnaryOp};
 use jv_build::metadata::SymbolIndex;
 use jv_ir::{
@@ -390,15 +391,55 @@ impl JavaCodeGenerator {
                 .as_ref()
                 .cloned()
                 .unwrap_or_else(|| plan.generic_name.clone());
+            let component_names = record::component_names_for_plan(plan);
+            let source_positions = Self::tuple_source_positions(plan);
             for usage in &plan.usage_sites {
                 self.tuple_usages.insert(
                     SpanKey::from(&usage.span),
                     TuplePlanUsage {
                         record_name: record_name.clone(),
+                        component_names: component_names.clone(),
+                        source_positions: source_positions.clone(),
                     },
                 );
             }
         }
+    }
+
+    fn tuple_source_positions(plan: &TupleRecordPlan) -> Vec<usize> {
+        (0..plan.arity)
+            .map(|index| {
+                let preferred = plan
+                    .fields
+                    .get(index)
+                    .map(|meta| Self::normalized_fallback_index(meta, index))
+                    .unwrap_or(index);
+                preferred
+            })
+            .collect()
+    }
+
+    fn normalized_fallback_index(meta: &TupleFieldMeta, default_index: usize) -> usize {
+        if meta.fallback_index == 0 {
+            default_index
+        } else {
+            meta.fallback_index.saturating_sub(1)
+        }
+    }
+
+    fn select_tuple_element_index(
+        preferred_index: usize,
+        slot_index: usize,
+        element_count: usize,
+        used: &[bool],
+    ) -> Option<usize> {
+        if preferred_index < element_count && !used[preferred_index] {
+            return Some(preferred_index);
+        }
+        if slot_index < element_count && !used[slot_index] {
+            return Some(slot_index);
+        }
+        (0..element_count).find(|idx| !used[*idx])
     }
 
     fn register_tuple_record(&mut self, record: &TupleRecord) {
@@ -1652,6 +1693,8 @@ impl JavaCodeGenerator {
 #[derive(Debug, Clone)]
 struct TuplePlanUsage {
     record_name: String,
+    component_names: Vec<String>,
+    source_positions: Vec<usize>,
 }
 
 #[derive(Debug, Clone)]
