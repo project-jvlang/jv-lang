@@ -655,12 +655,13 @@ pub fn transform_expression(
                 let _as_expr = parts.next();
                 let ty_expr = parts.next().expect("tuple third element");
                 let lowered_value = transform_expression(value_expr, context)?;
-                let type_annotation = expression_to_simple_type_annotation(ty_expr).map_err(
-                    |construct| TransformError::UnsupportedConstruct {
-                        construct,
-                        span: span.clone(),
-                    },
-                )?;
+                let type_annotation =
+                    expression_to_simple_type_annotation(ty_expr).map_err(|construct| {
+                        TransformError::UnsupportedConstruct {
+                            construct,
+                            span: span.clone(),
+                        }
+                    })?;
                 let target_type = convert_type_annotation(type_annotation)?;
                 return Ok(IrExpression::Cast {
                     expr: Box::new(lowered_value),
@@ -1554,7 +1555,9 @@ fn expression_to_simple_type_annotation(expr: Expression) -> Result<TypeAnnotati
                 segments.push(name);
                 Ok(())
             }
-            Expression::MemberAccess { object, property, .. } => {
+            Expression::MemberAccess {
+                object, property, ..
+            } => {
                 collect_segments(*object, segments)?;
                 segments.push(property);
                 Ok(())

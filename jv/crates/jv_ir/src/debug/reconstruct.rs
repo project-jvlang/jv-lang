@@ -5,10 +5,10 @@ use crate::types::{
     IrVisibility, JavaType, JavaWildcardKind,
 };
 use jv_ast::{
-    expression::{TupleContextFlags, TupleFieldMeta},
     Argument, CallArgumentMetadata, CommentKind, CommentStatement, CommentVisibility, Expression,
     Literal, Modifiers, Program, RegexLiteral, Span, Statement, StringPart, TypeAnnotation,
     ValBindingOrigin, Visibility,
+    expression::{TupleContextFlags, TupleFieldMeta},
 };
 
 fn render_type_annotation(annotation: TypeAnnotation) -> String {
