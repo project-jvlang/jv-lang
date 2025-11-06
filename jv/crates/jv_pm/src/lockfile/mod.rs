@@ -486,7 +486,10 @@ mod tests {
 
     use tempfile::tempdir;
 
-    use crate::{ResolutionSource, ResolutionStats, ResolvedDependency, ResolverAlgorithmKind};
+    use crate::{
+        RepositorySection, ResolutionSource, ResolutionStats, ResolvedDependency,
+        ResolverAlgorithmKind,
+    };
 
     fn sample_manifest() -> Manifest {
         Manifest {
@@ -500,6 +503,8 @@ mod tests {
                 ]),
             },
             project: Default::default(),
+            repositories: RepositorySection::default(),
+            mirrors: Vec::new(),
             build: None,
             maven: Default::default(),
         }

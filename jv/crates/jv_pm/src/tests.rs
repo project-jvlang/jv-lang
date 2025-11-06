@@ -55,6 +55,8 @@ fn test_manifest_creation() {
     let manifest = Manifest {
         package,
         project: ProjectSection::default(),
+        repositories: RepositorySection::default(),
+        mirrors: Vec::new(),
         build: Some(build_info),
         maven: Default::default(),
     };
@@ -125,6 +127,8 @@ fn test_resolve_dependencies_placeholder() {
             dependencies: HashMap::new(),
         },
         project: ProjectSection::default(),
+        repositories: RepositorySection::default(),
+        mirrors: Vec::new(),
         build: None,
         maven: Default::default(),
     };
@@ -230,6 +234,8 @@ fn resolver_resolves_manifest_with_default_strategy() {
             dependencies,
         },
         project: ProjectSection::default(),
+        repositories: RepositorySection::default(),
+        mirrors: Vec::new(),
         build: None,
         maven: Default::default(),
     };
@@ -271,6 +277,8 @@ fn resolver_rejects_unknown_strategy() {
             dependencies: HashMap::from([(String::from("core"), String::from("1.0.0"))]),
         },
         project: ProjectSection::default(),
+        repositories: RepositorySection::default(),
+        mirrors: Vec::new(),
         build: None,
         maven: Default::default(),
     };

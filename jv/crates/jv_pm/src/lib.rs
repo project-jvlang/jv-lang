@@ -12,6 +12,7 @@ pub mod download;
 pub mod lockfile;
 pub mod maven;
 pub mod registry;
+pub mod repository;
 pub mod resolver;
 
 pub use cache::{
@@ -33,6 +34,12 @@ pub use maven::{
 pub use registry::{
     ArtifactCoordinates, ArtifactResource, DownloadedJar, MavenCoordinates, MavenMetadata,
     MavenRegistry, MetadataParseError, RegistryError, RetryConfig,
+};
+pub use repository::{
+    Credentials, RepositoryError, RepositoryHandle, RepositoryManager,
+    config::{
+        AuthConfig, AuthType, FilterConfig, MirrorConfig, RepositoryConfig, RepositorySection,
+    },
 };
 pub use resolver::{
     DependencyScope, ManifestDependencyProvider, RequestedDependency, ResolutionDiagnostic,
@@ -206,6 +213,10 @@ pub struct Manifest {
     pub package: PackageInfo,
     #[serde(default)]
     pub project: ProjectSection,
+    #[serde(default, skip_serializing_if = "RepositorySection::is_empty")]
+    pub repositories: RepositorySection,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub mirrors: Vec<MirrorConfig>,
     pub build: Option<BuildInfo>,
     #[serde(default)]
     pub maven: MavenProjectMetadata,

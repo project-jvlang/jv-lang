@@ -29,7 +29,7 @@ use jv_cli::{
     Cli, Commands, format_resolved_import, get_version, init_project as cli_init_project,
     resolved_imports_header, tooling_failure,
 };
-use jv_pm::{Manifest, PackageInfo, ProjectSection};
+use jv_pm::{Manifest, PackageInfo, ProjectSection, RepositorySection};
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
@@ -447,6 +447,8 @@ fn build_ephemeral_run_settings(start_path: &Path) -> Option<(ProjectRoot, Proje
             dependencies: HashMap::new(),
         },
         project: project_section,
+        repositories: RepositorySection::default(),
+        mirrors: Vec::new(),
         build: None,
         maven: Default::default(),
     };

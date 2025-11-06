@@ -290,6 +290,8 @@ mod tests {
                 ]),
             },
             project: ProjectSection::default(),
+            repositories: crate::RepositorySection::default(),
+            mirrors: Vec::new(),
             build: None,
             maven: crate::MavenProjectMetadata {
                 group_id: "com.example".to_string(),
