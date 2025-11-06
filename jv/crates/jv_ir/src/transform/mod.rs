@@ -643,6 +643,45 @@ pub fn transform_expression(
                 span,
             })
         }
+        Expression::Tuple {
+            mut elements,
+            fields: _fields,
+            span,
+            ..
+        } => {
+            if elements.len() == 3 && is_as_keyword(&elements[1]) {
+                let mut parts = elements.into_iter();
+                let value_expr = parts.next().expect("tuple first element");
+                let _as_expr = parts.next();
+                let ty_expr = parts.next().expect("tuple third element");
+                let lowered_value = transform_expression(value_expr, context)?;
+                let type_annotation = expression_to_simple_type_annotation(ty_expr).map_err(
+                    |construct| TransformError::UnsupportedConstruct {
+                        construct,
+                        span: span.clone(),
+                    },
+                )?;
+                let target_type = convert_type_annotation(type_annotation)?;
+                return Ok(IrExpression::Cast {
+                    expr: Box::new(lowered_value),
+                    target_type,
+                    span,
+                });
+            }
+            if elements.len() == 1 {
+                let single = elements.pop().expect("tuple has single element");
+                return transform_expression(single, context);
+            }
+            let mut lowered_elements = Vec::with_capacity(elements.len());
+            for element in elements {
+                lowered_elements.push(transform_expression(element, context)?);
+            }
+            Ok(IrExpression::TupleLiteral {
+                elements: lowered_elements,
+                java_type: JavaType::object(),
+                span,
+            })
+        }
         Expression::This(span) => {
             if let Some(java_type) = context.lookup_variable("this").cloned() {
                 Ok(IrExpression::This { java_type, span })
@@ -1502,6 +1541,32 @@ pub(crate) fn normalize_whitespace_array_elements(elements: Vec<Expression>) -> 
     }
 
     normalized
+}
+
+fn is_as_keyword(expr: &Expression) -> bool {
+    matches!(expr, Expression::Identifier(name, _) if name == "as")
+}
+
+fn expression_to_simple_type_annotation(expr: Expression) -> Result<TypeAnnotation, String> {
+    fn collect_segments(expr: Expression, segments: &mut Vec<String>) -> Result<(), String> {
+        match expr {
+            Expression::Identifier(name, _) => {
+                segments.push(name);
+                Ok(())
+            }
+            Expression::MemberAccess { object, property, .. } => {
+                collect_segments(*object, segments)?;
+                segments.push(property);
+                Ok(())
+            }
+            other => Err(format!("unsupported type expression: {:?}", other)),
+        }
+    }
+
+    let mut segments = Vec::new();
+    collect_segments(expr, &mut segments)?;
+    let name = segments.join(".");
+    Ok(TypeAnnotation::Simple(name))
 }
 
 fn create_system_field_access(receiver: SystemReceiver, span: Span) -> IrExpression {

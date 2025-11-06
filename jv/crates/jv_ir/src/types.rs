@@ -200,6 +200,13 @@ pub enum IrExpression {
         span: Span,
     },
 
+    /// Tuple literal `(expr expr ...)` which will be materialized as a record instance.
+    TupleLiteral {
+        elements: Vec<IrExpression>,
+        java_type: JavaType,
+        span: Span,
+    },
+
     // Lambda expression (desugared to anonymous class or method reference)
     Lambda {
         functional_interface: String,
@@ -426,6 +433,7 @@ impl IrExpression {
             | IrExpression::Block { span, .. }
             | IrExpression::ArrayCreation { span, .. }
             | IrExpression::ObjectCreation { span, .. }
+            | IrExpression::TupleLiteral { span, .. }
             | IrExpression::Lambda { span, .. }
             | IrExpression::SequencePipeline { span, .. }
             | IrExpression::Switch { span, .. }

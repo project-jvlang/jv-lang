@@ -984,6 +984,7 @@ fn set_expression_type(expr: &mut IrExpression, java_type: JavaType) {
         | IrExpression::Conditional { java_type: ty, .. }
         | IrExpression::Block { java_type: ty, .. }
         | IrExpression::ObjectCreation { java_type: ty, .. }
+        | IrExpression::TupleLiteral { java_type: ty, .. }
         | IrExpression::SequencePipeline { java_type: ty, .. }
         | IrExpression::Switch { java_type: ty, .. }
         | IrExpression::NullSafeOperation { java_type: ty, .. }

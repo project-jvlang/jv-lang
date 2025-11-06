@@ -231,6 +231,9 @@ impl JavaCodeGenerator {
                 expr_str.push(')');
                 Ok(expr_str)
             }
+            IrExpression::TupleLiteral { elements, span, .. } => {
+                self.render_tuple_literal(elements.as_slice(), span)
+            }
             IrExpression::Lambda {
                 param_names, body, ..
             } => {
@@ -281,6 +284,29 @@ impl JavaCodeGenerator {
                 resources, body, ..
             } => self.generate_try_with_resources_expression(resources, body),
         }
+    }
+
+    fn render_tuple_literal(
+        &mut self,
+        elements: &[IrExpression],
+        span: &Span,
+    ) -> Result<String, CodeGenError> {
+        let key = super::SpanKey::from(span);
+        let record_name = self
+            .tuple_usages
+            .get(&key)
+            .map(|usage| usage.record_name.clone())
+            .ok_or_else(|| CodeGenError::UnsupportedConstruct {
+                construct: "Tuple literal missing tuple record plan".to_string(),
+                span: Some(span.clone()),
+            })?;
+
+        let mut rendered = Vec::with_capacity(elements.len());
+        for element in elements {
+            rendered.push(self.generate_expression(element)?);
+        }
+
+        Ok(format!("new {}({})", record_name, rendered.join(", ")))
     }
 
     fn try_render_collectors_to_list(

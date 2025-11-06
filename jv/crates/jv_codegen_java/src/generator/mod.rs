@@ -13,7 +13,7 @@ use jv_ir::{
     IrNumericRangeLoop, IrParameter, IrProgram, IrRecordComponent, IrResource, IrSampleDeclaration,
     IrStatement, IrSwitchCase, IrTypeParameter, IrVariance, IrVisibility, JavaType, MethodOverload,
     NullableGuard, NullableGuardReason, SequencePipeline, SequenceSource, SequenceStage,
-    SequenceTerminalKind, UtilityClass, VirtualThreadOp,
+    SequenceTerminalKind, TupleRecordPlan, UtilityClass, VirtualThreadOp,
 };
 use jv_mapper::{
     JavaPosition, JavaSpan, MappingCategory, MappingError, SourceMap, SourceMapBuilder,
@@ -50,6 +50,7 @@ pub struct JavaCodeGenerator {
     current_return_type: Option<JavaType>,
     mutable_captures: HashSet<String>,
     record_components: HashMap<String, HashSet<String>>,
+    tuple_usages: HashMap<SpanKey, TuplePlanUsage>,
 }
 
 impl JavaCodeGenerator {
@@ -78,6 +79,7 @@ impl JavaCodeGenerator {
             current_return_type: None,
             mutable_captures: HashSet::new(),
             record_components: HashMap::new(),
+            tuple_usages: HashMap::new(),
         }
     }
 
@@ -101,6 +103,7 @@ impl JavaCodeGenerator {
                 .or_default()
                 .push(entry.metadata.clone());
         }
+        self.populate_tuple_usages(&program.tuple_record_plans);
 
         let mut unit = JavaCompilationUnit::new();
         unit.package_declaration = program.package.clone();
@@ -322,6 +325,7 @@ impl JavaCodeGenerator {
         self.current_return_type = None;
         self.mutable_captures.clear();
         self.record_components.clear();
+        self.tuple_usages.clear();
     }
 
     fn register_record_components_from_declarations(
@@ -376,6 +380,25 @@ impl JavaCodeGenerator {
             }
         }
         false
+    }
+
+    fn populate_tuple_usages(&mut self, plans: &[TupleRecordPlan]) {
+        self.tuple_usages.clear();
+        for plan in plans {
+            let record_name = plan
+                .specific_name
+                .as_ref()
+                .cloned()
+                .unwrap_or_else(|| plan.generic_name.clone());
+            for usage in &plan.usage_sites {
+                self.tuple_usages.insert(
+                    SpanKey::from(&usage.span),
+                    TuplePlanUsage {
+                        record_name: record_name.clone(),
+                    },
+                );
+            }
+        }
     }
 
     fn register_tuple_record(&mut self, record: &TupleRecord) {
@@ -772,6 +795,16 @@ impl JavaCodeGenerator {
                 for arg in args {
                     self.collect_mutable_captures_in_expression(
                         arg,
+                        method_locals,
+                        captures,
+                        scope_locals,
+                    );
+                }
+            }
+            IrExpression::TupleLiteral { elements, .. } => {
+                for element in elements {
+                    self.collect_mutable_captures_in_expression(
+                        element,
                         method_locals,
                         captures,
                         scope_locals,
@@ -1614,6 +1647,11 @@ impl JavaCodeGenerator {
             .remove(type_name)
             .unwrap_or_default()
     }
+}
+
+#[derive(Debug, Clone)]
+struct TuplePlanUsage {
+    record_name: String,
 }
 
 #[derive(Debug, Clone)]

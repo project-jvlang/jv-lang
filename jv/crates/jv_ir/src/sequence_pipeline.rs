@@ -2365,6 +2365,11 @@ impl ListTerminalEnforcer {
                     self.visit_expression(arg, None);
                 }
             }
+            IrExpression::TupleLiteral { elements, .. } => {
+                for element in elements {
+                    self.visit_expression(element, None);
+                }
+            }
             IrExpression::Lambda { body, .. } => {
                 self.visit_expression(body, None);
             }
