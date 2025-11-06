@@ -136,6 +136,8 @@ pub enum Commands {
     },
     /// Inspect resolver strategies and metadata
     Resolver(commands::resolver::ResolverArgs),
+    /// Manage repository configuration and mirrors
+    Repo(commands::repo::RepoArgs),
     /// Show version information  
     Version,
     /// Start interactive REPL

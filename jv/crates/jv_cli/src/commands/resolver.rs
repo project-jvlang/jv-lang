@@ -1,10 +1,7 @@
-use std::env;
-use std::ffi::{OsStr, OsString};
-use std::io;
-use std::path::PathBuf;
-use std::process::{Command, ExitStatus};
+use std::ffi::OsString;
 
-use anyhow::{Context, Result, anyhow};
+use super::jvpm_bridge::{propagate_status, spawn_jvpm};
+use anyhow::{Context, Result};
 use clap::{Args, Subcommand};
 
 #[derive(Debug, Clone, Args)]
@@ -56,88 +53,6 @@ fn build_jvpm_args(args: &ResolverArgs) -> Vec<OsString> {
     }
     result
 }
-
-fn spawn_jvpm(args: &[OsString]) -> Result<ExitStatus> {
-    if let Some(explicit) = env::var_os("JVPM_BIN") {
-        let explicit_path = PathBuf::from(explicit);
-        return Command::new(&explicit_path)
-            .args(args)
-            .status()
-            .with_context(|| format!("failed to execute {}", explicit_path.display()));
-    }
-
-    // First try the normal PATH lookup.
-    match Command::new(binary_name()).args(args).status() {
-        Ok(status) => return Ok(status),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-        Err(error) => return Err(error.into()),
-    }
-
-    // Fall back to a sibling binary in the same directory as the current executable.
-    if let Some(candidate) = sibling_jvpm_candidate() {
-        return Command::new(&candidate)
-            .args(args)
-            .status()
-            .with_context(|| format!("failed to execute {}", candidate.display()));
-    }
-    // Developer fallback: invoke cargo to run the helper directly.
-    let cargo = cargo_command();
-    Command::new(&cargo)
-        .arg("run")
-        .arg("-p")
-        .arg("jv_pm")
-        .arg("--bin")
-        .arg("jvpm")
-        .arg("--")
-        .args(args)
-        .status()
-        .with_context(|| {
-            format!(
-                "failed to execute `{}` while attempting to run jvpm",
-                cargo.to_string_lossy()
-            )
-        })
-}
-
-fn propagate_status(status: ExitStatus) -> Result<()> {
-    if status.success() {
-        return Ok(());
-    }
-
-    if let Some(code) = status.code() {
-        std::process::exit(code);
-    }
-
-    Err(anyhow!("jvpm terminated by signal"))
-}
-
-fn sibling_jvpm_candidate() -> Option<PathBuf> {
-    let exe = env::current_exe().ok()?;
-    let dir = exe.parent()?;
-    let candidate = dir.join(binary_name());
-    if candidate.exists() {
-        Some(candidate)
-    } else {
-        None
-    }
-}
-
-fn cargo_command() -> OsString {
-    env::var_os("CARGO").unwrap_or_else(|| OsString::from("cargo"))
-}
-
-fn binary_name() -> &'static OsStr {
-    #[cfg(windows)]
-    {
-        OsStr::new("jvpm.exe")
-    }
-
-    #[cfg(not(windows))]
-    {
-        OsStr::new("jvpm")
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -344,6 +344,9 @@ fn main() -> Result<()> {
         Some(Commands::Resolver(args)) => {
             commands::resolver::run(&args)?;
         }
+        Some(Commands::Repo(args)) => {
+            commands::repo::run(&args)?;
+        }
         Some(Commands::Version) => {
             println!("{}", get_version());
         }
