@@ -3729,6 +3729,76 @@ fun sample(value: Any): Int {
     }
 
     #[test]
+    fn test_transform_val_declaration_with_tuple_binding_expands_elements() {
+        let mut context = test_context();
+
+        let pattern_span = dummy_span();
+        let element_span = dummy_span();
+        let pattern = BindingPatternKind::List {
+            elements: vec![
+                BindingPatternKind::identifier("first", element_span.clone()),
+                BindingPatternKind::identifier("second", element_span.clone()),
+            ],
+            span: pattern_span.clone(),
+        };
+
+        let stmt = Statement::ValDeclaration {
+            name: "first".to_string(),
+            binding: Some(pattern),
+            type_annotation: None,
+            initializer: Expression::Tuple {
+                elements: vec![
+                    Expression::Literal(Literal::Number("1".to_string()), pattern_span.clone()),
+                    Expression::Literal(Literal::Number("2".to_string()), pattern_span.clone()),
+                ],
+                fields: Vec::new(),
+                context: TupleContextFlags::default(),
+                span: pattern_span.clone(),
+            },
+            modifiers: Modifiers::default(),
+            origin: ValBindingOrigin::ExplicitKeyword,
+            span: pattern_span,
+        };
+
+        let lowered = transform_statement(stmt, &mut context)
+            .expect("destructuring val lowering should succeed");
+
+        match lowered.as_slice() {
+            [
+                IrStatement::VariableDeclaration { name, .. },
+                IrStatement::VariableDeclaration {
+                    name: first_binding,
+                    initializer:
+                        Some(IrExpression::FieldAccess {
+                            field_name: first_field,
+                            ..
+                        }),
+                    ..
+                },
+                IrStatement::VariableDeclaration {
+                    name: second_binding,
+                    initializer:
+                        Some(IrExpression::FieldAccess {
+                            field_name: second_field,
+                            ..
+                        }),
+                    ..
+                },
+            ] => {
+                assert!(name.starts_with("__jv_tuple_"));
+                assert_eq!(first_binding, "first");
+                assert_eq!(second_binding, "second");
+                assert_eq!(first_field, "_1");
+                assert_eq!(second_field, "_2");
+            }
+            other => panic!("unexpected lowered statements: {:?}", other),
+        }
+
+        assert!(context.lookup_variable("first").is_some());
+        assert!(context.lookup_variable("second").is_some());
+    }
+
+    #[test]
     fn test_transform_statement_assignment_without_binding_creates_implicit_val() {
         let mut context = test_context();
 

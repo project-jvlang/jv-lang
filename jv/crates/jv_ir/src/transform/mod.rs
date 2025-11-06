@@ -4,7 +4,8 @@ use crate::naming::method_erasure::apply_method_erasure;
 use crate::profiling::{PerfMetrics, TransformProfiler};
 use crate::sequence_pipeline;
 use crate::types::{
-    IrCommentKind, IrExpression, IrImport, IrImportDetail, IrProgram, IrStatement, JavaType,
+    IrCommentKind, IrExpression, IrImport, IrImportDetail, IrModifiers, IrProgram, IrStatement,
+    JavaType,
 };
 use jv_ast::{
     Argument, BinaryOp, BindingPatternKind, CallArgumentMetadata, CallArgumentStyle, CommentKind,
@@ -115,21 +116,44 @@ pub fn transform_statement(
         }
         Statement::ValDeclaration {
             name,
+            binding,
             type_annotation,
             initializer,
             modifiers,
             origin,
             span,
             ..
-        } => Ok(vec![desugar_val_declaration(
-            name,
-            type_annotation,
-            initializer,
-            modifiers,
-            origin,
-            span,
-            context,
-        )?]),
+        } => match binding {
+            Some(pattern) => match pattern {
+                BindingPatternKind::Tuple { .. } | BindingPatternKind::List { .. } => {
+                    desugar_pattern_val_declaration(
+                        pattern,
+                        type_annotation,
+                        initializer,
+                        modifiers,
+                        context,
+                    )
+                }
+                _ => Ok(vec![desugar_val_declaration(
+                    name,
+                    type_annotation,
+                    initializer,
+                    modifiers,
+                    origin,
+                    span,
+                    context,
+                )?]),
+            },
+            None => Ok(vec![desugar_val_declaration(
+                name,
+                type_annotation,
+                initializer,
+                modifiers,
+                origin,
+                span,
+                context,
+            )?]),
+        },
         Statement::VarDeclaration {
             name,
             type_annotation,
@@ -343,6 +367,131 @@ fn infer_implicit_binding_name(
         (None, Expression::Identifier(name, _)) => Some(name.clone()),
         _ => None,
     }
+}
+
+fn desugar_pattern_val_declaration(
+    pattern: BindingPatternKind,
+    type_annotation: Option<TypeAnnotation>,
+    initializer: Expression,
+    modifiers: Modifiers,
+    context: &mut TransformContext,
+) -> Result<Vec<IrStatement>, TransformError> {
+    let ir_initializer = transform_expression(initializer, context)?;
+    let tuple_span = ir_expression_span(&ir_initializer);
+    let tuple_java_type = infer_java_type(type_annotation, Some(&ir_initializer), context)?;
+
+    let mut statements = Vec::new();
+    let mut temp_modifiers = IrModifiers::default();
+    temp_modifiers.is_final = true;
+
+    let temp_name = context.fresh_identifier("__jv_tuple_");
+    statements.push(IrStatement::VariableDeclaration {
+        name: temp_name.clone(),
+        java_type: tuple_java_type.clone(),
+        initializer: Some(ir_initializer),
+        is_final: true,
+        modifiers: temp_modifiers,
+        span: tuple_span.clone(),
+    });
+
+    let receiver_expr = IrExpression::Identifier {
+        name: temp_name,
+        java_type: tuple_java_type,
+        span: tuple_span,
+    };
+
+    let mut expanded = lower_binding_pattern_elements(pattern, receiver_expr, &modifiers, context)?;
+    statements.append(&mut expanded);
+
+    Ok(statements)
+}
+
+fn lower_binding_pattern_elements(
+    pattern: BindingPatternKind,
+    value_expr: IrExpression,
+    modifiers: &Modifiers,
+    context: &mut TransformContext,
+) -> Result<Vec<IrStatement>, TransformError> {
+    match pattern {
+        BindingPatternKind::Identifier { name, span } => {
+            let mut ir_modifiers = utils::convert_modifiers(modifiers);
+            ir_modifiers.is_final = true;
+            let java_type = extract_java_type(&value_expr).unwrap_or_else(JavaType::object);
+            context.add_variable(name.clone(), java_type.clone());
+            Ok(vec![IrStatement::VariableDeclaration {
+                name,
+                java_type,
+                initializer: Some(value_expr),
+                is_final: true,
+                modifiers: ir_modifiers,
+                span,
+            }])
+        }
+        BindingPatternKind::Wildcard { span } => Ok(vec![IrStatement::Expression {
+            span,
+            expr: value_expr,
+        }]),
+        BindingPatternKind::Tuple { elements, .. } | BindingPatternKind::List { elements, .. } => {
+            let mut statements = Vec::new();
+            let (receiver_expr, mut prefix) = ensure_identifier_expression(value_expr, context);
+            statements.append(&mut prefix);
+
+            for (index, element) in elements.into_iter().enumerate() {
+                let component_expr =
+                    make_tuple_component_access(receiver_expr.clone(), index, element.span());
+                let mut nested =
+                    lower_binding_pattern_elements(element, component_expr, modifiers, context)?;
+                statements.append(&mut nested);
+            }
+
+            Ok(statements)
+        }
+    }
+}
+
+fn make_tuple_component_access(receiver: IrExpression, index: usize, span: Span) -> IrExpression {
+    let field_name = format!("_{}", index + 1);
+    let field_type = JavaType::object();
+
+    IrExpression::FieldAccess {
+        receiver: Box::new(receiver),
+        field_name,
+        java_type: field_type,
+        span,
+        is_record_component: true,
+    }
+}
+
+fn ensure_identifier_expression(
+    value_expr: IrExpression,
+    context: &mut TransformContext,
+) -> (IrExpression, Vec<IrStatement>) {
+    if matches!(value_expr, IrExpression::Identifier { .. }) {
+        return (value_expr, Vec::new());
+    }
+
+    let java_type = extract_java_type(&value_expr).unwrap_or_else(JavaType::object);
+    let span = ir_expression_span(&value_expr);
+    let mut modifiers = IrModifiers::default();
+    modifiers.is_final = true;
+    let temp_name = context.fresh_identifier("__jv_destruct_");
+
+    let statement = IrStatement::VariableDeclaration {
+        name: temp_name.clone(),
+        java_type: java_type.clone(),
+        initializer: Some(value_expr),
+        is_final: true,
+        modifiers,
+        span: span.clone(),
+    };
+
+    let identifier = IrExpression::Identifier {
+        name: temp_name,
+        java_type,
+        span,
+    };
+
+    (identifier, vec![statement])
 }
 
 fn lower_program(
