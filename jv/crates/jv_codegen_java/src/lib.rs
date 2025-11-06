@@ -1,5 +1,6 @@
 pub mod builder;
 pub mod config;
+mod destructure;
 pub mod error;
 pub mod generator;
 pub mod java21;

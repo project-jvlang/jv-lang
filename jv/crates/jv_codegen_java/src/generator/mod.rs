@@ -461,6 +461,10 @@ impl JavaCodeGenerator {
         }
     }
 
+    pub(crate) fn is_mutable_capture(&self, name: &str) -> bool {
+        self.mutable_captures.contains(name)
+    }
+
     fn add_record_components(
         &mut self,
         name: &str,
