@@ -378,7 +378,12 @@ fn desugar_pattern_val_declaration(
 ) -> Result<Vec<IrStatement>, TransformError> {
     let ir_initializer = transform_expression(initializer, context)?;
     let tuple_span = ir_expression_span(&ir_initializer);
-    let tuple_java_type = infer_java_type(type_annotation, Some(&ir_initializer), context)?;
+    let mut tuple_java_type = infer_java_type(type_annotation, Some(&ir_initializer), context)?;
+    if tuple_java_type == JavaType::object() {
+        if let Some(record_type) = context.tuple_record_java_type(&tuple_span) {
+            tuple_java_type = record_type;
+        }
+    }
 
     let mut statements = Vec::new();
     let mut temp_modifiers = IrModifiers::default();
@@ -416,7 +421,12 @@ fn lower_binding_pattern_elements(
         BindingPatternKind::Identifier { name, span } => {
             let mut ir_modifiers = utils::convert_modifiers(modifiers);
             ir_modifiers.is_final = true;
-            let java_type = extract_java_type(&value_expr).unwrap_or_else(JavaType::object);
+            let mut java_type = extract_java_type(&value_expr).unwrap_or_else(JavaType::object);
+            if java_type == JavaType::object() {
+                if let Some(hint) = context.lookup_variable(&name).cloned() {
+                    java_type = hint;
+                }
+            }
             context.add_variable(name.clone(), java_type.clone());
             Ok(vec![IrStatement::VariableDeclaration {
                 name,
@@ -437,8 +447,12 @@ fn lower_binding_pattern_elements(
             statements.append(&mut prefix);
 
             for (index, element) in elements.into_iter().enumerate() {
-                let component_expr =
-                    make_tuple_component_access(receiver_expr.clone(), index, element.span());
+                let component_expr = make_tuple_component_access(
+                    receiver_expr.clone(),
+                    index,
+                    element.span(),
+                    context,
+                );
                 let mut nested =
                     lower_binding_pattern_elements(element, component_expr, modifiers, context)?;
                 statements.append(&mut nested);
@@ -449,9 +463,18 @@ fn lower_binding_pattern_elements(
     }
 }
 
-fn make_tuple_component_access(receiver: IrExpression, index: usize, span: Span) -> IrExpression {
-    let field_name = format!("_{}", index + 1);
-    let field_type = JavaType::object();
+fn make_tuple_component_access(
+    receiver: IrExpression,
+    index: usize,
+    span: Span,
+    context: &TransformContext,
+) -> IrExpression {
+    let receiver_span = ir_expression_span(&receiver);
+    let metadata = context.tuple_component_metadata(&receiver_span, index);
+    let (field_name, field_type) = match metadata {
+        Some(meta) => (meta.field_name, meta.java_type),
+        None => (format!("_{}", index + 1), JavaType::object()),
+    };
 
     IrExpression::FieldAccess {
         receiver: Box::new(receiver),

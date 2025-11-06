@@ -467,7 +467,7 @@ pub mod pipeline {
     use std::sync::Arc;
     use std::time::Instant;
     use tracing::debug;
-    use type_facts_bridge::preload_type_facts_into_context;
+    use type_facts_bridge::{preload_tuple_plans_into_context, preload_type_facts_into_context};
 
     /// Resulting artifacts and diagnostics from the build pipeline.
     #[derive(Debug, Default, Clone)]
@@ -871,6 +871,7 @@ pub mod pipeline {
             if let Some(facts) = type_facts_snapshot.as_ref() {
                 preload_type_facts_into_context(&mut context, facts);
             }
+            preload_tuple_plans_into_context(&mut context, &tuple_record_plans);
             if !import_plan.is_empty() {
                 context.set_resolved_imports(import_plan.clone());
             }
@@ -910,6 +911,7 @@ pub mod pipeline {
             if let Some(facts) = type_facts_snapshot.as_ref() {
                 preload_type_facts_into_context(&mut context, facts);
             }
+            preload_tuple_plans_into_context(&mut context, &tuple_record_plans);
             if !import_plan.is_empty() {
                 context.set_resolved_imports(import_plan.clone());
             }
