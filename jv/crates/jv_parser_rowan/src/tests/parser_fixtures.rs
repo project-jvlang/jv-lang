@@ -874,7 +874,9 @@ fn class_missing_closing_brace_emits_block_error() {
             fun value() {
                 return
             }
-            fun other() => 1
+            fun other() {
+                println("test")
+            }
 
         val after = 1
     "#;
@@ -952,6 +954,42 @@ fn data_class_constructor_recovers_from_missing_parameter() {
         ),
         "expected error node when constructor parameter is missing"
     );
+}
+
+#[test]
+#[ignore]
+fn debug_when_example07() {
+    use crate::frontend::RowanPipeline;
+    use crate::verification::StatementKindKey;
+
+    let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let source_path =
+        manifest_dir.join("../../../jv/tests/fixtures/pattern/example7.jv");
+    let source =
+        std::fs::read_to_string(&source_path).expect("example7 fixture should be readable");
+
+    let pipeline = RowanPipeline::default();
+    let debug = pipeline
+        .execute_with_debug(&source)
+        .expect("pipeline to execute");
+
+    println!("parser diagnostics: {:?}", debug.parser_diagnostics());
+    println!("lowering diagnostics: {:?}", debug.lowering_diagnostics());
+    for (index, statement) in debug.statements().iter().enumerate() {
+        println!(
+            "statement[{index}]: {:?}",
+            StatementKindKey::from_statement(statement)
+        );
+        println!("  detail: {:?}", statement);
+    }
+
+    let tokens = lex(&source);
+    let parse_output = crate::parser::parse(&tokens);
+    let has_return = parse_output.events.iter().any(|event| match event {
+        ParseEvent::StartNode { kind } => *kind == SyntaxKind::ReturnStatement,
+        _ => false,
+    });
+    println!("parse contains return statement node: {has_return}");
 }
 
 fn start_node_sequence(events: &[ParseEvent]) -> Vec<SyntaxKind> {

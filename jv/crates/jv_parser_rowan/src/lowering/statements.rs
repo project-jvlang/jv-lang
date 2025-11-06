@@ -1246,6 +1246,7 @@ mod expression_parser {
                 }
                 TokenType::LeftBracket => self.parse_array_expression(index),
                 TokenType::When => self.parse_when_expression(),
+                TokenType::If => self.parse_if_expression(),
                 _ => self.parse_primary(),
             }
         }
@@ -1323,10 +1324,6 @@ mod expression_parser {
                 }
                 TokenType::StringStart => {
                     return self.parse_string_segments(index);
-                }
-                TokenType::If => {
-                    let span = span_from_token(token);
-                    return Err(ExpressionError::new("JV3103: `if` expressions are not supported / `if` 式はサポートされていません。\n条件分岐は `when` 式を使用してください。Quick Fix: when.convert.if. / Use a `when` expression for branching. Quick Fix: when.convert.if. (--explain JV3103)", Some(span)));
                 }
                 TokenType::Null => {
                     let span = span_from_token(token);
@@ -1854,6 +1851,112 @@ mod expression_parser {
                 }
             }
             None
+        }
+
+        fn parse_if_expression(&mut self) -> Result<ParsedExpr, ExpressionError> {
+            let (if_token, if_index) = self.advance_with_index().ok_or_else(|| {
+                ExpressionError::new("`if` 式の先頭トークンを取得できませんでした", None)
+            })?;
+            let if_span = span_from_token(if_token);
+
+            while matches!(
+                self.peek_token().map(|token| &token.token_type),
+                Some(TokenType::LayoutComma)
+            ) {
+                self.pos += 1;
+            }
+
+            let condition_start = self.pos;
+            if !matches!(
+                self.peek_token().map(|token| &token.token_type),
+                Some(TokenType::LeftParen)
+            ) {
+                return Err(ExpressionError::new(
+                    "`if` 条件を開始する '(' が必要です",
+                    self.span_at(self.pos),
+                ));
+            }
+
+            let condition_end = self.find_matching_paren(condition_start).ok_or_else(|| {
+                ExpressionError::new(
+                    "`if` 条件を閉じる ')' が必要です",
+                    self.span_at(condition_start),
+                )
+            })?;
+
+            let condition_tokens = &self.tokens[condition_start + 1..condition_end];
+            if condition_tokens.is_empty() {
+                return Err(ExpressionError::new(
+                    "`if` 条件式が必要です",
+                    self.span_at(condition_start),
+                ));
+            }
+            let condition_expr = Self::parse_nested_expression(condition_tokens)?.expr;
+            self.pos = condition_end + 1;
+
+            while matches!(
+                self.peek_token().map(|token| &token.token_type),
+                Some(TokenType::LayoutComma)
+            ) {
+                self.pos += 1;
+            }
+
+            if self.pos >= self.tokens.len() {
+                return Err(ExpressionError::new(
+                    "`if` 分岐の式が必要です",
+                    self.span_at(self.pos),
+                ));
+            }
+
+            let then_parsed = self.parse_expression_bp(0)?;
+            let then_span = then_parsed.span();
+            let then_expr = then_parsed.expr;
+
+            while matches!(
+                self.peek_token().map(|token| &token.token_type),
+                Some(TokenType::LayoutComma)
+            ) {
+                self.pos += 1;
+            }
+
+            let mut else_branch = None;
+            let mut end_span = then_span.clone();
+            if matches!(
+                self.peek_token().map(|token| &token.token_type),
+                Some(TokenType::Else)
+            ) {
+                self.pos += 1;
+
+                while matches!(
+                    self.peek_token().map(|token| &token.token_type),
+                    Some(TokenType::LayoutComma)
+                ) {
+                    self.pos += 1;
+                }
+
+                if self.pos >= self.tokens.len() {
+                    return Err(ExpressionError::new(
+                        "`else` 分岐の式が必要です",
+                        self.span_at(self.pos),
+                    ));
+                }
+
+                let else_parsed = self.parse_expression_bp(0)?;
+                end_span = else_parsed.span();
+                else_branch = Some(Box::new(else_parsed.expr));
+            }
+
+            let span = merge_spans(&if_span, &end_span);
+            Ok(ParsedExpr {
+                expr: Expression::If {
+                    condition: Box::new(condition_expr),
+                    then_branch: Box::new(then_expr),
+                    else_branch,
+                    span: span.clone(),
+                },
+                start: if_index,
+                end: self.pos,
+            })
         }
 
         fn parse_when_expression(&mut self) -> Result<ParsedExpr, ExpressionError> {

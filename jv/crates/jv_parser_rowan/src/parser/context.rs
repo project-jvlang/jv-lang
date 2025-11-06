@@ -9,6 +9,7 @@ const SYNC_TOKENS: &[TokenKind] = &[
     TokenKind::Semicolon,
     TokenKind::Newline,
     TokenKind::RightBrace,
+    TokenKind::Arrow,
     TokenKind::PackageKw,
     TokenKind::ImportKw,
     TokenKind::ValKw,

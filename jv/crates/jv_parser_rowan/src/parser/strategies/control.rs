@@ -68,16 +68,29 @@ fn parse_when(ctx: &mut ParserContext<'_>) -> bool {
     ctx.bump_raw(); // '{'
     loop {
         ctx.consume_trivia();
-        if ctx.peek_significant_kind() == Some(TokenKind::RightBrace) {
-            ctx.bump_raw();
-            break;
+        match ctx.peek_significant_kind() {
+            Some(TokenKind::LayoutComma) | Some(TokenKind::Comma) => {
+                ctx.bump_raw();
+                continue;
+            }
+            Some(TokenKind::RightBrace) => {
+                ctx.bump_raw();
+                break;
+            }
+            _ => {}
         }
         if ctx.is_eof() {
             ctx.recover_statement("when ブロックが閉じられていません", start);
             break;
         }
 
+        let before_branch = ctx.position();
         parse_when_branch(ctx);
+
+        // 進捗がない場合、強制的にトークンを消費して無限ループを回避
+        if ctx.position() == before_branch {
+            ctx.bump_raw(); // 強制的に次へ進む
+        }
     }
 
     ctx.finish_node();
@@ -95,7 +108,14 @@ fn parse_when_branch(ctx: &mut ParserContext<'_>) {
         ctx.parse_expression_until(&[TokenKind::Arrow], false);
     }
 
-    ctx.bump_expected(TokenKind::Arrow, "`->` が必要です");
+    let before_arrow = ctx.position();
+    if !ctx.bump_expected(TokenKind::Arrow, "`->` が必要です") {
+        // Arrow がない場合、これは不正な分岐なので、
+        // 少なくともトークンを1つ進めてから回復する
+        if ctx.position() == before_arrow && !ctx.is_eof() {
+            ctx.bump_raw(); // 強制的に進める
+        }
+    }
 
     parse_when_branch_body(ctx);
 
