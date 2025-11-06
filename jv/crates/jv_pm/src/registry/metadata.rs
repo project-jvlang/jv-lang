@@ -1,9 +1,9 @@
 use quick_xml::de::from_reader;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 /// Mavenリポジトリが提供する `maven-metadata.xml` の表現。
-#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct MavenMetadata {
     #[serde(rename = "groupId")]
     pub group_id: String,
@@ -37,7 +37,7 @@ impl MavenMetadata {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Versioning {
     pub latest: Option<String>,
     pub release: Option<String>,
@@ -47,7 +47,7 @@ pub struct Versioning {
     pub last_updated: Option<String>,
 }
 
-#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Versions {
     #[serde(default)]
     #[serde(rename = "version")]

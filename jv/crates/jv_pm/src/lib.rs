@@ -7,9 +7,13 @@ use std::path::Path;
 use std::str::FromStr;
 use thiserror::Error;
 
+pub mod cache;
 pub mod registry;
 pub mod resolver;
 
+pub use cache::{
+    CacheError, CacheStatsSnapshot, CachedArtifact, CachedMetadata, CachedPom, DependencyCache,
+};
 pub use registry::{
     ArtifactCoordinates, ArtifactResource, MavenCoordinates, MavenMetadata, MavenRegistry,
     MetadataParseError, RegistryError, RetryConfig,

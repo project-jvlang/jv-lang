@@ -963,8 +963,7 @@ fn debug_when_example07() {
     use crate::verification::StatementKindKey;
 
     let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-    let source_path =
-        manifest_dir.join("../../../jv/tests/fixtures/pattern/example7.jv");
+    let source_path = manifest_dir.join("../../../jv/tests/fixtures/pattern/example7.jv");
     let source =
         std::fs::read_to_string(&source_path).expect("example7 fixture should be readable");
 
