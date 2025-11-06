@@ -8,11 +8,17 @@ use std::str::FromStr;
 use thiserror::Error;
 
 pub mod cache;
+pub mod lockfile;
 pub mod registry;
 pub mod resolver;
 
 pub use cache::{
     CacheError, CacheStatsSnapshot, CachedArtifact, CachedMetadata, CachedPom, DependencyCache,
+};
+pub use lockfile::{
+    DependencyRequirementChange, LOCKFILE_VERSION, LockedDependency, LockedPackage, LockedSource,
+    Lockfile, LockfileDiff, LockfileError, LockfileManifestDependency, LockfileManifestSnapshot,
+    LockfileService, VersionChange,
 };
 pub use registry::{
     ArtifactCoordinates, ArtifactResource, MavenCoordinates, MavenMetadata, MavenRegistry,
