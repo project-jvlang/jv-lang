@@ -8,6 +8,7 @@ use std::str::FromStr;
 use thiserror::Error;
 
 pub mod cache;
+pub mod download;
 pub mod lockfile;
 pub mod registry;
 pub mod resolver;
@@ -15,14 +16,18 @@ pub mod resolver;
 pub use cache::{
     CacheError, CacheStatsSnapshot, CachedArtifact, CachedMetadata, CachedPom, DependencyCache,
 };
+pub use download::{
+    ArtifactDownloadRequest, DownloadError, DownloadFailure, DownloadManager, DownloadReport,
+    DownloadSettings, DownloadSource, DownloadSuccess, ParallelDownloader,
+};
 pub use lockfile::{
     DependencyRequirementChange, LOCKFILE_VERSION, LockedDependency, LockedPackage, LockedSource,
     Lockfile, LockfileDiff, LockfileError, LockfileManifestDependency, LockfileManifestSnapshot,
     LockfileService, VersionChange,
 };
 pub use registry::{
-    ArtifactCoordinates, ArtifactResource, MavenCoordinates, MavenMetadata, MavenRegistry,
-    MetadataParseError, RegistryError, RetryConfig,
+    ArtifactCoordinates, ArtifactResource, DownloadedJar, MavenCoordinates, MavenMetadata,
+    MavenRegistry, MetadataParseError, RegistryError, RetryConfig,
 };
 pub use resolver::{
     DependencyScope, ManifestDependencyProvider, RequestedDependency, ResolutionDiagnostic,
@@ -212,13 +217,29 @@ impl Manifest {
             .map(|info| info.java_version)
             .unwrap_or_default()
     }
+
+    pub fn max_concurrent_downloads(&self) -> Option<usize> {
+        self.build
+            .as_ref()
+            .and_then(|info| info.max_concurrent_downloads)
+    }
+
+    pub fn max_concurrent_warning(&self) -> Option<usize> {
+        self.build
+            .as_ref()
+            .and_then(|info| info.max_concurrent_warning)
+    }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub struct BuildInfo {
     #[serde(default)]
     #[serde(rename = "java_version")]
     pub java_version: JavaTarget,
+    #[serde(default)]
+    pub max_concurrent_downloads: Option<usize>,
+    #[serde(default)]
+    pub max_concurrent_warning: Option<usize>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -278,6 +299,7 @@ fn default_output_directory() -> String {
 }
 
 pub struct PackageManager {
+    #[allow(dead_code)]
     registry_url: String,
 }
 

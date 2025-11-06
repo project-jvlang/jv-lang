@@ -135,6 +135,7 @@ fn sample_manifest() -> Manifest {
         project: ProjectSection::default(),
         build: Some(BuildInfo {
             java_version: JavaTarget::Java25,
+            ..BuildInfo::default()
         }),
     }
 }

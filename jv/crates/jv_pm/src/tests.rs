@@ -49,6 +49,7 @@ fn test_manifest_creation() {
 
     let build_info = BuildInfo {
         java_version: JavaTarget::Java25,
+        ..BuildInfo::default()
     };
 
     let manifest = Manifest {

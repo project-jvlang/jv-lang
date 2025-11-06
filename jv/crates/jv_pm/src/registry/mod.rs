@@ -205,6 +205,23 @@ impl Default for RetryConfig {
     }
 }
 
+/// チェックサム検証済みのJARダウンロード結果。
+#[derive(Debug, Clone)]
+pub struct DownloadedJar {
+    pub bytes: Vec<u8>,
+    pub checksum: String,
+}
+
+impl DownloadedJar {
+    pub fn len(&self) -> usize {
+        self.bytes.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.bytes.is_empty()
+    }
+}
+
 /// Mavenレジストリに関するエラー種別。
 #[derive(Debug, Error)]
 pub enum RegistryError {
@@ -336,7 +353,7 @@ impl MavenRegistry {
     pub async fn download_jar(
         &self,
         coords: &ArtifactCoordinates,
-    ) -> Result<Vec<u8>, RegistryError> {
+    ) -> Result<DownloadedJar, RegistryError> {
         let url = self.join_path(&coords.jar_path())?;
         let jar_bytes = self.request_bytes(url, ResourceKind::Jar(coords)).await?;
 
@@ -356,7 +373,10 @@ impl MavenRegistry {
             });
         }
 
-        Ok(jar_bytes.to_vec())
+        Ok(DownloadedJar {
+            bytes: jar_bytes.to_vec(),
+            checksum: expected,
+        })
     }
 
     /// `.sha256` チェックサムファイルを取得し、正規化したハッシュ文字列を返す。
