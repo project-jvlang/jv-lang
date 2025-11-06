@@ -56,6 +56,7 @@ fn test_manifest_creation() {
         package,
         project: ProjectSection::default(),
         build: Some(build_info),
+        maven: Default::default(),
     };
 
     assert_eq!(manifest.package.name, "test");
@@ -125,6 +126,7 @@ fn test_resolve_dependencies_placeholder() {
         },
         project: ProjectSection::default(),
         build: None,
+        maven: Default::default(),
     };
 
     let result = pm.resolve_dependencies(&manifest);
@@ -229,6 +231,7 @@ fn resolver_resolves_manifest_with_default_strategy() {
         },
         project: ProjectSection::default(),
         build: None,
+        maven: Default::default(),
     };
 
     let dispatcher = ResolverDispatcher::with_default_strategies();
@@ -269,6 +272,7 @@ fn resolver_rejects_unknown_strategy() {
         },
         project: ProjectSection::default(),
         build: None,
+        maven: Default::default(),
     };
 
     let dispatcher = ResolverDispatcher::with_default_strategies();

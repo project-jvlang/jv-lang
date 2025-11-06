@@ -501,6 +501,7 @@ mod tests {
             },
             project: Default::default(),
             build: None,
+            maven: Default::default(),
         }
     }
 

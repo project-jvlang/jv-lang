@@ -137,6 +137,7 @@ fn sample_manifest() -> Manifest {
             java_version: JavaTarget::Java25,
             ..BuildInfo::default()
         }),
+        maven: Default::default(),
     }
 }
 

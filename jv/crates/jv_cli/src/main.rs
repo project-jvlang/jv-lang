@@ -448,6 +448,7 @@ fn build_ephemeral_run_settings(start_path: &Path) -> Option<(ProjectRoot, Proje
         },
         project: project_section,
         build: None,
+        maven: Default::default(),
     };
 
     let settings = ProjectSettings {

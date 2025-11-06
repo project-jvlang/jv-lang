@@ -10,6 +10,7 @@ use thiserror::Error;
 pub mod cache;
 pub mod download;
 pub mod lockfile;
+pub mod maven;
 pub mod registry;
 pub mod resolver;
 
@@ -24,6 +25,10 @@ pub use lockfile::{
     DependencyRequirementChange, LOCKFILE_VERSION, LockedDependency, LockedPackage, LockedSource,
     Lockfile, LockfileDiff, LockfileError, LockfileManifestDependency, LockfileManifestSnapshot,
     LockfileService, VersionChange,
+};
+pub use maven::{
+    MavenIntegrationConfig, MavenIntegrationDispatcher, MavenIntegrationError,
+    MavenIntegrationFiles, MavenMirrorConfig, MavenRepositoryConfig, PomGenerator,
 };
 pub use registry::{
     ArtifactCoordinates, ArtifactResource, DownloadedJar, MavenCoordinates, MavenMetadata,
@@ -202,6 +207,8 @@ pub struct Manifest {
     #[serde(default)]
     pub project: ProjectSection,
     pub build: Option<BuildInfo>,
+    #[serde(default)]
+    pub maven: MavenProjectMetadata,
 }
 
 impl Manifest {
@@ -229,6 +236,31 @@ impl Manifest {
             .as_ref()
             .and_then(|info| info.max_concurrent_warning)
     }
+
+    pub fn maven_group_id(&self) -> Option<&str> {
+        let group = self.maven.group_id.trim();
+        if group.is_empty() { None } else { Some(group) }
+    }
+
+    pub fn maven_artifact_id(&self) -> &str {
+        self.maven
+            .artifact_id
+            .as_deref()
+            .unwrap_or(&self.package.name)
+    }
+
+    pub fn maven_packaging(&self) -> &str {
+        self.maven.packaging.as_deref().unwrap_or("jar")
+    }
+
+    pub fn maven_description(&self) -> Option<&str> {
+        if let Some(desc) = self.maven.description.as_deref() {
+            if !desc.trim().is_empty() {
+                return Some(desc);
+            }
+        }
+        self.package.description.as_deref()
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
@@ -240,6 +272,28 @@ pub struct BuildInfo {
     pub max_concurrent_downloads: Option<usize>,
     #[serde(default)]
     pub max_concurrent_warning: Option<usize>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct MavenProjectMetadata {
+    pub group_id: String,
+    pub artifact_id: Option<String>,
+    pub packaging: Option<String>,
+    pub description: Option<String>,
+    pub url: Option<String>,
+}
+
+impl Default for MavenProjectMetadata {
+    fn default() -> Self {
+        Self {
+            group_id: String::new(),
+            artifact_id: None,
+            packaging: None,
+            description: None,
+            url: None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
