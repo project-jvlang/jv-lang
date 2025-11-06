@@ -9,6 +9,7 @@ use thiserror::Error;
 
 pub mod cache;
 pub mod download;
+pub mod export;
 pub mod lockfile;
 pub mod maven;
 pub mod registry;
@@ -22,6 +23,7 @@ pub use download::{
     ArtifactDownloadRequest, DownloadError, DownloadFailure, DownloadManager, DownloadReport,
     DownloadSettings, DownloadSource, DownloadSuccess, ParallelDownloader,
 };
+pub use export::{ExportError, ExportRequest, ExportSummary, JavaProjectExporter};
 pub use lockfile::{
     DependencyRequirementChange, LOCKFILE_VERSION, LockedDependency, LockedPackage, LockedSource,
     Lockfile, LockfileDiff, LockfileError, LockfileManifestDependency, LockfileManifestSnapshot,
