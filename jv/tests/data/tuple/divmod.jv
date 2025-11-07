@@ -1,0 +1,15 @@
+fun main(): Unit {
+    val dividend: Int = 27
+    val divisor: Int = 4
+    val divmodQuotient = dividend / divisor
+    val divmodRemainder = dividend % divisor
+
+    val divmodResult = (
+        divmodQuotient // quotient
+        divmodRemainder // remainder
+    )
+
+    val (quotient remainder) = divmodResult
+    println("divmod: quotient=${quotient} remainder=${remainder}")
+}
+package tuple.integration

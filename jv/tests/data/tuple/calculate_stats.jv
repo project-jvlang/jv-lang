@@ -1,0 +1,20 @@
+package tuple.integration
+
+fun main(): Unit {
+    val a: Int = 9
+    val b: Int = 2
+    val c: Int = 5
+
+    val minCandidate: Int = 2
+    val maxCandidate: Int = 9
+    val total: Int = a + b + c
+
+    val stats = (
+        minCandidate
+        maxCandidate
+        total
+    )
+
+    val (minValue maxValue totalSum) = stats
+    println("calculateStats: min=${minValue} max=${maxValue} total=${totalSum}")
+}
