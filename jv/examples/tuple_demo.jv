@@ -1,0 +1,80 @@
+fun main(): Unit {
+    val divmodResult = divmod(27 4)
+    val (quotient remainder) = divmodResult
+    println("divmod(27, 4) -> quotient=${quotient} remainder=${remainder}")
+
+    val [squareQuotient squareRemainder] = divmodResult
+    println("square bracket destructuring -> quotient=${squareQuotient} remainder=${squareRemainder}")
+
+    val findUserResult = findUser(9)
+    val (user found) = findUserResult
+    println("findUser(9) -> name=${user.name} found=${found}")
+
+    val [userFromBracket foundFromBracket] = findUserResult
+    println("[] destructuring on user -> name=${userFromBracket.name} found=${foundFromBracket}")
+
+    val stats = calculateStats(9 2 5)
+    val (minValue maxValue totalSum) = stats
+    println("calculateStats(9, 2, 5) -> min=${minValue} max=${maxValue} total=${totalSum}")
+
+    val fallbackValue: Int = 99
+    val labelPriority = (
+        quotient // commentPrimary
+        fallbackValue
+        42
+    )
+    println(
+        "label priority -> comment=${labelPriority.commentPrimary()} identifier=${labelPriority.fallbackValue()} literal=${labelPriority._3()}"
+    )
+}
+
+data User(id: Int, name: String)
+
+fun divmod(dividend: Int, divisor: Int): (Int Int) {
+    val quotient: Int = dividend / divisor
+    val remainder: Int = dividend % divisor
+
+    return (
+        quotient // quotient
+        remainder // remainder
+    )
+}
+
+fun findUser(id: Int): (User Boolean) {
+    val candidate: User = when (id) {
+        9 -> User(9 "Bob")
+        else -> User(id "Unknown")
+    }
+    val found: Boolean = id == 9
+
+    return (
+        candidate // user
+        found // found
+    )
+}
+
+fun calculateStats(a: Int, b: Int, c: Int): (Int Int Int) {
+    val minValue: Int = minOfInt(minOfInt(a b) c)
+    val maxValue: Int = maxOfInt(maxOfInt(a b) c)
+    val total: Int = a + b + c
+
+    return (
+        minValue // min
+        maxValue // max
+        total // total
+    )
+}
+
+fun minOfInt(left: Int, right: Int): Int {
+    return when (left <= right) {
+        true -> left
+        false -> right
+    }
+}
+
+fun maxOfInt(left: Int, right: Int): Int {
+    return when (left >= right) {
+        true -> left
+        false -> right
+    }
+}
