@@ -289,3 +289,7 @@ fn clean_option_removes_stale_target_artifacts() {
     assert!(!artifacts_clean.java_files.is_empty());
     prepared_clean.mark_success();
 }
+
+mod jv_pm_phase2_e2e {
+    include!("../../../../tests/e2e/jv_pm_phase2_e2e.rs");
+}
