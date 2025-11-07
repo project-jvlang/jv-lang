@@ -1,9 +1,11 @@
 use std::collections::HashSet;
 use std::env;
+use std::ffi::OsString;
 use std::fmt::Write as _;
 use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -44,6 +46,9 @@ enum Commands {
     /// Manage repository definitions and mirrors
     #[command(subcommand)]
     Repo(RepoCommand),
+    /// 未定義コマンドはMavenへフォワード
+    #[command(external_subcommand)]
+    Maven(Vec<OsString>),
 }
 
 #[derive(Debug, Clone, Args)]
@@ -382,7 +387,29 @@ fn real_main() -> Result<()> {
         Commands::Remove(args) => handle_remove_command(args),
         Commands::Resolver(command) => handle_resolver_command(command),
         Commands::Repo(command) => handle_repo_command(command),
+        Commands::Maven(args) => handle_maven_passthrough(args),
     }
+}
+
+fn handle_maven_passthrough(args: Vec<OsString>) -> Result<()> {
+    let maven_cmd = resolve_maven_binary()?;
+    let status = Command::new(&maven_cmd)
+        .args(&args)
+        .status()
+        .with_context(|| format!("{} の実行に失敗しました", maven_cmd.display()))?;
+
+    if status.success() {
+        return Ok(());
+    }
+
+    if let Some(code) = status.code() {
+        std::process::exit(code);
+    }
+
+    Err(anyhow!(
+        "{} がシグナル割り込みで終了しました",
+        maven_cmd.display()
+    ))
 }
 
 fn handle_add_command(args: AddArgs) -> Result<()> {
@@ -2137,6 +2164,107 @@ fn yes_no(value: bool) -> String {
     } else {
         "no".to_string()
     }
+}
+
+fn resolve_maven_binary() -> Result<PathBuf> {
+    if let Some(explicit) = env::var_os("JVPM_MAVEN_BIN") {
+        let candidate = PathBuf::from(&explicit);
+        if is_executable(&candidate) {
+            return Ok(candidate);
+        }
+        return Err(anyhow!(
+            "環境変数 JVPM_MAVEN_BIN で指定された Maven バイナリ '{}' が見つかりません。",
+            candidate.display()
+        ));
+    }
+
+    if let Some(candidate) = resolve_maven_from_env_homes() {
+        return Ok(candidate);
+    }
+
+    for start in candidate_roots() {
+        if let Some(candidate) = locate_maven_in_toolchains(&start) {
+            return Ok(candidate);
+        }
+    }
+
+    if let Some(candidate) = locate_maven_in_path() {
+        return Ok(candidate);
+    }
+
+    Err(anyhow!(
+        "Mavenコマンド (mvn) を検出できませんでした。toolchains/maven/bin/mvn を利用可能にするか、JVPM_MAVEN_BIN / MVN_HOME を設定してください。"
+    ))
+}
+
+fn resolve_maven_from_env_homes() -> Option<PathBuf> {
+    for var in ["MVN_HOME", "MAVEN_HOME", "M2_HOME"] {
+        if let Some(home) = env::var_os(var) {
+            let base = PathBuf::from(&home).join("bin");
+            for name in maven_candidates() {
+                let candidate = base.join(name);
+                if is_executable(&candidate) {
+                    return Some(candidate);
+                }
+            }
+        }
+    }
+    None
+}
+
+fn candidate_roots() -> Vec<PathBuf> {
+    let mut roots = Vec::new();
+    if let Ok(dir) = env::current_dir() {
+        roots.push(dir);
+    }
+    if let Ok(exe) = env::current_exe() {
+        if let Some(parent) = exe.parent() {
+            roots.push(parent.to_path_buf());
+        }
+    }
+    roots.push(PathBuf::from(env!("CARGO_MANIFEST_DIR")));
+    roots
+}
+
+fn locate_maven_in_toolchains(start: &Path) -> Option<PathBuf> {
+    for ancestor in start.ancestors() {
+        let toolchains = ancestor.join("toolchains").join("maven").join("bin");
+        for name in maven_candidates() {
+            let candidate = toolchains.join(name);
+            if is_executable(&candidate) {
+                return Some(candidate);
+            }
+        }
+    }
+    None
+}
+
+fn locate_maven_in_path() -> Option<PathBuf> {
+    let path_value = env::var_os("PATH")?;
+    for entry in env::split_paths(&path_value) {
+        for name in maven_candidates() {
+            let candidate = entry.join(name);
+            if is_executable(&candidate) {
+                return Some(candidate);
+            }
+        }
+    }
+    None
+}
+
+fn maven_candidates() -> &'static [&'static str] {
+    #[cfg(windows)]
+    {
+        &["mvn.cmd", "mvn.bat", "mvn.exe"]
+    }
+    #[cfg(not(windows))]
+    {
+        &["mvn"]
+    }
+}
+
+fn is_executable(path: &Path) -> bool {
+    path.is_file()
 }
 
 #[cfg(test)]
