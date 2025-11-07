@@ -263,6 +263,7 @@ impl TransformContext {
         span: Span,
         record_name: Option<String>,
         component_names: Vec<String>,
+        component_spans: Vec<Option<Span>>,
         type_hints: Vec<Option<JavaType>>,
     ) {
         let key = SpanKey::from(&span);
@@ -271,6 +272,7 @@ impl TransformContext {
             TuplePlanRegistration {
                 record_name,
                 component_names,
+                component_spans,
                 type_hints,
             },
         );
@@ -299,9 +301,14 @@ impl TransformContext {
                     .and_then(|name| self.record_component_type(name, &field_name))
             })
             .unwrap_or_else(JavaType::object);
+        let source_span = registration
+            .component_spans
+            .get(index)
+            .and_then(|entry| entry.clone());
         Some(TupleComponentMetadata {
             field_name,
             java_type,
+            source_span,
         })
     }
 
@@ -1235,12 +1242,14 @@ impl SequenceStyleCache {
 pub struct TupleComponentMetadata {
     pub field_name: String,
     pub java_type: JavaType,
+    pub source_span: Option<Span>,
 }
 
 #[derive(Debug, Clone)]
 struct TuplePlanRegistration {
     record_name: Option<String>,
     component_names: Vec<String>,
+    component_spans: Vec<Option<Span>>,
     type_hints: Vec<Option<JavaType>>,
 }
 

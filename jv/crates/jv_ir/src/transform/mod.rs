@@ -471,16 +471,17 @@ fn make_tuple_component_access(
 ) -> IrExpression {
     let receiver_span = ir_expression_span(&receiver);
     let metadata = context.tuple_component_metadata(&receiver_span, index);
-    let (field_name, field_type) = match metadata {
-        Some(meta) => (meta.field_name, meta.java_type),
-        None => (format!("_{}", index + 1), JavaType::object()),
+    let (field_name, field_type, source_span) = match metadata {
+        Some(meta) => (meta.field_name, meta.java_type, meta.source_span),
+        None => (format!("_{}", index + 1), JavaType::object(), None),
     };
+    let effective_span = source_span.unwrap_or(span);
 
     IrExpression::FieldAccess {
         receiver: Box::new(receiver),
         field_name,
         java_type: field_type,
-        span,
+        span: effective_span,
         is_record_component: true,
     }
 }

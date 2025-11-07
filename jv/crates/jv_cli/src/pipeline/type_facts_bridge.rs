@@ -219,7 +219,7 @@ pub fn preload_tuple_plans_into_context(
             TupleRecordStrategy::Generic => plan.generic_name.clone(),
         };
 
-        let component_names = component_names_for_plan(plan);
+        let (component_names, component_spans) = component_metadata_for_plan(plan);
         let type_hints = plan
             .type_hints
             .iter()
@@ -231,27 +231,34 @@ pub fn preload_tuple_plans_into_context(
                 usage.span.clone(),
                 Some(record_name.clone()),
                 component_names.clone(),
+                component_spans.clone(),
                 type_hints.clone(),
             );
         }
     }
 }
 
-fn component_names_for_plan(plan: &TupleRecordPlan) -> Vec<String> {
+fn component_metadata_for_plan(plan: &TupleRecordPlan) -> (Vec<String>, Vec<Option<Span>>) {
     let mut components = Vec::with_capacity(plan.arity);
+    let mut spans = Vec::with_capacity(plan.arity);
     for index in 0..plan.arity {
-        let meta = plan
-            .fields
-            .get(index)
-            .cloned()
-            .unwrap_or_else(|| TupleFieldMeta::empty(index + 1, Span::dummy()));
-        let name = match plan.strategy {
-            TupleRecordStrategy::Generic => format!("_{}", index + 1),
-            TupleRecordStrategy::Specific => field_name_from_meta(&meta, index),
+        let (name, span) = match plan.fields.get(index) {
+            Some(meta) => {
+                let label = match plan.strategy {
+                    TupleRecordStrategy::Generic => format!("_{}", index + 1),
+                    TupleRecordStrategy::Specific => field_name_from_meta(meta, index),
+                };
+                (label, Some(meta.span.clone()))
+            }
+            None => {
+                let fallback = format!("_{}", index + 1);
+                (fallback, None)
+            }
         };
         components.push(name);
+        spans.push(span);
     }
-    components
+    (components, spans)
 }
 
 fn field_name_from_meta(meta: &TupleFieldMeta, position: usize) -> String {
