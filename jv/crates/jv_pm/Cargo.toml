@@ -24,6 +24,8 @@ quick-xml = { version = "0.37", features = ["serialize"] }
 url = "2.5"
 bytes = "1.6"
 dirs = "5.0"
+is-terminal = "0.4"
+strsim = "0.11"
 
 [dev-dependencies]
 tempfile = "3.10"

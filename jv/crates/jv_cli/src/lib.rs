@@ -134,6 +134,10 @@ pub enum Commands {
         /// Diagnostic code (e.g., JV2001)
         code: String,
     },
+    /// Add dependencies via the package manager
+    Add(commands::add::AddArgs),
+    /// Remove dependencies managed by the package manager
+    Remove(commands::remove::RemoveArgs),
     /// Inspect resolver strategies and metadata
     Resolver(commands::resolver::ResolverArgs),
     /// Manage repository configuration and mirrors

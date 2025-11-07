@@ -341,6 +341,12 @@ fn main() -> Result<()> {
         Some(Commands::Explain { code }) => {
             commands::explain::run(&code).context("Failed to render explanation")?;
         }
+        Some(Commands::Add(args)) => {
+            commands::add::run(&args)?;
+        }
+        Some(Commands::Remove(args)) => {
+            commands::remove::run(&args)?;
+        }
         Some(Commands::Resolver(args)) => {
             commands::resolver::run(&args)?;
         }

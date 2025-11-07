@@ -2,17 +2,27 @@ use std::collections::HashSet;
 use std::env;
 use std::fmt::Write as _;
 use std::fs;
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow};
 use clap::{Args, Parser, Subcommand, ValueEnum};
+use is_terminal::IsTerminal;
 use jv_pm::{
-    AuthConfig, AuthType, ExportRequest, FilterConfig, JavaProjectExporter, LockfileService,
-    Manifest, MavenMirrorConfig, MavenRepositoryConfig, MirrorConfig, RepositoryConfig,
-    RepositoryManager, ResolverAlgorithmKind, ResolverDispatcher, ResolverStrategyInfo,
+    AuthConfig, AuthType, DependencyCache, ExportError, ExportRequest, FilterConfig,
+    JavaProjectExporter, LockfileService, Manifest, MavenCoordinates, MavenMetadata,
+    MavenMirrorConfig, MavenRegistry, MavenRepositoryConfig, MirrorConfig, RegistryError,
+    RepositoryConfig, RepositoryManager, ResolutionStats, ResolvedDependencies,
+    ResolverAlgorithmKind, ResolverDispatcher, ResolverOptions, ResolverStrategyInfo,
     StrategyStability,
 };
+use reqwest::Client;
 use serde::{Deserialize, Serialize};
+use strsim::normalized_levenshtein;
+use tokio::runtime::Builder as RuntimeBuilder;
+use url::form_urlencoded;
 
 #[derive(Parser, Debug)]
 #[command(name = "jvpm")]
@@ -24,6 +34,10 @@ struct Cli {
 
 #[derive(Subcommand, Debug)]
 enum Commands {
+    /// 依存関係を追加する
+    Add(AddArgs),
+    /// 依存関係を削除する
+    Remove(RemoveArgs),
     /// Inspect resolver strategies
     #[command(subcommand)]
     Resolver(ResolverCommand),
@@ -32,6 +46,26 @@ enum Commands {
     Repo(RepoCommand),
     /// 完全なJavaプロジェクトをエクスポートする
     Export(ExportArgs),
+}
+
+#[derive(Debug, Clone, Args)]
+struct AddArgs {
+    /// 追加する依存関係（group:artifact[:version] または group:artifact@version 形式）
+    #[arg(value_name = "package", required = true)]
+    packages: Vec<String>,
+    /// 非対話モード（候補のみ表示して終了）
+    #[arg(long = "non-interactive")]
+    non_interactive: bool,
+}
+
+#[derive(Debug, Clone, Args)]
+struct RemoveArgs {
+    /// 削除する依存関係（名前または group:artifact 形式）
+    #[arg(value_name = "package", required = true)]
+    packages: Vec<String>,
+    /// 非対話モード（候補のみ表示して終了）
+    #[arg(long = "non-interactive")]
+    non_interactive: bool,
 }
 
 #[derive(Subcommand, Debug)]
@@ -356,9 +390,671 @@ fn main() {
 fn real_main() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
+        Commands::Add(args) => handle_add_command(args),
+        Commands::Remove(args) => handle_remove_command(args),
         Commands::Resolver(command) => handle_resolver_command(command),
         Commands::Repo(command) => handle_repo_command(command),
         Commands::Export(command) => handle_export_command(command),
+    }
+}
+
+fn handle_add_command(args: AddArgs) -> Result<()> {
+    let runtime = RuntimeBuilder::new_multi_thread()
+        .enable_all()
+        .build()
+        .context("tokioランタイムの初期化に失敗しました")?;
+
+    let client = Client::builder()
+        .user_agent(format!("jvpm/{}", env!("CARGO_PKG_VERSION")))
+        .timeout(Duration::from_secs(20))
+        .build()
+        .context("HTTPクライアントの初期化に失敗しました")?;
+
+    let (mut manifest, manifest_path) = load_manifest_with_path()?;
+    let project_root = manifest_path
+        .parent()
+        .ok_or_else(|| anyhow!("jv.toml の親ディレクトリを特定できませんでした"))?
+        .to_path_buf();
+
+    let mut manager = RepositoryManager::with_project_root(project_root.clone())
+        .context("リポジトリマネージャーの初期化に失敗しました")?;
+    manager.load_project_config(&manifest);
+
+    let cache =
+        Arc::new(DependencyCache::global().context("グローバルキャッシュの初期化に失敗しました")?);
+
+    let interactive_allowed =
+        !args.non_interactive && io::stdin().is_terminal() && io::stdout().is_terminal();
+
+    let mut additions = Vec::new();
+
+    for raw in &args.packages {
+        let input = parse_dependency_input(raw)?;
+        let (coordinate, version_hint) = match input {
+            ParsedDependencyInput::Qualified {
+                coordinate,
+                requirement,
+            } => (coordinate, requirement),
+            ParsedDependencyInput::ArtifactOnly { query } => {
+                let suggestions = search_package_candidates(&runtime, &client, &query, 10)
+                    .with_context(|| format!("'{}' の依存候補検索に失敗しました", query))?;
+
+                if suggestions.is_empty() {
+                    return Err(anyhow!(
+                        "依存候補が見つかりませんでした: '{}'. 完全な group:artifact を指定してください。",
+                        query
+                    ));
+                }
+
+                if suggestions.len() > 1 && (!interactive_allowed || args.non_interactive) {
+                    print_non_interactive_suggestions(&suggestions);
+                    std::process::exit(2);
+                }
+
+                let chosen = if suggestions.len() == 1 {
+                    suggestions.into_iter().next().unwrap()
+                } else {
+                    println!("複数の候補が見つかりました。追加する依存関係を選択してください:");
+                    print_suggestions(&suggestions);
+                    let index = prompt_user_selection(suggestions.len())?;
+                    suggestions.into_iter().nth(index).unwrap()
+                };
+
+                (chosen.coordinate, None)
+            }
+        };
+
+        let version = resolve_version_for_coordinate(
+            &runtime,
+            &cache,
+            &manager,
+            &coordinate,
+            version_hint.as_deref(),
+        )
+        .with_context(|| format!("{} のバージョン決定に失敗しました", coordinate.display()))?;
+
+        manifest
+            .package
+            .dependencies
+            .insert(coordinate.display(), version.clone());
+
+        additions.push((coordinate, version));
+    }
+
+    finalize_project_state(&manifest, &manifest_path, &project_root)
+        .context("依存関係追加後のプロジェクト更新に失敗しました")?;
+
+    for (coordinate, version) in &additions {
+        println!(
+            "依存関係 '{}' をバージョン {} で追加しました。",
+            coordinate.display(),
+            version
+        );
+    }
+    println!("更新: jv.toml / jv.lock");
+
+    Ok(())
+}
+
+fn handle_remove_command(args: RemoveArgs) -> Result<()> {
+    let (mut manifest, manifest_path) = load_manifest_with_path()?;
+    let project_root = manifest_path
+        .parent()
+        .ok_or_else(|| anyhow!("jv.toml の親ディレクトリを特定できませんでした"))?
+        .to_path_buf();
+
+    if manifest.package.dependencies.is_empty() {
+        return Err(anyhow!("jv.toml に管理対象の依存関係がありません。"));
+    }
+
+    let interactive_allowed =
+        !args.non_interactive && io::stdin().is_terminal() && io::stdout().is_terminal();
+
+    let mut removed = Vec::new();
+
+    for raw in &args.packages {
+        let input = parse_dependency_input(raw)?;
+        let target = match input {
+            ParsedDependencyInput::Qualified { coordinate, .. } => {
+                let name = coordinate.display();
+                if manifest.package.dependencies.contains_key(&name) {
+                    name
+                } else {
+                    select_remove_candidate(
+                        &manifest,
+                        &coordinate.artifact_id,
+                        &name,
+                        interactive_allowed,
+                        args.non_interactive,
+                    )?
+                }
+            }
+            ParsedDependencyInput::ArtifactOnly { query } => select_remove_candidate(
+                &manifest,
+                &query,
+                &query,
+                interactive_allowed,
+                args.non_interactive,
+            )?,
+        };
+
+        if let Some(requirement) = manifest.package.dependencies.remove(&target) {
+            removed.push((target, requirement));
+        } else {
+            return Err(anyhow!("依存関係 '{}' は jv.toml に存在しません。", target));
+        }
+    }
+
+    finalize_project_state(&manifest, &manifest_path, &project_root)
+        .context("依存関係削除後のプロジェクト更新に失敗しました")?;
+
+    for (name, _) in &removed {
+        println!("依存関係 '{}' を削除しました。", name);
+    }
+    println!("更新: jv.toml / jv.lock");
+
+    Ok(())
+}
+
+#[derive(Debug, Clone)]
+struct DependencyCoordinate {
+    group_id: String,
+    artifact_id: String,
+}
+
+impl DependencyCoordinate {
+    fn new(group_id: impl Into<String>, artifact_id: impl Into<String>) -> Self {
+        Self {
+            group_id: group_id.into(),
+            artifact_id: artifact_id.into(),
+        }
+    }
+
+    fn display(&self) -> String {
+        format!("{}:{}", self.group_id, self.artifact_id)
+    }
+}
+
+enum ParsedDependencyInput {
+    Qualified {
+        coordinate: DependencyCoordinate,
+        requirement: Option<String>,
+    },
+    ArtifactOnly {
+        query: String,
+    },
+}
+
+fn parse_dependency_input(raw: &str) -> Result<ParsedDependencyInput> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Err(anyhow!("依存指定が空です。"));
+    }
+
+    let (coord_part, version_override) = match trimmed.rsplit_once('@') {
+        Some((coord, ver)) if coord.contains(':') && !ver.contains(':') => {
+            (coord.trim(), Some(ver.trim().to_string()))
+        }
+        _ => (trimmed, None),
+    };
+
+    let segments = coord_part
+        .split(':')
+        .map(|part| part.trim())
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>();
+
+    match segments.len() {
+        0 => Err(anyhow!("依存指定 '{}' が無効です。", raw)),
+        1 => Ok(ParsedDependencyInput::ArtifactOnly {
+            query: segments[0].to_string(),
+        }),
+        2 => Ok(ParsedDependencyInput::Qualified {
+            coordinate: DependencyCoordinate::new(segments[0], segments[1]),
+            requirement: version_override,
+        }),
+        3 => {
+            let requirement = segments[2].trim();
+            if requirement.is_empty() {
+                return Err(anyhow!("依存指定 '{}' のバージョン部分が空です。", raw));
+            }
+            Ok(ParsedDependencyInput::Qualified {
+                coordinate: DependencyCoordinate::new(segments[0], segments[1]),
+                requirement: Some(requirement.to_string()),
+            })
+        }
+        _ => Err(anyhow!(
+            "依存指定 '{}' が不正です。group:artifact[:version] 形式で指定してください。",
+            raw
+        )),
+    }
+}
+
+#[derive(Debug, Clone)]
+struct PackageSuggestion {
+    coordinate: DependencyCoordinate,
+    latest_version: Option<String>,
+    packaging: Option<String>,
+}
+
+fn search_package_candidates(
+    runtime: &tokio::runtime::Runtime,
+    client: &Client,
+    query: &str,
+    limit: usize,
+) -> Result<Vec<PackageSuggestion>> {
+    let trimmed = query.trim();
+    if trimmed.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let raw_query = if trimmed.contains(':') {
+        trimmed.to_string()
+    } else {
+        format!("a:{}*", trimmed)
+    };
+
+    let encoded_query: String = form_urlencoded::byte_serialize(raw_query.as_bytes()).collect();
+    let url = format!(
+        "https://search.maven.org/solrsearch/select?q={}&rows={}&wt=json",
+        encoded_query, limit
+    );
+
+    let response: MavenSearchResponse = runtime.block_on(async {
+        let resp = client.get(&url).send().await?;
+        let checked = resp.error_for_status()?;
+        checked.json::<MavenSearchResponse>().await
+    })?;
+
+    let mut suggestions = Vec::new();
+    for doc in response.response.docs.into_iter().take(limit) {
+        if doc.group_id.is_empty() || doc.artifact_id.is_empty() {
+            continue;
+        }
+        suggestions.push(PackageSuggestion {
+            coordinate: DependencyCoordinate::new(doc.group_id, doc.artifact_id),
+            latest_version: doc.latest_version.filter(|value| !value.is_empty()),
+            packaging: doc.packaging,
+        });
+    }
+
+    Ok(suggestions)
+}
+
+fn print_suggestions(suggestions: &[PackageSuggestion]) {
+    for (index, suggestion) in suggestions.iter().enumerate() {
+        let latest = suggestion.latest_version.as_deref().unwrap_or("不明");
+        let packaging = suggestion.packaging.as_deref().unwrap_or("jar");
+        println!(
+            "  [{}] {}  最新版: {}  パッケージ: {}",
+            index + 1,
+            suggestion.coordinate.display(),
+            latest,
+            packaging
+        );
+    }
+}
+
+fn print_non_interactive_suggestions(suggestions: &[PackageSuggestion]) {
+    println!("候補:");
+    print_suggestions(suggestions);
+    println!(
+        "複数の候補が見つかりました。--non-interactive を指定した場合は、完全な group:artifact を指定して再実行してください。"
+    );
+}
+
+fn prompt_user_selection(count: usize) -> Result<usize> {
+    loop {
+        print!("番号を入力してください (1-{} / qで中止): ", count);
+        io::stdout().flush().ok();
+
+        let mut buffer = String::new();
+        io::stdin().read_line(&mut buffer)?;
+        let input = buffer.trim();
+        if input.eq_ignore_ascii_case("q") || input.is_empty() {
+            return Err(anyhow!("選択がキャンセルされました"));
+        }
+
+        if let Ok(value) = input.parse::<usize>() {
+            if (1..=count).contains(&value) {
+                return Ok(value - 1);
+            }
+        }
+
+        println!(
+            "無効な入力です。1 から {} の数値を入力してください。",
+            count
+        );
+    }
+}
+
+fn resolve_version_for_coordinate(
+    runtime: &tokio::runtime::Runtime,
+    cache: &Arc<DependencyCache>,
+    manager: &RepositoryManager,
+    coordinate: &DependencyCoordinate,
+    explicit: Option<&str>,
+) -> Result<String> {
+    if let Some(version) = explicit {
+        let trimmed = version.trim();
+        if trimmed.is_empty() {
+            return Err(anyhow!("バージョン指定が空です。"));
+        }
+        return Ok(trimmed.to_string());
+    }
+
+    let coords = MavenCoordinates::new(&coordinate.group_id, &coordinate.artifact_id);
+
+    if let Some(cached) = cache.get_metadata(&coords)? {
+        if let Some(version) = select_preferred_version(&cached.metadata) {
+            return Ok(version);
+        }
+    }
+
+    let handles = manager.get_repositories_for_dependency(&coordinate.group_id);
+    if handles.is_empty() {
+        return Err(anyhow!(
+            "レジストリが設定されていないため最新バージョンを取得できません ({})",
+            coordinate.display()
+        ));
+    }
+
+    let mut last_error: Option<anyhow::Error> = None;
+
+    for handle in handles {
+        let registry = MavenRegistry::new(handle.url()).with_context(|| {
+            format!(
+                "リポジトリ '{}' ({}) の初期化に失敗しました",
+                handle.name(),
+                handle.url()
+            )
+        })?;
+
+        match runtime.block_on(registry.fetch_metadata(&coords)) {
+            Ok(metadata) => {
+                let preferred = select_preferred_version(&metadata);
+                if let Err(error) = cache.store_metadata(&coords, &metadata) {
+                    tracing::warn!(error = ?error, "メタデータのキャッシュ保存に失敗しました");
+                }
+                if let Some(version) = preferred {
+                    return Ok(version);
+                }
+                last_error = Some(anyhow!(
+                    "リポジトリ '{}' に利用可能なバージョンが見つかりませんでした ({})",
+                    handle.name(),
+                    coordinate.display()
+                ));
+            }
+            Err(RegistryError::PackageNotFound { .. }) => {
+                last_error = Some(anyhow!(
+                    "リポジトリ '{}' にパッケージが見つかりませんでした ({})",
+                    handle.name(),
+                    coordinate.display()
+                ));
+            }
+            Err(error) => {
+                last_error = Some(error.into());
+            }
+        }
+    }
+
+    Err(last_error.unwrap_or_else(|| {
+        anyhow!(
+            "{} のバージョンを特定できませんでした。完全な座標を指定してください。",
+            coordinate.display()
+        )
+    }))
+}
+
+fn select_preferred_version(metadata: &MavenMetadata) -> Option<String> {
+    metadata
+        .latest_release()
+        .map(|s| s.to_string())
+        .or_else(|| metadata.latest().map(|s| s.to_string()))
+        .or_else(|| metadata.versions().iter().last().cloned())
+}
+
+fn finalize_project_state(
+    manifest: &Manifest,
+    manifest_path: &Path,
+    project_root: &Path,
+) -> Result<()> {
+    save_manifest(manifest, manifest_path)?;
+
+    let dispatcher = ResolverDispatcher::with_default_strategies();
+    let resolved = if manifest.package.dependencies.is_empty() {
+        ResolvedDependencies {
+            strategy: dispatcher.default_strategy().to_string(),
+            algorithm: ResolverAlgorithmKind::PubGrub,
+            dependencies: Vec::new(),
+            diagnostics: Vec::new(),
+            stats: ResolutionStats {
+                elapsed_ms: 0,
+                total_dependencies: 0,
+                decided_dependencies: 0,
+            },
+        }
+    } else {
+        dispatcher
+            .resolve_manifest(manifest, ResolverOptions::default())
+            .context("依存関係の解決に失敗しました")?
+    };
+
+    let lockfile =
+        LockfileService::generate(manifest, &resolved).context("jv.lock の生成に失敗しました")?;
+    let lockfile_path = project_root.join("jv.lock");
+    LockfileService::save(&lockfile_path, &lockfile)
+        .with_context(|| format!("{} への書き込みに失敗しました", lockfile_path.display()))?;
+
+    let local_repository = ensure_local_repository(project_root)?;
+
+    let mut manager = RepositoryManager::with_project_root(project_root.to_path_buf())
+        .context("リポジトリマネージャーの初期化に失敗しました")?;
+    manager.load_project_config(manifest);
+
+    let repositories = collect_maven_repositories(&manager);
+    let mirrors = collect_effective_mirrors(manifest)?;
+    let sources_dir = resolve_sources_dir(project_root, manifest);
+    let output_dir = resolve_output_dir(project_root);
+
+    let request = ExportRequest {
+        project_root,
+        manifest,
+        lockfile: &lockfile,
+        sources_dir: sources_dir.as_path(),
+        output_dir: output_dir.as_path(),
+        local_repository: local_repository.as_path(),
+        repositories: &repositories,
+        mirrors: &mirrors,
+        resolved: Some(&resolved),
+    };
+
+    match JavaProjectExporter::export(&request) {
+        Ok(summary) => {
+            println!(
+                "Javaプロジェクトを {} にエクスポートしました (更新ファイル: {})",
+                summary.output_dir.display(),
+                summary.updated_files
+            );
+        }
+        Err(ExportError::MissingSources(path)) => {
+            println!(
+                "警告: Javaソースディレクトリ {} が見つからないため、OUTPUT_DIR へのエクスポートをスキップしました。",
+                path.display()
+            );
+        }
+        Err(error) => return Err(error.into()),
+    }
+
+    Ok(())
+}
+
+fn collect_maven_repositories(manager: &RepositoryManager) -> Vec<MavenRepositoryConfig> {
+    manager
+        .list()
+        .into_iter()
+        .map(|handle| {
+            let config = handle.config();
+            let mut repo =
+                MavenRepositoryConfig::new(config.name.clone(), handle.url().to_string());
+            if !config.name.trim().is_empty() {
+                repo = repo.with_name(config.name.clone());
+            }
+            repo
+        })
+        .collect()
+}
+
+fn collect_effective_mirrors(manifest: &Manifest) -> Result<Vec<MavenMirrorConfig>> {
+    let mut combined = Vec::new();
+    combined.extend(manifest.mirrors.iter().cloned());
+
+    let global_state = load_global_config_state()?;
+    combined.extend(global_state.data.mirrors.into_iter());
+
+    let mirrors = combined
+        .into_iter()
+        .enumerate()
+        .map(|(index, mirror)| {
+            let id = mirror
+                .name
+                .clone()
+                .unwrap_or_else(|| format!("mirror-{}", index));
+            MavenMirrorConfig::new(id, mirror.mirror_of, mirror.url)
+        })
+        .collect();
+
+    Ok(mirrors)
+}
+
+fn resolve_sources_dir(project_root: &Path, manifest: &Manifest) -> PathBuf {
+    let output = &manifest.project.output.directory;
+    let base = if Path::new(output).is_absolute() {
+        PathBuf::from(output)
+    } else {
+        project_root.join(output)
+    };
+    base.join(format!("java{}", manifest.java_target().as_str()))
+}
+
+fn resolve_output_dir(project_root: &Path) -> PathBuf {
+    project_root.join("target").join("java-project")
+}
+
+fn ensure_local_repository(project_root: &Path) -> Result<PathBuf> {
+    let path = project_root.join(".jv").join("repository");
+    fs::create_dir_all(&path)
+        .with_context(|| format!("{} の作成に失敗しました", path.display()))?;
+    Ok(path)
+}
+
+#[derive(Debug, Deserialize)]
+struct MavenSearchResponse {
+    response: MavenSearchDocs,
+}
+
+#[derive(Debug, Deserialize)]
+struct MavenSearchDocs {
+    docs: Vec<MavenSearchDoc>,
+}
+
+#[derive(Debug, Deserialize)]
+struct MavenSearchDoc {
+    #[serde(rename = "g", default)]
+    group_id: String,
+    #[serde(rename = "a", default)]
+    artifact_id: String,
+    #[serde(rename = "latestVersion", default)]
+    latest_version: Option<String>,
+    #[serde(rename = "p", default)]
+    packaging: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+struct DependencyCandidate {
+    name: String,
+    requirement: String,
+    score: f64,
+}
+
+fn select_remove_candidate(
+    manifest: &Manifest,
+    query: &str,
+    display_query: &str,
+    interactive_allowed: bool,
+    non_interactive: bool,
+) -> Result<String> {
+    let mut candidates = gather_dependency_candidates(manifest, query);
+    if candidates.is_empty() {
+        return Err(anyhow!(
+            "依存関係 '{}' は jv.toml に存在しません。",
+            display_query
+        ));
+    }
+
+    if candidates.len() == 1 {
+        return Ok(candidates.remove(0).name);
+    }
+
+    if non_interactive || !interactive_allowed {
+        print_remove_candidates(&candidates);
+        std::process::exit(2);
+    }
+
+    println!("複数の依存関係が該当します。削除する項目を選択してください:");
+    print_remove_candidates(&candidates);
+    let index = prompt_user_selection(candidates.len())?;
+    Ok(candidates.remove(index).name)
+}
+
+fn gather_dependency_candidates(manifest: &Manifest, query: &str) -> Vec<DependencyCandidate> {
+    let mut entries = Vec::new();
+    let lower_query = query.trim().to_ascii_lowercase();
+
+    for (name, requirement) in &manifest.package.dependencies {
+        let lower_name = name.to_ascii_lowercase();
+        let score = if lower_name == lower_query {
+            1.0
+        } else if lower_name.contains(&lower_query) {
+            0.9
+        } else {
+            let artifact = name.split(':').last().unwrap_or(name);
+            let artifact_lower = artifact.to_ascii_lowercase();
+            if artifact_lower == lower_query {
+                0.95
+            } else if artifact_lower.contains(&lower_query) {
+                0.85
+            } else {
+                let distance = normalized_levenshtein(&artifact_lower, &lower_query);
+                (1.0 - distance).max(0.0) * 0.5
+            }
+        };
+
+        entries.push(DependencyCandidate {
+            name: name.clone(),
+            requirement: requirement.clone(),
+            score,
+        });
+    }
+
+    entries.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    entries.truncate(10);
+    entries
+}
+
+fn print_remove_candidates(candidates: &[DependencyCandidate]) {
+    println!("候補:");
+    for (index, candidate) in candidates.iter().enumerate() {
+        println!(
+            "  [{}] {} = {}",
+            index + 1,
+            candidate.name,
+            candidate.requirement
+        );
     }
 }
 
