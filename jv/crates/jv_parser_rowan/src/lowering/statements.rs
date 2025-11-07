@@ -3093,6 +3093,7 @@ mod expression_parser {
             let (token, name_index) = self.advance_with_index_or_error("メンバー名が必要です")?;
             let property = match &token.token_type {
                 TokenType::Identifier(value) => value.clone(),
+                TokenType::ImplicitParam(index) => format!("_{}", index),
                 _ => {
                     return Err(ExpressionError::new(
                         "メンバーアクセスには識別子が必要です",
@@ -3122,6 +3123,7 @@ mod expression_parser {
             let (token, name_index) = self.advance_with_index_or_error("メンバー名が必要です")?;
             let property = match &token.token_type {
                 TokenType::Identifier(value) => value.clone(),
+                TokenType::ImplicitParam(index) => format!("_{}", index),
                 _ => {
                     return Err(ExpressionError::new(
                         "メンバーアクセスには識別子が必要です",

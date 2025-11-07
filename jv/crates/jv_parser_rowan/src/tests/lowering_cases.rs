@@ -2154,6 +2154,82 @@ fn multiline_string_interpolation_handles_complex_patterns() {
 }
 
 #[test]
+fn string_interpolation_handles_chained_calls() {
+    let source = r#"
+        fun demo(tuple: (Int Int Int)): Unit {
+            println("tuple third=${tuple._3()}")
+        }
+    "#;
+
+    let result = lower_source(source);
+    assert!(
+        result.diagnostics.is_empty(),
+        "unexpected diagnostics: {:?}",
+        result.diagnostics
+    );
+
+    let print_call = result
+        .statements
+        .iter()
+        .find_map(|statement| match statement {
+            Statement::FunctionDeclaration { name, body, .. } if name == "demo" => {
+                match body.as_ref() {
+                    Expression::Block { statements, .. } => {
+                        statements.iter().find_map(|stmt| match stmt {
+                            Statement::Expression { expr, .. } => Some(expr),
+                            _ => None,
+                        })
+                    }
+                    other => panic!("expected block body, got {:?}", other),
+                }
+            }
+            _ => None,
+        })
+        .expect("expected println expression");
+
+    let call_arg = match print_call {
+        Expression::Call { args, .. } => args
+            .iter()
+            .next()
+            .unwrap_or_else(|| panic!("println should have at least one argument")),
+        other => panic!("expected println call, got {:?}", other),
+    };
+
+    let argument_expr = match call_arg {
+        Argument::Positional(expr) => expr,
+        Argument::Named { .. } => panic!("expected positional argument"),
+    };
+
+    match argument_expr {
+        Expression::StringInterpolation { parts, .. } => {
+            let expr_count = parts
+                .iter()
+                .filter(|part| matches!(part, StringPart::Expression(_)))
+                .count();
+            assert_eq!(expr_count, 1, "expected single interpolation expression");
+            let mut expr_iter = parts.iter().filter_map(|part| match part {
+                StringPart::Expression(expr) => Some(expr),
+                _ => None,
+            });
+            let expr = expr_iter.next().expect("interpolation expression missing");
+            match expr {
+                Expression::Call { function, .. } => match function.as_ref() {
+                    Expression::MemberAccess { property, .. } => {
+                        assert_eq!(property, "_3", "expected member property `_3`")
+                    }
+                    other => panic!("expected member access callee, got {:?}", other),
+                },
+                other => panic!(
+                    "expected call expression inside interpolation, got {:?}",
+                    other
+                ),
+            }
+        }
+        other => panic!("expected string interpolation argument, got {:?}", other),
+    }
+}
+
+#[test]
 fn nested_package_fixture_preserves_interpolation_identifiers() {
     let source = include_str!("../../../../../jv/tests/fixtures/package/nested_package.jv");
     let result = lower_source(source);

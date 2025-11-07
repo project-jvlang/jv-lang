@@ -1,6 +1,8 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use jv_ast::Expression;
+use jv_ast::expression::{Argument, StringPart};
 use jv_checker::TypeChecker;
 use jv_cli::pipeline::{
     generics::apply_type_facts,
@@ -40,11 +42,9 @@ fn normalize(text: &str) -> String {
     text.replace("\r\n", "\n").trim_end().to_string()
 }
 
-fn generate_java_source(name: &str, target: JavaTarget) -> String {
-    let source =
-        fs::read_to_string(fixture_path(name)).expect("フィクスチャの読み込みに失敗しました");
+fn generate_java_source_from_text(source: &str, target: JavaTarget) -> String {
     let program = RowanPipeline::default()
-        .parse(&source)
+        .parse(source)
         .expect("ソース解析に失敗しました")
         .into_program();
 
@@ -80,6 +80,12 @@ fn generate_java_source(name: &str, target: JavaTarget) -> String {
         .expect("Javaコード生成に失敗しました")
 }
 
+fn generate_java_source(name: &str, target: JavaTarget) -> String {
+    let source =
+        fs::read_to_string(fixture_path(name)).expect("フィクスチャの読み込みに失敗しました");
+    generate_java_source_from_text(&source, target)
+}
+
 #[test]
 fn tuple_fixtures_match_expected_java() {
     let fixtures = ["divmod", "find_user", "calculate_stats", "function_return"];
@@ -104,4 +110,122 @@ fn tuple_fixtures_match_expected_java() {
             );
         }
     }
+}
+
+#[test]
+fn tuple_demo_example_preserves_interpolation_calls() {
+    let example_path = workspace_root().join("examples").join("tuple_demo.jv");
+    let source =
+        fs::read_to_string(&example_path).expect("tuple_demo.jv の読み込みに失敗しました");
+
+    let program = RowanPipeline::default()
+        .parse(&source)
+        .expect("tuple_demo.jv の解析に失敗しました")
+        .into_program();
+
+    fn expression_uses_tuple_component(expr: &Expression) -> bool {
+        match expr {
+            Expression::StringInterpolation { parts, .. } => parts.iter().any(|part| match part {
+                StringPart::Expression(inner) => expression_uses_tuple_component(inner),
+                _ => false,
+            }),
+            Expression::Call { function, args, .. } => {
+                if let Expression::MemberAccess { property, .. } = function.as_ref() {
+                    if property == "_3" {
+                        return true;
+                    }
+                }
+                if expression_uses_tuple_component(function) {
+                    return true;
+                }
+                args.iter().any(|arg| match arg {
+                    Argument::Positional(inner) => expression_uses_tuple_component(inner),
+                    Argument::Named { value, .. } => expression_uses_tuple_component(value),
+                })
+            }
+            Expression::MemberAccess { object, .. } => expression_uses_tuple_component(object),
+            Expression::Binary { left, right, .. } => {
+                expression_uses_tuple_component(left)
+                    || expression_uses_tuple_component(right)
+            }
+            Expression::Block { statements, .. } => statements.iter().any(|stmt| match stmt {
+                jv_ast::Statement::Expression { expr, .. } => expression_uses_tuple_component(expr),
+                jv_ast::Statement::ValDeclaration { initializer, .. } => {
+                    expression_uses_tuple_component(initializer)
+                }
+                jv_ast::Statement::VarDeclaration {
+                    initializer: Some(expr),
+                    ..
+                } => expression_uses_tuple_component(expr),
+                jv_ast::Statement::Return {
+                    value: Some(expr), ..
+                } => expression_uses_tuple_component(expr),
+                _ => false,
+            }),
+            Expression::Tuple { elements, .. } => {
+                elements.iter().any(expression_uses_tuple_component)
+            }
+            Expression::Array { elements, .. } => {
+                elements.iter().any(expression_uses_tuple_component)
+            }
+            Expression::If {
+                condition,
+                then_branch,
+                else_branch,
+                ..
+            } => {
+                expression_uses_tuple_component(condition)
+                    || expression_uses_tuple_component(then_branch)
+                    || else_branch
+                        .as_ref()
+                        .map_or(false, |expr| expression_uses_tuple_component(expr))
+            }
+            Expression::When {
+                expr,
+                arms,
+                else_arm,
+                ..
+            } => {
+                expr.as_ref()
+                    .map_or(false, |expr| expression_uses_tuple_component(expr))
+                    || arms.iter().any(|arm| {
+                        expression_uses_tuple_component(&arm.body)
+                            || arm
+                                .guard
+                                .as_ref()
+                                .map_or(false, |guard| expression_uses_tuple_component(guard))
+                    })
+                    || else_arm
+                        .as_ref()
+                        .map_or(false, |expr| expression_uses_tuple_component(expr))
+            }
+            Expression::Lambda { body, .. } => expression_uses_tuple_component(body),
+            Expression::Unary { operand, .. } => expression_uses_tuple_component(operand),
+            _ => false,
+        }
+    }
+
+    let main_body = program
+        .statements
+        .iter()
+        .find_map(|statement| match statement {
+            jv_ast::Statement::FunctionDeclaration { name, body, .. } if name == "main" => {
+                Some(body.as_ref())
+            }
+            _ => None,
+        })
+        .expect("main 関数が見つかりません");
+
+    let interpolation_found = match main_body {
+        Expression::Block { statements, .. } => statements.iter().any(|statement| match statement {
+            jv_ast::Statement::Expression { expr, .. } => expression_uses_tuple_component(expr),
+            _ => false,
+        }),
+        other => panic!("main 関数の本体がブロック式ではありません: {:?}", other),
+    };
+
+    assert!(
+        interpolation_found,
+        "Expected tuple_demo.jv to contain string interpolation calling tuple._3()"
+    );
 }
