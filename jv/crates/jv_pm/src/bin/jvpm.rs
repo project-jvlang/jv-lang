@@ -44,8 +44,6 @@ enum Commands {
     /// Manage repository definitions and mirrors
     #[command(subcommand)]
     Repo(RepoCommand),
-    /// 完全なJavaプロジェクトをエクスポートする
-    Export(ExportArgs),
 }
 
 #[derive(Debug, Clone, Args)]
@@ -166,16 +164,6 @@ enum RepoCommand {
         #[arg(long = "scope", value_enum, default_value_t = RepoScope::Project)]
         scope: RepoScope,
     },
-}
-
-#[derive(Debug, Clone, Args)]
-struct ExportArgs {
-    /// エクスポート先ディレクトリ（未指定時は target/java-project）
-    #[arg(long = "output-dir", value_name = "DIRECTORY")]
-    output_dir: Option<PathBuf>,
-    /// 生成済みJavaソースのディレクトリ（未指定時は manifest から推測）
-    #[arg(long = "sources-dir", value_name = "DIRECTORY")]
-    sources_dir: Option<PathBuf>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
@@ -394,7 +382,6 @@ fn real_main() -> Result<()> {
         Commands::Remove(args) => handle_remove_command(args),
         Commands::Resolver(command) => handle_resolver_command(command),
         Commands::Repo(command) => handle_repo_command(command),
-        Commands::Export(command) => handle_export_command(command),
     }
 }
 
@@ -1556,118 +1543,6 @@ fn process_mirror_options(
     Ok(MirrorCommandResult::Unchanged)
 }
 
-fn handle_export_command(args: ExportArgs) -> Result<()> {
-    let (manifest, manifest_path) = load_manifest_with_path()?;
-    let project_root = manifest_path
-        .parent()
-        .ok_or_else(|| anyhow!("jv.toml の親ディレクトリを特定できませんでした"))?
-        .to_path_buf();
-
-    let lockfile_path = project_root.join("jv.lock");
-    let lockfile = LockfileService::load(&lockfile_path).with_context(|| {
-        format!(
-            "{} の読み込みに失敗しました。`jv lock` または `jv add` を実行してください。",
-            lockfile_path.display()
-        )
-    })?;
-
-    let output_dir = resolve_path(&project_root, args.output_dir.as_ref())
-        .unwrap_or_else(|| project_root.join("target").join("java-project"));
-
-    let sources_dir = resolve_path(&project_root, args.sources_dir.as_ref()).unwrap_or_else(|| {
-        let base = project_root.join(&manifest.project.output.directory);
-        let java_dir = format!("java{}", manifest.java_target().as_str());
-        base.join(java_dir)
-    });
-
-    let local_repository = project_root.join(".jv").join("repository");
-
-    let mut manager = RepositoryManager::with_project_root(project_root.clone())
-        .context("リポジトリマネージャーの初期化に失敗しました")?;
-    manager.load_project_config(&manifest);
-
-    let repositories = manager
-        .list()
-        .into_iter()
-        .map(|handle| {
-            let config = handle.config();
-            let mut repo =
-                MavenRepositoryConfig::new(config.name.clone(), handle.url().to_string());
-            if !config.name.trim().is_empty() {
-                repo = repo.with_name(config.name.clone());
-            }
-            repo
-        })
-        .collect::<Vec<_>>();
-
-    let global = load_global_config_state()?;
-    let mut mirror_configs = Vec::new();
-    mirror_configs.extend(manifest.mirrors.iter().cloned());
-    mirror_configs.extend(global.data.mirrors.clone());
-    let mirrors = mirror_configs
-        .into_iter()
-        .enumerate()
-        .map(|(index, mirror)| {
-            let id = mirror
-                .name
-                .clone()
-                .unwrap_or_else(|| format!("mirror-{index}"));
-            MavenMirrorConfig::new(id, mirror.mirror_of.clone(), mirror.url.clone())
-        })
-        .collect::<Vec<_>>();
-
-    let request = ExportRequest {
-        project_root: &project_root,
-        manifest: &manifest,
-        lockfile: &lockfile,
-        sources_dir: sources_dir.as_path(),
-        output_dir: output_dir.as_path(),
-        local_repository: &local_repository,
-        repositories: &repositories,
-        mirrors: &mirrors,
-        resolved: None,
-    };
-
-    let summary = JavaProjectExporter::export(&request)
-        .with_context(|| format!("{} へのエクスポートに失敗しました", output_dir.display()))?;
-
-    println!("Javaプロジェクトをエクスポートしました:");
-    println!("  出力ディレクトリ : {}", summary.output_dir.display());
-    println!(
-        "  pom.xml         : {}",
-        summary.output_dir.join("pom.xml").display()
-    );
-    println!(
-        "  settings.xml    : {}",
-        summary
-            .output_dir
-            .join(".jv")
-            .join("settings.xml")
-            .display()
-    );
-    println!(
-        "  classpath.txt   : {}",
-        summary
-            .output_dir
-            .join(".jv")
-            .join("classpath.txt")
-            .display()
-    );
-    println!(
-        "  ソースディレクトリ : {}",
-        summary.output_dir.join("src").display()
-    );
-    println!(
-        "統計: 更新ファイル={} / リポジトリアーティファクト={} / ソース={} / classpath項目={}",
-        summary.updated_files,
-        summary.repository_artifacts,
-        summary.source_files,
-        summary.classpath_entries
-    );
-
-    Ok(())
-}
-
 fn load_repository_context(include_global: bool) -> Result<RepositoryContext> {
     let (manifest, manifest_path) = load_manifest_with_path()?;
     let project_root = manifest_path
@@ -1724,16 +1599,6 @@ fn load_repository_context(include_global: bool) -> Result<RepositoryContext> {
         manifest,
         global,
         entries,
-    })
-}
-
-fn resolve_path(base: &Path, candidate: Option<&PathBuf>) -> Option<PathBuf> {
-    candidate.map(|path| {
-        if path.is_absolute() {
-            path.clone()
-        } else {
-            base.join(path)
-        }
     })
 }
 

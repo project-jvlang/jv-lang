@@ -116,6 +116,15 @@ impl RepositoryManager {
             .collect()
     }
 
+    /// プロジェクト設定とグローバル設定を統合したミラー一覧を返す。
+    pub fn effective_mirrors(&self) -> Vec<MirrorConfig> {
+        let mut mirrors = self.project_mirrors.clone();
+        if self.use_global_repositories {
+            mirrors.extend(self.global_mirrors.clone());
+        }
+        mirrors
+    }
+
     /// グループIDに合致する検索対象リポジトリを返す。
     pub fn get_repositories_for_dependency(&self, group_id: &str) -> Vec<RepositoryHandle<'_>> {
         self.prioritised_repositories()

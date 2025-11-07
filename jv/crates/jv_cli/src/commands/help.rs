@@ -57,7 +57,7 @@ const OVERVIEW_TEXT: &str = r#"jv_pm Phase 2 パッケージマネージャ概�
 - 依存関係を追加: `jv add org.example:demo:1.0.0`
 - 依存解決戦略を確認: `jv resolver list`
 - リポジトリ設定を調整: `jv repo list --global`
-- Javaエクスポート: `jv build --java-only src/main.jv` → `jvpm export --output-dir ./target/java-project`
+- Javaエクスポート: `jv build --java-only src/main.jv` を実行すると `target/java-project` に Maven 互換ファイルが自動生成されます。
 
 補足:
 - `jv remove <name>` で不要な依存関係を削除できます。
@@ -161,10 +161,10 @@ max_concurrent_warning = 12     # この値を超えると警告を表示
 
 const EXPORT_TEXT: &str = r#"OUTPUT_DIRエクスポート
 
-- `jv build --java-only <entry>` を実行すると、デフォルトで `target/java-project` (`OUTPUT_DIR`) に Maven 互換プロジェクトを生成します。
+- `jv build --java-only <entry>` を実行すると、`project.output.directory`（既定: `target/java-project`）に Maven 互換プロジェクトが自動生成されます。
 - 生成物には `pom.xml`, `.jv/settings.xml`, `.jv/classpath.txt`, エクスポートされた `.jv/repository/`、Javaソース (`src/`) が含まれます。
-- 既存のエクスポートを再作成したい場合は `jvpm export --output-dir ./dist/java --sources-dir ./target/java25` のように直接呼び出せます。`--sources-dir` を省略すると `project.output.directory` から推測します。
-- ソースディレクトリが存在しない場合はエクスポートをスキップし、「警告: Javaソースディレクトリ ... が見つからないため、OUTPUT_DIR へのエクスポートをスキップしました。」と表示されます。
+- 生成物を再生成したい場合は再度 `jv build` を実行してください。`OUTPUT_DIR` や Javaターゲットを変更する場合は `jv.toml` か CLI フラグで上書きします。
+- ソースディレクトリが存在しない場合はエクスポートがスキップされ、その旨が警告として表示されます。
 - `.jv/repository` にはローカルキャッシュ済みの全JARがコピーされるため、CI/CDでの完全再現ビルドに直接利用できます。
 "#;
 

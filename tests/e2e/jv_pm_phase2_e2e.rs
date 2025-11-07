@@ -1,6 +1,6 @@
 use std::env;
 use std::ffi::OsStr;
-use std::fs::{self, File};
+use std::fs;
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
@@ -17,7 +17,7 @@ use serde::Deserialize;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use tempfile::{tempdir, TempDir};
-use toml::Value as TomlValue;
+use toml::{Value as TomlValue, map::Map as TomlMap};
 use zip::write::FileOptions;
 use zip::CompressionMethod;
 
@@ -424,7 +424,7 @@ impl TestEnvironment {
             .ok_or_else(|| anyhow::anyhow!("manifest root is not a table"))?;
         let repositories = table
             .entry("repositories".to_string())
-            .or_insert_with(|| TomlValue::Table(std::collections::HashMap::new()));
+            .or_insert_with(|| TomlValue::Table(TomlMap::new()));
 
         match repositories {
             TomlValue::Table(map) => {
@@ -432,17 +432,15 @@ impl TestEnvironment {
             }
             TomlValue::Array(values) => {
                 if values.is_empty() {
-                    *repositories = TomlValue::Table(std::collections::HashMap::from([(
-                        "use-global".to_string(),
-                        TomlValue::Boolean(false),
-                    )]));
+                    let mut new_table = TomlMap::new();
+                    new_table.insert("use-global".to_string(), TomlValue::Boolean(false));
+                    *repositories = TomlValue::Table(new_table);
                 }
             }
             _ => {
-                *repositories = TomlValue::Table(std::collections::HashMap::from([(
-                    "use-global".to_string(),
-                    TomlValue::Boolean(false),
-                )]));
+                let mut new_table = TomlMap::new();
+                new_table.insert("use-global".to_string(), TomlValue::Boolean(false));
+                *repositories = TomlValue::Table(new_table);
             }
         }
 
@@ -721,9 +719,6 @@ fn e2e_maven_flow_with_local_cache_and_export() -> Result<()> {
     for dep in &dependencies {
         env.verify_cache_and_repository(&env.project, dep)?;
     }
-
-    let export_output = env.run_jvpm(&env.project, ["export"])?;
-    ensure_success(&export_output, "jvpm export");
     env.verify_export_outputs(&env.project, &dependencies)?;
 
     let maven_output = env.run_maven_install(&env.project)?;

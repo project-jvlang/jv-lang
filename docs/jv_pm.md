@@ -208,11 +208,7 @@ Javaプロジェクトを ./target/java-project にエクスポートしまし�
 - `.jv/repository/`: ローカルリポジトリに存在するアーティファクトを完全ミラーリング。
 - `src/`: `project.output.directory/java{target}` からコピーされた Java ソース。
 
-`jvpm export` を直接呼び出すことで、任意の出力先に再エクスポートできます。
-
-```bash
-jvpm export --output-dir ./dist/java --sources-dir ./target/java25
-```
+生成物を再生成したい場合は再度 `jv build`（または `jv build --java-only`）を実行してください。`project.output.directory` を変更すると出力先が変わります。
 
 ソースディレクトリが見つからない場合はエクスポートをスキップし、警告メッセージを表示します。
 
@@ -236,4 +232,4 @@ jv help --list-topics   # 利用可能なトピック一覧を表示
 - 依存が見つからない: `jv repo list --global` でリポジトリ設定を確認し、`mirror` の有無をチェックしてください。
 - チェックサム不一致: キャッシュが破損している可能性があります。`~/.jv/cache` をバックアップ後に削除し、再実行してください。
 - 並列ダウンロード警告: `[build]` の `max_concurrent_downloads` と `max_concurrent_warning` を見直し、物理コア数やレジストリレート制限に合わせて調整してください。
-- エクスポートされない: `jv build --java-only` 実行後に `target/java25` が生成されているか確認し、必要に応じて `jvpm export --sources-dir` で明示指定してください。
+- エクスポートされない: `jv build --java-only` 実行後に `target/java25` が生成されているか確認し、`jv build` を再実行してください。
