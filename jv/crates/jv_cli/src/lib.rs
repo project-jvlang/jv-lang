@@ -35,6 +35,7 @@ pub mod commands;
 
 詳細は README と docs/stdlib/collections.md を参照してください。"#
 )]
+#[command(disable_help_subcommand = true)]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Option<Commands>,
@@ -134,6 +135,8 @@ pub enum Commands {
         /// Diagnostic code (e.g., JV2001)
         code: String,
     },
+    /// パッケージマネージャ関連の詳細ヘルプを表示
+    Help(commands::help::HelpArgs),
     /// Add dependencies via the package manager
     Add(commands::add::AddArgs),
     /// Remove dependencies managed by the package manager
