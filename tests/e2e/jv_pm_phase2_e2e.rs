@@ -1,5 +1,5 @@
 use std::env;
-use std::ffi::OsStr;
+use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
@@ -22,7 +22,7 @@ use zip::write::FileOptions;
 use zip::CompressionMethod;
 
 #[cfg(unix)]
-use std::os::unix::fs::MetadataExt;
+use std::os::unix::fs::{MetadataExt, PermissionsExt};
 
 #[derive(Clone)]
 struct DependencySpec {
@@ -382,6 +382,32 @@ impl TestEnvironment {
         command.output().context("jvpm コマンドの実行に失敗しました")
     }
 
+    fn run_jvpm_with_env<I, S>(
+        &self,
+        project: &Path,
+        args: I,
+        extras: &[(&OsStr, &OsStr)],
+    ) -> Result<Output>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<OsStr>,
+    {
+        let binary = match cargo_bin_path("jvpm") {
+            Some(path) => path,
+            None => anyhow::bail!("jvpm バイナリが見つからないためテストを実行できません"),
+        };
+
+        let mut command = Command::new(binary);
+        self.configure_command(&mut command, project)?;
+        for (key, value) in extras {
+            command.env(key, value);
+        }
+        for arg in args {
+            command.arg(arg);
+        }
+        command.output().context("jvpm コマンドの実行に失敗しました")
+    }
+
     fn configure_command(&self, command: &mut Command, project: &Path) -> Result<()> {
         command.current_dir(project);
         command.env("HOME", self.home.path());
@@ -523,7 +549,7 @@ impl TestEnvironment {
     fn verify_export_outputs(&self, project: &Path, dependencies: &[DependencySpec]) -> Result<()> {
         let output_dir = project.join("target").join("java-project");
         let pom_path = output_dir.join("pom.xml");
-        let settings_path = output_dir.join(".jv/settings.xml");
+        let settings_path = output_dir.join("settings.xml");
         let classpath_path = output_dir.join(".jv/classpath.txt");
 
         let pom = fs::read_to_string(&pom_path)
@@ -569,7 +595,7 @@ impl TestEnvironment {
             .ok_or_else(|| anyhow::anyhow!("Mavenツールチェーンが見つかりません"))?;
 
         let output_dir = project.join("target/java-project");
-        let settings = output_dir.join(".jv/settings.xml");
+        let settings = output_dir.join("settings.xml");
 
         let mut command = Command::new(maven);
         command.current_dir(&output_dir);
@@ -796,6 +822,179 @@ fn e2e_maven_flow_with_local_cache_and_export() -> Result<()> {
     let lock_after = fs::read_to_string(env.project.join("jv.lock"))
         .context("更新後のjv.lock の読み込みに失敗しました")?;
     assert_ne!(lock_before, lock_after, "lockfile が更新されていません");
+
+    Ok(())
+}
+
+#[cfg(unix)]
+#[test]
+fn e2e_jvpm_wrapper_passthrough() -> Result<()> {
+    if cargo_bin_path("jv").is_none() {
+        eprintln!("skipping e2e_jvpm_wrapper_passthrough: jv binary unavailable");
+        return Ok(());
+    }
+    if cargo_bin_path("jvpm").is_none() {
+        eprintln!("skipping e2e_jvpm_wrapper_passthrough: jvpm binary unavailable");
+        return Ok(());
+    }
+
+    let dependencies = vec![
+        DependencySpec::new("org.example", "demo", "1.0.0"),
+        DependencySpec::new("org.example", "util", "1.0.0"),
+    ];
+
+    let env = TestEnvironment::new(dependencies.clone())?;
+
+    let init_output = env.run_jv(&env.project, ["init", "."])?;
+    ensure_success(&init_output, "jv init");
+    env.configure_manifest(&env.project)?;
+
+    let repo_url = env.repo_url();
+    ensure_success(
+        &env.run_jvpm(
+            &env.project,
+            [
+                "repo",
+                "add",
+                "integration",
+                repo_url.as_str(),
+                "--priority",
+                "5",
+            ],
+        )?,
+        "jvpm repo add integration",
+    );
+
+    for dep in &dependencies {
+        let coord = dep.coordinate_with_version();
+        let add_output = env.run_jvpm(
+            &env.project,
+            ["add", "--non-interactive", coord.as_str()],
+        )?;
+        ensure_success(&add_output, &format!("jvpm add {}", dep.coordinate()));
+    }
+
+    let manifest_path = env.project.join("jv.toml");
+    let manifest_text = fs::read_to_string(&manifest_path)
+        .with_context(|| format!("{} の読み込みに失敗しました", manifest_path.display()))?;
+    for dep in &dependencies {
+        assert!(
+            manifest_text.contains(&dep.coordinate()),
+            "jv.toml に {} が含まれていません",
+            dep.coordinate()
+        );
+    }
+
+    let lock_path = env.project.join("jv.lock");
+    assert!(lock_path.exists(), "jvpm add 実行後に jv.lock が生成されていません");
+
+    let build_output = env.run_jv(&env.project, ["build", "--java-only", "src/main.jv"])?;
+    ensure_success(&build_output, "jv build after jvpm add");
+
+    for dep in &dependencies {
+        env.verify_cache_and_repository(&env.project, dep)?;
+    }
+    env.verify_export_outputs(&env.project, &dependencies)?;
+
+    let script_dir = env.home.path().join("maven-stub");
+    fs::create_dir_all(&script_dir)
+        .with_context(|| format!("{} の作成に失敗しました", script_dir.display()))?;
+    let script_path = script_dir.join("mvn");
+    let script_contents = r#"#!/usr/bin/env bash
+set -e
+: "${JVPM_MAVEN_LOG:?JVPM_MAVEN_LOG not set}"
+printf "%s\n" "$@" >> "$JVPM_MAVEN_LOG"
+if [[ "$1" == "unknown-command" ]]; then
+  echo "Unknown goal $1" >&2
+  exit 1
+fi
+exit 0
+"#;
+    fs::write(&script_path, script_contents)
+        .with_context(|| format!("{} の書き込みに失敗しました", script_path.display()))?;
+    let mut perms = fs::metadata(&script_path)
+        .with_context(|| format!("{} のメタデータ取得に失敗しました", script_path.display()))?
+        .permissions();
+    perms.set_mode(0o755);
+    fs::set_permissions(&script_path, perms)
+        .with_context(|| format!("{} の権限設定に失敗しました", script_path.display()))?;
+
+    let log_path = script_dir.join("maven.log");
+    fs::write(&log_path, "")
+        .with_context(|| format!("{} の初期化に失敗しました", log_path.display()))?;
+
+    let env_pairs = vec![
+        (
+            OsString::from("JVPM_MAVEN_BIN"),
+            script_path.as_os_str().to_os_string(),
+        ),
+        (
+            OsString::from("JVPM_MAVEN_LOG"),
+            log_path.as_os_str().to_os_string(),
+        ),
+    ];
+    let env_refs: Vec<(&OsStr, &OsStr)> = env_pairs
+        .iter()
+        .map(|(key, value)| (key.as_os_str(), value.as_os_str()))
+        .collect();
+
+    let install_output = env.run_jvpm_with_env(&env.project, ["install"], &env_refs)?;
+    ensure_success(&install_output, "jvpm install proxy");
+
+    let clean_package_output =
+        env.run_jvpm_with_env(&env.project, ["clean", "package"], &env_refs)?;
+    ensure_success(&clean_package_output, "jvpm clean package proxy");
+
+    let unknown_output =
+        env.run_jvpm_with_env(&env.project, ["unknown-command"], &env_refs)?;
+    assert!(
+        !unknown_output.status.success(),
+        "jvpm unknown-command が期待通り失敗していません"
+    );
+    let unknown_stderr = String::from_utf8_lossy(&unknown_output.stderr);
+    assert!(
+        unknown_stderr.contains("Unknown goal unknown-command"),
+        "未知コマンドのstderrが期待値を含んでいません: {}",
+        unknown_stderr
+    );
+
+    let maven_project = env.secondary_project.clone();
+    fs::write(
+        maven_project.join("pom.xml"),
+        r#"<project>
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>org.example</groupId>
+  <artifactId>standalone</artifactId>
+  <version>0.1.0</version>
+</project>
+"#,
+    )
+    .with_context(|| format!("{} の書き込みに失敗しました", maven_project.join("pom.xml").display()))?;
+    fs::create_dir_all(maven_project.join(".jv").join("repository"))
+        .with_context(|| format!("{} の作成に失敗しました", maven_project.join(".jv/repository").display()))?;
+
+    let wrapper_output = env.run_jvpm_with_env(&maven_project, ["install"], &env_refs)?;
+    ensure_success(&wrapper_output, "jvpm wrapper install");
+
+    let m2_repo = env.home.path().join(".m2").join("repository");
+    assert!(
+        !m2_repo.exists(),
+        "Mavenローカルリポジトリ {} が作成されています",
+        m2_repo.display()
+    );
+
+    let log_contents = fs::read_to_string(&log_path)
+        .with_context(|| format!("{} の読み込みに失敗しました", log_path.display()))?;
+    let entries: Vec<&str> = log_contents
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .collect();
+    assert_eq!(
+        entries,
+        ["install", "clean package", "unknown-command", "install"],
+        "Mavenラッパーモードで実行されたコマンド順が一致しません: {:?}",
+        entries
+    );
 
     Ok(())
 }

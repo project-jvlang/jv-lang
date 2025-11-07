@@ -162,7 +162,7 @@ max_concurrent_warning = 12     # この値を超えると警告を表示
 const EXPORT_TEXT: &str = r#"OUTPUT_DIRエクスポート
 
 - `jv build --java-only <entry>` を実行すると、`project.output.directory`（既定: `target/java-project`）に Maven 互換プロジェクトが自動生成されます。
-- 生成物には `pom.xml`, `.jv/settings.xml`, `.jv/classpath.txt`, エクスポートされた `.jv/repository/`、Javaソース (`src/`) が含まれます。
+- 生成物には `pom.xml`, `settings.xml`, `.jv/classpath.txt`, エクスポートされた `.jv/repository/`、Javaソース (`src/`) が含まれます。
 - 生成物を再生成したい場合は再度 `jv build` を実行してください。`OUTPUT_DIR` や Javaターゲットを変更する場合は `jv.toml` か CLI フラグで上書きします。
 - ソースディレクトリが存在しない場合はエクスポートがスキップされ、その旨が警告として表示されます。
 - `.jv/repository` にはローカルキャッシュ済みの全JARがコピーされるため、CI/CDでの完全再現ビルドに直接利用できます。

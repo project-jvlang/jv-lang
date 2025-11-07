@@ -586,7 +586,6 @@ fn auto_export_maven_outputs(prepared_output: &PreparedOutput) -> Result<()> {
                 "  settings.xml    : {}",
                 summary
                     .output_dir
-                    .join(".jv")
                     .join("settings.xml")
                     .display()
             );

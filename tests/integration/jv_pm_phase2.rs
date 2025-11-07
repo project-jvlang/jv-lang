@@ -100,11 +100,14 @@ fn cli_add_then_build_exports_java_project() {
 
     let output_dir = sandbox.project_root().join("target/java-project");
     let pom_path = output_dir.join("pom.xml");
-    let settings_path = output_dir.join(".jv/settings.xml");
-    let classpath_path = output_dir.join("classpath.txt");
+    let settings_path = output_dir.join("settings.xml");
+    let classpath_path = output_dir.join(".jv").join("classpath.txt");
     assert!(pom_path.exists(), "pom.xml が生成されていません");
     assert!(settings_path.exists(), "settings.xml が生成されていません");
-    assert!(classpath_path.exists(), "classpath.txt が生成されていません");
+    assert!(
+        classpath_path.exists(),
+        ".jv/classpath.txt が生成されていません"
+    );
 
     let pom = fs::read_to_string(&pom_path).expect("pom.xml の読み込みに失敗しました");
     assert!(
@@ -124,10 +127,11 @@ fn cli_add_then_build_exports_java_project() {
         .join("org/example/demo/1.0.0/demo-1.0.0.jar");
     assert!(exported_demo.exists(), "エクスポート先に demo-1.0.0.jar が存在しません");
 
-    let classpath = fs::read_to_string(&classpath_path).expect("classpath.txt の読み込みに失敗しました");
+    let classpath = fs::read_to_string(&classpath_path)
+        .expect(".jv/classpath.txt の読み込みに失敗しました");
     assert!(
         classpath.contains("demo-1.0.0.jar"),
-        "classpath.txt に demo-1.0.0.jar のエントリが含まれていません"
+        ".jv/classpath.txt に demo-1.0.0.jar のエントリが含まれていません"
     );
 }
 

@@ -236,7 +236,7 @@ impl MavenIntegrationStrategy for Maven3IntegrationStrategy {
 
         let mut files = MavenIntegrationFiles::new();
         files.push(PathBuf::from("pom.xml"), pom);
-        files.push(PathBuf::from(".jv/settings.xml"), settings);
+        files.push(PathBuf::from("settings.xml"), settings);
         Ok(files)
     }
 }
@@ -415,7 +415,7 @@ mod tests {
             files
                 .files
                 .iter()
-                .any(|(path, _)| path == Path::new(".jv/settings.xml"))
+                .any(|(path, _)| path == Path::new("settings.xml"))
         );
     }
 }
