@@ -6,8 +6,8 @@ use tempfile::{tempdir, TempDir};
 
 use jv_pm::{
     ArtifactCoordinates, ArtifactDownloadRequest, BuildInfo, DependencyCache, DownloadManager,
-    DownloadedJar, Manifest, MavenProjectMetadata, PackageInfo, ProjectSection, RepositorySection,
-    ResolverDispatcher, ResolverOptions,
+    DownloadSettings, DownloadSource, DownloadedJar, Manifest, MavenProjectMetadata, PackageInfo,
+    ProjectSection, RepositorySection, ResolverDispatcher, ResolverOptions,
 };
 
 use std::collections::HashMap;
@@ -20,6 +20,9 @@ use std::pin::Pin;
 use std::process::Command;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
+
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 
 const SAMPLE_MAIN: &str = r#"fun main() {
     println("Hello, jv!")
@@ -96,19 +99,36 @@ fn cli_add_then_build_exports_java_project() {
         .stdout(predicate::str::contains("出力ディレクトリ"));
 
     let output_dir = sandbox.project_root().join("target/java-project");
-    assert!(output_dir.join("pom.xml").exists(), "pom.xml が生成されていません");
-    assert!(output_dir.join(".jv/settings.xml").exists(), "settings.xml が生成されていません");
-    assert!(output_dir.join("classpath.txt").exists(), "classpath.txt が生成されていません");
+    let pom_path = output_dir.join("pom.xml");
+    let settings_path = output_dir.join(".jv/settings.xml");
+    let classpath_path = output_dir.join("classpath.txt");
+    assert!(pom_path.exists(), "pom.xml が生成されていません");
+    assert!(settings_path.exists(), "settings.xml が生成されていません");
+    assert!(classpath_path.exists(), "classpath.txt が生成されていません");
 
-    let settings = fs::read_to_string(output_dir.join(".jv/settings.xml"))
-        .expect("failed to read settings.xml");
+    let pom = fs::read_to_string(&pom_path).expect("pom.xml の読み込みに失敗しました");
     assert!(
-        settings.contains(registry_url),
-        "settings.xml にレジストリURLが含まれていません"
+        pom.contains("<artifactId>demo</artifactId>") && pom.contains("<version>1.0.0</version>"),
+        "pom.xml に依存関係 org.example:demo:1.0.0 が記載されていません"
     );
+
+    let settings = fs::read_to_string(&settings_path)
+        .expect("failed to read settings.xml");
+    let local_repo = normalise_path(&sandbox.project_root().join(".jv/repository"));
+    assert!(settings.contains(&local_repo), "settings.xml にローカルリポジトリパスが含まれていません");
+    assert!(settings.contains(registry_url), "settings.xml にレジストリURLが含まれていません");
 
     let exported_repo = output_dir.join(".jv/repository");
     assert!(exported_repo.exists(), ".jv/repository がエクスポートされていません");
+    let exported_demo = exported_repo
+        .join("org/example/demo/1.0.0/demo-1.0.0.jar");
+    assert!(exported_demo.exists(), "エクスポート先に demo-1.0.0.jar が存在しません");
+
+    let classpath = fs::read_to_string(&classpath_path).expect("classpath.txt の読み込みに失敗しました");
+    assert!(
+        classpath.contains("demo-1.0.0.jar"),
+        "classpath.txt に demo-1.0.0.jar のエントリが含まれていません"
+    );
 }
 
 #[test]
@@ -283,6 +303,100 @@ fn cli_repo_commands_manage_project_repositories() {
     assert!(!has_company, "company repository should be removed");
 }
 
+#[cfg(unix)]
+#[test]
+fn jvpm_maven_wrapper_forwards_commands_to_external_maven() {
+    let jvpm_path = match cargo_bin_path("jvpm") {
+        Some(path) => path,
+        None => {
+            eprintln!(
+                "skipping jvpm_maven_wrapper_forwards_commands_to_external_maven: jvpm binary unavailable"
+            );
+            return;
+        }
+    };
+
+    let sandbox = TestSandbox::new("https://registry.integration.test/");
+    let script_path = sandbox.project_root().join("fake-mvn.sh");
+    let log_path = sandbox.project_root().join("maven-forward.log");
+    let script_contents = "#!/bin/bash\nprintf \"%s\\n\" \"$*\" >> \"$JVPM_MAVEN_LOG\"\nexit 0\n";
+    fs::write(&script_path, script_contents).expect("フォワード用スクリプトの作成に失敗しました");
+    let mut perms = fs::metadata(&script_path)
+        .expect("スクリプトのメタデータ取得に失敗しました")
+        .permissions();
+    perms.set_mode(0o755);
+    fs::set_permissions(&script_path, perms).expect("スクリプトに実行権限を付与できませんでした");
+
+    let maven_home = sandbox.home_path().join(".m2");
+    fs::create_dir_all(&maven_home).expect("Mavenホームディレクトリの作成に失敗しました");
+
+    let mut repo_cmd = Command::new(&jvpm_path);
+    sandbox.configure_common_env(&mut repo_cmd);
+    repo_cmd.env("MAVEN_USER_HOME", &maven_home);
+    repo_cmd.env("JVPM_MAVEN_BIN", &script_path);
+    repo_cmd.env("JVPM_MAVEN_LOG", &log_path);
+    repo_cmd.args(["repo", "list", "--json"]);
+    let repo_output = repo_cmd
+        .output()
+        .expect("jvpm repo list の実行に失敗しました");
+    assert!(repo_output.status.success(), "repo list が失敗しました");
+    assert!(
+        !log_path.exists(),
+        "jvpm 固有コマンドで Maven ラッパーが呼び出されました"
+    );
+
+    let mut install_cmd = Command::new(&jvpm_path);
+    sandbox.configure_common_env(&mut install_cmd);
+    install_cmd.env("MAVEN_USER_HOME", &maven_home);
+    install_cmd.env("JVPM_MAVEN_BIN", &script_path);
+    install_cmd.env("JVPM_MAVEN_LOG", &log_path);
+    install_cmd.arg("install").arg("-DskipTests");
+    let install_output = install_cmd
+        .output()
+        .expect("jvpm install の実行に失敗しました");
+    assert!(install_output.status.success(), "jvpm install が失敗しました");
+
+    let mut log_contents = fs::read_to_string(&log_path)
+        .expect("Mavenフォワードログの読み込みに失敗しました");
+    assert!(
+        log_contents
+            .lines()
+            .any(|line| line == "install -DskipTests"),
+        "install コマンドが Maven へフォワードされていません"
+    );
+
+    let mut clean_cmd = Command::new(&jvpm_path);
+    sandbox.configure_common_env(&mut clean_cmd);
+    clean_cmd.env("MAVEN_USER_HOME", &maven_home);
+    clean_cmd.env("JVPM_MAVEN_BIN", &script_path);
+    clean_cmd.env("JVPM_MAVEN_LOG", &log_path);
+    clean_cmd.args(["clean", "package"]);
+    let clean_output = clean_cmd
+        .output()
+        .expect("jvpm clean package の実行に失敗しました");
+    assert!(clean_output.status.success(), "jvpm clean package が失敗しました");
+
+    log_contents = fs::read_to_string(&log_path)
+        .expect("Mavenフォワードログの再読み込みに失敗しました");
+    assert!(
+        log_contents.lines().any(|line| line == "clean package"),
+        "clean package コマンドが Maven へフォワードされていません"
+    );
+    let forwarded = log_contents
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .count();
+    assert_eq!(forwarded, 2, "Maven フォワード回数が期待値と一致しません");
+}
+
+#[cfg(not(unix))]
+#[test]
+fn jvpm_maven_wrapper_forwards_commands_to_external_maven() {
+    eprintln!(
+        "skipping jvpm_maven_wrapper_forwards_commands_to_external_maven: unix 環境のみ対応"
+    );
+}
+
 #[tokio::test]
 async fn download_manager_emits_concurrency_warnings() {
     let registry = MockRegistry::new();
@@ -301,10 +415,16 @@ async fn download_manager_emits_concurrency_warnings() {
     let registry_client = Arc::new(registry.clone());
 
     let mut build = BuildInfo::default();
-    build.max_concurrent_downloads = Some(32);
+    build.max_concurrent_downloads = Some(128);
     build.max_concurrent_warning = Some(8);
 
     let manager = DownloadManager::new(registry_client, cache).apply_manifest(Some(&build));
+    let expected_limit = DownloadSettings::default().hard_limit;
+    assert_eq!(
+        manager.effective_concurrency(),
+        expected_limit,
+        "ハードリミットが適用されていません"
+    );
 
     let requests = (0..12)
         .map(|index| {
@@ -323,8 +443,80 @@ async fn download_manager_emits_concurrency_warnings() {
         report
             .warnings
             .iter()
+            .any(|message| message.contains("丸めました")),
+        "ハードリミット適用の警告が出力されていません"
+    );
+    assert!(
+        report
+            .warnings
+            .iter()
             .any(|message| message.contains("警告閾値")),
-        "警告メッセージが期待どおりに出力されていません"
+        "警告閾値超過の警告が出力されていません"
+    );
+}
+
+#[tokio::test]
+async fn download_manager_cache_hit_miss_benchmark() {
+    let registry = MockRegistry::new();
+    let dependencies = (0..6)
+        .map(|index| (
+            "org.integration".to_string(),
+            format!("bench{}", index),
+            "1.0.0".to_string(),
+        ))
+        .collect::<Vec<_>>();
+
+    for (group, artifact, version) in &dependencies {
+        let coords = ArtifactCoordinates::new(group, artifact, version);
+        registry.insert_success(&coords, format!("jar-bytes-{artifact}").into_bytes());
+    }
+
+    let cache_dir = tempdir().expect("キャッシュ用ディレクトリの作成に失敗しました");
+    let cache = Arc::new(
+        DependencyCache::with_dir(cache_dir.path().to_path_buf())
+            .expect("キャッシュ初期化に失敗しました"),
+    );
+
+    let registry_client = Arc::new(registry.clone());
+    let manager = DownloadManager::new(registry_client, cache);
+
+    let make_requests = || {
+        dependencies
+            .iter()
+            .map(|(group, artifact, version)| {
+                ArtifactDownloadRequest::new(ArtifactCoordinates::new(group, artifact, version))
+            })
+            .collect::<Vec<_>>()
+    };
+
+    let start = Instant::now();
+    let first = manager.download_artifacts(make_requests()).await;
+    assert!(first.failures.is_empty(), "初回ダウンロードで失敗が発生しました");
+    assert_eq!(first.successes.len(), dependencies.len());
+    assert!(
+        first
+            .successes
+            .iter()
+            .all(|entry| matches!(entry.source(), DownloadSource::Registry)),
+        "初回ダウンロードはレジストリからの取得である必要があります"
+    );
+
+    let second = manager.download_artifacts(make_requests()).await;
+    assert!(second.failures.is_empty(), "2回目のダウンロードで失敗が発生しました");
+    assert_eq!(second.successes.len(), dependencies.len());
+    assert!(
+        second
+            .successes
+            .iter()
+            .all(|entry| matches!(entry.source(), DownloadSource::Cache)),
+        "2回目のダウンロードはキャッシュヒットとなるはずです"
+    );
+
+    let elapsed = start.elapsed();
+    assert!(
+        elapsed < Duration::from_secs(5),
+        "キャッシュ検証が想定よりも遅すぎます: {:?}",
+        elapsed
     );
 }
 
@@ -488,4 +680,8 @@ fn repo_root() -> PathBuf {
         .find(|candidate| candidate.join("toolchains").is_dir())
         .expect("failed to locate repository root")
         .to_path_buf()
+}
+
+fn normalise_path(path: &Path) -> String {
+    path.to_string_lossy().replace('\\', "/")
 }
