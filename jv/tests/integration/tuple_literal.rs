@@ -82,7 +82,7 @@ fn generate_java_source(name: &str, target: JavaTarget) -> String {
 
 #[test]
 fn tuple_fixtures_match_expected_java() {
-    let fixtures = ["divmod", "find_user", "calculate_stats"];
+    let fixtures = ["divmod", "find_user", "calculate_stats", "function_return"];
     for target in [JavaTarget::Java25, JavaTarget::Java21] {
         for fixture in fixtures {
             let actual = generate_java_source(fixture, target);

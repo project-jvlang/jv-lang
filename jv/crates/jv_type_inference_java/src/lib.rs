@@ -133,6 +133,10 @@ fn lower_from_tokens(tokens: &[Token]) -> Result<LoweredTypeAnnotation, TypeLowe
         ));
     }
 
+    if let Some(lowered) = try_lower_tuple_annotation(tokens, &filtered) {
+        return Ok(lowered);
+    }
+
     match TypeAnnotationParser::new(&filtered).parse() {
         Ok(annotation) => {
             let span = tokens_span(&filtered);
@@ -170,6 +174,208 @@ fn tokens_span(tokens: &[Token]) -> Option<Span> {
     let start = span_from_token(first);
     let end = span_from_token(last);
     Some(merge_spans(&start, &end))
+}
+
+fn try_lower_tuple_annotation(
+    tokens: &[Token],
+    filtered: &[Token],
+) -> Option<LoweredTypeAnnotation> {
+    let (mut base_annotation, base_span, tuple_end_index) =
+        detect_tuple_annotation(tokens, filtered)?;
+    let span = base_span.or_else(|| tokens_span(filtered));
+    // Apply array and nullable modifiers by re-parsing the trimmed suffix portion.
+    let raw_text = tokens_to_text(tokens);
+    let trimmed = raw_text.trim().to_string();
+
+    // Remove parentheses part to inspect suffixes. `detect_tuple_annotation` guarantees
+    // the tuple text is at the beginning of the trimmed string.
+    let mut suffix = trimmed[tuple_end_index..].trim_start().to_string();
+
+    while suffix.starts_with("[]") {
+        base_annotation = TypeAnnotation::Array(Box::new(base_annotation));
+        suffix = suffix[2..].trim_start().to_string();
+    }
+
+    if suffix.starts_with('?') {
+        base_annotation = TypeAnnotation::Nullable(Box::new(base_annotation));
+        suffix = suffix[1..].trim_start().to_string();
+    }
+
+    if !suffix.is_empty() {
+        return None;
+    }
+
+    Some(LoweredTypeAnnotation {
+        annotation: base_annotation,
+        span,
+    })
+}
+
+fn detect_tuple_annotation(
+    tokens: &[Token],
+    filtered: &[Token],
+) -> Option<(TypeAnnotation, Option<Span>, usize)> {
+    if filtered.first()?.token_type != TokenType::LeftParen {
+        return None;
+    }
+
+    let joined = tokens_to_text(tokens);
+    let trimmed = joined.trim();
+
+    let (tuple_text, tuple_end_index) = extract_tuple_text(trimmed)?;
+    let elements = match tuple_elements(tuple_text) {
+        Ok(elements) if elements.len() >= 2 => elements,
+        _ => return None,
+    };
+    let normalized_text = format!("({})", elements.join(" "));
+
+    // Build the base annotation using the normalized tuple text.
+    let annotation = TypeAnnotation::Simple(normalized_text);
+    let span = tokens_span(filtered);
+
+    // Ensure that there are no unexpected characters immediately following the tuple
+    // opening sequence such as an arrow that would indicate a function type.
+    let suffix = trimmed[tuple_end_index..].trim_start();
+    if suffix.starts_with("->") {
+        return None;
+    }
+
+    Some((annotation, span, tuple_end_index))
+}
+
+fn tokens_to_text(tokens: &[Token]) -> String {
+    let mut text = String::new();
+    for token in tokens {
+        if matches!(token.token_type, TokenType::Eof) {
+            continue;
+        }
+        let trivia = &token.leading_trivia;
+        for _ in 0..trivia.newlines {
+            text.push('\n');
+        }
+        for _ in 0..trivia.spaces {
+            text.push(' ');
+        }
+        text.push_str(token.lexeme.as_str());
+    }
+    text
+}
+
+fn extract_tuple_text(text: &str) -> Option<(&str, usize)> {
+    let trimmed = text.trim_start();
+    if !trimmed.starts_with('(') {
+        return None;
+    }
+
+    let mut depth = 0usize;
+    for (idx, ch) in trimmed.char_indices() {
+        match ch {
+            '(' => depth += 1,
+            ')' => {
+                if depth == 0 {
+                    return None;
+                }
+                depth -= 1;
+                if depth == 0 {
+                    let end_index = idx + 1;
+                    let tuple_text = &trimmed[..end_index];
+                    return Some((tuple_text, end_index));
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+fn tuple_elements(value: &str) -> Result<Vec<String>, ()> {
+    if value.len() < 2 {
+        return Err(());
+    }
+    let inner = &value[1..value.len() - 1];
+    split_tuple_elements(inner)
+}
+
+fn split_tuple_elements(value: &str) -> Result<Vec<String>, ()> {
+    let mut elements = Vec::new();
+    let mut current = String::new();
+    let mut paren_depth = 0usize;
+    let mut angle_depth = 0usize;
+    let mut square_depth = 0usize;
+
+    let mut chars = value.chars().peekable();
+    while let Some(ch) = chars.next() {
+        match ch {
+            '(' => {
+                paren_depth += 1;
+                current.push(ch);
+            }
+            ')' => {
+                if paren_depth == 0 {
+                    return Err(());
+                }
+                paren_depth -= 1;
+                current.push(ch);
+            }
+            '<' => {
+                angle_depth += 1;
+                current.push(ch);
+            }
+            '>' => {
+                if angle_depth == 0 {
+                    return Err(());
+                }
+                angle_depth -= 1;
+                current.push(ch);
+            }
+            '[' => {
+                square_depth += 1;
+                current.push(ch);
+            }
+            ']' => {
+                if square_depth == 0 {
+                    return Err(());
+                }
+                square_depth -= 1;
+                current.push(ch);
+            }
+            ',' => {
+                if paren_depth == 0 && angle_depth == 0 && square_depth == 0 {
+                    flush_segment(&mut current, &mut elements);
+                } else {
+                    current.push(ch);
+                }
+            }
+            ch if ch.is_whitespace() => {
+                if paren_depth == 0 && angle_depth == 0 && square_depth == 0 {
+                    flush_segment(&mut current, &mut elements);
+                } else {
+                    current.push(ch);
+                }
+            }
+            _ => current.push(ch),
+        }
+    }
+
+    if paren_depth != 0 || angle_depth != 0 || square_depth != 0 {
+        return Err(());
+    }
+
+    flush_segment(&mut current, &mut elements);
+
+    if elements.is_empty() {
+        return Err(());
+    }
+
+    Ok(elements)
+}
+
+fn flush_segment(buffer: &mut String, elements: &mut Vec<String>) {
+    let trimmed = buffer.trim();
+    if !trimmed.is_empty() {
+        elements.push(trimmed.to_string());
+    }
+    buffer.clear();
 }
 
 #[derive(Debug)]
@@ -508,5 +714,105 @@ mod tests {
             }
             other => panic!("unexpected annotation: {:?}", other),
         }
+    }
+
+    #[test]
+    fn lower_tuple_type_annotation() {
+        let tokens = vec![
+            token(TokenType::LeftParen, "("),
+            token(TokenType::Whitespace(" ".into()), " "),
+            token(TokenType::Identifier("Int".into()), "Int"),
+            token(TokenType::Whitespace(" ".into()), " "),
+            token(TokenType::Identifier("String".into()), "String"),
+            token(TokenType::Whitespace(" ".into()), " "),
+            token(TokenType::RightParen, ")"),
+        ];
+        let lowered = lower_type_annotation_from_tokens(&tokens).expect("should lower tuple");
+        assert_eq!(
+            lowered.annotation(),
+            &TypeAnnotation::Simple("(Int String)".into())
+        );
+    }
+
+    #[test]
+    fn lower_tuple_type_annotation_with_newlines() {
+        let tokens = vec![
+            token(TokenType::LeftParen, "("),
+            token(TokenType::Newline, "\n"),
+            token(TokenType::Identifier("Int".into()), "Int"),
+            token(TokenType::Newline, "\n"),
+            token(TokenType::Identifier("String".into()), "String"),
+            token(TokenType::Newline, "\n"),
+            token(TokenType::RightParen, ")"),
+        ];
+        let lowered = lower_type_annotation_from_tokens(&tokens).expect("should lower tuple");
+        assert_eq!(
+            lowered.annotation(),
+            &TypeAnnotation::Simple("(Int String)".into())
+        );
+    }
+
+    #[test]
+    fn lower_nullable_tuple_type_annotation() {
+        let tokens = vec![
+            token(TokenType::LeftParen, "("),
+            token(TokenType::Whitespace(" ".into()), " "),
+            token(TokenType::Identifier("Int".into()), "Int"),
+            token(TokenType::Whitespace(" ".into()), " "),
+            token(TokenType::Identifier("String".into()), "String"),
+            token(TokenType::Whitespace(" ".into()), " "),
+            token(TokenType::RightParen, ")"),
+            token(TokenType::Question, "?"),
+        ];
+        let lowered =
+            lower_type_annotation_from_tokens(&tokens).expect("should lower nullable tuple");
+        match lowered.annotation() {
+            TypeAnnotation::Nullable(inner) => match inner.as_ref() {
+                TypeAnnotation::Simple(text) => assert_eq!(text, "(Int String)"),
+                other => panic!("unexpected inner annotation: {:?}", other),
+            },
+            other => panic!("unexpected annotation: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn lower_array_tuple_type_annotation() {
+        let tokens = vec![
+            token(TokenType::LeftParen, "("),
+            token(TokenType::Whitespace(" ".into()), " "),
+            token(TokenType::Identifier("Int".into()), "Int"),
+            token(TokenType::Whitespace(" ".into()), " "),
+            token(TokenType::Identifier("String".into()), "String"),
+            token(TokenType::Whitespace(" ".into()), " "),
+            token(TokenType::RightParen, ")"),
+            token(TokenType::LeftBracket, "["),
+            token(TokenType::RightBracket, "]"),
+        ];
+        let lowered = lower_type_annotation_from_tokens(&tokens).expect("should lower tuple array");
+        match lowered.annotation() {
+            TypeAnnotation::Array(inner) => match inner.as_ref() {
+                TypeAnnotation::Simple(text) => assert_eq!(text, "(Int String)"),
+                other => panic!("unexpected inner annotation: {:?}", other),
+            },
+            other => panic!("unexpected annotation: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn lower_tuple_type_annotation_from_lexer() {
+        use jv_lexer::Lexer;
+        let mut lexer = Lexer::new("(Int String)".to_string());
+        let mut tokens = lexer.tokenize().expect("lexing should succeed");
+        if let Some(last) = tokens.last() {
+            if matches!(last.token_type, TokenType::Eof) {
+                tokens.pop();
+            }
+        }
+        let lowered =
+            lower_type_annotation_from_tokens(&tokens).expect("should lower tuple annotation");
+        assert_eq!(
+            lowered.annotation(),
+            &TypeAnnotation::Simple("(Int String)".into())
+        );
     }
 }
