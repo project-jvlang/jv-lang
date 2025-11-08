@@ -41,6 +41,15 @@ impl LayoutStage {
             let starts_when_block = matches!(when_event, WhenTrackerEvent::EnterBlock);
 
             if let Some(ctx) = stack.last_mut() {
+                if matches!(ctx.kind, SequenceContextKind::When)
+                    && ctx.when_brace_depth == 1
+                    && ctx.when_paren_depth == 0
+                    && ctx.when_bracket_depth == 0
+                    && token.leading_trivia.newlines > 0
+                {
+                    ctx.when_in_branch_body = false;
+                }
+
                 let eligible = match ctx.kind {
                     SequenceContextKind::Array => {
                         !matches!(token.token_type, TokenType::Comma | TokenType::RightBracket)
@@ -52,6 +61,7 @@ impl LayoutStage {
                         ctx.when_brace_depth == 1
                             && ctx.when_paren_depth == 0
                             && ctx.when_bracket_depth == 0
+                            && !ctx.when_in_branch_body
                             && is_when_layout_candidate(&token.token_type)
                     }
                 } && is_sequence_layout_candidate(
@@ -61,8 +71,16 @@ impl LayoutStage {
                 );
 
                 if eligible {
-                    let layout_needed =
+                    let mut layout_needed =
                         !ctx.prev_was_separator && has_layout_trivia(&token.leading_trivia);
+
+                    if layout_needed
+                        && matches!(ctx.kind, SequenceContextKind::When)
+                        && token.leading_trivia.newlines == 0
+                        && !token.leading_trivia.comments
+                    {
+                        layout_needed = false;
+                    }
 
                     if layout_needed {
                         match ctx.kind {
@@ -92,6 +110,7 @@ impl LayoutStage {
                                     .push(TokenMetadata::LayoutComma(metadata));
                                 result_origins.push(origin);
                                 result_tokens.push(synthetic);
+                                ctx.when_in_branch_body = false;
                             }
                         }
 
@@ -154,6 +173,29 @@ impl LayoutStage {
                             }
                         }
                         ctx.prev_was_separator = false;
+                        ctx.last_explicit_separator = None;
+                    }
+                }
+                TokenType::Arrow | TokenType::FatArrow => {
+                    if let Some(ctx) = stack.last_mut() {
+                        if let SequenceContextKind::When = ctx.kind {
+                            if ctx.when_brace_depth == 1
+                                && ctx.when_paren_depth == 0
+                                && ctx.when_bracket_depth == 0
+                            {
+                                ctx.when_in_branch_body = true;
+                            }
+                        }
+                        ctx.prev_was_separator = false;
+                        ctx.last_explicit_separator = None;
+                    }
+                }
+                TokenType::LayoutComma => {
+                    if let Some(ctx) = stack.last_mut() {
+                        if let SequenceContextKind::When = ctx.kind {
+                            ctx.when_in_branch_body = false;
+                        }
+                        ctx.prev_was_separator = true;
                         ctx.last_explicit_separator = None;
                     }
                 }
@@ -268,6 +310,7 @@ struct SequenceContext {
     when_brace_depth: usize,
     when_paren_depth: usize,
     when_bracket_depth: usize,
+    when_in_branch_body: bool,
 }
 
 impl SequenceContext {
@@ -279,6 +322,7 @@ impl SequenceContext {
             when_brace_depth: 0,
             when_paren_depth: 0,
             when_bracket_depth: 0,
+            when_in_branch_body: false,
         }
     }
 
@@ -290,17 +334,19 @@ impl SequenceContext {
             when_brace_depth: 0,
             when_paren_depth: 0,
             when_bracket_depth: 0,
+            when_in_branch_body: false,
         }
     }
 
     fn new_when() -> Self {
         Self {
             kind: SequenceContextKind::When,
-            prev_was_separator: true,
+            prev_was_separator: false,
             last_explicit_separator: None,
             when_brace_depth: 1,
             when_paren_depth: 0,
             when_bracket_depth: 0,
+            when_in_branch_body: false,
         }
     }
 }
