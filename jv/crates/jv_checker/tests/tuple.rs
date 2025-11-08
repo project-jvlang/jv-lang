@@ -145,3 +145,143 @@ fun duplicate(value: Int): (Int Int) {
     );
     assert_eq!(プラン.type_hints, vec!["Int".into(), "Int".into()]);
 }
+
+#[test]
+fn コメントラベル付きタプルのフィールドメタがプランに集約される() {
+    let ソース = r#"
+fun labeled(first: Int, second: Int): (Int Int) {
+    return (
+        // primaryFirst
+        /* extraAlias */
+        first
+        // primarySecond
+        /* extraSecond */
+        second
+    )
+}
+"#;
+    let チェッカー = 型チェック済み(ソース);
+
+    let プラン一覧 = チェッカー.tuple_record_plans();
+    assert_eq!(プラン一覧.len(), 1, "タプル計画が1件生成されること");
+    let プラン = &プラン一覧[0];
+    assert_eq!(
+        プラン.strategy,
+        TupleRecordStrategy::Specific,
+        "関数戻り値専用のプランはSpecific戦略となること"
+    );
+    assert_eq!(
+        プラン.specific_name.as_deref(),
+        Some("Labeled_Result"),
+        "関数名からPascalCaseのレコード名が生成されること"
+    );
+    assert_eq!(
+        プラン.type_hints,
+        vec!["Int".into(), "Int".into()],
+        "戻り値注釈から型ヒントが埋め込まれること"
+    );
+    assert_eq!(
+        プラン.fields.len(),
+        2,
+        "2要素分のフィールドメタが生成されること"
+    );
+
+    let 最初 = &プラン.fields[0];
+    assert_eq!(
+        最初.primary_label.as_deref(),
+        Some("primaryFirst"),
+        "コメント由来のprimaryラベルが保持されること"
+    );
+    let 最初副次: Vec<_> = 最初
+        .secondary_labels
+        .iter()
+        .map(|ラベル| ラベル.name.as_str())
+        .collect();
+    assert_eq!(最初副次, vec!["extraAlias"], "副次ラベルも保持されること");
+    assert_eq!(
+        最初.identifier_hint.as_deref(),
+        Some("first"),
+        "識別子ヒントが記録されること"
+    );
+
+    let 二番目 = &プラン.fields[1];
+    assert_eq!(
+        二番目.primary_label.as_deref(),
+        Some("primarySecond"),
+        "2番目の要素でもprimaryラベルが保存されること"
+    );
+    let 二番目副次: Vec<_> = 二番目
+        .secondary_labels
+        .iter()
+        .map(|ラベル| ラベル.name.as_str())
+        .collect();
+    assert_eq!(
+        二番目副次,
+        vec!["extraSecond"],
+        "2番目の要素でも副次ラベルが保存されること"
+    );
+    assert_eq!(
+        二番目.identifier_hint.as_deref(),
+        Some("second"),
+        "2番目の識別子ヒントが記録されること"
+    );
+
+    assert_eq!(
+        プラン.usage_sites.len(),
+        1,
+        "使用箇所は関数戻り値のみが記録されること"
+    );
+    assert_eq!(
+        プラン.usage_sites[0].kind,
+        TupleUsageKind::FunctionReturn,
+        "使用種別がFunctionReturnであること"
+    );
+    assert_eq!(
+        プラン.usage_sites[0].owner.as_deref(),
+        Some("labeled"),
+        "使用箇所の所有者が関数名と一致すること"
+    );
+}
+
+#[test]
+fn 代入式で使用したタプルはAssignmentValueとして追跡される() {
+    let ソース = r#"
+fun mutate(value: Int): (Int Int) {
+    var state: (Int Int) = (0 0)
+    state = (value value)
+    return state
+}
+"#;
+    let チェッカー = 型チェック済み(ソース);
+
+    let プラン一覧 = チェッカー.tuple_record_plans();
+    assert_eq!(プラン一覧.len(), 1, "タプル計画が1件生成されること");
+    let プラン = &プラン一覧[0];
+    assert_eq!(
+        プラン.strategy,
+        TupleRecordStrategy::Generic,
+        "戻り値以外の用途が混在する場合は汎用レコードが選択されること"
+    );
+    assert_eq!(
+        プラン.type_hints,
+        vec!["Int".into(), "Int".into()],
+        "型注釈からヒントが伝搬すること"
+    );
+    assert_eq!(
+        プラン.usage_sites.len(),
+        2,
+        "初期化と再代入の2箇所が記録されること"
+    );
+
+    let mut 初期化検出 = false;
+    let mut 代入検出 = false;
+    for 使用 in &プラン.usage_sites {
+        match 使用.kind {
+            TupleUsageKind::BindingInitializer => 初期化検出 = true,
+            TupleUsageKind::AssignmentValue => 代入検出 = true,
+            _ => {}
+        }
+    }
+    assert!(初期化検出, "BindingInitializerとしての使用が記録されること");
+    assert!(代入検出, "AssignmentValueとしての使用が記録されること");
+}

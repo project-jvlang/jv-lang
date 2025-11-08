@@ -4,7 +4,7 @@ data User(id: Int, name: String)
 
 fun main(): Unit {
     val selected: User = User(9 "Bob")
-    val findUserResult = (selected true)
+    val findUserResult: (User Bool) = (selected true)
 
     val (user found) = findUserResult
     println("findUser: id=${user.id} found=${found}")

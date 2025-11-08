@@ -65,6 +65,80 @@ fn 空白区切りの括弧はタプルとして解釈される() {
 }
 
 #[test]
+fn コメントラベルがタプルメタデータに反映される() {
+    let ソース = r#"
+val labeled = (
+    // userId
+    /* account */
+    user
+    // balance
+    /* amount */
+    amount
+)
+"#;
+    let (プログラム, 診断) = 解析結果(ソース);
+
+    assert!(
+        最終診断一覧(&診断).next().is_none(),
+        "コメントラベル付きタプルでは診断を発行しない: {:?}",
+        診断.final_diagnostics()
+    );
+
+    let 文 = プログラム
+        .statements
+        .first()
+        .expect("トップレベルに1つの宣言が存在すること");
+
+    let 初期化式 = match 文 {
+        Statement::ValDeclaration { initializer, .. } => initializer,
+        その他 => panic!("val宣言を想定しているが {:?} が得られた", その他),
+    };
+
+    let フィールド = match 初期化式 {
+        Expression::Tuple { fields, .. } => fields,
+        予期しない式 => panic!("タプル式を期待したが {:?} が得られた", 予期しない式),
+    };
+
+    assert_eq!(フィールド.len(), 2, "2要素のタプルとして解析されること");
+
+    let 最初 = &フィールド[0];
+    assert_eq!(
+        最初.primary_label.as_deref(),
+        Some("userId"),
+        "最初のラベルがprimaryとして設定されること"
+    );
+    let 最初の副次ラベル: Vec<_> = 最初
+        .secondary_labels
+        .iter()
+        .map(|ラベル| ラベル.name.as_str())
+        .collect();
+    assert_eq!(最初の副次ラベル, vec!["account"], "最初の要素にはコメント由来の副次ラベルが付与されること");
+    assert_eq!(
+        最初.identifier_hint.as_deref(),
+        Some("user"),
+        "識別子要素はidentifier_hintに記録されること"
+    );
+
+    let 二番目 = &フィールド[1];
+    assert_eq!(
+        二番目.primary_label.as_deref(),
+        Some("balance"),
+        "二番目のラベルがprimaryとして設定されること"
+    );
+    let 二番目の副次ラベル: Vec<_> = 二番目
+        .secondary_labels
+        .iter()
+        .map(|ラベル| ラベル.name.as_str())
+        .collect();
+    assert_eq!(二番目の副次ラベル, vec!["amount"], "二番目の要素にも副次ラベルが引き継がれること");
+    assert_eq!(
+        二番目.identifier_hint.as_deref(),
+        Some("amount"),
+        "識別子要素はidentifier_hintに記録されること"
+    );
+}
+
+#[test]
 fn 空タプルは診断を返す() {
     let (_, 診断) = 解析結果("val invalid = ()");
     let エラー = 最終診断一覧(&診断)
@@ -75,6 +149,40 @@ fn 空タプルは診断を返す() {
         エラー.severity(),
         DiagnosticSeverity::Error,
         "空タプルはエラー扱いになること"
+    );
+}
+
+#[test]
+fn 分割代入ではタプルコンテキストが設定される() {
+    let (プログラム, 診断) = 解析結果("val (first second) = (10 20)");
+
+    assert!(
+        最終診断一覧(&診断).next().is_none(),
+        "要素数が一致する分割代入では診断を発行しない: {:?}",
+        診断.final_diagnostics()
+    );
+
+    let 文 = プログラム
+        .statements
+        .first()
+        .expect("宣言が1件存在すること");
+    let 初期化式 = match 文 {
+        Statement::ValDeclaration { initializer, .. } => initializer,
+        予期しない => panic!("val宣言を期待したが {:?} を受け取った", 予期しない),
+    };
+
+    let 文脈 = match 初期化式 {
+        Expression::Tuple { context, .. } => context,
+        予期しない式 => panic!("タプル式を期待したが {:?} を取得した", 予期しない式),
+    };
+
+    assert!(
+        文脈.in_destructuring_pattern,
+        "分割代入ではin_destructuring_patternが設定されること"
+    );
+    assert!(
+        !文脈.is_function_return,
+        "分割代入ではis_function_returnは偽のままであること"
     );
 }
 

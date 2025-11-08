@@ -4,7 +4,7 @@ fun main(): Unit {
     val divmodQuotient = dividend / divisor
     val divmodRemainder = dividend % divisor
 
-    val divmodResult = (
+    val divmodResult: (Int Int) = (
         divmodQuotient // quotient
         divmodRemainder // remainder
     )

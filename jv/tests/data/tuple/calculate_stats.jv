@@ -9,7 +9,7 @@ fun main(): Unit {
     val maxCandidate: Int = 9
     val total: Int = a + b + c
 
-    val stats = (
+    val stats: (Int Int Int) = (
         minCandidate
         maxCandidate
         total

@@ -228,4 +228,37 @@ fn tuple_demo_example_preserves_interpolation_calls() {
         interpolation_found,
         "Expected tuple_demo.jv to contain string interpolation calling tuple._3()"
     );
+
+    for target in [JavaTarget::Java25, JavaTarget::Java21] {
+        let generated = generate_java_source_from_text(&source, target);
+        if std::env::var("PRINT_TUPLE_DEMO").ok().as_deref() == Some("1") {
+            eprintln!("tuple_demo (java{}) output:\n{}", target.as_str(), generated);
+        }
+        let normalized = normalize(&generated);
+        assert!(
+            normalized.contains("new Divmod_Result"),
+            "Divmod_Result record instantiation should appear for divmod result (target: java{})",
+            target.as_str()
+        );
+        assert!(
+            normalized.contains("new Finduser_Result"),
+            "Finduser_Result record instantiation should appear for findUser result (target: java{})",
+            target.as_str()
+        );
+        assert!(
+            normalized.contains("new Calculatestats_Result"),
+            "Calculatestats_Result record instantiation should appear for calculateStats result (target: java{})",
+            target.as_str()
+        );
+        assert!(
+            normalized.contains("new Tuple3_Unknown_Unknown_Unknown"),
+            "Generic Tuple3 record instantiation should appear for labelPriority tuple (target: java{})",
+            target.as_str()
+        );
+        assert!(
+            normalized.contains("commentPrimary()"),
+            "Label-based accessor commentPrimary() should be generated for labelPriority tuple (target: java{})",
+            target.as_str()
+        );
+    }
 }
