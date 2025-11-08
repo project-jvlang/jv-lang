@@ -142,6 +142,21 @@ impl BindingResolver {
                 span,
             } => {
                 let initializer = self.resolve_expression(initializer);
+                if origin == ValBindingOrigin::Implicit {
+                    if let Some(binding_kind) = self.current_scope_binding(&name) {
+                        if matches!(binding_kind, BindingKind::Immutable { .. }) {
+                            self.diagnostics.push(CheckError::ValidationError {
+                                message: reassignment_message(&name),
+                                span: Some(span.clone()),
+                            });
+                        }
+                    } else if self.is_self_reference(&name, &initializer) {
+                        self.diagnostics.push(CheckError::ValidationError {
+                            message: missing_initializer_message(&name),
+                            span: Some(span.clone()),
+                        });
+                    }
+                }
                 self.declare_immutable(name.clone(), origin, span.clone(), true);
                 self.record_late_init_seed(name.clone(), origin, true, &modifiers);
                 Statement::ValDeclaration {
@@ -776,6 +791,12 @@ impl BindingResolver {
             }
         }
         None
+    }
+
+    fn current_scope_binding(&self, name: &str) -> Option<&BindingKind> {
+        self.scopes
+            .last()
+            .and_then(|scope| scope.get(name))
     }
 
     fn enter_scope(&mut self) {
