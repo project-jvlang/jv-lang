@@ -70,13 +70,17 @@ fn test_string_interpolation_red_phase() {
 
     // Look for interpolation-related tokens
     let token_types: Vec<_> = tokens.iter().map(|t| &t.token_type).collect();
-    assert!(token_types
-        .iter()
-        .any(|t| matches!(t, TokenType::StringStart)));
+    assert!(
+        token_types
+            .iter()
+            .any(|t| matches!(t, TokenType::StringStart))
+    );
     assert!(token_types.contains(&&TokenType::Identifier("name".to_string())));
-    assert!(token_types
-        .iter()
-        .any(|t| matches!(t, TokenType::StringEnd)));
+    assert!(
+        token_types
+            .iter()
+            .any(|t| matches!(t, TokenType::StringEnd))
+    );
 }
 
 #[test]
@@ -493,9 +497,11 @@ fn test_block_brace_has_no_json_metadata() {
         .map(|token| token.metadata.iter().collect::<Vec<_>>())
         .unwrap_or_default();
 
-    assert!(brace_metadata
-        .iter()
-        .all(|metadata| !matches!(metadata, TokenMetadata::PotentialJsonStart { .. })));
+    assert!(
+        brace_metadata
+            .iter()
+            .all(|metadata| !matches!(metadata, TokenMetadata::PotentialJsonStart { .. }))
+    );
 }
 
 #[test]
@@ -644,12 +650,16 @@ fn test_range_tokens() {
     let mut lexer = Lexer::new(source.to_string());
     let tokens = lexer.tokenize().unwrap();
 
-    assert!(tokens
-        .iter()
-        .any(|t| matches!(t.token_type, TokenType::RangeExclusive)));
-    assert!(tokens
-        .iter()
-        .any(|t| matches!(t.token_type, TokenType::RangeInclusive)));
+    assert!(
+        tokens
+            .iter()
+            .any(|t| matches!(t.token_type, TokenType::RangeExclusive))
+    );
+    assert!(
+        tokens
+            .iter()
+            .any(|t| matches!(t.token_type, TokenType::RangeInclusive))
+    );
 }
 
 #[test]

@@ -1,5 +1,5 @@
-use criterion::{black_box, criterion_group, criterion_main, BatchSize, Criterion};
-use jv_lexer::{pipeline, Lexer};
+use criterion::{BatchSize, Criterion, black_box, criterion_group, criterion_main};
+use jv_lexer::{Lexer, pipeline};
 
 fn sample_source() -> String {
     let snippet = r#"

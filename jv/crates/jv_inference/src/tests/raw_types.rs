@@ -2,8 +2,8 @@ use crate::solver::{
     RawTypeAnalyzer, RawTypeEvent, RawTypeMitigation, SolverTelemetry, TypeArgumentSolution,
 };
 use crate::types::{GenericSignature, RawTypeContinuation, RawTypeDirective};
-use jv_ast::types::QualifiedName;
 use jv_ast::Span;
+use jv_ast::types::QualifiedName;
 
 fn span() -> Span {
     Span::new(10, 0, 10, 20)

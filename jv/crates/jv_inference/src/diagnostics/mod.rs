@@ -7,7 +7,7 @@
 
 pub mod generic;
 
-pub use generic::{translate_solver_diagnostic, GenericDiagnostic, GenericDiagnostics};
+pub use generic::{GenericDiagnostic, GenericDiagnostics, translate_solver_diagnostic};
 
 use crate::types::SymbolId;
 use jv_ast::Span;

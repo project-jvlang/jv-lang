@@ -1,5 +1,5 @@
 use super::cache::{CacheStoreStats, SymbolIndexCache};
-use super::classfile::{parse_class, parse_module_info, ClassParseError, ModuleInfo};
+use super::classfile::{ClassParseError, ModuleInfo, parse_class, parse_module_info};
 use super::index::{ModuleEntry, SymbolIndex, TypeEntry};
 use crate::{config::BuildConfig, jdk};
 use jv_pm::JavaTarget;
@@ -10,8 +10,8 @@ use std::path::{Path, PathBuf};
 use std::time::Instant;
 use thiserror::Error;
 use tracing::{debug, info, warn};
-use zip::result::ZipError;
 use zip::ZipArchive;
+use zip::result::ZipError;
 
 const LOG_TARGET: &str = "jv::build::symbol_index";
 
@@ -612,7 +612,7 @@ fn archive_entry_path(archive: &Path, entry: &str) -> PathBuf {
 }
 
 fn memory_usage_bytes() -> Option<u64> {
-    use sysinfo::{get_current_pid, ProcessExt, System, SystemExt};
+    use sysinfo::{ProcessExt, System, SystemExt, get_current_pid};
 
     let pid = get_current_pid().ok()?;
     let mut system = System::new();

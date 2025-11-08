@@ -1,4 +1,4 @@
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, black_box, criterion_group, criterion_main};
 use jv_ast::Span;
 use jv_codegen_java::{JavaCodeGenConfig, JavaCodeGenerator, JavaTarget};
 use jv_ir::{IrModifiers, IrProgram, IrStatement, IrVisibility, JavaType};

@@ -2,12 +2,12 @@ use std::sync::Arc;
 
 use jv_build::metadata::{ConversionCatalog, JavaMethodSignature, SymbolIndex, TypeEntry};
 use jv_checker::{
-    inference::{
-        conversions::ConversionHelperCatalog, Constraint, ConstraintKind, ConstraintSet,
-        ConstraintSolver, ConversionKind as InferenceConversionKind, NullableGuardReason,
-        PrimitiveType, TypeKind,
-    },
     InferenceTelemetry,
+    inference::{
+        Constraint, ConstraintKind, ConstraintSet, ConstraintSolver,
+        ConversionKind as InferenceConversionKind, NullableGuardReason, PrimitiveType, TypeKind,
+        conversions::ConversionHelperCatalog,
+    },
 };
 use jv_ir::types::JavaType;
 

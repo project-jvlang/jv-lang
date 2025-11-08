@@ -3,8 +3,8 @@ use std::io::Write;
 use anyhow::{Context, Result};
 use serde_json::json;
 
-use super::diagnostics::{format_span, DiagnosticsSummary};
 use super::ReconstructedAst;
+use super::diagnostics::{DiagnosticsSummary, format_span};
 use jv_ast::Span;
 
 #[derive(Debug, Default, Clone, Copy)]
