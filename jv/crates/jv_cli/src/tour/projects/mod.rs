@@ -1,6 +1,6 @@
 use std::io::Write;
 
-use anyhow::{ensure, Result};
+use anyhow::{Result, ensure};
 use jv_build::BuildConfig;
 
 use super::cli::SectionId;
@@ -316,7 +316,10 @@ pub fn render<W: Write>(writer: &mut W) -> Result<()> {
         artifact.render(writer)?;
     }
 
-    writeln!(writer, "\n✅ ミニプロジェクトビルダーを完了したら、ポートフォリオ生成セクションで成果をまとめましょう。")?;
+    writeln!(
+        writer,
+        "\n✅ ミニプロジェクトビルダーを完了したら、ポートフォリオ生成セクションで成果をまとめましょう。"
+    )?;
     Ok(())
 }
 
@@ -337,10 +340,12 @@ mod tests {
     fn build_executable_provides_commands() {
         let project = start_project(ProjectType::Calculator);
         let artifact = build_executable(&project).expect("artifact");
-        assert!(artifact
-            .commands
-            .iter()
-            .any(|command| command.contains("jv build")));
+        assert!(
+            artifact
+                .commands
+                .iter()
+                .any(|command| command.contains("jv build"))
+        );
         assert!(artifact.output_path.ends_with(".jar"));
     }
 

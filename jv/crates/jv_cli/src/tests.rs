@@ -208,10 +208,7 @@ fn test_build_command_parsing_with_apt() {
             ..
         }) => {
             assert!(apt, "--apt should enable annotation processing");
-            assert_eq!(
-                processors.as_deref(),
-                Some("org.example.Proc1,Proc2")
-            );
+            assert_eq!(processors.as_deref(), Some("org.example.Proc1,Proc2"));
             assert_eq!(processorpath.as_deref(), Some("libs/anno.jar"));
             assert!(apt_options.iter().any(|o| o.contains("mapstruct")));
             assert!(apt_options.iter().any(|o| o == "flag"));
@@ -237,11 +234,10 @@ fn test_build_plan_applies_apt_overrides() {
         root_path.to_path_buf(),
         manifest_path.clone(),
     );
-    let settings = pipeline::project::manifest::ManifestLoader::load(&manifest_path)
-        .expect("manifest loads");
-    let layout =
-        pipeline::project::layout::ProjectLayout::from_settings(&project_root, &settings)
-            .expect("layout resolves");
+    let settings =
+        pipeline::project::manifest::ManifestLoader::load(&manifest_path).expect("manifest loads");
+    let layout = pipeline::project::layout::ProjectLayout::from_settings(&project_root, &settings)
+        .expect("layout resolves");
 
     let overrides = pipeline::CliOverrides {
         entrypoint: Some(entrypoint.clone()),
@@ -271,7 +267,10 @@ fn test_build_plan_applies_apt_overrides() {
         .expect("compose");
     let apt = &plan.build_config.apt;
     assert!(apt.enabled);
-    assert_eq!(apt.processors, vec!["org.example.Proc1".to_string(), "Proc2".to_string()]);
+    assert_eq!(
+        apt.processors,
+        vec!["org.example.Proc1".to_string(), "Proc2".to_string()]
+    );
     assert_eq!(apt.processorpath, vec!["libs/anno.jar".to_string()]);
     assert!(apt.options.iter().any(|o| o.contains("mapstruct")));
     assert!(apt.options.iter().any(|o| o == "flag"));
@@ -448,7 +447,7 @@ entrypoint = "src/main.jv"
 
 [project.sources]
 include = ["src/**/*.jv"]
-"#",
+"#,
     )
     .expect("write manifest");
 
@@ -931,7 +930,7 @@ include = ["src/**/*.jv"]
 [project.output]
 directory = "target"
 clean = false
-"#",
+"#,
     )
     .expect("write manifest");
 
