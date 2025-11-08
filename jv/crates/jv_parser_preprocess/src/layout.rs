@@ -48,7 +48,12 @@ impl LayoutStage {
                     SequenceContextKind::Call => {
                         !matches!(token.token_type, TokenType::Comma | TokenType::RightParen)
                     }
-                    SequenceContextKind::When => is_when_layout_candidate(&token.token_type),
+                    SequenceContextKind::When => {
+                        ctx.when_brace_depth == 1
+                            && ctx.when_paren_depth == 0
+                            && ctx.when_bracket_depth == 0
+                            && is_when_layout_candidate(&token.token_type)
+                    }
                 } && is_sequence_layout_candidate(
                     prev_token_type.as_ref(),
                     token_type_ref,
@@ -100,6 +105,9 @@ impl LayoutStage {
                     if let Some(ctx) = stack.last_mut() {
                         ctx.prev_was_separator = false;
                         ctx.last_explicit_separator = None;
+                        if let SequenceContextKind::When = ctx.kind {
+                            ctx.when_bracket_depth += 1;
+                        }
                     }
                     stack.push(SequenceContext::new_array());
                 }
@@ -111,6 +119,11 @@ impl LayoutStage {
                         stack.pop();
                     }
                     if let Some(ctx) = stack.last_mut() {
+                        if let SequenceContextKind::When = ctx.kind {
+                            if ctx.when_bracket_depth > 0 {
+                                ctx.when_bracket_depth -= 1;
+                            }
+                        }
                         ctx.prev_was_separator = false;
                         ctx.last_explicit_separator = None;
                     }
@@ -119,6 +132,9 @@ impl LayoutStage {
                     if let Some(ctx) = stack.last_mut() {
                         ctx.prev_was_separator = false;
                         ctx.last_explicit_separator = None;
+                        if let SequenceContextKind::When = ctx.kind {
+                            ctx.when_paren_depth += 1;
+                        }
                     }
                     if call_paren_origins.contains(&origin) {
                         stack.push(SequenceContext::new_call());
@@ -132,6 +148,11 @@ impl LayoutStage {
                         stack.pop();
                     }
                     if let Some(ctx) = stack.last_mut() {
+                        if let SequenceContextKind::When = ctx.kind {
+                            if ctx.when_paren_depth > 0 {
+                                ctx.when_paren_depth -= 1;
+                            }
+                        }
                         ctx.prev_was_separator = false;
                         ctx.last_explicit_separator = None;
                     }
@@ -245,6 +266,8 @@ struct SequenceContext {
     prev_was_separator: bool,
     last_explicit_separator: Option<ExplicitSeparatorLocation>,
     when_brace_depth: usize,
+    when_paren_depth: usize,
+    when_bracket_depth: usize,
 }
 
 impl SequenceContext {
@@ -254,6 +277,8 @@ impl SequenceContext {
             prev_was_separator: true,
             last_explicit_separator: None,
             when_brace_depth: 0,
+            when_paren_depth: 0,
+            when_bracket_depth: 0,
         }
     }
 
@@ -263,6 +288,8 @@ impl SequenceContext {
             prev_was_separator: true,
             last_explicit_separator: None,
             when_brace_depth: 0,
+            when_paren_depth: 0,
+            when_bracket_depth: 0,
         }
     }
 
@@ -272,6 +299,8 @@ impl SequenceContext {
             prev_was_separator: true,
             last_explicit_separator: None,
             when_brace_depth: 1,
+            when_paren_depth: 0,
+            when_bracket_depth: 0,
         }
     }
 }

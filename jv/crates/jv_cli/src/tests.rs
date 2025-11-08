@@ -478,7 +478,9 @@ counter = counter + explicit
 
     let artifacts = pipeline::compile(&plan).expect("program should compile");
 
-    assert_eq!(artifacts.binding_usage.implicit, 1);
+    // Script-mode assignments synthesize an implicit binding for the trailing expression, so two
+    // implicit bindings are expected (the initial `result` assignment and the final `counter` update).
+    assert_eq!(artifacts.binding_usage.implicit, 2);
     assert_eq!(artifacts.binding_usage.implicit_typed, 1);
     assert_eq!(artifacts.binding_usage.explicit, 1);
     assert_eq!(artifacts.binding_usage.vars, 1);
