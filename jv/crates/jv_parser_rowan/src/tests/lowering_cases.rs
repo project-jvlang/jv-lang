@@ -38,7 +38,7 @@ fn build_tree(
     SyntaxNode::new_root(builder.finish())
 }
 
-fn lower_source(source: &str) -> LoweringResult {
+pub(crate) fn lower_source(source: &str) -> LoweringResult {
     let tokens = Lexer::new(source.to_string())
         .tokenize()
         .expect("lex source");

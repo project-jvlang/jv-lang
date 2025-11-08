@@ -480,6 +480,31 @@ fn lower_assignment(
                 }
             }
         }
+
+        let is_top_level = node.parent().map_or(false, |parent| {
+            if parent.kind() != SyntaxKind::StatementList {
+                return false;
+            }
+            parent
+                .parent()
+                .map(|grand| grand.kind() == SyntaxKind::Root)
+                .unwrap_or(false)
+        });
+
+        if is_top_level {
+            if let BindingPatternKind::Identifier { name, .. } = &pattern {
+                let modifiers = Modifiers::default();
+                return Ok(Statement::ValDeclaration {
+                    name: name.clone(),
+                    binding: Some(pattern),
+                    type_annotation: None,
+                    initializer: value,
+                    modifiers,
+                    origin: ValBindingOrigin::Implicit,
+                    span,
+                });
+            }
+        }
     }
 
     Ok(Statement::Assignment {
