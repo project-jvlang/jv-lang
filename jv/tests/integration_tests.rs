@@ -136,7 +136,10 @@ fn ensure_toolchain_envs() {
         ] {
             if env::var_os(var).is_none() {
                 if let Some(path) = dir {
-                    env::set_var(var, path);
+                    unsafe {
+                        // 安全性: OnceLock::get_or_init により別スレッドと競合しない初期化ブロックであり、テスト全体で一度だけ実行される。
+                        env::set_var(var, path);
+                    }
                 }
             }
         }

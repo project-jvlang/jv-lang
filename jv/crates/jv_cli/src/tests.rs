@@ -243,17 +243,7 @@ fn test_build_plan_applies_apt_overrides() {
         entrypoint: Some(entrypoint.clone()),
         output: Some(root_path.join("target")),
         java_only: true,
-        check: false,
-        format: false,
-        target: None,
         clean: true,
-        perf: false,
-        emit_types: false,
-        verbose: false,
-        emit_telemetry: false,
-        parallel_inference: false,
-        inference_workers: None,
-        constraint_batch: None,
         apt_enabled: true,
         apt_processors: Some("org.example.Proc1,Proc2".to_string()),
         apt_processorpath: Some("libs/anno.jar".to_string()),
@@ -261,6 +251,7 @@ fn test_build_plan_applies_apt_overrides() {
             "mapstruct.defaultComponentModel=spring".to_string(),
             "flag".to_string(),
         ],
+        ..pipeline::CliOverrides::default()
     };
 
     let plan = pipeline::BuildOptionsFactory::compose(project_root, settings, layout, overrides)
@@ -478,25 +469,8 @@ counter = counter + explicit
         entrypoint: Some(entrypoint.clone()),
         output: Some(root_path.join("target")),
         java_only: true,
-        check: false,
-        format: false,
         target: None,
-        clean: false,
-        perf: false,
-        emit_types: false,
-        verbose: false,
-        emit_telemetry: false,
-        parallel_inference: false,
-        inference_workers: None,
-        constraint_batch: None,
-        apt_enabled: false,
-        apt_processors: None,
-        apt_processorpath: None,
-        apt_options: Vec::new(),
-        apt_enabled: false,
-        apt_processors: None,
-        apt_processorpath: None,
-        apt_options: Vec::new(),
+        ..pipeline::CliOverrides::default()
     };
 
     let plan = pipeline::BuildOptionsFactory::compose(project_root, settings, layout, overrides)
@@ -550,21 +524,8 @@ include = ["src/**/*.jv"]
         entrypoint: Some(input_path.clone()),
         output: Some(project_root.root_dir().join("out/diag")),
         java_only: true,
-        check: false,
-        format: false,
         target: None,
-        clean: false,
-        perf: false,
-        emit_types: false,
-        verbose: false,
-        emit_telemetry: false,
-        parallel_inference: false,
-        inference_workers: None,
-        constraint_batch: None,
-        apt_enabled: false,
-        apt_processors: None,
-        apt_processorpath: None,
-        apt_options: Vec::new(),
+        ..pipeline::CliOverrides::default()
     };
 
     let plan = pipeline::BuildOptionsFactory::compose(project_root, settings, layout, overrides)
@@ -644,21 +605,8 @@ include = ["src/**/*.jv"]
         entrypoint: Some(input_path.clone()),
         output: Some(project_root.root_dir().join("out/inference-gap")),
         java_only: true,
-        check: false,
-        format: false,
         target: None,
-        clean: false,
-        perf: false,
-        emit_types: false,
-        verbose: false,
-        emit_telemetry: false,
-        parallel_inference: false,
-        inference_workers: None,
-        constraint_batch: None,
-        apt_enabled: false,
-        apt_processors: None,
-        apt_processorpath: None,
-        apt_options: Vec::new(),
+        ..pipeline::CliOverrides::default()
     };
 
     let plan = pipeline::BuildOptionsFactory::compose(project_root, settings, layout, overrides)
@@ -762,17 +710,8 @@ include = ["src/**/*.jv"]
             entrypoint: Some(entrypoint.clone()),
             output: Some(project_dir.join("target")),
             java_only: true,
-            check: false,
-            format: false,
             target: None,
-            clean: false,
-            perf: false,
-            emit_types: false,
-            verbose: false,
-            emit_telemetry: false,
-            parallel_inference: false,
-            inference_workers: None,
-            constraint_batch: None,
+            ..pipeline::CliOverrides::default()
         };
 
         let plan =
@@ -855,17 +794,8 @@ include = ["src/**/*.jv"]
             entrypoint: Some(entrypoint_path.clone()),
             output: Some(output_dir.clone()),
             java_only: true,
-            check: false,
-            format: false,
             target: Some(target),
-            clean: false,
-            perf: false,
-            emit_types: false,
-            verbose: false,
-            emit_telemetry: false,
-            parallel_inference: false,
-            inference_workers: None,
-            constraint_batch: None,
+            ..pipeline::CliOverrides::default()
         };
 
         let plan =
@@ -962,21 +892,8 @@ clean = false
         entrypoint: Some(entrypoint.clone()),
         output: Some(root_path.join("target")),
         java_only: true,
-        check: false,
-        format: false,
         target: None,
-        clean: false,
-        perf: false,
-        emit_types: false,
-        verbose: false,
-        emit_telemetry: false,
-        parallel_inference: false,
-        inference_workers: None,
-        constraint_batch: None,
-        apt_enabled: false,
-        apt_processors: None,
-        apt_processorpath: None,
-        apt_options: Vec::new(),
+        ..pipeline::CliOverrides::default()
     };
 
     let plan = pipeline::BuildOptionsFactory::compose(project_root, settings, layout, overrides)
@@ -1071,17 +988,8 @@ clean = false
         entrypoint: Some(entrypoint.clone()),
         output: Some(root_path.join("target")),
         java_only: true,
-        check: false,
-        format: false,
         target: None,
-        clean: false,
-        perf: false,
-        emit_types: false,
-        verbose: false,
-        emit_telemetry: false,
-        parallel_inference: false,
-        inference_workers: None,
-        constraint_batch: None,
+        ..pipeline::CliOverrides::default()
     };
 
     let plan = pipeline::BuildOptionsFactory::compose(project_root, settings, layout, overrides)
