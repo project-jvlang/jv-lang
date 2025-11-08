@@ -367,7 +367,10 @@ Java(TM) SE Runtime Environment"#;
 
         fn set_os(key: &'static str, value: &std::ffi::OsStr) -> Self {
             let original = env::var_os(key);
-            env::set_var(key, value);
+            unsafe {
+                // 安全性: テスト側でENV_MUTEXを保持した状態で呼び出し、環境変数操作を逐次化している。
+                env::set_var(key, value);
+            }
             Self { key, original }
         }
     }
@@ -375,9 +378,15 @@ Java(TM) SE Runtime Environment"#;
     impl Drop for EnvVarGuard {
         fn drop(&mut self) {
             if let Some(value) = self.original.take() {
-                env::set_var(self.key, value);
+                unsafe {
+                    // 安全性: EnvVarGuardの生成時と同じくENV_MUTEXで直列化されている。
+                    env::set_var(self.key, value);
+                }
             } else {
-                env::remove_var(self.key);
+                unsafe {
+                    // 安全性: ENV_MUTEXを保持しているため、環境変数の削除も競合しない。
+                    env::remove_var(self.key);
+                }
             }
         }
     }
