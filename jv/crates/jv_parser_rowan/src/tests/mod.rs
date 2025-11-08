@@ -7,6 +7,7 @@ pub mod semantics_pipeline_cases;
 mod stdlib_fixtures;
 pub mod syntax_layout_cases;
 pub mod val_and_null_safety_cases;
+pub mod val_declaration_scope_coverage;
 pub mod verification_specs;
 pub mod when_pattern_parity;
 pub mod whitespace_layout_parity;
