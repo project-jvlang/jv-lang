@@ -123,7 +123,7 @@ when (value) {
 
     assert_eq!(
         when_commas.len(),
-        1,
-        "whenアーム間には1個のレイアウトコンマが必要"
+        2,
+        "whenアームごとにレイアウトコンマが付与されるべき"
     );
 }

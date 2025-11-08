@@ -341,7 +341,7 @@ impl SequenceContext {
     fn new_when() -> Self {
         Self {
             kind: SequenceContextKind::When,
-            prev_was_separator: true,
+            prev_was_separator: false,
             last_explicit_separator: None,
             when_brace_depth: 1,
             when_paren_depth: 0,
