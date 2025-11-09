@@ -1768,6 +1768,7 @@ fn script_regex_val_is_hoisted_to_static_field() {
 
     let unit = generate_java_code(&program).expect("script regex lowering");
     let source = unit.to_source(&JavaCodeGenConfig::default());
+    eprintln!("{}", source);
 
     assert!(
         source.contains("static final java.util.regex.Pattern usernamePattern"),

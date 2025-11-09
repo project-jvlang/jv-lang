@@ -148,8 +148,6 @@ impl JavaCodeGenerator {
             }
         }
 
-        let mut hoisted_variable_fields =
-            Self::hoist_script_variable_fields(&mut script_statements);
         let mut hoisted_regex_fields = Vec::new();
         let mut retained_statements = Vec::new();
         for statement in script_statements.drain(..) {
@@ -160,6 +158,8 @@ impl JavaCodeGenerator {
             }
         }
         script_statements = retained_statements;
+        let mut hoisted_variable_fields =
+            Self::hoist_script_variable_fields(&mut script_statements);
         hoisted_variable_fields.append(&mut hoisted_regex_fields);
 
         let has_entry_method = script_methods.iter().any(Self::is_entry_point_method);
@@ -167,7 +167,7 @@ impl JavaCodeGenerator {
 
         if !script_statements.is_empty()
             || !script_methods.is_empty()
-            || !hoisted_regex_fields.is_empty()
+            || !hoisted_variable_fields.is_empty()
         {
             let script_class = self.config.script_main_class.clone();
             let qualified_script_class = if let Some(pkg) = &program.package {
