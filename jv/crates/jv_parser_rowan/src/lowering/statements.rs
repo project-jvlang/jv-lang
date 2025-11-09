@@ -401,7 +401,7 @@ fn lower_comment(
                 node.kind(),
                 None,
                 Vec::new(),
-            ))
+            ));
         }
     };
 
@@ -624,7 +624,7 @@ fn lower_assignment_target(
                 node.kind(),
                 None,
                 Vec::new(),
-            ))
+            ));
         }
     };
 
@@ -657,7 +657,7 @@ fn lower_assignment_target(
                             node.kind(),
                             None,
                             Vec::new(),
-                        ))
+                        ));
                     }
                 };
 
@@ -681,7 +681,7 @@ fn lower_assignment_target(
                     node.kind(),
                     None,
                     Vec::new(),
-                ))
+                ));
             }
         }
     }
@@ -722,7 +722,7 @@ fn lower_value(
                     clause.kind(),
                     first_identifier_text(&clause),
                     collect_annotation_texts(&clause),
-                ))
+                ));
             }
         },
         None => None,
@@ -1736,20 +1736,106 @@ mod expression_parser {
                                 Some(span.clone()),
                             ));
                         }
-                        let target = Self::parse_nested_expression(target_tokens)?.expr;
-                        let value = Self::parse_nested_expression(value_tokens)?.expr;
-                        Ok(Statement::Assignment {
-                            target,
-                            binding_pattern: None,
-                            value,
-                            span,
-                        })
+                        if let Some(val_decl) = self.try_parse_implicit_val_statement(
+                            target_tokens,
+                            value_tokens,
+                            span.clone(),
+                            absolute_start,
+                        )? {
+                            Ok(val_decl)
+                        } else {
+                            let target = Self::parse_nested_expression(target_tokens)?.expr;
+                            let value = Self::parse_nested_expression(value_tokens)?.expr;
+                            Ok(Statement::Assignment {
+                                target,
+                                binding_pattern: None,
+                                value,
+                                span,
+                            })
+                        }
                     } else {
                         let expr = Self::parse_nested_expression(slice)?.expr;
                         Ok(Statement::Expression { expr, span })
                     }
                 }
             }
+        }
+
+        fn try_parse_implicit_val_statement(
+            &self,
+            target_tokens: &[&'a Token],
+            value_tokens: &[&'a Token],
+            span: Span,
+            absolute_start: usize,
+        ) -> Result<Option<Statement>, ExpressionError> {
+            let first = target_tokens.first().ok_or_else(|| {
+                ExpressionError::new("代入ターゲットが存在しません", Some(span.clone()))
+            })?;
+
+            let name = match &first.token_type {
+                TokenType::Identifier(id) => id.clone(),
+                _ => return Ok(None),
+            };
+
+            let mut cursor = 1usize;
+            let mut type_annotation: Option<TypeAnnotation> = None;
+
+            if cursor < target_tokens.len() {
+                if !matches!(target_tokens[cursor].token_type, TokenType::Colon) {
+                    // `x.something` や `arr[0]` 等は暗黙valではない
+                    return Ok(None);
+                }
+                cursor += 1;
+                let type_start = cursor;
+                if type_start >= target_tokens.len() {
+                    return Err(ExpressionError::new(
+                        "`x: Type = ...` 形式の型注釈が不足しています",
+                        Some(span.clone()),
+                    ));
+                }
+
+                let owned: Vec<Token> = target_tokens[type_start..]
+                    .iter()
+                    .map(|token| (*token).clone())
+                    .collect();
+                match lower_type_annotation_from_tokens(&owned) {
+                    Ok(lowered) => {
+                        type_annotation = Some(lowered.into_annotation());
+                    }
+                    Err(error) => {
+                        let type_span = error.span().cloned().or_else(|| {
+                            Some(span_for_range(
+                                self.tokens,
+                                absolute_start + type_start,
+                                absolute_start + target_tokens.len(),
+                            ))
+                        });
+                        return Err(ExpressionError::new(error.message().to_string(), type_span));
+                    }
+                }
+                cursor = target_tokens.len();
+            }
+
+            if cursor != target_tokens.len() {
+                return Ok(None);
+            }
+
+            let initializer = Self::parse_nested_expression(value_tokens)?.expr;
+            let origin = if type_annotation.is_some() {
+                ValBindingOrigin::ImplicitTyped
+            } else {
+                ValBindingOrigin::Implicit
+            };
+
+            Ok(Some(Statement::ValDeclaration {
+                name,
+                binding: None,
+                type_annotation,
+                initializer,
+                modifiers: Modifiers::default(),
+                origin,
+                span,
+            }))
         }
 
         fn parse_val_statement(
@@ -1774,7 +1860,7 @@ mod expression_parser {
                     return Err(ExpressionError::new(
                         "`val` 宣言には識別子が必要です",
                         Some(span_from_token(name_token)),
-                    ))
+                    ));
                 }
             };
 
@@ -1800,7 +1886,7 @@ mod expression_parser {
                             return Err(ExpressionError::new(
                                 error.message().to_string(),
                                 error.span().cloned(),
-                            ))
+                            ));
                         }
                     }
                 }
@@ -2283,7 +2369,7 @@ mod expression_parser {
                             return Err(ExpressionError::new(
                                 "`is` パターンには識別子が必要です",
                                 Some(span_from_token(type_token)),
-                            ))
+                            ));
                         }
                     };
                     let span = merge_spans(&span_from_token(first), &span_from_token(type_token));
@@ -2585,7 +2671,7 @@ mod expression_parser {
                     return Err(ExpressionError::new(
                         "メンバーアクセスには識別子が必要です",
                         Some(span_from_token(token)),
-                    ))
+                    ));
                 }
             };
 
@@ -2614,7 +2700,7 @@ mod expression_parser {
                     return Err(ExpressionError::new(
                         "メンバーアクセスには識別子が必要です",
                         Some(span_from_token(token)),
-                    ))
+                    ));
                 }
             };
 
@@ -2994,7 +3080,7 @@ mod expression_parser {
                         return Err(ExpressionError::new(
                             "名前付き引数には識別子が必要です",
                             Some(span_from_token(name_token)),
-                        ))
+                        ));
                     }
                 };
                 let value_tokens = &slice[idx + 1..];
@@ -3191,7 +3277,7 @@ mod expression_parser {
                     return Err(ExpressionError::new(
                         "パラメータ名には識別子が必要です",
                         Some(span_from_token(name_token)),
-                    ))
+                    ));
                 }
             };
 
@@ -4162,7 +4248,7 @@ mod expression_parser {
                     return Err(ExpressionError::new(
                         "JSON オブジェクトのキーは識別子または文字列である必要があります",
                         Some(span_from_token(key_token)),
-                    ))
+                    ));
                 }
             };
 
@@ -5464,7 +5550,7 @@ fn lower_identifier_binding(
                 node.kind(),
                 first_identifier_text(node),
                 collect_annotation_texts(node),
-            ))
+            ));
         }
     };
 

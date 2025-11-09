@@ -794,9 +794,7 @@ impl BindingResolver {
     }
 
     fn current_scope_binding(&self, name: &str) -> Option<&BindingKind> {
-        self.scopes
-            .last()
-            .and_then(|scope| scope.get(name))
+        self.scopes.last().and_then(|scope| scope.get(name))
     }
 
     fn enter_scope(&mut self) {

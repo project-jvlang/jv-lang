@@ -1,8 +1,11 @@
 use super::lowering_cases::lower_source;
+use crate::{JvLanguage, ParseBuilder, ParseEvent};
+use jv_ast::Statement;
 use jv_ast::expression::Expression;
 use jv_ast::statement::ValBindingOrigin;
-use jv_ast::types::{Literal, TypeAnnotation};
-use jv_ast::{BindingPatternKind, Statement};
+use jv_ast::types::TypeAnnotation;
+use jv_lexer::Lexer;
+use rowan::SyntaxNode;
 
 /// val宣言の4パターン全てを検証するヘルパー関数
 fn assert_val_declaration(
@@ -18,10 +21,7 @@ fn assert_val_declaration(
             type_annotation,
             ..
         } => {
-            assert_eq!(
-                name, expected_name,
-                "val宣言の名前が期待値と異なります"
-            );
+            assert_eq!(name, expected_name, "val宣言の名前が期待値と異なります");
             assert_eq!(
                 *origin, expected_origin,
                 "ValBindingOriginが期待値と異なります: expected {:?}, got {:?}",
@@ -40,7 +40,10 @@ fn assert_val_declaration(
                 }
             }
         }
-        other => panic!("ValDeclarationが期待されましたが、{:?}が得られました", other),
+        other => panic!(
+            "ValDeclarationが期待されましたが、{:?}が得られました",
+            other
+        ),
     }
 }
 
@@ -457,15 +460,34 @@ fun outer() {
                     if let Statement::Expression { expr, .. } = when_stmt {
                         if let Expression::When { arms, .. } = expr {
                             let arm = arms.first().expect("when arm expected");
-                            if let Expression::Block { statements, .. } = &arm.body {
-                                let lambda_decl = statements.first().expect("lambda val decl expected");
-                                if let Statement::ValDeclaration { initializer, .. } = lambda_decl {
-                                    if let Expression::Lambda { body, .. } = initializer {
-                                        if let Expression::Block { statements, .. } = body.as_ref() {
-                                            let stmt = statements.first().expect("statement in lambda expected");
-                                            assert_val_declaration(stmt, "x", ValBindingOrigin::Implicit, None);
-                                            return;
-                                        }
+                            let statements = match &arm.body {
+                                Expression::Lambda { body, .. } => {
+                                    if let Expression::Block { statements, .. } = body.as_ref() {
+                                        statements
+                                    } else {
+                                        panic!("Expected Block expression inside lambda body");
+                                    }
+                                }
+                                Expression::Block { statements, .. } => statements,
+                                other => {
+                                    panic!("Expected Block or Lambda in when arm, got {:?}", other)
+                                }
+                            };
+
+                            let lambda_decl = statements.first().expect("lambda val decl expected");
+                            if let Statement::ValDeclaration { initializer, .. } = lambda_decl {
+                                if let Expression::Lambda { body, .. } = initializer {
+                                    if let Expression::Block { statements, .. } = body.as_ref() {
+                                        let stmt = statements
+                                            .first()
+                                            .expect("statement in lambda expected");
+                                        assert_val_declaration(
+                                            stmt,
+                                            "x",
+                                            ValBindingOrigin::Implicit,
+                                            None,
+                                        );
+                                        return;
                                     }
                                 }
                             }
@@ -508,4 +530,164 @@ fun test() {
 
     // 以降の詳細な検証は省略（構造が複雑なため）
     // 実際には各レベルで正しく変換されることが重要
+}
+
+// ==================== デバッグ用: CST構造ダンプ ====================
+
+/// CST構造をダンプするヘルパー関数
+fn dump_cst_structure(source: &str, test_name: &str) -> SyntaxNode<JvLanguage> {
+    eprintln!("\n=== CST Structure Dump: {} ===", test_name);
+    eprintln!("Source:\n{}", source);
+
+    let tokens = Lexer::new(source.to_string())
+        .tokenize()
+        .expect("lex source");
+    let parse_output = crate::parser::parse(&tokens);
+
+    eprintln!("\nParser Diagnostics: {:?}", parse_output.diagnostics);
+
+    let green = ParseBuilder::build_from_events(&parse_output.events, &tokens);
+    let syntax: SyntaxNode<JvLanguage> = SyntaxNode::new_root(green);
+
+    eprintln!("\nCST Structure:");
+    dump_node(&syntax, 0);
+    eprintln!("=== End CST Dump ===\n");
+
+    syntax
+}
+
+/// ノードを再帰的にダンプする
+fn dump_node(node: &SyntaxNode<JvLanguage>, indent: usize) {
+    let indent_str = "  ".repeat(indent);
+
+    // ノードの種類を表示
+    eprintln!("{}kind: {:?}", indent_str, node.kind());
+
+    // 子要素がない場合はテキストを表示
+    let children_count = node.children().count();
+    if children_count == 0 {
+        if let Some(text) = node.first_token() {
+            eprintln!("{}  text: {:?}", indent_str, text.text());
+        }
+    } else {
+        // 子要素がある場合は再帰的にダンプ
+        eprintln!("{}  (children: {})", indent_str, children_count);
+        for child in node.children() {
+            dump_node(&child, indent + 1);
+        }
+    }
+}
+
+#[test]
+#[ignore] // デバッグ用のため通常実行では無視
+fn debug_cst_function_success() {
+    let source = r#"
+fun test() {
+    x = 0
+}
+"#;
+    dump_cst_structure(source, "関数内_x_equals_0 (成功ケース)");
+}
+
+#[test]
+#[ignore] // デバッグ用のため通常実行では無視
+fn debug_cst_when_failure() {
+    let source = r#"
+when (value) {
+    1 -> {
+        x = 0
+    }
+}
+"#;
+    dump_cst_structure(source, "when分岐内_x_equals_0 (失敗ケース)");
+}
+
+#[test]
+#[ignore] // デバッグ用のため通常実行では無視
+fn debug_cst_lambda_failure() {
+    let source = r#"
+val f = { ->
+    x = 0
+    x
+}
+"#;
+    dump_cst_structure(source, "ラムダ内_x_equals_0 (失敗ケース)");
+}
+
+/// パーサーが生成したイベント列を詳細にダンプする
+fn dump_parser_events(source: &str, test_name: &str) {
+    eprintln!("\n=== Parser Events Dump: {} ===", test_name);
+    eprintln!("Source:\n{}", source);
+
+    let tokens = Lexer::new(source.to_string())
+        .tokenize()
+        .expect("lex source");
+
+    eprintln!("\nTokens (index, kind, lexeme):");
+    for (idx, token) in tokens.iter().enumerate() {
+        eprintln!("  [{idx:>3}] {:?} {:?}", token.token_type, token.lexeme);
+    }
+
+    let parse_output = crate::parser::parse(&tokens);
+    eprintln!("\nParser Diagnostics: {:?}", parse_output.diagnostics);
+
+    eprintln!("\nParse Events:");
+    for (idx, event) in parse_output.events.iter().enumerate() {
+        match event {
+            ParseEvent::StartNode { kind } => {
+                eprintln!("  [{idx:>3}] StartNode({kind:?})");
+            }
+            ParseEvent::FinishNode => {
+                eprintln!("  [{idx:>3}] FinishNode");
+            }
+            ParseEvent::Token { kind, token_index } => {
+                let token_info = tokens
+                    .get(*token_index)
+                    .map(|token| format!("{:?} {:?}", token.token_type, token.lexeme))
+                    .unwrap_or_else(|| "<?>".to_string());
+                eprintln!("  [{idx:>3}] Token({kind:?}, idx={token_index}) => {token_info}");
+            }
+            ParseEvent::Error { message, span } => {
+                eprintln!("  [{idx:>3}] Error(span={span:?}) {message}");
+            }
+        }
+    }
+
+    eprintln!("=== End Parser Events Dump ===\n");
+}
+
+#[test]
+#[ignore] // デバッグ用のため通常実行では無視
+fn debug_parser_events_function_success() {
+    let source = r#"
+fun test() {
+    x = 0
+}
+"#;
+    dump_parser_events(source, "関数内_x_equals_0 (成功ケース)");
+}
+
+#[test]
+#[ignore] // デバッグ用のため通常実行では無視
+fn debug_parser_events_when_failure() {
+    let source = r#"
+when (value) {
+    1 -> {
+        x = 0
+    }
+}
+"#;
+    dump_parser_events(source, "when分岐内_x_equals_0 (失敗ケース)");
+}
+
+#[test]
+#[ignore] // デバッグ用のため通常実行では無視
+fn debug_parser_events_lambda_failure() {
+    let source = r#"
+val f = { ->
+    x = 0
+    x
+}
+"#;
+    dump_parser_events(source, "ラムダ内_x_equals_0 (失敗ケース)");
 }
