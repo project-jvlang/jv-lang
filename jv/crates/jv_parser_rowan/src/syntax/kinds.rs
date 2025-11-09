@@ -80,6 +80,8 @@ pub enum SyntaxKind {
     ClassBody,
     /// ブロック文。
     Block,
+    /// ログブロック式。
+    LogBlockExpression,
     /// ブロック内部のステートメント列。
     StatementList,
     /// 代入ステートメント。
@@ -160,6 +162,18 @@ pub enum SyntaxKind {
     DeferKw,
     /// `spawn` キーワード。
     SpawnKw,
+    /// `LOG` キーワード。
+    LogKw,
+    /// `TRACE` キーワード。
+    TraceKw,
+    /// `DEBUG` キーワード。
+    DebugKw,
+    /// `INFO` キーワード。
+    InfoKw,
+    /// `WARN` キーワード。
+    WarnKw,
+    /// `ERROR` キーワード。
+    ErrorKw,
     /// `true` キーワード。
     TrueKw,
     /// `false` キーワード。
@@ -345,6 +359,18 @@ pub enum TokenKind {
     DeferKw,
     /// `spawn` キーワード。
     SpawnKw,
+    /// `LOG` キーワード。
+    LogKw,
+    /// `TRACE` キーワード。
+    TraceKw,
+    /// `DEBUG` キーワード。
+    DebugKw,
+    /// `INFO` キーワード。
+    InfoKw,
+    /// `WARN` キーワード。
+    WarnKw,
+    /// `ERROR` キーワード。
+    ErrorKw,
     /// `true` キーワード。
     TrueKw,
     /// `false` キーワード。
@@ -479,6 +505,12 @@ impl TokenKind {
             TokenKind::UseKw => SyntaxKind::UseKw,
             TokenKind::DeferKw => SyntaxKind::DeferKw,
             TokenKind::SpawnKw => SyntaxKind::SpawnKw,
+            TokenKind::LogKw => SyntaxKind::LogKw,
+            TokenKind::TraceKw => SyntaxKind::TraceKw,
+            TokenKind::DebugKw => SyntaxKind::DebugKw,
+            TokenKind::InfoKw => SyntaxKind::InfoKw,
+            TokenKind::WarnKw => SyntaxKind::WarnKw,
+            TokenKind::ErrorKw => SyntaxKind::ErrorKw,
             TokenKind::TrueKw => SyntaxKind::TrueKw,
             TokenKind::FalseKw => SyntaxKind::FalseKw,
             TokenKind::BooleanLiteral => SyntaxKind::BooleanLiteral,
@@ -572,6 +604,12 @@ impl TokenKind {
             TokenType::Continue => TokenKind::ContinueKw,
             TokenType::True => TokenKind::TrueKw,
             TokenType::False => TokenKind::FalseKw,
+            TokenType::Log => TokenKind::LogKw,
+            TokenType::Trace => TokenKind::TraceKw,
+            TokenType::Debug => TokenKind::DebugKw,
+            TokenType::Info => TokenKind::InfoKw,
+            TokenType::Warn => TokenKind::WarnKw,
+            TokenType::Error => TokenKind::ErrorKw,
             TokenType::Boolean(_) => TokenKind::BooleanLiteral,
             TokenType::Number(_) => TokenKind::NumberLiteral,
             TokenType::String(_) | TokenType::StringInterpolation(_) => TokenKind::StringLiteral,
@@ -692,6 +730,7 @@ mod tests {
         ("ClassDeclaration", SyntaxKind::ClassDeclaration),
         ("ClassBody", SyntaxKind::ClassBody),
         ("Block", SyntaxKind::Block),
+        ("LogBlockExpression", SyntaxKind::LogBlockExpression),
         ("WhenStatement", SyntaxKind::WhenStatement),
         ("WhenBranch", SyntaxKind::WhenBranch),
         ("ForStatement", SyntaxKind::ForStatement),
@@ -719,6 +758,12 @@ mod tests {
         ("UseKw", SyntaxKind::UseKw),
         ("DeferKw", SyntaxKind::DeferKw),
         ("SpawnKw", SyntaxKind::SpawnKw),
+        ("LogKw", SyntaxKind::LogKw),
+        ("TraceKw", SyntaxKind::TraceKw),
+        ("DebugKw", SyntaxKind::DebugKw),
+        ("InfoKw", SyntaxKind::InfoKw),
+        ("WarnKw", SyntaxKind::WarnKw),
+        ("ErrorKw", SyntaxKind::ErrorKw),
         ("ElseKw", SyntaxKind::ElseKw),
         ("WhenKw", SyntaxKind::WhenKw),
         ("ForKw", SyntaxKind::ForKw),

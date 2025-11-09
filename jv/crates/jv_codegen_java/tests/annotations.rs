@@ -83,6 +83,7 @@ fn audited_program() -> IrProgram {
         type_declarations: vec![class],
         generic_metadata: Default::default(),
         conversion_metadata: Vec::new(),
+        logging: Default::default(),
         span: dummy_span(),
     }
 }
@@ -222,6 +223,7 @@ fn field_annotations_render_and_imports() {
         type_declarations: vec![class],
         generic_metadata: Default::default(),
         conversion_metadata: Vec::new(),
+        logging: Default::default(),
         span,
     };
 
@@ -331,6 +333,7 @@ fn parameter_annotations_render_in_signature_and_imports() {
         type_declarations: vec![class],
         generic_metadata: Default::default(),
         conversion_metadata: Vec::new(),
+        logging: Default::default(),
         span,
     };
 

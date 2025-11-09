@@ -13,10 +13,11 @@ use jv_inference::types::{
 };
 use jv_ir::{
     IrExpression, IrModifiers, IrParameter, IrProgram, IrStatement, IrTypeLevelValue,
-    IrTypeParameter, IrVariance, JavaType, PipelineShape, PrimitiveSpecializationHint,
-    SequencePipeline, SequenceSource, SequenceTerminal, SequenceTerminalEvaluation,
-    SequenceTerminalKind,
+    IrTypeParameter, IrVariance, JavaType, LoggingMetadata, PipelineShape,
+    PrimitiveSpecializationHint, SequencePipeline, SequenceSource, SequenceTerminal,
+    SequenceTerminalEvaluation, SequenceTerminalKind,
 };
+use jv_pm::LoggingConfigLayer;
 use std::collections::HashMap;
 
 mod compat;
@@ -25,6 +26,7 @@ mod project_locator;
 mod project_output;
 
 use jv_build::{BuildConfig, BuildSystem, JavaTarget};
+use std::ffi::OsStr;
 use std::fs;
 use std::fs::File;
 use std::io::Write;
@@ -243,7 +245,17 @@ fn test_build_plan_applies_apt_overrides() {
         entrypoint: Some(entrypoint.clone()),
         output: Some(root_path.join("target")),
         java_only: true,
+        check: false,
+        format: false,
+        target: None,
         clean: true,
+        perf: false,
+        emit_types: false,
+        verbose: false,
+        emit_telemetry: false,
+        parallel_inference: false,
+        inference_workers: None,
+        constraint_batch: None,
         apt_enabled: true,
         apt_processors: Some("org.example.Proc1,Proc2".to_string()),
         apt_processorpath: Some("libs/anno.jar".to_string()),
@@ -251,7 +263,8 @@ fn test_build_plan_applies_apt_overrides() {
             "mapstruct.defaultComponentModel=spring".to_string(),
             "flag".to_string(),
         ],
-        ..pipeline::CliOverrides::default()
+        logging_cli: LoggingConfigLayer::default(),
+        logging_env: LoggingConfigLayer::default(),
     };
 
     let plan = pipeline::BuildOptionsFactory::compose(project_root, settings, layout, overrides)
@@ -469,8 +482,23 @@ counter = counter + explicit
         entrypoint: Some(entrypoint.clone()),
         output: Some(root_path.join("target")),
         java_only: true,
+        check: false,
+        format: false,
         target: None,
-        ..pipeline::CliOverrides::default()
+        clean: false,
+        perf: false,
+        emit_types: false,
+        verbose: false,
+        emit_telemetry: false,
+        parallel_inference: false,
+        inference_workers: None,
+        constraint_batch: None,
+        apt_enabled: false,
+        apt_processors: None,
+        apt_processorpath: None,
+        apt_options: Vec::new(),
+        logging_cli: LoggingConfigLayer::default(),
+        logging_env: LoggingConfigLayer::default(),
     };
 
     let plan = pipeline::BuildOptionsFactory::compose(project_root, settings, layout, overrides)
@@ -478,7 +506,6 @@ counter = counter + explicit
 
     let artifacts = pipeline::compile(&plan).expect("program should compile");
 
-    // スクリプトモードでは冒頭の代入 (`result = 1`) が暗黙 val として集計される。
     assert_eq!(artifacts.binding_usage.implicit, 1);
     assert_eq!(artifacts.binding_usage.implicit_typed, 1);
     assert_eq!(artifacts.binding_usage.explicit, 1);
@@ -525,8 +552,23 @@ include = ["src/**/*.jv"]
         entrypoint: Some(input_path.clone()),
         output: Some(project_root.root_dir().join("out/diag")),
         java_only: true,
+        check: false,
+        format: false,
         target: None,
-        ..pipeline::CliOverrides::default()
+        clean: false,
+        perf: false,
+        emit_types: false,
+        verbose: false,
+        emit_telemetry: false,
+        parallel_inference: false,
+        inference_workers: None,
+        constraint_batch: None,
+        apt_enabled: false,
+        apt_processors: None,
+        apt_processorpath: None,
+        apt_options: Vec::new(),
+        logging_cli: LoggingConfigLayer::default(),
+        logging_env: LoggingConfigLayer::default(),
     };
 
     let plan = pipeline::BuildOptionsFactory::compose(project_root, settings, layout, overrides)
@@ -606,8 +648,23 @@ include = ["src/**/*.jv"]
         entrypoint: Some(input_path.clone()),
         output: Some(project_root.root_dir().join("out/inference-gap")),
         java_only: true,
+        check: false,
+        format: false,
         target: None,
-        ..pipeline::CliOverrides::default()
+        clean: false,
+        perf: false,
+        emit_types: false,
+        verbose: false,
+        emit_telemetry: false,
+        parallel_inference: false,
+        inference_workers: None,
+        constraint_batch: None,
+        apt_enabled: false,
+        apt_processors: None,
+        apt_processorpath: None,
+        apt_options: Vec::new(),
+        logging_cli: LoggingConfigLayer::default(),
+        logging_env: LoggingConfigLayer::default(),
     };
 
     let plan = pipeline::BuildOptionsFactory::compose(project_root, settings, layout, overrides)
@@ -646,19 +703,28 @@ fn compile_repository_fixtures_without_interpolation() {
     let mut compiled = 0usize;
     let mut failures = Vec::new();
     for path in files {
-        if path.to_string_lossy().contains("/pattern/") {
-            continue;
-        }
-        if path.to_string_lossy().contains("/java_annotations/") {
-            continue;
-        }
         if path
-            .to_string_lossy()
-            .contains("package/complex_stdlib_pattern.jv")
+            .components()
+            .any(|component| component.as_os_str() == OsStr::new("pattern"))
         {
             continue;
         }
-        if path.to_string_lossy().contains("/pattern/neg-") {
+        if path
+            .components()
+            .any(|component| component.as_os_str() == OsStr::new("java_annotations"))
+        {
+            continue;
+        }
+        if path.file_name() == Some(OsStr::new("complex_stdlib_pattern.jv"))
+            && path
+                .parent()
+                .map(|parent| {
+                    parent
+                        .components()
+                        .any(|component| component.as_os_str() == OsStr::new("package"))
+                })
+                .unwrap_or(false)
+        {
             continue;
         }
         let source = match fs::read_to_string(&path) {
@@ -711,8 +777,23 @@ include = ["src/**/*.jv"]
             entrypoint: Some(entrypoint.clone()),
             output: Some(project_dir.join("target")),
             java_only: true,
+            check: false,
+            format: false,
             target: None,
-            ..pipeline::CliOverrides::default()
+            clean: false,
+            perf: false,
+            emit_types: false,
+            verbose: false,
+            emit_telemetry: false,
+            parallel_inference: false,
+            inference_workers: None,
+            constraint_batch: None,
+            apt_enabled: false,
+            apt_processors: None,
+            apt_processorpath: None,
+            apt_options: Vec::new(),
+            logging_cli: LoggingConfigLayer::default(),
+            logging_env: LoggingConfigLayer::default(),
         };
 
         let plan =
@@ -795,8 +876,23 @@ include = ["src/**/*.jv"]
             entrypoint: Some(entrypoint_path.clone()),
             output: Some(output_dir.clone()),
             java_only: true,
+            check: false,
+            format: false,
             target: Some(target),
-            ..pipeline::CliOverrides::default()
+            clean: false,
+            perf: false,
+            emit_types: false,
+            verbose: false,
+            emit_telemetry: false,
+            parallel_inference: false,
+            inference_workers: None,
+            constraint_batch: None,
+            apt_enabled: false,
+            apt_processors: None,
+            apt_processorpath: None,
+            apt_options: Vec::new(),
+            logging_cli: LoggingConfigLayer::default(),
+            logging_env: LoggingConfigLayer::default(),
         };
 
         let plan =
@@ -893,8 +989,23 @@ clean = false
         entrypoint: Some(entrypoint.clone()),
         output: Some(root_path.join("target")),
         java_only: true,
+        check: false,
+        format: false,
         target: None,
-        ..pipeline::CliOverrides::default()
+        clean: false,
+        perf: false,
+        emit_types: false,
+        verbose: false,
+        emit_telemetry: false,
+        parallel_inference: false,
+        inference_workers: None,
+        constraint_batch: None,
+        apt_enabled: false,
+        apt_processors: None,
+        apt_processorpath: None,
+        apt_options: Vec::new(),
+        logging_cli: LoggingConfigLayer::default(),
+        logging_env: LoggingConfigLayer::default(),
     };
 
     let plan = pipeline::BuildOptionsFactory::compose(project_root, settings, layout, overrides)
@@ -989,8 +1100,23 @@ clean = false
         entrypoint: Some(entrypoint.clone()),
         output: Some(root_path.join("target")),
         java_only: true,
+        check: false,
+        format: false,
         target: None,
-        ..pipeline::CliOverrides::default()
+        clean: false,
+        perf: false,
+        emit_types: false,
+        verbose: false,
+        emit_telemetry: false,
+        parallel_inference: false,
+        inference_workers: None,
+        constraint_batch: None,
+        apt_enabled: false,
+        apt_processors: None,
+        apt_processorpath: None,
+        apt_options: Vec::new(),
+        logging_cli: LoggingConfigLayer::default(),
+        logging_env: LoggingConfigLayer::default(),
     };
 
     let plan = pipeline::BuildOptionsFactory::compose(project_root, settings, layout, overrides)
@@ -1169,6 +1295,7 @@ fn apply_type_facts_enriches_class_metadata() {
         }],
         generic_metadata: Default::default(),
         conversion_metadata: Vec::new(),
+        logging: LoggingMetadata::default(),
         span,
     };
 
@@ -1284,6 +1411,7 @@ fn apply_type_facts_records_nested_metadata() {
         }],
         generic_metadata: Default::default(),
         conversion_metadata: Vec::new(),
+        logging: LoggingMetadata::default(),
         span,
     };
 
@@ -1347,6 +1475,7 @@ fn apply_type_facts_records_metadata_without_generics() {
         type_declarations: vec![class],
         generic_metadata: Default::default(),
         conversion_metadata: Vec::new(),
+        logging: LoggingMetadata::default(),
         span,
     };
 
@@ -1461,6 +1590,7 @@ fn apply_type_facts_sets_sequence_specialization_hint() {
         type_declarations: vec![class],
         generic_metadata: Default::default(),
         conversion_metadata: Vec::new(),
+        logging: LoggingMetadata::default(),
         span,
     };
 
@@ -1584,6 +1714,7 @@ fn where_constraints_flow_into_ir_bounds() {
         }],
         generic_metadata: Default::default(),
         conversion_metadata: Vec::new(),
+        logging: LoggingMetadata::default(),
         span: span.clone(),
     };
 

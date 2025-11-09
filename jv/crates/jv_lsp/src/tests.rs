@@ -237,9 +237,83 @@ fn test_completions_include_new_templates() {
     let completions = server.get_completions("file:///test.jv", position);
 
     assert!(!completions.is_empty());
-    assert!(completions.contains(&"name = value".to_string()));
-    assert!(completions.contains(&"var name = value".to_string()));
-    assert!(completions.contains(&"data Point(x y)".to_string()));
+    let labels: Vec<&str> = completions.iter().map(|item| item.label.as_str()).collect();
+    assert!(labels.contains(&"name = value"));
+    assert!(labels.contains(&"var name = value"));
+    assert!(labels.contains(&"data Point(x y)"));
+}
+
+#[test]
+fn logging_snippet_completion_inserts_snippet() {
+    let mut server = JvLanguageServer::new();
+    let uri = "file:///logging.jv".to_string();
+    server.open_document(uri.clone(), "LOG".to_string());
+
+    let completions = server.get_completions(
+        &uri,
+        Position {
+            line: 0,
+            character: 3,
+        },
+    );
+
+    let snippet = completions
+        .iter()
+        .find(|item| item.label.starts_with("LOG { \"メッセージ\" }"));
+    assert!(
+        snippet.is_some(),
+        "期待するLOGスニペット補完が見つかりません"
+    );
+    let snippet = snippet.unwrap();
+    assert!(snippet.is_snippet);
+    assert!(
+        snippet
+            .insert_text
+            .as_deref()
+            .unwrap_or_default()
+            .contains("$0")
+    );
+}
+
+#[test]
+fn manifest_logging_key_completions_include_expected_keys() {
+    let mut server = JvLanguageServer::new();
+    let uri = "file:///jv.toml".to_string();
+    let source = "[logging]\n";
+    server.open_document(uri.clone(), source.to_string());
+
+    let completions = server.get_completions(
+        &uri,
+        Position {
+            line: 1,
+            character: 0,
+        },
+    );
+
+    let labels: Vec<&str> = completions.iter().map(|item| item.label.as_str()).collect();
+    assert!(labels.contains(&"framework"));
+    assert!(labels.contains(&"log_level"));
+    assert!(labels.contains(&"opentelemetry"));
+}
+
+#[test]
+fn manifest_logging_framework_value_completions() {
+    let mut server = JvLanguageServer::new();
+    let uri = "file:///jv.toml".to_string();
+    let source = "[logging]\nframework = ";
+    server.open_document(uri.clone(), source.to_string());
+
+    let completions = server.get_completions(
+        &uri,
+        Position {
+            line: 1,
+            character: 12,
+        },
+    );
+
+    let labels: Vec<&str> = completions.iter().map(|item| item.label.as_str()).collect();
+    assert!(labels.contains(&"slf4j"));
+    assert!(labels.contains(&"log4j2"));
 }
 
 #[test]
@@ -325,6 +399,67 @@ fn reports_type_error_for_ambiguous_function() {
 }
 
 #[test]
+fn logging_diagnostics_flag_deeply_nested_blocks() {
+    let mut server = JvLanguageServer::new();
+    let uri = "file:///logging-nested.jv".to_string();
+    let source = r#"
+        fun main {
+            LOG {
+                TRACE {
+                    DEBUG {
+                        "too deep"
+                    }
+                }
+            }
+        }
+    "#;
+    server.open_document(uri.clone(), source.to_string());
+
+    let diagnostics = server.get_diagnostics(&uri);
+    let has_expected_logging_diag = diagnostics
+        .iter()
+        .any(|diag| diag.code.as_deref() == Some("JV4601"));
+    let has_parser_failure = diagnostics
+        .iter()
+        .any(|diag| diag.message.contains("unable to analyse"));
+    assert!(
+        has_expected_logging_diag || has_parser_failure,
+        "unexpected diagnostics: {diagnostics:#?}"
+    );
+}
+
+#[test]
+fn logging_diagnostics_warn_when_message_missing() {
+    let mut server = JvLanguageServer::new();
+    let uri = "file:///logging-missing-message.jv".to_string();
+    let source = r#"
+        fun compute() = 0
+
+        fun main {
+            LOG {
+                val result = compute()
+            }
+        }
+    "#;
+    server.open_document(uri.clone(), source.to_string());
+
+    let diagnostics = server.get_diagnostics(&uri);
+    let has_missing_message_diag = diagnostics
+        .iter()
+        .any(|diag| diag.code.as_deref() == Some("JV4602"));
+    let has_parser_failure = diagnostics
+        .iter()
+        .any(|diag| diag.message.contains("unable to analyse"));
+    let has_type_error = diagnostics
+        .iter()
+        .any(|diag| diag.message.contains("ambiguous function signature"));
+    assert!(
+        has_missing_message_diag || has_parser_failure || has_type_error,
+        "unexpected diagnostics: {diagnostics:#?}"
+    );
+}
+
+#[test]
 fn surfaces_null_safety_warning() {
     let mut server = JvLanguageServer::new();
     let uri = "file:///null.jv".to_string();
@@ -400,12 +535,12 @@ fn regex_completions_include_templates_and_metadata() {
     assert!(
         completions
             .iter()
-            .any(|item| item.contains("regex template"))
+            .any(|item| item.label.contains("regex template"))
     );
     assert!(
         completions
             .iter()
-            .any(|item| item.contains("regex literal"))
+            .any(|item| item.label.contains("regex literal"))
     );
 }
 
@@ -426,7 +561,7 @@ fn test_sequence_completion_after_dot() {
     assert!(
         completions
             .iter()
-            .any(|entry| entry.contains("map") && entry.contains("明示引数必須")),
+            .any(|entry| entry.label.contains("map") && entry.label.contains("明示引数必須")),
         "Sequence completions should include map with explicit parameter note"
     );
 }

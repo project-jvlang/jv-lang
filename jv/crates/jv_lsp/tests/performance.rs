@@ -49,7 +49,9 @@ fn lsp_responses_stay_under_latency_budget() {
         let start = Instant::now();
         let completions = server.get_completions(&uri, position);
         assert!(
-            completions.iter().any(|entry| entry.contains("identity")),
+            completions
+                .iter()
+                .any(|entry| entry.label.contains("identity")),
             "expected identity completion entry"
         );
         start.elapsed().as_millis()

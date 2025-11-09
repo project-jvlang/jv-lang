@@ -19,3 +19,7 @@ bincode = "1.3"
 sysinfo = "0.29"
 tracing.workspace = true
 libc = "0.2"
+toml.workspace = true
+
+[dev-dependencies]
+insta.workspace = true

@@ -34,6 +34,7 @@ pub fn expression_span(expr: &Expression) -> Span {
         Expression::Array { span, .. } => span.clone(),
         Expression::Lambda { span, .. } => span.clone(),
         Expression::Try { span, .. } => span.clone(),
+        Expression::LogBlock(block) => block.span.clone(),
         Expression::This(span) => span.clone(),
         Expression::Super(span) => span.clone(),
     }

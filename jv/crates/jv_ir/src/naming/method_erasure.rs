@@ -1,7 +1,7 @@
 use crate::context::{RegisteredMethodCall, RegisteredMethodDeclaration, TransformContext};
 use crate::types::{
     IrCatchClause, IrExpression, IrResolvedMethodTarget, IrResource, IrStatement, IrSwitchCase,
-    JavaType, JavaWildcardKind,
+    JavaType, JavaWildcardKind, LogInvocationItem, LogInvocationPlan,
 };
 use hex::encode;
 use jv_ast::Span;
@@ -629,12 +629,25 @@ fn apply_expression(expr: &mut IrExpression, resolution: &MethodResolution) {
             }
             apply_expression(body, resolution);
         }
+        IrExpression::LogInvocation { plan, .. } => apply_log_plan(plan, resolution),
         IrExpression::SequencePipeline { .. }
         | IrExpression::Literal(..)
         | IrExpression::RegexPattern { .. }
         | IrExpression::Identifier { .. }
         | IrExpression::This { .. }
         | IrExpression::Super { .. } => {}
+    }
+}
+
+fn apply_log_plan(plan: &mut LogInvocationPlan, resolution: &MethodResolution) {
+    for item in plan.items.iter_mut() {
+        match item {
+            LogInvocationItem::Statement(stmt) => apply_statement(stmt, resolution),
+            LogInvocationItem::Message(message) => {
+                apply_expression(&mut message.expression, resolution)
+            }
+            LogInvocationItem::Nested(nested) => apply_log_plan(nested, resolution),
+        }
     }
 }
 

@@ -1,7 +1,10 @@
 // jv_build - Build system and javac integration
+pub mod artifacts;
 mod compat;
 mod config;
+pub mod deps;
 mod jdk;
+pub mod manifest;
 pub mod metadata;
 
 pub use compat::{

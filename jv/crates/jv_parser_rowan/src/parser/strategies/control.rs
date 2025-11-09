@@ -217,7 +217,9 @@ fn parse_continue(ctx: &mut ParserContext<'_>) -> bool {
 
 fn report_unsupported_control(ctx: &mut ParserContext<'_>, keyword: TokenKind) -> bool {
     let message = match keyword {
-        TokenKind::IfKw => "jv 言語では `if`/`else` ステートメントは使用できません。`when` を使用してください。",
+        TokenKind::IfKw => {
+            "JV3103: jv 言語では `if`/`else` ステートメントは使用できません。`when` を使用してください。"
+        }
         TokenKind::WhileKw | TokenKind::DoKw => {
             "jv 言語では `while`/`do-while` ステートメントは使用できません。`for` によるループ表現へ書き換えてください。"
         }

@@ -277,6 +277,10 @@ impl JavaCodeGenerator {
             IrExpression::VirtualThread {
                 operation, args, ..
             } => self.generate_virtual_thread(operation.clone(), args),
+            IrExpression::LogInvocation { span, .. } => Err(CodeGenError::UnsupportedConstruct {
+                construct: "Log invocation used in expression context".to_string(),
+                span: Some(span.clone()),
+            }),
             IrExpression::TryWithResources {
                 resources, body, ..
             } => self.generate_try_with_resources_expression(resources, body),

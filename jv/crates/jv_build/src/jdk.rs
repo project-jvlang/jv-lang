@@ -274,16 +274,23 @@ fn java_executable() -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{BuildConfig, BuildSystem};
+    use std::env;
     use std::ffi::OsString;
-    use std::path::{Path, PathBuf};
+    use std::path::Path;
     use std::sync::Mutex;
-    use std::time::{SystemTime, UNIX_EPOCH};
-    use std::{env, fs};
 
     #[cfg(unix)]
+    use crate::{BuildConfig, BuildSystem};
+    #[cfg(unix)]
+    use std::fs;
+    #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
+    #[cfg(unix)]
+    use std::path::PathBuf;
+    #[cfg(unix)]
+    use std::time::{SystemTime, UNIX_EPOCH};
 
+    #[cfg(unix)]
     static ENV_MUTEX: Mutex<()> = Mutex::new(());
 
     #[test]
@@ -367,10 +374,9 @@ Java(TM) SE Runtime Environment"#;
 
         fn set_os(key: &'static str, value: &std::ffi::OsStr) -> Self {
             let original = env::var_os(key);
-            unsafe {
-                // 安全性: テスト側でENV_MUTEXを保持した状態で呼び出し、環境変数操作を逐次化している。
-                env::set_var(key, value);
-            }
+            // SAFETY: テスト環境内でプロセス環境変数を一時的に上書きする用途のため、
+            // 同期ミューテックスで保護した上で安全に呼び出す。
+            unsafe { env::set_var(key, value) };
             Self { key, original }
         }
     }
@@ -378,15 +384,9 @@ Java(TM) SE Runtime Environment"#;
     impl Drop for EnvVarGuard {
         fn drop(&mut self) {
             if let Some(value) = self.original.take() {
-                unsafe {
-                    // 安全性: EnvVarGuardの生成時と同じくENV_MUTEXで直列化されている。
-                    env::set_var(self.key, value);
-                }
+                unsafe { env::set_var(self.key, value) };
             } else {
-                unsafe {
-                    // 安全性: ENV_MUTEXを保持しているため、環境変数の削除も競合しない。
-                    env::remove_var(self.key);
-                }
+                unsafe { env::remove_var(self.key) };
             }
         }
     }

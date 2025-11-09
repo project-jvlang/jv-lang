@@ -1,12 +1,13 @@
 // jv_lsp - Language Server Protocol implementation
 mod handlers;
+mod services;
 
 use handlers::imports::build_imports_response;
 pub use handlers::imports::{ImportItem, ImportsParams, ImportsResponse};
 use jv_ast::types::TypeLevelExpr;
 use jv_ast::{
-    Argument, ConstParameter, Expression, GenericParameter, GenericSignature, Program,
-    RegexLiteral, Span, Statement, StringPart, TypeAnnotation,
+    Argument, ConstParameter, Expression, GenericParameter, GenericSignature, LogBlock, LogItem,
+    Program, RegexLiteral, Span, Statement, StringPart, TypeAnnotation,
 };
 use jv_build::BuildConfig;
 use jv_build::metadata::{
@@ -34,6 +35,8 @@ use jv_lexer::{Token, TokenMetadata, TokenType};
 use jv_parser_frontend::ParserPipeline;
 use jv_parser_rowan::frontend::RowanPipeline;
 use serde::{Deserialize, Serialize};
+use services::completion::logging::{log_block_snippet_completions, manifest_logging_completions};
+use services::diagnostics::logging::collect_logging_diagnostics;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt;
 use std::sync::Arc;
@@ -440,6 +443,69 @@ pub enum LspError {
     ParseError(String),
     #[error("IO error: {0}")]
     IoError(#[from] std::io::Error),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CompletionKind {
+    Keyword,
+    Snippet,
+    Value,
+    Field,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CompletionItemData {
+    pub label: String,
+    pub detail: Option<String>,
+    pub documentation: Option<String>,
+    pub insert_text: Option<String>,
+    pub kind: CompletionKind,
+    pub is_snippet: bool,
+}
+
+impl CompletionItemData {
+    pub fn keyword(label: impl Into<String>) -> Self {
+        Self {
+            label: label.into(),
+            detail: None,
+            documentation: None,
+            insert_text: None,
+            kind: CompletionKind::Keyword,
+            is_snippet: false,
+        }
+    }
+
+    pub fn snippet(label: impl Into<String>, insert_text: impl Into<String>) -> Self {
+        Self {
+            label: label.into(),
+            detail: None,
+            documentation: None,
+            insert_text: Some(insert_text.into()),
+            kind: CompletionKind::Snippet,
+            is_snippet: true,
+        }
+    }
+
+    pub fn with_detail(mut self, detail: impl Into<String>) -> Self {
+        self.detail = Some(detail.into());
+        self
+    }
+
+    pub fn with_documentation(mut self, documentation: impl Into<String>) -> Self {
+        self.documentation = Some(documentation.into());
+        self
+    }
+
+    pub fn with_kind(mut self, kind: CompletionKind) -> Self {
+        self.kind = kind;
+        self
+    }
+
+    pub fn with_snippet(mut self, insert_text: impl Into<String>) -> Self {
+        self.insert_text = Some(insert_text.into());
+        self.is_snippet = true;
+        self
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -854,34 +920,47 @@ impl JvLanguageServer {
         }
 
         diagnostics.extend(sequence_lambda_diagnostics(content));
+        diagnostics.extend(collect_logging_diagnostics(&program));
 
         diagnostics
     }
 
-    pub fn get_completions(&self, uri: &str, position: Position) -> Vec<String> {
-        let mut items: Vec<String> = COMPLETION_TEMPLATES
+    pub fn get_completions(&self, uri: &str, position: Position) -> Vec<CompletionItemData> {
+        if uri.ends_with(".toml") {
+            if let Some(content) = self.documents.get(uri) {
+                let mut items = manifest_logging_completions(content, &position);
+                deduplicate_completions(&mut items);
+                return items;
+            }
+            return Vec::new();
+        }
+
+        let mut items: Vec<CompletionItemData> = COMPLETION_TEMPLATES
             .iter()
-            .map(|template| (*template).to_string())
+            .map(|template| CompletionItemData::keyword((*template).to_string()))
             .collect();
 
         if let Some(content) = self.documents.get(uri) {
             if should_offer_sequence_completions(content, &position) {
                 items.extend(SEQUENCE_OPERATIONS.iter().map(sequence_completion_item));
             }
+            items.extend(log_block_snippet_completions(content, &position));
         }
 
         if let Some(analyses) = self.regex_metadata.get(uri) {
-            items.extend(
-                REGEX_COMPLETION_TEMPLATES
-                    .iter()
-                    .map(|template| format!("regex template: {}", template)),
-            );
+            items.extend(REGEX_COMPLETION_TEMPLATES.iter().map(|template| {
+                CompletionItemData::keyword(format!("regex template: {}", template))
+                    .with_kind(CompletionKind::Snippet)
+            }));
             for analysis in analyses {
                 if analysis.pattern.trim().is_empty() && analysis.raw.trim().is_empty() {
                     continue;
                 }
                 let preview = sanitize_regex_preview(&analysis.raw, &analysis.pattern);
-                items.push(format!("regex literal: {}", preview));
+                items.push(
+                    CompletionItemData::keyword(format!("regex literal: {}", preview))
+                        .with_kind(CompletionKind::Snippet),
+                );
             }
         }
 
@@ -890,8 +969,7 @@ impl JvLanguageServer {
             items.extend(build_generic_completions(index, facts));
         }
 
-        let mut seen = HashSet::new();
-        items.retain(|entry| seen.insert(entry.clone()));
+        deduplicate_completions(&mut items);
         items
     }
 
@@ -1117,7 +1195,7 @@ fn build_generic_hover(
 fn build_generic_completions(
     index: &GenericDocumentIndex,
     facts: Option<&TypeFactsSnapshot>,
-) -> Vec<String> {
+) -> Vec<CompletionItemData> {
     let mut entries = Vec::new();
     for info in index.symbols() {
         let summary = summarize_symbol(info, facts, index.package());
@@ -1125,21 +1203,36 @@ fn build_generic_completions(
             continue;
         }
         for param in &summary.type_params {
-            let mut entry = format!("{} · 型パラメータ `{}`", info.name, param.name);
+            let mut label = format!("{} · 型パラメータ `{}`", info.name, param.name);
             if !param.attributes.is_empty() {
-                entry.push_str(&format!(" ({})", param.attributes.join(", ")));
+                label.push_str(&format!(" ({})", param.attributes.join(", ")));
             }
-            entries.push(entry);
+            entries.push(
+                CompletionItemData::keyword(label)
+                    .with_kind(CompletionKind::Field)
+                    .with_documentation("ジェネリクス型パラメータ候補です。"),
+            );
         }
         for param in &summary.const_params {
-            let mut entry = format!("{} · const `{}`", info.name, param.name);
+            let mut label = format!("{} · const `{}`", info.name, param.name);
             if !param.attributes.is_empty() {
-                entry.push_str(&format!(" ({})", param.attributes.join(", ")));
+                label.push_str(&format!(" ({})", param.attributes.join(", ")));
             }
-            entries.push(entry);
+            entries.push(
+                CompletionItemData::keyword(label)
+                    .with_kind(CompletionKind::Field)
+                    .with_documentation("const パラメータ候補です。"),
+            );
         }
         for (slot, value) in &summary.type_level_results {
-            entries.push(format!("{} · type-level `{}` = {}", info.name, slot, value));
+            entries.push(
+                CompletionItemData::keyword(format!(
+                    "{} · type-level `{}` = {}",
+                    info.name, slot, value
+                ))
+                .with_kind(CompletionKind::Value)
+                .with_documentation("型レベル式の評価結果"),
+            );
         }
     }
     entries
@@ -1798,6 +1891,9 @@ fn collect_call_diagnostics_from_expression(
                 collect_call_diagnostics_from_statement(statement, tokens, diagnostics);
             }
         }
+        Expression::LogBlock(block) => {
+            collect_call_diagnostics_from_log_block(block, tokens, diagnostics);
+        }
         Expression::When {
             expr,
             arms,
@@ -1857,6 +1953,26 @@ fn collect_call_diagnostics_from_expression(
         | Expression::Identifier(_, _)
         | Expression::This(_)
         | Expression::Super(_) => {}
+    }
+}
+
+fn collect_call_diagnostics_from_log_block(
+    block: &LogBlock,
+    tokens: &[Token],
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    for item in &block.items {
+        match item {
+            LogItem::Statement(statement) => {
+                collect_call_diagnostics_from_statement(statement, tokens, diagnostics);
+            }
+            LogItem::Expression(expr) => {
+                collect_call_diagnostics_from_expression(expr, tokens, diagnostics);
+            }
+            LogItem::Nested(nested) => {
+                collect_call_diagnostics_from_log_block(nested, tokens, diagnostics);
+            }
+        }
     }
 }
 
@@ -2022,13 +2138,21 @@ fn escape_inline_code(input: &str) -> String {
     input.replace('`', "\\`")
 }
 
-fn sequence_completion_item(operation: &SequenceOperationDoc) -> String {
-    let mut entry = format!("{} · {}", operation.name, operation.completion);
+fn sequence_completion_item(operation: &SequenceOperationDoc) -> CompletionItemData {
+    let mut label = format!("{} · {}", operation.name, operation.completion);
     if operation.requires_lambda {
-        entry.push_str(" // 明示引数必須");
+        label.push_str(" // 明示引数必須");
     }
-    entry.push_str(&format!(" — {}", operation.description));
-    entry
+    label.push_str(&format!(" — {}", operation.description));
+    CompletionItemData::keyword(label)
+        .with_kind(CompletionKind::Snippet)
+        .with_detail(operation.java_output)
+        .with_documentation(operation.description)
+}
+
+fn deduplicate_completions(items: &mut Vec<CompletionItemData>) {
+    let mut seen: HashSet<(String, Option<String>)> = HashSet::new();
+    items.retain(|item| seen.insert((item.label.clone(), item.insert_text.clone())));
 }
 
 fn should_offer_sequence_completions(content: &str, position: &Position) -> bool {
@@ -2065,7 +2189,10 @@ fn should_offer_sequence_completions(content: &str, position: &Position) -> bool
     !identifier.is_empty()
 }
 
-fn word_at_position(content: &str, position: &Position) -> Option<(usize, usize, String)> {
+pub(crate) fn word_at_position(
+    content: &str,
+    position: &Position,
+) -> Option<(usize, usize, String)> {
     let line_index = position.line as usize;
     let lines: Vec<&str> = content.split('\n').collect();
     if line_index >= lines.len() {

@@ -28,6 +28,8 @@ const SYNC_TOKENS: &[TokenKind] = &[
     TokenKind::Eof,
 ];
 
+const MAX_LOG_BLOCK_DEPTH: usize = 2;
+
 #[derive(Default)]
 struct WhenBlockState {
     brace_depth: usize,
@@ -88,6 +90,7 @@ pub(crate) struct ParserContext<'tokens> {
     recovered: bool,
     block_depth: usize,
     expression_states: Vec<ExpressionState>,
+    log_block_depth: usize,
 }
 
 impl<'tokens> ParserContext<'tokens> {
@@ -101,6 +104,7 @@ impl<'tokens> ParserContext<'tokens> {
             recovered: false,
             block_depth: 0,
             expression_states: Vec::new(),
+            log_block_depth: 0,
         }
     }
 
@@ -252,6 +256,65 @@ impl<'tokens> ParserContext<'tokens> {
         self.block_depth = self.block_depth.saturating_sub(1);
         self.finish_node(); // outer_kind
         true
+    }
+
+    pub(crate) fn parse_log_block_expression(&mut self, keyword: TokenKind) -> Option<usize> {
+        debug_assert!(matches!(
+            keyword,
+            TokenKind::LogKw
+                | TokenKind::TraceKw
+                | TokenKind::DebugKw
+                | TokenKind::InfoKw
+                | TokenKind::WarnKw
+                | TokenKind::ErrorKw
+        ));
+
+        let start = self.position();
+        self.consume_trivia();
+        self.start_node(SyntaxKind::LogBlockExpression);
+
+        let keyword_line = self.bump_raw().map(|token| token.line).unwrap_or_default();
+
+        let previous_depth = self.log_block_depth;
+        self.log_block_depth = self.log_block_depth.saturating_add(1);
+        if self.log_block_depth > MAX_LOG_BLOCK_DEPTH {
+            let message = "ログブロックのネストは1段までです";
+            self.report_error(message, start, self.cursor);
+        }
+
+        let mut last_line = Some(keyword_line);
+
+        self.consume_trivia();
+        if self.peek_significant_kind() == Some(TokenKind::LeftBrace) {
+            let parsed = self.parse_braced_statements(SyntaxKind::Block);
+            if parsed {
+                if let Some(token) = self.tokens.get(self.cursor.saturating_sub(1)) {
+                    last_line = Some(token.line);
+                }
+            }
+        } else {
+            let message = format!(
+                "{} ブロックは'{{'で開始する必要があります",
+                Self::log_keyword_label(keyword)
+            );
+            self.report_error(message, start, self.cursor);
+        }
+
+        self.log_block_depth = previous_depth;
+        self.finish_node();
+        last_line
+    }
+
+    fn log_keyword_label(keyword: TokenKind) -> &'static str {
+        match keyword {
+            TokenKind::LogKw => "LOG",
+            TokenKind::TraceKw => "TRACE",
+            TokenKind::DebugKw => "DEBUG",
+            TokenKind::InfoKw => "INFO",
+            TokenKind::WarnKw => "WARN",
+            TokenKind::ErrorKw => "ERROR",
+            _ => "LOG",
+        }
     }
 
     /// バインディングパターンを解析する。
@@ -538,6 +601,12 @@ impl<'tokens> ParserContext<'tokens> {
             if kind == TokenKind::Eof {
                 break;
             }
+            if kind == TokenKind::IfKw {
+                let message = "JV3103: jv 言語では `if`/`else` 式はサポートされていません。`when` を使用してください。";
+                self.report_error(message, self.cursor, self.cursor + 1);
+                self.bump_raw();
+                break;
+            }
             let at_top_level = depth_paren == 0 && depth_brace == 0 && depth_bracket == 0;
             if at_top_level && terminators.contains(&kind) {
                 break;
@@ -601,6 +670,31 @@ impl<'tokens> ParserContext<'tokens> {
                         started_when_block = true;
                     }
                 }
+            }
+
+            if at_top_level
+                && matches!(
+                    kind,
+                    TokenKind::LogKw
+                        | TokenKind::TraceKw
+                        | TokenKind::DebugKw
+                        | TokenKind::InfoKw
+                        | TokenKind::WarnKw
+                        | TokenKind::ErrorKw
+                )
+            {
+                let consumed_line = self.parse_log_block_expression(kind);
+                if let Some(line) = consumed_line {
+                    if line > 0 {
+                        last_line = Some(line);
+                    }
+                    second_last_significant_kind = last_significant_kind;
+                    last_significant_kind = Some(TokenKind::RightBrace);
+                } else {
+                    second_last_significant_kind = last_significant_kind;
+                    last_significant_kind = Some(kind);
+                }
+                continue;
             }
 
             match kind {

@@ -683,7 +683,7 @@ mod tests {
     use super::{DiagnosticSeverity, collect_raw_type_diagnostics, extract_tooling_metadata};
     use jv_ast::{Literal, Span};
     use jv_ir::types::{
-        IrCommentKind, IrExpression, IrModifiers, IrProgram, IrStatement, JavaType,
+        IrCommentKind, IrExpression, IrModifiers, IrProgram, IrStatement, JavaType, LoggingMetadata,
     };
 
     #[test]
@@ -735,6 +735,7 @@ mod tests {
             type_declarations: vec![statement],
             generic_metadata: Default::default(),
             conversion_metadata: Vec::new(),
+            logging: LoggingMetadata::default(),
             span,
         }
     }

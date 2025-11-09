@@ -289,6 +289,7 @@ fn sample_embed_program() -> IrProgram {
         type_declarations: vec![user_sample_record(), embed_data_class()],
         generic_metadata: Default::default(),
         conversion_metadata: Vec::new(),
+        logging: Default::default(),
         span: dummy_span(),
     }
 }
@@ -380,6 +381,7 @@ fn sample_load_program() -> IrProgram {
         type_declarations: vec![load_helper_class()],
         generic_metadata: Default::default(),
         conversion_metadata: Vec::new(),
+        logging: Default::default(),
         span: dummy_span(),
     }
 }
@@ -606,6 +608,7 @@ fn snapshot_program() -> IrProgram {
         type_declarations: vec![class],
         generic_metadata: Default::default(),
         conversion_metadata: Vec::new(),
+        logging: Default::default(),
         span: dummy_span(),
     }
 }
@@ -856,6 +859,7 @@ fn record_extension_method_is_emitted_as_instance_method() {
         type_declarations: vec![record_declaration, extension_method],
         generic_metadata: Default::default(),
         conversion_metadata: Vec::new(),
+        logging: Default::default(),
         span,
     };
 
@@ -919,6 +923,7 @@ fn top_level_records_drop_private_visibility() {
         type_declarations: vec![record_declaration],
         generic_metadata: Default::default(),
         conversion_metadata: Vec::new(),
+        logging: Default::default(),
         span,
     };
 
@@ -1056,6 +1061,7 @@ fn record_field_access_is_lowered_to_accessor_calls() {
         type_declarations: vec![record_declaration, renderer_class],
         generic_metadata: Default::default(),
         conversion_metadata: Vec::new(),
+        logging: Default::default(),
         span,
     };
 
@@ -1143,6 +1149,7 @@ fn class_extension_method_is_emitted_as_instance_method() {
         type_declarations: vec![class_declaration, extension_method],
         generic_metadata: Default::default(),
         conversion_metadata: Vec::new(),
+        logging: Default::default(),
         span,
     };
 
@@ -1285,6 +1292,7 @@ fn primitive_specialized_pipeline_renders_character_casts() {
         type_declarations: vec![class],
         generic_metadata: Default::default(),
         conversion_metadata: Vec::new(),
+        logging: Default::default(),
         span,
     };
 
@@ -1493,6 +1501,7 @@ fn external_extension_method_remains_static_utility() {
         type_declarations: vec![method],
         generic_metadata: Default::default(),
         conversion_metadata: Vec::new(),
+        logging: Default::default(),
         span,
     };
 
@@ -1648,6 +1657,7 @@ fn compilation_unit_collects_type_declarations() {
         type_declarations: vec![simple_class()],
         generic_metadata: Default::default(),
         conversion_metadata: Vec::new(),
+        logging: Default::default(),
         span: dummy_span(),
     };
 
@@ -1716,6 +1726,7 @@ fn script_statements_are_wrapped_in_generated_main() {
         ],
         generic_metadata: Default::default(),
         conversion_metadata: Vec::new(),
+        logging: Default::default(),
         span: dummy_span(),
     };
 
@@ -1751,6 +1762,7 @@ fn script_regex_val_is_hoisted_to_static_field() {
         type_declarations: vec![regex_decl],
         generic_metadata: Default::default(),
         conversion_metadata: Vec::new(),
+        logging: Default::default(),
         span: dummy_span(),
     };
 
@@ -1820,6 +1832,7 @@ fn class_regex_field_is_emitted_as_static_final() {
         type_declarations: vec![class],
         generic_metadata: Default::default(),
         conversion_metadata: Vec::new(),
+        logging: Default::default(),
         span: dummy_span(),
     };
 
@@ -2194,6 +2207,11 @@ fn snapshot_ir_program() {
   ],
   "generic_metadata": {},
   "conversion_metadata": [],
+  "logging": {
+    "logger_fields": [],
+    "framework": "Slf4j",
+    "trace_context": false
+  },
   "span": {
     "start_line": 0,
     "start_column": 0,
@@ -2243,6 +2261,7 @@ fn sample_record_generation_emits_expected_record() {
         type_declarations: vec![user_sample_record()],
         generic_metadata: Default::default(),
         conversion_metadata: Vec::new(),
+        logging: Default::default(),
         span: dummy_span(),
     };
 
@@ -2264,6 +2283,7 @@ fn sample_declaration_generates_records_from_descriptors() {
         type_declarations: vec![IrStatement::SampleDeclaration(declaration)],
         generic_metadata: Default::default(),
         conversion_metadata: Vec::new(),
+        logging: Default::default(),
         span: dummy_span(),
     };
 
@@ -2314,6 +2334,7 @@ fn embed_mode_sample_declaration_handles_csv() {
         type_declarations: vec![IrStatement::SampleDeclaration(declaration)],
         generic_metadata: Default::default(),
         conversion_metadata: Vec::new(),
+        logging: Default::default(),
         span: dummy_span(),
     };
 
@@ -2344,6 +2365,7 @@ fn embed_mode_sample_declaration_handles_tsv() {
         type_declarations: vec![IrStatement::SampleDeclaration(declaration)],
         generic_metadata: Default::default(),
         conversion_metadata: Vec::new(),
+        logging: Default::default(),
         span: dummy_span(),
     };
 
@@ -2374,6 +2396,7 @@ fn embed_mode_sample_declaration_produces_helper_class() {
         type_declarations: vec![IrStatement::SampleDeclaration(declaration)],
         generic_metadata: Default::default(),
         conversion_metadata: Vec::new(),
+        logging: Default::default(),
         span: dummy_span(),
     };
 
@@ -2551,6 +2574,7 @@ fn load_mode_sample_declaration_generates_http_fetch_pipeline() {
         type_declarations: vec![IrStatement::SampleDeclaration(declaration)],
         generic_metadata: Default::default(),
         conversion_metadata: Vec::new(),
+        logging: Default::default(),
         span: dummy_span(),
     };
 
@@ -2629,6 +2653,7 @@ fn load_mode_sample_declaration_supports_s3_and_tabular_decoding() {
         type_declarations: vec![IrStatement::SampleDeclaration(declaration)],
         generic_metadata: Default::default(),
         conversion_metadata: Vec::new(),
+        logging: Default::default(),
         span: dummy_span(),
     };
 
@@ -3229,6 +3254,7 @@ fn switch_expression_java21_mixed_labels_emits_jv3105() {
     }
 }
 
+mod logging;
 mod pattern_switch;
 mod target_matrix;
 mod val_declaration_codegen_coverage;

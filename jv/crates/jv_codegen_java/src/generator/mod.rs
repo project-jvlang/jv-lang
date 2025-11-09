@@ -9,9 +9,10 @@ use jv_ir::{
     IrCatchClause, IrDeconstructionComponent, IrDeconstructionPattern, IrExpression, IrForEachKind,
     IrForLoopMetadata, IrGenericMetadata, IrImplicitWhenEnd, IrImport, IrImportDetail, IrModifiers,
     IrNumericRangeLoop, IrParameter, IrProgram, IrRecordComponent, IrResource, IrSampleDeclaration,
-    IrStatement, IrSwitchCase, IrTypeParameter, IrVariance, IrVisibility, JavaType, MethodOverload,
-    NullableGuard, NullableGuardReason, SequencePipeline, SequenceSource, SequenceStage,
-    SequenceTerminalKind, UtilityClass, VirtualThreadOp,
+    IrStatement, IrSwitchCase, IrTypeParameter, IrVariance, IrVisibility, JavaType, LogGuardKind,
+    LogInvocationItem, LogInvocationPlan, LogLevel, LogMessage, LoggerFieldId, LoggerFieldSpec,
+    LoggingFrameworkKind, MethodOverload, NullableGuard, NullableGuardReason, SequencePipeline,
+    SequenceSource, SequenceStage, SequenceTerminalKind, UtilityClass, VirtualThreadOp,
 };
 use jv_mapper::{
     JavaPosition, JavaSpan, MappingCategory, MappingError, SourceMap, SourceMapBuilder,
@@ -22,6 +23,7 @@ use std::sync::Arc;
 mod declarations;
 mod expressions;
 mod formatting;
+mod logging;
 mod sample;
 mod statements;
 mod types;
@@ -47,6 +49,9 @@ pub struct JavaCodeGenerator {
     current_return_type: Option<JavaType>,
     mutable_captures: HashSet<String>,
     record_components: HashMap<String, HashSet<String>>,
+    logging_framework: LoggingFrameworkKind,
+    logger_fields: HashMap<LoggerFieldId, LoggerFieldSpec>,
+    trace_context_enabled: bool,
 }
 
 impl JavaCodeGenerator {
@@ -75,6 +80,9 @@ impl JavaCodeGenerator {
             current_return_type: None,
             mutable_captures: HashSet::new(),
             record_components: HashMap::new(),
+            logging_framework: LoggingFrameworkKind::default(),
+            logger_fields: HashMap::new(),
+            trace_context_enabled: false,
         }
     }
 
@@ -89,6 +97,14 @@ impl JavaCodeGenerator {
         self.reset();
         self.package = program.package.clone();
         self.generic_metadata = program.generic_metadata.clone();
+        self.logging_framework = program.logging.framework.clone();
+        self.trace_context_enabled = program.logging.trace_context;
+        self.logger_fields = program
+            .logging
+            .logger_fields
+            .iter()
+            .map(|spec| (spec.id, spec.clone()))
+            .collect();
         self.metadata_path.clear();
         self.conversion_metadata.clear();
         self.register_record_components_from_declarations(&program.type_declarations, &[]);
@@ -132,6 +148,8 @@ impl JavaCodeGenerator {
             }
         }
 
+        let mut hoisted_variable_fields =
+            Self::hoist_script_variable_fields(&mut script_statements);
         let mut hoisted_regex_fields = Vec::new();
         let mut retained_statements = Vec::new();
         for statement in script_statements.drain(..) {
@@ -142,6 +160,7 @@ impl JavaCodeGenerator {
             }
         }
         script_statements = retained_statements;
+        hoisted_variable_fields.append(&mut hoisted_regex_fields);
 
         let has_entry_method = script_methods.iter().any(Self::is_entry_point_method);
         let needs_wrapper = !script_statements.is_empty() || !has_entry_method;
@@ -151,6 +170,26 @@ impl JavaCodeGenerator {
             || !hoisted_regex_fields.is_empty()
         {
             let script_class = self.config.script_main_class.clone();
+            let qualified_script_class = if let Some(pkg) = &program.package {
+                format!("{}.{}", pkg, script_class)
+            } else {
+                script_class.clone()
+            };
+            let script_logger_fields: Vec<String> = program
+                .logging
+                .logger_fields
+                .iter()
+                .filter(|spec| {
+                    spec.class_id
+                        .as_ref()
+                        .and_then(|id| id.local_name.last())
+                        .map(|name| name == &script_class)
+                        .unwrap_or(true)
+                })
+                .filter_map(|spec| {
+                    self.render_script_logger_field(spec, &script_class, &qualified_script_class)
+                })
+                .collect();
 
             self.script_method_names = script_methods
                 .iter()
@@ -167,8 +206,20 @@ impl JavaCodeGenerator {
             builder.push_line(&format!("public final class {} {{", script_class));
             builder.indent();
 
-            if !hoisted_regex_fields.is_empty() {
-                for field in &hoisted_regex_fields {
+            if !script_logger_fields.is_empty() {
+                for field in &script_logger_fields {
+                    builder.push_line(field);
+                }
+                if needs_wrapper
+                    || !script_methods.is_empty()
+                    || !hoisted_variable_fields.is_empty()
+                {
+                    builder.push_line("");
+                }
+            }
+
+            if !hoisted_variable_fields.is_empty() {
+                for field in &hoisted_variable_fields {
                     let code = self.generate_statement(field)?;
                     Self::push_lines(&mut builder, &code);
                 }
@@ -281,6 +332,19 @@ impl JavaCodeGenerator {
         JavaSourceBuilder::new(self.config.indent.clone())
     }
 
+    fn resolve_logger_field_name(&self, id: LoggerFieldId) -> Option<&str> {
+        self.logger_fields
+            .get(&id)
+            .map(|spec| spec.field_name.as_str())
+    }
+
+    fn generate_log_invocation(
+        &mut self,
+        plan: &LogInvocationPlan,
+    ) -> Result<String, CodeGenError> {
+        logging::emit_log_plan(self, plan)
+    }
+
     fn add_import(&mut self, import_path: &str) {
         self.imports
             .insert(import_path.to_string(), import_path.to_string());
@@ -299,6 +363,9 @@ impl JavaCodeGenerator {
         self.current_return_type = None;
         self.mutable_captures.clear();
         self.record_components.clear();
+        self.logging_framework = LoggingFrameworkKind::default();
+        self.logger_fields.clear();
+        self.trace_context_enabled = false;
     }
 
     fn register_record_components_from_declarations(
@@ -686,6 +753,14 @@ impl JavaCodeGenerator {
                     scope_locals,
                 );
             }
+            IrExpression::LogInvocation { plan, .. } => {
+                self.collect_mutable_captures_in_log_plan(
+                    plan,
+                    method_locals,
+                    captures,
+                    scope_locals,
+                );
+            }
             IrExpression::Conditional {
                 condition,
                 then_expr,
@@ -756,6 +831,43 @@ impl JavaCodeGenerator {
             | IrExpression::StringFormat { .. }
             | IrExpression::InstanceOf { .. }
             | IrExpression::Cast { .. } => {}
+        }
+    }
+
+    fn collect_mutable_captures_in_log_plan(
+        &self,
+        plan: &LogInvocationPlan,
+        method_locals: &HashSet<String>,
+        captures: &mut HashSet<String>,
+        scope_locals: &HashSet<String>,
+    ) {
+        for item in &plan.items {
+            match item {
+                LogInvocationItem::Statement(statement) => {
+                    self.collect_mutable_captures_in_statement(
+                        statement,
+                        method_locals,
+                        captures,
+                        scope_locals,
+                    );
+                }
+                LogInvocationItem::Message(message) => {
+                    self.collect_mutable_captures_in_expression(
+                        &message.expression,
+                        method_locals,
+                        captures,
+                        scope_locals,
+                    );
+                }
+                LogInvocationItem::Nested(nested) => {
+                    self.collect_mutable_captures_in_log_plan(
+                        nested,
+                        method_locals,
+                        captures,
+                        scope_locals,
+                    );
+                }
+            }
         }
     }
 
@@ -1013,8 +1125,8 @@ impl JavaCodeGenerator {
                     captures,
                     scope_locals,
                 );
-                let mut then_scope = scope_locals.clone();
-                then_scope = self.collect_mutable_captures_in_statement(
+                let then_scope = scope_locals.clone();
+                let _ = self.collect_mutable_captures_in_statement(
                     then_stmt,
                     method_locals,
                     captures,
@@ -1479,6 +1591,110 @@ impl JavaCodeGenerator {
                 None
             }
             _ => None,
+        }
+    }
+
+    fn hoist_script_variable_fields(statements: &mut Vec<IrStatement>) -> Vec<IrStatement> {
+        let mut hoisted = Vec::new();
+        let mut retained = Vec::new();
+
+        for statement in statements.drain(..) {
+            match statement {
+                IrStatement::VariableDeclaration { .. } => {
+                    hoisted.push(Self::variable_declaration_to_field(statement));
+                }
+                IrStatement::Commented {
+                    statement: inner,
+                    comment,
+                    kind,
+                    comment_span,
+                } => {
+                    if matches!(inner.as_ref(), IrStatement::VariableDeclaration { .. }) {
+                        let field = Self::variable_declaration_to_field(*inner);
+                        hoisted.push(IrStatement::Commented {
+                            statement: Box::new(field),
+                            comment,
+                            kind,
+                            comment_span,
+                        });
+                    } else {
+                        retained.push(IrStatement::Commented {
+                            statement: inner,
+                            comment,
+                            kind,
+                            comment_span,
+                        });
+                    }
+                }
+                other => retained.push(other),
+            }
+        }
+
+        *statements = retained;
+        hoisted
+    }
+
+    fn variable_declaration_to_field(statement: IrStatement) -> IrStatement {
+        match statement {
+            IrStatement::VariableDeclaration {
+                name,
+                java_type,
+                initializer,
+                is_final,
+                mut modifiers,
+                span,
+            } => {
+                if matches!(modifiers.visibility, IrVisibility::Package) {
+                    modifiers.visibility = IrVisibility::Private;
+                }
+                modifiers.is_static = true;
+                modifiers.is_final = is_final;
+                IrStatement::FieldDeclaration {
+                    name,
+                    java_type,
+                    initializer,
+                    modifiers,
+                    span,
+                }
+            }
+            other => other,
+        }
+    }
+
+    fn render_script_logger_field(
+        &self,
+        spec: &LoggerFieldSpec,
+        simple_class: &str,
+        fqcn: &str,
+    ) -> Option<String> {
+        let field_name = &spec.field_name;
+        match &self.logging_framework {
+            LoggingFrameworkKind::Slf4j => Some(format!(
+                "private static final org.slf4j.Logger {name} = org.slf4j.LoggerFactory.getLogger({class}.class);",
+                name = field_name,
+                class = simple_class
+            )),
+            LoggingFrameworkKind::Log4j2 => Some(format!(
+                "private static final org.apache.logging.log4j.Logger {name} = org.apache.logging.log4j.LogManager.getLogger({class}.class);",
+                name = field_name,
+                class = simple_class
+            )),
+            LoggingFrameworkKind::JbossLogging => Some(format!(
+                "private static final org.jboss.logging.Logger {name} = org.jboss.logging.Logger.getLogger({class}.class);",
+                name = field_name,
+                class = simple_class
+            )),
+            LoggingFrameworkKind::CommonsLogging => Some(format!(
+                "private static final org.apache.commons.logging.Log {name} = org.apache.commons.logging.LogFactory.getLog({class}.class);",
+                name = field_name,
+                class = simple_class
+            )),
+            LoggingFrameworkKind::Jul => Some(format!(
+                "private static final java.util.logging.Logger {name} = java.util.logging.Logger.getLogger(\"{fqcn}\");",
+                name = field_name,
+                fqcn = fqcn
+            )),
+            LoggingFrameworkKind::Custom { .. } => None,
         }
     }
 

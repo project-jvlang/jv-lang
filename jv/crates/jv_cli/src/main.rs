@@ -22,14 +22,16 @@ use jv_cli::pipeline::project::{
     manifest::{ManifestLoader, OutputConfig, ProjectSettings, SourceConfig},
 };
 use jv_cli::pipeline::{
-    BuildOptionsFactory, CliOverrides, OutputManager, compile, produce_binary, run_program,
+    BuildOptionsFactory, CliOverrides, OutputManager, compile, produce_binary,
+    report::render_logging_overview, run_program,
 };
 use jv_cli::tour::TourOrchestrator;
 use jv_cli::{
     Cli, Commands, format_resolved_import, get_version, init_project as cli_init_project,
+    logging_overrides::{build_cli_logging_layer, read_env_logging_layer},
     resolved_imports_header, tooling_failure,
 };
-use jv_pm::{Manifest, PackageInfo, ProjectSection};
+use jv_pm::{LoggingConfig, LoggingConfigLayer, Manifest, PackageInfo, ProjectSection};
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
@@ -67,6 +69,13 @@ fn main() -> Result<()> {
             parallel_inference,
             inference_workers,
             constraint_batch,
+            log_level,
+            log_framework,
+            log_default_level,
+            otel_enabled,
+            otel_endpoint,
+            otel_protocol,
+            otel_trace_context,
             binary,
             bin_name,
             target,
@@ -115,6 +124,17 @@ fn main() -> Result<()> {
                 check = true;
             }
 
+            let env_logging_layer = read_env_logging_layer()?;
+            let cli_logging_layer = build_cli_logging_layer(
+                log_framework.as_deref(),
+                log_level.as_deref(),
+                log_default_level.as_deref(),
+                otel_enabled.as_deref(),
+                otel_endpoint.as_deref(),
+                otel_protocol.as_deref(),
+                otel_trace_context.as_deref(),
+            )?;
+
             let overrides = CliOverrides {
                 entrypoint: entrypoint_override,
                 output: output.clone().map(PathBuf::from),
@@ -135,6 +155,8 @@ fn main() -> Result<()> {
                 apt_processors: processors.clone(),
                 apt_processorpath: processorpath.clone(),
                 apt_options: apt_options.clone(),
+                logging_cli: cli_logging_layer,
+                logging_env: env_logging_layer,
             };
 
             let plan = BuildOptionsFactory::compose(project_root, settings, layout, overrides)
@@ -192,6 +214,7 @@ fn main() -> Result<()> {
                 "バインディング統計 / Binding usage: explicit val={} implicit val={} implicit typed={} var={}",
                 usage.explicit, usage.implicit, usage.implicit_typed, usage.vars
             );
+            println!("{}", render_logging_overview(&plan.logging_config));
 
             if let Some(perf) = &artifacts.perf_capture {
                 let summary = &perf.report.summary;
@@ -299,6 +322,8 @@ fn main() -> Result<()> {
             let layout = ProjectLayout::from_settings(&project_root, &settings)
                 .map_err(|diagnostic| tooling_failure(&error_path, diagnostic))?;
 
+            let env_logging_layer = read_env_logging_layer()?;
+
             let overrides = CliOverrides {
                 entrypoint: entrypoint_override,
                 output: None,
@@ -319,6 +344,8 @@ fn main() -> Result<()> {
                 apt_processors: None,
                 apt_processorpath: None,
                 apt_options: Vec::new(),
+                logging_cli: LoggingConfigLayer::default(),
+                logging_env: env_logging_layer,
             };
 
             let plan = BuildOptionsFactory::compose(project_root, settings, layout, overrides)
@@ -343,6 +370,9 @@ fn main() -> Result<()> {
         }
         Some(Commands::Version) => {
             println!("{}", get_version());
+        }
+        Some(Commands::Otel(args)) => {
+            commands::otel::run(args).context("OpenTelemetry コマンドの実行に失敗しました")?;
         }
         Some(Commands::Debug(args)) => {
             commands::debug::run(args).context("Failed to run debug command")?;
@@ -445,6 +475,7 @@ fn build_ephemeral_run_settings(start_path: &Path) -> Option<(ProjectRoot, Proje
         },
         project: project_section,
         build: None,
+        logging: LoggingConfig::default(),
     };
 
     let settings = ProjectSettings {

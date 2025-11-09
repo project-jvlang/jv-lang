@@ -2,6 +2,7 @@ pub mod builder;
 pub mod config;
 pub mod error;
 pub mod generator;
+pub mod log_message;
 pub mod target_version;
 pub mod types;
 

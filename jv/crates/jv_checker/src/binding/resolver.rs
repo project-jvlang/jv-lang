@@ -3,8 +3,8 @@ use std::collections::HashMap;
 use crate::CheckError;
 use jv_ast::Span;
 use jv_ast::{
-    Argument, ConcurrencyConstruct, Expression, ExtensionFunction, Modifiers, Program,
-    ResourceManagement, Statement, TryCatchClause, ValBindingOrigin,
+    Argument, ConcurrencyConstruct, Expression, ExtensionFunction, LogBlock, LogItem, Modifiers,
+    Program, ResourceManagement, Statement, TryCatchClause, ValBindingOrigin,
 };
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -649,6 +649,7 @@ impl BindingResolver {
                 finally_block: finally_block.map(|expr| Box::new(self.resolve_expression(*expr))),
                 span,
             },
+            Expression::LogBlock(block) => Expression::LogBlock(self.resolve_log_block(block)),
             Expression::Literal(_, _)
             | Expression::Identifier(_, _)
             | Expression::MultilineString(_)
@@ -682,6 +683,33 @@ impl BindingResolver {
         clause.body = Box::new(self.resolve_expression(*clause.body));
         self.exit_scope();
         clause
+    }
+
+    fn resolve_log_block(&mut self, block: LogBlock) -> LogBlock {
+        self.enter_scope();
+        let mut resolved_items = Vec::with_capacity(block.items.len());
+        for item in block.items {
+            match item {
+                LogItem::Statement(statement) => {
+                    let resolved = self.resolve_statements(vec![statement]);
+                    for stmt in resolved {
+                        resolved_items.push(LogItem::Statement(stmt));
+                    }
+                }
+                LogItem::Expression(expr) => {
+                    resolved_items.push(LogItem::Expression(self.resolve_expression(expr)));
+                }
+                LogItem::Nested(nested) => {
+                    resolved_items.push(LogItem::Nested(self.resolve_log_block(nested)));
+                }
+            }
+        }
+        self.exit_scope();
+        LogBlock {
+            level: block.level,
+            items: resolved_items,
+            span: block.span,
+        }
     }
 
     fn resolve_concurrency(&mut self, construct: ConcurrencyConstruct) -> ConcurrencyConstruct {

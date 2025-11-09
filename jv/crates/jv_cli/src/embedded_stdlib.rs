@@ -6,8 +6,8 @@ use std::sync::{Arc, OnceLock};
 
 use anyhow::{Result, anyhow};
 use jv_ast::{
-    Argument, CallArgumentMetadata, Expression, JsonLiteral, JsonValue, Program, Statement,
-    StringPart, Visibility,
+    Argument, CallArgumentMetadata, Expression, JsonLiteral, JsonValue, LogBlock, LogItem, Program,
+    Statement, StringPart, Visibility,
     types::{Kind, Pattern},
 };
 use jv_build::{JavaTarget, metadata::SymbolIndex};
@@ -386,6 +386,17 @@ fn rewrite_expression(expression: &mut Expression) {
                 rewrite_expression(finally_block.as_mut());
             }
         }
+        Expression::LogBlock(block) => rewrite_log_block(block),
+    }
+}
+
+fn rewrite_log_block(block: &mut LogBlock) {
+    for item in &mut block.items {
+        match item {
+            LogItem::Statement(statement) => rewrite_statement(statement),
+            LogItem::Expression(expr) => rewrite_expression(expr),
+            LogItem::Nested(nested) => rewrite_log_block(nested),
+        }
     }
 }
 
@@ -479,18 +490,15 @@ impl StdlibUsage {
             if token.is_empty() {
                 continue;
             }
-            let mut current = token;
-            loop {
-                for package in catalog.packages_for_reference(current) {
-                    self.packages.insert(package);
+
+            // Consider the full token as well as each suffix separated by '.' so that both
+            // fully-qualified references and simple type names are recognised.
+            for candidate in std::iter::once(token).chain(token.rsplit('.')) {
+                if candidate.is_empty() {
+                    continue;
                 }
-                if let Some((prefix, suffix)) = current.rsplit_once('.') {
-                    for package in catalog.packages_for_reference(suffix) {
-                        self.packages.insert(package);
-                    }
-                    current = prefix;
-                } else {
-                    break;
+                for package in catalog.packages_for_reference(candidate) {
+                    self.packages.insert(package);
                 }
             }
         }
@@ -630,6 +638,16 @@ impl<'a, 'b> ProgramUsageDetector<'a, 'b> {
         }
     }
 
+    fn visit_log_block(&mut self, block: &LogBlock) {
+        for item in &block.items {
+            match item {
+                LogItem::Statement(statement) => self.visit_statement(statement),
+                LogItem::Expression(expr) => self.visit_expression(expr),
+                LogItem::Nested(nested) => self.visit_log_block(nested),
+            }
+        }
+    }
+
     fn visit_argument(&mut self, argument: &Argument) {
         match argument {
             Argument::Positional(expr) => self.visit_expression(expr),
@@ -765,6 +783,7 @@ impl<'a, 'b> ProgramUsageDetector<'a, 'b> {
             | Expression::RegexLiteral(_)
             | Expression::This(_)
             | Expression::Super(_) => {}
+            Expression::LogBlock(block) => self.visit_log_block(block),
         }
     }
 }
@@ -1580,7 +1599,7 @@ mod tests {
     use super::*;
     use jv_ast::Span;
     use jv_checker::imports::resolution::{ResolvedImport, ResolvedImportKind};
-    use jv_ir::{IrModifiers, IrStatement};
+    use jv_ir::{IrModifiers, IrStatement, LoggingMetadata};
 
     use std::{
         fs,
@@ -1742,6 +1761,7 @@ mod tests {
             type_declarations: vec![class_decl],
             generic_metadata: BTreeMap::new(),
             conversion_metadata: Vec::new(),
+            logging: LoggingMetadata::default(),
             span,
         };
 

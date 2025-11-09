@@ -24,6 +24,33 @@ fn test_basic_keywords_green_phase() {
 }
 
 #[test]
+fn test_logging_keywords_are_classified() {
+    let mut lexer = Lexer::new("LOG TRACE DEBUG INFO WARN ERROR".to_string());
+    let tokens = lexer.tokenize().expect("lexing success");
+
+    let kinds: Vec<_> = tokens.iter().map(|token| &token.token_type).collect();
+    assert!(kinds.contains(&&TokenType::Log));
+    assert!(kinds.contains(&&TokenType::Trace));
+    assert!(kinds.contains(&&TokenType::Debug));
+    assert!(kinds.contains(&&TokenType::Info));
+    assert!(kinds.contains(&&TokenType::Warn));
+    assert!(kinds.contains(&&TokenType::Error));
+}
+
+#[test]
+fn test_lowercase_logging_words_are_identifiers() {
+    let mut lexer = Lexer::new("log trace debug info warn error".to_string());
+    let tokens = lexer.tokenize().expect("lexing success");
+
+    for expected in ["log", "trace", "debug", "info", "warn", "error"] {
+        assert!(tokens.iter().any(|token| matches!(
+            &token.token_type,
+            TokenType::Identifier(text) if text == expected
+        )));
+    }
+}
+
+#[test]
 fn test_identifiers_and_literals_green_phase() {
     // RED: This test should fail
     let mut lexer = Lexer::new("val name = \"Hello\" 42 true".to_string());

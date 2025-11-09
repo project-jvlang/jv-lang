@@ -7,6 +7,7 @@ members = [
     "crates/jv_parser_semantics",
     "crates/jv_parser_frontend",
     "crates/jv_parser_rowan",
+    "crates/jv_parser",
     "crates/jv_ast",
     "crates/jv_ir",
     "crates/jv_inference",

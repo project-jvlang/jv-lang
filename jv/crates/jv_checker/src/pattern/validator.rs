@@ -3,9 +3,9 @@ use super::{
 };
 use crate::CheckError;
 use jv_ast::{
-    Argument, ConcurrencyConstruct, Expression, ForInStatement, Literal, LoopStrategy,
-    NumericRangeLoop, Pattern, Program, Property, ResourceManagement, Span, Statement, StringPart,
-    TypeAnnotation, WhenArm,
+    Argument, ConcurrencyConstruct, Expression, ForInStatement, Literal, LogBlock, LogItem,
+    LoopStrategy, NumericRangeLoop, Pattern, Program, Property, ResourceManagement, Span,
+    Statement, StringPart, TypeAnnotation, WhenArm,
 };
 
 pub(super) fn validate_program(
@@ -193,6 +193,7 @@ impl<'a> WhenUsageValidator<'a> {
                     self.visit_statement(statement, stmt_expects_value);
                 }
             }
+            Expression::LogBlock(block) => self.visit_log_block(block),
             Expression::If {
                 condition,
                 then_branch,
@@ -230,6 +231,16 @@ impl<'a> WhenUsageValidator<'a> {
                     self.record_missing_else(span);
                 }
                 self.analyze_when_expression(expression, span, expects_value, has_subject);
+            }
+        }
+    }
+
+    fn visit_log_block(&mut self, block: &LogBlock) {
+        for item in &block.items {
+            match item {
+                LogItem::Statement(statement) => self.visit_statement(statement, false),
+                LogItem::Expression(expr) => self.visit_expression(expr, false),
+                LogItem::Nested(nested) => self.visit_log_block(nested),
             }
         }
     }

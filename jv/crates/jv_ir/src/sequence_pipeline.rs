@@ -3,7 +3,10 @@ use crate::error::TransformError;
 use crate::transform::{
     extract_java_type, normalize_whitespace_array_elements, transform_expression,
 };
-use crate::types::{IrExpression, IrProgram, IrResolvedMethodTarget, IrStatement, JavaType};
+use crate::types::{
+    IrExpression, IrProgram, IrResolvedMethodTarget, IrStatement, JavaType, LogInvocationItem,
+    LogInvocationPlan,
+};
 use jv_ast::{
     Argument, BinaryOp, CallArgumentMetadata, CallArgumentStyle, Expression, SequenceDelimiter,
     Span, types::PrimitiveTypeName,
@@ -2071,6 +2074,7 @@ fn expression_span(expr: &Expression) -> Span {
         Expression::RegexLiteral(regex) => regex.span.clone(),
         Expression::JsonLiteral(literal) => literal.span.clone(),
         Expression::MultilineString(literal) => literal.span.clone(),
+        Expression::LogBlock(block) => block.span.clone(),
     }
 }
 
@@ -2414,6 +2418,19 @@ impl ListTerminalEnforcer {
                 for arg in args {
                     self.visit_expression(arg, None);
                 }
+            }
+            IrExpression::LogInvocation { plan, .. } => self.visit_log_plan(plan),
+        }
+    }
+
+    fn visit_log_plan(&mut self, plan: &mut LogInvocationPlan) {
+        for item in plan.items.iter_mut() {
+            match item {
+                LogInvocationItem::Statement(stmt) => self.visit_statement(stmt),
+                LogInvocationItem::Message(message) => {
+                    self.visit_expression(&mut message.expression, Some(&JavaType::void()));
+                }
+                LogInvocationItem::Nested(nested) => self.visit_log_plan(nested),
             }
         }
     }

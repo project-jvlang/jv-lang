@@ -5,6 +5,46 @@ use crate::types::*;
 use serde::de::Deserializer;
 use serde::{Deserialize, Serialize};
 
+/// ログブロックの出力レベルを表す。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum LogBlockLevel {
+    /// `LOG { ... }` で宣言された、設定の `default_level` を利用するブロック。
+    Default,
+    /// `TRACE { ... }` ブロック。
+    Trace,
+    /// `DEBUG { ... }` ブロック。
+    Debug,
+    /// `INFO { ... }` ブロック。
+    Info,
+    /// `WARN { ... }` ブロック。
+    Warn,
+    /// `ERROR { ... }` ブロック。
+    Error,
+}
+
+/// ログブロック内で保持される要素。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum LogItem {
+    /// ログ前に評価されるステートメント。
+    Statement(crate::Statement),
+    /// ログメッセージや引数を生成する式。
+    Expression(Expression),
+    /// ネストされたログブロック。
+    Nested(LogBlock),
+}
+
+/// ログブロック式のデータモデル。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LogBlock {
+    /// ブロックに割り当てられたログレベル。
+    pub level: LogBlockLevel,
+    /// ブロック本体に出現するステートメント・メッセージ。
+    #[serde(default)]
+    pub items: Vec<LogItem>,
+    /// ブロック全体のソース位置。
+    pub span: Span,
+}
+
 /// AST Expression node representing all types of expressions in jv
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Expression {
@@ -113,6 +153,9 @@ pub enum Expression {
         statements: Vec<crate::Statement>,
         span: Span,
     },
+
+    /// ログブロック式。レベルおよび本体要素を保持する。
+    LogBlock(LogBlock),
 
     // Array literals
     Array {

@@ -2,7 +2,7 @@ description = "Auto-generated expectation for jv/tests/lang/imports/smart_import
 source = "jv/tests/lang/imports/smart_imports.jv"
 
 [expect]
-statement_count = 8
+statement_count = 7
 
 [expect.parser_diagnostics]
 allowed = false
@@ -21,20 +21,10 @@ name = "java.time.LocalDate"
 start_line = 1
 start_column = 1
 end_line = 1
-end_column = 27
-
-[[expect.statements]]
-index = 1
-kind = "expression"
-
-[expect.statements.span]
-start_line = 1
-start_column = 28
-end_line = 1
 end_column = 35
 
 [[expect.statements]]
-index = 2
+index = 1
 kind = "import"
 name = "java.util"
 
@@ -45,7 +35,7 @@ end_line = 2
 end_column = 19
 
 [[expect.statements]]
-index = 3
+index = 2
 kind = "import"
 name = "java.util.Collections"
 
@@ -56,7 +46,7 @@ end_line = 3
 end_column = 31
 
 [[expect.statements]]
-index = 4
+index = 3
 kind = "import"
 name = "java.lang.Math.max"
 
@@ -67,7 +57,7 @@ end_line = 4
 end_column = 26
 
 [[expect.statements]]
-index = 5
+index = 4
 kind = "import"
 name = "java.sql.DriverManager"
 
@@ -78,7 +68,7 @@ end_line = 5
 end_column = 30
 
 [[expect.statements]]
-index = 6
+index = 5
 kind = "function_declaration"
 name = "describeImportPipeline"
 
@@ -102,7 +92,7 @@ statement_kinds = [
 ]
 
 [[expect.statements]]
-index = 7
+index = 6
 kind = "function_declaration"
 name = "main"
 

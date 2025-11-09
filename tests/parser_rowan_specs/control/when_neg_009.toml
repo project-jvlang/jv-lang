@@ -6,7 +6,7 @@ statement_count = 1
 
 [expect.parser_diagnostics]
 allowed = true
-max = 1
+max = 2
 
 [expect.lowering_diagnostics]
 allowed = true
@@ -26,5 +26,6 @@ end_column = 2
 [expect.statements.block]
 statement_kinds = [
     "val_declaration",
+    "expression",
     "return_statement",
 ]
