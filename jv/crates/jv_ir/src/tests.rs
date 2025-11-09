@@ -4,8 +4,8 @@ mod tests {
     use crate::{
         CompletableFutureOp, DataFormat, IrCaseLabel, IrDeconstructionComponent,
         IrDeconstructionPattern, IrExpression, IrForEachKind, IrForLoopMetadata, IrImplicitWhenEnd,
-        IrModifiers, IrNumericRangeLoop, IrParameter, IrResolvedMethodTarget, IrStatement,
-        IrVisibility, JavaType, PipelineShape, SampleMode, SampleSourceKind, Schema,
+        IrModifiers, IrNumericRangeLoop, IrParameter, IrProgram, IrResolvedMethodTarget,
+        IrStatement, IrVisibility, JavaType, PipelineShape, SampleMode, SampleSourceKind, Schema,
         SequencePipeline, SequenceSource, SequenceStage, SequenceTerminal,
         SequenceTerminalEvaluation, SequenceTerminalKind, TransformContext, TransformError,
         TransformPools, TransformProfiler, VirtualThreadOp, convert_type_annotation,
@@ -27,6 +27,10 @@ mod tests {
     use std::path::{Path, PathBuf};
     use std::time::Duration;
     use tempfile::tempdir;
+
+    mod val_declaration_transform_coverage {
+        include!("tests/val_declaration_transform_coverage.rs");
+    }
 
     fn dummy_span() -> Span {
         Span::dummy()
