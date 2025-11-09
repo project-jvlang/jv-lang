@@ -1,9 +1,9 @@
 use super::lowering_cases::lower_source;
 use crate::{JvLanguage, ParseBuilder, ParseEvent};
-use jv_ast::Statement;
 use jv_ast::expression::Expression;
 use jv_ast::statement::ValBindingOrigin;
 use jv_ast::types::TypeAnnotation;
+use jv_ast::Statement;
 use jv_lexer::Lexer;
 use rowan::SyntaxNode;
 
@@ -42,6 +42,51 @@ fn assert_val_declaration(
         }
         other => panic!(
             "ValDeclarationが期待されましたが、{:?}が得られました",
+            other
+        ),
+    }
+}
+
+/// var宣言を検証するヘルパー関数
+fn assert_var_declaration(
+    statement: &Statement,
+    expected_name: &str,
+    expected_type: Option<&str>,
+    expects_initializer: bool,
+) {
+    match statement {
+        Statement::VarDeclaration {
+            name,
+            type_annotation,
+            initializer,
+            ..
+        } => {
+            assert_eq!(name, expected_name, "var宣言の名前が期待値と異なります");
+            match (type_annotation, expected_type) {
+                (None, None) => {}
+                (Some(TypeAnnotation::Simple(actual)), Some(expected)) => {
+                    assert_eq!(actual, expected, "型注釈が期待値と異なります");
+                }
+                (actual, expected) => {
+                    panic!(
+                        "型注釈の有無が期待値と異なります: expected {:?}, got {:?}",
+                        expected, actual
+                    );
+                }
+            }
+
+            match (initializer.is_some(), expects_initializer) {
+                (true, true) | (false, false) => {}
+                (present, expected) => {
+                    panic!(
+                        "初期化子の有無が期待値と異なります: expected {}, got {}",
+                        expected, present
+                    );
+                }
+            }
+        }
+        other => panic!(
+            "VarDeclarationが期待されましたが、{:?}が得られました",
             other
         ),
     }
@@ -369,6 +414,82 @@ when (value) {
     }
 }
 
+// ----- var宣言 -----
+
+#[test]
+fn when分岐内_var_x_equals_0() {
+    let result = lower_source(
+        r#"
+when (value) {
+    1 -> {
+        var x = 0
+    }
+}
+"#,
+    );
+    assert!(result.diagnostics.is_empty());
+    let when_expr = result.statements.first().expect("when expression expected");
+    if let Statement::Expression { expr, .. } = when_expr {
+        if let Expression::When { arms, .. } = expr {
+            let arm = arms.first().expect("when arm expected");
+            let statements = match &arm.body {
+                Expression::Lambda { body, .. } => {
+                    if let Expression::Block { statements, .. } = body.as_ref() {
+                        statements
+                    } else {
+                        panic!("Expected Block in lambda body");
+                    }
+                }
+                Expression::Block { statements, .. } => statements,
+                other => panic!("Expected Block or Lambda in when arm, got {:?}", other),
+            };
+            let stmt = statements.first().expect("statement in when arm expected");
+            assert_var_declaration(stmt, "x", None, true);
+        } else {
+            panic!("Expected When expression");
+        }
+    } else {
+        panic!("Expected Expression statement");
+    }
+}
+
+#[test]
+fn when分岐内_var_x_colon_int_equals_0() {
+    let result = lower_source(
+        r#"
+when (value) {
+    1 -> {
+        var x: Int = 0
+    }
+}
+"#,
+    );
+    assert!(result.diagnostics.is_empty());
+    let when_expr = result.statements.first().expect("when expression expected");
+    if let Statement::Expression { expr, .. } = when_expr {
+        if let Expression::When { arms, .. } = expr {
+            let arm = arms.first().expect("when arm expected");
+            let statements = match &arm.body {
+                Expression::Lambda { body, .. } => {
+                    if let Expression::Block { statements, .. } = body.as_ref() {
+                        statements
+                    } else {
+                        panic!("Expected Block in lambda body");
+                    }
+                }
+                Expression::Block { statements, .. } => statements,
+                other => panic!("Expected Block or Lambda in when arm, got {:?}", other),
+            };
+            let stmt = statements.first().expect("statement in when arm expected");
+            assert_var_declaration(stmt, "x", Some("Int"), true);
+        } else {
+            panic!("Expected When expression");
+        }
+    } else {
+        panic!("Expected Expression statement");
+    }
+}
+
 // ==================== ラムダ内 ====================
 
 #[test]
@@ -416,6 +537,64 @@ val f = { ->
             if let Expression::Block { statements, .. } = body.as_ref() {
                 let stmt = statements.first().expect("statement in lambda expected");
                 assert_val_declaration(stmt, "x", ValBindingOrigin::Implicit, None);
+            } else {
+                panic!("Expected Block expression in lambda");
+            }
+        } else {
+            panic!("Expected Lambda expression");
+        }
+    } else {
+        panic!("Expected ValDeclaration");
+    }
+}
+
+// ----- var宣言 -----
+
+#[test]
+fn ラムダ内_var_x_equals_0() {
+    let result = lower_source(
+        r#"
+val f = { ->
+    var x = 0
+    x
+}
+"#,
+    );
+    assert!(result.diagnostics.is_empty());
+    let val_decl = result.statements.first().expect("val declaration expected");
+    if let Statement::ValDeclaration { initializer, .. } = val_decl {
+        if let Expression::Lambda { body, .. } = initializer {
+            if let Expression::Block { statements, .. } = body.as_ref() {
+                let stmt = statements.first().expect("statement in lambda expected");
+                assert_var_declaration(stmt, "x", None, true);
+            } else {
+                panic!("Expected Block expression in lambda");
+            }
+        } else {
+            panic!("Expected Lambda expression");
+        }
+    } else {
+        panic!("Expected ValDeclaration");
+    }
+}
+
+#[test]
+fn ラムダ内_var_x_colon_int_equals_0() {
+    let result = lower_source(
+        r#"
+val f = { ->
+    var x: Int = 0
+    x
+}
+"#,
+    );
+    assert!(result.diagnostics.is_empty());
+    let val_decl = result.statements.first().expect("val declaration expected");
+    if let Statement::ValDeclaration { initializer, .. } = val_decl {
+        if let Expression::Lambda { body, .. } = initializer {
+            if let Expression::Block { statements, .. } = body.as_ref() {
+                let stmt = statements.first().expect("statement in lambda expected");
+                assert_var_declaration(stmt, "x", Some("Int"), true);
             } else {
                 panic!("Expected Block expression in lambda");
             }
@@ -487,6 +666,71 @@ fun outer() {
                                             ValBindingOrigin::Implicit,
                                             None,
                                         );
+                                        return;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    panic!("Failed to navigate through nested structure");
+}
+
+#[test]
+fn 深くネストした関数内_var_x_equals_0() {
+    let result = lower_source(
+        r#"
+fun outer() {
+    for (i in 0..10) {
+        when (i) {
+            1 -> {
+                val f = { ->
+                    var x = 0
+                    x
+                }
+            }
+        }
+    }
+}
+"#,
+    );
+    assert!(result.diagnostics.is_empty());
+
+    let func = result.statements.first().expect("function expected");
+    if let Statement::FunctionDeclaration { body, .. } = func {
+        if let Expression::Block { statements, .. } = body.as_ref() {
+            let for_stmt = statements.first().expect("for statement expected");
+            if let Statement::ForIn(for_in) = for_stmt {
+                if let Expression::Block { statements, .. } = for_in.body.as_ref() {
+                    let when_stmt = statements.first().expect("when statement expected");
+                    if let Statement::Expression { expr, .. } = when_stmt {
+                        if let Expression::When { arms, .. } = expr {
+                            let arm = arms.first().expect("when arm expected");
+                            let statements = match &arm.body {
+                                Expression::Lambda { body, .. } => {
+                                    if let Expression::Block { statements, .. } = body.as_ref() {
+                                        statements
+                                    } else {
+                                        panic!("Expected Block expression inside lambda body");
+                                    }
+                                }
+                                Expression::Block { statements, .. } => statements,
+                                other => {
+                                    panic!("Expected Block or Lambda in when arm, got {:?}", other)
+                                }
+                            };
+
+                            let lambda_decl = statements.first().expect("lambda val decl expected");
+                            if let Statement::ValDeclaration { initializer, .. } = lambda_decl {
+                                if let Expression::Lambda { body, .. } = initializer {
+                                    if let Expression::Block { statements, .. } = body.as_ref() {
+                                        let stmt = statements
+                                            .first()
+                                            .expect("statement in lambda expected");
+                                        assert_var_declaration(stmt, "x", None, true);
                                         return;
                                     }
                                 }

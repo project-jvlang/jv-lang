@@ -1253,7 +1253,20 @@ mod expression_parser {
                     })
                 }
                 TokenType::LeftBrace => {
-                    if has_high_json_confidence(token) {
+                    let use_json = if has_high_json_confidence(token) {
+                        if let Some(close_index) = self.find_matching_brace(index) {
+                            let inner = &self.tokens[index + 1..close_index];
+                            !inner
+                                .iter()
+                                .any(|tok| matches!(tok.token_type, TokenType::Arrow))
+                        } else {
+                            true
+                        }
+                    } else {
+                        false
+                    };
+
+                    if use_json {
                         self.parse_json_object_expression(index)
                     } else {
                         self.parse_brace_expression()
@@ -1578,11 +1591,15 @@ mod expression_parser {
 
                 let parameters = self.parse_lambda_parameters(parameter_tokens)?;
 
+                let force_block = Self::lambda_body_prefers_statement_block(body_tokens);
+
                 let body_expr = if body_tokens.is_empty() {
                     Expression::Block {
                         statements: Vec::new(),
                         span: span.clone(),
                     }
+                } else if force_block {
+                    self.parse_lambda_body_as_block(body_tokens, arrow_absolute + 1)?
                 } else {
                     match Self::parse_nested_expression(body_tokens) {
                         Ok(expr) => expr.expr,
@@ -1602,11 +1619,15 @@ mod expression_parser {
                     end: closing_index + 1,
                 }
             } else {
+                let force_block = Self::lambda_body_prefers_statement_block(inner);
+
                 let body_expr = if inner.is_empty() {
                     Expression::Block {
                         statements: Vec::new(),
                         span: span.clone(),
                     }
+                } else if force_block {
+                    self.parse_lambda_body_as_block(inner, start_index + 1)?
                 } else {
                     match Self::parse_nested_expression(inner) {
                         Ok(expr) => expr.expr,
@@ -1702,6 +1723,12 @@ mod expression_parser {
                 .collect()
         }
 
+        fn lambda_body_prefers_statement_block(tokens: &[&Token]) -> bool {
+            tokens
+                .iter()
+                .any(|token| matches!(token.token_type, TokenType::Val | TokenType::Var))
+        }
+
         fn parse_lambda_statement(
             &self,
             slice: &[&'a Token],
@@ -1717,6 +1744,7 @@ mod expression_parser {
 
             match first.token_type {
                 TokenType::Val => self.parse_val_statement(slice, absolute_start),
+                TokenType::Var => self.parse_var_statement(slice, absolute_start),
                 TokenType::Return => {
                     let expr_slice = &slice[1..];
                     let value = if expr_slice.is_empty() {
@@ -1917,6 +1945,95 @@ mod expression_parser {
                 initializer,
                 modifiers: Modifiers::default(),
                 origin: ValBindingOrigin::ExplicitKeyword,
+                span,
+            })
+        }
+
+        fn parse_var_statement(
+            &self,
+            slice: &[&'a Token],
+            absolute_start: usize,
+        ) -> Result<Statement, ExpressionError> {
+            let absolute_end = absolute_start + slice.len();
+            let span = span_for_range(self.tokens, absolute_start, absolute_end);
+
+            if slice.len() < 2 {
+                return Err(ExpressionError::new(
+                    "`var` 宣言の構文が不正です",
+                    Some(span.clone()),
+                ));
+            }
+
+            let name_token = slice[1];
+            let name = match &name_token.token_type {
+                TokenType::Identifier(id) => id.clone(),
+                _ => {
+                    return Err(ExpressionError::new(
+                        "`var` 宣言には識別子が必要です",
+                        Some(span_from_token(name_token)),
+                    ));
+                }
+            };
+
+            let mut cursor = 2usize;
+            let mut type_annotation: Option<TypeAnnotation> = None;
+
+            if cursor < slice.len() && matches!(slice[cursor].token_type, TokenType::Colon) {
+                cursor += 1;
+                let mut type_end = cursor;
+                while type_end < slice.len()
+                    && !matches!(slice[type_end].token_type, TokenType::Assign)
+                {
+                    type_end += 1;
+                }
+
+                let type_tokens = &slice[cursor..type_end];
+                if type_tokens.is_empty() {
+                    return Err(ExpressionError::new(
+                        "`var` 宣言の型注釈が不足しています",
+                        Some(span.clone()),
+                    ));
+                }
+
+                let owned: Vec<Token> = type_tokens.iter().map(|token| (*token).clone()).collect();
+                match lower_type_annotation_from_tokens(&owned) {
+                    Ok(lowered) => type_annotation = Some(lowered.into_annotation()),
+                    Err(error) => {
+                        return Err(ExpressionError::new(
+                            error.message().to_string(),
+                            error.span().cloned(),
+                        ));
+                    }
+                }
+                cursor = type_end;
+            }
+
+            let mut initializer: Option<Expression> = None;
+
+            if cursor < slice.len() {
+                if matches!(slice[cursor].token_type, TokenType::Assign) {
+                    let initializer_tokens = &slice[cursor + 1..];
+                    if initializer_tokens.is_empty() {
+                        return Err(ExpressionError::new(
+                            "`var` 宣言の初期化式が必要です",
+                            Some(span.clone()),
+                        ));
+                    }
+                    initializer = Some(Self::parse_nested_expression(initializer_tokens)?.expr);
+                } else {
+                    return Err(ExpressionError::new(
+                        "`var` 宣言の構文が不正です",
+                        Some(span.clone()),
+                    ));
+                }
+            }
+
+            Ok(Statement::VarDeclaration {
+                name,
+                binding: None,
+                type_annotation,
+                initializer,
+                modifiers: Modifiers::default(),
                 span,
             })
         }
