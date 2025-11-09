@@ -3231,6 +3231,7 @@ fn switch_expression_java21_mixed_labels_emits_jv3105() {
 
 mod pattern_switch;
 mod target_matrix;
+mod val_declaration_codegen_coverage;
 
 #[test]
 fn passthrough_comments_emit_in_java() {
