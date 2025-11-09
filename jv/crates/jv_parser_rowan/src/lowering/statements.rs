@@ -30,6 +30,7 @@ use jv_lexer::{
     Token, TokenMetadata, TokenTrivia, TokenType,
 };
 use jv_type_inference_java::{lower_type_annotation_from_tokens, TypeLoweringErrorKind};
+use std::collections::HashSet;
 
 /// ローワリング結果。
 #[derive(Debug)]
@@ -93,13 +94,114 @@ impl LoweringDiagnostic {
     }
 }
 
+#[derive(Clone, Default)]
+struct BindingEnvironment {
+    known: HashSet<String>,
+}
+
+impl BindingEnvironment {
+    fn new() -> Self {
+        Self {
+            known: HashSet::new(),
+        }
+    }
+
+    fn from_parent(parent: &BindingEnvironment) -> Self {
+        Self {
+            known: parent.known.clone(),
+        }
+    }
+
+    fn register_name(&mut self, name: &str) {
+        if name.is_empty() || name == "_" {
+            return;
+        }
+        self.known.insert(name.to_string());
+    }
+
+    fn register_pattern(&mut self, pattern: &BindingPatternKind) {
+        match pattern {
+            BindingPatternKind::Identifier { name, .. } => self.register_name(name),
+            BindingPatternKind::Tuple { elements, .. }
+            | BindingPatternKind::List { elements, .. } => {
+                for element in elements {
+                    self.register_pattern(element);
+                }
+            }
+            BindingPatternKind::Wildcard { .. } => {}
+        }
+    }
+
+    fn register_parameters(&mut self, parameters: &[Parameter]) {
+        for parameter in parameters {
+            self.register_name(&parameter.name);
+        }
+    }
+
+    fn register_statement(&mut self, statement: &Statement) {
+        match statement {
+            Statement::ValDeclaration { name, binding, .. } => {
+                if let Some(pattern) = binding {
+                    self.register_pattern(pattern);
+                } else {
+                    self.register_name(name);
+                }
+            }
+            Statement::VarDeclaration { name, binding, .. } => {
+                if let Some(pattern) = binding {
+                    self.register_pattern(pattern);
+                } else {
+                    self.register_name(name);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn register_loop_binding(&mut self, binding: &LoopBinding) {
+        if let Some(pattern) = &binding.pattern {
+            self.register_pattern(pattern);
+        } else {
+            self.register_name(&binding.name);
+        }
+    }
+
+    fn contains(&self, name: &str) -> bool {
+        self.known.contains(name)
+    }
+}
+
+fn collect_binding_pattern_identifiers(pattern: &BindingPatternKind, output: &mut Vec<String>) {
+    match pattern {
+        BindingPatternKind::Identifier { name, .. } => {
+            if name != "_" {
+                output.push(name.clone());
+            }
+        }
+        BindingPatternKind::Tuple { elements, .. }
+        | BindingPatternKind::List { elements, .. } => {
+            for element in elements {
+                collect_binding_pattern_identifiers(element, output);
+            }
+        }
+        BindingPatternKind::Wildcard { .. } => {}
+    }
+}
+
 /// Rowan構文木からASTステートメントを生成する。
 pub fn lower_program(root: &JvSyntaxNode, tokens: &[Token]) -> LoweringResult {
     let context = LoweringContext::new(tokens);
     let mut statements = Vec::new();
     let mut diagnostics = Vec::new();
 
-    collect_statements_from_children(&context, root, &mut statements, &mut diagnostics);
+    let mut environment = BindingEnvironment::new();
+    collect_statements_from_children(
+        &context,
+        root,
+        &mut statements,
+        &mut diagnostics,
+        &mut environment,
+    );
 
     LoweringResult {
         statements,
@@ -112,6 +214,7 @@ fn collect_statements_from_children(
     parent: &JvSyntaxNode,
     statements: &mut Vec<Statement>,
     diagnostics: &mut Vec<LoweringDiagnostic>,
+    environment: &mut BindingEnvironment,
 ) {
     for child in parent.children() {
         if child.kind().is_token() {
@@ -119,11 +222,17 @@ fn collect_statements_from_children(
         }
 
         if child.kind() == SyntaxKind::StatementList {
-            collect_statements_from_children(context, &child, statements, diagnostics);
+            collect_statements_from_children(
+                context,
+                &child,
+                statements,
+                diagnostics,
+                environment,
+            );
             continue;
         }
 
-        process_candidate(context, child, statements, diagnostics);
+        process_candidate(context, child, statements, diagnostics, environment);
     }
 }
 
@@ -156,6 +265,7 @@ fn process_candidate(
     node: JvSyntaxNode,
     statements: &mut Vec<Statement>,
     diagnostics: &mut Vec<LoweringDiagnostic>,
+    environment: &mut BindingEnvironment,
 ) {
     if node.kind().is_token() {
         return;
@@ -178,8 +288,11 @@ fn process_candidate(
         return;
     }
 
-    match lower_single_statement(context, &node, diagnostics) {
-        Ok(statement) => statements.push(statement),
+    match lower_single_statement(context, &node, diagnostics, environment) {
+        Ok(statement) => {
+            environment.register_statement(&statement);
+            statements.push(statement);
+        }
         Err(diagnostic) => diagnostics.push(diagnostic),
     }
 }
@@ -188,6 +301,7 @@ fn lower_single_statement(
     context: &LoweringContext<'_>,
     node: &JvSyntaxNode,
     diagnostics: &mut Vec<LoweringDiagnostic>,
+    environment: &BindingEnvironment,
 ) -> Result<Statement, LoweringDiagnostic> {
     if context.tokens_for(node).is_empty() {
         return Err(LoweringDiagnostic::new(
@@ -204,19 +318,23 @@ fn lower_single_statement(
         SyntaxKind::PackageDeclaration => lower_package(context, node),
         SyntaxKind::ImportDeclaration => lower_import(context, node),
         SyntaxKind::CommentStatement => lower_comment(context, node),
-        SyntaxKind::AssignmentStatement => lower_assignment(context, node, diagnostics),
+        SyntaxKind::AssignmentStatement => {
+            lower_assignment(context, node, diagnostics, environment)
+        }
         SyntaxKind::ValDeclaration => lower_value(context, node, true, diagnostics),
         SyntaxKind::VarDeclaration => lower_value(context, node, false, diagnostics),
-        SyntaxKind::FunctionDeclaration => lower_function(context, node, diagnostics),
-        SyntaxKind::ClassDeclaration => lower_class(context, node, diagnostics),
-        SyntaxKind::ForStatement => lower_for(context, node, diagnostics),
+        SyntaxKind::FunctionDeclaration => {
+            lower_function(context, node, diagnostics, environment)
+        }
+        SyntaxKind::ClassDeclaration => lower_class(context, node, diagnostics, environment),
+        SyntaxKind::ForStatement => lower_for(context, node, diagnostics, environment),
         SyntaxKind::ReturnStatement => lower_return(context, node, diagnostics),
         SyntaxKind::ThrowStatement => lower_throw(context, node, diagnostics),
         SyntaxKind::BreakStatement => lower_break(context, node),
         SyntaxKind::ContinueStatement => lower_continue(context, node),
-        SyntaxKind::UseStatement => lower_use(context, node, diagnostics),
-        SyntaxKind::DeferStatement => lower_defer(context, node, diagnostics),
-        SyntaxKind::SpawnStatement => lower_spawn(context, node, diagnostics),
+        SyntaxKind::UseStatement => lower_use(context, node, diagnostics, environment),
+        SyntaxKind::DeferStatement => lower_defer(context, node, diagnostics, environment),
+        SyntaxKind::SpawnStatement => lower_spawn(context, node, diagnostics, environment),
         SyntaxKind::WhenStatement | SyntaxKind::Expression => {
             lower_expression_statement(context, node, diagnostics)
         }
@@ -427,6 +545,7 @@ fn lower_assignment(
     context: &LoweringContext<'_>,
     node: &JvSyntaxNode,
     diagnostics: &mut Vec<LoweringDiagnostic>,
+    environment: &BindingEnvironment,
 ) -> Result<Statement, LoweringDiagnostic> {
     let target_node = child_node(node, SyntaxKind::AssignmentTarget).ok_or_else(|| {
         missing_child_diagnostic(
@@ -462,38 +581,48 @@ fn lower_assignment(
     let span = context.span_for(node).unwrap_or_else(Span::dummy);
 
     if let Some(pattern) = binding_pattern.clone() {
-        if let Some(type_node) = child_node(&target_node, SyntaxKind::TypeAnnotation) {
-            if let Some(annotation) =
-                lower_type_annotation_container(context, &type_node, node, diagnostics)
-            {
-                if let Some(name) = pattern.first_identifier() {
-                    let modifiers = Modifiers::default();
-                    return Ok(Statement::ValDeclaration {
-                        name: name.to_string(),
-                        binding: Some(pattern),
-                        type_annotation: Some(annotation),
-                        initializer: value,
-                        modifiers,
-                        origin: ValBindingOrigin::ImplicitTyped,
-                        span,
-                    });
+        let mut identifiers = Vec::new();
+        collect_binding_pattern_identifiers(&pattern, &mut identifiers);
+        let declare_binding = if identifiers.is_empty() {
+            false
+        } else {
+            identifiers
+                .iter()
+                .any(|name| !environment.contains(name.as_str()))
+        };
+
+        if declare_binding {
+            if let Some(type_node) = child_node(&target_node, SyntaxKind::TypeAnnotation) {
+                if let Some(annotation) =
+                    lower_type_annotation_container(context, &type_node, node, diagnostics)
+                {
+                    if let Some(name) = pattern.first_identifier() {
+                        let modifiers = Modifiers::default();
+                        return Ok(Statement::ValDeclaration {
+                            name: name.to_string(),
+                            binding: Some(pattern),
+                            type_annotation: Some(annotation),
+                            initializer: value,
+                            modifiers,
+                            origin: ValBindingOrigin::ImplicitTyped,
+                            span,
+                        });
+                    }
                 }
             }
-        }
 
-        // 暗黙val宣言: `x = 0` の形式（型注釈なし、valキーワードなし）
-        // binding_patternが存在する場合は、スコープに関係なく暗黙valとして扱う
-        if let BindingPatternKind::Identifier { name, .. } = &pattern {
-            let modifiers = Modifiers::default();
-            return Ok(Statement::ValDeclaration {
-                name: name.clone(),
-                binding: Some(pattern),
-                type_annotation: None,
-                initializer: value,
-                modifiers,
-                origin: ValBindingOrigin::Implicit,
-                span,
-            });
+            if let BindingPatternKind::Identifier { name, .. } = &pattern {
+                let modifiers = Modifiers::default();
+                return Ok(Statement::ValDeclaration {
+                    name: name.clone(),
+                    binding: Some(pattern),
+                    type_annotation: None,
+                    initializer: value,
+                    modifiers,
+                    origin: ValBindingOrigin::Implicit,
+                    span,
+                });
+            }
         }
     }
 
@@ -509,6 +638,7 @@ fn lower_use(
     context: &LoweringContext<'_>,
     node: &JvSyntaxNode,
     diagnostics: &mut Vec<LoweringDiagnostic>,
+    environment: &BindingEnvironment,
 ) -> Result<Statement, LoweringDiagnostic> {
     let resource_node = child_node(node, SyntaxKind::Expression).ok_or_else(|| {
         missing_child_diagnostic(
@@ -530,7 +660,7 @@ fn lower_use(
         )
     })?;
 
-    let body = lower_block_expression(context, &block_node, diagnostics);
+    let body = lower_block_expression_with_parent(context, &block_node, diagnostics, environment);
     let resource_span = expression_span(&resource);
     let body_span = expression_span(&body);
     let span = merge_spans(&resource_span, &body_span);
@@ -546,6 +676,7 @@ fn lower_defer(
     context: &LoweringContext<'_>,
     node: &JvSyntaxNode,
     diagnostics: &mut Vec<LoweringDiagnostic>,
+    environment: &BindingEnvironment,
 ) -> Result<Statement, LoweringDiagnostic> {
     let block_node = child_node(node, SyntaxKind::Block).ok_or_else(|| {
         missing_child_diagnostic(
@@ -556,7 +687,7 @@ fn lower_defer(
         )
     })?;
 
-    let body = lower_block_expression(context, &block_node, diagnostics);
+    let body = lower_block_expression_with_parent(context, &block_node, diagnostics, environment);
     let span = expression_span(&body);
 
     Ok(Statement::ResourceManagement(ResourceManagement::Defer {
@@ -569,6 +700,7 @@ fn lower_spawn(
     context: &LoweringContext<'_>,
     node: &JvSyntaxNode,
     diagnostics: &mut Vec<LoweringDiagnostic>,
+    environment: &BindingEnvironment,
 ) -> Result<Statement, LoweringDiagnostic> {
     let block_node = child_node(node, SyntaxKind::Block).ok_or_else(|| {
         missing_child_diagnostic(
@@ -579,7 +711,7 @@ fn lower_spawn(
         )
     })?;
 
-    let body = lower_block_expression(context, &block_node, diagnostics);
+    let body = lower_block_expression_with_parent(context, &block_node, diagnostics, environment);
     let span = expression_span(&body);
 
     Ok(Statement::Concurrency(ConcurrencyConstruct::Spawn {
@@ -814,15 +946,36 @@ fn lower_type_annotation_container(
     }
 }
 
-fn lower_block_expression(
+fn lower_block_expression_with_env(
     context: &LoweringContext<'_>,
     block: &JvSyntaxNode,
     diagnostics: &mut Vec<LoweringDiagnostic>,
+    mut environment: BindingEnvironment,
 ) -> Expression {
     let span = context.span_for(block).unwrap_or_else(Span::dummy);
     let mut statements = Vec::new();
-    collect_statements_from_children(context, block, &mut statements, diagnostics);
+    collect_statements_from_children(
+        context,
+        block,
+        &mut statements,
+        diagnostics,
+        &mut environment,
+    );
     Expression::Block { statements, span }
+}
+
+fn lower_block_expression_with_parent(
+    context: &LoweringContext<'_>,
+    block: &JvSyntaxNode,
+    diagnostics: &mut Vec<LoweringDiagnostic>,
+    parent: &BindingEnvironment,
+) -> Expression {
+    lower_block_expression_with_env(
+        context,
+        block,
+        diagnostics,
+        BindingEnvironment::from_parent(parent),
+    )
 }
 
 fn lower_expression(
@@ -4902,6 +5055,7 @@ fn lower_function(
     context: &LoweringContext<'_>,
     node: &JvSyntaxNode,
     diagnostics: &mut Vec<LoweringDiagnostic>,
+    environment: &BindingEnvironment,
 ) -> Result<Statement, LoweringDiagnostic> {
     let tokens = context.tokens_for(node);
     let span = context.span_for(node).unwrap_or_else(Span::dummy);
@@ -5047,7 +5201,9 @@ fn lower_function(
 
     let fallback_span = span.clone();
     let body = if let Some(block) = child_node(node, SyntaxKind::Block) {
-        lower_block_expression(context, &block, diagnostics)
+        let mut block_environment = BindingEnvironment::from_parent(environment);
+        block_environment.register_parameters(&parameters);
+        lower_block_expression_with_env(context, &block, diagnostics, block_environment)
     } else {
         node.children()
             .find(|child| child.kind() == SyntaxKind::Expression)
@@ -5084,6 +5240,7 @@ fn lower_class(
     context: &LoweringContext<'_>,
     node: &JvSyntaxNode,
     diagnostics: &mut Vec<LoweringDiagnostic>,
+    environment: &BindingEnvironment,
 ) -> Result<Statement, LoweringDiagnostic> {
     let tokens = context.tokens_for(node);
     let span = context.span_for(node).unwrap_or_else(Span::dummy);
@@ -5104,7 +5261,7 @@ fn lower_class(
         .unwrap_or_default();
 
     let (properties, methods) = child_node(node, SyntaxKind::ClassBody)
-        .map(|body| lower_class_members(context, &body, diagnostics))
+        .map(|body| lower_class_members(context, &body, diagnostics, environment))
         .transpose()?
         .unwrap_or_default();
 
@@ -5143,6 +5300,7 @@ fn lower_class_members(
     context: &LoweringContext<'_>,
     body: &JvSyntaxNode,
     diagnostics: &mut Vec<LoweringDiagnostic>,
+    environment: &BindingEnvironment,
 ) -> Result<(Vec<Property>, Vec<Box<Statement>>), LoweringDiagnostic> {
     let mut properties = Vec::new();
     let mut methods = Vec::new();
@@ -5151,7 +5309,14 @@ fn lower_class_members(
         if child.kind().is_token() {
             continue;
         }
-        process_class_member(context, &child, diagnostics, &mut properties, &mut methods)?;
+        process_class_member(
+            context,
+            &child,
+            diagnostics,
+            &mut properties,
+            &mut methods,
+            environment,
+        )?;
     }
 
     Ok((properties, methods))
@@ -5163,6 +5328,7 @@ fn process_class_member(
     diagnostics: &mut Vec<LoweringDiagnostic>,
     properties: &mut Vec<Property>,
     methods: &mut Vec<Box<Statement>>,
+    environment: &BindingEnvironment,
 ) -> Result<(), LoweringDiagnostic> {
     match member.kind() {
         SyntaxKind::ValDeclaration => {
@@ -5176,7 +5342,7 @@ fn process_class_member(
             }
         }
         SyntaxKind::FunctionDeclaration => {
-            let statement = lower_function(context, member, diagnostics)?;
+            let statement = lower_function(context, member, diagnostics, environment)?;
             methods.push(Box::new(statement));
         }
         SyntaxKind::StatementList => {
@@ -5184,7 +5350,14 @@ fn process_class_member(
                 if stmt.kind().is_token() {
                     continue;
                 }
-                process_class_member(context, &stmt, diagnostics, properties, methods)?;
+                process_class_member(
+                    context,
+                    &stmt,
+                    diagnostics,
+                    properties,
+                    methods,
+                    environment,
+                )?;
             }
         }
         other => {
@@ -5264,6 +5437,7 @@ fn lower_for(
     context: &LoweringContext<'_>,
     node: &JvSyntaxNode,
     diagnostics: &mut Vec<LoweringDiagnostic>,
+    environment: &BindingEnvironment,
 ) -> Result<Statement, LoweringDiagnostic> {
     let binding_node = child_node(node, SyntaxKind::BindingPattern).ok_or_else(|| {
         missing_child_diagnostic(
@@ -5303,12 +5477,15 @@ fn lower_for(
             )
         })?;
 
+    let mut body_environment = BindingEnvironment::from_parent(environment);
+    body_environment.register_loop_binding(&loop_binding);
+
     let body_span = child_node(node, SyntaxKind::Block)
         .and_then(|block| context.span_for(&block))
         .unwrap_or_else(|| context.span_for(node).unwrap_or_else(Span::dummy));
 
     let body = match child_node(node, SyntaxKind::Block) {
-        Some(block) => lower_block_expression(context, &block, diagnostics),
+        Some(block) => lower_block_expression_with_env(context, &block, diagnostics, body_environment),
         None => {
             push_diagnostic(
                 diagnostics,
