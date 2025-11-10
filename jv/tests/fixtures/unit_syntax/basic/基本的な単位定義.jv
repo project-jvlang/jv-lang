@@ -1,0 +1,7 @@
+@ 長さ(Double) m! {
+    基準 := 1
+    標準 -> m
+    @Conversion {}
+}
+
+val 歩行距離 = 1250 @ m

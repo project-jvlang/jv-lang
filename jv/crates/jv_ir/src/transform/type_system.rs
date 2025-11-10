@@ -65,6 +65,10 @@ pub fn convert_type_annotation(
             let return_type = convert_type_annotation(*return_type)?;
             Ok(functional_interface_type(&param_types, &return_type))
         }
+        TypeAnnotation::Unit { base, .. } => {
+            // Units do not influence generated Java types; fall back to base type.
+            convert_type_annotation(*base)
+        }
     }
 }
 

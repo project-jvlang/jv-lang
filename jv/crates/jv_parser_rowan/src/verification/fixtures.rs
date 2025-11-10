@@ -205,6 +205,7 @@ pub enum StatementKindKey {
     ThrowStatement,
     ValDeclaration,
     VarDeclaration,
+    UnitTypeDefinition,
     WhenStatement,
     Unknown,
 }

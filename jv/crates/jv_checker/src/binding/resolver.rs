@@ -3,8 +3,9 @@ use std::collections::HashMap;
 use crate::CheckError;
 use jv_ast::Span;
 use jv_ast::{
-    Argument, ConcurrencyConstruct, Expression, ExtensionFunction, LogBlock, LogItem, Modifiers,
-    Program, ResourceManagement, Statement, TryCatchClause, ValBindingOrigin,
+    statement::UnitTypeMember, Argument, ConcurrencyConstruct, Expression, ExtensionFunction,
+    LogBlock, LogItem, Modifiers, Program, ResourceManagement, Statement, TryCatchClause,
+    ValBindingOrigin,
 };
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -339,6 +340,29 @@ impl BindingResolver {
                     span,
                 }
             }
+            Statement::UnitTypeDefinition(mut definition) => {
+                for member in definition.members.iter_mut() {
+                    match member {
+                        UnitTypeMember::Dependency(dependency) => {
+                            if let Some(expr) = dependency.value.take() {
+                                dependency.value =
+                                    Some(self.resolve_expression(expr));
+                            }
+                        }
+                        UnitTypeMember::Conversion(block) => {
+                            for statement in block.body.iter_mut() {
+                                let resolved = self.resolve_statement(statement.clone());
+                                *statement = resolved;
+                            }
+                        }
+                        UnitTypeMember::NestedStatement(inner) => {
+                            let resolved = self.resolve_statement((**inner).clone());
+                            **inner = resolved;
+                        }
+                    }
+                }
+                Statement::UnitTypeDefinition(definition)
+            }
             Statement::ExtensionFunction(extension) => {
                 let extension = self.resolve_extension_function(extension);
                 Statement::ExtensionFunction(extension)
@@ -650,6 +674,17 @@ impl BindingResolver {
                 span,
             },
             Expression::LogBlock(block) => Expression::LogBlock(self.resolve_log_block(block)),
+            Expression::UnitLiteral {
+                value,
+                unit,
+                spacing,
+                span,
+            } => Expression::UnitLiteral {
+                value: Box::new(self.resolve_expression(*value)),
+                unit,
+                spacing,
+                span,
+            },
             Expression::Literal(_, _)
             | Expression::Identifier(_, _)
             | Expression::MultilineString(_)

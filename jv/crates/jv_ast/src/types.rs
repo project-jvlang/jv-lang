@@ -26,6 +26,19 @@ impl Span {
     }
 }
 
+/// 単位名・表記に関するメタデータ。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct UnitSymbol {
+    /// 単位名（例: `"m"`, `"USD"`, `"[°C]"`）。
+    pub name: String,
+    /// 角括弧で囲まれているか。
+    pub is_bracketed: bool,
+    /// デフォルト単位マーカー（`!`）が付いているか。
+    pub has_default_marker: bool,
+    /// ソース上の位置。
+    pub span: Span,
+}
+
 /// Regex literal metadata capturing both the normalized pattern and raw source text.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RegexLiteral {
@@ -107,6 +120,15 @@ pub enum TypeAnnotation {
         return_type: Box<TypeAnnotation>,
     },
     Array(Box<TypeAnnotation>),
+    /// 単位付き型注釈。
+    Unit {
+        /// 基底となる型注釈。
+        base: Box<TypeAnnotation>,
+        /// 付随する単位情報。
+        unit: UnitSymbol,
+        /// `@` を省略した暗黙スタイルか。
+        implicit: bool,
+    },
 }
 
 /// Variance marker used by generic parameters (`out T` / `in T`).

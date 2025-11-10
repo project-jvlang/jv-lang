@@ -36,6 +36,30 @@ pub enum SyntaxKind {
     BindingTuplePattern,
     /// 型注釈。
     TypeAnnotation,
+    /// 単位付き型注釈。
+    UnitTypeAnnotation,
+    /// 単位型定義全体。
+    UnitTypeDefinition,
+    /// 単位型定義のヘッダー（カテゴリや基底型部分）。
+    UnitHeader,
+    /// 単位カテゴリを示す識別子。
+    UnitCategory,
+    /// 単位定義で指定された基底型。
+    UnitBaseType,
+    /// 単位名の識別子。
+    UnitName,
+    /// デフォルト単位を示すマーカー。
+    UnitDefaultMarker,
+    /// 単位定義の本体ブロック。
+    UnitBody,
+    /// 単位依存定義（`識別子 := 式`）。
+    UnitDependency,
+    /// 単位間の関係定義（`識別子 -> 識別子`）。
+    UnitRelation,
+    /// 順方向変換ブロック。
+    UnitConversionBlock,
+    /// 逆方向変換ブロック。
+    UnitReverseConversionBlock,
     /// 初期化子。
     InitializerClause,
     /// アノテーションの並び。
@@ -46,6 +70,8 @@ pub enum SyntaxKind {
     AnnotationArgumentList,
     /// アノテーション引数。
     AnnotationArgument,
+    /// 単位リテラル。
+    UnitLiteral,
     /// ステートメントレベル修飾子のリスト。
     ModifierList,
     /// 単一の修飾子。
@@ -700,6 +726,7 @@ mod tests {
         ("ImportPath", SyntaxKind::ImportPath),
         ("ImportClause", SyntaxKind::ImportClause),
         ("ImportWildcard", SyntaxKind::ImportWildcard),
+        ("ImportAlias", SyntaxKind::ImportAlias),
         ("StatementList", SyntaxKind::StatementList),
         ("CommentStatement", SyntaxKind::CommentStatement),
         ("AssignmentStatement", SyntaxKind::AssignmentStatement),
@@ -710,11 +737,27 @@ mod tests {
         ("BindingListPattern", SyntaxKind::BindingListPattern),
         ("BindingTuplePattern", SyntaxKind::BindingTuplePattern),
         ("TypeAnnotation", SyntaxKind::TypeAnnotation),
+        ("UnitTypeAnnotation", SyntaxKind::UnitTypeAnnotation),
+        ("UnitTypeDefinition", SyntaxKind::UnitTypeDefinition),
+        ("UnitHeader", SyntaxKind::UnitHeader),
+        ("UnitCategory", SyntaxKind::UnitCategory),
+        ("UnitBaseType", SyntaxKind::UnitBaseType),
+        ("UnitName", SyntaxKind::UnitName),
+        ("UnitDefaultMarker", SyntaxKind::UnitDefaultMarker),
+        ("UnitBody", SyntaxKind::UnitBody),
+        ("UnitDependency", SyntaxKind::UnitDependency),
+        ("UnitRelation", SyntaxKind::UnitRelation),
+        ("UnitConversionBlock", SyntaxKind::UnitConversionBlock),
+        (
+            "UnitReverseConversionBlock",
+            SyntaxKind::UnitReverseConversionBlock,
+        ),
         ("InitializerClause", SyntaxKind::InitializerClause),
         ("AnnotationList", SyntaxKind::AnnotationList),
         ("Annotation", SyntaxKind::Annotation),
         ("AnnotationArgumentList", SyntaxKind::AnnotationArgumentList),
         ("AnnotationArgument", SyntaxKind::AnnotationArgument),
+        ("UnitLiteral", SyntaxKind::UnitLiteral),
         ("ModifierList", SyntaxKind::ModifierList),
         ("Modifier", SyntaxKind::Modifier),
         ("FunctionDeclaration", SyntaxKind::FunctionDeclaration),
@@ -783,9 +826,12 @@ mod tests {
         ("RightParen", SyntaxKind::RightParen),
         ("LeftBrace", SyntaxKind::LeftBrace),
         ("RightBrace", SyntaxKind::RightBrace),
+        ("LeftBracket", SyntaxKind::LeftBracket),
+        ("RightBracket", SyntaxKind::RightBracket),
         ("Less", SyntaxKind::Less),
         ("Greater", SyntaxKind::Greater),
         ("Arrow", SyntaxKind::Arrow),
+        ("Bang", SyntaxKind::Bang),
         ("Identifier", SyntaxKind::Identifier),
         ("ExpressionToken", SyntaxKind::Expression),
     ];

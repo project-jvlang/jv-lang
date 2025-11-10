@@ -9,19 +9,20 @@ use crate::syntax::SyntaxKind;
 use jv_ast::comments::{CommentKind, CommentStatement, CommentVisibility};
 use jv_ast::expression::{
     Argument, CallArgumentMetadata, CallArgumentStyle, LogBlock, LogBlockLevel, LogItem, Parameter,
-    ParameterModifiers, ParameterProperty, StringPart, WhenArm,
+    ParameterModifiers, ParameterProperty, StringPart, UnitSpacingStyle, WhenArm,
 };
 use jv_ast::json::{
     JsonComment, JsonCommentKind, JsonEntry, JsonLiteral, JsonValue, NumberGrouping,
 };
 use jv_ast::statement::{
     ConcurrencyConstruct, ExtensionFunction, ForInStatement, LoopBinding, LoopStrategy,
-    NumericRangeLoop, Property, ResourceManagement, ValBindingOrigin,
+    NumericRangeLoop, Property, ResourceManagement, UnitConversionBlock, UnitConversionKind,
+    UnitDependency, UnitRelation, UnitTypeDefinition, UnitTypeMember, ValBindingOrigin,
 };
 use jv_ast::strings::{MultilineKind, MultilineStringLiteral};
 use jv_ast::types::{
     BinaryOp, GenericParameter, GenericSignature, Literal, Modifiers, Pattern, TypeAnnotation,
-    UnaryOp, VarianceMarker,
+    UnaryOp, UnitSymbol, VarianceMarker,
 };
 use jv_ast::{BindingPatternKind, Expression, SequenceDelimiter, Span, Statement};
 use jv_lexer::{
@@ -30,7 +31,6 @@ use jv_lexer::{
     Token, TokenMetadata, TokenTrivia, TokenType,
 };
 use jv_type_inference_java::{lower_type_annotation_from_tokens, TypeLoweringErrorKind};
-use std::collections::HashSet;
 
 /// ローワリング結果。
 #[derive(Debug)]
@@ -94,114 +94,13 @@ impl LoweringDiagnostic {
     }
 }
 
-#[derive(Clone, Default)]
-struct BindingEnvironment {
-    known: HashSet<String>,
-}
-
-impl BindingEnvironment {
-    fn new() -> Self {
-        Self {
-            known: HashSet::new(),
-        }
-    }
-
-    fn from_parent(parent: &BindingEnvironment) -> Self {
-        Self {
-            known: parent.known.clone(),
-        }
-    }
-
-    fn register_name(&mut self, name: &str) {
-        if name.is_empty() || name == "_" {
-            return;
-        }
-        self.known.insert(name.to_string());
-    }
-
-    fn register_pattern(&mut self, pattern: &BindingPatternKind) {
-        match pattern {
-            BindingPatternKind::Identifier { name, .. } => self.register_name(name),
-            BindingPatternKind::Tuple { elements, .. }
-            | BindingPatternKind::List { elements, .. } => {
-                for element in elements {
-                    self.register_pattern(element);
-                }
-            }
-            BindingPatternKind::Wildcard { .. } => {}
-        }
-    }
-
-    fn register_parameters(&mut self, parameters: &[Parameter]) {
-        for parameter in parameters {
-            self.register_name(&parameter.name);
-        }
-    }
-
-    fn register_statement(&mut self, statement: &Statement) {
-        match statement {
-            Statement::ValDeclaration { name, binding, .. } => {
-                if let Some(pattern) = binding {
-                    self.register_pattern(pattern);
-                } else {
-                    self.register_name(name);
-                }
-            }
-            Statement::VarDeclaration { name, binding, .. } => {
-                if let Some(pattern) = binding {
-                    self.register_pattern(pattern);
-                } else {
-                    self.register_name(name);
-                }
-            }
-            _ => {}
-        }
-    }
-
-    fn register_loop_binding(&mut self, binding: &LoopBinding) {
-        if let Some(pattern) = &binding.pattern {
-            self.register_pattern(pattern);
-        } else {
-            self.register_name(&binding.name);
-        }
-    }
-
-    fn contains(&self, name: &str) -> bool {
-        self.known.contains(name)
-    }
-}
-
-fn collect_binding_pattern_identifiers(pattern: &BindingPatternKind, output: &mut Vec<String>) {
-    match pattern {
-        BindingPatternKind::Identifier { name, .. } => {
-            if name != "_" {
-                output.push(name.clone());
-            }
-        }
-        BindingPatternKind::Tuple { elements, .. } | BindingPatternKind::List { elements, .. } => {
-            for element in elements {
-                collect_binding_pattern_identifiers(element, output);
-            }
-        }
-        BindingPatternKind::Wildcard { .. } => {}
-    }
-}
-
 /// Rowan構文木からASTステートメントを生成する。
 pub fn lower_program(root: &JvSyntaxNode, tokens: &[Token]) -> LoweringResult {
     let context = LoweringContext::new(tokens);
     let mut statements = Vec::new();
     let mut diagnostics = Vec::new();
-    let mut environment = BindingEnvironment::new();
 
-    collect_statements_from_children(
-        &context,
-        root,
-        &mut statements,
-        &mut diagnostics,
-        &mut environment,
-    );
-    normalize_import_aliases(&mut statements);
+    collect_statements_from_children(&context, root, &mut statements, &mut diagnostics);
 
     LoweringResult {
         statements,
@@ -214,7 +113,6 @@ fn collect_statements_from_children(
     parent: &JvSyntaxNode,
     statements: &mut Vec<Statement>,
     diagnostics: &mut Vec<LoweringDiagnostic>,
-    environment: &mut BindingEnvironment,
 ) {
     for child in parent.children() {
         if child.kind().is_token() {
@@ -222,11 +120,11 @@ fn collect_statements_from_children(
         }
 
         if child.kind() == SyntaxKind::StatementList {
-            collect_statements_from_children(context, &child, statements, diagnostics, environment);
+            collect_statements_from_children(context, &child, statements, diagnostics);
             continue;
         }
 
-        process_candidate(context, child, statements, diagnostics, environment);
+        process_candidate(context, child, statements, diagnostics);
     }
 }
 
@@ -238,6 +136,7 @@ fn is_top_level_statement(kind: SyntaxKind) -> bool {
             | SyntaxKind::CommentStatement
             | SyntaxKind::ValDeclaration
             | SyntaxKind::VarDeclaration
+            | SyntaxKind::UnitTypeDefinition
             | SyntaxKind::FunctionDeclaration
             | SyntaxKind::ClassDeclaration
             | SyntaxKind::WhenStatement
@@ -259,7 +158,6 @@ fn process_candidate(
     node: JvSyntaxNode,
     statements: &mut Vec<Statement>,
     diagnostics: &mut Vec<LoweringDiagnostic>,
-    environment: &mut BindingEnvironment,
 ) {
     if node.kind().is_token() {
         return;
@@ -282,11 +180,8 @@ fn process_candidate(
         return;
     }
 
-    match lower_single_statement(context, &node, diagnostics, environment) {
-        Ok(statement) => {
-            environment.register_statement(&statement);
-            statements.push(statement);
-        }
+    match lower_single_statement(context, &node, diagnostics) {
+        Ok(statement) => statements.push(statement),
         Err(diagnostic) => diagnostics.push(diagnostic),
     }
 }
@@ -295,7 +190,6 @@ fn lower_single_statement(
     context: &LoweringContext<'_>,
     node: &JvSyntaxNode,
     diagnostics: &mut Vec<LoweringDiagnostic>,
-    environment: &BindingEnvironment,
 ) -> Result<Statement, LoweringDiagnostic> {
     if context.tokens_for(node).is_empty() {
         return Err(LoweringDiagnostic::new(
@@ -312,21 +206,20 @@ fn lower_single_statement(
         SyntaxKind::PackageDeclaration => lower_package(context, node),
         SyntaxKind::ImportDeclaration => lower_import(context, node),
         SyntaxKind::CommentStatement => lower_comment(context, node),
-        SyntaxKind::AssignmentStatement => {
-            lower_assignment(context, node, diagnostics, environment)
-        }
+        SyntaxKind::AssignmentStatement => lower_assignment(context, node, diagnostics),
         SyntaxKind::ValDeclaration => lower_value(context, node, true, diagnostics),
         SyntaxKind::VarDeclaration => lower_value(context, node, false, diagnostics),
-        SyntaxKind::FunctionDeclaration => lower_function(context, node, diagnostics, environment),
-        SyntaxKind::ClassDeclaration => lower_class(context, node, diagnostics, environment),
-        SyntaxKind::ForStatement => lower_for(context, node, diagnostics, environment),
+        SyntaxKind::FunctionDeclaration => lower_function(context, node, diagnostics),
+        SyntaxKind::UnitTypeDefinition => lower_unit_type_definition(context, node, diagnostics),
+        SyntaxKind::ClassDeclaration => lower_class(context, node, diagnostics),
+        SyntaxKind::ForStatement => lower_for(context, node, diagnostics),
         SyntaxKind::ReturnStatement => lower_return(context, node, diagnostics),
         SyntaxKind::ThrowStatement => lower_throw(context, node, diagnostics),
         SyntaxKind::BreakStatement => lower_break(context, node),
         SyntaxKind::ContinueStatement => lower_continue(context, node),
-        SyntaxKind::UseStatement => lower_use(context, node, diagnostics, environment),
-        SyntaxKind::DeferStatement => lower_defer(context, node, diagnostics, environment),
-        SyntaxKind::SpawnStatement => lower_spawn(context, node, diagnostics, environment),
+        SyntaxKind::UseStatement => lower_use(context, node, diagnostics),
+        SyntaxKind::DeferStatement => lower_defer(context, node, diagnostics),
+        SyntaxKind::SpawnStatement => lower_spawn(context, node, diagnostics),
         SyntaxKind::WhenStatement | SyntaxKind::Expression => {
             lower_expression_statement(context, node, diagnostics)
         }
@@ -537,7 +430,6 @@ fn lower_assignment(
     context: &LoweringContext<'_>,
     node: &JvSyntaxNode,
     diagnostics: &mut Vec<LoweringDiagnostic>,
-    environment: &BindingEnvironment,
 ) -> Result<Statement, LoweringDiagnostic> {
     let target_node = child_node(node, SyntaxKind::AssignmentTarget).ok_or_else(|| {
         missing_child_diagnostic(
@@ -573,47 +465,22 @@ fn lower_assignment(
     let span = context.span_for(node).unwrap_or_else(Span::dummy);
 
     if let Some(pattern) = binding_pattern.clone() {
-        let mut identifiers = Vec::new();
-        collect_binding_pattern_identifiers(&pattern, &mut identifiers);
-        let declare_binding = if identifiers.is_empty() {
-            false
-        } else {
-            identifiers
-                .iter()
-                .any(|name| !environment.contains(name.as_str()))
-        };
-
-        if declare_binding {
-            if let Some(type_node) = child_node(&target_node, SyntaxKind::TypeAnnotation) {
-                if let Some(annotation) =
-                    lower_type_annotation_container(context, &type_node, node, diagnostics)
-                {
-                    if let Some(name) = pattern.first_identifier() {
-                        let modifiers = Modifiers::default();
-                        return Ok(Statement::ValDeclaration {
-                            name: name.to_string(),
-                            binding: Some(pattern),
-                            type_annotation: Some(annotation),
-                            initializer: value,
-                            modifiers,
-                            origin: ValBindingOrigin::ImplicitTyped,
-                            span,
-                        });
-                    }
+        if let Some(type_node) = child_node(&target_node, SyntaxKind::TypeAnnotation) {
+            if let Some(annotation) =
+                lower_type_annotation_container(context, &type_node, node, diagnostics)
+            {
+                if let Some(name) = pattern.first_identifier() {
+                    let modifiers = Modifiers::default();
+                    return Ok(Statement::ValDeclaration {
+                        name: name.to_string(),
+                        binding: Some(pattern),
+                        type_annotation: Some(annotation),
+                        initializer: value,
+                        modifiers,
+                        origin: ValBindingOrigin::ImplicitTyped,
+                        span,
+                    });
                 }
-            }
-
-            if let BindingPatternKind::Identifier { name, .. } = &pattern {
-                let modifiers = Modifiers::default();
-                return Ok(Statement::ValDeclaration {
-                    name: name.clone(),
-                    binding: Some(pattern),
-                    type_annotation: None,
-                    initializer: value,
-                    modifiers,
-                    origin: ValBindingOrigin::Implicit,
-                    span,
-                });
             }
         }
     }
@@ -630,7 +497,6 @@ fn lower_use(
     context: &LoweringContext<'_>,
     node: &JvSyntaxNode,
     diagnostics: &mut Vec<LoweringDiagnostic>,
-    environment: &BindingEnvironment,
 ) -> Result<Statement, LoweringDiagnostic> {
     let resource_node = child_node(node, SyntaxKind::Expression).ok_or_else(|| {
         missing_child_diagnostic(
@@ -652,7 +518,7 @@ fn lower_use(
         )
     })?;
 
-    let body = lower_block_expression_with_parent(context, &block_node, diagnostics, environment);
+    let body = lower_block_expression(context, &block_node, diagnostics);
     let resource_span = expression_span(&resource);
     let body_span = expression_span(&body);
     let span = merge_spans(&resource_span, &body_span);
@@ -668,7 +534,6 @@ fn lower_defer(
     context: &LoweringContext<'_>,
     node: &JvSyntaxNode,
     diagnostics: &mut Vec<LoweringDiagnostic>,
-    environment: &BindingEnvironment,
 ) -> Result<Statement, LoweringDiagnostic> {
     let block_node = child_node(node, SyntaxKind::Block).ok_or_else(|| {
         missing_child_diagnostic(
@@ -679,7 +544,7 @@ fn lower_defer(
         )
     })?;
 
-    let body = lower_block_expression_with_parent(context, &block_node, diagnostics, environment);
+    let body = lower_block_expression(context, &block_node, diagnostics);
     let span = expression_span(&body);
 
     Ok(Statement::ResourceManagement(ResourceManagement::Defer {
@@ -692,7 +557,6 @@ fn lower_spawn(
     context: &LoweringContext<'_>,
     node: &JvSyntaxNode,
     diagnostics: &mut Vec<LoweringDiagnostic>,
-    environment: &BindingEnvironment,
 ) -> Result<Statement, LoweringDiagnostic> {
     let block_node = child_node(node, SyntaxKind::Block).ok_or_else(|| {
         missing_child_diagnostic(
@@ -703,7 +567,7 @@ fn lower_spawn(
         )
     })?;
 
-    let body = lower_block_expression_with_parent(context, &block_node, diagnostics, environment);
+    let body = lower_block_expression(context, &block_node, diagnostics);
     let span = expression_span(&body);
 
     Ok(Statement::Concurrency(ConcurrencyConstruct::Spawn {
@@ -901,15 +765,32 @@ fn lower_type_annotation_container(
     let expr = match child_node(container_node, SyntaxKind::Expression) {
         Some(expr) => expr,
         None => {
-            diagnostics.push(LoweringDiagnostic::new(
-                LoweringDiagnosticSeverity::Error,
-                "型注釈の式が見つかりません",
-                context.span_for(container_node),
-                container_node.kind(),
-                first_identifier_text(owner),
-                collect_annotation_texts(owner),
-            ));
-            return None;
+            if let Some(unit_node) = child_node(container_node, SyntaxKind::UnitTypeAnnotation) {
+                match child_node(&unit_node, SyntaxKind::Expression) {
+                    Some(expr) => expr,
+                    None => {
+                        diagnostics.push(LoweringDiagnostic::new(
+                            LoweringDiagnosticSeverity::Error,
+                            "型注釈の式が見つかりません",
+                            context.span_for(container_node),
+                            container_node.kind(),
+                            first_identifier_text(owner),
+                            collect_annotation_texts(owner),
+                        ));
+                        return None;
+                    }
+                }
+            } else {
+                diagnostics.push(LoweringDiagnostic::new(
+                    LoweringDiagnosticSeverity::Error,
+                    "型注釈の式が見つかりません",
+                    context.span_for(container_node),
+                    container_node.kind(),
+                    first_identifier_text(owner),
+                    collect_annotation_texts(owner),
+                ));
+                return None;
+            }
         }
     };
 
@@ -943,38 +824,9 @@ fn lower_block_expression(
     block: &JvSyntaxNode,
     diagnostics: &mut Vec<LoweringDiagnostic>,
 ) -> Expression {
-    lower_block_expression_with_env(context, block, diagnostics, BindingEnvironment::new())
-}
-
-fn lower_block_expression_with_parent(
-    context: &LoweringContext<'_>,
-    block: &JvSyntaxNode,
-    diagnostics: &mut Vec<LoweringDiagnostic>,
-    parent: &BindingEnvironment,
-) -> Expression {
-    lower_block_expression_with_env(
-        context,
-        block,
-        diagnostics,
-        BindingEnvironment::from_parent(parent),
-    )
-}
-
-fn lower_block_expression_with_env(
-    context: &LoweringContext<'_>,
-    block: &JvSyntaxNode,
-    diagnostics: &mut Vec<LoweringDiagnostic>,
-    mut environment: BindingEnvironment,
-) -> Expression {
     let span = context.span_for(block).unwrap_or_else(Span::dummy);
     let mut statements = Vec::new();
-    collect_statements_from_children(
-        context,
-        block,
-        &mut statements,
-        diagnostics,
-        &mut environment,
-    );
+    collect_statements_from_children(context, block, &mut statements, diagnostics);
     Expression::Block { statements, span }
 }
 
@@ -982,6 +834,23 @@ fn lower_expression(
     context: &LoweringContext<'_>,
     node: &JvSyntaxNode,
 ) -> Result<Expression, LoweringDiagnostic> {
+    if node.kind() == SyntaxKind::UnitLiteral {
+        return lower_unit_literal_expression(context, node);
+    }
+
+    if node.kind() == SyntaxKind::Expression {
+        let mut non_token_children: Vec<JvSyntaxNode> = node
+            .children()
+            .filter(|child| !child.kind().is_token())
+            .collect();
+        if non_token_children.len() == 1
+            && non_token_children[0].kind() == SyntaxKind::UnitLiteral
+        {
+            let unit_node = non_token_children.remove(0);
+            return lower_unit_literal_expression(context, &unit_node);
+        }
+    }
+
     let tokens = context.tokens_for(node);
     lower_expression_from_tokens(context, node, tokens)
 }
@@ -1046,6 +915,143 @@ fn lower_expression_from_tokens(
     }
 }
 
+fn lower_unit_literal_expression(
+    context: &LoweringContext<'_>,
+    node: &JvSyntaxNode,
+) -> Result<Expression, LoweringDiagnostic> {
+    let tokens = context.tokens_for(node);
+    if tokens.is_empty() {
+        return Err(LoweringDiagnostic::new(
+            LoweringDiagnosticSeverity::Error,
+            "単位リテラルの構成要素が不足しています",
+            context.span_for(node),
+            node.kind(),
+            first_identifier_text(node),
+            collect_annotation_texts(node),
+        ));
+    }
+
+    let value_token = tokens[0];
+    let value_span = span_from_token(value_token);
+    let value_expr = match &value_token.token_type {
+        TokenType::Number(value) => {
+            Expression::Literal(Literal::Number(value.clone()), value_span.clone())
+        }
+        TokenType::String(value) => {
+            Expression::Literal(Literal::String(value.clone()), value_span.clone())
+        }
+        TokenType::Character(ch) => {
+            Expression::Literal(Literal::Character(*ch), value_span.clone())
+        }
+        _ => {
+            return Err(LoweringDiagnostic::new(
+                LoweringDiagnosticSeverity::Error,
+                "単位リテラルの値部分を解釈できませんでした",
+                context.span_for(node),
+                node.kind(),
+                first_identifier_text(node),
+                collect_annotation_texts(node),
+            ))
+        }
+    };
+
+    let mut index = 1usize;
+    let mut whitespace_after_value = false;
+    let mut at_index: Option<usize> = None;
+
+    while index < tokens.len() {
+        match tokens[index].token_type {
+            TokenType::Whitespace(_) => {
+                whitespace_after_value = true;
+                index += 1;
+            }
+            TokenType::At => {
+                at_index = Some(index);
+                index += 1;
+                break;
+            }
+            _ => break,
+        }
+    }
+
+    let mut space_after_at = false;
+    if at_index.is_some() {
+        while index < tokens.len() && matches!(tokens[index].token_type, TokenType::Whitespace(_))
+        {
+            space_after_at = true;
+            index += 1;
+        }
+    }
+
+    while index < tokens.len() && matches!(tokens[index].token_type, TokenType::Whitespace(_)) {
+        index += 1;
+    }
+
+    let mut symbol_tokens: Vec<&Token> = tokens.iter().skip(index).copied().collect();
+    while matches!(
+        symbol_tokens.first().map(|token| &token.token_type),
+        Some(TokenType::Whitespace(_))
+    ) {
+        symbol_tokens.remove(0);
+    }
+    while matches!(
+        symbol_tokens.last().map(|token| &token.token_type),
+        Some(TokenType::Whitespace(_))
+    ) {
+        symbol_tokens.pop();
+    }
+
+    if symbol_tokens.is_empty() {
+        return Err(LoweringDiagnostic::new(
+            LoweringDiagnosticSeverity::Error,
+            "単位リテラルの単位表記が見つかりません",
+            context.span_for(node),
+            node.kind(),
+            first_identifier_text(node),
+            collect_annotation_texts(node),
+        ));
+    }
+
+    let mut symbol_text = String::new();
+    let mut symbol_span_opt: Option<Span> = None;
+    let mut is_bracketed = false;
+    let mut has_default_marker = false;
+
+    for token in &symbol_tokens {
+        match token.token_type {
+            TokenType::LeftBracket => is_bracketed = true,
+            TokenType::Not => has_default_marker = true,
+            _ => {}
+        }
+        symbol_text.push_str(&token.lexeme);
+        let token_span = span_from_token(token);
+        symbol_span_opt = Some(match symbol_span_opt {
+            Some(current) => merge_spans(&current, &token_span),
+            None => token_span,
+        });
+    }
+
+    let symbol_span = symbol_span_opt.unwrap_or_else(Span::dummy);
+    let unit_symbol = UnitSymbol {
+        name: symbol_text,
+        is_bracketed,
+        has_default_marker,
+        span: symbol_span,
+    };
+
+    let spacing = UnitSpacingStyle {
+        space_before_at: at_index.is_some() && whitespace_after_value,
+        space_after_at,
+    };
+
+    Ok(Expression::UnitLiteral {
+        value: Box::new(value_expr),
+        unit: unit_symbol,
+        spacing,
+        span: context.span_for(node).unwrap_or_else(Span::dummy),
+    })
+}
+
 fn qualified_name_segments(
     context: &LoweringContext<'_>,
     node: &JvSyntaxNode,
@@ -1099,51 +1105,6 @@ fn join_tokens(tokens: &[&Token]) -> String {
         .collect::<String>()
 }
 
-fn normalize_import_aliases(statements: &mut Vec<Statement>) {
-    let mut index = 0;
-    while index + 1 < statements.len() {
-        let mut merged = false;
-        {
-            let (head, tail) = statements.split_at_mut(index + 1);
-            if let Statement::Import { alias, span, .. } = &mut head[index] {
-                if alias.is_none() {
-                    if let Statement::Expression {
-                        expr,
-                        span: expr_span,
-                    } = &tail[0]
-                    {
-                        if let Some(alias_name) = extract_alias_from_expression(expr) {
-                            *alias = Some(alias_name);
-                            *span = merge_spans(span, expr_span);
-                            merged = true;
-                        }
-                    }
-                }
-            }
-        }
-
-        if merged {
-            statements.remove(index + 1);
-        } else {
-            index += 1;
-        }
-    }
-}
-
-fn extract_alias_from_expression(expr: &Expression) -> Option<String> {
-    match expr {
-        Expression::Identifier(name, _) if name.len() > 2 && name.starts_with("as") => {
-            let alias = name[2..].trim().to_string();
-            if alias.is_empty() {
-                None
-            } else {
-                Some(alias)
-            }
-        }
-        _ => None,
-    }
-}
-
 fn log_level_from_token_kind(token_type: &TokenType) -> Option<LogBlockLevel> {
     match token_type {
         TokenType::Log => Some(LogBlockLevel::Default),
@@ -1154,6 +1115,17 @@ fn log_level_from_token_kind(token_type: &TokenType) -> Option<LogBlockLevel> {
         TokenType::Error => Some(LogBlockLevel::Error),
         _ => None,
     }
+}
+
+fn identifier_texts(context: &LoweringContext<'_>, node: &JvSyntaxNode) -> Vec<String> {
+    context
+        .tokens_for(node)
+        .into_iter()
+        .filter_map(|token| match &token.token_type {
+            TokenType::Identifier(value) => Some(value.clone()),
+            _ => None,
+        })
+        .collect()
 }
 
 fn token_requires_followup(token_type: &TokenType) -> bool {
@@ -1215,17 +1187,6 @@ mod tests {
             .filter(|token| !matches!(token.token_type, TokenType::Eof))
             .collect();
         expression_parser::parse_expression(&filtered).expect("parse expression")
-    }
-
-    #[test]
-    fn parses_regex_literal_expression() {
-        let expr = parse_expression_from_source("/abc/");
-        match expr {
-            Expression::RegexLiteral(literal) => {
-                assert_eq!(literal.pattern, "abc", "regex pattern should be normalized");
-            }
-            other => panic!("expected regex literal expression, got {:?}", other),
-        }
     }
 
     #[test]
@@ -1509,20 +1470,7 @@ mod expression_parser {
                     })
                 }
                 TokenType::LeftBrace => {
-                    let use_json = if has_high_json_confidence(token) {
-                        if let Some(close_index) = self.find_matching_brace(index) {
-                            let inner = &self.tokens[index + 1..close_index];
-                            !inner
-                                .iter()
-                                .any(|tok| matches!(tok.token_type, TokenType::Arrow))
-                        } else {
-                            true
-                        }
-                    } else {
-                        false
-                    };
-
-                    if use_json {
+                    if has_high_json_confidence(token) {
                         self.parse_json_object_expression(index)
                     } else {
                         self.parse_brace_expression()
@@ -1622,15 +1570,6 @@ mod expression_parser {
                     let span = span_from_token(token);
                     Ok(ParsedExpr {
                         expr: Expression::Literal(Literal::Null, span.clone()),
-                        start: index,
-                        end: index + 1,
-                    })
-                }
-                TokenType::RegexLiteral(_) => {
-                    let span = span_from_token(token);
-                    let literal = regex_literal_from_token(token, span.clone());
-                    Ok(ParsedExpr {
-                        expr: Expression::RegexLiteral(literal),
                         start: index,
                         end: index + 1,
                     })
@@ -2087,7 +2026,6 @@ mod expression_parser {
 
             match first.token_type {
                 TokenType::Val => self.parse_val_statement(slice, absolute_start),
-                TokenType::Var => self.parse_var_statement(slice, absolute_start),
                 TokenType::Return => {
                     let expr_slice = &slice[1..];
                     let value = if expr_slice.is_empty() {
@@ -2107,105 +2045,20 @@ mod expression_parser {
                                 Some(span.clone()),
                             ));
                         }
-                        if let Some(val_decl) = self.try_parse_implicit_val_statement(
-                            target_tokens,
-                            value_tokens,
-                            span.clone(),
-                            absolute_start,
-                        )? {
-                            Ok(val_decl)
-                        } else {
-                            let target = Self::parse_nested_expression(target_tokens)?.expr;
-                            let value = Self::parse_nested_expression(value_tokens)?.expr;
-                            Ok(Statement::Assignment {
-                                target,
-                                binding_pattern: None,
-                                value,
-                                span,
-                            })
-                        }
+                        let target = Self::parse_nested_expression(target_tokens)?.expr;
+                        let value = Self::parse_nested_expression(value_tokens)?.expr;
+                        Ok(Statement::Assignment {
+                            target,
+                            binding_pattern: None,
+                            value,
+                            span,
+                        })
                     } else {
                         let expr = Self::parse_nested_expression(slice)?.expr;
                         Ok(Statement::Expression { expr, span })
                     }
                 }
             }
-        }
-
-        fn try_parse_implicit_val_statement(
-            &self,
-            target_tokens: &[&'a Token],
-            value_tokens: &[&'a Token],
-            span: Span,
-            absolute_start: usize,
-        ) -> Result<Option<Statement>, ExpressionError> {
-            let first = target_tokens.first().ok_or_else(|| {
-                ExpressionError::new("代入ターゲットが存在しません", Some(span.clone()))
-            })?;
-
-            let name = match &first.token_type {
-                TokenType::Identifier(id) => id.clone(),
-                _ => return Ok(None),
-            };
-
-            let mut cursor = 1usize;
-            let mut type_annotation: Option<TypeAnnotation> = None;
-
-            if cursor < target_tokens.len() {
-                if !matches!(target_tokens[cursor].token_type, TokenType::Colon) {
-                    return Ok(None);
-                }
-                cursor += 1;
-                let type_start = cursor;
-                if type_start >= target_tokens.len() {
-                    return Err(ExpressionError::new(
-                        "`x: Type = ...` 形式の型注釈が不足しています",
-                        Some(span.clone()),
-                    ));
-                }
-
-                let owned: Vec<Token> = target_tokens[type_start..]
-                    .iter()
-                    .map(|token| (*token).clone())
-                    .collect();
-                match lower_type_annotation_from_tokens(&owned) {
-                    Ok(lowered) => {
-                        type_annotation = Some(lowered.into_annotation());
-                    }
-                    Err(error) => {
-                        let type_span = error.span().cloned().or_else(|| {
-                            Some(span_for_range(
-                                self.tokens,
-                                absolute_start + type_start,
-                                absolute_start + target_tokens.len(),
-                            ))
-                        });
-                        return Err(ExpressionError::new(error.message().to_string(), type_span));
-                    }
-                }
-                cursor = target_tokens.len();
-            }
-
-            if cursor != target_tokens.len() {
-                return Ok(None);
-            }
-
-            let initializer = Self::parse_nested_expression(value_tokens)?.expr;
-            let origin = if type_annotation.is_some() {
-                ValBindingOrigin::ImplicitTyped
-            } else {
-                ValBindingOrigin::Implicit
-            };
-
-            Ok(Some(Statement::ValDeclaration {
-                name,
-                binding: None,
-                type_annotation,
-                initializer,
-                modifiers: Modifiers::default(),
-                origin,
-                span,
-            }))
         }
 
         fn parse_val_statement(
@@ -2287,95 +2140,6 @@ mod expression_parser {
                 initializer,
                 modifiers: Modifiers::default(),
                 origin: ValBindingOrigin::ExplicitKeyword,
-                span,
-            })
-        }
-
-        fn parse_var_statement(
-            &self,
-            slice: &[&'a Token],
-            absolute_start: usize,
-        ) -> Result<Statement, ExpressionError> {
-            let absolute_end = absolute_start + slice.len();
-            let span = span_for_range(self.tokens, absolute_start, absolute_end);
-
-            if slice.len() < 2 {
-                return Err(ExpressionError::new(
-                    "`var` 宣言の構文が不正です",
-                    Some(span.clone()),
-                ));
-            }
-
-            let name_token = slice[1];
-            let name = match &name_token.token_type {
-                TokenType::Identifier(id) => id.clone(),
-                _ => {
-                    return Err(ExpressionError::new(
-                        "`var` 宣言には識別子が必要です",
-                        Some(span_from_token(name_token)),
-                    ));
-                }
-            };
-
-            let mut cursor = 2usize;
-            let mut type_annotation: Option<TypeAnnotation> = None;
-
-            if cursor < slice.len() && matches!(slice[cursor].token_type, TokenType::Colon) {
-                cursor += 1;
-                let mut type_end = cursor;
-                while type_end < slice.len()
-                    && !matches!(slice[type_end].token_type, TokenType::Assign)
-                {
-                    type_end += 1;
-                }
-
-                let type_tokens = &slice[cursor..type_end];
-                if type_tokens.is_empty() {
-                    return Err(ExpressionError::new(
-                        "`var` 宣言の型注釈が不足しています",
-                        Some(span.clone()),
-                    ));
-                }
-
-                let owned: Vec<Token> = type_tokens.iter().map(|token| (*token).clone()).collect();
-                match lower_type_annotation_from_tokens(&owned) {
-                    Ok(lowered) => type_annotation = Some(lowered.into_annotation()),
-                    Err(error) => {
-                        return Err(ExpressionError::new(
-                            error.message().to_string(),
-                            error.span().cloned(),
-                        ));
-                    }
-                }
-                cursor = type_end;
-            }
-
-            let mut initializer: Option<Expression> = None;
-
-            if cursor < slice.len() {
-                if matches!(slice[cursor].token_type, TokenType::Assign) {
-                    let initializer_tokens = &slice[cursor + 1..];
-                    if initializer_tokens.is_empty() {
-                        return Err(ExpressionError::new(
-                            "`var` 宣言の初期化式が必要です",
-                            Some(span.clone()),
-                        ));
-                    }
-                    initializer = Some(Self::parse_nested_expression(initializer_tokens)?.expr);
-                } else {
-                    return Err(ExpressionError::new(
-                        "`var` 宣言の構文が不正です",
-                        Some(span.clone()),
-                    ));
-                }
-            }
-
-            Ok(Statement::VarDeclaration {
-                name,
-                binding: None,
-                type_annotation,
-                initializer,
-                modifiers: Modifiers::default(),
                 span,
             })
         }
@@ -5244,7 +5008,6 @@ fn lower_function(
     context: &LoweringContext<'_>,
     node: &JvSyntaxNode,
     diagnostics: &mut Vec<LoweringDiagnostic>,
-    environment: &BindingEnvironment,
 ) -> Result<Statement, LoweringDiagnostic> {
     let tokens = context.tokens_for(node);
     let span = context.span_for(node).unwrap_or_else(Span::dummy);
@@ -5389,10 +5152,8 @@ fn lower_function(
         .and_then(|ret| lower_type_annotation_container(context, &ret, node, diagnostics));
 
     let fallback_span = span.clone();
-    let mut body_environment = BindingEnvironment::from_parent(environment);
-    body_environment.register_parameters(&parameters);
     let body = if let Some(block) = child_node(node, SyntaxKind::Block) {
-        lower_block_expression_with_env(context, &block, diagnostics, body_environment)
+        lower_block_expression(context, &block, diagnostics)
     } else {
         node.children()
             .find(|child| child.kind() == SyntaxKind::Expression)
@@ -5425,11 +5186,325 @@ fn lower_function(
     }
 }
 
+fn lower_unit_type_definition(
+    context: &LoweringContext<'_>,
+    node: &JvSyntaxNode,
+    diagnostics: &mut Vec<LoweringDiagnostic>,
+) -> Result<Statement, LoweringDiagnostic> {
+    let header = child_node(node, SyntaxKind::UnitHeader).ok_or_else(|| {
+        missing_child_diagnostic(
+            context,
+            node,
+            "単位定義のヘッダーが不足しています",
+            SyntaxKind::UnitHeader,
+        )
+    })?;
+
+    let category_node = child_node(&header, SyntaxKind::UnitCategory).ok_or_else(|| {
+        missing_child_diagnostic(
+            context,
+            &header,
+            "単位分類の識別子が見つかりません",
+            SyntaxKind::UnitCategory,
+        )
+    })?;
+    let category = first_identifier_text(&category_node).ok_or_else(|| {
+        LoweringDiagnostic::new(
+            LoweringDiagnosticSeverity::Error,
+            "単位分類の識別子が取得できません",
+            context.span_for(&category_node),
+            category_node.kind(),
+            first_identifier_text(&category_node),
+            collect_annotation_texts(&category_node),
+        )
+    })?;
+
+    let base_type_node = child_node(&header, SyntaxKind::UnitBaseType).ok_or_else(|| {
+        missing_child_diagnostic(
+            context,
+            &header,
+            "単位の基底型が不足しています",
+            SyntaxKind::UnitBaseType,
+        )
+    })?;
+    let base_expr_node = child_node(&base_type_node, SyntaxKind::Expression).ok_or_else(|| {
+        missing_child_diagnostic(
+            context,
+            &base_type_node,
+            "単位の基底型に対応する式が見つかりません",
+            SyntaxKind::Expression,
+        )
+    })?;
+    let base_tokens = context.tokens_for(&base_expr_node);
+    let owned_base_tokens: Vec<Token> = base_tokens.into_iter().cloned().collect();
+    let base_type = match lower_type_annotation_from_tokens(&owned_base_tokens) {
+        Ok(lowered) => lowered.into_annotation(),
+        Err(error) => {
+            return Err(LoweringDiagnostic::new(
+                LoweringDiagnosticSeverity::Error,
+                error.message().to_string(),
+                error
+                    .span()
+                    .cloned()
+                    .or_else(|| context.span_for(&base_expr_node))
+                    .or_else(|| context.span_for(&base_type_node))
+                    .or_else(|| context.span_for(node)),
+                base_type_node.kind(),
+                first_identifier_text(&base_type_node),
+                collect_annotation_texts(&base_type_node),
+            ))
+        }
+    };
+
+    let name_node = child_node(&header, SyntaxKind::UnitName).ok_or_else(|| {
+        missing_child_diagnostic(
+            context,
+            &header,
+            "単位名が指定されていません",
+            SyntaxKind::UnitName,
+        )
+    })?;
+    let unit_name = first_identifier_text(&name_node).ok_or_else(|| {
+        LoweringDiagnostic::new(
+            LoweringDiagnosticSeverity::Error,
+            "単位名の識別子が取得できません",
+            context.span_for(&name_node),
+            name_node.kind(),
+            first_identifier_text(&name_node),
+            collect_annotation_texts(&name_node),
+        )
+    })?;
+
+    let default_marker_node = child_node(&header, SyntaxKind::UnitDefaultMarker);
+    let mut symbol_span = context.span_for(&name_node);
+    if let Some(marker) = &default_marker_node {
+        if let Some(marker_span) = context.span_for(marker) {
+            symbol_span = match symbol_span {
+                Some(name_span) => Some(merge_spans(&name_span, &marker_span)),
+                None => Some(marker_span),
+            };
+        }
+    }
+    let unit_symbol = UnitSymbol {
+        name: unit_name,
+        is_bracketed: false,
+        has_default_marker: default_marker_node.is_some(),
+        span: symbol_span.unwrap_or_else(Span::dummy),
+    };
+
+    let body_node = child_node(node, SyntaxKind::UnitBody).ok_or_else(|| {
+        missing_child_diagnostic(
+            context,
+            node,
+            "単位定義に本体が存在しません",
+            SyntaxKind::UnitBody,
+        )
+    })?;
+    let members = lower_unit_members(context, &body_node, diagnostics);
+
+    let definition = UnitTypeDefinition {
+        category,
+        base_type,
+        name: unit_symbol,
+        members,
+        span: context.span_for(node).unwrap_or_else(Span::dummy),
+    };
+
+    Ok(Statement::UnitTypeDefinition(definition))
+}
+
+fn lower_unit_members(
+    context: &LoweringContext<'_>,
+    body: &JvSyntaxNode,
+    diagnostics: &mut Vec<LoweringDiagnostic>,
+) -> Vec<UnitTypeMember> {
+    let mut members = Vec::new();
+
+    for child in body.children() {
+        if child.kind().is_token() {
+            continue;
+        }
+        match child.kind() {
+            SyntaxKind::UnitDependency => {
+                if let Some(member) = lower_unit_dependency_member(context, &child, diagnostics) {
+                    members.push(member);
+                }
+            }
+            SyntaxKind::UnitRelation => {
+                if let Some(member) = lower_unit_relation_member(context, &child, diagnostics) {
+                    members.push(member);
+                }
+            }
+            SyntaxKind::UnitConversionBlock | SyntaxKind::UnitReverseConversionBlock => {
+                if let Some(member) =
+                    lower_unit_conversion_block_member(context, &child, diagnostics)
+                {
+                    members.push(member);
+                }
+            }
+            SyntaxKind::StatementList => {
+                for stmt in child.children() {
+                    if stmt.kind().is_token() {
+                        continue;
+                    }
+                    match lower_single_statement(context, &stmt, diagnostics) {
+                        Ok(statement) => members.push(UnitTypeMember::NestedStatement(Box::new(
+                            statement,
+                        ))),
+                        Err(diag) => diagnostics.push(diag),
+                    }
+                }
+            }
+            other => {
+                push_diagnostic(
+                    diagnostics,
+                    LoweringDiagnosticSeverity::Warning,
+                    format!(
+                        "単位定義内で処理できない構文 {:?} を検出しました",
+                        other
+                    ),
+                    context,
+                    &child,
+                );
+            }
+        }
+    }
+
+    members
+}
+
+fn lower_unit_dependency_member(
+    context: &LoweringContext<'_>,
+    node: &JvSyntaxNode,
+    diagnostics: &mut Vec<LoweringDiagnostic>,
+) -> Option<UnitTypeMember> {
+    let mut identifiers = identifier_texts(context, node).into_iter();
+    let name = match identifiers.next() {
+        Some(value) => value,
+        None => {
+            push_diagnostic(
+                diagnostics,
+                LoweringDiagnosticSeverity::Error,
+                "単位依存の識別子を取得できませんでした",
+                context,
+                node,
+            );
+            return None;
+        }
+    };
+
+    let expr_node = match child_node(node, SyntaxKind::Expression) {
+        Some(expr_node) => expr_node,
+        None => {
+            push_diagnostic(
+                diagnostics,
+                LoweringDiagnosticSeverity::Error,
+                "単位依存の右辺が不足しています",
+                context,
+                node,
+            );
+            return None;
+        }
+    };
+
+    let value = match lower_expression(context, &expr_node) {
+        Ok(expr) => expr,
+        Err(diag) => {
+            diagnostics.push(diag);
+            return None;
+        }
+    };
+
+    Some(UnitTypeMember::Dependency(UnitDependency {
+        name,
+        relation: UnitRelation::DefinitionAssign,
+        value: Some(value),
+        target: None,
+        span: context.span_for(node).unwrap_or_else(Span::dummy),
+    }))
+}
+
+fn lower_unit_relation_member(
+    context: &LoweringContext<'_>,
+    node: &JvSyntaxNode,
+    diagnostics: &mut Vec<LoweringDiagnostic>,
+) -> Option<UnitTypeMember> {
+    let mut identifiers = identifier_texts(context, node).into_iter();
+    let source = match identifiers.next() {
+        Some(value) => value,
+        None => {
+            push_diagnostic(
+                diagnostics,
+                LoweringDiagnosticSeverity::Error,
+                "単位変換の元単位を取得できませんでした",
+                context,
+                node,
+            );
+            return None;
+        }
+    };
+    let target = match identifiers.next() {
+        Some(value) => value,
+        None => {
+            push_diagnostic(
+                diagnostics,
+                LoweringDiagnosticSeverity::Error,
+                "単位変換の変換先が不足しています",
+                context,
+                node,
+            );
+            return None;
+        }
+    };
+
+    Some(UnitTypeMember::Dependency(UnitDependency {
+        name: source,
+        relation: UnitRelation::ConversionArrow,
+        value: None,
+        target: Some(target),
+        span: context.span_for(node).unwrap_or_else(Span::dummy),
+    }))
+}
+
+fn lower_unit_conversion_block_member(
+    context: &LoweringContext<'_>,
+    node: &JvSyntaxNode,
+    diagnostics: &mut Vec<LoweringDiagnostic>,
+) -> Option<UnitTypeMember> {
+    let block_node = match child_node(node, SyntaxKind::Block) {
+        Some(block) => block,
+        None => {
+            push_diagnostic(
+                diagnostics,
+                LoweringDiagnosticSeverity::Error,
+                "単位変換ブロックに処理本体が含まれていません",
+                context,
+                node,
+            );
+            return None;
+        }
+    };
+
+    let mut statements = Vec::new();
+    collect_statements_from_children(context, &block_node, &mut statements, diagnostics);
+
+    let kind = if node.kind() == SyntaxKind::UnitReverseConversionBlock {
+        UnitConversionKind::ReverseConversion
+    } else {
+        UnitConversionKind::Conversion
+    };
+
+    Some(UnitTypeMember::Conversion(UnitConversionBlock {
+        kind,
+        body: statements,
+        span: context.span_for(node).unwrap_or_else(Span::dummy),
+    }))
+}
+
 fn lower_class(
     context: &LoweringContext<'_>,
     node: &JvSyntaxNode,
     diagnostics: &mut Vec<LoweringDiagnostic>,
-    environment: &BindingEnvironment,
 ) -> Result<Statement, LoweringDiagnostic> {
     let tokens = context.tokens_for(node);
     let span = context.span_for(node).unwrap_or_else(Span::dummy);
@@ -5450,7 +5525,7 @@ fn lower_class(
         .unwrap_or_default();
 
     let (properties, methods) = child_node(node, SyntaxKind::ClassBody)
-        .map(|body| lower_class_members(context, &body, diagnostics, environment))
+        .map(|body| lower_class_members(context, &body, diagnostics))
         .transpose()?
         .unwrap_or_default();
 
@@ -5489,7 +5564,6 @@ fn lower_class_members(
     context: &LoweringContext<'_>,
     body: &JvSyntaxNode,
     diagnostics: &mut Vec<LoweringDiagnostic>,
-    environment: &BindingEnvironment,
 ) -> Result<(Vec<Property>, Vec<Box<Statement>>), LoweringDiagnostic> {
     let mut properties = Vec::new();
     let mut methods = Vec::new();
@@ -5498,14 +5572,7 @@ fn lower_class_members(
         if child.kind().is_token() {
             continue;
         }
-        process_class_member(
-            context,
-            &child,
-            diagnostics,
-            &mut properties,
-            &mut methods,
-            environment,
-        )?;
+        process_class_member(context, &child, diagnostics, &mut properties, &mut methods)?;
     }
 
     Ok((properties, methods))
@@ -5517,7 +5584,6 @@ fn process_class_member(
     diagnostics: &mut Vec<LoweringDiagnostic>,
     properties: &mut Vec<Property>,
     methods: &mut Vec<Box<Statement>>,
-    environment: &BindingEnvironment,
 ) -> Result<(), LoweringDiagnostic> {
     match member.kind() {
         SyntaxKind::ValDeclaration => {
@@ -5531,7 +5597,7 @@ fn process_class_member(
             }
         }
         SyntaxKind::FunctionDeclaration => {
-            let statement = lower_function(context, member, diagnostics, environment)?;
+            let statement = lower_function(context, member, diagnostics)?;
             methods.push(Box::new(statement));
         }
         SyntaxKind::StatementList => {
@@ -5539,14 +5605,7 @@ fn process_class_member(
                 if stmt.kind().is_token() {
                     continue;
                 }
-                process_class_member(
-                    context,
-                    &stmt,
-                    diagnostics,
-                    properties,
-                    methods,
-                    environment,
-                )?;
+                process_class_member(context, &stmt, diagnostics, properties, methods)?;
             }
         }
         other => {
@@ -5626,7 +5685,6 @@ fn lower_for(
     context: &LoweringContext<'_>,
     node: &JvSyntaxNode,
     diagnostics: &mut Vec<LoweringDiagnostic>,
-    environment: &BindingEnvironment,
 ) -> Result<Statement, LoweringDiagnostic> {
     let binding_node = child_node(node, SyntaxKind::BindingPattern).ok_or_else(|| {
         missing_child_diagnostic(
@@ -5670,12 +5728,8 @@ fn lower_for(
         .and_then(|block| context.span_for(&block))
         .unwrap_or_else(|| context.span_for(node).unwrap_or_else(Span::dummy));
 
-    let mut body_environment = BindingEnvironment::from_parent(environment);
-    body_environment.register_loop_binding(&loop_binding);
     let body = match child_node(node, SyntaxKind::Block) {
-        Some(block) => {
-            lower_block_expression_with_env(context, &block, diagnostics, body_environment)
-        }
+        Some(block) => lower_block_expression(context, &block, diagnostics),
         None => {
             push_diagnostic(
                 diagnostics,

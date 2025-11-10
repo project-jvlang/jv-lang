@@ -3,6 +3,7 @@ use super::{
 };
 use crate::CheckError;
 use jv_ast::{
+    statement::{UnitTypeDefinition, UnitTypeMember},
     Argument, ConcurrencyConstruct, Expression, ForInStatement, Literal, LogBlock, LogItem,
     LoopStrategy, NumericRangeLoop, Pattern, Program, Property, ResourceManagement, Span,
     Statement, StringPart, TypeAnnotation, WhenArm,
@@ -108,11 +109,34 @@ impl<'a> WhenUsageValidator<'a> {
                     }
                 }
             }
+            Statement::UnitTypeDefinition(definition) => {
+                self.visit_unit_definition(definition);
+            }
             Statement::Import { .. }
             | Statement::Package { .. }
             | Statement::Break(_)
             | Statement::Continue(_)
             | Statement::Comment(_) => {}
+        }
+    }
+
+    fn visit_unit_definition(&mut self, definition: &UnitTypeDefinition) {
+        for member in &definition.members {
+            match member {
+                UnitTypeMember::Dependency(dependency) => {
+                    if let Some(expr) = dependency.value.as_ref() {
+                        self.visit_expression(expr, true);
+                    }
+                }
+                UnitTypeMember::Conversion(block) => {
+                    for statement in &block.body {
+                        self.visit_statement(statement, false);
+                    }
+                }
+                UnitTypeMember::NestedStatement(statement) => {
+                    self.visit_statement(statement, false);
+                }
+            }
         }
     }
 
@@ -155,6 +179,9 @@ impl<'a> WhenUsageValidator<'a> {
                         self.visit_expression(expr, true);
                     }
                 }
+            }
+            Expression::UnitLiteral { value, .. } => {
+                self.visit_expression(value, expects_value);
             }
             Expression::MultilineString { .. } | Expression::JsonLiteral { .. } => {}
             Expression::Array { elements, .. } => {

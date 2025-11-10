@@ -7,8 +7,9 @@
 use crate::CheckError;
 use jv_ast::types::Span;
 use jv_ast::{
-    BinaryOp, Expression, Literal, LogBlock, LogItem, Program, Statement, TypeAnnotation, UnaryOp,
     expression::Argument,
+    statement::{UnitTypeDefinition, UnitTypeMember},
+    BinaryOp, Expression, Literal, LogBlock, LogItem, Program, Statement, TypeAnnotation, UnaryOp,
 };
 use std::collections::HashMap;
 
@@ -234,6 +235,10 @@ impl NullabilityAnalyzer {
                 }
                 None
             }
+            Statement::UnitTypeDefinition(definition) => {
+                self.visit_unit_definition(definition);
+                None
+            }
             Statement::DataClassDeclaration { .. }
             | Statement::Import { .. }
             | Statement::Package { .. }
@@ -244,10 +249,31 @@ impl NullabilityAnalyzer {
         }
     }
 
+    fn visit_unit_definition(&mut self, definition: &UnitTypeDefinition) {
+        for member in &definition.members {
+            match member {
+                UnitTypeMember::Dependency(dependency) => {
+                    if let Some(expr) = dependency.value.as_ref() {
+                        self.evaluate_expression(expr);
+                    }
+                }
+                UnitTypeMember::Conversion(block) => {
+                    for statement in &block.body {
+                        self.visit_statement(statement);
+                    }
+                }
+                UnitTypeMember::NestedStatement(statement) => {
+                    self.visit_statement(statement);
+                }
+            }
+        }
+    }
+
     fn evaluate_expression(&mut self, expr: &Expression) -> Nullability {
         match expr {
             Expression::RegexLiteral(_) => Nullability::NonNull,
             Expression::Literal(literal, _) => Nullability::from_literal(literal),
+            Expression::UnitLiteral { value, .. } => self.evaluate_expression(value),
             Expression::Identifier(name, _) => self.lookup(name),
             Expression::Binary {
                 left, op, right, ..

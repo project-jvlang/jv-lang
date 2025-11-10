@@ -6,6 +6,7 @@ use std::sync::{Arc, OnceLock};
 
 use anyhow::{Result, anyhow};
 use jv_ast::{
+    statement::{UnitTypeDefinition, UnitTypeMember},
     Argument, CallArgumentMetadata, Expression, JsonLiteral, JsonValue, LogBlock, LogItem, Program,
     Statement, StringPart, Visibility,
     types::{Kind, Pattern},
@@ -122,6 +123,7 @@ fn promote_visibility(statement: &mut Statement) {
         Statement::ExtensionFunction(extension) => {
             promote_visibility(extension.function.as_mut());
         }
+        Statement::UnitTypeDefinition(definition) => promote_unit_definition(definition),
         Statement::Expression { .. }
         | Statement::Return { .. }
         | Statement::Throw { .. }
@@ -142,6 +144,20 @@ fn promote_visibility(statement: &mut Statement) {
 fn promote_modifiers(modifiers: &mut jv_ast::Modifiers) {
     if matches!(modifiers.visibility, Visibility::Private) {
         modifiers.visibility = Visibility::Public;
+    }
+}
+
+fn promote_unit_definition(definition: &mut UnitTypeDefinition) {
+    for member in &mut definition.members {
+        match member {
+            UnitTypeMember::Conversion(block) => {
+                for statement in &mut block.body {
+                    promote_visibility(statement);
+                }
+            }
+            UnitTypeMember::NestedStatement(statement) => promote_visibility(statement),
+            UnitTypeMember::Dependency(_) => {}
+        }
     }
 }
 
@@ -226,6 +242,7 @@ fn rewrite_statement(statement: &mut Statement) {
             rewrite_expression(target);
             rewrite_expression(value);
         }
+        Statement::UnitTypeDefinition(definition) => rewrite_unit_definition(definition),
         Statement::ForIn(statement) => {
             rewrite_expression(&mut statement.iterable);
             rewrite_expression(statement.body.as_mut());
@@ -237,6 +254,24 @@ fn rewrite_statement(statement: &mut Statement) {
         | Statement::Package { .. }
         | Statement::Break(_)
         | Statement::Continue(_) => {}
+    }
+}
+
+fn rewrite_unit_definition(definition: &mut UnitTypeDefinition) {
+    for member in &mut definition.members {
+        match member {
+            UnitTypeMember::Dependency(dependency) => {
+                if let Some(expr) = &mut dependency.value {
+                    rewrite_expression(expr);
+                }
+            }
+            UnitTypeMember::Conversion(block) => {
+                for statement in &mut block.body {
+                    rewrite_statement(statement);
+                }
+            }
+            UnitTypeMember::NestedStatement(statement) => rewrite_statement(statement),
+        }
     }
 }
 
@@ -304,6 +339,7 @@ fn rewrite_expression(expression: &mut Expression) {
             rewrite_expression(index.as_mut());
         }
         Expression::TypeCast { expr, .. } => rewrite_expression(expr.as_mut()),
+        Expression::UnitLiteral { value, .. } => rewrite_expression(value.as_mut()),
         Expression::StringInterpolation { parts, .. } => {
             for part in parts {
                 if let StringPart::Expression(expr) = part {

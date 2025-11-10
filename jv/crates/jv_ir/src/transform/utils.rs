@@ -278,6 +278,7 @@ fn type_annotation_base_name(annotation: &TypeAnnotation) -> String {
         TypeAnnotation::Generic { name, .. } => simple_type_name(name),
         TypeAnnotation::Function { .. } => "Function".to_string(),
         TypeAnnotation::Array(inner) => format!("{}Array", type_annotation_base_name(inner)),
+        TypeAnnotation::Unit { base, .. } => type_annotation_base_name(base),
     }
 }
 

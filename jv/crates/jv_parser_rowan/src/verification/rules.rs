@@ -311,6 +311,7 @@ fn statement_name(statement: &Statement) -> Option<String> {
         Statement::Import { path, .. } => Some(path.clone()),
         Statement::ForIn(for_in) => Some(for_in.binding.name.clone()),
         Statement::Assignment { target, .. } => Some(format!("{target:?}")),
+        Statement::UnitTypeDefinition(definition) => Some(definition.name.name.clone()),
         _ => None,
     }
 }
@@ -338,6 +339,7 @@ impl StatementKindKey {
             Statement::Throw { .. } => StatementKindKey::ThrowStatement,
             Statement::ValDeclaration { .. } => StatementKindKey::ValDeclaration,
             Statement::VarDeclaration { .. } => StatementKindKey::VarDeclaration,
+            Statement::UnitTypeDefinition(_) => StatementKindKey::UnitTypeDefinition,
         }
     }
 }

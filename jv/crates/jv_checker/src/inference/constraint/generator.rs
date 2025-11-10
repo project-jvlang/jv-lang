@@ -18,6 +18,7 @@ use crate::pattern::{
     NarrowedBinding, NarrowedNullability, NarrowingSnapshot, PatternMatchService, PatternTarget,
 };
 use jv_ast::{
+    statement::{UnitTypeDefinition, UnitTypeMember},
     Argument, BinaryOp, Expression, ForInStatement, Literal, LogBlock, LogItem, Parameter, Program,
     Span, Statement, TypeAnnotation, UnaryOp,
 };
@@ -178,8 +179,31 @@ impl<'env, 'ext, 'imp> ConstraintGenerator<'env, 'ext, 'imp> {
 
                 self.env.leave_scope();
             }
+            Statement::UnitTypeDefinition(definition) => {
+                self.visit_unit_definition(definition);
+            }
             _ => {
                 // そのほかの文でも子ノードを可能な範囲で評価しておく。
+            }
+        }
+    }
+
+    fn visit_unit_definition(&mut self, definition: &UnitTypeDefinition) {
+        for member in &definition.members {
+            match member {
+                UnitTypeMember::Dependency(dependency) => {
+                    if let Some(expr) = dependency.value.as_ref() {
+                        self.infer_expression(expr);
+                    }
+                }
+                UnitTypeMember::Conversion(block) => {
+                    for statement in &block.body {
+                        self.visit_statement(statement);
+                    }
+                }
+                UnitTypeMember::NestedStatement(statement) => {
+                    self.visit_statement(statement);
+                }
             }
         }
     }
@@ -274,6 +298,7 @@ impl<'env, 'ext, 'imp> ConstraintGenerator<'env, 'ext, 'imp> {
         match expr {
             Expression::RegexLiteral(_) => TypeKind::reference("java.util.regex.Pattern"),
             Expression::Literal(literal, _) => self.type_from_literal(literal),
+            Expression::UnitLiteral { value, .. } => self.infer_expression(value),
             Expression::Identifier(name, _) => {
                 if let Some(scheme) = self.env.lookup(name).cloned() {
                     self.env.instantiate(&scheme)

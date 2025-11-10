@@ -20,6 +20,7 @@ impl Expression {
             Expression::TypeCast { span, .. } => span,
             Expression::StringInterpolation { span, .. } => span,
             Expression::MultilineString(literal) => &literal.span,
+            Expression::UnitLiteral { span, .. } => span,
             Expression::JsonLiteral(literal) => &literal.span,
             Expression::When { span, .. } => span,
             Expression::If { span, .. } => span,
@@ -53,6 +54,7 @@ impl Statement {
             Statement::Continue(span) => span,
             Statement::Import { span, .. } => span,
             Statement::Package { span, .. } => span,
+            Statement::UnitTypeDefinition(definition) => &definition.span,
             Statement::Comment(comment) => &comment.span,
             Statement::Concurrency(construct) => match construct {
                 ConcurrencyConstruct::Spawn { span, .. } => span,

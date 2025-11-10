@@ -27,6 +27,120 @@ fn make_token(column: &mut usize, token_type: TokenType, lexeme: &str) -> Token 
     token
 }
 
+#[test]
+fn lowers_unit_definition() {
+    let source = r#"
+@ length(Double) km! {
+    base := 1000
+    base -> m
+    @Conversion {
+        val result = value
+    }
+}
+"#;
+
+    let result = lower_source(source);
+    assert!(
+        result.diagnostics.is_empty(),
+        "unexpected diagnostics: {:?}",
+        result.diagnostics
+    );
+
+    assert_eq!(result.statements.len(), 1);
+    match &result.statements[0] {
+        Statement::UnitTypeDefinition(UnitTypeDefinition {
+            category,
+            base_type,
+            name,
+            members,
+            ..
+        }) => {
+            assert_eq!(category, "length");
+            assert!(
+                matches!(base_type, TypeAnnotation::Simple(t) if t == "Double"),
+                "expected Double base type, got {:?}",
+                base_type
+            );
+            assert_eq!(name.name, "km");
+            assert!(name.has_default_marker);
+            assert!(!name.is_bracketed);
+            assert_eq!(members.len(), 3);
+
+            match &members[0] {
+                UnitTypeMember::Dependency(dependency) => {
+                    assert_eq!(dependency.name, "base");
+                    assert!(matches!(
+                        dependency.relation,
+                        UnitRelation::DefinitionAssign
+                    ));
+                    assert!(dependency.target.is_none());
+                    match dependency.value.as_ref() {
+                        Some(Expression::Literal(Literal::Number(value), _)) => {
+                            assert_eq!(value, "1000");
+                        }
+                        other => panic!("expected numeric literal, got {:?}", other),
+                    }
+                }
+                other => panic!("expected dependency for first member, got {:?}", other),
+            }
+
+            match &members[1] {
+                UnitTypeMember::Dependency(dependency) => {
+                    assert_eq!(dependency.name, "base");
+                    assert!(matches!(
+                        dependency.relation,
+                        UnitRelation::ConversionArrow
+                    ));
+                    assert!(dependency.value.is_none());
+                    assert_eq!(dependency.target.as_deref(), Some("m"));
+                }
+                other => panic!("expected conversion arrow, got {:?}", other),
+            }
+
+            match &members[2] {
+                UnitTypeMember::Conversion(block) => {
+                    assert!(matches!(block.kind, UnitConversionKind::Conversion));
+                    assert_eq!(block.body.len(), 1);
+                    match &block.body[0] {
+                        Statement::ValDeclaration { name, .. } => assert_eq!(name, "result"),
+                        other => panic!("expected val declaration, got {:?}", other),
+                    }
+                }
+                other => panic!("expected conversion block, got {:?}", other),
+            }
+        }
+        other => panic!("expected unit definition, got {:?}", other),
+    }
+}
+
+#[test]
+fn lowers_unit_literal() {
+    let source = r#"
+val distance = 42 @ km
+"#;
+
+    let result = lower_source(source);
+    assert!(
+        result.diagnostics.is_empty(),
+        "unexpected diagnostics: {:?}",
+        result.diagnostics
+    );
+
+    assert_eq!(result.statements.len(), 1);
+    match &result.statements[0] {
+        Statement::ValDeclaration { initializer, .. } => match initializer {
+            Expression::UnitLiteral { value, unit, spacing, .. } => {
+                assert!(matches!(value.as_ref(), Expression::Literal(_, _)));
+                assert_eq!(unit.symbol, "km");
+                assert_eq!(spacing.space_before_at, true);
+                assert_eq!(spacing.space_after_at, true);
+            }
+            other => panic!("expected unit literal, got {:?}", other),
+        },
+        other => panic!("expected val declaration, got {:?}", other),
+    }
+}
+
 fn build_tree(
     tokens: &[Token],
     build: impl FnOnce(&mut ParseBuilder, &[Token]),

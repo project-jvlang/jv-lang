@@ -266,6 +266,7 @@ fn validate_statement(statement: &Statement, errors: &mut Vec<CheckError>) {
         | Statement::Import { .. }
         | Statement::Package { .. }
         | Statement::Concurrency(_)
+        | Statement::UnitTypeDefinition(_)
         | Statement::ResourceManagement(_) => {}
     }
 }

@@ -1,0 +1,7 @@
+@ 温度(Double) ℃ {
+    基準 := 273.15
+    @Conversion {}
+}
+
+val 現在温度: Double@[℃] = 298.15
+val 目標温度: Double @ ℃ = 295.0

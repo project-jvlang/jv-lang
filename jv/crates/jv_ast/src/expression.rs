@@ -54,6 +54,18 @@ pub enum Expression {
     /// Regex literal with raw + normalized pattern metadata.
     RegexLiteral(RegexLiteral),
 
+    /// 単位付きリテラル。
+    UnitLiteral {
+        /// 元となるリテラル式。
+        value: Box<Expression>,
+        /// 付随する単位情報。
+        unit: UnitSymbol,
+        /// `@` 前後の空白スタイル。
+        spacing: UnitSpacingStyle,
+        /// ソース上の位置。
+        span: Span,
+    },
+
     // Identifiers
     Identifier(String, Span),
 
@@ -226,6 +238,24 @@ pub struct CallArgumentMetadata {
     pub separator_diagnostics: Vec<CallArgumentIssue>,
     #[serde(default)]
     pub used_commas: bool,
+}
+
+/// `@` 周囲の空白スタイルを記録する補助構造体。
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    Default
+)]
+pub struct UnitSpacingStyle {
+    /// `@` の直前に空白が存在するか。
+    pub space_before_at: bool,
+    /// `@` の直後に空白が存在するか。
+    pub space_after_at: bool,
 }
 
 impl Default for CallArgumentMetadata {
