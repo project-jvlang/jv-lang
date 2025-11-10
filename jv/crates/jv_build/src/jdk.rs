@@ -376,7 +376,9 @@ Java(TM) SE Runtime Environment"#;
             let original = env::var_os(key);
             // SAFETY: テスト環境内でプロセス環境変数を一時的に上書きする用途のため、
             // 同期ミューテックスで保護した上で安全に呼び出す。
-            unsafe { env::set_var(key, value) };
+            unsafe {
+                env::set_var(key, value);
+            }
             Self { key, original }
         }
     }
@@ -384,11 +386,16 @@ Java(TM) SE Runtime Environment"#;
     impl Drop for EnvVarGuard {
         fn drop(&mut self) {
             if let Some(value) = self.original.take() {
-                unsafe { env::set_var(self.key, value) };
+                unsafe {
+                    env::set_var(self.key, value);
+                }
             } else {
-                unsafe { env::remove_var(self.key) };
+                unsafe {
+                    env::remove_var(self.key);
+                }
             }
         }
+    }
     }
 
     #[cfg(unix)]

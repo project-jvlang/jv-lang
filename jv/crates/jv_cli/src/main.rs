@@ -16,6 +16,7 @@ use jv_parser_frontend::ParserPipeline;
 use jv_parser_rowan::frontend::RowanPipeline;
 
 use jv_cli::commands;
+use jv_cli::pipeline::project::output::PreparedOutput;
 use jv_cli::pipeline::project::{
     layout::ProjectLayout,
     locator::{ProjectLocator, ProjectRoot},
@@ -31,7 +32,11 @@ use jv_cli::{
     logging_overrides::{build_cli_logging_layer, read_env_logging_layer},
     resolved_imports_header, tooling_failure,
 };
-use jv_pm::{LoggingConfig, LoggingConfigLayer, Manifest, PackageInfo, ProjectSection};
+use jv_pm::{
+    ExportError, ExportRequest, JavaProjectExporter, LockfileError, LockfileService,
+    LoggingConfig, LoggingConfigLayer, Manifest, MavenMirrorConfig, MavenRepositoryConfig,
+    PackageInfo, ProjectSection, RepositoryManager, RepositorySection,
+};
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
@@ -288,6 +293,9 @@ fn main() -> Result<()> {
             }
 
             prepared_output.mark_success();
+
+            auto_export_maven_outputs(&prepared_output)
+                .context("Maven互換ファイルの自動生成に失敗しました")?;
         }
         Some(Commands::Run { input, args }) => {
             let cwd = std::env::current_dir()?;
@@ -322,8 +330,6 @@ fn main() -> Result<()> {
             let layout = ProjectLayout::from_settings(&project_root, &settings)
                 .map_err(|diagnostic| tooling_failure(&error_path, diagnostic))?;
 
-            let env_logging_layer = read_env_logging_layer()?;
-
             let overrides = CliOverrides {
                 entrypoint: entrypoint_override,
                 output: None,
@@ -344,8 +350,6 @@ fn main() -> Result<()> {
                 apt_processors: None,
                 apt_processorpath: None,
                 apt_options: Vec::new(),
-                logging_cli: LoggingConfigLayer::default(),
-                logging_env: env_logging_layer,
             };
 
             let plan = BuildOptionsFactory::compose(project_root, settings, layout, overrides)
@@ -368,11 +372,23 @@ fn main() -> Result<()> {
         Some(Commands::Explain { code }) => {
             commands::explain::run(&code).context("Failed to render explanation")?;
         }
+        Some(Commands::Help(args)) => {
+            commands::help::run(&args)?;
+        }
+        Some(Commands::Add(args)) => {
+            commands::add::run(&args)?;
+        }
+        Some(Commands::Remove(args)) => {
+            commands::remove::run(&args)?;
+        }
+        Some(Commands::Resolver(args)) => {
+            commands::resolver::run(&args)?;
+        }
+        Some(Commands::Repo(args)) => {
+            commands::repo::run(&args)?;
+        }
         Some(Commands::Version) => {
             println!("{}", get_version());
-        }
-        Some(Commands::Otel(args)) => {
-            commands::otel::run(args).context("OpenTelemetry コマンドの実行に失敗しました")?;
         }
         Some(Commands::Debug(args)) => {
             commands::debug::run(args).context("Failed to run debug command")?;
@@ -474,8 +490,10 @@ fn build_ephemeral_run_settings(start_path: &Path) -> Option<(ProjectRoot, Proje
             dependencies: HashMap::new(),
         },
         project: project_section,
+        repositories: RepositorySection::default(),
+        mirrors: Vec::new(),
         build: None,
-        logging: LoggingConfig::default(),
+        maven: Default::default(),
     };
 
     let settings = ProjectSettings {
@@ -493,6 +511,130 @@ fn build_ephemeral_run_settings(start_path: &Path) -> Option<(ProjectRoot, Proje
 
     let project_root = ProjectRoot::new(root_dir.clone(), root_dir.join("jv.toml"));
     Some((project_root, settings))
+}
+
+fn auto_export_maven_outputs(prepared_output: &PreparedOutput) -> Result<()> {
+    let plan = prepared_output.plan();
+    let manifest = &plan.settings.manifest;
+
+    if manifest.package.name.trim().is_empty() {
+        // スクリプトビルドなどのエフェメラルプロジェクトは対象外。
+        return Ok(());
+    }
+
+    let manifest_path = plan.root.manifest_path();
+    if !manifest_path.exists() {
+        // マニフェストファイルが存在しない場合はスキップする。
+        return Ok(());
+    }
+
+    let project_root = plan.root.root_dir();
+    let lockfile_path = project_root.join("jv.lock");
+    let lockfile = match LockfileService::load(&lockfile_path) {
+        Ok(lockfile) => lockfile,
+        Err(LockfileError::Io(ref error)) if error.kind() == std::io::ErrorKind::NotFound => {
+            println!(
+                "警告: {} が存在しないため、自動エクスポートをスキップしました。",
+                lockfile_path.display()
+            );
+            return Ok(());
+        }
+        Err(error) => {
+            return Err(anyhow::anyhow!(
+                "{} の読み込みに失敗しました。`jv lock` または `jv add` を実行してください。: {error}",
+                lockfile_path.display()
+            ));
+        }
+    };
+
+    let mut manager = RepositoryManager::with_project_root(project_root.to_path_buf())
+        .context("リポジトリマネージャーの初期化に失敗しました")?;
+    manager.load_project_config(manifest);
+
+    let repositories: Vec<MavenRepositoryConfig> = manager
+        .list()
+        .into_iter()
+        .map(|handle| {
+            let config = handle.config();
+            let mut repo =
+                MavenRepositoryConfig::new(config.name.clone(), handle.url().to_string());
+            if !config.name.trim().is_empty() {
+                repo = repo.with_name(config.name.clone());
+            }
+            repo
+        })
+        .collect();
+
+    let mirrors: Vec<MavenMirrorConfig> = manager
+        .effective_mirrors()
+        .into_iter()
+        .enumerate()
+        .map(|(index, mirror)| {
+            let id = mirror
+                .name
+                .clone()
+                .unwrap_or_else(|| format!("mirror-{index}"));
+            MavenMirrorConfig::new(id, mirror.mirror_of.clone(), mirror.url.clone())
+        })
+        .collect();
+
+    let output_dir = prepared_output.base_dir();
+    let sources_dir = prepared_output.target_dir();
+
+    let local_repository = project_root.join(".jv").join("repository");
+    fs::create_dir_all(&local_repository)
+        .with_context(|| format!("{} の作成に失敗しました", local_repository.display()))?;
+
+    let request = ExportRequest {
+        project_root,
+        manifest,
+        lockfile: &lockfile,
+        sources_dir,
+        output_dir,
+        local_repository: &local_repository,
+        repositories: &repositories,
+        mirrors: &mirrors,
+        resolved: None,
+    };
+
+    match JavaProjectExporter::export(&request) {
+        Ok(summary) => {
+            println!("Maven互換出力を更新しました:");
+            println!("  出力ディレクトリ : {}", summary.output_dir.display());
+            println!(
+                "  pom.xml         : {}",
+                summary.output_dir.join("pom.xml").display()
+            );
+            println!(
+                "  settings.xml    : {}",
+                summary
+                    .output_dir
+                    .join("settings.xml")
+                    .display()
+            );
+            println!(
+                "  classpath.txt   : {}",
+                summary
+                    .output_dir
+                    .join(".jv")
+                    .join("classpath.txt")
+                    .display()
+            );
+            println!(
+                "  ソースディレクトリ : {}",
+                summary.output_dir.join("src").display()
+            );
+        }
+        Err(ExportError::MissingSources(path)) => {
+            println!(
+                "警告: Javaソースディレクトリ {} が見つからないため、自動エクスポートをスキップしました。",
+                path.display()
+            );
+        }
+        Err(error) => return Err(error.into()),
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]

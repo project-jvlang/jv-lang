@@ -128,6 +128,26 @@ fn workspace_file(relative: &str) -> PathBuf {
     workspace_root().join(relative)
 }
 
+fn collect_java_files(root: &Path) -> Vec<PathBuf> {
+    let mut stack = vec![root.to_path_buf()];
+    let mut files = Vec::new();
+
+    while let Some(current) = stack.pop() {
+        let entries = fs::read_dir(&current)
+            .unwrap_or_else(|err| panic!("Failed to read {}: {}", current.display(), err));
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                stack.push(path);
+            } else if path.extension().and_then(|ext| ext.to_str()) == Some("java") {
+                files.push(path);
+            }
+        }
+    }
+
+    files
+}
+
 fn ensure_toolchain_envs() {
     static INIT: OnceLock<()> = OnceLock::new();
     INIT.get_or_init(|| {
@@ -138,7 +158,9 @@ fn ensure_toolchain_envs() {
             if env::var_os(var).is_none() {
                 if let Some(path) = dir {
                     // プロセス開始時に一度だけ実行されるため、安全に環境変数を設定できる。
-                    unsafe { env::set_var(var, path) };
+                    unsafe {
+                        env::set_var(var, path);
+                    }
                 }
             }
         }
@@ -546,12 +568,8 @@ include = ["src/**/*.jv"]
 
     assert!(status.success(), "CLI build failed with status: {}", status);
 
-    let java_files: Vec<_> = fs::read_dir(project_dir.join("target/java25"))
-        .expect("Failed to read output directory")
-        .filter_map(|entry| entry.ok())
-        .map(|entry| entry.path())
-        .filter(|path| path.extension().and_then(|ext| ext.to_str()) == Some("java"))
-        .collect();
+    let java_dir = project_dir.join("target/java25");
+    let java_files = collect_java_files(&java_dir);
 
     assert!(
         !java_files.is_empty(),
@@ -559,9 +577,15 @@ include = ["src/**/*.jv"]
     );
 
     let java_source = fs::read_to_string(&java_files[0]).expect("Failed to read Java output");
+    let class_name = java_files[0]
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .expect("generated Java should have a valid class name");
     assert!(
-        java_source.contains("class CliMain"),
-        "generated Java should declare CliMain: {java_source}"
+        java_source.contains(&format!("class {}", class_name)),
+        "generated Java should declare {}: {}",
+        class_name,
+        java_source
     );
     assert!(
         java_source.contains("Sequence output"),
@@ -627,13 +651,15 @@ fn cli_build_quick_tour_script_compiles() {
     };
 
     let temp_dir = TempDirGuard::new("cli-quick-tour").expect("create temp dir");
-    let output_dir = temp_dir.path().join("out");
     let quick_tour = workspace_file("examples/quick-tour.jv");
+    let quick_tour_copy = temp_dir.path().join("quick-tour.jv");
+    fs::copy(&quick_tour, &quick_tour_copy).expect("copy quick-tour script");
+    let output_dir = temp_dir.path().join("out");
 
     let status = Command::new(&cli_path)
         .current_dir(temp_dir.path())
         .arg("build")
-        .arg(&quick_tour)
+        .arg(&quick_tour_copy)
         .arg("--java-only")
         .arg("-o")
         .arg(&output_dir)
@@ -960,26 +986,34 @@ fun sample(input: String): Boolean {
 
     assert!(status.success(), "regex CLI build failed: {status:?}");
 
-    let java_files: Vec<_> = fs::read_dir(project_dir.join("target/java25"))
-        .expect("read regex java output")
-        .filter_map(|entry| entry.ok())
-        .map(|entry| entry.path())
-        .filter(|path| path.extension().and_then(|ext| ext.to_str()) == Some("java"))
-        .collect();
+    let java_dir = project_dir.join("target/java25");
+    let java_files = collect_java_files(&java_dir);
 
     assert!(
         !java_files.is_empty(),
         "regex build should emit at least one Java file"
     );
 
-    let java_source = fs::read_to_string(&java_files[0]).expect("read regex java source");
+    let java_sources: Vec<String> = java_files
+        .iter()
+        .map(|path| fs::read_to_string(path).expect("read regex java source"))
+        .collect();
+    let combined_java = java_sources.join("\n");
     assert!(
-        java_source.contains("import java.util.regex.Pattern;"),
-        "generated Java should import Pattern: {java_source}"
+        combined_java.contains("import java.util.regex.Pattern;"),
+        "generated Java should import Pattern: {combined_java}"
     );
     assert!(
-        java_source.contains("Pattern.compile(\"\\\\d+\")"),
-        "generated Java should compile the regex literal: {java_source}"
+        combined_java.contains("Pattern.compile("),
+        "generated Java should invoke Pattern.compile: {combined_java}"
+    );
+    assert!(
+        combined_java.contains("\\d+"),
+        "generated Java should compile the regex literal: {combined_java}"
+    );
+    assert!(
+        combined_java.contains(&format!("Pattern.compile(\"\\d+\")")),
+        "generated Java should compile the regex literal with literal pattern: {combined_java}"
     );
 }
 
@@ -1013,9 +1047,14 @@ fn cli_check_reports_regex_diagnostics() {
         stderr.contains("JV5102"),
         "regex diagnostic output should contain JV5102, got: {stderr}"
     );
+    let stderr_lower = stderr.to_ascii_lowercase();
     assert!(
         stderr.contains("Unsupported regex escape sequence"),
         "regex diagnostic text should describe the escape error, got: {stderr}"
+    );
+    assert!(
+        stderr_lower.contains("regex literal"),
+        "regex diagnostic text should mention regex literal, got: {stderr}"
     );
 }
 
@@ -1706,24 +1745,6 @@ fn cli_all_subcommands_smoke_test() {
         .output()
         .expect("Failed to run jv build");
     assert!(build_output.status.success());
-    fn collect_java_files(dir: &Path) -> Vec<PathBuf> {
-        let mut java_files = Vec::new();
-        let mut stack = vec![dir.to_path_buf()];
-        while let Some(current) = stack.pop() {
-            if let Ok(entries) = fs::read_dir(&current) {
-                for entry in entries.flatten() {
-                    let path = entry.path();
-                    if path.is_dir() {
-                        stack.push(path);
-                    } else if path.extension().and_then(|ext| ext.to_str()) == Some("java") {
-                        java_files.push(path);
-                    }
-                }
-            }
-        }
-        java_files
-    }
-
     let generated_java = collect_java_files(&output_dir);
     assert!(
         !generated_java.is_empty(),

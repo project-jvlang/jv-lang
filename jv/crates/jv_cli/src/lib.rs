@@ -3,8 +3,9 @@ use anyhow::Result;
 use clap::Parser;
 use jv_ir::{
     sequence_pipeline,
-    types::{IrImport, IrImportDetail},
+    types::{IrImport, IrImportDetail, LogLevel as IrLogLevel, LoggingFrameworkKind},
 };
+use jv_ir::TransformContext;
 use jv_support::i18n::{LocaleCode, catalog};
 use std::collections::HashMap;
 use std::fs;
@@ -14,7 +15,7 @@ use jv_checker::diagnostics::{
     DiagnosticSeverity, DiagnosticStrategy, EnhancedDiagnostic, from_check_error,
     from_frontend_diagnostics, from_parse_error, from_transform_error,
 };
-use jv_pm::JavaTarget;
+use jv_pm::{JavaTarget, LogLevel, LoggingConfig, LoggingFramework};
 
 mod embedded_stdlib;
 mod java_type_names;
@@ -36,6 +37,7 @@ pub mod logging_overrides;
 
 詳細は README と docs/stdlib/collections.md を参照してください。"#
 )]
+#[command(disable_help_subcommand = true)]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Option<Commands>,
@@ -156,6 +158,16 @@ pub enum Commands {
         /// Diagnostic code (e.g., JV2001)
         code: String,
     },
+    /// パッケージマネージャ関連の詳細ヘルプを表示
+    Help(commands::help::HelpArgs),
+    /// Add dependencies via the package manager
+    Add(commands::add::AddArgs),
+    /// Remove dependencies managed by the package manager
+    Remove(commands::remove::RemoveArgs),
+    /// Inspect resolver strategies and metadata
+    Resolver(commands::resolver::ResolverArgs),
+    /// Manage repository configuration and mirrors
+    Repo(commands::repo::RepoArgs),
     /// Show version information  
     Version,
     /// Start interactive REPL
@@ -488,14 +500,13 @@ pub mod pipeline {
     use jv_inference::types::TypeVariant;
     use jv_ir::TransformContext;
     use jv_ir::context::WhenStrategyRecord;
-    use jv_ir::types::{IrImport, IrImportDetail, LogLevel as IrLogLevel, LoggingFrameworkKind};
+    use jv_ir::types::{IrImport, IrImportDetail};
     use jv_ir::{
         TransformPools, TransformProfiler, transform_program_with_context,
         transform_program_with_context_profiled,
     };
     use jv_parser_frontend::ParserPipeline;
     use jv_parser_rowan::frontend::RowanPipeline;
-    use jv_pm::{LogLevel, LoggingConfig, LoggingFramework};
     use serde_json::json;
     use std::collections::{BTreeMap, HashSet};
     use std::ffi::OsStr;
@@ -1146,7 +1157,10 @@ pub mod pipeline {
                 let mut class_files = Vec::new();
                 while let Some(dir) = pending.pop() {
                     let entries = fs::read_dir(&dir).with_context(|| {
-                        format!("Failed to enumerate output directory: {}", dir.display())
+                        format!(
+                            "Failed to enumerate output directory: {}",
+                            dir.display()
+                        )
                     })?;
                     for entry in entries {
                         let path = entry?.path();

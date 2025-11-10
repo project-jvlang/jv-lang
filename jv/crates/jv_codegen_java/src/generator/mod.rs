@@ -148,11 +148,11 @@ impl JavaCodeGenerator {
             }
         }
 
-        let mut hoisted_regex_fields = Vec::new();
+        let mut hoisted_fields = Vec::new();
         let mut retained_statements = Vec::new();
         for statement in script_statements.drain(..) {
-            if let Some(field) = Self::hoist_regex_pattern_field(&statement) {
-                hoisted_regex_fields.push(field);
+            if let Some(field) = Self::hoist_script_field(&statement) {
+                hoisted_fields.push(field);
             } else {
                 retained_statements.push(statement);
             }
@@ -168,6 +168,7 @@ impl JavaCodeGenerator {
         if !script_statements.is_empty()
             || !script_methods.is_empty()
             || !hoisted_variable_fields.is_empty()
+            || !hoisted_fields.is_empty()
         {
             let script_class = self.config.script_main_class.clone();
             let qualified_script_class = if let Some(pkg) = &program.package {
@@ -210,16 +211,13 @@ impl JavaCodeGenerator {
                 for field in &script_logger_fields {
                     builder.push_line(field);
                 }
-                if needs_wrapper
-                    || !script_methods.is_empty()
-                    || !hoisted_variable_fields.is_empty()
-                {
+                if needs_wrapper || !script_methods.is_empty() || !hoisted_fields.is_empty() {
                     builder.push_line("");
                 }
             }
 
-            if !hoisted_variable_fields.is_empty() {
-                for field in &hoisted_variable_fields {
+            if !hoisted_fields.is_empty() {
+                for field in &hoisted_fields {
                     let code = self.generate_statement(field)?;
                     Self::push_lines(&mut builder, &code);
                 }
@@ -1553,14 +1551,14 @@ impl JavaCodeGenerator {
         }
     }
 
-    fn hoist_regex_pattern_field(statement: &IrStatement) -> Option<IrStatement> {
+    fn hoist_script_field(statement: &IrStatement) -> Option<IrStatement> {
         match statement {
             IrStatement::Commented {
                 statement,
                 comment,
                 kind,
                 comment_span,
-            } => Self::hoist_regex_pattern_field(statement).map(|inner| IrStatement::Commented {
+            } => Self::hoist_script_field(statement).map(|inner| IrStatement::Commented {
                 statement: Box::new(inner),
                 comment: comment.clone(),
                 kind: kind.clone(),
@@ -1573,23 +1571,19 @@ impl JavaCodeGenerator {
                 is_final,
                 modifiers,
                 span,
-            } if *is_final => {
-                if let Some(expr) = initializer {
-                    if matches!(expr, IrExpression::RegexPattern { .. }) {
-                        let mut field_modifiers = modifiers.clone();
-                        field_modifiers.is_static = true;
-                        field_modifiers.is_final = true;
-                        return Some(IrStatement::FieldDeclaration {
-                            name: name.clone(),
-                            java_type: java_type.clone(),
-                            initializer: Some(expr.clone()),
-                            modifiers: field_modifiers,
-                            span: span.clone(),
-                        });
-                    }
-                }
-                None
+            } => {
+                let mut field_modifiers = modifiers.clone();
+                field_modifiers.is_static = true;
+                field_modifiers.is_final = *is_final;
+                return Some(IrStatement::FieldDeclaration {
+                    name: name.clone(),
+                    java_type: java_type.clone(),
+                    initializer: initializer.clone(),
+                    modifiers: field_modifiers,
+                    span: span.clone(),
+                });
             }
+            IrStatement::FieldDeclaration { .. } => Some(statement.clone()),
             _ => None,
         }
     }

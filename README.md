@@ -316,3 +316,4 @@ IDEA UltimateとCommunity用プラグインが利用可能。
 - [はじめに](jv/docs/getting-started.md)
 - [アーキテクチャ概要](jv/docs/architecture.md)
 - [CLIリファレンス](jv/docs/cli-reference.md)
+- [パッケージマネージャーガイド](docs/jv_pm.md)

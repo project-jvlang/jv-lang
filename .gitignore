@@ -98,6 +98,7 @@ out/
 .classpath
 .settings/
 bin/
+!jv/crates/**/src/bin/
 
 # NetBeans
 nbproject/

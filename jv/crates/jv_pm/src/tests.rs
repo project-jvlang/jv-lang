@@ -2,6 +2,9 @@ use super::*;
 use std::fs;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use crate::resolver::ResolverError;
+use crate::resolver::{ResolverDispatcher, ResolverOptions, VersionDecision};
+
 #[test]
 fn test_package_info_creation() {
     let package = PackageInfo {
@@ -46,13 +49,17 @@ fn test_manifest_creation() {
 
     let build_info = BuildInfo {
         java_version: JavaTarget::Java25,
+        ..BuildInfo::default()
     };
 
     let manifest = Manifest {
         package,
         project: ProjectSection::default(),
+        repositories: RepositorySection::default(),
+        mirrors: Vec::new(),
         build: Some(build_info),
         logging: LoggingConfig::default(),
+        maven: Default::default(),
     };
 
     assert_eq!(manifest.package.name, "test");
@@ -121,8 +128,11 @@ fn test_resolve_dependencies_placeholder() {
             dependencies: HashMap::new(),
         },
         project: ProjectSection::default(),
+        repositories: RepositorySection::default(),
+        mirrors: Vec::new(),
         build: None,
         logging: LoggingConfig::default(),
+        maven: Default::default(),
     };
 
     let result = pm.resolve_dependencies(&manifest);
@@ -221,6 +231,95 @@ java_version = "99"
     }
 
     let _ = fs::remove_file(path);
+}
+
+#[test]
+fn resolver_dispatcher_lists_builtins() {
+    let dispatcher = ResolverDispatcher::with_default_strategies();
+    let strategies = dispatcher.list_strategies();
+    assert!(strategies.iter().any(|info| info.name == "pubgrub"));
+    assert!(strategies.iter().any(|info| info.name == "breadth-first"));
+    assert!(strategies.iter().any(|info| info.name == "maven"));
+    assert!(strategies.iter().any(|info| info.is_default));
+}
+
+#[test]
+fn resolver_resolves_manifest_with_default_strategy() {
+    let mut dependencies = HashMap::new();
+    dependencies.insert("logging".to_string(), "1.2.3".to_string());
+    dependencies.insert("metrics".to_string(), "^2.0".to_string());
+
+    let manifest = Manifest {
+        package: PackageInfo {
+            name: "demo".to_string(),
+            version: "0.1.0".to_string(),
+            description: None,
+            dependencies,
+        },
+        project: ProjectSection::default(),
+        repositories: RepositorySection::default(),
+        mirrors: Vec::new(),
+        build: None,
+        maven: Default::default(),
+    };
+
+    let dispatcher = ResolverDispatcher::with_default_strategies();
+    let resolved = dispatcher
+        .resolve_manifest(&manifest, ResolverOptions::default())
+        .expect("resolution succeeds");
+
+    assert_eq!(resolved.dependencies.len(), 2);
+    let mut names = resolved
+        .dependencies
+        .iter()
+        .map(|dep| dep.name.as_str())
+        .collect::<Vec<_>>();
+    names.sort();
+    assert_eq!(names, vec!["logging", "metrics"]);
+    assert!(
+        resolved
+            .dependencies
+            .iter()
+            .any(|dep| matches!(dep.decision, VersionDecision::Range(_)))
+    );
+    assert!(
+        resolved
+            .dependencies
+            .iter()
+            .any(|dep| matches!(dep.decision, VersionDecision::Exact(_)))
+    );
+}
+
+#[test]
+fn resolver_rejects_unknown_strategy() {
+    let manifest = Manifest {
+        package: PackageInfo {
+            name: "demo".to_string(),
+            version: "0.1.0".to_string(),
+            description: None,
+            dependencies: HashMap::from([(String::from("core"), String::from("1.0.0"))]),
+        },
+        project: ProjectSection::default(),
+        repositories: RepositorySection::default(),
+        mirrors: Vec::new(),
+        build: None,
+        maven: Default::default(),
+    };
+
+    let dispatcher = ResolverDispatcher::with_default_strategies();
+    let error = dispatcher
+        .resolve_manifest(
+            &manifest,
+            ResolverOptions::default().with_strategy("does-not-exist"),
+        )
+        .expect_err("unknown strategy should error");
+
+    match error {
+        ResolverError::UnknownStrategy(name) => {
+            assert_eq!(name, "does-not-exist");
+        }
+        other => panic!("unexpected error: {other:?}"),
+    }
 }
 
 fn manifest_path(suffix: &str) -> std::path::PathBuf {

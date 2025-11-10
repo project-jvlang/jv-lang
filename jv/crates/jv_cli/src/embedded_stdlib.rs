@@ -493,12 +493,23 @@ impl StdlibUsage {
 
             // Consider the full token as well as each suffix separated by '.' so that both
             // fully-qualified references and simple type names are recognised.
-            for candidate in std::iter::once(token).chain(token.rsplit('.')) {
-                if candidate.is_empty() {
-                    continue;
+            // Consider the full token as well as each suffix separated by '.' so that both
+            // fully-qualified references and simple type names are recognised.
+            let mut current = token;
+            loop {
+                if !current.is_empty() {
+                    for package in catalog.packages_for_reference(current) {
+                        self.packages.insert(package);
+                    }
                 }
-                for package in catalog.packages_for_reference(candidate) {
-                    self.packages.insert(package);
+
+                if let Some((prefix, suffix)) = current.rsplit_once('.') {
+                    for package in catalog.packages_for_reference(suffix) {
+                        self.packages.insert(package);
+                    }
+                    current = prefix;
+                } else {
+                    break;
                 }
             }
         }

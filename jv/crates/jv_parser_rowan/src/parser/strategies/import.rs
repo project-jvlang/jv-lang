@@ -33,13 +33,20 @@ impl StatementStrategy for ImportStrategy {
         ctx.consume_trivia();
         if ctx.peek_significant_kind() == Some(TokenKind::Dot) {
             if let Some((_, TokenKind::Star)) = ctx.peek_significant_kind_n(1) {
+                ctx.start_node(SyntaxKind::ImportClause);
+                ctx.start_node(SyntaxKind::ImportWildcard);
                 ctx.bump_raw(); // dot
                 ctx.bump_raw(); // star
+                ctx.finish_node(); // ImportWildcard
+                ctx.finish_node(); // ImportClause
             }
         } else if ctx.peek_significant_kind() == Some(TokenKind::Star) {
-            ctx.bump_raw();
+            ctx.start_node(SyntaxKind::ImportClause);
+            ctx.start_node(SyntaxKind::ImportWildcard);
+            ctx.bump_raw(); // star
+            ctx.finish_node(); // ImportWildcard
+            ctx.finish_node(); // ImportClause
         }
-
         ctx.finish_node();
         true
     }

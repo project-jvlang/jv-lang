@@ -9,6 +9,7 @@ const SYNC_TOKENS: &[TokenKind] = &[
     TokenKind::Semicolon,
     TokenKind::Newline,
     TokenKind::RightBrace,
+    TokenKind::Arrow,
     TokenKind::PackageKw,
     TokenKind::ImportKw,
     TokenKind::ValKw,
@@ -69,10 +70,6 @@ impl ExpressionState {
                 block.brace_depth -= 1;
             }
         }
-    }
-
-    fn is_in_when_context(&self) -> bool {
-        self.pending_when || !self.when_blocks.is_empty()
     }
 
     fn reset(&mut self) {
@@ -638,15 +635,6 @@ impl<'tokens> ParserContext<'tokens> {
                 if kind == TokenKind::WhenKw {
                     if let Some(state) = self.expression_states.last_mut() {
                         state.register_when();
-                    }
-                } else if kind == TokenKind::ElseKw {
-                    let inside_when = self
-                        .expression_states
-                        .last()
-                        .map(ExpressionState::is_in_when_context)
-                        .unwrap_or(false);
-                    if !inside_when {
-                        should_break_on_sync = true;
                     }
                 } else if matches!(
                     kind,

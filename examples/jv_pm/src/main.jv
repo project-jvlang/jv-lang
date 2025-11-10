@@ -1,0 +1,4 @@
+fun main() {
+    println("jv_pm Phase 2 デモからこんにちは!")
+    println("依存を追加した後は jv build --java-only で OUTPUT_DIR を確認できます")
+}
