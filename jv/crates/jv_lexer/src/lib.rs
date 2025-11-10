@@ -16,6 +16,8 @@ pub enum TokenType {
     Number(String),              // Store as string to avoid f64 Eq issues, parse later
     Character(char),
     Identifier(String),
+    Underscore,
+    ImplicitParam(u32),
     Boolean(bool),
     RegexLiteral(String),
 
@@ -225,6 +227,18 @@ pub struct NumberLiteralMetadata {
     pub suffix: Option<char>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct UnderscoreInfoMetadata {
+    pub raw: String,
+    pub is_implicit: bool,
+    #[serde(default)]
+    pub number: Option<u32>,
+    pub line: usize,
+    pub column: usize,
+    pub length: usize,
+    pub in_non_code_region: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 pub struct CommentCarryOverMetadata {
     #[serde(default)]
@@ -244,6 +258,7 @@ pub enum TokenMetadata {
     },
     StringLiteral(StringLiteralMetadata),
     NumberLiteral(NumberLiteralMetadata),
+    UnderscoreInfo(UnderscoreInfoMetadata),
     LayoutComma(LayoutCommaMetadata),
     StringInterpolation {
         segments: Vec<StringInterpolationSegment>,
@@ -287,9 +302,23 @@ pub enum LegacyLoopKeyword {
     Do,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum InvalidImplicitParamReason {
+    LeadingZero,
+    Overflow,
+    NonDigit,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum TokenDiagnostic {
-    LegacyLoop { keyword: LegacyLoopKeyword },
+    LegacyLoop {
+        keyword: LegacyLoopKeyword,
+    },
+    InvalidImplicitParam {
+        reason: InvalidImplicitParamReason,
+        #[serde(default)]
+        suggested: Option<String>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]

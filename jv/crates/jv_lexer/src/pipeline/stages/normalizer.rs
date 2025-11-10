@@ -161,6 +161,8 @@ fn can_end_layout_item(token: &TokenType) -> bool {
     matches!(
         token,
         TokenType::Identifier(_)
+            | TokenType::Underscore
+            | TokenType::ImplicitParam(_)
             | TokenType::Number(_)
             | TokenType::String(_)
             | TokenType::StringInterpolation(_)

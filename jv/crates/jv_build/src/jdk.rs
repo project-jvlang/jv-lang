@@ -377,6 +377,7 @@ Java(TM) SE Runtime Environment"#;
             // SAFETY: テスト環境内でプロセス環境変数を一時的に上書きする用途のため、
             // 同期ミューテックスで保護した上で安全に呼び出す。
             unsafe {
+                // SAFETY: `set_var` simply sets process env; inputs are well-formed `OsStr`.
                 env::set_var(key, value);
             }
             Self { key, original }
@@ -387,10 +388,12 @@ Java(TM) SE Runtime Environment"#;
         fn drop(&mut self) {
             if let Some(value) = self.original.take() {
                 unsafe {
+                    // SAFETY: restoring previously captured value.
                     env::set_var(self.key, value);
                 }
             } else {
                 unsafe {
+                    // SAFETY: removing variable for current process; no aliases retained.
                     env::remove_var(self.key);
                 }
             }

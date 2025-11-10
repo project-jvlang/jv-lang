@@ -529,20 +529,11 @@ impl StdlibUsage {
 
             // Consider the full token as well as each suffix separated by '.' so that both
             // fully-qualified references and simple type names are recognised.
-            // Consider the full token as well as each suffix separated by '.' so that both
-            // fully-qualified references and simple type names are recognised.
             let mut current = token;
             loop {
-                if !current.is_empty() {
-                    for package in catalog.packages_for_reference(current) {
-                        self.packages.insert(package);
-                    }
-                }
-
+                self.record_reference(catalog, current);
                 if let Some((prefix, suffix)) = current.rsplit_once('.') {
-                    for package in catalog.packages_for_reference(suffix) {
-                        self.packages.insert(package);
-                    }
+                    self.record_reference(catalog, suffix);
                     current = prefix;
                 } else {
                     break;
