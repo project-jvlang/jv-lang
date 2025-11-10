@@ -6,9 +6,9 @@ use std::sync::{Arc, OnceLock};
 
 use anyhow::{Result, anyhow};
 use jv_ast::{
-    statement::{UnitTypeDefinition, UnitTypeMember},
     Argument, CallArgumentMetadata, Expression, JsonLiteral, JsonValue, LogBlock, LogItem, Program,
     Statement, StringPart, Visibility,
+    statement::{UnitTypeDefinition, UnitTypeMember},
     types::{Kind, Pattern},
 };
 use jv_build::{JavaTarget, metadata::SymbolIndex};
@@ -656,6 +656,9 @@ impl<'a, 'b> ProgramUsageDetector<'a, 'b> {
                 self.visit_expression(&statement.iterable);
                 self.visit_expression(&statement.body);
             }
+            Statement::UnitTypeDefinition(definition) => {
+                self.visit_unit_definition(definition);
+            }
             Statement::Concurrency(construct) => self.visit_concurrency(construct),
             Statement::ResourceManagement(resource) => self.visit_resource_management(resource),
             Statement::DataClassDeclaration { .. }
@@ -682,6 +685,26 @@ impl<'a, 'b> ProgramUsageDetector<'a, 'b> {
                 self.visit_expression(body);
             }
             jv_ast::ResourceManagement::Defer { body, .. } => self.visit_expression(body),
+        }
+    }
+
+    fn visit_unit_definition(&mut self, definition: &UnitTypeDefinition) {
+        for member in &definition.members {
+            match member {
+                UnitTypeMember::Dependency(dependency) => {
+                    if let Some(expr) = &dependency.value {
+                        self.visit_expression(expr);
+                    }
+                }
+                UnitTypeMember::Conversion(block) => {
+                    for statement in &block.body {
+                        self.visit_statement(statement);
+                    }
+                }
+                UnitTypeMember::NestedStatement(statement) => {
+                    self.visit_statement(statement);
+                }
+            }
         }
     }
 
@@ -747,6 +770,7 @@ impl<'a, 'b> ProgramUsageDetector<'a, 'b> {
                 self.visit_expression(index);
             }
             Expression::TypeCast { expr, .. } => self.visit_expression(expr),
+            Expression::UnitLiteral { value, .. } => self.visit_expression(value),
             Expression::StringInterpolation { parts, .. } => {
                 for part in parts {
                     if let StringPart::Expression(expr) = part {
@@ -1647,12 +1671,20 @@ mod tests {
     use jv_ast::Span;
     use jv_checker::imports::resolution::{ResolvedImport, ResolvedImportKind};
     use jv_ir::{IrModifiers, IrStatement, LoggingMetadata};
+    use jv_parser_rowan::frontend::RowanPipeline;
 
     use std::{
         fs,
         path::PathBuf,
         time::{SystemTime, UNIX_EPOCH},
     };
+
+    fn parse_program(source: &str) -> Program {
+        RowanPipeline::default()
+            .parse(source)
+            .expect("source should parse for embedded stdlib tests")
+            .into_program()
+    }
 
     fn test_catalog() -> StdlibCatalog {
         let mut catalog = StdlibCatalog::default();
@@ -1742,6 +1774,41 @@ mod tests {
         assert!(
             usage.package_set().contains("jv.collections"),
             "scan should detect stdlib package"
+        );
+    }
+
+    #[test]
+    fn unit_syntax_is_handled_during_stdlib_rewrites() {
+        let mut program = parse_program(
+            r#"
+@ 温度(Double) ℃ {
+    基準 := 273.15
+}
+
+val reading = 42 @ ℃
+"#,
+        );
+
+        rewrite_collection_property_access(&mut program);
+        promote_stdlib_visibility(&mut program);
+
+        let catalog = StdlibCatalog::default();
+        let mut usage = StdlibUsage::default();
+        usage.record_program_usage(&program, &catalog);
+
+        assert!(
+            matches!(
+                program.statements.first(),
+                Some(Statement::UnitTypeDefinition(_))
+            ),
+            "unit type definition should survive stdlib rewrites"
+        );
+        assert!(
+            matches!(
+                program.statements.get(1),
+                Some(Statement::ValDeclaration { .. })
+            ),
+            "value declaration should remain after rewrites"
         );
     }
 

@@ -3,9 +3,9 @@ use std::collections::HashMap;
 use crate::CheckError;
 use jv_ast::Span;
 use jv_ast::{
-    statement::UnitTypeMember, Argument, ConcurrencyConstruct, Expression, ExtensionFunction,
-    LogBlock, LogItem, Modifiers, Program, ResourceManagement, Statement, TryCatchClause,
-    ValBindingOrigin,
+    Argument, ConcurrencyConstruct, Expression, ExtensionFunction, LogBlock, LogItem, Modifiers,
+    Program, ResourceManagement, Statement, TryCatchClause, ValBindingOrigin,
+    statement::UnitTypeMember,
 };
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -345,8 +345,7 @@ impl BindingResolver {
                     match member {
                         UnitTypeMember::Dependency(dependency) => {
                             if let Some(expr) = dependency.value.take() {
-                                dependency.value =
-                                    Some(self.resolve_expression(expr));
+                                dependency.value = Some(self.resolve_expression(expr));
                             }
                         }
                         UnitTypeMember::Conversion(block) => {

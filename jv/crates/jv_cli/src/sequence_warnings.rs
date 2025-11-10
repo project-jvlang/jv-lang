@@ -1,6 +1,7 @@
 use jv_ast::{
     Argument, Expression, JsonLiteral, JsonValue, LogBlock, LogItem, Parameter, Pattern, Program,
     SequenceDelimiter, Span, Statement,
+    statement::{UnitTypeDefinition, UnitTypeMember},
 };
 
 pub fn collect_sequence_warnings(program: &Program) -> Vec<String> {
@@ -475,5 +476,23 @@ numbers.map { value -> value * 2 }.toList()
         );
         let warnings = collect_sequence_warnings(&program);
         assert!(warnings.iter().any(|warning| warning.contains("SEQ1002")));
+    }
+
+    #[test]
+    fn unit_syntax_is_ignored_for_sequence_warnings() {
+        let program = parse(
+            r#"
+@ 温度(Double) ℃ {
+    基準 := 273.15
+}
+
+val reading = 42 @ ℃
+"#,
+        );
+        let warnings = collect_sequence_warnings(&program);
+        assert!(
+            warnings.is_empty(),
+            "unit syntax should not trigger sequence warnings, got {warnings:?}"
+        );
     }
 }

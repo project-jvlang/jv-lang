@@ -1,4 +1,4 @@
-use jv_lexer::Token;
+use jv_lexer::{Token, TokenType};
 
 use crate::{
     frontend::DIAGNOSTIC_JV_UNIT_005_DEFAULT_MARKER_FORBIDDEN,
@@ -749,7 +749,7 @@ impl<'tokens> ParserContext<'tokens> {
                             self.consume_inline_whitespace();
                             if let Some(token) = self.current_token() {
                                 debug_assert!(
-                                    TokenKind::from_token(token) == TokenKind::Identifier,
+                                    Self::token_supports_unit_symbol(token),
                                     "`@` の直後には単位識別子が必要です"
                                 );
                             }
@@ -761,7 +761,7 @@ impl<'tokens> ParserContext<'tokens> {
                         UnitSuffixDescriptor::SimpleWithoutAt => {
                             if let Some(token) = self.current_token() {
                                 debug_assert!(
-                                    TokenKind::from_token(token) == TokenKind::Identifier,
+                                    Self::token_supports_unit_symbol(token),
                                     "単位リテラルの末尾には単位識別子が必要です"
                                 );
                             }
@@ -1050,6 +1050,9 @@ impl<'tokens> ParserContext<'tokens> {
                 self.bump_raw();
                 consumed = true;
             } else {
+                if token.leading_trivia.spaces > 0 {
+                    consumed = true;
+                }
                 break;
             }
         }
@@ -1074,20 +1077,52 @@ impl<'tokens> ParserContext<'tokens> {
         let mut angle_depth = 0usize;
         let mut paren_depth = 0usize;
         let mut bracket_depth = 0usize;
+        let mut saw_significant = false;
+        let mut pending_whitespace = false;
 
         loop {
-            self.consume_trivia();
-            let Some(kind) = self.peek_significant_kind() else {
+            let Some(token) = self.current_token() else {
                 break;
             };
+            let kind = TokenKind::from_token(token);
 
-            if angle_depth == 0
-                && paren_depth == 0
-                && bracket_depth == 0
-                && terminators.contains(&kind)
-            {
+            if kind.is_trivia() {
+                if matches!(kind, TokenKind::Whitespace)
+                    && saw_significant
+                    && angle_depth == 0
+                    && paren_depth == 0
+                    && bracket_depth == 0
+                {
+                    pending_whitespace = true;
+                } else if matches!(kind, TokenKind::Newline)
+                    && saw_significant
+                    && angle_depth == 0
+                    && paren_depth == 0
+                    && bracket_depth == 0
+                {
+                    break;
+                }
+                self.bump_raw();
+                continue;
+            }
+
+            let at_top_level = angle_depth == 0 && paren_depth == 0 && bracket_depth == 0;
+            if at_top_level && terminators.contains(&kind) {
                 break;
             }
+            if at_top_level && self.unit_type_annotation_depth > 0 && saw_significant {
+                if kind == TokenKind::At {
+                    break;
+                }
+                if pending_whitespace
+                    && (Self::token_supports_unit_symbol(token) || kind == TokenKind::LeftBracket)
+                {
+                    break;
+                }
+            }
+
+            pending_whitespace = false;
+            saw_significant = true;
 
             match kind {
                 TokenKind::Less => angle_depth = angle_depth.saturating_add(1),
@@ -1098,15 +1133,17 @@ impl<'tokens> ParserContext<'tokens> {
                 }
                 TokenKind::LeftParen => paren_depth = paren_depth.saturating_add(1),
                 TokenKind::RightParen => {
-                    if paren_depth > 0 {
-                        paren_depth -= 1;
+                    if paren_depth == 0 {
+                        break;
                     }
+                    paren_depth -= 1;
                 }
                 TokenKind::LeftBracket => bracket_depth = bracket_depth.saturating_add(1),
                 TokenKind::RightBracket => {
-                    if bracket_depth > 0 {
-                        bracket_depth -= 1;
+                    if bracket_depth == 0 {
+                        break;
                     }
+                    bracket_depth -= 1;
                 }
                 _ => {}
             }
@@ -1163,9 +1200,17 @@ impl<'tokens> ParserContext<'tokens> {
         let mut index = literal_index.saturating_add(1);
         let len = self.tokens.len();
         let mut saw_whitespace = false;
+        let literal_line = self
+            .tokens
+            .get(literal_index)
+            .map(|token| token.line)
+            .unwrap_or(0);
 
         while index < len {
             let token = &self.tokens[index];
+            if token.line != literal_line {
+                return None;
+            }
             let kind = TokenKind::from_token(token);
             match kind {
                 TokenKind::Whitespace => {
@@ -1181,9 +1226,6 @@ impl<'tokens> ParserContext<'tokens> {
                         match kind_after {
                             TokenKind::Whitespace => index += 1,
                             TokenKind::Newline => return None,
-                            TokenKind::Identifier => {
-                                return Some(UnitSuffixDescriptor::SimpleWithAt);
-                            }
                             TokenKind::LeftBracket => {
                                 if self.find_matching_right_bracket(index).is_some() {
                                     return Some(UnitSuffixDescriptor::BracketWithAt);
@@ -1191,16 +1233,13 @@ impl<'tokens> ParserContext<'tokens> {
                                     return None;
                                 }
                             }
+                            _ if Self::token_supports_unit_symbol(token_after) => {
+                                return Some(UnitSuffixDescriptor::SimpleWithAt);
+                            }
                             _ => return None,
                         }
                     }
                     return None;
-                }
-                TokenKind::Identifier => {
-                    if saw_whitespace {
-                        return None;
-                    }
-                    return Some(UnitSuffixDescriptor::SimpleWithoutAt);
                 }
                 TokenKind::LeftBracket => {
                     if saw_whitespace {
@@ -1211,6 +1250,12 @@ impl<'tokens> ParserContext<'tokens> {
                     } else {
                         return None;
                     }
+                }
+                _ if Self::token_supports_unit_symbol(token) => {
+                    if saw_whitespace {
+                        return None;
+                    }
+                    return Some(UnitSuffixDescriptor::SimpleWithoutAt);
                 }
                 _ => return None,
             }
@@ -1260,13 +1305,26 @@ impl<'tokens> ParserContext<'tokens> {
             return false;
         };
 
-        matches!(TokenKind::from_token(next_token), TokenKind::Whitespace)
+        let has_explicit_whitespace =
+            matches!(TokenKind::from_token(next_token), TokenKind::Whitespace);
+        let has_trivia_gap =
+            next_token.leading_trivia.spaces > 0 || next_token.leading_trivia.newlines > 0;
+        let token_width = token.lexeme.chars().count().max(1);
+        let token_end_column = token.column + token_width;
+        let has_inline_gap = next_token.line == token.line && next_token.column > token_end_column;
+
+        has_explicit_whitespace || has_trivia_gap || has_inline_gap
     }
 
     /// 現在のカーソル位置が `@` であり直後にホワイトスペースが存在するかを判定する。
     #[allow(dead_code)]
     pub(crate) fn cursor_has_whitespace_after_at(&self) -> bool {
         self.has_whitespace_after_at(self.cursor)
+    }
+
+    fn token_supports_unit_symbol(token: &Token) -> bool {
+        TokenKind::from_token(token) == TokenKind::Identifier
+            || matches!(token.token_type, TokenType::Invalid(_))
     }
 
     fn preview_unit_type_annotation_suffix(
@@ -1325,22 +1383,29 @@ impl<'tokens> ParserContext<'tokens> {
                 && saw_significant
             {
                 if kind == TokenKind::At {
-                    let lookahead = self.peek_significant_kind_from(index + 1);
-                    match lookahead.map(|(_, next_kind)| next_kind) {
-                        Some(TokenKind::Identifier) => {
-                            return Some(UnitSuffixDescriptor::SimpleWithAt)
+                    if let Some((next_index, next_kind)) =
+                        self.peek_significant_kind_from(index + 1)
+                    {
+                        if next_kind == TokenKind::LeftBracket {
+                            return Some(UnitSuffixDescriptor::BracketWithAt);
                         }
-                        Some(TokenKind::LeftBracket) => {
-                            return Some(UnitSuffixDescriptor::BracketWithAt)
+                        if let Some(token_after) = self.tokens.get(next_index) {
+                            if Self::token_supports_unit_symbol(token_after) {
+                                return Some(UnitSuffixDescriptor::SimpleWithAt);
+                            }
                         }
-                        _ => return None,
+                        return None;
+                    } else {
+                        return None;
                     }
                 } else if pending_whitespace {
-                    return match kind {
-                        TokenKind::Identifier => Some(UnitSuffixDescriptor::SimpleWithoutAt),
-                        TokenKind::LeftBracket => Some(UnitSuffixDescriptor::BracketWithoutAt),
-                        _ => None,
-                    };
+                    if kind == TokenKind::LeftBracket {
+                        return Some(UnitSuffixDescriptor::BracketWithoutAt);
+                    }
+                    if Self::token_supports_unit_symbol(token) {
+                        return Some(UnitSuffixDescriptor::SimpleWithoutAt);
+                    }
+                    return None;
                 }
             }
 
@@ -1393,19 +1458,15 @@ impl<'tokens> ParserContext<'tokens> {
                     return false;
                 }
                 let _ = self.consume_inline_whitespace();
-                if !self.bump_expected(
-                    TokenKind::Identifier,
-                    "単位名として識別子を指定してください",
-                ) {
+                if !self.bump_unit_identifier_or_invalid("単位名として識別子を指定してください")
+                {
                     return false;
                 }
                 true
             }
             UnitSuffixDescriptor::SimpleWithoutAt => {
-                if !self.bump_expected(
-                    TokenKind::Identifier,
-                    "単位名として識別子を指定してください",
-                ) {
+                if !self.bump_unit_identifier_or_invalid("単位名として識別子を指定してください")
+                {
                     return false;
                 }
                 true
@@ -1545,6 +1606,23 @@ impl<'tokens> ParserContext<'tokens> {
         }
     }
 
+    fn bump_unit_identifier_or_invalid(&mut self, message: &str) -> bool {
+        self.consume_trivia();
+        if let Some(token) = self.current_token() {
+            if Self::token_supports_unit_symbol(token) {
+                self.bump_raw();
+                return true;
+            }
+        }
+        let span = self.make_span(self.cursor, self.cursor);
+        self.push_diagnostic(ParserDiagnostic::new(
+            message,
+            DiagnosticSeverity::Error,
+            span,
+        ));
+        false
+    }
+
     /// エラーノードを伴う回復を実行する。
     pub(crate) fn recover_statement(&mut self, message: impl Into<String>, start: usize) {
         let message = message.into();
@@ -1651,33 +1729,165 @@ impl<'tokens> ParserContext<'tokens> {
 
 #[cfg(test)]
 mod tests {
-    use super::ParserContext;
+    use super::{ParserContext, UnitSuffixDescriptor};
     use crate::frontend::DIAGNOSTIC_JV_UNIT_005_DEFAULT_MARKER_FORBIDDEN;
     use crate::syntax::{SyntaxKind, TokenKind};
-    use jv_lexer::{
-        StringDelimiterKind, Token, TokenMetadata, TokenTrivia, TokenType, {self as lexer}, Lexer,
-    };
+    use jv_lexer::{Lexer, Token, TokenTrivia, TokenType};
 
     fn make_token(token_type: TokenType, lexeme: &str) -> Token {
         Token {
             token_type,
             lexeme: lexeme.to_string(),
+            line: 1,
+            column: 0,
             leading_trivia: TokenTrivia::default(),
-            trailing_trivia: TokenTrivia::default(),
+            diagnostic: None,
             metadata: Vec::new(),
         }
     }
 
+    fn assert_token_kind(token_type: TokenType, lexeme: &str, expected: TokenKind) {
+        let token = make_token(token_type, lexeme);
+        let actual = TokenKind::from_token(&token);
+        assert_eq!(
+            actual, expected,
+            "token {:?} should map to {:?}, got {:?}",
+            token.token_type, expected, actual
+        );
+    }
+
     #[test]
     fn rowan_symbols_match_token_kind() {
-        let mut seen = std::collections::HashSet::new();
-        for kind in lexer::TokenKind::all() {
-            let syntax_kind = TokenKind::match_lexer_kind(kind.clone());
-            assert!(
-                seen.insert((kind, syntax_kind)),
-                "SyntaxKind <-> TokenKind mapping must be 1:1"
-            );
+        use TokenKind::*;
+
+        let keyword_cases = vec![
+            (TokenType::Package, "package", PackageKw),
+            (TokenType::Import, "import", ImportKw),
+            (TokenType::Val, "val", ValKw),
+            (TokenType::Var, "var", VarKw),
+            (TokenType::Fun, "fun", FunKw),
+            (TokenType::Class, "class", ClassKw),
+            (TokenType::Data, "data", DataKw),
+            (TokenType::When, "when", WhenKw),
+            (TokenType::Where, "where", WhereKw),
+            (TokenType::If, "if", IfKw),
+            (TokenType::Else, "else", ElseKw),
+            (TokenType::For, "for", ForKw),
+            (TokenType::In, "in", InKw),
+            (TokenType::While, "while", WhileKw),
+            (TokenType::Do, "do", DoKw),
+            (TokenType::Return, "return", ReturnKw),
+            (TokenType::Throw, "throw", ThrowKw),
+            (TokenType::Break, "break", BreakKw),
+            (TokenType::Continue, "continue", ContinueKw),
+            (TokenType::True, "true", TrueKw),
+            (TokenType::False, "false", FalseKw),
+            (TokenType::Null, "null", NullKw),
+            (TokenType::Log, "LOG", LogKw),
+            (TokenType::Trace, "TRACE", TraceKw),
+            (TokenType::Debug, "DEBUG", DebugKw),
+            (TokenType::Info, "INFO", InfoKw),
+            (TokenType::Warn, "WARN", WarnKw),
+            (TokenType::Error, "ERROR", ErrorKw),
+        ];
+
+        let operator_cases = vec![
+            (TokenType::Assign, "=", Assign),
+            (TokenType::Plus, "+", Plus),
+            (TokenType::Minus, "-", Minus),
+            (TokenType::Multiply, "*", Star),
+            (TokenType::Divide, "/", Slash),
+            (TokenType::Modulo, "%", Percent),
+            (TokenType::Equal, "==", EqualEqual),
+            (TokenType::NotEqual, "!=", NotEqual),
+            (TokenType::Less, "<", Less),
+            (TokenType::LessEqual, "<=", LessEqual),
+            (TokenType::Greater, ">", Greater),
+            (TokenType::GreaterEqual, ">=", GreaterEqual),
+            (TokenType::And, "&&", AndAnd),
+            (TokenType::Or, "||", OrOr),
+            (TokenType::Not, "!", Bang),
+            (TokenType::RangeExclusive, "..", RangeExclusive),
+            (TokenType::RangeInclusive, "..=", RangeInclusive),
+            (TokenType::Question, "?", Question),
+            (TokenType::NullSafe, "?.", NullSafe),
+            (TokenType::Elvis, "?:", Elvis),
+            (TokenType::Arrow, "->", Arrow),
+            (TokenType::FatArrow, "=>", FatArrow),
+            (TokenType::DoubleColon, "::", DoubleColon),
+        ];
+
+        let punctuation_cases = vec![
+            (TokenType::LeftParen, "(", LeftParen),
+            (TokenType::RightParen, ")", RightParen),
+            (TokenType::LeftBrace, "{", LeftBrace),
+            (TokenType::RightBrace, "}", RightBrace),
+            (TokenType::LeftBracket, "[", LeftBracket),
+            (TokenType::RightBracket, "]", RightBracket),
+            (TokenType::Comma, ",", Comma),
+            (TokenType::LayoutComma, ",", LayoutComma),
+            (TokenType::Dot, ".", Dot),
+            (TokenType::Semicolon, ";", Semicolon),
+            (TokenType::Colon, ":", Colon),
+            (TokenType::At, "@", At),
+        ];
+
+        let literal_cases = vec![
+            (
+                TokenType::String("\"text\"".into()),
+                "\"text\"",
+                StringLiteral,
+            ),
+            (
+                TokenType::StringInterpolation("${value}".into()),
+                "${value}",
+                StringLiteral,
+            ),
+            (TokenType::Number("42".into()), "42", NumberLiteral),
+            (TokenType::Character('a'), "'a'", CharacterLiteral),
+            (TokenType::Identifier("name".into()), "name", Identifier),
+            (TokenType::Boolean(true), "true", BooleanLiteral),
+            (TokenType::RegexLiteral(".*".into()), "/.*/", RegexLiteral),
+        ];
+
+        let trivia_cases = vec![
+            (TokenType::Whitespace(" ".into()), " ", Whitespace),
+            (TokenType::Newline, "\n", Newline),
+            (TokenType::LineComment("// a".into()), "// a", LineComment),
+            (
+                TokenType::BlockComment("/* a */".into()),
+                "/* a */",
+                BlockComment,
+            ),
+            (
+                TokenType::JavaDocComment("/** a */".into()),
+                "/** a */",
+                DocComment,
+            ),
+        ];
+
+        let misc_cases = vec![
+            (TokenType::StringStart, "\"$", StringStart),
+            (TokenType::StringMid, "}", StringMid),
+            (TokenType::StringEnd, "\"", StringEnd),
+            (TokenType::Eof, "", Eof),
+            (TokenType::Invalid("???".into()), "???", Unknown),
+        ];
+
+        for (token_type, lexeme, expected) in keyword_cases
+            .into_iter()
+            .chain(operator_cases)
+            .chain(punctuation_cases)
+            .chain(literal_cases)
+            .chain(trivia_cases)
+            .chain(misc_cases)
+        {
+            assert_token_kind(token_type, lexeme, expected);
         }
+
+        assert_token_kind(TokenType::Identifier("use".into()), "use", UseKw);
+        assert_token_kind(TokenType::Identifier("defer".into()), "defer", DeferKw);
+        assert_token_kind(TokenType::Identifier("spawn".into()), "spawn", SpawnKw);
     }
 
     #[test]
@@ -1726,6 +1936,33 @@ mod tests {
         ];
         let ctx = ParserContext::new(tokens.as_slice());
         assert!(!ctx.has_whitespace_after_at(0));
+        assert!(!ctx.cursor_has_whitespace_after_at());
+    }
+
+    fn lex_tokens(source: &str) -> Vec<Token> {
+        let mut lexer = Lexer::new(source.to_owned());
+        lexer.tokenize().expect("字句解析に成功すること")
+    }
+
+    #[test]
+    fn detects_real_world_whitespace_after_at() {
+        let tokens = lex_tokens("@ 単位(Double) m {");
+        let ctx = ParserContext::new(tokens.as_slice());
+        assert!(
+            ctx.has_whitespace_after_at(0),
+            "実際のトークン列で空白ありケースを検出できること"
+        );
+        assert!(ctx.cursor_has_whitespace_after_at());
+    }
+
+    #[test]
+    fn detects_missing_whitespace_with_lexer_tokens() {
+        let tokens = lex_tokens("@単位(Double) m {");
+        let ctx = ParserContext::new(tokens.as_slice());
+        assert!(
+            !ctx.has_whitespace_after_at(0),
+            "実際のトークン列で空白なしケースを検出できること"
+        );
         assert!(!ctx.cursor_has_whitespace_after_at());
     }
 
@@ -1846,7 +2083,9 @@ mod tests {
         "#;
 
         let mut lexer = Lexer::new(source.to_string());
-        let tokens = lexer.tokenize().expect("lexing should succeed for parser tests");
+        let tokens = lexer
+            .tokenize()
+            .expect("lexing should succeed for parser tests");
         let arrow_index = tokens
             .iter()
             .position(|token| TokenKind::from_token(token) == TokenKind::Arrow)

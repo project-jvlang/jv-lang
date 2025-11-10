@@ -241,16 +241,7 @@ pub struct CallArgumentMetadata {
 }
 
 /// `@` 周囲の空白スタイルを記録する補助構造体。
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    Serialize,
-    Deserialize,
-    Default
-)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct UnitSpacingStyle {
     /// `@` の直前に空白が存在するか。
     pub space_before_at: bool,

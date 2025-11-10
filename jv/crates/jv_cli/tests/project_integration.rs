@@ -344,9 +344,8 @@ fn project_pipeline_builds_unit_syntax_sources() {
         logging_env: LoggingConfigLayer::default(),
     };
 
-    let plan =
-        BuildOptionsFactory::compose(project_root.clone(), settings, layout, overrides)
-            .expect("plan builds");
+    let plan = BuildOptionsFactory::compose(project_root.clone(), settings, layout, overrides)
+        .expect("plan builds");
 
     let mut prepared = OutputManager::prepare(plan).expect("output prepared");
     let artifacts = compile(prepared.plan()).expect("compile succeeds");

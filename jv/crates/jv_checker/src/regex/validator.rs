@@ -1,10 +1,10 @@
 use crate::CheckError;
 use crate::diagnostics::{self, DiagnosticSeverity, EnhancedDiagnostic};
 use jv_ast::{
-    statement::{UnitTypeDefinition, UnitTypeMember},
     Argument, ConcurrencyConstruct, Expression, ForInStatement, LogBlock, LogItem, LoopStrategy,
     NumericRangeLoop, Program, RegexLiteral, ResourceManagement, Span, Statement, StringPart,
     TryCatchClause,
+    statement::{UnitTypeDefinition, UnitTypeMember},
 };
 use std::time::Instant;
 
@@ -170,13 +170,13 @@ impl<'a> RegexValidationVisitor<'a> {
             Statement::Throw { expr, .. } => {
                 self.visit_expression(expr);
             }
-        Statement::Assignment { target, value, .. } => {
-            self.visit_expression(target);
-            self.visit_expression(value);
-        }
-        Statement::UnitTypeDefinition(definition) => {
-            self.visit_unit_definition(definition);
-        }
+            Statement::Assignment { target, value, .. } => {
+                self.visit_expression(target);
+                self.visit_expression(value);
+            }
+            Statement::UnitTypeDefinition(definition) => {
+                self.visit_unit_definition(definition);
+            }
             Statement::ForIn(for_in) => self.visit_for_in(for_in),
             Statement::Concurrency(construct) => self.visit_concurrency(construct),
             Statement::ResourceManagement(resource) => self.visit_resource_management(resource),

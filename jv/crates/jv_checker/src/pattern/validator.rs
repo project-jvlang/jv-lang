@@ -3,10 +3,10 @@ use super::{
 };
 use crate::CheckError;
 use jv_ast::{
-    statement::{UnitTypeDefinition, UnitTypeMember},
     Argument, ConcurrencyConstruct, Expression, ForInStatement, Literal, LogBlock, LogItem,
     LoopStrategy, NumericRangeLoop, Pattern, Program, Property, ResourceManagement, Span,
     Statement, StringPart, TypeAnnotation, WhenArm,
+    statement::{UnitTypeDefinition, UnitTypeMember},
 };
 
 pub(super) fn validate_program(

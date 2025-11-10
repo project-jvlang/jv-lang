@@ -1,3 +1,4 @@
+use crate::frontend::RowanPipeline;
 use crate::lowering::{lower_program, LoweringDiagnosticSeverity, LoweringResult};
 use crate::parser::parse;
 use crate::verification::StatementKindKey;
@@ -6,11 +7,15 @@ use jv_ast::strings::MultilineKind;
 use jv_ast::{
     expression::{Argument, Parameter, ParameterProperty, StringPart},
     json::{JsonLiteral, JsonValue},
-    statement::{ConcurrencyConstruct, LoopStrategy, ResourceManagement, ValBindingOrigin},
+    statement::{
+        ConcurrencyConstruct, LoopStrategy, ResourceManagement, UnitConversionKind, UnitRelation,
+        UnitTypeDefinition, UnitTypeMember, ValBindingOrigin,
+    },
     types::{BinaryOp, Literal, Modifiers, Pattern, TypeAnnotation},
     BindingPatternKind, Expression, Statement,
 };
 use jv_lexer::{Lexer, Token, TokenTrivia, TokenType};
+use jv_parser_preprocess::run as preprocess_run;
 use rowan::SyntaxNode;
 
 fn make_token(column: &mut usize, token_type: TokenType, lexeme: &str) -> Token {
@@ -87,10 +92,7 @@ fn lowers_unit_definition() {
             match &members[1] {
                 UnitTypeMember::Dependency(dependency) => {
                     assert_eq!(dependency.name, "base");
-                    assert!(matches!(
-                        dependency.relation,
-                        UnitRelation::ConversionArrow
-                    ));
+                    assert!(matches!(dependency.relation, UnitRelation::ConversionArrow));
                     assert!(dependency.value.is_none());
                     assert_eq!(dependency.target.as_deref(), Some("m"));
                 }
@@ -129,9 +131,14 @@ val distance = 42 @ km
     assert_eq!(result.statements.len(), 1);
     match &result.statements[0] {
         Statement::ValDeclaration { initializer, .. } => match initializer {
-            Expression::UnitLiteral { value, unit, spacing, .. } => {
+            Expression::UnitLiteral {
+                value,
+                unit,
+                spacing,
+                ..
+            } => {
                 assert!(matches!(value.as_ref(), Expression::Literal(_, _)));
-                assert_eq!(unit.symbol, "km");
+                assert_eq!(unit.name, "km");
                 assert_eq!(spacing.space_before_at, true);
                 assert_eq!(spacing.space_after_at, true);
             }
@@ -165,6 +172,28 @@ pub(crate) fn lower_source(source: &str) -> LoweringResult {
     let green = ParseBuilder::build_from_events(&parse_output.events, &tokens);
     let syntax: SyntaxNode<JvLanguage> = SyntaxNode::new_root(green);
     lower_program(&syntax, &tokens)
+}
+
+#[test]
+fn pipeline_handles_unit_syntax_fixture() {
+    let source = include_str!("../../../../tests/fixtures/unit_syntax/basic/基本的な単位定義.jv");
+    let pipeline = RowanPipeline::default();
+    let debug = pipeline
+        .execute_with_debug(source)
+        .expect("unit syntax fixture should parse");
+    let statements = debug.statements();
+    assert!(
+        matches!(statements.first(), Some(Statement::UnitTypeDefinition(_))),
+        "expected first statement to be unit definition, got {:?}",
+        statements.first()
+    );
+    assert!(
+        statements.iter().any(|statement| matches!(
+            statement,
+            Statement::ValDeclaration { name, .. } if name == "歩行距離"
+        )),
+        "unit literal val declaration should be present"
+    );
 }
 
 fn sample_package_val() -> (SyntaxNode<JvLanguage>, Vec<Token>) {

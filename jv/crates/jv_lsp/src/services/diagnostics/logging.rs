@@ -104,6 +104,25 @@ fn collect_from_statement(statement: &Statement, depth: usize, diagnostics: &mut
                 collect_from_expression(body, depth, diagnostics);
             }
         },
+        Statement::UnitTypeDefinition(definition) => {
+            for member in &definition.members {
+                match member {
+                    jv_ast::statement::UnitTypeMember::Dependency(dependency) => {
+                        if let Some(value) = dependency.value.as_ref() {
+                            collect_from_expression(value, depth, diagnostics);
+                        }
+                    }
+                    jv_ast::statement::UnitTypeMember::Conversion(block) => {
+                        for statement in &block.body {
+                            collect_from_statement(statement, depth, diagnostics);
+                        }
+                    }
+                    jv_ast::statement::UnitTypeMember::NestedStatement(statement) => {
+                        collect_from_statement(statement, depth, diagnostics);
+                    }
+                }
+            }
+        }
         Statement::Package { .. }
         | Statement::Import { .. }
         | Statement::Comment(_)
@@ -148,6 +167,9 @@ fn collect_from_expression(expr: &Expression, depth: usize, diagnostics: &mut Ve
             for element in elements {
                 collect_from_expression(element, depth, diagnostics);
             }
+        }
+        Expression::UnitLiteral { value, .. } => {
+            collect_from_expression(value, depth, diagnostics);
         }
         Expression::Lambda {
             parameters, body, ..
@@ -265,5 +287,42 @@ fn collect_from_log_block(block: &LogBlock, depth: usize, diagnostics: &mut Vec<
             LogItem::Statement(stmt) => collect_from_statement(stmt, depth, diagnostics),
             LogItem::Expression(expr) => collect_from_expression(expr, depth, diagnostics),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use jv_parser_frontend::ParserPipeline;
+    use jv_parser_rowan::frontend::RowanPipeline;
+
+    fn parse_program(source: &str) -> jv_ast::Program {
+        RowanPipeline::default()
+            .parse(source)
+            .expect("source should parse for logging diagnostics")
+            .into_program()
+    }
+
+    #[test]
+    fn unit_syntax_nodes_do_not_emit_logging_diagnostics() {
+        let program = parse_program(
+            r#"
+@ 温度(Double) ℃ {
+    基準 := 273.15
+}
+
+val reading = 42 @ ℃
+LOG {
+    "temperature reading"
+    reading
+}
+"#,
+        );
+
+        let diagnostics = collect_logging_diagnostics(&program);
+        assert!(
+            diagnostics.is_empty(),
+            "expected no diagnostics, got {diagnostics:?}"
+        );
     }
 }

@@ -6652,6 +6652,11 @@ fun sample(value: Any): Int {
             if display.contains("/java_annotations/") {
                 continue;
             }
+            if display.contains("/unit_syntax/errors/")
+                || display.contains("\\unit_syntax\\errors\\")
+            {
+                continue;
+            }
             if display.contains("package/complex_stdlib_pattern.jv") {
                 continue;
             }

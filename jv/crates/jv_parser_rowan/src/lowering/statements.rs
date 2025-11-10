@@ -843,8 +843,7 @@ fn lower_expression(
             .children()
             .filter(|child| !child.kind().is_token())
             .collect();
-        if non_token_children.len() == 1
-            && non_token_children[0].kind() == SyntaxKind::UnitLiteral
+        if non_token_children.len() == 1 && non_token_children[0].kind() == SyntaxKind::UnitLiteral
         {
             let unit_node = non_token_children.remove(0);
             return lower_unit_literal_expression(context, &unit_node);
@@ -966,6 +965,10 @@ fn lower_unit_literal_expression(
                 index += 1;
             }
             TokenType::At => {
+                let trivia = &tokens[index].leading_trivia;
+                if trivia.spaces > 0 || trivia.newlines > 0 {
+                    whitespace_after_value = true;
+                }
                 at_index = Some(index);
                 index += 1;
                 break;
@@ -975,11 +978,30 @@ fn lower_unit_literal_expression(
     }
 
     let mut space_after_at = false;
-    if at_index.is_some() {
-        while index < tokens.len() && matches!(tokens[index].token_type, TokenType::Whitespace(_))
-        {
+    if let Some(at_pos) = at_index {
+        if index < tokens.len() {
+            let trivia = &tokens[index].leading_trivia;
+            if trivia.spaces > 0 || trivia.newlines > 0 {
+                space_after_at = true;
+            }
+        }
+        while index < tokens.len() && matches!(tokens[index].token_type, TokenType::Whitespace(_)) {
             space_after_at = true;
             index += 1;
+        }
+        if !space_after_at {
+            if let Some(symbol_token) = tokens.get(index) {
+                let trivia = &symbol_token.leading_trivia;
+                if trivia.spaces > 0 || trivia.newlines > 0 {
+                    space_after_at = true;
+                }
+            }
+        }
+        if !whitespace_after_value {
+            let trivia = &tokens[at_pos].leading_trivia;
+            if trivia.spaces > 0 || trivia.newlines > 0 {
+                whitespace_after_value = true;
+            }
         }
     }
 
@@ -5264,16 +5286,29 @@ fn lower_unit_type_definition(
             SyntaxKind::UnitName,
         )
     })?;
-    let unit_name = first_identifier_text(&name_node).ok_or_else(|| {
-        LoweringDiagnostic::new(
-            LoweringDiagnosticSeverity::Error,
-            "単位名の識別子が取得できません",
-            context.span_for(&name_node),
-            name_node.kind(),
-            first_identifier_text(&name_node),
-            collect_annotation_texts(&name_node),
-        )
-    })?;
+    let unit_name = first_identifier_text(&name_node)
+        .or_else(|| {
+            context
+                .tokens_for(&name_node)
+                .into_iter()
+                .find_map(|token| {
+                    if matches!(token.token_type, TokenType::Invalid(_)) {
+                        Some(token.lexeme.clone())
+                    } else {
+                        None
+                    }
+                })
+        })
+        .ok_or_else(|| {
+            LoweringDiagnostic::new(
+                LoweringDiagnosticSeverity::Error,
+                "単位名の識別子が取得できません",
+                context.span_for(&name_node),
+                name_node.kind(),
+                first_identifier_text(&name_node),
+                collect_annotation_texts(&name_node),
+            )
+        })?;
 
     let default_marker_node = child_node(&header, SyntaxKind::UnitDefaultMarker);
     let mut symbol_span = context.span_for(&name_node);
@@ -5348,9 +5383,9 @@ fn lower_unit_members(
                         continue;
                     }
                     match lower_single_statement(context, &stmt, diagnostics) {
-                        Ok(statement) => members.push(UnitTypeMember::NestedStatement(Box::new(
-                            statement,
-                        ))),
+                        Ok(statement) => {
+                            members.push(UnitTypeMember::NestedStatement(Box::new(statement)))
+                        }
                         Err(diag) => diagnostics.push(diag),
                     }
                 }
@@ -5359,10 +5394,7 @@ fn lower_unit_members(
                 push_diagnostic(
                     diagnostics,
                     LoweringDiagnosticSeverity::Warning,
-                    format!(
-                        "単位定義内で処理できない構文 {:?} を検出しました",
-                        other
-                    ),
+                    format!("単位定義内で処理できない構文 {:?} を検出しました", other),
                     context,
                     &child,
                 );

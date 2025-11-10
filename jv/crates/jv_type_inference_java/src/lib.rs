@@ -327,14 +327,12 @@ impl<'a> TypeAnnotationParser<'a> {
 
     fn parse_identifier_symbol(&mut self) -> Result<UnitSymbol, ParseError> {
         let ident = self.expect_identifier()?;
-        let mut name = identifier_text(ident)
-            .map(str::to_string)
-            .ok_or_else(|| {
-                ParseError::new(
-                    "単位注釈の識別子が取得できませんでした",
-                    Some(span_from_token(ident)),
-                )
-            })?;
+        let mut name = identifier_text(ident).map(str::to_string).ok_or_else(|| {
+            ParseError::new(
+                "単位注釈の識別子が取得できませんでした",
+                Some(span_from_token(ident)),
+            )
+        })?;
         let mut span = span_from_token(ident);
         let mut has_default_marker = false;
 
@@ -634,9 +632,13 @@ mod tests {
         ];
         let lowered = lower_type_annotation_from_tokens(&tokens).expect("should lower");
         match lowered.annotation() {
-            TypeAnnotation::Unit { base, unit, implicit } => {
+            TypeAnnotation::Unit {
+                ref base,
+                unit,
+                implicit,
+            } => {
                 assert!(!implicit);
-                assert_eq!(*base, TypeAnnotation::Simple("Double".into()));
+                assert!(matches!(base.as_ref(), TypeAnnotation::Simple(name) if name == "Double"));
                 assert_eq!(unit.name, "km");
                 assert!(!unit.is_bracketed);
                 assert!(!unit.has_default_marker);
@@ -655,9 +657,13 @@ mod tests {
         ];
         let lowered = lower_type_annotation_from_tokens(&tokens).expect("should lower");
         match lowered.annotation() {
-            TypeAnnotation::Unit { base, unit, implicit } => {
+            TypeAnnotation::Unit {
+                ref base,
+                unit,
+                implicit,
+            } => {
                 assert!(implicit);
-                assert_eq!(*base, TypeAnnotation::Simple("Double".into()));
+                assert!(matches!(base.as_ref(), TypeAnnotation::Simple(name) if name == "Double"));
                 assert_eq!(unit.name, "[℃]");
                 assert!(unit.is_bracketed);
             }

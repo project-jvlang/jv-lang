@@ -7,9 +7,9 @@
 use crate::CheckError;
 use jv_ast::types::Span;
 use jv_ast::{
+    BinaryOp, Expression, Literal, LogBlock, LogItem, Program, Statement, TypeAnnotation, UnaryOp,
     expression::Argument,
     statement::{UnitTypeDefinition, UnitTypeMember},
-    BinaryOp, Expression, Literal, LogBlock, LogItem, Program, Statement, TypeAnnotation, UnaryOp,
 };
 use std::collections::HashMap;
 
