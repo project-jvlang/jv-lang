@@ -6,8 +6,9 @@ use tempfile::{tempdir, TempDir};
 
 use jv_pm::{
     ArtifactCoordinates, ArtifactDownloadRequest, BuildInfo, DependencyCache, DownloadManager,
-    DownloadSettings, DownloadSource, DownloadedJar, Manifest, MavenProjectMetadata, PackageInfo,
-    ProjectSection, RepositorySection, ResolverDispatcher, ResolverOptions,
+    DownloadSettings, DownloadSource, DownloadedJar, LoggingConfig, Manifest,
+    MavenProjectMetadata, PackageInfo, ProjectSection, RepositorySection, ResolverDispatcher,
+    ResolverOptions,
 };
 
 use std::collections::HashMap;
@@ -544,6 +545,7 @@ fn resolver_performance_benchmark_completes_quickly() {
         repositories: RepositorySection::default(),
         mirrors: Vec::new(),
         build: None,
+        logging: LoggingConfig::default(),
         maven: MavenProjectMetadata::default(),
     };
 

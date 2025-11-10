@@ -405,7 +405,7 @@ struct GlobalConfigFile {
 mod tests {
     use super::*;
     use crate::repository::config::{AuthConfig, FilterConfig, RepositorySection};
-    use crate::{BuildInfo, Manifest, PackageInfo, ProjectSection};
+    use crate::{BuildInfo, LoggingConfig, Manifest, PackageInfo, ProjectSection};
     use std::collections::HashMap;
     use std::env;
     use tempfile::TempDir;
@@ -454,6 +454,7 @@ mod tests {
             repositories: RepositorySection::default(),
             mirrors: Vec::new(),
             build: Some(BuildInfo::default()),
+            logging: LoggingConfig::default(),
             maven: Default::default(),
         }
     }

@@ -160,7 +160,6 @@ impl JavaCodeGenerator {
         script_statements = retained_statements;
         let mut hoisted_variable_fields =
             Self::hoist_script_variable_fields(&mut script_statements);
-        hoisted_variable_fields.append(&mut hoisted_regex_fields);
 
         let has_entry_method = script_methods.iter().any(Self::is_entry_point_method);
         let needs_wrapper = !script_statements.is_empty() || !has_entry_method;

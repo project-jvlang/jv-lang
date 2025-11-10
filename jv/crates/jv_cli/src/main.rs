@@ -33,9 +33,9 @@ use jv_cli::{
     resolved_imports_header, tooling_failure,
 };
 use jv_pm::{
-    ExportError, ExportRequest, JavaProjectExporter, LockfileError, LockfileService,
-    LoggingConfig, LoggingConfigLayer, Manifest, MavenMirrorConfig, MavenRepositoryConfig,
-    PackageInfo, ProjectSection, RepositoryManager, RepositorySection,
+    ExportError, ExportRequest, JavaProjectExporter, LockfileError, LockfileService, LoggingConfig,
+    LoggingConfigLayer, Manifest, MavenMirrorConfig, MavenRepositoryConfig, PackageInfo,
+    ProjectSection, RepositoryManager, RepositorySection,
 };
 
 fn main() -> Result<()> {
@@ -350,6 +350,8 @@ fn main() -> Result<()> {
                 apt_processors: None,
                 apt_processorpath: None,
                 apt_options: Vec::new(),
+                logging_cli: LoggingConfigLayer::default(),
+                logging_env: LoggingConfigLayer::default(),
             };
 
             let plan = BuildOptionsFactory::compose(project_root, settings, layout, overrides)
@@ -392,6 +394,9 @@ fn main() -> Result<()> {
         }
         Some(Commands::Debug(args)) => {
             commands::debug::run(args).context("Failed to run debug command")?;
+        }
+        Some(Commands::Otel(args)) => {
+            commands::otel::run(args).context("Failed to run otel command")?;
         }
         Some(Commands::Repl) | None => {
             repl()?;
@@ -493,6 +498,7 @@ fn build_ephemeral_run_settings(start_path: &Path) -> Option<(ProjectRoot, Proje
         repositories: RepositorySection::default(),
         mirrors: Vec::new(),
         build: None,
+        logging: LoggingConfig::default(),
         maven: Default::default(),
     };
 
@@ -607,10 +613,7 @@ fn auto_export_maven_outputs(prepared_output: &PreparedOutput) -> Result<()> {
             );
             println!(
                 "  settings.xml    : {}",
-                summary
-                    .output_dir
-                    .join("settings.xml")
-                    .display()
+                summary.output_dir.join("settings.xml").display()
             );
             println!(
                 "  classpath.txt   : {}",

@@ -260,6 +260,7 @@ fn resolver_resolves_manifest_with_default_strategy() {
         repositories: RepositorySection::default(),
         mirrors: Vec::new(),
         build: None,
+        logging: LoggingConfig::default(),
         maven: Default::default(),
     };
 
@@ -303,6 +304,7 @@ fn resolver_rejects_unknown_strategy() {
         repositories: RepositorySection::default(),
         mirrors: Vec::new(),
         build: None,
+        logging: LoggingConfig::default(),
         maven: Default::default(),
     };
 

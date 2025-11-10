@@ -478,6 +478,19 @@ counter = counter + explicit
     let layout = pipeline::project::layout::ProjectLayout::from_settings(&project_root, &settings)
         .expect("layout resolves");
 
+    let overrides = pipeline::CliOverrides {
+        entrypoint: Some(entrypoint.clone()),
+        output: Some(root_path.join("target")),
+        java_only: true,
+        check: false,
+        format: false,
+        target: None,
+        clean: false,
+        perf: false,
+        emit_types: false,
+        verbose: false,
+        emit_telemetry: false,
+        parallel_inference: false,
         inference_workers: None,
         constraint_batch: None,
         apt_enabled: false,
@@ -560,6 +573,14 @@ include = ["src/**/*.jv"]
 
     let plan = pipeline::BuildOptionsFactory::compose(project_root, settings, layout, overrides)
         .expect("plan composition succeeds");
+
+    let result = pipeline::compile(&plan);
+    assert!(result.is_err());
+
+    let message = result.unwrap_err().to_string();
+    assert!(message.contains("JV2101"));
+    assert!(message.contains("カンマ") || message.contains("comma"));
+}
 
 #[test]
 fn compile_without_parameter_type_annotation_uses_object() {

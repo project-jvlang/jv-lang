@@ -487,7 +487,7 @@ mod tests {
     use tempfile::tempdir;
 
     use crate::{
-        RepositorySection, ResolutionSource, ResolutionStats, ResolvedDependency,
+        LoggingConfig, RepositorySection, ResolutionSource, ResolutionStats, ResolvedDependency,
         ResolverAlgorithmKind,
     };
 
@@ -506,6 +506,7 @@ mod tests {
             repositories: RepositorySection::default(),
             mirrors: Vec::new(),
             build: None,
+            logging: LoggingConfig::default(),
             maven: Default::default(),
         }
     }

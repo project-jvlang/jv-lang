@@ -30,12 +30,17 @@ const SYNC_TOKENS: &[TokenKind] = &[
 ];
 
 const MAX_LOG_BLOCK_DEPTH: usize = 2;
+/// ジェネリック引数シーケンスの先読み最大トークン数（無限ループ防止）
+const MAX_GENERIC_LOOKAHEAD: usize = 100;
+/// 式のネスト最大深度（メモリ消費制限）
+const MAX_EXPRESSION_DEPTH: usize = 50;
 
 #[derive(Default)]
 struct WhenBlockState {
     brace_depth: usize,
 }
 
+/// 式解析時の `when` ブロック状態を保持し、`->` を誤った同期境界として扱わないようにする。
 #[derive(Default)]
 struct ExpressionState {
     pending_when: bool,
@@ -70,6 +75,10 @@ impl ExpressionState {
                 block.brace_depth -= 1;
             }
         }
+    }
+
+    fn inside_when_block(&self) -> bool {
+        !self.when_blocks.is_empty()
     }
 
     fn reset(&mut self) {
@@ -580,6 +589,13 @@ impl<'tokens> ParserContext<'tokens> {
         terminators: &[TokenKind],
         respect_statement_boundaries: bool,
     ) -> bool {
+        // ネストの深さ制限チェック（スタックオーバーフロー・メモリ不足防止）
+        if self.expression_states.len() >= MAX_EXPRESSION_DEPTH {
+            let message = format!("式のネストが深すぎます（最大{}段）", MAX_EXPRESSION_DEPTH);
+            self.report_error(message, self.cursor, self.cursor);
+            return false;
+        }
+
         self.expression_states.push(ExpressionState::default());
         self.consume_trivia();
         let start = self.cursor;
@@ -602,7 +618,7 @@ impl<'tokens> ParserContext<'tokens> {
                 let message = "JV3103: jv 言語では `if`/`else` 式はサポートされていません。`when` を使用してください。";
                 self.report_error(message, self.cursor, self.cursor + 1);
                 self.bump_raw();
-                break;
+                continue;
             }
             let at_top_level = depth_paren == 0 && depth_brace == 0 && depth_bracket == 0;
             if at_top_level && terminators.contains(&kind) {
@@ -642,7 +658,16 @@ impl<'tokens> ParserContext<'tokens> {
                 ) {
                     should_break_on_sync = true;
                 } else if SYNC_TOKENS.contains(&kind) {
-                    should_break_on_sync = true;
+                    // `when` 式のアーム内では `->` はステートメント境界にならない。
+                    let allow_arrow_within_when = kind == TokenKind::Arrow
+                        && self
+                            .expression_states
+                            .last()
+                            .map(|state| state.inside_when_block())
+                            .unwrap_or(false);
+                    if !allow_arrow_within_when {
+                        should_break_on_sync = true;
+                    }
                 }
             }
 
@@ -783,7 +808,9 @@ impl<'tokens> ParserContext<'tokens> {
 
         let mut depth = 1usize;
         let mut index = start_index + 1;
-        while index < self.tokens.len() {
+        let max_index = (start_index + MAX_GENERIC_LOOKAHEAD).min(self.tokens.len());
+
+        while index < max_index {
             let token = &self.tokens[index];
             let kind = TokenKind::from_token(token);
             if kind.is_trivia() {
@@ -800,7 +827,8 @@ impl<'tokens> ParserContext<'tokens> {
                     depth -= 1;
                     if depth == 0 {
                         let mut lookahead = index + 1;
-                        while lookahead < self.tokens.len() {
+                        let max_lookahead = lookahead.saturating_add(10).min(self.tokens.len());
+                        while lookahead < max_lookahead {
                             let next_kind = TokenKind::from_token(&self.tokens[lookahead]);
                             if next_kind.is_trivia() {
                                 lookahead += 1;
@@ -1020,7 +1048,8 @@ impl<'tokens> ParserContext<'tokens> {
             let kind = TokenKind::from_token(token);
             if SYNC_TOKENS.contains(&kind) {
                 match kind {
-                    TokenKind::Newline | TokenKind::Semicolon => {
+                    TokenKind::Newline | TokenKind::Semicolon | TokenKind::Arrow => {
+                        // Arrow may have triggered error recovery, so always advance to avoid infinite loops.
                         self.bump_raw();
                     }
                     _ => {}
@@ -1102,5 +1131,56 @@ impl<'tokens> ParserContext<'tokens> {
     /// ノードの終了を記録する。
     pub(crate) fn finish_node(&mut self) {
         self.events.push(ParseEvent::FinishNode);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ParserContext;
+    use crate::syntax::TokenKind;
+    use jv_lexer::{Lexer, Token};
+
+    fn lex(source: &str) -> Vec<Token> {
+        let mut lexer = Lexer::new(source.to_string());
+        lexer
+            .tokenize()
+            .expect("lexing should succeed for parser tests")
+    }
+
+    #[test]
+    fn parse_expression_until_keeps_parsing_when_arrow_within_return() {
+        let source = r#"
+            return when (value) {
+                is Int -> "int"
+                else -> "other"
+            }
+        "#;
+
+        let tokens = lex(source);
+        let arrow_index = tokens
+            .iter()
+            .position(|token| TokenKind::from_token(token) == TokenKind::Arrow)
+            .expect("fixture should contain an arrow token");
+
+        let mut context = ParserContext::new(&tokens);
+        assert!(
+            context.bump_expected(TokenKind::ReturnKw, "test should consume return keyword"),
+            "return keyword should be present"
+        );
+
+        let terminators = [
+            TokenKind::Semicolon,
+            TokenKind::Newline,
+            TokenKind::RightBrace,
+        ];
+        let consumed = context.parse_expression_until(&terminators, true);
+        assert!(
+            consumed,
+            "when expression body should be parsed as return payload"
+        );
+        assert!(
+            context.position() > arrow_index,
+            "cursor must advance past the when arrow to avoid syncing on it"
+        );
     }
 }

@@ -1,11 +1,11 @@
 // jv_cli - CLI functionality (library interface for testing)
 use anyhow::Result;
 use clap::Parser;
+use jv_ir::TransformContext;
 use jv_ir::{
     sequence_pipeline,
     types::{IrImport, IrImportDetail, LogLevel as IrLogLevel, LoggingFrameworkKind},
 };
-use jv_ir::TransformContext;
 use jv_support::i18n::{LocaleCode, catalog};
 use std::collections::HashMap;
 use std::fs;
@@ -1157,10 +1157,7 @@ pub mod pipeline {
                 let mut class_files = Vec::new();
                 while let Some(dir) = pending.pop() {
                     let entries = fs::read_dir(&dir).with_context(|| {
-                        format!(
-                            "Failed to enumerate output directory: {}",
-                            dir.display()
-                        )
+                        format!("Failed to enumerate output directory: {}", dir.display())
                     })?;
                     for entry in entries {
                         let path = entry?.path();

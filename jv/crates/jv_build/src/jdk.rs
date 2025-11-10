@@ -396,7 +396,6 @@ Java(TM) SE Runtime Environment"#;
             }
         }
     }
-    }
 
     #[cfg(unix)]
     struct TempJdk {

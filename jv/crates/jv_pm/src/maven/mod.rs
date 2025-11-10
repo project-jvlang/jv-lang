@@ -269,6 +269,7 @@ impl MavenIntegrationStrategy for Maven4IntegrationStrategy {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::LoggingConfig;
     use crate::lockfile::LockfileService;
     use crate::resolver::{
         DependencyScope, ResolutionDiagnostic, ResolutionSource, ResolutionStats,
@@ -293,6 +294,7 @@ mod tests {
             repositories: crate::RepositorySection::default(),
             mirrors: Vec::new(),
             build: None,
+            logging: LoggingConfig::default(),
             maven: crate::MavenProjectMetadata {
                 group_id: "com.example".to_string(),
                 artifact_id: Some("demo-app".to_string()),

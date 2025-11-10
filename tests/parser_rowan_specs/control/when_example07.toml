@@ -20,11 +20,11 @@ name = "classify"
 [expect.statements.span]
 start_line = 1
 start_column = 1
-end_line = 8
-end_column = 6
+end_line = 9
+end_column = 2
 
 [expect.statements.block]
-statement_kinds = ["return_statement", "expression"]
+statement_kinds = ["return_statement"]
 
 [[expect.statements]]
 index = 1

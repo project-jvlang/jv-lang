@@ -3,7 +3,10 @@ use std::io::Write;
 
 use anyhow::Result;
 use jv_build::{BuildConfig, JavaTarget, SampleConfig};
-use jv_pm::{BuildInfo, LoggingConfig, Manifest, PackageInfo, PackageManager, ProjectSection, RepositorySection};
+use jv_pm::{
+    BuildInfo, LoggingConfig, Manifest, PackageInfo, PackageManager, ProjectSection,
+    RepositorySection,
+};
 
 /// Render the Build Tools learning module demonstrating the full workflow.
 pub fn render<W: Write>(writer: &mut W) -> Result<()> {
