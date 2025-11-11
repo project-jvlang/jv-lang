@@ -1059,6 +1059,42 @@ fn cli_check_reports_regex_diagnostics() {
 }
 
 #[test]
+fn pipeline_compiles_regex_command_sample() {
+    let temp_dir = TempDirGuard::new("regex-command-sample").expect("create temp dir");
+    let sample = workspace_file("samples/regex/concise_command.jv");
+
+    let plan = compose_plan_from_fixture(
+        temp_dir.path(),
+        &sample,
+        CliOverrides {
+            java_only: true,
+            ..CliOverrides::default()
+        },
+    );
+
+    let artifacts = compile(&plan).expect("regex command sample should compile");
+    assert!(
+        !artifacts.java_files.is_empty(),
+        "regex sample should produce Java output"
+    );
+
+    let java_sources: Vec<String> = artifacts
+        .java_files
+        .iter()
+        .map(|path| fs::read_to_string(path).expect("read regex sample java"))
+        .collect();
+    let combined = java_sources.join("\n");
+    assert!(
+        combined.contains("replaceAll"),
+        "regex sample should emit replaceAll pipeline: {combined}"
+    );
+    assert!(
+        combined.contains(".split("),
+        "regex sample should emit split calls: {combined}"
+    );
+}
+
+#[test]
 fn pipeline_compile_produces_artifacts() {
     let temp_dir = TempDirGuard::new("pipeline").expect("Failed to create temp dir");
     let input = workspace_file("test_simple.jv");

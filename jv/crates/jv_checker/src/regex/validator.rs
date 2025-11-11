@@ -254,6 +254,7 @@ impl<'a> RegexValidationVisitor<'a> {
             Expression::RegexLiteral(literal) => {
                 self.validator.analyze_literal(literal, self.errors);
             }
+            Expression::RegexCommand(_) => {}
             Expression::Identifier(..)
             | Expression::This(..)
             | Expression::Super(..)

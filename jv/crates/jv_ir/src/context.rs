@@ -1031,6 +1031,7 @@ fn set_expression_type(expr: &mut IrExpression, java_type: JavaType) {
         | IrExpression::VirtualThread { java_type: ty, .. }
         | IrExpression::TryWithResources { java_type: ty, .. }
         | IrExpression::LogInvocation { java_type: ty, .. }
+        | IrExpression::RegexCommand { java_type: ty, .. }
         | IrExpression::This { java_type: ty, .. }
         | IrExpression::Super { java_type: ty, .. } => {
             *ty = java_type;
@@ -1040,6 +1041,7 @@ fn set_expression_type(expr: &mut IrExpression, java_type: JavaType) {
         }
         IrExpression::Lambda { .. }
         | IrExpression::Literal(_, _)
+        | IrExpression::TextBlock { .. }
         | IrExpression::RegexPattern { .. }
         | IrExpression::ArrayCreation { .. }
         | IrExpression::StringFormat { .. }

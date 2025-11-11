@@ -187,6 +187,9 @@ mod tests {
             pattern: "\\d+".to_string(),
             raw: "/\\d+/".to_string(),
             span: span.clone(),
+            origin: Some(PatternOrigin::literal(span.clone())),
+            const_key: None,
+            template_segments: Vec::new(),
         };
         let mut context = TransformContext::new();
         let ir_expr = transform_expression(Expression::RegexLiteral(literal.clone()), &mut context)
@@ -1045,6 +1048,9 @@ mod tests {
             pattern: "^[a-z]+$".to_string(),
             raw: "/^[a-z]+$/".to_string(),
             span: span.clone(),
+            origin: Some(PatternOrigin::literal(span.clone())),
+            const_key: None,
+            template_segments: Vec::new(),
         };
         let mut context = TransformContext::new();
         let ir_expr = transform_expression(
@@ -2644,6 +2650,7 @@ mod tests {
                 StringPart::Expression(Expression::Identifier("status".to_string(), dummy_span())),
             ],
             indent: None,
+            raw_flavor: None,
             span: dummy_span(),
         };
 
@@ -2671,6 +2678,77 @@ mod tests {
                 "multiline interpolation should desugar to string format, got {:?}",
                 other
             ),
+        }
+    }
+
+    #[test]
+    fn multiline_literal_without_interpolation_emits_text_block() {
+        let mut context = test_context();
+        let literal = MultilineStringLiteral {
+            kind: MultilineKind::TripleQuote,
+            normalized: "first\nsecond\n".to_string(),
+            raw: "first\nsecond\n".to_string(),
+            parts: Vec::new(),
+            indent: None,
+            raw_flavor: None,
+            span: dummy_span(),
+        };
+
+        let result = transform_expression(Expression::MultilineString(literal), &mut context)
+            .expect("multiline literal lowers");
+
+        match result {
+            IrExpression::TextBlock { content, .. } => {
+                assert_eq!(content, "first\nsecond\n");
+            }
+            other => panic!("expected text block expression, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn regex_command_lowering_preserves_mode_and_type() {
+        let mut context = test_context();
+        let literal = RegexLiteral {
+            pattern: "\\d+".to_string(),
+            raw: "/\\d+/".to_string(),
+            span: dummy_span(),
+            origin: None,
+            const_key: None,
+            template_segments: Vec::new(),
+        };
+        let command = RegexCommand {
+            mode: RegexCommandMode::Match,
+            mode_origin: RegexCommandModeOrigin::DefaultMatch,
+            subject: Box::new(Expression::Literal(
+                Literal::String("input".to_string()),
+                dummy_span(),
+            )),
+            pattern: literal,
+            pattern_expr: None,
+            replacement: None,
+            flags: vec![RegexFlag::CaseInsensitive],
+            raw_flags: Some("i".to_string()),
+            span: dummy_span(),
+        };
+
+        let result =
+            transform_expression(Expression::RegexCommand(Box::new(command)), &mut context)
+                .expect("regex command lowers");
+
+        match result {
+            IrExpression::RegexCommand {
+                mode,
+                java_type,
+                flags,
+                replacement,
+                ..
+            } => {
+                assert_eq!(mode, RegexCommandMode::Match);
+                assert_eq!(java_type, JavaType::boolean());
+                assert_eq!(flags.len(), 1);
+                assert!(replacement.is_none());
+            }
+            other => panic!("expected regex command IR expression, got {:?}", other),
         }
     }
 
@@ -4378,6 +4456,7 @@ fun sample(value: Any): Int {
                 dummy_span(),
             )),
             span: dummy_span(),
+            metadata: BinaryMetadata::default(),
         };
 
         let ir_expr = transform_expression(expr, &mut context)
@@ -4404,6 +4483,7 @@ fun sample(value: Any): Int {
                 dummy_span(),
             )),
             span: dummy_span(),
+            metadata: BinaryMetadata::default(),
         };
 
         let ir_expr = transform_expression(expr, &mut context)
@@ -4568,6 +4648,7 @@ fun sample(value: Any): Int {
                     dummy_span(),
                 )),
                 span: dummy_span(),
+                metadata: BinaryMetadata::default(),
             },
             span: dummy_span(),
         };
@@ -4728,6 +4809,7 @@ fun sample(value: Any): Int {
                         dummy_span(),
                     )),
                     span: dummy_span(),
+                    metadata: BinaryMetadata::default(),
                 }),
                 then_branch: Box::new(Expression::IndexAccess {
                     object: Box::new(Expression::This(dummy_span())),

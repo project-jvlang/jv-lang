@@ -6,8 +6,9 @@ use crate::pattern::{self, PatternTarget};
 use crate::regex::RegexValidator;
 use fastrand::Rng;
 use jv_ast::{
-    Annotation, AnnotationName, BinaryOp, Expression, Literal, Modifiers, Parameter,
-    ParameterModifiers, Pattern, Program, RegexLiteral, Span, Statement, TypeAnnotation,
+    Annotation, AnnotationName, BinaryMetadata, BinaryOp, Expression, Literal, Modifiers,
+    Parameter, ParameterModifiers, Pattern, PatternOrigin, Program, RegexCommand, RegexCommandMode,
+    RegexCommandModeOrigin, RegexLiteral, RegexReplacement, Span, Statement, TypeAnnotation,
     ValBindingOrigin, WhenArm,
 };
 use jv_inference::TypeFacts;
@@ -174,6 +175,7 @@ fn check_program_populates_inference_snapshot() {
         op: BinaryOp::Add,
         right: Box::new(Expression::Identifier("rhs".into(), span.clone())),
         span: span.clone(),
+        metadata: BinaryMetadata::default(),
     };
 
     let program = Program {
@@ -340,6 +342,7 @@ fn check_program_reports_type_error_on_mismatch() {
             span.clone(),
         )),
         span: span.clone(),
+        metadata: BinaryMetadata::default(),
     };
 
     let program = Program {
@@ -1351,6 +1354,9 @@ fn regex_literal_infers_pattern_type() {
         pattern: "\\d+".into(),
         raw: "/\\d+/".into(),
         span: span.clone(),
+        origin: Some(PatternOrigin::literal(span.clone())),
+        const_key: None,
+        template_segments: Vec::new(),
     };
     let program = Program {
         package: None,
@@ -1393,12 +1399,128 @@ fn regex_literal_infers_pattern_type() {
 }
 
 #[test]
+fn regex_command_match_infers_boolean() {
+    let span = dummy_span();
+    let literal = RegexLiteral {
+        pattern: "\\d+".into(),
+        raw: "/\\d+/".into(),
+        span: span.clone(),
+        origin: Some(PatternOrigin::literal(span.clone())),
+        const_key: None,
+        template_segments: Vec::new(),
+    };
+    let command = RegexCommand {
+        mode: RegexCommandMode::Match,
+        mode_origin: RegexCommandModeOrigin::DefaultMatch,
+        subject: Box::new(Expression::Literal(
+            Literal::String("text".into()),
+            span.clone(),
+        )),
+        pattern: literal,
+        pattern_expr: None,
+        replacement: None,
+        flags: Vec::new(),
+        raw_flags: None,
+        span: span.clone(),
+    };
+
+    let program = Program {
+        package: None,
+        imports: Vec::new(),
+        statements: vec![Statement::ValDeclaration {
+            name: "result".into(),
+            binding: None,
+            type_annotation: None,
+            initializer: Expression::RegexCommand(Box::new(command)),
+            modifiers: default_modifiers(),
+            origin: ValBindingOrigin::ExplicitKeyword,
+            span: span.clone(),
+        }],
+        span: span.clone(),
+    };
+
+    let mut checker = TypeChecker::new();
+    let result = checker.check_program(&program);
+    assert!(
+        result.is_ok(),
+        "regex command should type-check: {result:?}"
+    );
+
+    let snapshot = checker
+        .inference_snapshot()
+        .expect("snapshot should be produced");
+    let scheme = snapshot
+        .binding_scheme("result")
+        .expect("scheme for result binding");
+    assert_eq!(
+        scheme.ty,
+        TypeKind::boxed(PrimitiveType::Boolean),
+        "match mode should infer boolean"
+    );
+}
+
+#[test]
+fn regex_command_replacement_expression_requires_string() {
+    let span = dummy_span();
+    let literal = RegexLiteral {
+        pattern: "foo".into(),
+        raw: "/foo/".into(),
+        span: span.clone(),
+        origin: Some(PatternOrigin::literal(span.clone())),
+        const_key: None,
+        template_segments: Vec::new(),
+    };
+    let command = RegexCommand {
+        mode: RegexCommandMode::All,
+        mode_origin: RegexCommandModeOrigin::ExplicitToken,
+        subject: Box::new(Expression::Literal(
+            Literal::String("text".into()),
+            span.clone(),
+        )),
+        pattern: literal,
+        pattern_expr: None,
+        replacement: Some(RegexReplacement::Expression(Expression::Literal(
+            Literal::Number("1".into()),
+            span.clone(),
+        ))),
+        flags: Vec::new(),
+        raw_flags: None,
+        span: span.clone(),
+    };
+
+    let program = Program {
+        package: None,
+        imports: Vec::new(),
+        statements: vec![Statement::ValDeclaration {
+            name: "normalized".into(),
+            binding: None,
+            type_annotation: None,
+            initializer: Expression::RegexCommand(Box::new(command)),
+            modifiers: default_modifiers(),
+            origin: ValBindingOrigin::ExplicitKeyword,
+            span: span.clone(),
+        }],
+        span: span.clone(),
+    };
+
+    let mut checker = TypeChecker::new();
+    let result = checker.check_program(&program);
+    assert!(
+        result.is_err(),
+        "non-string replacement expressions should be rejected"
+    );
+}
+
+#[test]
 fn regex_validator_reports_unsupported_escape() {
     let span = dummy_span();
     let literal = RegexLiteral {
         pattern: "abc\\q".into(),
         raw: "/abc\\q/".into(),
         span: span.clone(),
+        origin: Some(PatternOrigin::literal(span.clone())),
+        const_key: None,
+        template_segments: Vec::new(),
     };
     let program = Program {
         package: None,
@@ -1433,6 +1555,9 @@ fn regex_validator_reports_unbalanced_groups() {
         pattern: "(abc".into(),
         raw: "/(abc/".into(),
         span: span.clone(),
+        origin: Some(PatternOrigin::literal(span.clone())),
+        const_key: None,
+        template_segments: Vec::new(),
     };
     let program = Program {
         package: None,
@@ -1466,6 +1591,9 @@ fn build_regex_program(pattern: &str) -> Program {
         pattern: pattern.to_string(),
         raw: format!("/{pattern}/"),
         span: span.clone(),
+        origin: Some(PatternOrigin::literal(span.clone())),
+        const_key: None,
+        template_segments: Vec::new(),
     };
     Program {
         package: None,

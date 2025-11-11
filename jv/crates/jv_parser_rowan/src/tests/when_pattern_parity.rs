@@ -144,7 +144,15 @@ fn when_リテラルと正規表現パターンを検証する() {
         panic!("正規表現パターンのwhen式が得られませんでした");
     };
     match &arms[0].pattern {
-        Pattern::Literal(Literal::Regex(RegexLiteral { pattern, raw, span }), outer_span) => {
+        Pattern::Literal(
+            Literal::Regex(RegexLiteral {
+                pattern,
+                raw,
+                span,
+                ..
+            }),
+            outer_span,
+        ) => {
             assert_eq!(pattern, "foo", "正規表現パターンが一致しません");
             assert_eq!(raw, "/foo/", "正規表現のraw表現が一致しません");
             assert_eq!(

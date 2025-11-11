@@ -1,8 +1,10 @@
 use super::*;
-use jv_ast::{Span, types::PrimitiveTypeName};
+use crate::Java25FeatureGenerator;
+use jv_ast::{RegexCommandMode, RegexFlag, RegexLiteral, Span, types::PrimitiveTypeName};
 use jv_ir::PipelineShape;
 use jv_ir::{
-    SequencePipeline, SequenceSource, SequenceStage, SequenceTerminal, SequenceTerminalKind,
+    IrRegexLiteralReplacement, IrRegexReplacement, IrRegexTemplateSegment, SequencePipeline,
+    SequenceSource, SequenceStage, SequenceTerminal, SequenceTerminalKind,
 };
 
 impl JavaCodeGenerator {
@@ -26,6 +28,25 @@ impl JavaCodeGenerator {
                     Self::escape_string(pattern)
                 ))
             }
+            IrExpression::TextBlock { content, .. } => self.generate_text_block_literal(content),
+            IrExpression::RegexCommand {
+                mode,
+                subject,
+                pattern,
+                pattern_expr,
+                replacement,
+                flags,
+                span,
+                ..
+            } => self.generate_regex_command_expression(
+                *mode,
+                subject,
+                pattern,
+                pattern_expr.as_deref(),
+                replacement.as_ref(),
+                flags,
+                span,
+            ),
             IrExpression::Identifier { name, .. } => {
                 if self.mutable_captures.contains(name) {
                     Ok(format!("{}.get()", name))
@@ -285,6 +306,143 @@ impl JavaCodeGenerator {
                 resources, body, ..
             } => self.generate_try_with_resources_expression(resources, body),
         }
+    }
+
+    fn generate_text_block_literal(&mut self, content: &str) -> Result<String, CodeGenError> {
+        if self.targeting.supports_text_blocks() {
+            Ok(Java25FeatureGenerator::generate_text_block(content))
+        } else {
+            Ok(format!("\"{}\"", Self::escape_string(content)))
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn generate_regex_command_expression(
+        &mut self,
+        mode: RegexCommandMode,
+        subject: &IrExpression,
+        pattern: &RegexLiteral,
+        pattern_expr: Option<&IrExpression>,
+        replacement: Option<&IrRegexReplacement>,
+        flags: &[RegexFlag],
+        span: &Span,
+    ) -> Result<String, CodeGenError> {
+        let subject_code = self.generate_expression(subject)?;
+        let pattern_code = self.render_regex_pattern_source(pattern, pattern_expr, flags)?;
+
+        match mode {
+            RegexCommandMode::Match => Ok(format!(
+                "{}.matcher({}).matches()",
+                pattern_code, subject_code
+            )),
+            RegexCommandMode::All => {
+                let replacement_code = self.render_regex_replacement_code(replacement, span)?;
+                Ok(format!(
+                    "{}.matcher({}).replaceAll({})",
+                    pattern_code, subject_code, replacement_code
+                ))
+            }
+            RegexCommandMode::First => {
+                let replacement_code = self.render_regex_replacement_code(replacement, span)?;
+                Ok(format!(
+                    "{}.matcher({}).replaceFirst({})",
+                    pattern_code, subject_code, replacement_code
+                ))
+            }
+            RegexCommandMode::Split => Ok(format!("{}.split({})", pattern_code, subject_code)),
+            RegexCommandMode::Iterate => {
+                if let Some(replacement) = replacement {
+                    let replacement_code =
+                        self.render_regex_replacement_code(Some(replacement), span)?;
+                    Ok(format!(
+                        "{}.matcher({}).replaceAll({})",
+                        pattern_code, subject_code, replacement_code
+                    ))
+                } else {
+                    Ok(format!(
+                        "{}.matcher({}).results()",
+                        pattern_code, subject_code
+                    ))
+                }
+            }
+        }
+    }
+
+    fn render_regex_pattern_source(
+        &mut self,
+        literal: &RegexLiteral,
+        pattern_expr: Option<&IrExpression>,
+        flags: &[RegexFlag],
+    ) -> Result<String, CodeGenError> {
+        if let Some(expr) = pattern_expr {
+            return self.generate_expression(expr);
+        }
+
+        self.add_import("java.util.regex.Pattern");
+        let escaped = Self::escape_string(&literal.pattern);
+        let mut compiled = format!("Pattern.compile(\"{}\"", escaped);
+        if !flags.is_empty() {
+            let mask = self.render_regex_flag_mask(flags);
+            compiled.push_str(", ");
+            compiled.push_str(&mask);
+        }
+        compiled.push(')');
+        Ok(compiled)
+    }
+
+    fn render_regex_flag_mask(&mut self, flags: &[RegexFlag]) -> String {
+        let mut parts = Vec::new();
+        for flag in flags {
+            let constant = match flag {
+                RegexFlag::CaseInsensitive => "Pattern.CASE_INSENSITIVE",
+                RegexFlag::Multiline => "Pattern.MULTILINE",
+                RegexFlag::DotAll => "Pattern.DOTALL",
+                RegexFlag::UnicodeCase => "Pattern.UNICODE_CASE",
+                RegexFlag::UnixLines => "Pattern.UNIX_LINES",
+                RegexFlag::Comments => "Pattern.COMMENTS",
+                RegexFlag::Literal => "Pattern.LITERAL",
+                RegexFlag::CanonEq => "Pattern.CANON_EQ",
+            };
+            parts.push(constant.to_string());
+        }
+        parts.join(" | ")
+    }
+
+    fn render_regex_replacement_code(
+        &mut self,
+        replacement: Option<&IrRegexReplacement>,
+        _span: &Span,
+    ) -> Result<String, CodeGenError> {
+        match replacement {
+            Some(IrRegexReplacement::Literal(literal)) => {
+                self.render_literal_regex_replacement(literal)
+            }
+            Some(IrRegexReplacement::Expression(expr)) => self.generate_expression(expr),
+            None => Ok("\"\"".to_string()),
+        }
+    }
+
+    fn render_literal_regex_replacement(
+        &mut self,
+        literal: &IrRegexLiteralReplacement,
+    ) -> Result<String, CodeGenError> {
+        let mut buffer = String::new();
+        for segment in &literal.segments {
+            match segment {
+                IrRegexTemplateSegment::Text(text) => buffer.push_str(text),
+                IrRegexTemplateSegment::BackReference(index) => {
+                    buffer.push('$');
+                    buffer.push_str(&index.to_string());
+                }
+                IrRegexTemplateSegment::Expression(_) => {
+                    return Err(CodeGenError::UnsupportedConstruct {
+                        construct: "Regex replacement interpolation expressions".to_string(),
+                        span: Some(literal.span.clone()),
+                    });
+                }
+            }
+        }
+        Ok(format!("\"{}\"", Self::escape_string(&buffer)))
     }
 
     fn try_render_collectors_to_list(

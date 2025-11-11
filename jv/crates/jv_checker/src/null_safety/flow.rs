@@ -871,6 +871,7 @@ fn classify_expression(
 ) -> ExpressionInfo {
     match expr {
         Expression::RegexLiteral(_) => ExpressionInfo::new(NullabilityKind::NonNull),
+        Expression::RegexCommand(_) => ExpressionInfo::new(NullabilityKind::Unknown),
         Expression::Literal(literal, _) => match literal {
             Literal::Null => ExpressionInfo::new(NullabilityKind::Nullable),
             Literal::Boolean(_)
@@ -908,6 +909,7 @@ fn classify_expression(
             op,
             right,
             span,
+            ..
         } => {
             let left_info = classify_expression(builder, left);
             let right_info = classify_expression(builder, right);
@@ -1057,7 +1059,10 @@ mod tests {
     use crate::null_safety::JavaLoweringStrategy;
     use crate::null_safety::graph::BranchAssumption;
     use jv_ast::ValBindingOrigin;
-    use jv_ast::{Expression, Pattern, Program, Statement, TryCatchClause, WhenArm, types::Span};
+    use jv_ast::{
+        BinaryMetadata, Expression, Pattern, Program, Statement, TryCatchClause, WhenArm,
+        types::Span,
+    };
 
     #[test]
     fn build_graph_with_linear_statements() {
@@ -1412,6 +1417,7 @@ mod tests {
                 span.clone(),
             )),
             span: span.clone(),
+            metadata: BinaryMetadata::default(),
         };
 
         let program = Program {

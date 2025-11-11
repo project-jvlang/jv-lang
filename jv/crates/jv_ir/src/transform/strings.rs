@@ -35,6 +35,12 @@ pub fn desugar_string_interpolation(
     }
 
     if !has_expression {
+        if raw_text.contains('\n') {
+            return Ok(IrExpression::TextBlock {
+                content: raw_text,
+                span,
+            });
+        }
         return Ok(IrExpression::Literal(Literal::String(raw_text), span));
     }
 

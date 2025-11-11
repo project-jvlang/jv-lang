@@ -211,6 +211,7 @@ fn multiline_string_literal_roundtrips_through_serde() {
             StringPart::Text("!".to_string()),
         ],
         indent: Some(IndentMetadata::new(4, true)),
+        raw_flavor: None,
         span: span.clone(),
     };
 
@@ -228,6 +229,9 @@ fn regex_literal_roundtrips_through_serde() {
         pattern: "a/b".to_string(),
         raw: "/a\\/b/".to_string(),
         span: span.clone(),
+        origin: Some(PatternOrigin::literal(span.clone())),
+        const_key: None,
+        template_segments: Vec::new(),
     };
 
     let variant = Literal::Regex(literal.clone());
@@ -240,6 +244,27 @@ fn regex_literal_roundtrips_through_serde() {
     let expr_decoded: Expression =
         serde_json::from_str(&expr_serialized).expect("deserialize regex expression");
     assert_eq!(expr_decoded, expr);
+}
+
+#[test]
+fn raw_single_literal_roundtrips_with_empty_parts() {
+    let span = Span::new(3, 1, 3, 20);
+    let literal = MultilineStringLiteral {
+        kind: MultilineKind::RawSingle,
+        normalized: "C:\\Users\\dev".to_string(),
+        raw: "'C:\\Users\\dev'".to_string(),
+        parts: Vec::new(),
+        indent: None,
+        raw_flavor: Some(RawStringFlavor::SingleLine),
+        span: span.clone(),
+    };
+
+    let serialized = serde_json::to_string(&literal).expect("serialize raw literal");
+    let decoded: MultilineStringLiteral =
+        serde_json::from_str(&serialized).expect("deserialize raw literal");
+
+    assert_eq!(decoded, literal);
+    assert!(decoded.parts.is_empty());
 }
 
 #[test]

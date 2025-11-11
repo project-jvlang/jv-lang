@@ -8,11 +8,12 @@ use jv_ir::{
     CompletableFutureOp, ConversionHelper, ConversionKind, ConversionMetadata, IrCaseLabel,
     IrCatchClause, IrDeconstructionComponent, IrDeconstructionPattern, IrExpression, IrForEachKind,
     IrForLoopMetadata, IrGenericMetadata, IrImplicitWhenEnd, IrImport, IrImportDetail, IrModifiers,
-    IrNumericRangeLoop, IrParameter, IrProgram, IrRecordComponent, IrResource, IrSampleDeclaration,
-    IrStatement, IrSwitchCase, IrTypeParameter, IrVariance, IrVisibility, JavaType, LogGuardKind,
-    LogInvocationItem, LogInvocationPlan, LogLevel, LogMessage, LoggerFieldId, LoggerFieldSpec,
-    LoggingFrameworkKind, MethodOverload, NullableGuard, NullableGuardReason, SequencePipeline,
-    SequenceSource, SequenceStage, SequenceTerminalKind, UtilityClass, VirtualThreadOp,
+    IrNumericRangeLoop, IrParameter, IrProgram, IrRecordComponent, IrRegexReplacement,
+    IrRegexTemplateSegment, IrResource, IrSampleDeclaration, IrStatement, IrSwitchCase,
+    IrTypeParameter, IrVariance, IrVisibility, JavaType, LogGuardKind, LogInvocationItem,
+    LogInvocationPlan, LogLevel, LogMessage, LoggerFieldId, LoggerFieldSpec, LoggingFrameworkKind,
+    MethodOverload, NullableGuard, NullableGuardReason, SequencePipeline, SequenceSource,
+    SequenceStage, SequenceTerminalKind, UtilityClass, VirtualThreadOp,
 };
 use jv_mapper::{
     JavaPosition, JavaSpan, MappingCategory, MappingError, SourceMap, SourceMapBuilder,
@@ -813,8 +814,38 @@ impl JavaCodeGenerator {
                     scope_locals,
                 );
             }
+            IrExpression::RegexCommand {
+                subject,
+                pattern_expr,
+                replacement,
+                ..
+            } => {
+                self.collect_mutable_captures_in_expression(
+                    subject,
+                    method_locals,
+                    captures,
+                    scope_locals,
+                );
+                if let Some(pattern_expr) = pattern_expr {
+                    self.collect_mutable_captures_in_expression(
+                        pattern_expr,
+                        method_locals,
+                        captures,
+                        scope_locals,
+                    );
+                }
+                if let Some(replacement) = replacement {
+                    self.collect_mutable_captures_in_regex_replacement(
+                        replacement,
+                        method_locals,
+                        captures,
+                        scope_locals,
+                    );
+                }
+            }
             IrExpression::Literal(_, _)
             | IrExpression::RegexPattern { .. }
+            | IrExpression::TextBlock { .. }
             | IrExpression::Identifier { .. }
             | IrExpression::Switch { .. }
             | IrExpression::TryWithResources { .. }
@@ -828,6 +859,37 @@ impl JavaCodeGenerator {
             | IrExpression::StringFormat { .. }
             | IrExpression::InstanceOf { .. }
             | IrExpression::Cast { .. } => {}
+        }
+    }
+
+    fn collect_mutable_captures_in_regex_replacement(
+        &self,
+        replacement: &IrRegexReplacement,
+        method_locals: &HashSet<String>,
+        captures: &mut HashSet<String>,
+        scope_locals: &HashSet<String>,
+    ) {
+        match replacement {
+            IrRegexReplacement::Literal(literal) => {
+                for segment in &literal.segments {
+                    if let IrRegexTemplateSegment::Expression(expr) = segment {
+                        self.collect_mutable_captures_in_expression(
+                            expr,
+                            method_locals,
+                            captures,
+                            scope_locals,
+                        );
+                    }
+                }
+            }
+            IrRegexReplacement::Expression(expr) => {
+                self.collect_mutable_captures_in_expression(
+                    expr,
+                    method_locals,
+                    captures,
+                    scope_locals,
+                );
+            }
         }
     }
 

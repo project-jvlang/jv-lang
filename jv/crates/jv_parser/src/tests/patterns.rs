@@ -100,6 +100,7 @@ fn parses_regex_literal_pattern() {
                 pattern,
                 raw,
                 span: literal_span,
+                ..
             }),
             span,
         ) => {

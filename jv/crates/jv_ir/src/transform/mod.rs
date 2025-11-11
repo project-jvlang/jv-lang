@@ -4,12 +4,15 @@ use crate::naming::method_erasure::apply_method_erasure;
 use crate::profiling::{PerfMetrics, TransformProfiler};
 use crate::sequence_pipeline;
 use crate::types::{
-    IrCommentKind, IrExpression, IrImport, IrImportDetail, IrProgram, IrStatement, JavaType,
+    IrCommentKind, IrExpression, IrImport, IrImportDetail, IrProgram, IrRegexLiteralReplacement,
+    IrRegexReplacement, IrRegexTemplateSegment, IrStatement, JavaType,
 };
 use jv_ast::{
-    Argument, BinaryOp, BindingPatternKind, CallArgumentMetadata, CallArgumentStyle, CommentKind,
-    ConcurrencyConstruct, Expression, Literal, Modifiers, Program, ResourceManagement,
-    SequenceDelimiter, Span, Statement, TypeAnnotation, UnaryOp, ValBindingOrigin,
+    Argument, BinaryMetadata, BinaryOp, BindingPatternKind, CallArgumentMetadata,
+    CallArgumentStyle, CommentKind, ConcurrencyConstruct, Expression, Literal, Modifiers, Program,
+    RegexCommand, RegexCommandMode, RegexLiteralReplacement, RegexReplacement,
+    RegexTemplateSegment, ResourceManagement, SequenceDelimiter, Span, Statement, StringPart,
+    TypeAnnotation, UnaryOp, ValBindingOrigin,
 };
 
 mod concurrency;
@@ -471,6 +474,107 @@ fn should_attach_trailing_comment(statement: &IrStatement, comment_span: &Span) 
     false
 }
 
+fn lower_regex_command(
+    command: RegexCommand,
+    context: &mut TransformContext,
+) -> Result<IrExpression, TransformError> {
+    let span = command.span.clone();
+    let subject = transform_expression(*command.subject, context)?;
+    let pattern_expr = command
+        .pattern_expr
+        .map(|expr| transform_expression(*expr, context))
+        .transpose()?;
+    let replacement = command
+        .replacement
+        .map(|replacement| lower_regex_replacement(replacement, context))
+        .transpose()?;
+    let java_type = regex_command_java_type(command.mode, replacement.is_some());
+
+    Ok(IrExpression::RegexCommand {
+        mode: command.mode,
+        mode_origin: command.mode_origin,
+        subject: Box::new(subject),
+        pattern: command.pattern,
+        pattern_expr: pattern_expr.map(Box::new),
+        replacement,
+        flags: command.flags,
+        java_type,
+        span,
+    })
+}
+
+fn regex_command_java_type(mode: RegexCommandMode, has_replacement: bool) -> JavaType {
+    match mode {
+        RegexCommandMode::All | RegexCommandMode::First => JavaType::string(),
+        RegexCommandMode::Match => JavaType::boolean(),
+        RegexCommandMode::Split => JavaType::Array {
+            element_type: Box::new(JavaType::string()),
+            dimensions: 1,
+        },
+        RegexCommandMode::Iterate => {
+            if has_replacement {
+                JavaType::string()
+            } else {
+                JavaType::Reference {
+                    name: "java.util.stream.Stream".to_string(),
+                    generic_args: Vec::new(),
+                }
+            }
+        }
+    }
+}
+
+fn lower_regex_replacement(
+    replacement: RegexReplacement,
+    context: &mut TransformContext,
+) -> Result<IrRegexReplacement, TransformError> {
+    match replacement {
+        RegexReplacement::Literal(literal) => {
+            lower_regex_literal_replacement(literal, context).map(IrRegexReplacement::Literal)
+        }
+        RegexReplacement::Expression(expr) => {
+            let lowered = transform_expression(expr, context)?;
+            Ok(IrRegexReplacement::Expression(Box::new(lowered)))
+        }
+        RegexReplacement::Lambda(lambda) => {
+            let expression = Expression::Lambda {
+                parameters: lambda.params,
+                body: lambda.body,
+                span: lambda.span,
+            };
+            let lowered = transform_expression(expression, context)?;
+            Ok(IrRegexReplacement::Expression(Box::new(lowered)))
+        }
+    }
+}
+
+fn lower_regex_literal_replacement(
+    literal: RegexLiteralReplacement,
+    context: &mut TransformContext,
+) -> Result<IrRegexLiteralReplacement, TransformError> {
+    let mut segments = Vec::with_capacity(literal.template_segments.len());
+    for segment in literal.template_segments {
+        match segment {
+            RegexTemplateSegment::Text(text) => {
+                segments.push(IrRegexTemplateSegment::Text(text));
+            }
+            RegexTemplateSegment::BackReference(index) => {
+                segments.push(IrRegexTemplateSegment::BackReference(index));
+            }
+            RegexTemplateSegment::Expression(expr) => {
+                let lowered = transform_expression(expr, context)?;
+                segments.push(IrRegexTemplateSegment::Expression(Box::new(lowered)));
+            }
+        }
+    }
+
+    Ok(IrRegexLiteralReplacement {
+        normalized: literal.normalized,
+        segments,
+        span: literal.span,
+    })
+}
+
 fn unwrap_commented<'a>(statement: &'a IrStatement) -> &'a IrStatement {
     match statement {
         IrStatement::Commented { statement, .. } => unwrap_commented(statement),
@@ -513,6 +617,14 @@ pub fn transform_expression(
 ) -> Result<IrExpression, TransformError> {
     match expr {
         Expression::Literal(lit, span) => {
+            if let Literal::String(value) = &lit {
+                if value.contains('\n') {
+                    return Ok(IrExpression::TextBlock {
+                        content: value.clone(),
+                        span: span.clone(),
+                    });
+                }
+            }
             if let Literal::Regex(regex) = &lit {
                 return Ok(IrExpression::RegexPattern {
                     pattern: regex.pattern.clone(),
@@ -584,14 +696,46 @@ pub fn transform_expression(
         }
         Expression::MultilineString(literal) => {
             if literal.parts.is_empty() {
-                Ok(IrExpression::Literal(
+                if literal.normalized.contains('\n') {
+                    return Ok(IrExpression::TextBlock {
+                        content: literal.normalized,
+                        span: literal.span,
+                    });
+                }
+                return Ok(IrExpression::Literal(
                     Literal::String(literal.normalized),
                     literal.span,
-                ))
-            } else {
-                desugar_string_interpolation(literal.parts, literal.span, context)
+                ));
             }
+
+            let mut has_interpolation = false;
+            let mut accumulated = String::new();
+            for part in &literal.parts {
+                match part {
+                    StringPart::Text(text) => accumulated.push_str(text),
+                    StringPart::Expression(_) => {
+                        has_interpolation = true;
+                        break;
+                    }
+                }
+            }
+
+            if !has_interpolation {
+                if accumulated.contains('\n') {
+                    return Ok(IrExpression::TextBlock {
+                        content: accumulated,
+                        span: literal.span,
+                    });
+                }
+                return Ok(IrExpression::Literal(
+                    Literal::String(accumulated),
+                    literal.span,
+                ));
+            }
+
+            desugar_string_interpolation(literal.parts, literal.span, context)
         }
+        Expression::RegexCommand(command) => lower_regex_command(*command, context),
         Expression::Block { statements, span } => {
             context.enter_scope();
             let mut ir_statements = Vec::new();
@@ -667,6 +811,7 @@ pub fn transform_expression(
             op,
             right,
             span,
+            ..
         } => {
             if matches!(op, BinaryOp::Elvis) {
                 desugar_elvis_operator(left, right, span, context)
@@ -1500,6 +1645,7 @@ pub(crate) fn normalize_whitespace_array_elements(elements: Vec<Expression>) -> 
                             op: binary_op,
                             right: operand,
                             span: merged_span,
+                            metadata: BinaryMetadata::default(),
                         });
                     }
                 } else {

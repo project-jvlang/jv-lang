@@ -3257,6 +3257,7 @@ fn switch_expression_java21_mixed_labels_emits_jv3105() {
 
 mod logging;
 mod pattern_switch;
+mod regex_command;
 mod target_matrix;
 mod val_declaration_codegen_coverage;
 

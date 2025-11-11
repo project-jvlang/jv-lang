@@ -1,0 +1,21 @@
+package samples.regex
+
+val auditLog = """
+INFO 2024-10-05  User: Alice
+WARN 2024-10-05  User: Bob
+"""
+
+val windowsPath = 'C:\Users\analysis'
+
+fun condenseWhitespace(line: String): String {
+    return a/line/\s+/ " " /
+}
+
+fun containsWarnMarker(text: String): Boolean {
+    return /text/WARN\s+\d{4}-\d{2}-\d{2}/
+}
+
+fun normalizedUsers() {
+    val compact = condenseWhitespace(auditLog)
+    return s/compact/\n+User:/
+}

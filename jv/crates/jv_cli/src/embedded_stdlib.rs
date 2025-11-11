@@ -297,6 +297,7 @@ fn rewrite_expression(expression: &mut Expression) {
     match expression {
         Expression::Literal(_, _)
         | Expression::RegexLiteral(_)
+        | Expression::RegexCommand(_)
         | Expression::Identifier(_, _)
         | Expression::This(_)
         | Expression::Super(_) => {}
@@ -843,6 +844,7 @@ impl<'a, 'b> ProgramUsageDetector<'a, 'b> {
             | Expression::MultilineString(_)
             | Expression::Literal(_, _)
             | Expression::RegexLiteral(_)
+            | Expression::RegexCommand(_)
             | Expression::This(_)
             | Expression::Super(_) => {}
             Expression::LogBlock(block) => self.visit_log_block(block),

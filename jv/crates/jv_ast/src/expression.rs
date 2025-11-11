@@ -54,6 +54,9 @@ pub enum Expression {
     /// Regex literal with raw + normalized pattern metadata.
     RegexLiteral(RegexLiteral),
 
+    /// Concise regex command expression.
+    RegexCommand(Box<RegexCommand>),
+
     /// 単位付きリテラル。
     UnitLiteral {
         /// 元となるリテラル式。
@@ -75,6 +78,8 @@ pub enum Expression {
         op: BinaryOp,
         right: Box<Expression>,
         span: Span,
+        #[serde(default)]
+        metadata: BinaryMetadata,
     },
 
     // Unary operations
@@ -196,6 +201,102 @@ pub enum Expression {
     // This/super references
     This(Span),
     Super(Span),
+}
+
+/// Regex command expression data.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RegexCommand {
+    pub mode: RegexCommandMode,
+    pub mode_origin: RegexCommandModeOrigin,
+    pub subject: Box<Expression>,
+    pub pattern: RegexLiteral,
+    #[serde(default)]
+    pub pattern_expr: Option<Box<Expression>>,
+    #[serde(default)]
+    pub replacement: Option<RegexReplacement>,
+    #[serde(default)]
+    pub flags: Vec<RegexFlag>,
+    #[serde(default)]
+    pub raw_flags: Option<String>,
+    pub span: Span,
+}
+
+/// Regex command execution mode.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RegexCommandMode {
+    /// Replace all matches with the replacement.
+    All,
+    /// Replace only the first match.
+    First,
+    /// Perform a boolean match test.
+    Match,
+    /// Split the subject into an array of strings.
+    Split,
+    /// Iterate over matches as a stream.
+    Iterate,
+}
+
+/// Origin of the resolved regex command mode.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RegexCommandModeOrigin {
+    /// Mode provided via long-form token such as `[match]`.
+    ExplicitToken,
+    /// Mode provided via short single-character prefix such as `m`.
+    ShortMode,
+    /// Mode inferred from presence of replacement section.
+    DefaultReplacement,
+    /// Mode inferred due to absence of replacement section.
+    DefaultMatch,
+}
+
+/// Replacement description for a regex command.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum RegexReplacement {
+    /// Literal replacement with optional embedded expressions/back-references.
+    Literal(RegexLiteralReplacement),
+    /// Lambda replacement capturing parameters and body.
+    Lambda(RegexLambdaReplacement),
+    /// Fallback expression replacement (e.g. helper function returning `String`).
+    Expression(Expression),
+}
+
+/// Literal replacement metadata.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RegexLiteralReplacement {
+    pub raw: String,
+    pub normalized: String,
+    #[serde(default)]
+    pub template_segments: Vec<RegexTemplateSegment>,
+    pub span: Span,
+}
+
+/// Lambda replacement metadata.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RegexLambdaReplacement {
+    pub params: Vec<Parameter>,
+    pub body: Box<Expression>,
+    pub span: Span,
+}
+
+/// Template segment in a literal replacement.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum RegexTemplateSegment {
+    Text(String),
+    BackReference(u32),
+    Expression(Expression),
+}
+
+/// Regex flag identifiers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RegexFlag {
+    CaseInsensitive,
+    Multiline,
+    DotAll,
+    UnicodeCase,
+    UnixLines,
+    Comments,
+    Literal,
+    CanonEq,
 }
 
 /// Delimiter metadata describing how a sequence literal separated its elements.
@@ -343,6 +444,78 @@ pub enum Argument {
 pub enum StringPart {
     Text(String),
     Expression(Expression),
+}
+
+/// 2項演算子に付随する補助メタデータ。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct BinaryMetadata {
+    /// `is` 演算子に関するメタデータ。
+    #[serde(default)]
+    pub is_test: Option<IsTestMetadata>,
+}
+
+/// `is` 演算子の種別と関連情報。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct IsTestMetadata {
+    /// 解析された `is` 演算子の判定種別。
+    pub kind: IsTestKind,
+    /// 正規表現リテラルが右辺に現れた場合のリテラル情報。
+    #[serde(default)]
+    pub regex: Option<RegexLiteral>,
+    /// `Pattern` 型を返す式が右辺に現れた場合の式ツリー。
+    #[serde(default)]
+    pub pattern_expr: Option<Box<Expression>>,
+    /// 事前検証で得られた診断情報。
+    #[serde(default)]
+    pub diagnostics: Vec<RegexTestDiagnostic>,
+    /// 左辺に適用するガード戦略ヒント。
+    #[serde(default)]
+    pub guard_strategy: RegexGuardStrategy,
+    /// `is` 判定全体のソーススパン。
+    pub span: Span,
+}
+
+/// `is` 判定で利用される分類。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum IsTestKind {
+    /// 型テスト（従来の `is Type`）。
+    Type,
+    /// 正規表現リテラル。
+    RegexLiteral,
+    /// `Pattern` 型を返す任意の式。
+    PatternExpression,
+}
+
+/// 正規表現判定に付随する簡易診断。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RegexTestDiagnostic {
+    /// 日本語での診断メッセージ。
+    pub message: String,
+    /// 任意の診断コード。
+    #[serde(default)]
+    pub code: Option<String>,
+    /// 該当箇所のスパン。
+    #[serde(default)]
+    pub span: Option<Span>,
+}
+
+/// 左辺に適用するガード戦略。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum RegexGuardStrategy {
+    /// ガード不要。
+    None,
+    /// 一時変数へ退避しつつ null ガードを行う。
+    CaptureAndGuard {
+        /// 生成済みの一時変数名（未定義時は `None`）。
+        #[serde(default)]
+        temp_name: Option<String>,
+    },
+}
+
+impl Default for RegexGuardStrategy {
+    fn default() -> Self {
+        RegexGuardStrategy::None
+    }
 }
 
 /// When expression arms with pattern matching

@@ -241,6 +241,7 @@ fn collect_from_expression(expr: &Expression, depth: usize, diagnostics: &mut Ve
         Expression::Literal(_, _)
         | Expression::Identifier(_, _)
         | Expression::RegexLiteral(_)
+        | Expression::RegexCommand(_)
         | Expression::JsonLiteral(_)
         | Expression::MultilineString(_)
         | Expression::This(_)

@@ -1,4 +1,4 @@
-use jv_ast::{RegexLiteral, Span};
+use jv_ast::{PatternOrigin, RegexLiteral, Span};
 use jv_lexer::{Token, TokenMetadata, TokenType};
 
 /// Construct a [`RegexLiteral`] from the originating [`Token`] and span.
@@ -19,10 +19,14 @@ pub fn regex_literal_from_token(token: &Token, span: Span) -> RegexLiteral {
 
     let mut computed_span = span;
     computed_span.end_column = computed_span.start_column + raw.chars().count();
+    let origin_span = computed_span.clone();
 
     RegexLiteral {
         pattern,
         raw,
         span: computed_span,
+        origin: Some(PatternOrigin::literal(origin_span)),
+        const_key: None,
+        template_segments: Vec::new(),
     }
 }

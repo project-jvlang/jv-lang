@@ -190,6 +190,7 @@ impl SequenceWarningCollector {
         match expression {
             Expression::Literal(_, _)
             | Expression::RegexLiteral(_)
+            | Expression::RegexCommand(_)
             | Expression::Identifier(_, _)
             | Expression::This(_)
             | Expression::Super(_) => {}

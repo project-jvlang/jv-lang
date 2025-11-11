@@ -1,9 +1,9 @@
 // jv_ast/types - Basic types, operators, and position information
-use crate::annotation::Annotation;
+use crate::{annotation::Annotation, expression::RegexTemplateSegment};
 use serde::{Deserialize, Serialize};
 
 /// Position information for AST nodes
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct Span {
     pub start_line: usize,
     pub start_column: usize,
@@ -47,6 +47,12 @@ pub struct RegexLiteral {
     /// Raw literal text including delimiters as it appeared in source.
     pub raw: String,
     pub span: Span,
+    #[serde(default)]
+    pub origin: Option<PatternOrigin>,
+    #[serde(default)]
+    pub const_key: Option<PatternConstKey>,
+    #[serde(default)]
+    pub template_segments: Vec<RegexTemplateSegment>,
 }
 
 /// Literal values
@@ -58,6 +64,61 @@ pub enum Literal {
     Null,
     Character(char),
     Regex(RegexLiteral),
+}
+
+/// 正規表現の定数化キー（SHA-256の下位128bitとプレビュー）。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PatternConstKey {
+    pub hash: [u8; 16],
+    pub preview: String,
+}
+
+impl PatternConstKey {
+    pub fn new(hash: [u8; 16], preview: impl Into<String>) -> Self {
+        Self {
+            hash,
+            preview: preview.into(),
+        }
+    }
+}
+
+/// 正規表現の生成元を示す。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PatternOriginKind {
+    RegexLiteral,
+    RegexCommand,
+}
+
+/// 正規表現の生成元メタデータ。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PatternOrigin {
+    pub kind: PatternOriginKind,
+    #[serde(default)]
+    pub expr_id: Option<u64>,
+    pub span: Span,
+}
+
+impl PatternOrigin {
+    pub fn literal(span: Span) -> Self {
+        Self {
+            kind: PatternOriginKind::RegexLiteral,
+            expr_id: None,
+            span,
+        }
+    }
+
+    pub fn command(span: Span) -> Self {
+        Self {
+            kind: PatternOriginKind::RegexCommand,
+            expr_id: None,
+            span,
+        }
+    }
+
+    pub fn with_expr_id(mut self, expr_id: u64) -> Self {
+        self.expr_id = Some(expr_id);
+        self
+    }
 }
 
 /// Binary operators

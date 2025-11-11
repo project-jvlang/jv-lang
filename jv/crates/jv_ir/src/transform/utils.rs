@@ -100,6 +100,7 @@ fn convert_annotation_value(value: &AnnotationValue) -> IrAnnotationValue {
 pub(crate) fn extract_java_type(expr: &IrExpression) -> Option<JavaType> {
     match expr {
         IrExpression::Literal(literal, _) => Some(literal_to_java_type(literal)),
+        IrExpression::TextBlock { .. } => Some(JavaType::string()),
         IrExpression::RegexPattern { java_type, .. }
         | IrExpression::Identifier { java_type, .. }
         | IrExpression::MethodCall { java_type, .. }
@@ -120,7 +121,8 @@ pub(crate) fn extract_java_type(expr: &IrExpression) -> Option<JavaType> {
         | IrExpression::TryWithResources { java_type, .. }
         | IrExpression::LogInvocation { java_type, .. }
         | IrExpression::This { java_type, .. }
-        | IrExpression::Super { java_type, .. } => Some(java_type.clone()),
+        | IrExpression::Super { java_type, .. }
+        | IrExpression::RegexCommand { java_type, .. } => Some(java_type.clone()),
         IrExpression::Cast { target_type, .. } => Some(target_type.clone()),
         IrExpression::InstanceOf { .. } => Some(JavaType::boolean()),
         IrExpression::ArrayCreation {
@@ -150,6 +152,7 @@ pub(crate) fn extract_java_type(expr: &IrExpression) -> Option<JavaType> {
 pub(crate) fn ir_expression_span(expr: &IrExpression) -> Span {
     match expr {
         IrExpression::Literal(_, span)
+        | IrExpression::TextBlock { span, .. }
         | IrExpression::RegexPattern { span, .. }
         | IrExpression::Identifier { span, .. }
         | IrExpression::MethodCall { span, .. }
@@ -174,7 +177,8 @@ pub(crate) fn ir_expression_span(expr: &IrExpression) -> Span {
         | IrExpression::CompletableFuture { span, .. }
         | IrExpression::VirtualThread { span, .. }
         | IrExpression::TryWithResources { span, .. }
-        | IrExpression::LogInvocation { span, .. } => span.clone(),
+        | IrExpression::LogInvocation { span, .. }
+        | IrExpression::RegexCommand { span, .. } => span.clone(),
     }
 }
 

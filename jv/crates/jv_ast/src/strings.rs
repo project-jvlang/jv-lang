@@ -9,6 +9,19 @@ pub enum MultilineKind {
     TripleQuote,
     /// Backtick-based delimiter (``` ... ```).
     Backtick,
+    /// Raw single quote delimiter (' ... ').
+    RawSingle,
+    /// Raw triple single quote delimiter (''' ... ''').
+    RawTriple,
+}
+
+/// Flavor information for raw string literals.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RawStringFlavor {
+    /// Raw strings declared with single quotes.
+    SingleLine,
+    /// Raw strings declared with triple single quotes.
+    MultiLine,
 }
 
 /// Indentation metadata calculated for multiline string literals.
@@ -40,5 +53,7 @@ pub struct MultilineStringLiteral {
     pub parts: Vec<StringPart>,
     #[serde(default)]
     pub indent: Option<IndentMetadata>,
+    #[serde(default)]
+    pub raw_flavor: Option<RawStringFlavor>,
     pub span: Span,
 }

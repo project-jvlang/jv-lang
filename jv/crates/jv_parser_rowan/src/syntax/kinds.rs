@@ -78,6 +78,8 @@ pub enum SyntaxKind {
     Modifier,
     /// 一般的な式プレースホルダー。
     Expression,
+    /// 正規表現コマンド式。
+    RegexCommand,
     /// 修飾名。
     QualifiedName,
     /// 修飾名セグメント。
@@ -799,6 +801,7 @@ mod tests {
         ("QualifiedName", SyntaxKind::QualifiedName),
         ("QualifiedNameSegment", SyntaxKind::QualifiedNameSegment),
         ("Expression", SyntaxKind::Expression),
+        ("RegexCommand", SyntaxKind::RegexCommand),
         ("PackageKw", SyntaxKind::PackageKw),
         ("ImportKw", SyntaxKind::ImportKw),
         ("ValKw", SyntaxKind::ValKw),

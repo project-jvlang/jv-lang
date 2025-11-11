@@ -213,7 +213,12 @@ fn regex_literal_expression_captures_raw_and_pattern() {
 
     match statement {
         Statement::ValDeclaration { initializer, .. } => match initializer {
-            Expression::RegexLiteral(RegexLiteral { pattern, raw, span }) => {
+            Expression::RegexLiteral(RegexLiteral {
+                pattern,
+                raw,
+                span,
+                ..
+            }) => {
                 assert_eq!(pattern, "a/b");
                 assert_eq!(raw, "/a\\/b/");
                 assert_eq!(span.start_line, 1);

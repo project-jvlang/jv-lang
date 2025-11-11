@@ -6,8 +6,9 @@ use handlers::imports::build_imports_response;
 pub use handlers::imports::{ImportItem, ImportsParams, ImportsResponse};
 use jv_ast::types::TypeLevelExpr;
 use jv_ast::{
-    Argument, ConstParameter, Expression, GenericParameter, GenericSignature, LogBlock, LogItem,
-    Program, RegexLiteral, Span, Statement, StringPart, TypeAnnotation,
+    Argument, ConcurrencyConstruct, ConstParameter, Expression, ForInStatement, GenericParameter,
+    GenericSignature, LogBlock, LogItem, LoopStrategy, NumericRangeLoop, PatternOrigin, Program,
+    RegexLiteral, ResourceManagement, Span, Statement, StringPart, TryCatchClause, TypeAnnotation,
     statement::{UnitTypeDefinition, UnitTypeMember},
 };
 use jv_build::BuildConfig;
@@ -709,6 +710,11 @@ impl JvLanguageServer {
 
         let mut diagnostics = Vec::new();
         let mut regex_analyses: Vec<RegexAnalysis> = Vec::new();
+        let has_regex_tokens = Self::tokens_include_regex_literals(&tokens);
+        let mut regex_features_present = has_regex_tokens;
+        if !regex_features_present {
+            regex_features_present = Self::program_contains_regex_features(&program);
+        }
 
         let frontend_diagnostics = from_frontend_diagnostics(diagnostics_view.final_diagnostics());
         for diagnostic in &frontend_diagnostics {
@@ -781,22 +787,24 @@ impl JvLanguageServer {
         }
         let check_result = checker.check_program(&program);
 
-        if let Some(analyses) = checker.regex_analyses() {
-            regex_analyses = analyses.to_vec();
-        }
+        if regex_features_present {
+            if let Some(analyses) = checker.regex_analyses() {
+                regex_analyses = analyses.to_vec();
+            }
 
-        if regex_analyses.is_empty() {
-            let mut validator = RegexValidator::new();
-            let regex_program = checker.normalized_program().unwrap_or(&program);
-            let _ = validator.validate_program(regex_program);
-            regex_analyses = validator.take_analyses();
-        }
-
-        if regex_analyses.is_empty() {
-            if let Some(regex_program) = Self::regex_program_from_tokens(&tokens) {
+            if regex_analyses.is_empty() {
                 let mut validator = RegexValidator::new();
-                let _ = validator.validate_program(&regex_program);
+                let regex_program = checker.normalized_program().unwrap_or(&program);
+                let _ = validator.validate_program(regex_program);
                 regex_analyses = validator.take_analyses();
+            }
+
+            if regex_analyses.is_empty() && has_regex_tokens {
+                if let Some(regex_program) = Self::regex_program_from_tokens(&tokens) {
+                    let mut validator = RegexValidator::new();
+                    let _ = validator.validate_program(&regex_program);
+                    regex_analyses = validator.take_analyses();
+                }
             }
         }
 
@@ -1013,6 +1021,9 @@ impl JvLanguageServer {
                         pattern: pattern.clone(),
                         raw: raw.clone(),
                         span: span.clone(),
+                        origin: Some(PatternOrigin::literal(span.clone())),
+                        const_key: None,
+                        template_segments: Vec::new(),
                     };
                     statements.push(Statement::Expression {
                         expr: Expression::RegexLiteral(literal),
@@ -1032,6 +1043,22 @@ impl JvLanguageServer {
             statements,
             span: Span::dummy(),
         })
+    }
+
+    fn tokens_include_regex_literals(tokens: &[Token]) -> bool {
+        tokens.iter().any(|token| {
+            token
+                .metadata
+                .iter()
+                .any(|metadata| matches!(metadata, TokenMetadata::RegexLiteral { .. }))
+        })
+    }
+
+    fn program_contains_regex_features(program: &Program) -> bool {
+        program
+            .statements
+            .iter()
+            .any(statement_contains_regex_features)
     }
 
     fn sequence_hover(&self, uri: &str, position: &Position) -> Option<HoverResult> {
@@ -1957,6 +1984,7 @@ fn collect_call_diagnostics_from_expression(
         Expression::MultilineString(_)
         | Expression::Literal(_, _)
         | Expression::RegexLiteral(_)
+        | Expression::RegexCommand(_)
         | Expression::Identifier(_, _)
         | Expression::This(_)
         | Expression::Super(_) => {}
@@ -2372,6 +2400,249 @@ fn offset_to_position(content: &str, offset: usize) -> Position {
 
 fn is_word_byte(byte: u8) -> bool {
     byte.is_ascii_alphanumeric() || byte == b'_'
+}
+
+fn statement_contains_regex_features(statement: &Statement) -> bool {
+    match statement {
+        Statement::ValDeclaration { initializer, .. } => {
+            expression_contains_regex_features(initializer)
+        }
+        Statement::VarDeclaration { initializer, .. } => initializer
+            .as_ref()
+            .is_some_and(expression_contains_regex_features),
+        Statement::FunctionDeclaration {
+            parameters, body, ..
+        } => {
+            parameters
+                .iter()
+                .filter_map(|param| param.default_value.as_ref())
+                .any(expression_contains_regex_features)
+                || expression_contains_regex_features(body)
+        }
+        Statement::ClassDeclaration {
+            properties,
+            methods,
+            ..
+        }
+        | Statement::InterfaceDeclaration {
+            properties,
+            methods,
+            ..
+        } => {
+            let property_has_regex = properties.iter().any(|property| {
+                property
+                    .initializer
+                    .as_ref()
+                    .is_some_and(expression_contains_regex_features)
+                    || property.getter.as_ref().map_or(false, |expr| {
+                        expression_contains_regex_features(expr.as_ref())
+                    })
+                    || property.setter.as_ref().map_or(false, |expr| {
+                        expression_contains_regex_features(expr.as_ref())
+                    })
+            });
+            property_has_regex
+                || methods
+                    .iter()
+                    .any(|method| statement_contains_regex_features(method.as_ref()))
+        }
+        Statement::DataClassDeclaration { parameters, .. } => parameters
+            .iter()
+            .filter_map(|param| param.default_value.as_ref())
+            .any(expression_contains_regex_features),
+        Statement::ExtensionFunction(extension) => {
+            statement_contains_regex_features(extension.function.as_ref())
+        }
+        Statement::Expression { expr, .. } => expression_contains_regex_features(expr),
+        Statement::Return { value, .. } => value
+            .as_ref()
+            .is_some_and(expression_contains_regex_features),
+        Statement::Throw { expr, .. } => expression_contains_regex_features(expr),
+        Statement::Assignment { target, value, .. } => {
+            expression_contains_regex_features(target) || expression_contains_regex_features(value)
+        }
+        Statement::UnitTypeDefinition(definition) => definition
+            .members
+            .iter()
+            .any(unit_member_contains_regex_features),
+        Statement::ForIn(for_in) => for_in_contains_regex_features(for_in),
+        Statement::Concurrency(construct) => concurrency_contains_regex_features(construct),
+        Statement::ResourceManagement(resource) => {
+            resource_management_contains_regex_features(resource)
+        }
+        Statement::Package { .. }
+        | Statement::Import { .. }
+        | Statement::Comment(_)
+        | Statement::Break(_)
+        | Statement::Continue(_) => false,
+    }
+}
+
+fn unit_member_contains_regex_features(member: &UnitTypeMember) -> bool {
+    match member {
+        UnitTypeMember::Dependency(dependency) => dependency
+            .value
+            .as_ref()
+            .is_some_and(expression_contains_regex_features),
+        UnitTypeMember::Conversion(block) => {
+            block.body.iter().any(statement_contains_regex_features)
+        }
+        UnitTypeMember::NestedStatement(statement) => {
+            statement_contains_regex_features(statement.as_ref())
+        }
+    }
+}
+
+fn for_in_contains_regex_features(for_in: &ForInStatement) -> bool {
+    expression_contains_regex_features(&for_in.iterable)
+        || match &for_in.strategy {
+            LoopStrategy::NumericRange(NumericRangeLoop { start, end, .. }) => {
+                expression_contains_regex_features(start) || expression_contains_regex_features(end)
+            }
+            LoopStrategy::LazySequence { .. } | LoopStrategy::Iterable | LoopStrategy::Unknown => {
+                false
+            }
+        }
+        || expression_contains_regex_features(for_in.body.as_ref())
+}
+
+fn concurrency_contains_regex_features(construct: &ConcurrencyConstruct) -> bool {
+    match construct {
+        ConcurrencyConstruct::Spawn { body, .. } | ConcurrencyConstruct::Async { body, .. } => {
+            expression_contains_regex_features(body.as_ref())
+        }
+        ConcurrencyConstruct::Await { expr, .. } => {
+            expression_contains_regex_features(expr.as_ref())
+        }
+    }
+}
+
+fn resource_management_contains_regex_features(resource: &ResourceManagement) -> bool {
+    match resource {
+        ResourceManagement::Use { resource, body, .. } => {
+            expression_contains_regex_features(resource.as_ref())
+                || expression_contains_regex_features(body.as_ref())
+        }
+        ResourceManagement::Defer { body, .. } => expression_contains_regex_features(body.as_ref()),
+    }
+}
+
+fn expression_contains_regex_features(expression: &Expression) -> bool {
+    match expression {
+        Expression::RegexLiteral(_) | Expression::RegexCommand(_) => true,
+        Expression::Literal(_, _)
+        | Expression::Identifier(_, _)
+        | Expression::MultilineString(_)
+        | Expression::JsonLiteral(_)
+        | Expression::This(_)
+        | Expression::Super(_) => false,
+        Expression::Binary { left, right, .. } => {
+            expression_contains_regex_features(left) || expression_contains_regex_features(right)
+        }
+        Expression::Unary { operand, .. } | Expression::TypeCast { expr: operand, .. } => {
+            expression_contains_regex_features(operand)
+        }
+        Expression::Call { function, args, .. } => {
+            expression_contains_regex_features(function)
+                || args.iter().any(argument_contains_regex_features)
+        }
+        Expression::MemberAccess { object, .. }
+        | Expression::NullSafeMemberAccess { object, .. } => {
+            expression_contains_regex_features(object)
+        }
+        Expression::IndexAccess { object, index, .. }
+        | Expression::NullSafeIndexAccess { object, index, .. } => {
+            expression_contains_regex_features(object) || expression_contains_regex_features(index)
+        }
+        Expression::UnitLiteral { value, .. } => expression_contains_regex_features(value),
+        Expression::StringInterpolation { parts, .. } => parts.iter().any(|part| match part {
+            StringPart::Expression(expr) => expression_contains_regex_features(expr),
+            StringPart::Text(_) => false,
+        }),
+        Expression::Array { elements, .. } => {
+            elements.iter().any(expression_contains_regex_features)
+        }
+        Expression::Lambda {
+            parameters, body, ..
+        } => {
+            parameters
+                .iter()
+                .filter_map(|param| param.default_value.as_ref())
+                .any(expression_contains_regex_features)
+                || expression_contains_regex_features(body)
+        }
+        Expression::When {
+            expr,
+            arms,
+            else_arm,
+            ..
+        } => {
+            expr.as_ref().map_or(false, |expr| {
+                expression_contains_regex_features(expr.as_ref())
+            }) || arms.iter().any(|arm| {
+                arm.guard
+                    .as_ref()
+                    .is_some_and(expression_contains_regex_features)
+                    || expression_contains_regex_features(&arm.body)
+            }) || else_arm.as_ref().map_or(false, |expr| {
+                expression_contains_regex_features(expr.as_ref())
+            })
+        }
+        Expression::If {
+            condition,
+            then_branch,
+            else_branch,
+            ..
+        } => {
+            expression_contains_regex_features(condition)
+                || expression_contains_regex_features(then_branch)
+                || else_branch.as_ref().map_or(false, |expr| {
+                    expression_contains_regex_features(expr.as_ref())
+                })
+        }
+        Expression::Block { statements, .. } => {
+            statements.iter().any(statement_contains_regex_features)
+        }
+        Expression::LogBlock(block) => log_block_contains_regex_features(block),
+        Expression::Try {
+            body,
+            catch_clauses,
+            finally_block,
+            ..
+        } => {
+            expression_contains_regex_features(body)
+                || catch_clauses
+                    .iter()
+                    .any(catch_clause_contains_regex_features)
+                || finally_block.as_ref().map_or(false, |expr| {
+                    expression_contains_regex_features(expr.as_ref())
+                })
+        }
+    }
+}
+
+fn log_block_contains_regex_features(block: &LogBlock) -> bool {
+    block.items.iter().any(|item| match item {
+        LogItem::Statement(statement) => statement_contains_regex_features(statement),
+        LogItem::Expression(expr) => expression_contains_regex_features(expr),
+        LogItem::Nested(nested) => log_block_contains_regex_features(nested),
+    })
+}
+
+fn catch_clause_contains_regex_features(clause: &TryCatchClause) -> bool {
+    clause
+        .parameter
+        .as_ref()
+        .and_then(|param| param.default_value.as_ref())
+        .is_some_and(expression_contains_regex_features)
+        || expression_contains_regex_features(clause.body.as_ref())
+}
+
+fn argument_contains_regex_features(argument: &Argument) -> bool {
+    match argument {
+        Argument::Positional(expr) => expression_contains_regex_features(expr),
+        Argument::Named { value, .. } => expression_contains_regex_features(value),
+    }
 }
 
 #[cfg(test)]

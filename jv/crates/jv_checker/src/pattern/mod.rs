@@ -231,6 +231,7 @@ pub(crate) fn expression_span(expression: &Expression) -> Option<&Span> {
         | Expression::Try { span, .. } => Some(span),
         Expression::LogBlock(block) => Some(&block.span),
         Expression::RegexLiteral(literal) => Some(&literal.span),
+        Expression::RegexCommand(command) => Some(&command.span),
         Expression::This(span) | Expression::Super(span) => Some(span),
         Expression::MultilineString(literal) => Some(&literal.span),
         Expression::JsonLiteral(literal) => Some(&literal.span),

@@ -9,6 +9,7 @@ impl Expression {
         match self {
             Expression::Literal(_, span) => span,
             Expression::RegexLiteral(literal) => &literal.span,
+            Expression::RegexCommand(command) => &command.span,
             Expression::Identifier(_, span) => span,
             Expression::Binary { span, .. } => span,
             Expression::Unary { span, .. } => span,

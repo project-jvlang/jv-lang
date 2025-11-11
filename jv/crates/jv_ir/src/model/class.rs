@@ -4,8 +4,9 @@ use jv_ast::{CallArgumentStyle, Literal, Span};
 
 use crate::error::TransformError;
 use crate::types::{
-    ClassId, IrExpression, IrModifiers, IrStatement, IrVisibility, JavaType, LogInvocationItem,
-    LogInvocationPlan, LoggerFieldId, LoggingFrameworkKind, LoggingMetadata,
+    ClassId, IrExpression, IrModifiers, IrRegexReplacement, IrRegexTemplateSegment, IrStatement,
+    IrVisibility, JavaType, LogInvocationItem, LogInvocationPlan, LoggerFieldId,
+    LoggingFrameworkKind, LoggingMetadata,
 };
 
 /// ロガーフィールドを各クラスへ割り当て、重複や衝突を解消する。
@@ -656,7 +657,34 @@ impl<'a> LoggerPlanCollector<'a> {
                 }
             }
             IrExpression::LogInvocation { plan, .. } => self.visit_plan(plan),
-            IrExpression::RegexPattern { .. } => {}
+            IrExpression::RegexCommand {
+                subject,
+                pattern_expr,
+                replacement,
+                ..
+            } => {
+                self.visit_expression(subject);
+                if let Some(pattern_expr) = pattern_expr {
+                    self.visit_expression(pattern_expr);
+                }
+                if let Some(replacement) = replacement {
+                    self.visit_regex_replacement(replacement);
+                }
+            }
+            IrExpression::RegexPattern { .. } | IrExpression::TextBlock { .. } => {}
+        }
+    }
+
+    fn visit_regex_replacement(&mut self, replacement: &mut IrRegexReplacement) {
+        match replacement {
+            IrRegexReplacement::Literal(literal) => {
+                for segment in &mut literal.segments {
+                    if let IrRegexTemplateSegment::Expression(expr) = segment {
+                        self.visit_expression(expr);
+                    }
+                }
+            }
+            IrRegexReplacement::Expression(expr) => self.visit_expression(expr),
         }
     }
 
@@ -928,15 +956,46 @@ fn collect_plan_ids_from_expression(expr: &IrExpression, used: &mut HashSet<Logg
         IrExpression::LogInvocation { plan, .. } => {
             collect_plan_ids_from_plan(plan, used);
         }
+        IrExpression::RegexCommand {
+            subject,
+            pattern_expr,
+            replacement,
+            ..
+        } => {
+            collect_plan_ids_from_expression(subject, used);
+            if let Some(pattern_expr) = pattern_expr {
+                collect_plan_ids_from_expression(pattern_expr, used);
+            }
+            if let Some(replacement) = replacement {
+                collect_plan_ids_from_regex_replacement(replacement, used);
+            }
+        }
         IrExpression::InstanceOf { expr: inner, .. } => {
             collect_plan_ids_from_expression(inner, used);
         }
         IrExpression::SequencePipeline { .. }
         | IrExpression::RegexPattern { .. }
+        | IrExpression::TextBlock { .. }
         | IrExpression::Literal(_, _)
         | IrExpression::Identifier { .. }
         | IrExpression::This { .. }
         | IrExpression::Super { .. } => {}
+    }
+}
+
+fn collect_plan_ids_from_regex_replacement(
+    replacement: &IrRegexReplacement,
+    used: &mut HashSet<LoggerFieldId>,
+) {
+    match replacement {
+        IrRegexReplacement::Literal(literal) => {
+            for segment in &literal.segments {
+                if let IrRegexTemplateSegment::Expression(expr) = segment {
+                    collect_plan_ids_from_expression(expr, used);
+                }
+            }
+        }
+        IrRegexReplacement::Expression(expr) => collect_plan_ids_from_expression(expr, used),
     }
 }
 

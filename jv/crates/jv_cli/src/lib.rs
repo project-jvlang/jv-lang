@@ -1,7 +1,6 @@
 // jv_cli - CLI functionality (library interface for testing)
 use anyhow::Result;
 use clap::Parser;
-use jv_ir::TransformContext;
 use jv_ir::{
     sequence_pipeline,
     types::{IrImport, IrImportDetail, LogLevel as IrLogLevel, LoggingFrameworkKind},

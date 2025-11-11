@@ -296,8 +296,8 @@ mod tests {
     use super::*;
     use crate::inference::types::PrimitiveType;
     use jv_ast::{
-        BinaryOp, Expression, Literal, Modifiers, Parameter, ParameterModifiers, Span, Statement,
-        TypeAnnotation,
+        BinaryMetadata, BinaryOp, Expression, Literal, Modifiers, Parameter, ParameterModifiers,
+        Span, Statement, TypeAnnotation,
     };
 
     fn dummy_span() -> Span {
@@ -352,6 +352,7 @@ mod tests {
             op: BinaryOp::Add,
             right: Box::new(Expression::Identifier("rhs".into(), dummy_span())),
             span: dummy_span(),
+            metadata: BinaryMetadata::default(),
         };
 
         let program = Program {

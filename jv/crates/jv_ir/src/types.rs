@@ -68,6 +68,23 @@ pub enum IrExpression {
         java_type: JavaType,
         span: Span,
     },
+    /// Multiline text block literal preserving layout for Java emission.
+    TextBlock {
+        content: String,
+        span: Span,
+    },
+    /// Concise regex command expression lowered from surface syntax.
+    RegexCommand {
+        mode: RegexCommandMode,
+        mode_origin: RegexCommandModeOrigin,
+        subject: Box<IrExpression>,
+        pattern: RegexLiteral,
+        pattern_expr: Option<Box<IrExpression>>,
+        replacement: Option<IrRegexReplacement>,
+        flags: Vec<RegexFlag>,
+        java_type: JavaType,
+        span: Span,
+    },
     Identifier {
         name: String,
         java_type: JavaType,
@@ -266,6 +283,26 @@ pub enum IrExpression {
         java_type: JavaType,
         span: Span,
     },
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum IrRegexReplacement {
+    Literal(IrRegexLiteralReplacement),
+    Expression(Box<IrExpression>),
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct IrRegexLiteralReplacement {
+    pub normalized: String,
+    pub segments: Vec<IrRegexTemplateSegment>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum IrRegexTemplateSegment {
+    Text(String),
+    BackReference(u32),
+    Expression(Box<IrExpression>),
 }
 
 /// ログレベルの優先度を表す。TRACE < DEBUG < INFO < WARN < ERROR。
@@ -548,6 +585,7 @@ impl IrExpression {
     pub fn span(&self) -> Span {
         match self {
             IrExpression::Literal(_, span)
+            | IrExpression::TextBlock { span, .. }
             | IrExpression::RegexPattern { span, .. }
             | IrExpression::Identifier { span, .. }
             | IrExpression::MethodCall { span, .. }
@@ -572,7 +610,8 @@ impl IrExpression {
             | IrExpression::CompletableFuture { span, .. }
             | IrExpression::VirtualThread { span, .. }
             | IrExpression::TryWithResources { span, .. }
-            | IrExpression::LogInvocation { span, .. } => span.clone(),
+            | IrExpression::LogInvocation { span, .. }
+            | IrExpression::RegexCommand { span, .. } => span.clone(),
         }
     }
 }

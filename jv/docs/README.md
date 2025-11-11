@@ -9,6 +9,8 @@ jv（Javaシンタックスシュガー）のドキュメントへようこそ�
 ### ユーザーガイド
 - [はじめに](getting-started.md) - インストールと最初のステップ
 - [言語ガイド](language-guide.md) - jv言語リファレンス
+- [Raw文字列ガイド](language/raw-strings.md) - テキストブロックとRawリテラル
+- [正規表現診断ガイド](language/regex-diagnostics.md) - CLI/LSPでのエラー確認
 - [CLIリファレンス](cli-reference.md) - コマンドラインの使い方
 - [プロジェクト構成](project-structure.md) - jvプロジェクトの整理方法
 

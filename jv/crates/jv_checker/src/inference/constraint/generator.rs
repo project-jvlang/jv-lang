@@ -19,7 +19,7 @@ use crate::pattern::{
 };
 use jv_ast::{
     Argument, BinaryOp, Expression, ForInStatement, Literal, LogBlock, LogItem, Parameter, Program,
-    Span, Statement, TypeAnnotation, UnaryOp,
+    RegexCommand, RegexCommandMode, RegexReplacement, Span, Statement, TypeAnnotation, UnaryOp,
     statement::{UnitTypeDefinition, UnitTypeMember},
 };
 use jv_inference::types::NullabilityFlag;
@@ -296,6 +296,7 @@ impl<'env, 'ext, 'imp> ConstraintGenerator<'env, 'ext, 'imp> {
 
     fn infer_expression(&mut self, expr: &Expression) -> TypeKind {
         match expr {
+            Expression::RegexCommand(command) => self.infer_regex_command(command),
             Expression::RegexLiteral(_) => TypeKind::reference("java.util.regex.Pattern"),
             Expression::Literal(literal, _) => self.type_from_literal(literal),
             Expression::UnitLiteral { value, .. } => self.infer_expression(value),
@@ -661,6 +662,71 @@ impl<'env, 'ext, 'imp> ConstraintGenerator<'env, 'ext, 'imp> {
         TypeKind::reference("Unit")
     }
 
+    fn infer_regex_command(&mut self, command: &RegexCommand) -> TypeKind {
+        let _subject_ty = self.infer_expression(&command.subject);
+
+        if let Some(replacement) = &command.replacement {
+            self.verify_regex_replacement(replacement);
+        }
+
+        self.resolve_regex_command_return_type(command.mode, command.replacement.is_some())
+    }
+
+    fn resolve_regex_command_return_type(
+        &self,
+        mode: RegexCommandMode,
+        has_replacement: bool,
+    ) -> TypeKind {
+        match mode {
+            RegexCommandMode::All | RegexCommandMode::First => {
+                TypeKind::reference("java.lang.String")
+            }
+            RegexCommandMode::Match => TypeKind::boxed(PrimitiveType::Boolean),
+            RegexCommandMode::Split => TypeKind::reference("java.lang.String[]"),
+            RegexCommandMode::Iterate => {
+                if has_replacement {
+                    TypeKind::reference("java.lang.String")
+                } else {
+                    TypeKind::reference("java.util.stream.Stream")
+                }
+            }
+        }
+    }
+
+    fn verify_regex_replacement(&mut self, replacement: &RegexReplacement) {
+        match replacement {
+            RegexReplacement::Literal(_) => {}
+            RegexReplacement::Expression(expr) => {
+                let expr_ty = self.infer_expression(expr);
+                let expected = TypeKind::reference("java.lang.String");
+                self.push_constraint(
+                    ConstraintKind::Equal(expected, expr_ty),
+                    Some("regex replacement must produce String"),
+                );
+            }
+            RegexReplacement::Lambda(lambda) => {
+                self.env.enter_scope();
+                for param in &lambda.params {
+                    let ty = param
+                        .type_annotation
+                        .as_ref()
+                        .map(|ann| self.type_from_annotation(ann))
+                        .unwrap_or_else(|| TypeKind::reference("java.util.regex.MatchResult"));
+                    self.env
+                        .define_scheme(param.name.clone(), TypeScheme::monotype(ty));
+                }
+                let body_ty = self.infer_expression(&lambda.body);
+                self.env.leave_scope();
+
+                let expected = TypeKind::reference("java.lang.String");
+                self.push_constraint(
+                    ConstraintKind::Equal(expected, body_ty),
+                    Some("regex replacement lambda must return String"),
+                );
+            }
+        }
+    }
+
     fn infer_binary_expression(
         &mut self,
         op: &BinaryOp,
@@ -938,7 +1004,7 @@ fn ensure_optional_type(ty: TypeKind) -> TypeKind {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use jv_ast::{Modifiers, Pattern, Span, ValBindingOrigin, WhenArm};
+    use jv_ast::{BinaryMetadata, Modifiers, Pattern, Span, ValBindingOrigin, WhenArm};
     use jv_parser_frontend::ParserPipeline;
     use jv_parser_rowan::frontend::RowanPipeline;
 
@@ -1029,6 +1095,7 @@ mod tests {
                             span.clone(),
                         )),
                         span: span.clone(),
+                        metadata: BinaryMetadata::default(),
                     },
                     modifiers: default_modifiers(),
                     origin: ValBindingOrigin::ExplicitKeyword,
