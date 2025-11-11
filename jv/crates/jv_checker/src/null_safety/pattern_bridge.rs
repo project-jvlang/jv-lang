@@ -136,6 +136,7 @@ impl PatternFactsBridge {
                     self.visit_expression(body, service, context)
                 }
             },
+            Statement::TestDeclaration(_) => BridgeOutcome::default(),
             Statement::DataClassDeclaration { .. }
             | Statement::Break(_)
             | Statement::Continue(_)

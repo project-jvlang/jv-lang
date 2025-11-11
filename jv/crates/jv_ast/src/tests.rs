@@ -247,6 +247,59 @@ fn regex_literal_roundtrips_through_serde() {
 }
 
 #[test]
+fn test_declaration_roundtrips_through_serde() {
+    let annotation_span = Span::new(1, 0, 1, 7);
+    let annotations = vec![Annotation {
+        name: AnnotationName::new(vec!["Sample".to_string()], annotation_span.clone()),
+        arguments: Vec::new(),
+        span: annotation_span.clone(),
+    }];
+
+    let parameter_span = Span::new(2, 4, 2, 10);
+    let parameter = TestParameter {
+        pattern: BindingPatternKind::identifier("input", parameter_span.clone()),
+        type_annotation: Some(TypeAnnotation::Simple("Int".to_string())),
+        span: parameter_span.clone(),
+    };
+
+    let dataset_row = TestDatasetRow {
+        values: vec![Expression::Literal(
+            Literal::Number("1".to_string()),
+            Span::new(3, 8, 3, 9),
+        )],
+        span: Span::new(3, 4, 3, 11),
+    };
+
+    let dataset = TestDataset::InlineArray {
+        rows: vec![dataset_row],
+        span: Span::new(3, 2, 4, 3),
+    };
+
+    let body_span = Span::new(5, 2, 7, 3);
+    let body = Expression::Block {
+        statements: Vec::new(),
+        span: body_span.clone(),
+    };
+
+    let declaration = TestDeclaration {
+        display_name: "サンプルケース".to_string(),
+        normalized: None,
+        dataset: Some(dataset),
+        parameters: vec![parameter],
+        annotations,
+        body,
+        span: Span::new(1, 0, 7, 3),
+    };
+
+    let statement = Statement::TestDeclaration(declaration);
+    let serialized = serde_json::to_string(&statement).expect("serialize test declaration");
+    let decoded: Statement =
+        serde_json::from_str(&serialized).expect("deserialize test declaration");
+
+    assert_eq!(decoded, statement);
+}
+
+#[test]
 fn raw_single_literal_roundtrips_with_empty_parts() {
     let span = Span::new(3, 1, 3, 20);
     let literal = MultilineStringLiteral {

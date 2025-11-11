@@ -292,19 +292,8 @@ fn simple_type_name(name: &str) -> String {
 
 fn sanitize_type_identifier(raw: &str) -> String {
     let mut result = String::new();
-    let mut current = String::new();
-
-    for ch in raw.chars() {
-        if ch.is_alphanumeric() {
-            current.push(ch);
-        } else if !current.is_empty() {
-            push_component(&mut result, &current);
-            current.clear();
-        }
-    }
-
-    if !current.is_empty() {
-        push_component(&mut result, &current);
+    for component in identifier_components(raw) {
+        push_component(&mut result, &component);
     }
 
     if result.is_empty() {
@@ -321,6 +310,26 @@ fn sanitize_type_identifier(raw: &str) -> String {
     }
 
     result
+}
+
+pub(crate) fn identifier_components(raw: &str) -> Vec<String> {
+    let mut components = Vec::new();
+    let mut current = String::new();
+
+    for ch in raw.chars() {
+        if ch.is_alphanumeric() {
+            current.push(ch);
+        } else if !current.is_empty() {
+            components.push(current);
+            current = String::new();
+        }
+    }
+
+    if !current.is_empty() {
+        components.push(current);
+    }
+
+    components
 }
 
 fn push_component(result: &mut String, component: &str) {

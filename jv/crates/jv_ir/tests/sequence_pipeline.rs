@@ -1,4 +1,4 @@
-use jv_ast::expression::ParameterModifiers;
+use jv_ast::expression::{BinaryMetadata, ParameterModifiers};
 use jv_ast::types::PrimitiveTypeName;
 use jv_ast::{
     Argument, BinaryOp, CallArgumentStyle, Expression, Literal, Parameter, SequenceDelimiter, Span,
@@ -54,6 +54,7 @@ fn add(lhs: Expression, rhs: Expression) -> Expression {
         op: BinaryOp::Add,
         right: Box::new(rhs),
         span: dummy_span(),
+        metadata: BinaryMetadata::default(),
     }
 }
 
@@ -77,6 +78,7 @@ fn multiply(lhs: Expression, rhs: Expression) -> Expression {
         op: BinaryOp::Multiply,
         right: Box::new(rhs),
         span: dummy_span(),
+        metadata: BinaryMetadata::default(),
     }
 }
 
@@ -86,6 +88,7 @@ fn modulo(lhs: Expression, rhs: Expression) -> Expression {
         op: BinaryOp::Modulo,
         right: Box::new(rhs),
         span: dummy_span(),
+        metadata: BinaryMetadata::default(),
     }
 }
 
@@ -95,6 +98,7 @@ fn equal(lhs: Expression, rhs: Expression) -> Expression {
         op: BinaryOp::Equal,
         right: Box::new(rhs),
         span: dummy_span(),
+        metadata: BinaryMetadata::default(),
     }
 }
 
@@ -967,6 +971,7 @@ fn sequence_flatmap_overloads_receive_stable_java_names() {
         body: None,
         modifiers: static_modifiers(true),
         throws: vec![],
+        assertion_patterns: vec![],
         span: span_decl_iter.clone(),
     };
 
@@ -985,6 +990,7 @@ fn sequence_flatmap_overloads_receive_stable_java_names() {
         body: None,
         modifiers: static_modifiers(true),
         throws: vec![],
+        assertion_patterns: vec![],
         span: span_decl_seq.clone(),
     };
 

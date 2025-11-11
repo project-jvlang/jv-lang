@@ -105,6 +105,7 @@ fn build_log_method(plans: Vec<LogInvocationPlan>, param_names: &[&str]) -> IrSt
             ..IrModifiers::default()
         },
         throws: Vec::new(),
+        assertion_patterns: Vec::new(),
         span: dummy_span(),
     }
 }

@@ -309,6 +309,7 @@ fn parameter_annotations_render_in_signature_and_imports() {
             ..IrModifiers::default()
         },
         throws: vec![],
+        assertion_patterns: vec![],
         span: span.clone(),
     };
 

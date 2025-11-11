@@ -1000,6 +1000,7 @@ fn log_block_emits_diagnostic_for_excessive_nesting() {
     );
 }
 
+#[allow(dead_code)]
 #[ignore]
 fn debug_when_example07() {
     use crate::frontend::RowanPipeline;
@@ -1032,6 +1033,70 @@ fn debug_when_example07() {
         _ => false,
     });
     println!("parse contains return statement node: {has_return}");
+}
+
+#[test]
+fn parses_test_declaration_with_inline_dataset() {
+    let source = r#"
+        test "加算結果を確認" [ [1 2], [3 4] ] (lhs: Int, rhs: Int) {
+            val result = lhs + rhs
+        }
+    "#;
+
+    let tokens = lex(source);
+    let output = parse(&tokens);
+
+    assert!(
+        output.diagnostics.is_empty(),
+        "parser diagnostics should be empty but got {:?}",
+        output.diagnostics
+    );
+
+    let started: Vec<SyntaxKind> = start_node_sequence(&output.events);
+    assert!(
+        started.contains(&SyntaxKind::TestDeclaration),
+        "TestDeclaration node should be produced"
+    );
+    assert!(
+        started.contains(&SyntaxKind::TestDataset),
+        "TestDataset node should be produced"
+    );
+    assert!(
+        started.contains(&SyntaxKind::TestParameterList),
+        "TestParameterList node should be produced"
+    );
+}
+
+#[test]
+fn parses_test_declaration_with_sample_dataset() {
+    let source = r#"
+        test "外部ケースを検証" [@Sample("cases.json", mode = SampleMode.Load)] (row) {
+            println(row)
+        }
+    "#;
+
+    let tokens = lex(source);
+    let output = parse(&tokens);
+
+    assert!(
+        output.diagnostics.is_empty(),
+        "parser diagnostics should be empty but got {:?}",
+        output.diagnostics
+    );
+
+    let started: Vec<SyntaxKind> = start_node_sequence(&output.events);
+    assert!(
+        started.contains(&SyntaxKind::TestDeclaration),
+        "TestDeclaration node should be produced"
+    );
+    assert!(
+        started.contains(&SyntaxKind::TestDatasetRow),
+        "TestDatasetRow node should be produced"
+    );
+    assert!(
+        started.contains(&SyntaxKind::Annotation),
+        "Annotation node inside dataset should be produced"
+    );
 }
 
 fn start_node_sequence(events: &[ParseEvent]) -> Vec<SyntaxKind> {

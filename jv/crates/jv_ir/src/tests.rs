@@ -434,6 +434,7 @@ mod tests {
             }),
             modifiers: IrModifiers::default(),
             throws: Vec::new(),
+            assertion_patterns: Vec::new(),
             span: span.clone(),
         };
 
@@ -592,6 +593,7 @@ mod tests {
             body: Some(block),
             modifiers: IrModifiers::default(),
             throws: Vec::new(),
+            assertion_patterns: Vec::new(),
             span: span.clone(),
         };
 
@@ -694,6 +696,7 @@ mod tests {
             }),
             modifiers: IrModifiers::default(),
             throws: Vec::new(),
+            assertion_patterns: Vec::new(),
             span: span.clone(),
         };
 
@@ -5093,6 +5096,7 @@ fun sample(value: Any): Int {
             body: None,
             modifiers: IrModifiers::default(),
             throws: vec![],
+            assertion_patterns: vec![],
             span: dummy_span(),
         };
 
@@ -6280,6 +6284,7 @@ fun sample(value: Any): Int {
             body: None,
             modifiers: static_modifiers(true),
             throws: vec![],
+            assertion_patterns: vec![],
             span: span_decl_one.clone(),
         };
 
@@ -6298,6 +6303,7 @@ fun sample(value: Any): Int {
             body: None,
             modifiers: static_modifiers(true),
             throws: vec![],
+            assertion_patterns: vec![],
             span: span_decl_two.clone(),
         };
 
@@ -6525,6 +6531,7 @@ fun sample(value: Any): Int {
             body: None,
             modifiers: modifiers(true),
             throws: vec![],
+            assertion_patterns: vec![],
             span: span_decl_one.clone(),
         };
 
@@ -6546,6 +6553,7 @@ fun sample(value: Any): Int {
             body: None,
             modifiers: modifiers(true),
             throws: vec![],
+            assertion_patterns: vec![],
             span: span_decl_two.clone(),
         };
 

@@ -297,6 +297,9 @@ fn main() -> Result<()> {
             auto_export_maven_outputs(&prepared_output)
                 .context("Maven互換ファイルの自動生成に失敗しました")?;
         }
+        Some(Commands::Test(args)) => {
+            commands::test::run(args)?;
+        }
         Some(Commands::Run { input, args }) => {
             let cwd = std::env::current_dir()?;
             let start_path = {

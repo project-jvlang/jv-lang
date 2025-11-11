@@ -3,19 +3,19 @@ use crate::lowering::{lower_program, LoweringDiagnosticSeverity, LoweringResult}
 use crate::parser::parse;
 use crate::verification::StatementKindKey;
 use crate::{JvLanguage, ParseBuilder, SyntaxKind};
+use jv_ast::annotation::{AnnotationArgument, AnnotationValue};
 use jv_ast::strings::MultilineKind;
 use jv_ast::{
     expression::{Argument, Parameter, ParameterProperty, StringPart},
     json::{JsonLiteral, JsonValue},
     statement::{
-        ConcurrencyConstruct, LoopStrategy, ResourceManagement, UnitConversionKind, UnitRelation,
-        UnitTypeDefinition, UnitTypeMember, ValBindingOrigin,
+        ConcurrencyConstruct, LoopStrategy, ResourceManagement, TestDataset, TestSampleMetadata,
+        UnitConversionKind, UnitRelation, UnitTypeDefinition, UnitTypeMember, ValBindingOrigin,
     },
     types::{BinaryOp, Literal, Modifiers, Pattern, TypeAnnotation},
     BindingPatternKind, Expression, Statement,
 };
 use jv_lexer::{Lexer, Token, TokenTrivia, TokenType};
-use jv_parser_preprocess::run as preprocess_run;
 use rowan::SyntaxNode;
 
 fn make_token(column: &mut usize, token_type: TokenType, lexeme: &str) -> Token {
@@ -194,6 +194,99 @@ fn pipeline_handles_unit_syntax_fixture() {
         )),
         "unit literal val declaration should be present"
     );
+}
+
+#[test]
+fn lowers_test_declaration_with_inline_dataset() {
+    let source = r#"
+test "行列加算" [ [1 2], [3 4] ] (lhs: Int, rhs: Int) {
+    val sum = lhs + rhs
+}
+"#;
+
+    let result = lower_source(source);
+    assert!(
+        result.is_success(),
+        "lowering should succeed: {:?}",
+        result.diagnostics
+    );
+
+    let declaration = result
+        .statements
+        .iter()
+        .find_map(|statement| match statement {
+            Statement::TestDeclaration(decl) => Some(decl),
+            _ => None,
+        })
+        .expect("test declaration should be lowered");
+
+    assert_eq!(declaration.display_name, "行列加算");
+    match &declaration.dataset {
+        Some(TestDataset::InlineArray { rows, .. }) => {
+            assert_eq!(rows.len(), 2, "expected two dataset rows");
+            assert_eq!(rows[0].values.len(), 2, "row should contain two values");
+        }
+        other => panic!("expected inline dataset, got {:?}", other),
+    }
+
+    assert_eq!(declaration.parameters.len(), 2, "expected two parameters");
+    match &declaration.body {
+        Expression::Block { .. } => {}
+        other => panic!("expected block body, got {:?}", other),
+    }
+}
+
+#[test]
+fn lowers_test_declaration_with_sample_dataset() {
+    let source = r#"
+test "外部ケース" [@Sample("cases.json", mode = SampleMode.Load)] (row) {
+    println(row)
+}
+"#;
+
+    let result = lower_source(source);
+    assert!(
+        result.is_success(),
+        "lowering should succeed: {:?}",
+        result.diagnostics
+    );
+
+    let declaration = result
+        .statements
+        .iter()
+        .find_map(|statement| match statement {
+            Statement::TestDeclaration(decl) => Some(decl),
+            _ => None,
+        })
+        .expect("test declaration should be lowered");
+
+    match &declaration.dataset {
+        Some(TestDataset::Sample(TestSampleMetadata {
+            source, arguments, ..
+        })) => {
+            assert_eq!(source, "cases.json");
+            assert_eq!(arguments.len(), 1, "expected named mode argument");
+            match &arguments[0] {
+                AnnotationArgument::Named { name, value, .. } => {
+                    assert_eq!(name, "mode");
+                    match value {
+                        AnnotationValue::EnumConstant {
+                            type_path,
+                            constant,
+                        } => {
+                            assert_eq!(type_path, &vec!["SampleMode".to_string()]);
+                            assert_eq!(constant, "Load");
+                        }
+                        other => panic!("expected enum constant value, got {:?}", other),
+                    }
+                }
+                other => panic!("expected named annotation argument, got {:?}", other),
+            }
+        }
+        other => panic!("expected @Sample dataset, got {:?}", other),
+    }
+
+    assert_eq!(declaration.parameters.len(), 1, "expected single parameter");
 }
 
 fn sample_package_val() -> (SyntaxNode<JvLanguage>, Vec<Token>) {

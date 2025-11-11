@@ -1,5 +1,5 @@
 use crate::{Diagnostic, DiagnosticSeverity, span_to_range};
-use jv_ast::{Argument, Expression, LogBlock, LogItem, Statement};
+use jv_ast::{Argument, Expression, LogBlock, LogItem, Statement, TestDataset};
 
 const MAX_ALLOWED_LOG_BLOCK_DEPTH: usize = 2;
 const LOG_NESTING_DIAGNOSTIC_CODE: &str = "JV4601";
@@ -65,6 +65,12 @@ fn collect_from_statement(statement: &Statement, depth: usize, diagnostics: &mut
                 }
             }
         }
+        Statement::TestDeclaration(declaration) => {
+            if let Some(dataset) = &declaration.dataset {
+                collect_from_test_dataset(dataset, depth, diagnostics);
+            }
+            collect_from_expression(&declaration.body, depth, diagnostics);
+        }
         Statement::ExtensionFunction(extension) => {
             collect_from_statement(&extension.function, depth, diagnostics);
         }
@@ -128,6 +134,20 @@ fn collect_from_statement(statement: &Statement, depth: usize, diagnostics: &mut
         | Statement::Comment(_)
         | Statement::Break(..)
         | Statement::Continue(..) => {}
+    }
+}
+
+fn collect_from_test_dataset(
+    dataset: &TestDataset,
+    depth: usize,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    if let TestDataset::InlineArray { rows, .. } = dataset {
+        for row in rows {
+            for value in &row.values {
+                collect_from_expression(value, depth, diagnostics);
+            }
+        }
     }
 }
 

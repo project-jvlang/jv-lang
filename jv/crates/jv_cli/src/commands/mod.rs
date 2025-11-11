@@ -8,3 +8,4 @@ pub mod otel;
 pub mod remove;
 pub mod repo;
 pub mod resolver;
+pub mod test;

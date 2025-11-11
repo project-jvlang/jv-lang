@@ -169,6 +169,7 @@ fn implicit_vals_in_function_scope_render_as_final_locals() {
         body: Some(method_body),
         modifiers: method_modifiers,
         throws: vec![],
+        assertion_patterns: Vec::new(),
         span: dummy_span(),
     };
 
@@ -257,6 +258,7 @@ fn implicit_vals_across_multiple_methods_remain_final() {
             mods
         },
         throws: vec![],
+        assertion_patterns: Vec::new(),
         span: dummy_span(),
     };
 
@@ -291,6 +293,7 @@ fn implicit_vals_across_multiple_methods_remain_final() {
             mods
         },
         throws: vec![],
+        assertion_patterns: Vec::new(),
         span: dummy_span(),
     };
 

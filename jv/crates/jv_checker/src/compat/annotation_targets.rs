@@ -251,6 +251,9 @@ fn validate_statement(statement: &Statement, errors: &mut Vec<CheckError>) {
         Statement::FunctionDeclaration { modifiers, .. } => {
             check_annotations(&modifiers.annotations, AnnotationSite::Method, errors);
         }
+        Statement::TestDeclaration(declaration) => {
+            check_annotations(&declaration.annotations, AnnotationSite::Method, errors);
+        }
         Statement::ValDeclaration { modifiers, .. }
         | Statement::VarDeclaration { modifiers, .. } => {
             check_annotations(&modifiers.annotations, AnnotationSite::Field, errors);

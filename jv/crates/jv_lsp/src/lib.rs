@@ -8,7 +8,8 @@ use jv_ast::types::TypeLevelExpr;
 use jv_ast::{
     Argument, ConcurrencyConstruct, ConstParameter, Expression, ForInStatement, GenericParameter,
     GenericSignature, LogBlock, LogItem, LoopStrategy, NumericRangeLoop, PatternOrigin, Program,
-    RegexLiteral, ResourceManagement, Span, Statement, StringPart, TryCatchClause, TypeAnnotation,
+    RegexLiteral, ResourceManagement, Span, Statement, StringPart, TestDataset, TryCatchClause,
+    TypeAnnotation,
     statement::{UnitTypeDefinition, UnitTypeMember},
 };
 use jv_build::BuildConfig;
@@ -1809,6 +1810,12 @@ fn collect_call_diagnostics_from_statement(
                 }
             }
         }
+        Statement::TestDeclaration(declaration) => {
+            if let Some(dataset) = &declaration.dataset {
+                collect_call_diagnostics_from_dataset(dataset, tokens, diagnostics);
+            }
+            collect_call_diagnostics_from_expression(&declaration.body, tokens, diagnostics);
+        }
         Statement::ExtensionFunction(extension) => {
             collect_call_diagnostics_from_statement(&extension.function, tokens, diagnostics);
         }
@@ -1856,6 +1863,20 @@ fn collect_call_diagnostics_from_statement(
         | Statement::Import { .. }
         | Statement::Package { .. }
         | Statement::Comment(_) => {}
+    }
+}
+
+fn collect_call_diagnostics_from_dataset(
+    dataset: &TestDataset,
+    tokens: &[Token],
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    if let TestDataset::InlineArray { rows, .. } = dataset {
+        for row in rows {
+            for value in &row.values {
+                collect_call_diagnostics_from_expression(value, tokens, diagnostics);
+            }
+        }
     }
 }
 
@@ -2450,6 +2471,13 @@ fn statement_contains_regex_features(statement: &Statement) -> bool {
             .iter()
             .filter_map(|param| param.default_value.as_ref())
             .any(expression_contains_regex_features),
+        Statement::TestDeclaration(declaration) => {
+            let dataset_has_regex = declaration
+                .dataset
+                .as_ref()
+                .is_some_and(dataset_contains_regex_features);
+            dataset_has_regex || expression_contains_regex_features(&declaration.body)
+        }
         Statement::ExtensionFunction(extension) => {
             statement_contains_regex_features(extension.function.as_ref())
         }
@@ -2524,6 +2552,16 @@ fn resource_management_contains_regex_features(resource: &ResourceManagement) ->
                 || expression_contains_regex_features(body.as_ref())
         }
         ResourceManagement::Defer { body, .. } => expression_contains_regex_features(body.as_ref()),
+    }
+}
+
+fn dataset_contains_regex_features(dataset: &TestDataset) -> bool {
+    if let TestDataset::InlineArray { rows, .. } = dataset {
+        rows.iter()
+            .flat_map(|row| row.values.iter())
+            .any(expression_contains_regex_features)
+    } else {
+        false
     }
 }
 

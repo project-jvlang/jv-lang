@@ -25,8 +25,9 @@ mod null_safety;
 mod resources;
 mod sample;
 mod strings;
+mod tests;
 mod type_system;
-mod utils;
+pub(crate) mod utils;
 mod when_lowering_planner;
 
 use self::utils::boxed_java_type;
@@ -53,6 +54,7 @@ pub use null_safety::{
 pub use resources::{desugar_defer_expression, desugar_use_expression};
 pub use sample::{fetch_sample_data, infer_json_value_schema, infer_schema};
 pub use strings::desugar_string_interpolation;
+use tests::lower_test_declaration;
 pub use type_system::{convert_type_annotation, infer_java_type};
 pub use utils::{generate_extension_class_name, generate_utility_class_name};
 
@@ -313,6 +315,7 @@ pub fn transform_statement(
             }
         },
         Statement::ForIn(for_in) => loops::desugar_for_in_statement(for_in, context),
+        Statement::TestDeclaration(declaration) => lower_test_declaration(declaration, context),
         _ => Ok(vec![]),
     }
 }

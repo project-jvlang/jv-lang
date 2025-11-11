@@ -134,6 +134,8 @@ pub enum Commands {
         #[arg(long = "apt-option", value_name = "k=v")]
         apt_options: Vec<String>,
     },
+    /// テストDSLからJUnit 5テストを生成して Maven で実行
+    Test(commands::test::TestArgs),
     /// Run a compiled jv program
     Run {
         /// Input .jv file to compile and run

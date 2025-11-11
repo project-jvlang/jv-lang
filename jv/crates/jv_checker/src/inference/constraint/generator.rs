@@ -18,9 +18,10 @@ use crate::pattern::{
     NarrowedBinding, NarrowedNullability, NarrowingSnapshot, PatternMatchService, PatternTarget,
 };
 use jv_ast::{
-    Argument, BinaryOp, Expression, ForInStatement, Literal, LogBlock, LogItem, Parameter, Program,
-    RegexCommand, RegexCommandMode, RegexReplacement, Span, Statement, TypeAnnotation, UnaryOp,
-    statement::{UnitTypeDefinition, UnitTypeMember},
+    Argument, BinaryOp, BindingPatternKind, Expression, ForInStatement, Literal, LogBlock, LogItem,
+    Parameter, Program, RegexCommand, RegexCommandMode, RegexReplacement, Span, Statement,
+    TypeAnnotation, UnaryOp,
+    statement::{TestDeclaration, UnitTypeDefinition, UnitTypeMember},
 };
 use jv_inference::types::NullabilityFlag;
 use std::collections::HashMap;
@@ -179,12 +180,44 @@ impl<'env, 'ext, 'imp> ConstraintGenerator<'env, 'ext, 'imp> {
 
                 self.env.leave_scope();
             }
+            Statement::TestDeclaration(TestDeclaration {
+                parameters, body, ..
+            }) => {
+                self.env.enter_scope();
+                for parameter in parameters {
+                    let ty = parameter
+                        .type_annotation
+                        .as_ref()
+                        .map(|ann| self.type_from_annotation(ann))
+                        .unwrap_or_else(|| self.env.fresh_type_variable());
+                    self.bind_test_parameter_pattern(&parameter.pattern, ty);
+                }
+
+                self.infer_expression(body);
+                self.env.leave_scope();
+            }
             Statement::UnitTypeDefinition(definition) => {
                 self.visit_unit_definition(definition);
             }
             _ => {
                 // そのほかの文でも子ノードを可能な範囲で評価しておく。
             }
+        }
+    }
+
+    fn bind_test_parameter_pattern(&mut self, pattern: &BindingPatternKind, ty: TypeKind) {
+        match pattern {
+            BindingPatternKind::Identifier { name, .. } => {
+                self.env
+                    .define_scheme(name, TypeScheme::monotype(ty.clone()));
+            }
+            BindingPatternKind::Tuple { elements, .. }
+            | BindingPatternKind::List { elements, .. } => {
+                for element in elements {
+                    self.bind_test_parameter_pattern(element, ty.clone());
+                }
+            }
+            BindingPatternKind::Wildcard { .. } => {}
         }
     }
 

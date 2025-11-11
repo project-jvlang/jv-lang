@@ -70,6 +70,16 @@ pub enum SyntaxKind {
     AnnotationArgumentList,
     /// アノテーション引数。
     AnnotationArgument,
+    /// テスト宣言。
+    TestDeclaration,
+    /// テストデータセット全体。
+    TestDataset,
+    /// データセット内の1行。
+    TestDatasetRow,
+    /// テストパラメータリスト。
+    TestParameterList,
+    /// テストパラメータ。
+    TestParameter,
     /// 単位リテラル。
     UnitLiteral,
     /// ステートメントレベル修飾子のリスト。
@@ -771,6 +781,11 @@ mod tests {
         ("Annotation", SyntaxKind::Annotation),
         ("AnnotationArgumentList", SyntaxKind::AnnotationArgumentList),
         ("AnnotationArgument", SyntaxKind::AnnotationArgument),
+        ("TestDeclaration", SyntaxKind::TestDeclaration),
+        ("TestDataset", SyntaxKind::TestDataset),
+        ("TestDatasetRow", SyntaxKind::TestDatasetRow),
+        ("TestParameterList", SyntaxKind::TestParameterList),
+        ("TestParameter", SyntaxKind::TestParameter),
         ("UnitLiteral", SyntaxKind::UnitLiteral),
         ("ModifierList", SyntaxKind::ModifierList),
         ("Modifier", SyntaxKind::Modifier),
@@ -802,6 +817,7 @@ mod tests {
         ("QualifiedNameSegment", SyntaxKind::QualifiedNameSegment),
         ("Expression", SyntaxKind::Expression),
         ("RegexCommand", SyntaxKind::RegexCommand),
+        ("StringLiteral", SyntaxKind::StringLiteral),
         ("PackageKw", SyntaxKind::PackageKw),
         ("ImportKw", SyntaxKind::ImportKw),
         ("ValKw", SyntaxKind::ValKw),

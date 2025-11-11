@@ -121,6 +121,7 @@ fn example1_program() -> IrProgram {
             ..IrModifiers::default()
         },
         throws: vec![],
+        assertion_patterns: Vec::new(),
         span: dummy_span(),
     };
 
@@ -261,6 +262,7 @@ fn example2_program() -> IrProgram {
             ..IrModifiers::default()
         },
         throws: vec![],
+        assertion_patterns: Vec::new(),
         span: dummy_span(),
     };
 
@@ -405,6 +407,7 @@ fn example5_program() -> IrProgram {
         }),
         modifiers: method_modifiers(),
         throws: vec![],
+        assertion_patterns: Vec::new(),
         span: dummy_span(),
     };
 

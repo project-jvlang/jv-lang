@@ -5,7 +5,8 @@ use crate::support::{
     literals::regex_literal_from_token,
     spans::{expression_span, merge_spans, span_from_token},
 };
-use crate::syntax::SyntaxKind;
+use crate::syntax::{SyntaxKind, TokenKind};
+use jv_ast::annotation::{Annotation, AnnotationArgument, AnnotationName, AnnotationValue};
 use jv_ast::comments::{CommentKind, CommentStatement, CommentVisibility};
 use jv_ast::expression::{
     Argument, BinaryMetadata, CallArgumentMetadata, CallArgumentStyle, IsTestKind, IsTestMetadata,
@@ -19,8 +20,9 @@ use jv_ast::json::{
 };
 use jv_ast::statement::{
     ConcurrencyConstruct, ExtensionFunction, ForInStatement, LoopBinding, LoopStrategy,
-    NumericRangeLoop, Property, ResourceManagement, UnitConversionBlock, UnitConversionKind,
-    UnitDependency, UnitRelation, UnitTypeDefinition, UnitTypeMember, ValBindingOrigin,
+    NumericRangeLoop, Property, ResourceManagement, TestDataset, TestDatasetRow, TestDeclaration,
+    TestParameter, TestSampleMetadata, UnitConversionBlock, UnitConversionKind, UnitDependency,
+    UnitRelation, UnitTypeDefinition, UnitTypeMember, ValBindingOrigin,
 };
 use jv_ast::strings::{MultilineKind, MultilineStringLiteral, RawStringFlavor};
 use jv_ast::types::{
@@ -140,6 +142,7 @@ fn is_top_level_statement(kind: SyntaxKind) -> bool {
             | SyntaxKind::ValDeclaration
             | SyntaxKind::VarDeclaration
             | SyntaxKind::UnitTypeDefinition
+            | SyntaxKind::TestDeclaration
             | SyntaxKind::FunctionDeclaration
             | SyntaxKind::ClassDeclaration
             | SyntaxKind::WhenStatement
@@ -213,6 +216,7 @@ fn lower_single_statement(
         SyntaxKind::ValDeclaration => lower_value(context, node, true, diagnostics),
         SyntaxKind::VarDeclaration => lower_value(context, node, false, diagnostics),
         SyntaxKind::FunctionDeclaration => lower_function(context, node, diagnostics),
+        SyntaxKind::TestDeclaration => lower_test(context, node, diagnostics),
         SyntaxKind::UnitTypeDefinition => lower_unit_type_definition(context, node, diagnostics),
         SyntaxKind::ClassDeclaration => lower_class(context, node, diagnostics),
         SyntaxKind::ForStatement => lower_for(context, node, diagnostics),
@@ -1096,6 +1100,21 @@ fn qualified_name_segments(
             .or_else(|| tokens.first().map(|token| token.lexeme.clone()))?;
         segments.push(text);
     }
+
+    if segments.is_empty() {
+        if let Some(identifier) =
+            context
+                .tokens_for(node)
+                .iter()
+                .find_map(|token| match &token.token_type {
+                    TokenType::Identifier(value) => Some(value.clone()),
+                    _ => None,
+                })
+        {
+            segments.push(identifier);
+        }
+    }
+
     if segments.is_empty() {
         None
     } else {
@@ -2790,7 +2809,12 @@ mod expression_parser {
                             self.span_at(self.pos),
                         ));
                     }
-                    let body_expr = parsed_body.expr;
+                    let body_expr = match parsed_body.expr {
+                        Expression::Lambda {
+                            parameters, body, ..
+                        } if parameters.is_empty() => *body,
+                        other => other,
+                    };
                     else_arm = Some(body_expr);
                     self.pos += parsed_body.end;
                     while self.pos < closing_index
@@ -2873,7 +2897,12 @@ mod expression_parser {
                         self.span_at(self.pos),
                     ));
                 }
-                let body_expr = parsed_body.expr;
+                let body_expr = match parsed_body.expr {
+                    Expression::Lambda {
+                        parameters, body, ..
+                    } if parameters.is_empty() => *body,
+                    other => other,
+                };
                 let body_end = self.pos + parsed_body.end;
                 let body_span = expression_span(&body_expr);
                 let arm_span = merge_spans(&pattern_span, &body_span);
@@ -4790,7 +4819,7 @@ mod expression_parser {
             let mut paren_depth = 0usize;
             let mut brace_depth = 0usize;
             let mut bracket_depth = 0usize;
-            let mut replacement_start = end_index;
+            let replacement_start = end_index;
             let mut ended_by_closing_slash = false;
 
             while end_index < len {
@@ -6142,6 +6171,438 @@ fn lower_function(
     } else {
         Ok(function_statement)
     }
+}
+
+fn lower_test(
+    context: &LoweringContext<'_>,
+    node: &JvSyntaxNode,
+    diagnostics: &mut Vec<LoweringDiagnostic>,
+) -> Result<Statement, LoweringDiagnostic> {
+    let span = context.span_for(node).unwrap_or_else(Span::dummy);
+
+    let annotations = child_node(node, SyntaxKind::AnnotationList)
+        .map(|list| lower_annotation_list_node(context, &list, diagnostics))
+        .unwrap_or_default();
+
+    let display_name = extract_test_display_name(context, node).ok_or_else(|| {
+        LoweringDiagnostic::new(
+            LoweringDiagnosticSeverity::Error,
+            "テスト表示名の文字列が必要です",
+            context.span_for(node),
+            node.kind(),
+            first_identifier_text(node),
+            collect_annotation_texts(node),
+        )
+    })?;
+
+    let dataset = child_node(node, SyntaxKind::TestDataset)
+        .and_then(|dataset| lower_test_dataset(context, &dataset, diagnostics));
+
+    let parameters = child_node(node, SyntaxKind::TestParameterList)
+        .map(|list| lower_test_parameters(context, &list, diagnostics))
+        .unwrap_or_default();
+
+    let body = match child_node(node, SyntaxKind::Block) {
+        Some(block) => lower_block_expression(context, &block, diagnostics),
+        None => {
+            diagnostics.push(LoweringDiagnostic::new(
+                LoweringDiagnosticSeverity::Error,
+                "テスト本体のブロックが見つかりません",
+                context.span_for(node),
+                node.kind(),
+                first_identifier_text(node),
+                collect_annotation_texts(node),
+            ));
+            Expression::Block {
+                statements: Vec::new(),
+                span: span.clone(),
+            }
+        }
+    };
+
+    let declaration = TestDeclaration {
+        display_name,
+        normalized: None,
+        dataset,
+        parameters,
+        annotations,
+        body,
+        span,
+    };
+
+    Ok(Statement::TestDeclaration(declaration))
+}
+
+fn extract_test_display_name(context: &LoweringContext<'_>, node: &JvSyntaxNode) -> Option<String> {
+    context
+        .tokens_for(node)
+        .into_iter()
+        .find_map(|token| match &token.token_type {
+            TokenType::String(value) => Some(value.clone()),
+            _ => None,
+        })
+}
+
+fn lower_annotation_list_node(
+    context: &LoweringContext<'_>,
+    list_node: &JvSyntaxNode,
+    diagnostics: &mut Vec<LoweringDiagnostic>,
+) -> Vec<Annotation> {
+    let mut annotations = Vec::new();
+    for child in list_node.children() {
+        if child.kind() != SyntaxKind::Annotation {
+            continue;
+        }
+        if let Some(annotation) = lower_annotation_node(context, &child, diagnostics) {
+            annotations.push(annotation);
+        }
+    }
+    annotations
+}
+
+fn lower_annotation_node(
+    context: &LoweringContext<'_>,
+    node: &JvSyntaxNode,
+    diagnostics: &mut Vec<LoweringDiagnostic>,
+) -> Option<Annotation> {
+    let name_node = child_node(node, SyntaxKind::QualifiedName)?;
+    let segments = match qualified_name_segments(context, &name_node) {
+        Some(segments) => segments,
+        None => {
+            diagnostics.push(LoweringDiagnostic::new(
+                LoweringDiagnosticSeverity::Error,
+                "アノテーション名を解決できません",
+                context.span_for(node),
+                node.kind(),
+                first_identifier_text(node),
+                collect_annotation_texts(node),
+            ));
+            return None;
+        }
+    };
+
+    let name_span = context.span_for(&name_node).unwrap_or_else(Span::dummy);
+    let arguments = child_node(node, SyntaxKind::AnnotationArgumentList)
+        .map(|arg_list| lower_annotation_arguments(context, &arg_list, diagnostics))
+        .unwrap_or_default();
+    let span = context.span_for(node).unwrap_or_else(Span::dummy);
+
+    Some(Annotation {
+        name: AnnotationName::new(segments, name_span),
+        arguments,
+        span,
+    })
+}
+
+fn lower_annotation_arguments(
+    context: &LoweringContext<'_>,
+    list_node: &JvSyntaxNode,
+    diagnostics: &mut Vec<LoweringDiagnostic>,
+) -> Vec<AnnotationArgument> {
+    let mut arguments = Vec::new();
+    for child in list_node.children() {
+        if child.kind() != SyntaxKind::AnnotationArgument {
+            continue;
+        }
+        if let Some(argument) = lower_annotation_argument_node(context, &child, diagnostics) {
+            arguments.push(argument);
+        }
+    }
+    arguments
+}
+
+fn lower_annotation_argument_node(
+    context: &LoweringContext<'_>,
+    node: &JvSyntaxNode,
+    diagnostics: &mut Vec<LoweringDiagnostic>,
+) -> Option<AnnotationArgument> {
+    let span = context.span_for(node).unwrap_or_else(Span::dummy);
+
+    let expression_node = child_node(node, SyntaxKind::Expression);
+    let expression = match expression_node {
+        Some(expr_node) => match lower_expression(context, &expr_node) {
+            Ok(expr) => expr,
+            Err(diagnostic) => {
+                diagnostics.push(diagnostic);
+                return None;
+            }
+        },
+        None => {
+            diagnostics.push(LoweringDiagnostic::new(
+                LoweringDiagnosticSeverity::Error,
+                "アノテーション引数の式が見つかりません",
+                context.span_for(node),
+                node.kind(),
+                first_identifier_text(node),
+                collect_annotation_texts(node),
+            ));
+            return None;
+        }
+    };
+
+    let value = match annotation_value_from_expression(&expression) {
+        Some(value) => value,
+        None => {
+            diagnostics.push(LoweringDiagnostic::new(
+                LoweringDiagnosticSeverity::Error,
+                "アノテーション引数を値に変換できません",
+                context.span_for(node),
+                node.kind(),
+                first_identifier_text(node),
+                collect_annotation_texts(node),
+            ));
+            return None;
+        }
+    };
+
+    let is_named = context
+        .tokens_for(node)
+        .iter()
+        .filter(|token| !TokenKind::from_token(token).is_trivia())
+        .any(|token| matches!(token.token_type, TokenType::Assign));
+
+    if is_named {
+        let mut tokens = context.tokens_for(node).into_iter();
+        let name = tokens
+            .find_map(|token| match &token.token_type {
+                TokenType::Identifier(name) => Some(name.clone()),
+                TokenType::Assign => None,
+                _ => None,
+            })
+            .unwrap_or_default();
+        Some(AnnotationArgument::Named { name, value, span })
+    } else {
+        Some(AnnotationArgument::Positional { value, span })
+    }
+}
+
+fn annotation_value_from_expression(expr: &Expression) -> Option<AnnotationValue> {
+    match expr {
+        Expression::Literal(literal, _) => Some(AnnotationValue::Literal(literal.clone())),
+        Expression::Array { elements, .. } => {
+            let mut values = Vec::with_capacity(elements.len());
+            for element in elements {
+                values.push(annotation_value_from_expression(element)?);
+            }
+            Some(AnnotationValue::Array(values))
+        }
+        Expression::MemberAccess { .. } | Expression::Identifier(_, _) => {
+            enum_constant_from_expression(expr).map(|(type_path, constant)| {
+                AnnotationValue::EnumConstant {
+                    type_path,
+                    constant,
+                }
+            })
+        }
+        _ => None,
+    }
+}
+
+fn enum_constant_from_expression(expr: &Expression) -> Option<(Vec<String>, String)> {
+    let mut segments = Vec::new();
+    if !collect_member_segments(expr, &mut segments) {
+        return None;
+    }
+    if segments.is_empty() {
+        return None;
+    }
+    let constant = segments.pop().unwrap();
+    Some((segments, constant))
+}
+
+fn collect_member_segments(expr: &Expression, segments: &mut Vec<String>) -> bool {
+    match expr {
+        Expression::Identifier(name, _) => {
+            segments.push(name.clone());
+            true
+        }
+        Expression::MemberAccess {
+            object, property, ..
+        } => {
+            if !collect_member_segments(object, segments) {
+                return false;
+            }
+            segments.push(property.clone());
+            true
+        }
+        _ => false,
+    }
+}
+
+fn lower_test_dataset(
+    context: &LoweringContext<'_>,
+    dataset_node: &JvSyntaxNode,
+    diagnostics: &mut Vec<LoweringDiagnostic>,
+) -> Option<TestDataset> {
+    let span = context.span_for(dataset_node).unwrap_or_else(Span::dummy);
+    let mut rows = Vec::new();
+    let mut sample: Option<TestSampleMetadata> = None;
+
+    for row_node in dataset_node.children() {
+        if row_node.kind() != SyntaxKind::TestDatasetRow {
+            continue;
+        }
+
+        if let Some(annotation_node) = child_node(&row_node, SyntaxKind::Annotation) {
+            if sample.is_some() {
+                diagnostics.push(LoweringDiagnostic::new(
+                    LoweringDiagnosticSeverity::Error,
+                    "データセットに複数の @Sample 注釈が含まれています",
+                    context.span_for(&row_node),
+                    row_node.kind(),
+                    first_identifier_text(&row_node),
+                    collect_annotation_texts(&row_node),
+                ));
+                continue;
+            }
+
+            let annotation = match lower_annotation_node(context, &annotation_node, diagnostics) {
+                Some(annotation) => annotation,
+                None => continue,
+            };
+
+            if annotation.name.simple_name() != "Sample" {
+                diagnostics.push(LoweringDiagnostic::new(
+                    LoweringDiagnosticSeverity::Error,
+                    "データセットで使用できるアノテーションは @Sample のみです",
+                    Some(annotation.span.clone()),
+                    annotation_node.kind(),
+                    first_identifier_text(&annotation_node),
+                    collect_annotation_texts(&annotation_node),
+                ));
+                continue;
+            }
+
+            let mut arguments = annotation.arguments.clone();
+            let source_index = arguments.iter().position(|argument| {
+                matches!(
+                    argument,
+                    AnnotationArgument::Positional {
+                        value: AnnotationValue::Literal(Literal::String(_)),
+                        ..
+                    }
+                )
+            });
+
+            let Some(pos) = source_index else {
+                diagnostics.push(LoweringDiagnostic::new(
+                    LoweringDiagnosticSeverity::Error,
+                    "@Sample 注釈には文字列の第一引数が必要です",
+                    Some(annotation.span.clone()),
+                    annotation_node.kind(),
+                    first_identifier_text(&annotation_node),
+                    collect_annotation_texts(&annotation_node),
+                ));
+                continue;
+            };
+
+            let argument = arguments.remove(pos);
+            let source = match argument {
+                AnnotationArgument::Positional {
+                    value: AnnotationValue::Literal(Literal::String(value)),
+                    ..
+                } => value,
+                _ => unreachable!(),
+            };
+
+            sample = Some(TestSampleMetadata {
+                source,
+                arguments,
+                span: annotation.span,
+            });
+        } else if sample.is_some() {
+            diagnostics.push(LoweringDiagnostic::new(
+                LoweringDiagnosticSeverity::Error,
+                "@Sample を使用するデータセットにインライン行を混在させることはできません",
+                context.span_for(&row_node),
+                row_node.kind(),
+                first_identifier_text(&row_node),
+                collect_annotation_texts(&row_node),
+            ));
+        } else if let Some(row) = lower_inline_dataset_row(context, &row_node, diagnostics) {
+            rows.push(row);
+        }
+    }
+
+    if let Some(metadata) = sample {
+        return Some(TestDataset::Sample(metadata));
+    }
+
+    Some(TestDataset::InlineArray { rows, span })
+}
+
+fn lower_inline_dataset_row(
+    context: &LoweringContext<'_>,
+    row_node: &JvSyntaxNode,
+    diagnostics: &mut Vec<LoweringDiagnostic>,
+) -> Option<TestDatasetRow> {
+    let span = context.span_for(row_node).unwrap_or_else(Span::dummy);
+    let expr_node = child_node(row_node, SyntaxKind::Expression)?;
+    match lower_expression(context, &expr_node) {
+        Ok(Expression::Array { elements, .. }) => Some(TestDatasetRow {
+            values: elements,
+            span,
+        }),
+        Ok(expression) => Some(TestDatasetRow {
+            values: vec![expression],
+            span,
+        }),
+        Err(diagnostic) => {
+            diagnostics.push(diagnostic);
+            None
+        }
+    }
+}
+
+fn lower_test_parameters(
+    context: &LoweringContext<'_>,
+    list_node: &JvSyntaxNode,
+    diagnostics: &mut Vec<LoweringDiagnostic>,
+) -> Vec<TestParameter> {
+    let mut parameters = Vec::new();
+    for parameter_node in list_node.children() {
+        if parameter_node.kind() != SyntaxKind::TestParameter {
+            continue;
+        }
+
+        let span = context
+            .span_for(&parameter_node)
+            .unwrap_or_else(Span::dummy);
+        let binding_node = match child_node(&parameter_node, SyntaxKind::BindingPattern) {
+            Some(node) => node,
+            None => {
+                diagnostics.push(LoweringDiagnostic::new(
+                    LoweringDiagnosticSeverity::Error,
+                    "テストパラメータのバインディングが見つかりません",
+                    context.span_for(&parameter_node),
+                    parameter_node.kind(),
+                    first_identifier_text(&parameter_node),
+                    collect_annotation_texts(&parameter_node),
+                ));
+                continue;
+            }
+        };
+
+        let pattern = match lower_binding_pattern(context, &binding_node) {
+            Ok(pattern) => pattern,
+            Err(diagnostic) => {
+                diagnostics.push(diagnostic);
+                continue;
+            }
+        };
+
+        let type_annotation =
+            child_node(&parameter_node, SyntaxKind::TypeAnnotation).and_then(|type_node| {
+                lower_type_annotation_container(context, &type_node, &parameter_node, diagnostics)
+            });
+
+        parameters.push(TestParameter {
+            pattern,
+            type_annotation,
+            span,
+        });
+    }
+    parameters
 }
 
 fn lower_unit_type_definition(

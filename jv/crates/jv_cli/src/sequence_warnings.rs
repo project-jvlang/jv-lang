@@ -1,6 +1,6 @@
 use jv_ast::{
     Argument, Expression, JsonLiteral, JsonValue, LogBlock, LogItem, Parameter, Pattern, Program,
-    SequenceDelimiter, Span, Statement,
+    SequenceDelimiter, Span, Statement, TestDataset,
     statement::{UnitTypeDefinition, UnitTypeMember},
 };
 
@@ -92,6 +92,12 @@ impl SequenceWarningCollector {
                     self.visit_statement(method);
                 }
             }
+            Statement::TestDeclaration(declaration) => {
+                if let Some(dataset) = &declaration.dataset {
+                    self.visit_test_dataset(dataset);
+                }
+                self.visit_expression(&declaration.body);
+            }
             Statement::ExtensionFunction(extension) => {
                 self.visit_statement(&extension.function);
             }
@@ -122,6 +128,16 @@ impl SequenceWarningCollector {
             | Statement::Package { .. }
             | Statement::Break(_)
             | Statement::Continue(_) => {}
+        }
+    }
+
+    fn visit_test_dataset(&mut self, dataset: &TestDataset) {
+        if let TestDataset::InlineArray { rows, .. } = dataset {
+            for row in rows {
+                for value in &row.values {
+                    self.visit_expression(value);
+                }
+            }
         }
     }
 

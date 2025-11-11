@@ -7,7 +7,7 @@ use std::sync::{Arc, OnceLock};
 use anyhow::{Result, anyhow};
 use jv_ast::{
     Argument, CallArgumentMetadata, Expression, JsonLiteral, JsonValue, LogBlock, LogItem, Program,
-    Statement, StringPart, Visibility,
+    Statement, StringPart, TestDataset, Visibility,
     statement::{UnitTypeDefinition, UnitTypeMember},
     types::{Kind, Pattern},
 };
@@ -137,7 +137,8 @@ fn promote_visibility(statement: &mut Statement) {
         | Statement::Import { .. }
         | Statement::Package { .. }
         | Statement::Break(_)
-        | Statement::Continue(_) => {}
+        | Statement::Continue(_)
+        | Statement::TestDeclaration(_) => {}
     }
 }
 
@@ -229,6 +230,12 @@ fn rewrite_statement(statement: &mut Statement) {
         Statement::ExtensionFunction(extension) => {
             rewrite_statement(extension.function.as_mut());
         }
+        Statement::TestDeclaration(declaration) => {
+            if let Some(dataset) = &mut declaration.dataset {
+                rewrite_test_dataset(dataset);
+            }
+            rewrite_expression(&mut declaration.body);
+        }
         Statement::Expression { expr, .. } => rewrite_expression(expr),
         Statement::Return { value, .. } => {
             if let Some(expr) = value {
@@ -290,6 +297,16 @@ fn rewrite_resource_management(resource: &mut jv_ast::ResourceManagement) {
             rewrite_expression(body.as_mut());
         }
         jv_ast::ResourceManagement::Defer { body, .. } => rewrite_expression(body.as_mut()),
+    }
+}
+
+fn rewrite_test_dataset(dataset: &mut TestDataset) {
+    if let TestDataset::InlineArray { rows, .. } = dataset {
+        for row in rows {
+            for value in &mut row.values {
+                rewrite_expression(value);
+            }
+        }
     }
 }
 
@@ -625,6 +642,12 @@ impl<'a, 'b> ProgramUsageDetector<'a, 'b> {
             Statement::ExtensionFunction(extension) => {
                 self.visit_statement(extension.function.as_ref());
             }
+            Statement::TestDeclaration(declaration) => {
+                if let Some(dataset) = &declaration.dataset {
+                    self.visit_test_dataset(dataset);
+                }
+                self.visit_expression(&declaration.body);
+            }
             Statement::Expression { expr, .. } => self.visit_expression(expr),
             Statement::Return { value, .. } => {
                 if let Some(expr) = value {
@@ -848,6 +871,16 @@ impl<'a, 'b> ProgramUsageDetector<'a, 'b> {
             | Expression::This(_)
             | Expression::Super(_) => {}
             Expression::LogBlock(block) => self.visit_log_block(block),
+        }
+    }
+
+    fn visit_test_dataset(&mut self, dataset: &TestDataset) {
+        if let TestDataset::InlineArray { rows, .. } = dataset {
+            for row in rows {
+                for value in &row.values {
+                    self.visit_expression(value);
+                }
+            }
         }
     }
 }

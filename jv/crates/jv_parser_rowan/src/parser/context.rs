@@ -1731,7 +1731,7 @@ impl<'tokens> ParserContext<'tokens> {
 mod tests {
     use super::{ParserContext, UnitSuffixDescriptor};
     use crate::frontend::DIAGNOSTIC_JV_UNIT_005_DEFAULT_MARKER_FORBIDDEN;
-    use crate::syntax::{SyntaxKind, TokenKind};
+    use crate::syntax::TokenKind;
     use jv_lexer::{Lexer, Token, TokenTrivia, TokenType};
 
     fn make_token(token_type: TokenType, lexeme: &str) -> Token {

@@ -1,4 +1,5 @@
 // jv_ast/statement - Statement types and program structure
+use crate::annotation::{Annotation, AnnotationArgument};
 use crate::binding_pattern::BindingPatternKind;
 use crate::comments::*;
 use crate::expression::*;
@@ -91,6 +92,74 @@ pub enum LoopStrategy {
     Iterable,
     LazySequence { needs_cleanup: bool },
     Unknown,
+}
+
+/// Test declaration metadata captured at the AST level.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TestDeclaration {
+    /// Display name provided by the DSL (e.g., `"renders dataset"`).
+    pub display_name: String,
+    /// Normalized identifier applied during lowering.
+    #[serde(default)]
+    pub normalized: Option<String>,
+    /// Dataset bound to the test (inline rows or @Sample reference).
+    #[serde(default)]
+    pub dataset: Option<TestDataset>,
+    /// Parameter bindings exposed to the test body.
+    #[serde(default)]
+    pub parameters: Vec<TestParameter>,
+    /// Attached annotations such as lifecycle hooks.
+    #[serde(default)]
+    pub annotations: Vec<Annotation>,
+    /// Body expression to execute.
+    pub body: Expression,
+    /// Source span for the entire declaration.
+    pub span: Span,
+}
+
+/// Dataset specification for a test declaration.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum TestDataset {
+    /// Inline array dataset rows.
+    InlineArray {
+        rows: Vec<TestDatasetRow>,
+        span: Span,
+    },
+    /// External dataset reference via @Sample annotation.
+    Sample(TestSampleMetadata),
+}
+
+/// Single row within an inline dataset.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TestDatasetRow {
+    /// Values within the row.
+    pub values: Vec<Expression>,
+    /// Span for the row.
+    pub span: Span,
+}
+
+/// Metadata describing an @Sample dataset reference.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TestSampleMetadata {
+    /// Source path passed to @Sample.
+    pub source: String,
+    /// Additional annotation arguments.
+    #[serde(default)]
+    pub arguments: Vec<AnnotationArgument>,
+    /// Span covering the annotation usage.
+    pub span: Span,
+}
+
+/// Describes a single parameter exposed to the test body.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TestParameter {
+    /// Pattern describing the binding (identifier, tuple, etc.).
+    pub pattern: BindingPatternKind,
+    /// Optional type annotation for the binding.
+    #[serde(default)]
+    pub type_annotation: Option<TypeAnnotation>,
+    /// Span covering the entire parameter declaration.
+    pub span: Span,
 }
 
 /// Structured representation of a `for-in` loop.
@@ -218,6 +287,9 @@ pub enum Statement {
         modifiers: Modifiers,
         span: Span,
     },
+
+    // Test declarations
+    TestDeclaration(TestDeclaration),
 
     // Class declarations
     ClassDeclaration {

@@ -910,6 +910,7 @@ pub fn desugar_top_level_function(
                 body: Some(ir_body),
                 modifiers: ir_modifiers,
                 throws,
+                assertion_patterns: Vec::new(),
                 span,
             };
 

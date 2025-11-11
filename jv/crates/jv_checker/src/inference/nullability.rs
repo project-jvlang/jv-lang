@@ -239,6 +239,7 @@ impl NullabilityAnalyzer {
                 self.visit_unit_definition(definition);
                 None
             }
+            Statement::TestDeclaration(_) => None,
             Statement::DataClassDeclaration { .. }
             | Statement::Import { .. }
             | Statement::Package { .. }

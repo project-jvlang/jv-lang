@@ -8,6 +8,7 @@ use std::borrow::Cow;
 
 impl JavaCodeGenerator {
     pub fn generate_class(&mut self, class: &IrStatement) -> Result<String, CodeGenError> {
+        let base = JavaCodeGenerator::base_statement(class);
         if let IrStatement::ClassDeclaration {
             name,
             type_parameters,
@@ -18,8 +19,9 @@ impl JavaCodeGenerator {
             nested_classes,
             modifiers,
             ..
-        } = JavaCodeGenerator::base_statement(class)
+        } = base
         {
+            tests::register_test_class_imports(self, base);
             let is_nested = !self.metadata_path.is_empty();
             self.metadata_path.push(name.clone());
             let metadata_entry = self.current_generic_metadata().cloned();
@@ -434,6 +436,7 @@ impl JavaCodeGenerator {
                 body,
                 modifiers,
                 throws,
+                assertion_patterns,
                 span,
             } => {
                 if parameters.is_empty() {
@@ -465,6 +468,7 @@ impl JavaCodeGenerator {
                     body: instance_body,
                     modifiers: instance_modifiers,
                     throws: throws.clone(),
+                    assertion_patterns: assertion_patterns.clone(),
                     span: span.clone(),
                 };
 

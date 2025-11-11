@@ -112,6 +112,7 @@ impl<'a> WhenUsageValidator<'a> {
             Statement::UnitTypeDefinition(definition) => {
                 self.visit_unit_definition(definition);
             }
+            Statement::TestDeclaration(_) => {}
             Statement::Import { .. }
             | Statement::Package { .. }
             | Statement::Break(_)

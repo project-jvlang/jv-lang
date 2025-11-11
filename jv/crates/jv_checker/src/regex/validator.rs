@@ -3,7 +3,7 @@ use crate::diagnostics::{self, DiagnosticSeverity, EnhancedDiagnostic};
 use jv_ast::{
     Argument, ConcurrencyConstruct, Expression, ForInStatement, LogBlock, LogItem, LoopStrategy,
     NumericRangeLoop, Program, RegexLiteral, ResourceManagement, Span, Statement, StringPart,
-    TryCatchClause,
+    TestDataset, TryCatchClause,
     statement::{UnitTypeDefinition, UnitTypeMember},
 };
 use std::time::Instant;
@@ -174,6 +174,12 @@ impl<'a> RegexValidationVisitor<'a> {
                 self.visit_expression(target);
                 self.visit_expression(value);
             }
+            Statement::TestDeclaration(declaration) => {
+                if let Some(dataset) = &declaration.dataset {
+                    self.visit_test_dataset(dataset);
+                }
+                self.visit_expression(&declaration.body);
+            }
             Statement::UnitTypeDefinition(definition) => {
                 self.visit_unit_definition(definition);
             }
@@ -216,6 +222,16 @@ impl<'a> RegexValidationVisitor<'a> {
                 self.visit_expression(body);
             }
             ResourceManagement::Defer { body, .. } => self.visit_expression(body),
+        }
+    }
+
+    fn visit_test_dataset(&mut self, dataset: &TestDataset) {
+        if let TestDataset::InlineArray { rows, .. } = dataset {
+            for row in rows {
+                for value in &row.values {
+                    self.visit_expression(value);
+                }
+            }
         }
     }
 

@@ -63,6 +63,7 @@ pub fn statement_span(stmt: &Statement) -> Span {
         Statement::Package { span, .. } => span.clone(),
         Statement::Comment(comment) => comment.span.clone(),
         Statement::UnitTypeDefinition(definition) => definition.span.clone(),
+        Statement::TestDeclaration(declaration) => declaration.span.clone(),
         Statement::Concurrency(concurrency) => match concurrency {
             ConcurrencyConstruct::Spawn { span, .. } => span.clone(),
             ConcurrencyConstruct::Async { span, .. } => span.clone(),

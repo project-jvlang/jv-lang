@@ -27,6 +27,7 @@ mod formatting;
 mod logging;
 mod sample;
 mod statements;
+mod tests;
 mod types;
 
 pub use types::ErasurePlan;
