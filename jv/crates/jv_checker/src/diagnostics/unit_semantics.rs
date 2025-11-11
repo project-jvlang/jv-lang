@@ -43,6 +43,24 @@ pub const ENTRIES: &[DiagnosticDescriptor] = &[
         help: "依存がDAGになるように `:=` / `->` の関係を見直してください。",
         severity: DiagnosticSeverity::Error,
     },
+    DiagnosticDescriptor {
+        code: "JV_UNIT_SEM_040",
+        title: "変換ラムダの型が一致しません",
+        help: "カテゴリの基底型と同じ引数・戻り値型を指定してください。",
+        severity: DiagnosticSeverity::Error,
+    },
+    DiagnosticDescriptor {
+        code: "JV_UNIT_SEM_041",
+        title: "`@ConversionRate` は数値式のみ指定できます",
+        help: "リテラルまたはコンパイル時定数を用いてレートを記述してください。",
+        severity: DiagnosticSeverity::Error,
+    },
+    DiagnosticDescriptor {
+        code: "JV_UNIT_SEM_050",
+        title: "自動逆変換を生成できません",
+        help: "`value * k + b` 形式で表現するか `@ReverseConversion` を定義してください。",
+        severity: DiagnosticSeverity::Warning,
+    },
 ];
 
 pub fn descriptor(code: &str) -> Option<&'static DiagnosticDescriptor> {

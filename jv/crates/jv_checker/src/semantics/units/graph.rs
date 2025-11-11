@@ -1,10 +1,14 @@
+use super::conversion::{self, EdgeConversionPlan};
 use super::registry::{
     ReverseMode, UnitCategoryEntry, UnitCategoryId, UnitConversionBody, UnitEdge, UnitEdgeId,
     UnitEntry, UnitId, UnitLookupKey, UnitRegistry,
 };
-use super::{DefaultUnit, UnitDefinitionValidated, UnitMemberRaw, UnitSymbolRaw, ValidatedCatalog};
-use crate::CheckError;
+use super::{
+    DefaultUnit, UnitConversionKind, UnitDefinitionValidated, UnitMemberRaw, UnitSymbolRaw,
+    ValidatedCatalog,
+};
 use crate::diagnostics::unit_semantics;
+use crate::CheckError;
 use jv_ast::{Argument, Expression, Span, Statement, StringPart, UnitRelation};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -30,6 +34,16 @@ impl UnitDependencyGraphBuilder {
         builder.register_units(&catalog.definitions);
         builder.assign_defaults(&catalog.defaults);
         builder.register_edges(&catalog.definitions, diagnostics);
+        if conversion::apply_edge_conversions(
+            &builder.edge_conversions,
+            &mut builder.edges,
+            &builder.units,
+            &builder.categories,
+            &mut builder.conversions,
+            diagnostics,
+        ) {
+            builder.had_error = true;
+        }
         builder.detect_cycles(diagnostics);
 
         if builder.had_error() {
@@ -49,6 +63,7 @@ struct RegistryBuilder {
     edges: Vec<UnitEdge>,
     adjacency: Vec<Vec<(UnitId, UnitEdgeId)>>,
     conversions: Vec<UnitConversionBody>,
+    edge_conversions: HashMap<UnitEdgeId, EdgeConversionPlan>,
     had_error: bool,
 }
 
@@ -62,6 +77,7 @@ impl RegistryBuilder {
             edges: Vec::new(),
             adjacency: Vec::new(),
             conversions: Vec::new(),
+            edge_conversions: HashMap::new(),
             had_error: false,
         }
     }
@@ -159,46 +175,79 @@ impl RegistryBuilder {
                 continue;
             };
 
+            let mut pending_conversion_edge: Option<UnitEdgeId> = None;
+
             for member in &definition.definition.members {
-                let UnitMemberRaw::Dependency(dependency) = member else {
-                    continue;
-                };
+                match member {
+                    UnitMemberRaw::Dependency(dependency) => {
+                        pending_conversion_edge = None;
+                        let Some(from_id) = self.lookup_by_symbol(category_id, &dependency.symbol)
+                        else {
+                            continue;
+                        };
 
-                let Some(from_id) = self.lookup_by_symbol(category_id, &dependency.symbol) else {
-                    continue;
-                };
+                        match dependency.relation {
+                            UnitRelation::DefinitionAssign => {
+                                if let Some(value) = &dependency.value {
+                                    let mut references = Vec::new();
+                                    collect_unit_references(value, &mut references);
 
-                match dependency.relation {
-                    UnitRelation::DefinitionAssign => {
-                        if let Some(value) = &dependency.value {
-                            let mut references = Vec::new();
-                            collect_unit_references(value, &mut references);
-
-                            for reference in references {
-                                self.connect_edge(
-                                    category_id,
-                                    from_id,
-                                    &reference,
-                                    dependency.relation,
-                                    &dependency.span,
-                                    diagnostics,
-                                );
+                                    for reference in references {
+                                        self.connect_edge(
+                                            category_id,
+                                            from_id,
+                                            &reference,
+                                            dependency.relation,
+                                            &dependency.span,
+                                            diagnostics,
+                                        );
+                                    }
+                                }
+                            }
+                            UnitRelation::ConversionArrow => {
+                                if let Some(target) = &dependency.target {
+                                    let reference =
+                                        UnitSymbolRaw::from_identifier(target, &dependency.span);
+                                    pending_conversion_edge = self.connect_edge(
+                                        category_id,
+                                        from_id,
+                                        &reference,
+                                        dependency.relation,
+                                        &dependency.span,
+                                        diagnostics,
+                                    );
+                                }
                             }
                         }
                     }
-                    UnitRelation::ConversionArrow => {
-                        if let Some(target) = &dependency.target {
-                            let reference =
-                                UnitSymbolRaw::from_identifier(target, &dependency.span);
-                            self.connect_edge(
-                                category_id,
-                                from_id,
-                                &reference,
-                                dependency.relation,
-                                &dependency.span,
-                                diagnostics,
-                            );
+                    UnitMemberRaw::Conversion(block) => {
+                        if let Some(edge_id) = pending_conversion_edge {
+                            let entry = self.edge_conversions.entry(edge_id).or_default();
+                            match block.kind {
+                                UnitConversionKind::Conversion => {
+                                    if entry.forward.is_none() {
+                                        entry.forward = Some(block.clone());
+                                    }
+                                }
+                                UnitConversionKind::ReverseConversion => {
+                                    if entry.reverse.is_none() {
+                                        entry.reverse = Some(block.clone());
+                                    }
+                                }
+                            }
                         }
+                    }
+                    UnitMemberRaw::ConversionRate(rate) => {
+                        if let Some(edge_id) = pending_conversion_edge {
+                            self.edge_conversions
+                                .entry(edge_id)
+                                .or_default()
+                                .rate
+                                .get_or_insert(rate.clone());
+                        }
+                    }
+                    _ => {
+                        pending_conversion_edge = None;
                     }
                 }
             }
@@ -213,7 +262,7 @@ impl RegistryBuilder {
         relation: UnitRelation,
         span: &Span,
         diagnostics: &mut Vec<CheckError>,
-    ) {
+    ) -> Option<UnitEdgeId> {
         let Some(target_id) = self.lookup_by_symbol(category_id, target) else {
             self.had_error = true;
             emit_dependency_error(
@@ -227,7 +276,7 @@ impl RegistryBuilder {
                 span,
                 diagnostics,
             );
-            return;
+            return None;
         };
 
         if target_id == from_id {
@@ -241,13 +290,19 @@ impl RegistryBuilder {
                 span,
                 diagnostics,
             );
-            return;
+            return None;
         }
 
-        self.push_edge(from_id, target_id, relation, span.clone());
+        Some(self.push_edge(from_id, target_id, relation, span.clone()))
     }
 
-    fn push_edge(&mut self, from: UnitId, to: UnitId, relation: UnitRelation, span: Span) {
+    fn push_edge(
+        &mut self,
+        from: UnitId,
+        to: UnitId,
+        relation: UnitRelation,
+        span: Span,
+    ) -> UnitEdgeId {
         let id = self.edges.len() as UnitEdgeId;
         self.edges.push(UnitEdge {
             id,
@@ -263,6 +318,8 @@ impl RegistryBuilder {
         if let Some(bucket) = self.adjacency.get_mut(from as usize) {
             bucket.push((to, id));
         }
+
+        id
     }
 
     fn detect_cycles(&mut self, diagnostics: &mut Vec<CheckError>) {
@@ -524,7 +581,7 @@ fn collect_from_statement(statement: &Statement, output: &mut Vec<UnitSymbolRaw>
     }
 }
 
-fn format_symbol(symbol: &UnitSymbolRaw) -> String {
+pub(super) fn format_symbol(symbol: &UnitSymbolRaw) -> String {
     let mut label = if symbol.is_bracketed {
         format!("[{}]", symbol.name)
     } else {

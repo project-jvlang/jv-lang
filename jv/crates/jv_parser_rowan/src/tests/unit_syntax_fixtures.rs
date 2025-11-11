@@ -15,8 +15,12 @@ fn fixture_root() -> PathBuf {
 }
 
 fn load_fixture(path: &Path) -> String {
-    fs::read_to_string(path)
-        .unwrap_or_else(|error| panic!("フィクスチャ {:?} の読み込みに失敗しました: {}", path, error))
+    fs::read_to_string(path).unwrap_or_else(|error| {
+        panic!(
+            "フィクスチャ {:?} の読み込みに失敗しました: {}",
+            path, error
+        )
+    })
 }
 
 fn collect_fixtures(subdir: &str) -> Vec<PathBuf> {

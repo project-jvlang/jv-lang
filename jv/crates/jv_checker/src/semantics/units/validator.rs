@@ -1,9 +1,9 @@
 use super::{RawUnitCatalog, UnitDefinitionRaw, UnitMemberRaw};
-use crate::CheckError;
 use crate::diagnostics;
 use crate::diagnostics::unit_semantics;
 use crate::inference::type_factory::TypeFactory;
 use crate::inference::types::{TypeError, TypeKind};
+use crate::CheckError;
 use jv_ast::{Span, TypeAnnotation};
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};

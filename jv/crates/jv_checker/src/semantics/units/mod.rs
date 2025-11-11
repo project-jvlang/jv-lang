@@ -5,6 +5,7 @@ use jv_ast::{
 use serde::{Deserialize, Serialize};
 
 pub mod collector;
+mod conversion;
 pub mod graph;
 pub mod registry;
 pub mod validator;
@@ -12,8 +13,9 @@ pub mod validator;
 pub use collector::UnitCatalogCollector;
 pub use graph::UnitDependencyGraphBuilder;
 pub use registry::{
-    ReverseMode, UnitCategoryEntry, UnitCategoryId, UnitConversionBody, UnitConversionRef,
-    UnitEdge, UnitEdgeId, UnitEntry, UnitId, UnitRegistry, UnitRegistrySummary,
+    ConversionLambdaIr, ReverseMode, UnitCategoryEntry, UnitCategoryId, UnitConversionAstRef,
+    UnitConversionBody, UnitConversionRef, UnitEdge, UnitEdgeId, UnitEntry, UnitId, UnitRegistry,
+    UnitRegistrySummary,
 };
 pub use validator::{
     BaseTypeCapability, DefaultUnit, NumericCapability, UnitCategoryKind, UnitCategorySpec,

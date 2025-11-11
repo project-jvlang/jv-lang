@@ -1,9 +1,10 @@
-use super::{BaseTypeCapability, UnitCategorySpec, UnitSymbolRaw};
+use super::{BaseTypeCapability, UnitCategorySpec, UnitConversionKind, UnitSymbolRaw};
 use crate::inference::types::TypeKind;
-use jv_ast::{Span, UnitRelation};
+use jv_ast::{Expression, Span, UnitRelation};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::sync::Arc;
 
 pub type UnitCategoryId = u32;
 pub type UnitId = u32;
@@ -42,10 +43,38 @@ pub struct UnitEdge {
     pub span: Span,
 }
 
-/// 変換ラムダ本体（タスク4で実装予定）。
+/// 変換ラムダIR本体。
 #[derive(Debug, Clone)]
 pub struct UnitConversionBody {
     pub edge: UnitEdgeId,
+    pub ir: Arc<ConversionLambdaIr>,
+    pub original_ast: Option<UnitConversionAstRef>,
+}
+
+/// 解析済み変換ラムダのIR。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ConversionLambdaIr {
+    pub parameter_name: String,
+    pub parameter_type: TypeKind,
+    pub return_type: TypeKind,
+    pub lambda: Expression,
+    pub span: Span,
+}
+
+impl ConversionLambdaIr {
+    pub fn body_expression(&self) -> Option<&Expression> {
+        match &self.lambda {
+            Expression::Lambda { body, .. } => Some(body),
+            _ => None,
+        }
+    }
+}
+
+/// 元となったAST参照。
+#[derive(Debug, Clone)]
+pub struct UnitConversionAstRef {
+    pub kind: UnitConversionKind,
+    pub span: Span,
 }
 
 /// 逆変換の状態。
