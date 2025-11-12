@@ -429,7 +429,7 @@ jobs:
           mkdir -p "${FAKE_BIN}"
           cat > "${FAKE_BIN}/curl" <<EOF
           #!/usr/bin/env bash
-          set -euo pipefail
+          set -eo pipefail
           DEST=""
           URL=""
           while [[ \$# -gt 0 ]]; do
