@@ -874,7 +874,11 @@ fn lower_type_annotation_container(
         }
     };
 
-    let tokens = context.tokens_for(&expr);
+    let tokens = if let Some(unit_node) = child_node(container_node, SyntaxKind::UnitTypeAnnotation) {
+        context.tokens_for(&unit_node)
+    } else {
+        context.tokens_for(&expr)
+    };
     let owned_tokens: Vec<Token> = tokens.into_iter().cloned().collect();
 
     match lower_type_annotation_from_tokens(&owned_tokens) {
@@ -1059,8 +1063,16 @@ fn lower_unit_literal_expression(
         }
     }
 
+    let mut space_before_at = false;
     let mut space_after_at = false;
     if let Some(at_pos) = at_index {
+        let at_token = tokens[at_pos];
+        if whitespace_after_value
+            || at_token.leading_trivia.spaces > 0
+            || at_token.leading_trivia.newlines > 0
+        {
+            space_before_at = true;
+        }
         if index < tokens.len() {
             let trivia = &tokens[index].leading_trivia;
             if trivia.spaces > 0 || trivia.newlines > 0 {
@@ -1080,7 +1092,7 @@ fn lower_unit_literal_expression(
             }
         }
         if !whitespace_after_value {
-            let trivia = &tokens[at_pos].leading_trivia;
+            let trivia = &at_token.leading_trivia;
             if trivia.spaces > 0 || trivia.newlines > 0 {
                 whitespace_after_value = true;
             }
@@ -1103,6 +1115,13 @@ fn lower_unit_literal_expression(
         Some(TokenType::Whitespace(_))
     ) {
         symbol_tokens.pop();
+    }
+
+    if !space_after_at {
+        if let Some(symbol_token) = symbol_tokens.first() {
+            let trivia = &symbol_token.leading_trivia;
+            space_after_at = trivia.spaces > 0 || trivia.newlines > 0;
+        }
     }
 
     if symbol_tokens.is_empty() {
@@ -1144,7 +1163,7 @@ fn lower_unit_literal_expression(
     };
 
     let spacing = UnitSpacingStyle {
-        space_before_at: at_index.is_some() && whitespace_after_value,
+        space_before_at,
         space_after_at,
     };
 
