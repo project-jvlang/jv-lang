@@ -242,7 +242,12 @@ pub fn transform_statement(
         Statement::Expression {
             expr: Expression::Identifier(name, _),
             ..
-        } if name.eq_ignore_ascii_case("as") || is_constructor_like(&name) => Ok(Vec::new()),
+        } if name.eq_ignore_ascii_case("as")
+            || is_constructor_like(&name)
+            || name.starts_with('@') =>
+        {
+            Ok(Vec::new())
+        }
         Statement::Expression { expr, span } => {
             let ir_expr = transform_expression(expr, context)?;
             Ok(vec![IrStatement::Expression {
