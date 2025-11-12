@@ -503,7 +503,9 @@ impl<'a> TypeAnnotationParser<'a> {
                 ));
             }
 
-            let symbol = if self.peek_is(|kind| matches!(kind, TokenType::Identifier(_))) {
+            let symbol = if self.peek_is(|kind| {
+                matches!(kind, TokenType::Identifier(_)) || matches!(kind, TokenType::Invalid(_))
+            }) {
                 self.parse_identifier_symbol()?
             } else if self.peek_is(|kind| matches!(kind, TokenType::LeftBracket)) {
                 self.parse_bracket_symbol()?
@@ -533,14 +535,24 @@ impl<'a> TypeAnnotationParser<'a> {
     }
 
     fn parse_identifier_symbol(&mut self) -> Result<UnitSymbol, ParseError> {
-        let ident = self.expect_identifier()?;
-        let mut name = identifier_text(ident).map(str::to_string).ok_or_else(|| {
-            ParseError::new(
+        let (mut name, mut span) = if self.peek_is(|kind| matches!(kind, TokenType::Identifier(_))) {
+            let ident = self.expect_identifier()?;
+            let text = identifier_text(ident).map(str::to_string).ok_or_else(|| {
+                ParseError::new(
+                    "単位注釈の識別子が取得できませんでした",
+                    Some(span_from_token(ident)),
+                )
+            })?;
+            (text, span_from_token(ident))
+        } else if self.peek_is(|kind| matches!(kind, TokenType::Invalid(_))) {
+            let invalid = self.advance().expect("invalid token should be present");
+            (invalid.lexeme.clone(), span_from_token(invalid))
+        } else {
+            return Err(ParseError::new(
                 "単位注釈の識別子が取得できませんでした",
-                Some(span_from_token(ident)),
-            )
-        })?;
-        let mut span = span_from_token(ident);
+                self.peek().map(span_from_token),
+            ));
+        };
         let mut has_default_marker = false;
 
         if self.peek_is(|kind| matches!(kind, TokenType::Not)) {

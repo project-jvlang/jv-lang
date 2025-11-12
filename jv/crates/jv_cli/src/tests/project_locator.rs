@@ -3,7 +3,7 @@ use std::path::Path;
 
 use crate::pipeline::project::locator::ProjectLocator;
 
-use super::{TempDirGuard, lock_current_dir};
+use super::{lock_current_dir, TempDirGuard};
 
 struct WorkingDirGuard {
     previous: std::path::PathBuf,

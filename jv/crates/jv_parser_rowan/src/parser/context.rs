@@ -1079,6 +1079,7 @@ impl<'tokens> ParserContext<'tokens> {
         let mut bracket_depth = 0usize;
         let mut saw_significant = false;
         let mut pending_whitespace = false;
+        let mut last_significant_kind: Option<TokenKind> = None;
 
         loop {
             let Some(token) = self.current_token() else {
@@ -1107,6 +1108,25 @@ impl<'tokens> ParserContext<'tokens> {
             }
 
             let at_top_level = angle_depth == 0 && paren_depth == 0 && bracket_depth == 0;
+
+            if self.unit_type_annotation_depth > 0
+                && last_significant_kind.is_some()
+                && at_top_level
+            {
+                if kind == TokenKind::At {
+                    break;
+                }
+                if kind == TokenKind::Whitespace {
+                    if let Some((_, next_kind)) =
+                        self.peek_significant_kind_from(self.cursor + 1)
+                    {
+                        if matches!(next_kind, TokenKind::Identifier | TokenKind::LeftBracket) {
+                            break;
+                        }
+                    }
+                }
+            }
+
             if at_top_level && terminators.contains(&kind) {
                 break;
             }
@@ -1149,6 +1169,9 @@ impl<'tokens> ParserContext<'tokens> {
             }
 
             self.bump_raw();
+            if !kind.is_trivia() {
+                last_significant_kind = Some(kind);
+            }
         }
     }
 
