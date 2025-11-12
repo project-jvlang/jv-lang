@@ -1468,6 +1468,34 @@ mod tests {
     }
 
     #[test]
+    fn parses_arithmetic_with_divide_inside_parens() {
+        let mut divide = divide_token();
+        divide.leading_trivia.spaces = 1;
+
+        let mut number = make_token(TokenType::Number("3".into()), "3");
+        number.leading_trivia.spaces = 1;
+
+        let expr = parse_expression_from_tokens(vec![
+            identifier_token("total"),
+            make_token(TokenType::Plus, "+"),
+            identifier_token("bucket"),
+            make_token(TokenType::Plus, "+"),
+            make_token(TokenType::LeftParen, "("),
+            identifier_token("value"),
+            divide,
+            number,
+            make_token(TokenType::RightParen, ")"),
+        ]);
+
+        match expr {
+            Expression::Binary { op, .. } => {
+                assert_eq!(op, BinaryOp::Add, "outer expression should be addition");
+            }
+            other => panic!("expected binary expression, got {:?}", other),
+        }
+    }
+
+    #[test]
     fn parses_log_block_expression() {
         let expr = parse_expression_from_source("LOG { \"start\" }");
         match expr {
@@ -2433,7 +2461,9 @@ mod expression_parser {
                     && token.leading_trivia.spaces > 0
                 {
                     if let Some(prev_token) = inner.get(offset - 1) {
-                        if !token_requires_followup(&prev_token.token_type) {
+                        if !token_requires_followup(&prev_token.token_type)
+                            && !token_requires_followup(&token.token_type)
+                        {
                             parts.push(&inner[start..offset]);
                             separators.push(SeparatorKind::Layout);
                             start = offset;
@@ -2748,7 +2778,9 @@ mod expression_parser {
                     && token.leading_trivia.spaces > 0
                 {
                     if let Some(prev_token) = tokens.get(offset - 1) {
-                        if !token_requires_followup(&prev_token.token_type) {
+                        if !token_requires_followup(&prev_token.token_type)
+                            && !token_requires_followup(&token.token_type)
+                        {
                             parts.push(&tokens[start..offset]);
                             start = offset;
                             continue;
@@ -4216,7 +4248,9 @@ mod expression_parser {
                     && token.leading_trivia.spaces > 0
                 {
                     if let Some(prev_token) = inner.get(offset - 1) {
-                        if !token_requires_followup(&prev_token.token_type) {
+                        if !token_requires_followup(&prev_token.token_type)
+                            && !token_requires_followup(&token.token_type)
+                        {
                             parts.push(&inner[start..offset]);
                             separators.push(SeparatorKind::Layout);
                             start = offset;
