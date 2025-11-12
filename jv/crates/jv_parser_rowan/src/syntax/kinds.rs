@@ -785,6 +785,7 @@ mod tests {
         ("Less", SyntaxKind::Less),
         ("Greater", SyntaxKind::Greater),
         ("Arrow", SyntaxKind::Arrow),
+        ("Bang", SyntaxKind::Bang),
         ("Identifier", SyntaxKind::Identifier),
         ("ExpressionToken", SyntaxKind::Expression),
     ];

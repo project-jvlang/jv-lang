@@ -1152,10 +1152,13 @@ fn lowering_table_driven_cases() {
                 let warning = result
                     .diagnostics
                     .iter()
-                    .find(|diag| diag.severity == LoweringDiagnosticSeverity::Warning)
+                    .find(|diag| {
+                        diag.severity == LoweringDiagnosticSeverity::Warning
+                            && diag.message.contains("本体ブロック")
+                    })
                     .expect("expected warning diagnostic for missing block");
                 assert!(
-                    warning.message.to_lowercase().contains("block"),
+                    warning.message.contains("本体ブロック"),
                     "unexpected warning message: {}",
                     warning.message
                 );
@@ -1216,7 +1219,7 @@ fn lowering_table_driven_cases() {
                     .find(|diag| diag.severity == LoweringDiagnosticSeverity::Warning)
                     .expect("expected warning for unsupported class member");
                 assert!(
-                    warning.message.to_lowercase().contains("class"),
+                    warning.message.contains("クラス"),
                     "unexpected warning message: {}",
                     warning.message
                 );

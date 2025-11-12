@@ -1073,10 +1073,14 @@ impl<'tokens> ParserContext<'tokens> {
         let mut index = literal_index.saturating_add(1);
         let len = self.tokens.len();
         let mut saw_whitespace = false;
+        let literal_line = self.tokens[literal_index].line;
 
         while index < len {
             let token = &self.tokens[index];
             let kind = TokenKind::from_token(token);
+            if token.line > literal_line {
+                return None;
+            }
             match kind {
                 TokenKind::Whitespace => {
                     saw_whitespace = true;
@@ -1175,7 +1179,16 @@ impl<'tokens> ParserContext<'tokens> {
             return false;
         };
 
-        matches!(TokenKind::from_token(next_token), TokenKind::Whitespace)
+        let next_kind = TokenKind::from_token(next_token);
+        let token_end_column = token.column + token.lexeme.len();
+        let has_column_gap = next_token.column > token_end_column;
+        if matches!(next_kind, TokenKind::Whitespace | TokenKind::Newline) || has_column_gap {
+            return true;
+        }
+
+        let trivia = &next_token.leading_trivia;
+        let result = trivia.spaces > 0 || trivia.newlines > 0;
+        result
     }
 
     /// 現在のカーソル位置が `@` であり直後にホワイトスペースが存在するかを判定する。

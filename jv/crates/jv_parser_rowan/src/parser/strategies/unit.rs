@@ -62,12 +62,15 @@ impl UnitTypeDefinitionStrategy {
     fn parse_header(&self, ctx: &mut ParserContext<'_>, start: usize) -> bool {
         ctx.start_node(SyntaxKind::UnitHeader);
 
+        let at_index = ctx.position();
         if !ctx.bump_expected(TokenKind::At, "単位定義は `@` で始まります") {
             ctx.finish_node();
             return false;
         }
 
-        let has_space = ctx.consume_inline_whitespace();
+        let consumed_space = ctx.consume_inline_whitespace();
+        let whitespace_after_at = ctx.has_whitespace_after_at(at_index);
+        let has_space = consumed_space || whitespace_after_at;
         if !has_space {
             ctx.report_error(DIAGNOSTIC_JV_UNIT_001_MISSING_SPACE, start, ctx.position());
         }
