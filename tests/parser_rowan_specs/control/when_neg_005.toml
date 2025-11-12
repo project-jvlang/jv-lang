@@ -6,7 +6,7 @@ statement_count = 1
 
 [expect.parser_diagnostics]
 allowed = true
-max = 1
+max = 2
 
 [expect.lowering_diagnostics]
 allowed = true

@@ -25,8 +25,9 @@ impl OutputManager {
         let base_dir = plan.options.output_dir.clone();
         let target_label = format!("java{}", plan.build_config.target.as_str());
         let target_dir = base_dir.join(&target_label);
-
-        ensure_within_workspace(plan.root.root_dir(), &target_dir)?;
+        if !plan.options.output_override {
+            ensure_within_workspace(plan.root.root_dir(), &target_dir)?;
+        }
 
         let mut clean_applied = false;
 
@@ -86,13 +87,25 @@ fn ensure_within_workspace(root: &Path, candidate: &Path) -> Result<(), Enhanced
 }
 
 fn path_within(root: &Path, candidate: &Path) -> bool {
-    let Ok(root_canonical) = fs::canonicalize(root) else {
+    let Some(root_canonical) = canonicalize_allowing_missing(root) else {
         return false;
     };
+    let Some(candidate_canonical) = canonicalize_allowing_missing(candidate) else {
+        return candidate.starts_with(root);
+    };
+    candidate_canonical.starts_with(&root_canonical)
+}
 
-    match fs::canonicalize(candidate) {
-        Ok(candidate) => candidate.starts_with(&root_canonical),
-        Err(_) => candidate.starts_with(root),
+fn canonicalize_allowing_missing(path: &Path) -> Option<PathBuf> {
+    match fs::canonicalize(path) {
+        Ok(resolved) => Some(resolved),
+        Err(_) => {
+            let parent = path.parent()?;
+            let mut base = canonicalize_allowing_missing(parent)?;
+            let component = path.file_name()?.to_owned();
+            base.push(component);
+            Some(base)
+        }
     }
 }
 

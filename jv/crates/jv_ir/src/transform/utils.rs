@@ -100,6 +100,7 @@ fn convert_annotation_value(value: &AnnotationValue) -> IrAnnotationValue {
 pub(crate) fn extract_java_type(expr: &IrExpression) -> Option<JavaType> {
     match expr {
         IrExpression::Literal(literal, _) => Some(literal_to_java_type(literal)),
+        IrExpression::TextBlock { .. } => Some(JavaType::string()),
         IrExpression::RegexPattern { java_type, .. }
         | IrExpression::Identifier { java_type, .. }
         | IrExpression::MethodCall { java_type, .. }
@@ -111,6 +112,7 @@ pub(crate) fn extract_java_type(expr: &IrExpression) -> Option<JavaType> {
         | IrExpression::Conditional { java_type, .. }
         | IrExpression::Block { java_type, .. }
         | IrExpression::ObjectCreation { java_type, .. }
+        | IrExpression::TupleLiteral { java_type, .. }
         | IrExpression::Lambda { java_type, .. }
         | IrExpression::SequencePipeline { java_type, .. }
         | IrExpression::Switch { java_type, .. }
@@ -118,8 +120,10 @@ pub(crate) fn extract_java_type(expr: &IrExpression) -> Option<JavaType> {
         | IrExpression::CompletableFuture { java_type, .. }
         | IrExpression::VirtualThread { java_type, .. }
         | IrExpression::TryWithResources { java_type, .. }
+        | IrExpression::LogInvocation { java_type, .. }
         | IrExpression::This { java_type, .. }
-        | IrExpression::Super { java_type, .. } => Some(java_type.clone()),
+        | IrExpression::Super { java_type, .. }
+        | IrExpression::RegexCommand { java_type, .. } => Some(java_type.clone()),
         IrExpression::Cast { target_type, .. } => Some(target_type.clone()),
         IrExpression::InstanceOf { .. } => Some(JavaType::boolean()),
         IrExpression::ArrayCreation {
@@ -149,6 +153,7 @@ pub(crate) fn extract_java_type(expr: &IrExpression) -> Option<JavaType> {
 pub(crate) fn ir_expression_span(expr: &IrExpression) -> Span {
     match expr {
         IrExpression::Literal(_, span)
+        | IrExpression::TextBlock { span, .. }
         | IrExpression::RegexPattern { span, .. }
         | IrExpression::Identifier { span, .. }
         | IrExpression::MethodCall { span, .. }
@@ -161,6 +166,7 @@ pub(crate) fn ir_expression_span(expr: &IrExpression) -> Span {
         | IrExpression::Block { span, .. }
         | IrExpression::ArrayCreation { span, .. }
         | IrExpression::ObjectCreation { span, .. }
+        | IrExpression::TupleLiteral { span, .. }
         | IrExpression::Lambda { span, .. }
         | IrExpression::SequencePipeline { span, .. }
         | IrExpression::Switch { span, .. }
@@ -172,7 +178,9 @@ pub(crate) fn ir_expression_span(expr: &IrExpression) -> Span {
         | IrExpression::NullSafeOperation { span, .. }
         | IrExpression::CompletableFuture { span, .. }
         | IrExpression::VirtualThread { span, .. }
-        | IrExpression::TryWithResources { span, .. } => span.clone(),
+        | IrExpression::TryWithResources { span, .. }
+        | IrExpression::LogInvocation { span, .. }
+        | IrExpression::RegexCommand { span, .. } => span.clone(),
     }
 }
 
@@ -276,6 +284,7 @@ fn type_annotation_base_name(annotation: &TypeAnnotation) -> String {
         TypeAnnotation::Generic { name, .. } => simple_type_name(name),
         TypeAnnotation::Function { .. } => "Function".to_string(),
         TypeAnnotation::Array(inner) => format!("{}Array", type_annotation_base_name(inner)),
+        TypeAnnotation::Unit { base, .. } => type_annotation_base_name(base),
     }
 }
 
@@ -285,19 +294,8 @@ fn simple_type_name(name: &str) -> String {
 
 fn sanitize_type_identifier(raw: &str) -> String {
     let mut result = String::new();
-    let mut current = String::new();
-
-    for ch in raw.chars() {
-        if ch.is_alphanumeric() {
-            current.push(ch);
-        } else if !current.is_empty() {
-            push_component(&mut result, &current);
-            current.clear();
-        }
-    }
-
-    if !current.is_empty() {
-        push_component(&mut result, &current);
+    for component in identifier_components(raw) {
+        push_component(&mut result, &component);
     }
 
     if result.is_empty() {
@@ -314,6 +312,26 @@ fn sanitize_type_identifier(raw: &str) -> String {
     }
 
     result
+}
+
+pub(crate) fn identifier_components(raw: &str) -> Vec<String> {
+    let mut components = Vec::new();
+    let mut current = String::new();
+
+    for ch in raw.chars() {
+        if ch.is_alphanumeric() {
+            current.push(ch);
+        } else if !current.is_empty() {
+            components.push(current);
+            current = String::new();
+        }
+    }
+
+    if !current.is_empty() {
+        components.push(current);
+    }
+
+    components
 }
 
 fn push_component(result: &mut String, component: &str) {

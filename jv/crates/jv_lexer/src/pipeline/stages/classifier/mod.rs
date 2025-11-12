@@ -1,10 +1,10 @@
 use crate::{
+    LexError, TokenDiagnostic, TokenMetadata, TokenType,
     pipeline::{
         context::LexerContext,
         pipeline::ClassifierStage,
         types::{ClassifiedToken, EmissionPlan, NormalizedToken, RawTokenKind},
     },
-    LexError, TokenDiagnostic, TokenMetadata, TokenType,
 };
 
 mod comment;
@@ -15,6 +15,7 @@ mod number_literal;
 mod operator;
 mod regex_literal;
 mod string_interpolation;
+mod underscore;
 
 use comment::CommentModule;
 use json_detection::JsonDetectionModule;
@@ -24,6 +25,7 @@ use number_literal::NumberLiteralModule;
 use operator::OperatorModule;
 use regex_literal::RegexLiteralModule;
 use string_interpolation::StringInterpolationModule;
+use underscore::UnderscoreModule;
 
 /// 分類処理中に蓄積する中間状態。
 pub struct ClassificationState<'source> {
@@ -122,6 +124,7 @@ impl Classifier {
         Self {
             modules: vec![
                 Box::new(KeywordModule::new()),
+                Box::new(UnderscoreModule::new()),
                 Box::new(StringInterpolationModule::new()),
                 Box::new(JsonDetectionModule::new()),
                 Box::new(LayoutAnalysisModule::new()),
@@ -191,8 +194,9 @@ mod tests {
     use super::*;
     use crate::pipeline::types::{EmissionPlan, PreMetadata, RawToken, Span};
     use crate::{
-        JsonConfidence, LayoutCommaMetadata, LayoutSequenceKind, StringDelimiterKind,
-        StringInterpolationSegment, StringLiteralMetadata, TokenMetadata,
+        InvalidImplicitParamReason, JsonConfidence, LayoutCommaMetadata, LayoutSequenceKind,
+        StringDelimiterKind, StringInterpolationSegment, StringLiteralMetadata, TokenDiagnostic,
+        TokenMetadata,
     };
 
     fn make_raw_token(kind: RawTokenKind, text: &str) -> RawToken<'static> {
@@ -203,6 +207,8 @@ mod tests {
             span: Span::empty(Default::default()),
             trivia: None,
             carry_over: None,
+            field_label: None,
+            field_label_issue: None,
         }
     }
 
@@ -243,6 +249,57 @@ mod tests {
         assert!(
             matches!(classified.token_type, TokenType::Identifier(ref value) if value == "custom")
         );
+    }
+
+    #[test]
+    fn classifier_classifies_wildcard_underscore() {
+        let mut classifier = Classifier::new();
+        let raw = make_raw_token(RawTokenKind::Identifier, "_");
+        let token = NormalizedToken::new(raw.clone(), "_".to_string(), PreMetadata::default());
+        let mut ctx = build_context("_");
+
+        let classified = classifier.classify(token, &mut ctx).unwrap();
+        assert!(matches!(classified.token_type, TokenType::Underscore));
+        assert!(classified.metadata.iter().any(|meta| matches!(
+            meta,
+            TokenMetadata::UnderscoreInfo(info)
+            if !info.is_implicit && info.number.is_none()
+        )));
+    }
+
+    #[test]
+    fn classifier_classifies_implicit_parameter() {
+        let mut classifier = Classifier::new();
+        let raw = make_raw_token(RawTokenKind::Identifier, "_7");
+        let token = NormalizedToken::new(raw.clone(), "_7".to_string(), PreMetadata::default());
+        let mut ctx = build_context("_7");
+
+        let classified = classifier.classify(token, &mut ctx).unwrap();
+        assert!(matches!(classified.token_type, TokenType::ImplicitParam(7)));
+        assert!(classified.metadata.iter().any(|meta| matches!(
+            meta,
+            TokenMetadata::UnderscoreInfo(info)
+            if info.is_implicit && info.number == Some(7)
+        )));
+    }
+
+    #[test]
+    fn classifier_reports_invalid_implicit_parameter() {
+        let mut classifier = Classifier::new();
+        let raw = make_raw_token(RawTokenKind::Identifier, "_0");
+        let token = NormalizedToken::new(raw.clone(), "_0".to_string(), PreMetadata::default());
+        let mut ctx = build_context("_0");
+
+        let classified = classifier.classify(token, &mut ctx).unwrap();
+        assert!(matches!(classified.token_type, TokenType::Invalid(value) if value == "_0"));
+        assert_eq!(classified.diagnostics.len(), 1);
+        match &classified.diagnostics[0] {
+            TokenDiagnostic::InvalidImplicitParam { reason, suggested } => {
+                assert_eq!(*reason, InvalidImplicitParamReason::LeadingZero);
+                assert_eq!(suggested.as_deref(), Some("_1"));
+            }
+            other => panic!("unexpected diagnostic: {other:?}"),
+        }
     }
 
     #[test]
@@ -323,10 +380,12 @@ mod tests {
             classified.token_type,
             TokenType::StringInterpolation(ref value) if value == "Hello ${name}!"
         ));
-        assert!(classified
-            .metadata
-            .iter()
-            .any(|meta| matches!(meta, TokenMetadata::StringInterpolation { .. })));
+        assert!(
+            classified
+                .metadata
+                .iter()
+                .any(|meta| matches!(meta, TokenMetadata::StringInterpolation { .. }))
+        );
         match &classified.emission_plan {
             EmissionPlan::StringInterpolation { segments } => {
                 assert_eq!(segments.len(), 3);
@@ -372,10 +431,12 @@ mod tests {
 
         let classified = classifier.classify(token, &mut ctx).unwrap();
         assert!(matches!(classified.token_type, TokenType::LayoutComma));
-        assert!(classified
-            .metadata
-            .iter()
-            .any(|meta| matches!(meta, TokenMetadata::LayoutComma(_))));
+        assert!(
+            classified
+                .metadata
+                .iter()
+                .any(|meta| matches!(meta, TokenMetadata::LayoutComma(_)))
+        );
     }
 
     #[test]

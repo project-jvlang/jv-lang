@@ -43,9 +43,17 @@ impl JavaCodeGenerator {
                     parts.push(type_str);
                     parts.push(name.clone());
                     let mut line = parts.join(" ");
+                    let rendered_initializer = if let Some(expr) = initializer {
+                        Some(
+                            self.try_render_destructure_component(expr)?
+                                .unwrap_or(self.generate_expression(expr)?),
+                        )
+                    } else {
+                        None
+                    };
                     line.push_str(" = new AtomicReference<>(");
-                    if let Some(expr) = initializer {
-                        line.push_str(&self.generate_expression(expr)?);
+                    if let Some(expr) = rendered_initializer {
+                        line.push_str(&expr);
                     }
                     line.push_str(");");
                     line
@@ -59,8 +67,11 @@ impl JavaCodeGenerator {
                     parts.push(name.clone());
                     let mut line = parts.join(" ");
                     if let Some(expr) = initializer {
+                        let rendered = self
+                            .try_render_destructure_component(expr)?
+                            .unwrap_or(self.generate_expression(expr)?);
                         line.push_str(" = ");
-                        line.push_str(&self.generate_expression(expr)?);
+                        line.push_str(&rendered);
                     }
                     line.push(';');
                     line
@@ -100,7 +111,18 @@ impl JavaCodeGenerator {
                     line.push_str(&self.generate_expression(expr)?);
                 }
                 line.push(';');
-                line
+                if !modifiers.annotations.is_empty() {
+                    let mut builder = self.builder();
+                    for annotation in &modifiers.annotations {
+                        // Ensure imports are registered for qualified annotations
+                        self.register_annotation_imports(annotation);
+                        builder.push_line(&self.format_annotation(annotation));
+                    }
+                    builder.push_line(&line);
+                    builder.build()
+                } else {
+                    line
+                }
             }
             IrStatement::MethodDeclaration { .. } => self.generate_method(stmt)?,
             IrStatement::ClassDeclaration { .. } => self.generate_class(stmt)?,
@@ -118,11 +140,21 @@ impl JavaCodeGenerator {
                 builder.build()
             }
             IrStatement::Expression { expr, .. } => {
-                let mut line = self.generate_expression(expr)?;
-                if !line.ends_with(';') {
-                    line.push(';');
+                if let IrExpression::LogInvocation { plan, .. } = expr {
+                    self.generate_log_invocation(plan)?
+                } else if let Some(rendered) = self.try_render_destructure_expression(expr)? {
+                    let mut line = rendered;
+                    if !line.ends_with(';') {
+                        line.push(';');
+                    }
+                    line
+                } else {
+                    let mut line = self.generate_expression(expr)?;
+                    if !line.ends_with(';') {
+                        line.push(';');
+                    }
+                    line
                 }
-                line
             }
             IrStatement::Return { value, .. } => match value {
                 Some(expr) => {

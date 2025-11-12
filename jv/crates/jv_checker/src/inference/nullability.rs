@@ -7,8 +7,9 @@
 use crate::CheckError;
 use jv_ast::types::Span;
 use jv_ast::{
-    expression::Argument, BinaryOp, Expression, Literal, Program, Statement, TypeAnnotation,
-    UnaryOp,
+    BinaryOp, Expression, Literal, LogBlock, LogItem, Program, Statement, TypeAnnotation, UnaryOp,
+    expression::Argument,
+    statement::{UnitTypeDefinition, UnitTypeMember},
 };
 use std::collections::HashMap;
 
@@ -234,6 +235,11 @@ impl NullabilityAnalyzer {
                 }
                 None
             }
+            Statement::UnitTypeDefinition(definition) => {
+                self.visit_unit_definition(definition);
+                None
+            }
+            Statement::TestDeclaration(_) => None,
             Statement::DataClassDeclaration { .. }
             | Statement::Import { .. }
             | Statement::Package { .. }
@@ -244,10 +250,32 @@ impl NullabilityAnalyzer {
         }
     }
 
+    fn visit_unit_definition(&mut self, definition: &UnitTypeDefinition) {
+        for member in &definition.members {
+            match member {
+                UnitTypeMember::Dependency(dependency) => {
+                    if let Some(expr) = dependency.value.as_ref() {
+                        self.evaluate_expression(expr);
+                    }
+                }
+                UnitTypeMember::Conversion(block) => {
+                    for statement in &block.body {
+                        self.visit_statement(statement);
+                    }
+                }
+                UnitTypeMember::NestedStatement(statement) => {
+                    self.visit_statement(statement);
+                }
+            }
+        }
+    }
+
     fn evaluate_expression(&mut self, expr: &Expression) -> Nullability {
         match expr {
+            Expression::RegexCommand(_) => Nullability::Unknown,
             Expression::RegexLiteral(_) => Nullability::NonNull,
             Expression::Literal(literal, _) => Nullability::from_literal(literal),
+            Expression::UnitLiteral { value, .. } => self.evaluate_expression(value),
             Expression::Identifier(name, _) => self.lookup(name),
             Expression::Binary {
                 left, op, right, ..
@@ -300,6 +328,7 @@ impl NullabilityAnalyzer {
                 }
                 Nullability::NonNull
             }
+            Expression::LogBlock(block) => self.evaluate_log_block(block),
             Expression::When {
                 expr: scrutinee,
                 arms,
@@ -355,6 +384,12 @@ impl NullabilityAnalyzer {
                 }
                 Nullability::NonNull
             }
+            Expression::Tuple { elements, .. } => {
+                for element in elements {
+                    self.evaluate_expression(element);
+                }
+                Nullability::NonNull
+            }
             Expression::Lambda {
                 body, parameters, ..
             } => {
@@ -393,6 +428,23 @@ impl NullabilityAnalyzer {
         }
     }
 
+    fn evaluate_log_block(&mut self, block: &LogBlock) -> Nullability {
+        for item in &block.items {
+            match item {
+                LogItem::Statement(statement) => {
+                    let _ = self.visit_statement(statement);
+                }
+                LogItem::Expression(expr) => {
+                    let _ = self.evaluate_expression(expr);
+                }
+                LogItem::Nested(nested) => {
+                    let _ = self.evaluate_log_block(nested);
+                }
+            }
+        }
+        Nullability::NonNull
+    }
+
     fn evaluate_binary(
         &mut self,
         op: &BinaryOp,
@@ -427,7 +479,12 @@ impl NullabilityAnalyzer {
         if matches!(expected, Nullability::NonNull) && matches!(value, Nullability::Optional) {
             let message = format!(
                 "JV3002: 行 {} 列 {} の変数 `{}` は non-null と宣言されていますが Optional な値が代入されています。`?.` や `!!` で明示的に処理してください。\nJV3002: Variable `{}` at line {} column {} is declared non-null but receives an optional value. Handle the optional explicitly using `?.` or `!!`.",
-                span.start_line, span.start_column, subject, subject, span.start_line, span.start_column
+                span.start_line,
+                span.start_column,
+                subject,
+                subject,
+                span.start_line,
+                span.start_column
             );
             self.errors.push(CheckError::NullSafetyError(message));
             Nullability::NonNull
@@ -483,8 +540,9 @@ impl NullabilityAnalyzer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use jv_ast::types::{Modifiers, Visibility};
+    use jv_ast::BinaryMetadata;
     use jv_ast::ValBindingOrigin;
+    use jv_ast::types::{Modifiers, Visibility};
 
     fn span() -> Span {
         Span::new(1, 1, 1, 5)
@@ -553,6 +611,7 @@ mod tests {
             op: BinaryOp::Elvis,
             right: Box::new(Expression::Literal(Literal::Number("0".into()), span())),
             span: span(),
+            metadata: BinaryMetadata::default(),
         };
 
         let program = program_with(vec![

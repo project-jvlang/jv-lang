@@ -88,6 +88,7 @@ fn is_ignorable_between_when_and_brace(token_type: &TokenType) -> bool {
         TokenType::LineComment(_)
             | TokenType::BlockComment(_)
             | TokenType::JavaDocComment(_)
+            | TokenType::FieldNameLabel(_)
             | TokenType::Whitespace(_)
             | TokenType::Newline
             | TokenType::LayoutComma
@@ -115,9 +116,11 @@ mod tests {
         ]);
 
         assert!(matches!(events.as_slice(), [WhenTrackerEvent::None, ..]));
-        assert!(events
-            .last()
-            .is_some_and(|event| *event == WhenTrackerEvent::EnterBlock));
+        assert!(
+            events
+                .last()
+                .is_some_and(|event| *event == WhenTrackerEvent::EnterBlock)
+        );
     }
 
     #[test]
@@ -132,9 +135,11 @@ mod tests {
             TokenType::LeftBrace,
         ]);
 
-        assert!(events
-            .last()
-            .is_some_and(|event| *event == WhenTrackerEvent::EnterBlock));
+        assert!(
+            events
+                .last()
+                .is_some_and(|event| *event == WhenTrackerEvent::EnterBlock)
+        );
     }
 
     #[test]

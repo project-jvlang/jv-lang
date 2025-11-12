@@ -1,9 +1,9 @@
 // jv_ast/types - Basic types, operators, and position information
-use crate::annotation::Annotation;
+use crate::{annotation::Annotation, expression::RegexTemplateSegment};
 use serde::{Deserialize, Serialize};
 
 /// Position information for AST nodes
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct Span {
     pub start_line: usize,
     pub start_column: usize,
@@ -26,6 +26,19 @@ impl Span {
     }
 }
 
+/// 単位名・表記に関するメタデータ。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct UnitSymbol {
+    /// 単位名（例: `"m"`, `"USD"`, `"[°C]"`）。
+    pub name: String,
+    /// 角括弧で囲まれているか。
+    pub is_bracketed: bool,
+    /// デフォルト単位マーカー（`!`）が付いているか。
+    pub has_default_marker: bool,
+    /// ソース上の位置。
+    pub span: Span,
+}
+
 /// Regex literal metadata capturing both the normalized pattern and raw source text.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RegexLiteral {
@@ -34,6 +47,12 @@ pub struct RegexLiteral {
     /// Raw literal text including delimiters as it appeared in source.
     pub raw: String,
     pub span: Span,
+    #[serde(default)]
+    pub origin: Option<PatternOrigin>,
+    #[serde(default)]
+    pub const_key: Option<PatternConstKey>,
+    #[serde(default)]
+    pub template_segments: Vec<RegexTemplateSegment>,
 }
 
 /// Literal values
@@ -45,6 +64,61 @@ pub enum Literal {
     Null,
     Character(char),
     Regex(RegexLiteral),
+}
+
+/// 正規表現の定数化キー（SHA-256の下位128bitとプレビュー）。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PatternConstKey {
+    pub hash: [u8; 16],
+    pub preview: String,
+}
+
+impl PatternConstKey {
+    pub fn new(hash: [u8; 16], preview: impl Into<String>) -> Self {
+        Self {
+            hash,
+            preview: preview.into(),
+        }
+    }
+}
+
+/// 正規表現の生成元を示す。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PatternOriginKind {
+    RegexLiteral,
+    RegexCommand,
+}
+
+/// 正規表現の生成元メタデータ。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PatternOrigin {
+    pub kind: PatternOriginKind,
+    #[serde(default)]
+    pub expr_id: Option<u64>,
+    pub span: Span,
+}
+
+impl PatternOrigin {
+    pub fn literal(span: Span) -> Self {
+        Self {
+            kind: PatternOriginKind::RegexLiteral,
+            expr_id: None,
+            span,
+        }
+    }
+
+    pub fn command(span: Span) -> Self {
+        Self {
+            kind: PatternOriginKind::RegexCommand,
+            expr_id: None,
+            span,
+        }
+    }
+
+    pub fn with_expr_id(mut self, expr_id: u64) -> Self {
+        self.expr_id = Some(expr_id);
+        self
+    }
 }
 
 /// Binary operators
@@ -107,6 +181,73 @@ pub enum TypeAnnotation {
         return_type: Box<TypeAnnotation>,
     },
     Array(Box<TypeAnnotation>),
+    /// 単位付き型注釈。
+    Unit {
+        /// 基底となる型注釈。
+        base: Box<TypeAnnotation>,
+        /// 付随する単位情報。
+        unit: UnitSymbol,
+        /// `@` を省略した暗黙スタイルか。
+        implicit: bool,
+    },
+}
+
+/// Tuple 型注釈の各要素を表すメタデータ。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TupleTypeElement {
+    /// 要素の型注釈。
+    pub ty: TypeAnnotation,
+    /// ソースにおける要素位置。
+    #[serde(default)]
+    pub span: Option<Span>,
+}
+
+impl TupleTypeElement {
+    /// 指定された型とスパンで新しい要素メタデータを生成する。
+    pub fn new(ty: TypeAnnotation, span: Option<Span>) -> Self {
+        Self { ty, span }
+    }
+}
+
+/// Tuple 型注釈全体を表す記述子。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TupleTypeDescriptor {
+    /// 要素数。
+    pub arity: usize,
+    /// 宣言順に並んだ要素メタデータ。
+    #[serde(default)]
+    pub elements: Vec<TupleTypeElement>,
+    /// `(A B C)` 全体のスパン。
+    #[serde(default)]
+    pub annotation_span: Option<Span>,
+}
+
+impl TupleTypeDescriptor {
+    /// 要素列とスパンから記述子を生成する。
+    pub fn new(elements: Vec<TupleTypeElement>, annotation_span: Option<Span>) -> Self {
+        let arity = elements.len();
+        Self {
+            arity,
+            elements,
+            annotation_span,
+        }
+    }
+
+    /// 要素を差し替えつつ要素数を同期する。
+    pub fn set_elements(&mut self, elements: Vec<TupleTypeElement>) {
+        self.arity = elements.len();
+        self.elements = elements;
+    }
+
+    /// 要素数を返す。
+    pub fn arity(&self) -> usize {
+        self.arity
+    }
+
+    /// 空タプルか判定する。
+    pub fn is_empty(&self) -> bool {
+        self.arity == 0
+    }
 }
 
 /// Variance marker used by generic parameters (`out T` / `in T`).

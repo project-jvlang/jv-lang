@@ -6,8 +6,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use jv_cli::pipeline::project::{
     layout::ProjectLayout, locator::ProjectLocator, manifest::ManifestLoader,
 };
-use jv_cli::pipeline::{compile, BuildOptionsFactory, CliOverrides, OutputManager};
-use jv_pm::JavaTarget;
+use jv_cli::pipeline::{BuildOptionsFactory, CliOverrides, OutputManager, compile};
+use jv_pm::{JavaTarget, LoggingConfigLayer};
 
 const SAMPLE_MAIN: &str = r#"
 val message = "integration"
@@ -17,6 +17,16 @@ const SAMPLE_HELPER: &str = r#"
 fun helper(value: Int): Int {
     value + 1
 }
+"#;
+
+const UNIT_MAIN: &str = r#"
+@ 長さ(Double) m! {
+    基準 := 1
+    @Conversion {}
+}
+
+val 歩行距離 = 1250 @ m
+val 室温: Double@[K] = 298.15
 "#;
 
 struct TempDirGuard {
@@ -155,6 +165,13 @@ fn project_pipeline_supports_multi_target_builds() {
         parallel_inference: false,
         inference_workers: None,
         constraint_batch: None,
+        // APT defaults
+        apt_enabled: false,
+        apt_processors: None,
+        apt_processorpath: None,
+        apt_options: Vec::new(),
+        logging_cli: LoggingConfigLayer::default(),
+        logging_env: LoggingConfigLayer::default(),
     };
 
     let plan21 = BuildOptionsFactory::compose(
@@ -193,6 +210,12 @@ fn project_pipeline_supports_multi_target_builds() {
         parallel_inference: false,
         inference_workers: None,
         constraint_batch: None,
+        apt_enabled: false,
+        apt_processors: None,
+        apt_processorpath: None,
+        apt_options: Vec::new(),
+        logging_cli: LoggingConfigLayer::default(),
+        logging_env: LoggingConfigLayer::default(),
     };
 
     let plan25 = BuildOptionsFactory::compose(project_root, settings, layout, overrides25)
@@ -243,6 +266,12 @@ fn clean_option_removes_stale_target_artifacts() {
         parallel_inference: false,
         inference_workers: None,
         constraint_batch: None,
+        apt_enabled: false,
+        apt_processors: None,
+        apt_processorpath: None,
+        apt_options: Vec::new(),
+        logging_cli: LoggingConfigLayer::default(),
+        logging_env: LoggingConfigLayer::default(),
     };
 
     let plan_initial = BuildOptionsFactory::compose(
@@ -275,4 +304,66 @@ fn clean_option_removes_stale_target_artifacts() {
     let artifacts_clean = compile(prepared_clean.plan()).expect("clean compile");
     assert!(!artifacts_clean.java_files.is_empty());
     prepared_clean.mark_success();
+}
+
+#[test]
+fn project_pipeline_builds_unit_syntax_sources() {
+    let fixture = TempDirGuard::new("unit-syntax").expect("temp dir");
+    let root = fixture.path();
+    write_manifest(root);
+    fs::create_dir_all(root.join("src/app")).expect("src/app directory");
+    fs::write(root.join("src/app/main.jv"), UNIT_MAIN).expect("unit syntax source");
+
+    let project_root = ProjectLocator::new()
+        .locate(root.join("src/app"))
+        .expect("project root detected");
+    let manifest_path = project_root.manifest_path().to_path_buf();
+    let settings = ManifestLoader::load(&manifest_path).expect("manifest loads");
+    let layout = ProjectLayout::from_settings(&project_root, &settings).expect("layout builds");
+
+    let overrides = CliOverrides {
+        entrypoint: None,
+        output: Some(project_root.join("dist")),
+        java_only: true,
+        check: true,
+        format: false,
+        target: Some(JavaTarget::Java25),
+        clean: false,
+        perf: false,
+        emit_types: false,
+        verbose: false,
+        emit_telemetry: false,
+        parallel_inference: false,
+        inference_workers: None,
+        constraint_batch: None,
+        apt_enabled: false,
+        apt_processors: None,
+        apt_processorpath: None,
+        apt_options: Vec::new(),
+        logging_cli: LoggingConfigLayer::default(),
+        logging_env: LoggingConfigLayer::default(),
+    };
+
+    let plan = BuildOptionsFactory::compose(project_root.clone(), settings, layout, overrides)
+        .expect("plan builds");
+
+    let mut prepared = OutputManager::prepare(plan).expect("output prepared");
+    let artifacts = compile(prepared.plan()).expect("compile succeeds");
+    prepared.mark_success();
+
+    assert!(
+        !artifacts.java_files.is_empty(),
+        "ユニット構文を含むソースから Java ファイルが生成されませんでした"
+    );
+    assert!(
+        artifacts
+            .warnings
+            .iter()
+            .all(|warning| !warning.contains("JV_UNIT")),
+        "ユニット構文に関する警告が想定外に出力されました: {:?}",
+        artifacts.warnings
+    );
+}
+mod jv_pm_phase2_e2e {
+    include!("../../../../tests/e2e/jv_pm_phase2_e2e.rs");
 }

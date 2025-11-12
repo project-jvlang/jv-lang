@@ -10,16 +10,19 @@ use crate::inference::environment::{TypeEnvironment, TypeScheme};
 use crate::inference::extensions::ExtensionRegistry;
 use crate::inference::imports::ImportRegistry;
 use crate::inference::iteration::{
-    classify_loop, expression_can_yield_iterable, LoopClassification,
+    LoopClassification, classify_loop, expression_can_yield_iterable,
 };
 use crate::inference::type_factory::TypeFactory;
+use crate::inference::type_parser;
 use crate::inference::types::{PrimitiveType, TypeError, TypeId, TypeKind};
 use crate::pattern::{
     NarrowedBinding, NarrowedNullability, NarrowingSnapshot, PatternMatchService, PatternTarget,
 };
 use jv_ast::{
-    Argument, BinaryOp, Expression, ForInStatement, Literal, Parameter, Program, Span, Statement,
+    Argument, BinaryOp, BindingPatternKind, Expression, ForInStatement, Literal, LogBlock, LogItem,
+    Parameter, Program, RegexCommand, RegexCommandMode, RegexReplacement, Span, Statement,
     TypeAnnotation, UnaryOp,
+    statement::{TestDeclaration, UnitTypeDefinition, UnitTypeMember},
 };
 use jv_inference::types::NullabilityFlag;
 use std::collections::HashMap;
@@ -178,8 +181,63 @@ impl<'env, 'ext, 'imp> ConstraintGenerator<'env, 'ext, 'imp> {
 
                 self.env.leave_scope();
             }
+            Statement::TestDeclaration(TestDeclaration {
+                parameters, body, ..
+            }) => {
+                self.env.enter_scope();
+                for parameter in parameters {
+                    let ty = parameter
+                        .type_annotation
+                        .as_ref()
+                        .map(|ann| self.type_from_annotation(ann))
+                        .unwrap_or_else(|| self.env.fresh_type_variable());
+                    self.bind_test_parameter_pattern(&parameter.pattern, ty);
+                }
+
+                self.infer_expression(body);
+                self.env.leave_scope();
+            }
+            Statement::UnitTypeDefinition(definition) => {
+                self.visit_unit_definition(definition);
+            }
             _ => {
                 // そのほかの文でも子ノードを可能な範囲で評価しておく。
+            }
+        }
+    }
+
+    fn bind_test_parameter_pattern(&mut self, pattern: &BindingPatternKind, ty: TypeKind) {
+        match pattern {
+            BindingPatternKind::Identifier { name, .. } => {
+                self.env
+                    .define_scheme(name, TypeScheme::monotype(ty.clone()));
+            }
+            BindingPatternKind::Tuple { elements, .. }
+            | BindingPatternKind::List { elements, .. } => {
+                for element in elements {
+                    self.bind_test_parameter_pattern(element, ty.clone());
+                }
+            }
+            BindingPatternKind::Wildcard { .. } => {}
+        }
+    }
+
+    fn visit_unit_definition(&mut self, definition: &UnitTypeDefinition) {
+        for member in &definition.members {
+            match member {
+                UnitTypeMember::Dependency(dependency) => {
+                    if let Some(expr) = dependency.value.as_ref() {
+                        self.infer_expression(expr);
+                    }
+                }
+                UnitTypeMember::Conversion(block) => {
+                    for statement in &block.body {
+                        self.visit_statement(statement);
+                    }
+                }
+                UnitTypeMember::NestedStatement(statement) => {
+                    self.visit_statement(statement);
+                }
             }
         }
     }
@@ -272,8 +330,10 @@ impl<'env, 'ext, 'imp> ConstraintGenerator<'env, 'ext, 'imp> {
 
     fn infer_expression(&mut self, expr: &Expression) -> TypeKind {
         match expr {
+            Expression::RegexCommand(command) => self.infer_regex_command(command),
             Expression::RegexLiteral(_) => TypeKind::reference("java.util.regex.Pattern"),
             Expression::Literal(literal, _) => self.type_from_literal(literal),
+            Expression::UnitLiteral { value, .. } => self.infer_expression(value),
             Expression::Identifier(name, _) => {
                 if let Some(scheme) = self.env.lookup(name).cloned() {
                     self.env.instantiate(&scheme)
@@ -312,6 +372,7 @@ impl<'env, 'ext, 'imp> ConstraintGenerator<'env, 'ext, 'imp> {
                 self.type_from_annotation(target)
             }
             Expression::Block { statements, .. } => self.infer_block(statements),
+            Expression::LogBlock(block) => self.infer_log_block(block),
             Expression::If {
                 condition,
                 then_branch,
@@ -358,6 +419,14 @@ impl<'env, 'ext, 'imp> ConstraintGenerator<'env, 'ext, 'imp> {
                     self.infer_expression(element);
                 }
                 TypeKind::Unknown
+            }
+            Expression::Tuple { elements, .. } => {
+                let mut element_types = Vec::with_capacity(elements.len());
+                for element in elements {
+                    let ty = self.infer_expression(element);
+                    element_types.push(ty);
+                }
+                TypeKind::tuple(element_types)
             }
             Expression::Lambda {
                 parameters, body, ..
@@ -618,6 +687,88 @@ impl<'env, 'ext, 'imp> ConstraintGenerator<'env, 'ext, 'imp> {
         last
     }
 
+    fn infer_log_block(&mut self, block: &LogBlock) -> TypeKind {
+        self.env.enter_scope();
+        for item in &block.items {
+            match item {
+                LogItem::Statement(statement) => self.visit_statement(statement),
+                LogItem::Expression(expr) => {
+                    let _ = self.infer_expression(expr);
+                }
+                LogItem::Nested(nested) => {
+                    let _ = self.infer_log_block(nested);
+                }
+            }
+        }
+        self.env.leave_scope();
+        TypeKind::reference("Unit")
+    }
+
+    fn infer_regex_command(&mut self, command: &RegexCommand) -> TypeKind {
+        let _subject_ty = self.infer_expression(&command.subject);
+
+        if let Some(replacement) = &command.replacement {
+            self.verify_regex_replacement(replacement);
+        }
+
+        self.resolve_regex_command_return_type(command.mode, command.replacement.is_some())
+    }
+
+    fn resolve_regex_command_return_type(
+        &self,
+        mode: RegexCommandMode,
+        has_replacement: bool,
+    ) -> TypeKind {
+        match mode {
+            RegexCommandMode::All | RegexCommandMode::First => {
+                TypeKind::reference("java.lang.String")
+            }
+            RegexCommandMode::Match => TypeKind::boxed(PrimitiveType::Boolean),
+            RegexCommandMode::Split => TypeKind::reference("java.lang.String[]"),
+            RegexCommandMode::Iterate => {
+                if has_replacement {
+                    TypeKind::reference("java.lang.String")
+                } else {
+                    TypeKind::reference("java.util.stream.Stream")
+                }
+            }
+        }
+    }
+
+    fn verify_regex_replacement(&mut self, replacement: &RegexReplacement) {
+        match replacement {
+            RegexReplacement::Literal(_) => {}
+            RegexReplacement::Expression(expr) => {
+                let expr_ty = self.infer_expression(expr);
+                let expected = TypeKind::reference("java.lang.String");
+                self.push_constraint(
+                    ConstraintKind::Equal(expected, expr_ty),
+                    Some("regex replacement must produce String"),
+                );
+            }
+            RegexReplacement::Lambda(lambda) => {
+                self.env.enter_scope();
+                for param in &lambda.params {
+                    let ty = param
+                        .type_annotation
+                        .as_ref()
+                        .map(|ann| self.type_from_annotation(ann))
+                        .unwrap_or_else(|| TypeKind::reference("java.util.regex.MatchResult"));
+                    self.env
+                        .define_scheme(param.name.clone(), TypeScheme::monotype(ty));
+                }
+                let body_ty = self.infer_expression(&lambda.body);
+                self.env.leave_scope();
+
+                let expected = TypeKind::reference("java.lang.String");
+                self.push_constraint(
+                    ConstraintKind::Equal(expected, body_ty),
+                    Some("regex replacement lambda must return String"),
+                );
+            }
+        }
+    }
+
     fn infer_binary_expression(
         &mut self,
         op: &BinaryOp,
@@ -754,30 +905,7 @@ impl<'env, 'ext, 'imp> ConstraintGenerator<'env, 'ext, 'imp> {
     }
 
     fn type_from_annotation(&mut self, annotation: &TypeAnnotation) -> TypeKind {
-        match annotation {
-            TypeAnnotation::Simple(name) => self.type_from_identifier(name),
-            TypeAnnotation::Generic { name, .. } => self.type_from_identifier(name),
-            TypeAnnotation::Nullable(inner) => {
-                let inner_ty = self.type_from_annotation(inner);
-                TypeKind::optional(inner_ty)
-            }
-            TypeAnnotation::Function {
-                params,
-                return_type,
-            } => {
-                let param_types = params
-                    .iter()
-                    .map(|ann| self.type_from_annotation(ann))
-                    .collect();
-                let ret_ty = self.type_from_annotation(return_type.as_ref());
-                TypeKind::function(param_types, ret_ty)
-            }
-            _ => TypeKind::Unknown,
-        }
-    }
-
-    fn type_from_identifier(&mut self, identifier: &str) -> TypeKind {
-        match TypeFactory::from_annotation(identifier) {
+        match type_parser::parse_type_annotation(annotation) {
             Ok(kind) => kind,
             Err(error) => {
                 self.report_type_error(error);
@@ -840,6 +968,11 @@ impl<'env, 'ext, 'imp> ConstraintGenerator<'env, 'ext, 'imp> {
                 }
                 self.record_type_vars(result);
             }
+            TypeKind::Tuple(elements) => {
+                for element in elements {
+                    self.record_type_vars(element);
+                }
+            }
             TypeKind::Primitive(_)
             | TypeKind::Boxed(_)
             | TypeKind::Reference(_)
@@ -881,7 +1014,8 @@ fn nullability_from_type(ty: &TypeKind) -> NullabilityFlag {
         TypeKind::Primitive(_)
         | TypeKind::Boxed(_)
         | TypeKind::Reference(_)
-        | TypeKind::Function(_, _) => NullabilityFlag::NonNull,
+        | TypeKind::Function(_, _)
+        | TypeKind::Tuple(_) => NullabilityFlag::NonNull,
     }
 }
 
@@ -895,7 +1029,7 @@ fn ensure_optional_type(ty: TypeKind) -> TypeKind {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use jv_ast::{Modifiers, Pattern, Span, ValBindingOrigin, WhenArm};
+    use jv_ast::{BinaryMetadata, Modifiers, Pattern, Span, ValBindingOrigin, WhenArm};
     use jv_parser_frontend::ParserPipeline;
     use jv_parser_rowan::frontend::RowanPipeline;
 
@@ -986,6 +1120,7 @@ mod tests {
                             span.clone(),
                         )),
                         span: span.clone(),
+                        metadata: BinaryMetadata::default(),
                     },
                     modifiers: default_modifiers(),
                     origin: ValBindingOrigin::ExplicitKeyword,

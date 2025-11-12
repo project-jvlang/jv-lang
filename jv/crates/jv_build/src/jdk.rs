@@ -264,34 +264,33 @@ fn interpret_version_token(token: &str) -> Option<u32> {
 }
 
 fn javac_executable() -> &'static str {
-    if cfg!(windows) {
-        "javac.exe"
-    } else {
-        "javac"
-    }
+    if cfg!(windows) { "javac.exe" } else { "javac" }
 }
 
 fn java_executable() -> &'static str {
-    if cfg!(windows) {
-        "java.exe"
-    } else {
-        "java"
-    }
+    if cfg!(windows) { "java.exe" } else { "java" }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{BuildConfig, BuildSystem};
+    use std::env;
     use std::ffi::OsString;
-    use std::path::{Path, PathBuf};
+    use std::path::Path;
     use std::sync::Mutex;
-    use std::time::{SystemTime, UNIX_EPOCH};
-    use std::{env, fs};
 
     #[cfg(unix)]
+    use crate::{BuildConfig, BuildSystem};
+    #[cfg(unix)]
+    use std::fs;
+    #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
+    #[cfg(unix)]
+    use std::path::PathBuf;
+    #[cfg(unix)]
+    use std::time::{SystemTime, UNIX_EPOCH};
 
+    #[cfg(unix)]
     static ENV_MUTEX: Mutex<()> = Mutex::new(());
 
     #[test]
@@ -375,7 +374,12 @@ Java(TM) SE Runtime Environment"#;
 
         fn set_os(key: &'static str, value: &std::ffi::OsStr) -> Self {
             let original = env::var_os(key);
-            unsafe { env::set_var(key, value); }
+            // SAFETY: テスト環境内でプロセス環境変数を一時的に上書きする用途のため、
+            // 同期ミューテックスで保護した上で安全に呼び出す。
+            unsafe {
+                // SAFETY: `set_var` simply sets process env; inputs are well-formed `OsStr`.
+                env::set_var(key, value);
+            }
             Self { key, original }
         }
     }
@@ -383,9 +387,15 @@ Java(TM) SE Runtime Environment"#;
     impl Drop for EnvVarGuard {
         fn drop(&mut self) {
             if let Some(value) = self.original.take() {
-                unsafe { env::set_var(self.key, value); }
+                unsafe {
+                    // SAFETY: restoring previously captured value.
+                    env::set_var(self.key, value);
+                }
             } else {
-                unsafe { env::remove_var(self.key); }
+                unsafe {
+                    // SAFETY: removing variable for current process; no aliases retained.
+                    env::remove_var(self.key);
+                }
             }
         }
     }

@@ -1,0 +1,18 @@
+description = "Return statements keep parsing when expressions in verification fixtures"
+source = "../fixtures/when_return_expression.jv"
+
+[expect]
+statement_count = 2
+
+[[expect.statements]]
+index = 0
+kind = "package"
+name = "fixtures.control"
+
+[[expect.statements]]
+index = 1
+kind = "function_declaration"
+name = "evaluate"
+
+  [expect.statements.block]
+  statement_kinds = ["return_statement"]

@@ -1,14 +1,15 @@
 use std::collections::VecDeque;
 
 use crate::{
+    CommentCarryOverMetadata, FieldNameLabelCandidate, FieldNameLabelErrorKind,
+    FieldNameLabelIssue, FieldNameLabelKind, JsonCommentTrivia, JsonCommentTriviaKind, LexError,
+    SourceCommentKind, SourceCommentTrivia, TokenTrivia, TokenType,
     pipeline::{
         context::LexerContext,
         pipeline::CharScannerStage,
         pipeline::DEFAULT_LOOKAHEAD_LIMIT,
         types::{RawToken, RawTokenKind, ScannerPosition, Span},
     },
-    CommentCarryOverMetadata, JsonCommentTrivia, JsonCommentTriviaKind, LexError,
-    SourceCommentKind, SourceCommentTrivia, TokenTrivia, TokenType,
 };
 use unicode_ident::{is_xid_continue, is_xid_start};
 
@@ -75,6 +76,12 @@ impl RingBuffer {
     }
 }
 
+#[derive(Debug, Clone)]
+struct SanitizedComment {
+    text: String,
+    prefix_bytes: usize,
+}
+
 #[derive(Debug, Clone, Copy)]
 struct Checkpoint {
     position: ScannerPosition,
@@ -117,6 +124,8 @@ pub struct CharScanner {
     trivia_tracker: TriviaTracker,
     pending_comment_trivia: Option<TokenTrivia>,
     pending_comment_carry: Option<CommentCarryOverMetadata>,
+    token_serial: usize,
+    last_primary_token_serial: Option<usize>,
     lookahead_limit: usize,
     last_source_ptr: Option<usize>,
 }
@@ -142,6 +151,8 @@ impl CharScanner {
             trivia_tracker: TriviaTracker::default(),
             pending_comment_trivia: None,
             pending_comment_carry: None,
+            token_serial: 0,
+            last_primary_token_serial: None,
             lookahead_limit: capacity,
             last_source_ptr: None,
         }
@@ -160,6 +171,8 @@ impl CharScanner {
         self.trivia_tracker.reset();
         self.pending_comment_trivia = None;
         self.pending_comment_carry = None;
+        self.token_serial = 0;
+        self.last_primary_token_serial = None;
     }
 
     fn synchronize_context<'source>(&mut self, ctx: &mut LexerContext<'source>) {
@@ -606,10 +619,10 @@ impl CharScanner {
             });
         } else {
             let sanitized = Self::sanitize_line_comment(text);
-            if !sanitized.is_empty() {
+            if !sanitized.text.is_empty() {
                 carry.json.push(JsonCommentTrivia {
                     kind: JsonCommentTriviaKind::Line,
-                    text: sanitized,
+                    text: sanitized.text.clone(),
                     line,
                     column,
                 });
@@ -656,10 +669,10 @@ impl CharScanner {
             carry.doc_comment = Some(doc);
         } else {
             let sanitized = Self::sanitize_block_comment(text);
-            if !sanitized.is_empty() {
+            if !sanitized.text.is_empty() {
                 carry.json.push(JsonCommentTrivia {
                     kind: JsonCommentTriviaKind::Block,
-                    text: sanitized,
+                    text: sanitized.text.clone(),
                     line,
                     column,
                 });
@@ -690,23 +703,51 @@ impl CharScanner {
         carry
     }
 
-    fn sanitize_line_comment(text: &str) -> String {
-        let trimmed = text.trim_start();
-        if let Some(rest) = trimmed.strip_prefix("//") {
-            rest.trim().to_string()
-        } else if let Some(rest) = trimmed.strip_prefix('#') {
-            rest.trim().to_string()
-        } else {
-            trimmed.trim().to_string()
+    fn sanitize_line_comment(text: &str) -> SanitizedComment {
+        let trimmed_start = text.trim_start();
+        let start_trim = text.len() - trimmed_start.len();
+        let mut prefix_bytes = start_trim;
+        let mut remainder = trimmed_start;
+
+        if let Some(rest) = remainder.strip_prefix("//") {
+            prefix_bytes += 2;
+            remainder = rest;
+        } else if let Some(rest) = remainder.strip_prefix('#') {
+            prefix_bytes += 1;
+            remainder = rest;
         }
+
+        let trimmed_leading = remainder.trim_start();
+        prefix_bytes += remainder.len() - trimmed_leading.len();
+        let text = trimmed_leading.trim_end().to_string();
+
+        SanitizedComment { text, prefix_bytes }
     }
 
-    fn sanitize_block_comment(text: &str) -> String {
-        text.trim()
-            .trim_start_matches("/*")
-            .trim_end_matches("*/")
-            .trim()
-            .to_string()
+    fn sanitize_block_comment(text: &str) -> SanitizedComment {
+        let trimmed_start = text.trim_start();
+        let start_trim = text.len() - trimmed_start.len();
+        let mut prefix_bytes = start_trim;
+        let mut remainder = trimmed_start;
+
+        if let Some(rest) = remainder.strip_prefix("/*") {
+            prefix_bytes += 2;
+            remainder = rest;
+        }
+
+        let trimmed_leading = remainder.trim_start();
+        prefix_bytes += remainder.len() - trimmed_leading.len();
+        remainder = trimmed_leading;
+
+        let trimmed_trailing = remainder.trim_end();
+        let without_suffix = if let Some(rest) = trimmed_trailing.strip_suffix("*/") {
+            rest
+        } else {
+            trimmed_trailing
+        };
+        let text = without_suffix.trim_end().to_string();
+
+        SanitizedComment { text, prefix_bytes }
     }
 
     fn read_string_literal<'source>(
@@ -894,10 +935,10 @@ impl CharScanner {
             });
         } else {
             let sanitized = Self::sanitize_line_comment(text);
-            if !sanitized.is_empty() {
+            if !sanitized.text.is_empty() {
                 trivia.json_comments.push(JsonCommentTrivia {
                     kind: JsonCommentTriviaKind::Line,
-                    text: sanitized,
+                    text: sanitized.text.clone(),
                     line,
                     column,
                 });
@@ -941,10 +982,10 @@ impl CharScanner {
             trivia.doc_comment = Some(doc);
         } else {
             let sanitized = Self::sanitize_block_comment(text);
-            if !sanitized.is_empty() {
+            if !sanitized.text.is_empty() {
                 trivia.json_comments.push(JsonCommentTrivia {
                     kind: JsonCommentTriviaKind::Block,
-                    text: sanitized,
+                    text: sanitized.text.clone(),
                     line,
                     column,
                 });
@@ -1042,6 +1083,101 @@ impl CharScanner {
             RawTokenKind::Symbol
         }
     }
+
+    fn next_token_serial(&self) -> usize {
+        self.token_serial.saturating_add(1)
+    }
+
+    fn field_label_distance(&self) -> Option<usize> {
+        self.last_primary_token_serial
+            .map(|last| self.next_token_serial().saturating_sub(last))
+    }
+
+    fn record_token_serial(&mut self, kind: RawTokenKind) {
+        self.token_serial = self.next_token_serial();
+        if !matches!(
+            kind,
+            RawTokenKind::Whitespace | RawTokenKind::CommentCandidate
+        ) {
+            self.last_primary_token_serial = Some(self.token_serial);
+        }
+    }
+
+    fn advance_position_by(mut position: ScannerPosition, text: &str) -> ScannerPosition {
+        for ch in text.chars() {
+            let len = ch.len_utf8();
+            if ch == '\n' {
+                position.advance(len, 1, 1);
+            } else {
+                position.advance(len, 0, 1);
+            }
+        }
+        position
+    }
+
+    fn is_valid_identifier(name: &str) -> bool {
+        let mut chars = name.chars();
+        let Some(first) = chars.next() else {
+            return false;
+        };
+        if !Self::is_identifier_start(first) {
+            return false;
+        }
+        chars.all(Self::is_identifier_continue)
+    }
+
+    fn detect_field_name_label(
+        &self,
+        text: &str,
+        span: &Span,
+        kind: FieldNameLabelKind,
+        token_distance: Option<usize>,
+    ) -> (Option<FieldNameLabelCandidate>, Option<FieldNameLabelIssue>) {
+        let sanitized = match kind {
+            FieldNameLabelKind::LineComment => Self::sanitize_line_comment(text),
+            FieldNameLabelKind::BlockComment => Self::sanitize_block_comment(text),
+        };
+
+        if sanitized.text.is_empty() {
+            return (None, None);
+        }
+
+        let prefix_len = sanitized.prefix_bytes.min(text.len());
+        let prefix = &text[..prefix_len];
+        let start_position = Self::advance_position_by(span.start, prefix);
+        let label_text = sanitized.text.trim_end().to_string();
+
+        if label_text.chars().any(char::is_whitespace) {
+            let issue = FieldNameLabelIssue {
+                reason: FieldNameLabelErrorKind::ExtraText,
+                text: label_text,
+                line: start_position.line,
+                column: start_position.column,
+            };
+            return (None, Some(issue));
+        }
+
+        if !Self::is_valid_identifier(&label_text) {
+            let issue = FieldNameLabelIssue {
+                reason: FieldNameLabelErrorKind::InvalidIdentifier,
+                text: label_text,
+                line: start_position.line,
+                column: start_position.column,
+            };
+            return (None, Some(issue));
+        }
+
+        let candidate = FieldNameLabelCandidate {
+            name: label_text.clone(),
+            line: start_position.line,
+            column: start_position.column,
+            length: label_text.chars().count(),
+            token_distance,
+            kind,
+        };
+
+        (Some(candidate), None)
+    }
 }
 
 impl CharScannerStage for CharScanner {
@@ -1090,12 +1226,15 @@ impl CharScannerStage for CharScanner {
                 final_trivia = Some(comment_trivia);
             }
             let carry_over = self.pending_comment_carry.take();
+            self.record_token_serial(RawTokenKind::Eof);
             return Ok(RawToken {
                 kind: RawTokenKind::Eof,
                 text: "",
                 span,
                 trivia: final_trivia,
                 carry_over,
+                field_label: None,
+                field_label_issue: None,
             });
         }
 
@@ -1108,6 +1247,7 @@ impl CharScannerStage for CharScanner {
             let line = start_position.line;
             let column = start_position.column;
             let is_jv_block = Self::is_jv_block_comment(rest);
+            let mut is_jv_only = false;
             let (slice, trivia_piece, carry_piece) = if is_jv_block {
                 let slice = self.read_jv_only_block_comment(source)?;
                 let trivia_piece = self.build_jv_block_comment_trivia(slice, line, column);
@@ -1115,7 +1255,7 @@ impl CharScannerStage for CharScanner {
                 (slice, trivia_piece, carry_piece)
             } else {
                 let slice = self.read_line_comment(source)?;
-                let is_jv_only = slice.starts_with("///") || slice.starts_with("//*");
+                is_jv_only = slice.starts_with("///") || slice.starts_with("//*");
                 let trivia_piece = self.build_line_comment_trivia(slice, line, column, is_jv_only);
                 let carry_piece = self.build_line_comment_carry(slice, line, column, is_jv_only);
                 (slice, trivia_piece, carry_piece)
@@ -1126,12 +1266,25 @@ impl CharScannerStage for CharScanner {
             }
             let span = self.current_span(start_offset, start_position);
             ctx.update_position(self.position);
+            let (field_label, field_label_issue) = if !is_jv_block && !is_jv_only {
+                self.detect_field_name_label(
+                    slice,
+                    &span,
+                    FieldNameLabelKind::LineComment,
+                    self.field_label_distance(),
+                )
+            } else {
+                (None, None)
+            };
+            self.record_token_serial(RawTokenKind::CommentCandidate);
             return Ok(RawToken {
                 kind: RawTokenKind::CommentCandidate,
                 text: slice,
                 span,
                 trivia,
                 carry_over: (!is_jv_block).then_some(carry_piece),
+                field_label,
+                field_label_issue,
             });
         }
 
@@ -1146,12 +1299,25 @@ impl CharScannerStage for CharScanner {
             self.push_comment_carry(carry_piece.clone());
             let span = self.current_span(start_offset, start_position);
             ctx.update_position(self.position);
+            let (field_label, field_label_issue) = if !is_javadoc {
+                self.detect_field_name_label(
+                    slice,
+                    &span,
+                    FieldNameLabelKind::BlockComment,
+                    self.field_label_distance(),
+                )
+            } else {
+                (None, None)
+            };
+            self.record_token_serial(RawTokenKind::CommentCandidate);
             return Ok(RawToken {
                 kind: RawTokenKind::CommentCandidate,
                 text: slice,
                 span,
                 trivia,
                 carry_over: Some(carry_piece),
+                field_label,
+                field_label_issue,
             });
         }
 
@@ -1165,12 +1331,15 @@ impl CharScannerStage for CharScanner {
             self.push_comment_carry(carry_piece.clone());
             let span = self.current_span(start_offset, start_position);
             ctx.update_position(self.position);
+            self.record_token_serial(RawTokenKind::CommentCandidate);
             return Ok(RawToken {
                 kind: RawTokenKind::CommentCandidate,
                 text: slice,
                 span,
                 trivia,
                 carry_over: Some(carry_piece),
+                field_label: None,
+                field_label_issue: None,
             });
         }
 
@@ -1203,6 +1372,7 @@ impl CharScannerStage for CharScanner {
         }
 
         let carry_over = self.pending_comment_carry.take();
+        self.record_token_serial(kind);
 
         Ok(RawToken {
             kind,
@@ -1210,6 +1380,8 @@ impl CharScannerStage for CharScanner {
             span,
             trivia: final_trivia,
             carry_over,
+            field_label: None,
+            field_label_issue: None,
         })
     }
 
@@ -1356,6 +1528,42 @@ mod tests {
         assert_eq!(identifier.kind, RawTokenKind::Identifier);
         assert_eq!(identifier.text, "val");
         assert!(identifier.trivia.is_some());
+    }
+
+    #[test]
+    fn line_comment_field_label_detection() {
+        let mut scanner = CharScanner::new();
+        let source = "value // result\nnext";
+        let mut ctx = LexerContext::new(source);
+
+        scanner
+            .scan_next_token(&mut ctx)
+            .expect("identifier preceding comment");
+        let comment = scanner.scan_next_token(&mut ctx).expect("comment token");
+        assert_eq!(comment.kind, RawTokenKind::CommentCandidate);
+        let label = comment.field_label.expect("field label candidate");
+        assert_eq!(label.name, "result");
+        assert_eq!(label.kind, FieldNameLabelKind::LineComment);
+        assert_eq!(label.line, 1);
+        assert_eq!(label.token_distance, Some(1));
+        assert!(label.column >= 8);
+    }
+
+    #[test]
+    fn invalid_field_label_reports_issue() {
+        let mut scanner = CharScanner::new();
+        let source = "value // not valid\nnext";
+        let mut ctx = LexerContext::new(source);
+
+        scanner
+            .scan_next_token(&mut ctx)
+            .expect("identifier preceding invalid comment");
+        let comment = scanner.scan_next_token(&mut ctx).expect("comment token");
+        assert!(comment.field_label.is_none());
+        let issue = comment.field_label_issue.expect("field label issue");
+        assert!(matches!(issue.reason, FieldNameLabelErrorKind::ExtraText));
+        assert_eq!(issue.text, "not valid");
+        assert_eq!(issue.line, 1);
     }
 
     #[test]

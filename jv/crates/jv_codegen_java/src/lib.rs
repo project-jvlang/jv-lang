@@ -1,7 +1,11 @@
 pub mod builder;
 pub mod config;
+mod destructure;
 pub mod error;
 pub mod generator;
+pub mod java21;
+pub mod record;
+pub mod log_message;
 pub mod target_version;
 pub mod types;
 

@@ -8,8 +8,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use jv_cli::pipeline::project::{
     layout::ProjectLayout, locator::ProjectLocator, manifest::ManifestLoader,
 };
-use jv_cli::pipeline::{run_program, BuildOptionsFactory, BuildPlan, CliOverrides};
+use jv_cli::pipeline::{BuildOptionsFactory, BuildPlan, CliOverrides, run_program};
 use jv_cli::tooling_failure;
+use jv_pm::LoggingConfigLayer;
 
 #[derive(Parser)]
 #[command(name = "jvx", about = "Quickly execute a jv file or snippet")]
@@ -95,6 +96,13 @@ fn build_plan_for_input(input_path: &Path) -> Result<BuildPlan> {
         parallel_inference: false,
         inference_workers: None,
         constraint_batch: None,
+        // APT defaults disabled for quick runner
+        apt_enabled: false,
+        apt_processors: None,
+        apt_processorpath: None,
+        apt_options: Vec::new(),
+        logging_cli: LoggingConfigLayer::default(),
+        logging_env: LoggingConfigLayer::default(),
     };
 
     BuildOptionsFactory::compose(project_root, settings, layout, overrides)
@@ -174,8 +182,15 @@ include = ["src/**/*.jv"]
         fs::write(root.join("jv.toml"), manifest).expect("write manifest");
 
         let plan = build_plan_for_input(&entrypoint).expect("plan");
+        let actual_entrypoint =
+            fs::canonicalize(plan.entrypoint()).expect("canonical plan entrypoint resolves");
+        let expected_entrypoint =
+            fs::canonicalize(&entrypoint).expect("canonical entrypoint resolves");
+        let actual_root =
+            fs::canonicalize(plan.root.root_dir()).expect("canonical plan root resolves");
+        let expected_root = fs::canonicalize(root).expect("canonical root resolves");
 
-        assert_eq!(plan.entrypoint(), entrypoint.as_path());
-        assert_eq!(plan.root.root_dir(), root);
+        assert_eq!(actual_entrypoint, expected_entrypoint);
+        assert_eq!(actual_root, expected_root);
     }
 }

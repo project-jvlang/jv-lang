@@ -1,14 +1,14 @@
 use std::collections::{HashMap, VecDeque};
 
 use jv_ast::{
+    BinaryOp, Expression, LogBlock, LogItem, Program, Statement, TryCatchClause, WhenArm,
     expression::Argument,
     types::{Literal, Modifiers, Span},
-    BinaryOp, Expression, Program, Statement, TryCatchClause, WhenArm,
 };
 
-use super::{patterns, NullSafetyContext, NullabilityKind, NullabilityLattice};
-use crate::pattern::{self, ArmId, NarrowedBinding, NarrowedNullability, NarrowingSnapshot};
+use super::{NullSafetyContext, NullabilityKind, NullabilityLattice, patterns};
 use crate::CheckError;
+use crate::pattern::{self, ArmId, NarrowedBinding, NarrowedNullability, NarrowingSnapshot};
 
 use crate::null_safety::graph::{
     BranchAssumption, FlowConstraint, FlowEdgeKind, FlowGraph, FlowNodeId, FlowNodeKind,
@@ -258,6 +258,10 @@ impl<'g, 'ctx, 'facts> FlowGraphBuilder<'g, 'ctx, 'facts> {
                 }
                 self.emit_passthrough(cursor, FlowNodeKind::Expression, Some(block_span.clone()))
             }
+            Expression::LogBlock(block) => {
+                let cursor = self.handle_log_block(current, block);
+                self.emit_passthrough(cursor, FlowNodeKind::Expression, Some(block.span.clone()))
+            }
             Expression::When {
                 expr,
                 arms,
@@ -285,6 +289,23 @@ impl<'g, 'ctx, 'facts> FlowGraphBuilder<'g, 'ctx, 'facts> {
             ),
             _ => self.emit_passthrough(current, FlowNodeKind::Expression, span),
         }
+    }
+
+    fn handle_log_block(&mut self, mut current: FlowNodeId, block: &LogBlock) -> FlowNodeId {
+        for item in &block.items {
+            match item {
+                LogItem::Statement(statement) => {
+                    current = self.handle_statement(current, statement);
+                }
+                LogItem::Expression(expr) => {
+                    current = self.handle_expression(current, expr, None);
+                }
+                LogItem::Nested(nested) => {
+                    current = self.handle_log_block(current, nested);
+                }
+            }
+        }
+        current
     }
 
     fn build_if_expression(
@@ -850,6 +871,7 @@ fn classify_expression(
 ) -> ExpressionInfo {
     match expr {
         Expression::RegexLiteral(_) => ExpressionInfo::new(NullabilityKind::NonNull),
+        Expression::RegexCommand(_) => ExpressionInfo::new(NullabilityKind::Unknown),
         Expression::Literal(literal, _) => match literal {
             Literal::Null => ExpressionInfo::new(NullabilityKind::Nullable),
             Literal::Boolean(_)
@@ -881,11 +903,13 @@ fn classify_expression(
             ExpressionInfo::new(apply_operator_outcome(builder, outcome))
         }
         Expression::TypeCast { expr, .. } => classify_expression(builder, expr),
+        Expression::UnitLiteral { value, .. } => classify_expression(builder, value),
         Expression::Binary {
             left,
             op,
             right,
             span,
+            ..
         } => {
             let left_info = classify_expression(builder, left);
             let right_info = classify_expression(builder, right);
@@ -941,8 +965,10 @@ fn classify_expression(
             }
             info
         }
+        Expression::LogBlock(block) => classify_log_block(builder, block),
         Expression::Lambda { .. }
         | Expression::Array { .. }
+        | Expression::Tuple { .. }
         | Expression::StringInterpolation { .. }
         | Expression::MultilineString { .. }
         | Expression::JsonLiteral { .. }
@@ -983,6 +1009,22 @@ fn classify_statement_expression(
     }
 }
 
+fn classify_log_block(
+    builder: &mut FlowGraphBuilder<'_, '_, '_>,
+    block: &LogBlock,
+) -> ExpressionInfo {
+    let mut info = ExpressionInfo::new(NullabilityKind::NonNull);
+    for item in &block.items {
+        let item_info = match item {
+            LogItem::Statement(statement) => classify_statement_expression(builder, statement),
+            LogItem::Expression(expr) => classify_expression(builder, expr),
+            LogItem::Nested(nested) => classify_log_block(builder, nested),
+        };
+        info = info.join(&item_info);
+    }
+    info
+}
+
 fn apply_edge_kind(kind: &FlowEdgeKind, state: &mut FlowStateSnapshot) {
     match kind {
         FlowEdgeKind::TrueBranch { assumption } | FlowEdgeKind::FalseBranch { assumption } => {
@@ -1015,10 +1057,13 @@ impl FlowStateSnapshot {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::null_safety::graph::BranchAssumption;
     use crate::null_safety::JavaLoweringStrategy;
+    use crate::null_safety::graph::BranchAssumption;
     use jv_ast::ValBindingOrigin;
-    use jv_ast::{types::Span, Expression, Pattern, Program, Statement, TryCatchClause, WhenArm};
+    use jv_ast::{
+        BinaryMetadata, Expression, Pattern, Program, Statement, TryCatchClause, WhenArm,
+        types::Span,
+    };
 
     #[test]
     fn build_graph_with_linear_statements() {
@@ -1373,6 +1418,7 @@ mod tests {
                 span.clone(),
             )),
             span: span.clone(),
+            metadata: BinaryMetadata::default(),
         };
 
         let program = Program {

@@ -360,10 +360,12 @@ mod tests {
 
         let guide = manager.setup_guide(OperatingSystem::Windows);
         assert_eq!(guide.os, OperatingSystem::Windows);
-        assert!(guide
-            .post_install_checks
-            .iter()
-            .any(|step| step.contains("javac --version")));
+        assert!(
+            guide
+                .post_install_checks
+                .iter()
+                .any(|step| step.contains("javac --version"))
+        );
         assert_eq!(guide.distributions.len(), 3);
     }
 

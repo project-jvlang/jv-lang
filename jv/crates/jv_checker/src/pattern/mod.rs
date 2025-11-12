@@ -9,7 +9,7 @@ mod validator;
 
 use crate::CheckError;
 use jv_ast::{Expression, Program, Span};
-use std::collections::{hash_map::DefaultHasher, HashMap, HashSet};
+use std::collections::{HashMap, HashSet, hash_map::DefaultHasher};
 use std::hash::{Hash, Hasher};
 
 use catalog::PatternTypeCatalog;
@@ -221,14 +221,18 @@ pub(crate) fn expression_span(expression: &Expression) -> Option<&Span> {
         | Expression::IndexAccess { span, .. }
         | Expression::NullSafeIndexAccess { span, .. }
         | Expression::TypeCast { span, .. }
+        | Expression::UnitLiteral { span, .. }
         | Expression::StringInterpolation { span, .. }
         | Expression::When { span, .. }
         | Expression::If { span, .. }
         | Expression::Block { span, .. }
         | Expression::Array { span, .. }
+        | Expression::Tuple { span, .. }
         | Expression::Lambda { span, .. }
         | Expression::Try { span, .. } => Some(span),
+        Expression::LogBlock(block) => Some(&block.span),
         Expression::RegexLiteral(literal) => Some(&literal.span),
+        Expression::RegexCommand(command) => Some(&command.span),
         Expression::This(span) | Expression::Super(span) => Some(span),
         Expression::MultilineString(literal) => Some(&literal.span),
         Expression::JsonLiteral(literal) => Some(&literal.span),

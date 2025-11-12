@@ -104,7 +104,8 @@ impl JsonStage {
             match tokens[index].token_type {
                 TokenType::LineComment(_)
                 | TokenType::BlockComment(_)
-                | TokenType::JavaDocComment(_) => {
+                | TokenType::JavaDocComment(_)
+                | TokenType::FieldNameLabel(_) => {
                     index += 1;
                 }
                 _ => return Some(index),

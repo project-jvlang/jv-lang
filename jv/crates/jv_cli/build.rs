@@ -4,8 +4,8 @@ use std::io::Write;
 use std::path::PathBuf;
 
 use walkdir::WalkDir;
-use zip::write::FileOptions;
 use zip::CompressionMethod;
+use zip::write::FileOptions;
 
 fn main() -> anyhow::Result<()> {
     let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR")?);

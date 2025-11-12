@@ -1,19 +1,21 @@
 use super::*;
 use insta::assert_snapshot;
 use jv_ast::{
-    types::{PrimitiveTypeName, PrimitiveTypeReference, PrimitiveTypeSource},
     BinaryOp, CallArgumentStyle, Literal, SequenceDelimiter, Span,
+    expression::TupleFieldMeta,
+    types::{PrimitiveTypeName, PrimitiveTypeReference, PrimitiveTypeSource},
 };
-use jv_ir::transform::transform_program_with_context;
 use jv_ir::TransformContext;
+use jv_ir::transform::transform_program_with_context;
 use jv_ir::{
     DataFormat, IrCaseLabel, IrCommentKind, IrDeconstructionComponent, IrDeconstructionPattern,
     IrExpression, IrImplicitWhenEnd, IrModifiers, IrParameter, IrProgram, IrRecordComponent,
     IrSampleDeclaration, IrStatement, IrSwitchCase, IrTypeParameter, IrVisibility, JavaType,
-    MethodOverload, PipelineShape, PrimitiveReturnMetadata, PrimitiveSpecializationHint,
-    PrimitiveType, SampleMode, SampleRecordDescriptor, SampleRecordField, SampleSourceKind, Schema,
-    SequencePipeline, SequenceSource, SequenceTerminal, SequenceTerminalEvaluation,
-    SequenceTerminalKind,
+    LoggingMetadata, MethodOverload, PipelineShape, PrimitiveReturnMetadata,
+    PrimitiveSpecializationHint, PrimitiveType, SampleMode, SampleRecordDescriptor,
+    SampleRecordField, SampleSourceKind, Schema, SequencePipeline, SequenceSource,
+    SequenceTerminal, SequenceTerminalEvaluation, SequenceTerminalKind, TupleRecordPlan,
+    TupleRecordStrategy, TupleUsageContext, TupleUsageKind,
 };
 use jv_parser_frontend::ParserPipeline;
 use jv_parser_rowan::frontend::RowanPipeline;
@@ -289,6 +291,8 @@ fn sample_embed_program() -> IrProgram {
         type_declarations: vec![user_sample_record(), embed_data_class()],
         generic_metadata: Default::default(),
         conversion_metadata: Vec::new(),
+        logging: Default::default(),
+        tuple_record_plans: Vec::new(),
         span: dummy_span(),
     }
 }
@@ -352,6 +356,7 @@ fn load_users_method() -> IrStatement {
             ..IrModifiers::default()
         },
         throws: vec!["java.io.IOException".to_string()],
+        assertion_patterns: vec![],
         span: dummy_span(),
     }
 }
@@ -380,6 +385,8 @@ fn sample_load_program() -> IrProgram {
         type_declarations: vec![load_helper_class()],
         generic_metadata: Default::default(),
         conversion_metadata: Vec::new(),
+        logging: Default::default(),
+        tuple_record_plans: Vec::new(),
         span: dummy_span(),
     }
 }
@@ -451,6 +458,7 @@ fn simple_method() -> IrStatement {
             ..IrModifiers::default()
         },
         throws: vec![],
+        assertion_patterns: Vec::new(),
         span: dummy_span(),
     }
 }
@@ -582,6 +590,7 @@ fn snapshot_program() -> IrProgram {
             ..IrModifiers::default()
         },
         throws: vec![],
+        assertion_patterns: Vec::new(),
         span: dummy_span(),
     };
 
@@ -606,6 +615,8 @@ fn snapshot_program() -> IrProgram {
         type_declarations: vec![class],
         generic_metadata: Default::default(),
         conversion_metadata: Vec::new(),
+        logging: Default::default(),
+        tuple_record_plans: Vec::new(),
         span: dummy_span(),
     }
 }
@@ -668,6 +679,7 @@ fn method_generation_renders_generic_type_parameters() {
             ..IrModifiers::default()
         },
         throws: vec![],
+        assertion_patterns: Vec::new(),
         span,
     };
 
@@ -715,6 +727,7 @@ fn primitive_return_methods_receive_specialized_names() {
             ..IrModifiers::default()
         },
         throws: Vec::new(),
+        assertion_patterns: Vec::new(),
         span,
     };
 
@@ -770,6 +783,7 @@ fn method_generation_renders_where_clause_bounds() {
             ..IrModifiers::default()
         },
         throws: vec![],
+        assertion_patterns: Vec::new(),
         span,
     };
 
@@ -847,6 +861,7 @@ fn record_extension_method_is_emitted_as_instance_method() {
         }),
         modifiers: extension_modifiers,
         throws: vec![],
+        assertion_patterns: Vec::new(),
         span: span.clone(),
     };
 
@@ -856,6 +871,8 @@ fn record_extension_method_is_emitted_as_instance_method() {
         type_declarations: vec![record_declaration, extension_method],
         generic_metadata: Default::default(),
         conversion_metadata: Vec::new(),
+        logging: Default::default(),
+        tuple_record_plans: Vec::new(),
         span,
     };
 
@@ -919,6 +936,8 @@ fn top_level_records_drop_private_visibility() {
         type_declarations: vec![record_declaration],
         generic_metadata: Default::default(),
         conversion_metadata: Vec::new(),
+        logging: Default::default(),
+        tuple_record_plans: Vec::new(),
         span,
     };
 
@@ -1012,6 +1031,7 @@ fn record_field_access_is_lowered_to_accessor_calls() {
             ..IrModifiers::default()
         },
         throws: vec![],
+        assertion_patterns: Vec::new(),
         span: span.clone(),
     };
 
@@ -1032,6 +1052,7 @@ fn record_field_access_is_lowered_to_accessor_calls() {
             ..IrModifiers::default()
         },
         throws: vec![],
+        assertion_patterns: Vec::new(),
         span: span.clone(),
     };
 
@@ -1056,6 +1077,8 @@ fn record_field_access_is_lowered_to_accessor_calls() {
         type_declarations: vec![record_declaration, renderer_class],
         generic_metadata: Default::default(),
         conversion_metadata: Vec::new(),
+        logging: Default::default(),
+        tuple_record_plans: Vec::new(),
         span,
     };
 
@@ -1134,6 +1157,7 @@ fn class_extension_method_is_emitted_as_instance_method() {
         }),
         modifiers: extension_modifiers,
         throws: vec![],
+        assertion_patterns: Vec::new(),
         span: span.clone(),
     };
 
@@ -1143,6 +1167,8 @@ fn class_extension_method_is_emitted_as_instance_method() {
         type_declarations: vec![class_declaration, extension_method],
         generic_metadata: Default::default(),
         conversion_metadata: Vec::new(),
+        logging: Default::default(),
+        tuple_record_plans: Vec::new(),
         span,
     };
 
@@ -1260,6 +1286,7 @@ fn primitive_specialized_pipeline_renders_character_casts() {
         body: Some(method_body),
         modifiers: method_modifiers,
         throws: vec![],
+        assertion_patterns: Vec::new(),
         span: span.clone(),
     };
 
@@ -1285,6 +1312,8 @@ fn primitive_specialized_pipeline_renders_character_casts() {
         type_declarations: vec![class],
         generic_metadata: Default::default(),
         conversion_metadata: Vec::new(),
+        logging: Default::default(),
+        tuple_record_plans: Vec::new(),
         span,
     };
 
@@ -1484,6 +1513,7 @@ fn external_extension_method_remains_static_utility() {
         }),
         modifiers,
         throws: vec![],
+        assertion_patterns: Vec::new(),
         span: span.clone(),
     };
 
@@ -1493,6 +1523,8 @@ fn external_extension_method_remains_static_utility() {
         type_declarations: vec![method],
         generic_metadata: Default::default(),
         conversion_metadata: Vec::new(),
+        logging: Default::default(),
+        tuple_record_plans: Vec::new(),
         span,
     };
 
@@ -1648,6 +1680,8 @@ fn compilation_unit_collects_type_declarations() {
         type_declarations: vec![simple_class()],
         generic_metadata: Default::default(),
         conversion_metadata: Vec::new(),
+        logging: Default::default(),
+        tuple_record_plans: Vec::new(),
         span: dummy_span(),
     };
 
@@ -1716,6 +1750,8 @@ fn script_statements_are_wrapped_in_generated_main() {
         ],
         generic_metadata: Default::default(),
         conversion_metadata: Vec::new(),
+        logging: Default::default(),
+        tuple_record_plans: Vec::new(),
         span: dummy_span(),
     };
 
@@ -1751,11 +1787,14 @@ fn script_regex_val_is_hoisted_to_static_field() {
         type_declarations: vec![regex_decl],
         generic_metadata: Default::default(),
         conversion_metadata: Vec::new(),
+        logging: Default::default(),
+        tuple_record_plans: Vec::new(),
         span: dummy_span(),
     };
 
     let unit = generate_java_code(&program).expect("script regex lowering");
     let source = unit.to_source(&JavaCodeGenConfig::default());
+    eprintln!("{}", source);
 
     assert!(
         source.contains("static final java.util.regex.Pattern usernamePattern"),
@@ -1820,6 +1859,8 @@ fn class_regex_field_is_emitted_as_static_final() {
         type_declarations: vec![class],
         generic_metadata: Default::default(),
         conversion_metadata: Vec::new(),
+        logging: Default::default(),
+        tuple_record_plans: Vec::new(),
         span: dummy_span(),
     };
 
@@ -2161,6 +2202,7 @@ fn snapshot_ir_program() {
                 "permitted_types": []
               },
               "throws": [],
+              "assertion_patterns": [],
               "span": {
                 "start_line": 0,
                 "start_column": 0,
@@ -2194,6 +2236,12 @@ fn snapshot_ir_program() {
   ],
   "generic_metadata": {},
   "conversion_metadata": [],
+  "logging": {
+    "logger_fields": [],
+    "framework": "Slf4j",
+    "trace_context": false
+  },
+  "tuple_record_plans": [],
   "span": {
     "start_line": 0,
     "start_column": 0,
@@ -2243,6 +2291,8 @@ fn sample_record_generation_emits_expected_record() {
         type_declarations: vec![user_sample_record()],
         generic_metadata: Default::default(),
         conversion_metadata: Vec::new(),
+        logging: Default::default(),
+        tuple_record_plans: Vec::new(),
         span: dummy_span(),
     };
 
@@ -2256,6 +2306,174 @@ fn sample_record_generation_emits_expected_record() {
 }
 
 #[test]
+fn tuple_specific_record_plan_generates_definition() {
+    let span = dummy_span();
+    let plan = TupleRecordPlan {
+        arity: 2,
+        strategy: TupleRecordStrategy::Specific,
+        specific_name: Some("Divmod_Result".to_string()),
+        generic_name: "Tuple2_Int_Int".to_string(),
+        fields: vec![
+            TupleFieldMeta {
+                primary_label: Some("quotient".into()),
+                secondary_labels: Vec::new(),
+                identifier_hint: Some("quotient".into()),
+                fallback_index: 1,
+                span: span.clone(),
+            },
+            TupleFieldMeta {
+                primary_label: Some("remainder".into()),
+                secondary_labels: Vec::new(),
+                identifier_hint: Some("remainder".into()),
+                fallback_index: 2,
+                span: span.clone(),
+            },
+        ],
+        type_hints: vec!["Int".into(), "Int".into()],
+        usage_sites: vec![TupleUsageContext {
+            kind: TupleUsageKind::FunctionReturn,
+            owner: Some("divmod".into()),
+            span: span.clone(),
+        }],
+    };
+
+    let program = IrProgram {
+        package: Some("example.tuples".to_string()),
+        imports: vec![],
+        type_declarations: Vec::new(),
+        generic_metadata: Default::default(),
+        conversion_metadata: Vec::new(),
+        logging: LoggingMetadata::default(),
+        tuple_record_plans: vec![plan],
+        span,
+    };
+
+    let source = generate_java_source(&program).expect("tuple record generation");
+    assert!(
+        source.contains("public record Divmod_Result(int quotient, int remainder) {}"),
+        "tuple record definition should include field labels: {source}"
+    );
+}
+
+#[test]
+fn tuple_generic_record_plan_uses_default_labels() {
+    let span = dummy_span();
+    let plan = TupleRecordPlan {
+        arity: 2,
+        strategy: TupleRecordStrategy::Generic,
+        specific_name: None,
+        generic_name: "Tuple2_Int_String".to_string(),
+        fields: vec![
+            TupleFieldMeta::empty(1, span.clone()),
+            TupleFieldMeta::empty(2, span.clone()),
+        ],
+        type_hints: vec!["Int".into(), "String".into()],
+        usage_sites: vec![TupleUsageContext {
+            kind: TupleUsageKind::BindingInitializer,
+            owner: Some("pair".into()),
+            span: span.clone(),
+        }],
+    };
+
+    let program = IrProgram {
+        package: Some("example.tuples".to_string()),
+        imports: vec![],
+        type_declarations: Vec::new(),
+        generic_metadata: Default::default(),
+        conversion_metadata: Vec::new(),
+        logging: LoggingMetadata::default(),
+        tuple_record_plans: vec![plan],
+        span,
+    };
+
+    let config = JavaCodeGenConfig::for_target(JavaTarget::Java21);
+    let source =
+        generate_java_source_with_config(&program, &config).expect("tuple record generation");
+    assert!(
+        source.contains("public record Tuple2_Int_String(int _1, String _2) {}"),
+        "generic tuple record should use fallback field names: {source}"
+    );
+}
+
+#[test]
+fn tuple_literal_respects_plan_field_mapping() {
+    let tuple_span = Span::new(12, 4, 12, 18);
+    let plan = TupleRecordPlan {
+        arity: 2,
+        strategy: TupleRecordStrategy::Specific,
+        specific_name: Some("Divmod_Result".to_string()),
+        generic_name: "Tuple2_Int_Int".to_string(),
+        fields: vec![
+            TupleFieldMeta {
+                primary_label: Some("second".into()),
+                secondary_labels: Vec::new(),
+                identifier_hint: None,
+                fallback_index: 2,
+                span: tuple_span.clone(),
+            },
+            TupleFieldMeta {
+                primary_label: Some("first".into()),
+                secondary_labels: Vec::new(),
+                identifier_hint: None,
+                fallback_index: 1,
+                span: tuple_span.clone(),
+            },
+        ],
+        type_hints: vec!["Int".into(), "Int".into()],
+        usage_sites: vec![TupleUsageContext {
+            kind: TupleUsageKind::Expression,
+            owner: None,
+            span: tuple_span.clone(),
+        }],
+    };
+
+    let program = IrProgram {
+        package: None,
+        imports: vec![],
+        type_declarations: Vec::new(),
+        generic_metadata: Default::default(),
+        conversion_metadata: Vec::new(),
+        logging: LoggingMetadata::default(),
+        tuple_record_plans: vec![plan],
+        span: dummy_span(),
+    };
+
+    let mut generator = JavaCodeGenerator::new();
+    generator
+        .generate_compilation_unit(&program)
+        .expect("populate tuple plan usage");
+
+    let tuple_literal = IrExpression::TupleLiteral {
+        elements: vec![
+            IrExpression::Identifier {
+                name: "left".into(),
+                java_type: JavaType::Primitive("int".into()),
+                span: tuple_span.clone(),
+            },
+            IrExpression::Identifier {
+                name: "right".into(),
+                java_type: JavaType::Primitive("int".into()),
+                span: tuple_span.clone(),
+            },
+        ],
+        java_type: JavaType::Reference {
+            name: "Divmod_Result".into(),
+            generic_args: vec![],
+        },
+        span: tuple_span,
+    };
+
+    let rendered = generator
+        .generate_expression(&tuple_literal)
+        .expect("tuple literal generation");
+
+    assert_eq!(
+        rendered, "new Divmod_Result(right, left)",
+        "tuple literal should align arguments to the record plan"
+    );
+}
+
+#[test]
 fn sample_declaration_generates_records_from_descriptors() {
     let declaration = sample_declaration(vec![sample_record_descriptor()]);
     let program = IrProgram {
@@ -2264,6 +2482,8 @@ fn sample_declaration_generates_records_from_descriptors() {
         type_declarations: vec![IrStatement::SampleDeclaration(declaration)],
         generic_metadata: Default::default(),
         conversion_metadata: Vec::new(),
+        logging: Default::default(),
+        tuple_record_plans: Vec::new(),
         span: dummy_span(),
     };
 
@@ -2314,6 +2534,8 @@ fn embed_mode_sample_declaration_handles_csv() {
         type_declarations: vec![IrStatement::SampleDeclaration(declaration)],
         generic_metadata: Default::default(),
         conversion_metadata: Vec::new(),
+        logging: Default::default(),
+        tuple_record_plans: Vec::new(),
         span: dummy_span(),
     };
 
@@ -2344,6 +2566,8 @@ fn embed_mode_sample_declaration_handles_tsv() {
         type_declarations: vec![IrStatement::SampleDeclaration(declaration)],
         generic_metadata: Default::default(),
         conversion_metadata: Vec::new(),
+        logging: Default::default(),
+        tuple_record_plans: Vec::new(),
         span: dummy_span(),
     };
 
@@ -2374,6 +2598,8 @@ fn embed_mode_sample_declaration_produces_helper_class() {
         type_declarations: vec![IrStatement::SampleDeclaration(declaration)],
         generic_metadata: Default::default(),
         conversion_metadata: Vec::new(),
+        logging: Default::default(),
+        tuple_record_plans: Vec::new(),
         span: dummy_span(),
     };
 
@@ -2551,6 +2777,8 @@ fn load_mode_sample_declaration_generates_http_fetch_pipeline() {
         type_declarations: vec![IrStatement::SampleDeclaration(declaration)],
         generic_metadata: Default::default(),
         conversion_metadata: Vec::new(),
+        logging: Default::default(),
+        tuple_record_plans: Vec::new(),
         span: dummy_span(),
     };
 
@@ -2629,6 +2857,8 @@ fn load_mode_sample_declaration_supports_s3_and_tabular_decoding() {
         type_declarations: vec![IrStatement::SampleDeclaration(declaration)],
         generic_metadata: Default::default(),
         conversion_metadata: Vec::new(),
+        logging: Default::default(),
+        tuple_record_plans: Vec::new(),
         span: dummy_span(),
     };
 
@@ -3229,8 +3459,12 @@ fn switch_expression_java21_mixed_labels_emits_jv3105() {
     }
 }
 
+mod junit5;
+mod logging;
 mod pattern_switch;
+mod regex_command;
 mod target_matrix;
+mod val_declaration_codegen_coverage;
 
 #[test]
 fn passthrough_comments_emit_in_java() {

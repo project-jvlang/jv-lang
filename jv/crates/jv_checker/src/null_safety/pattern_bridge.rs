@@ -1,13 +1,13 @@
+use crate::CheckError;
 use crate::null_safety::{NullSafetyContext, NullabilityKind};
 use crate::pattern::{
     self, NarrowedNullability, NarrowingSnapshot, PatternMatchFacts, PatternMatchService,
     PatternTarget,
 };
-use crate::CheckError;
 use jv_ast::expression::{Parameter, StringPart};
-use jv_ast::statement::Property;
+use jv_ast::statement::{Property, UnitTypeDefinition, UnitTypeMember};
 use jv_ast::types::TypeAnnotation;
-use jv_ast::{Expression, Program, Statement};
+use jv_ast::{Expression, LogBlock, LogItem, Program, Statement};
 use jv_inference::types::TypeVariant as FactsTypeVariant;
 use std::collections::HashMap;
 
@@ -98,6 +98,9 @@ impl PatternFactsBridge {
             Statement::ExtensionFunction(extension) => {
                 self.visit_statement(&extension.function, service, context)
             }
+            Statement::UnitTypeDefinition(definition) => {
+                self.visit_unit_definition(definition, service, context)
+            }
             Statement::Expression { expr, .. } => self.visit_expression(expr, service, context),
             Statement::Return { value, .. } => value
                 .as_ref()
@@ -133,6 +136,7 @@ impl PatternFactsBridge {
                     self.visit_expression(body, service, context)
                 }
             },
+            Statement::TestDeclaration(_) => BridgeOutcome::default(),
             Statement::DataClassDeclaration { .. }
             | Statement::Break(_)
             | Statement::Continue(_)
@@ -140,6 +144,29 @@ impl PatternFactsBridge {
             | Statement::Package { .. }
             | Statement::Comment(_) => BridgeOutcome::default(),
         }
+    }
+
+    fn visit_log_block(
+        &mut self,
+        block: &LogBlock,
+        service: &mut PatternMatchService,
+        context: &mut NullSafetyContext,
+    ) -> BridgeOutcome {
+        let mut outcome = BridgeOutcome::default();
+        for item in &block.items {
+            match item {
+                LogItem::Statement(statement) => {
+                    outcome.merge(self.visit_statement(statement, service, context));
+                }
+                LogItem::Expression(expr) => {
+                    outcome.merge(self.visit_expression(expr, service, context));
+                }
+                LogItem::Nested(nested) => {
+                    outcome.merge(self.visit_log_block(nested, service, context));
+                }
+            }
+        }
+        outcome
     }
 
     fn visit_property(
@@ -161,6 +188,33 @@ impl PatternFactsBridge {
         outcome
     }
 
+    fn visit_unit_definition(
+        &mut self,
+        definition: &UnitTypeDefinition,
+        service: &mut PatternMatchService,
+        context: &mut NullSafetyContext,
+    ) -> BridgeOutcome {
+        let mut outcome = BridgeOutcome::default();
+        for member in &definition.members {
+            match member {
+                UnitTypeMember::Dependency(dependency) => {
+                    if let Some(expr) = dependency.value.as_ref() {
+                        outcome.merge(self.visit_expression(expr, service, context));
+                    }
+                }
+                UnitTypeMember::Conversion(block) => {
+                    for statement in &block.body {
+                        outcome.merge(self.visit_statement(statement, service, context));
+                    }
+                }
+                UnitTypeMember::NestedStatement(statement) => {
+                    outcome.merge(self.visit_statement(statement, service, context));
+                }
+            }
+        }
+        outcome
+    }
+
     fn visit_expression(
         &mut self,
         expression: &Expression,
@@ -169,6 +223,7 @@ impl PatternFactsBridge {
     ) -> BridgeOutcome {
         match expression {
             Expression::RegexLiteral(_) => BridgeOutcome::default(),
+            Expression::RegexCommand(_) => BridgeOutcome::default(),
             Expression::Literal(_, _) | Expression::Identifier(_, _) => BridgeOutcome::default(),
             Expression::Unary { operand, .. } => self.visit_expression(operand, service, context),
             Expression::Binary { left, right, .. } => {
@@ -201,7 +256,15 @@ impl PatternFactsBridge {
                 outcome
             }
             Expression::TypeCast { expr, .. } => self.visit_expression(expr, service, context),
+            Expression::UnitLiteral { value, .. } => self.visit_expression(value, service, context),
             Expression::Array { elements, .. } => {
+                let mut outcome = BridgeOutcome::default();
+                for element in elements {
+                    outcome.merge(self.visit_expression(element, service, context));
+                }
+                outcome
+            }
+            Expression::Tuple { elements, .. } => {
                 let mut outcome = BridgeOutcome::default();
                 for element in elements {
                     outcome.merge(self.visit_expression(element, service, context));
@@ -221,6 +284,7 @@ impl PatternFactsBridge {
                     self.visit_expression(body, service, context)
                 }
             }
+            Expression::LogBlock(block) => self.visit_log_block(block, service, context),
             Expression::Try {
                 body,
                 catch_clauses,

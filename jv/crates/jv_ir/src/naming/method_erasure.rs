@@ -1,7 +1,8 @@
 use crate::context::{RegisteredMethodCall, RegisteredMethodDeclaration, TransformContext};
 use crate::types::{
-    IrCatchClause, IrExpression, IrResolvedMethodTarget, IrResource, IrStatement, IrSwitchCase,
-    JavaType, JavaWildcardKind,
+    IrCatchClause, IrExpression, IrRegexReplacement, IrRegexTemplateSegment,
+    IrResolvedMethodTarget, IrResource, IrStatement, IrSwitchCase, JavaType, JavaWildcardKind,
+    LogInvocationItem, LogInvocationPlan,
 };
 use hex::encode;
 use jv_ast::Span;
@@ -589,6 +590,11 @@ fn apply_expression(expr: &mut IrExpression, resolution: &MethodResolution) {
                 apply_expression(arg, resolution);
             }
         }
+        IrExpression::TupleLiteral { elements, .. } => {
+            for element in elements {
+                apply_expression(element, resolution);
+            }
+        }
         IrExpression::Lambda { body, .. } => apply_expression(body, resolution),
         IrExpression::Switch {
             discriminant,
@@ -629,12 +635,53 @@ fn apply_expression(expr: &mut IrExpression, resolution: &MethodResolution) {
             }
             apply_expression(body, resolution);
         }
+        IrExpression::LogInvocation { plan, .. } => apply_log_plan(plan, resolution),
+        IrExpression::RegexCommand {
+            subject,
+            pattern_expr,
+            replacement,
+            ..
+        } => {
+            apply_expression(subject, resolution);
+            if let Some(expr) = pattern_expr {
+                apply_expression(expr, resolution);
+            }
+            if let Some(replacement) = replacement {
+                apply_regex_replacement(replacement, resolution);
+            }
+        }
         IrExpression::SequencePipeline { .. }
         | IrExpression::Literal(..)
         | IrExpression::RegexPattern { .. }
+        | IrExpression::TextBlock { .. }
         | IrExpression::Identifier { .. }
         | IrExpression::This { .. }
         | IrExpression::Super { .. } => {}
+    }
+}
+
+fn apply_regex_replacement(replacement: &mut IrRegexReplacement, resolution: &MethodResolution) {
+    match replacement {
+        IrRegexReplacement::Literal(literal) => {
+            for segment in &mut literal.segments {
+                if let IrRegexTemplateSegment::Expression(expr) = segment {
+                    apply_expression(expr, resolution);
+                }
+            }
+        }
+        IrRegexReplacement::Expression(expr) => apply_expression(expr, resolution),
+    }
+}
+
+fn apply_log_plan(plan: &mut LogInvocationPlan, resolution: &MethodResolution) {
+    for item in plan.items.iter_mut() {
+        match item {
+            LogInvocationItem::Statement(stmt) => apply_statement(stmt, resolution),
+            LogInvocationItem::Message(message) => {
+                apply_expression(&mut message.expression, resolution)
+            }
+            LogInvocationItem::Nested(nested) => apply_log_plan(nested, resolution),
+        }
     }
 }
 

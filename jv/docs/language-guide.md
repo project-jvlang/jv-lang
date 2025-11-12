@@ -448,6 +448,8 @@ String message = String.format("Hello, my name is %s and I'm %d years old", name
 String calculation = "The result is " + (2 + 2);
 ```
 
+> Raw文字列・テキストブロックの詳しい整形ルールは [Raw文字列ガイド](language/raw-strings.md) を参照してください。
+
 ## 正規表現リテラル
 
 正規表現はスラッシュ区切りのリテラル `/<pattern>/` として記述でき、コンパイル後は
@@ -483,6 +485,8 @@ public static boolean isNumber(String input) {
 - 文字列リテラル（`"/not/regex/"`）は従来どおり `TokenType::String` として扱われ、
   正規表現リテラルと混同されません。
 - 追加のランタイム依存関係は不要で、`java.util.regex.Pattern` のみを使用します。
+
+> CLI/LSP での診断連携や `RegexCommand` の書き方は [正規表現診断ガイド](language/regex-diagnostics.md) を参照してください。
 
 ## スマートインポート
 

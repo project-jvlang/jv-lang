@@ -3,24 +3,25 @@ use anyhow::Result;
 use clap::Parser;
 use jv_ir::{
     sequence_pipeline,
-    types::{IrImport, IrImportDetail},
+    types::{IrImport, IrImportDetail, LogLevel as IrLogLevel, LoggingFrameworkKind},
 };
-use jv_support::i18n::{catalog, LocaleCode};
+use jv_support::i18n::{LocaleCode, catalog};
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 
 use jv_checker::diagnostics::{
-    from_check_error, from_frontend_diagnostics, from_parse_error, from_transform_error,
-    DiagnosticSeverity, DiagnosticStrategy, EnhancedDiagnostic,
+    DiagnosticSeverity, DiagnosticStrategy, EnhancedDiagnostic, from_check_error,
+    from_frontend_diagnostics, from_parse_error, from_transform_error,
 };
-use jv_pm::JavaTarget;
+use jv_pm::{JavaTarget, LogLevel, LoggingConfig, LoggingFramework};
 
 mod embedded_stdlib;
 mod java_type_names;
 mod sequence_warnings;
 
 pub mod commands;
+pub mod logging_overrides;
 #[derive(Parser, Debug, Clone)]
 #[command(name = "jv")]
 #[command(
@@ -35,6 +36,7 @@ pub mod commands;
 
 詳細は README と docs/stdlib/collections.md を参照してください。"#
 )]
+#[command(disable_help_subcommand = true)]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Option<Commands>,
@@ -89,6 +91,27 @@ pub enum Commands {
         /// Override constraint batch size for inference
         #[arg(long, value_name = "batch")]
         constraint_batch: Option<usize>,
+        /// ログレベルを上書きする
+        #[arg(long = "log-level", value_name = "level")]
+        log_level: Option<String>,
+        /// ロギングフレームワークを上書きする
+        #[arg(long = "log-framework", value_name = "framework")]
+        log_framework: Option<String>,
+        /// 既定のログレベルを上書きする
+        #[arg(long = "log-default-level", value_name = "level")]
+        log_default_level: Option<String>,
+        /// OpenTelemetry の有効・無効を上書きする
+        #[arg(long = "otel-enabled", value_name = "bool")]
+        otel_enabled: Option<String>,
+        /// OpenTelemetry Collector のエンドポイントを指定する
+        #[arg(long = "otel-endpoint", value_name = "url")]
+        otel_endpoint: Option<String>,
+        /// OpenTelemetry のプロトコルを指定する
+        #[arg(long = "otel-protocol", value_name = "protocol")]
+        otel_protocol: Option<String>,
+        /// TraceContext ヘッダ注入の可否を指定する
+        #[arg(long = "otel-trace-context", value_name = "bool")]
+        otel_trace_context: Option<String>,
         /// Produce a single-file binary artifact: 'jar' or 'native'
         #[arg(long, value_parser = ["jar", "native"])]
         binary: Option<String>,
@@ -98,7 +121,21 @@ pub enum Commands {
         /// Override the Java target (e.g., 21 or 25)
         #[arg(long, value_name = "java-target")]
         target: Option<JavaTarget>,
+        /// Enable javac annotation processing (APT)
+        #[arg(long, default_value_t = false)]
+        apt: bool,
+        /// Comma-separated annotation processors (e.g., org.example.Proc1,Proc2)
+        #[arg(long, value_name = "list")]
+        processors: Option<String>,
+        /// Processor path entries (jar/dir). Use platform separator if multiple.
+        #[arg(long, value_name = "path")]
+        processorpath: Option<String>,
+        /// Repeated processor option to pass as -A<k=v>
+        #[arg(long = "apt-option", value_name = "k=v")]
+        apt_options: Vec<String>,
     },
+    /// テストDSLからJUnit 5テストを生成して Maven で実行
+    Test(commands::test::TestArgs),
     /// Run a compiled jv program
     Run {
         /// Input .jv file to compile and run
@@ -122,6 +159,16 @@ pub enum Commands {
         /// Diagnostic code (e.g., JV2001)
         code: String,
     },
+    /// パッケージマネージャ関連の詳細ヘルプを表示
+    Help(commands::help::HelpArgs),
+    /// Add dependencies via the package manager
+    Add(commands::add::AddArgs),
+    /// Remove dependencies managed by the package manager
+    Remove(commands::remove::RemoveArgs),
+    /// Inspect resolver strategies and metadata
+    Resolver(commands::resolver::ResolverArgs),
+    /// Manage repository configuration and mirrors
+    Repo(commands::repo::RepoArgs),
     /// Show version information  
     Version,
     /// Start interactive REPL
@@ -130,6 +177,8 @@ pub enum Commands {
     Tour,
     /// Inspect compiler artifacts for debugging
     Debug(commands::debug::DebugArgs),
+    /// OpenTelemetry の設定検証と疎通確認を実行する
+    Otel(commands::otel::OtelCommand),
 }
 
 pub fn tooling_failure(path: &Path, diagnostic: EnhancedDiagnostic) -> anyhow::Error {
@@ -428,34 +477,34 @@ pub mod pipeline {
     }
 
     pub use build_plan::{BuildOptions, BuildOptionsFactory, BuildPlan, CliOverrides};
-    pub use perf::{persist_single_run_report, PerfCapture};
+    pub use perf::{PerfCapture, persist_single_run_report};
     pub use project::output::{OutputManager, PreparedOutput};
 
     use super::*;
-    use anyhow::{anyhow, bail, Context};
+    use anyhow::{Context, anyhow, bail};
     use generics::apply_type_facts;
     use jv_ast::{Argument, CallArgumentMetadata, Expression, Literal, Span, Statement};
+    use jv_build::BuildSystem;
     use jv_build::metadata::{
         BuildContext as SymbolBuildContext, SymbolIndexBuilder, SymbolIndexCache,
     };
-    use jv_build::BuildSystem;
     use jv_checker::binding::BindingUsageSummary;
     use jv_checker::compat::diagnostics as compat_diagnostics;
     use jv_checker::imports::{
-        diagnostics as import_diagnostics, ImportResolutionService, ResolvedImport,
-        ResolvedImportKind,
+        ImportResolutionService, ResolvedImport, ResolvedImportKind,
+        diagnostics as import_diagnostics,
     };
     use jv_checker::inference::{AppliedConversion, HelperSpec, NullableGuardReason};
     use jv_checker::{InferenceSnapshot, InferenceTelemetry, TypeChecker, TypeKind};
     use jv_codegen_java::{JavaCodeGenConfig, JavaCodeGenerator};
     use jv_fmt::JavaFormatter;
     use jv_inference::types::TypeVariant;
+    use jv_ir::TransformContext;
     use jv_ir::context::WhenStrategyRecord;
     use jv_ir::types::{IrImport, IrImportDetail};
-    use jv_ir::TransformContext;
     use jv_ir::{
-        transform_program_with_context, transform_program_with_context_profiled, TransformPools,
-        TransformProfiler,
+        TransformPools, TransformProfiler, transform_program_with_context,
+        transform_program_with_context_profiled,
     };
     use jv_parser_frontend::ParserPipeline;
     use jv_parser_rowan::frontend::RowanPipeline;
@@ -467,7 +516,7 @@ pub mod pipeline {
     use std::sync::Arc;
     use std::time::Instant;
     use tracing::debug;
-    use type_facts_bridge::preload_type_facts_into_context;
+    use type_facts_bridge::{preload_tuple_plans_into_context, preload_type_facts_into_context};
 
     /// Resulting artifacts and diagnostics from the build pipeline.
     #[derive(Debug, Default, Clone)]
@@ -527,6 +576,40 @@ pub mod pipeline {
 
     fn script_main_class(plan: &BuildPlan) -> String {
         compute_script_main_class(&plan.settings.manifest.package.name, plan.entrypoint())
+    }
+
+    fn apply_logging_config_to_context(context: &mut TransformContext, config: &LoggingConfig) {
+        context.set_logging_framework(map_framework(&config.framework));
+        {
+            let options = context.logging_options_mut();
+            options.active_level = map_log_level(config.log_level);
+            options.default_level = map_log_level(config.default_level);
+        }
+        let trace_enabled = config.opentelemetry.enabled && config.opentelemetry.trace_context;
+        context.set_trace_context_enabled(trace_enabled);
+    }
+
+    fn map_log_level(level: LogLevel) -> IrLogLevel {
+        match level {
+            LogLevel::Trace => IrLogLevel::Trace,
+            LogLevel::Debug => IrLogLevel::Debug,
+            LogLevel::Info => IrLogLevel::Info,
+            LogLevel::Warn => IrLogLevel::Warn,
+            LogLevel::Error => IrLogLevel::Error,
+        }
+    }
+
+    fn map_framework(framework: &LoggingFramework) -> LoggingFrameworkKind {
+        match framework {
+            LoggingFramework::Slf4j => LoggingFrameworkKind::Slf4j,
+            LoggingFramework::Log4j2 => LoggingFrameworkKind::Log4j2,
+            LoggingFramework::JbossLogging => LoggingFrameworkKind::JbossLogging,
+            LoggingFramework::CommonsLogging => LoggingFrameworkKind::CommonsLogging,
+            LoggingFramework::Jul => LoggingFrameworkKind::Jul,
+            LoggingFramework::Custom(custom) => LoggingFrameworkKind::Custom {
+                identifier: custom.identifier.clone(),
+            },
+        }
     }
 
     fn to_pascal_case(input: &str) -> String {
@@ -787,6 +870,7 @@ pub mod pipeline {
         };
 
         let binding_usage = type_checker.binding_usage().clone();
+        let tuple_record_plans = type_checker.tuple_record_plans().to_vec();
 
         let mut type_facts_snapshot = type_facts_snapshot;
         let requires_probe = type_facts_snapshot
@@ -867,9 +951,11 @@ pub mod pipeline {
         let mut ir_program = if options.perf {
             let pools = TransformPools::with_chunk_capacity(256 * 1024);
             let mut context = TransformContext::with_pools(pools);
+            apply_logging_config_to_context(&mut context, &plan.logging_config);
             if let Some(facts) = type_facts_snapshot.as_ref() {
                 preload_type_facts_into_context(&mut context, facts);
             }
+            preload_tuple_plans_into_context(&mut context, &tuple_record_plans);
             if !import_plan.is_empty() {
                 context.set_resolved_imports(import_plan.clone());
             }
@@ -906,9 +992,11 @@ pub mod pipeline {
             }
         } else {
             let mut context = TransformContext::new();
+            apply_logging_config_to_context(&mut context, &plan.logging_config);
             if let Some(facts) = type_facts_snapshot.as_ref() {
                 preload_type_facts_into_context(&mut context, facts);
             }
+            preload_tuple_plans_into_context(&mut context, &tuple_record_plans);
             if !import_plan.is_empty() {
                 context.set_resolved_imports(import_plan.clone());
             }
@@ -935,6 +1023,8 @@ pub mod pipeline {
                 }
             }
         };
+
+        ir_program.tuple_record_plans = tuple_record_plans;
 
         if let Some(facts) = type_facts_snapshot.as_ref() {
             apply_type_facts(&mut ir_program, facts);
@@ -1069,20 +1159,22 @@ pub mod pipeline {
                     .compile_java_files(java_paths)
                     .map_err(|e| anyhow!("Java compilation failed: {}", e))?;
 
-                let entries = fs::read_dir(&options.output_dir).with_context(|| {
-                    format!(
-                        "Failed to enumerate output directory: {}",
-                        options.output_dir.display()
-                    )
-                })?;
-
+                let mut pending = vec![options.output_dir.clone()];
                 let mut class_files = Vec::new();
-                for entry in entries {
-                    let path = entry?.path();
-                    if path.extension().and_then(OsStr::to_str) == Some("class") {
-                        class_files.push(path);
+                while let Some(dir) = pending.pop() {
+                    let entries = fs::read_dir(&dir).with_context(|| {
+                        format!("Failed to enumerate output directory: {}", dir.display())
+                    })?;
+                    for entry in entries {
+                        let path = entry?.path();
+                        if path.is_dir() {
+                            pending.push(path);
+                        } else if path.extension().and_then(OsStr::to_str) == Some("class") {
+                            class_files.push(path);
+                        }
                     }
                 }
+                class_files.sort();
                 artifacts.class_files = class_files;
             }
         }
@@ -1368,6 +1460,14 @@ pub mod pipeline {
                     .collect::<Vec<_>>()
                     .join(", ");
                 format!("fn({}) -> {}", param_repr, format_type_kind(result))
+            }
+            TypeKind::Tuple(elements) => {
+                let items = elements
+                    .iter()
+                    .map(format_type_kind)
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("({items})")
             }
             TypeKind::Unknown => "unknown".to_string(),
         }

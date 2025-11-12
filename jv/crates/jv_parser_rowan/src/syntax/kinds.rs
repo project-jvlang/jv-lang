@@ -36,6 +36,30 @@ pub enum SyntaxKind {
     BindingTuplePattern,
     /// 型注釈。
     TypeAnnotation,
+    /// 単位付き型注釈。
+    UnitTypeAnnotation,
+    /// 単位型定義全体。
+    UnitTypeDefinition,
+    /// 単位型定義のヘッダー（カテゴリや基底型部分）。
+    UnitHeader,
+    /// 単位カテゴリを示す識別子。
+    UnitCategory,
+    /// 単位定義で指定された基底型。
+    UnitBaseType,
+    /// 単位名の識別子。
+    UnitName,
+    /// デフォルト単位を示すマーカー。
+    UnitDefaultMarker,
+    /// 単位定義の本体ブロック。
+    UnitBody,
+    /// 単位依存定義（`識別子 := 式`）。
+    UnitDependency,
+    /// 単位間の関係定義（`識別子 -> 識別子`）。
+    UnitRelation,
+    /// 順方向変換ブロック。
+    UnitConversionBlock,
+    /// 逆方向変換ブロック。
+    UnitReverseConversionBlock,
     /// 初期化子。
     InitializerClause,
     /// アノテーションの並び。
@@ -46,12 +70,26 @@ pub enum SyntaxKind {
     AnnotationArgumentList,
     /// アノテーション引数。
     AnnotationArgument,
+    /// テスト宣言。
+    TestDeclaration,
+    /// テストデータセット全体。
+    TestDataset,
+    /// データセット内の1行。
+    TestDatasetRow,
+    /// テストパラメータリスト。
+    TestParameterList,
+    /// テストパラメータ。
+    TestParameter,
+    /// 単位リテラル。
+    UnitLiteral,
     /// ステートメントレベル修飾子のリスト。
     ModifierList,
     /// 単一の修飾子。
     Modifier,
     /// 一般的な式プレースホルダー。
     Expression,
+    /// 正規表現コマンド式。
+    RegexCommand,
     /// 修飾名。
     QualifiedName,
     /// 修飾名セグメント。
@@ -80,6 +118,8 @@ pub enum SyntaxKind {
     ClassBody,
     /// ブロック文。
     Block,
+    /// ログブロック式。
+    LogBlockExpression,
     /// ブロック内部のステートメント列。
     StatementList,
     /// 代入ステートメント。
@@ -160,6 +200,18 @@ pub enum SyntaxKind {
     DeferKw,
     /// `spawn` キーワード。
     SpawnKw,
+    /// `LOG` キーワード。
+    LogKw,
+    /// `TRACE` キーワード。
+    TraceKw,
+    /// `DEBUG` キーワード。
+    DebugKw,
+    /// `INFO` キーワード。
+    InfoKw,
+    /// `WARN` キーワード。
+    WarnKw,
+    /// `ERROR` キーワード。
+    ErrorKw,
     /// `true` キーワード。
     TrueKw,
     /// `false` キーワード。
@@ -176,6 +228,10 @@ pub enum SyntaxKind {
     CharacterLiteral,
     /// 識別子。
     Identifier,
+    /// ワイルドカードアンダースコア。
+    Underscore,
+    /// 暗黙引数アンダースコア。
+    ImplicitParam,
     /// コロン。
     Colon,
     /// セミコロン。
@@ -345,6 +401,18 @@ pub enum TokenKind {
     DeferKw,
     /// `spawn` キーワード。
     SpawnKw,
+    /// `LOG` キーワード。
+    LogKw,
+    /// `TRACE` キーワード。
+    TraceKw,
+    /// `DEBUG` キーワード。
+    DebugKw,
+    /// `INFO` キーワード。
+    InfoKw,
+    /// `WARN` キーワード。
+    WarnKw,
+    /// `ERROR` キーワード。
+    ErrorKw,
     /// `true` キーワード。
     TrueKw,
     /// `false` キーワード。
@@ -361,6 +429,10 @@ pub enum TokenKind {
     CharacterLiteral,
     /// 識別子。
     Identifier,
+    /// ワイルドカードアンダースコア。
+    Underscore,
+    /// 暗黙引数アンダースコア。
+    ImplicitParam,
     /// コロン。
     Colon,
     /// セミコロン。
@@ -479,6 +551,12 @@ impl TokenKind {
             TokenKind::UseKw => SyntaxKind::UseKw,
             TokenKind::DeferKw => SyntaxKind::DeferKw,
             TokenKind::SpawnKw => SyntaxKind::SpawnKw,
+            TokenKind::LogKw => SyntaxKind::LogKw,
+            TokenKind::TraceKw => SyntaxKind::TraceKw,
+            TokenKind::DebugKw => SyntaxKind::DebugKw,
+            TokenKind::InfoKw => SyntaxKind::InfoKw,
+            TokenKind::WarnKw => SyntaxKind::WarnKw,
+            TokenKind::ErrorKw => SyntaxKind::ErrorKw,
             TokenKind::TrueKw => SyntaxKind::TrueKw,
             TokenKind::FalseKw => SyntaxKind::FalseKw,
             TokenKind::BooleanLiteral => SyntaxKind::BooleanLiteral,
@@ -487,6 +565,8 @@ impl TokenKind {
             TokenKind::RegexLiteral => SyntaxKind::RegexLiteral,
             TokenKind::CharacterLiteral => SyntaxKind::CharacterLiteral,
             TokenKind::Identifier => SyntaxKind::Identifier,
+            TokenKind::Underscore => SyntaxKind::Underscore,
+            TokenKind::ImplicitParam => SyntaxKind::ImplicitParam,
             TokenKind::Colon => SyntaxKind::Colon,
             TokenKind::Semicolon => SyntaxKind::Semicolon,
             TokenKind::Assign => SyntaxKind::Assign,
@@ -572,12 +652,20 @@ impl TokenKind {
             TokenType::Continue => TokenKind::ContinueKw,
             TokenType::True => TokenKind::TrueKw,
             TokenType::False => TokenKind::FalseKw,
+            TokenType::Log => TokenKind::LogKw,
+            TokenType::Trace => TokenKind::TraceKw,
+            TokenType::Debug => TokenKind::DebugKw,
+            TokenType::Info => TokenKind::InfoKw,
+            TokenType::Warn => TokenKind::WarnKw,
+            TokenType::Error => TokenKind::ErrorKw,
             TokenType::Boolean(_) => TokenKind::BooleanLiteral,
             TokenType::Number(_) => TokenKind::NumberLiteral,
             TokenType::String(_) | TokenType::StringInterpolation(_) => TokenKind::StringLiteral,
             TokenType::RegexLiteral(_) => TokenKind::RegexLiteral,
             TokenType::Character(_) => TokenKind::CharacterLiteral,
             TokenType::Identifier(_) => TokenKind::Identifier,
+            TokenType::Underscore => TokenKind::Underscore,
+            TokenType::ImplicitParam(_) => TokenKind::ImplicitParam,
             TokenType::Colon => TokenKind::Colon,
             TokenType::Semicolon => TokenKind::Semicolon,
             TokenType::Assign => TokenKind::Assign,
@@ -621,6 +709,7 @@ impl TokenKind {
             TokenType::LineComment(_) => TokenKind::LineComment,
             TokenType::BlockComment(_) => TokenKind::BlockComment,
             TokenType::JavaDocComment(_) => TokenKind::DocComment,
+            TokenType::FieldNameLabel(_) => TokenKind::LineComment,
             TokenType::Eof => TokenKind::Eof,
             TokenType::Invalid(_) => TokenKind::Unknown,
         }
@@ -662,6 +751,7 @@ mod tests {
         ("ImportPath", SyntaxKind::ImportPath),
         ("ImportClause", SyntaxKind::ImportClause),
         ("ImportWildcard", SyntaxKind::ImportWildcard),
+        ("ImportAlias", SyntaxKind::ImportAlias),
         ("StatementList", SyntaxKind::StatementList),
         ("CommentStatement", SyntaxKind::CommentStatement),
         ("AssignmentStatement", SyntaxKind::AssignmentStatement),
@@ -672,11 +762,32 @@ mod tests {
         ("BindingListPattern", SyntaxKind::BindingListPattern),
         ("BindingTuplePattern", SyntaxKind::BindingTuplePattern),
         ("TypeAnnotation", SyntaxKind::TypeAnnotation),
+        ("UnitTypeAnnotation", SyntaxKind::UnitTypeAnnotation),
+        ("UnitTypeDefinition", SyntaxKind::UnitTypeDefinition),
+        ("UnitHeader", SyntaxKind::UnitHeader),
+        ("UnitCategory", SyntaxKind::UnitCategory),
+        ("UnitBaseType", SyntaxKind::UnitBaseType),
+        ("UnitName", SyntaxKind::UnitName),
+        ("UnitDefaultMarker", SyntaxKind::UnitDefaultMarker),
+        ("UnitBody", SyntaxKind::UnitBody),
+        ("UnitDependency", SyntaxKind::UnitDependency),
+        ("UnitRelation", SyntaxKind::UnitRelation),
+        ("UnitConversionBlock", SyntaxKind::UnitConversionBlock),
+        (
+            "UnitReverseConversionBlock",
+            SyntaxKind::UnitReverseConversionBlock,
+        ),
         ("InitializerClause", SyntaxKind::InitializerClause),
         ("AnnotationList", SyntaxKind::AnnotationList),
         ("Annotation", SyntaxKind::Annotation),
         ("AnnotationArgumentList", SyntaxKind::AnnotationArgumentList),
         ("AnnotationArgument", SyntaxKind::AnnotationArgument),
+        ("TestDeclaration", SyntaxKind::TestDeclaration),
+        ("TestDataset", SyntaxKind::TestDataset),
+        ("TestDatasetRow", SyntaxKind::TestDatasetRow),
+        ("TestParameterList", SyntaxKind::TestParameterList),
+        ("TestParameter", SyntaxKind::TestParameter),
+        ("UnitLiteral", SyntaxKind::UnitLiteral),
         ("ModifierList", SyntaxKind::ModifierList),
         ("Modifier", SyntaxKind::Modifier),
         ("FunctionDeclaration", SyntaxKind::FunctionDeclaration),
@@ -692,6 +803,7 @@ mod tests {
         ("ClassDeclaration", SyntaxKind::ClassDeclaration),
         ("ClassBody", SyntaxKind::ClassBody),
         ("Block", SyntaxKind::Block),
+        ("LogBlockExpression", SyntaxKind::LogBlockExpression),
         ("WhenStatement", SyntaxKind::WhenStatement),
         ("WhenBranch", SyntaxKind::WhenBranch),
         ("ForStatement", SyntaxKind::ForStatement),
@@ -705,6 +817,8 @@ mod tests {
         ("QualifiedName", SyntaxKind::QualifiedName),
         ("QualifiedNameSegment", SyntaxKind::QualifiedNameSegment),
         ("Expression", SyntaxKind::Expression),
+        ("RegexCommand", SyntaxKind::RegexCommand),
+        ("StringLiteral", SyntaxKind::StringLiteral),
         ("PackageKw", SyntaxKind::PackageKw),
         ("ImportKw", SyntaxKind::ImportKw),
         ("ValKw", SyntaxKind::ValKw),
@@ -719,6 +833,12 @@ mod tests {
         ("UseKw", SyntaxKind::UseKw),
         ("DeferKw", SyntaxKind::DeferKw),
         ("SpawnKw", SyntaxKind::SpawnKw),
+        ("LogKw", SyntaxKind::LogKw),
+        ("TraceKw", SyntaxKind::TraceKw),
+        ("DebugKw", SyntaxKind::DebugKw),
+        ("InfoKw", SyntaxKind::InfoKw),
+        ("WarnKw", SyntaxKind::WarnKw),
+        ("ErrorKw", SyntaxKind::ErrorKw),
         ("ElseKw", SyntaxKind::ElseKw),
         ("WhenKw", SyntaxKind::WhenKw),
         ("ForKw", SyntaxKind::ForKw),
@@ -738,9 +858,12 @@ mod tests {
         ("RightParen", SyntaxKind::RightParen),
         ("LeftBrace", SyntaxKind::LeftBrace),
         ("RightBrace", SyntaxKind::RightBrace),
+        ("LeftBracket", SyntaxKind::LeftBracket),
+        ("RightBracket", SyntaxKind::RightBracket),
         ("Less", SyntaxKind::Less),
         ("Greater", SyntaxKind::Greater),
         ("Arrow", SyntaxKind::Arrow),
+        ("Bang", SyntaxKind::Bang),
         ("Identifier", SyntaxKind::Identifier),
         ("ExpressionToken", SyntaxKind::Expression),
     ];

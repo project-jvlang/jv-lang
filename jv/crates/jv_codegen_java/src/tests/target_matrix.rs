@@ -58,6 +58,8 @@ fn sealed_program() -> IrProgram {
         type_declarations: vec![result_class, success_class, failure_class],
         generic_metadata: Default::default(),
         conversion_metadata: Vec::new(),
+        logging: Default::default(),
+        tuple_record_plans: Vec::new(),
         span: dummy_span(),
     }
 }

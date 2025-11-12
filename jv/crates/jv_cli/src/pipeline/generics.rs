@@ -5,9 +5,10 @@ use jv_inference::service::{TypeFacts, TypeFactsSnapshot, TypeLevelValue};
 use jv_inference::solver::Variance;
 use jv_inference::types::{BoundPredicate, GenericBounds, SymbolId, TypeId, TypeKind, TypeVariant};
 use jv_ir::{
-    GenericMetadataMap, IrExpression, IrGenericMetadata, IrModifiers, IrProgram, IrStatement,
-    IrTypeLevelValue, IrTypeParameter, IrVariance, JavaType, PrimitiveSpecializationHint,
-    SequencePipeline, SequenceSource, SequenceStage,
+    GenericMetadataMap, IrExpression, IrGenericMetadata, IrModifiers, IrProgram, IrRegexReplacement,
+    IrRegexTemplateSegment, IrStatement, IrTypeLevelValue, IrTypeParameter, IrVariance, JavaType,
+    LogInvocationItem, LogInvocationPlan, PrimitiveSpecializationHint, SequencePipeline,
+    SequenceSource, SequenceStage,
 };
 
 /// Enriches the generated IR program with generic metadata sourced from type inference facts.
@@ -478,6 +479,11 @@ fn apply_hint_to_expression(expr: &mut IrExpression, hint: &PrimitiveSpecializat
                 apply_hint_to_expression(arg, hint);
             }
         }
+        IrExpression::TupleLiteral { elements, .. } => {
+            for element in elements.iter_mut() {
+                apply_hint_to_expression(element, hint);
+            }
+        }
         IrExpression::Switch { discriminant, cases, .. } => {
             apply_hint_to_expression(discriminant, hint);
             for case in cases.iter_mut() {
@@ -520,10 +526,54 @@ fn apply_hint_to_expression(expr: &mut IrExpression, hint: &PrimitiveSpecializat
             apply_hint_to_expression(body, hint);
         }
         IrExpression::RegexPattern { .. }
+        | IrExpression::TextBlock { .. }
         | IrExpression::Literal(..)
         | IrExpression::Identifier { .. }
         | IrExpression::This { .. }
         | IrExpression::Super { .. } => {}
+        IrExpression::RegexCommand {
+            subject,
+            pattern_expr,
+            replacement,
+            ..
+        } => {
+            apply_hint_to_expression(subject, hint);
+            if let Some(expr) = pattern_expr {
+                apply_hint_to_expression(expr, hint);
+            }
+            if let Some(replacement) = replacement {
+                apply_hint_to_regex_replacement(replacement, hint);
+            }
+        },
+        IrExpression::LogInvocation { plan, .. } => apply_hint_to_log_plan(plan.as_mut(), hint),
+    }
+}
+
+fn apply_hint_to_regex_replacement(
+    replacement: &mut IrRegexReplacement,
+    hint: &PrimitiveSpecializationHint,
+) {
+    match replacement {
+        IrRegexReplacement::Literal(literal) => {
+            for segment in &mut literal.segments {
+                if let IrRegexTemplateSegment::Expression(expr) = segment {
+                    apply_hint_to_expression(expr, hint);
+                }
+            }
+        }
+        IrRegexReplacement::Expression(expr) => apply_hint_to_expression(expr, hint),
+    }
+}
+
+fn apply_hint_to_log_plan(plan: &mut LogInvocationPlan, hint: &PrimitiveSpecializationHint) {
+    for item in plan.items.iter_mut() {
+        match item {
+            LogInvocationItem::Statement(statement) => apply_hint_to_statement(statement, hint),
+            LogInvocationItem::Message(message) => {
+                apply_hint_to_expression(&mut message.expression, hint)
+            }
+            LogInvocationItem::Nested(nested) => apply_hint_to_log_plan(nested.as_mut(), hint),
+        }
     }
 }
 

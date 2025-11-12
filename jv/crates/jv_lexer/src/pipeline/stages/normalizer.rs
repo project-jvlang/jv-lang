@@ -3,14 +3,14 @@ use std::char;
 use unicode_normalization::UnicodeNormalization;
 
 use crate::{
+    LayoutCommaMetadata, LayoutSequenceKind, LexError, NumberGroupingKind, NumberLiteralMetadata,
+    StringDelimiterKind, StringInterpolationSegment, StringLiteralMetadata, TokenDiagnostic,
+    TokenMetadata, TokenType,
     pipeline::{
         context::LexerContext,
         pipeline::NormalizerStage,
         types::{NormalizedToken, PreMetadata, RawToken, RawTokenKind, Span},
     },
-    LayoutCommaMetadata, LayoutSequenceKind, LexError, NumberGroupingKind, NumberLiteralMetadata,
-    StringDelimiterKind, StringInterpolationSegment, StringLiteralMetadata, TokenDiagnostic,
-    TokenMetadata, TokenType,
 };
 
 use super::json_utils::{detect_array_confidence, detect_object_confidence};
@@ -161,6 +161,8 @@ fn can_end_layout_item(token: &TokenType) -> bool {
     matches!(
         token,
         TokenType::Identifier(_)
+            | TokenType::Underscore
+            | TokenType::ImplicitParam(_)
             | TokenType::Number(_)
             | TokenType::String(_)
             | TokenType::StringInterpolation(_)
@@ -614,7 +616,18 @@ impl Normalizer {
         } else {
             raw_text.to_string()
         };
-        Ok(self.finalize_token(token, PreMetadata::default(), normalized_text))
+        let mut metadata = PreMetadata::default();
+        if let Some(issue) = token.field_label_issue.as_ref() {
+            metadata
+                .provisional_diagnostics
+                .push(TokenDiagnostic::InvalidFieldNameLabel {
+                    reason: issue.reason,
+                    text: issue.text.clone(),
+                    line: issue.line,
+                    column: issue.column,
+                });
+        }
+        Ok(self.finalize_token(token, metadata, normalized_text))
     }
 }
 
@@ -735,6 +748,8 @@ mod tests {
             span: make_span(leaked.len()),
             trivia: None,
             carry_over: None,
+            field_label: None,
+            field_label_issue: None,
         }
     }
 
@@ -749,11 +764,13 @@ mod tests {
             .expect("string normalization");
 
         assert_eq!(normalized.normalized_text, "Café");
-        assert!(normalized
-            .metadata
-            .provisional_metadata
-            .iter()
-            .any(|meta| matches!(meta, TokenMetadata::StringLiteral(_))));
+        assert!(
+            normalized
+                .metadata
+                .provisional_metadata
+                .iter()
+                .any(|meta| matches!(meta, TokenMetadata::StringLiteral(_)))
+        );
         assert!(normalized.metadata.provisional_diagnostics.is_empty());
 
         let string_meta = normalized
@@ -809,15 +826,17 @@ mod tests {
             .expect("number normalization");
 
         assert_eq!(normalized.normalized_text, "1234567");
-        assert!(normalized
-            .metadata
-            .provisional_metadata
-            .iter()
-            .any(|meta| matches!(
-                meta,
-                TokenMetadata::NumberLiteral(info)
-                if matches!(info.grouping, NumberGroupingKind::Mixed)
-            )));
+        assert!(
+            normalized
+                .metadata
+                .provisional_metadata
+                .iter()
+                .any(|meta| matches!(
+                    meta,
+                    TokenMetadata::NumberLiteral(info)
+                    if matches!(info.grouping, NumberGroupingKind::Mixed)
+                ))
+        );
     }
 
     #[test]
@@ -845,12 +864,14 @@ mod tests {
                 .unwrap_or_else(|_| panic!("number normalization failed for {}", lexeme));
 
             assert_eq!(normalized.normalized_text, expected);
-            assert!(normalized
-                .metadata
-                .provisional_metadata
-                .iter()
-                .any(|meta| matches!(meta, TokenMetadata::NumberLiteral(info)
-                    if info.original_lexeme == lexeme && info.suffix == suffix)));
+            assert!(
+                normalized
+                    .metadata
+                    .provisional_metadata
+                    .iter()
+                    .any(|meta| matches!(meta, TokenMetadata::NumberLiteral(info)
+                    if info.original_lexeme == lexeme && info.suffix == suffix))
+            );
         }
     }
 
@@ -975,6 +996,8 @@ mod tests {
             span: make_span_with_offset(2, 1, 1, 3),
             trivia: None,
             carry_over: None,
+            field_label: None,
+            field_label_issue: None,
         };
         let mut ctx = LexerContext::new("[1 2]");
         ctx.push_layout_sequence(LayoutSequenceKind::Array);
@@ -1005,6 +1028,8 @@ mod tests {
             span: make_span_with_offset(5, 1, 1, 6),
             trivia: None,
             carry_over: None,
+            field_label: None,
+            field_label_issue: None,
         };
         let mut ctx = LexerContext::new("plot(1 2)");
         ctx.push_layout_sequence(LayoutSequenceKind::Call);
@@ -1085,11 +1110,13 @@ mod tests {
             .normalize(raw, &mut ctx)
             .expect("comment normalization");
 
-        assert!(normalized
-            .metadata
-            .provisional_metadata
-            .iter()
-            .all(|meta| !matches!(meta, TokenMetadata::CommentCarryOver(_))));
+        assert!(
+            normalized
+                .metadata
+                .provisional_metadata
+                .iter()
+                .all(|meta| !matches!(meta, TokenMetadata::CommentCarryOver(_)))
+        );
         assert_eq!(normalized.raw.carry_over, Some(carry));
     }
 }

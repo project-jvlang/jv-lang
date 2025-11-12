@@ -1,0 +1,9 @@
+package fixtures.control
+
+fun evaluate(value: Any): String {
+    return when (value) {
+        is Int -> "int"
+        is String -> "string"
+        else -> "other"
+    }
+}

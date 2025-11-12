@@ -1,9 +1,9 @@
 use crate::{
+    LexError, TokenType,
     pipeline::{
         context::LexerContext,
         types::{NormalizedToken, RawTokenKind},
     },
-    LexError, TokenType,
 };
 
 use super::{ClassificationModule, ClassificationState};
@@ -54,6 +54,12 @@ impl ClassificationModule for KeywordModule {
             "null" => Some(TokenType::Null),
             "package" => Some(TokenType::Package),
             "import" => Some(TokenType::Import),
+            "LOG" => Some(TokenType::Log),
+            "TRACE" => Some(TokenType::Trace),
+            "DEBUG" => Some(TokenType::Debug),
+            "INFO" => Some(TokenType::Info),
+            "WARN" => Some(TokenType::Warn),
+            "ERROR" => Some(TokenType::Error),
             _ => None,
         };
 

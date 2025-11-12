@@ -1,8 +1,8 @@
+use jv_ast::Span;
 use jv_ast::types::{
     ConstParameter, GenericParameter, GenericSignature, Kind, QualifiedName, RawTypeContinuation,
     RawTypeDirective, TypeAnnotation, TypeLevelExpr, VarianceMarker, WhereClause,
 };
-use jv_ast::Span;
 use serde_json::json;
 
 fn span() -> Span {
@@ -76,12 +76,14 @@ fn signature_collects_raw_directives_and_where_clause() {
 
     let owner = &signature.raw_directives[0].owner;
     assert_eq!(owner.qualified(), "demo.Widget");
-    assert!(signature
-        .where_clause
-        .as_ref()
-        .unwrap()
-        .predicates
-        .is_empty());
+    assert!(
+        signature
+            .where_clause
+            .as_ref()
+            .unwrap()
+            .predicates
+            .is_empty()
+    );
 }
 
 #[test]

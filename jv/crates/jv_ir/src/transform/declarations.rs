@@ -173,7 +173,7 @@ pub fn desugar_extension_function(
             return Err(TransformError::ExtensionFunctionError {
                 message: "Extension function must wrap a function declaration".to_string(),
                 span,
-            })
+            });
         }
     };
 
@@ -288,6 +288,7 @@ pub fn desugar_extension_function(
         body: Some(body_ir),
         modifiers: method_modifiers,
         throws: Vec::new(),
+        assertion_patterns: Vec::new(),
         span: function_span,
     };
 

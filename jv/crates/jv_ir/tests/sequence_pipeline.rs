@@ -1,4 +1,4 @@
-use jv_ast::expression::ParameterModifiers;
+use jv_ast::expression::{BinaryMetadata, ParameterModifiers};
 use jv_ast::types::PrimitiveTypeName;
 use jv_ast::{
     Argument, BinaryOp, CallArgumentStyle, Expression, Literal, Parameter, SequenceDelimiter, Span,
@@ -7,9 +7,9 @@ use jv_ast::{
 use jv_ir::context::{RegisteredMethodCall, RegisteredMethodDeclaration};
 use jv_ir::naming::method_erasure::apply_method_erasure;
 use jv_ir::{
-    transform_expression, IrExpression, IrModifiers, IrParameter, IrStatement, JavaType,
-    PipelineShape, PrimitiveSpecializationHint, SequencePipeline, SequenceSource, SequenceStage,
-    SequenceTerminal, SequenceTerminalEvaluation, SequenceTerminalKind, TransformContext,
+    IrExpression, IrModifiers, IrParameter, IrStatement, JavaType, PipelineShape,
+    PrimitiveSpecializationHint, SequencePipeline, SequenceSource, SequenceStage, SequenceTerminal,
+    SequenceTerminalEvaluation, SequenceTerminalKind, TransformContext, transform_expression,
 };
 
 fn dummy_span() -> Span {
@@ -54,6 +54,7 @@ fn add(lhs: Expression, rhs: Expression) -> Expression {
         op: BinaryOp::Add,
         right: Box::new(rhs),
         span: dummy_span(),
+        metadata: BinaryMetadata::default(),
     }
 }
 
@@ -77,6 +78,7 @@ fn multiply(lhs: Expression, rhs: Expression) -> Expression {
         op: BinaryOp::Multiply,
         right: Box::new(rhs),
         span: dummy_span(),
+        metadata: BinaryMetadata::default(),
     }
 }
 
@@ -86,6 +88,7 @@ fn modulo(lhs: Expression, rhs: Expression) -> Expression {
         op: BinaryOp::Modulo,
         right: Box::new(rhs),
         span: dummy_span(),
+        metadata: BinaryMetadata::default(),
     }
 }
 
@@ -95,6 +98,7 @@ fn equal(lhs: Expression, rhs: Expression) -> Expression {
         op: BinaryOp::Equal,
         right: Box::new(rhs),
         span: dummy_span(),
+        metadata: BinaryMetadata::default(),
     }
 }
 
@@ -967,6 +971,7 @@ fn sequence_flatmap_overloads_receive_stable_java_names() {
         body: None,
         modifiers: static_modifiers(true),
         throws: vec![],
+        assertion_patterns: vec![],
         span: span_decl_iter.clone(),
     };
 
@@ -985,6 +990,7 @@ fn sequence_flatmap_overloads_receive_stable_java_names() {
         body: None,
         modifiers: static_modifiers(true),
         throws: vec![],
+        assertion_patterns: vec![],
         span: span_decl_seq.clone(),
     };
 
@@ -1043,7 +1049,7 @@ fn sequence_flatmap_overloads_receive_stable_java_names() {
     };
 
     assert_eq!(iter_name, "flatMap");
-    let expected_seq_name = "flatMap$838775ca";
+    let expected_seq_name = "flatMap$1b3b055b";
     assert_eq!(seq_name, expected_seq_name);
 
     let (call_iter_name, call_iter_target) = match &statements[2] {

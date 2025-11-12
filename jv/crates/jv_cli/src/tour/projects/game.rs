@@ -1,4 +1,4 @@
-use super::{add_feature, Feature, MiniProject, ProjectStep};
+use super::{Feature, MiniProject, ProjectStep, add_feature};
 use crate::tour::cli::SectionId;
 
 pub fn create_project() -> MiniProject {
@@ -49,8 +49,7 @@ const GAME_FEATURES: [Feature; 4] = [
     },
     Feature {
         name: "ランダム選択とUI演出",
-        description:
-            "Java標準ライブラリを利用して CPU の手を生成し、インタラクティブ表示を整えます。",
+        description: "Java標準ライブラリを利用して CPU の手を生成し、インタラクティブ表示を整えます。",
         requirements: &["8.3"],
         section_refs: &[SectionId::InteractiveEditor],
         code_highlight: r#"val random = java.util.Random()
@@ -79,8 +78,12 @@ const GAME_STEPS: [ProjectStep; 3] = [
     ProjectStep {
         title: "列挙と勝敗判定の定義",
         goal: "Move enum と Outcome 判定関数を実装する",
-        walkthrough: &["Move/Outcome を enum class で定義", "judge 関数で when 式による勝敗ロジックを実装"],
-        code: Some(r#"enum class Outcome { Player, Cpu, Draw }
+        walkthrough: &[
+            "Move/Outcome を enum class で定義",
+            "judge 関数で when 式による勝敗ロジックを実装",
+        ],
+        code: Some(
+            r#"enum class Outcome { Player, Cpu, Draw }
 
 enum class Move { ROCK, PAPER, SCISSORS }
 
@@ -91,14 +94,19 @@ fun judge(player: Move, cpu: Move): Outcome = when (player to cpu) {
     cpu to player -> Outcome.Cpu
     else -> Outcome.Draw
 }
-"#),
+"#,
+        ),
         verification: &["jv fmt tour/projects/rps-game/src/main.jv"],
     },
     ProjectStep {
         title: "ゲームループと演出",
         goal: "プレイヤー入力を受け取り、CPU の手と演出を表示する",
-        walkthrough: &["readLine で入力を受け取り、toUpperCase で Move に変換", "Thread.sleep を使ってカウントダウン演出を追加"],
-        code: Some(r#"fun promptMove(): Move? {
+        walkthrough: &[
+            "readLine で入力を受け取り、toUpperCase で Move に変換",
+            "Thread.sleep を使ってカウントダウン演出を追加",
+        ],
+        code: Some(
+            r#"fun promptMove(): Move? {
     print("rock / paper / scissors > ")
     val choice = readLine()?.trim()?.uppercase()
     return Move.values().find { it.name == choice }
@@ -117,14 +125,19 @@ fun playRound(board: ScoreBoard) {
     println("あなた: ${player} / CPU: ${cpu} => ${outcome}")
     board.record(outcome)
 }
-"#),
+"#,
+        ),
         verification: &["printf \"rock\\n\" | jv run tour/projects/rps-game/src/main.jv"],
     },
     ProjectStep {
         title: "スコア保存とJar化",
         goal: "スコアボードをファイルに書き出し、ビルドを自動化する",
-        walkthrough: &["Files.write を使って結果を results/summary.txt に保存", "jv build --binary jar で配布可能な成果物を生成"],
-        code: Some(r#"fun saveScore(board: ScoreBoard) {
+        walkthrough: &[
+            "Files.write を使って結果を results/summary.txt に保存",
+            "jv build --binary jar で配布可能な成果物を生成",
+        ],
+        code: Some(
+            r#"fun saveScore(board: ScoreBoard) {
     val content = "Player=${board.player}, Cpu=${board.cpu}"
     java.nio.file.Files.createDirectories(java.nio.file.Path.of("results"))
     java.nio.file.Files.writeString(
@@ -133,7 +146,10 @@ fun playRound(board: ScoreBoard) {
         java.nio.charset.StandardCharsets.UTF_8,
     )
 }
-"#),
-        verification: &["jv build --input tour/projects/rps-game/src/main.jv --output target/jv/rps-game/java --binary jar --bin-name rps-game"],
+"#,
+        ),
+        verification: &[
+            "jv build --input tour/projects/rps-game/src/main.jv --output target/jv/rps-game/java --binary jar --bin-name rps-game",
+        ],
     },
 ];

@@ -4,6 +4,7 @@
 //! `TypeScheme` として公開する。タスク5では特に関数パラメータ・デフォルト値・
 //! return 経路を制約に反映し、解決結果から曖昧なシグネチャを検出する。
 
+use crate::InferenceTelemetry;
 use crate::imports::ResolvedImport;
 use crate::inference::constraint::ConstraintGenerator;
 use crate::inference::conversions::ConversionHelperCatalog;
@@ -12,7 +13,6 @@ use crate::inference::imports::ImportRegistry;
 use crate::inference::prelude;
 use crate::inference::types::{TypeBinding, TypeId, TypeKind};
 use crate::inference::unify::{ConstraintSolver, SolveError, SolveResult};
-use crate::InferenceTelemetry;
 use jv_ast::{Program, Statement};
 use jv_build::metadata::{ConversionCatalogCache, SymbolIndex};
 use jv_inference::ParallelInferenceConfig;
@@ -274,6 +274,13 @@ fn resolve_type(ty: &TypeKind, substitutions: &HashMap<TypeId, TypeKind>) -> Typ
             let resolved_return = resolve_type(ret, substitutions);
             TypeKind::function(resolved_params, resolved_return)
         }
+        TypeKind::Tuple(elements) => {
+            let resolved = elements
+                .iter()
+                .map(|element| resolve_type(element, substitutions))
+                .collect();
+            TypeKind::tuple(resolved)
+        }
         TypeKind::Unknown => TypeKind::Unknown,
     }
 }
@@ -296,8 +303,8 @@ mod tests {
     use super::*;
     use crate::inference::types::PrimitiveType;
     use jv_ast::{
-        BinaryOp, Expression, Literal, Modifiers, Parameter, ParameterModifiers, Span, Statement,
-        TypeAnnotation,
+        BinaryMetadata, BinaryOp, Expression, Literal, Modifiers, Parameter, ParameterModifiers,
+        Span, Statement, TypeAnnotation,
     };
 
     fn dummy_span() -> Span {
@@ -352,6 +359,7 @@ mod tests {
             op: BinaryOp::Add,
             right: Box::new(Expression::Identifier("rhs".into(), dummy_span())),
             span: dummy_span(),
+            metadata: BinaryMetadata::default(),
         };
 
         let program = Program {

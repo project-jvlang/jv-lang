@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use jv_ir::{
-    transform_program_with_context_profiled, TransformContext, TransformPools, TransformProfiler,
+    TransformContext, TransformPools, TransformProfiler, transform_program_with_context_profiled,
 };
 use jv_parser_frontend::ParserPipeline;
 use jv_parser_rowan::frontend::RowanPipeline;

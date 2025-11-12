@@ -49,6 +49,11 @@ impl CommentsStage {
                     result_origins.push(origin);
                     continue;
                 }
+                TokenType::FieldNameLabel(_) => {
+                    result_tokens.push(token);
+                    result_origins.push(origin);
+                    continue;
+                }
                 _ => {}
             }
 

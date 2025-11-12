@@ -43,7 +43,8 @@ impl CallStage {
             match token.token_type {
                 TokenType::JavaDocComment(_)
                 | TokenType::LineComment(_)
-                | TokenType::BlockComment(_) => continue,
+                | TokenType::BlockComment(_)
+                | TokenType::FieldNameLabel(_) => continue,
                 _ => {}
             }
 

@@ -5,9 +5,10 @@ use crate::types::{
     IrVisibility, JavaType, JavaWildcardKind,
 };
 use jv_ast::{
-    Argument, CallArgumentMetadata, CommentKind, CommentStatement, CommentVisibility, Expression,
-    Literal, Modifiers, Program, RegexLiteral, Span, Statement, StringPart, TypeAnnotation,
-    ValBindingOrigin, Visibility,
+    Argument, BinaryMetadata, CallArgumentMetadata, CommentKind, CommentStatement,
+    CommentVisibility, Expression, Literal, Modifiers, Program, RegexLiteral, Span, Statement,
+    StringPart, TypeAnnotation, ValBindingOrigin, Visibility,
+    expression::{TupleContextFlags, TupleFieldMeta},
 };
 
 fn render_type_annotation(annotation: TypeAnnotation) -> String {
@@ -432,7 +433,14 @@ impl<'a> ReconstructionContext<'a> {
                     pattern: pattern.clone(),
                     raw: format!("/{}/", escaped),
                     span: span.clone(),
+                    origin: None,
+                    const_key: None,
+                    template_segments: Vec::new(),
                 })
+            }
+            IrExpression::TextBlock { content, span } => {
+                self.record_success();
+                Expression::Literal(Literal::String(content.clone()), span.clone())
             }
             IrExpression::Identifier { name, span, .. } => {
                 self.record_success();
@@ -453,6 +461,7 @@ impl<'a> ReconstructionContext<'a> {
                     op: op.clone(),
                     right: Box::new(right),
                     span: span.clone(),
+                    metadata: BinaryMetadata::default(),
                 }
             }
             IrExpression::Unary {
@@ -596,6 +605,24 @@ impl<'a> ReconstructionContext<'a> {
                     span: span.clone(),
                 }
             }
+            IrExpression::TupleLiteral { elements, span, .. } => {
+                let converted = elements
+                    .iter()
+                    .enumerate()
+                    .map(|(idx, expr)| {
+                        self.with_segment(format!("tuple[{idx}]"), |ctx| {
+                            ctx.convert_expression(expr)
+                        })
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                self.record_success();
+                Expression::Tuple {
+                    elements: converted,
+                    fields: Vec::<TupleFieldMeta>::new(),
+                    context: TupleContextFlags::default(),
+                    span: span.clone(),
+                }
+            }
             IrExpression::StringFormat {
                 format_string,
                 args,
@@ -643,6 +670,13 @@ impl<'a> ReconstructionContext<'a> {
                     &span,
                     WarningKind::UnsupportedNode,
                     "Sequence pipeline expression reconstruction is not implemented",
+                );
+            }
+            IrExpression::RegexCommand { span, .. } => {
+                return self.placeholder_expression(
+                    span,
+                    WarningKind::UnsupportedNode,
+                    "Regex command expressions are not yet reconstructable",
                 );
             }
             other => {
@@ -821,6 +855,7 @@ fn extract_span(stmt: &IrStatement) -> Option<Span> {
 fn extract_expr_span(expr: &IrExpression) -> Span {
     match expr {
         IrExpression::Literal(_, span)
+        | IrExpression::TextBlock { span, .. }
         | IrExpression::Identifier { span, .. }
         | IrExpression::MethodCall { span, .. }
         | IrExpression::FieldAccess { span, .. }
@@ -832,6 +867,7 @@ fn extract_expr_span(expr: &IrExpression) -> Span {
         | IrExpression::Block { span, .. }
         | IrExpression::ArrayCreation { span, .. }
         | IrExpression::ObjectCreation { span, .. }
+        | IrExpression::TupleLiteral { span, .. }
         | IrExpression::Lambda { span, .. }
         | IrExpression::Switch { span, .. }
         | IrExpression::Cast { span, .. }
@@ -844,6 +880,8 @@ fn extract_expr_span(expr: &IrExpression) -> Span {
         | IrExpression::VirtualThread { span, .. }
         | IrExpression::TryWithResources { span, .. }
         | IrExpression::RegexPattern { span, .. }
-        | IrExpression::SequencePipeline { span, .. } => span.clone(),
+        | IrExpression::RegexCommand { span, .. }
+        | IrExpression::SequencePipeline { span, .. }
+        | IrExpression::LogInvocation { span, .. } => span.clone(),
     }
 }

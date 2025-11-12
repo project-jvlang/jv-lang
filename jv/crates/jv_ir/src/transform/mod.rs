@@ -4,25 +4,30 @@ use crate::naming::method_erasure::apply_method_erasure;
 use crate::profiling::{PerfMetrics, TransformProfiler};
 use crate::sequence_pipeline;
 use crate::types::{
-    IrCommentKind, IrExpression, IrImport, IrImportDetail, IrProgram, IrStatement, JavaType,
+    IrCommentKind, IrExpression, IrImport, IrImportDetail, IrModifiers, IrProgram,
+    IrRegexLiteralReplacement, IrRegexReplacement, IrRegexTemplateSegment, IrStatement, JavaType,
 };
 use jv_ast::{
-    Argument, BinaryOp, BindingPatternKind, CallArgumentMetadata, CallArgumentStyle, CommentKind,
-    ConcurrencyConstruct, Expression, Literal, Modifiers, Program, ResourceManagement,
-    SequenceDelimiter, Span, Statement, TypeAnnotation, UnaryOp, ValBindingOrigin,
+    Argument, BinaryMetadata, BinaryOp, BindingPatternKind, CallArgumentMetadata,
+    CallArgumentStyle, CommentKind, ConcurrencyConstruct, Expression, Literal, Modifiers, Program,
+    RegexCommand, RegexCommandMode, RegexLiteralReplacement, RegexReplacement,
+    RegexTemplateSegment, ResourceManagement, SequenceDelimiter, Span, Statement, StringPart,
+    TypeAnnotation, UnaryOp, ValBindingOrigin,
 };
 
 mod concurrency;
 mod control_flow;
 mod declarations;
 mod functions;
+mod logging;
 mod loops;
 mod null_safety;
 mod resources;
 mod sample;
 mod strings;
+mod tests;
 mod type_system;
-mod utils;
+pub(crate) mod utils;
 mod when_lowering_planner;
 
 use self::utils::boxed_java_type;
@@ -49,6 +54,7 @@ pub use null_safety::{
 pub use resources::{desugar_defer_expression, desugar_use_expression};
 pub use sample::{fetch_sample_data, infer_json_value_schema, infer_schema};
 pub use strings::desugar_string_interpolation;
+use tests::lower_test_declaration;
 pub use type_system::{convert_type_annotation, infer_java_type};
 pub use utils::{generate_extension_class_name, generate_utility_class_name};
 
@@ -115,21 +121,44 @@ pub fn transform_statement(
         }
         Statement::ValDeclaration {
             name,
+            binding,
             type_annotation,
             initializer,
             modifiers,
             origin,
             span,
             ..
-        } => Ok(vec![desugar_val_declaration(
-            name,
-            type_annotation,
-            initializer,
-            modifiers,
-            origin,
-            span,
-            context,
-        )?]),
+        } => match binding {
+            Some(pattern) => match pattern {
+                BindingPatternKind::Tuple { .. } | BindingPatternKind::List { .. } => {
+                    desugar_pattern_val_declaration(
+                        pattern,
+                        type_annotation,
+                        initializer,
+                        modifiers,
+                        context,
+                    )
+                }
+                _ => Ok(vec![desugar_val_declaration(
+                    name,
+                    type_annotation,
+                    initializer,
+                    modifiers,
+                    origin,
+                    span,
+                    context,
+                )?]),
+            },
+            None => Ok(vec![desugar_val_declaration(
+                name,
+                type_annotation,
+                initializer,
+                modifiers,
+                origin,
+                span,
+                context,
+            )?]),
+        },
         Statement::VarDeclaration {
             name,
             type_annotation,
@@ -309,6 +338,7 @@ pub fn transform_statement(
             }
         },
         Statement::ForIn(for_in) => loops::desugar_for_in_statement(for_in, context),
+        Statement::TestDeclaration(declaration) => lower_test_declaration(declaration, context),
         _ => Ok(vec![]),
     }
 }
@@ -343,6 +373,155 @@ fn infer_implicit_binding_name(
         (None, Expression::Identifier(name, _)) => Some(name.clone()),
         _ => None,
     }
+}
+
+fn desugar_pattern_val_declaration(
+    pattern: BindingPatternKind,
+    type_annotation: Option<TypeAnnotation>,
+    initializer: Expression,
+    modifiers: Modifiers,
+    context: &mut TransformContext,
+) -> Result<Vec<IrStatement>, TransformError> {
+    let ir_initializer = transform_expression(initializer, context)?;
+    let tuple_span = ir_expression_span(&ir_initializer);
+    let mut tuple_java_type = infer_java_type(type_annotation, Some(&ir_initializer), context)?;
+    if tuple_java_type == JavaType::object() {
+        if let Some(record_type) = context.tuple_record_java_type(&tuple_span) {
+            tuple_java_type = record_type;
+        }
+    }
+
+    let mut statements = Vec::new();
+    let mut temp_modifiers = IrModifiers::default();
+    temp_modifiers.is_final = true;
+
+    let temp_name = context.fresh_identifier("__jv_tuple_");
+    statements.push(IrStatement::VariableDeclaration {
+        name: temp_name.clone(),
+        java_type: tuple_java_type.clone(),
+        initializer: Some(ir_initializer),
+        is_final: true,
+        modifiers: temp_modifiers,
+        span: tuple_span.clone(),
+    });
+
+    let receiver_expr = IrExpression::Identifier {
+        name: temp_name,
+        java_type: tuple_java_type,
+        span: tuple_span,
+    };
+
+    let mut expanded = lower_binding_pattern_elements(pattern, receiver_expr, &modifiers, context)?;
+    statements.append(&mut expanded);
+
+    Ok(statements)
+}
+
+fn lower_binding_pattern_elements(
+    pattern: BindingPatternKind,
+    value_expr: IrExpression,
+    modifiers: &Modifiers,
+    context: &mut TransformContext,
+) -> Result<Vec<IrStatement>, TransformError> {
+    match pattern {
+        BindingPatternKind::Identifier { name, span } => {
+            let mut ir_modifiers = utils::convert_modifiers(modifiers);
+            ir_modifiers.is_final = true;
+            let mut java_type = extract_java_type(&value_expr).unwrap_or_else(JavaType::object);
+            if java_type == JavaType::object() {
+                if let Some(hint) = context.lookup_variable(&name).cloned() {
+                    java_type = hint;
+                }
+            }
+            context.add_variable(name.clone(), java_type.clone());
+            Ok(vec![IrStatement::VariableDeclaration {
+                name,
+                java_type,
+                initializer: Some(value_expr),
+                is_final: true,
+                modifiers: ir_modifiers,
+                span,
+            }])
+        }
+        BindingPatternKind::Wildcard { span } => Ok(vec![IrStatement::Expression {
+            span,
+            expr: value_expr,
+        }]),
+        BindingPatternKind::Tuple { elements, .. } | BindingPatternKind::List { elements, .. } => {
+            let mut statements = Vec::new();
+            let (receiver_expr, mut prefix) = ensure_identifier_expression(value_expr, context);
+            statements.append(&mut prefix);
+
+            for (index, element) in elements.into_iter().enumerate() {
+                let component_expr = make_tuple_component_access(
+                    receiver_expr.clone(),
+                    index,
+                    element.span(),
+                    context,
+                );
+                let mut nested =
+                    lower_binding_pattern_elements(element, component_expr, modifiers, context)?;
+                statements.append(&mut nested);
+            }
+
+            Ok(statements)
+        }
+    }
+}
+
+fn make_tuple_component_access(
+    receiver: IrExpression,
+    index: usize,
+    span: Span,
+    context: &TransformContext,
+) -> IrExpression {
+    let receiver_span = ir_expression_span(&receiver);
+    let metadata = context.tuple_component_metadata(&receiver_span, index);
+    let (field_name, field_type, source_span) = match metadata {
+        Some(meta) => (meta.field_name, meta.java_type, meta.source_span),
+        None => (format!("_{}", index + 1), JavaType::object(), None),
+    };
+    let effective_span = source_span.unwrap_or(span);
+
+    IrExpression::FieldAccess {
+        receiver: Box::new(receiver),
+        field_name,
+        java_type: field_type,
+        span: effective_span,
+        is_record_component: true,
+    }
+}
+
+fn ensure_identifier_expression(
+    value_expr: IrExpression,
+    context: &mut TransformContext,
+) -> (IrExpression, Vec<IrStatement>) {
+    if matches!(value_expr, IrExpression::Identifier { .. }) {
+        return (value_expr, Vec::new());
+    }
+
+    let java_type = extract_java_type(&value_expr).unwrap_or_else(JavaType::object);
+    let span = ir_expression_span(&value_expr);
+    let mut modifiers = IrModifiers::default();
+    modifiers.is_final = true;
+    let temp_name = context.fresh_identifier("__jv_destruct_");
+
+    let statement = IrStatement::VariableDeclaration {
+        name: temp_name.clone(),
+        java_type: java_type.clone(),
+        initializer: Some(value_expr),
+        is_final: true,
+        modifiers,
+        span: span.clone(),
+    };
+
+    let identifier = IrExpression::Identifier {
+        name: temp_name,
+        java_type,
+        span,
+    };
+
+    (identifier, vec![statement])
 }
 
 fn lower_program(
@@ -408,12 +587,21 @@ fn lower_program(
             .collect()
     };
 
+    let mut logging_metadata = context.take_logging_metadata();
+    crate::model::class::attach_logger_fields(
+        package.as_deref(),
+        &mut type_declarations,
+        &mut logging_metadata,
+    )?;
+
     Ok(IrProgram {
         package,
         imports: ir_imports,
         type_declarations,
         generic_metadata: Default::default(),
         conversion_metadata: Vec::new(),
+        logging: logging_metadata,
+        tuple_record_plans: Vec::new(),
         span,
     })
 }
@@ -462,6 +650,107 @@ fn should_attach_trailing_comment(statement: &IrStatement, comment_span: &Span) 
     false
 }
 
+fn lower_regex_command(
+    command: RegexCommand,
+    context: &mut TransformContext,
+) -> Result<IrExpression, TransformError> {
+    let span = command.span.clone();
+    let subject = transform_expression(*command.subject, context)?;
+    let pattern_expr = command
+        .pattern_expr
+        .map(|expr| transform_expression(*expr, context))
+        .transpose()?;
+    let replacement = command
+        .replacement
+        .map(|replacement| lower_regex_replacement(replacement, context))
+        .transpose()?;
+    let java_type = regex_command_java_type(command.mode, replacement.is_some());
+
+    Ok(IrExpression::RegexCommand {
+        mode: command.mode,
+        mode_origin: command.mode_origin,
+        subject: Box::new(subject),
+        pattern: command.pattern,
+        pattern_expr: pattern_expr.map(Box::new),
+        replacement,
+        flags: command.flags,
+        java_type,
+        span,
+    })
+}
+
+fn regex_command_java_type(mode: RegexCommandMode, has_replacement: bool) -> JavaType {
+    match mode {
+        RegexCommandMode::All | RegexCommandMode::First => JavaType::string(),
+        RegexCommandMode::Match => JavaType::boolean(),
+        RegexCommandMode::Split => JavaType::Array {
+            element_type: Box::new(JavaType::string()),
+            dimensions: 1,
+        },
+        RegexCommandMode::Iterate => {
+            if has_replacement {
+                JavaType::string()
+            } else {
+                JavaType::Reference {
+                    name: "java.util.stream.Stream".to_string(),
+                    generic_args: Vec::new(),
+                }
+            }
+        }
+    }
+}
+
+fn lower_regex_replacement(
+    replacement: RegexReplacement,
+    context: &mut TransformContext,
+) -> Result<IrRegexReplacement, TransformError> {
+    match replacement {
+        RegexReplacement::Literal(literal) => {
+            lower_regex_literal_replacement(literal, context).map(IrRegexReplacement::Literal)
+        }
+        RegexReplacement::Expression(expr) => {
+            let lowered = transform_expression(expr, context)?;
+            Ok(IrRegexReplacement::Expression(Box::new(lowered)))
+        }
+        RegexReplacement::Lambda(lambda) => {
+            let expression = Expression::Lambda {
+                parameters: lambda.params,
+                body: lambda.body,
+                span: lambda.span,
+            };
+            let lowered = transform_expression(expression, context)?;
+            Ok(IrRegexReplacement::Expression(Box::new(lowered)))
+        }
+    }
+}
+
+fn lower_regex_literal_replacement(
+    literal: RegexLiteralReplacement,
+    context: &mut TransformContext,
+) -> Result<IrRegexLiteralReplacement, TransformError> {
+    let mut segments = Vec::with_capacity(literal.template_segments.len());
+    for segment in literal.template_segments {
+        match segment {
+            RegexTemplateSegment::Text(text) => {
+                segments.push(IrRegexTemplateSegment::Text(text));
+            }
+            RegexTemplateSegment::BackReference(index) => {
+                segments.push(IrRegexTemplateSegment::BackReference(index));
+            }
+            RegexTemplateSegment::Expression(expr) => {
+                let lowered = transform_expression(expr, context)?;
+                segments.push(IrRegexTemplateSegment::Expression(Box::new(lowered)));
+            }
+        }
+    }
+
+    Ok(IrRegexLiteralReplacement {
+        normalized: literal.normalized,
+        segments,
+        span: literal.span,
+    })
+}
+
 fn unwrap_commented<'a>(statement: &'a IrStatement) -> &'a IrStatement {
     match statement {
         IrStatement::Commented { statement, .. } => unwrap_commented(statement),
@@ -504,6 +793,14 @@ pub fn transform_expression(
 ) -> Result<IrExpression, TransformError> {
     match expr {
         Expression::Literal(lit, span) => {
+            if let Literal::String(value) = &lit {
+                if value.contains('\n') {
+                    return Ok(IrExpression::TextBlock {
+                        content: value.clone(),
+                        span: span.clone(),
+                    });
+                }
+            }
             if let Literal::Regex(regex) = &lit {
                 return Ok(IrExpression::RegexPattern {
                     pattern: regex.pattern.clone(),
@@ -575,14 +872,46 @@ pub fn transform_expression(
         }
         Expression::MultilineString(literal) => {
             if literal.parts.is_empty() {
-                Ok(IrExpression::Literal(
+                if literal.normalized.contains('\n') {
+                    return Ok(IrExpression::TextBlock {
+                        content: literal.normalized,
+                        span: literal.span,
+                    });
+                }
+                return Ok(IrExpression::Literal(
                     Literal::String(literal.normalized),
                     literal.span,
-                ))
-            } else {
-                desugar_string_interpolation(literal.parts, literal.span, context)
+                ));
             }
+
+            let mut has_interpolation = false;
+            let mut accumulated = String::new();
+            for part in &literal.parts {
+                match part {
+                    StringPart::Text(text) => accumulated.push_str(text),
+                    StringPart::Expression(_) => {
+                        has_interpolation = true;
+                        break;
+                    }
+                }
+            }
+
+            if !has_interpolation {
+                if accumulated.contains('\n') {
+                    return Ok(IrExpression::TextBlock {
+                        content: accumulated,
+                        span: literal.span,
+                    });
+                }
+                return Ok(IrExpression::Literal(
+                    Literal::String(accumulated),
+                    literal.span,
+                ));
+            }
+
+            desugar_string_interpolation(literal.parts, literal.span, context)
         }
+        Expression::RegexCommand(command) => lower_regex_command(*command, context),
         Expression::Block { statements, span } => {
             context.enter_scope();
             let mut ir_statements = Vec::new();
@@ -598,6 +927,7 @@ pub fn transform_expression(
                 span,
             })
         }
+        Expression::LogBlock(block) => logging::lower_log_block_expression(block, context),
         Expression::Array {
             elements,
             delimiter,
@@ -642,6 +972,46 @@ pub fn transform_expression(
                 span,
             })
         }
+        Expression::Tuple {
+            mut elements,
+            fields: _fields,
+            span,
+            ..
+        } => {
+            if elements.len() == 3 && is_as_keyword(&elements[1]) {
+                let mut parts = elements.into_iter();
+                let value_expr = parts.next().expect("tuple first element");
+                let _as_expr = parts.next();
+                let ty_expr = parts.next().expect("tuple third element");
+                let lowered_value = transform_expression(value_expr, context)?;
+                let type_annotation =
+                    expression_to_simple_type_annotation(ty_expr).map_err(|construct| {
+                        TransformError::UnsupportedConstruct {
+                            construct,
+                            span: span.clone(),
+                        }
+                    })?;
+                let target_type = convert_type_annotation(type_annotation)?;
+                return Ok(IrExpression::Cast {
+                    expr: Box::new(lowered_value),
+                    target_type,
+                    span,
+                });
+            }
+            if elements.len() == 1 {
+                let single = elements.pop().expect("tuple has single element");
+                return transform_expression(single, context);
+            }
+            let mut lowered_elements = Vec::with_capacity(elements.len());
+            for element in elements {
+                lowered_elements.push(transform_expression(element, context)?);
+            }
+            Ok(IrExpression::TupleLiteral {
+                elements: lowered_elements,
+                java_type: JavaType::object(),
+                span,
+            })
+        }
         Expression::This(span) => {
             if let Some(java_type) = context.lookup_variable("this").cloned() {
                 Ok(IrExpression::This { java_type, span })
@@ -657,6 +1027,7 @@ pub fn transform_expression(
             op,
             right,
             span,
+            ..
         } => {
             if matches!(op, BinaryOp::Elvis) {
                 desugar_elvis_operator(left, right, span, context)
@@ -1490,6 +1861,7 @@ pub(crate) fn normalize_whitespace_array_elements(elements: Vec<Expression>) -> 
                             op: binary_op,
                             right: operand,
                             span: merged_span,
+                            metadata: BinaryMetadata::default(),
                         });
                     }
                 } else {
@@ -1501,6 +1873,34 @@ pub(crate) fn normalize_whitespace_array_elements(elements: Vec<Expression>) -> 
     }
 
     normalized
+}
+
+fn is_as_keyword(expr: &Expression) -> bool {
+    matches!(expr, Expression::Identifier(name, _) if name == "as")
+}
+
+fn expression_to_simple_type_annotation(expr: Expression) -> Result<TypeAnnotation, String> {
+    fn collect_segments(expr: Expression, segments: &mut Vec<String>) -> Result<(), String> {
+        match expr {
+            Expression::Identifier(name, _) => {
+                segments.push(name);
+                Ok(())
+            }
+            Expression::MemberAccess {
+                object, property, ..
+            } => {
+                collect_segments(*object, segments)?;
+                segments.push(property);
+                Ok(())
+            }
+            other => Err(format!("unsupported type expression: {:?}", other)),
+        }
+    }
+
+    let mut segments = Vec::new();
+    collect_segments(expr, &mut segments)?;
+    let name = segments.join(".");
+    Ok(TypeAnnotation::Simple(name))
 }
 
 fn create_system_field_access(receiver: SystemReceiver, span: Span) -> IrExpression {

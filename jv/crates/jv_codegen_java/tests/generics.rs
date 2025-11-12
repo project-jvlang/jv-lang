@@ -1,6 +1,6 @@
 use jv_ast::{
-    types::{Kind, QualifiedName, RawTypeContinuation, RawTypeDirective},
     Literal, Span,
+    types::{Kind, QualifiedName, RawTypeContinuation, RawTypeDirective},
 };
 use jv_codegen_java::{JavaCodeGenConfig, JavaCodeGenerator, JavaTarget};
 use jv_ir::{
@@ -56,6 +56,8 @@ fn sealed_classes_emit_target_specific_metadata() {
         type_declarations: vec![class],
         generic_metadata: Default::default(),
         conversion_metadata: Vec::new(),
+        logging: Default::default(),
+        tuple_record_plans: Vec::new(),
         span,
     };
 
@@ -115,6 +117,8 @@ fn class_signature_includes_generic_bounds() {
         type_declarations: vec![class],
         generic_metadata: Default::default(),
         conversion_metadata: Vec::new(),
+        logging: Default::default(),
+        tuple_record_plans: Vec::new(),
         span,
     };
 
@@ -175,6 +179,8 @@ fn generic_metadata_comment_emitted() {
         type_declarations: vec![class],
         generic_metadata: metadata_map,
         conversion_metadata: Vec::new(),
+        logging: Default::default(),
+        tuple_record_plans: Vec::new(),
         span,
     };
 
@@ -226,6 +232,8 @@ fn metadata_kind_comment_uses_fallback_entry() {
         type_declarations: vec![class],
         generic_metadata: metadata_map,
         conversion_metadata: Vec::new(),
+        logging: Default::default(),
+        tuple_record_plans: Vec::new(),
         span,
     };
 
@@ -285,6 +293,8 @@ fn covariant_type_arguments_render_wildcards() {
         type_declarations: vec![class],
         generic_metadata: Default::default(),
         conversion_metadata: Vec::new(),
+        logging: Default::default(),
+        tuple_record_plans: Vec::new(),
         span,
     };
 
@@ -342,6 +352,8 @@ fn contravariant_type_arguments_render_wildcards() {
         type_declarations: vec![class],
         generic_metadata: Default::default(),
         conversion_metadata: Vec::new(),
+        logging: Default::default(),
+        tuple_record_plans: Vec::new(),
         span,
     };
 
@@ -448,6 +460,8 @@ fn raw_default_comment_on_field_adds_import_and_guard() {
         type_declarations: vec![class],
         generic_metadata: Default::default(),
         conversion_metadata: Vec::new(),
+        logging: Default::default(),
+        tuple_record_plans: Vec::new(),
         span,
     };
 
@@ -510,6 +524,8 @@ fn raw_allow_comment_on_field_keeps_imports_clean() {
         type_declarations: vec![class],
         generic_metadata: Default::default(),
         conversion_metadata: Vec::new(),
+        logging: Default::default(),
+        tuple_record_plans: Vec::new(),
         span,
     };
 

@@ -68,16 +68,29 @@ fn parse_when(ctx: &mut ParserContext<'_>) -> bool {
     ctx.bump_raw(); // '{'
     loop {
         ctx.consume_trivia();
-        if ctx.peek_significant_kind() == Some(TokenKind::RightBrace) {
-            ctx.bump_raw();
-            break;
+        match ctx.peek_significant_kind() {
+            Some(TokenKind::LayoutComma) | Some(TokenKind::Comma) => {
+                ctx.bump_raw();
+                continue;
+            }
+            Some(TokenKind::RightBrace) => {
+                ctx.bump_raw();
+                break;
+            }
+            _ => {}
         }
         if ctx.is_eof() {
             ctx.recover_statement("when ブロックが閉じられていません", start);
             break;
         }
 
+        let before_branch = ctx.position();
         parse_when_branch(ctx);
+
+        // 進捗がない場合、強制的にトークンを消費して無限ループを回避
+        if ctx.position() == before_branch {
+            ctx.bump_raw(); // 強制的に次へ進む
+        }
     }
 
     ctx.finish_node();
@@ -95,7 +108,14 @@ fn parse_when_branch(ctx: &mut ParserContext<'_>) {
         ctx.parse_expression_until(&[TokenKind::Arrow], false);
     }
 
-    ctx.bump_expected(TokenKind::Arrow, "`->` が必要です");
+    let before_arrow = ctx.position();
+    if !ctx.bump_expected(TokenKind::Arrow, "`->` が必要です") {
+        // Arrow がない場合、これは不正な分岐なので、
+        // 少なくともトークンを1つ進めてから回復する
+        if ctx.position() == before_arrow && !ctx.is_eof() {
+            ctx.bump_raw(); // 強制的に進める
+        }
+    }
 
     parse_when_branch_body(ctx);
 
@@ -217,11 +237,9 @@ fn parse_continue(ctx: &mut ParserContext<'_>) -> bool {
 
 fn report_unsupported_control(ctx: &mut ParserContext<'_>, keyword: TokenKind) -> bool {
     let message = match keyword {
-        TokenKind::IfKw => "jv 言語では `if`/`else` ステートメントは使用できません。`when` を使用してください。",
-        TokenKind::WhileKw | TokenKind::DoKw => {
-            "jv 言語では `while`/`do-while` ステートメントは使用できません。`for` によるループ表現へ書き換えてください。"
-        }
-        _ => "この制御構文はサポートされていません。",
+        TokenKind::IfKw => "JV3103: `if` expressions are not supported / `if` 式はサポートされていません。\n条件分岐は `when` 式を使用してください。Quick Fix: when.convert.if. / Use a `when` expression for branching. Quick Fix: when.convert.if. (--explain JV3103)",
+        TokenKind::WhileKw | TokenKind::DoKw => "E_LOOP_001: `while`/`do-while` loops have been removed from the language / `while`/`do-while` ループはサポートされていません。\n`for (item in ...)` ループへ書き換えてください。/ Replace legacy loops with `for (item in ...)`. (--explain E_LOOP_001)",
+        _ => "JVF000: Unsupported control construct encountered.\n指定の制御構文は現在サポートされていません。/ This control construct is not supported.",
     };
     ctx.consume_trivia();
     let start = ctx.position();

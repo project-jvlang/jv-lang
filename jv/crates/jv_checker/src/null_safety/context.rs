@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use super::annotations::{lookup_nullability_hint, JavaNullabilityHint};
+use super::annotations::{JavaNullabilityHint, lookup_nullability_hint};
 use crate::binding::LateInitManifest;
 use crate::inference::{TypeEnvironment, TypeKind as CheckerTypeKind, TypeScheme};
 use crate::pattern::{PatternMatchFacts, PatternTarget};
@@ -37,7 +37,9 @@ impl NullabilityKind {
             Optional(_) => NullabilityKind::Nullable,
             Unknown => NullabilityKind::Unknown,
             Variable(_) => NullabilityKind::Unknown,
-            Primitive(_) | Boxed(_) | Reference(_) | Function(_, _) => NullabilityKind::NonNull,
+            Primitive(_) | Boxed(_) | Reference(_) | Function(_, _) | Tuple(_) => {
+                NullabilityKind::NonNull
+            }
         }
     }
 
@@ -609,10 +611,10 @@ impl JavaSymbolMetadata {
 mod tests {
     use super::*;
     use crate::binding::{LateInitManifest, LateInitSeed};
-    use crate::inference::type_factory::TypeFactory;
-    use crate::inference::types::TypeKind;
     use crate::inference::PrimitiveType;
     use crate::inference::TypeEnvironment;
+    use crate::inference::type_factory::TypeFactory;
+    use crate::inference::types::TypeKind;
     use jv_inference::service::TypeFactsBuilder;
     use jv_inference::service::TypeScheme as FactsTypeScheme;
     use jv_inference::types::{NullabilityFlag, TypeKind as FactsTypeKind, TypeVariant};

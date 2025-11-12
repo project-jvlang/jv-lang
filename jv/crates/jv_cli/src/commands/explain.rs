@@ -1,4 +1,4 @@
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use std::fmt::Write as _;
 
 #[derive(Debug, Clone)]

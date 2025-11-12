@@ -27,6 +27,10 @@ impl TargetedJavaEmitter {
         matches!(self.target, JavaTarget::Java25)
     }
 
+    pub const fn supports_text_blocks(&self) -> bool {
+        matches!(self.target, JavaTarget::Java25)
+    }
+
     pub fn permits_clause(&self, permitted: &[String]) -> Option<String> {
         if !permitted.is_empty() && self.supports_sealed_types() {
             Some(format!(" permits {}", permitted.join(", ")))

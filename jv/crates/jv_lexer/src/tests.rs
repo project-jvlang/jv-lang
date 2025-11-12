@@ -2,6 +2,7 @@ use super::*;
 
 use crate::pipeline::pipeline::{CharScannerStage, ClassifierStage, EmitterStage, NormalizerStage};
 use fastrand::Rng;
+use serde_json::{from_str, to_string};
 use std::fs;
 use std::path::{Path, PathBuf};
 use test_case::test_case;
@@ -21,6 +22,33 @@ fn test_basic_keywords_green_phase() {
     assert_eq!(tokens[4].token_type, TokenType::Class);
     assert_eq!(tokens[5].token_type, TokenType::Fun);
     assert_eq!(tokens[6].token_type, TokenType::Eof);
+}
+
+#[test]
+fn test_logging_keywords_are_classified() {
+    let mut lexer = Lexer::new("LOG TRACE DEBUG INFO WARN ERROR".to_string());
+    let tokens = lexer.tokenize().expect("lexing success");
+
+    let kinds: Vec<_> = tokens.iter().map(|token| &token.token_type).collect();
+    assert!(kinds.contains(&&TokenType::Log));
+    assert!(kinds.contains(&&TokenType::Trace));
+    assert!(kinds.contains(&&TokenType::Debug));
+    assert!(kinds.contains(&&TokenType::Info));
+    assert!(kinds.contains(&&TokenType::Warn));
+    assert!(kinds.contains(&&TokenType::Error));
+}
+
+#[test]
+fn test_lowercase_logging_words_are_identifiers() {
+    let mut lexer = Lexer::new("log trace debug info warn error".to_string());
+    let tokens = lexer.tokenize().expect("lexing success");
+
+    for expected in ["log", "trace", "debug", "info", "warn", "error"] {
+        assert!(tokens.iter().any(|token| matches!(
+            &token.token_type,
+            TokenType::Identifier(text) if text == expected
+        )));
+    }
 }
 
 #[test]
@@ -70,13 +98,17 @@ fn test_string_interpolation_red_phase() {
 
     // Look for interpolation-related tokens
     let token_types: Vec<_> = tokens.iter().map(|t| &t.token_type).collect();
-    assert!(token_types
-        .iter()
-        .any(|t| matches!(t, TokenType::StringStart)));
+    assert!(
+        token_types
+            .iter()
+            .any(|t| matches!(t, TokenType::StringStart))
+    );
     assert!(token_types.contains(&&TokenType::Identifier("name".to_string())));
-    assert!(token_types
-        .iter()
-        .any(|t| matches!(t, TokenType::StringEnd)));
+    assert!(
+        token_types
+            .iter()
+            .any(|t| matches!(t, TokenType::StringEnd))
+    );
 }
 
 #[test]
@@ -212,6 +244,224 @@ fn layout_comma_metadata_survives_commented_call_arguments() {
 }
 
 #[test]
+fn implicit_params_in_arrays_keep_json_metadata_and_trivia() {
+    let source = "[\"_label\" _2]";
+    let mut lexer = Lexer::new(source.to_string());
+    let tokens = lexer
+        .tokenize()
+        .expect("配列内の暗黙引数を含むソースの字句解析に失敗しました");
+
+    let bracket = tokens
+        .iter()
+        .find(|token| matches!(token.token_type, TokenType::LeftBracket))
+        .expect("開きブラケットが見つかりません");
+    let json_confidence = bracket.metadata.iter().find_map(|metadata| match metadata {
+        TokenMetadata::PotentialJsonStart { confidence } => Some(*confidence),
+        _ => None,
+    });
+    assert!(
+        json_confidence.is_some(),
+        "JSON候補メタデータが欠落しています"
+    );
+
+    let implicit_param = tokens
+        .iter()
+        .find(|token| matches!(token.token_type, TokenType::ImplicitParam(2)))
+        .expect("暗黙引数トークンを取得できません");
+    assert!(
+        implicit_param.leading_trivia.spaces > 0,
+        "暗黙引数直前の空白がトリビアとして保持されていません"
+    );
+    let underscore_info = implicit_param
+        .metadata
+        .iter()
+        .find_map(|meta| match meta {
+            TokenMetadata::UnderscoreInfo(info) => Some(info),
+            _ => None,
+        })
+        .expect("Underscoreメタデータが欠落しています");
+    assert!(underscore_info.is_implicit);
+    assert_eq!(underscore_info.number, Some(2));
+}
+
+#[test]
+fn implicit_params_preserve_comment_trivia_and_metadata() {
+    let source = "// carry\n_7";
+    let mut lexer = Lexer::new(source.to_string());
+    let tokens = lexer
+        .tokenize()
+        .expect("コメント付き暗黙引数の字句解析に失敗しました");
+
+    let implicit_param = tokens
+        .iter()
+        .find(|token| matches!(token.token_type, TokenType::ImplicitParam(7)))
+        .expect("暗黙引数トークンが見つかりません");
+
+    assert!(implicit_param.leading_trivia.comments);
+    assert_eq!(implicit_param.leading_trivia.passthrough_comments.len(), 1);
+    let carry_text = &implicit_param.leading_trivia.passthrough_comments[0].text;
+    assert!(carry_text.contains("carry"));
+
+    let underscore_info = implicit_param
+        .metadata
+        .iter()
+        .find_map(|meta| match meta {
+            TokenMetadata::UnderscoreInfo(info) => Some(info),
+            _ => None,
+        })
+        .expect("暗黙引数メタデータが見つかりません");
+    assert_eq!(underscore_info.line, 2);
+    assert_eq!(underscore_info.column, 1);
+    assert_eq!(underscore_info.number, Some(7));
+}
+
+#[test]
+fn invalid_implicit_param_emits_token_diagnostic() {
+    let source = "_0";
+    let mut lexer = Lexer::new(source.to_string());
+    let tokens = lexer
+        .tokenize()
+        .expect("_0の診断検証用トークナイズに失敗しました");
+
+    let invalid_token = tokens
+        .iter()
+        .find(|token| matches!(&token.token_type, TokenType::Invalid(value) if value == "_0"))
+        .expect("Invalidトークンが見つかりません");
+
+    let diagnostic = invalid_token
+        .diagnostic
+        .as_ref()
+        .expect("診断が添付されていません");
+    match diagnostic {
+        TokenDiagnostic::InvalidImplicitParam { reason, suggested } => {
+            assert_eq!(*reason, InvalidImplicitParamReason::LeadingZero);
+            assert_eq!(suggested.as_deref(), Some("_1"));
+        }
+        other => panic!("想定外の診断: {other:?}"),
+    }
+
+    assert!(
+        invalid_token
+            .metadata
+            .iter()
+            .any(|meta| matches!(meta, TokenMetadata::UnderscoreInfo(_))),
+        "InvalidトークンにUnderscoreメタデータが残っていません"
+    );
+}
+
+#[test]
+fn lex_wildcard_and_multiple_implicit_params() {
+    let source = "_ _1 _999";
+    let mut lexer = Lexer::new(source.to_string());
+    let tokens = lexer
+        .tokenize()
+        .expect("暗黙引数の列を含むソースの字句解析に失敗しました");
+
+    let essential: Vec<TokenType> = tokens
+        .iter()
+        .filter_map(|token| match &token.token_type {
+            TokenType::Whitespace(_) | TokenType::Newline => None,
+            other => Some(other.clone()),
+        })
+        .collect();
+
+    assert!(matches!(essential.get(0), Some(TokenType::Underscore)));
+    assert!(matches!(
+        essential.get(1),
+        Some(TokenType::ImplicitParam(1))
+    ));
+    assert!(matches!(
+        essential.get(2),
+        Some(TokenType::ImplicitParam(999))
+    ));
+    assert!(matches!(essential.last(), Some(TokenType::Eof)));
+}
+
+#[test]
+fn alphanumeric_suffix_remains_identifier() {
+    let source = "_1value";
+    let mut lexer = Lexer::new(source.to_string());
+    let tokens = lexer
+        .tokenize()
+        .expect("英数字混合識別子の字句解析に失敗しました");
+
+    let identifier = tokens
+        .iter()
+        .find(|token| matches!(token.token_type, TokenType::Identifier(_)))
+        .expect("識別子トークンが見つかりません");
+    assert!(matches!(identifier.token_type, TokenType::Identifier(ref name) if name == "_1value"));
+    assert!(
+        tokens
+            .iter()
+            .all(|token| !matches!(token.token_type, TokenType::ImplicitParam(_)))
+    );
+}
+
+#[test]
+fn underscores_inside_strings_remain_literals() {
+    let source = "\"prefix _1 suffix\"";
+    let mut lexer = Lexer::new(source.to_string());
+    let tokens = lexer
+        .tokenize()
+        .expect("文字列リテラルの字句解析に失敗しました");
+
+    assert!(tokens.iter().any(|token| {
+        matches!(token.token_type, TokenType::String(ref value) if value.contains("_1"))
+    }));
+    assert!(
+        tokens
+            .iter()
+            .all(|token| !matches!(token.token_type, TokenType::ImplicitParam(_)))
+    );
+}
+
+#[test]
+fn underscores_inside_comments_do_not_emit_tokens() {
+    let source = "// _3は無視\n_4";
+    let mut lexer = Lexer::new(source.to_string());
+    let tokens = lexer
+        .tokenize()
+        .expect("コメントを含むソースの字句解析に失敗しました");
+
+    assert!(tokens.iter().any(|token| matches!(
+        token.token_type,
+        TokenType::LineComment(ref text) if text.contains("_3")
+    )));
+    assert!(
+        tokens
+            .iter()
+            .filter(|token| matches!(token.token_type, TokenType::ImplicitParam(_)))
+            .count()
+            == 1
+    );
+}
+
+#[test]
+fn overflow_implicit_param_emits_diagnostic() {
+    let source = "_4294967296";
+    let mut lexer = Lexer::new(source.to_string());
+    let tokens = lexer
+        .tokenize()
+        .expect("オーバーフロー検証用ソースの字句解析に失敗しました");
+
+    let invalid_token = tokens
+        .iter()
+        .find(|token| matches!(&token.token_type, TokenType::Invalid(value) if value == "_4294967296"))
+        .expect("オーバーフロー診断トークンが見つかりません");
+    let diagnostic = invalid_token
+        .diagnostic
+        .as_ref()
+        .expect("診断が添付されていません");
+    match diagnostic {
+        TokenDiagnostic::InvalidImplicitParam { reason, suggested } => {
+            assert_eq!(*reason, InvalidImplicitParamReason::Overflow);
+            assert!(suggested.is_none());
+        }
+        other => panic!("想定外の診断: {other:?}"),
+    }
+}
+
+#[test]
 fn test_arithmetic_operators_red_phase() {
     // RED: This test should fail
     let mut lexer = Lexer::new("a + b - c * d / e % f".to_string());
@@ -341,6 +591,33 @@ val star = 3
     assert!(star_val.leading_trivia.passthrough_comments.is_empty());
     assert_eq!(star_val.leading_trivia.jv_comments.len(), 1);
     assert_eq!(star_val.leading_trivia.jv_comments[0].text, "//* star");
+}
+
+#[test]
+fn lexer_emits_field_name_label_tokens() {
+    let source = "value // result";
+    let mut lexer = Lexer::new(source.to_string());
+    let tokens = lexer.tokenize().expect("tokenize label sample");
+
+    let label_token = tokens
+        .iter()
+        .find(|token| matches!(token.token_type, TokenType::FieldNameLabel(_)))
+        .expect("expected FieldNameLabel token");
+
+    match &label_token.token_type {
+        TokenType::FieldNameLabel(payload) => {
+            assert_eq!(payload.primary.as_deref(), Some("result"));
+            let span = payload
+                .primary_span
+                .as_ref()
+                .expect("primary span should be recorded");
+            assert_eq!(span.name, "result");
+            assert_eq!(span.line, label_token.line);
+            assert_eq!(span.column, label_token.column);
+            assert_eq!(span.kind, FieldNameLabelKind::LineComment);
+        }
+        _ => unreachable!(),
+    }
 }
 
 #[test]
@@ -493,9 +770,11 @@ fn test_block_brace_has_no_json_metadata() {
         .map(|token| token.metadata.iter().collect::<Vec<_>>())
         .unwrap_or_default();
 
-    assert!(brace_metadata
-        .iter()
-        .all(|metadata| !matches!(metadata, TokenMetadata::PotentialJsonStart { .. })));
+    assert!(
+        brace_metadata
+            .iter()
+            .all(|metadata| !matches!(metadata, TokenMetadata::PotentialJsonStart { .. }))
+    );
 }
 
 #[test]
@@ -644,12 +923,16 @@ fn test_range_tokens() {
     let mut lexer = Lexer::new(source.to_string());
     let tokens = lexer.tokenize().unwrap();
 
-    assert!(tokens
-        .iter()
-        .any(|t| matches!(t.token_type, TokenType::RangeExclusive)));
-    assert!(tokens
-        .iter()
-        .any(|t| matches!(t.token_type, TokenType::RangeInclusive)));
+    assert!(
+        tokens
+            .iter()
+            .any(|t| matches!(t.token_type, TokenType::RangeExclusive))
+    );
+    assert!(
+        tokens
+            .iter()
+            .any(|t| matches!(t.token_type, TokenType::RangeInclusive))
+    );
 }
 
 #[test]
@@ -1209,6 +1492,8 @@ fn classifier_resolves_keywords_and_identifiers() {
         span: span_with_len(3),
         trivia: None,
         carry_over: None,
+        field_label: None,
+        field_label_issue: None,
     };
     let normalized_keyword = pipeline::NormalizedToken::new(
         raw_keyword,
@@ -1228,6 +1513,8 @@ fn classifier_resolves_keywords_and_identifiers() {
         span: span_with_len(5),
         trivia: None,
         carry_over: None,
+        field_label: None,
+        field_label_issue: None,
     };
     let normalized_identifier = pipeline::NormalizedToken::new(
         raw_identifier,
@@ -1271,6 +1558,8 @@ fn classifier_marks_string_interpolation_plan() {
         span: span_with_len(source.len()),
         trivia: Some(TokenTrivia::default()),
         carry_over: None,
+        field_label: None,
+        field_label_issue: None,
     };
     let normalized = pipeline::NormalizedToken::new(raw, source.to_string(), metadata);
     let classified = classifier
@@ -1309,6 +1598,8 @@ fn emitter_merges_comment_carry_into_trivia() {
         span: span_with_len(5),
         trivia: Some(TokenTrivia::default()),
         carry_over: None,
+        field_label: None,
+        field_label_issue: None,
     };
     let normalized =
         pipeline::NormalizedToken::new(raw, "value".to_string(), pipeline::PreMetadata::default());
@@ -1596,4 +1887,48 @@ fn tokenize_repository_fixtures() {
             .join("\n");
         panic!("lexer failed to tokenize fixtures:\n{details}");
     }
+}
+
+#[test]
+fn token_type_serde_roundtrip_supports_underscore_variants() {
+    let cases = vec![
+        TokenType::Underscore,
+        TokenType::ImplicitParam(42),
+        TokenType::ImplicitParam(u32::MAX),
+    ];
+
+    for token in cases {
+        let json = to_string(&token).expect("serialize token type");
+        let restored: TokenType = from_str(&json).expect("deserialize token type");
+        assert_eq!(restored, token);
+    }
+}
+
+#[test]
+fn token_metadata_roundtrip_preserves_underscore_info() {
+    let metadata = TokenMetadata::UnderscoreInfo(UnderscoreInfoMetadata {
+        raw: "_123".to_string(),
+        is_implicit: true,
+        number: Some(123),
+        line: 12,
+        column: 4,
+        length: 4,
+        in_non_code_region: false,
+    });
+
+    let json = to_string(&metadata).expect("serialize underscore metadata");
+    let restored: TokenMetadata = from_str(&json).expect("deserialize underscore metadata");
+    assert_eq!(restored, metadata);
+}
+
+#[test]
+fn token_diagnostic_roundtrip_covers_invalid_implicit_param() {
+    let diagnostic = TokenDiagnostic::InvalidImplicitParam {
+        reason: InvalidImplicitParamReason::LeadingZero,
+        suggested: Some("_1".to_string()),
+    };
+
+    let json = to_string(&diagnostic).expect("serialize diagnostic");
+    let restored: TokenDiagnostic = from_str(&json).expect("deserialize diagnostic");
+    assert_eq!(restored, diagnostic);
 }

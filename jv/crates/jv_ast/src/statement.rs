@@ -1,4 +1,5 @@
 // jv_ast/statement - Statement types and program structure
+use crate::annotation::{Annotation, AnnotationArgument};
 use crate::binding_pattern::BindingPatternKind;
 use crate::comments::*;
 use crate::expression::*;
@@ -93,6 +94,74 @@ pub enum LoopStrategy {
     Unknown,
 }
 
+/// Test declaration metadata captured at the AST level.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TestDeclaration {
+    /// Display name provided by the DSL (e.g., `"renders dataset"`).
+    pub display_name: String,
+    /// Normalized identifier applied during lowering.
+    #[serde(default)]
+    pub normalized: Option<String>,
+    /// Dataset bound to the test (inline rows or @Sample reference).
+    #[serde(default)]
+    pub dataset: Option<TestDataset>,
+    /// Parameter bindings exposed to the test body.
+    #[serde(default)]
+    pub parameters: Vec<TestParameter>,
+    /// Attached annotations such as lifecycle hooks.
+    #[serde(default)]
+    pub annotations: Vec<Annotation>,
+    /// Body expression to execute.
+    pub body: Expression,
+    /// Source span for the entire declaration.
+    pub span: Span,
+}
+
+/// Dataset specification for a test declaration.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum TestDataset {
+    /// Inline array dataset rows.
+    InlineArray {
+        rows: Vec<TestDatasetRow>,
+        span: Span,
+    },
+    /// External dataset reference via @Sample annotation.
+    Sample(TestSampleMetadata),
+}
+
+/// Single row within an inline dataset.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TestDatasetRow {
+    /// Values within the row.
+    pub values: Vec<Expression>,
+    /// Span for the row.
+    pub span: Span,
+}
+
+/// Metadata describing an @Sample dataset reference.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TestSampleMetadata {
+    /// Source path passed to @Sample.
+    pub source: String,
+    /// Additional annotation arguments.
+    #[serde(default)]
+    pub arguments: Vec<AnnotationArgument>,
+    /// Span covering the annotation usage.
+    pub span: Span,
+}
+
+/// Describes a single parameter exposed to the test body.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TestParameter {
+    /// Pattern describing the binding (identifier, tuple, etc.).
+    pub pattern: BindingPatternKind,
+    /// Optional type annotation for the binding.
+    #[serde(default)]
+    pub type_annotation: Option<TypeAnnotation>,
+    /// Span covering the entire parameter declaration.
+    pub span: Span,
+}
+
 /// Structured representation of a `for-in` loop.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ForInStatement {
@@ -103,11 +172,82 @@ pub struct ForInStatement {
     pub span: Span,
 }
 
+/// `:=` および `->` による単位定義の関係演算子。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum UnitRelation {
+    /// `:=` による値定義。
+    DefinitionAssign,
+    /// `->` による変換先参照。
+    ConversionArrow,
+}
+
+/// 単位依存定義1件を表現する構造体。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct UnitDependency {
+    /// 左辺の単位名。
+    pub name: String,
+    /// 使用された関係演算子。
+    pub relation: UnitRelation,
+    /// `:=` の右辺に出現した式。
+    #[serde(default)]
+    pub value: Option<Expression>,
+    /// `->` の右側に表記された単位名。
+    #[serde(default)]
+    pub target: Option<String>,
+    /// ソース位置。
+    pub span: Span,
+}
+
+/// 単位変換ブロックの種別。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum UnitConversionKind {
+    /// `@Conversion` ブロック。
+    Conversion,
+    /// `@ReverseConversion` ブロック。
+    ReverseConversion,
+}
+
+/// `@Conversion` / `@ReverseConversion` ブロックを表す構造体。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct UnitConversionBlock {
+    pub kind: UnitConversionKind,
+    #[serde(default)]
+    pub body: Vec<Statement>,
+    pub span: Span,
+}
+
+/// 単位定義ブロックに格納されるメンバー列挙体。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum UnitTypeMember {
+    Dependency(UnitDependency),
+    Conversion(UnitConversionBlock),
+    NestedStatement(Box<Statement>),
+}
+
+/// トップレベル単位定義を表現する構造体。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct UnitTypeDefinition {
+    /// カテゴリ名（例: 「単位系」「Currency」）。
+    pub category: String,
+    /// 基底型注釈。
+    pub base_type: TypeAnnotation,
+    /// 単位シンボル情報。
+    pub name: UnitSymbol,
+    /// ブロック内のメンバー。
+    #[serde(default)]
+    pub members: Vec<UnitTypeMember>,
+    /// ソース位置。
+    pub span: Span,
+}
+
 /// Statements in jv language
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Statement {
     // Comments
     Comment(CommentStatement),
+
+    /// 単位型定義。
+    UnitTypeDefinition(UnitTypeDefinition),
 
     // Variable declarations
     ValDeclaration {
@@ -147,6 +287,9 @@ pub enum Statement {
         modifiers: Modifiers,
         span: Span,
     },
+
+    // Test declarations
+    TestDeclaration(TestDeclaration),
 
     // Class declarations
     ClassDeclaration {

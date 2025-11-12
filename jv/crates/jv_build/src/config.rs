@@ -5,6 +5,18 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 use thiserror::Error;
 
+/// Annotation processing (APT) configuration for `javac`.
+#[derive(Debug, Clone, Default)]
+pub struct AptConfig {
+    pub enabled: bool,
+    /// Annotation processor classes (simple or fully-qualified), comma-joined for `-processor`.
+    pub processors: Vec<String>,
+    /// Processor classpath entries (jars/dirs), joined for `-processorpath`.
+    pub processorpath: Vec<String>,
+    /// Raw options passed as `-A<opt>`.
+    pub options: Vec<String>,
+}
+
 /// Top-level configuration shared by the build system.
 #[derive(Debug, Clone)]
 pub struct BuildConfig {
@@ -13,6 +25,7 @@ pub struct BuildConfig {
     pub classpath: Vec<String>,
     pub compiler_options: Vec<String>,
     pub sample: SampleConfig,
+    pub apt: AptConfig,
 }
 
 impl Default for BuildConfig {
@@ -24,6 +37,7 @@ impl Default for BuildConfig {
             classpath: vec![],
             compiler_options: compiler_options_for(target),
             sample: SampleConfig::default(),
+            apt: AptConfig::default(),
         }
     }
 }
@@ -101,6 +115,29 @@ impl BuildConfig {
         self.sample
             .enforce_source_security(source)
             .map_err(|error| BuildError::ConfigError(error.to_string()))
+    }
+
+    /// Enable APT processing explicitly.
+    pub fn enable_apt(&mut self) {
+        self.apt.enabled = true;
+    }
+
+    /// Set annotation processors (simple or qualified class names)
+    pub fn set_apt_processors<I: IntoIterator<Item = String>>(&mut self, processors: I) {
+        self.apt.enabled = true;
+        self.apt.processors = processors.into_iter().collect();
+    }
+
+    /// Set processor path entries (jar/class directories)
+    pub fn set_apt_processorpath<I: IntoIterator<Item = String>>(&mut self, entries: I) {
+        self.apt.enabled = true;
+        self.apt.processorpath = entries.into_iter().collect();
+    }
+
+    /// Add a raw processor option (will be passed as -A<opt>)
+    pub fn add_apt_option(&mut self, option: String) {
+        self.apt.enabled = true;
+        self.apt.options.push(option);
     }
 }
 
@@ -309,7 +346,9 @@ impl fmt::Display for SampleDependency {
 /// Errors raised while enforcing @Sample configuration security.
 #[derive(Debug, Error)]
 pub enum SampleConfigError {
-    #[error("Network access for @Sample protocol '{protocol}' is disabled. Enable with --sample-network=allow or set sample.allow_network=true in jv.toml.")]
+    #[error(
+        "Network access for @Sample protocol '{protocol}' is disabled. Enable with --sample-network=allow or set sample.allow_network=true in jv.toml."
+    )]
     NetworkNotAllowed { protocol: SampleProtocol },
 
     #[error("CLI dependency '{command}' is not available{hint}.")]

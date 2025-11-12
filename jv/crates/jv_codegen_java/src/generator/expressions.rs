@@ -1,8 +1,10 @@
 use super::*;
-use jv_ast::{types::PrimitiveTypeName, Span};
+use crate::Java25FeatureGenerator;
+use jv_ast::{RegexCommandMode, RegexFlag, RegexLiteral, Span, types::PrimitiveTypeName};
 use jv_ir::PipelineShape;
 use jv_ir::{
-    SequencePipeline, SequenceSource, SequenceStage, SequenceTerminal, SequenceTerminalKind,
+    IrRegexLiteralReplacement, IrRegexReplacement, IrRegexTemplateSegment, SequencePipeline,
+    SequenceSource, SequenceStage, SequenceTerminal, SequenceTerminalKind,
 };
 
 impl JavaCodeGenerator {
@@ -26,6 +28,25 @@ impl JavaCodeGenerator {
                     Self::escape_string(pattern)
                 ))
             }
+            IrExpression::TextBlock { content, .. } => self.generate_text_block_literal(content),
+            IrExpression::RegexCommand {
+                mode,
+                subject,
+                pattern,
+                pattern_expr,
+                replacement,
+                flags,
+                span,
+                ..
+            } => self.generate_regex_command_expression(
+                *mode,
+                subject,
+                pattern,
+                pattern_expr.as_deref(),
+                replacement.as_ref(),
+                flags,
+                span,
+            ),
             IrExpression::Identifier { name, .. } => {
                 if self.mutable_captures.contains(name) {
                     Ok(format!("{}.get()", name))
@@ -231,6 +252,9 @@ impl JavaCodeGenerator {
                 expr_str.push(')');
                 Ok(expr_str)
             }
+            IrExpression::TupleLiteral { elements, span, .. } => {
+                self.render_tuple_literal(elements.as_slice(), span)
+            }
             IrExpression::Lambda {
                 param_names, body, ..
             } => {
@@ -277,11 +301,253 @@ impl JavaCodeGenerator {
             IrExpression::VirtualThread {
                 operation, args, ..
             } => self.generate_virtual_thread(operation.clone(), args),
+            IrExpression::LogInvocation { span, .. } => Err(CodeGenError::UnsupportedConstruct {
+                construct: "Log invocation used in expression context".to_string(),
+                span: Some(span.clone()),
+            }),
             IrExpression::TryWithResources {
                 resources, body, ..
             } => self.generate_try_with_resources_expression(resources, body),
         }
     }
+
+    fn generate_text_block_literal(&mut self, content: &str) -> Result<String, CodeGenError> {
+        if self.targeting.supports_text_blocks() {
+            Ok(Java25FeatureGenerator::generate_text_block(content))
+        } else {
+            Ok(format!("\"{}\"", Self::escape_string(content)))
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn generate_regex_command_expression(
+        &mut self,
+        mode: RegexCommandMode,
+        subject: &IrExpression,
+        pattern: &RegexLiteral,
+        pattern_expr: Option<&IrExpression>,
+        replacement: Option<&IrRegexReplacement>,
+        flags: &[RegexFlag],
+        span: &Span,
+    ) -> Result<String, CodeGenError> {
+        let subject_code = self.generate_expression(subject)?;
+        let pattern_code = self.render_regex_pattern_source(pattern, pattern_expr, flags)?;
+
+        match mode {
+            RegexCommandMode::Match => Ok(format!(
+                "{}.matcher({}).matches()",
+                pattern_code, subject_code
+            )),
+            RegexCommandMode::All => {
+                let replacement_code = self.render_regex_replacement_code(replacement, span)?;
+                Ok(format!(
+                    "{}.matcher({}).replaceAll({})",
+                    pattern_code, subject_code, replacement_code
+                ))
+            }
+            RegexCommandMode::First => {
+                let replacement_code = self.render_regex_replacement_code(replacement, span)?;
+                Ok(format!(
+                    "{}.matcher({}).replaceFirst({})",
+                    pattern_code, subject_code, replacement_code
+                ))
+            }
+            RegexCommandMode::Split => Ok(format!("{}.split({})", pattern_code, subject_code)),
+            RegexCommandMode::Iterate => {
+                if let Some(replacement) = replacement {
+                    let replacement_code =
+                        self.render_regex_replacement_code(Some(replacement), span)?;
+                    Ok(format!(
+                        "{}.matcher({}).replaceAll({})",
+                        pattern_code, subject_code, replacement_code
+                    ))
+                } else {
+                    Ok(format!(
+                        "{}.matcher({}).results()",
+                        pattern_code, subject_code
+                    ))
+                }
+            }
+        }
+    }
+
+    fn render_regex_pattern_source(
+        &mut self,
+        literal: &RegexLiteral,
+        pattern_expr: Option<&IrExpression>,
+        flags: &[RegexFlag],
+    ) -> Result<String, CodeGenError> {
+        if let Some(expr) = pattern_expr {
+            return self.generate_expression(expr);
+        }
+
+        self.add_import("java.util.regex.Pattern");
+        let escaped = Self::escape_string(&literal.pattern);
+        let mut compiled = format!("Pattern.compile(\"{}\"", escaped);
+        if !flags.is_empty() {
+            let mask = self.render_regex_flag_mask(flags);
+            compiled.push_str(", ");
+            compiled.push_str(&mask);
+        }
+        compiled.push(')');
+        Ok(compiled)
+    }
+
+    fn render_regex_flag_mask(&mut self, flags: &[RegexFlag]) -> String {
+        let mut parts = Vec::new();
+        for flag in flags {
+            let constant = match flag {
+                RegexFlag::CaseInsensitive => "Pattern.CASE_INSENSITIVE",
+                RegexFlag::Multiline => "Pattern.MULTILINE",
+                RegexFlag::DotAll => "Pattern.DOTALL",
+                RegexFlag::UnicodeCase => "Pattern.UNICODE_CASE",
+                RegexFlag::UnixLines => "Pattern.UNIX_LINES",
+                RegexFlag::Comments => "Pattern.COMMENTS",
+                RegexFlag::Literal => "Pattern.LITERAL",
+                RegexFlag::CanonEq => "Pattern.CANON_EQ",
+            };
+            parts.push(constant.to_string());
+        }
+        parts.join(" | ")
+    }
+
+    fn render_regex_replacement_code(
+        &mut self,
+        replacement: Option<&IrRegexReplacement>,
+        _span: &Span,
+    ) -> Result<String, CodeGenError> {
+        match replacement {
+            Some(IrRegexReplacement::Literal(literal)) => {
+                self.render_literal_regex_replacement(literal)
+            }
+            Some(IrRegexReplacement::Expression(expr)) => self.generate_expression(expr),
+            None => Ok("\"\"".to_string()),
+        }
+    }
+
+    fn render_literal_regex_replacement(
+        &mut self,
+        literal: &IrRegexLiteralReplacement,
+    ) -> Result<String, CodeGenError> {
+        let mut buffer = String::new();
+        for segment in &literal.segments {
+            match segment {
+                IrRegexTemplateSegment::Text(text) => buffer.push_str(text),
+                IrRegexTemplateSegment::BackReference(index) => {
+                    buffer.push('$');
+                    buffer.push_str(&index.to_string());
+                }
+                IrRegexTemplateSegment::Expression(_) => {
+                    return Err(CodeGenError::UnsupportedConstruct {
+                        construct: "Regex replacement interpolation expressions".to_string(),
+                        span: Some(literal.span.clone()),
+                    });
+                }
+            }
+        }
+        Ok(format!("\"{}\"", Self::escape_string(&buffer)))
+    }
+
+    fn render_tuple_literal(
+        &mut self,
+        elements: &[IrExpression],
+        span: &Span,
+    ) -> Result<String, CodeGenError> {
+        let key = super::SpanKey::from(span);
+        let usage = self.tuple_usages.get(&key).cloned().ok_or_else(|| {
+            CodeGenError::UnsupportedConstruct {
+                construct: "Tuple literal missing tuple record plan".to_string(),
+                span: Some(span.clone()),
+            }
+        })?;
+
+        let arity = usage.component_names.len();
+        if arity == 0 {
+            if elements.is_empty() {
+                return Ok(format!("new {}()", usage.record_name));
+            }
+            return Err(CodeGenError::UnsupportedConstruct {
+                construct: format!(
+                    "Tuple literal has {} elements but record {} has no components",
+                    elements.len(),
+                    usage.record_name
+                ),
+                span: Some(span.clone()),
+            });
+        }
+
+        if elements.len() != arity {
+            return Err(CodeGenError::UnsupportedConstruct {
+                construct: format!(
+                    "Tuple literal element count ({}) does not match record {} arity ({})",
+                    elements.len(),
+                    usage.record_name,
+                    arity
+                ),
+                span: Some(span.clone()),
+            });
+        }
+
+        let mut slot_indices: Vec<Option<usize>> = vec![None; arity];
+        let mut used_inputs = vec![false; elements.len()];
+
+        for slot in 0..arity {
+            let preferred = usage.source_positions.get(slot).copied().unwrap_or(slot);
+            if let Some(index) =
+                Self::select_tuple_element_index(preferred, slot, elements.len(), &used_inputs)
+            {
+                slot_indices[slot] = Some(index);
+                used_inputs[index] = true;
+            }
+        }
+
+        for slot in 0..arity {
+            if slot_indices[slot].is_none() {
+                if let Some(index) = (0..elements.len()).find(|idx| !used_inputs[*idx]) {
+                    slot_indices[slot] = Some(index);
+                    used_inputs[index] = true;
+                }
+            }
+        }
+
+        if let Some(missing_slot) = slot_indices.iter().position(|opt| opt.is_none()) {
+            let component_name = usage
+                .component_names
+                .get(missing_slot)
+                .cloned()
+                .unwrap_or_else(|| format!("_{}", missing_slot + 1));
+            return Err(CodeGenError::UnsupportedConstruct {
+                construct: format!(
+                    "Unable to map tuple element to component `{}` of record {}",
+                    component_name, usage.record_name
+                ),
+                span: Some(span.clone()),
+            });
+        }
+
+        let mut cache: Vec<Option<String>> = vec![None; elements.len()];
+        let mut rendered = Vec::with_capacity(arity);
+        for index in slot_indices
+            .into_iter()
+            .map(|opt| opt.expect("all indices must be assigned"))
+        {
+            let expr_str = if let Some(existing) = &cache[index] {
+                existing.clone()
+            } else {
+                let value = self.generate_expression(&elements[index])?;
+                cache[index] = Some(value.clone());
+                value
+            };
+            rendered.push(expr_str);
+        }
+
+        Ok(format!(
+            "new {}({})",
+            usage.record_name,
+            rendered.join(", ")
+        ))
+    }
+
 
     fn try_render_collectors_to_list(
         &mut self,
@@ -1007,7 +1273,7 @@ impl JavaCodeGenerator {
                     return Err(CodeGenError::InvalidMethodSignature {
                         message: "supplyAsync expects supplier (and optional executor)".to_string(),
                         span: None,
-                    })
+                    });
                 }
             },
             CompletableFutureOp::ThenApply => match rendered_args.as_slice() {
@@ -1016,7 +1282,7 @@ impl JavaCodeGenerator {
                     return Err(CodeGenError::InvalidMethodSignature {
                         message: "thenApply expects future and function".to_string(),
                         span: None,
-                    })
+                    });
                 }
             },
             CompletableFutureOp::ThenCompose => match rendered_args.as_slice() {
@@ -1025,7 +1291,7 @@ impl JavaCodeGenerator {
                     return Err(CodeGenError::InvalidMethodSignature {
                         message: "thenCompose expects future and function".to_string(),
                         span: None,
-                    })
+                    });
                 }
             },
             CompletableFutureOp::Get => match rendered_args.as_slice() {
@@ -1034,7 +1300,7 @@ impl JavaCodeGenerator {
                     return Err(CodeGenError::InvalidMethodSignature {
                         message: "get expects future".to_string(),
                         span: None,
-                    })
+                    });
                 }
             },
             CompletableFutureOp::CompletedFuture => match rendered_args.as_slice() {
@@ -1043,7 +1309,7 @@ impl JavaCodeGenerator {
                     return Err(CodeGenError::InvalidMethodSignature {
                         message: "completedFuture expects a single value".to_string(),
                         span: None,
-                    })
+                    });
                 }
             },
         })
@@ -2284,13 +2550,13 @@ impl JavaCodeGenerator {
                 return Err(CodeGenError::UnsupportedConstruct {
                     construct: "Range operators must be lowered before Java emission".to_string(),
                     span: None,
-                })
+                });
             }
             BinaryOp::Elvis => {
                 return Err(CodeGenError::UnsupportedConstruct {
                     construct: "Elvis operator requires specialised lowering".to_string(),
                     span: None,
-                })
+                });
             }
         })
     }

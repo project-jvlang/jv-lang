@@ -1,4 +1,4 @@
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, black_box, criterion_group, criterion_main};
 use jv_ast::{Literal, Span};
 use jv_codegen_java::{JavaCodeGenConfig, JavaCodeGenerator, JavaTarget};
 use jv_ir::{
@@ -166,6 +166,8 @@ fn build_switch_program(
         type_declarations: extra_declarations,
         generic_metadata: Default::default(),
         conversion_metadata: Vec::new(),
+        logging: Default::default(),
+        tuple_record_plans: Vec::new(),
         span: dummy_span(),
     }
 }

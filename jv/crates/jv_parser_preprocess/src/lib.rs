@@ -110,6 +110,8 @@ fn default_pipeline() -> ProcessingPipeline {
 
 #[cfg(test)]
 mod tests {
+    mod layout_parity;
+
     use super::*;
     use jv_lexer::{Lexer, StringInterpolationSegment, TokenMetadata};
 

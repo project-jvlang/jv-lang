@@ -4,6 +4,9 @@ mod diagnostics;
 mod pipeline;
 
 #[cfg(feature = "rowan-parser")]
+pub(crate) use diagnostics::*;
+
+#[cfg(feature = "rowan-parser")]
 pub use pipeline::{RowanPipeline, RowanPipelineDebug};
 
 #[cfg(all(test, feature = "rowan-parser"))]

@@ -6,18 +6,18 @@ use std::process::Command;
 use anyhow::{Context, Result};
 use jv_ast::{BinaryOp, CallArgumentStyle, Literal, Span};
 use jv_checker::{
-    diagnostics::{
-        collect_raw_type_diagnostics, from_check_error, from_parse_error, from_transform_error,
-        DiagnosticStrategy,
-    },
     CheckError, TypeChecker,
+    diagnostics::{
+        DiagnosticStrategy, collect_raw_type_diagnostics, from_check_error, from_parse_error,
+        from_transform_error,
+    },
 };
 use jv_cli::format_tooling_diagnostic;
 use jv_codegen_java::{JavaCodeGenConfig, JavaCodeGenerator};
 use jv_ir::{
-    transform_program, IrCaseLabel, IrDeconstructionComponent, IrDeconstructionPattern,
-    IrExpression, IrModifiers, IrParameter, IrProgram, IrRecordComponent, IrStatement,
-    IrSwitchCase, IrVisibility, JavaType,
+    IrCaseLabel, IrDeconstructionComponent, IrDeconstructionPattern, IrExpression, IrModifiers,
+    IrParameter, IrProgram, IrRecordComponent, IrStatement, IrSwitchCase, IrVisibility, JavaType,
+    transform_program,
 };
 use jv_parser_frontend::ParserPipeline;
 use jv_parser_rowan::frontend::RowanPipeline;
@@ -531,6 +531,7 @@ fn example1_program() -> IrProgram {
             ..IrModifiers::default()
         },
         throws: vec![],
+        assertion_patterns: Vec::new(),
         span: dummy_span(),
     };
 
@@ -555,6 +556,8 @@ fn example1_program() -> IrProgram {
         type_declarations: vec![class],
         generic_metadata: Default::default(),
         conversion_metadata: Vec::new(),
+        logging: Default::default(),
+        tuple_record_plans: Vec::new(),
         span: dummy_span(),
     }
 }
@@ -611,6 +614,7 @@ fn example2_program() -> IrProgram {
             ..IrModifiers::default()
         },
         throws: vec![],
+        assertion_patterns: Vec::new(),
         span: dummy_span(),
     };
 
@@ -635,6 +639,8 @@ fn example2_program() -> IrProgram {
         type_declarations: vec![class],
         generic_metadata: Default::default(),
         conversion_metadata: Vec::new(),
+        logging: Default::default(),
+        tuple_record_plans: Vec::new(),
         span: dummy_span(),
     }
 }
@@ -802,6 +808,7 @@ fn example5_program() -> IrProgram {
         }),
         modifiers: static_public_method(),
         throws: vec![],
+        assertion_patterns: Vec::new(),
         span: dummy_span(),
     };
 
@@ -823,6 +830,8 @@ fn example5_program() -> IrProgram {
         type_declarations: vec![inner_record, outer_record, example_class],
         generic_metadata: Default::default(),
         conversion_metadata: Vec::new(),
+        logging: Default::default(),
+        tuple_record_plans: Vec::new(),
         span: dummy_span(),
     }
 }

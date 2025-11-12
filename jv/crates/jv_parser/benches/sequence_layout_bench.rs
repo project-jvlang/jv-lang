@@ -1,7 +1,7 @@
 use std::time::Instant;
 
 use jv_ast::{Expression, Program, Span, Statement};
-use jv_ir::{transform_program_with_context, JavaType, TransformContext};
+use jv_ir::{JavaType, TransformContext, transform_program_with_context};
 use jv_parser::Parser;
 
 fn first_whitespace_array_span(program: &Program) -> Option<Span> {

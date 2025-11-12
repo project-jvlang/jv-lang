@@ -1,11 +1,11 @@
 use crate::{
+    CommentCarryOverMetadata, FieldNameLabelCandidate, FieldNameLabelToken, LabeledSpan, LexError,
+    Token, TokenDiagnostic, TokenMetadata, TokenTrivia, TokenType,
     pipeline::{
         context::LexerContext,
         pipeline::EmitterStage,
         types::{ClassifiedToken, EmissionPlan},
     },
-    CommentCarryOverMetadata, LexError, Token, TokenDiagnostic, TokenMetadata, TokenTrivia,
-    TokenType,
 };
 
 use crate::{LayoutMode, Lexer, StringInterpolationSegment};
@@ -176,6 +176,23 @@ impl Emitter {
 
         Ok(tokens)
     }
+
+    fn build_field_label_token(candidate: &FieldNameLabelCandidate) -> Token {
+        let payload = FieldNameLabelToken {
+            primary: Some(candidate.name.clone()),
+            primary_span: Some(LabeledSpan::from(candidate)),
+            secondary: Vec::new(),
+        };
+        Self::build_token(
+            TokenType::FieldNameLabel(payload),
+            candidate.name.clone(),
+            TokenTrivia::default(),
+            candidate.line,
+            candidate.column,
+            None,
+            Vec::new(),
+        )
+    }
 }
 
 impl EmitterStage for Emitter {
@@ -200,17 +217,19 @@ impl EmitterStage for Emitter {
         }
 
         let span_start = normalized.raw.span.start;
-
-        match emission_plan {
-            EmissionPlan::Direct => Ok(vec![Self::build_token(
-                token_type,
-                normalized.normalized_text,
-                trivia,
-                span_start.line,
-                span_start.column,
-                diagnostics.into_iter().next(),
-                metadata,
-            )]),
+        let mut tokens = match emission_plan {
+            EmissionPlan::Direct => {
+                let lexeme = normalized.normalized_text.clone();
+                vec![Self::build_token(
+                    token_type,
+                    lexeme,
+                    trivia,
+                    span_start.line,
+                    span_start.column,
+                    diagnostics.into_iter().next(),
+                    metadata,
+                )]
+            }
             EmissionPlan::StringInterpolation { segments } => self.emit_string_interpolation(
                 segments,
                 metadata,
@@ -218,7 +237,13 @@ impl EmitterStage for Emitter {
                 trivia,
                 span_start.line,
                 span_start.column,
-            ),
+            )?,
+        };
+
+        if let Some(candidate) = normalized.raw.field_label.as_ref() {
+            tokens.push(Self::build_field_label_token(candidate));
         }
+
+        Ok(tokens)
     }
 }

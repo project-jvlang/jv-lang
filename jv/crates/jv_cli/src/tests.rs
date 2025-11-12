@@ -13,10 +13,11 @@ use jv_inference::types::{
 };
 use jv_ir::{
     IrExpression, IrModifiers, IrParameter, IrProgram, IrStatement, IrTypeLevelValue,
-    IrTypeParameter, IrVariance, JavaType, PipelineShape, PrimitiveSpecializationHint,
-    SequencePipeline, SequenceSource, SequenceTerminal, SequenceTerminalEvaluation,
-    SequenceTerminalKind,
+    IrTypeParameter, IrVariance, JavaType, LoggingMetadata, PipelineShape,
+    PrimitiveSpecializationHint, SequencePipeline, SequenceSource, SequenceTerminal,
+    SequenceTerminalEvaluation, SequenceTerminalKind,
 };
+use jv_pm::LoggingConfigLayer;
 use std::collections::HashMap;
 
 mod compat;
@@ -181,6 +182,102 @@ fn test_build_command_parsing() {
     }
 }
 
+#[test]
+fn test_build_command_parsing_with_apt() {
+    let build_args = vec![
+        "jv",
+        "build",
+        "test.jv",
+        "--apt",
+        "--processors",
+        "org.example.Proc1,Proc2",
+        "--processorpath",
+        "libs/anno.jar",
+        "--apt-option",
+        "mapstruct.defaultComponentModel=spring",
+        "--apt-option",
+        "flag",
+    ];
+    let cli = Cli::try_parse_from(build_args).unwrap();
+
+    match cli.command {
+        Some(Commands::Build {
+            apt,
+            processors,
+            processorpath,
+            apt_options,
+            ..
+        }) => {
+            assert!(apt, "--apt should enable annotation processing");
+            assert_eq!(processors.as_deref(), Some("org.example.Proc1,Proc2"));
+            assert_eq!(processorpath.as_deref(), Some("libs/anno.jar"));
+            assert!(apt_options.iter().any(|o| o.contains("mapstruct")));
+            assert!(apt_options.iter().any(|o| o == "flag"));
+        }
+        _ => panic!("Expected Build command"),
+    }
+}
+
+#[test]
+fn test_build_plan_applies_apt_overrides() {
+    let _guard = lock_current_dir();
+    let temp_dir = TempDirGuard::new("apt-plan");
+    let root_path = temp_dir.path();
+    let manifest_path = root_path.join("jv.toml");
+    let src_dir = root_path.join("src");
+    let entrypoint = src_dir.join("main.jv");
+    fs::create_dir_all(&src_dir).expect("create src");
+    let manifest = "[package]\nname = \"apt-plan\"\nversion = \"0.1.0\"\n\n[project]\nentrypoint = \"src/main.jv\"\n\n[project.sources]\ninclude = [\"src/**/*.jv\"]\n";
+    fs::write(&manifest_path, manifest).expect("write manifest");
+    fs::write(&entrypoint, "fun main() {}\n").expect("write entrypoint");
+
+    let project_root = pipeline::project::locator::ProjectRoot::new(
+        root_path.to_path_buf(),
+        manifest_path.clone(),
+    );
+    let settings =
+        pipeline::project::manifest::ManifestLoader::load(&manifest_path).expect("manifest loads");
+    let layout = pipeline::project::layout::ProjectLayout::from_settings(&project_root, &settings)
+        .expect("layout resolves");
+
+    let overrides = pipeline::CliOverrides {
+        entrypoint: Some(entrypoint.clone()),
+        output: Some(root_path.join("target")),
+        java_only: true,
+        check: false,
+        format: false,
+        target: None,
+        clean: true,
+        perf: false,
+        emit_types: false,
+        verbose: false,
+        emit_telemetry: false,
+        parallel_inference: false,
+        inference_workers: None,
+        constraint_batch: None,
+        apt_enabled: true,
+        apt_processors: Some("org.example.Proc1,Proc2".to_string()),
+        apt_processorpath: Some("libs/anno.jar".to_string()),
+        apt_options: vec![
+            "mapstruct.defaultComponentModel=spring".to_string(),
+            "flag".to_string(),
+        ],
+        logging_cli: LoggingConfigLayer::default(),
+        logging_env: LoggingConfigLayer::default(),
+    };
+
+    let plan = pipeline::BuildOptionsFactory::compose(project_root, settings, layout, overrides)
+        .expect("compose");
+    let apt = &plan.build_config.apt;
+    assert!(apt.enabled);
+    assert_eq!(
+        apt.processors,
+        vec!["org.example.Proc1".to_string(), "Proc2".to_string()]
+    );
+    assert_eq!(apt.processorpath, vec!["libs/anno.jar".to_string()]);
+    assert!(apt.options.iter().any(|o| o.contains("mapstruct")));
+    assert!(apt.options.iter().any(|o| o == "flag"));
+}
 #[test]
 fn test_build_command_perf_flag() {
     let build_args = vec!["jv", "build", "test.jv", "--perf"];
@@ -395,6 +492,12 @@ counter = counter + explicit
         parallel_inference: false,
         inference_workers: None,
         constraint_batch: None,
+        apt_enabled: false,
+        apt_processors: None,
+        apt_processorpath: None,
+        apt_options: Vec::new(),
+        logging_cli: LoggingConfigLayer::default(),
+        logging_env: LoggingConfigLayer::default(),
     };
 
     let plan = pipeline::BuildOptionsFactory::compose(project_root, settings, layout, overrides)
@@ -459,6 +562,12 @@ include = ["src/**/*.jv"]
         parallel_inference: false,
         inference_workers: None,
         constraint_batch: None,
+        apt_enabled: false,
+        apt_processors: None,
+        apt_processorpath: None,
+        apt_options: Vec::new(),
+        logging_cli: LoggingConfigLayer::default(),
+        logging_env: LoggingConfigLayer::default(),
     };
 
     let plan = pipeline::BuildOptionsFactory::compose(project_root, settings, layout, overrides)
@@ -549,6 +658,12 @@ include = ["src/**/*.jv"]
         parallel_inference: false,
         inference_workers: None,
         constraint_batch: None,
+        apt_enabled: false,
+        apt_processors: None,
+        apt_processorpath: None,
+        apt_options: Vec::new(),
+        logging_cli: LoggingConfigLayer::default(),
+        logging_env: LoggingConfigLayer::default(),
     };
 
     let plan = pipeline::BuildOptionsFactory::compose(project_root, settings, layout, overrides)
@@ -602,6 +717,10 @@ fn compile_repository_fixtures_without_interpolation() {
         if path.to_string_lossy().contains("/pattern/neg-") {
             continue;
         }
+        if path.to_string_lossy().contains("/unit_syntax/errors/") {
+            // These fixtures intentionally fail parsing; skip them when verifying CLI compilation.
+            continue;
+        }
         let source = match fs::read_to_string(&path) {
             Ok(content) => content,
             Err(err) => {
@@ -648,22 +767,21 @@ include = ["src/**/*.jv"]
             pipeline::project::layout::ProjectLayout::from_settings(&project_root, &settings)
                 .expect("layout resolves");
 
-        let overrides = pipeline::CliOverrides {
-            entrypoint: Some(entrypoint.clone()),
-            output: Some(project_dir.join("target")),
-            java_only: true,
-            check: false,
-            format: false,
-            target: None,
-            clean: false,
-            perf: false,
-            emit_types: false,
-            verbose: false,
-            emit_telemetry: false,
-            parallel_inference: false,
-            inference_workers: None,
-            constraint_batch: None,
-        };
+        let mut overrides = pipeline::CliOverrides::default();
+        overrides.entrypoint = Some(entrypoint.clone());
+        overrides.output = Some(project_dir.join("target"));
+        overrides.java_only = true;
+        overrides.check = false;
+        overrides.format = false;
+        overrides.target = None;
+        overrides.clean = false;
+        overrides.perf = false;
+        overrides.emit_types = false;
+        overrides.verbose = false;
+        overrides.emit_telemetry = false;
+        overrides.parallel_inference = false;
+        overrides.inference_workers = None;
+        overrides.constraint_batch = None;
 
         let plan =
             pipeline::BuildOptionsFactory::compose(project_root, settings, layout, overrides)
@@ -741,22 +859,12 @@ include = ["src/**/*.jv"]
 
         let output_dir = project_root_path.join(format!("target-{}", target.as_str()));
 
-        let overrides = pipeline::CliOverrides {
-            entrypoint: Some(entrypoint_path.clone()),
-            output: Some(output_dir.clone()),
-            java_only: true,
-            check: false,
-            format: false,
-            target: Some(target),
-            clean: false,
-            perf: false,
-            emit_types: false,
-            verbose: false,
-            emit_telemetry: false,
-            parallel_inference: false,
-            inference_workers: None,
-            constraint_batch: None,
-        };
+        let mut overrides = pipeline::CliOverrides::default();
+        overrides.entrypoint = Some(entrypoint_path.clone());
+        overrides.output = Some(output_dir.clone());
+        overrides.java_only = true;
+        overrides.target = Some(target);
+
 
         let plan =
             pipeline::BuildOptionsFactory::compose(project_root, settings, layout, overrides)
@@ -849,22 +957,10 @@ clean = false
     let layout = pipeline::project::layout::ProjectLayout::from_settings(&project_root, &settings)
         .expect("layout resolves");
 
-    let overrides = pipeline::CliOverrides {
-        entrypoint: Some(entrypoint.clone()),
-        output: Some(root_path.join("target")),
-        java_only: true,
-        check: false,
-        format: false,
-        target: None,
-        clean: false,
-        perf: false,
-        emit_types: false,
-        verbose: false,
-        emit_telemetry: false,
-        parallel_inference: false,
-        inference_workers: None,
-        constraint_batch: None,
-    };
+    let mut overrides = pipeline::CliOverrides::default();
+    overrides.entrypoint = Some(entrypoint.clone());
+    overrides.output = Some(root_path.join("target"));
+    overrides.java_only = true;
 
     let plan = pipeline::BuildOptionsFactory::compose(project_root, settings, layout, overrides)
         .expect("plan composition succeeds");
@@ -954,22 +1050,10 @@ clean = false
     let layout = pipeline::project::layout::ProjectLayout::from_settings(&project_root, &settings)
         .expect("layout resolves");
 
-    let overrides = pipeline::CliOverrides {
-        entrypoint: Some(entrypoint.clone()),
-        output: Some(root_path.join("target")),
-        java_only: true,
-        check: false,
-        format: false,
-        target: None,
-        clean: false,
-        perf: false,
-        emit_types: false,
-        verbose: false,
-        emit_telemetry: false,
-        parallel_inference: false,
-        inference_workers: None,
-        constraint_batch: None,
-    };
+    let mut overrides = pipeline::CliOverrides::default();
+    overrides.entrypoint = Some(entrypoint.clone());
+    overrides.output = Some(root_path.join("target"));
+    overrides.java_only = true;
 
     let plan = pipeline::BuildOptionsFactory::compose(project_root, settings, layout, overrides)
         .expect("plan composition succeeds");
@@ -1147,6 +1231,8 @@ fn apply_type_facts_enriches_class_metadata() {
         }],
         generic_metadata: Default::default(),
         conversion_metadata: Vec::new(),
+        logging: LoggingMetadata::default(),
+        tuple_record_plans: Vec::new(),
         span,
     };
 
@@ -1262,6 +1348,8 @@ fn apply_type_facts_records_nested_metadata() {
         }],
         generic_metadata: Default::default(),
         conversion_metadata: Vec::new(),
+        logging: LoggingMetadata::default(),
+        tuple_record_plans: Vec::new(),
         span,
     };
 
@@ -1325,6 +1413,8 @@ fn apply_type_facts_records_metadata_without_generics() {
         type_declarations: vec![class],
         generic_metadata: Default::default(),
         conversion_metadata: Vec::new(),
+        logging: LoggingMetadata::default(),
+        tuple_record_plans: Vec::new(),
         span,
     };
 
@@ -1418,6 +1508,7 @@ fn apply_type_facts_sets_sequence_specialization_hint() {
         body: Some(method_body),
         modifiers: IrModifiers::default(),
         throws: Vec::new(),
+        assertion_patterns: Vec::new(),
         span: method_span,
     };
 
@@ -1439,6 +1530,8 @@ fn apply_type_facts_sets_sequence_specialization_hint() {
         type_declarations: vec![class],
         generic_metadata: Default::default(),
         conversion_metadata: Vec::new(),
+        logging: LoggingMetadata::default(),
+        tuple_record_plans: Vec::new(),
         span,
     };
 
@@ -1562,6 +1655,8 @@ fn where_constraints_flow_into_ir_bounds() {
         }],
         generic_metadata: Default::default(),
         conversion_metadata: Vec::new(),
+        logging: LoggingMetadata::default(),
+        tuple_record_plans: Vec::new(),
         span: span.clone(),
     };
 

@@ -1,7 +1,7 @@
 use std::time::Instant;
 
-use jv_ast::types::{TypeLevelExpr, TypeLevelOp};
 use jv_ast::Span;
+use jv_ast::types::{TypeLevelExpr, TypeLevelOp};
 use jv_inference::constraint::AstId;
 use jv_inference::type_level::{EvaluationContext, TypeLevelEvaluator};
 

@@ -11,3 +11,23 @@ thiserror.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 toml.workspace = true
+indexmap.workspace = true
+semver.workspace = true
+once_cell.workspace = true
+anyhow.workspace = true
+clap.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+reqwest = { version = "0.12", default-features = false, features = ["brotli", "gzip", "json", "rustls-tls"] }
+sha2 = "0.10"
+quick-xml = { version = "0.37", features = ["serialize"] }
+url = "2.5"
+bytes = "1.6"
+dirs = "5.0"
+is-terminal = "0.4"
+strsim = "0.11"
+
+[dev-dependencies]
+tempfile = "3.10"
+assert_cmd = "2.0"
+predicates = "3.1"

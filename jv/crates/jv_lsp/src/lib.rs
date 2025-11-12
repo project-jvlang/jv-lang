@@ -1,39 +1,45 @@
 // jv_lsp - Language Server Protocol implementation
 mod handlers;
+mod services;
 
 use handlers::imports::build_imports_response;
 pub use handlers::imports::{ImportItem, ImportsParams, ImportsResponse};
 use jv_ast::types::TypeLevelExpr;
 use jv_ast::{
-    Argument, ConstParameter, Expression, GenericParameter, GenericSignature, Program,
-    RegexLiteral, Span, Statement, StringPart, TypeAnnotation,
+    Argument, ConcurrencyConstruct, ConstParameter, Expression, ForInStatement, GenericParameter,
+    GenericSignature, LogBlock, LogItem, LoopStrategy, NumericRangeLoop, PatternOrigin, Program,
+    RegexLiteral, ResourceManagement, Span, Statement, StringPart, TestDataset, TryCatchClause,
+    TypeAnnotation,
+    statement::{UnitTypeDefinition, UnitTypeMember},
 };
+use jv_build::BuildConfig;
 use jv_build::metadata::{
     BuildContext as SymbolBuildContext, SymbolIndexBuilder, SymbolIndexCache,
 };
-use jv_build::BuildConfig;
 use jv_checker::diagnostics::{
+    DiagnosticSeverity as ToolingSeverity, DiagnosticStrategy, EnhancedDiagnostic,
     collect_raw_type_diagnostics, from_check_error, from_frontend_diagnostics, from_parse_error,
-    from_transform_error, DiagnosticSeverity as ToolingSeverity, DiagnosticStrategy,
-    EnhancedDiagnostic,
+    from_transform_error,
 };
 use jv_checker::imports::{
-    diagnostics as import_diagnostics, ImportResolutionService, ResolvedImport, ResolvedImportKind,
+    ImportResolutionService, ResolvedImport, ResolvedImportKind, diagnostics as import_diagnostics,
 };
 use jv_checker::regex::RegexValidator;
 use jv_checker::{CheckError, RegexAnalysis, TypeChecker};
 use jv_inference::{
+    ParallelInferenceConfig, TypeFacts,
     service::{TypeFactsSnapshot, TypeLevelValue},
     solver::Variance,
     types::{SymbolId, TypeId},
-    ParallelInferenceConfig, TypeFacts,
 };
 use jv_ir::types::{IrImport, IrImportDetail};
-use jv_ir::{transform_program_with_context, TransformContext};
+use jv_ir::{TransformContext, transform_program_with_context};
 use jv_lexer::{Token, TokenMetadata, TokenType};
 use jv_parser_frontend::ParserPipeline;
 use jv_parser_rowan::frontend::RowanPipeline;
 use serde::{Deserialize, Serialize};
+use services::completion::logging::{log_block_snippet_completions, manifest_logging_completions};
+use services::diagnostics::logging::collect_logging_diagnostics;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt;
 use std::sync::Arc;
@@ -442,6 +448,69 @@ pub enum LspError {
     IoError(#[from] std::io::Error),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CompletionKind {
+    Keyword,
+    Snippet,
+    Value,
+    Field,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CompletionItemData {
+    pub label: String,
+    pub detail: Option<String>,
+    pub documentation: Option<String>,
+    pub insert_text: Option<String>,
+    pub kind: CompletionKind,
+    pub is_snippet: bool,
+}
+
+impl CompletionItemData {
+    pub fn keyword(label: impl Into<String>) -> Self {
+        Self {
+            label: label.into(),
+            detail: None,
+            documentation: None,
+            insert_text: None,
+            kind: CompletionKind::Keyword,
+            is_snippet: false,
+        }
+    }
+
+    pub fn snippet(label: impl Into<String>, insert_text: impl Into<String>) -> Self {
+        Self {
+            label: label.into(),
+            detail: None,
+            documentation: None,
+            insert_text: Some(insert_text.into()),
+            kind: CompletionKind::Snippet,
+            is_snippet: true,
+        }
+    }
+
+    pub fn with_detail(mut self, detail: impl Into<String>) -> Self {
+        self.detail = Some(detail.into());
+        self
+    }
+
+    pub fn with_documentation(mut self, documentation: impl Into<String>) -> Self {
+        self.documentation = Some(documentation.into());
+        self
+    }
+
+    pub fn with_kind(mut self, kind: CompletionKind) -> Self {
+        self.kind = kind;
+        self
+    }
+
+    pub fn with_snippet(mut self, insert_text: impl Into<String>) -> Self {
+        self.insert_text = Some(insert_text.into());
+        self.is_snippet = true;
+        self
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Position {
     pub line: u32,
@@ -563,6 +632,10 @@ impl JvLanguageServer {
         }
         let program = frontend_output.into_program();
 
+        if program.imports.is_empty() {
+            return Ok(Vec::new());
+        }
+
         let build_config = BuildConfig::default();
         let symbol_context = SymbolBuildContext::from_config(&build_config);
         let cache = SymbolIndexCache::with_default_location();
@@ -642,6 +715,12 @@ impl JvLanguageServer {
 
         let mut diagnostics = Vec::new();
         let mut regex_analyses: Vec<RegexAnalysis> = Vec::new();
+        let has_regex_tokens = Self::tokens_include_regex_literals(&tokens);
+        let mut regex_features_present = has_regex_tokens;
+        if !regex_features_present {
+            regex_features_present = Self::program_contains_regex_features(&program);
+        }
+        let has_regex_literals = has_regex_tokens;
 
         let frontend_diagnostics = from_frontend_diagnostics(diagnostics_view.final_diagnostics());
         for diagnostic in &frontend_diagnostics {
@@ -669,67 +748,72 @@ impl JvLanguageServer {
             GenericDocumentIndex::from_program(&program),
         );
 
-        let build_config = BuildConfig::default();
-        let symbol_context = SymbolBuildContext::from_config(&build_config);
-        let cache = SymbolIndexCache::with_default_location();
-        let builder = SymbolIndexBuilder::new(&symbol_context);
-        let symbol_index = match builder.build_with_cache(&cache) {
-            Ok(index) => Arc::new(index),
-            Err(error) => {
-                diagnostics.push(fallback_diagnostic(
-                    uri,
-                    &format!("Symbol index build failed: {error}"),
-                ));
-                self.type_facts.remove(uri);
-                self.regex_metadata.remove(uri);
-                return diagnostics;
-            }
-        };
-
-        let import_service =
-            ImportResolutionService::new(Arc::clone(&symbol_index), build_config.target);
         let mut resolved_imports = Vec::new();
-        for import_stmt in &program.imports {
-            match import_service.resolve(import_stmt) {
-                Ok(resolved) => resolved_imports.push(resolved),
+        let mut symbol_index: Option<Arc<_>> = None;
+        if !program.imports.is_empty() {
+            let build_config = BuildConfig::default();
+            let symbol_context = SymbolBuildContext::from_config(&build_config);
+            let cache = SymbolIndexCache::with_default_location();
+            let builder = SymbolIndexBuilder::new(&symbol_context);
+            let index = match builder.build_with_cache(&cache) {
+                Ok(index) => Arc::new(index),
                 Err(error) => {
+                    diagnostics.push(fallback_diagnostic(
+                        uri,
+                        &format!("Symbol index build failed: {error}"),
+                    ));
                     self.type_facts.remove(uri);
                     self.regex_metadata.remove(uri);
-                    return vec![match import_diagnostics::from_error(&error) {
-                        Some(diagnostic) => tooling_diagnostic_to_lsp(
-                            uri,
-                            diagnostic.with_strategy(DiagnosticStrategy::Interactive),
-                        ),
-                        None => fallback_diagnostic(uri, "Import resolution error"),
-                    }];
+                    return diagnostics;
+                }
+            };
+            let import_service =
+                ImportResolutionService::new(Arc::clone(&index), build_config.target);
+            for import_stmt in &program.imports {
+                match import_service.resolve(import_stmt) {
+                    Ok(resolved) => resolved_imports.push(resolved),
+                    Err(error) => {
+                        self.type_facts.remove(uri);
+                        self.regex_metadata.remove(uri);
+                        return vec![match import_diagnostics::from_error(&error) {
+                            Some(diagnostic) => tooling_diagnostic_to_lsp(
+                                uri,
+                                diagnostic.with_strategy(DiagnosticStrategy::Interactive),
+                            ),
+                            None => fallback_diagnostic(uri, "Import resolution error"),
+                        }];
+                    }
                 }
             }
+            symbol_index = Some(index);
         }
 
         let import_plan = lowered_import_plan(&resolved_imports);
 
         let mut checker = TypeChecker::with_parallel_config(self.parallel_config);
-        if !resolved_imports.is_empty() {
-            checker.set_imports(Arc::clone(&symbol_index), resolved_imports.clone());
+        if let Some(index) = symbol_index.as_ref() {
+            checker.set_imports(Arc::clone(index), resolved_imports.clone());
         }
         let check_result = checker.check_program(&program);
 
-        if let Some(analyses) = checker.regex_analyses() {
-            regex_analyses = analyses.to_vec();
-        }
+        if regex_features_present {
+            if let Some(analyses) = checker.regex_analyses() {
+                regex_analyses = analyses.to_vec();
+            }
 
-        if regex_analyses.is_empty() {
-            let mut validator = RegexValidator::new();
-            let regex_program = checker.normalized_program().unwrap_or(&program);
-            let _ = validator.validate_program(regex_program);
-            regex_analyses = validator.take_analyses();
-        }
-
-        if regex_analyses.is_empty() {
-            if let Some(regex_program) = Self::regex_program_from_tokens(&tokens) {
+            if regex_analyses.is_empty() && has_regex_literals {
                 let mut validator = RegexValidator::new();
-                let _ = validator.validate_program(&regex_program);
+                let regex_program = checker.normalized_program().unwrap_or(&program);
+                let _ = validator.validate_program(regex_program);
                 regex_analyses = validator.take_analyses();
+            }
+
+            if regex_analyses.is_empty() && has_regex_literals {
+                if let Some(regex_program) = Self::regex_program_from_tokens(&tokens) {
+                    let mut validator = RegexValidator::new();
+                    let _ = validator.validate_program(&regex_program);
+                    regex_analyses = validator.take_analyses();
+                }
             }
         }
 
@@ -854,34 +938,47 @@ impl JvLanguageServer {
         }
 
         diagnostics.extend(sequence_lambda_diagnostics(content));
+        diagnostics.extend(collect_logging_diagnostics(&program));
 
         diagnostics
     }
 
-    pub fn get_completions(&self, uri: &str, position: Position) -> Vec<String> {
-        let mut items: Vec<String> = COMPLETION_TEMPLATES
+    pub fn get_completions(&self, uri: &str, position: Position) -> Vec<CompletionItemData> {
+        if uri.ends_with(".toml") {
+            if let Some(content) = self.documents.get(uri) {
+                let mut items = manifest_logging_completions(content, &position);
+                deduplicate_completions(&mut items);
+                return items;
+            }
+            return Vec::new();
+        }
+
+        let mut items: Vec<CompletionItemData> = COMPLETION_TEMPLATES
             .iter()
-            .map(|template| (*template).to_string())
+            .map(|template| CompletionItemData::keyword((*template).to_string()))
             .collect();
 
         if let Some(content) = self.documents.get(uri) {
             if should_offer_sequence_completions(content, &position) {
                 items.extend(SEQUENCE_OPERATIONS.iter().map(sequence_completion_item));
             }
+            items.extend(log_block_snippet_completions(content, &position));
         }
 
         if let Some(analyses) = self.regex_metadata.get(uri) {
-            items.extend(
-                REGEX_COMPLETION_TEMPLATES
-                    .iter()
-                    .map(|template| format!("regex template: {}", template)),
-            );
+            items.extend(REGEX_COMPLETION_TEMPLATES.iter().map(|template| {
+                CompletionItemData::keyword(format!("regex template: {}", template))
+                    .with_kind(CompletionKind::Snippet)
+            }));
             for analysis in analyses {
                 if analysis.pattern.trim().is_empty() && analysis.raw.trim().is_empty() {
                     continue;
                 }
                 let preview = sanitize_regex_preview(&analysis.raw, &analysis.pattern);
-                items.push(format!("regex literal: {}", preview));
+                items.push(
+                    CompletionItemData::keyword(format!("regex literal: {}", preview))
+                        .with_kind(CompletionKind::Snippet),
+                );
             }
         }
 
@@ -890,8 +987,7 @@ impl JvLanguageServer {
             items.extend(build_generic_completions(index, facts));
         }
 
-        let mut seen = HashSet::new();
-        items.retain(|entry| seen.insert(entry.clone()));
+        deduplicate_completions(&mut items);
         items
     }
 
@@ -934,6 +1030,9 @@ impl JvLanguageServer {
                         pattern: pattern.clone(),
                         raw: raw.clone(),
                         span: span.clone(),
+                        origin: Some(PatternOrigin::literal(span.clone())),
+                        const_key: None,
+                        template_segments: Vec::new(),
                     };
                     statements.push(Statement::Expression {
                         expr: Expression::RegexLiteral(literal),
@@ -953,6 +1052,22 @@ impl JvLanguageServer {
             statements,
             span: Span::dummy(),
         })
+    }
+
+    fn tokens_include_regex_literals(tokens: &[Token]) -> bool {
+        tokens.iter().any(|token| {
+            token
+                .metadata
+                .iter()
+                .any(|metadata| matches!(metadata, TokenMetadata::RegexLiteral { .. }))
+        })
+    }
+
+    fn program_contains_regex_features(program: &Program) -> bool {
+        program
+            .statements
+            .iter()
+            .any(statement_contains_regex_features)
     }
 
     fn sequence_hover(&self, uri: &str, position: &Position) -> Option<HoverResult> {
@@ -1117,7 +1232,7 @@ fn build_generic_hover(
 fn build_generic_completions(
     index: &GenericDocumentIndex,
     facts: Option<&TypeFactsSnapshot>,
-) -> Vec<String> {
+) -> Vec<CompletionItemData> {
     let mut entries = Vec::new();
     for info in index.symbols() {
         let summary = summarize_symbol(info, facts, index.package());
@@ -1125,21 +1240,36 @@ fn build_generic_completions(
             continue;
         }
         for param in &summary.type_params {
-            let mut entry = format!("{} · 型パラメータ `{}`", info.name, param.name);
+            let mut label = format!("{} · 型パラメータ `{}`", info.name, param.name);
             if !param.attributes.is_empty() {
-                entry.push_str(&format!(" ({})", param.attributes.join(", ")));
+                label.push_str(&format!(" ({})", param.attributes.join(", ")));
             }
-            entries.push(entry);
+            entries.push(
+                CompletionItemData::keyword(label)
+                    .with_kind(CompletionKind::Field)
+                    .with_documentation("ジェネリクス型パラメータ候補です。"),
+            );
         }
         for param in &summary.const_params {
-            let mut entry = format!("{} · const `{}`", info.name, param.name);
+            let mut label = format!("{} · const `{}`", info.name, param.name);
             if !param.attributes.is_empty() {
-                entry.push_str(&format!(" ({})", param.attributes.join(", ")));
+                label.push_str(&format!(" ({})", param.attributes.join(", ")));
             }
-            entries.push(entry);
+            entries.push(
+                CompletionItemData::keyword(label)
+                    .with_kind(CompletionKind::Field)
+                    .with_documentation("const パラメータ候補です。"),
+            );
         }
         for (slot, value) in &summary.type_level_results {
-            entries.push(format!("{} · type-level `{}` = {}", info.name, slot, value));
+            entries.push(
+                CompletionItemData::keyword(format!(
+                    "{} · type-level `{}` = {}",
+                    info.name, slot, value
+                ))
+                .with_kind(CompletionKind::Value)
+                .with_documentation("型レベル式の評価結果"),
+            );
         }
     }
     entries
@@ -1163,10 +1293,16 @@ fn enrich_generic_diagnostics(
         }
 
         let suggestion = match code {
-            "JV2008" => "型引数のkind注釈か部分適用を調整し、推論されたkindと一致させてください。ホバーで期待kindを確認できます。",
-            "JV3101" => "型レベル式の入力とconstパラメータを見直し、評価が収束するように境界やデフォルト値を修正してください。",
+            "JV2008" => {
+                "型引数のkind注釈か部分適用を調整し、推論されたkindと一致させてください。ホバーで期待kindを確認できます。"
+            }
+            "JV3101" => {
+                "型レベル式の入力とconstパラメータを見直し、評価が収束するように境界やデフォルト値を修正してください。"
+            }
             "JV3102" => "型レベル式の上下限・比較対象を揃え、同じ型に統一してください。",
-            "JV3202" => "raw型を避けるようにconstパラメータや境界を補い、安全な型情報を提供してください。",
+            "JV3202" => {
+                "raw型を避けるようにconstパラメータや境界を補い、安全な型情報を提供してください。"
+            }
             _ => continue,
         };
 
@@ -1682,6 +1818,12 @@ fn collect_call_diagnostics_from_statement(
                 }
             }
         }
+        Statement::TestDeclaration(declaration) => {
+            if let Some(dataset) = &declaration.dataset {
+                collect_call_diagnostics_from_dataset(dataset, tokens, diagnostics);
+            }
+            collect_call_diagnostics_from_expression(&declaration.body, tokens, diagnostics);
+        }
         Statement::ExtensionFunction(extension) => {
             collect_call_diagnostics_from_statement(&extension.function, tokens, diagnostics);
         }
@@ -1702,6 +1844,9 @@ fn collect_call_diagnostics_from_statement(
         Statement::ForIn(for_in) => {
             collect_call_diagnostics_from_expression(&for_in.iterable, tokens, diagnostics);
             collect_call_diagnostics_from_expression(&for_in.body, tokens, diagnostics);
+        }
+        Statement::UnitTypeDefinition(definition) => {
+            collect_call_diagnostics_from_unit_definition(definition, tokens, diagnostics);
         }
         Statement::Concurrency(construct) => match construct {
             jv_ast::ConcurrencyConstruct::Spawn { body, .. }
@@ -1726,6 +1871,20 @@ fn collect_call_diagnostics_from_statement(
         | Statement::Import { .. }
         | Statement::Package { .. }
         | Statement::Comment(_) => {}
+    }
+}
+
+fn collect_call_diagnostics_from_dataset(
+    dataset: &TestDataset,
+    tokens: &[Token],
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    if let TestDataset::InlineArray { rows, .. } = dataset {
+        for row in rows {
+            for value in &row.values {
+                collect_call_diagnostics_from_expression(value, tokens, diagnostics);
+            }
+        }
     }
 }
 
@@ -1777,6 +1936,11 @@ fn collect_call_diagnostics_from_expression(
                 collect_call_diagnostics_from_expression(element, tokens, diagnostics);
             }
         }
+        Expression::Tuple { elements, .. } => {
+            for element in elements {
+                collect_call_diagnostics_from_expression(element, tokens, diagnostics);
+            }
+        }
         Expression::Lambda {
             parameters, body, ..
         } => {
@@ -1791,6 +1955,9 @@ fn collect_call_diagnostics_from_expression(
             for statement in statements {
                 collect_call_diagnostics_from_statement(statement, tokens, diagnostics);
             }
+        }
+        Expression::LogBlock(block) => {
+            collect_call_diagnostics_from_log_block(block, tokens, diagnostics);
         }
         Expression::When {
             expr,
@@ -1837,6 +2004,9 @@ fn collect_call_diagnostics_from_expression(
                 collect_call_diagnostics_from_expression(finally_block, tokens, diagnostics);
             }
         }
+        Expression::UnitLiteral { value, .. } => {
+            collect_call_diagnostics_from_expression(value, tokens, diagnostics);
+        }
         Expression::JsonLiteral(_) => {}
         Expression::StringInterpolation { parts, .. } => {
             for part in parts {
@@ -1848,9 +2018,54 @@ fn collect_call_diagnostics_from_expression(
         Expression::MultilineString(_)
         | Expression::Literal(_, _)
         | Expression::RegexLiteral(_)
+        | Expression::RegexCommand(_)
         | Expression::Identifier(_, _)
         | Expression::This(_)
         | Expression::Super(_) => {}
+    }
+}
+
+fn collect_call_diagnostics_from_unit_definition(
+    definition: &UnitTypeDefinition,
+    tokens: &[Token],
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    for member in &definition.members {
+        match member {
+            UnitTypeMember::Dependency(dependency) => {
+                if let Some(expr) = dependency.value.as_ref() {
+                    collect_call_diagnostics_from_expression(expr, tokens, diagnostics);
+                }
+            }
+            UnitTypeMember::Conversion(block) => {
+                for statement in &block.body {
+                    collect_call_diagnostics_from_statement(statement, tokens, diagnostics);
+                }
+            }
+            UnitTypeMember::NestedStatement(statement) => {
+                collect_call_diagnostics_from_statement(statement, tokens, diagnostics);
+            }
+        }
+    }
+}
+
+fn collect_call_diagnostics_from_log_block(
+    block: &LogBlock,
+    tokens: &[Token],
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    for item in &block.items {
+        match item {
+            LogItem::Statement(statement) => {
+                collect_call_diagnostics_from_statement(statement, tokens, diagnostics);
+            }
+            LogItem::Expression(expr) => {
+                collect_call_diagnostics_from_expression(expr, tokens, diagnostics);
+            }
+            LogItem::Nested(nested) => {
+                collect_call_diagnostics_from_log_block(nested, tokens, diagnostics);
+            }
+        }
     }
 }
 
@@ -2016,13 +2231,21 @@ fn escape_inline_code(input: &str) -> String {
     input.replace('`', "\\`")
 }
 
-fn sequence_completion_item(operation: &SequenceOperationDoc) -> String {
-    let mut entry = format!("{} · {}", operation.name, operation.completion);
+fn sequence_completion_item(operation: &SequenceOperationDoc) -> CompletionItemData {
+    let mut label = format!("{} · {}", operation.name, operation.completion);
     if operation.requires_lambda {
-        entry.push_str(" // 明示引数必須");
+        label.push_str(" // 明示引数必須");
     }
-    entry.push_str(&format!(" — {}", operation.description));
-    entry
+    label.push_str(&format!(" — {}", operation.description));
+    CompletionItemData::keyword(label)
+        .with_kind(CompletionKind::Snippet)
+        .with_detail(operation.java_output)
+        .with_documentation(operation.description)
+}
+
+fn deduplicate_completions(items: &mut Vec<CompletionItemData>) {
+    let mut seen: HashSet<(String, Option<String>)> = HashSet::new();
+    items.retain(|item| seen.insert((item.label.clone(), item.insert_text.clone())));
 }
 
 fn should_offer_sequence_completions(content: &str, position: &Position) -> bool {
@@ -2059,7 +2282,10 @@ fn should_offer_sequence_completions(content: &str, position: &Position) -> bool
     !identifier.is_empty()
 }
 
-fn word_at_position(content: &str, position: &Position) -> Option<(usize, usize, String)> {
+pub(crate) fn word_at_position(
+    content: &str,
+    position: &Position,
+) -> Option<(usize, usize, String)> {
     let line_index = position.line as usize;
     let lines: Vec<&str> = content.split('\n').collect();
     if line_index >= lines.len() {
@@ -2208,6 +2434,269 @@ fn offset_to_position(content: &str, offset: usize) -> Position {
 
 fn is_word_byte(byte: u8) -> bool {
     byte.is_ascii_alphanumeric() || byte == b'_'
+}
+
+fn statement_contains_regex_features(statement: &Statement) -> bool {
+    match statement {
+        Statement::ValDeclaration { initializer, .. } => {
+            expression_contains_regex_features(initializer)
+        }
+        Statement::VarDeclaration { initializer, .. } => initializer
+            .as_ref()
+            .is_some_and(expression_contains_regex_features),
+        Statement::FunctionDeclaration {
+            parameters, body, ..
+        } => {
+            parameters
+                .iter()
+                .filter_map(|param| param.default_value.as_ref())
+                .any(expression_contains_regex_features)
+                || expression_contains_regex_features(body)
+        }
+        Statement::ClassDeclaration {
+            properties,
+            methods,
+            ..
+        }
+        | Statement::InterfaceDeclaration {
+            properties,
+            methods,
+            ..
+        } => {
+            let property_has_regex = properties.iter().any(|property| {
+                property
+                    .initializer
+                    .as_ref()
+                    .is_some_and(expression_contains_regex_features)
+                    || property.getter.as_ref().map_or(false, |expr| {
+                        expression_contains_regex_features(expr.as_ref())
+                    })
+                    || property.setter.as_ref().map_or(false, |expr| {
+                        expression_contains_regex_features(expr.as_ref())
+                    })
+            });
+            property_has_regex
+                || methods
+                    .iter()
+                    .any(|method| statement_contains_regex_features(method.as_ref()))
+        }
+        Statement::DataClassDeclaration { parameters, .. } => parameters
+            .iter()
+            .filter_map(|param| param.default_value.as_ref())
+            .any(expression_contains_regex_features),
+        Statement::TestDeclaration(declaration) => {
+            let dataset_has_regex = declaration
+                .dataset
+                .as_ref()
+                .is_some_and(dataset_contains_regex_features);
+            dataset_has_regex || expression_contains_regex_features(&declaration.body)
+        }
+        Statement::ExtensionFunction(extension) => {
+            statement_contains_regex_features(extension.function.as_ref())
+        }
+        Statement::Expression { expr, .. } => expression_contains_regex_features(expr),
+        Statement::Return { value, .. } => value
+            .as_ref()
+            .is_some_and(expression_contains_regex_features),
+        Statement::Throw { expr, .. } => expression_contains_regex_features(expr),
+        Statement::Assignment { target, value, .. } => {
+            expression_contains_regex_features(target) || expression_contains_regex_features(value)
+        }
+        Statement::UnitTypeDefinition(definition) => definition
+            .members
+            .iter()
+            .any(unit_member_contains_regex_features),
+        Statement::ForIn(for_in) => for_in_contains_regex_features(for_in),
+        Statement::Concurrency(construct) => concurrency_contains_regex_features(construct),
+        Statement::ResourceManagement(resource) => {
+            resource_management_contains_regex_features(resource)
+        }
+        Statement::Package { .. }
+        | Statement::Import { .. }
+        | Statement::Comment(_)
+        | Statement::Break(_)
+        | Statement::Continue(_) => false,
+    }
+}
+
+fn unit_member_contains_regex_features(member: &UnitTypeMember) -> bool {
+    match member {
+        UnitTypeMember::Dependency(dependency) => dependency
+            .value
+            .as_ref()
+            .is_some_and(expression_contains_regex_features),
+        UnitTypeMember::Conversion(block) => {
+            block.body.iter().any(statement_contains_regex_features)
+        }
+        UnitTypeMember::NestedStatement(statement) => {
+            statement_contains_regex_features(statement.as_ref())
+        }
+    }
+}
+
+fn for_in_contains_regex_features(for_in: &ForInStatement) -> bool {
+    expression_contains_regex_features(&for_in.iterable)
+        || match &for_in.strategy {
+            LoopStrategy::NumericRange(NumericRangeLoop { start, end, .. }) => {
+                expression_contains_regex_features(start) || expression_contains_regex_features(end)
+            }
+            LoopStrategy::LazySequence { .. } | LoopStrategy::Iterable | LoopStrategy::Unknown => {
+                false
+            }
+        }
+        || expression_contains_regex_features(for_in.body.as_ref())
+}
+
+fn concurrency_contains_regex_features(construct: &ConcurrencyConstruct) -> bool {
+    match construct {
+        ConcurrencyConstruct::Spawn { body, .. } | ConcurrencyConstruct::Async { body, .. } => {
+            expression_contains_regex_features(body.as_ref())
+        }
+        ConcurrencyConstruct::Await { expr, .. } => {
+            expression_contains_regex_features(expr.as_ref())
+        }
+    }
+}
+
+fn resource_management_contains_regex_features(resource: &ResourceManagement) -> bool {
+    match resource {
+        ResourceManagement::Use { resource, body, .. } => {
+            expression_contains_regex_features(resource.as_ref())
+                || expression_contains_regex_features(body.as_ref())
+        }
+        ResourceManagement::Defer { body, .. } => expression_contains_regex_features(body.as_ref()),
+    }
+}
+
+fn dataset_contains_regex_features(dataset: &TestDataset) -> bool {
+    if let TestDataset::InlineArray { rows, .. } = dataset {
+        rows.iter()
+            .flat_map(|row| row.values.iter())
+            .any(expression_contains_regex_features)
+    } else {
+        false
+    }
+}
+
+fn expression_contains_regex_features(expression: &Expression) -> bool {
+    match expression {
+        Expression::RegexLiteral(_) | Expression::RegexCommand(_) => true,
+        Expression::Literal(_, _)
+        | Expression::Identifier(_, _)
+        | Expression::MultilineString(_)
+        | Expression::JsonLiteral(_)
+        | Expression::This(_)
+        | Expression::Super(_) => false,
+        Expression::Binary { left, right, .. } => {
+            expression_contains_regex_features(left) || expression_contains_regex_features(right)
+        }
+        Expression::Unary { operand, .. } | Expression::TypeCast { expr: operand, .. } => {
+            expression_contains_regex_features(operand)
+        }
+        Expression::Call { function, args, .. } => {
+            expression_contains_regex_features(function)
+                || args.iter().any(argument_contains_regex_features)
+        }
+        Expression::MemberAccess { object, .. }
+        | Expression::NullSafeMemberAccess { object, .. } => {
+            expression_contains_regex_features(object)
+        }
+        Expression::IndexAccess { object, index, .. }
+        | Expression::NullSafeIndexAccess { object, index, .. } => {
+            expression_contains_regex_features(object) || expression_contains_regex_features(index)
+        }
+        Expression::UnitLiteral { value, .. } => expression_contains_regex_features(value),
+        Expression::StringInterpolation { parts, .. } => parts.iter().any(|part| match part {
+            StringPart::Expression(expr) => expression_contains_regex_features(expr),
+            StringPart::Text(_) => false,
+        }),
+        Expression::Array { elements, .. } => {
+            elements.iter().any(expression_contains_regex_features)
+        }
+        Expression::Tuple { elements, .. } => {
+            elements.iter().any(expression_contains_regex_features)
+        }
+        Expression::Lambda {
+            parameters, body, ..
+        } => {
+            parameters
+                .iter()
+                .filter_map(|param| param.default_value.as_ref())
+                .any(expression_contains_regex_features)
+                || expression_contains_regex_features(body)
+        }
+        Expression::When {
+            expr,
+            arms,
+            else_arm,
+            ..
+        } => {
+            expr.as_ref().map_or(false, |expr| {
+                expression_contains_regex_features(expr.as_ref())
+            }) || arms.iter().any(|arm| {
+                arm.guard
+                    .as_ref()
+                    .is_some_and(expression_contains_regex_features)
+                    || expression_contains_regex_features(&arm.body)
+            }) || else_arm.as_ref().map_or(false, |expr| {
+                expression_contains_regex_features(expr.as_ref())
+            })
+        }
+        Expression::If {
+            condition,
+            then_branch,
+            else_branch,
+            ..
+        } => {
+            expression_contains_regex_features(condition)
+                || expression_contains_regex_features(then_branch)
+                || else_branch.as_ref().map_or(false, |expr| {
+                    expression_contains_regex_features(expr.as_ref())
+                })
+        }
+        Expression::Block { statements, .. } => {
+            statements.iter().any(statement_contains_regex_features)
+        }
+        Expression::LogBlock(block) => log_block_contains_regex_features(block),
+        Expression::Try {
+            body,
+            catch_clauses,
+            finally_block,
+            ..
+        } => {
+            expression_contains_regex_features(body)
+                || catch_clauses
+                    .iter()
+                    .any(catch_clause_contains_regex_features)
+                || finally_block.as_ref().map_or(false, |expr| {
+                    expression_contains_regex_features(expr.as_ref())
+                })
+        }
+    }
+}
+
+fn log_block_contains_regex_features(block: &LogBlock) -> bool {
+    block.items.iter().any(|item| match item {
+        LogItem::Statement(statement) => statement_contains_regex_features(statement),
+        LogItem::Expression(expr) => expression_contains_regex_features(expr),
+        LogItem::Nested(nested) => log_block_contains_regex_features(nested),
+    })
+}
+
+fn catch_clause_contains_regex_features(clause: &TryCatchClause) -> bool {
+    clause
+        .parameter
+        .as_ref()
+        .and_then(|param| param.default_value.as_ref())
+        .is_some_and(expression_contains_regex_features)
+        || expression_contains_regex_features(clause.body.as_ref())
+}
+
+fn argument_contains_regex_features(argument: &Argument) -> bool {
+    match argument {
+        Argument::Positional(expr) => expression_contains_regex_features(expr),
+        Argument::Named { value, .. } => expression_contains_regex_features(value),
+    }
 }
 
 #[cfg(test)]

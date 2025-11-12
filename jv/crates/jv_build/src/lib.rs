@@ -1,7 +1,10 @@
 // jv_build - Build system and javac integration
+pub mod artifacts;
 mod compat;
 mod config;
+pub mod deps;
 mod jdk;
+pub mod manifest;
 pub mod metadata;
 
 pub use compat::{
@@ -12,7 +15,7 @@ pub use config::{
     BuildConfig, CliRequirement, JavaTarget, NetworkPolicy, SampleCliDependencies, SampleConfig,
     SampleConfigError, SampleDependency, SampleProtocol,
 };
-pub use jdk::{discover_jdk, JdkInfo};
+pub use jdk::{JdkInfo, discover_jdk};
 
 use anyhow::Result;
 use std::io;
@@ -100,6 +103,19 @@ impl BuildSystem {
         // Add classpath if specified
         if !self.config.classpath.is_empty() {
             cmd.args(["-cp", &self.config.classpath.join(":")]);
+        }
+
+        // Annotation processing (APT)
+        if self.config.apt.enabled {
+            if !self.config.apt.processors.is_empty() {
+                cmd.args(["-processor", &self.config.apt.processors.join(",")]);
+            }
+            if !self.config.apt.processorpath.is_empty() {
+                cmd.args(["-processorpath", &self.config.apt.processorpath.join(":")]);
+            }
+            for opt in &self.config.apt.options {
+                cmd.arg(format!("-A{}", opt));
+            }
         }
 
         // Add source files

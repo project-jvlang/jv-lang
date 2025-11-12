@@ -1,0 +1,7 @@
+package integration.logging
+
+fun main {
+    LOG {
+        "開始"
+    }
+}

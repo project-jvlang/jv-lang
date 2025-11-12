@@ -9,6 +9,7 @@ impl Expression {
         match self {
             Expression::Literal(_, span) => span,
             Expression::RegexLiteral(literal) => &literal.span,
+            Expression::RegexCommand(command) => &command.span,
             Expression::Identifier(_, span) => span,
             Expression::Binary { span, .. } => span,
             Expression::Unary { span, .. } => span,
@@ -20,11 +21,14 @@ impl Expression {
             Expression::TypeCast { span, .. } => span,
             Expression::StringInterpolation { span, .. } => span,
             Expression::MultilineString(literal) => &literal.span,
+            Expression::UnitLiteral { span, .. } => span,
             Expression::JsonLiteral(literal) => &literal.span,
             Expression::When { span, .. } => span,
             Expression::If { span, .. } => span,
             Expression::Block { span, .. } => span,
+            Expression::LogBlock(block) => &block.span,
             Expression::Array { span, .. } => span,
+            Expression::Tuple { span, .. } => span,
             Expression::Lambda { span, .. } => span,
             Expression::Try { span, .. } => span,
             Expression::This(span) => span,
@@ -39,6 +43,7 @@ impl Statement {
             Statement::ValDeclaration { span, .. } => span,
             Statement::VarDeclaration { span, .. } => span,
             Statement::FunctionDeclaration { span, .. } => span,
+            Statement::TestDeclaration(decl) => &decl.span,
             Statement::ClassDeclaration { span, .. } => span,
             Statement::DataClassDeclaration { span, .. } => span,
             Statement::InterfaceDeclaration { span, .. } => span,
@@ -52,6 +57,7 @@ impl Statement {
             Statement::Continue(span) => span,
             Statement::Import { span, .. } => span,
             Statement::Package { span, .. } => span,
+            Statement::UnitTypeDefinition(definition) => &definition.span,
             Statement::Comment(comment) => &comment.span,
             Statement::Concurrency(construct) => match construct {
                 ConcurrencyConstruct::Spawn { span, .. } => span,
@@ -74,6 +80,7 @@ pub fn requires_null_safety_check(expr: &Expression) -> bool {
             requires_null_safety_check(object)
         }
         Expression::Call { function, .. } => requires_null_safety_check(function),
+        Expression::LogBlock(_) => false,
         _ => false,
     }
 }
@@ -93,6 +100,7 @@ pub fn analyze_null_safety(expr: &Expression) -> bool {
                     Argument::Named { value, .. } => analyze_null_safety(value),
                 })
         }
+        Expression::LogBlock(_) => false,
         _ => false, // Conservative: assume other expressions are not null-safe
     }
 }
@@ -126,6 +134,7 @@ pub fn resolve_scope(expr: &Expression) -> String {
             resolve_scope(function)
         }
         Expression::This(_) => "instance".to_string(),
+        Expression::LogBlock(_) => "expression".to_string(),
         _ => "expression".to_string(), // Other expressions don't have meaningful scope
     }
 }

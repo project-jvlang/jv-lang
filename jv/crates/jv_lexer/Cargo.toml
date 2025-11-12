@@ -21,6 +21,7 @@ tracing = { workspace = true, optional = true }
 criterion = "0.5"
 test-case.workspace = true
 fastrand.workspace = true
+serde_json.workspace = true
 
 [[bench]]
 name = "pipeline"

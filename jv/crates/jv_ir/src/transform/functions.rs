@@ -559,11 +559,7 @@ impl ReturnTypeAccumulator {
     }
 
     fn into_option(self) -> Option<JavaType> {
-        if self.conflicted {
-            None
-        } else {
-            self.value
-        }
+        if self.conflicted { None } else { self.value }
     }
 }
 
@@ -914,6 +910,7 @@ pub fn desugar_top_level_function(
                 body: Some(ir_body),
                 modifiers: ir_modifiers,
                 throws,
+                assertion_patterns: Vec::new(),
                 span,
             };
 

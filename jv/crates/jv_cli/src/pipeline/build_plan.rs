@@ -6,6 +6,7 @@ use jv_checker::{
     diagnostics::{DiagnosticSeverity, DiagnosticStrategy, EnhancedDiagnostic},
     ParallelInferenceConfig,
 };
+use jv_pm::{LoggingConfig, LoggingConfigLayer};
 
 use super::project::{
     layout::ProjectLayout,
@@ -39,12 +40,21 @@ pub struct CliOverrides {
     pub parallel_inference: bool,
     pub inference_workers: Option<usize>,
     pub constraint_batch: Option<usize>,
+    // APT options
+    pub apt_enabled: bool,
+    pub apt_processors: Option<String>,
+    pub apt_processorpath: Option<String>,
+    pub apt_options: Vec<String>,
+    // ロギング関連の上書き層
+    pub logging_cli: LoggingConfigLayer,
+    pub logging_env: LoggingConfigLayer,
 }
 
 #[derive(Debug, Clone)]
 pub struct BuildOptions {
     pub entrypoint: PathBuf,
     pub output_dir: PathBuf,
+    pub output_override: bool,
     pub java_only: bool,
     pub check: bool,
     pub format: bool,
@@ -62,6 +72,7 @@ pub struct BuildPlan {
     pub settings: ProjectSettings,
     pub layout: ProjectLayout,
     pub options: BuildOptions,
+    pub logging_config: LoggingConfig,
     pub build_config: BuildConfig,
 }
 
@@ -77,6 +88,7 @@ impl BuildPlan {
     pub fn with_output_dir(&self, output_dir: PathBuf) -> Self {
         let mut clone = self.clone();
         clone.options.output_dir = output_dir.clone();
+        // Preserve whether the user explicitly overrode the output directory.
         clone.build_config.output_dir = stringify_path(&output_dir);
         clone
     }
@@ -91,48 +103,122 @@ impl BuildOptionsFactory {
         layout: ProjectLayout,
         overrides: CliOverrides,
     ) -> Result<BuildPlan, EnhancedDiagnostic> {
-        let entrypoint = resolve_entrypoint(&root, &layout, overrides.entrypoint)?;
-        let output_dir = resolve_output_dir(&root, &settings.output, overrides.output)?;
-        let target = overrides
-            .target
-            .unwrap_or_else(|| settings.manifest.java_target());
+        let CliOverrides {
+            entrypoint: entry_override,
+            output: output_override,
+            java_only,
+            check: check_flag,
+            format: format_flag,
+            target,
+            clean: clean_flag,
+            perf,
+            emit_types: emit_types_flag,
+            verbose,
+            emit_telemetry: emit_telemetry_flag,
+            parallel_inference,
+            inference_workers,
+            constraint_batch,
+            apt_enabled,
+            apt_processors,
+            apt_processorpath,
+            apt_options,
+            logging_cli,
+            logging_env,
+        } = overrides;
+
+        let entrypoint = resolve_entrypoint(&root, &layout, entry_override)?;
+        let output_override_applied = output_override.is_some();
+        let output_dir =
+            resolve_output_dir(&root, &settings.output, output_override.clone())?;
+        let target = target.unwrap_or_else(|| settings.manifest.java_target());
 
         let mut build_config = BuildConfig::with_target(target);
         build_config.output_dir = stringify_path(&output_dir);
 
-        let emit_types = overrides.emit_types;
-        let emit_telemetry = overrides.emit_telemetry;
+        let emit_types = emit_types_flag;
+        let emit_telemetry = emit_telemetry_flag;
         let mut parallel_config = ParallelInferenceConfig::default();
-        if overrides.parallel_inference {
+        if parallel_inference {
             parallel_config.module_parallelism = true;
         }
-        if let Some(workers) = overrides.inference_workers {
+        if let Some(workers) = inference_workers {
             parallel_config.worker_threads = workers;
         }
-        if let Some(batch) = overrides.constraint_batch {
+        if let Some(batch) = constraint_batch {
             parallel_config.constraint_batching = batch;
         }
         parallel_config = parallel_config.sanitized();
         let options = BuildOptions {
             entrypoint,
             output_dir,
-            java_only: overrides.java_only,
-            check: overrides.check || emit_types,
-            format: overrides.format,
-            clean: overrides.clean || settings.output.clean,
-            perf: overrides.perf,
+            output_override: output_override_applied,
+            java_only,
+            check: check_flag || emit_types,
+            format: format_flag,
+            clean: clean_flag || settings.output.clean,
+            perf,
             emit_types,
-            verbose: overrides.verbose,
+            verbose,
             parallel_config,
             emit_telemetry,
         };
+
+        let mut logging_layers = Vec::new();
+        if !logging_env.is_empty() {
+            logging_layers.push(logging_env.clone());
+        }
+        if !logging_cli.is_empty() {
+            logging_layers.push(logging_cli.clone());
+        }
+        let manifest_logging = settings.manifest.logging.clone();
+        let logging_config =
+            LoggingConfig::from_manifest(Some(manifest_logging)).with_layers(&logging_layers);
 
         Ok(BuildPlan {
             root,
             settings,
             layout,
             options,
-            build_config,
+            logging_config,
+            build_config: {
+                // Apply APT overrides
+                let mut cfg = build_config;
+                if apt_enabled
+                    || apt_processors.is_some()
+                    || apt_processorpath.is_some()
+                    || !apt_options.is_empty()
+                {
+                    cfg.enable_apt();
+                }
+                if let Some(list) = apt_processors.as_ref() {
+                    let processors = list
+                        .split(',')
+                        .map(|s| s.trim().to_string())
+                        .filter(|s| !s.is_empty())
+                        .collect::<Vec<_>>();
+                    if !processors.is_empty() {
+                        cfg.set_apt_processors(processors);
+                    }
+                }
+                if let Some(path) = apt_processorpath.as_ref() {
+                    // Do not try to be smart here; allow user to pass joined path
+                    let entries = path
+                        .split(if cfg!(windows) { ';' } else { ':' })
+                        .map(|s| s.trim().to_string())
+                        .filter(|s| !s.is_empty())
+                        .collect::<Vec<_>>();
+                    if !entries.is_empty() {
+                        cfg.set_apt_processorpath(entries);
+                    }
+                }
+                for opt in apt_options {
+                    let trimmed = opt.trim();
+                    if !trimmed.is_empty() {
+                        cfg.add_apt_option(opt);
+                    }
+                }
+                cfg
+            },
         })
     }
 }
@@ -161,11 +247,13 @@ fn resolve_output_dir(
     override_path: Option<PathBuf>,
 ) -> Result<PathBuf, EnhancedDiagnostic> {
     let candidate = match override_path {
-        Some(path) => absolutize(&path)?,
+        Some(ref path) => absolutize(path)?,
         None => root.join(&output.directory),
     };
 
-    guard_within_root(root.root_dir(), &candidate)?;
+    if override_path.is_none() {
+        guard_within_root(root.root_dir(), &candidate)?;
+    }
     Ok(candidate)
 }
 
@@ -203,7 +291,8 @@ fn guard_extension(path: &Path, expected: &str) -> Result<(), EnhancedDiagnostic
 
     Err(source_diagnostic(format!(
         "エントリポイント '{}' は .{} ファイルではありません。",
-        path.display(), expected
+        path.display(),
+        expected
     )))
 }
 
@@ -230,8 +319,9 @@ fn absolutize(path: &Path) -> Result<PathBuf, EnhancedDiagnostic> {
     if path.is_absolute() {
         Ok(path.to_path_buf())
     } else {
-        let cwd = std::env::current_dir()
-            .map_err(|error| root_diagnostic(format!("カレントディレクトリを取得できません: {}", error)))?;
+        let cwd = std::env::current_dir().map_err(|error| {
+            root_diagnostic(format!("カレントディレクトリを取得できません: {}", error))
+        })?;
         Ok(cwd.join(path))
     }
 }
@@ -244,13 +334,25 @@ fn same_file(lhs: &Path, rhs: &Path) -> bool {
 }
 
 fn path_within(root: &Path, candidate: &Path) -> bool {
-    let Ok(root_canonical) = fs::canonicalize(root) else {
+    let Some(root_canonical) = canonicalize_allowing_missing(root) else {
         return false;
     };
+    let Some(candidate_canonical) = canonicalize_allowing_missing(candidate) else {
+        return candidate.starts_with(root);
+    };
+    candidate_canonical.starts_with(&root_canonical)
+}
 
-    match fs::canonicalize(candidate) {
-        Ok(candidate) => candidate.starts_with(&root_canonical),
-        Err(_) => candidate.starts_with(root),
+fn canonicalize_allowing_missing(path: &Path) -> Option<PathBuf> {
+    match fs::canonicalize(path) {
+        Ok(resolved) => Some(resolved),
+        Err(_) => {
+            let parent = path.parent()?;
+            let mut base = canonicalize_allowing_missing(parent)?;
+            let component = path.file_name()?.to_owned();
+            base.push(component);
+            Some(base)
+        }
     }
 }
 

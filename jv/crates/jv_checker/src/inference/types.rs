@@ -40,6 +40,7 @@ pub enum TypeKind {
     Optional(Box<TypeKind>),
     Variable(TypeId),
     Function(Vec<TypeKind>, Box<TypeKind>),
+    Tuple(Vec<TypeKind>),
     Unknown,
 }
 
@@ -75,6 +76,11 @@ impl TypeKind {
         TypeKind::Optional(Box::new(inner))
     }
 
+    /// タプル型を生成する。
+    pub fn tuple(elements: Vec<TypeKind>) -> Self {
+        TypeKind::Tuple(elements)
+    }
+
     /// プリミティブ型の nullable 版を生成する（ボックス型を Optional で包む）。
     pub fn optional_primitive(primitive: PrimitiveType) -> Self {
         if JavaNullabilityPolicy::requires_boxing_for_nullable(primitive) {
@@ -98,6 +104,7 @@ impl TypeKind {
     pub fn is_nullable(&self) -> bool {
         match self {
             TypeKind::Primitive(_) => JavaNullabilityPolicy::primitives_allow_null(),
+            TypeKind::Tuple(_) => true,
             _ => true,
         }
     }
@@ -110,6 +117,7 @@ impl TypeKind {
             TypeKind::Function(params, ret) => {
                 params.iter().any(TypeKind::contains_unknown) || ret.contains_unknown()
             }
+            TypeKind::Tuple(elements) => elements.iter().any(TypeKind::contains_unknown),
             TypeKind::Primitive(_)
             | TypeKind::Boxed(_)
             | TypeKind::Reference(_)
@@ -142,6 +150,11 @@ impl TypeKind {
                 }
                 ret.collect_free_type_vars_into(acc);
             }
+            TypeKind::Tuple(elements) => {
+                for element in elements {
+                    element.collect_free_type_vars_into(acc);
+                }
+            }
         }
     }
 
@@ -161,6 +174,14 @@ impl TypeKind {
                     .join(", ");
                 format!("fn({params}) -> {}", ret.describe())
             }
+            TypeKind::Tuple(elements) => {
+                let elements = elements
+                    .iter()
+                    .map(TypeKind::describe)
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("({elements})")
+            }
             TypeKind::Unknown => "unknown".to_string(),
         }
     }
@@ -175,6 +196,8 @@ pub enum TypeError {
     NullabilityMismatch { from: String, to: String },
     #[error("cannot convert `{from}` to `{to}`")]
     IncompatibleConversion { from: String, to: String },
+    #[error("invalid tuple annotation `{annotation}`: {reason}")]
+    InvalidTupleAnnotation { annotation: String, reason: String },
 }
 
 impl TypeError {
@@ -184,6 +207,13 @@ impl TypeError {
 
     pub fn incompatible_conversion(from: String, to: String) -> Self {
         Self::IncompatibleConversion { from, to }
+    }
+
+    pub fn invalid_tuple(annotation: impl Into<String>, reason: impl Into<String>) -> Self {
+        Self::InvalidTupleAnnotation {
+            annotation: annotation.into(),
+            reason: reason.into(),
+        }
     }
 }
 

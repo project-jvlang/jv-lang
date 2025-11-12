@@ -41,6 +41,15 @@ impl LayoutStage {
             let starts_when_block = matches!(when_event, WhenTrackerEvent::EnterBlock);
 
             if let Some(ctx) = stack.last_mut() {
+                if matches!(ctx.kind, SequenceContextKind::When)
+                    && ctx.when_brace_depth == 1
+                    && ctx.when_paren_depth == 0
+                    && ctx.when_bracket_depth == 0
+                    && token.leading_trivia.newlines > 0
+                {
+                    ctx.when_in_branch_body = false;
+                }
+
                 let eligible = match ctx.kind {
                     SequenceContextKind::Array => {
                         !matches!(token.token_type, TokenType::Comma | TokenType::RightBracket)
@@ -48,7 +57,13 @@ impl LayoutStage {
                     SequenceContextKind::Call => {
                         !matches!(token.token_type, TokenType::Comma | TokenType::RightParen)
                     }
-                    SequenceContextKind::When => is_when_layout_candidate(&token.token_type),
+                    SequenceContextKind::When => {
+                        ctx.when_brace_depth == 1
+                            && ctx.when_paren_depth == 0
+                            && ctx.when_bracket_depth == 0
+                            && !ctx.when_in_branch_body
+                            && is_when_layout_candidate(&token.token_type)
+                    }
                 } && is_sequence_layout_candidate(
                     prev_token_type.as_ref(),
                     token_type_ref,
@@ -56,8 +71,16 @@ impl LayoutStage {
                 );
 
                 if eligible {
-                    let layout_needed =
+                    let mut layout_needed =
                         !ctx.prev_was_separator && has_layout_trivia(&token.leading_trivia);
+
+                    if layout_needed
+                        && matches!(ctx.kind, SequenceContextKind::When)
+                        && token.leading_trivia.newlines == 0
+                        && !token.leading_trivia.comments
+                    {
+                        layout_needed = false;
+                    }
 
                     if layout_needed {
                         match ctx.kind {
@@ -87,6 +110,7 @@ impl LayoutStage {
                                     .push(TokenMetadata::LayoutComma(metadata));
                                 result_origins.push(origin);
                                 result_tokens.push(synthetic);
+                                ctx.when_in_branch_body = false;
                             }
                         }
 
@@ -100,6 +124,9 @@ impl LayoutStage {
                     if let Some(ctx) = stack.last_mut() {
                         ctx.prev_was_separator = false;
                         ctx.last_explicit_separator = None;
+                        if let SequenceContextKind::When = ctx.kind {
+                            ctx.when_bracket_depth += 1;
+                        }
                     }
                     stack.push(SequenceContext::new_array());
                 }
@@ -111,6 +138,11 @@ impl LayoutStage {
                         stack.pop();
                     }
                     if let Some(ctx) = stack.last_mut() {
+                        if let SequenceContextKind::When = ctx.kind {
+                            if ctx.when_bracket_depth > 0 {
+                                ctx.when_bracket_depth -= 1;
+                            }
+                        }
                         ctx.prev_was_separator = false;
                         ctx.last_explicit_separator = None;
                     }
@@ -119,6 +151,9 @@ impl LayoutStage {
                     if let Some(ctx) = stack.last_mut() {
                         ctx.prev_was_separator = false;
                         ctx.last_explicit_separator = None;
+                        if let SequenceContextKind::When = ctx.kind {
+                            ctx.when_paren_depth += 1;
+                        }
                     }
                     if call_paren_origins.contains(&origin) {
                         stack.push(SequenceContext::new_call());
@@ -132,7 +167,35 @@ impl LayoutStage {
                         stack.pop();
                     }
                     if let Some(ctx) = stack.last_mut() {
+                        if let SequenceContextKind::When = ctx.kind {
+                            if ctx.when_paren_depth > 0 {
+                                ctx.when_paren_depth -= 1;
+                            }
+                        }
                         ctx.prev_was_separator = false;
+                        ctx.last_explicit_separator = None;
+                    }
+                }
+                TokenType::Arrow | TokenType::FatArrow => {
+                    if let Some(ctx) = stack.last_mut() {
+                        if let SequenceContextKind::When = ctx.kind {
+                            if ctx.when_brace_depth == 1
+                                && ctx.when_paren_depth == 0
+                                && ctx.when_bracket_depth == 0
+                            {
+                                ctx.when_in_branch_body = true;
+                            }
+                        }
+                        ctx.prev_was_separator = false;
+                        ctx.last_explicit_separator = None;
+                    }
+                }
+                TokenType::LayoutComma => {
+                    if let Some(ctx) = stack.last_mut() {
+                        if let SequenceContextKind::When = ctx.kind {
+                            ctx.when_in_branch_body = false;
+                        }
+                        ctx.prev_was_separator = true;
                         ctx.last_explicit_separator = None;
                     }
                 }
@@ -245,6 +308,9 @@ struct SequenceContext {
     prev_was_separator: bool,
     last_explicit_separator: Option<ExplicitSeparatorLocation>,
     when_brace_depth: usize,
+    when_paren_depth: usize,
+    when_bracket_depth: usize,
+    when_in_branch_body: bool,
 }
 
 impl SequenceContext {
@@ -254,6 +320,9 @@ impl SequenceContext {
             prev_was_separator: true,
             last_explicit_separator: None,
             when_brace_depth: 0,
+            when_paren_depth: 0,
+            when_bracket_depth: 0,
+            when_in_branch_body: false,
         }
     }
 
@@ -263,6 +332,9 @@ impl SequenceContext {
             prev_was_separator: true,
             last_explicit_separator: None,
             when_brace_depth: 0,
+            when_paren_depth: 0,
+            when_bracket_depth: 0,
+            when_in_branch_body: false,
         }
     }
 
@@ -272,6 +344,9 @@ impl SequenceContext {
             prev_was_separator: false,
             last_explicit_separator: None,
             when_brace_depth: 1,
+            when_paren_depth: 0,
+            when_bracket_depth: 0,
+            when_in_branch_body: false,
         }
     }
 }
@@ -349,7 +424,7 @@ fn is_when_layout_candidate(token_type: &TokenType) -> bool {
 }
 
 fn has_layout_trivia(trivia: &TokenTrivia) -> bool {
-    trivia.newlines > 0 || trivia.comments
+    trivia.spaces > 0 || trivia.newlines > 0 || trivia.comments
 }
 
 fn make_layout_comma_token(reference: &Token) -> Token {

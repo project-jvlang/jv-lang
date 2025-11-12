@@ -1,3 +1,11 @@
+pub mod add;
 pub mod check;
 pub mod debug;
 pub mod explain;
+pub mod help;
+pub mod jvpm_bridge;
+pub mod otel;
+pub mod remove;
+pub mod repo;
+pub mod resolver;
+pub mod test;

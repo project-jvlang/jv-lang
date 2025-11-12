@@ -16,6 +16,7 @@ pub fn expression_span(expr: &Expression) -> Span {
     match expr {
         Expression::Literal(_, span) => span.clone(),
         Expression::RegexLiteral(literal) => literal.span.clone(),
+        Expression::RegexCommand(command) => command.span.clone(),
         Expression::Identifier(_, span) => span.clone(),
         Expression::Binary { span, .. } => span.clone(),
         Expression::Unary { span, .. } => span.clone(),
@@ -32,10 +33,13 @@ pub fn expression_span(expr: &Expression) -> Span {
         Expression::TypeCast { span, .. } => span.clone(),
         Expression::Block { span, .. } => span.clone(),
         Expression::Array { span, .. } => span.clone(),
+        Expression::Tuple { span, .. } => span.clone(),
         Expression::Lambda { span, .. } => span.clone(),
         Expression::Try { span, .. } => span.clone(),
+        Expression::LogBlock(block) => block.span.clone(),
         Expression::This(span) => span.clone(),
         Expression::Super(span) => span.clone(),
+        Expression::UnitLiteral { span, .. } => span.clone(),
     }
 }
 
@@ -59,6 +63,8 @@ pub fn statement_span(stmt: &Statement) -> Span {
         Statement::Continue(span) => span.clone(),
         Statement::Package { span, .. } => span.clone(),
         Statement::Comment(comment) => comment.span.clone(),
+        Statement::UnitTypeDefinition(definition) => definition.span.clone(),
+        Statement::TestDeclaration(declaration) => declaration.span.clone(),
         Statement::Concurrency(concurrency) => match concurrency {
             ConcurrencyConstruct::Spawn { span, .. } => span.clone(),
             ConcurrencyConstruct::Async { span, .. } => span.clone(),

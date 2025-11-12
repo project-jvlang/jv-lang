@@ -3,7 +3,7 @@ use std::path::Path;
 
 use crate::pipeline::project::locator::ProjectLocator;
 
-use super::{current_dir_lock, TempDirGuard};
+use super::{TempDirGuard, lock_current_dir};
 
 struct WorkingDirGuard {
     previous: std::path::PathBuf,
@@ -59,7 +59,7 @@ fn locate_fails_without_manifest() {
 
 #[test]
 fn locate_blocks_relative_escape_outside_workspace() {
-    let _lock = current_dir_lock().lock().unwrap();
+    let _lock = lock_current_dir();
 
     let temp_dir = TempDirGuard::new("project-locator-escape");
     let nested = temp_dir.path().join("nested/inner");

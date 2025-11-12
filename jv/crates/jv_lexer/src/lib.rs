@@ -16,6 +16,8 @@ pub enum TokenType {
     Number(String),              // Store as string to avoid f64 Eq issues, parse later
     Character(char),
     Identifier(String),
+    Underscore,
+    ImplicitParam(u32),
     Boolean(bool),
     RegexLiteral(String),
 
@@ -42,6 +44,12 @@ pub enum TokenType {
     Null,
     Package,
     Import,
+    Log,
+    Trace,
+    Debug,
+    Info,
+    Warn,
+    Error,
 
     // Operators
     Assign,         // =
@@ -95,6 +103,7 @@ pub enum TokenType {
     LineComment(String),
     BlockComment(String),
     JavaDocComment(String),
+    FieldNameLabel(FieldNameLabelToken),
 
     // Whitespace (usually ignored but useful for formatting)
     Whitespace(String),
@@ -219,6 +228,18 @@ pub struct NumberLiteralMetadata {
     pub suffix: Option<char>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct UnderscoreInfoMetadata {
+    pub raw: String,
+    pub is_implicit: bool,
+    #[serde(default)]
+    pub number: Option<u32>,
+    pub line: usize,
+    pub column: usize,
+    pub length: usize,
+    pub in_non_code_region: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 pub struct CommentCarryOverMetadata {
     #[serde(default)]
@@ -231,6 +252,70 @@ pub struct CommentCarryOverMetadata {
     pub doc_comment: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum FieldNameLabelKind {
+    LineComment,
+    BlockComment,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum FieldNameLabelErrorKind {
+    InvalidIdentifier,
+    ExtraText,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct FieldNameLabelIssue {
+    pub reason: FieldNameLabelErrorKind,
+    pub text: String,
+    pub line: usize,
+    pub column: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct FieldNameLabelCandidate {
+    pub name: String,
+    pub line: usize,
+    pub column: usize,
+    pub length: usize,
+    #[serde(default)]
+    pub token_distance: Option<usize>,
+    pub kind: FieldNameLabelKind,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct LabeledSpan {
+    pub name: String,
+    pub line: usize,
+    pub column: usize,
+    pub length: usize,
+    pub kind: FieldNameLabelKind,
+    #[serde(default)]
+    pub token_distance: Option<usize>,
+}
+
+impl From<&FieldNameLabelCandidate> for LabeledSpan {
+    fn from(candidate: &FieldNameLabelCandidate) -> Self {
+        Self {
+            name: candidate.name.clone(),
+            line: candidate.line,
+            column: candidate.column,
+            length: candidate.length,
+            kind: candidate.kind,
+            token_distance: candidate.token_distance,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct FieldNameLabelToken {
+    pub primary: Option<String>,
+    #[serde(default)]
+    pub primary_span: Option<LabeledSpan>,
+    #[serde(default)]
+    pub secondary: Vec<LabeledSpan>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum TokenMetadata {
     PotentialJsonStart {
@@ -238,6 +323,7 @@ pub enum TokenMetadata {
     },
     StringLiteral(StringLiteralMetadata),
     NumberLiteral(NumberLiteralMetadata),
+    UnderscoreInfo(UnderscoreInfoMetadata),
     LayoutComma(LayoutCommaMetadata),
     StringInterpolation {
         segments: Vec<StringInterpolationSegment>,
@@ -281,9 +367,29 @@ pub enum LegacyLoopKeyword {
     Do,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum InvalidImplicitParamReason {
+    LeadingZero,
+    Overflow,
+    NonDigit,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum TokenDiagnostic {
-    LegacyLoop { keyword: LegacyLoopKeyword },
+    LegacyLoop {
+        keyword: LegacyLoopKeyword,
+    },
+    InvalidImplicitParam {
+        reason: InvalidImplicitParamReason,
+        #[serde(default)]
+        suggested: Option<String>,
+    },
+    InvalidFieldNameLabel {
+        reason: FieldNameLabelErrorKind,
+        text: String,
+        line: usize,
+        column: usize,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]

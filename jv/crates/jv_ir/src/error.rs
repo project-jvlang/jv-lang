@@ -1,5 +1,17 @@
 use jv_ast::Span;
 
+/// Additional structured context for test lowering diagnostics.
+#[derive(Debug, Clone, PartialEq)]
+pub enum TestLoweringDiagnostic {
+    /// The number of declared parameters does not match dataset columns.
+    DatasetColumnMismatch {
+        parameter_count: usize,
+        column_count: usize,
+    },
+    /// A non-boolean expression must be rewritten into an explicit assertion.
+    AssertionRewriteRequired,
+}
+
 // Error types
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
 pub enum TransformError {
@@ -36,11 +48,21 @@ pub enum TransformError {
     #[error("@Sample処理エラー: {message}")]
     SampleProcessingError { message: String, span: Span },
 
-    #[error("JV1008: whitespace-delimited sequence must be homogeneous. expected {expected}, found {found}")]
+    #[error(
+        "JV1008: whitespace-delimited sequence must be homogeneous. expected {expected}, found {found}"
+    )]
     WhitespaceSequenceTypeMismatch {
         expected: String,
         found: String,
         span: Span,
+    },
+
+    #[error("{code}: {message}")]
+    TestLoweringError {
+        code: &'static str,
+        message: String,
+        span: Span,
+        details: Option<TestLoweringDiagnostic>,
     },
 }
 
@@ -58,7 +80,8 @@ impl TransformError {
             | TransformError::ResourceManagementError { span, .. }
             | TransformError::SampleAnnotationError { span, .. }
             | TransformError::SampleProcessingError { span, .. }
-            | TransformError::WhitespaceSequenceTypeMismatch { span, .. } => span,
+            | TransformError::WhitespaceSequenceTypeMismatch { span, .. }
+            | TransformError::TestLoweringError { span, .. } => span,
         }
     }
 }

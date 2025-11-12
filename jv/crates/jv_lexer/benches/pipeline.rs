@@ -1,5 +1,5 @@
-use criterion::{black_box, criterion_group, criterion_main, BatchSize, Criterion};
-use jv_lexer::{pipeline, Lexer};
+use criterion::{BatchSize, Criterion, black_box, criterion_group, criterion_main};
+use jv_lexer::{Lexer, pipeline};
 
 fn sample_source() -> String {
     let snippet = r#"
@@ -12,6 +12,10 @@ fun transform(value: Int) -> Int {
 }
 "#;
     snippet.repeat(128)
+}
+
+fn underscore_heavy_source() -> String {
+    include_str!("data/underscore-heavy.jv").repeat(64)
 }
 
 fn run_pipeline_baseline(input: String) {
@@ -29,20 +33,27 @@ fn run_pipeline_new(input: String) {
 }
 
 fn bench_pipeline(c: &mut Criterion) {
-    let sample = sample_source();
     let mut group = c.benchmark_group("lexer_pipeline");
+    let scenarios: Vec<(&str, String)> = vec![
+        ("pipeline", sample_source()),
+        ("underscore_heavy", underscore_heavy_source()),
+    ];
 
-    group.bench_function("pipeline_baseline", |b| {
-        b.iter_batched(
-            || sample.clone(),
-            run_pipeline_baseline,
-            BatchSize::SmallInput,
-        )
-    });
+    for (label, sample) in &scenarios {
+        let baseline_name = format!("{label}_baseline");
+        group.bench_function(baseline_name, |b| {
+            b.iter_batched(
+                || sample.clone(),
+                run_pipeline_baseline,
+                BatchSize::SmallInput,
+            )
+        });
 
-    group.bench_function("pipeline_new", |b| {
-        b.iter_batched(|| sample.clone(), run_pipeline_new, BatchSize::SmallInput)
-    });
+        let traced_name = format!("{label}_trace");
+        group.bench_function(traced_name, |b| {
+            b.iter_batched(|| sample.clone(), run_pipeline_new, BatchSize::SmallInput)
+        });
+    }
 
     group.finish();
 }

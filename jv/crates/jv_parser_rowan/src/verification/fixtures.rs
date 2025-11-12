@@ -197,6 +197,7 @@ pub enum StatementKindKey {
     Expression,
     ForIn,
     FunctionDeclaration,
+    TestDeclaration,
     Import,
     InterfaceDeclaration,
     Package,
@@ -205,6 +206,7 @@ pub enum StatementKindKey {
     ThrowStatement,
     ValDeclaration,
     VarDeclaration,
+    UnitTypeDefinition,
     WhenStatement,
     Unknown,
 }

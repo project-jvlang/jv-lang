@@ -4,24 +4,25 @@ use std::io::{Cursor, Read};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use jv_ast::{
+    Argument, CallArgumentMetadata, Expression, JsonLiteral, JsonValue, LogBlock, LogItem, Program,
+    Statement, StringPart, TestDataset, Visibility,
+    statement::{UnitTypeDefinition, UnitTypeMember},
     types::{Kind, Pattern},
-    Argument, CallArgumentMetadata, Expression, JsonLiteral, JsonValue, Program, Statement,
-    StringPart, Visibility,
 };
-use jv_build::{metadata::SymbolIndex, JavaTarget};
+use jv_build::{JavaTarget, metadata::SymbolIndex};
 use jv_checker::diagnostics::{
-    from_check_error, from_frontend_diagnostics, from_parse_error, from_transform_error,
-    DiagnosticSeverity, DiagnosticStrategy,
+    DiagnosticSeverity, DiagnosticStrategy, from_check_error, from_frontend_diagnostics,
+    from_parse_error, from_transform_error,
 };
 use jv_checker::imports::resolution::{ResolvedImport, ResolvedImportKind};
 use jv_checker::{ParallelInferenceConfig, TypeChecker};
 use jv_codegen_java::{JavaCodeGenConfig, JavaCodeGenerator};
 use jv_fmt::JavaFormatter;
 use jv_ir::{
-    transform_program_with_context, IrGenericMetadata, IrProgram, IrStatement, IrTypeLevelValue,
-    IrTypeParameter, IrVariance, JavaType, JavaWildcardKind, TransformContext,
+    IrGenericMetadata, IrProgram, IrStatement, IrTypeLevelValue, IrTypeParameter, IrVariance,
+    JavaType, JavaWildcardKind, TransformContext, transform_program_with_context,
 };
 use jv_parser_frontend::ParserPipeline;
 use jv_parser_rowan::frontend::RowanPipeline;
@@ -122,6 +123,7 @@ fn promote_visibility(statement: &mut Statement) {
         Statement::ExtensionFunction(extension) => {
             promote_visibility(extension.function.as_mut());
         }
+        Statement::UnitTypeDefinition(definition) => promote_unit_definition(definition),
         Statement::Expression { .. }
         | Statement::Return { .. }
         | Statement::Throw { .. }
@@ -135,13 +137,28 @@ fn promote_visibility(statement: &mut Statement) {
         | Statement::Import { .. }
         | Statement::Package { .. }
         | Statement::Break(_)
-        | Statement::Continue(_) => {}
+        | Statement::Continue(_)
+        | Statement::TestDeclaration(_) => {}
     }
 }
 
 fn promote_modifiers(modifiers: &mut jv_ast::Modifiers) {
     if matches!(modifiers.visibility, Visibility::Private) {
         modifiers.visibility = Visibility::Public;
+    }
+}
+
+fn promote_unit_definition(definition: &mut UnitTypeDefinition) {
+    for member in &mut definition.members {
+        match member {
+            UnitTypeMember::Conversion(block) => {
+                for statement in &mut block.body {
+                    promote_visibility(statement);
+                }
+            }
+            UnitTypeMember::NestedStatement(statement) => promote_visibility(statement),
+            UnitTypeMember::Dependency(_) => {}
+        }
     }
 }
 
@@ -213,6 +230,12 @@ fn rewrite_statement(statement: &mut Statement) {
         Statement::ExtensionFunction(extension) => {
             rewrite_statement(extension.function.as_mut());
         }
+        Statement::TestDeclaration(declaration) => {
+            if let Some(dataset) = &mut declaration.dataset {
+                rewrite_test_dataset(dataset);
+            }
+            rewrite_expression(&mut declaration.body);
+        }
         Statement::Expression { expr, .. } => rewrite_expression(expr),
         Statement::Return { value, .. } => {
             if let Some(expr) = value {
@@ -226,6 +249,7 @@ fn rewrite_statement(statement: &mut Statement) {
             rewrite_expression(target);
             rewrite_expression(value);
         }
+        Statement::UnitTypeDefinition(definition) => rewrite_unit_definition(definition),
         Statement::ForIn(statement) => {
             rewrite_expression(&mut statement.iterable);
             rewrite_expression(statement.body.as_mut());
@@ -237,6 +261,24 @@ fn rewrite_statement(statement: &mut Statement) {
         | Statement::Package { .. }
         | Statement::Break(_)
         | Statement::Continue(_) => {}
+    }
+}
+
+fn rewrite_unit_definition(definition: &mut UnitTypeDefinition) {
+    for member in &mut definition.members {
+        match member {
+            UnitTypeMember::Dependency(dependency) => {
+                if let Some(expr) = &mut dependency.value {
+                    rewrite_expression(expr);
+                }
+            }
+            UnitTypeMember::Conversion(block) => {
+                for statement in &mut block.body {
+                    rewrite_statement(statement);
+                }
+            }
+            UnitTypeMember::NestedStatement(statement) => rewrite_statement(statement),
+        }
     }
 }
 
@@ -258,10 +300,21 @@ fn rewrite_resource_management(resource: &mut jv_ast::ResourceManagement) {
     }
 }
 
+fn rewrite_test_dataset(dataset: &mut TestDataset) {
+    if let TestDataset::InlineArray { rows, .. } = dataset {
+        for row in rows {
+            for value in &mut row.values {
+                rewrite_expression(value);
+            }
+        }
+    }
+}
+
 fn rewrite_expression(expression: &mut Expression) {
     match expression {
         Expression::Literal(_, _)
         | Expression::RegexLiteral(_)
+        | Expression::RegexCommand(_)
         | Expression::Identifier(_, _)
         | Expression::This(_)
         | Expression::Super(_) => {}
@@ -304,6 +357,7 @@ fn rewrite_expression(expression: &mut Expression) {
             rewrite_expression(index.as_mut());
         }
         Expression::TypeCast { expr, .. } => rewrite_expression(expr.as_mut()),
+        Expression::UnitLiteral { value, .. } => rewrite_expression(value.as_mut()),
         Expression::StringInterpolation { parts, .. } => {
             for part in parts {
                 if let StringPart::Expression(expr) = part {
@@ -357,6 +411,11 @@ fn rewrite_expression(expression: &mut Expression) {
                 rewrite_expression(element);
             }
         }
+        Expression::Tuple { elements, .. } => {
+            for element in elements {
+                rewrite_expression(element);
+            }
+        }
         Expression::Lambda {
             parameters, body, ..
         } => {
@@ -385,6 +444,17 @@ fn rewrite_expression(expression: &mut Expression) {
             if let Some(finally_block) = finally_block {
                 rewrite_expression(finally_block.as_mut());
             }
+        }
+        Expression::LogBlock(block) => rewrite_log_block(block),
+    }
+}
+
+fn rewrite_log_block(block: &mut LogBlock) {
+    for item in &mut block.items {
+        match item {
+            LogItem::Statement(statement) => rewrite_statement(statement),
+            LogItem::Expression(expr) => rewrite_expression(expr),
+            LogItem::Nested(nested) => rewrite_log_block(nested),
         }
     }
 }
@@ -479,15 +549,14 @@ impl StdlibUsage {
             if token.is_empty() {
                 continue;
             }
+
+            // Consider the full token as well as each suffix separated by '.' so that both
+            // fully-qualified references and simple type names are recognised.
             let mut current = token;
             loop {
-                for package in catalog.packages_for_reference(current) {
-                    self.packages.insert(package);
-                }
+                self.record_reference(catalog, current);
                 if let Some((prefix, suffix)) = current.rsplit_once('.') {
-                    for package in catalog.packages_for_reference(suffix) {
-                        self.packages.insert(package);
-                    }
+                    self.record_reference(catalog, suffix);
                     current = prefix;
                 } else {
                     break;
@@ -578,6 +647,12 @@ impl<'a, 'b> ProgramUsageDetector<'a, 'b> {
             Statement::ExtensionFunction(extension) => {
                 self.visit_statement(extension.function.as_ref());
             }
+            Statement::TestDeclaration(declaration) => {
+                if let Some(dataset) = &declaration.dataset {
+                    self.visit_test_dataset(dataset);
+                }
+                self.visit_expression(&declaration.body);
+            }
             Statement::Expression { expr, .. } => self.visit_expression(expr),
             Statement::Return { value, .. } => {
                 if let Some(expr) = value {
@@ -600,6 +675,9 @@ impl<'a, 'b> ProgramUsageDetector<'a, 'b> {
             Statement::ForIn(statement) => {
                 self.visit_expression(&statement.iterable);
                 self.visit_expression(&statement.body);
+            }
+            Statement::UnitTypeDefinition(definition) => {
+                self.visit_unit_definition(definition);
             }
             Statement::Concurrency(construct) => self.visit_concurrency(construct),
             Statement::ResourceManagement(resource) => self.visit_resource_management(resource),
@@ -627,6 +705,36 @@ impl<'a, 'b> ProgramUsageDetector<'a, 'b> {
                 self.visit_expression(body);
             }
             jv_ast::ResourceManagement::Defer { body, .. } => self.visit_expression(body),
+        }
+    }
+
+    fn visit_unit_definition(&mut self, definition: &UnitTypeDefinition) {
+        for member in &definition.members {
+            match member {
+                UnitTypeMember::Dependency(dependency) => {
+                    if let Some(expr) = &dependency.value {
+                        self.visit_expression(expr);
+                    }
+                }
+                UnitTypeMember::Conversion(block) => {
+                    for statement in &block.body {
+                        self.visit_statement(statement);
+                    }
+                }
+                UnitTypeMember::NestedStatement(statement) => {
+                    self.visit_statement(statement);
+                }
+            }
+        }
+    }
+
+    fn visit_log_block(&mut self, block: &LogBlock) {
+        for item in &block.items {
+            match item {
+                LogItem::Statement(statement) => self.visit_statement(statement),
+                LogItem::Expression(expr) => self.visit_expression(expr),
+                LogItem::Nested(nested) => self.visit_log_block(nested),
+            }
         }
     }
 
@@ -682,6 +790,7 @@ impl<'a, 'b> ProgramUsageDetector<'a, 'b> {
                 self.visit_expression(index);
             }
             Expression::TypeCast { expr, .. } => self.visit_expression(expr),
+            Expression::UnitLiteral { value, .. } => self.visit_expression(value),
             Expression::StringInterpolation { parts, .. } => {
                 for part in parts {
                     if let StringPart::Expression(expr) = part {
@@ -730,6 +839,11 @@ impl<'a, 'b> ProgramUsageDetector<'a, 'b> {
                     self.visit_expression(element);
                 }
             }
+            Expression::Tuple { elements, .. } => {
+                for element in elements {
+                    self.visit_expression(element);
+                }
+            }
             Expression::Lambda {
                 parameters, body, ..
             } => {
@@ -763,8 +877,20 @@ impl<'a, 'b> ProgramUsageDetector<'a, 'b> {
             | Expression::MultilineString(_)
             | Expression::Literal(_, _)
             | Expression::RegexLiteral(_)
+            | Expression::RegexCommand(_)
             | Expression::This(_)
             | Expression::Super(_) => {}
+            Expression::LogBlock(block) => self.visit_log_block(block),
+        }
+    }
+
+    fn visit_test_dataset(&mut self, dataset: &TestDataset) {
+        if let TestDataset::InlineArray { rows, .. } = dataset {
+            for row in rows {
+                for value in &row.values {
+                    self.visit_expression(value);
+                }
+            }
         }
     }
 }
@@ -1580,13 +1706,21 @@ mod tests {
     use super::*;
     use jv_ast::Span;
     use jv_checker::imports::resolution::{ResolvedImport, ResolvedImportKind};
-    use jv_ir::{IrModifiers, IrStatement};
+    use jv_ir::{IrModifiers, IrStatement, LoggingMetadata};
+    use jv_parser_rowan::frontend::RowanPipeline;
 
     use std::{
         fs,
         path::PathBuf,
         time::{SystemTime, UNIX_EPOCH},
     };
+
+    fn parse_program(source: &str) -> Program {
+        RowanPipeline::default()
+            .parse(source)
+            .expect("source should parse for embedded stdlib tests")
+            .into_program()
+    }
 
     fn test_catalog() -> StdlibCatalog {
         let mut catalog = StdlibCatalog::default();
@@ -1665,15 +1799,52 @@ mod tests {
     #[test]
     fn scan_java_source_picks_up_fully_qualified_references() {
         let catalog = test_catalog();
-        assert!(catalog
-            .packages_for_reference("map")
-            .iter()
-            .any(|pkg| pkg == "jv.collections"));
+        assert!(
+            catalog
+                .packages_for_reference("map")
+                .iter()
+                .any(|pkg| pkg == "jv.collections")
+        );
         let mut usage = StdlibUsage::default();
         usage.scan_java_source("return java.util.stream.Stream.of(values);", &catalog);
         assert!(
             usage.package_set().contains("jv.collections"),
             "scan should detect stdlib package"
+        );
+    }
+
+    #[test]
+    fn unit_syntax_is_handled_during_stdlib_rewrites() {
+        let mut program = parse_program(
+            r#"
+@ 温度(Double) ℃ {
+    基準 := 273.15
+}
+
+val reading = 42 @ ℃
+"#,
+        );
+
+        rewrite_collection_property_access(&mut program);
+        promote_stdlib_visibility(&mut program);
+
+        let catalog = StdlibCatalog::default();
+        let mut usage = StdlibUsage::default();
+        usage.record_program_usage(&program, &catalog);
+
+        assert!(
+            matches!(
+                program.statements.first(),
+                Some(Statement::UnitTypeDefinition(_))
+            ),
+            "unit type definition should survive stdlib rewrites"
+        );
+        assert!(
+            matches!(
+                program.statements.get(1),
+                Some(Statement::ValDeclaration { .. })
+            ),
+            "value declaration should remain after rewrites"
         );
     }
 
@@ -1740,6 +1911,8 @@ mod tests {
             type_declarations: vec![class_decl],
             generic_metadata: BTreeMap::new(),
             conversion_metadata: Vec::new(),
+            logging: LoggingMetadata::default(),
+            tuple_record_plans: Vec::new(),
             span,
         };
 

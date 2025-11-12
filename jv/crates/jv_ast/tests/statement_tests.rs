@@ -557,3 +557,25 @@ fn test_resource_defer() {
         _ => panic!("Expected defer construct"),
     }
 }
+
+#[test]
+fn test_log_block_items() {
+    let span = dummy_span();
+    let statement = Statement::Expression {
+        expr: Expression::Identifier("sideEffect".to_string(), span.clone()),
+        span: span.clone(),
+    };
+    let block = LogBlock {
+        level: LogBlockLevel::Warn,
+        items: vec![
+            LogItem::Statement(statement),
+            LogItem::Expression(Expression::Literal(
+                Literal::String("payload".to_string()),
+                span.clone(),
+            )),
+        ],
+        span,
+    };
+    assert_eq!(block.level, LogBlockLevel::Warn);
+    assert_eq!(block.items.len(), 2);
+}

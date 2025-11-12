@@ -1,8 +1,43 @@
 // jv_ir - Intermediate representation for desugaring jv language constructs
 use crate::sequence_pipeline::SequencePipeline;
+use jv_ast::expression::TupleFieldMeta;
 use jv_ast::*;
 
-pub use jv_ast::types::PrimitiveReturnMetadata;
+pub use jv_ast::types::{PrimitiveReturnMetadata, TupleTypeDescriptor, TupleTypeElement};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TupleRecordStrategy {
+    Specific,
+    Generic,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TupleUsageContext {
+    pub kind: TupleUsageKind,
+    #[serde(default)]
+    pub owner: Option<String>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TupleUsageKind {
+    FunctionReturn,
+    BindingInitializer,
+    AssignmentValue,
+    Expression,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TupleRecordPlan {
+    pub arity: usize,
+    pub strategy: TupleRecordStrategy,
+    #[serde(default)]
+    pub specific_name: Option<String>,
+    pub generic_name: String,
+    pub fields: Vec<TupleFieldMeta>,
+    pub type_hints: Vec<String>,
+    pub usage_sites: Vec<TupleUsageContext>,
+}
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PrimitiveSpecializationHint {
@@ -65,6 +100,23 @@ pub enum IrExpression {
     /// Compiled regular expression pattern handle.
     RegexPattern {
         pattern: String,
+        java_type: JavaType,
+        span: Span,
+    },
+    /// Multiline text block literal preserving layout for Java emission.
+    TextBlock {
+        content: String,
+        span: Span,
+    },
+    /// Concise regex command expression lowered from surface syntax.
+    RegexCommand {
+        mode: RegexCommandMode,
+        mode_origin: RegexCommandModeOrigin,
+        subject: Box<IrExpression>,
+        pattern: RegexLiteral,
+        pattern_expr: Option<Box<IrExpression>>,
+        replacement: Option<IrRegexReplacement>,
+        flags: Vec<RegexFlag>,
         java_type: JavaType,
         span: Span,
     },
@@ -165,6 +217,13 @@ pub enum IrExpression {
         span: Span,
     },
 
+    /// Tuple literal `(expr expr ...)` which will be materialized as a record instance.
+    TupleLiteral {
+        elements: Vec<IrExpression>,
+        java_type: JavaType,
+        span: Span,
+    },
+
     // Lambda expression (desugared to anonymous class or method reference)
     Lambda {
         functional_interface: String,
@@ -259,6 +318,195 @@ pub enum IrExpression {
         java_type: JavaType,
         span: Span,
     },
+
+    // Logging invocation generated from log blocks.
+    LogInvocation {
+        plan: Box<LogInvocationPlan>,
+        java_type: JavaType,
+        span: Span,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum IrRegexReplacement {
+    Literal(IrRegexLiteralReplacement),
+    Expression(Box<IrExpression>),
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct IrRegexLiteralReplacement {
+    pub normalized: String,
+    pub segments: Vec<IrRegexTemplateSegment>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum IrRegexTemplateSegment {
+    Text(String),
+    BackReference(u32),
+    Expression(Box<IrExpression>),
+}
+
+/// ログレベルの優先度を表す。TRACE < DEBUG < INFO < WARN < ERROR。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub enum LogLevel {
+    Trace,
+    Debug,
+    Info,
+    Warn,
+    Error,
+}
+
+impl LogLevel {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            LogLevel::Trace => "TRACE",
+            LogLevel::Debug => "DEBUG",
+            LogLevel::Info => "INFO",
+            LogLevel::Warn => "WARN",
+            LogLevel::Error => "ERROR",
+        }
+    }
+
+    const fn priority(self) -> u8 {
+        match self {
+            LogLevel::Trace => 0,
+            LogLevel::Debug => 1,
+            LogLevel::Info => 2,
+            LogLevel::Warn => 3,
+            LogLevel::Error => 4,
+        }
+    }
+
+    pub const fn is_enabled(self, threshold: LogLevel) -> bool {
+        self.priority() >= threshold.priority()
+    }
+}
+
+/// ログ出力前に実行するガード種別。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum LogGuardKind {
+    TraceEnabled,
+    DebugEnabled,
+    InfoEnabled,
+    WarnEnabled,
+    ErrorEnabled,
+}
+
+impl LogGuardKind {
+    pub fn for_level(level: LogLevel) -> Option<Self> {
+        match level {
+            LogLevel::Trace => Some(LogGuardKind::TraceEnabled),
+            LogLevel::Debug => Some(LogGuardKind::DebugEnabled),
+            LogLevel::Info => Some(LogGuardKind::InfoEnabled),
+            LogLevel::Warn => Some(LogGuardKind::WarnEnabled),
+            LogLevel::Error => Some(LogGuardKind::ErrorEnabled),
+        }
+    }
+}
+
+/// 利用するロギングフレームワーク種別。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum LoggingFrameworkKind {
+    Slf4j,
+    Log4j2,
+    JbossLogging,
+    CommonsLogging,
+    Jul,
+    Custom { identifier: Option<String> },
+}
+
+impl Default for LoggingFrameworkKind {
+    fn default() -> Self {
+        LoggingFrameworkKind::Slf4j
+    }
+}
+
+/// ロガーフィールドを識別するID。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct LoggerFieldId(pub u32);
+
+impl LoggerFieldId {
+    pub const fn raw(self) -> u32 {
+        self.0
+    }
+}
+
+/// ロガーフィールド挿入要求のメタデータ。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LoggerFieldSpec {
+    pub id: LoggerFieldId,
+    #[serde(default)]
+    pub owner_hint: Option<String>,
+    pub field_name: String,
+    #[serde(default)]
+    pub class_id: Option<ClassId>,
+}
+
+/// ログメッセージの生データ。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LogMessage {
+    pub expression: IrExpression,
+    pub span: Span,
+}
+
+/// ログ呼び出し内の要素を列挙する。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum LogInvocationItem {
+    Statement(IrStatement),
+    Message(LogMessage),
+    Nested(Box<LogInvocationPlan>),
+}
+
+/// Javaクラスを一意に識別するID。ネスト情報を保持する。
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct ClassId {
+    #[serde(default)]
+    pub package: Option<String>,
+    #[serde(default)]
+    pub local_name: Vec<String>,
+}
+
+impl ClassId {
+    pub fn new(package: Option<String>, simple_name: impl Into<String>) -> Self {
+        Self {
+            package,
+            local_name: vec![simple_name.into()],
+        }
+    }
+
+    pub fn with_nesting(package: Option<String>, nesting: Vec<String>) -> Self {
+        Self {
+            package,
+            local_name: nesting,
+        }
+    }
+}
+
+/// ログブロックのローワリング結果を保持する。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LogInvocationPlan {
+    #[serde(default)]
+    pub class_id: Option<ClassId>,
+    pub logger_field: LoggerFieldId,
+    pub level: LogLevel,
+    #[serde(default)]
+    pub uses_default_level: bool,
+    #[serde(default)]
+    pub guard_kind: Option<LogGuardKind>,
+    pub items: Vec<LogInvocationItem>,
+    pub span: Span,
+}
+
+/// プログラム全体のロギングメタデータ。
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct LoggingMetadata {
+    #[serde(default)]
+    pub logger_fields: Vec<LoggerFieldSpec>,
+    #[serde(default)]
+    pub framework: LoggingFrameworkKind,
+    #[serde(default)]
+    pub trace_context: bool,
 }
 
 /// Metadata describing the resolved target for a method call after name mapping.
@@ -379,6 +627,7 @@ impl IrExpression {
     pub fn span(&self) -> Span {
         match self {
             IrExpression::Literal(_, span)
+            | IrExpression::TextBlock { span, .. }
             | IrExpression::RegexPattern { span, .. }
             | IrExpression::Identifier { span, .. }
             | IrExpression::MethodCall { span, .. }
@@ -391,6 +640,7 @@ impl IrExpression {
             | IrExpression::Block { span, .. }
             | IrExpression::ArrayCreation { span, .. }
             | IrExpression::ObjectCreation { span, .. }
+            | IrExpression::TupleLiteral { span, .. }
             | IrExpression::Lambda { span, .. }
             | IrExpression::SequencePipeline { span, .. }
             | IrExpression::Switch { span, .. }
@@ -402,7 +652,9 @@ impl IrExpression {
             | IrExpression::StringFormat { span, .. }
             | IrExpression::CompletableFuture { span, .. }
             | IrExpression::VirtualThread { span, .. }
-            | IrExpression::TryWithResources { span, .. } => span.clone(),
+            | IrExpression::TryWithResources { span, .. }
+            | IrExpression::LogInvocation { span, .. }
+            | IrExpression::RegexCommand { span, .. } => span.clone(),
         }
     }
 }
@@ -752,6 +1004,25 @@ pub struct IrImport {
     pub span: Span,
 }
 
+/// Patterns detected in test bodies that map to JUnit assertions.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum AssertionPattern {
+    Equals {
+        actual: IrExpression,
+        expected: IrExpression,
+        span: Span,
+    },
+    NotEquals {
+        actual: IrExpression,
+        expected: IrExpression,
+        span: Span,
+    },
+    Truthy {
+        expr: IrExpression,
+        span: Span,
+    },
+}
+
 /// Desugared statements
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum IrStatement {
@@ -797,6 +1068,8 @@ pub enum IrStatement {
         body: Option<IrExpression>, // None for abstract methods
         modifiers: IrModifiers,
         throws: Vec<String>, // Exception types
+        #[serde(default)]
+        assertion_patterns: Vec<AssertionPattern>,
         span: Span,
     },
 
@@ -1149,6 +1422,10 @@ pub struct IrProgram {
     pub generic_metadata: GenericMetadataMap,
     #[serde(default)]
     pub conversion_metadata: Vec<ConversionMetadataEntry>,
+    #[serde(default)]
+    pub logging: LoggingMetadata,
+    #[serde(default)]
+    pub tuple_record_plans: Vec<TupleRecordPlan>,
     pub span: Span,
 }
 

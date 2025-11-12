@@ -3,10 +3,14 @@ use crate::error::TransformError;
 use crate::transform::{
     extract_java_type, normalize_whitespace_array_elements, transform_expression,
 };
-use crate::types::{IrExpression, IrProgram, IrResolvedMethodTarget, IrStatement, JavaType};
+use crate::types::{
+    IrExpression, IrModifiers, IrProgram, IrRegexReplacement, IrRegexTemplateSegment,
+    IrResolvedMethodTarget, IrStatement, IrVisibility, JavaType, LogInvocationItem,
+    LogInvocationPlan,
+};
 use jv_ast::{
-    types::PrimitiveTypeName, Argument, BinaryOp, CallArgumentMetadata, CallArgumentStyle,
-    Expression, SequenceDelimiter, Span,
+    Argument, BinaryOp, CallArgumentMetadata, CallArgumentStyle, Expression, SequenceDelimiter,
+    Span, types::PrimitiveTypeName,
 };
 use serde::{Deserialize, Serialize};
 use std::mem;
@@ -1443,11 +1447,45 @@ fn update_identifier_usage(expr: &mut IrExpression, target: &str, java_type: &Ja
             }
             update_identifier_usage(body.as_mut(), target, java_type);
         }
+        IrExpression::RegexCommand {
+            subject,
+            pattern_expr,
+            replacement,
+            ..
+        } => {
+            update_identifier_usage(subject, target, java_type);
+            if let Some(pattern_expr) = pattern_expr.as_deref_mut() {
+                update_identifier_usage(pattern_expr, target, java_type);
+            }
+            if let Some(replacement) = replacement.as_mut() {
+                update_identifier_usage_in_regex_replacement(replacement, target, java_type);
+            }
+        }
         IrExpression::RegexPattern { .. }
         | IrExpression::Literal(_, _)
+        | IrExpression::TextBlock { .. }
         | IrExpression::This { .. }
         | IrExpression::Super { .. } => {}
         _ => {}
+    }
+}
+
+fn update_identifier_usage_in_regex_replacement(
+    replacement: &mut IrRegexReplacement,
+    target: &str,
+    java_type: &JavaType,
+) {
+    match replacement {
+        IrRegexReplacement::Literal(literal) => {
+            for segment in &mut literal.segments {
+                if let IrRegexTemplateSegment::Expression(expr) = segment {
+                    update_identifier_usage(expr, target, java_type);
+                }
+            }
+        }
+        IrRegexReplacement::Expression(expr) => {
+            update_identifier_usage(expr, target, java_type);
+        }
     }
 }
 
@@ -1970,6 +2008,74 @@ fn determine_java_type(pipeline: &SequencePipeline) -> JavaType {
     }
 }
 
+/// Plans the set of IR statements required to represent a single test suite.
+#[derive(Debug, Clone)]
+pub struct TestSuitePlanner {
+    class_name: String,
+    span: Span,
+    modifiers: IrModifiers,
+    fields: Vec<IrStatement>,
+    methods: Vec<IrStatement>,
+    nested_classes: Vec<IrStatement>,
+    samples: Vec<IrStatement>,
+}
+
+impl TestSuitePlanner {
+    pub fn new(class_name: impl Into<String>, span: Span) -> Self {
+        Self {
+            class_name: class_name.into(),
+            span,
+            modifiers: IrModifiers {
+                visibility: IrVisibility::Public,
+                is_final: true,
+                ..IrModifiers::default()
+            },
+            fields: Vec::new(),
+            methods: Vec::new(),
+            nested_classes: Vec::new(),
+            samples: Vec::new(),
+        }
+    }
+
+    pub fn modifiers_mut(&mut self) -> &mut IrModifiers {
+        &mut self.modifiers
+    }
+
+    pub fn push_field(&mut self, field: IrStatement) {
+        self.fields.push(field);
+    }
+
+    pub fn push_method(&mut self, method: IrStatement) {
+        self.methods.push(method);
+    }
+
+    pub fn push_nested_class(&mut self, class: IrStatement) {
+        self.nested_classes.push(class);
+    }
+
+    pub fn push_sample(&mut self, sample: IrStatement) {
+        self.samples.push(sample);
+    }
+
+    pub fn build(self) -> Vec<IrStatement> {
+        let class_decl = IrStatement::ClassDeclaration {
+            name: self.class_name,
+            type_parameters: Vec::new(),
+            superclass: None,
+            interfaces: Vec::new(),
+            fields: self.fields,
+            methods: self.methods,
+            nested_classes: self.nested_classes,
+            modifiers: self.modifiers,
+            span: self.span,
+        };
+
+        let mut statements = self.samples;
+        statements.push(class_decl);
+        statements
+    }
+}
+
 fn determine_sum_result_type(pipeline: &SequencePipeline, terminal: &SequenceTerminal) -> JavaType {
     if let Some(hint) = terminal.specialization_hint.as_ref() {
         return match hint.canonical {
@@ -2061,7 +2167,9 @@ fn expression_span(expr: &Expression) -> Span {
         | Expression::TypeCast { span, .. }
         | Expression::StringInterpolation { span, .. }
         | Expression::Array { span, .. }
+        | Expression::Tuple { span, .. }
         | Expression::Lambda { span, .. }
+        | Expression::UnitLiteral { span, .. }
         | Expression::Block { span, .. }
         | Expression::When { span, .. }
         | Expression::If { span, .. }
@@ -2069,6 +2177,8 @@ fn expression_span(expr: &Expression) -> Span {
         | Expression::This(span)
         | Expression::Super(span) => span.clone(),
         Expression::RegexLiteral(regex) => regex.span.clone(),
+        Expression::RegexCommand(command) => command.span.clone(),
+        Expression::LogBlock(block) => block.span.clone(),
         Expression::JsonLiteral(literal) => literal.span.clone(),
         Expression::MultilineString(literal) => literal.span.clone(),
     }
@@ -2303,6 +2413,7 @@ impl ListTerminalEnforcer {
         match expr {
             IrExpression::SequencePipeline { .. }
             | IrExpression::Literal(_, _)
+            | IrExpression::TextBlock { .. }
             | IrExpression::RegexPattern { .. }
             | IrExpression::Identifier { .. }
             | IrExpression::InstanceOf { .. }
@@ -2364,6 +2475,11 @@ impl ListTerminalEnforcer {
                     self.visit_expression(arg, None);
                 }
             }
+            IrExpression::TupleLiteral { elements, .. } => {
+                for element in elements {
+                    self.visit_expression(element, None);
+                }
+            }
             IrExpression::Lambda { body, .. } => {
                 self.visit_expression(body, None);
             }
@@ -2414,6 +2530,48 @@ impl ListTerminalEnforcer {
                 for arg in args {
                     self.visit_expression(arg, None);
                 }
+            }
+            IrExpression::LogInvocation { plan, .. } => self.visit_log_plan(plan),
+            IrExpression::RegexCommand {
+                subject,
+                pattern_expr,
+                replacement,
+                ..
+            } => {
+                self.visit_expression(subject, None);
+                if let Some(pattern_expr) = pattern_expr {
+                    self.visit_expression(pattern_expr, None);
+                }
+                if let Some(replacement) = replacement {
+                    self.visit_regex_replacement(replacement);
+                }
+            }
+        }
+    }
+
+    fn visit_regex_replacement(&mut self, replacement: &mut IrRegexReplacement) {
+        match replacement {
+            IrRegexReplacement::Literal(literal) => {
+                for segment in &mut literal.segments {
+                    if let IrRegexTemplateSegment::Expression(expr) = segment {
+                        self.visit_expression(expr, None);
+                    }
+                }
+            }
+            IrRegexReplacement::Expression(expr) => {
+                self.visit_expression(expr, None);
+            }
+        }
+    }
+
+    fn visit_log_plan(&mut self, plan: &mut LogInvocationPlan) {
+        for item in plan.items.iter_mut() {
+            match item {
+                LogInvocationItem::Statement(stmt) => self.visit_statement(stmt),
+                LogInvocationItem::Message(message) => {
+                    self.visit_expression(&mut message.expression, Some(&JavaType::void()));
+                }
+                LogInvocationItem::Nested(nested) => self.visit_log_plan(nested),
             }
         }
     }

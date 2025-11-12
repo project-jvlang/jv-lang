@@ -2,6 +2,14 @@
 mod tests {
     use crate::context::{RegisteredMethodCall, RegisteredMethodDeclaration, SequenceStyleCache};
     use crate::{
+        CompletableFutureOp, DataFormat, IrCaseLabel, IrDeconstructionComponent,
+        IrDeconstructionPattern, IrExpression, IrForEachKind, IrForLoopMetadata, IrImplicitWhenEnd,
+        IrModifiers, IrNumericRangeLoop, IrParameter, IrResolvedMethodTarget, IrStatement,
+        IrVisibility, JavaType, LogInvocationItem, LogInvocationPlan, LogLevel, LogMessage,
+        LoggerFieldId, LoggerFieldSpec, LoggingFrameworkKind, LoggingMetadata, PipelineShape,
+        SampleMode, SampleSourceKind, Schema, SequencePipeline, SequenceSource, SequenceStage,
+        SequenceTerminal, SequenceTerminalEvaluation, SequenceTerminalKind, TransformContext,
+        TransformError, TransformPools, TransformProfiler, VirtualThreadOp,
         convert_type_annotation, desugar_async_expression, desugar_await_expression,
         desugar_data_class, desugar_default_parameters, desugar_defer_expression,
         desugar_elvis_operator, desugar_extension_function, desugar_named_arguments,
@@ -11,13 +19,7 @@ mod tests {
         generate_extension_class_name, generate_utility_class_name, infer_java_type,
         naming::method_erasure::apply_method_erasure, transform_expression, transform_program,
         transform_program_with_context, transform_program_with_context_profiled,
-        transform_statement, CompletableFutureOp, DataFormat, IrCaseLabel,
-        IrDeconstructionComponent, IrDeconstructionPattern, IrExpression, IrForEachKind,
-        IrForLoopMetadata, IrImplicitWhenEnd, IrModifiers, IrNumericRangeLoop, IrParameter,
-        IrResolvedMethodTarget, IrStatement, IrVisibility, JavaType, PipelineShape, SampleMode,
-        SampleSourceKind, Schema, SequencePipeline, SequenceSource, SequenceStage,
-        SequenceTerminal, SequenceTerminalEvaluation, SequenceTerminalKind, TransformContext,
-        TransformError, TransformPools, TransformProfiler, VirtualThreadOp,
+        transform_statement,
     };
     use jv_ast::*;
     use jv_parser_frontend::ParserPipeline;
@@ -185,6 +187,9 @@ mod tests {
             pattern: "\\d+".to_string(),
             raw: "/\\d+/".to_string(),
             span: span.clone(),
+            origin: Some(PatternOrigin::literal(span.clone())),
+            const_key: None,
+            template_segments: Vec::new(),
         };
         let mut context = TransformContext::new();
         let ir_expr = transform_expression(Expression::RegexLiteral(literal.clone()), &mut context)
@@ -210,6 +215,521 @@ mod tests {
                 }
             }
             other => panic!("expected regex pattern ir expression, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn log_block_lowering_builds_plan() {
+        let span = dummy_span();
+        let inner_span = dummy_span();
+
+        let val_stmt = Statement::ValDeclaration {
+            name: "user".to_string(),
+            binding: None,
+            type_annotation: None,
+            initializer: Expression::Literal(
+                Literal::String("loadUser".to_string()),
+                inner_span.clone(),
+            ),
+            modifiers: Modifiers::default(),
+            origin: ValBindingOrigin::ExplicitKeyword,
+            span: inner_span.clone(),
+        };
+
+        let log_block = LogBlock {
+            level: LogBlockLevel::Default,
+            items: vec![
+                LogItem::Statement(val_stmt),
+                LogItem::Expression(Expression::Literal(
+                    Literal::String("done".to_string()),
+                    inner_span.clone(),
+                )),
+            ],
+            span: inner_span.clone(),
+        };
+
+        let function = Statement::FunctionDeclaration {
+            name: "main".to_string(),
+            type_parameters: Vec::new(),
+            generic_signature: None,
+            where_clause: None,
+            parameters: Vec::new(),
+            return_type: None,
+            primitive_return: None,
+            body: Box::new(Expression::Block {
+                statements: vec![Statement::Expression {
+                    expr: Expression::LogBlock(log_block),
+                    span: inner_span.clone(),
+                }],
+                span: inner_span.clone(),
+            }),
+            modifiers: Modifiers::default(),
+            span: span.clone(),
+        };
+
+        let program = Program {
+            package: None,
+            imports: Vec::new(),
+            statements: vec![function],
+            span: span.clone(),
+        };
+
+        let mut context = TransformContext::new();
+        let ir_program =
+            transform_program_with_context(program, &mut context).expect("lowering succeeds");
+
+        let plan = ir_program
+            .type_declarations
+            .iter()
+            .find_map(|stmt| match stmt {
+                IrStatement::MethodDeclaration {
+                    name,
+                    body: Some(body),
+                    ..
+                } if name == "main" => match body {
+                    IrExpression::Block { statements, .. } => statements.iter().find_map(|stmt| {
+                        if let IrStatement::Expression { expr, .. } = stmt {
+                            if let IrExpression::LogInvocation { plan, .. } = expr {
+                                return Some(plan.as_ref());
+                            }
+                        }
+                        None
+                    }),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .expect("log invocation present");
+
+        assert_eq!(plan.level, LogLevel::Info);
+        assert!(plan.uses_default_level);
+        assert_eq!(plan.guard_kind, None);
+        assert_eq!(plan.items.len(), 2);
+        assert!(matches!(plan.items[0], LogInvocationItem::Statement(_)));
+        assert!(matches!(plan.items[1], LogInvocationItem::Message(_)));
+
+        assert_eq!(ir_program.logging.logger_fields.len(), 1);
+        let field = &ir_program.logging.logger_fields[0];
+        assert_eq!(field.field_name, "LOGGER");
+        assert_eq!(plan.logger_field.raw(), field.id.raw());
+    }
+
+    #[test]
+    fn log_block_filtered_below_threshold() {
+        let span = dummy_span();
+        let inner_span = dummy_span();
+
+        let log_block = LogBlock {
+            level: LogBlockLevel::Debug,
+            items: vec![LogItem::Expression(Expression::Literal(
+                Literal::String("debug".to_string()),
+                inner_span.clone(),
+            ))],
+            span: inner_span.clone(),
+        };
+
+        let function = Statement::FunctionDeclaration {
+            name: "main".to_string(),
+            type_parameters: Vec::new(),
+            generic_signature: None,
+            where_clause: None,
+            parameters: Vec::new(),
+            return_type: None,
+            primitive_return: None,
+            body: Box::new(Expression::Block {
+                statements: vec![Statement::Expression {
+                    expr: Expression::LogBlock(log_block),
+                    span: inner_span.clone(),
+                }],
+                span: inner_span.clone(),
+            }),
+            modifiers: Modifiers::default(),
+            span: span.clone(),
+        };
+
+        let program = Program {
+            package: None,
+            imports: Vec::new(),
+            statements: vec![function],
+            span: span.clone(),
+        };
+
+        let mut context = TransformContext::new();
+        context.logging_options_mut().active_level = LogLevel::Error;
+
+        let ir_program =
+            transform_program_with_context(program, &mut context).expect("lowering succeeds");
+
+        let has_log = ir_program.type_declarations.iter().any(|stmt| {
+            if let IrStatement::MethodDeclaration {
+                name,
+                body: Some(body),
+                ..
+            } = stmt
+            {
+                if name == "main" {
+                    if let IrExpression::Block { statements, .. } = body {
+                        return statements.iter().any(|stmt| {
+                            matches!(
+                                stmt,
+                                IrStatement::Expression {
+                                    expr: IrExpression::LogInvocation { .. },
+                                    ..
+                                }
+                            )
+                        });
+                    }
+                }
+            }
+            false
+        });
+
+        assert!(!has_log, "filtered block should not emit log invocation");
+        assert!(ir_program.logging.logger_fields.is_empty());
+    }
+
+    #[test]
+    fn logger_field_injection_adds_field_and_metadata() {
+        let span = dummy_span();
+        let logger_id = LoggerFieldId(0);
+
+        let mut metadata = LoggingMetadata {
+            logger_fields: vec![LoggerFieldSpec {
+                id: logger_id,
+                owner_hint: None,
+                field_name: "LOGGER".to_string(),
+                class_id: None,
+            }],
+            framework: LoggingFrameworkKind::Slf4j,
+            trace_context: false,
+        };
+
+        let log_plan = LogInvocationPlan {
+            class_id: None,
+            logger_field: logger_id,
+            level: LogLevel::Info,
+            uses_default_level: false,
+            guard_kind: None,
+            items: vec![LogInvocationItem::Message(LogMessage {
+                expression: IrExpression::Literal(
+                    Literal::String("hello".to_string()),
+                    span.clone(),
+                ),
+                span: span.clone(),
+            })],
+            span: span.clone(),
+        };
+
+        let method = IrStatement::MethodDeclaration {
+            name: "doIt".to_string(),
+            java_name: None,
+            type_parameters: Vec::new(),
+            parameters: Vec::new(),
+            primitive_return: None,
+            return_type: JavaType::void(),
+            body: Some(IrExpression::LogInvocation {
+                plan: Box::new(log_plan),
+                java_type: JavaType::void(),
+                span: span.clone(),
+            }),
+            modifiers: IrModifiers::default(),
+            throws: Vec::new(),
+            assertion_patterns: Vec::new(),
+            span: span.clone(),
+        };
+
+        let class_stmt = IrStatement::ClassDeclaration {
+            name: "Example".to_string(),
+            type_parameters: Vec::new(),
+            superclass: None,
+            interfaces: Vec::new(),
+            fields: Vec::new(),
+            methods: vec![method],
+            nested_classes: Vec::new(),
+            modifiers: IrModifiers::default(),
+            span: span.clone(),
+        };
+
+        let mut declarations = vec![class_stmt];
+
+        crate::model::class::attach_logger_fields(None, &mut declarations, &mut metadata)
+            .expect("logger field injection succeeds");
+
+        let (fields, methods) = match &declarations[0] {
+            IrStatement::ClassDeclaration {
+                fields, methods, ..
+            } => (fields, methods),
+            _ => panic!("expected class declaration"),
+        };
+
+        assert_eq!(fields.len(), 1, "logger field inserted");
+        let field = match &fields[0] {
+            IrStatement::FieldDeclaration {
+                name,
+                initializer,
+                modifiers,
+                ..
+            } => {
+                assert_eq!(name, "LOGGER");
+                assert!(modifiers.is_static && modifiers.is_final);
+                initializer
+            }
+            other => panic!("unexpected field statement: {other:?}"),
+        };
+
+        let init_call = match field {
+            Some(IrExpression::MethodCall {
+                receiver: Some(receiver),
+                method_name,
+                ..
+            }) => {
+                assert_eq!(method_name, "getLogger");
+                receiver
+            }
+            other => panic!("unexpected initializer: {other:?}"),
+        };
+
+        match init_call.as_ref() {
+            IrExpression::Identifier { name, .. } => {
+                assert_eq!(name, "org.slf4j.LoggerFactory");
+            }
+            other => panic!("unexpected receiver: {other:?}"),
+        }
+
+        let plan = match &methods[0] {
+            IrStatement::MethodDeclaration {
+                body: Some(IrExpression::LogInvocation { plan, .. }),
+                ..
+            } => plan.as_ref(),
+            other => panic!("unexpected method body: {other:?}"),
+        };
+
+        let class_id = plan.class_id.as_ref().expect("class id assigned");
+        assert!(class_id.package.is_none());
+        assert_eq!(class_id.local_name, vec!["Example".to_string()]);
+        assert_eq!(plan.logger_field, logger_id);
+
+        assert_eq!(metadata.logger_fields.len(), 1);
+        let spec = &metadata.logger_fields[0];
+        assert_eq!(spec.id, logger_id);
+        assert!(spec.owner_hint.as_deref() == Some("Example"));
+        assert!(
+            spec.class_id
+                .as_ref()
+                .map(|cid| cid.local_name.clone())
+                .unwrap_or_default()
+                == vec!["Example".to_string()]
+        );
+    }
+
+    #[test]
+    fn logger_field_injection_deduplicates_multiple_plans() {
+        let span = dummy_span();
+        let id_primary = LoggerFieldId(1);
+        let id_secondary = LoggerFieldId(2);
+
+        let mut metadata = LoggingMetadata {
+            logger_fields: vec![
+                LoggerFieldSpec {
+                    id: id_primary,
+                    owner_hint: None,
+                    field_name: "LOGGER".to_string(),
+                    class_id: None,
+                },
+                LoggerFieldSpec {
+                    id: id_secondary,
+                    owner_hint: None,
+                    field_name: "LOGGER".to_string(),
+                    class_id: None,
+                },
+            ],
+            framework: LoggingFrameworkKind::Slf4j,
+            trace_context: false,
+        };
+
+        let make_plan = |logger_field| LogInvocationPlan {
+            class_id: None,
+            logger_field,
+            level: LogLevel::Info,
+            uses_default_level: false,
+            guard_kind: None,
+            items: vec![LogInvocationItem::Message(LogMessage {
+                expression: IrExpression::Literal(Literal::String("msg".to_string()), span.clone()),
+                span: span.clone(),
+            })],
+            span: span.clone(),
+        };
+
+        let block = IrExpression::Block {
+            statements: vec![
+                IrStatement::Expression {
+                    expr: IrExpression::LogInvocation {
+                        plan: Box::new(make_plan(id_primary)),
+                        java_type: JavaType::void(),
+                        span: span.clone(),
+                    },
+                    span: span.clone(),
+                },
+                IrStatement::Expression {
+                    expr: IrExpression::LogInvocation {
+                        plan: Box::new(make_plan(id_secondary)),
+                        java_type: JavaType::void(),
+                        span: span.clone(),
+                    },
+                    span: span.clone(),
+                },
+            ],
+            java_type: JavaType::void(),
+            span: span.clone(),
+        };
+
+        let method = IrStatement::MethodDeclaration {
+            name: "action".to_string(),
+            java_name: None,
+            type_parameters: Vec::new(),
+            parameters: Vec::new(),
+            primitive_return: None,
+            return_type: JavaType::void(),
+            body: Some(block),
+            modifiers: IrModifiers::default(),
+            throws: Vec::new(),
+            assertion_patterns: Vec::new(),
+            span: span.clone(),
+        };
+
+        let class_stmt = IrStatement::ClassDeclaration {
+            name: "Dup".to_string(),
+            type_parameters: Vec::new(),
+            superclass: None,
+            interfaces: Vec::new(),
+            fields: Vec::new(),
+            methods: vec![method],
+            nested_classes: Vec::new(),
+            modifiers: IrModifiers::default(),
+            span: span.clone(),
+        };
+
+        let mut declarations = vec![class_stmt];
+
+        crate::model::class::attach_logger_fields(None, &mut declarations, &mut metadata)
+            .expect("deduplication succeeds");
+
+        let (_, methods) = match &declarations[0] {
+            IrStatement::ClassDeclaration {
+                fields, methods, ..
+            } => {
+                assert_eq!(fields.len(), 1, "logger field inserted once");
+                (fields, methods)
+            }
+            other => panic!("unexpected declaration: {other:?}"),
+        };
+
+        let method_body = match &methods[0] {
+            IrStatement::MethodDeclaration {
+                body: Some(body), ..
+            } => body,
+            other => panic!("unexpected method: {other:?}"),
+        };
+
+        let statements = match method_body {
+            IrExpression::Block { statements, .. } => statements,
+            other => panic!("expected block, got {other:?}"),
+        };
+
+        let mut seen_ids = Vec::new();
+        for stmt in statements {
+            if let IrStatement::Expression {
+                expr: IrExpression::LogInvocation { plan, .. },
+                ..
+            } = stmt
+            {
+                let plan = plan.as_ref();
+                seen_ids.push(plan.logger_field);
+                let cid = plan.class_id.as_ref().expect("class id exists");
+                assert_eq!(cid.local_name, vec!["Dup".to_string()]);
+            }
+        }
+
+        assert_eq!(seen_ids.len(), 2);
+        assert!(seen_ids.iter().all(|id| *id == id_primary));
+        assert_eq!(metadata.logger_fields.len(), 1);
+        assert_eq!(metadata.logger_fields[0].id, id_primary);
+    }
+
+    #[test]
+    fn logger_field_injection_detects_conflict() {
+        let span = dummy_span();
+        let logger_id = LoggerFieldId(7);
+
+        let mut metadata = LoggingMetadata {
+            logger_fields: vec![LoggerFieldSpec {
+                id: logger_id,
+                owner_hint: None,
+                field_name: "LOGGER".to_string(),
+                class_id: None,
+            }],
+            framework: LoggingFrameworkKind::Slf4j,
+            trace_context: false,
+        };
+
+        let plan = LogInvocationPlan {
+            class_id: None,
+            logger_field: logger_id,
+            level: LogLevel::Info,
+            uses_default_level: false,
+            guard_kind: None,
+            items: Vec::new(),
+            span: span.clone(),
+        };
+
+        let method = IrStatement::MethodDeclaration {
+            name: "conflict".to_string(),
+            java_name: None,
+            type_parameters: Vec::new(),
+            parameters: Vec::new(),
+            primitive_return: None,
+            return_type: JavaType::void(),
+            body: Some(IrExpression::LogInvocation {
+                plan: Box::new(plan),
+                java_type: JavaType::void(),
+                span: span.clone(),
+            }),
+            modifiers: IrModifiers::default(),
+            throws: Vec::new(),
+            assertion_patterns: Vec::new(),
+            span: span.clone(),
+        };
+
+        let existing_field = IrStatement::FieldDeclaration {
+            name: "LOGGER".to_string(),
+            java_type: JavaType::Primitive("int".to_string()),
+            initializer: None,
+            modifiers: IrModifiers::default(),
+            span: span.clone(),
+        };
+
+        let class_stmt = IrStatement::ClassDeclaration {
+            name: "Clash".to_string(),
+            type_parameters: Vec::new(),
+            superclass: None,
+            interfaces: Vec::new(),
+            fields: vec![existing_field],
+            methods: vec![method],
+            nested_classes: Vec::new(),
+            modifiers: IrModifiers::default(),
+            span: span.clone(),
+        };
+
+        let mut declarations = vec![class_stmt];
+
+        let result =
+            crate::model::class::attach_logger_fields(None, &mut declarations, &mut metadata);
+
+        match result {
+            Err(TransformError::ScopeError { message, .. }) => {
+                assert!(message.contains("LOGGER"));
+            }
+            other => panic!("expected conflict error, got {other:?}"),
         }
     }
 
@@ -531,6 +1051,9 @@ mod tests {
             pattern: "^[a-z]+$".to_string(),
             raw: "/^[a-z]+$/".to_string(),
             span: span.clone(),
+            origin: Some(PatternOrigin::literal(span.clone())),
+            const_key: None,
+            template_segments: Vec::new(),
         };
         let mut context = TransformContext::new();
         let ir_expr = transform_expression(
@@ -795,10 +1318,12 @@ mod tests {
                 assert_eq!(declaration.format, DataFormat::Json);
                 assert_eq!(declaration.mode, SampleMode::Embed);
                 assert_eq!(declaration.source_kind, SampleSourceKind::Inline);
-                assert!(declaration
-                    .embedded_data
-                    .as_ref()
-                    .is_some_and(|data| !data.is_empty()));
+                assert!(
+                    declaration
+                        .embedded_data
+                        .as_ref()
+                        .is_some_and(|data| !data.is_empty())
+                );
                 assert!(!declaration.records.is_empty());
 
                 let registered = context
@@ -2128,6 +2653,7 @@ mod tests {
                 StringPart::Expression(Expression::Identifier("status".to_string(), dummy_span())),
             ],
             indent: None,
+            raw_flavor: None,
             span: dummy_span(),
         };
 
@@ -2155,6 +2681,77 @@ mod tests {
                 "multiline interpolation should desugar to string format, got {:?}",
                 other
             ),
+        }
+    }
+
+    #[test]
+    fn multiline_literal_without_interpolation_emits_text_block() {
+        let mut context = test_context();
+        let literal = MultilineStringLiteral {
+            kind: MultilineKind::TripleQuote,
+            normalized: "first\nsecond\n".to_string(),
+            raw: "first\nsecond\n".to_string(),
+            parts: Vec::new(),
+            indent: None,
+            raw_flavor: None,
+            span: dummy_span(),
+        };
+
+        let result = transform_expression(Expression::MultilineString(literal), &mut context)
+            .expect("multiline literal lowers");
+
+        match result {
+            IrExpression::TextBlock { content, .. } => {
+                assert_eq!(content, "first\nsecond\n");
+            }
+            other => panic!("expected text block expression, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn regex_command_lowering_preserves_mode_and_type() {
+        let mut context = test_context();
+        let literal = RegexLiteral {
+            pattern: "\\d+".to_string(),
+            raw: "/\\d+/".to_string(),
+            span: dummy_span(),
+            origin: None,
+            const_key: None,
+            template_segments: Vec::new(),
+        };
+        let command = RegexCommand {
+            mode: RegexCommandMode::Match,
+            mode_origin: RegexCommandModeOrigin::DefaultMatch,
+            subject: Box::new(Expression::Literal(
+                Literal::String("input".to_string()),
+                dummy_span(),
+            )),
+            pattern: literal,
+            pattern_expr: None,
+            replacement: None,
+            flags: vec![RegexFlag::CaseInsensitive],
+            raw_flags: Some("i".to_string()),
+            span: dummy_span(),
+        };
+
+        let result =
+            transform_expression(Expression::RegexCommand(Box::new(command)), &mut context)
+                .expect("regex command lowers");
+
+        match result {
+            IrExpression::RegexCommand {
+                mode,
+                java_type,
+                flags,
+                replacement,
+                ..
+            } => {
+                assert_eq!(mode, RegexCommandMode::Match);
+                assert_eq!(java_type, JavaType::boolean());
+                assert_eq!(flags.len(), 1);
+                assert!(replacement.is_none());
+            }
+            other => panic!("expected regex command IR expression, got {:?}", other),
         }
     }
 
@@ -3727,6 +4324,76 @@ fun sample(value: Any): Int {
     }
 
     #[test]
+    fn test_transform_val_declaration_with_tuple_binding_expands_elements() {
+        let mut context = test_context();
+
+        let pattern_span = dummy_span();
+        let element_span = dummy_span();
+        let pattern = BindingPatternKind::List {
+            elements: vec![
+                BindingPatternKind::identifier("first", element_span.clone()),
+                BindingPatternKind::identifier("second", element_span.clone()),
+            ],
+            span: pattern_span.clone(),
+        };
+
+        let stmt = Statement::ValDeclaration {
+            name: "first".to_string(),
+            binding: Some(pattern),
+            type_annotation: None,
+            initializer: Expression::Tuple {
+                elements: vec![
+                    Expression::Literal(Literal::Number("1".to_string()), pattern_span.clone()),
+                    Expression::Literal(Literal::Number("2".to_string()), pattern_span.clone()),
+                ],
+                fields: Vec::new(),
+                context: TupleContextFlags::default(),
+                span: pattern_span.clone(),
+            },
+            modifiers: Modifiers::default(),
+            origin: ValBindingOrigin::ExplicitKeyword,
+            span: pattern_span,
+        };
+
+        let lowered = transform_statement(stmt, &mut context)
+            .expect("destructuring val lowering should succeed");
+
+        match lowered.as_slice() {
+            [
+                IrStatement::VariableDeclaration { name, .. },
+                IrStatement::VariableDeclaration {
+                    name: first_binding,
+                    initializer:
+                        Some(IrExpression::FieldAccess {
+                            field_name: first_field,
+                            ..
+                        }),
+                    ..
+                },
+                IrStatement::VariableDeclaration {
+                    name: second_binding,
+                    initializer:
+                        Some(IrExpression::FieldAccess {
+                            field_name: second_field,
+                            ..
+                        }),
+                    ..
+                },
+            ] => {
+                assert!(name.starts_with("__jv_tuple_"));
+                assert_eq!(first_binding, "first");
+                assert_eq!(second_binding, "second");
+                assert_eq!(first_field, "_1");
+                assert_eq!(second_field, "_2");
+            }
+            other => panic!("unexpected lowered statements: {:?}", other),
+        }
+
+        assert!(context.lookup_variable("first").is_some());
+        assert!(context.lookup_variable("second").is_some());
+    }
+
+    #[test]
     fn test_transform_statement_assignment_without_binding_creates_implicit_val() {
         let mut context = test_context();
 
@@ -3741,12 +4408,14 @@ fun sample(value: Any): Int {
             .expect("implicit assignment lowering should succeed");
 
         match lowered.as_slice() {
-            [IrStatement::VariableDeclaration {
-                name,
-                is_final,
-                java_type,
-                ..
-            }] => {
+            [
+                IrStatement::VariableDeclaration {
+                    name,
+                    is_final,
+                    java_type,
+                    ..
+                },
+            ] => {
                 assert_eq!(name, "greeting");
                 assert!(is_final, "implicit val declarations must be final");
                 assert_eq!(java_type, &JavaType::string());
@@ -3803,10 +4472,12 @@ fun sample(value: Any): Int {
             transform_statement(stmt, &mut context).expect("assignment lowering should succeed");
 
         match lowered.as_slice() {
-            [IrStatement::Expression {
-                expr: IrExpression::Assignment { .. },
-                ..
-            }] => {}
+            [
+                IrStatement::Expression {
+                    expr: IrExpression::Assignment { .. },
+                    ..
+                },
+            ] => {}
             other => panic!("expected assignment expression, got {:?}", other),
         }
     }
@@ -3858,6 +4529,7 @@ fun sample(value: Any): Int {
                 dummy_span(),
             )),
             span: dummy_span(),
+            metadata: BinaryMetadata::default(),
         };
 
         let ir_expr = transform_expression(expr, &mut context)
@@ -3884,6 +4556,7 @@ fun sample(value: Any): Int {
                 dummy_span(),
             )),
             span: dummy_span(),
+            metadata: BinaryMetadata::default(),
         };
 
         let ir_expr = transform_expression(expr, &mut context)
@@ -4048,6 +4721,7 @@ fun sample(value: Any): Int {
                     dummy_span(),
                 )),
                 span: dummy_span(),
+                metadata: BinaryMetadata::default(),
             },
             span: dummy_span(),
         };
@@ -4208,6 +4882,7 @@ fun sample(value: Any): Int {
                         dummy_span(),
                     )),
                     span: dummy_span(),
+                    metadata: BinaryMetadata::default(),
                 }),
                 then_branch: Box::new(Expression::IndexAccess {
                     object: Box::new(Expression::This(dummy_span())),
@@ -4466,9 +5141,11 @@ fun sample(value: Any): Int {
             construct: "goto statement".to_string(),
             span: span.clone(),
         };
-        assert!(unsupported_error
-            .to_string()
-            .contains("Unsupported construct"));
+        assert!(
+            unsupported_error
+                .to_string()
+                .contains("Unsupported construct")
+        );
 
         let pattern_error = TransformError::InvalidPattern {
             message: "Invalid range pattern".to_string(),
@@ -4489,6 +5166,7 @@ fun sample(value: Any): Int {
             body: None,
             modifiers: IrModifiers::default(),
             throws: vec![],
+            assertion_patterns: vec![],
             span: dummy_span(),
         };
 
@@ -5676,6 +6354,7 @@ fun sample(value: Any): Int {
             body: None,
             modifiers: static_modifiers(true),
             throws: vec![],
+            assertion_patterns: vec![],
             span: span_decl_one.clone(),
         };
 
@@ -5694,6 +6373,7 @@ fun sample(value: Any): Int {
             body: None,
             modifiers: static_modifiers(true),
             throws: vec![],
+            assertion_patterns: vec![],
             span: span_decl_two.clone(),
         };
 
@@ -5921,6 +6601,7 @@ fun sample(value: Any): Int {
             body: None,
             modifiers: modifiers(true),
             throws: vec![],
+            assertion_patterns: vec![],
             span: span_decl_one.clone(),
         };
 
@@ -5942,6 +6623,7 @@ fun sample(value: Any): Int {
             body: None,
             modifiers: modifiers(true),
             throws: vec![],
+            assertion_patterns: vec![],
             span: span_decl_two.clone(),
         };
 
@@ -6128,6 +6810,11 @@ fun sample(value: Any): Int {
                 continue;
             }
             if display.contains("/java_annotations/") {
+                continue;
+            }
+            if display.contains("/unit_syntax/errors/")
+                || display.contains("\\unit_syntax\\errors\\")
+            {
                 continue;
             }
             if display.contains("package/complex_stdlib_pattern.jv") {

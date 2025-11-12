@@ -5,9 +5,9 @@ use std::error::Error as StdError;
 use tokio::io::{stdin, stdout};
 use tokio::sync::{Mutex, RwLock};
 use tower_lsp::{
+    LspService, Server,
     jsonrpc::{Error as JsonRpcError, ErrorCode, Result as LspResult},
     lsp_types::*,
-    LspService, Server,
 };
 
 #[tokio::main]
@@ -63,6 +63,15 @@ fn map_diagnostic(diag: jv_lsp::Diagnostic) -> Diagnostic {
         source: diag.source.clone(),
         code: diag.code.map(tower_lsp::lsp_types::NumberOrString::String),
         ..Default::default()
+    }
+}
+
+fn map_completion_kind(kind: jv_lsp::CompletionKind) -> CompletionItemKind {
+    match kind {
+        jv_lsp::CompletionKind::Keyword => CompletionItemKind::KEYWORD,
+        jv_lsp::CompletionKind::Snippet => CompletionItemKind::SNIPPET,
+        jv_lsp::CompletionKind::Value => CompletionItemKind::VALUE,
+        jv_lsp::CompletionKind::Field => CompletionItemKind::FIELD,
     }
 }
 
@@ -171,10 +180,23 @@ impl tower_lsp::LanguageServer for Backend {
 
         let completion_items: Vec<CompletionItem> = completions
             .into_iter()
-            .map(|label| CompletionItem {
-                label,
-                kind: Some(CompletionItemKind::KEYWORD),
-                ..Default::default()
+            .map(|item| {
+                let mut completion = CompletionItem {
+                    label: item.label.clone(),
+                    kind: Some(map_completion_kind(item.kind)),
+                    detail: item.detail.clone(),
+                    ..Default::default()
+                };
+                if let Some(doc) = item.documentation.clone() {
+                    completion.documentation = Some(Documentation::String(doc));
+                }
+                if let Some(insert_text) = item.insert_text.clone() {
+                    completion.insert_text = Some(insert_text);
+                }
+                if item.is_snippet {
+                    completion.insert_text_format = Some(InsertTextFormat::SNIPPET);
+                }
+                completion
             })
             .collect();
 

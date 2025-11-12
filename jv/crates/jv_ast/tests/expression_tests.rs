@@ -1,5 +1,6 @@
 // Expression tests for jv_ast
 use jv_ast::*;
+use serde_json;
 
 // Test helper functions
 fn dummy_span() -> Span {
@@ -34,6 +35,7 @@ fn test_expression_binary() {
         op: BinaryOp::Add,
         right: Box::new(right),
         span: dummy_span(),
+        metadata: BinaryMetadata::default(),
     };
     match expr {
         Expression::Binary { op, .. } => assert_eq!(op, BinaryOp::Add),
@@ -210,6 +212,55 @@ fn test_expression_when_without_subject() {
     }
 }
 
+fn sample_log_block_expression() -> Expression {
+    let stmt_span = dummy_span();
+    let side_effect = Statement::Expression {
+        expr: Expression::Identifier("sideEffect".to_string(), stmt_span.clone()),
+        span: stmt_span.clone(),
+    };
+    let nested_block = LogBlock {
+        level: LogBlockLevel::Debug,
+        items: vec![LogItem::Expression(Expression::Identifier(
+            "nested".to_string(),
+            stmt_span.clone(),
+        ))],
+        span: stmt_span.clone(),
+    };
+    Expression::LogBlock(LogBlock {
+        level: LogBlockLevel::Info,
+        items: vec![
+            LogItem::Statement(side_effect),
+            LogItem::Expression(Expression::Literal(
+                Literal::String("message".to_string()),
+                stmt_span.clone(),
+            )),
+            LogItem::Nested(nested_block),
+        ],
+        span: stmt_span,
+    })
+}
+
+#[test]
+fn test_expression_log_block_structure() {
+    let expr = sample_log_block_expression();
+    match expr {
+        Expression::LogBlock(block) => {
+            assert_eq!(block.level, LogBlockLevel::Info);
+            assert_eq!(block.items.len(), 3);
+        }
+        _ => panic!("Expected log block expression"),
+    }
+}
+
+#[test]
+fn test_expression_log_block_roundtrip() {
+    let expr = sample_log_block_expression();
+    let json = serde_json::to_value(&expr).expect("serialize log block expression");
+    let restored: Expression =
+        serde_json::from_value(json).expect("deserialize log block expression");
+    assert_eq!(restored, expr);
+}
+
 #[test]
 fn test_expression_if() {
     let condition = Expression::Literal(Literal::Boolean(true), dummy_span());
@@ -278,6 +329,7 @@ fn test_expression_lambda() {
             dummy_span(),
         )),
         span: dummy_span(),
+        metadata: BinaryMetadata::default(),
     };
     let expr = Expression::Lambda {
         parameters: vec![param],

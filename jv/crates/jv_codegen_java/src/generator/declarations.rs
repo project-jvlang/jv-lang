@@ -8,6 +8,7 @@ use std::borrow::Cow;
 
 impl JavaCodeGenerator {
     pub fn generate_class(&mut self, class: &IrStatement) -> Result<String, CodeGenError> {
+        let base = JavaCodeGenerator::base_statement(class);
         if let IrStatement::ClassDeclaration {
             name,
             type_parameters,
@@ -18,8 +19,9 @@ impl JavaCodeGenerator {
             nested_classes,
             modifiers,
             ..
-        } = JavaCodeGenerator::base_statement(class)
+        } = base
         {
+            tests::register_test_class_imports(self, base);
             let is_nested = !self.metadata_path.is_empty();
             self.metadata_path.push(name.clone());
             let metadata_entry = self.current_generic_metadata().cloned();
@@ -434,6 +436,7 @@ impl JavaCodeGenerator {
                 body,
                 modifiers,
                 throws,
+                assertion_patterns,
                 span,
             } => {
                 if parameters.is_empty() {
@@ -465,6 +468,7 @@ impl JavaCodeGenerator {
                     body: instance_body,
                     modifiers: instance_modifiers,
                     throws: throws.clone(),
+                    assertion_patterns: assertion_patterns.clone(),
                     span: span.clone(),
                 };
 
@@ -689,19 +693,28 @@ impl JavaCodeGenerator {
         Ok(rendered.join(", "))
     }
 
-    fn render_parameters(&self, params: &[IrParameter]) -> Result<String, CodeGenError> {
+    fn render_parameters(&mut self, params: &[IrParameter]) -> Result<String, CodeGenError> {
         let mut rendered = Vec::new();
         for param in params {
-            let mut entry = String::new();
+            let mut parts: Vec<String> = Vec::new();
+            // Inline parameter annotations (e.g., @Nullable)
+            if !param.modifiers.annotations.is_empty() {
+                for annotation in &param.modifiers.annotations {
+                    // Register imports for qualified annotation names
+                    self.register_annotation_imports(annotation);
+                    parts.push(self.format_annotation(annotation));
+                }
+            }
+
             let modifiers = self.generate_parameter_modifiers(&param.modifiers);
             if !modifiers.is_empty() {
-                entry.push_str(&modifiers);
-                entry.push(' ');
+                parts.push(modifiers);
             }
-            entry.push_str(&self.generate_type(&param.java_type)?);
-            entry.push(' ');
-            entry.push_str(&param.name);
-            rendered.push(entry);
+
+            parts.push(self.generate_type(&param.java_type)?);
+            parts.push(param.name.clone());
+
+            rendered.push(parts.join(" "));
         }
         Ok(rendered.join(", "))
     }
@@ -757,7 +770,7 @@ impl JavaCodeGenerator {
         }
     }
 
-    fn format_annotation(&self, annotation: &IrAnnotation) -> String {
+    pub(super) fn format_annotation(&self, annotation: &IrAnnotation) -> String {
         let mut rendered = String::new();
         rendered.push('@');
         let qualified = annotation.name.qualified_name();
@@ -816,7 +829,7 @@ impl JavaCodeGenerator {
         }
     }
 
-    fn register_annotation_imports(&mut self, annotation: &IrAnnotation) {
+    pub(super) fn register_annotation_imports(&mut self, annotation: &IrAnnotation) {
         let (package, _) = annotation.name.split_package();
         if package.is_some() {
             let qualified_name = annotation.name.qualified_name();

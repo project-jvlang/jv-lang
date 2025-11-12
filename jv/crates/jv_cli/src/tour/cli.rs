@@ -603,9 +603,11 @@ mod tests {
     #[test]
     fn section_metadata_contains_expected_titles() {
         assert_eq!(SectionId::BasicSyntax.title(), "基本構文");
-        assert!(SectionId::AsyncProgramming
-            .description()
-            .contains("CompletableFuture"));
+        assert!(
+            SectionId::AsyncProgramming
+                .description()
+                .contains("CompletableFuture")
+        );
     }
 
     #[test]
@@ -617,9 +619,11 @@ mod tests {
             .filter(|entry| matches!(entry.action, MenuAction::Section(_)))
             .count();
         assert_eq!(section_count, 9);
-        assert!(entries
-            .iter()
-            .any(|entry| entry.action == MenuAction::Progress));
+        assert!(
+            entries
+                .iter()
+                .any(|entry| entry.action == MenuAction::Progress)
+        );
         assert!(entries.iter().any(|entry| entry.action == MenuAction::Exit));
     }
 

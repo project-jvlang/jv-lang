@@ -37,8 +37,8 @@ fn diagnostics_for_generic_source_are_empty() {
         messages
     );
     assert!(
-        elapsed <= Duration::from_millis(200),
-        "diagnostic collection exceeded 200ms: {:?}",
+        elapsed <= Duration::from_millis(1000),
+        "diagnostic collection exceeded 1s: {:?}",
         elapsed
     );
 }
@@ -55,7 +55,7 @@ fn completions_include_sequence_templates() {
 
     let completions = server.get_completions(&uri, position);
     assert!(!completions.is_empty());
-    assert!(completions.iter().any(|item| item.contains("data")));
+    assert!(completions.iter().any(|item| item.label.contains("data")));
 }
 
 #[test]

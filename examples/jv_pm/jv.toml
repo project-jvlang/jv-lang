@@ -1,0 +1,36 @@
+[package]
+name = "jvpm-demo"
+version = "0.1.0"
+description = "jv_pm Phase 2 のチュートリアル用サンプル"
+
+[package.dependencies]
+"org.example:demo" = "1.0.0"
+
+[build]
+java_version = "25"
+max_concurrent_downloads = 12
+max_concurrent_warning = 8
+
+[project]
+entrypoint = "src/main.jv"
+
+[project.sources]
+include = ["src/**/*.jv"]
+exclude = []
+
+[project.output]
+directory = "target"
+clean = false
+
+[repositories]
+use-global = true
+
+[[repositories.entries]]
+name = "central"
+url = "https://repo1.maven.org/maven2"
+priority = 10
+
+[maven]
+group_id = "org.example"
+artifact_id = "jvpm-demo"
+description = "jv_pm Phase 2 のチュートリアル用サンプル"

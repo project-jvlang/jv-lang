@@ -1,0 +1,15 @@
+package tuple.integration
+
+fun makePair(base: Int): (Int String) {
+    val label: String = "pair"
+
+    return (
+        base // value
+        label // label
+    )
+}
+
+fun main(): Unit {
+    val (number text) = makePair(42)
+    println("makePair -> number=${number} label=${text}")
+}

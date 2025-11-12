@@ -174,6 +174,11 @@ pub(super) fn run_legacy_preprocess(tokens: Vec<Token>) -> Vec<Token> {
         let json_confidence = json_contexts.get(index).copied().flatten();
         update_token_json_metadata(&mut token, json_confidence);
 
+        if matches!(token.token_type, TokenType::FieldNameLabel(_)) {
+            result.push(token);
+            continue;
+        }
+
         if matches!(token.token_type, TokenType::JavaDocComment(_)) {
             if let Some(ctx) = stack.last_mut() {
                 ctx.pending_layout = true;
