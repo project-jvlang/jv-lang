@@ -491,27 +491,27 @@ jobs:
           set -eo pipefail
           DEST=""
           URL=""
-          while [[ $# -gt 0 ]]; do
-            case "$1" in
+          while [[ \$# -gt 0 ]]; do
+            case "\$1" in
               -L|--location)
                 shift
                 ;;
               -o|--output)
-                DEST="$2"
+                DEST="\$2"
                 shift 2
                 ;;
               *)
-                URL="$1"
+                URL="\$1"
                 shift
                 ;;
             esac
           done
-          case "$URL" in
+          case "\$URL" in
             "https://github.com/${REPO}/releases/download/${VERSION}/jvpm-${VERSION}-linux-x86_64.tar.gz")
-              cp "${RELEASE_DIR}/jvpm-${VERSION}-linux-x86_64.tar.gz" "$DEST"
+              cp "${RELEASE_DIR}/jvpm-${VERSION}-linux-x86_64.tar.gz" "\$DEST"
               ;;
             *)
-              echo "Unexpected URL: $URL" >&2
+              echo "Unexpected URL: \$URL" >&2
               exit 1
               ;;
           esac
