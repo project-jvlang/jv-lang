@@ -827,7 +827,7 @@ fn when_branch_nullability_is_exposed_via_inference_service() {
 fun provide(): String? = null
 
 maybe = provide()
-val fallback = "fallback"
+val fallback = "fallback";
 label = when (maybe) {
     is String -> maybe
     else -> fallback
@@ -843,35 +843,39 @@ label = when (maybe) {
     let snapshot = checker
         .inference_snapshot()
         .expect("inference snapshot should be available");
-    let normalized = checker
-        .normalized_program()
-        .expect("normalized program should be available");
-
-    let (subject_name, arm_count, has_else, span) = normalized
+    let (subject_name, arm_count, has_else, span) = program
         .statements
         .iter()
-        .find_map(|statement| match statement {
-            Statement::ValDeclaration {
-                name, initializer, ..
-            } if name == "label" => {
-                if let Expression::When {
-                    expr,
-                    arms,
-                    else_arm,
-                    span,
-                    ..
-                } = initializer
-                {
-                    let subject = expr.as_deref().and_then(|expr| match expr {
-                        Expression::Identifier(name, _) => Some(name.as_str()),
-                        _ => None,
-                    });
-                    Some((subject, arms.len(), else_arm.is_some(), span.clone()))
-                } else {
-                    None
-                }
+        .find_map(|statement| {
+            let (label_name, initializer) = match statement {
+                Statement::ValDeclaration {
+                    name, initializer, ..
+                } => (name.as_str(), initializer),
+                Statement::Assignment { target, value, .. } => match target {
+                    Expression::Identifier(name, _) => (name.as_str(), value),
+                    _ => return None,
+                },
+                _ => return None,
+            };
+            if label_name != "label" {
+                return None;
             }
-            _ => None,
+            if let Expression::When {
+                expr,
+                arms,
+                else_arm,
+                span,
+                ..
+            } = initializer
+            {
+                let subject = expr.as_deref().and_then(|expr| match expr {
+                    Expression::Identifier(name, _) => Some(name.as_str()),
+                    _ => None,
+                });
+                Some((subject, arms.len(), else_arm.is_some(), span.clone()))
+            } else {
+                None
+            }
         })
         .expect("label declaration should contain when expression");
 
