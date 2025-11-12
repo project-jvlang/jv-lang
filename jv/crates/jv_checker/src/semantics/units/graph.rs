@@ -7,8 +7,8 @@ use super::{
     DefaultUnit, UnitConversionKind, UnitDefinitionValidated, UnitMemberRaw, UnitSymbolRaw,
     ValidatedCatalog,
 };
-use crate::diagnostics::unit_semantics;
 use crate::CheckError;
+use crate::diagnostics::unit_semantics;
 use jv_ast::{Argument, Expression, Span, Statement, StringPart, UnitRelation};
 use std::collections::HashMap;
 use std::sync::Arc;

@@ -4,10 +4,10 @@ use super::registry::{
     UnitConversionRef, UnitEdge, UnitEdgeId, UnitEntry,
 };
 use super::{UnitConversionKind, UnitConversionRaw, UnitRateRaw};
-use crate::diagnostics::{unit_semantics, DiagnosticSeverity};
+use crate::CheckError;
+use crate::diagnostics::{DiagnosticSeverity, unit_semantics};
 use crate::inference::type_factory::TypeFactory;
 use crate::inference::types::TypeKind;
-use crate::CheckError;
 use jv_ast::{BinaryOp, Expression, Literal, Statement, TypeAnnotation, UnaryOp};
 use rust_decimal::Decimal;
 use std::collections::HashMap;

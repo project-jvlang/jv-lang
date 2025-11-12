@@ -1,3 +1,4 @@
+#![rustfmt::skip]
 use super::*;
 use crate::commands::explain;
 use crate::pipeline::compute_script_main_class;
