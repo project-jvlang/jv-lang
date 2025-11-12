@@ -183,6 +183,8 @@ mod tests {
             span: Span::new(0..leaked.len(), start, end),
             trivia: None,
             carry_over: None,
+            field_label: None,
+            field_label_issue: None,
         }
     }
 

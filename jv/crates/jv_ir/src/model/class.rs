@@ -656,6 +656,11 @@ impl<'a> LoggerPlanCollector<'a> {
                     self.visit_expression(arg);
                 }
             }
+            IrExpression::TupleLiteral { elements, .. } => {
+                for element in elements {
+                    self.visit_expression(element);
+                }
+            }
             IrExpression::LogInvocation { plan, .. } => self.visit_plan(plan),
             IrExpression::RegexCommand {
                 subject,
@@ -951,6 +956,11 @@ fn collect_plan_ids_from_expression(expr: &IrExpression, used: &mut HashSet<Logg
         | IrExpression::VirtualThread { args, .. } => {
             for arg in args {
                 collect_plan_ids_from_expression(arg, used);
+            }
+        }
+        IrExpression::TupleLiteral { elements, .. } => {
+            for element in elements {
+                collect_plan_ids_from_expression(element, used);
             }
         }
         IrExpression::LogInvocation { plan, .. } => {

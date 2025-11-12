@@ -84,6 +84,7 @@ fn audited_program() -> IrProgram {
         generic_metadata: Default::default(),
         conversion_metadata: Vec::new(),
         logging: Default::default(),
+        tuple_record_plans: Vec::new(),
         span: dummy_span(),
     }
 }
@@ -224,6 +225,7 @@ fn field_annotations_render_and_imports() {
         generic_metadata: Default::default(),
         conversion_metadata: Vec::new(),
         logging: Default::default(),
+        tuple_record_plans: Vec::new(),
         span,
     };
 
@@ -335,6 +337,7 @@ fn parameter_annotations_render_in_signature_and_imports() {
         generic_metadata: Default::default(),
         conversion_metadata: Vec::new(),
         logging: Default::default(),
+        tuple_record_plans: Vec::new(),
         span,
     };
 

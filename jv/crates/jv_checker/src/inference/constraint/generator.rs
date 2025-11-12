@@ -13,6 +13,7 @@ use crate::inference::iteration::{
     LoopClassification, classify_loop, expression_can_yield_iterable,
 };
 use crate::inference::type_factory::TypeFactory;
+use crate::inference::type_parser;
 use crate::inference::types::{PrimitiveType, TypeError, TypeId, TypeKind};
 use crate::pattern::{
     NarrowedBinding, NarrowedNullability, NarrowingSnapshot, PatternMatchService, PatternTarget,
@@ -418,6 +419,14 @@ impl<'env, 'ext, 'imp> ConstraintGenerator<'env, 'ext, 'imp> {
                     self.infer_expression(element);
                 }
                 TypeKind::Unknown
+            }
+            Expression::Tuple { elements, .. } => {
+                let mut element_types = Vec::with_capacity(elements.len());
+                for element in elements {
+                    let ty = self.infer_expression(element);
+                    element_types.push(ty);
+                }
+                TypeKind::tuple(element_types)
             }
             Expression::Lambda {
                 parameters, body, ..
@@ -896,30 +905,7 @@ impl<'env, 'ext, 'imp> ConstraintGenerator<'env, 'ext, 'imp> {
     }
 
     fn type_from_annotation(&mut self, annotation: &TypeAnnotation) -> TypeKind {
-        match annotation {
-            TypeAnnotation::Simple(name) => self.type_from_identifier(name),
-            TypeAnnotation::Generic { name, .. } => self.type_from_identifier(name),
-            TypeAnnotation::Nullable(inner) => {
-                let inner_ty = self.type_from_annotation(inner);
-                TypeKind::optional(inner_ty)
-            }
-            TypeAnnotation::Function {
-                params,
-                return_type,
-            } => {
-                let param_types = params
-                    .iter()
-                    .map(|ann| self.type_from_annotation(ann))
-                    .collect();
-                let ret_ty = self.type_from_annotation(return_type.as_ref());
-                TypeKind::function(param_types, ret_ty)
-            }
-            _ => TypeKind::Unknown,
-        }
-    }
-
-    fn type_from_identifier(&mut self, identifier: &str) -> TypeKind {
-        match TypeFactory::from_annotation(identifier) {
+        match type_parser::parse_type_annotation(annotation) {
             Ok(kind) => kind,
             Err(error) => {
                 self.report_type_error(error);
@@ -982,6 +968,11 @@ impl<'env, 'ext, 'imp> ConstraintGenerator<'env, 'ext, 'imp> {
                 }
                 self.record_type_vars(result);
             }
+            TypeKind::Tuple(elements) => {
+                for element in elements {
+                    self.record_type_vars(element);
+                }
+            }
             TypeKind::Primitive(_)
             | TypeKind::Boxed(_)
             | TypeKind::Reference(_)
@@ -1023,7 +1014,8 @@ fn nullability_from_type(ty: &TypeKind) -> NullabilityFlag {
         TypeKind::Primitive(_)
         | TypeKind::Boxed(_)
         | TypeKind::Reference(_)
-        | TypeKind::Function(_, _) => NullabilityFlag::NonNull,
+        | TypeKind::Function(_, _)
+        | TypeKind::Tuple(_) => NullabilityFlag::NonNull,
     }
 }
 

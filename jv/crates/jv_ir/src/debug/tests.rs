@@ -80,6 +80,7 @@ fn reconstructs_basic_program_with_variable_and_expression() {
         generic_metadata: Default::default(),
         conversion_metadata: Vec::new(),
         logging: Default::default(),
+        tuple_record_plans: Vec::new(),
         span: span(),
     };
 
@@ -179,6 +180,7 @@ fn emits_warning_for_missing_final_initializer() {
         generic_metadata: Default::default(),
         conversion_metadata: Vec::new(),
         logging: Default::default(),
+        tuple_record_plans: Vec::new(),
         span: span(),
     };
 
@@ -225,6 +227,7 @@ fn errors_when_placeholders_disallowed() {
         generic_metadata: Default::default(),
         conversion_metadata: Vec::new(),
         logging: Default::default(),
+        tuple_record_plans: Vec::new(),
         span: span(),
     };
 
@@ -256,6 +259,7 @@ fn produces_warning_for_unsupported_statement() {
         generic_metadata: Default::default(),
         conversion_metadata: Vec::new(),
         logging: Default::default(),
+        tuple_record_plans: Vec::new(),
         span: span(),
     };
 

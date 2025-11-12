@@ -227,6 +227,7 @@ pub(crate) fn expression_span(expression: &Expression) -> Option<&Span> {
         | Expression::If { span, .. }
         | Expression::Block { span, .. }
         | Expression::Array { span, .. }
+        | Expression::Tuple { span, .. }
         | Expression::Lambda { span, .. }
         | Expression::Try { span, .. } => Some(span),
         Expression::LogBlock(block) => Some(&block.span),

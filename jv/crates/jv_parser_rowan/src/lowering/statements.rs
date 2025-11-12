@@ -10,10 +10,11 @@ use jv_ast::annotation::{Annotation, AnnotationArgument, AnnotationName, Annotat
 use jv_ast::comments::{CommentKind, CommentStatement, CommentVisibility};
 use jv_ast::expression::{
     Argument, BinaryMetadata, CallArgumentMetadata, CallArgumentStyle, IsTestKind, IsTestMetadata,
-    LogBlock, LogBlockLevel, LogItem, Parameter, ParameterModifiers, ParameterProperty,
-    RegexCommand, RegexCommandMode, RegexCommandModeOrigin, RegexFlag, RegexGuardStrategy,
-    RegexLambdaReplacement, RegexLiteralReplacement, RegexReplacement, RegexTemplateSegment,
-    StringPart, UnitSpacingStyle, WhenArm,
+    LabeledSpan as TupleLabelSpan, LogBlock, LogBlockLevel, LogItem, Parameter,
+    ParameterModifiers, ParameterProperty, RegexCommand, RegexCommandMode, RegexCommandModeOrigin,
+    RegexFlag, RegexGuardStrategy, RegexLambdaReplacement, RegexLiteralReplacement,
+    RegexReplacement, RegexTemplateSegment, StringPart, TupleContextFlags, TupleFieldMeta,
+    UnitSpacingStyle, WhenArm,
 };
 use jv_ast::json::{
     JsonComment, JsonCommentKind, JsonEntry, JsonLiteral, JsonValue, NumberGrouping,
@@ -31,11 +32,13 @@ use jv_ast::types::{
 };
 use jv_ast::{BindingPatternKind, Expression, SequenceDelimiter, Span, Statement};
 use jv_lexer::{
-    JsonCommentTrivia, JsonCommentTriviaKind, JsonConfidence, LayoutMode, Lexer,
-    NumberGroupingKind, StringDelimiterKind, StringInterpolationSegment, StringLiteralMetadata,
-    Token, TokenMetadata, TokenTrivia, TokenType,
+    FieldNameLabelToken, JsonCommentTrivia, JsonCommentTriviaKind, JsonConfidence,
+    LabeledSpan as LexerLabelSpan, LayoutMode, Lexer, NumberGroupingKind, StringDelimiterKind,
+    StringInterpolationSegment, StringLiteralMetadata, Token, TokenMetadata, TokenTrivia,
+    TokenType,
 };
 use jv_type_inference_java::{lower_type_annotation_from_tokens, TypeLoweringErrorKind};
+use std::cmp::Ordering;
 
 /// ローワリング結果。
 #[derive(Debug)]
@@ -333,7 +336,8 @@ fn import_alias_from_tokens(tokens: &[&Token]) -> Option<String> {
             TokenType::Whitespace(_) | TokenType::Newline => continue,
             TokenType::LineComment(_)
             | TokenType::BlockComment(_)
-            | TokenType::JavaDocComment(_) => continue,
+            | TokenType::JavaDocComment(_)
+            | TokenType::FieldNameLabel(_) => continue,
             TokenType::Dot => {
                 previous_was_dot = true;
                 if awaiting_alias_name {
@@ -400,6 +404,15 @@ fn lower_comment(
             text: format!("/*{}*/", raw),
             span,
         }),
+        TokenType::FieldNameLabel(_) => {
+            let text = comment_token.lexeme.trim();
+            Statement::Comment(CommentStatement {
+                kind: CommentKind::Line,
+                visibility: CommentVisibility::Passthrough,
+                text: format!("// {}", text),
+                span,
+            })
+        }
         other => {
             return Err(LoweringDiagnostic::new(
                 LoweringDiagnosticSeverity::Error,
@@ -447,8 +460,11 @@ fn lower_assignment(
         )
     })?;
 
+    let mut pattern_syntax_node: Option<JvSyntaxNode> = None;
+
     let (target, binding_pattern) =
         if let Some(pattern_node) = child_node(&target_node, SyntaxKind::BindingPattern) {
+            pattern_syntax_node = Some(pattern_node.clone());
             let pattern = lower_binding_pattern(context, &pattern_node)?;
             let expr = binding_pattern_primary_expression(&pattern);
             (expr, Some(pattern))
@@ -468,7 +484,65 @@ fn lower_assignment(
             )
         })?;
 
-    let value = lower_expression(context, &value_node)?;
+    let mut value = lower_expression(context, &value_node)?;
+
+    if binding_pattern.is_some() {
+        if let Expression::Tuple {
+            context: tuple_context,
+            ..
+        } = &mut value
+        {
+            tuple_context.in_destructuring_pattern = true;
+        }
+    }
+
+    if let (
+        Some(pattern),
+        Expression::Tuple {
+            elements, fields, ..
+        },
+    ) = (binding_pattern.as_ref(), &value)
+    {
+        if let Some(pattern_len) = destructuring_element_count(pattern) {
+            let tuple_len = elements.len();
+            match pattern_len.cmp(&tuple_len) {
+                Ordering::Less => {
+                    let example = tuple_field_example(fields, pattern_len)
+                        .unwrap_or_else(|| format!("{}番目", pattern_len + 1));
+                    let message = format!(
+                        "分割代入の要素が不足しています: パターンは {} 要素ですが、タプルは {} 要素です (例: `{}` が未割り当てです)",
+                        pattern_len, tuple_len, example
+                    );
+                    let diagnostic_node = pattern_syntax_node.as_ref().unwrap_or(node);
+                    push_diagnostic(
+                        diagnostics,
+                        LoweringDiagnosticSeverity::Error,
+                        message,
+                        context,
+                        diagnostic_node,
+                    );
+                }
+                Ordering::Greater => {
+                    let example = pattern_element_example(pattern, tuple_len)
+                        .unwrap_or_else(|| format!("{}番目", tuple_len + 1));
+                    let message = format!(
+                        "分割代入の要素が多すぎます: パターンは {} 要素ですが、タプルは {} 要素です (例: `{}` が余剰です)",
+                        pattern_len, tuple_len, example
+                    );
+                    let diagnostic_node = pattern_syntax_node.as_ref().unwrap_or(node);
+                    push_diagnostic(
+                        diagnostics,
+                        LoweringDiagnosticSeverity::Error,
+                        message,
+                        context,
+                        diagnostic_node,
+                    );
+                }
+                Ordering::Equal => {}
+            }
+        }
+    }
+
     let span = context.span_for(node).unwrap_or_else(Span::dummy);
 
     if let Some(pattern) = binding_pattern.clone() {
@@ -880,7 +954,7 @@ fn lower_expression_from_tokens(
     let filtered: Vec<&Token> = tokens
         .iter()
         .copied()
-        .filter(|token| !is_trivia_token(token) && !matches!(token.token_type, TokenType::Eof))
+        .filter(|token| !is_expression_trivia(token) && !matches!(token.token_type, TokenType::Eof))
         .collect();
 
     if filtered.is_empty() {
@@ -910,6 +984,8 @@ fn lower_expression_from_tokens(
                     first_identifier_text(span_node),
                     collect_annotation_texts(span_node),
                 ))
+            } else if let Some(cast) = try_parse_type_cast_fallback(&filtered) {
+                Ok(cast)
             } else {
                 let span = span
                     .or_else(|| context.span_for(span_node))
@@ -1081,6 +1157,104 @@ fn lower_unit_literal_expression(
     })
 }
 
+fn try_parse_type_cast_fallback(tokens: &[&Token]) -> Option<Expression> {
+    fn parse_expression_slice(tokens: &[&Token]) -> Option<Expression> {
+        if tokens.is_empty() {
+            return None;
+        }
+
+        if let Ok(expr) = expression_parser::parse_expression(tokens) {
+            return Some(expr);
+        }
+
+        if matches!(
+            tokens.first().map(|token| &token.token_type),
+            Some(TokenType::LeftParen)
+        ) {
+            if let Some(close_index) = find_matching_paren_in_slice(tokens, 0) {
+                if close_index == tokens.len() - 1 {
+                    return parse_expression_slice(&tokens[1..close_index]);
+                }
+            }
+        }
+
+        None
+    }
+
+    fn find_matching_paren_in_slice(tokens: &[&Token], open_index: usize) -> Option<usize> {
+        let mut depth = 0isize;
+        for (idx, token) in tokens.iter().enumerate().skip(open_index) {
+            match token.token_type {
+                TokenType::LeftParen => depth += 1,
+                TokenType::RightParen => {
+                    depth -= 1;
+                    if depth == 0 {
+                        return Some(idx);
+                    }
+                }
+                _ => {}
+            }
+        }
+        None
+    }
+
+    for (index, token) in tokens.iter().enumerate().rev() {
+        if !matches!(
+            token.token_type,
+            TokenType::Identifier(ref value) if value == "as"
+        ) {
+            continue;
+        }
+
+        let left_tokens = &tokens[..index];
+        let right_tokens = &tokens[index + 1..];
+
+        if left_tokens.is_empty() || right_tokens.is_empty() {
+            continue;
+        }
+
+        let left_expr = match parse_expression_slice(left_tokens) {
+            Some(expr) => expr,
+            None => continue,
+        };
+
+        let owned_right: Vec<Token> = right_tokens.iter().map(|token| (*token).clone()).collect();
+        if owned_right.is_empty() {
+            continue;
+        }
+
+        let lowered = match lower_type_annotation_from_tokens(&owned_right) {
+            Ok(result) => result,
+            Err(_) => continue,
+        };
+
+        let annotation_span = lowered
+            .span()
+            .cloned()
+            .or_else(|| {
+                right_tokens.first().map(|first| {
+                    let last = right_tokens.last().unwrap_or(first);
+                    merge_spans(&span_from_token(first), &span_from_token(last))
+                })
+            })
+            .unwrap_or_else(|| expression_span(&left_expr));
+
+        let left_outer_span = left_tokens.first().map(|first| {
+            let last = left_tokens.last().unwrap_or(first);
+            merge_spans(&span_from_token(first), &span_from_token(last))
+        });
+
+        let left_span = left_outer_span.unwrap_or_else(|| expression_span(&left_expr));
+        let span = merge_spans(&left_span, &annotation_span);
+        return Some(Expression::TypeCast {
+            expr: Box::new(left_expr),
+            target: lowered.into_annotation(),
+            span,
+        });
+    }
+    None
+}
+
 fn qualified_name_segments(
     context: &LoweringContext<'_>,
     node: &JvSyntaxNode,
@@ -1215,22 +1389,40 @@ fn is_trivia_token(token: &Token) -> bool {
             | TokenType::LineComment(_)
             | TokenType::BlockComment(_)
             | TokenType::JavaDocComment(_)
+            | TokenType::FieldNameLabel(_)
+    )
+}
+
+fn is_expression_trivia(token: &Token) -> bool {
+    matches!(
+        token.token_type,
+        TokenType::Whitespace(_)
+            | TokenType::Newline
+            | TokenType::LineComment(_)
+            | TokenType::BlockComment(_)
+            | TokenType::JavaDocComment(_)
     )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use jv_lexer::{Lexer, Token, TokenMetadata, TokenTrivia, TokenType};
+    use jv_lexer::{LayoutMode, Lexer, Token, TokenMetadata, TokenTrivia, TokenType};
 
-    fn parse_expression_from_source(source: &str) -> Expression {
+    fn try_parse_expression_from_source(
+        source: &str,
+    ) -> Result<Expression, expression_parser::ExpressionError> {
         let mut lexer = Lexer::with_layout_mode(source.to_string(), LayoutMode::Enabled);
         let tokens = lexer.tokenize().expect("tokenize expression");
         let filtered: Vec<&Token> = tokens
             .iter()
             .filter(|token| !matches!(token.token_type, TokenType::Eof))
             .collect();
-        expression_parser::parse_expression(&filtered).expect("parse expression")
+        expression_parser::parse_expression(&filtered)
+    }
+
+    fn parse_expression_from_source(source: &str) -> Expression {
+        try_parse_expression_from_source(source).expect("parse expression")
     }
 
     fn parse_expression_from_tokens(tokens: Vec<Token>) -> Expression {
@@ -1331,6 +1523,16 @@ mod tests {
     }
 
     #[test]
+    fn parses_parenthesized_cast_expression() {
+        let expr = parse_expression_from_source("(value) as Int");
+        assert!(
+            matches!(expr, Expression::TypeCast { .. }),
+            "expected type cast expression, got {:?}",
+            expr
+        );
+    }
+
+    #[test]
     fn call_arguments_split_across_newlines_parse() {
         let expr = parse_expression_from_source("operation(\n    accumulator\n    value\n)");
         match expr {
@@ -1388,6 +1590,22 @@ mod tests {
     }
 
     #[test]
+    fn tuple_literal_with_whitespace_separators_parses() {
+        let expr = parse_expression_from_source("(left right)");
+        match expr {
+            Expression::Tuple {
+                elements, fields, ..
+            } => {
+                assert_eq!(elements.len(), 2);
+                assert_eq!(fields.len(), 2);
+                assert!(matches!(elements[0], Expression::Identifier(_, _)));
+                assert!(matches!(elements[1], Expression::Identifier(_, _)));
+            }
+            other => panic!("expected tuple literal, got {:?}", other),
+        }
+    }
+
+    #[test]
     fn regex_command_without_explicit_mode_defaults_to_match() {
         let expr = parse_expression_from_tokens(vec![
             divide_token(),
@@ -1405,6 +1623,20 @@ mod tests {
                 ));
             }
             other => panic!("expected regex command expression, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn tuple_literal_spanning_multiple_lines_parses() {
+        let expr = parse_expression_from_source("(alpha\n beta\n gamma)");
+        match expr {
+            Expression::Tuple {
+                elements, fields, ..
+            } => {
+                assert_eq!(elements.len(), 3);
+                assert_eq!(fields.len(), 3);
+            }
+            other => panic!("expected tuple literal across lines, got {:?}", other),
         }
     }
 
@@ -1437,6 +1669,37 @@ mod tests {
                 }
             }
             other => panic!("expected regex command expression, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parenthesized_single_expression_does_not_become_tuple() {
+        let expr = parse_expression_from_source("(value)");
+        assert!(
+            matches!(expr, Expression::Identifier(_, _)),
+            "single expression must remain grouping: {:?}",
+            expr
+        );
+    }
+
+    #[test]
+    fn tuple_literal_captures_comment_labels() {
+        let source = "(
+                left // quotient
+                right // remainder
+            )";
+        let expr = parse_expression_from_source(source);
+        match expr {
+            Expression::Tuple { fields, .. } => {
+                assert_eq!(fields.len(), 2);
+                assert_eq!(fields[0].primary_label.as_deref(), Some("quotient"));
+                assert_eq!(fields[0].identifier_hint.as_deref(), Some("left"));
+                assert_eq!(fields[0].fallback_index, 1);
+                assert_eq!(fields[1].primary_label.as_deref(), Some("remainder"));
+                assert_eq!(fields[1].identifier_hint.as_deref(), Some("right"));
+                assert_eq!(fields[1].fallback_index, 2);
+            }
+            other => panic!("expected tuple literal with metadata, got {:?}", other),
         }
     }
 
@@ -1505,6 +1768,16 @@ mod tests {
             }
             other => panic!("expected regex command expression, got {:?}", other),
         }
+    }
+
+    #[test]
+    fn empty_tuple_literal_reports_error() {
+        let err = try_parse_expression_from_source("()").expect_err("expected parse error");
+        assert!(
+            err.message.contains("空のタプル"),
+            "unexpected error: {}",
+            err.message
+        );
     }
 }
 
@@ -2066,6 +2339,10 @@ mod expression_parser {
                     let close_index = self.find_matching_paren(index).ok_or_else(|| {
                         ExpressionError::new("')' が必要です", self.span_at(index))
                     })?;
+                    if let Some(tuple_expr) = self.try_parse_tuple_literal(index, close_index)? {
+                        self.pos = close_index + 1;
+                        return Ok(tuple_expr);
+                    }
                     let inner_tokens = &self.tokens[index + 1..close_index];
                     let expr = Self::parse_nested_expression(inner_tokens)?;
                     self.pos = close_index + 1;
@@ -2345,6 +2622,257 @@ mod expression_parser {
             }
 
             Ok(items)
+        }
+
+        fn try_parse_tuple_literal(
+            &mut self,
+            open_index: usize,
+            close_index: usize,
+        ) -> Result<Option<ParsedExpr>, ExpressionError> {
+            let inner = &self.tokens[open_index + 1..close_index];
+            if inner.is_empty()
+                || inner
+                    .iter()
+                    .all(|token| Self::is_tuple_separator_or_trivia(token))
+            {
+                let span = span_for_range(self.tokens, open_index, close_index + 1);
+                return Err(ExpressionError::new(
+                    "空のタプルや句読点のみのタプルリテラルはサポートされません",
+                    Some(span),
+                ));
+            }
+
+            let slices = Self::tuple_candidate_parts(inner);
+            let mut elements = Vec::new();
+            let mut field_meta = Vec::new();
+            let mut fallback_counter = 0usize;
+            let mut leading_labels: Vec<&FieldNameLabelToken> = Vec::new();
+
+            for slice in slices.iter() {
+                let (labels, filtered) = Self::partition_tuple_slice_tokens(slice);
+                if filtered.is_empty() {
+                    if !labels.is_empty() {
+                        if field_meta.is_empty() {
+                            leading_labels.extend(labels);
+                        } else if let Some(last) = field_meta.last_mut() {
+                            Self::merge_labels_into_meta(last, &labels);
+                        }
+                    }
+                    continue;
+                }
+
+                let mut effective_labels: Vec<&FieldNameLabelToken> = Vec::new();
+                if !leading_labels.is_empty() {
+                    effective_labels.extend(leading_labels.drain(..));
+                }
+                effective_labels.extend(labels);
+
+                let parsed = Self::parse_nested_expression(filtered.as_slice())?;
+                let element_span = parsed.span();
+                let ParsedExpr {
+                    expr: element_expr, ..
+                } = parsed;
+                let identifier_hint = match &element_expr {
+                    Expression::Identifier(name, _) => Some(name.clone()),
+                    _ => None,
+                };
+                let (primary_label, secondary_labels) =
+                    Self::collect_tuple_labels(&effective_labels);
+
+                fallback_counter += 1;
+                let meta = TupleFieldMeta {
+                    primary_label,
+                    secondary_labels,
+                    identifier_hint,
+                    fallback_index: fallback_counter,
+                    span: element_span.clone(),
+                };
+
+                field_meta.push(meta);
+                elements.push(element_expr);
+            }
+
+            if elements.is_empty() {
+                let span = span_for_range(self.tokens, open_index, close_index + 1);
+                return Err(ExpressionError::new(
+                    "タプル要素を解析できませんでした。少なくとも1つの式を記述してください",
+                    Some(span),
+                ));
+            }
+
+            if elements.len() < 2 {
+                return Ok(None);
+            }
+
+            let span = span_for_range(self.tokens, open_index, close_index + 1);
+            let expr = Expression::Tuple {
+                elements,
+                fields: field_meta,
+                context: TupleContextFlags::default(),
+                span: span.clone(),
+            };
+
+            Ok(Some(ParsedExpr {
+                expr,
+                start: open_index,
+                end: close_index + 1,
+            }))
+        }
+
+        fn tuple_candidate_parts<'slice>(
+            tokens: &'slice [&'slice Token],
+        ) -> Vec<&'slice [&'slice Token]> {
+            if tokens.is_empty() {
+                return Vec::new();
+            }
+
+            let mut parts = Vec::new();
+            let mut start = 0usize;
+            let mut depth_paren = 0usize;
+            let mut depth_brace = 0usize;
+            let mut depth_bracket = 0usize;
+
+            for (offset, token) in tokens.iter().enumerate() {
+                let at_top_level = depth_paren == 0 && depth_brace == 0 && depth_bracket == 0;
+
+                if at_top_level
+                    && has_layout_break(token)
+                    && !matches!(token.token_type, TokenType::Comma | TokenType::LayoutComma)
+                    && start < offset
+                {
+                    parts.push(&tokens[start..offset]);
+                    start = offset;
+                } else if at_top_level
+                    && start < offset
+                    && token.leading_trivia.newlines == 0
+                    && token.leading_trivia.spaces > 0
+                {
+                    if let Some(prev_token) = tokens.get(offset - 1) {
+                        if !token_requires_followup(&prev_token.token_type) {
+                            parts.push(&tokens[start..offset]);
+                            start = offset;
+                            continue;
+                        }
+                    }
+                }
+
+                match token.token_type {
+                    TokenType::LeftParen => depth_paren += 1,
+                    TokenType::RightParen if depth_paren > 0 => depth_paren -= 1,
+                    TokenType::LeftBrace => depth_brace += 1,
+                    TokenType::RightBrace if depth_brace > 0 => depth_brace -= 1,
+                    TokenType::LeftBracket => depth_bracket += 1,
+                    TokenType::RightBracket if depth_bracket > 0 => depth_bracket -= 1,
+                    TokenType::Comma | TokenType::LayoutComma if at_top_level => {
+                        if start != offset {
+                            parts.push(&tokens[start..offset]);
+                        }
+                        start = offset + 1;
+                        continue;
+                    }
+                    _ => {}
+                }
+            }
+
+            if start < tokens.len() {
+                parts.push(&tokens[start..]);
+            }
+
+            parts
+        }
+
+        fn is_tuple_separator_or_trivia(token: &Token) -> bool {
+            is_expression_trivia(token)
+                || matches!(token.token_type, TokenType::LayoutComma | TokenType::Comma)
+        }
+
+        fn partition_tuple_slice_tokens<'slice>(
+            slice: &'slice [&'slice Token],
+        ) -> (Vec<&'slice FieldNameLabelToken>, Vec<&'slice Token>) {
+            let mut labels = Vec::new();
+            let mut filtered = Vec::new();
+
+            for token in slice.iter().copied() {
+                if let TokenType::FieldNameLabel(payload) = &token.token_type {
+                    labels.push(payload);
+                    continue;
+                }
+
+                if Self::is_tuple_separator_or_trivia(token) {
+                    continue;
+                }
+
+                filtered.push(token);
+            }
+
+            (labels, filtered)
+        }
+
+        fn collect_tuple_labels(
+            labels: &[&FieldNameLabelToken],
+        ) -> (Option<String>, Vec<TupleLabelSpan>) {
+            let mut primary_label: Option<String> = None;
+            let mut secondary = Vec::new();
+
+            for (idx, label) in labels.iter().enumerate() {
+                if idx == 0 {
+                    if let Some(value) = &label.primary {
+                        primary_label = Some(value.clone());
+                    }
+                    Self::push_secondary_labels(&mut secondary, label.secondary.iter());
+                } else {
+                    if let Some(primary_span) = label.primary_span.as_ref() {
+                        secondary.push(Self::convert_label_span(primary_span));
+                    } else if let Some(value) = &label.primary {
+                        secondary.push(Self::virtual_label_from_text(value));
+                    }
+                    Self::push_secondary_labels(&mut secondary, label.secondary.iter());
+                }
+            }
+
+            (primary_label, secondary)
+        }
+
+        fn merge_labels_into_meta(meta: &mut TupleFieldMeta, labels: &[&FieldNameLabelToken]) {
+            if labels.is_empty() {
+                return;
+            }
+
+            let (primary_label, mut secondary_labels) = Self::collect_tuple_labels(labels);
+            if let Some(label) = primary_label {
+                if meta.primary_label.is_none() {
+                    meta.primary_label = Some(label);
+                } else {
+                    meta.secondary_labels
+                        .push(Self::virtual_label_from_text(&label));
+                }
+            }
+
+            meta.secondary_labels.append(&mut secondary_labels);
+        }
+
+        fn push_secondary_labels<'label>(
+            target: &mut Vec<TupleLabelSpan>,
+            spans: impl IntoIterator<Item = &'label LexerLabelSpan>,
+        ) {
+            for span in spans {
+                target.push(Self::convert_label_span(span));
+            }
+        }
+
+        fn convert_label_span(label: &LexerLabelSpan) -> TupleLabelSpan {
+            let end_column = label.column + label.length;
+            TupleLabelSpan {
+                name: label.name.clone(),
+                span: Span::new(label.line, label.column, label.line, end_column),
+            }
+        }
+
+        fn virtual_label_from_text(name: &str) -> TupleLabelSpan {
+            TupleLabelSpan {
+                name: name.to_string(),
+                span: Span::dummy(),
+            }
         }
 
         fn parse_brace_expression(&mut self) -> Result<ParsedExpr, ExpressionError> {
@@ -3383,6 +3911,7 @@ mod expression_parser {
             let (token, name_index) = self.advance_with_index_or_error("メンバー名が必要です")?;
             let property = match &token.token_type {
                 TokenType::Identifier(value) => value.clone(),
+                TokenType::ImplicitParam(index) => format!("_{}", index),
                 _ => {
                     return Err(ExpressionError::new(
                         "メンバーアクセスには識別子が必要です",
@@ -3412,6 +3941,7 @@ mod expression_parser {
             let (token, name_index) = self.advance_with_index_or_error("メンバー名が必要です")?;
             let property = match &token.token_type {
                 TokenType::Identifier(value) => value.clone(),
+                TokenType::ImplicitParam(index) => format!("_{}", index),
                 _ => {
                     return Err(ExpressionError::new(
                         "メンバーアクセスには識別子が必要です",
@@ -3546,7 +4076,8 @@ mod expression_parser {
                     | TokenType::LayoutComma
                     | TokenType::LineComment(_)
                     | TokenType::BlockComment(_)
-                    | TokenType::JavaDocComment(_) => self.pos += 1,
+                    | TokenType::JavaDocComment(_)
+                    | TokenType::FieldNameLabel(_) => self.pos += 1,
                     _ => break,
                 }
             }
@@ -4199,7 +4730,8 @@ mod expression_parser {
                     | TokenType::LayoutComma
                     | TokenType::LineComment(_)
                     | TokenType::BlockComment(_)
-                    | TokenType::JavaDocComment(_) => idx += 1,
+                    | TokenType::JavaDocComment(_)
+                    | TokenType::FieldNameLabel(_) => idx += 1,
                     _ => return Some(&token.token_type),
                 }
             }
@@ -4207,13 +4739,37 @@ mod expression_parser {
         }
 
         fn peek_is_as_keyword(&self) -> bool {
-            matches!(
-                self.peek_token().map(|token| &token.token_type),
-                Some(TokenType::Identifier(text)) if text == "as"
-            )
+            let mut index = self.pos;
+            while let Some(token) = self.tokens.get(index) {
+                match &token.token_type {
+                    TokenType::Whitespace(_)
+                    | TokenType::Newline
+                    | TokenType::LayoutComma
+                    | TokenType::LineComment(_)
+                    | TokenType::BlockComment(_)
+                    | TokenType::JavaDocComment(_)
+                    | TokenType::FieldNameLabel(_) => index += 1,
+                    TokenType::Identifier(text) if text == "as" => return true,
+                    _ => return false,
+                }
+            }
+            false
         }
 
         fn parse_type_cast(&mut self, left: ParsedExpr) -> Result<ParsedExpr, ExpressionError> {
+            while let Some(token) = self.tokens.get(self.pos) {
+                match token.token_type {
+                    TokenType::Whitespace(_)
+                    | TokenType::Newline
+                    | TokenType::LayoutComma
+                    | TokenType::LineComment(_)
+                    | TokenType::BlockComment(_)
+                    | TokenType::JavaDocComment(_)
+                    | TokenType::FieldNameLabel(_) => self.pos += 1,
+                    _ => break,
+                }
+            }
+
             let (as_token, _as_index) = self.advance_with_index_or_error("`as` が必要です")?;
             let as_span = span_from_token(as_token);
 
@@ -4224,7 +4780,8 @@ mod expression_parser {
                     | TokenType::LayoutComma
                     | TokenType::LineComment(_)
                     | TokenType::BlockComment(_)
-                    | TokenType::JavaDocComment(_) => self.pos += 1,
+                    | TokenType::JavaDocComment(_)
+                    | TokenType::FieldNameLabel(_) => self.pos += 1,
                     _ => break,
                 }
             }
@@ -5505,7 +6062,8 @@ mod expression_parser {
                     | TokenType::Newline
                     | TokenType::LineComment(_)
                     | TokenType::BlockComment(_)
-                    | TokenType::JavaDocComment(_) => self.pos += 1,
+                    | TokenType::JavaDocComment(_)
+                    | TokenType::FieldNameLabel(_) => self.pos += 1,
                     _ => break,
                 }
             }
@@ -7550,4 +8108,46 @@ fn binding_pattern_primary_expression(pattern: &BindingPatternKind) -> Expressio
     } else {
         Expression::Identifier("_".to_string(), span)
     }
+}
+
+fn destructuring_element_count(pattern: &BindingPatternKind) -> Option<usize> {
+    match pattern {
+        BindingPatternKind::Tuple { elements, .. } | BindingPatternKind::List { elements, .. } => {
+            Some(elements.len())
+        }
+        _ => None,
+    }
+}
+
+fn tuple_field_example(fields: &[TupleFieldMeta], index: usize) -> Option<String> {
+    fields.get(index).map(tuple_field_label)
+}
+
+fn tuple_field_label(meta: &TupleFieldMeta) -> String {
+    meta.primary_label
+        .as_ref()
+        .cloned()
+        .or_else(|| meta.identifier_hint.clone())
+        .unwrap_or_else(|| format!("_{}", meta.fallback_index))
+}
+
+fn pattern_element_example(pattern: &BindingPatternKind, index: usize) -> Option<String> {
+    match pattern {
+        BindingPatternKind::Tuple { elements, .. } | BindingPatternKind::List { elements, .. } => {
+            elements.get(index).map(pattern_binding_label)
+        }
+        _ => None,
+    }
+}
+
+fn pattern_binding_label(pattern: &BindingPatternKind) -> String {
+    pattern
+        .first_identifier()
+        .map(|text| text.to_string())
+        .unwrap_or_else(|| match pattern {
+            BindingPatternKind::Wildcard { .. } => "_".to_string(),
+            BindingPatternKind::Tuple { .. } => "(...)".to_string(),
+            BindingPatternKind::List { .. } => "[...]".to_string(),
+            BindingPatternKind::Identifier { name, .. } => name.clone(),
+        })
 }

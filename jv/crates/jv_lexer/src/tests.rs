@@ -594,6 +594,33 @@ val star = 3
 }
 
 #[test]
+fn lexer_emits_field_name_label_tokens() {
+    let source = "value // result";
+    let mut lexer = Lexer::new(source.to_string());
+    let tokens = lexer.tokenize().expect("tokenize label sample");
+
+    let label_token = tokens
+        .iter()
+        .find(|token| matches!(token.token_type, TokenType::FieldNameLabel(_)))
+        .expect("expected FieldNameLabel token");
+
+    match &label_token.token_type {
+        TokenType::FieldNameLabel(payload) => {
+            assert_eq!(payload.primary.as_deref(), Some("result"));
+            let span = payload
+                .primary_span
+                .as_ref()
+                .expect("primary span should be recorded");
+            assert_eq!(span.name, "result");
+            assert_eq!(span.line, label_token.line);
+            assert_eq!(span.column, label_token.column);
+            assert_eq!(span.kind, FieldNameLabelKind::LineComment);
+        }
+        _ => unreachable!(),
+    }
+}
+
+#[test]
 fn test_block_comment_trivia_passthrough() {
     let source = "/* keep */
 val value = 1";
@@ -1465,6 +1492,8 @@ fn classifier_resolves_keywords_and_identifiers() {
         span: span_with_len(3),
         trivia: None,
         carry_over: None,
+        field_label: None,
+        field_label_issue: None,
     };
     let normalized_keyword = pipeline::NormalizedToken::new(
         raw_keyword,
@@ -1484,6 +1513,8 @@ fn classifier_resolves_keywords_and_identifiers() {
         span: span_with_len(5),
         trivia: None,
         carry_over: None,
+        field_label: None,
+        field_label_issue: None,
     };
     let normalized_identifier = pipeline::NormalizedToken::new(
         raw_identifier,
@@ -1527,6 +1558,8 @@ fn classifier_marks_string_interpolation_plan() {
         span: span_with_len(source.len()),
         trivia: Some(TokenTrivia::default()),
         carry_over: None,
+        field_label: None,
+        field_label_issue: None,
     };
     let normalized = pipeline::NormalizedToken::new(raw, source.to_string(), metadata);
     let classified = classifier
@@ -1565,6 +1598,8 @@ fn emitter_merges_comment_carry_into_trivia() {
         span: span_with_len(5),
         trivia: Some(TokenTrivia::default()),
         carry_over: None,
+        field_label: None,
+        field_label_issue: None,
     };
     let normalized =
         pipeline::NormalizedToken::new(raw, "value".to_string(), pipeline::PreMetadata::default());

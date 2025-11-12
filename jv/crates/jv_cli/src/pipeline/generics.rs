@@ -479,6 +479,11 @@ fn apply_hint_to_expression(expr: &mut IrExpression, hint: &PrimitiveSpecializat
                 apply_hint_to_expression(arg, hint);
             }
         }
+        IrExpression::TupleLiteral { elements, .. } => {
+            for element in elements.iter_mut() {
+                apply_hint_to_expression(element, hint);
+            }
+        }
         IrExpression::Switch { discriminant, cases, .. } => {
             apply_hint_to_expression(discriminant, hint);
             for case in cases.iter_mut() {

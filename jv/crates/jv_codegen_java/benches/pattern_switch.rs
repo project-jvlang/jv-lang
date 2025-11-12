@@ -167,6 +167,7 @@ fn build_switch_program(
         generic_metadata: Default::default(),
         conversion_metadata: Vec::new(),
         logging: Default::default(),
+        tuple_record_plans: Vec::new(),
         span: dummy_span(),
     }
 }

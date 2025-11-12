@@ -103,6 +103,7 @@ pub enum TokenType {
     LineComment(String),
     BlockComment(String),
     JavaDocComment(String),
+    FieldNameLabel(FieldNameLabelToken),
 
     // Whitespace (usually ignored but useful for formatting)
     Whitespace(String),
@@ -251,6 +252,70 @@ pub struct CommentCarryOverMetadata {
     pub doc_comment: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum FieldNameLabelKind {
+    LineComment,
+    BlockComment,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum FieldNameLabelErrorKind {
+    InvalidIdentifier,
+    ExtraText,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct FieldNameLabelIssue {
+    pub reason: FieldNameLabelErrorKind,
+    pub text: String,
+    pub line: usize,
+    pub column: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct FieldNameLabelCandidate {
+    pub name: String,
+    pub line: usize,
+    pub column: usize,
+    pub length: usize,
+    #[serde(default)]
+    pub token_distance: Option<usize>,
+    pub kind: FieldNameLabelKind,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct LabeledSpan {
+    pub name: String,
+    pub line: usize,
+    pub column: usize,
+    pub length: usize,
+    pub kind: FieldNameLabelKind,
+    #[serde(default)]
+    pub token_distance: Option<usize>,
+}
+
+impl From<&FieldNameLabelCandidate> for LabeledSpan {
+    fn from(candidate: &FieldNameLabelCandidate) -> Self {
+        Self {
+            name: candidate.name.clone(),
+            line: candidate.line,
+            column: candidate.column,
+            length: candidate.length,
+            kind: candidate.kind,
+            token_distance: candidate.token_distance,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct FieldNameLabelToken {
+    pub primary: Option<String>,
+    #[serde(default)]
+    pub primary_span: Option<LabeledSpan>,
+    #[serde(default)]
+    pub secondary: Vec<LabeledSpan>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum TokenMetadata {
     PotentialJsonStart {
@@ -318,6 +383,12 @@ pub enum TokenDiagnostic {
         reason: InvalidImplicitParamReason,
         #[serde(default)]
         suggested: Option<String>,
+    },
+    InvalidFieldNameLabel {
+        reason: FieldNameLabelErrorKind,
+        text: String,
+        line: usize,
+        column: usize,
     },
 }
 

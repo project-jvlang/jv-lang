@@ -192,6 +192,64 @@ pub enum TypeAnnotation {
     },
 }
 
+/// Tuple 型注釈の各要素を表すメタデータ。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TupleTypeElement {
+    /// 要素の型注釈。
+    pub ty: TypeAnnotation,
+    /// ソースにおける要素位置。
+    #[serde(default)]
+    pub span: Option<Span>,
+}
+
+impl TupleTypeElement {
+    /// 指定された型とスパンで新しい要素メタデータを生成する。
+    pub fn new(ty: TypeAnnotation, span: Option<Span>) -> Self {
+        Self { ty, span }
+    }
+}
+
+/// Tuple 型注釈全体を表す記述子。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TupleTypeDescriptor {
+    /// 要素数。
+    pub arity: usize,
+    /// 宣言順に並んだ要素メタデータ。
+    #[serde(default)]
+    pub elements: Vec<TupleTypeElement>,
+    /// `(A B C)` 全体のスパン。
+    #[serde(default)]
+    pub annotation_span: Option<Span>,
+}
+
+impl TupleTypeDescriptor {
+    /// 要素列とスパンから記述子を生成する。
+    pub fn new(elements: Vec<TupleTypeElement>, annotation_span: Option<Span>) -> Self {
+        let arity = elements.len();
+        Self {
+            arity,
+            elements,
+            annotation_span,
+        }
+    }
+
+    /// 要素を差し替えつつ要素数を同期する。
+    pub fn set_elements(&mut self, elements: Vec<TupleTypeElement>) {
+        self.arity = elements.len();
+        self.elements = elements;
+    }
+
+    /// 要素数を返す。
+    pub fn arity(&self) -> usize {
+        self.arity
+    }
+
+    /// 空タプルか判定する。
+    pub fn is_empty(&self) -> bool {
+        self.arity == 0
+    }
+}
+
 /// Variance marker used by generic parameters (`out T` / `in T`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum VarianceMarker {

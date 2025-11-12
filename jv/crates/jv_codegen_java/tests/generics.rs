@@ -57,6 +57,7 @@ fn sealed_classes_emit_target_specific_metadata() {
         generic_metadata: Default::default(),
         conversion_metadata: Vec::new(),
         logging: Default::default(),
+        tuple_record_plans: Vec::new(),
         span,
     };
 
@@ -117,6 +118,7 @@ fn class_signature_includes_generic_bounds() {
         generic_metadata: Default::default(),
         conversion_metadata: Vec::new(),
         logging: Default::default(),
+        tuple_record_plans: Vec::new(),
         span,
     };
 
@@ -178,6 +180,7 @@ fn generic_metadata_comment_emitted() {
         generic_metadata: metadata_map,
         conversion_metadata: Vec::new(),
         logging: Default::default(),
+        tuple_record_plans: Vec::new(),
         span,
     };
 
@@ -230,6 +233,7 @@ fn metadata_kind_comment_uses_fallback_entry() {
         generic_metadata: metadata_map,
         conversion_metadata: Vec::new(),
         logging: Default::default(),
+        tuple_record_plans: Vec::new(),
         span,
     };
 
@@ -290,6 +294,7 @@ fn covariant_type_arguments_render_wildcards() {
         generic_metadata: Default::default(),
         conversion_metadata: Vec::new(),
         logging: Default::default(),
+        tuple_record_plans: Vec::new(),
         span,
     };
 
@@ -348,6 +353,7 @@ fn contravariant_type_arguments_render_wildcards() {
         generic_metadata: Default::default(),
         conversion_metadata: Vec::new(),
         logging: Default::default(),
+        tuple_record_plans: Vec::new(),
         span,
     };
 
@@ -455,6 +461,7 @@ fn raw_default_comment_on_field_adds_import_and_guard() {
         generic_metadata: Default::default(),
         conversion_metadata: Vec::new(),
         logging: Default::default(),
+        tuple_record_plans: Vec::new(),
         span,
     };
 
@@ -518,6 +525,7 @@ fn raw_allow_comment_on_field_keeps_imports_clean() {
         generic_metadata: Default::default(),
         conversion_metadata: Vec::new(),
         logging: Default::default(),
+        tuple_record_plans: Vec::new(),
         span,
     };
 

@@ -788,6 +788,7 @@ mod tests {
             generic_metadata: Default::default(),
             conversion_metadata: Vec::new(),
             logging: LoggingMetadata::default(),
+            tuple_record_plans: Vec::new(),
             span,
         }
     }

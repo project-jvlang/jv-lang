@@ -281,6 +281,7 @@ fn render_logging_program_with_plans(
         generic_metadata: Default::default(),
         conversion_metadata: Vec::new(),
         logging: metadata,
+        tuple_record_plans: Vec::new(),
         span: dummy_span(),
     };
 

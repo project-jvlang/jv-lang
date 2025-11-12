@@ -2389,6 +2389,82 @@ fn multiline_string_interpolation_handles_complex_patterns() {
 }
 
 #[test]
+fn string_interpolation_handles_chained_calls() {
+    let source = r#"
+        fun demo(tuple: (Int Int Int)): Unit {
+            println("tuple third=${tuple._3()}")
+        }
+    "#;
+
+    let result = lower_source(source);
+    assert!(
+        result.diagnostics.is_empty(),
+        "unexpected diagnostics: {:?}",
+        result.diagnostics
+    );
+
+    let print_call = result
+        .statements
+        .iter()
+        .find_map(|statement| match statement {
+            Statement::FunctionDeclaration { name, body, .. } if name == "demo" => {
+                match body.as_ref() {
+                    Expression::Block { statements, .. } => {
+                        statements.iter().find_map(|stmt| match stmt {
+                            Statement::Expression { expr, .. } => Some(expr),
+                            _ => None,
+                        })
+                    }
+                    other => panic!("expected block body, got {:?}", other),
+                }
+            }
+            _ => None,
+        })
+        .expect("expected println expression");
+
+    let call_arg = match print_call {
+        Expression::Call { args, .. } => args
+            .iter()
+            .next()
+            .unwrap_or_else(|| panic!("println should have at least one argument")),
+        other => panic!("expected println call, got {:?}", other),
+    };
+
+    let argument_expr = match call_arg {
+        Argument::Positional(expr) => expr,
+        Argument::Named { .. } => panic!("expected positional argument"),
+    };
+
+    match argument_expr {
+        Expression::StringInterpolation { parts, .. } => {
+            let expr_count = parts
+                .iter()
+                .filter(|part| matches!(part, StringPart::Expression(_)))
+                .count();
+            assert_eq!(expr_count, 1, "expected single interpolation expression");
+            let mut expr_iter = parts.iter().filter_map(|part| match part {
+                StringPart::Expression(expr) => Some(expr),
+                _ => None,
+            });
+            let expr = expr_iter.next().expect("interpolation expression missing");
+            match expr {
+                Expression::Call { function, .. } => match function.as_ref() {
+                    Expression::MemberAccess { property, .. } => {
+                        assert_eq!(property, "_3", "expected member property `_3`")
+                    }
+                    other => panic!("expected member access callee, got {:?}", other),
+                },
+                other => panic!(
+                    "expected call expression inside interpolation, got {:?}",
+                    other
+                ),
+            }
+        }
+        other => panic!("expected string interpolation argument, got {:?}", other),
+    }
+}
+
+#[test]
 fn nested_package_fixture_preserves_interpolation_identifiers() {
     let source = include_str!("../../../../../jv/tests/fixtures/package/nested_package.jv");
     let result = lower_source(source);
@@ -2594,4 +2670,107 @@ fn data_class_lowering_produces_constructor_properties() {
         }
         _ => unreachable!("matched in find_map above"),
     }
+}
+
+#[test]
+fn type_cast_allows_trivia_before_keyword() {
+    let source = r#"
+val casted = (
+    42
+)    as Int
+"#;
+
+    let result = lower_source(source);
+    assert!(
+        result.diagnostics.is_empty(),
+        "unexpected lowering diagnostics: {:?}",
+        result.diagnostics
+    );
+
+    let statement = result
+        .statements
+        .first()
+        .expect("expected a single top-level statement");
+
+    match statement {
+        Statement::ValDeclaration { initializer, .. } => match initializer {
+            Expression::TypeCast { .. } => {}
+            other => panic!("expected type cast initializer, got {:?}", other),
+        },
+        other => panic!("expected val declaration, got {:?}", other),
+    }
+}
+
+#[test]
+fn rowan_pipeline_preserves_type_cast_after_parenthetical_sequence() {
+    let source = r#"
+fun main(): Unit {
+    val modules = ["lexer" "parser"]
+    val castList = (
+        modules
+            .map { value -> value + "-module" }
+            .filter { candidate -> candidate.length >= 6 }
+    ) as List
+}
+"#;
+
+    let debug = RowanPipeline::default()
+        .execute_with_debug(source)
+        .expect("pipeline parse succeeds");
+
+    let lexemes: Vec<&str> = debug
+        .artifacts()
+        .tokens()
+        .iter()
+        .map(|token| token.lexeme.as_str())
+        .collect();
+    assert!(
+        lexemes.iter().any(|lexeme| *lexeme == "as"),
+        "expected tokens to contain `as`, got {:?}",
+        lexemes
+    );
+    let as_token = debug
+        .artifacts()
+        .tokens()
+        .iter()
+        .find(|token| token.lexeme == "as")
+        .expect("as token should be present");
+    assert!(
+        matches!(as_token.token_type, TokenType::Identifier(_)),
+        "expected `as` token to be classified as identifier, got {:?}",
+        as_token.token_type
+    );
+
+    let program = debug.artifacts().program();
+    assert_eq!(
+        program.statements.len(),
+        1,
+        "expected single top-level statement"
+    );
+
+    let initializer = match program
+        .statements
+        .first()
+        .expect("program should contain main function")
+    {
+        Statement::FunctionDeclaration { body, .. } => match &**body {
+            Expression::Block { statements, .. } => statements
+                .iter()
+                .find_map(|stmt| match stmt {
+                    Statement::ValDeclaration {
+                        initializer, name, ..
+                    } if name == "castList" => Some(initializer),
+                    _ => None,
+                })
+                .expect("expected castList declaration"),
+            other => panic!("expected block body, got {:?}", other),
+        },
+        other => panic!("expected function declaration, got {:?}", other),
+    };
+
+    assert!(
+        matches!(initializer, Expression::TypeCast { .. }),
+        "expected type cast expression for castList initializer, got {:?}",
+        initializer
+    );
 }

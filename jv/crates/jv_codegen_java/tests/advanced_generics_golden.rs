@@ -44,6 +44,7 @@ fn build_program() -> IrProgram {
         generic_metadata: metadata,
         conversion_metadata: Vec::new(),
         logging: Default::default(),
+        tuple_record_plans: Vec::new(),
         span,
     }
 }

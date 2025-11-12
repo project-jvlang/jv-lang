@@ -8,6 +8,7 @@ use jv_ast::{
     Argument, BinaryMetadata, CallArgumentMetadata, CommentKind, CommentStatement,
     CommentVisibility, Expression, Literal, Modifiers, Program, RegexLiteral, Span, Statement,
     StringPart, TypeAnnotation, ValBindingOrigin, Visibility,
+    expression::{TupleContextFlags, TupleFieldMeta},
 };
 
 fn render_type_annotation(annotation: TypeAnnotation) -> String {
@@ -604,6 +605,24 @@ impl<'a> ReconstructionContext<'a> {
                     span: span.clone(),
                 }
             }
+            IrExpression::TupleLiteral { elements, span, .. } => {
+                let converted = elements
+                    .iter()
+                    .enumerate()
+                    .map(|(idx, expr)| {
+                        self.with_segment(format!("tuple[{idx}]"), |ctx| {
+                            ctx.convert_expression(expr)
+                        })
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                self.record_success();
+                Expression::Tuple {
+                    elements: converted,
+                    fields: Vec::<TupleFieldMeta>::new(),
+                    context: TupleContextFlags::default(),
+                    span: span.clone(),
+                }
+            }
             IrExpression::StringFormat {
                 format_string,
                 args,
@@ -848,6 +867,7 @@ fn extract_expr_span(expr: &IrExpression) -> Span {
         | IrExpression::Block { span, .. }
         | IrExpression::ArrayCreation { span, .. }
         | IrExpression::ObjectCreation { span, .. }
+        | IrExpression::TupleLiteral { span, .. }
         | IrExpression::Lambda { span, .. }
         | IrExpression::Switch { span, .. }
         | IrExpression::Cast { span, .. }

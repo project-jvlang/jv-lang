@@ -252,6 +252,9 @@ impl JavaCodeGenerator {
                 expr_str.push(')');
                 Ok(expr_str)
             }
+            IrExpression::TupleLiteral { elements, span, .. } => {
+                self.render_tuple_literal(elements.as_slice(), span)
+            }
             IrExpression::Lambda {
                 param_names, body, ..
             } => {
@@ -444,6 +447,107 @@ impl JavaCodeGenerator {
         }
         Ok(format!("\"{}\"", Self::escape_string(&buffer)))
     }
+
+    fn render_tuple_literal(
+        &mut self,
+        elements: &[IrExpression],
+        span: &Span,
+    ) -> Result<String, CodeGenError> {
+        let key = super::SpanKey::from(span);
+        let usage = self.tuple_usages.get(&key).cloned().ok_or_else(|| {
+            CodeGenError::UnsupportedConstruct {
+                construct: "Tuple literal missing tuple record plan".to_string(),
+                span: Some(span.clone()),
+            }
+        })?;
+
+        let arity = usage.component_names.len();
+        if arity == 0 {
+            if elements.is_empty() {
+                return Ok(format!("new {}()", usage.record_name));
+            }
+            return Err(CodeGenError::UnsupportedConstruct {
+                construct: format!(
+                    "Tuple literal has {} elements but record {} has no components",
+                    elements.len(),
+                    usage.record_name
+                ),
+                span: Some(span.clone()),
+            });
+        }
+
+        if elements.len() != arity {
+            return Err(CodeGenError::UnsupportedConstruct {
+                construct: format!(
+                    "Tuple literal element count ({}) does not match record {} arity ({})",
+                    elements.len(),
+                    usage.record_name,
+                    arity
+                ),
+                span: Some(span.clone()),
+            });
+        }
+
+        let mut slot_indices: Vec<Option<usize>> = vec![None; arity];
+        let mut used_inputs = vec![false; elements.len()];
+
+        for slot in 0..arity {
+            let preferred = usage.source_positions.get(slot).copied().unwrap_or(slot);
+            if let Some(index) =
+                Self::select_tuple_element_index(preferred, slot, elements.len(), &used_inputs)
+            {
+                slot_indices[slot] = Some(index);
+                used_inputs[index] = true;
+            }
+        }
+
+        for slot in 0..arity {
+            if slot_indices[slot].is_none() {
+                if let Some(index) = (0..elements.len()).find(|idx| !used_inputs[*idx]) {
+                    slot_indices[slot] = Some(index);
+                    used_inputs[index] = true;
+                }
+            }
+        }
+
+        if let Some(missing_slot) = slot_indices.iter().position(|opt| opt.is_none()) {
+            let component_name = usage
+                .component_names
+                .get(missing_slot)
+                .cloned()
+                .unwrap_or_else(|| format!("_{}", missing_slot + 1));
+            return Err(CodeGenError::UnsupportedConstruct {
+                construct: format!(
+                    "Unable to map tuple element to component `{}` of record {}",
+                    component_name, usage.record_name
+                ),
+                span: Some(span.clone()),
+            });
+        }
+
+        let mut cache: Vec<Option<String>> = vec![None; elements.len()];
+        let mut rendered = Vec::with_capacity(arity);
+        for index in slot_indices
+            .into_iter()
+            .map(|opt| opt.expect("all indices must be assigned"))
+        {
+            let expr_str = if let Some(existing) = &cache[index] {
+                existing.clone()
+            } else {
+                let value = self.generate_expression(&elements[index])?;
+                cache[index] = Some(value.clone());
+                value
+            };
+            rendered.push(expr_str);
+        }
+
+        Ok(format!(
+            "new {}({})",
+            usage.record_name,
+            rendered.join(", ")
+        ))
+    }
+
 
     fn try_render_collectors_to_list(
         &mut self,

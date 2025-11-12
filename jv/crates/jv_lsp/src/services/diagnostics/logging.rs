@@ -188,6 +188,11 @@ fn collect_from_expression(expr: &Expression, depth: usize, diagnostics: &mut Ve
                 collect_from_expression(element, depth, diagnostics);
             }
         }
+        Expression::Tuple { elements, .. } => {
+            for element in elements {
+                collect_from_expression(element, depth, diagnostics);
+            }
+        }
         Expression::UnitLiteral { value, .. } => {
             collect_from_expression(value, depth, diagnostics);
         }

@@ -53,7 +53,10 @@ fn type_kind_to_java(kind: &TypeKind) -> Option<JavaType> {
             generic_args: Vec::new(),
         }),
         TypeKind::Optional(inner) => type_kind_to_java(inner),
-        TypeKind::Function(_, _) | TypeKind::Variable(_) | TypeKind::Unknown => None,
+        TypeKind::Function(_, _)
+        | TypeKind::Variable(_)
+        | TypeKind::Tuple(_)
+        | TypeKind::Unknown => None,
     }
 }
 

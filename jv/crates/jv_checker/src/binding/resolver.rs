@@ -1,12 +1,11 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::CheckError;
 use jv_ast::Span;
 use jv_ast::{
-    Argument, ConcurrencyConstruct, Expression, ExtensionFunction, LogBlock, LogItem, Modifiers,
-    Program, RegexCommand, RegexLambdaReplacement, RegexReplacement, ResourceManagement, Statement,
-    TryCatchClause, ValBindingOrigin,
-    binding_pattern::BindingPatternKind,
+    Argument, BindingPatternKind, ConcurrencyConstruct, Expression, ExtensionFunction, LogBlock,
+    LogItem, Modifiers, Program, RegexCommand, RegexLambdaReplacement, RegexReplacement,
+    ResourceManagement, Statement, TryCatchClause, ValBindingOrigin,
     statement::{TestDataset, TestParameter, UnitTypeMember},
 };
 
@@ -160,8 +159,7 @@ impl BindingResolver {
                         });
                     }
                 }
-                self.declare_immutable(name.clone(), origin, span.clone(), true);
-                self.record_late_init_seed(name.clone(), origin, true, &modifiers);
+                self.register_val_binding(&name, binding.as_ref(), origin, &span, &modifiers, true);
                 Statement::ValDeclaration {
                     name,
                     binding,
@@ -187,12 +185,12 @@ impl BindingResolver {
                     }
                     None => (false, None),
                 };
-                self.declare_mutable(name.clone(), span.clone(), true);
-                self.record_late_init_seed(
-                    name.clone(),
-                    ValBindingOrigin::ExplicitKeyword,
-                    has_initializer,
+                self.register_var_binding(
+                    &name,
+                    binding.as_ref(),
+                    &span,
                     &modifiers,
+                    has_initializer,
                 );
                 Statement::VarDeclaration {
                     name,
@@ -207,8 +205,8 @@ impl BindingResolver {
                 target,
                 value,
                 span,
-                binding_pattern: _,
-            } => self.resolve_assignment(target, value, span),
+                binding_pattern,
+            } => self.resolve_assignment(target, value, span, binding_pattern),
             Statement::Expression { expr, span } => Statement::Expression {
                 expr: self.resolve_expression(expr),
                 span,
@@ -426,6 +424,7 @@ impl BindingResolver {
         target: Expression,
         value: Expression,
         span: Span,
+        binding_pattern: Option<BindingPatternKind>,
     ) -> Statement {
         match target {
             Expression::Identifier(name, target_span) => {
@@ -438,16 +437,14 @@ impl BindingResolver {
                         });
                         Statement::Assignment {
                             target: Expression::Identifier(name, target_span),
-                            binding_pattern: None,
-
+                            binding_pattern,
                             value,
                             span,
                         }
                     }
                     Some(BindingKind::Mutable { .. }) => Statement::Assignment {
                         target: Expression::Identifier(name, target_span),
-                        binding_pattern: None,
-
+                        binding_pattern,
                         value,
                         span,
                     },
@@ -459,16 +456,41 @@ impl BindingResolver {
                             });
                             Statement::Assignment {
                                 target: Expression::Identifier(name, target_span),
-                                binding_pattern: None,
-
+                                binding_pattern,
                                 value,
+                                span,
+                            }
+                        } else if let Some(pattern) = binding_pattern {
+                            let origin = ValBindingOrigin::Implicit;
+                            let modifiers = Modifiers::default();
+                            self.register_val_binding(
+                                &name,
+                                Some(&pattern),
+                                origin,
+                                &target_span,
+                                &modifiers,
+                                true,
+                            );
+                            Statement::ValDeclaration {
+                                name,
+                                binding: Some(pattern),
+                                type_annotation: None,
+                                initializer: value,
+                                modifiers,
+                                origin,
                                 span,
                             }
                         } else {
                             let origin = ValBindingOrigin::Implicit;
-                            self.declare_immutable(name.clone(), origin, target_span.clone(), true);
                             let modifiers = Modifiers::default();
-                            self.record_late_init_seed(name.clone(), origin, true, &modifiers);
+                            self.register_val_binding(
+                                &name,
+                                None,
+                                origin,
+                                &target_span,
+                                &modifiers,
+                                true,
+                            );
                             Statement::ValDeclaration {
                                 name,
                                 binding: None,
@@ -489,9 +511,89 @@ impl BindingResolver {
                     target,
                     value,
                     span,
-                    binding_pattern: None,
+                    binding_pattern,
                 }
             }
+        }
+    }
+
+    fn register_val_binding(
+        &mut self,
+        name: &str,
+        binding: Option<&BindingPatternKind>,
+        origin: ValBindingOrigin,
+        span: &Span,
+        modifiers: &Modifiers,
+        has_initializer: bool,
+    ) {
+        self.declare_immutable(name.to_string(), origin, span.clone(), true);
+        self.record_late_init_seed(name.to_string(), origin, has_initializer, modifiers);
+
+        if let Some(pattern) = binding {
+            for (pattern_name, pattern_span) in Self::extract_pattern_identifiers(pattern) {
+                if pattern_name == name {
+                    continue;
+                }
+                self.declare_immutable(pattern_name.clone(), origin, pattern_span.clone(), true);
+                self.record_late_init_seed(pattern_name, origin, has_initializer, modifiers);
+            }
+        }
+    }
+
+    fn register_var_binding(
+        &mut self,
+        name: &str,
+        binding: Option<&BindingPatternKind>,
+        span: &Span,
+        modifiers: &Modifiers,
+        has_initializer: bool,
+    ) {
+        self.declare_mutable(name.to_string(), span.clone(), true);
+        self.record_late_init_seed(
+            name.to_string(),
+            ValBindingOrigin::ExplicitKeyword,
+            has_initializer,
+            modifiers,
+        );
+
+        if let Some(pattern) = binding {
+            for (pattern_name, pattern_span) in Self::extract_pattern_identifiers(pattern) {
+                if pattern_name == name {
+                    continue;
+                }
+                self.declare_mutable(pattern_name.clone(), pattern_span.clone(), true);
+                self.record_late_init_seed(
+                    pattern_name,
+                    ValBindingOrigin::ExplicitKeyword,
+                    has_initializer,
+                    modifiers,
+                );
+            }
+        }
+    }
+
+    fn extract_pattern_identifiers(pattern: &BindingPatternKind) -> Vec<(String, Span)> {
+        let mut identifiers = Vec::new();
+        Self::collect_pattern_identifiers(pattern, &mut identifiers);
+        let mut seen = HashSet::new();
+        identifiers
+            .into_iter()
+            .filter(|(name, _)| seen.insert(name.clone()))
+            .collect()
+    }
+
+    fn collect_pattern_identifiers(pattern: &BindingPatternKind, acc: &mut Vec<(String, Span)>) {
+        match pattern {
+            BindingPatternKind::Identifier { name, span } => {
+                acc.push((name.clone(), span.clone()));
+            }
+            BindingPatternKind::Tuple { elements, .. }
+            | BindingPatternKind::List { elements, .. } => {
+                for element in elements {
+                    Self::collect_pattern_identifiers(element, acc);
+                }
+            }
+            BindingPatternKind::Wildcard { .. } => {}
         }
     }
 
@@ -642,6 +744,20 @@ impl BindingResolver {
                     .map(|element| self.resolve_expression(element))
                     .collect(),
                 delimiter,
+                span,
+            },
+            Expression::Tuple {
+                elements,
+                fields,
+                context,
+                span,
+            } => Expression::Tuple {
+                elements: elements
+                    .into_iter()
+                    .map(|element| self.resolve_expression(element))
+                    .collect(),
+                fields,
+                context,
                 span,
             },
             Expression::Lambda {

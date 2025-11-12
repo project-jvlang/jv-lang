@@ -2167,6 +2167,7 @@ fn expression_span(expr: &Expression) -> Span {
         | Expression::TypeCast { span, .. }
         | Expression::StringInterpolation { span, .. }
         | Expression::Array { span, .. }
+        | Expression::Tuple { span, .. }
         | Expression::Lambda { span, .. }
         | Expression::UnitLiteral { span, .. }
         | Expression::Block { span, .. }
@@ -2472,6 +2473,11 @@ impl ListTerminalEnforcer {
             IrExpression::ObjectCreation { args, .. } => {
                 for arg in args {
                     self.visit_expression(arg, None);
+                }
+            }
+            IrExpression::TupleLiteral { elements, .. } => {
+                for element in elements {
+                    self.visit_expression(element, None);
                 }
             }
             IrExpression::Lambda { body, .. } => {

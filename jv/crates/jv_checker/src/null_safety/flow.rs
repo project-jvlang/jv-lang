@@ -968,6 +968,7 @@ fn classify_expression(
         Expression::LogBlock(block) => classify_log_block(builder, block),
         Expression::Lambda { .. }
         | Expression::Array { .. }
+        | Expression::Tuple { .. }
         | Expression::StringInterpolation { .. }
         | Expression::MultilineString { .. }
         | Expression::JsonLiteral { .. }

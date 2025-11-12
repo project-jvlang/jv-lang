@@ -28,6 +28,7 @@ impl Expression {
             Expression::Block { span, .. } => span,
             Expression::LogBlock(block) => &block.span,
             Expression::Array { span, .. } => span,
+            Expression::Tuple { span, .. } => span,
             Expression::Lambda { span, .. } => span,
             Expression::Try { span, .. } => span,
             Expression::This(span) => span,

@@ -42,6 +42,7 @@ fn boxing_conversion_wraps_literal_expression() {
             metadata: ConversionMetadata::new(ConversionKind::Boxing, "int", "java.lang.Integer"),
         }],
         logging: Default::default(),
+        tuple_record_plans: Vec::new(),
         span: expr_span.clone(),
     };
 
@@ -91,6 +92,7 @@ fn unboxing_conversion_injects_nullable_guard() {
             metadata,
         }],
         logging: Default::default(),
+        tuple_record_plans: Vec::new(),
         span: expr_span,
     };
 
@@ -153,6 +155,7 @@ fn method_invocation_conversion_wraps_collection_transform() {
             metadata,
         }],
         logging: Default::default(),
+        tuple_record_plans: Vec::new(),
         span: expr_span.clone(),
     };
 

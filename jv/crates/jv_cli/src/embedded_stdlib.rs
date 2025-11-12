@@ -411,6 +411,11 @@ fn rewrite_expression(expression: &mut Expression) {
                 rewrite_expression(element);
             }
         }
+        Expression::Tuple { elements, .. } => {
+            for element in elements {
+                rewrite_expression(element);
+            }
+        }
         Expression::Lambda {
             parameters, body, ..
         } => {
@@ -830,6 +835,11 @@ impl<'a, 'b> ProgramUsageDetector<'a, 'b> {
                 }
             }
             Expression::Array { elements, .. } => {
+                for element in elements {
+                    self.visit_expression(element);
+                }
+            }
+            Expression::Tuple { elements, .. } => {
                 for element in elements {
                     self.visit_expression(element);
                 }
@@ -1902,6 +1912,7 @@ val reading = 42 @ ℃
             generic_metadata: BTreeMap::new(),
             conversion_metadata: Vec::new(),
             logging: LoggingMetadata::default(),
+            tuple_record_plans: Vec::new(),
             span,
         };
 

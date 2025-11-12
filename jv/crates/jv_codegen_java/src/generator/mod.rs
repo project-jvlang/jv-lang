@@ -1,7 +1,10 @@
 use crate::builder::{JavaCompilationUnit, JavaSourceBuilder};
 use crate::config::JavaCodeGenConfig;
 use crate::error::CodeGenError;
+use crate::java21;
+use crate::record::{self, TupleRecord};
 use crate::target_version::TargetedJavaEmitter;
+use jv_ast::expression::TupleFieldMeta;
 use jv_ast::{BinaryOp, CallArgumentStyle, Literal, SequenceDelimiter, Span, UnaryOp};
 use jv_build::metadata::SymbolIndex;
 use jv_ir::{
@@ -13,11 +16,12 @@ use jv_ir::{
     IrTypeParameter, IrVariance, IrVisibility, JavaType, LogGuardKind, LogInvocationItem,
     LogInvocationPlan, LogLevel, LogMessage, LoggerFieldId, LoggerFieldSpec, LoggingFrameworkKind,
     MethodOverload, NullableGuard, NullableGuardReason, SequencePipeline, SequenceSource,
-    SequenceStage, SequenceTerminalKind, UtilityClass, VirtualThreadOp,
+    SequenceStage, SequenceTerminalKind, TupleRecordPlan, UtilityClass, VirtualThreadOp,
 };
 use jv_mapper::{
     JavaPosition, JavaSpan, MappingCategory, MappingError, SourceMap, SourceMapBuilder,
 };
+use jv_pm::JavaTarget;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
@@ -54,6 +58,7 @@ pub struct JavaCodeGenerator {
     logging_framework: LoggingFrameworkKind,
     logger_fields: HashMap<LoggerFieldId, LoggerFieldSpec>,
     trace_context_enabled: bool,
+    tuple_usages: HashMap<SpanKey, TuplePlanUsage>,
 }
 
 impl JavaCodeGenerator {
@@ -85,6 +90,7 @@ impl JavaCodeGenerator {
             logging_framework: LoggingFrameworkKind::default(),
             logger_fields: HashMap::new(),
             trace_context_enabled: false,
+            tuple_usages: HashMap::new(),
         }
     }
 
@@ -116,6 +122,7 @@ impl JavaCodeGenerator {
                 .or_default()
                 .push(entry.metadata.clone());
         }
+        self.populate_tuple_usages(&program.tuple_record_plans);
 
         let mut unit = JavaCompilationUnit::new();
         unit.package_declaration = program.package.clone();
@@ -273,6 +280,26 @@ impl JavaCodeGenerator {
             unit.type_declarations.push(builder.build());
         }
 
+        let tuple_records = record::collect_tuple_records(&program.tuple_record_plans);
+        let mut emitted_tuple_records: HashSet<String> = HashSet::new();
+        for record in tuple_records {
+            if !emitted_tuple_records.insert(record.name.clone()) {
+                continue;
+            }
+            if self.has_tuple_record_definition(&record.name) {
+                continue;
+            }
+
+            let rendered = if self.targeting.target() == JavaTarget::Java21 {
+                java21::render_tuple_record_java21(&record, &self.config.indent)
+            } else {
+                record::render_tuple_record(&record, &self.config.indent)
+            };
+
+            self.register_tuple_record(&record);
+            unit.type_declarations.push(rendered);
+        }
+
         for declaration in remaining_declarations {
             if let IrStatement::SampleDeclaration(sample) = Self::base_statement(&declaration) {
                 let artifacts = self.generate_sample_declaration_artifacts(sample)?;
@@ -365,6 +392,7 @@ impl JavaCodeGenerator {
         self.logging_framework = LoggingFrameworkKind::default();
         self.logger_fields.clear();
         self.trace_context_enabled = false;
+        self.tuple_usages.clear();
     }
 
     fn register_record_components_from_declarations(
@@ -404,6 +432,103 @@ impl JavaCodeGenerator {
             }
             _ => {}
         }
+    }
+
+    fn has_tuple_record_definition(&self, name: &str) -> bool {
+        if self.record_components.contains_key(name) {
+            return true;
+        }
+        if let Some(pkg) = &self.package {
+            if !pkg.is_empty() {
+                let fq = format!("{pkg}.{name}");
+                if self.record_components.contains_key(&fq) {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    fn populate_tuple_usages(&mut self, plans: &[TupleRecordPlan]) {
+        self.tuple_usages.clear();
+        for plan in plans {
+            let record_name = plan
+                .specific_name
+                .as_ref()
+                .cloned()
+                .unwrap_or_else(|| plan.generic_name.clone());
+            let component_names = record::component_names_for_plan(plan);
+            let source_positions = Self::tuple_source_positions(plan);
+            for usage in &plan.usage_sites {
+                self.tuple_usages.insert(
+                    SpanKey::from(&usage.span),
+                    TuplePlanUsage {
+                        record_name: record_name.clone(),
+                        component_names: component_names.clone(),
+                        source_positions: source_positions.clone(),
+                    },
+                );
+            }
+        }
+    }
+
+    fn tuple_source_positions(plan: &TupleRecordPlan) -> Vec<usize> {
+        (0..plan.arity)
+            .map(|index| {
+                let preferred = plan
+                    .fields
+                    .get(index)
+                    .map(|meta| Self::normalized_fallback_index(meta, index))
+                    .unwrap_or(index);
+                preferred
+            })
+            .collect()
+    }
+
+    fn normalized_fallback_index(meta: &TupleFieldMeta, default_index: usize) -> usize {
+        if meta.fallback_index == 0 {
+            default_index
+        } else {
+            meta.fallback_index.saturating_sub(1)
+        }
+    }
+
+    fn select_tuple_element_index(
+        preferred_index: usize,
+        slot_index: usize,
+        element_count: usize,
+        used: &[bool],
+    ) -> Option<usize> {
+        if preferred_index < element_count && !used[preferred_index] {
+            return Some(preferred_index);
+        }
+        if slot_index < element_count && !used[slot_index] {
+            return Some(slot_index);
+        }
+        (0..element_count).find(|idx| !used[*idx])
+    }
+
+    fn register_tuple_record(&mut self, record: &TupleRecord) {
+        let component_names: Vec<String> = record.component_names();
+
+        self.record_components
+            .entry(record.name.clone())
+            .or_insert_with(HashSet::new)
+            .extend(component_names.iter().cloned());
+
+        if let Some(pkg) = &self.package {
+            if !pkg.is_empty() {
+                let fq = format!("{pkg}.{}", record.name);
+                self.record_components
+                    .entry(fq)
+                    .or_insert_with(HashSet::new)
+                    .extend(component_names.iter().cloned());
+            }
+        }
+    }
+
+    pub(crate) fn is_mutable_capture(&self, name: &str) -> bool {
+        self.mutable_captures.contains(name)
     }
 
     fn add_record_components(
@@ -789,6 +914,16 @@ impl JavaCodeGenerator {
                 for arg in args {
                     self.collect_mutable_captures_in_expression(
                         arg,
+                        method_locals,
+                        captures,
+                        scope_locals,
+                    );
+                }
+            }
+            IrExpression::TupleLiteral { elements, .. } => {
+                for element in elements {
+                    self.collect_mutable_captures_in_expression(
+                        element,
                         method_locals,
                         captures,
                         scope_locals,
@@ -1829,6 +1964,13 @@ impl JavaCodeGenerator {
             .remove(type_name)
             .unwrap_or_default()
     }
+}
+
+#[derive(Debug, Clone)]
+struct TuplePlanUsage {
+    record_name: String,
+    component_names: Vec<String>,
+    source_positions: Vec<usize>,
 }
 
 #[derive(Debug, Clone)]

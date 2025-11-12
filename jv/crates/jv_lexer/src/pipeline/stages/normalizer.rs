@@ -616,7 +616,18 @@ impl Normalizer {
         } else {
             raw_text.to_string()
         };
-        Ok(self.finalize_token(token, PreMetadata::default(), normalized_text))
+        let mut metadata = PreMetadata::default();
+        if let Some(issue) = token.field_label_issue.as_ref() {
+            metadata
+                .provisional_diagnostics
+                .push(TokenDiagnostic::InvalidFieldNameLabel {
+                    reason: issue.reason,
+                    text: issue.text.clone(),
+                    line: issue.line,
+                    column: issue.column,
+                });
+        }
+        Ok(self.finalize_token(token, metadata, normalized_text))
     }
 }
 
@@ -737,6 +748,8 @@ mod tests {
             span: make_span(leaked.len()),
             trivia: None,
             carry_over: None,
+            field_label: None,
+            field_label_issue: None,
         }
     }
 
@@ -983,6 +996,8 @@ mod tests {
             span: make_span_with_offset(2, 1, 1, 3),
             trivia: None,
             carry_over: None,
+            field_label: None,
+            field_label_issue: None,
         };
         let mut ctx = LexerContext::new("[1 2]");
         ctx.push_layout_sequence(LayoutSequenceKind::Array);
@@ -1013,6 +1028,8 @@ mod tests {
             span: make_span_with_offset(5, 1, 1, 6),
             trivia: None,
             carry_over: None,
+            field_label: None,
+            field_label_issue: None,
         };
         let mut ctx = LexerContext::new("plot(1 2)");
         ctx.push_layout_sequence(LayoutSequenceKind::Call);

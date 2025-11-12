@@ -44,6 +44,8 @@ pub struct TransformContext {
     pub sample_options: SampleOptions,
     /// Cache tracking whitespace-delimited sequence element types to avoid recomputation
     pub sequence_style_cache: SequenceStyleCache,
+    /// Tuple record plan metadata keyed by tuple literal span
+    tuple_plan_usages: HashMap<SpanKey, TuplePlanRegistration>,
     /// Counter for synthesised local identifiers
     temp_counter: usize,
     /// Optional arena pools shared across lowering sessions
@@ -99,6 +101,7 @@ impl TransformContext {
             record_components: HashMap::new(),
             sample_options: SampleOptions::default(),
             sequence_style_cache: SequenceStyleCache::with_capacity(),
+            tuple_plan_usages: HashMap::new(),
             temp_counter: 0,
             pool_state: None,
             when_strategies: Vec::new(),
@@ -257,6 +260,72 @@ impl TransformContext {
             }
         }
         keys
+    }
+
+    pub fn register_tuple_plan_usage(
+        &mut self,
+        span: Span,
+        record_name: Option<String>,
+        component_names: Vec<String>,
+        component_spans: Vec<Option<Span>>,
+        type_hints: Vec<Option<JavaType>>,
+    ) {
+        let key = SpanKey::from(&span);
+        self.tuple_plan_usages.insert(
+            key,
+            TuplePlanRegistration {
+                record_name,
+                component_names,
+                component_spans,
+                type_hints,
+            },
+        );
+    }
+
+    pub fn tuple_component_metadata(
+        &self,
+        span: &Span,
+        index: usize,
+    ) -> Option<TupleComponentMetadata> {
+        let key = SpanKey::from(span);
+        let registration = self.tuple_plan_usages.get(&key)?;
+        let field_name = registration
+            .component_names
+            .get(index)
+            .cloned()
+            .unwrap_or_else(|| format!("_{}", index + 1));
+        let java_type = registration
+            .type_hints
+            .get(index)
+            .and_then(|hint| hint.clone())
+            .or_else(|| {
+                registration
+                    .record_name
+                    .as_ref()
+                    .and_then(|name| self.record_component_type(name, &field_name))
+            })
+            .unwrap_or_else(JavaType::object);
+        let source_span = registration
+            .component_spans
+            .get(index)
+            .and_then(|entry| entry.clone());
+        Some(TupleComponentMetadata {
+            field_name,
+            java_type,
+            source_span,
+        })
+    }
+
+    pub fn tuple_record_java_type(&self, span: &Span) -> Option<JavaType> {
+        let key = SpanKey::from(span);
+        let registration = self.tuple_plan_usages.get(&key)?;
+        registration
+            .record_name
+            .as_ref()
+            .map(|name| JavaType::Reference {
+                name: name.clone(),
+                generic_args: vec![],
+            })
     }
 
     /// Registers a lowered method declaration so that later passes can resolve Java naming.
@@ -1024,6 +1093,7 @@ fn set_expression_type(expr: &mut IrExpression, java_type: JavaType) {
         | IrExpression::Conditional { java_type: ty, .. }
         | IrExpression::Block { java_type: ty, .. }
         | IrExpression::ObjectCreation { java_type: ty, .. }
+        | IrExpression::TupleLiteral { java_type: ty, .. }
         | IrExpression::SequencePipeline { java_type: ty, .. }
         | IrExpression::Switch { java_type: ty, .. }
         | IrExpression::NullSafeOperation { java_type: ty, .. }
@@ -1073,6 +1143,7 @@ impl Clone for TransformContext {
             record_components: self.record_components.clone(),
             sample_options: self.sample_options.clone(),
             sequence_style_cache: self.sequence_style_cache.clone(),
+            tuple_plan_usages: self.tuple_plan_usages.clone(),
             temp_counter: self.temp_counter,
             pool_state: self
                 .pool_state
@@ -1268,6 +1339,21 @@ impl SequenceStyleCache {
         self.array_elements.clear();
         self.call_arguments.clear();
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct TupleComponentMetadata {
+    pub field_name: String,
+    pub java_type: JavaType,
+    pub source_span: Option<Span>,
+}
+
+#[derive(Debug, Clone)]
+struct TuplePlanRegistration {
+    record_name: Option<String>,
+    component_names: Vec<String>,
+    component_spans: Vec<Option<Span>>,
+    type_hints: Vec<Option<JavaType>>,
 }
 
 #[derive(Debug)]

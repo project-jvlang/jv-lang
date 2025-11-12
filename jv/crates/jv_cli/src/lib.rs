@@ -516,7 +516,7 @@ pub mod pipeline {
     use std::sync::Arc;
     use std::time::Instant;
     use tracing::debug;
-    use type_facts_bridge::preload_type_facts_into_context;
+    use type_facts_bridge::{preload_tuple_plans_into_context, preload_type_facts_into_context};
 
     /// Resulting artifacts and diagnostics from the build pipeline.
     #[derive(Debug, Default, Clone)]
@@ -870,6 +870,7 @@ pub mod pipeline {
         };
 
         let binding_usage = type_checker.binding_usage().clone();
+        let tuple_record_plans = type_checker.tuple_record_plans().to_vec();
 
         let mut type_facts_snapshot = type_facts_snapshot;
         let requires_probe = type_facts_snapshot
@@ -954,6 +955,7 @@ pub mod pipeline {
             if let Some(facts) = type_facts_snapshot.as_ref() {
                 preload_type_facts_into_context(&mut context, facts);
             }
+            preload_tuple_plans_into_context(&mut context, &tuple_record_plans);
             if !import_plan.is_empty() {
                 context.set_resolved_imports(import_plan.clone());
             }
@@ -994,6 +996,7 @@ pub mod pipeline {
             if let Some(facts) = type_facts_snapshot.as_ref() {
                 preload_type_facts_into_context(&mut context, facts);
             }
+            preload_tuple_plans_into_context(&mut context, &tuple_record_plans);
             if !import_plan.is_empty() {
                 context.set_resolved_imports(import_plan.clone());
             }
@@ -1020,6 +1023,8 @@ pub mod pipeline {
                 }
             }
         };
+
+        ir_program.tuple_record_plans = tuple_record_plans;
 
         if let Some(facts) = type_facts_snapshot.as_ref() {
             apply_type_facts(&mut ir_program, facts);
@@ -1455,6 +1460,14 @@ pub mod pipeline {
                     .collect::<Vec<_>>()
                     .join(", ");
                 format!("fn({}) -> {}", param_repr, format_type_kind(result))
+            }
+            TypeKind::Tuple(elements) => {
+                let items = elements
+                    .iter()
+                    .map(format_type_kind)
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("({items})")
             }
             TypeKind::Unknown => "unknown".to_string(),
         }

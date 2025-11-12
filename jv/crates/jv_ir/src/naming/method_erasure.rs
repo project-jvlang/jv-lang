@@ -590,6 +590,11 @@ fn apply_expression(expr: &mut IrExpression, resolution: &MethodResolution) {
                 apply_expression(arg, resolution);
             }
         }
+        IrExpression::TupleLiteral { elements, .. } => {
+            for element in elements {
+                apply_expression(element, resolution);
+            }
+        }
         IrExpression::Lambda { body, .. } => apply_expression(body, resolution),
         IrExpression::Switch {
             discriminant,

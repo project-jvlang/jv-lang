@@ -88,6 +88,7 @@ fn is_ignorable_between_when_and_brace(token_type: &TokenType) -> bool {
         TokenType::LineComment(_)
             | TokenType::BlockComment(_)
             | TokenType::JavaDocComment(_)
+            | TokenType::FieldNameLabel(_)
             | TokenType::Whitespace(_)
             | TokenType::Newline
             | TokenType::LayoutComma

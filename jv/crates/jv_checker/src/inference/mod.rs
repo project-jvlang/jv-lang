@@ -15,6 +15,7 @@ pub mod iteration;
 pub mod nullability;
 pub mod prelude;
 pub mod type_factory;
+pub mod type_parser;
 pub mod types;
 pub mod unify;
 pub mod utils;

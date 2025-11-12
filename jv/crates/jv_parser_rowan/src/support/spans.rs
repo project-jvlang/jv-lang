@@ -33,6 +33,7 @@ pub fn expression_span(expr: &Expression) -> Span {
         Expression::TypeCast { span, .. } => span.clone(),
         Expression::Block { span, .. } => span.clone(),
         Expression::Array { span, .. } => span.clone(),
+        Expression::Tuple { span, .. } => span.clone(),
         Expression::Lambda { span, .. } => span.clone(),
         Expression::Try { span, .. } => span.clone(),
         Expression::LogBlock(block) => block.span.clone(),

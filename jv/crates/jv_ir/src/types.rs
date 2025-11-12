@@ -1,8 +1,43 @@
 // jv_ir - Intermediate representation for desugaring jv language constructs
 use crate::sequence_pipeline::SequencePipeline;
+use jv_ast::expression::TupleFieldMeta;
 use jv_ast::*;
 
-pub use jv_ast::types::PrimitiveReturnMetadata;
+pub use jv_ast::types::{PrimitiveReturnMetadata, TupleTypeDescriptor, TupleTypeElement};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TupleRecordStrategy {
+    Specific,
+    Generic,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TupleUsageContext {
+    pub kind: TupleUsageKind,
+    #[serde(default)]
+    pub owner: Option<String>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TupleUsageKind {
+    FunctionReturn,
+    BindingInitializer,
+    AssignmentValue,
+    Expression,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TupleRecordPlan {
+    pub arity: usize,
+    pub strategy: TupleRecordStrategy,
+    #[serde(default)]
+    pub specific_name: Option<String>,
+    pub generic_name: String,
+    pub fields: Vec<TupleFieldMeta>,
+    pub type_hints: Vec<String>,
+    pub usage_sites: Vec<TupleUsageContext>,
+}
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PrimitiveSpecializationHint {
@@ -178,6 +213,13 @@ pub enum IrExpression {
         class_name: String,
         generic_args: Vec<JavaType>,
         args: Vec<IrExpression>,
+        java_type: JavaType,
+        span: Span,
+    },
+
+    /// Tuple literal `(expr expr ...)` which will be materialized as a record instance.
+    TupleLiteral {
+        elements: Vec<IrExpression>,
         java_type: JavaType,
         span: Span,
     },
@@ -598,6 +640,7 @@ impl IrExpression {
             | IrExpression::Block { span, .. }
             | IrExpression::ArrayCreation { span, .. }
             | IrExpression::ObjectCreation { span, .. }
+            | IrExpression::TupleLiteral { span, .. }
             | IrExpression::Lambda { span, .. }
             | IrExpression::SequencePipeline { span, .. }
             | IrExpression::Switch { span, .. }
@@ -1381,6 +1424,8 @@ pub struct IrProgram {
     pub conversion_metadata: Vec<ConversionMetadataEntry>,
     #[serde(default)]
     pub logging: LoggingMetadata,
+    #[serde(default)]
+    pub tuple_record_plans: Vec<TupleRecordPlan>,
     pub span: Span,
 }
 

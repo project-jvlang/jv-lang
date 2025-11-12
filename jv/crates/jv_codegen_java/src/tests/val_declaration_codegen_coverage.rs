@@ -63,6 +63,7 @@ fn implicit_val_fields_render_with_final_modifier() {
         generic_metadata: Default::default(),
         conversion_metadata: Vec::new(),
         logging: Default::default(),
+        tuple_record_plans: Vec::new(),
         span: dummy_span(),
     };
 
@@ -195,6 +196,7 @@ fn implicit_vals_in_function_scope_render_as_final_locals() {
         generic_metadata: Default::default(),
         conversion_metadata: Vec::new(),
         logging: Default::default(),
+        tuple_record_plans: Vec::new(),
         span: dummy_span(),
     };
 
@@ -317,6 +319,7 @@ fn implicit_vals_across_multiple_methods_remain_final() {
         generic_metadata: Default::default(),
         conversion_metadata: Vec::new(),
         logging: Default::default(),
+        tuple_record_plans: Vec::new(),
         span: dummy_span(),
     };
 

@@ -43,9 +43,17 @@ impl JavaCodeGenerator {
                     parts.push(type_str);
                     parts.push(name.clone());
                     let mut line = parts.join(" ");
+                    let rendered_initializer = if let Some(expr) = initializer {
+                        Some(
+                            self.try_render_destructure_component(expr)?
+                                .unwrap_or(self.generate_expression(expr)?),
+                        )
+                    } else {
+                        None
+                    };
                     line.push_str(" = new AtomicReference<>(");
-                    if let Some(expr) = initializer {
-                        line.push_str(&self.generate_expression(expr)?);
+                    if let Some(expr) = rendered_initializer {
+                        line.push_str(&expr);
                     }
                     line.push_str(");");
                     line
@@ -59,8 +67,11 @@ impl JavaCodeGenerator {
                     parts.push(name.clone());
                     let mut line = parts.join(" ");
                     if let Some(expr) = initializer {
+                        let rendered = self
+                            .try_render_destructure_component(expr)?
+                            .unwrap_or(self.generate_expression(expr)?);
                         line.push_str(" = ");
-                        line.push_str(&self.generate_expression(expr)?);
+                        line.push_str(&rendered);
                     }
                     line.push(';');
                     line
@@ -128,16 +139,23 @@ impl JavaCodeGenerator {
                 }
                 builder.build()
             }
-            IrStatement::Expression { expr, .. } => match expr {
-                IrExpression::LogInvocation { plan, .. } => self.generate_log_invocation(plan)?,
-                _ => {
+            IrStatement::Expression { expr, .. } => {
+                if let IrExpression::LogInvocation { plan, .. } = expr {
+                    self.generate_log_invocation(plan)?
+                } else if let Some(rendered) = self.try_render_destructure_expression(expr)? {
+                    let mut line = rendered;
+                    if !line.ends_with(';') {
+                        line.push(';');
+                    }
+                    line
+                } else {
                     let mut line = self.generate_expression(expr)?;
                     if !line.ends_with(';') {
                         line.push(';');
                     }
                     line
                 }
-            },
+            }
             IrStatement::Return { value, .. } => match value {
                 Some(expr) => {
                     let expr_code = self.generate_expression(expr)?;
