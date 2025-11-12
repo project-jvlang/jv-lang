@@ -3,7 +3,7 @@ use std::io::{BufRead, Write};
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use jv_ast::Span;
 use jv_checker::TypeChecker;
 use jv_codegen_java::generate_java_source;
@@ -70,7 +70,10 @@ impl Default for SessionState {
 impl SessionState {
     fn print_intro<W: Write>(&self, writer: &mut W) -> Result<()> {
         writeln!(writer, "--- インタラクティブエディタ ---")?;
-        writeln!(writer, "リアルタイムでjvコードを編集し、構文チェックとJava出力、サンドボックス実行を体験できます。")?;
+        writeln!(
+            writer,
+            "リアルタイムでjvコードを編集し、構文チェックとJava出力、サンドボックス実行を体験できます。"
+        )?;
         writeln!(
             writer,
             "主なコマンド: :help, :show, :edit, :append, :reset, :run, :quit"

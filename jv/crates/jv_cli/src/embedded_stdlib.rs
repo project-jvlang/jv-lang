@@ -4,25 +4,25 @@ use std::io::{Cursor, Read};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use jv_ast::{
-    statement::{UnitTypeDefinition, UnitTypeMember},
-    types::{Kind, Pattern},
     Argument, CallArgumentMetadata, Expression, JsonLiteral, JsonValue, Program, Statement,
     StringPart, Visibility,
+    statement::{UnitTypeDefinition, UnitTypeMember},
+    types::{Kind, Pattern},
 };
-use jv_build::{metadata::SymbolIndex, JavaTarget};
+use jv_build::{JavaTarget, metadata::SymbolIndex};
 use jv_checker::diagnostics::{
-    from_check_error, from_frontend_diagnostics, from_parse_error, from_transform_error,
-    DiagnosticSeverity, DiagnosticStrategy,
+    DiagnosticSeverity, DiagnosticStrategy, from_check_error, from_frontend_diagnostics,
+    from_parse_error, from_transform_error,
 };
 use jv_checker::imports::resolution::{ResolvedImport, ResolvedImportKind};
 use jv_checker::{ParallelInferenceConfig, TypeChecker};
 use jv_codegen_java::{JavaCodeGenConfig, JavaCodeGenerator};
 use jv_fmt::JavaFormatter;
 use jv_ir::{
-    transform_program_with_context, IrGenericMetadata, IrProgram, IrStatement, IrTypeLevelValue,
-    IrTypeParameter, IrVariance, JavaType, JavaWildcardKind, TransformContext,
+    IrGenericMetadata, IrProgram, IrStatement, IrTypeLevelValue, IrTypeParameter, IrVariance,
+    JavaType, JavaWildcardKind, TransformContext, transform_program_with_context,
 };
 use jv_parser_frontend::ParserPipeline;
 use jv_parser_rowan::frontend::RowanPipeline;
@@ -136,7 +136,7 @@ fn promote_visibility(statement: &mut Statement) {
         | Statement::Import { .. }
         | Statement::Package { .. }
         | Statement::Break(_)
-        | Statement::Continue(_) => {},
+        | Statement::Continue(_) => {}
         Statement::UnitTypeDefinition(definition) => promote_unit_definition(definition),
     }
 }
@@ -520,7 +520,10 @@ impl StdlibUsage {
                 for package in catalog.packages_for_reference(current) {
                     self.packages.insert(package);
                 }
-                if let Some((prefix, _)) = current.rsplit_once('.') {
+                if let Some((prefix, suffix)) = current.rsplit_once('.') {
+                    for package in catalog.packages_for_reference(suffix) {
+                        self.packages.insert(package);
+                    }
                     current = prefix;
                 } else {
                     break;
@@ -1740,10 +1743,12 @@ mod tests {
     #[test]
     fn scan_java_source_picks_up_fully_qualified_references() {
         let catalog = test_catalog();
-        assert!(catalog
-            .packages_for_reference("map")
-            .iter()
-            .any(|pkg| pkg == "jv.collections"));
+        assert!(
+            catalog
+                .packages_for_reference("map")
+                .iter()
+                .any(|pkg| pkg == "jv.collections")
+        );
         let mut usage = StdlibUsage::default();
         usage.scan_java_source("return java.util.stream.Stream.of(values);", &catalog);
         assert!(

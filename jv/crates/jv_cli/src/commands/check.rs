@@ -3,15 +3,15 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::Path;
 
+use jv_checker::InferenceTelemetry;
+use jv_checker::TypeChecker;
 use jv_checker::diagnostics::messages::{helper_label, helper_recommendation};
 use jv_checker::diagnostics::{
-    collect_raw_type_diagnostics, from_check_error, from_frontend_diagnostics, from_parse_error,
-    from_transform_error, DiagnosticSeverity, DiagnosticStrategy,
+    DiagnosticSeverity, DiagnosticStrategy, collect_raw_type_diagnostics, from_check_error,
+    from_frontend_diagnostics, from_parse_error, from_transform_error,
 };
 use jv_checker::inference::conversions::HelperSpec;
 use jv_checker::inference::diagnostics::conversion_diagnostic;
-use jv_checker::InferenceTelemetry;
-use jv_checker::TypeChecker;
 use jv_ir::transform_program;
 use jv_parser_frontend::ParserPipeline;
 use jv_parser_rowan::frontend::RowanPipeline;

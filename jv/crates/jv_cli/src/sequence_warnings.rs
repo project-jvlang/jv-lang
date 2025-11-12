@@ -1,7 +1,7 @@
 use jv_ast::{
-    statement::{UnitTypeDefinition, UnitTypeMember},
     Argument, Expression, JsonLiteral, JsonValue, Parameter, Pattern, Program, SequenceDelimiter,
     Span, Statement,
+    statement::{UnitTypeDefinition, UnitTypeMember},
 };
 
 pub fn collect_sequence_warnings(program: &Program) -> Vec<String> {

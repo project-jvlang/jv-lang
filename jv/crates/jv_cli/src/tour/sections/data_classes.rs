@@ -1,6 +1,6 @@
 use std::io::Write;
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use jv_parser_frontend::ParserPipeline;
 use jv_parser_rowan::frontend::RowanPipeline;
 

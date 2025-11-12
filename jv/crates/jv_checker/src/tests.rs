@@ -843,6 +843,11 @@ label = when (maybe) {
     let snapshot = checker
         .inference_snapshot()
         .expect("inference snapshot should be available");
+    let normalized = checker
+        .normalized_program()
+        .expect("normalized program should be available");
+
+    println!("normalized statements: {:?}", normalized.statements);
     let (subject_name, arm_count, has_else, span) = program
         .statements
         .iter()
