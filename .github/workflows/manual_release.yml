@@ -82,7 +82,10 @@ jobs:
           EOF
 
       - name: Build release binaries
-        run: cargo build --release -p jv_cli --target ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          cargo build --release -p jv_cli --target ${{ matrix.target }}
+          cargo build --release -p jv_pm --target ${{ matrix.target }}
         working-directory: jv
 
       - name: Upload binaries
@@ -93,6 +96,7 @@ jobs:
           path: |
             jv/target/${{ matrix.target }}/release/jv${{ matrix.binary_ext }}
             jv/target/${{ matrix.target }}/release/jvx${{ matrix.binary_ext }}
+            jv/target/${{ matrix.target }}/release/jvpm${{ matrix.binary_ext }}
 
   release:
     runs-on: ubuntu-latest
@@ -142,21 +146,51 @@ jobs:
             fi
           }
 
+          package_jvpm_tarball() {
+            # $1: src_dir, $2: suffix
+            local src_dir="$1"; local suffix="$2"
+            if [ -d "$src_dir" ]; then
+              local jvpm_path; jvpm_path="$(find_binary "$src_dir" jvpm || true)"
+              if [ -n "${jvpm_path}" ]; then
+                local tmp_dir; tmp_dir="$(mktemp -d)"
+                cp "${jvpm_path}" "${tmp_dir}/jvpm"
+                tar -czf "${RELEASE_DIR}/jvpm-${VERSION}-${suffix}.tar.gz" -C "${tmp_dir}" jvpm
+                sha256sum "${RELEASE_DIR}/jvpm-${VERSION}-${suffix}.tar.gz" > "${RELEASE_DIR}/jvpm-${VERSION}-${suffix}.tar.gz.sha256"
+                rm -rf "${tmp_dir}"
+              else
+                echo "[package] Skipping jvpm ${suffix}: binary not found under ${src_dir}" >&2
+              fi
+            else
+              echo "[package] Skipping jvpm ${suffix}: directory not found: ${src_dir}" >&2
+            fi
+          }
+
           package_tarball "downloads/binaries-linux-x86_64" "linux-x86_64"
           package_tarball "downloads/binaries-macos-x86_64" "macos-x86_64"
           # TODO: Re-enable after fixing ring dependency for Apple Silicon
           # package_tarball "downloads/binaries-macos-aarch64" "macos-aarch64"
           package_tarball "downloads/binaries-linux-aarch64" "linux-aarch64"
 
+          package_jvpm_tarball "downloads/binaries-linux-x86_64" "linux-x86_64"
+          package_jvpm_tarball "downloads/binaries-macos-x86_64" "macos-x86_64"
+          package_jvpm_tarball "downloads/binaries-linux-aarch64" "linux-aarch64"
+
           WINDOWS_DIR="downloads/binaries-windows-x86_64"
           if [ -d "$WINDOWS_DIR" ]; then
             jv_win="$(find_binary "$WINDOWS_DIR" 'jv.exe' || true)"
             jvx_win="$(find_binary "$WINDOWS_DIR" 'jvx.exe' || true)"
+            jvpm_win="$(find_binary "$WINDOWS_DIR" 'jvpm.exe' || true)"
             if [ -n "${jv_win}" ] && [ -n "${jvx_win}" ]; then
               zip -j "${RELEASE_DIR}/jv-${VERSION}-windows-x86_64.zip" "${jv_win}" "${jvx_win}"
               sha256sum "${RELEASE_DIR}/jv-${VERSION}-windows-x86_64.zip" > "${RELEASE_DIR}/jv-${VERSION}-windows-x86_64.zip.sha256"
             else
               echo "[package] Skipping windows-x86_64: executables not found under ${WINDOWS_DIR}" >&2
+            fi
+            if [ -n "${jvpm_win}" ]; then
+              zip -j "${RELEASE_DIR}/jvpm-${VERSION}-windows-x86_64.zip" "${jvpm_win}"
+              sha256sum "${RELEASE_DIR}/jvpm-${VERSION}-windows-x86_64.zip" > "${RELEASE_DIR}/jvpm-${VERSION}-windows-x86_64.zip.sha256"
+            else
+              echo "[package] Skipping jvpm windows-x86_64: executable not found under ${WINDOWS_DIR}" >&2
             fi
           else
             echo "[package] Skipping windows-x86_64: directory not found: ${WINDOWS_DIR}" >&2
@@ -282,6 +316,107 @@ jobs:
           sed -i "s|REPO_PLACEHOLDER|${REPO}|g" "${INSTALL_SCRIPT}"
           chmod +x "${INSTALL_SCRIPT}"
 
+      - name: Generate jvpm install script
+        run: |
+          set -euo pipefail
+          VERSION="${{ inputs.version }}"
+          REPO="${{ github.repository }}"
+          RELEASE_DIR="release"
+          INSTALL_SCRIPT="${RELEASE_DIR}/install_jvpm.sh"
+
+          cat > "${INSTALL_SCRIPT}" << 'INSTALL_EOF'
+          #!/usr/bin/env bash
+          if [ -z "${BASH_VERSION:-}" ]; then
+            echo "This installer requires bash. Run with: curl -fsSL https://github.com/${REPO}/releases/latest/download/install_jvpm.sh | bash" >&2
+            exit 1
+          fi
+          set -euo pipefail
+
+          VERSION="VERSION_PLACEHOLDER"
+          REPO="REPO_PLACEHOLDER"
+
+          die() {
+            echo "install_jvpm.sh: $*" >&2
+            exit 1
+          }
+
+          log() {
+            echo "[install-jvpm] $*" >&2
+          }
+
+          require_cmd() {
+            command -v "$1" >/dev/null 2>&1 || die "Required command '$1' not found in PATH"
+          }
+
+          require_cmd uname
+          require_cmd curl
+          require_cmd tar
+          require_cmd install
+
+          OS="$(uname -s)"
+          ARCH="$(uname -m)"
+          SUFFIX="${JVPM_INSTALL_SUFFIX:-}"
+
+          if [[ -z "$SUFFIX" ]]; then
+            case "$OS" in
+              Linux*)
+                case "$ARCH" in
+                  x86_64|amd64) SUFFIX="linux-x86_64" ;;
+                  aarch64|arm64) SUFFIX="linux-aarch64" ;;
+                  *) die "Unsupported Linux architecture: $ARCH" ;;
+                esac
+                ;;
+              Darwin*)
+                case "$ARCH" in
+                  x86_64) SUFFIX="macos-x86_64" ;;
+                  arm64|aarch64)
+                    die "macOS ARM64 (Apple Silicon) is not yet supported due to dependency issues. Please use Rosetta to run the x86_64 version: arch -x86_64 /bin/bash -c \"\$(curl -fsSL https://github.com/${REPO}/releases/latest/download/install_jvpm.sh)\""
+                    ;;
+                  *) die "Unsupported macOS architecture: $ARCH" ;;
+                esac
+                ;;
+              *)
+                die "Unsupported operating system: $OS"
+                ;;
+            esac
+          fi
+
+          ARCHIVE_BASENAME="jvpm-${VERSION}-${SUFFIX}"
+          case "$SUFFIX" in
+            windows-*) die "Windows installation is not supported by this script. Please download the ZIP manually." ;;
+            *) ARCHIVE_NAME="${ARCHIVE_BASENAME}.tar.gz" ;;
+          esac
+
+          DOWNLOAD_URL="https://github.com/${REPO}/releases/download/${VERSION}/${ARCHIVE_NAME}"
+
+          TMP_DIR="$(mktemp -d)"
+          trap 'rm -rf "$TMP_DIR"' EXIT
+
+          ARCHIVE_PATH="${TMP_DIR}/${ARCHIVE_NAME}"
+          log "Downloading ${ARCHIVE_NAME}..."
+          curl -L "${DOWNLOAD_URL}" -o "${ARCHIVE_PATH}"
+
+          log "Extracting archive..."
+          tar -xzf "${ARCHIVE_PATH}" -C "${TMP_DIR}"
+          [[ -f "${TMP_DIR}/jvpm" ]] || die "Archive did not contain jvpm binary"
+
+          BIN_DIR="${JVPM_BIN_DIR:-$HOME/.local/bin}"
+          mkdir -p "${BIN_DIR}"
+          install -m 0755 "${TMP_DIR}/jvpm" "${BIN_DIR}/jvpm"
+          log "Installed jvpm to ${BIN_DIR}"
+
+          if ! command -v jvpm >/dev/null 2>&1; then
+            log "Warning: ${BIN_DIR} is not on your PATH. Add the following to your shell profile:"
+            log "  export PATH=\"${BIN_DIR}:\$PATH\""
+          fi
+
+          log "jvpm installation complete."
+          INSTALL_EOF
+
+          sed -i "s|VERSION_PLACEHOLDER|${VERSION}|g" "${INSTALL_SCRIPT}"
+          sed -i "s|REPO_PLACEHOLDER|${REPO}|g" "${INSTALL_SCRIPT}"
+          chmod +x "${INSTALL_SCRIPT}"
+
       - name: Test install script
         run: |
           set -euo pipefail
@@ -340,6 +475,55 @@ jobs:
 
           test -x "${TEST_ROOT}/install/bin/jv"
           test -x "${TEST_ROOT}/install/bin/jvx"
+
+      - name: Test jvpm install script
+        run: |
+          set -euo pipefail
+          VERSION="${{ inputs.version }}"
+          REPO="${{ github.repository }}"
+          RELEASE_DIR="release"
+          TEST_ROOT="$(mktemp -d)"
+          FAKE_BIN="${TEST_ROOT}/bin"
+          mkdir -p "${FAKE_BIN}"
+          cat > "${FAKE_BIN}/curl" <<EOF
+          #!/usr/bin/env bash
+          set -euo pipefail
+          DEST=""
+          URL=""
+          while [[ $# -gt 0 ]]; do
+            case "$1" in
+              -L|--location)
+                shift
+                ;;
+              -o|--output)
+                DEST="$2"
+                shift 2
+                ;;
+              *)
+                URL="$1"
+                shift
+                ;;
+            esac
+          done
+          case "$URL" in
+            "https://github.com/${REPO}/releases/download/${VERSION}/jvpm-${VERSION}-linux-x86_64.tar.gz")
+              cp "${RELEASE_DIR}/jvpm-${VERSION}-linux-x86_64.tar.gz" "$DEST"
+              ;;
+            *)
+              echo "Unexpected URL: $URL" >&2
+              exit 1
+              ;;
+          esac
+          EOF
+          chmod +x "${FAKE_BIN}/curl"
+
+          export PATH="${FAKE_BIN}:${PATH}"
+          export JVPM_INSTALL_SUFFIX="linux-x86_64"
+          export JVPM_BIN_DIR="${TEST_ROOT}/install/bin"
+
+          bash "${RELEASE_DIR}/install_jvpm.sh"
+
+          test -x "${TEST_ROOT}/install/bin/jvpm"
 
       - name: Prepare release body
         id: release_body
