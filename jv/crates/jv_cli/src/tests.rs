@@ -1,4 +1,3 @@
-#![rustfmt::skip]
 use super::*;
 use crate::commands::explain;
 use crate::pipeline::compute_script_main_class;
@@ -183,101 +182,6 @@ fn test_build_command_parsing() {
 }
 
 #[test]
-fn test_build_command_parsing_with_apt() {
-    let build_args = vec![
-        "jv",
-        "build",
-        "test.jv",
-        "--apt",
-        "--processors",
-        "org.example.Proc1,Proc2",
-        "--processorpath",
-        "libs/anno.jar",
-        "--apt-option",
-        "mapstruct.defaultComponentModel=spring",
-        "--apt-option",
-        "flag",
-    ];
-    let cli = Cli::try_parse_from(build_args).unwrap();
-
-    match cli.command {
-        Some(Commands::Build {
-            apt,
-            processors,
-            processorpath,
-            apt_options,
-            ..
-        }) => {
-            assert!(apt, "--apt should enable annotation processing");
-            assert_eq!(
-                processors.as_deref(),
-                Some("org.example.Proc1,Proc2")
-            );
-            assert_eq!(processorpath.as_deref(), Some("libs/anno.jar"));
-            assert!(apt_options.iter().any(|o| o.contains("mapstruct")));
-            assert!(apt_options.iter().any(|o| o == "flag"));
-        }
-        _ => panic!("Expected Build command"),
-    }
-}
-
-#[test]
-fn test_build_plan_applies_apt_overrides() {
-    let _guard = lock_current_dir();
-    let temp_dir = TempDirGuard::new("apt-plan");
-    let root_path = temp_dir.path();
-    let manifest_path = root_path.join("jv.toml");
-    let src_dir = root_path.join("src");
-    let entrypoint = src_dir.join("main.jv");
-    fs::create_dir_all(&src_dir).expect("create src");
-    let manifest = "[package]\nname = \"apt-plan\"\nversion = \"0.1.0\"\n\n[project]\nentrypoint = \"src/main.jv\"\n\n[project.sources]\ninclude = [\"src/**/*.jv\"]\n";
-    fs::write(&manifest_path, manifest).expect("write manifest");
-    fs::write(&entrypoint, "fun main() {}\n").expect("write entrypoint");
-
-    let project_root = pipeline::project::locator::ProjectRoot::new(
-        root_path.to_path_buf(),
-        manifest_path.clone(),
-    );
-    let settings = pipeline::project::manifest::ManifestLoader::load(&manifest_path)
-        .expect("manifest loads");
-    let layout =
-        pipeline::project::layout::ProjectLayout::from_settings(&project_root, &settings)
-            .expect("layout resolves");
-
-    let overrides = pipeline::CliOverrides {
-        entrypoint: Some(entrypoint.clone()),
-        output: Some(root_path.join("target")),
-        java_only: true,
-        check: false,
-        format: false,
-        target: None,
-        clean: true,
-        perf: false,
-        emit_types: false,
-        verbose: false,
-        emit_telemetry: false,
-        parallel_inference: false,
-        inference_workers: None,
-        constraint_batch: None,
-        apt_enabled: true,
-        apt_processors: Some("org.example.Proc1,Proc2".to_string()),
-        apt_processorpath: Some("libs/anno.jar".to_string()),
-        apt_options: vec![
-            "mapstruct.defaultComponentModel=spring".to_string(),
-            "flag".to_string(),
-        ],
-    };
-
-    let plan = pipeline::BuildOptionsFactory::compose(project_root, settings, layout, overrides)
-        .expect("compose");
-    let apt = &plan.build_config.apt;
-    assert!(apt.enabled);
-    assert_eq!(apt.processors, vec!["org.example.Proc1".to_string(), "Proc2".to_string()]);
-    assert_eq!(apt.processorpath, vec!["libs/anno.jar".to_string()]);
-    assert!(apt.options.iter().any(|o| o.contains("mapstruct")));
-    assert!(apt.options.iter().any(|o| o == "flag"));
-}
-#[test]
 fn test_build_command_perf_flag() {
     let build_args = vec!["jv", "build", "test.jv", "--perf"];
     let cli = Cli::try_parse_from(build_args).unwrap();
@@ -449,7 +353,7 @@ entrypoint = "src/main.jv"
 
 [project.sources]
 include = ["src/**/*.jv"]
-"#",
+"#,
     )
     .expect("write manifest");
 
@@ -491,14 +395,6 @@ counter = counter + explicit
         parallel_inference: false,
         inference_workers: None,
         constraint_batch: None,
-        apt_enabled: false,
-        apt_processors: None,
-        apt_processorpath: None,
-        apt_options: Vec::new(),
-        apt_enabled: false,
-        apt_processors: None,
-        apt_processorpath: None,
-        apt_options: Vec::new(),
     };
 
     let plan = pipeline::BuildOptionsFactory::compose(project_root, settings, layout, overrides)
@@ -563,10 +459,6 @@ include = ["src/**/*.jv"]
         parallel_inference: false,
         inference_workers: None,
         constraint_batch: None,
-        apt_enabled: false,
-        apt_processors: None,
-        apt_processorpath: None,
-        apt_options: Vec::new(),
     };
 
     let plan = pipeline::BuildOptionsFactory::compose(project_root, settings, layout, overrides)
@@ -657,10 +549,6 @@ include = ["src/**/*.jv"]
         parallel_inference: false,
         inference_workers: None,
         constraint_batch: None,
-        apt_enabled: false,
-        apt_processors: None,
-        apt_processorpath: None,
-        apt_options: Vec::new(),
     };
 
     let plan = pipeline::BuildOptionsFactory::compose(project_root, settings, layout, overrides)
@@ -929,10 +817,11 @@ entrypoint = "src/main.jv"
 
 [project.sources]
 include = ["src/**/*.jv"]
+
 [project.output]
 directory = "target"
 clean = false
-"#",
+"#,
     )
     .expect("write manifest");
 
@@ -975,10 +864,6 @@ clean = false
         parallel_inference: false,
         inference_workers: None,
         constraint_batch: None,
-        apt_enabled: false,
-        apt_processors: None,
-        apt_processorpath: None,
-        apt_options: Vec::new(),
     };
 
     let plan = pipeline::BuildOptionsFactory::compose(project_root, settings, layout, overrides)
