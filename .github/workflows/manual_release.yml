@@ -82,6 +82,7 @@ jobs:
           EOF
 
       - name: Build release binaries
+        shell: bash
         run: |
           set -euo pipefail
           cargo build --release -p jv_cli --target ${{ matrix.target }}
