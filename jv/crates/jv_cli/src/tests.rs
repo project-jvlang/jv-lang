@@ -614,6 +614,9 @@ fn compile_repository_fixtures_without_interpolation() {
         if path.to_string_lossy().contains("/pattern/neg-") {
             continue;
         }
+        if path.to_string_lossy().contains("/unit_syntax/errors/") {
+            continue;
+        }
         let source = match fs::read_to_string(&path) {
             Ok(content) => content,
             Err(err) => {

@@ -964,6 +964,7 @@ impl<'tokens> ParserContext<'tokens> {
         let mut angle_depth = 0usize;
         let mut paren_depth = 0usize;
         let mut bracket_depth = 0usize;
+        let mut last_significant_kind: Option<TokenKind> = None;
 
         loop {
             self.consume_trivia();
@@ -971,11 +972,27 @@ impl<'tokens> ParserContext<'tokens> {
                 break;
             };
 
-            if angle_depth == 0
-                && paren_depth == 0
-                && bracket_depth == 0
-                && terminators.contains(&kind)
+            let at_top_level = angle_depth == 0 && paren_depth == 0 && bracket_depth == 0;
+
+            if self.unit_type_annotation_depth > 0
+                && last_significant_kind.is_some()
+                && at_top_level
             {
+                if kind == TokenKind::At {
+                    break;
+                }
+                if kind == TokenKind::Whitespace {
+                    if let Some((_, next_kind)) =
+                        self.peek_significant_kind_from(self.cursor + 1)
+                    {
+                        if matches!(next_kind, TokenKind::Identifier | TokenKind::LeftBracket) {
+                            break;
+                        }
+                    }
+                }
+            }
+
+            if at_top_level && terminators.contains(&kind) {
                 break;
             }
 
@@ -1002,6 +1019,9 @@ impl<'tokens> ParserContext<'tokens> {
             }
 
             self.bump_raw();
+            if !kind.is_trivia() {
+                last_significant_kind = Some(kind);
+            }
         }
     }
 
@@ -1089,6 +1109,11 @@ impl<'tokens> ParserContext<'tokens> {
                 TokenKind::Identifier => {
                     if saw_whitespace {
                         return None;
+                    }
+                    if let Some((_, next_kind)) = self.peek_significant_kind_from(index + 1) {
+                        if matches!(next_kind, TokenKind::Colon | TokenKind::Assign) {
+                            return None;
+                        }
                     }
                     return Some(UnitSuffixDescriptor::SimpleWithoutAt);
                 }
