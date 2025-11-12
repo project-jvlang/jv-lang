@@ -325,7 +325,7 @@ fn 単位型注釈がシリアライズ往復する() {
     let 復元: TypeAnnotation =
         serde_json::from_str(&シリアライズ).expect("単位型注釈のデシリアライズに成功する");
 
-    match 復元 {
+    match &復元 {
         TypeAnnotation::Unit {
             base,
             unit,
@@ -333,8 +333,8 @@ fn 単位型注釈がシリアライズ往復する() {
         } => {
             assert!(!implicit);
             assert_eq!(unit.name, "[℃]");
-            match *base {
-                TypeAnnotation::Simple(ref 名前) => assert_eq!(名前, "Double"),
+            match base.as_ref() {
+                TypeAnnotation::Simple(名前) => assert_eq!(名前, "Double"),
                 ほか => panic!("Double を期待したが {:?} が復元された", ほか),
             }
         }
@@ -391,7 +391,7 @@ fn 単位定義文がシリアライズ往復する() {
     let 復元: Statement =
         serde_json::from_str(&シリアライズ).expect("単位定義文のデシリアライズに成功する");
 
-    match 復元 {
+    match &復元 {
         Statement::UnitTypeDefinition(復元定義) => {
             assert_eq!(復元定義.category, "長さ");
             assert!(matches!(

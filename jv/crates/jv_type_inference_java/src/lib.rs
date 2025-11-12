@@ -638,7 +638,7 @@ mod tests {
                 implicit,
             } => {
                 assert!(!implicit);
-                assert_eq!(*base, TypeAnnotation::Simple("Double".into()));
+                assert_eq!(*base, Box::new(TypeAnnotation::Simple("Double".into())));
                 assert_eq!(unit.name, "km");
                 assert!(!unit.is_bracketed);
                 assert!(!unit.has_default_marker);
@@ -663,7 +663,7 @@ mod tests {
                 implicit,
             } => {
                 assert!(implicit);
-                assert_eq!(*base, TypeAnnotation::Simple("Double".into()));
+                assert_eq!(*base, Box::new(TypeAnnotation::Simple("Double".into())));
                 assert_eq!(unit.name, "[℃]");
                 assert!(unit.is_bracketed);
             }
