@@ -21,7 +21,9 @@ impl StatementStrategy for UnitTypeDefinitionStrategy {
         if lookahead != TokenKind::At {
             return false;
         }
-        if !ctx.cursor_has_whitespace_after_at() {
+        if !ctx.cursor_has_whitespace_after_at()
+            && !self.looks_like_unit_definition_without_space(ctx)
+        {
             return false;
         }
 
@@ -307,6 +309,92 @@ impl UnitTypeDefinitionStrategy {
 
         ctx.finish_node();
         block_ok
+    }
+
+    fn looks_like_unit_definition_without_space(&self, ctx: &ParserContext<'_>) -> bool {
+        let mut index = ctx.position().saturating_add(1);
+        let tokens = ctx.tokens;
+        let len = tokens.len();
+
+        let next_significant = |mut idx: usize| -> Option<(usize, TokenKind)> {
+            while idx < len {
+                let kind = TokenKind::from_token(&tokens[idx]);
+                if !kind.is_trivia() {
+                    return Some((idx, kind));
+                }
+                idx += 1;
+            }
+            None
+        };
+
+        let (new_index, kind) = match next_significant(index) {
+            Some(value) => value,
+            None => return false,
+        };
+        index = new_index;
+        if kind != TokenKind::Identifier {
+            return false;
+        }
+        index += 1;
+
+        let (new_index, kind) = match next_significant(index) {
+            Some(value) => value,
+            None => return false,
+        };
+        index = new_index;
+        if kind != TokenKind::LeftParen {
+            return false;
+        }
+        let mut depth = 1usize;
+        index += 1;
+        while index < len {
+            let kind_now = TokenKind::from_token(&tokens[index]);
+            match kind_now {
+                TokenKind::LeftParen => depth = depth.saturating_add(1),
+                TokenKind::RightParen => {
+                    depth = depth.saturating_sub(1);
+                    index += 1;
+                    if depth == 0 {
+                        break;
+                    } else {
+                        continue;
+                    }
+                }
+                TokenKind::Eof | TokenKind::Newline => return false,
+                _ => {}
+            }
+            index += 1;
+        }
+
+        if depth != 0 {
+            return false;
+        }
+
+        let (new_index, kind) = match next_significant(index) {
+            Some(value) => value,
+            None => return false,
+        };
+        index = new_index;
+        if kind != TokenKind::Identifier {
+            return false;
+        }
+        index += 1;
+
+        let (new_index, kind) = match next_significant(index) {
+            Some(value) => value,
+            None => return false,
+        };
+        index = new_index;
+        let mut current_kind = kind;
+        if current_kind == TokenKind::Bang {
+            index += 1;
+            current_kind = match next_significant(index) {
+                Some((_, next_kind)) => next_kind,
+                None => return false,
+            };
+        }
+
+        current_kind == TokenKind::LeftBrace
     }
 
     fn consume_unit_name(&self, ctx: &mut ParserContext<'_>) -> bool {
