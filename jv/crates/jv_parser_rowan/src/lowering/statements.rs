@@ -794,7 +794,8 @@ fn lower_type_annotation_container(
         }
     };
 
-    let tokens = if let Some(unit_node) = child_node(container_node, SyntaxKind::UnitTypeAnnotation) {
+    let tokens = if let Some(unit_node) = child_node(container_node, SyntaxKind::UnitTypeAnnotation)
+    {
         context.tokens_for(&unit_node)
     } else {
         context.tokens_for(&expr)
@@ -1013,8 +1014,8 @@ fn lower_unit_literal_expression(
 
     if !space_after_at {
         if let Some(first_token) = symbol_tokens.first() {
-            space_after_at = first_token.leading_trivia.spaces > 0
-                || first_token.leading_trivia.newlines > 0;
+            space_after_at =
+                first_token.leading_trivia.spaces > 0 || first_token.leading_trivia.newlines > 0;
         }
     }
 

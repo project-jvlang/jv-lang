@@ -6132,6 +6132,7 @@ fun sample(value: Any): Int {
         let mut failures = Vec::new();
         for path in files {
             let display = path.display().to_string();
+            let normalized = display.replace('\\', "/");
             if display.contains("/pattern/") {
                 continue;
             }
@@ -6139,6 +6140,9 @@ fun sample(value: Any): Int {
                 continue;
             }
             if display.contains("package/complex_stdlib_pattern.jv") {
+                continue;
+            }
+            if normalized.contains("/unit_syntax/errors/") {
                 continue;
             }
             let source = match fs::read_to_string(&path) {
