@@ -7259,26 +7259,16 @@ fn lower_unit_type_definition(
             SyntaxKind::UnitName,
         )
     })?;
-    let unit_name = first_identifier_text(&name_node)
-        .or_else(|| {
-            context
-                .tokens_for(&name_node)
-                .into_iter()
-                .find_map(|token| {
-                    if matches!(token.token_type, TokenType::Invalid(_)) {
-                        Some(token.lexeme.clone())
-                    } else {
-                        None
-                    }
-                })
-        })
+    let unit_name = context
+        .text_for_node(&name_node)
+        .and_then(|text| if text.is_empty() { None } else { Some(text) })
         .ok_or_else(|| {
             LoweringDiagnostic::new(
                 LoweringDiagnosticSeverity::Error,
-                "単位名の識別子が取得できません",
+                "単位名のテキストが取得できません",
                 context.span_for(&name_node),
                 name_node.kind(),
-                first_identifier_text(&name_node),
+                None,
                 collect_annotation_texts(&name_node),
             )
         })?;

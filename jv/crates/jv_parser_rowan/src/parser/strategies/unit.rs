@@ -97,25 +97,21 @@ impl UnitTypeDefinitionStrategy {
     }
 
     fn bump_unit_symbol(&self, ctx: &mut ParserContext<'_>) -> bool {
-        let Some(token) = ctx.peek_significant_token_n(0) else {
-            ctx.report_error(
-                "単位名を識別子で指定してください",
-                ctx.position(),
-                ctx.position(),
-            );
-            return false;
-        };
-        let kind = TokenKind::from_token(token);
-        if kind == TokenKind::Identifier || matches!(token.token_type, TokenType::Invalid(_)) {
-            ctx.bump_raw();
-            true
-        } else {
-            ctx.report_error(
-                "単位名を識別子で指定してください",
-                ctx.position(),
-                ctx.position(),
-            );
-            false
+        ctx.consume_trivia();
+        match ctx.peek_significant_kind() {
+            Some(TokenKind::Identifier) | Some(TokenKind::Unknown) => {
+                ctx.bump_raw();
+                true
+            }
+            _ => {
+                let start = ctx.position();
+                ctx.report_error(
+                    "単位名を識別子または記号で指定してください",
+                    start,
+                    start.saturating_add(1),
+                );
+                false
+            }
         }
     }
 
