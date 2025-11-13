@@ -328,7 +328,8 @@ impl<'a> TypeAnnotationParser<'a> {
     }
 
     fn parse_identifier_symbol(&mut self) -> Result<UnitSymbol, ParseError> {
-        let (mut name, mut span) = if self.peek_is(|kind| matches!(kind, TokenType::Identifier(_))) {
+        let (mut name, mut span) = if self.peek_is(|kind| matches!(kind, TokenType::Identifier(_)))
+        {
             let ident = self.expect_identifier()?;
             let text = identifier_text(ident).map(str::to_string).ok_or_else(|| {
                 ParseError::new(

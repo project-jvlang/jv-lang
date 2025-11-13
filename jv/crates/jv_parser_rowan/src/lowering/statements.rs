@@ -5142,16 +5142,19 @@ fn lower_unit_type_definition(
             SyntaxKind::UnitName,
         )
     })?;
-    let unit_name = first_identifier_text(&name_node).ok_or_else(|| {
-        LoweringDiagnostic::new(
-            LoweringDiagnosticSeverity::Error,
-            "単位名の識別子が取得できません",
-            context.span_for(&name_node),
-            name_node.kind(),
-            first_identifier_text(&name_node),
-            collect_annotation_texts(&name_node),
-        )
-    })?;
+    let unit_name = context
+        .text_for_node(&name_node)
+        .and_then(|text| if text.is_empty() { None } else { Some(text) })
+        .ok_or_else(|| {
+            LoweringDiagnostic::new(
+                LoweringDiagnosticSeverity::Error,
+                "単位名のテキストが取得できません",
+                context.span_for(&name_node),
+                name_node.kind(),
+                None,
+                collect_annotation_texts(&name_node),
+            )
+        })?;
 
     let default_marker_node = child_node(&header, SyntaxKind::UnitDefaultMarker);
     let mut symbol_span = context.span_for(&name_node);

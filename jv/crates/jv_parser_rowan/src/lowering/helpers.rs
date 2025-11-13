@@ -131,4 +131,18 @@ impl<'a> LoweringContext<'a> {
         let tokens = self.tokens_for(node);
         merged_span(&tokens)
     }
+
+    /// ノードを構成するトークンの文字列結合を返す。
+    pub fn text_for_node(&self, node: &JvSyntaxNode) -> Option<String> {
+        let tokens = self.tokens_for(node);
+        if tokens.is_empty() {
+            return None;
+        }
+
+        let mut buffer = String::new();
+        for token in tokens {
+            buffer.push_str(&token.lexeme);
+        }
+        Some(buffer)
+    }
 }

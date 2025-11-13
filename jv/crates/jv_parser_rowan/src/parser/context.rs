@@ -982,9 +982,7 @@ impl<'tokens> ParserContext<'tokens> {
                     break;
                 }
                 if kind == TokenKind::Whitespace {
-                    if let Some((_, next_kind)) =
-                        self.peek_significant_kind_from(self.cursor + 1)
-                    {
+                    if let Some((_, next_kind)) = self.peek_significant_kind_from(self.cursor + 1) {
                         if matches!(next_kind, TokenKind::Identifier | TokenKind::LeftBracket) {
                             break;
                         }

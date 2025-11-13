@@ -116,8 +116,7 @@ impl UnitTypeDefinitionStrategy {
         ctx.consume_inline_whitespace();
 
         ctx.start_node(SyntaxKind::UnitName);
-        if !ctx.bump_expected(TokenKind::Identifier, "単位名を識別子で指定してください")
-        {
+        if !self.consume_unit_name(ctx) {
             ctx.finish_node(); // UnitName
             ctx.finish_node(); // UnitHeader
             return false;
@@ -308,5 +307,24 @@ impl UnitTypeDefinitionStrategy {
 
         ctx.finish_node();
         block_ok
+    }
+
+    fn consume_unit_name(&self, ctx: &mut ParserContext<'_>) -> bool {
+        ctx.consume_trivia();
+        match ctx.peek_significant_kind() {
+            Some(TokenKind::Identifier) | Some(TokenKind::Unknown) => {
+                ctx.bump_raw();
+                true
+            }
+            _ => {
+                let start = ctx.position();
+                ctx.report_error(
+                    "単位名を識別子または記号で指定してください",
+                    start,
+                    start.saturating_add(1),
+                );
+                false
+            }
+        }
     }
 }
