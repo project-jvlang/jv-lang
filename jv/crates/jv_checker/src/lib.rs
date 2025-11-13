@@ -20,8 +20,11 @@ pub use jv_inference::ParallelInferenceConfig;
 pub use regex::RegexAnalysis;
 
 use crate::imports::ResolvedImport;
+use crate::semantics::SemanticContext;
+use crate::semantics::units::UnitRegistry;
 use binding::{BindingResolution, BindingUsageSummary, LateInitManifest, resolve_bindings};
 use inference::conversions::{AppliedConversion, ConversionKind, HelperSpec, NullableGuard};
+use inference::unit_integration;
 use jv_ast::{Program, Span};
 use jv_build::metadata::SymbolIndex;
 use null_safety::{JavaLoweringHint, NullSafetyCoordinator};
@@ -40,6 +43,7 @@ use jv_inference::types::{
     NullabilityFlag, TypeId as FactsTypeId, TypeKind as FactsTypeKind,
     TypeVariant as FactsTypeVariant,
 };
+use jv_ir::unit::UnitRegistrySummary;
 use jv_pm::JavaTarget;
 
 #[derive(Error, Debug)]
@@ -388,6 +392,7 @@ pub struct TypeChecker {
     normalized_program: Option<Program>,
     binding_usage: BindingUsageSummary,
     late_init_manifest: LateInitManifest,
+    semantic_context: SemanticContext,
 }
 
 impl TypeChecker {
@@ -411,6 +416,7 @@ impl TypeChecker {
             normalized_program: None,
             binding_usage: BindingUsageSummary::default(),
             late_init_manifest: LateInitManifest::default(),
+            semantic_context: SemanticContext::new(),
         }
     }
 
@@ -453,6 +459,16 @@ impl TypeChecker {
         &self.late_init_manifest
     }
 
+    pub fn unit_registry_summary(&self) -> Option<UnitRegistrySummary> {
+        self.semantic_context
+            .unit_registry()
+            .map(|registry| registry.to_summary())
+    }
+
+    pub fn release_unit_registry(&mut self) -> Option<Arc<UnitRegistry>> {
+        self.semantic_context.release_unit_registry()
+    }
+
     pub fn set_imports(&mut self, symbol_index: Arc<SymbolIndex>, imports: Vec<ResolvedImport>) {
         self.engine.set_imports(symbol_index, imports);
     }
@@ -464,6 +480,7 @@ impl TypeChecker {
     pub fn check_program(&mut self, program: &Program) -> Result<(), Vec<CheckError>> {
         self.engine.set_parallel_config(self.parallel_config);
         self.null_safety_hints.clear();
+        self.semantic_context.release_unit_registry();
 
         let binding_resolution = resolve_bindings(program);
         let BindingResolution {
@@ -477,10 +494,27 @@ impl TypeChecker {
         self.normalized_program = Some(normalized);
         self.late_init_manifest = late_init_manifest;
 
+        let mut diagnostics = diagnostics;
         if !diagnostics.is_empty() {
             self.snapshot = None;
             self.merged_facts = None;
             return Err(diagnostics);
+        }
+
+        let normalized_program = self
+            .normalized_program
+            .as_ref()
+            .expect("normalized program should be available");
+        let unit_result = unit_integration::build_registry(normalized_program);
+        diagnostics.extend(unit_result.diagnostics);
+        if unit_result.had_error {
+            self.snapshot = None;
+            self.merged_facts = None;
+            return Err(diagnostics);
+        }
+
+        if let Some(registry) = unit_result.registry {
+            self.semantic_context.attach_unit_registry(registry);
         }
 
         let inference_result = {

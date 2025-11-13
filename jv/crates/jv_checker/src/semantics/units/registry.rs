@@ -1,6 +1,10 @@
 use super::{BaseTypeCapability, UnitCategorySpec, UnitConversionKind, UnitSymbolRaw};
 use crate::inference::types::TypeKind;
 use jv_ast::{Expression, Span, UnitRelation};
+use jv_ir::unit::{
+    ReverseMode as IrReverseMode, UnitCategorySummary, UnitConversionRef as IrConversionRef,
+    UnitConversionSummary, UnitEdgeSummary, UnitRegistrySummary, UnitSummary, UnitSymbolSummary,
+};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -68,6 +72,26 @@ impl ConversionLambdaIr {
             _ => None,
         }
     }
+}
+
+fn summarize_symbol(symbol: &UnitSymbolRaw) -> UnitSymbolSummary {
+    UnitSymbolSummary {
+        name: symbol.name.clone(),
+        is_bracketed: symbol.is_bracketed,
+        has_default_marker: symbol.has_default_marker,
+    }
+}
+
+fn map_reverse_mode(mode: ReverseMode) -> IrReverseMode {
+    match mode {
+        ReverseMode::Provided => IrReverseMode::Provided,
+        ReverseMode::Auto { scale, offset } => IrReverseMode::Auto { scale, offset },
+        ReverseMode::Unavailable => IrReverseMode::Unavailable,
+    }
+}
+
+fn map_conversion_ref(reference: UnitConversionRef) -> IrConversionRef {
+    IrConversionRef(reference.0)
 }
 
 /// 元となったAST参照。
@@ -208,8 +232,8 @@ impl UnitRegistry {
                     id: entry.id,
                     name: entry.name.clone(),
                     default_unit: entry.default_unit,
-                    base_type: entry.base_type.clone(),
-                    base_capability: entry.base_capability,
+                    base_type: entry.base_type.describe(),
+                    base_capability: entry.base_capability.to_string(),
                 })
                 .collect(),
             units: self
@@ -218,7 +242,7 @@ impl UnitRegistry {
                 .map(|entry| UnitSummary {
                     id: entry.id,
                     category_id: entry.category_id,
-                    symbol: entry.symbol.clone(),
+                    symbol: summarize_symbol(&entry.symbol),
                     is_default: entry.is_default,
                 })
                 .collect(),
@@ -231,8 +255,8 @@ impl UnitRegistry {
                     to: edge.to,
                     relation: edge.relation,
                     rate: edge.rate,
-                    reverse_mode: edge.reverse_mode,
-                    conversion_ref: edge.conversion_ref,
+                    reverse_mode: map_reverse_mode(edge.reverse_mode),
+                    conversion_ref: edge.conversion_ref.map(map_conversion_ref),
                 })
                 .collect(),
             conversions: self
@@ -246,47 +270,4 @@ impl UnitRegistry {
                 .collect(),
         }
     }
-}
-
-/// IR へ搬送するためのサマリ構造。
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct UnitRegistrySummary {
-    pub categories: Vec<UnitCategorySummary>,
-    pub units: Vec<UnitSummary>,
-    pub edges: Vec<UnitEdgeSummary>,
-    pub conversions: Vec<UnitConversionSummary>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct UnitCategorySummary {
-    pub id: UnitCategoryId,
-    pub name: String,
-    pub default_unit: Option<UnitId>,
-    pub base_type: TypeKind,
-    pub base_capability: BaseTypeCapability,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct UnitSummary {
-    pub id: UnitId,
-    pub category_id: UnitCategoryId,
-    pub symbol: UnitSymbolRaw,
-    pub is_default: bool,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct UnitEdgeSummary {
-    pub id: UnitEdgeId,
-    pub from: UnitId,
-    pub to: UnitId,
-    pub relation: UnitRelation,
-    pub rate: Option<Decimal>,
-    pub reverse_mode: ReverseMode,
-    pub conversion_ref: Option<UnitConversionRef>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct UnitConversionSummary {
-    pub edge: UnitEdgeId,
-    pub index: u32,
 }

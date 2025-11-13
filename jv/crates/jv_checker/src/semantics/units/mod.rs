@@ -12,10 +12,10 @@ pub mod validator;
 
 pub use collector::UnitCatalogCollector;
 pub use graph::UnitDependencyGraphBuilder;
+pub use jv_ir::unit::UnitRegistrySummary;
 pub use registry::{
     ConversionLambdaIr, ReverseMode, UnitCategoryEntry, UnitCategoryId, UnitConversionAstRef,
     UnitConversionBody, UnitConversionRef, UnitEdge, UnitEdgeId, UnitEntry, UnitId, UnitRegistry,
-    UnitRegistrySummary,
 };
 pub use validator::{
     BaseTypeCapability, DefaultUnit, NumericCapability, UnitCategoryKind, UnitCategorySpec,

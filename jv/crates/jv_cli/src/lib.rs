@@ -799,6 +799,8 @@ pub mod pipeline {
         };
 
         let binding_usage = type_checker.binding_usage().clone();
+        let unit_registry_summary = type_checker.unit_registry_summary();
+        let _ = type_checker.release_unit_registry();
 
         let mut type_facts_snapshot = type_facts_snapshot;
         let requires_probe = type_facts_snapshot
@@ -879,6 +881,7 @@ pub mod pipeline {
         let mut ir_program = if options.perf {
             let pools = TransformPools::with_chunk_capacity(256 * 1024);
             let mut context = TransformContext::with_pools(pools);
+            context.set_unit_registry_summary(unit_registry_summary.clone());
             if let Some(facts) = type_facts_snapshot.as_ref() {
                 preload_type_facts_into_context(&mut context, facts);
             }
@@ -918,6 +921,7 @@ pub mod pipeline {
             }
         } else {
             let mut context = TransformContext::new();
+            context.set_unit_registry_summary(unit_registry_summary.clone());
             if let Some(facts) = type_facts_snapshot.as_ref() {
                 preload_type_facts_into_context(&mut context, facts);
             }
@@ -962,6 +966,7 @@ pub mod pipeline {
         codegen_config.script_main_class = script_main_class.clone();
 
         let mut code_generator = JavaCodeGenerator::with_config(codegen_config);
+        code_generator.set_unit_registry_summary(unit_registry_summary.clone());
         code_generator.set_symbol_index(Some(Arc::clone(&symbol_index)));
         let java_unit = code_generator
             .generate_compilation_unit(&ir_program)

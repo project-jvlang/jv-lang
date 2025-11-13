@@ -6,6 +6,7 @@ use crate::types::{
     DataFormat, IrExpression, IrImport, IrImportDetail, IrResolvedMethodTarget, IrStatement,
     JavaType, MethodOverload, PrimitiveReturnMetadata, SampleMode, UtilityClass,
 };
+use crate::unit::UnitRegistrySummary;
 use jv_ast::{CallArgumentStyle, Span};
 use jv_support::arena::{
     PoolMetrics as TransformPoolMetrics, PoolSessionMetrics as TransformPoolSessionMetrics,
@@ -53,6 +54,8 @@ pub struct TransformContext {
     planned_imports: Vec<IrImport>,
     /// Alias lookup for resolved import entries
     import_aliases: HashMap<String, JavaType>,
+    /// Optional unit registry snapshot shared with transformations
+    unit_registry_summary: Option<UnitRegistrySummary>,
 }
 
 /// Hint describing a function signature sourced from TypeFacts prior to lowering.
@@ -101,6 +104,7 @@ impl TransformContext {
             when_strategies: Vec::new(),
             planned_imports: Vec::new(),
             import_aliases: HashMap::new(),
+            unit_registry_summary: None,
         }
     }
 
@@ -132,6 +136,14 @@ impl TransformContext {
 
     pub fn register_function_signature(&mut self, name: String, params: Vec<JavaType>) {
         self.function_signatures.insert(name, params);
+    }
+
+    pub fn set_unit_registry_summary(&mut self, summary: Option<UnitRegistrySummary>) {
+        self.unit_registry_summary = summary;
+    }
+
+    pub fn unit_registry_summary(&self) -> Option<&UnitRegistrySummary> {
+        self.unit_registry_summary.as_ref()
     }
 
     /// Registers a preloaded function signature hint sourced from upstream analysis.
@@ -1038,6 +1050,7 @@ impl Clone for TransformContext {
             when_strategies: self.when_strategies.clone(),
             planned_imports: self.planned_imports.clone(),
             import_aliases: self.import_aliases.clone(),
+            unit_registry_summary: self.unit_registry_summary.clone(),
         }
     }
 }

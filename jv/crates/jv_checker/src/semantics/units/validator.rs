@@ -1,7 +1,7 @@
 use super::{RawUnitCatalog, UnitDefinitionRaw, UnitMemberRaw};
 use crate::CheckError;
 use crate::diagnostics;
-use crate::diagnostics::unit_semantics;
+use crate::diagnostics::{DiagnosticSeverity, unit_semantics};
 use crate::inference::type_factory::TypeFactory;
 use crate::inference::types::{TypeError, TypeKind};
 use jv_ast::{Span, TypeAnnotation};
@@ -84,6 +84,7 @@ pub struct UnitDefinitionValidated {
 pub struct ValidatedCatalog {
     pub definitions: Vec<UnitDefinitionValidated>,
     pub defaults: HashMap<String, DefaultUnit>,
+    pub had_error: bool,
 }
 
 /// カテゴリ検証ロジック。
@@ -98,24 +99,25 @@ impl UnitSchemaValidator {
         let mut validated = Vec::new();
         let mut defaults = HashMap::new();
         let mut category_records: HashMap<String, CategoryRecord> = HashMap::new();
+        let mut had_error = false;
 
         for definition in catalog.definitions {
             let category_name = definition.category.clone();
             let definition_span = definition.span.clone();
 
             let Some(spec) = lookup_category(&category_name) else {
-                emit_unknown_category(&category_name, &definition_span, diagnostics);
+                had_error |= emit_unknown_category(&category_name, &definition_span, diagnostics);
                 continue;
             };
 
             if spec.kind == UnitCategoryKind::Custom {
-                emit_custom_warning(&category_name, &definition_span, diagnostics);
+                had_error |= emit_custom_warning(&category_name, &definition_span, diagnostics);
             }
 
             let type_kind = match resolve_type_annotation(&definition.base_type) {
                 Ok(kind) => kind,
                 Err(error) => {
-                    emit_base_type_error(
+                    had_error |= emit_base_type_error(
                         describe_type_annotation(&definition.base_type),
                         error.message(),
                         &definition_span,
@@ -128,7 +130,7 @@ impl UnitSchemaValidator {
             let capability = match capability_from_type(&type_kind) {
                 Some(capability) => capability,
                 None => {
-                    emit_base_type_error(
+                    had_error |= emit_base_type_error(
                         type_kind.describe(),
                         "指定された型は単位カテゴリでサポートされる能力に分類できません。"
                             .to_string(),
@@ -140,7 +142,7 @@ impl UnitSchemaValidator {
             };
 
             if !spec.allows(capability) {
-                emit_base_type_error(
+                had_error |= emit_base_type_error(
                     type_kind.describe(),
                     format!(
                         "カテゴリ `{}` では {} を基底型として使用できません。",
@@ -161,7 +163,8 @@ impl UnitSchemaValidator {
 
             for marker in markers {
                 if let Some(existing) = &record.default_marker {
-                    emit_duplicate_default(&category_name, &marker, existing, diagnostics);
+                    had_error |=
+                        emit_duplicate_default(&category_name, &marker, existing, diagnostics);
                     continue;
                 }
 
@@ -181,13 +184,15 @@ impl UnitSchemaValidator {
 
         for record in category_records.values() {
             if record.default_marker.is_none() && record.spec.requires_default_marker {
-                emit_missing_default(record.spec.name, &record.first_span, diagnostics);
+                had_error |=
+                    emit_missing_default(record.spec.name, &record.first_span, diagnostics);
             }
         }
 
         ValidatedCatalog {
             definitions: validated,
             defaults,
+            had_error,
         }
     }
 }
@@ -363,7 +368,7 @@ fn collect_default_markers(definition: &UnitDefinitionRaw) -> Vec<DefaultUnit> {
     markers
 }
 
-fn emit_unknown_category(category: &str, span: &Span, diagnostics: &mut Vec<CheckError>) {
+fn emit_unknown_category(category: &str, span: &Span, diagnostics: &mut Vec<CheckError>) -> bool {
     let descriptor =
         unit_semantics::descriptor("JV_UNIT_SEM_001").expect("JV_UNIT_SEM_001 must be registered");
     emit_validation_message(
@@ -371,10 +376,10 @@ fn emit_unknown_category(category: &str, span: &Span, diagnostics: &mut Vec<Chec
         format!("`{category}` は許可された単位カテゴリではありません。"),
         span,
         diagnostics,
-    );
+    )
 }
 
-fn emit_custom_warning(category: &str, span: &Span, diagnostics: &mut Vec<CheckError>) {
+fn emit_custom_warning(category: &str, span: &Span, diagnostics: &mut Vec<CheckError>) -> bool {
     let descriptor =
         unit_semantics::descriptor("JV_UNIT_SEM_005").expect("JV_UNIT_SEM_005 must be registered");
     emit_validation_message(
@@ -384,7 +389,7 @@ fn emit_custom_warning(category: &str, span: &Span, diagnostics: &mut Vec<CheckE
         ),
         span,
         diagnostics,
-    );
+    )
 }
 
 fn emit_base_type_error(
@@ -392,7 +397,7 @@ fn emit_base_type_error(
     reason: String,
     span: &Span,
     diagnostics: &mut Vec<CheckError>,
-) {
+) -> bool {
     let descriptor =
         unit_semantics::descriptor("JV_UNIT_SEM_002").expect("JV_UNIT_SEM_002 must be registered");
     emit_validation_message(
@@ -400,7 +405,7 @@ fn emit_base_type_error(
         format!("基底型 `{type_label}` が無効です。{reason}"),
         span,
         diagnostics,
-    );
+    )
 }
 
 fn emit_duplicate_default(
@@ -408,7 +413,7 @@ fn emit_duplicate_default(
     latest: &DefaultUnit,
     previous: &DefaultUnit,
     diagnostics: &mut Vec<CheckError>,
-) {
+) -> bool {
     let descriptor =
         unit_semantics::descriptor("JV_UNIT_SEM_010").expect("JV_UNIT_SEM_010 must be registered");
     emit_validation_message(
@@ -419,10 +424,10 @@ fn emit_duplicate_default(
         ),
         &latest.span,
         diagnostics,
-    );
+    )
 }
 
-fn emit_missing_default(category: &str, span: &Span, diagnostics: &mut Vec<CheckError>) {
+fn emit_missing_default(category: &str, span: &Span, diagnostics: &mut Vec<CheckError>) -> bool {
     let descriptor =
         unit_semantics::descriptor("JV_UNIT_SEM_011").expect("JV_UNIT_SEM_011 must be registered");
     emit_validation_message(
@@ -430,7 +435,7 @@ fn emit_missing_default(category: &str, span: &Span, diagnostics: &mut Vec<Check
         format!("カテゴリ `{category}` には `!` マーカー付きの単位が必要です。"),
         span,
         diagnostics,
-    );
+    )
 }
 
 fn emit_validation_message(
@@ -438,7 +443,7 @@ fn emit_validation_message(
     detail: String,
     span: &Span,
     diagnostics: &mut Vec<CheckError>,
-) {
+) -> bool {
     let mut lines = vec![format!("{}: {}", descriptor.code, descriptor.title)];
     if !detail.is_empty() {
         lines.push(detail);
@@ -451,6 +456,7 @@ fn emit_validation_message(
         message: lines.join("\n"),
         span: Some(span.clone()),
     });
+    matches!(descriptor.severity, DiagnosticSeverity::Error)
 }
 
 fn describe_type_annotation(annotation: &TypeAnnotation) -> String {

@@ -29,6 +29,9 @@ impl UnitDependencyGraphBuilder {
         catalog: ValidatedCatalog,
         diagnostics: &mut Vec<CheckError>,
     ) -> Option<Arc<UnitRegistry>> {
+        if catalog.had_error {
+            return None;
+        }
         let mut builder = RegistryBuilder::new();
         builder.register_categories(&catalog.definitions);
         builder.register_units(&catalog.definitions);

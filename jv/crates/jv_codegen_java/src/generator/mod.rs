@@ -11,7 +11,7 @@ use jv_ir::{
     IrNumericRangeLoop, IrParameter, IrProgram, IrRecordComponent, IrResource, IrSampleDeclaration,
     IrStatement, IrSwitchCase, IrTypeParameter, IrVariance, IrVisibility, JavaType, MethodOverload,
     NullableGuard, NullableGuardReason, SequencePipeline, SequenceSource, SequenceStage,
-    SequenceTerminalKind, UtilityClass, VirtualThreadOp,
+    SequenceTerminalKind, UtilityClass, VirtualThreadOp, unit::UnitRegistrySummary,
 };
 use jv_mapper::{
     JavaPosition, JavaSpan, MappingCategory, MappingError, SourceMap, SourceMapBuilder,
@@ -47,6 +47,7 @@ pub struct JavaCodeGenerator {
     current_return_type: Option<JavaType>,
     mutable_captures: HashSet<String>,
     record_components: HashMap<String, HashSet<String>>,
+    unit_registry_summary: Option<UnitRegistrySummary>,
 }
 
 impl JavaCodeGenerator {
@@ -75,11 +76,20 @@ impl JavaCodeGenerator {
             current_return_type: None,
             mutable_captures: HashSet::new(),
             record_components: HashMap::new(),
+            unit_registry_summary: None,
         }
     }
 
     pub fn set_symbol_index(&mut self, index: Option<Arc<SymbolIndex>>) {
         self.symbol_index = index;
+    }
+
+    pub fn set_unit_registry_summary(&mut self, summary: Option<UnitRegistrySummary>) {
+        self.unit_registry_summary = summary;
+    }
+
+    pub fn unit_registry_summary(&self) -> Option<&UnitRegistrySummary> {
+        self.unit_registry_summary.as_ref()
     }
 
     pub fn generate_compilation_unit(
