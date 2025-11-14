@@ -6,7 +6,10 @@ use crate::repository::config::AuthType;
 
 #[derive(Parser, Debug)]
 #[command(name = "jvpm")]
-#[command(about = "jv package manager helper", long_about = None)]
+#[command(
+    about = "jv package manager helper",
+    long_about = "jvpm runs in Maven wrapper mode: it keeps pom.xml, settings.xml, and jv.lock aligned while preventing jv-only commands, and it accepts --strategy for pubgrub/breadth-first/maven-compat resolver runs."
+)]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Commands,
@@ -29,6 +32,30 @@ pub enum Commands {
     Maven(Vec<OsString>),
 }
 
+/// Resolver algorithm selection exposed to wrapper and native commands.
+#[derive(ValueEnum, Clone, Copy, Debug)]
+pub enum ResolverAlgorithm {
+    /// PubGrub (default) resolver.
+    #[value(name = "pubgrub")]
+    PubGrub,
+    /// Breadth-first resolution strategy.
+    #[value(name = "breadth-first")]
+    BreadthFirst,
+    /// Maven-compatible resolution path.
+    #[value(name = "maven-compat", alias = "maven")]
+    MavenCompat,
+}
+
+impl ResolverAlgorithm {
+    pub fn strategy_name(self) -> &'static str {
+        match self {
+            ResolverAlgorithm::PubGrub => "pubgrub",
+            ResolverAlgorithm::BreadthFirst => "breadth-first",
+            ResolverAlgorithm::MavenCompat => "maven-compat",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Args)]
 pub struct AddArgs {
     /// 追加する依存関係（group:artifact[:version] または group:artifact@version 形式）
@@ -37,6 +64,9 @@ pub struct AddArgs {
     /// 非対話モード（候補のみ表示して終了）
     #[arg(long = "non-interactive")]
     pub non_interactive: bool,
+    /// 使用する依存解決アルゴリズム（wrapperモードでも有効）
+    #[arg(long = "strategy", value_enum)]
+    pub strategy: Option<ResolverAlgorithm>,
 }
 
 #[derive(Debug, Clone, Args)]
@@ -47,6 +77,9 @@ pub struct RemoveArgs {
     /// 非対話モード（候補のみ表示して終了）
     #[arg(long = "non-interactive")]
     pub non_interactive: bool,
+    /// 使用する依存解決アルゴリズム（wrapperモードでも有効）
+    #[arg(long = "strategy", value_enum)]
+    pub strategy: Option<ResolverAlgorithm>,
 }
 
 #[derive(Subcommand, Debug)]

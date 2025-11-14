@@ -2,7 +2,6 @@ use dirs;
 use std::{
     env, fs,
     io::{self, Write},
-    path::Path,
     sync::Arc,
     time::Duration,
 };
@@ -28,17 +27,11 @@ use crate::{
 };
 
 use super::{
-    context::WrapperContext, error::WrapperError, integration::WrapperIntegrationStrategy,
+    context::WrapperContext,
+    error::WrapperError,
+    integration::WrapperIntegrationStrategy,
+    sync::{self, WrapperUpdateSummary},
 };
-
-/// Summary of files touched by wrapper operations.
-pub struct WrapperUpdateSummary {
-    pub added: Vec<MavenCoordinates>,
-    pub removed: Vec<MavenCoordinates>,
-    pub pom_updated: bool,
-    pub settings_updated: bool,
-    pub lockfile_updated: bool,
-}
 
 /// Orchestrates Maven wrapper add/remove flow.
 pub struct WrapperPipeline {
@@ -48,10 +41,14 @@ pub struct WrapperPipeline {
     cache: Arc<DependencyCache>,
     dispatcher: ResolverDispatcher,
     integration_dispatcher: MavenIntegrationDispatcher,
+    resolver_options: ResolverOptions,
 }
 
 impl WrapperPipeline {
-    pub fn new(context: WrapperContext) -> Result<Self, WrapperError> {
+    pub fn new(
+        context: WrapperContext,
+        resolver_options: ResolverOptions,
+    ) -> Result<Self, WrapperError> {
         let runtime = RuntimeBuilder::new_multi_thread()
             .enable_all()
             .build()
@@ -88,6 +85,7 @@ impl WrapperPipeline {
             cache,
             dispatcher,
             integration_dispatcher,
+            resolver_options,
         })
     }
 
@@ -233,7 +231,7 @@ impl WrapperPipeline {
         })?;
 
         let lockfile_updated =
-            write_bytes_if_changed(&self.context.lockfile_path, lockfile_content.as_bytes())?;
+            sync::write_lockfile(&self.context.lockfile_path, lockfile_content.as_bytes())?;
 
         let (pom_updated, settings_updated) =
             self.generate_maven_artifacts(manifest, &resolved, &lockfile)?;
@@ -249,9 +247,21 @@ impl WrapperPipeline {
 
     fn resolve_manifest(&self, manifest: &Manifest) -> Result<ResolvedDependencies, WrapperError> {
         if manifest.package.dependencies.is_empty() {
+            let strategy_name = self.requested_strategy_name();
+            let (strategy_label, algorithm) = self
+                .dispatcher
+                .strategy_info(strategy_name)
+                .map(|info| (info.name.clone(), info.algorithm))
+                .unwrap_or_else(|| {
+                    (
+                        self.dispatcher.default_strategy().to_string(),
+                        ResolverAlgorithmKind::PubGrub,
+                    )
+                });
+
             return Ok(ResolvedDependencies {
-                strategy: self.dispatcher.default_strategy().to_string(),
-                algorithm: ResolverAlgorithmKind::PubGrub,
+                strategy: strategy_label,
+                algorithm,
                 dependencies: Vec::new(),
                 diagnostics: Vec::new(),
                 stats: crate::resolver::ResolutionStats {
@@ -263,10 +273,17 @@ impl WrapperPipeline {
         }
 
         self.dispatcher
-            .resolve_manifest(manifest, ResolverOptions::default())
+            .resolve_manifest(manifest, self.resolver_options.clone())
             .map_err(|error| {
                 WrapperError::OperationFailed(format!("依存関係の解決に失敗しました: {error}"))
             })
+    }
+
+    fn requested_strategy_name(&self) -> &str {
+        self.resolver_options
+            .strategy
+            .as_deref()
+            .unwrap_or_else(|| self.dispatcher.default_strategy())
     }
 
     fn generate_maven_artifacts(
@@ -287,7 +304,7 @@ impl WrapperPipeline {
         let mirrors = collect_effective_mirrors(manifest)?;
 
         let config = MavenIntegrationConfig {
-            manifest,
+            manifest: Some(manifest),
             resolved,
             lockfile: Some(lockfile),
             repositories: &repositories,
@@ -303,21 +320,7 @@ impl WrapperPipeline {
                 WrapperError::OperationFailed(format!("pom/xml の生成に失敗しました: {error}"))
             })?;
 
-        let mut pom_updated = false;
-        let mut settings_updated = false;
-
-        for (relative, contents) in files.files {
-            let target = self.context.project_root.join(&relative);
-            let updated = write_bytes_if_changed(&target, contents.as_bytes())?;
-            if relative.file_name().and_then(|name| name.to_str()) == Some("pom.xml") {
-                pom_updated |= updated;
-            }
-            if relative.file_name().and_then(|name| name.to_str()) == Some("settings.xml") {
-                settings_updated |= updated;
-            }
-        }
-
-        Ok((pom_updated, settings_updated))
+        sync::sync_maven_artifacts(&self.context.project_root, &files)
     }
 
     fn pick_suggestion(
@@ -353,38 +356,6 @@ impl WrapperPipeline {
             .map_err(|error| WrapperError::OperationFailed(error.to_string()))?;
         Ok(suggestions.remove(index))
     }
-}
-
-fn write_bytes_if_changed(path: &Path, contents: &[u8]) -> Result<bool, WrapperError> {
-    if path.exists() {
-        let existing = fs::read(path).map_err(|error| {
-            WrapperError::OperationFailed(format!(
-                "{} の読み込みに失敗しました: {error}",
-                path.display()
-            ))
-        })?;
-        if existing.as_slice() == contents {
-            return Ok(false);
-        }
-    }
-
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|error| {
-            WrapperError::OperationFailed(format!(
-                "{} の作成に失敗しました: {error}",
-                parent.display()
-            ))
-        })?;
-    }
-
-    fs::write(path, contents).map_err(|error| {
-        WrapperError::OperationFailed(format!(
-            "{} への書き込みに失敗しました: {error}",
-            path.display()
-        ))
-    })?;
-
-    Ok(true)
 }
 
 fn collect_maven_repositories(manager: &RepositoryManager) -> Vec<MavenRepositoryConfig> {

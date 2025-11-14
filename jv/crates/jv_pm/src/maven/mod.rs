@@ -73,7 +73,7 @@ impl MavenMirrorConfig {
 /// Maven統合に必要な入力情報。
 #[derive(Debug)]
 pub struct MavenIntegrationConfig<'a> {
-    pub manifest: &'a Manifest,
+    pub manifest: Option<&'a Manifest>,
     pub resolved: &'a ResolvedDependencies,
     pub lockfile: Option<&'a Lockfile>,
     pub repositories: &'a [MavenRepositoryConfig],
@@ -201,6 +201,8 @@ pub enum MavenIntegrationError {
     Pom(#[from] PomGenerationError),
     #[error("settings.xml の生成に失敗しました: {0}")]
     Settings(#[from] SettingsGenerationError),
+    #[error("manifest 情報が不足しています")]
+    MissingManifest,
 }
 
 struct Maven3IntegrationStrategy;
@@ -222,7 +224,11 @@ impl MavenIntegrationStrategy for Maven3IntegrationStrategy {
         &self,
         config: &MavenIntegrationConfig<'_>,
     ) -> Result<MavenIntegrationFiles, MavenIntegrationError> {
-        let pom = PomGenerator::new(config.manifest, config.resolved)
+        let manifest = config
+            .manifest
+            .ok_or(MavenIntegrationError::MissingManifest)?;
+
+        let pom = PomGenerator::new(manifest, config.resolved)
             .with_lockfile(config.lockfile)
             .with_repositories(config.repositories)
             .generate()?;
@@ -397,7 +403,7 @@ mod tests {
         let dispatcher = MavenIntegrationDispatcher::new();
         let files = dispatcher
             .generate_default(&MavenIntegrationConfig {
-                manifest: &manifest,
+                manifest: Some(&manifest),
                 resolved: &resolved,
                 lockfile: Some(&lockfile),
                 repositories: &repositories,

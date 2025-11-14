@@ -14,12 +14,11 @@ use clap::Parser;
 use is_terminal::IsTerminal;
 use jv_pm::cli::{
     AddArgs, Cli, Commands, RemoveArgs, RepoAuthKind, RepoCommand, RepoOrigin, RepoScope,
-    ResolverCommand,
+    ResolverAlgorithm, ResolverCommand,
 };
 use jv_pm::wrapper::{
-    CliMode, WrapperCommandFilter,
-    context::WrapperContext,
-    pipeline::{WrapperPipeline, WrapperUpdateSummary},
+    CliMode, WrapperCommandFilter, context::WrapperContext, pipeline::WrapperPipeline,
+    sync::WrapperUpdateSummary,
 };
 use jv_pm::{
     AuthConfig, AuthType, DependencyCache, ExportError, ExportRequest, FilterConfig,
@@ -191,6 +190,14 @@ fn handle_maven_passthrough(args: Vec<OsString>) -> Result<()> {
     ))
 }
 
+fn resolver_options_from_strategy(strategy: Option<ResolverAlgorithm>) -> ResolverOptions {
+    let mut options = ResolverOptions::default();
+    if let Some(strategy) = strategy {
+        options = options.with_strategy(strategy.strategy_name());
+    }
+    options
+}
+
 fn handle_add_command(args: AddArgs, mode: CliMode) -> Result<()> {
     if mode.is_wrapper() {
         return handle_wrapper_add_command(&args);
@@ -200,7 +207,9 @@ fn handle_add_command(args: AddArgs, mode: CliMode) -> Result<()> {
 
 fn handle_wrapper_add_command(args: &AddArgs) -> Result<()> {
     let context = WrapperContext::detect().map_err(|error| anyhow!(error))?;
-    let mut pipeline = WrapperPipeline::new(context).map_err(|error| anyhow!(error))?;
+    let resolver_options = resolver_options_from_strategy(args.strategy);
+    let mut pipeline =
+        WrapperPipeline::new(context, resolver_options).map_err(|error| anyhow!(error))?;
     let summary = pipeline.add(args).map_err(|error| anyhow!(error))?;
 
     print_wrapper_add_summary(&summary);
@@ -208,6 +217,8 @@ fn handle_wrapper_add_command(args: &AddArgs) -> Result<()> {
 }
 
 fn handle_native_add_command(args: AddArgs) -> Result<()> {
+    let resolver_options = resolver_options_from_strategy(args.strategy);
+
     let runtime = RuntimeBuilder::new_multi_thread()
         .enable_all()
         .build()
@@ -290,8 +301,13 @@ fn handle_native_add_command(args: AddArgs) -> Result<()> {
         additions.push((coordinate, version));
     }
 
-    finalize_project_state(&manifest, &manifest_path, &project_root)
-        .context("依存関係追加後のプロジェクト更新に失敗しました")?;
+    finalize_project_state(
+        &manifest,
+        &manifest_path,
+        &project_root,
+        resolver_options.clone(),
+    )
+    .context("依存関係追加後のプロジェクト更新に失敗しました")?;
 
     for (coordinate, version) in &additions {
         println!(
@@ -314,7 +330,9 @@ fn handle_remove_command(args: RemoveArgs, mode: CliMode) -> Result<()> {
 
 fn handle_wrapper_remove_command(args: &RemoveArgs) -> Result<()> {
     let context = WrapperContext::detect().map_err(|error| anyhow!(error))?;
-    let mut pipeline = WrapperPipeline::new(context).map_err(|error| anyhow!(error))?;
+    let resolver_options = resolver_options_from_strategy(args.strategy);
+    let mut pipeline =
+        WrapperPipeline::new(context, resolver_options).map_err(|error| anyhow!(error))?;
     let summary = pipeline.remove(args).map_err(|error| anyhow!(error))?;
 
     print_wrapper_remove_summary(&summary);
@@ -322,6 +340,8 @@ fn handle_wrapper_remove_command(args: &RemoveArgs) -> Result<()> {
 }
 
 fn handle_native_remove_command(args: RemoveArgs) -> Result<()> {
+    let resolver_options = resolver_options_from_strategy(args.strategy);
+
     let (mut manifest, manifest_path) = load_manifest_with_path()?;
     let project_root = manifest_path
         .parent()
@@ -370,7 +390,7 @@ fn handle_native_remove_command(args: RemoveArgs) -> Result<()> {
         }
     }
 
-    finalize_project_state(&manifest, &manifest_path, &project_root)
+    finalize_project_state(&manifest, &manifest_path, &project_root, resolver_options)
         .context("依存関係削除後のプロジェクト更新に失敗しました")?;
 
     for (name, _) in &removed {
@@ -684,14 +704,29 @@ fn finalize_project_state(
     manifest: &Manifest,
     manifest_path: &Path,
     project_root: &Path,
+    options: ResolverOptions,
 ) -> Result<()> {
     save_manifest(manifest, manifest_path)?;
 
     let dispatcher = ResolverDispatcher::with_default_strategies();
     let resolved = if manifest.package.dependencies.is_empty() {
+        let requested = options
+            .strategy
+            .as_deref()
+            .unwrap_or_else(|| dispatcher.default_strategy());
+        let (strategy_label, algorithm) = dispatcher
+            .strategy_info(requested)
+            .map(|info| (info.name.clone(), info.algorithm))
+            .unwrap_or_else(|| {
+                (
+                    dispatcher.default_strategy().to_string(),
+                    ResolverAlgorithmKind::PubGrub,
+                )
+            });
+
         ResolvedDependencies {
-            strategy: dispatcher.default_strategy().to_string(),
-            algorithm: ResolverAlgorithmKind::PubGrub,
+            strategy: strategy_label,
+            algorithm,
             dependencies: Vec::new(),
             diagnostics: Vec::new(),
             stats: ResolutionStats {
@@ -702,7 +737,7 @@ fn finalize_project_state(
         }
     } else {
         dispatcher
-            .resolve_manifest(manifest, ResolverOptions::default())
+            .resolve_manifest(manifest, options.clone())
             .context("依存関係の解決に失敗しました")?
     };
 

@@ -26,7 +26,11 @@ impl MavenIntegrationStrategy for WrapperIntegrationStrategy {
         &self,
         config: &MavenIntegrationConfig<'_>,
     ) -> Result<MavenIntegrationFiles, MavenIntegrationError> {
-        let pom = PomGenerator::new(config.manifest, config.resolved)
+        let manifest = config
+            .manifest
+            .ok_or(MavenIntegrationError::MissingManifest)?;
+
+        let pom = PomGenerator::new(manifest, config.resolved)
             .with_lockfile(config.lockfile)
             .with_repositories(config.repositories)
             .generate()?;
