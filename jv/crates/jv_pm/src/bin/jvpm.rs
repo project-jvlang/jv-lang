@@ -16,7 +16,11 @@ use jv_pm::cli::{
     AddArgs, Cli, Commands, RemoveArgs, RepoAuthKind, RepoCommand, RepoOrigin, RepoScope,
     ResolverCommand,
 };
-use jv_pm::wrapper::{CliMode, WrapperCommandFilter};
+use jv_pm::wrapper::{
+    CliMode, WrapperCommandFilter,
+    context::WrapperContext,
+    pipeline::{WrapperPipeline, WrapperUpdateSummary},
+};
 use jv_pm::{
     AuthConfig, AuthType, DependencyCache, ExportError, ExportRequest, FilterConfig,
     JavaProjectExporter, LockfileService, Manifest, MavenCoordinates, MavenMetadata,
@@ -158,8 +162,8 @@ fn real_main() -> Result<()> {
     WrapperCommandFilter::validate(&cli.command, mode).map_err(|err| anyhow!(err))?;
 
     match cli.command {
-        Commands::Add(args) => handle_add_command(args),
-        Commands::Remove(args) => handle_remove_command(args),
+        Commands::Add(args) => handle_add_command(args, mode),
+        Commands::Remove(args) => handle_remove_command(args, mode),
         Commands::Resolver(command) => handle_resolver_command(command),
         Commands::Repo(command) => handle_repo_command(command),
         Commands::Maven(args) => handle_maven_passthrough(args),
@@ -187,7 +191,23 @@ fn handle_maven_passthrough(args: Vec<OsString>) -> Result<()> {
     ))
 }
 
-fn handle_add_command(args: AddArgs) -> Result<()> {
+fn handle_add_command(args: AddArgs, mode: CliMode) -> Result<()> {
+    if mode.is_wrapper() {
+        return handle_wrapper_add_command(&args);
+    }
+    handle_native_add_command(args)
+}
+
+fn handle_wrapper_add_command(args: &AddArgs) -> Result<()> {
+    let context = WrapperContext::detect().map_err(|error| anyhow!(error))?;
+    let mut pipeline = WrapperPipeline::new(context).map_err(|error| anyhow!(error))?;
+    let summary = pipeline.add(args).map_err(|error| anyhow!(error))?;
+
+    print_wrapper_add_summary(&summary);
+    Ok(())
+}
+
+fn handle_native_add_command(args: AddArgs) -> Result<()> {
     let runtime = RuntimeBuilder::new_multi_thread()
         .enable_all()
         .build()
@@ -285,7 +305,23 @@ fn handle_add_command(args: AddArgs) -> Result<()> {
     Ok(())
 }
 
-fn handle_remove_command(args: RemoveArgs) -> Result<()> {
+fn handle_remove_command(args: RemoveArgs, mode: CliMode) -> Result<()> {
+    if mode.is_wrapper() {
+        return handle_wrapper_remove_command(&args);
+    }
+    handle_native_remove_command(args)
+}
+
+fn handle_wrapper_remove_command(args: &RemoveArgs) -> Result<()> {
+    let context = WrapperContext::detect().map_err(|error| anyhow!(error))?;
+    let mut pipeline = WrapperPipeline::new(context).map_err(|error| anyhow!(error))?;
+    let summary = pipeline.remove(args).map_err(|error| anyhow!(error))?;
+
+    print_wrapper_remove_summary(&summary);
+    Ok(())
+}
+
+fn handle_native_remove_command(args: RemoveArgs) -> Result<()> {
     let (mut manifest, manifest_path) = load_manifest_with_path()?;
     let project_root = manifest_path
         .parent()
@@ -343,6 +379,47 @@ fn handle_remove_command(args: RemoveArgs) -> Result<()> {
     println!("更新: jv.toml / jv.lock");
 
     Ok(())
+}
+
+fn print_wrapper_add_summary(summary: &WrapperUpdateSummary) {
+    if summary.added.is_empty() {
+        println!("依存関係の追加に変更はありませんでした。");
+    } else {
+        for coordinate in &summary.added {
+            println!("依存関係 '{}' を追加しました。", coordinate);
+        }
+    }
+    print_wrapper_file_updates(summary);
+}
+
+fn print_wrapper_remove_summary(summary: &WrapperUpdateSummary) {
+    if summary.removed.is_empty() {
+        println!("依存関係の削除に変更はありませんでした。");
+    } else {
+        for coordinate in &summary.removed {
+            println!("依存関係 '{}' を削除しました。", coordinate);
+        }
+    }
+    print_wrapper_file_updates(summary);
+}
+
+fn print_wrapper_file_updates(summary: &WrapperUpdateSummary) {
+    let mut updates = Vec::new();
+    if summary.pom_updated {
+        updates.push("pom.xml");
+    }
+    if summary.settings_updated {
+        updates.push("settings.xml");
+    }
+    if summary.lockfile_updated {
+        updates.push("jv.lock");
+    }
+
+    if updates.is_empty() {
+        println!("更新: ファイルに変更はありませんでした。");
+    } else {
+        println!("更新: {}", updates.join(" / "));
+    }
 }
 
 #[derive(Debug, Clone)]
