@@ -3,11 +3,7 @@
 
 use jv_ast::TypeAnnotation;
 use jv_checker::{
-    PrimitiveType,
-    TypeChecker,
-    TypeInferenceService,
-    TypeKind,
-    inference::type_parser,
+    PrimitiveType, TypeChecker, TypeInferenceService, TypeKind, inference::type_parser,
 };
 use jv_ir::{TupleRecordStrategy, TupleUsageKind};
 use jv_parser_frontend::ParserPipeline;
