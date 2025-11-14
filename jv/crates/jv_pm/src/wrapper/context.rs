@@ -5,9 +5,9 @@ use std::path::{Path, PathBuf};
 
 use crate::maven::settings::{SettingsGenerationRequest, generate_settings_xml};
 use crate::{
-    LoggingConfig, Manifest, MavenMirrorConfig, MavenProjectMetadata, MavenRepositoryConfig,
-    PackageInfo, PomGenerator, ProjectSection, RepositorySection, ResolutionStats,
-    ResolvedDependencies, ResolverAlgorithmKind,
+    Lockfile, LockfileService, LoggingConfig, Manifest, MavenMirrorConfig, MavenProjectMetadata,
+    MavenRepositoryConfig, PackageInfo, PomGenerator, ProjectSection, RepositorySection,
+    ResolutionStats, ResolvedDependencies, ResolverAlgorithmKind,
 };
 
 use super::error::WrapperError;
@@ -18,7 +18,10 @@ pub struct WrapperContext {
     pub project_root: PathBuf,
     pub pom_path: PathBuf,
     pub settings_path: PathBuf,
+    pub lockfile_path: PathBuf,
+    pub local_repository: PathBuf,
     pub template_generated: bool,
+    pub manifest: Manifest,
 }
 
 impl WrapperContext {
@@ -36,6 +39,7 @@ impl WrapperContext {
         let manifest_path = project_root.join("jv.toml");
         let pom_path = project_root.join("pom.xml");
         let settings_path = project_root.join("settings.xml");
+        let lockfile_path = project_root.join("jv.lock");
 
         let manifest_exists = manifest_path.exists();
         let pom_exists = pom_path.exists();
@@ -44,12 +48,26 @@ impl WrapperContext {
             (true, false) => Err(WrapperError::NativeProjectDetected),
             (true, true) => Err(WrapperError::MixedProjectConfiguration),
             (false, true) => {
-                Self::ensure_settings(&project_root, &settings_path)?;
+                let local_repository = Self::ensure_settings(&project_root, &settings_path)?;
+                let manifest = if lockfile_path.exists() {
+                    let lockfile = LockfileService::load(&lockfile_path).map_err(|error| {
+                        WrapperError::OperationFailed(format!(
+                            "jv.lock の読み込みに失敗しました: {error}"
+                        ))
+                    })?;
+                    Self::manifest_from_lockfile(&lockfile, &project_root)
+                } else {
+                    Self::template_manifest(&project_root)
+                };
+
                 Ok(Self {
                     project_root,
                     pom_path,
                     settings_path,
+                    lockfile_path,
+                    local_repository,
                     template_generated: false,
+                    manifest,
                 })
             }
             (false, false) => Self::generate_templates(project_root, pom_path, settings_path),
@@ -71,22 +89,27 @@ impl WrapperContext {
             })?;
         Self::write_text(&pom_path, &pom_xml)?;
 
-        Self::ensure_settings(&project_root, &settings_path)?;
+        let local_repository = Self::ensure_settings(&project_root, &settings_path)?;
+
+        let lockfile_path = project_root.join("jv.lock");
 
         Ok(Self {
             project_root,
             pom_path,
             settings_path,
+            lockfile_path,
+            local_repository,
             template_generated: true,
+            manifest,
         })
     }
 
-    fn ensure_settings(project_root: &Path, settings_path: &Path) -> Result<(), WrapperError> {
+    fn ensure_settings(project_root: &Path, settings_path: &Path) -> Result<PathBuf, WrapperError> {
+        let local_repository = project_root.join(".jv").join("repository");
         if settings_path.exists() {
-            return Ok(());
+            return Ok(local_repository);
         }
 
-        let local_repository = project_root.join(".jv").join("repository");
         fs::create_dir_all(&local_repository).map_err(|error| {
             WrapperError::OperationFailed(format!(
                 "{} の作成に失敗しました: {error}",
@@ -104,7 +127,49 @@ impl WrapperContext {
             WrapperError::OperationFailed(format!("settings.xml の生成に失敗しました: {error}"))
         })?;
 
-        Self::write_text(settings_path, &settings_xml)
+        Self::write_text(settings_path, &settings_xml)?;
+        Ok(local_repository)
+    }
+
+    fn manifest_from_lockfile(lockfile: &Lockfile, project_root: &Path) -> Manifest {
+        let manifest_name = lockfile.manifest.name.clone();
+        let manifest_version = lockfile.manifest.version.clone();
+        let dependencies = lockfile
+            .manifest
+            .dependencies
+            .iter()
+            .map(|dependency| (dependency.name.clone(), dependency.requirement.clone()))
+            .collect::<HashMap<String, String>>();
+
+        let project_name = project_root
+            .file_name()
+            .and_then(|os| os.to_str())
+            .map(str::to_string)
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| manifest_name.clone());
+
+        let group_id = Self::suggest_group_id(&project_name);
+
+        Manifest {
+            package: PackageInfo {
+                name: manifest_name.clone(),
+                version: manifest_version.clone(),
+                description: Some("Maven wrapper manifest".to_string()),
+                dependencies,
+            },
+            project: ProjectSection::default(),
+            repositories: RepositorySection::default(),
+            mirrors: Vec::new(),
+            build: None,
+            logging: LoggingConfig::default(),
+            maven: MavenProjectMetadata {
+                group_id,
+                artifact_id: Some(manifest_name),
+                packaging: Some("jar".to_string()),
+                description: Some("Maven wrapper manifest".to_string()),
+                url: None,
+            },
+        }
     }
 
     fn write_text(path: &Path, contents: &str) -> Result<(), WrapperError> {
