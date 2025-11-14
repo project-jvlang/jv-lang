@@ -10,6 +10,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow};
+use clap::Parser;
 use is_terminal::IsTerminal;
 use jv_pm::cli::{
     AddArgs, Cli, Commands, RemoveArgs, RepoAuthKind, RepoCommand, RepoOrigin, RepoScope,

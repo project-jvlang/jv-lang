@@ -55,15 +55,15 @@ pub enum ResolverCommand {
     List {
         /// Emit machine-readable JSON instead of a human table
         #[arg(long)]
-        pub json: bool,
+        json: bool,
     },
     /// Show extended metadata for a single strategy
     Info {
         /// Strategy name or alias (see `jv resolver list`)
-        pub name: String,
+        name: String,
         /// Emit machine-readable JSON instead of a textual block
         #[arg(long)]
-        pub json: bool,
+        json: bool,
     },
 }
 
@@ -73,79 +73,79 @@ pub enum RepoCommand {
     List {
         /// グローバル設定に登録済みのリポジトリも含める
         #[arg(long = "include-global")]
-        pub include_global: bool,
+        include_global: bool,
         /// JSON形式で出力する
         #[arg(long)]
-        pub json: bool,
+        json: bool,
     },
     /// 指定したリポジトリの詳細を表示する
     Show {
         /// 対象となるリポジトリ名
-        pub name: String,
+        name: String,
         /// グローバル設定の一覧も検索対象に含める
         #[arg(long = "include-global")]
-        pub include_global: bool,
+        include_global: bool,
         /// JSON形式で出力する
         #[arg(long)]
-        pub json: bool,
+        json: bool,
     },
     /// 新しいリポジトリ定義を追加する
     Add {
         /// 追加するリポジトリ名
-        pub name: String,
+        name: String,
         /// 追加するリポジトリURL
-        pub url: String,
+        url: String,
         /// 優先度（小さいほど優先）
         #[arg(long)]
-        pub priority: Option<u32>,
+        priority: Option<u32>,
         /// 書き込み先のスコープ
         #[arg(long = "scope", value_enum, default_value_t = RepoScope::Project)]
-        pub scope: RepoScope,
+        scope: RepoScope,
         /// 認証方式
         #[arg(long, value_enum, default_value_t = RepoAuthKind::None)]
-        pub auth: RepoAuthKind,
+        auth: RepoAuthKind,
         /// BASIC認証のユーザー名環境変数
         #[arg(long = "username-env")]
-        pub username_env: Option<String>,
+        username_env: Option<String>,
         /// BASIC認証のパスワード環境変数
         #[arg(long = "password-env")]
-        pub password_env: Option<String>,
+        password_env: Option<String>,
         /// トークン認証の環境変数
         #[arg(long = "token-env")]
-        pub token_env: Option<String>,
+        token_env: Option<String>,
         /// include-groups フィルタ
         #[arg(long = "include-group")]
-        pub include_groups: Vec<String>,
+        include_groups: Vec<String>,
         /// exclude-groups フィルタ
         #[arg(long = "exclude-group")]
-        pub exclude_groups: Vec<String>,
+        exclude_groups: Vec<String>,
     },
     /// 既存リポジトリ定義を削除する
     Remove {
         /// 削除するリポジトリ名
-        pub name: String,
+        name: String,
         /// 削除対象のスコープ
         #[arg(long = "scope", value_enum, default_value_t = RepoScope::Project)]
-        pub scope: RepoScope,
+        scope: RepoScope,
     },
     /// ミラー設定を表示・編集する
     Mirror {
         /// mirror-of対象名
-        pub target: Option<String>,
+        target: Option<String>,
         /// ミラーURL（設定/更新時）
-        pub url: Option<String>,
+        url: Option<String>,
         /// 表示名（省略可）
         #[arg(long = "name")]
-        pub display_name: Option<String>,
+        display_name: Option<String>,
         /// 指定時は該当設定を削除する
         #[arg(long)]
-        pub remove: bool,
+        remove: bool,
         /// JSON形式で出力する
         #[arg(long)]
-        pub json: bool,
+        json: bool,
         /// 操作対象スコープ
         #[arg(long = "scope", value_enum, default_value_t = RepoScope::Project)]
-        pub scope: RepoScope,
+        scope: RepoScope,
     },
 }
 
