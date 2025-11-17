@@ -1,33 +1,35 @@
 use dirs;
+const MAX_PARALLEL_DOWNLOADS: usize = 8;
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{HashMap, HashSet, VecDeque},
     env, fs,
-    future::Future,
     io::{self, Write},
     path::{Path, PathBuf},
-    pin::Pin,
     sync::Arc,
     time::Duration,
 };
 
 use anyhow::{Context, anyhow};
 use is_terminal::IsTerminal;
-use reqwest::Client;
+use reqwest::{Client, StatusCode};
 use serde::{Deserialize, Serialize};
 use strsim::normalized_levenshtein;
 use tokio::runtime::Builder as RuntimeBuilder;
+use tokio::task::JoinSet;
 use url::{Url, form_urlencoded};
 
 use crate::{
     DependencyCache, Manifest, MavenCoordinates, RepositoryManager,
     cli::{AddArgs, RemoveArgs},
-    download::{ArtifactDownloadRequest, DownloadManager, DownloadSuccess, JarFetcher},
     lockfile::{Lockfile, LockfileService},
     maven::{
         MavenIntegrationConfig, MavenIntegrationDispatcher, MavenMirrorConfig,
         MavenRepositoryConfig,
     },
-    registry::{ArtifactCoordinates, DownloadedJar, MavenMetadata, MavenRegistry, RegistryError},
+    registry::{
+        ArtifactCoordinates, ArtifactResource, ChecksumAlgorithm, ChecksumVerifiedJar,
+        MavenMetadata, MavenRegistry, RegistryError,
+    },
     resolver::{
         ResolvedDependencies, ResolvedDependency, ResolverAlgorithmKind, ResolverDispatcher,
         ResolverOptions, VersionDecision,
@@ -358,63 +360,48 @@ impl WrapperPipeline {
         resolved: &ResolvedDependencies,
         manager: &RepositoryManager,
     ) -> Result<(), WrapperError> {
-        self.download_wrapper_jars(manifest, resolved, manager)
-    }
-
-    fn download_wrapper_jars(
-        &self,
-        manifest: &Manifest,
-        resolved: &ResolvedDependencies,
-        manager: &RepositoryManager,
-    ) -> Result<(), WrapperError> {
-        let requests = self.build_download_requests(manifest, resolved)?;
-        if requests.is_empty() {
-            return Ok(());
-        }
-
         let registries = build_registry_clients(manager)?;
-        let fetcher = Arc::new(MultiRegistryFetcher::new(registries));
+        let downloader = MavenCentralDownloader::new(registries, MAX_PARALLEL_DOWNLOADS);
 
-        let mut download_manager =
-            DownloadManager::new(Arc::clone(&fetcher), Arc::clone(&self.cache));
-        download_manager.apply_manifest(manifest.build.as_ref());
-
-        let report = self
-            .runtime
-            .block_on(download_manager.download_artifacts(requests));
-
-        if !report.failures.is_empty() {
-            let message = report
-                .failures
-                .iter()
-                .map(|failure| failure.error.to_string())
-                .collect::<Vec<_>>()
-                .join("; ");
-            return Err(WrapperError::OperationFailed(format!(
-                "依存Jarのダウンロードに失敗しました: {message}"
-            )));
-        }
-
-        self.sync_downloaded_jars(&report.successes)
-    }
-
-    fn build_download_requests(
-        &self,
-        manifest: &Manifest,
-        resolved: &ResolvedDependencies,
-    ) -> Result<Vec<ArtifactDownloadRequest>, WrapperError> {
         let mut seen = HashSet::new();
-        let mut requests = Vec::new();
+        let mut to_download = Vec::new();
+        let mut jar_paths = HashMap::new();
 
         for dependency in &resolved.dependencies {
             let coords = self.artifact_coordinates_from_dependency(manifest, dependency)?;
             if !seen.insert(coords.clone()) {
                 continue;
             }
-            requests.push(ArtifactDownloadRequest::new(coords));
+
+            let jar_path = self.artifact_jar_path(&coords);
+            if self.validate_existing_jar(&jar_path)? {
+                continue;
+            }
+
+            jar_paths.insert(coords.clone(), jar_path);
+            to_download.push(coords);
         }
 
-        Ok(requests)
+        if to_download.is_empty() {
+            return Ok(());
+        }
+
+        let downloads = self
+            .runtime
+            .block_on(downloader.download_all(to_download))
+            .map_err(|error| WrapperError::OperationFailed(error.to_string()))?;
+
+        for (coords, download) in downloads {
+            let jar_path = jar_paths.remove(&coords).ok_or_else(|| {
+                WrapperError::OperationFailed(format!(
+                    "ダウンロード済み Jar のパスが見つかりません: {}",
+                    coords
+                ))
+            })?;
+            self.write_downloaded_jar(&jar_path, download)?;
+        }
+
+        Ok(())
     }
 
     fn artifact_coordinates_from_dependency(
@@ -436,27 +423,97 @@ impl WrapperPipeline {
         Ok(ArtifactCoordinates::new(group_id, artifact_id, version))
     }
 
-    fn sync_downloaded_jars(&self, successes: &[DownloadSuccess]) -> Result<(), WrapperError> {
-        let mut seen = HashSet::new();
-        for success in successes {
-            let coordinates = success.request.coordinates().clone();
-            if !seen.insert(coordinates.clone()) {
+    fn artifact_jar_path(&self, coords: &ArtifactCoordinates) -> PathBuf {
+        self.context
+            .local_repository
+            .join(coords.maven_coordinates().group_path())
+            .join(&coords.artifact_id)
+            .join(&coords.version)
+            .join(coords.jar_file_name())
+    }
+
+    fn validate_existing_jar(&self, path: &Path) -> Result<bool, WrapperError> {
+        if !path.exists() {
+            return Ok(false);
+        }
+
+        if let Some((algorithm, expected)) = self.read_local_checksum(path)? {
+            let bytes = fs::read(path).map_err(|error| {
+                WrapperError::OperationFailed(format!(
+                    "{} の読み込みに失敗しました: {error}",
+                    path.display()
+                ))
+            })?;
+            let actual = algorithm.compute(&bytes);
+            if actual == expected {
+                return Ok(true);
+            }
+        }
+
+        self.remove_local_artifact(path)?;
+        Ok(false)
+    }
+
+    fn read_local_checksum(
+        &self,
+        jar_path: &Path,
+    ) -> Result<Option<(ChecksumAlgorithm, String)>, WrapperError> {
+        for algorithm in [
+            ChecksumAlgorithm::Sha256,
+            ChecksumAlgorithm::Sha1,
+            ChecksumAlgorithm::Md5,
+        ] {
+            let checksum_path = jar_path.with_extension(format!("jar.{}", algorithm.extension()));
+            if !checksum_path.exists() {
                 continue;
             }
-            self.copy_cached_artifact_to_local_repo(&coordinates, &success.artifact.path)?;
+
+            let content = fs::read_to_string(&checksum_path).map_err(|error| {
+                WrapperError::OperationFailed(format!(
+                    "{} の読み込みに失敗しました: {error}",
+                    checksum_path.display()
+                ))
+            })?;
+
+            if let Some(value) = extract_local_checksum(&content) {
+                return Ok(Some((algorithm, value)));
+            }
         }
+
+        Ok(None)
+    }
+
+    fn remove_local_artifact(&self, jar_path: &Path) -> Result<(), WrapperError> {
+        if jar_path.exists() {
+            fs::remove_file(jar_path).map_err(|error| {
+                WrapperError::OperationFailed(format!(
+                    "{} の削除に失敗しました: {error}",
+                    jar_path.display()
+                ))
+            })?;
+        }
+
+        for ext in &["sha256", "sha1", "md5"] {
+            let checksum_path = jar_path.with_extension(format!("jar.{ext}"));
+            if checksum_path.exists() {
+                fs::remove_file(&checksum_path).map_err(|error| {
+                    WrapperError::OperationFailed(format!(
+                        "{} の削除に失敗しました: {error}",
+                        checksum_path.display()
+                    ))
+                })?;
+            }
+        }
+
         Ok(())
     }
 
-    fn copy_cached_artifact_to_local_repo(
+    fn write_downloaded_jar(
         &self,
-        coords: &ArtifactCoordinates,
-        source: &Path,
+        jar_path: &Path,
+        download: ChecksumVerifiedJar,
     ) -> Result<(), WrapperError> {
-        let relative_path = PathBuf::from(coords.jar_path());
-        let target = self.context.local_repository.join(relative_path);
-
-        if let Some(parent) = target.parent() {
+        if let Some(parent) = jar_path.parent() {
             fs::create_dir_all(parent).map_err(|error| {
                 WrapperError::OperationFailed(format!(
                     "{} の作成に失敗しました: {error}",
@@ -465,23 +522,22 @@ impl WrapperPipeline {
             })?;
         }
 
-        fs::copy(source, &target).map_err(|error| {
+        fs::write(jar_path, &download.jar.bytes).map_err(|error| {
             WrapperError::OperationFailed(format!(
-                "{} へのコピーに失敗しました: {error}",
-                target.display()
+                "{} への書き込みに失敗しました: {error}",
+                jar_path.display()
             ))
         })?;
 
-        let checksum_source = source.with_extension("jar.sha256");
-        if checksum_source.exists() {
-            let checksum_target = target.with_extension("jar.sha256");
-            fs::copy(&checksum_source, checksum_target).map_err(|error| {
-                WrapperError::OperationFailed(format!(
-                    "{} へのコピーに失敗しました: {error}",
-                    checksum_target.display()
-                ))
-            })?;
-        }
+        let checksum_path =
+            jar_path.with_extension(format!("jar.{}", download.algorithm.extension()));
+        let content = format!("{}\n", download.expected_checksum);
+        fs::write(&checksum_path, content).map_err(|error| {
+            WrapperError::OperationFailed(format!(
+                "{} への書き込みに失敗しました: {error}",
+                checksum_path.display()
+            ))
+        })?;
 
         Ok(())
     }
@@ -685,54 +741,116 @@ fn parse_dependency_name(
     }
 }
 
-const CHECKSUM_RETRY_LIMIT: usize = 2;
+fn extract_local_checksum(text: &str) -> Option<String> {
+    text.lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .map(|line| {
+            line.split_whitespace()
+                .next()
+                .unwrap_or(line)
+                .to_ascii_lowercase()
+        })
+}
 
-#[derive(Clone)]
-struct MultiRegistryFetcher {
+struct MavenCentralDownloader {
     registries: Vec<Arc<MavenRegistry>>,
+    max_concurrent: usize,
 }
 
-impl MultiRegistryFetcher {
-    fn new(registries: Vec<Arc<MavenRegistry>>) -> Self {
-        Self { registries }
+impl MavenCentralDownloader {
+    fn new(registries: Vec<Arc<MavenRegistry>>, max_concurrent: usize) -> Self {
+        Self {
+            registries,
+            max_concurrent: max_concurrent.max(1),
+        }
     }
-}
 
-impl JarFetcher for MultiRegistryFetcher {
-    fn download_jar<'a>(
-        &'a self,
-        coords: &'a ArtifactCoordinates,
-    ) -> Pin<Box<dyn Future<Output = Result<DownloadedJar, RegistryError>> + Send + 'a>> {
-        let registries = self.registries.clone();
-        let coords = coords.clone();
+    async fn download_all(
+        &self,
+        mut requests: Vec<ArtifactCoordinates>,
+    ) -> Result<Vec<(ArtifactCoordinates, ChecksumVerifiedJar)>, RegistryError> {
+        let mut results = Vec::new();
+        let mut join_set = JoinSet::new();
+        let mut queue: VecDeque<ArtifactCoordinates> = requests.drain(..).collect();
 
-        Box::pin(async move {
-            let mut last_error = None;
-            for registry in registries {
-                for attempt in 1..=CHECKSUM_RETRY_LIMIT {
-                    match registry.download_jar(&coords).await {
-                        Ok(jar) => return Ok(jar),
-                        Err(error) => {
-                            if matches!(error, RegistryError::ChecksumMismatch { .. })
-                                && attempt < CHECKSUM_RETRY_LIMIT
-                            {
-                                continue;
-                            }
-                            last_error = Some(error);
-                            break;
-                        }
-                    }
+        while let Some(coords) = queue.pop_front() {
+            let registries = self.registries.clone();
+            join_set.spawn(async move { download_single(coords, registries).await });
+
+            if join_set.len() >= self.max_concurrent {
+                let join_result = join_set.join_next().await;
+                if let Some(joined) = join_result {
+                    results.push(handle_join_result(joined)?);
                 }
             }
+        }
 
-            Err(
-                last_error.unwrap_or_else(|| RegistryError::InvalidResponse {
-                    resource: coords.jar_path(),
-                    message: "Jar をダウンロードできませんでした".to_string(),
-                }),
-            )
-        })
+        while let Some(joined) = join_set.join_next().await {
+            results.push(handle_join_result(joined)?);
+        }
+
+        Ok(results)
     }
+}
+
+fn handle_join_result(
+    joined: Result<
+        Result<(ArtifactCoordinates, ChecksumVerifiedJar), RegistryError>,
+        tokio::task::JoinError,
+    >,
+) -> Result<(ArtifactCoordinates, ChecksumVerifiedJar), RegistryError> {
+    match joined {
+        Ok(Ok(value)) => Ok(value),
+        Ok(Err(error)) => Err(error),
+        Err(join_error) => Err(RegistryError::InvalidResponse {
+            resource: "parallel-download".to_string(),
+            message: join_error.to_string(),
+        }),
+    }
+}
+
+async fn download_single(
+    coords: ArtifactCoordinates,
+    registries: Vec<Arc<MavenRegistry>>,
+) -> Result<(ArtifactCoordinates, ChecksumVerifiedJar), RegistryError> {
+    let algorithms = [
+        ChecksumAlgorithm::Sha256,
+        ChecksumAlgorithm::Sha1,
+        ChecksumAlgorithm::Md5,
+    ];
+
+    let mut last_error = None;
+
+    for registry in registries {
+        match registry
+            .download_jar_with_algorithms(&coords, &algorithms)
+            .await
+        {
+            Ok(download) => return Ok((coords.clone(), download)),
+            Err(error) => match error {
+                RegistryError::ArtifactNotFound { resource, .. }
+                    if matches!(resource, ArtifactResource::Jar) =>
+                {
+                    last_error = Some(error);
+                    continue;
+                }
+                RegistryError::PackageNotFound { .. } | RegistryError::ChecksumMissing { .. } => {
+                    last_error = Some(error);
+                    continue;
+                }
+                other => return Err(other),
+            },
+        }
+    }
+
+    Err(
+        last_error.unwrap_or_else(|| RegistryError::ArtifactNotFound {
+            coordinates: coords.clone(),
+            resource: ArtifactResource::Jar,
+            status: StatusCode::NOT_FOUND,
+        }),
+    )
 }
 
 fn load_global_config_state() -> Result<GlobalConfigState, WrapperError> {
