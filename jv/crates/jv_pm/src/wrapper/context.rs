@@ -32,7 +32,9 @@ impl WrapperContext {
                 "プロジェクトルートの特定に失敗しました: {error}"
             ))
         })?;
-        metrics::measure("wrapper-context-detect", move || Self::detect_in(project_root))
+        metrics::measure("wrapper-context-detect", move || {
+            Self::detect_in(project_root)
+        })
     }
 
     fn detect_in(project_root: PathBuf) -> Result<Self, WrapperError> {

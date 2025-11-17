@@ -1,7 +1,11 @@
 use dirs;
 use std::{
+    collections::{HashMap, HashSet},
     env, fs,
+    future::Future,
     io::{self, Write},
+    path::{Path, PathBuf},
+    pin::Pin,
     sync::Arc,
     time::Duration,
 };
@@ -12,18 +16,22 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use strsim::normalized_levenshtein;
 use tokio::runtime::Builder as RuntimeBuilder;
-use url::form_urlencoded;
+use url::{Url, form_urlencoded};
 
 use crate::{
     DependencyCache, Manifest, MavenCoordinates, RepositoryManager,
     cli::{AddArgs, RemoveArgs},
+    download::{ArtifactDownloadRequest, DownloadManager, DownloadSuccess, JarFetcher},
     lockfile::{Lockfile, LockfileService},
     maven::{
         MavenIntegrationConfig, MavenIntegrationDispatcher, MavenMirrorConfig,
         MavenRepositoryConfig,
     },
-    registry::{MavenMetadata, MavenRegistry, RegistryError},
-    resolver::{ResolvedDependencies, ResolverAlgorithmKind, ResolverDispatcher, ResolverOptions},
+    registry::{ArtifactCoordinates, DownloadedJar, MavenMetadata, MavenRegistry, RegistryError},
+    resolver::{
+        ResolvedDependencies, ResolvedDependency, ResolverAlgorithmKind, ResolverDispatcher,
+        ResolverOptions, VersionDecision,
+    },
 };
 
 use super::{
@@ -93,6 +101,7 @@ impl WrapperPipeline {
             !args.non_interactive && io::stdin().is_terminal() && io::stdout().is_terminal();
 
         let mut manifest = self.context.manifest.clone();
+        let previous_resolved = self.resolve_manifest(&self.context.manifest)?;
 
         let mut manager = RepositoryManager::with_project_root(self.context.project_root.clone())
             .map_err(|error| {
@@ -145,7 +154,8 @@ impl WrapperPipeline {
             ));
         }
 
-        let summary = self.apply_manifest_update(&manifest, additions, Vec::new())?;
+        let summary =
+            self.apply_manifest_update(&manifest, additions, Vec::new(), &previous_resolved)?;
         self.context.manifest = manifest;
         Ok(summary)
     }
@@ -161,6 +171,8 @@ impl WrapperPipeline {
                 "pom.xml に管理対象の依存関係がありません。".to_string(),
             ));
         }
+
+        let previous_resolved = self.resolve_manifest(&self.context.manifest)?;
 
         let mut removals = Vec::new();
 
@@ -208,7 +220,8 @@ impl WrapperPipeline {
             }
         }
 
-        let summary = self.apply_manifest_update(&manifest, Vec::new(), removals)?;
+        let summary =
+            self.apply_manifest_update(&manifest, Vec::new(), removals, &previous_resolved)?;
         self.context.manifest = manifest;
         Ok(summary)
     }
@@ -218,6 +231,7 @@ impl WrapperPipeline {
         manifest: &Manifest,
         added: Vec<MavenCoordinates>,
         removed: Vec<MavenCoordinates>,
+        previous_resolved: &ResolvedDependencies,
     ) -> Result<WrapperUpdateSummary, WrapperError> {
         let resolved = metrics::measure("wrapper-pipeline-dependency-resolution", || {
             self.resolve_manifest(manifest)
@@ -237,10 +251,26 @@ impl WrapperPipeline {
             sync::write_lockfile(&self.context.lockfile_path, lockfile_content.as_bytes())
         })?;
 
-        let (pom_updated, settings_updated) = metrics::measure(
-            "wrapper-pipeline-artifact-generation",
-            || self.generate_maven_artifacts(manifest, &resolved, &lockfile),
-        )?;
+        let mut manager = RepositoryManager::with_project_root(self.context.project_root.clone())
+            .map_err(|error| {
+            WrapperError::OperationFailed(format!(
+                "リポジトリマネージャーの初期化に失敗しました: {error}"
+            ))
+        })?;
+        manager.load_project_config(manifest);
+
+        let (pom_updated, settings_updated) =
+            metrics::measure("wrapper-pipeline-artifact-generation", || {
+                self.generate_maven_artifacts(manifest, &resolved, &lockfile, &manager)
+            })?;
+
+        metrics::measure("wrapper-pipeline-jar-download", || {
+            self.ensure_wrapper_jars(manifest, &resolved, &manager)
+        })?;
+
+        metrics::measure("wrapper-pipeline-artifact-cleanup", || {
+            self.cleanup_removed_artifacts(&removed, previous_resolved)
+        })?;
 
         Ok(WrapperUpdateSummary {
             added,
@@ -297,16 +327,9 @@ impl WrapperPipeline {
         manifest: &Manifest,
         resolved: &ResolvedDependencies,
         lockfile: &Lockfile,
+        manager: &RepositoryManager,
     ) -> Result<(bool, bool), WrapperError> {
-        let mut manager = RepositoryManager::with_project_root(self.context.project_root.clone())
-            .map_err(|error| {
-            WrapperError::OperationFailed(format!(
-                "リポジトリマネージャーの初期化に失敗しました: {error}"
-            ))
-        })?;
-        manager.load_project_config(manifest);
-
-        let repositories = collect_maven_repositories(&manager);
+        let repositories = collect_maven_repositories(manager);
         let mirrors = collect_effective_mirrors(manifest)?;
 
         let config = MavenIntegrationConfig {
@@ -327,6 +350,181 @@ impl WrapperPipeline {
             })?;
 
         sync::sync_maven_artifacts(&self.context.project_root, &files)
+    }
+
+    fn ensure_wrapper_jars(
+        &self,
+        manifest: &Manifest,
+        resolved: &ResolvedDependencies,
+        manager: &RepositoryManager,
+    ) -> Result<(), WrapperError> {
+        self.download_wrapper_jars(manifest, resolved, manager)
+    }
+
+    fn download_wrapper_jars(
+        &self,
+        manifest: &Manifest,
+        resolved: &ResolvedDependencies,
+        manager: &RepositoryManager,
+    ) -> Result<(), WrapperError> {
+        let requests = self.build_download_requests(manifest, resolved)?;
+        if requests.is_empty() {
+            return Ok(());
+        }
+
+        let registries = build_registry_clients(manager)?;
+        let fetcher = Arc::new(MultiRegistryFetcher::new(registries));
+
+        let mut download_manager =
+            DownloadManager::new(Arc::clone(&fetcher), Arc::clone(&self.cache));
+        download_manager.apply_manifest(manifest.build.as_ref());
+
+        let report = self
+            .runtime
+            .block_on(download_manager.download_artifacts(requests));
+
+        if !report.failures.is_empty() {
+            let message = report
+                .failures
+                .iter()
+                .map(|failure| failure.error.to_string())
+                .collect::<Vec<_>>()
+                .join("; ");
+            return Err(WrapperError::OperationFailed(format!(
+                "依存Jarのダウンロードに失敗しました: {message}"
+            )));
+        }
+
+        self.sync_downloaded_jars(&report.successes)
+    }
+
+    fn build_download_requests(
+        &self,
+        manifest: &Manifest,
+        resolved: &ResolvedDependencies,
+    ) -> Result<Vec<ArtifactDownloadRequest>, WrapperError> {
+        let mut seen = HashSet::new();
+        let mut requests = Vec::new();
+
+        for dependency in &resolved.dependencies {
+            let coords = self.artifact_coordinates_from_dependency(manifest, dependency)?;
+            if !seen.insert(coords.clone()) {
+                continue;
+            }
+            requests.push(ArtifactDownloadRequest::new(coords));
+        }
+
+        Ok(requests)
+    }
+
+    fn artifact_coordinates_from_dependency(
+        &self,
+        manifest: &Manifest,
+        dependency: &ResolvedDependency,
+    ) -> Result<ArtifactCoordinates, WrapperError> {
+        let (group_id, artifact_id) =
+            parse_dependency_name(&dependency.name, manifest.maven_group_id())?;
+        let version = match &dependency.decision {
+            VersionDecision::Exact(value) => value.clone(),
+            _ => {
+                return Err(WrapperError::OperationFailed(format!(
+                    "{} のバージョンが確定していません",
+                    dependency.name
+                )));
+            }
+        };
+        Ok(ArtifactCoordinates::new(group_id, artifact_id, version))
+    }
+
+    fn sync_downloaded_jars(&self, successes: &[DownloadSuccess]) -> Result<(), WrapperError> {
+        let mut seen = HashSet::new();
+        for success in successes {
+            let coordinates = success.request.coordinates().clone();
+            if !seen.insert(coordinates.clone()) {
+                continue;
+            }
+            self.copy_cached_artifact_to_local_repo(&coordinates, &success.artifact.path)?;
+        }
+        Ok(())
+    }
+
+    fn copy_cached_artifact_to_local_repo(
+        &self,
+        coords: &ArtifactCoordinates,
+        source: &Path,
+    ) -> Result<(), WrapperError> {
+        let relative_path = PathBuf::from(coords.jar_path());
+        let target = self.context.local_repository.join(relative_path);
+
+        if let Some(parent) = target.parent() {
+            fs::create_dir_all(parent).map_err(|error| {
+                WrapperError::OperationFailed(format!(
+                    "{} の作成に失敗しました: {error}",
+                    parent.display()
+                ))
+            })?;
+        }
+
+        fs::copy(source, &target).map_err(|error| {
+            WrapperError::OperationFailed(format!(
+                "{} へのコピーに失敗しました: {error}",
+                target.display()
+            ))
+        })?;
+
+        let checksum_source = source.with_extension("jar.sha256");
+        if checksum_source.exists() {
+            let checksum_target = target.with_extension("jar.sha256");
+            fs::copy(&checksum_source, checksum_target).map_err(|error| {
+                WrapperError::OperationFailed(format!(
+                    "{} へのコピーに失敗しました: {error}",
+                    checksum_target.display()
+                ))
+            })?;
+        }
+
+        Ok(())
+    }
+
+    fn cleanup_removed_artifacts(
+        &self,
+        removed: &[MavenCoordinates],
+        previous_resolved: &ResolvedDependencies,
+    ) -> Result<(), WrapperError> {
+        if removed.is_empty() {
+            return Ok(());
+        }
+
+        let version_map: HashMap<String, String> = previous_resolved
+            .dependencies
+            .iter()
+            .filter_map(|dependency| match &dependency.decision {
+                VersionDecision::Exact(version) => Some((dependency.name.clone(), version.clone())),
+                _ => None,
+            })
+            .collect();
+
+        for coord in removed {
+            if let Some(version) = version_map.get(&coord.to_string()) {
+                let target_dir = self
+                    .context
+                    .local_repository
+                    .join(coord.group_path())
+                    .join(&coord.artifact_id)
+                    .join(version);
+
+                if target_dir.exists() {
+                    fs::remove_dir_all(&target_dir).map_err(|error| {
+                        WrapperError::OperationFailed(format!(
+                            "{} の削除に失敗しました: {error}",
+                            target_dir.display()
+                        ))
+                    })?;
+                }
+            }
+        }
+
+        Ok(())
     }
 
     fn pick_suggestion(
@@ -405,6 +603,136 @@ fn collect_effective_mirrors(manifest: &Manifest) -> Result<Vec<MavenMirrorConfi
     }
 
     Ok(mirrors)
+}
+
+fn build_registry_clients(
+    manager: &RepositoryManager,
+) -> Result<Vec<Arc<MavenRegistry>>, WrapperError> {
+    let mut registries = Vec::new();
+    for handle in manager.list().into_iter() {
+        if handle.config().name == "local" {
+            continue;
+        }
+
+        if let Ok(parsed) = Url::parse(handle.url()) {
+            if parsed.scheme() == "file" {
+                continue;
+            }
+        }
+
+        let registry = MavenRegistry::new(handle.url()).map_err(|error| {
+            WrapperError::OperationFailed(format!(
+                "リポジトリ '{}' の初期化に失敗しました: {error}",
+                handle.name()
+            ))
+        })?;
+        registries.push(Arc::new(registry));
+    }
+
+    if registries.is_empty() {
+        return Err(WrapperError::OperationFailed(
+            "Maven Jar をダウンロードするリポジトリが構成されていません。".to_string(),
+        ));
+    }
+
+    Ok(registries)
+}
+
+fn parse_dependency_name(
+    raw: &str,
+    default_group: Option<&str>,
+) -> Result<(String, String), WrapperError> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Err(WrapperError::OperationFailed(
+            "依存指定が空です。".to_string(),
+        ));
+    }
+
+    let segments: Vec<&str> = trimmed.split(':').collect();
+    match segments.len() {
+        1 => {
+            let artifact = segments[0];
+            if artifact.is_empty() {
+                return Err(WrapperError::OperationFailed(format!(
+                    "依存 '{}' の artifactId が空です。",
+                    raw
+                )));
+            }
+            let group = default_group.ok_or_else(|| {
+                WrapperError::OperationFailed(format!(
+                    "依存 '{}' の groupId を特定できません。",
+                    raw
+                ))
+            })?;
+            Ok((group.to_string(), artifact.to_string()))
+        }
+        2 => {
+            let group = segments[0];
+            let artifact = segments[1];
+            if group.is_empty() || artifact.is_empty() {
+                return Err(WrapperError::OperationFailed(format!(
+                    "依存 '{}' の座標に空の要素が含まれています。",
+                    raw
+                )));
+            }
+            Ok((group.to_string(), artifact.to_string()))
+        }
+        _ => Err(WrapperError::OperationFailed(format!(
+            "依存 '{}' の座標は 'group:artifact' 形式で指定してください。",
+            raw
+        ))),
+    }
+}
+
+const CHECKSUM_RETRY_LIMIT: usize = 2;
+
+#[derive(Clone)]
+struct MultiRegistryFetcher {
+    registries: Vec<Arc<MavenRegistry>>,
+}
+
+impl MultiRegistryFetcher {
+    fn new(registries: Vec<Arc<MavenRegistry>>) -> Self {
+        Self { registries }
+    }
+}
+
+impl JarFetcher for MultiRegistryFetcher {
+    fn download_jar<'a>(
+        &'a self,
+        coords: &'a ArtifactCoordinates,
+    ) -> Pin<Box<dyn Future<Output = Result<DownloadedJar, RegistryError>> + Send + 'a>> {
+        let registries = self.registries.clone();
+        let coords = coords.clone();
+
+        Box::pin(async move {
+            let mut last_error = None;
+            for registry in registries {
+                for attempt in 1..=CHECKSUM_RETRY_LIMIT {
+                    match registry.download_jar(&coords).await {
+                        Ok(jar) => return Ok(jar),
+                        Err(error) => {
+                            if matches!(error, RegistryError::ChecksumMismatch { .. })
+                                && attempt < CHECKSUM_RETRY_LIMIT
+                            {
+                                continue;
+                            }
+                            last_error = Some(error);
+                            break;
+                        }
+                    }
+                }
+            }
+
+            Err(
+                last_error.unwrap_or_else(|| RegistryError::InvalidResponse {
+                    resource: coords.jar_path(),
+                    message: "Jar をダウンロードできませんでした".to_string(),
+                }),
+            )
+        })
+    }
 }
 
 fn load_global_config_state() -> Result<GlobalConfigState, WrapperError> {
