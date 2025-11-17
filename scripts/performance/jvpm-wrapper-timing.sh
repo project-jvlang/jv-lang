@@ -157,12 +157,92 @@ verify_downloaded_jar() {
     fi
 }
 
+verify_wrapper_jar() {
+    local workdir="$1"
+    local group="$2"
+    local artifact="$3"
+    local version="$4"
+    local group_path="${group//./\/}"
+    local local_repo="$workdir/.jv/repository"
+    local jar_path="$local_repo/$group_path/$artifact/$version/$artifact-$version.jar"
+
+    if [[ -f "$jar_path" ]]; then
+        echo "Wrapper ローカルリポジトリに Jar を確認しました: $jar_path"
+    else
+        echo "Wrapper ローカルリポジトリに依存 Jar が見つかりません: $jar_path" >&2
+        exit 1
+    fi
+}
+
+verify_wrapper_jar_removed() {
+    local workdir="$1"
+    local group="$2"
+    local artifact="$3"
+    local version="$4"
+    local group_path="${group//./\/}"
+    local local_repo="$workdir/.jv/repository"
+    local version_dir="$local_repo/$group_path/$artifact/$version"
+
+    if [[ -d "$version_dir" ]]; then
+        echo "依存 Jar がまだ存在しています: $version_dir" >&2
+        exit 1
+    else
+        echo "依存 Jar が正常に削除されました: $version_dir"
+    fi
+}
+
+collect_maven_jar_list() {
+    local run_dir="$1"
+    local jar_list="$run_dir/maven-jars.txt"
+
+    find "$MAVEN_CACHE_DIR" -type f -name '*.jar' -printf '%P\n' | sort > "$jar_list"
+}
+
+verify_wrapper_jars_from_list() {
+    local run_dir="$1"
+    local jar_list="$run_dir/maven-jars.txt"
+
+    if [[ ! -f "$jar_list" ]]; then
+        echo "Maven jar リストが見つかりません: $jar_list" >&2
+        exit 1
+    fi
+
+    while IFS= read -r relative; do
+        local jar_path="$run_dir/.jv/repository/$relative"
+        if [[ ! -f "$jar_path" ]]; then
+            echo "Wrapper のローカルリポジトリに Jar がありません: $jar_path" >&2
+            exit 1
+        fi
+    done < "$jar_list"
+    echo "Wrapper リポジトリに Maven 取得 Jar をすべて確認しました"
+}
+
+verify_wrapper_jars_removed_from_list() {
+    local run_dir="$1"
+    local jar_list="$run_dir/maven-jars.txt"
+
+    if [[ ! -f "$jar_list" ]]; then
+        echo "Maven jar リストが見つかりません: $jar_list" >&2
+        exit 1
+    fi
+
+    while IFS= read -r relative; do
+        local version_dir="$run_dir/.jv/repository/${relative%/*}"
+        if [[ -d "$version_dir" ]]; then
+            echo "依存 Jar が残っています: $version_dir" >&2
+            exit 1
+        fi
+    done < "$jar_list"
+    echo "Wrapper ローカルリポジトリから Maven Jar がすべて削除されていることを確認しました"
+}
+
 run_maven_with_verify() {
     local run="$1"
     local workdir="$2"
 
     run_and_log "Maven dependency:resolve run #$run" "$workdir" "$MVN_BIN" -B dependency:resolve
     verify_downloaded_jar "$DEP_GROUP" "$DEP_ARTIFACT" "$DEP_VERSION"
+    collect_maven_jar_list "$workdir"
 }
 
 rm -rf "$PERF_ROOT"
@@ -188,8 +268,10 @@ for run in $(seq 1 "$RUNS"); do
     clean_caches
     write_base_pom "$run_dir"
     run_and_log "jvpm add $DEPENDENCY run #$run" "$run_dir" "$JVPM_BIN" add "$DEPENDENCY"
-    verify_downloaded_jar "$DEP_GROUP" "$DEP_ARTIFACT" "$DEP_VERSION"
+    verify_wrapper_jar "$run_dir" "$DEP_GROUP" "$DEP_ARTIFACT" "$DEP_VERSION"
     validate_jvpm_pom "$run_dir" "$DEP_ARTIFACT"
+    run_and_log "jvpm remove $DEPENDENCY run #$run" "$run_dir" "$JVPM_BIN" remove "$DEPENDENCY"
+    verify_wrapper_jar_removed "$run_dir" "$DEP_GROUP" "$DEP_ARTIFACT" "$DEP_VERSION"
 done
 
 echo "測定が完了しました (ログ: $LOGFILE)"
