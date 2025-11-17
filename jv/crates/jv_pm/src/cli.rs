@@ -8,7 +8,7 @@ use crate::repository::config::AuthType;
 #[command(name = "jvpm")]
 #[command(
     about = "jv package manager helper",
-    long_about = "jvpm runs in Maven wrapper mode: it keeps pom.xml, settings.xml, and jv.lock aligned while preventing jv-only commands, and it accepts --strategy for pubgrub/breadth-first/maven-compat resolver runs."
+    long_about = "jvpm は Maven ラッパーモードで、pom.xml/settings.xml/jv.lock を同期しながら `WrapperUpdateSummary` で更新ファイルを報告します。`--strategy <pubgrub|breadth-first|maven-compat>` を渡せばアルゴリズムを選択でき、その結果が `jv.lock` に記録されます。resolver/repo 系コマンドは jv CLI を案内して終了し、それ以外の引数は mvn に転送されます。"
 )]
 pub struct Cli {
     #[command(subcommand)]

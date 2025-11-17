@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 
 use thiserror::Error;
 
+use crate::wrapper::integration::WrapperIntegrationStrategy;
 use crate::{Lockfile, Manifest, ResolvedDependencies};
 
 pub mod pom_generator;
@@ -130,6 +131,10 @@ impl MavenIntegrationDispatcher {
         let mut strategies: HashMap<String, Box<dyn MavenIntegrationStrategy>> = HashMap::new();
         strategies.insert("maven3".to_string(), Box::new(Maven3IntegrationStrategy));
         strategies.insert("maven4".to_string(), Box::new(Maven4IntegrationStrategy));
+        strategies.insert(
+            "wrapper-default".to_string(),
+            Box::new(WrapperIntegrationStrategy),
+        );
 
         Self {
             strategies,

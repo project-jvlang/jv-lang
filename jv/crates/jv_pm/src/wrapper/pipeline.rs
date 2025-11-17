@@ -29,7 +29,6 @@ use crate::{
 use super::{
     context::WrapperContext,
     error::WrapperError,
-    integration::WrapperIntegrationStrategy,
     sync::{self, WrapperUpdateSummary},
 };
 
@@ -75,8 +74,7 @@ impl WrapperPipeline {
         })?);
 
         let dispatcher = ResolverDispatcher::with_default_strategies();
-        let mut integration_dispatcher = MavenIntegrationDispatcher::new();
-        integration_dispatcher.register_strategy(Box::new(WrapperIntegrationStrategy));
+        let integration_dispatcher = MavenIntegrationDispatcher::new();
 
         Ok(Self {
             context,

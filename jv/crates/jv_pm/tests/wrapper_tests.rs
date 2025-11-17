@@ -1,9 +1,11 @@
-use std::{env, fs, path::Path, sync::Mutex};
+use std::{collections::HashMap, env, fs, path::Path, sync::Mutex};
 
 use once_cell::sync::Lazy;
 use tempfile::tempdir;
 
 use jv_pm::{
+    LoggingConfig, Manifest, MavenIntegrationConfig, MavenIntegrationDispatcher,
+    MavenProjectMetadata, PackageInfo, ProjectSection, RepositorySection,
     cli::{Commands, ResolverCommand},
     lockfile::{LockedSource, LockfileService},
     resolver::{
@@ -166,4 +168,103 @@ fn wrapper_command_filter_rejects_jv_commands_in_wrapper_mode() {
     assert!(matches!(err, WrapperError::OperationFailed(_)));
 
     assert!(WrapperCommandFilter::validate(&command, CliMode::Native).is_ok());
+}
+
+#[test]
+fn wrapper_integration_strategy_generates_maven_artifacts() {
+    let manifest = sample_manifest();
+    let resolved = sample_resolved();
+
+    let temp = tempdir().expect("temp dir");
+    let local_repo = temp.path().join("repository");
+    fs::create_dir_all(&local_repo).expect("create local repo");
+
+    let dispatcher = MavenIntegrationDispatcher::new();
+    let config = MavenIntegrationConfig {
+        manifest: Some(&manifest),
+        resolved: &resolved,
+        lockfile: None,
+        repositories: &[],
+        mirrors: &[],
+        project_root: Path::new("."),
+        local_repository: &local_repo,
+    };
+
+    let files = dispatcher
+        .generate("wrapper-default", &config)
+        .expect("wrapper integration");
+
+    let pom = files
+        .files
+        .iter()
+        .find(|(path, _)| path == Path::new("pom.xml"))
+        .expect("pom.xml generated")
+        .1
+        .as_str();
+    assert!(pom.contains("<artifactId>demo-app</artifactId>"));
+    assert!(pom.contains("<dependency>"));
+
+    let settings = files
+        .files
+        .iter()
+        .find(|(path, _)| path == Path::new("settings.xml"))
+        .expect("settings.xml generated")
+        .1
+        .as_str();
+    assert!(settings.contains("<localRepository>"));
+}
+
+fn sample_manifest() -> Manifest {
+    Manifest {
+        package: PackageInfo {
+            name: "demo-app".to_string(),
+            version: "1.2.3".to_string(),
+            description: Some("デモアプリ".to_string()),
+            dependencies: HashMap::from([
+                ("org.example:demo-lib".to_string(), "^1.0".to_string()),
+                ("org.example:test-kit".to_string(), "^2.0".to_string()),
+            ]),
+        },
+        project: ProjectSection::default(),
+        repositories: RepositorySection::default(),
+        mirrors: Vec::new(),
+        build: None,
+        logging: LoggingConfig::default(),
+        maven: MavenProjectMetadata {
+            group_id: "com.example".to_string(),
+            artifact_id: Some("demo-app".to_string()),
+            packaging: Some("jar".to_string()),
+            description: None,
+            url: Some("https://example.com".to_string()),
+        },
+    }
+}
+
+fn sample_resolved() -> ResolvedDependencies {
+    ResolvedDependencies {
+        strategy: "pubgrub".to_string(),
+        algorithm: ResolverAlgorithmKind::PubGrub,
+        dependencies: vec![
+            ResolvedDependency {
+                name: "org.example:demo-lib".to_string(),
+                requested: "^1.0".to_string(),
+                decision: VersionDecision::Exact("1.0.1".to_string()),
+                scope: DependencyScope::Main,
+                source: ResolutionSource::Registry,
+            },
+            ResolvedDependency {
+                name: "org.example:test-kit".to_string(),
+                requested: "^2.0".to_string(),
+                decision: VersionDecision::Exact("2.1.0".to_string()),
+                scope: DependencyScope::Dev,
+                source: ResolutionSource::Registry,
+            },
+        ],
+        diagnostics: Vec::new(),
+        stats: ResolutionStats {
+            elapsed_ms: 0,
+            total_dependencies: 2,
+            decided_dependencies: 2,
+        },
+    }
 }
