@@ -10,7 +10,7 @@ use crate::{
     ResolutionStats, ResolvedDependencies, ResolverAlgorithmKind,
 };
 
-use super::error::WrapperError;
+use super::{error::WrapperError, metrics};
 
 /// Execution context for `jvpm` wrapper mode.
 #[derive(Debug)]
@@ -32,7 +32,7 @@ impl WrapperContext {
                 "プロジェクトルートの特定に失敗しました: {error}"
             ))
         })?;
-        Self::detect_in(project_root)
+        metrics::measure("wrapper-context-detect", move || Self::detect_in(project_root))
     }
 
     fn detect_in(project_root: PathBuf) -> Result<Self, WrapperError> {
@@ -79,28 +79,30 @@ impl WrapperContext {
         pom_path: PathBuf,
         settings_path: PathBuf,
     ) -> Result<Self, WrapperError> {
-        let manifest = Self::template_manifest(&project_root);
-        let resolved = Self::template_resolved();
+        metrics::measure("wrapper-context-template-generation", move || {
+            let manifest = Self::template_manifest(&project_root);
+            let resolved = Self::template_resolved();
 
-        let pom_xml = PomGenerator::new(&manifest, &resolved)
-            .generate()
-            .map_err(|error| {
-                WrapperError::OperationFailed(format!("pom.xml の生成に失敗しました: {error}"))
-            })?;
-        Self::write_text(&pom_path, &pom_xml)?;
+            let pom_xml = PomGenerator::new(&manifest, &resolved)
+                .generate()
+                .map_err(|error| {
+                    WrapperError::OperationFailed(format!("pom.xml の生成に失敗しました: {error}"))
+                })?;
+            Self::write_text(&pom_path, &pom_xml)?;
 
-        let local_repository = Self::ensure_settings(&project_root, &settings_path)?;
+            let local_repository = Self::ensure_settings(&project_root, &settings_path)?;
 
-        let lockfile_path = project_root.join("jv.lock");
+            let lockfile_path = project_root.join("jv.lock");
 
-        Ok(Self {
-            project_root,
-            pom_path,
-            settings_path,
-            lockfile_path,
-            local_repository,
-            template_generated: true,
-            manifest,
+            Ok(Self {
+                project_root,
+                pom_path,
+                settings_path,
+                lockfile_path,
+                local_repository,
+                template_generated: true,
+                manifest,
+            })
         })
     }
 

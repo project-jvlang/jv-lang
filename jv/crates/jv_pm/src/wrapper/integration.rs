@@ -6,6 +6,8 @@ use crate::maven::{
     settings::{SettingsGenerationRequest, generate_settings_xml},
 };
 
+use super::metrics;
+
 /// Generates pom.xml/settings.xml for wrapper mode.
 pub struct WrapperIntegrationStrategy;
 
@@ -26,25 +28,27 @@ impl MavenIntegrationStrategy for WrapperIntegrationStrategy {
         &self,
         config: &MavenIntegrationConfig<'_>,
     ) -> Result<MavenIntegrationFiles, MavenIntegrationError> {
-        let manifest = config
-            .manifest
-            .ok_or(MavenIntegrationError::MissingManifest)?;
+        metrics::measure("wrapper-integration-generate", || {
+            let manifest = config
+                .manifest
+                .ok_or(MavenIntegrationError::MissingManifest)?;
 
-        let pom = PomGenerator::new(manifest, config.resolved)
-            .with_lockfile(config.lockfile)
-            .with_repositories(config.repositories)
-            .generate()?;
+            let pom = PomGenerator::new(manifest, config.resolved)
+                .with_lockfile(config.lockfile)
+                .with_repositories(config.repositories)
+                .generate()?;
 
-        let settings_request = SettingsGenerationRequest {
-            local_repository: config.local_repository,
-            repositories: config.repositories,
-            mirrors: config.mirrors,
-        };
-        let settings = generate_settings_xml(&settings_request)?;
+            let settings_request = SettingsGenerationRequest {
+                local_repository: config.local_repository,
+                repositories: config.repositories,
+                mirrors: config.mirrors,
+            };
+            let settings = generate_settings_xml(&settings_request)?;
 
-        let mut files = MavenIntegrationFiles::new();
-        files.push(PathBuf::from("pom.xml"), pom);
-        files.push(PathBuf::from("settings.xml"), settings);
-        Ok(files)
+            let mut files = MavenIntegrationFiles::new();
+            files.push(PathBuf::from("pom.xml"), pom);
+            files.push(PathBuf::from("settings.xml"), settings);
+            Ok(files)
+        })
     }
 }

@@ -29,6 +29,7 @@ use crate::{
 use super::{
     context::WrapperContext,
     error::WrapperError,
+    metrics,
     sync::{self, WrapperUpdateSummary},
 };
 
@@ -218,21 +219,28 @@ impl WrapperPipeline {
         added: Vec<MavenCoordinates>,
         removed: Vec<MavenCoordinates>,
     ) -> Result<WrapperUpdateSummary, WrapperError> {
-        let resolved = self.resolve_manifest(manifest)?;
+        let resolved = metrics::measure("wrapper-pipeline-dependency-resolution", || {
+            self.resolve_manifest(manifest)
+        })?;
 
-        let lockfile = LockfileService::generate(manifest, &resolved).map_err(|error| {
-            WrapperError::OperationFailed(format!("jv.lock の生成に失敗しました: {error}"))
+        let lockfile = metrics::measure("wrapper-pipeline-lockfile-generation", || {
+            LockfileService::generate(manifest, &resolved).map_err(|error| {
+                WrapperError::OperationFailed(format!("jv.lock の生成に失敗しました: {error}"))
+            })
         })?;
 
         let lockfile_content = toml::to_string_pretty(&lockfile).map_err(|error| {
             WrapperError::OperationFailed(format!("jv.lock の整形に失敗しました: {error}"))
         })?;
 
-        let lockfile_updated =
-            sync::write_lockfile(&self.context.lockfile_path, lockfile_content.as_bytes())?;
+        let lockfile_updated = metrics::measure("wrapper-pipeline-lockfile-write", || {
+            sync::write_lockfile(&self.context.lockfile_path, lockfile_content.as_bytes())
+        })?;
 
-        let (pom_updated, settings_updated) =
-            self.generate_maven_artifacts(manifest, &resolved, &lockfile)?;
+        let (pom_updated, settings_updated) = metrics::measure(
+            "wrapper-pipeline-artifact-generation",
+            || self.generate_maven_artifacts(manifest, &resolved, &lockfile),
+        )?;
 
         Ok(WrapperUpdateSummary {
             added,

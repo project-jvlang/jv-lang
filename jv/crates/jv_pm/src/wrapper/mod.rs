@@ -6,5 +6,6 @@ pub mod integration;
 pub mod lockfile;
 pub mod pipeline;
 pub mod sync;
+pub mod metrics;
 
 pub use filter::{CliMode, WrapperCommandFilter};
