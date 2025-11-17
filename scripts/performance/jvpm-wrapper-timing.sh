@@ -142,6 +142,29 @@ validate_jvpm_pom() {
     echo "pom.xml (${workdir}) に ${artifact} が登録されていることを確認しました"
 }
 
+verify_downloaded_jar() {
+    local group="$1"
+    local artifact="$2"
+    local version="$3"
+    local group_path="${group//./\/}"
+    local jar_path="$MAVEN_CACHE_DIR/$group_path/$artifact/$version/$artifact-$version.jar"
+
+    if [[ -f "$jar_path" ]]; then
+        echo "Jar を確認しました: $jar_path"
+    else
+        echo "ダウンロードされた Jar が見つかりません: $jar_path" >&2
+        exit 1
+    fi
+}
+
+run_maven_with_verify() {
+    local run="$1"
+    local workdir="$2"
+
+    run_and_log "Maven dependency:resolve run #$run" "$workdir" "$MVN_BIN" -B dependency:resolve
+    verify_downloaded_jar "$DEP_GROUP" "$DEP_ARTIFACT" "$DEP_VERSION"
+}
+
 rm -rf "$PERF_ROOT"
 mkdir -p "$PERF_ROOT"
 MAVEN_PROJECTS="$PERF_ROOT/maven"
@@ -156,7 +179,7 @@ for run in $(seq 1 "$RUNS"); do
     mkdir -p "$run_dir"
     clean_caches
     write_dependency_pom "$run_dir"
-    run_and_log "Maven dependency:resolve run #$run" "$run_dir" "$MVN_BIN" -B dependency:resolve
+    run_maven_with_verify "$run" "$run_dir"
 done
 
 for run in $(seq 1 "$RUNS"); do
@@ -165,6 +188,7 @@ for run in $(seq 1 "$RUNS"); do
     clean_caches
     write_base_pom "$run_dir"
     run_and_log "jvpm add $DEPENDENCY run #$run" "$run_dir" "$JVPM_BIN" add "$DEPENDENCY"
+    verify_downloaded_jar "$DEP_GROUP" "$DEP_ARTIFACT" "$DEP_VERSION"
     validate_jvpm_pom "$run_dir" "$DEP_ARTIFACT"
 done
 
