@@ -45,6 +45,7 @@ pub fn parse_type_annotation(annotation: &TypeAnnotation) -> Result<TypeKind, Ty
             let ret_ty = parse_type_annotation(return_type)?;
             Ok(TypeKind::function(param_types, ret_ty))
         }
+        TypeAnnotation::Unit { base, .. } => parse_type_annotation(base),
         _ => Ok(TypeKind::Unknown),
     }
 }
