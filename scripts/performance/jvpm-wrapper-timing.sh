@@ -1,16 +1,20 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPO_ROOT=$(cd "$(dirname "$0")/.." && pwd)
-PERF_ROOT="$REPO_ROOT/target/performance/jvpm-wrapper-timing"
+REPO_ROOT=$(cd "$(dirname "$0")/../.." && pwd)
+TARGET_DIR="$REPO_ROOT/target"
+PERF_ROOT="$TARGET_DIR/performance/jvpm-wrapper-timing"
 TIMESTAMP=$(date -u +%Y%m%dT%H%M%SZ)
 LOGFILE="$PERF_ROOT/measurements-$TIMESTAMP.log"
+
+MAVEN_CACHE_DIR=${MAVEN_CACHE_DIR:-"$HOME/.m2/repository"}
+JV_CACHE_DIR=${JV_CACHE_DIR:-"$HOME/.jv/cache"}
 
 JAVA25_HOME="$REPO_ROOT/toolchains/jdk25"
 JAVA21_HOME="$REPO_ROOT/toolchains/jdk21"
 MVN_HOME="$REPO_ROOT/toolchains/maven"
 MVN_BIN="$MVN_HOME/bin/mvn"
-JVPM_BIN="$REPO_ROOT/target/debug/jvpm"
+JVPM_BIN="$TARGET_DIR/debug/jvpm"
 RUNS=${RUNS:-3}
 
 export JAVA_HOME="$JAVA25_HOME"
@@ -42,6 +46,19 @@ for required in "$JAVA25_HOME" "$JAVA21_HOME" "$MVN_HOME"; do
     check_toolchain_dir "$required"
 done
 
+clean_caches() {
+    for dir in "$MAVEN_CACHE_DIR" "$JV_CACHE_DIR"; do
+        if [[ -d "$dir" ]]; then
+            echo "キャッシュを削除します: $dir"
+            rm -rf "$dir"
+        else
+            echo "キャッシュディレクトリが見つかりません（スキップ）: $dir"
+        fi
+    done
+}
+
+clean_caches
+
 if [[ ! -x "$MVN_BIN" ]]; then
     echo "Maven 実行ファイルが見つかりません: $MVN_BIN" >&2
     exit 1
@@ -49,7 +66,7 @@ fi
 
 if [[ ! -x "$JVPM_BIN" ]]; then
     echo "jvpm バイナリが見つかりません。ビルドを開始します..."
-    (cd "$REPO_ROOT" && cargo build --package jv_pm --bin jvpm)
+    (cd "$REPO_ROOT/jv" && env CARGO_TARGET_DIR="$TARGET_DIR" cargo build --package jv_pm --bin jvpm)
 fi
 
 run_and_log() {
@@ -102,6 +119,29 @@ write_dependency_pom() {
 EOF
 }
 
+validate_jvpm_pom() {
+    local workdir="$1"
+    local artifact="$2"
+    local pom_path="$workdir/pom.xml"
+
+    if [[ ! -f "$pom_path" ]]; then
+        echo "pom.xml が見つかりません: $pom_path" >&2
+        exit 1
+    fi
+
+    if ! grep -q "<dependency>" "$pom_path"; then
+        echo "pom.xml に依存関係セクションが含まれていません: $pom_path" >&2
+        exit 1
+    fi
+
+    if ! grep -q "<artifactId>${artifact}</artifactId>" "$pom_path"; then
+        echo "期待する依存関係 ${artifact} が pom.xml に見つかりません: $pom_path" >&2
+        exit 1
+    fi
+
+    echo "pom.xml (${workdir}) に ${artifact} が登録されていることを確認しました"
+}
+
 rm -rf "$PERF_ROOT"
 mkdir -p "$PERF_ROOT"
 MAVEN_PROJECTS="$PERF_ROOT/maven"
@@ -114,6 +154,7 @@ printf "依存関係: %s\n" "$DEPENDENCY" | tee -a "$LOGFILE"
 for run in $(seq 1 "$RUNS"); do
     run_dir="$MAVEN_PROJECTS/run-$run"
     mkdir -p "$run_dir"
+    clean_caches
     write_dependency_pom "$run_dir"
     run_and_log "Maven dependency:resolve run #$run" "$run_dir" "$MVN_BIN" -B dependency:resolve
 done
@@ -121,8 +162,10 @@ done
 for run in $(seq 1 "$RUNS"); do
     run_dir="$JVPM_PROJECTS/run-$run"
     mkdir -p "$run_dir"
+    clean_caches
     write_base_pom "$run_dir"
     run_and_log "jvpm add $DEPENDENCY run #$run" "$run_dir" "$JVPM_BIN" add "$DEPENDENCY"
+    validate_jvpm_pom "$run_dir" "$DEP_ARTIFACT"
 done
 
 echo "測定が完了しました (ログ: $LOGFILE)"

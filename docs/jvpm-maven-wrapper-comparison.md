@@ -33,7 +33,7 @@
 
 ## 6. 継続的な計測と改善アクション
 
-`scripts/performance/jvpm-wrapper-timing.sh` は `mvn -B dependency:resolve` と `target/debug/jvpm add <dependency>` をそれぞれ最初から 3 回実行し、`/usr/bin/time -p` の `real`/`user`/`sys` と `WrapperUpdateSummary` を含む CLI 出力を `target/performance/jvpm-wrapper-timing/measurements-<timestamp>.log` に追記することで、初回（キャッシュなし）と再実行時（キャッシュあり）の差を連続的に記録できるようにしています。依存名は引数（デフォルトは `org.apache.commons:commons-lang3:3.14.0`）で差し替えられ、ツールチップを `tee` するためリアルタイムでもログを確認できます。
+`scripts/performance/jvpm-wrapper-timing.sh` は `mvn -B dependency:resolve` と `target/debug/jvpm add <dependency>` をそれぞれ最初から 3 回実行し、`/usr/bin/time -p` の `real`/`user`/`sys` と `WrapperUpdateSummary` を含む CLI 出力を `target/performance/jvpm-wrapper-timing/measurements-<timestamp>.log` に追記することで、初回（キャッシュなし）と再実行時（キャッシュあり）の差を連続的に記録できるようにしています。各実行の直前に `~/.m2/repository` と `~/.jv/cache` を削除して Maven/JV のキャッシュを強制的にクリアするため、Cold run とキャッシュ再利用の時間差が明確に分かります。依存名は引数（デフォルトは `org.apache.commons:commons-lang3:3.14.0`）で差し替えられ、ツールチップを `tee` するためリアルタイムでもログを確認できます。
 
 測定ログには `WrapperPipeline` → `WrapperIntegrationStrategy` → `WrapperUpdateSummary` に並ぶ出力が含まれており、`pom.xml/settings.xml/jv.lock` の更新状況と `real` 時間をセットで照合できます。再測定は変更のたびに 2 時間スパンで、「計測 → 分析 → 改善 → 再計測」のサイクルを回すことで、Maven との差を 50% 以下に圧縮することを目標とします。
 
@@ -47,3 +47,18 @@
    CLI 全体での `tokio` ランタイム生成や `WrapperContext` のファイル検出を遅延化し、`wrapper-context-detect` と `wrapper-context-template-generation` のログから見える遅延をカットする。必要に応じて `DependencyCache` などのマネージャーをシングルトン化し、`bench` で 50% ターゲットに近づくかを測定後に判断する。
 
 改善を適用するたびにスクリプト（およびログ）を再実行し、`real` 時間の 50% 削減と `WrapperUpdateSummary` 出力の安定性を両立させることで、Phase 7 の目標に合致したレスポンスと再現性を確保してください。
+
+## 7. 最新測定ログのハイライト
+
+直近の測定ログは `target/performance/jvpm-wrapper-timing/measurements-20251117T062649Z.log` に記録されています。`/usr/bin/time -p` の `real`/`user`/`sys` に加え、`WrapperUpdateSummary` の `pom.xml / settings.xml / jv.lock` 同期メッセージも含まれるため、Maven 実行と `jvpm` Wrapper モードのコマンド出力を一緒に追跡できます。スクリプトは実行前と各 run の直前に `~/.m2/repository` と `~/.jv/cache` を削除して Maven/JV キャッシュをクリアしており、Run #1 では Cold run（`real 20.17 s`）を記録しています。以下は同ログから抽出した `real/user/sys` 値（jvpm 実行は `WrapperUpdateSummary: 依存関係 'org.apache.commons:commons-lang3' を追加しました。更新: pom.xml / settings.xml / jv.lock` を出力）。
+
+| フロー | `real` | `user` | `sys` | 備考 |
+| --- | --- | --- | --- | --- |
+| Maven `dependency:resolve` run #1 | 20.17 s | 38.41 s | 5.70 s | Cold run（`Total time: 16.549 s`）でキャッシュ削除直後。 |
+| Maven `dependency:resolve` run #2 | 23.69 s | 36.39 s | 5.96 s | 2 回目も毎回クリアしながら少しずつ成果物が溜まる走行。 |
+| Maven `dependency:resolve` run #3 | 23.88 s | 34.96 s | 5.51 s | Run #2 成果物で安定化。 |
+| `jvpm add org.apache.commons:commons-lang3:3.14.0` run #1 | 0.04 s | 0.00 s | 0.03 s | `WrapperUpdateSummary` によるテンプレート+lockfile更新。 |
+| `jvpm add org.apache.commons:commons-lang3:3.14.0` run #2 | 0.04 s | 0.00 s | 0.04 s | 再 run でも 0.04 s を維持。 |
+| `jvpm add org.apache.commons:commons-lang3:3.14.0` run #3 | 0.04 s | 0.00 s | 0.04 s | キャッシュ利用で 0.04 s を再現。 |
+
+上記の記録とログファイルを参照しながら、改善案の適用後に同じスクリプトを走らせ、`real` 時間と `WrapperUpdateSummary` 出力の推移を定点観測することで Maven 比で 50% 以内のレスポンス目標に近づけます。
