@@ -157,6 +157,9 @@ fn main() {
 
 fn real_main() -> Result<()> {
     let mode = CliMode::detect();
+    if mode.is_wrapper() {
+        println!("[wrapper-mode] Maven ラッパーモードで起動しました");
+    }
     let cli = Cli::parse();
     WrapperCommandFilter::validate(&cli.command, mode).map_err(|err| anyhow!(err))?;
 

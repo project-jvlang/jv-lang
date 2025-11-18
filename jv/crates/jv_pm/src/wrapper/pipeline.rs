@@ -2,7 +2,7 @@ use dirs;
 const MAX_PARALLEL_DOWNLOADS: usize = 8;
 const MAX_JAR_DOWNLOAD_ATTEMPTS: usize = 3;
 use std::{
-    collections::{HashMap, HashSet, VecDeque},
+    collections::{HashMap, VecDeque},
     env, fs,
     io::{self, Write},
     path::{Path, PathBuf},
@@ -24,8 +24,8 @@ use crate::{
     cli::{AddArgs, RemoveArgs},
     lockfile::{Lockfile, LockfileService},
     maven::{
-        MavenIntegrationConfig, MavenIntegrationDispatcher, MavenMirrorConfig,
-        MavenRepositoryConfig,
+        dependency_graph::MavenDependencyResolver, MavenIntegrationConfig,
+        MavenIntegrationDispatcher, MavenMirrorConfig, MavenRepositoryConfig,
     },
     registry::{
         ArtifactCoordinates, ArtifactResource, ChecksumAlgorithm, ChecksumVerifiedJar,
@@ -362,8 +362,14 @@ impl WrapperPipeline {
         manager: &RepositoryManager,
     ) -> Result<(), WrapperError> {
         let registries = build_registry_clients(manager)?;
+        let dependency_resolver = MavenDependencyResolver::new(
+            &self.runtime,
+            Arc::clone(&self.cache),
+            registries.clone(),
+        );
         let downloader = MavenCentralDownloader::new(registries, MAX_PARALLEL_DOWNLOADS);
-        let artifact_targets = self.collect_artifact_targets(manifest, resolved)?;
+        let artifact_targets =
+            self.collect_artifact_targets(manifest, resolved, &dependency_resolver)?;
 
         if artifact_targets.is_empty() {
             return Ok(());
@@ -413,20 +419,20 @@ impl WrapperPipeline {
         &self,
         manifest: &Manifest,
         resolved: &ResolvedDependencies,
+        resolver: &MavenDependencyResolver,
     ) -> Result<Vec<(ArtifactCoordinates, PathBuf)>, WrapperError> {
-        let mut seen = HashSet::new();
-        let mut targets = Vec::new();
-
+        let mut roots = Vec::new();
         for dependency in &resolved.dependencies {
             let coords = self.artifact_coordinates_from_dependency(manifest, dependency)?;
-            if !seen.insert(coords.clone()) {
-                continue;
-            }
+            roots.push(coords);
+        }
 
+        let closure = resolver.resolve_closure(&roots)?;
+        let mut targets = Vec::new();
+        for coords in closure {
             let jar_path = self.artifact_jar_path(&coords);
             targets.push((coords, jar_path));
         }
-
         Ok(targets)
     }
 
@@ -460,7 +466,14 @@ impl WrapperPipeline {
         downloads: Vec<(ArtifactCoordinates, ChecksumVerifiedJar)>,
         mut jar_paths: HashMap<ArtifactCoordinates, PathBuf>,
     ) -> Result<(), WrapperError> {
-        for (coords, download) in downloads {
+        let total = downloads.len();
+        for (index, (coords, download)) in downloads.into_iter().enumerate() {
+            println!(
+                "[wrapper-download] {}/{} {}",
+                index + 1,
+                total,
+                coords
+            );
             let jar_path = jar_paths.remove(&coords).ok_or_else(|| {
                 WrapperError::OperationFailed(format!(
                     "ダウンロード済み Jar のパスが見つかりません: {}",

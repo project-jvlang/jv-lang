@@ -13,7 +13,7 @@ use std::{
     time::{Duration, SystemTime},
 };
 
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use sha2::{Digest, Sha256};
 use tempfile::{tempdir, TempDir};
 use zip::{write::FileOptions, CompressionMethod};
@@ -23,15 +23,29 @@ struct DependencySpec {
     group: &'static str,
     artifact: &'static str,
     version: &'static str,
+    dependencies: Vec<DependencyCoordinate>,
+}
+
+#[derive(Clone)]
+struct DependencyCoordinate {
+    group: &'static str,
+    artifact: &'static str,
+    version: &'static str,
 }
 
 impl DependencySpec {
-    const fn new(group: &'static str, artifact: &'static str, version: &'static str) -> Self {
+    fn new(group: &'static str, artifact: &'static str, version: &'static str) -> Self {
         Self {
             group,
             artifact,
             version,
+            dependencies: Vec::new(),
         }
+    }
+
+    fn with_dependencies(mut self, dependencies: Vec<DependencyCoordinate>) -> Self {
+        self.dependencies = dependencies;
+        self
     }
 
     fn coordinate(&self) -> String {
@@ -56,6 +70,16 @@ impl DependencySpec {
 
     fn pom_name(&self) -> String {
         format!("{}-{}.pom", self.artifact, self.version)
+    }
+}
+
+impl DependencyCoordinate {
+    fn new(group: &'static str, artifact: &'static str, version: &'static str) -> Self {
+        Self {
+            group,
+            artifact,
+            version,
+        }
     }
 }
 
@@ -120,8 +144,12 @@ impl FakeMavenRepo {
 
         let pom_path = version_dir.join(dep.pom_name());
         let pom = format!(
-            "<project>\n  <modelVersion>4.0.0</modelVersion>\n  <groupId>{}</groupId>\n  <artifactId>{}</artifactId>\n  <version>{}</version>\n  <packaging>jar</packaging>\n  <name>{}</name>\n</project>\n",
-            dep.group, dep.artifact, dep.version, dep.artifact
+            "<project>\n  <modelVersion>4.0.0</modelVersion>\n  <groupId>{}</groupId>\n  <artifactId>{}</artifactId>\n  <version>{}</version>\n  <packaging>jar</packaging>\n  <name>{}</name>\n{}\n</project>\n",
+            dep.group,
+            dep.artifact,
+            dep.version,
+            dep.artifact,
+            emit_dependency_section(&dep.dependencies)
         );
         fs::write(&pom_path, pom)
             .with_context(|| format!("{} への書き込みに失敗しました", pom_path.display()))?;
@@ -160,6 +188,23 @@ impl FakeMavenRepo {
             .as_secs();
         format!("2025{:0>10}", now % 10_000_000_000)
     }
+}
+
+fn emit_dependency_section(dependencies: &[DependencyCoordinate]) -> String {
+    if dependencies.is_empty() {
+        return String::new();
+    }
+
+    let mut buffer = String::new();
+    buffer.push_str("  <dependencies>\n");
+    for dep in dependencies {
+        buffer.push_str(&format!(
+            "    <dependency>\n      <groupId>{}</groupId>\n      <artifactId>{}</artifactId>\n      <version>{}</version>\n    </dependency>\n",
+            dep.group, dep.artifact, dep.version
+        ));
+    }
+    buffer.push_str("  </dependencies>");
+    buffer
 }
 
 struct FakeMavenServer {
@@ -369,6 +414,18 @@ fn repo_root() -> PathBuf {
         .to_path_buf()
 }
 
+fn assert_dependency_jar(repo_root: &Path, spec: &DependencySpec) -> Result<()> {
+    let jar_path = repo_root
+        .join(spec.group_path())
+        .join(spec.artifact)
+        .join(spec.version)
+        .join(spec.jar_name());
+    if !jar_path.exists() {
+        bail!("Jar が見つかりません: {}", jar_path.display());
+    }
+    Ok(())
+}
+
 #[test]
 fn e2e_wrapper_add_synchronizes_maven_files() -> Result<()> {
     let binary = match cargo_bin_path("jvpm") {
@@ -409,6 +466,51 @@ fn e2e_wrapper_add_synchronizes_maven_files() -> Result<()> {
     let lockfile = fs::read_to_string(project.path().join("jv.lock"))
         .context("jv.lock の読み込みに失敗しました")?;
     assert!(lockfile.contains("wrapper-"));
+    Ok(())
+}
+
+#[test]
+fn e2e_wrapper_downloads_transitive_dependencies() -> Result<()> {
+    let binary = match cargo_bin_path("jvpm") {
+        Some(path) => path,
+        None => {
+            eprintln!(
+                "skipping e2e_wrapper_downloads_transitive_dependencies: jvpm binary unavailable"
+            );
+            return Ok(());
+        }
+    };
+
+    let root = DependencySpec::new("org.example", "demo-app", "1.0.0").with_dependencies(vec![
+        DependencyCoordinate::new("org.libs", "support-lib", "2.0.0"),
+    ]);
+    let transitive = DependencySpec::new("org.libs", "support-lib", "2.0.0");
+    let dependencies = vec![root.clone(), transitive.clone()];
+
+    let home = tempdir().context("HOMEディレクトリの作成に失敗しました")?;
+    let repo_dir = home.path().join("fake-maven");
+    FakeMavenRepo::create(&repo_dir, &dependencies)?;
+    let server = FakeMavenServer::start(repo_dir)?;
+    write_global_config(&home, &server.base_url())?;
+
+    let project = tempdir().context("プロジェクト用ディレクトリの作成に失敗しました")?;
+    let args = ["add", "--non-interactive", "org.example:demo-app@1.0.0"];
+    let output = run_jvpm_command(&binary, project.path(), home.path(), &args)?;
+    assert!(
+        output.status.success(),
+        "jvpm add failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("[wrapper-mode] Maven ラッパーモードで起動しました"),
+        "wrapper mode log missing: {stdout}"
+    );
+
+    let repo_root = project.path().join(".jv/repository");
+    assert_dependency_jar(&repo_root, &root)?;
+    assert_dependency_jar(&repo_root, &transitive)?;
     Ok(())
 }
 

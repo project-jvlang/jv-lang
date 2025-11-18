@@ -6,6 +6,7 @@ use thiserror::Error;
 use crate::wrapper::integration::WrapperIntegrationStrategy;
 use crate::{Lockfile, Manifest, ResolvedDependencies};
 
+pub mod dependency_graph;
 pub mod pom_generator;
 pub mod settings;
 
