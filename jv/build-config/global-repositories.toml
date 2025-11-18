@@ -2,3 +2,78 @@
 name = "maven-central"
 url = "https://repo.maven.apache.org/maven2"
 priority = 100
+
+[maven]
+default_distribution = "maven3"
+
+[[maven.distributions]]
+id = "maven3"
+version = "3.9.11"
+release_channel = "stable"
+description = "Apache Maven 3.x (current GA)"
+
+[[maven.distributions]]
+id = "maven4"
+version = "4.0.0"
+release_channel = "upcoming"
+description = "Apache Maven 4.0.0 (GA expected later this year)"
+
+[[maven.standard_plugins]]
+group_id = "org.apache.maven.plugins"
+artifact_id = "maven-clean-plugin"
+version = "3.2.0"
+
+[[maven.standard_plugins]]
+group_id = "org.apache.maven.plugins"
+artifact_id = "maven-resources-plugin"
+version = "3.3.1"
+
+[[maven.standard_plugins]]
+group_id = "org.apache.maven.plugins"
+artifact_id = "maven-compiler-plugin"
+version = "3.13.0"
+
+[[maven.standard_plugins]]
+group_id = "org.apache.maven.plugins"
+artifact_id = "maven-surefire-plugin"
+version = "3.2.5"
+
+[[maven.standard_plugins]]
+group_id = "org.apache.maven.plugins"
+artifact_id = "maven-jar-plugin"
+version = "3.4.1"
+
+[[maven.standard_plugins]]
+group_id = "org.apache.maven.plugins"
+artifact_id = "maven-install-plugin"
+version = "3.1.2"
+
+[[maven.standard_plugins]]
+group_id = "org.apache.maven.plugins"
+artifact_id = "maven-deploy-plugin"
+version = "3.1.2"
+
+[[maven.standard_plugins]]
+group_id = "org.apache.maven.plugins"
+artifact_id = "maven-site-plugin"
+version = "3.12.1"
+
+[[maven.standard_plugins]]
+group_id = "org.apache.maven.plugins"
+artifact_id = "maven-antrun-plugin"
+version = "3.1.0"
+
+[[maven.standard_plugins]]
+group_id = "org.apache.maven.plugins"
+artifact_id = "maven-assembly-plugin"
+version = "3.7.1"
+
+[[maven.standard_plugins]]
+group_id = "org.apache.maven.plugins"
+artifact_id = "maven-dependency-plugin"
+version = "3.7.0"
+
+[[maven.managed_artifacts]]
+group_id = "org.apache.commons"
+artifact_id = "commons-text"
+version = "1.12.0"

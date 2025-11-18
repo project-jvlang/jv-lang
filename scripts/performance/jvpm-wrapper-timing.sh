@@ -270,11 +270,11 @@ for run in $(seq 1 "$RUNS"); do
     write_base_pom "$run_dir"
     run_and_log "jvpm add $DEPENDENCY run #$run" "$run_dir" "$JVPM_BIN" add "$DEPENDENCY"
     cp "$maven_run_dir/maven-jars.txt" "$run_dir/maven-jars.txt"
-    verify_wrapper_jars_from_list "$run_dir"
-    verify_wrapper_jar "$run_dir" "$DEP_GROUP" "$DEP_ARTIFACT" "$DEP_VERSION"
-    validate_jvpm_pom "$run_dir" "$DEP_ARTIFACT"
+    verify_wrapper_jars_from_list "$run_dir" |& tee -a "$LOGFILE"
+    verify_wrapper_jar "$run_dir" "$DEP_GROUP" "$DEP_ARTIFACT" "$DEP_VERSION" |& tee -a "$LOGFILE"
+    validate_jvpm_pom "$run_dir" "$DEP_ARTIFACT" |& tee -a "$LOGFILE"
     run_and_log "jvpm remove $DEPENDENCY run #$run" "$run_dir" "$JVPM_BIN" remove "$DEPENDENCY"
-    verify_wrapper_jar_removed "$run_dir" "$DEP_GROUP" "$DEP_ARTIFACT" "$DEP_VERSION"
+    verify_wrapper_jar_removed "$run_dir" "$DEP_GROUP" "$DEP_ARTIFACT" "$DEP_VERSION" |& tee -a "$LOGFILE"
 done
 
 echo "測定が完了しました (ログ: $LOGFILE)"

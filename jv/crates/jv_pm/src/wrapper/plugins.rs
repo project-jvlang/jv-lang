@@ -1,76 +1,85 @@
 use std::collections::HashMap;
 
 use indexmap::IndexSet;
+use once_cell::sync::OnceCell;
 use roxmltree::{Document, Node};
 
 use crate::maven::dependency_graph::{MavenDependencyResolver, PomMetadata};
 use crate::registry::ArtifactCoordinates;
+use crate::repository::defaults;
 use crate::wrapper::error::WrapperError;
 
 /// Represents a Maven plugin artifact that needs to be hydrated in wrapper mode.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct MavenPluginCoordinate {
-    pub group_id: &'static str,
-    pub artifact_id: &'static str,
-    pub version: &'static str,
+    pub group_id: String,
+    pub artifact_id: String,
+    pub version: String,
 }
 
 impl MavenPluginCoordinate {
-    pub const fn new(
-        group_id: &'static str,
-        artifact_id: &'static str,
-        version: &'static str,
+    pub fn new(
+        group_id: impl Into<String>,
+        artifact_id: impl Into<String>,
+        version: impl Into<String>,
     ) -> Self {
         Self {
-            group_id,
-            artifact_id,
-            version,
+            group_id: group_id.into(),
+            artifact_id: artifact_id.into(),
+            version: version.into(),
         }
     }
 
     pub fn to_artifact(&self) -> ArtifactCoordinates {
         ArtifactCoordinates::new(
-            self.group_id.to_string(),
-            self.artifact_id.to_string(),
-            self.version.to_string(),
+            self.group_id.clone(),
+            self.artifact_id.clone(),
+            self.version.clone(),
         )
     }
 }
 
-/// Default Maven plugins required by the super POM and CLI operations such as
-/// `dependency:resolve`. Downloading these ensures `.jv/repository` can satisfy
-/// common Maven workflows offline.
-pub const DEFAULT_MAVEN_PLUGINS: &[MavenPluginCoordinate] = &[
-    MavenPluginCoordinate::new("org.apache.maven.plugins", "maven-clean-plugin", "3.2.0"),
-    MavenPluginCoordinate::new(
-        "org.apache.maven.plugins",
-        "maven-resources-plugin",
-        "3.3.1",
-    ),
-    MavenPluginCoordinate::new(
-        "org.apache.maven.plugins",
-        "maven-compiler-plugin",
-        "3.13.0",
-    ),
-    MavenPluginCoordinate::new("org.apache.maven.plugins", "maven-surefire-plugin", "3.2.5"),
-    MavenPluginCoordinate::new("org.apache.maven.plugins", "maven-jar-plugin", "3.4.1"),
-    MavenPluginCoordinate::new("org.apache.maven.plugins", "maven-install-plugin", "3.1.2"),
-    MavenPluginCoordinate::new("org.apache.maven.plugins", "maven-deploy-plugin", "3.1.2"),
-    MavenPluginCoordinate::new("org.apache.maven.plugins", "maven-site-plugin", "3.12.1"),
-    MavenPluginCoordinate::new("org.apache.maven.plugins", "maven-antrun-plugin", "3.1.0"),
-    MavenPluginCoordinate::new("org.apache.maven.plugins", "maven-assembly-plugin", "3.7.1"),
-    MavenPluginCoordinate::new(
-        "org.apache.maven.plugins",
-        "maven-dependency-plugin",
-        "3.7.0",
-    ),
-];
+impl From<&defaults::MavenPluginDefinition> for MavenPluginCoordinate {
+    fn from(value: &defaults::MavenPluginDefinition) -> Self {
+        Self::new(
+            value.group_id.clone(),
+            value.artifact_id.clone(),
+            value.version.clone(),
+        )
+    }
+}
 
 pub fn default_plugin_version(group: &str, artifact: &str) -> Option<&'static str> {
-    DEFAULT_MAVEN_PLUGINS
+    standard_plugins()
         .iter()
         .find(|plugin| plugin.group_id == group && plugin.artifact_id == artifact)
-        .map(|plugin| plugin.version)
+        .map(|plugin| plugin.version.as_str())
+}
+
+pub fn standard_plugins() -> &'static [MavenPluginCoordinate] {
+    static CACHE: OnceCell<Vec<MavenPluginCoordinate>> = OnceCell::new();
+    CACHE.get_or_init(|| {
+        defaults::maven_standard_plugins()
+            .iter()
+            .map(MavenPluginCoordinate::from)
+            .collect()
+    })
+}
+
+pub fn managed_artifacts() -> &'static [ArtifactCoordinates] {
+    static CACHE: OnceCell<Vec<ArtifactCoordinates>> = OnceCell::new();
+    CACHE.get_or_init(|| {
+        defaults::maven_managed_artifacts()
+            .iter()
+            .map(|artifact| {
+                ArtifactCoordinates::new(
+                    artifact.group_id.clone(),
+                    artifact.artifact_id.clone(),
+                    artifact.version.clone(),
+                )
+            })
+            .collect()
+    })
 }
 
 pub fn discover_declared_plugins(

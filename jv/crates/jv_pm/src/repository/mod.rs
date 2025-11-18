@@ -1,5 +1,5 @@
 pub mod config;
-mod defaults;
+pub(crate) mod defaults;
 
 use crate::Manifest;
 use crate::repository::config::{AuthType, MirrorConfig, RepositoryConfig, RepositorySection};

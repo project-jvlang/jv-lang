@@ -41,8 +41,7 @@ use crate::{
 use super::{
     context::WrapperContext,
     error::WrapperError,
-    metrics,
-    plugins::{self, DEFAULT_MAVEN_PLUGINS},
+    metrics, plugins,
     sync::{self, WrapperUpdateSummary},
 };
 
@@ -389,12 +388,15 @@ impl WrapperPipeline {
 
         let mut attempt = 0;
         loop {
-            attempt += 1;
             let (to_download, jar_paths) = self.build_download_plan(&artifact_targets)?;
             if to_download.is_empty() {
-                return Ok(());
+                if self.verify_repository_state(&artifact_targets)? {
+                    return Ok(());
+                }
+                continue;
             }
 
+            attempt += 1;
             println!(
                 "[wrapper-download-plan] attempt {attempt}: {}/{} artifacts pending",
                 to_download.len(),
@@ -451,7 +453,7 @@ impl WrapperPipeline {
             plugin_roots.insert(plugin.clone());
         }
 
-        for plugin in DEFAULT_MAVEN_PLUGINS {
+        for plugin in plugins::standard_plugins() {
             plugin_roots.insert(plugin.to_artifact());
         }
 
@@ -464,7 +466,7 @@ impl WrapperPipeline {
 
         for plugin in plugin_roots.into_iter() {
             ordered.insert(plugin.clone());
-            match resolver.resolve_closure(std::slice::from_ref(&plugin)) {
+            match resolver.resolve_closure_with_optional(std::slice::from_ref(&plugin), true) {
                 Ok(plugin_closure) => {
                     for coords in plugin_closure {
                         ordered.insert(coords);
@@ -474,6 +476,10 @@ impl WrapperPipeline {
                     tracing::warn!(artifact = %plugin, error = ?error, "プラグイン依存関係の解決に失敗したためスキップします");
                 }
             }
+        }
+
+        for managed in plugins::managed_artifacts() {
+            ordered.insert(managed.clone());
         }
 
         let mut targets = Vec::new();
@@ -649,6 +655,99 @@ impl WrapperPipeline {
         }
 
         Ok(())
+    }
+
+    fn verify_repository_state(
+        &self,
+        targets: &[(ArtifactCoordinates, PathBuf)],
+    ) -> Result<bool, WrapperError> {
+        if targets.is_empty() {
+            return Ok(true);
+        }
+
+        println!(
+            "[wrapper-verify] {} artifacts scheduled for verification (repository: {})",
+            targets.len(),
+            self.context.local_repository.display()
+        );
+
+        let mut needs_download = false;
+        let total = targets.len();
+        for (index, (coords, jar_path)) in targets.iter().enumerate() {
+            match self.verify_single_jar(coords, jar_path, index + 1, total)? {
+                JarVerification::Valid => {}
+                JarVerification::NeedsDownload => needs_download = true,
+            }
+        }
+
+        if !needs_download {
+            println!(
+                "[wrapper-verify] repository verification succeeded ({} artifacts)",
+                targets.len()
+            );
+        } else {
+            println!(
+                "[wrapper-verify] integrity issues detected; invalid artifacts will be re-downloaded"
+            );
+        }
+
+        Ok(!needs_download)
+    }
+
+    fn verify_single_jar(
+        &self,
+        coords: &ArtifactCoordinates,
+        jar_path: &Path,
+        index: usize,
+        total: usize,
+    ) -> Result<JarVerification, WrapperError> {
+        if !jar_path.exists() {
+            println!("[wrapper-verify] {}/{} missing {}", index, total, coords);
+            return Ok(JarVerification::NeedsDownload);
+        }
+
+        let Some((algorithm, expected)) = self.read_local_checksum(jar_path)? else {
+            println!(
+                "[wrapper-verify] {}/{} checksum file missing for {}",
+                index, total, coords
+            );
+            self.remove_local_artifact(jar_path)?;
+            return Ok(JarVerification::NeedsDownload);
+        };
+
+        let bytes = fs::read(jar_path).map_err(|error| {
+            WrapperError::OperationFailed(format!(
+                "{} の読み込みに失敗しました: {error}",
+                jar_path.display()
+            ))
+        })?;
+        let actual = algorithm.compute(&bytes);
+
+        if actual == expected {
+            if let Some(relative) = self.relative_repository_path(jar_path) {
+                println!(
+                    "[wrapper-verify] {}/{} OK {} ({})",
+                    index, total, coords, relative
+                );
+            } else {
+                println!("[wrapper-verify] {}/{} OK {}", index, total, coords);
+            }
+            return Ok(JarVerification::Valid);
+        }
+
+        println!(
+            "[wrapper-verify] {}/{} checksum mismatch {} (expected {}, actual {})",
+            index, total, coords, expected, actual
+        );
+        self.remove_local_artifact(jar_path)?;
+        Ok(JarVerification::NeedsDownload)
+    }
+
+    fn relative_repository_path(&self, jar_path: &Path) -> Option<String> {
+        jar_path
+            .strip_prefix(&self.context.local_repository)
+            .ok()
+            .map(|path| path.to_string_lossy().replace('\\', "/"))
     }
 
     fn write_downloaded_jar(
@@ -908,6 +1007,12 @@ fn extract_local_checksum(text: &str) -> Option<String> {
                 .unwrap_or(line)
                 .to_ascii_lowercase()
         })
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum JarVerification {
+    Valid,
+    NeedsDownload,
 }
 
 struct MavenCentralDownloader {

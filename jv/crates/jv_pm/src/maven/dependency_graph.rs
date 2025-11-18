@@ -112,7 +112,7 @@ impl<'a> MavenDependencyResolver<'a> {
             }
             if !matches!(
                 dependency.scope.as_deref(),
-                None | Some("compile") | Some("runtime")
+                None | Some("compile") | Some("runtime") | Some("provided")
             ) {
                 continue;
             }

@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 
 use thiserror::Error;
 
+use crate::repository::defaults;
 use crate::wrapper::integration::WrapperIntegrationStrategy;
 use crate::{Lockfile, Manifest, ResolvedDependencies};
 
@@ -137,9 +138,11 @@ impl MavenIntegrationDispatcher {
             Box::new(WrapperIntegrationStrategy),
         );
 
+        let default_strategy = defaults::default_maven_distribution_id().to_string();
+
         Self {
             strategies,
-            default_strategy: "maven3".to_string(),
+            default_strategy,
         }
     }
 
@@ -223,7 +226,7 @@ impl MavenIntegrationStrategy for Maven3IntegrationStrategy {
     }
 
     fn maven_version(&self) -> &str {
-        "3.x"
+        defaults::maven_distribution_version("maven3")
     }
 
     fn generate(
@@ -265,7 +268,7 @@ impl MavenIntegrationStrategy for Maven4IntegrationStrategy {
     }
 
     fn maven_version(&self) -> &str {
-        "4.x"
+        defaults::maven_distribution_version("maven4")
     }
 
     fn generate(
