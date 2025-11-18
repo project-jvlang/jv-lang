@@ -1,5 +1,6 @@
 use dirs;
 const MAX_PARALLEL_DOWNLOADS: usize = 8;
+const MAX_JAR_DOWNLOAD_ATTEMPTS: usize = 3;
 use std::{
     collections::{HashMap, HashSet, VecDeque},
     env, fs,
@@ -362,10 +363,59 @@ impl WrapperPipeline {
     ) -> Result<(), WrapperError> {
         let registries = build_registry_clients(manager)?;
         let downloader = MavenCentralDownloader::new(registries, MAX_PARALLEL_DOWNLOADS);
+        let artifact_targets = self.collect_artifact_targets(manifest, resolved)?;
 
+        if artifact_targets.is_empty() {
+            return Ok(());
+        }
+
+        let mut attempt = 0;
+        loop {
+            attempt += 1;
+            let (to_download, jar_paths) = self.build_download_plan(&artifact_targets)?;
+            if to_download.is_empty() {
+                return Ok(());
+            }
+
+            let downloads = match self.runtime.block_on(downloader.download_all(to_download)) {
+                Ok(downloads) => downloads,
+                Err(error) => {
+                    tracing::warn!(
+                        attempt,
+                        artifact_count = artifact_targets.len(),
+                        error = ?error,
+                        "Jar のダウンロードに失敗しました"
+                    );
+                    if attempt >= MAX_JAR_DOWNLOAD_ATTEMPTS {
+                        return Err(WrapperError::OperationFailed(format!(
+                            "Jar のダウンロードに失敗しました: {error}"
+                        )));
+                    }
+                    continue;
+                }
+            };
+
+            self.write_downloads(downloads, jar_paths)?;
+
+            if attempt >= MAX_JAR_DOWNLOAD_ATTEMPTS {
+                let (remaining, _) = self.build_download_plan(&artifact_targets)?;
+                if remaining.is_empty() {
+                    return Ok(());
+                }
+                return Err(WrapperError::OperationFailed(
+                    "Jar のダウンロード確認に失敗しました".to_string(),
+                ));
+            }
+        }
+    }
+
+    fn collect_artifact_targets(
+        &self,
+        manifest: &Manifest,
+        resolved: &ResolvedDependencies,
+    ) -> Result<Vec<(ArtifactCoordinates, PathBuf)>, WrapperError> {
         let mut seen = HashSet::new();
-        let mut to_download = Vec::new();
-        let mut jar_paths = HashMap::new();
+        let mut targets = Vec::new();
 
         for dependency in &resolved.dependencies {
             let coords = self.artifact_coordinates_from_dependency(manifest, dependency)?;
@@ -374,23 +424,42 @@ impl WrapperPipeline {
             }
 
             let jar_path = self.artifact_jar_path(&coords);
-            if self.validate_existing_jar(&jar_path)? {
+            targets.push((coords, jar_path));
+        }
+
+        Ok(targets)
+    }
+
+    fn build_download_plan(
+        &self,
+        targets: &[(ArtifactCoordinates, PathBuf)],
+    ) -> Result<
+        (
+            Vec<ArtifactCoordinates>,
+            HashMap<ArtifactCoordinates, PathBuf>,
+        ),
+        WrapperError,
+    > {
+        let mut to_download = Vec::new();
+        let mut jar_paths = HashMap::new();
+
+        for (coords, path) in targets {
+            if self.validate_existing_jar(path)? {
                 continue;
             }
 
-            jar_paths.insert(coords.clone(), jar_path);
-            to_download.push(coords);
+            jar_paths.insert(coords.clone(), path.clone());
+            to_download.push(coords.clone());
         }
 
-        if to_download.is_empty() {
-            return Ok(());
-        }
+        Ok((to_download, jar_paths))
+    }
 
-        let downloads = self
-            .runtime
-            .block_on(downloader.download_all(to_download))
-            .map_err(|error| WrapperError::OperationFailed(error.to_string()))?;
-
+    fn write_downloads(
+        &self,
+        downloads: Vec<(ArtifactCoordinates, ChecksumVerifiedJar)>,
+        mut jar_paths: HashMap<ArtifactCoordinates, PathBuf>,
+    ) -> Result<(), WrapperError> {
         for (coords, download) in downloads {
             let jar_path = jar_paths.remove(&coords).ok_or_else(|| {
                 WrapperError::OperationFailed(format!(

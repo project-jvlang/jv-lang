@@ -240,7 +240,7 @@ run_maven_with_verify() {
     local run="$1"
     local workdir="$2"
 
-    run_and_log "Maven dependency:resolve run #$run" "$workdir" "$MVN_BIN" -B dependency:resolve
+run_and_log "Maven dependency:resolve run #$run" "$workdir" "$MVN_BIN" -B -Dmaven.repo.local="$MAVEN_CACHE_DIR" dependency:resolve
     verify_downloaded_jar "$DEP_GROUP" "$DEP_ARTIFACT" "$DEP_VERSION"
     collect_maven_jar_list "$workdir"
 }
@@ -264,10 +264,13 @@ done
 
 for run in $(seq 1 "$RUNS"); do
     run_dir="$JVPM_PROJECTS/run-$run"
+    maven_run_dir="$MAVEN_PROJECTS/run-$run"
     mkdir -p "$run_dir"
     clean_caches
     write_base_pom "$run_dir"
     run_and_log "jvpm add $DEPENDENCY run #$run" "$run_dir" "$JVPM_BIN" add "$DEPENDENCY"
+    cp "$maven_run_dir/maven-jars.txt" "$run_dir/maven-jars.txt"
+    verify_wrapper_jars_from_list "$run_dir"
     verify_wrapper_jar "$run_dir" "$DEP_GROUP" "$DEP_ARTIFACT" "$DEP_VERSION"
     validate_jvpm_pom "$run_dir" "$DEP_ARTIFACT"
     run_and_log "jvpm remove $DEPENDENCY run #$run" "$run_dir" "$JVPM_BIN" remove "$DEPENDENCY"
