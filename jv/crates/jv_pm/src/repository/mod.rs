@@ -1,4 +1,5 @@
 pub mod config;
+mod defaults;
 
 use crate::Manifest;
 use crate::repository::config::{AuthType, MirrorConfig, RepositoryConfig, RepositorySection};
@@ -352,7 +353,7 @@ fn load_global_config(home_override: Option<PathBuf>) -> Result<GlobalConfig, Re
     let config_path = home.join(".jv").join("config.toml");
     if !config_path.exists() {
         return Ok(GlobalConfig {
-            repositories: default_global_repositories(),
+            repositories: defaults::embedded_global_repositories(),
             mirrors: Vec::new(),
         });
     }
@@ -361,7 +362,7 @@ fn load_global_config(home_override: Option<PathBuf>) -> Result<GlobalConfig, Re
     let parsed: GlobalConfigFile = toml::from_str(&contents)?;
 
     let repositories = if parsed.repositories.is_empty() {
-        default_global_repositories()
+        defaults::embedded_global_repositories()
     } else {
         parsed.repositories
     };
@@ -372,23 +373,8 @@ fn load_global_config(home_override: Option<PathBuf>) -> Result<GlobalConfig, Re
     })
 }
 
-fn default_global_repositories() -> Vec<RepositoryConfig> {
-    vec![
-        RepositoryConfig {
-            name: "jv-registry".to_string(),
-            url: "https://registry.jvlang.org".to_string(),
-            priority: 50,
-            auth: None,
-            filter: None,
-        },
-        RepositoryConfig {
-            name: "maven-central".to_string(),
-            url: "https://repo.maven.apache.org/maven2".to_string(),
-            priority: 100,
-            auth: None,
-            filter: None,
-        },
-    ]
+pub fn builtin_global_repositories() -> Vec<RepositoryConfig> {
+    defaults::embedded_global_repositories()
 }
 
 #[derive(Debug, Clone, serde::Deserialize, Default)]
@@ -474,7 +460,6 @@ mod tests {
         let handles = manager.list();
 
         assert!(handles.iter().any(|h| h.name() == "local"));
-        assert!(handles.iter().any(|h| h.name() == "jv-registry"));
         assert!(handles.iter().any(|h| h.name() == "maven-central"));
     }
 
@@ -518,7 +503,6 @@ mod tests {
         assert_eq!(names[0], "local");
         assert!(names.contains(&"corp-private".to_string()));
         assert!(names.contains(&"jitpack".to_string()));
-        assert!(!names.contains(&"jv-registry".to_string()));
         assert!(!names.contains(&"maven-central".to_string()));
     }
 

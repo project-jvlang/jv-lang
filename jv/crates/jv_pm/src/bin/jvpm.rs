@@ -21,12 +21,12 @@ use jv_pm::wrapper::{
     sync::WrapperUpdateSummary,
 };
 use jv_pm::{
-    AuthConfig, AuthType, DependencyCache, ExportError, ExportRequest, FilterConfig,
+    self, AuthConfig, AuthType, DependencyCache, ExportError, ExportRequest, FilterConfig,
     JavaProjectExporter, LockfileService, Manifest, MavenCoordinates, MavenMetadata,
     MavenMirrorConfig, MavenRegistry, MavenRepositoryConfig, MirrorConfig, RegistryError,
     RepositoryConfig, RepositoryManager, ResolutionStats, ResolvedDependencies,
     ResolverAlgorithmKind, ResolverDispatcher, ResolverOptions, ResolverStrategyInfo,
-    StrategyStability,
+    StrategyStability, repository,
 };
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
@@ -1221,7 +1221,7 @@ fn add_project_repository(options: AddOptions) -> Result<()> {
 fn add_global_repository(options: AddOptions) -> Result<()> {
     let mut global = load_global_config_state()?;
     if global.data.repositories.is_empty() {
-        global.data.repositories = default_global_repositories();
+        global.data.repositories = repository::builtin_global_repositories();
     }
 
     let new_config = build_repository_config(&options)?;
@@ -1286,7 +1286,7 @@ fn remove_project_repository(options: RemoveOptions) -> Result<()> {
 fn remove_global_repository(options: RemoveOptions) -> Result<()> {
     let mut global = load_global_config_state()?;
     if global.data.repositories.is_empty() {
-        global.data.repositories = default_global_repositories();
+        global.data.repositories = repository::builtin_global_repositories();
     }
 
     let before = global.data.repositories.len();
@@ -1583,7 +1583,7 @@ fn save_global_config_state(state: &GlobalConfigState) -> Result<()> {
 
 fn effective_global_repositories(config: &StoredGlobalConfig) -> Vec<RepositoryConfig> {
     if config.repositories.is_empty() {
-        default_global_repositories()
+        repository::builtin_global_repositories()
     } else {
         config.repositories.clone()
     }
@@ -1591,25 +1591,6 @@ fn effective_global_repositories(config: &StoredGlobalConfig) -> Vec<RepositoryC
 
 fn effective_global_mirrors(config: &StoredGlobalConfig) -> Vec<MirrorConfig> {
     config.mirrors.clone()
-}
-
-fn default_global_repositories() -> Vec<RepositoryConfig> {
-    vec![
-        RepositoryConfig {
-            name: "jv-registry".to_string(),
-            url: "https://registry.jvlang.org".to_string(),
-            priority: 50,
-            auth: None,
-            filter: None,
-        },
-        RepositoryConfig {
-            name: "maven-central".to_string(),
-            url: "https://repo.maven.apache.org/maven2".to_string(),
-            priority: 100,
-            auth: None,
-            filter: None,
-        },
-    ]
 }
 
 fn build_repository_config(options: &AddOptions) -> Result<RepositoryConfig> {

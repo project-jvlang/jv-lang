@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
@@ -41,6 +42,15 @@ impl<'a> MavenDependencyResolver<'a> {
         &self,
         roots: &[ArtifactCoordinates],
     ) -> Result<Vec<ArtifactCoordinates>, WrapperError> {
+        self.resolve_closure_with_optional(roots, false)
+    }
+
+    /// Resolves the dependency closure, optionally keeping dependencies marked as optional.
+    pub fn resolve_closure_with_optional(
+        &self,
+        roots: &[ArtifactCoordinates],
+        include_optional: bool,
+    ) -> Result<Vec<ArtifactCoordinates>, WrapperError> {
         let mut ordered = IndexSet::new();
         let mut memo = HashMap::new();
         for root in roots {
@@ -49,6 +59,7 @@ impl<'a> MavenDependencyResolver<'a> {
                 &mut ordered,
                 &mut memo,
                 &[],
+                include_optional,
                 &mut HashSet::new(),
             )?;
         }
@@ -78,6 +89,7 @@ impl<'a> MavenDependencyResolver<'a> {
         ordered: &mut IndexSet<ArtifactCoordinates>,
         memo: &mut HashMap<ArtifactCoordinates, Arc<EffectivePom>>,
         inherited_exclusions: &[(String, String)],
+        include_optional: bool,
         stack: &mut HashSet<ArtifactCoordinates>,
     ) -> Result<(), WrapperError> {
         if ordered.contains(&coords) {
@@ -95,7 +107,7 @@ impl<'a> MavenDependencyResolver<'a> {
         let effective = self.load_effective_pom(coords.clone(), memo, &mut HashSet::new())?;
 
         for dependency in &effective.dependencies {
-            if dependency.optional {
+            if dependency.optional && !include_optional {
                 continue;
             }
             if !matches!(
@@ -120,12 +132,9 @@ impl<'a> MavenDependencyResolver<'a> {
                 ordered,
                 memo,
                 &next_exclusions,
+                include_optional,
                 stack,
             )?;
-        }
-
-        for plugin in &effective.plugins {
-            self.expand(plugin.coordinates.clone(), ordered, memo, &[], stack)?;
         }
 
         stack.remove(&coords);
@@ -150,7 +159,7 @@ impl<'a> MavenDependencyResolver<'a> {
         }
 
         let pom_text = self.fetch_pom(&coords)?;
-        let model = PomModel::parse(&pom_text)?;
+        let mut model = PomModel::parse(&pom_text)?;
 
         let parent_effective = if let Some(parent) = &model.parent {
             let parent_coords = ArtifactCoordinates::new(
@@ -163,6 +172,36 @@ impl<'a> MavenDependencyResolver<'a> {
             None
         };
 
+        let mut property_context = parent_effective
+            .as_ref()
+            .map(|parent| parent.properties.clone())
+            .unwrap_or_default();
+        property_context.extend(model.properties.clone());
+        property_context.insert("project.groupId".to_string(), coords.group_id.clone());
+        property_context.insert("project.artifactId".to_string(), coords.artifact_id.clone());
+        property_context.insert("project.version".to_string(), coords.version.clone());
+        if let Some(parent_pom) = parent_effective.as_deref() {
+            property_context.insert(
+                "project.parent.groupId".to_string(),
+                parent_pom.coordinates.group_id.clone(),
+            );
+            property_context.insert(
+                "project.parent.artifactId".to_string(),
+                parent_pom.coordinates.artifact_id.clone(),
+            );
+            property_context.insert(
+                "project.parent.version".to_string(),
+                parent_pom.coordinates.version.clone(),
+            );
+        }
+
+        self.expand_dependency_management_imports(
+            &mut model,
+            &property_context,
+            memo,
+            parent_stack,
+        )?;
+
         parent_stack.remove(&coords);
 
         let effective =
@@ -170,6 +209,69 @@ impl<'a> MavenDependencyResolver<'a> {
         let shared = Arc::new(effective);
         memo.insert(coords, shared.clone());
         Ok(shared)
+    }
+
+    fn expand_dependency_management_imports(
+        &self,
+        model: &mut PomModel,
+        properties: &HashMap<String, String>,
+        memo: &mut HashMap<ArtifactCoordinates, Arc<EffectivePom>>,
+        parent_stack: &mut HashSet<ArtifactCoordinates>,
+    ) -> Result<(), WrapperError> {
+        let mut retained = Vec::new();
+        for entry in model.dependency_management.drain(..) {
+            let is_import = matches!(
+                entry.dep_type.as_deref(),
+                Some(dep_type) if dep_type.eq_ignore_ascii_case("pom")
+            ) && matches!(
+                entry.scope.as_deref(),
+                Some(scope) if scope.eq_ignore_ascii_case("import")
+            );
+
+            if !is_import {
+                retained.push(entry);
+                continue;
+            }
+
+            let group =
+                resolve_property(entry.group_id.as_deref(), properties).ok_or_else(|| {
+                    WrapperError::OperationFailed(
+                        "dependencyManagement import の groupId が未設定です".to_string(),
+                    )
+                })?;
+            let artifact =
+                resolve_property(entry.artifact_id.as_deref(), properties).ok_or_else(|| {
+                    WrapperError::OperationFailed(
+                        "dependencyManagement import の artifactId が未設定です".to_string(),
+                    )
+                })?;
+            let version =
+                resolve_property(entry.version.as_deref(), properties).ok_or_else(|| {
+                    WrapperError::OperationFailed(format!(
+                        "{group}:{artifact} の dependencyManagement import にバージョンがありません"
+                    ))
+                })?;
+
+            let import_coords = ArtifactCoordinates::new(group, artifact, version);
+            let imported = self.load_effective_pom(import_coords, memo, parent_stack)?;
+            for ((managed_group, managed_artifact), managed) in
+                imported.dependency_management.iter()
+            {
+                retained.push(PomDependency {
+                    group_id: Some(managed_group.clone()),
+                    artifact_id: Some(managed_artifact.clone()),
+                    version: Some(managed.version.clone()),
+                    scope: None,
+                    optional: false,
+                    exclusions: Vec::new(),
+                    classifier: None,
+                    dep_type: None,
+                });
+            }
+        }
+
+        model.dependency_management = retained;
+        Ok(())
     }
 
     fn fetch_pom(&self, coords: &ArtifactCoordinates) -> Result<String, WrapperError> {
@@ -222,7 +324,6 @@ struct PomModel {
     dependency_management: Vec<PomDependency>,
     dependencies: Vec<PomDependency>,
     plugin_management: Vec<PomPlugin>,
-    plugins: Vec<PomPlugin>,
 }
 
 #[derive(Debug, Clone)]
@@ -245,21 +346,22 @@ struct PomDependency {
 }
 
 #[derive(Debug, Clone)]
-struct DependencyExclusion {
-    group_id: String,
-    artifact_id: String,
-}
-
-#[derive(Debug, Clone)]
 struct PomPlugin {
     group_id: Option<String>,
     artifact_id: Option<String>,
     version: Option<String>,
 }
 
+#[derive(Debug, Clone)]
+struct DependencyExclusion {
+    group_id: String,
+    artifact_id: String,
+}
+
 impl PomModel {
     fn parse(xml: &str) -> Result<Self, WrapperError> {
-        let document = Document::parse(xml).map_err(|error| {
+        let normalized = normalize_xml_entities(xml);
+        let document = Document::parse(normalized.as_ref()).map_err(|error| {
             WrapperError::OperationFailed(format!("pom.xml の解析に失敗しました: {error}"))
         })?;
         let project = document
@@ -281,7 +383,7 @@ impl PomModel {
         let properties = parse_properties(&project);
         let dependency_management = parse_dependency_group(&project, "dependencyManagement")?;
         let dependencies = parse_dependency_group(&project, "dependencies")?;
-        let (plugin_management, plugins) = parse_plugin_sections(&project)?;
+        let (plugin_management, _) = parse_plugin_sections(&project)?;
 
         Ok(Self {
             _group_id: group_id,
@@ -293,7 +395,6 @@ impl PomModel {
             dependency_management,
             dependencies,
             plugin_management,
-            plugins,
         })
     }
 }
@@ -470,6 +571,50 @@ fn node_text(node: &Node<'_, '_>, tag: &str) -> Option<String> {
         .filter(|text| !text.is_empty())
 }
 
+fn normalize_xml_entities(input: &str) -> Cow<'_, str> {
+    if !input.contains('&') {
+        return Cow::Borrowed(input);
+    }
+
+    let mut output = String::with_capacity(input.len());
+    let mut chars = input.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch == '&' {
+            let mut entity = String::new();
+            while let Some(&next) = chars.peek() {
+                entity.push(next);
+                chars.next();
+                if next == ';' || entity.len() > 32 {
+                    break;
+                }
+            }
+
+            if entity.ends_with(';') {
+                let name = &entity[..entity.len() - 1];
+                if name.eq_ignore_ascii_case("lt")
+                    || name.eq_ignore_ascii_case("gt")
+                    || name.eq_ignore_ascii_case("amp")
+                    || name.eq_ignore_ascii_case("quot")
+                    || name.eq_ignore_ascii_case("apos")
+                    || name.starts_with('#')
+                {
+                    output.push('&');
+                    output.push_str(&entity);
+                } else {
+                    output.push(' ');
+                }
+            } else {
+                output.push('&');
+                output.push_str(&entity);
+            }
+        } else {
+            output.push(ch);
+        }
+    }
+
+    Cow::Owned(output)
+}
+
 #[derive(Debug, Clone)]
 struct EffectivePom {
     coordinates: ArtifactCoordinates,
@@ -477,7 +622,6 @@ struct EffectivePom {
     dependency_management: HashMap<(String, String), ManagedDependency>,
     dependencies: Vec<ResolvedDependency>,
     plugin_management: HashMap<(String, String), ManagedPlugin>,
-    plugins: Vec<ResolvedPlugin>,
 }
 
 #[derive(Debug, Clone)]
@@ -500,11 +644,6 @@ struct ResolvedDependency {
     scope: Option<String>,
     optional: bool,
     exclusions: Vec<DependencyExclusion>,
-}
-
-#[derive(Debug, Clone)]
-struct ResolvedPlugin {
-    coordinates: ArtifactCoordinates,
 }
 
 impl EffectivePom {
@@ -582,15 +721,23 @@ impl EffectivePom {
             };
             let version = match resolve_property(dependency.version.as_deref(), &properties) {
                 Some(value) => value,
-                None => dependency_management
-                    .get(&(group.clone(), artifact.clone()))
-                    .map(|managed| managed.version.clone())
-                    .ok_or_else(|| {
-                        WrapperError::OperationFailed(format!(
+                None => {
+                    if let Some(managed) =
+                        dependency_management.get(&(group.clone(), artifact.clone()))
+                    {
+                        managed.version.clone()
+                    } else if matches!(
+                        dependency.scope.as_deref(),
+                        Some("compile") | Some("runtime") | None
+                    ) {
+                        return Err(WrapperError::OperationFailed(format!(
                             "{}:{} のバージョンを特定できません",
                             group, artifact
-                        ))
-                    })?,
+                        )));
+                    } else {
+                        continue;
+                    }
+                }
             };
 
             let mut coords = ArtifactCoordinates::new(group, artifact, version);
@@ -617,39 +764,10 @@ impl EffectivePom {
                         "pluginManagement の artifactId が未設定です".to_string(),
                     )
                 })?;
-            let version =
-                resolve_property(plugin.version.as_deref(), &properties).ok_or_else(|| {
-                    WrapperError::OperationFailed(format!(
-                        "{}:{} の pluginManagement にバージョンがありません",
-                        group, artifact
-                    ))
-                })?;
+            let Some(version) = resolve_property(plugin.version.as_deref(), &properties) else {
+                continue;
+            };
             plugin_management.insert((group.clone(), artifact.clone()), ManagedPlugin { version });
-        }
-
-        let mut plugins = Vec::new();
-        for plugin in model.plugins {
-            let group = resolve_plugin_group(plugin.group_id.as_deref(), &properties);
-            let artifact = match resolve_property(plugin.artifact_id.as_deref(), &properties) {
-                Some(value) => value,
-                None => continue,
-            };
-            let version = match resolve_property(plugin.version.as_deref(), &properties) {
-                Some(value) => value,
-                None => plugin_management
-                    .get(&(group.clone(), artifact.clone()))
-                    .map(|managed| managed.version.clone())
-                    .ok_or_else(|| {
-                        WrapperError::OperationFailed(format!(
-                            "{}:{} のプラグインバージョンを特定できません",
-                            group, artifact
-                        ))
-                    })?,
-            };
-
-            plugins.push(ResolvedPlugin {
-                coordinates: ArtifactCoordinates::new(group, artifact, version),
-            });
         }
 
         Ok(Self {
@@ -658,7 +776,6 @@ impl EffectivePom {
             dependency_management,
             dependencies: resolved,
             plugin_management,
-            plugins,
         })
     }
 }

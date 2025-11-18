@@ -121,9 +121,12 @@ pub fn discover_declared_plugins(
     for build in collect_build_nodes(&project) {
         let management = parse_plugin_group(&build, true)?;
         for plugin in management {
-            let (group, artifact, version) = resolve_plugin(&plugin, &properties, None)?;
-            management_entries.insert((group.clone(), artifact.clone()), version.clone());
-            plugin_versions.insert((group, artifact), version);
+            if let Some((group, artifact, version)) =
+                resolve_management_plugin(&plugin, &properties)
+            {
+                management_entries.insert((group.clone(), artifact.clone()), version.clone());
+                plugin_versions.insert((group, artifact), version);
+            }
         }
 
         let plugins = parse_plugin_group(&build, false)?;
@@ -143,16 +146,6 @@ pub fn discover_declared_plugins(
                 declared.insert(coords);
             }
         }
-    }
-
-    for plugin in management_entries {
-        if declared
-            .iter()
-            .any(|coords| coords.group_id == plugin.0.0 && coords.artifact_id == plugin.0.1)
-        {
-            continue;
-        }
-        declared.insert(ArtifactCoordinates::new(plugin.0.0, plugin.0.1, plugin.1));
     }
 
     Ok(declared.into_iter().collect())
@@ -286,25 +279,14 @@ fn build_coordinates(
     Ok(Some(ArtifactCoordinates::new(group, artifact, version)))
 }
 
-fn resolve_plugin(
+fn resolve_management_plugin(
     plugin: &PomPluginDecl,
     properties: &HashMap<String, String>,
-    default: Option<&HashMap<(String, String), String>>,
-) -> Result<(String, String, String), WrapperError> {
-    let artifact =
-        resolve_property(plugin.artifact_id.as_deref(), properties).ok_or_else(|| {
-            WrapperError::OperationFailed("プラグインの artifactId が未設定です".to_string())
-        })?;
+) -> Option<(String, String, String)> {
+    let artifact = resolve_property(plugin.artifact_id.as_deref(), properties)?;
     let group = resolve_plugin_group(plugin.group_id.as_deref(), properties);
-    let version = resolve_property(plugin.version.as_deref(), properties)
-        .or_else(|| default.and_then(|map| map.get(&(group.clone(), artifact.clone())).cloned()))
-        .ok_or_else(|| {
-            WrapperError::OperationFailed(format!(
-                "{}:{} のプラグインバージョンを特定できません",
-                group, artifact
-            ))
-        })?;
-    Ok((group, artifact, version))
+    let version = resolve_property(plugin.version.as_deref(), properties)?;
+    Some((group, artifact, version))
 }
 
 fn node_text(node: &Node<'_, '_>, tag: &str) -> Option<String> {

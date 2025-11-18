@@ -1,0 +1,4 @@
+[[repositories]]
+name = "maven-central"
+url = "https://repo.maven.apache.org/maven2"
+priority = 100

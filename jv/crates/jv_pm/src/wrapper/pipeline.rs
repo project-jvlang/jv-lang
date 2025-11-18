@@ -11,6 +11,7 @@ use std::{
 };
 
 use anyhow::{Context, anyhow};
+use indexmap::IndexSet;
 use is_terminal::IsTerminal;
 use reqwest::{Client, StatusCode};
 use serde::{Deserialize, Serialize};
@@ -394,6 +395,12 @@ impl WrapperPipeline {
                 return Ok(());
             }
 
+            println!(
+                "[wrapper-download-plan] attempt {attempt}: {}/{} artifacts pending",
+                to_download.len(),
+                artifact_targets.len()
+            );
+
             let downloads = match self.runtime.block_on(downloader.download_all(to_download)) {
                 Ok(downloads) => downloads,
                 Err(error) => {
@@ -433,23 +440,44 @@ impl WrapperPipeline {
         resolver: &MavenDependencyResolver,
         declared_plugins: &[ArtifactCoordinates],
     ) -> Result<Vec<(ArtifactCoordinates, PathBuf)>, WrapperError> {
-        let mut roots = Vec::new();
+        let mut dependency_roots = Vec::new();
         for dependency in &resolved.dependencies {
             let coords = self.artifact_coordinates_from_dependency(manifest, dependency)?;
-            roots.push(coords);
+            dependency_roots.push(coords);
         }
 
+        let mut plugin_roots = IndexSet::new();
         for plugin in declared_plugins {
-            roots.push(plugin.clone());
+            plugin_roots.insert(plugin.clone());
         }
 
         for plugin in DEFAULT_MAVEN_PLUGINS {
-            roots.push(plugin.to_artifact());
+            plugin_roots.insert(plugin.to_artifact());
         }
 
-        let closure = resolver.resolve_closure(&roots)?;
+        let mut ordered = IndexSet::new();
+        if !dependency_roots.is_empty() {
+            for coords in resolver.resolve_closure(&dependency_roots)? {
+                ordered.insert(coords);
+            }
+        }
+
+        for plugin in plugin_roots.into_iter() {
+            ordered.insert(plugin.clone());
+            match resolver.resolve_closure(std::slice::from_ref(&plugin)) {
+                Ok(plugin_closure) => {
+                    for coords in plugin_closure {
+                        ordered.insert(coords);
+                    }
+                }
+                Err(error) => {
+                    tracing::warn!(artifact = %plugin, error = ?error, "プラグイン依存関係の解決に失敗したためスキップします");
+                }
+            }
+        }
+
         let mut targets = Vec::new();
-        for coords in closure {
+        for coords in ordered {
             let jar_path = self.artifact_jar_path(&coords);
             targets.push((coords, jar_path));
         }
@@ -800,6 +828,20 @@ fn build_registry_clients(
         registries.push(Arc::new(registry));
     }
 
+    registries.sort_by_key(|registry| {
+        registry
+            .base_url()
+            .domain()
+            .map(|domain| {
+                if domain == "repo.maven.apache.org" {
+                    0
+                } else {
+                    1
+                }
+            })
+            .unwrap_or(1)
+    });
+
     if registries.is_empty() {
         return Err(WrapperError::OperationFailed(
             "Maven Jar をダウンロードするリポジトリが構成されていません。".to_string(),
@@ -936,6 +978,7 @@ async fn download_single(
     ];
 
     let mut last_error = None;
+    println!("[wrapper-download-start] {}", coords);
 
     for registry in registries {
         match registry

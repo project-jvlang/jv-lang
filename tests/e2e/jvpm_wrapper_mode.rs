@@ -31,6 +31,7 @@ struct DependencyCoordinate {
     group: &'static str,
     artifact: &'static str,
     version: &'static str,
+    optional: bool,
 }
 
 impl DependencySpec {
@@ -79,7 +80,13 @@ impl DependencyCoordinate {
             group,
             artifact,
             version,
+            optional: false,
         }
+    }
+
+    fn optional(mut self) -> Self {
+        self.optional = true;
+        self
     }
 }
 
@@ -199,8 +206,15 @@ fn emit_dependency_section(dependencies: &[DependencyCoordinate]) -> String {
     buffer.push_str("  <dependencies>\n");
     for dep in dependencies {
         buffer.push_str(&format!(
-            "    <dependency>\n      <groupId>{}</groupId>\n      <artifactId>{}</artifactId>\n      <version>{}</version>\n    </dependency>\n",
-            dep.group, dep.artifact, dep.version
+            "    <dependency>\n      <groupId>{}</groupId>\n      <artifactId>{}</artifactId>\n      <version>{}</version>{}    </dependency>\n",
+            dep.group,
+            dep.artifact,
+            dep.version,
+            if dep.optional {
+                "\n      <optional>true</optional>\n"
+            } else {
+                "\n"
+            }
         ));
     }
     buffer.push_str("  </dependencies>");
@@ -579,6 +593,98 @@ fn e2e_wrapper_downloads_declared_plugins() -> Result<()> {
 
     let repo_root = project.path().join(".jv/repository");
     assert_dependency_jar(&repo_root, &plugin)?;
+    Ok(())
+}
+
+#[test]
+fn e2e_wrapper_downloads_plugin_dependencies() -> Result<()> {
+    let binary = match cargo_bin_path("jvpm") {
+        Some(path) => path,
+        None => {
+            eprintln!(
+                "skipping e2e_wrapper_downloads_plugin_dependencies: jvpm binary unavailable"
+            );
+            return Ok(());
+        }
+    };
+
+    let plugin = DependencySpec::new("org.example", "wrapper-zstd-plugin", "1.0.0").with_dependencies(vec![
+        DependencyCoordinate::new("org.libs", "plugin-core", "1.0.0"),
+        DependencyCoordinate::new("org.libs", "plugin-native", "2.0.0"),
+    ]);
+    let dependency = DependencySpec::new("org.example", "demo", "1.0.0");
+    let plugin_core = DependencySpec::new("org.libs", "plugin-core", "1.0.0");
+    let plugin_native = DependencySpec::new("org.libs", "plugin-native", "2.0.0");
+    let dependencies = vec![
+        dependency.clone(),
+        plugin.clone(),
+        plugin_core.clone(),
+        plugin_native.clone(),
+    ];
+
+    let home = tempdir().context("HOMEディレクトリの作成に失敗しました")?;
+    let repo_dir = home.path().join("fake-maven");
+    FakeMavenRepo::create(&repo_dir, &dependencies)?;
+    let server = FakeMavenServer::start(repo_dir)?;
+    write_global_config(&home, &server.base_url())?;
+
+    let project = tempdir().context("プロジェクト用ディレクトリの作成に失敗しました")?;
+    let custom_pom = format!(
+        r#"<project>
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>com.example</groupId>
+  <artifactId>wrapper-sample</artifactId>
+  <version>0.1.0</version>
+  <properties>
+    <wrapper.plugin.version>{}</wrapper.plugin.version>
+  </properties>
+  <build>
+    <pluginManagement>
+      <plugins>
+        <plugin>
+          <groupId>{}</groupId>
+          <artifactId>{}</artifactId>
+          <version>{}</version>
+        </plugin>
+      </plugins>
+    </pluginManagement>
+    <plugins>
+      <plugin>
+        <groupId>{}</groupId>
+        <artifactId>{}</artifactId>
+        <version>${{wrapper.plugin.version}}</version>
+      </plugin>
+    </plugins>
+  </build>
+</project>
+"#,
+        plugin.version,
+        plugin.group,
+        plugin.artifact,
+        plugin.version,
+        plugin.group,
+        plugin.artifact,
+    );
+    write_custom_pom(project.path(), &custom_pom)?;
+
+    let dependency_arg = dependency.coordinate_with_version();
+    let args = ["add", "--non-interactive", dependency_arg.as_str()];
+    let output = run_jvpm_command(&binary, project.path(), home.path(), &args)?;
+    assert!(
+        output.status.success(),
+        "jvpm add failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("[wrapper-mode] Maven ラッパーモードで起動しました"),
+        "wrapper mode log missing: {stdout}"
+    );
+
+    let repo_root = project.path().join(".jv/repository");
+    assert_dependency_jar(&repo_root, &plugin)?;
+    assert_dependency_jar(&repo_root, &plugin_core)?;
+    assert_dependency_jar(&repo_root, &plugin_native)?;
     Ok(())
 }
 
