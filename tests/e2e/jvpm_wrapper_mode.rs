@@ -426,6 +426,11 @@ fn assert_dependency_jar(repo_root: &Path, spec: &DependencySpec) -> Result<()> 
     Ok(())
 }
 
+fn write_custom_pom(path: &Path, contents: &str) -> Result<()> {
+    fs::write(path.join("pom.xml"), contents)
+        .with_context(|| format!("{} への書き込みに失敗しました", path.join("pom.xml").display()))
+}
+
 #[test]
 fn e2e_wrapper_add_synchronizes_maven_files() -> Result<()> {
     let binary = match cargo_bin_path("jvpm") {
@@ -511,6 +516,69 @@ fn e2e_wrapper_downloads_transitive_dependencies() -> Result<()> {
     let repo_root = project.path().join(".jv/repository");
     assert_dependency_jar(&repo_root, &root)?;
     assert_dependency_jar(&repo_root, &transitive)?;
+    Ok(())
+}
+
+#[test]
+fn e2e_wrapper_downloads_declared_plugins() -> Result<()> {
+    let binary = match cargo_bin_path("jvpm") {
+        Some(path) => path,
+        None => {
+            eprintln!(
+                "skipping e2e_wrapper_downloads_declared_plugins: jvpm binary unavailable"
+            );
+            return Ok(());
+        }
+    };
+
+    let plugin = DependencySpec::new("org.example", "wrapper-plugin", "1.0.0");
+    let dependencies = vec![plugin.clone(), DependencySpec::new("org.example", "demo", "1.0.0")];
+    let home = tempdir().context("HOMEディレクトリの作成に失敗しました")?;
+    let repo_dir = home.path().join("fake-maven");
+    FakeMavenRepo::create(&repo_dir, &dependencies)?;
+    let server = FakeMavenServer::start(repo_dir)?;
+    write_global_config(&home, &server.base_url())?;
+
+    let project = tempdir().context("プロジェクト用ディレクトリの作成に失敗しました")?;
+    let custom_pom = format!(
+        r#"<project>
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>com.example</groupId>
+  <artifactId>wrapper-sample</artifactId>
+  <version>0.1.0</version>
+  <build>
+    <pluginManagement>
+      <plugins>
+        <plugin>
+          <groupId>{}</groupId>
+          <artifactId>{}</artifactId>
+          <version>{}</version>
+        </plugin>
+      </plugins>
+    </pluginManagement>
+    <plugins>
+      <plugin>
+        <groupId>{}</groupId>
+        <artifactId>{}</artifactId>
+      </plugin>
+    </plugins>
+  </build>
+</project>
+"#,
+        plugin.group, plugin.artifact, plugin.version, plugin.group, plugin.artifact
+    );
+    write_custom_pom(project.path(), &custom_pom)?;
+
+    let args = ["add", "--non-interactive", "org.example:demo@1.0.0"];
+    let output = run_jvpm_command(&binary, project.path(), home.path(), &args)?;
+    assert!(
+        output.status.success(),
+        "jvpm add failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let repo_root = project.path().join(".jv/repository");
+    assert_dependency_jar(&repo_root, &plugin)?;
     Ok(())
 }
 

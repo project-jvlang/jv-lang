@@ -24,8 +24,8 @@ use crate::{
     cli::{AddArgs, RemoveArgs},
     lockfile::{Lockfile, LockfileService},
     maven::{
-        dependency_graph::MavenDependencyResolver, MavenIntegrationConfig,
-        MavenIntegrationDispatcher, MavenMirrorConfig, MavenRepositoryConfig,
+        MavenIntegrationConfig, MavenIntegrationDispatcher, MavenMirrorConfig,
+        MavenRepositoryConfig, dependency_graph::MavenDependencyResolver,
     },
     registry::{
         ArtifactCoordinates, ArtifactResource, ChecksumAlgorithm, ChecksumVerifiedJar,
@@ -41,6 +41,7 @@ use super::{
     context::WrapperContext,
     error::WrapperError,
     metrics,
+    plugins::{self, DEFAULT_MAVEN_PLUGINS},
     sync::{self, WrapperUpdateSummary},
 };
 
@@ -262,13 +263,27 @@ impl WrapperPipeline {
         })?;
         manager.load_project_config(manifest);
 
+        let registries = build_registry_clients(&manager)?;
+        let dependency_resolver = MavenDependencyResolver::new(
+            &self.runtime,
+            Arc::clone(&self.cache),
+            registries.clone(),
+        );
+        let declared_plugins = self.discover_project_plugins(Some(&dependency_resolver))?;
+
         let (pom_updated, settings_updated) =
             metrics::measure("wrapper-pipeline-artifact-generation", || {
                 self.generate_maven_artifacts(manifest, &resolved, &lockfile, &manager)
             })?;
 
         metrics::measure("wrapper-pipeline-jar-download", || {
-            self.ensure_wrapper_jars(manifest, &resolved, &manager)
+            self.ensure_wrapper_jars(
+                manifest,
+                &resolved,
+                registries,
+                &dependency_resolver,
+                &declared_plugins,
+            )
         })?;
 
         metrics::measure("wrapper-pipeline-artifact-cleanup", || {
@@ -359,17 +374,13 @@ impl WrapperPipeline {
         &self,
         manifest: &Manifest,
         resolved: &ResolvedDependencies,
-        manager: &RepositoryManager,
+        registries: Vec<Arc<MavenRegistry>>,
+        resolver: &MavenDependencyResolver,
+        declared_plugins: &[ArtifactCoordinates],
     ) -> Result<(), WrapperError> {
-        let registries = build_registry_clients(manager)?;
-        let dependency_resolver = MavenDependencyResolver::new(
-            &self.runtime,
-            Arc::clone(&self.cache),
-            registries.clone(),
-        );
         let downloader = MavenCentralDownloader::new(registries, MAX_PARALLEL_DOWNLOADS);
         let artifact_targets =
-            self.collect_artifact_targets(manifest, resolved, &dependency_resolver)?;
+            self.collect_artifact_targets(manifest, resolved, resolver, declared_plugins)?;
 
         if artifact_targets.is_empty() {
             return Ok(());
@@ -420,11 +431,20 @@ impl WrapperPipeline {
         manifest: &Manifest,
         resolved: &ResolvedDependencies,
         resolver: &MavenDependencyResolver,
+        declared_plugins: &[ArtifactCoordinates],
     ) -> Result<Vec<(ArtifactCoordinates, PathBuf)>, WrapperError> {
         let mut roots = Vec::new();
         for dependency in &resolved.dependencies {
             let coords = self.artifact_coordinates_from_dependency(manifest, dependency)?;
             roots.push(coords);
+        }
+
+        for plugin in declared_plugins {
+            roots.push(plugin.clone());
+        }
+
+        for plugin in DEFAULT_MAVEN_PLUGINS {
+            roots.push(plugin.to_artifact());
         }
 
         let closure = resolver.resolve_closure(&roots)?;
@@ -468,12 +488,7 @@ impl WrapperPipeline {
     ) -> Result<(), WrapperError> {
         let total = downloads.len();
         for (index, (coords, download)) in downloads.into_iter().enumerate() {
-            println!(
-                "[wrapper-download] {}/{} {}",
-                index + 1,
-                total,
-                coords
-            );
+            println!("[wrapper-download] {}/{} {}", index + 1, total, coords);
             let jar_path = jar_paths.remove(&coords).ok_or_else(|| {
                 WrapperError::OperationFailed(format!(
                     "ダウンロード済み Jar のパスが見つかりません: {}",
@@ -512,6 +527,24 @@ impl WrapperPipeline {
             .join(&coords.artifact_id)
             .join(&coords.version)
             .join(coords.jar_file_name())
+    }
+
+    fn discover_project_plugins(
+        &self,
+        resolver: Option<&MavenDependencyResolver>,
+    ) -> Result<Vec<ArtifactCoordinates>, WrapperError> {
+        if !self.context.pom_path.exists() {
+            return Ok(Vec::new());
+        }
+
+        let contents = fs::read_to_string(&self.context.pom_path).map_err(|error| {
+            WrapperError::OperationFailed(format!(
+                "{} の読み込みに失敗しました: {error}",
+                self.context.pom_path.display()
+            ))
+        })?;
+
+        plugins::discover_declared_plugins(&contents, resolver)
     }
 
     fn validate_existing_jar(&self, path: &Path) -> Result<bool, WrapperError> {

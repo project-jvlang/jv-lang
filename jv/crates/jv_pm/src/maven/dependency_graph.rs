@@ -16,6 +16,11 @@ pub struct MavenDependencyResolver<'a> {
     registries: Vec<Arc<MavenRegistry>>,
 }
 
+pub struct PomMetadata {
+    pub properties: HashMap<String, String>,
+    pub plugin_management: HashMap<(String, String), String>,
+}
+
 impl<'a> MavenDependencyResolver<'a> {
     pub fn new(
         runtime: &'a tokio::runtime::Runtime,
@@ -39,9 +44,32 @@ impl<'a> MavenDependencyResolver<'a> {
         let mut ordered = IndexSet::new();
         let mut memo = HashMap::new();
         for root in roots {
-            self.expand(root.clone(), &mut ordered, &mut memo, &[], &mut HashSet::new())?;
+            self.expand(
+                root.clone(),
+                &mut ordered,
+                &mut memo,
+                &[],
+                &mut HashSet::new(),
+            )?;
         }
         Ok(ordered.into_iter().collect())
+    }
+
+    pub fn metadata_for(&self, coords: &ArtifactCoordinates) -> Result<PomMetadata, WrapperError> {
+        let mut memo = HashMap::new();
+        let mut stack = HashSet::new();
+        let effective = self.load_effective_pom(coords.clone(), &mut memo, &mut stack)?;
+        let plugin_management = effective
+            .plugin_management
+            .iter()
+            .map(|((group, artifact), managed)| {
+                ((group.clone(), artifact.clone()), managed.version.clone())
+            })
+            .collect();
+        Ok(PomMetadata {
+            properties: effective.properties.clone(),
+            plugin_management,
+        })
     }
 
     fn expand(
@@ -70,7 +98,10 @@ impl<'a> MavenDependencyResolver<'a> {
             if dependency.optional {
                 continue;
             }
-            if !matches!(dependency.scope.as_deref(), None | Some("compile") | Some("runtime")) {
+            if !matches!(
+                dependency.scope.as_deref(),
+                None | Some("compile") | Some("runtime")
+            ) {
                 continue;
             }
             if is_excluded(&dependency.coordinates, inherited_exclusions) {
@@ -91,6 +122,10 @@ impl<'a> MavenDependencyResolver<'a> {
                 &next_exclusions,
                 stack,
             )?;
+        }
+
+        for plugin in &effective.plugins {
+            self.expand(plugin.coordinates.clone(), ordered, memo, &[], stack)?;
         }
 
         stack.remove(&coords);
@@ -130,20 +165,17 @@ impl<'a> MavenDependencyResolver<'a> {
 
         parent_stack.remove(&coords);
 
-        let effective = EffectivePom::from_model(coords.clone(), model, parent_effective.as_deref())?;
+        let effective =
+            EffectivePom::from_model(coords.clone(), model, parent_effective.as_deref())?;
         let shared = Arc::new(effective);
         memo.insert(coords, shared.clone());
         Ok(shared)
     }
 
     fn fetch_pom(&self, coords: &ArtifactCoordinates) -> Result<String, WrapperError> {
-        if let Some(cached) = self
-            .cache
-            .get_pom(coords)
-            .map_err(|error| WrapperError::OperationFailed(format!(
-                "POMキャッシュの読み込みに失敗しました: {error}"
-            )))?
-        {
+        if let Some(cached) = self.cache.get_pom(coords).map_err(|error| {
+            WrapperError::OperationFailed(format!("POMキャッシュの読み込みに失敗しました: {error}"))
+        })? {
             return Ok(cached.content);
         }
 
@@ -173,10 +205,7 @@ impl<'a> MavenDependencyResolver<'a> {
     }
 }
 
-fn is_excluded(
-    coords: &ArtifactCoordinates,
-    exclusions: &[(String, String)],
-) -> bool {
+fn is_excluded(coords: &ArtifactCoordinates, exclusions: &[(String, String)]) -> bool {
     exclusions
         .iter()
         .any(|(group, artifact)| group == &coords.group_id && artifact == &coords.artifact_id)
@@ -192,6 +221,8 @@ struct PomModel {
     properties: HashMap<String, String>,
     dependency_management: Vec<PomDependency>,
     dependencies: Vec<PomDependency>,
+    plugin_management: Vec<PomPlugin>,
+    plugins: Vec<PomPlugin>,
 }
 
 #[derive(Debug, Clone)]
@@ -219,6 +250,13 @@ struct DependencyExclusion {
     artifact_id: String,
 }
 
+#[derive(Debug, Clone)]
+struct PomPlugin {
+    group_id: Option<String>,
+    artifact_id: Option<String>,
+    version: Option<String>,
+}
+
 impl PomModel {
     fn parse(xml: &str) -> Result<Self, WrapperError> {
         let document = Document::parse(xml).map_err(|error| {
@@ -243,6 +281,7 @@ impl PomModel {
         let properties = parse_properties(&project);
         let dependency_management = parse_dependency_group(&project, "dependencyManagement")?;
         let dependencies = parse_dependency_group(&project, "dependencies")?;
+        let (plugin_management, plugins) = parse_plugin_sections(&project)?;
 
         Ok(Self {
             _group_id: group_id,
@@ -253,20 +292,20 @@ impl PomModel {
             properties,
             dependency_management,
             dependencies,
+            plugin_management,
+            plugins,
         })
     }
 }
 
 fn parse_parent(node: Node<'_, '_>) -> Result<PomParent, WrapperError> {
-    let group_id = node_text(&node, "groupId").ok_or_else(|| {
-        WrapperError::OperationFailed("parent.groupId が未指定です".to_string())
-    })?;
+    let group_id = node_text(&node, "groupId")
+        .ok_or_else(|| WrapperError::OperationFailed("parent.groupId が未指定です".to_string()))?;
     let artifact_id = node_text(&node, "artifactId").ok_or_else(|| {
         WrapperError::OperationFailed("parent.artifactId が未指定です".to_string())
     })?;
-    let version = node_text(&node, "version").ok_or_else(|| {
-        WrapperError::OperationFailed("parent.version が未指定です".to_string())
-    })?;
+    let version = node_text(&node, "version")
+        .ok_or_else(|| WrapperError::OperationFailed("parent.version が未指定です".to_string()))?;
 
     Ok(PomParent {
         group_id,
@@ -361,6 +400,68 @@ fn parse_dependency(node: Node<'_, '_>) -> Result<PomDependency, WrapperError> {
     })
 }
 
+fn parse_plugin_sections(
+    node: &Node<'_, '_>,
+) -> Result<(Vec<PomPlugin>, Vec<PomPlugin>), WrapperError> {
+    let mut management = Vec::new();
+    let mut plugins = Vec::new();
+
+    if let Some(build) = node
+        .children()
+        .find(|child| child.is_element() && child.tag_name().name() == "build")
+    {
+        management.extend(parse_plugin_group(&build, true)?);
+        plugins.extend(parse_plugin_group(&build, false)?);
+    }
+
+    if let Some(reporting) = node
+        .children()
+        .find(|child| child.is_element() && child.tag_name().name() == "reporting")
+    {
+        plugins.extend(parse_plugin_group(&reporting, false)?);
+    }
+
+    Ok((management, plugins))
+}
+
+fn parse_plugin_group(
+    node: &Node<'_, '_>,
+    management: bool,
+) -> Result<Vec<PomPlugin>, WrapperError> {
+    let container = if management {
+        node.children()
+            .find(|child| child.is_element() && child.tag_name().name() == "pluginManagement")
+            .and_then(|pm| {
+                pm.children()
+                    .find(|child| child.is_element() && child.tag_name().name() == "plugins")
+            })
+    } else {
+        node.children()
+            .find(|child| child.is_element() && child.tag_name().name() == "plugins")
+    };
+
+    if let Some(plugins_node) = container {
+        let mut plugins = Vec::new();
+        for plugin in plugins_node
+            .children()
+            .filter(|child| child.is_element() && child.tag_name().name() == "plugin")
+        {
+            plugins.push(parse_plugin(plugin)?);
+        }
+        Ok(plugins)
+    } else {
+        Ok(Vec::new())
+    }
+}
+
+fn parse_plugin(node: Node<'_, '_>) -> Result<PomPlugin, WrapperError> {
+    Ok(PomPlugin {
+        group_id: node_text(&node, "groupId"),
+        artifact_id: node_text(&node, "artifactId"),
+        version: node_text(&node, "version"),
+    })
+}
+
 fn node_text(node: &Node<'_, '_>, tag: &str) -> Option<String> {
     node.children()
         .find(|child| child.is_element() && child.tag_name().name() == tag)
@@ -375,6 +476,8 @@ struct EffectivePom {
     properties: HashMap<String, String>,
     dependency_management: HashMap<(String, String), ManagedDependency>,
     dependencies: Vec<ResolvedDependency>,
+    plugin_management: HashMap<(String, String), ManagedPlugin>,
+    plugins: Vec<ResolvedPlugin>,
 }
 
 #[derive(Debug, Clone)]
@@ -387,11 +490,21 @@ struct ManagedDependency {
 }
 
 #[derive(Debug, Clone)]
+struct ManagedPlugin {
+    version: String,
+}
+
+#[derive(Debug, Clone)]
 struct ResolvedDependency {
     coordinates: ArtifactCoordinates,
     scope: Option<String>,
     optional: bool,
     exclusions: Vec<DependencyExclusion>,
+}
+
+#[derive(Debug, Clone)]
+struct ResolvedPlugin {
+    coordinates: ArtifactCoordinates,
 }
 
 impl EffectivePom {
@@ -427,20 +540,24 @@ impl EffectivePom {
             .map(|parent| parent.dependency_management.clone())
             .unwrap_or_default();
         for entry in model.dependency_management {
-            let group = resolve_property(entry.group_id.as_deref(), &properties).ok_or_else(|| {
-                WrapperError::OperationFailed("dependencyManagement の groupId が未設定です".to_string())
-            })?;
+            let group =
+                resolve_property(entry.group_id.as_deref(), &properties).ok_or_else(|| {
+                    WrapperError::OperationFailed(
+                        "dependencyManagement の groupId が未設定です".to_string(),
+                    )
+                })?;
             let artifact =
                 resolve_property(entry.artifact_id.as_deref(), &properties).ok_or_else(|| {
                     WrapperError::OperationFailed(
                         "dependencyManagement の artifactId が未設定です".to_string(),
                     )
                 })?;
-            let version = resolve_property(entry.version.as_deref(), &properties).ok_or_else(|| {
-                WrapperError::OperationFailed(format!(
-                    "{group}:{artifact} の dependencyManagement にバージョンがありません"
-                ))
-            })?;
+            let version =
+                resolve_property(entry.version.as_deref(), &properties).ok_or_else(|| {
+                    WrapperError::OperationFailed(format!(
+                        "{group}:{artifact} の dependencyManagement にバージョンがありません"
+                    ))
+                })?;
             dependency_management.insert(
                 (group.clone(), artifact.clone()),
                 ManagedDependency {
@@ -453,7 +570,7 @@ impl EffectivePom {
             );
         }
 
-        let mut resolved = Vec::new();
+        let mut resolved: Vec<ResolvedDependency> = Vec::new();
         for dependency in model.dependencies {
             let group = match resolve_property(dependency.group_id.as_deref(), &properties) {
                 Some(value) => value,
@@ -470,7 +587,8 @@ impl EffectivePom {
                     .map(|managed| managed.version.clone())
                     .ok_or_else(|| {
                         WrapperError::OperationFailed(format!(
-                            "{}:{} のバージョンを特定できません", group, artifact
+                            "{}:{} のバージョンを特定できません",
+                            group, artifact
                         ))
                     })?,
             };
@@ -488,19 +606,64 @@ impl EffectivePom {
             });
         }
 
+        let mut plugin_management = parent
+            .map(|parent| parent.plugin_management.clone())
+            .unwrap_or_default();
+        for plugin in model.plugin_management {
+            let group = resolve_plugin_group(plugin.group_id.as_deref(), &properties);
+            let artifact = resolve_property(plugin.artifact_id.as_deref(), &properties)
+                .ok_or_else(|| {
+                    WrapperError::OperationFailed(
+                        "pluginManagement の artifactId が未設定です".to_string(),
+                    )
+                })?;
+            let version =
+                resolve_property(plugin.version.as_deref(), &properties).ok_or_else(|| {
+                    WrapperError::OperationFailed(format!(
+                        "{}:{} の pluginManagement にバージョンがありません",
+                        group, artifact
+                    ))
+                })?;
+            plugin_management.insert((group.clone(), artifact.clone()), ManagedPlugin { version });
+        }
+
+        let mut plugins = Vec::new();
+        for plugin in model.plugins {
+            let group = resolve_plugin_group(plugin.group_id.as_deref(), &properties);
+            let artifact = match resolve_property(plugin.artifact_id.as_deref(), &properties) {
+                Some(value) => value,
+                None => continue,
+            };
+            let version = match resolve_property(plugin.version.as_deref(), &properties) {
+                Some(value) => value,
+                None => plugin_management
+                    .get(&(group.clone(), artifact.clone()))
+                    .map(|managed| managed.version.clone())
+                    .ok_or_else(|| {
+                        WrapperError::OperationFailed(format!(
+                            "{}:{} のプラグインバージョンを特定できません",
+                            group, artifact
+                        ))
+                    })?,
+            };
+
+            plugins.push(ResolvedPlugin {
+                coordinates: ArtifactCoordinates::new(group, artifact, version),
+            });
+        }
+
         Ok(Self {
             coordinates: coords,
             properties,
             dependency_management,
             dependencies: resolved,
+            plugin_management,
+            plugins,
         })
     }
 }
 
-fn resolve_property(
-    value: Option<&str>,
-    properties: &HashMap<String, String>,
-) -> Option<String> {
+fn resolve_property(value: Option<&str>, properties: &HashMap<String, String>) -> Option<String> {
     let mut current = value?.trim().to_string();
     if current.is_empty() {
         return None;
@@ -520,6 +683,12 @@ fn resolve_property(
     }
 
     Some(current)
+}
+
+fn resolve_plugin_group(value: Option<&str>, properties: &HashMap<String, String>) -> String {
+    resolve_property(value, properties)
+        .filter(|group| !group.is_empty())
+        .unwrap_or_else(|| "org.apache.maven.plugins".to_string())
 }
 
 fn resolve_placeholders(
