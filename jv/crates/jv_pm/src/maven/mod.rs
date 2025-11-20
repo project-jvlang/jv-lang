@@ -331,6 +331,7 @@ mod tests {
                     decision: VersionDecision::Exact("1.0.1".to_string()),
                     scope: DependencyScope::Main,
                     source: ResolutionSource::Registry,
+                    local_artifact: None,
                 },
                 crate::resolver::ResolvedDependency {
                     name: "org.example:test-kit".to_string(),
@@ -338,6 +339,7 @@ mod tests {
                     decision: VersionDecision::Exact("2.1.0".to_string()),
                     scope: DependencyScope::Dev,
                     source: ResolutionSource::Registry,
+                    local_artifact: None,
                 },
             ],
             diagnostics: Vec::<ResolutionDiagnostic>::new(),

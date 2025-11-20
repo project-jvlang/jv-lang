@@ -644,6 +644,7 @@ mod tests {
                     decision: VersionDecision::Exact("1.0.188".to_string()),
                     scope: DependencyScope::Main,
                     source: ResolutionSource::Registry,
+                    local_artifact: None,
                 },
                 ResolvedDependency {
                     name: "tokio".to_string(),
@@ -651,6 +652,7 @@ mod tests {
                     decision: VersionDecision::Exact("1.37.0".to_string()),
                     scope: DependencyScope::Dev,
                     source: ResolutionSource::Registry,
+                    local_artifact: None,
                 },
             ],
             diagnostics: Vec::new(),

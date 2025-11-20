@@ -223,6 +223,7 @@ fn lockfile_package_to_dependency(
         decision: VersionDecision::Exact(package.version.clone()),
         scope,
         source: ResolutionSource::Lockfile,
+        local_artifact: None,
     })
 }
 

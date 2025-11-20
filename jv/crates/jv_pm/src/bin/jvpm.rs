@@ -28,6 +28,7 @@ use jv_pm::{
     ResolverAlgorithmKind, ResolverDispatcher, ResolverOptions, ResolverStrategyInfo,
     StrategyStability, repository,
 };
+use jv_pm::resolver::MavenResolverContext;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use strsim::normalized_levenshtein;
@@ -722,6 +723,22 @@ fn finalize_project_state(
     save_manifest(manifest, manifest_path)?;
 
     let dispatcher = ResolverDispatcher::with_default_strategies();
+    let mut manager = RepositoryManager::with_project_root(project_root.to_path_buf())
+        .context("リポジトリマネージャーの初期化に失敗しました")?;
+    manager.load_project_config(manifest);
+
+    let local_repository = ensure_local_repository(project_root)?;
+    let repositories = collect_maven_repositories(&manager);
+    let mirrors = collect_effective_mirrors(manifest)?;
+
+    let ctx = MavenResolverContext {
+        project_root: project_root.to_path_buf(),
+        local_repository: local_repository.clone(),
+        repositories: repositories.clone(),
+        mirrors: mirrors.clone(),
+    };
+    let options_with_context = options.clone().with_maven_context(ctx);
+
     let resolved = if manifest.package.dependencies.is_empty() {
         let requested = options
             .strategy
@@ -750,7 +767,7 @@ fn finalize_project_state(
         }
     } else {
         dispatcher
-            .resolve_manifest(manifest, options.clone())
+            .resolve_manifest(manifest, options_with_context.clone())
             .context("依存関係の解決に失敗しました")?
     };
 
@@ -760,14 +777,6 @@ fn finalize_project_state(
     LockfileService::save(&lockfile_path, &lockfile)
         .with_context(|| format!("{} への書き込みに失敗しました", lockfile_path.display()))?;
 
-    let local_repository = ensure_local_repository(project_root)?;
-
-    let mut manager = RepositoryManager::with_project_root(project_root.to_path_buf())
-        .context("リポジトリマネージャーの初期化に失敗しました")?;
-    manager.load_project_config(manifest);
-
-    let repositories = collect_maven_repositories(&manager);
-    let mirrors = collect_effective_mirrors(manifest)?;
     let sources_dir = resolve_sources_dir(project_root, manifest);
     let output_dir = resolve_output_dir(project_root);
 

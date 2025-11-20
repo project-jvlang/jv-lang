@@ -4,11 +4,12 @@
 //! supporting data structures required to convert a `Manifest` into
 //! deterministically ordered `ResolvedDependencies`.
 
-use crate::{Manifest, PackageInfo};
+use crate::{Manifest, MavenMirrorConfig, MavenRepositoryConfig, PackageInfo};
 use indexmap::IndexMap;
 use semver::{Version, VersionReq};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 use thiserror::Error;
@@ -178,11 +179,32 @@ pub struct ResolverOptions {
     pub allow_prerelease: bool,
     pub include_dev_dependencies: bool,
     pub max_depth: usize,
+    /// Optional Maven-specific context required for strategies that perform
+    /// artifact downloads or pom.xml resolution. This is populated by the CLI
+    /// layer and skipped during serialization to avoid leaking filesystem
+    /// details into persisted configs.
+    #[serde(skip)]
+    pub maven_context: Option<MavenResolverContext>,
+}
+
+/// Maven resolution context shared across strategies that need repository
+/// and filesystem information to download artifacts.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MavenResolverContext {
+    pub project_root: PathBuf,
+    pub local_repository: PathBuf,
+    pub repositories: Vec<MavenRepositoryConfig>,
+    pub mirrors: Vec<MavenMirrorConfig>,
 }
 
 impl ResolverOptions {
     pub fn with_strategy(mut self, strategy: impl Into<String>) -> Self {
         self.strategy = Some(strategy.into());
+        self
+    }
+
+    pub fn with_maven_context(mut self, context: MavenResolverContext) -> Self {
+        self.maven_context = Some(context);
         self
     }
 }
@@ -194,6 +216,7 @@ impl Default for ResolverOptions {
             allow_prerelease: false,
             include_dev_dependencies: false,
             max_depth: 64,
+            maven_context: None,
         }
     }
 }
@@ -245,6 +268,10 @@ pub struct ResolvedDependency {
     pub decision: VersionDecision,
     pub scope: DependencyScope,
     pub source: ResolutionSource,
+    /// Absolute path to the locally cached artifact (e.g., `.jv/repository/...`).
+    /// Strategies that do not download artifacts should leave this as `None`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub local_artifact: Option<String>,
 }
 
 /// How a dependency version was decided.
@@ -450,6 +477,7 @@ pub(crate) fn execute_linear_resolution(
             decision,
             scope: dependency.scope,
             source: ResolutionSource::Manifest,
+            local_artifact: None,
         });
     }
 
