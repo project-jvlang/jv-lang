@@ -146,6 +146,7 @@ verify_downloaded_jar() {
     local group="$1"
     local artifact="$2"
     local version="$3"
+    local run_dir="${4:-}"
     local group_path="${group//./\/}"
     local jar_path="$MAVEN_CACHE_DIR/$group_path/$artifact/$version/$artifact-$version.jar"
 
@@ -154,6 +155,22 @@ verify_downloaded_jar() {
     else
         echo "ダウンロードされた Jar が見つかりません: $jar_path" >&2
         exit 1
+    fi
+
+    local actual_count
+    actual_count=$(find "$MAVEN_CACHE_DIR" -type f -name '*.jar' | wc -l | tr -d ' ')
+
+    if [[ -n "$run_dir" ]]; then
+        local jar_list="$run_dir/maven-jars.txt"
+        if [[ -f "$jar_list" ]]; then
+            local expected_count
+            expected_count=$(wc -l < "$jar_list" | tr -d ' ')
+            if [[ "$actual_count" -ne "$expected_count" ]]; then
+                echo "Maven の Jar 件数が一致しません (expected=${expected_count}, actual=${actual_count})" >&2
+                exit 1
+            fi
+            echo "Maven Jar 件数を確認しました: ${actual_count} 件"
+        fi
     fi
 }
 
@@ -214,7 +231,15 @@ verify_wrapper_jars_from_list() {
             exit 1
         fi
     done < "$jar_list"
-    echo "Wrapper リポジトリに Maven 取得 Jar をすべて確認しました"
+    local wrapper_count
+    wrapper_count=$(find "$run_dir/.jv/repository" -type f -name '*.jar' | wc -l | tr -d ' ')
+    local expected_count
+    expected_count=$(wc -l < "$jar_list" | tr -d ' ')
+    if [[ "$wrapper_count" -ne "$expected_count" ]]; then
+        echo "Wrapper ローカルリポジトリの Jar 件数が一致しません (expected=${expected_count}, actual=${wrapper_count})" >&2
+        exit 1
+    fi
+    echo "Wrapper リポジトリに Maven 取得 Jar をすべて確認しました (${wrapper_count} 件)"
 }
 
 verify_wrapper_jars_removed_from_list() {
@@ -241,8 +266,8 @@ run_maven_with_verify() {
     local workdir="$2"
 
 run_and_log "Maven dependency:resolve run #$run" "$workdir" "$MVN_BIN" -B -Dmaven.repo.local="$MAVEN_CACHE_DIR" dependency:resolve
-    verify_downloaded_jar "$DEP_GROUP" "$DEP_ARTIFACT" "$DEP_VERSION"
     collect_maven_jar_list "$workdir"
+    verify_downloaded_jar "$DEP_GROUP" "$DEP_ARTIFACT" "$DEP_VERSION" "$workdir"
 }
 
 rm -rf "$PERF_ROOT"
