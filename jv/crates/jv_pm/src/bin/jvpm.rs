@@ -201,6 +201,16 @@ fn resolver_options_from_strategy(strategy: Option<ResolverAlgorithm>) -> Resolv
     options
 }
 
+/// Wrapperモード専用: 明示指定が無ければ Maven 互換戦略をデフォルトで使用する。
+fn resolver_options_for_wrapper(strategy: Option<ResolverAlgorithm>) -> ResolverOptions {
+    match strategy {
+        Some(value) => resolver_options_from_strategy(Some(value)),
+        None => {
+            ResolverOptions::default().with_strategy(ResolverAlgorithm::MavenCompat.strategy_name())
+        }
+    }
+}
+
 fn handle_add_command(args: AddArgs, mode: CliMode) -> Result<()> {
     if mode.is_wrapper() {
         return handle_wrapper_add_command(&args);
@@ -210,7 +220,7 @@ fn handle_add_command(args: AddArgs, mode: CliMode) -> Result<()> {
 
 fn handle_wrapper_add_command(args: &AddArgs) -> Result<()> {
     let context = WrapperContext::detect().map_err(|error| anyhow!(error))?;
-    let resolver_options = resolver_options_from_strategy(args.strategy);
+    let resolver_options = resolver_options_for_wrapper(args.strategy);
     let mut pipeline =
         WrapperPipeline::new(context, resolver_options).map_err(|error| anyhow!(error))?;
     let summary = pipeline.add(args).map_err(|error| anyhow!(error))?;
@@ -333,7 +343,7 @@ fn handle_remove_command(args: RemoveArgs, mode: CliMode) -> Result<()> {
 
 fn handle_wrapper_remove_command(args: &RemoveArgs) -> Result<()> {
     let context = WrapperContext::detect().map_err(|error| anyhow!(error))?;
-    let resolver_options = resolver_options_from_strategy(args.strategy);
+    let resolver_options = resolver_options_for_wrapper(args.strategy);
     let mut pipeline =
         WrapperPipeline::new(context, resolver_options).map_err(|error| anyhow!(error))?;
     let summary = pipeline.remove(args).map_err(|error| anyhow!(error))?;

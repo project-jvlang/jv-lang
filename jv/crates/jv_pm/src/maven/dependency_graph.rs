@@ -53,6 +53,8 @@ impl<'a> MavenDependencyResolver<'a> {
     ) -> Result<Vec<ArtifactCoordinates>, WrapperError> {
         let mut ordered = IndexSet::new();
         let mut memo = HashMap::new();
+        // Maven の nearest-wins 調停に合わせ、最初に現れた groupId/artifactId(+classifier) のバージョンを固定する。
+        let mut seen_versions: HashMap<(String, String, Option<String>), String> = HashMap::new();
         for root in roots {
             self.expand(
                 root.clone(),
@@ -61,6 +63,7 @@ impl<'a> MavenDependencyResolver<'a> {
                 &[],
                 include_optional,
                 &mut HashSet::new(),
+                &mut seen_versions,
             )?;
         }
         Ok(ordered.into_iter().collect())
@@ -91,9 +94,25 @@ impl<'a> MavenDependencyResolver<'a> {
         inherited_exclusions: &[(String, String)],
         include_optional: bool,
         stack: &mut HashSet<ArtifactCoordinates>,
+        seen_versions: &mut HashMap<(String, String, Option<String>), String>,
     ) -> Result<(), WrapperError> {
         if ordered.contains(&coords) {
             return Ok(());
+        }
+
+        let key = (
+            coords.group_id.clone(),
+            coords.artifact_id.clone(),
+            coords.classifier.clone(),
+        );
+
+        if let Some(existing) = seen_versions.get(&key) {
+            if existing != &coords.version {
+                // nearest-wins: 先に確定したバージョンを優先し、後続の異なるバージョンは展開しない。
+                return Ok(());
+            }
+        } else {
+            seen_versions.insert(key, coords.version.clone());
         }
 
         if !stack.insert(coords.clone()) {
@@ -134,6 +153,7 @@ impl<'a> MavenDependencyResolver<'a> {
                 &next_exclusions,
                 include_optional,
                 stack,
+                seen_versions,
             )?;
         }
 
