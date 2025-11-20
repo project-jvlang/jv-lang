@@ -16,6 +16,7 @@ use jv_pm::cli::{
     AddArgs, Cli, Commands, RemoveArgs, RepoAuthKind, RepoCommand, RepoOrigin, RepoScope,
     ResolverAlgorithm, ResolverCommand,
 };
+use jv_pm::resolver::MavenResolverContext;
 use jv_pm::wrapper::{
     CliMode, WrapperCommandFilter, context::WrapperContext, pipeline::WrapperPipeline,
     sync::WrapperUpdateSummary,
@@ -28,7 +29,6 @@ use jv_pm::{
     ResolverAlgorithmKind, ResolverDispatcher, ResolverOptions, ResolverStrategyInfo,
     StrategyStability, repository,
 };
-use jv_pm::resolver::MavenResolverContext;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use strsim::normalized_levenshtein;

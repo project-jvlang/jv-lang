@@ -33,8 +33,8 @@ use crate::{
         MavenMetadata, MavenRegistry, RegistryError,
     },
     resolver::{
-        ResolvedDependencies, ResolvedDependency, ResolverAlgorithmKind, ResolverDispatcher,
-        ResolverOptions, VersionDecision,
+        MavenResolverContext, ResolvedDependencies, ResolvedDependency, ResolverAlgorithmKind,
+        ResolverDispatcher, ResolverOptions, VersionDecision,
     },
 };
 
@@ -326,11 +326,37 @@ impl WrapperPipeline {
             });
         }
 
+        let options_with_context = self.resolver_options_with_context(manifest)?;
+
         self.dispatcher
-            .resolve_manifest(manifest, self.resolver_options.clone())
+            .resolve_manifest(manifest, options_with_context)
             .map_err(|error| {
                 WrapperError::OperationFailed(format!("依存関係の解決に失敗しました: {error}"))
             })
+    }
+
+    fn resolver_options_with_context(
+        &self,
+        manifest: &Manifest,
+    ) -> Result<ResolverOptions, WrapperError> {
+        let mut manager = RepositoryManager::with_project_root(self.context.project_root.clone())
+            .map_err(|error| {
+            WrapperError::OperationFailed(format!(
+                "リポジトリマネージャーの初期化に失敗しました: {error}"
+            ))
+        })?;
+        manager.load_project_config(manifest);
+
+        let repositories = collect_maven_repositories(&manager);
+        let mirrors = collect_effective_mirrors(manifest)?;
+        let ctx = MavenResolverContext {
+            project_root: self.context.project_root.clone(),
+            local_repository: self.context.local_repository.clone(),
+            repositories,
+            mirrors,
+        };
+
+        Ok(self.resolver_options.clone().with_maven_context(ctx))
     }
 
     fn requested_strategy_name(&self) -> &str {

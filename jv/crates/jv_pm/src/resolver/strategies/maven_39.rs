@@ -1,17 +1,26 @@
+use crate::DependencyCache;
 use crate::maven::{MavenMirrorConfig, MavenRepositoryConfig};
-use crate::registry::{ArtifactCoordinates, MavenRegistry};
+use crate::registry::{
+    ArtifactCoordinates, ArtifactResource, ChecksumAlgorithm, ChecksumVerifiedJar, MavenRegistry,
+    RegistryError,
+};
 use crate::resolver::{
-    DependencyProvider, DependencyScope, MavenResolverContext, Manifest, RequestedDependency,
+    DependencyProvider, DependencyScope, Manifest, MavenResolverContext, RequestedDependency,
     ResolutionDiagnostic, ResolutionSource, ResolutionStats, ResolvedDependencies,
     ResolvedDependency, ResolverAlgorithmKind, ResolverError, ResolverOptions, ResolverStrategy,
     ResolverStrategyInfo, StrategyStability, VersionDecision,
 };
-use crate::DependencyCache;
-use once_cell::sync::OnceCell;
+use reqwest::StatusCode;
+use std::collections::{HashMap, VecDeque};
 use std::fs;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::runtime::Builder as RuntimeBuilder;
+use tokio::task::JoinSet;
+
+const MAX_PARALLEL_DOWNLOADS: usize = 8;
+const MAX_JAR_DOWNLOAD_ATTEMPTS: usize = 3;
 
 /// Dependency provider for Maven 3.9 compatibility mode.
 pub struct MavenDependencyProvider3_9<'a> {
@@ -77,6 +86,463 @@ impl<'a> DependencyProvider for MavenDependencyProvider3_9<'a> {
     }
 }
 
+fn repository_conflict(subject: impl Into<String>, details: impl Into<String>) -> ResolverError {
+    ResolverError::Conflict {
+        dependency: subject.into(),
+        details: details.into(),
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+enum JarVerification {
+    Valid,
+    NeedsDownload,
+}
+
+struct MavenJarDownloader {
+    local_repository: PathBuf,
+    registries: Vec<Arc<MavenRegistry>>,
+    max_concurrent: usize,
+}
+
+impl MavenJarDownloader {
+    fn new(local_repository: PathBuf, registries: Vec<Arc<MavenRegistry>>) -> Self {
+        Self {
+            local_repository,
+            registries,
+            max_concurrent: MAX_PARALLEL_DOWNLOADS,
+        }
+    }
+
+    fn artifact_targets(
+        &self,
+        coords: &[ArtifactCoordinates],
+    ) -> Vec<(ArtifactCoordinates, PathBuf)> {
+        coords
+            .iter()
+            .cloned()
+            .map(|coords| {
+                let path = self.artifact_path(&coords);
+                (coords, path)
+            })
+            .collect()
+    }
+
+    fn artifact_path(&self, coords: &ArtifactCoordinates) -> PathBuf {
+        self.local_repository
+            .join(coords.maven_coordinates().group_path())
+            .join(&coords.artifact_id)
+            .join(&coords.version)
+            .join(coords.jar_file_name())
+    }
+
+    fn ensure_artifacts(
+        &self,
+        runtime: &tokio::runtime::Runtime,
+        targets: &[(ArtifactCoordinates, PathBuf)],
+    ) -> Result<(), ResolverError> {
+        if targets.is_empty() {
+            return Ok(());
+        }
+
+        let mut attempt = 0;
+        loop {
+            let (to_download, mut jar_paths) = self.build_download_plan(targets)?;
+            if to_download.is_empty() {
+                if self.verify_repository_state(targets)? {
+                    return Ok(());
+                }
+                continue;
+            }
+
+            attempt += 1;
+            println!(
+                "[maven-compat-download-plan] attempt {attempt}: {}/{} artifacts pending",
+                to_download.len(),
+                targets.len()
+            );
+
+            let downloads = runtime
+                .block_on(self.download_all(to_download))
+                .map_err(|error| {
+                    repository_conflict(
+                        "artifact-download",
+                        format!("Jar のダウンロードに失敗しました: {error}"),
+                    )
+                })?;
+
+            self.write_downloads(downloads, &mut jar_paths)?;
+
+            if attempt >= MAX_JAR_DOWNLOAD_ATTEMPTS {
+                let (remaining, _) = self.build_download_plan(targets)?;
+                if remaining.is_empty() {
+                    return Ok(());
+                }
+                return Err(repository_conflict(
+                    "artifact-download",
+                    "Jar のダウンロード確認に失敗しました",
+                ));
+            }
+        }
+    }
+
+    fn build_download_plan(
+        &self,
+        targets: &[(ArtifactCoordinates, PathBuf)],
+    ) -> Result<
+        (
+            Vec<ArtifactCoordinates>,
+            HashMap<ArtifactCoordinates, PathBuf>,
+        ),
+        ResolverError,
+    > {
+        let mut to_download = Vec::new();
+        let mut jar_paths = HashMap::new();
+
+        for (coords, path) in targets {
+            if self.validate_existing_jar(path)? {
+                continue;
+            }
+
+            jar_paths.insert(coords.clone(), path.clone());
+            to_download.push(coords.clone());
+        }
+
+        Ok((to_download, jar_paths))
+    }
+
+    async fn download_all(
+        &self,
+        mut requests: Vec<ArtifactCoordinates>,
+    ) -> Result<Vec<(ArtifactCoordinates, ChecksumVerifiedJar)>, RegistryError> {
+        let mut results = Vec::new();
+        let mut join_set = JoinSet::new();
+        let mut queue: VecDeque<ArtifactCoordinates> = requests.drain(..).collect();
+
+        while let Some(coords) = queue.pop_front() {
+            let registries = self.registries.clone();
+            join_set.spawn(async move { download_single(coords, registries).await });
+
+            if join_set.len() >= self.max_concurrent {
+                let joined = join_set.join_next().await;
+                if let Some(result) = joined {
+                    results.push(handle_join_result(result)?);
+                }
+            }
+        }
+
+        while let Some(joined) = join_set.join_next().await {
+            results.push(handle_join_result(joined)?);
+        }
+
+        Ok(results)
+    }
+
+    fn write_downloads(
+        &self,
+        downloads: Vec<(ArtifactCoordinates, ChecksumVerifiedJar)>,
+        jar_paths: &mut HashMap<ArtifactCoordinates, PathBuf>,
+    ) -> Result<(), ResolverError> {
+        let total = downloads.len();
+        for (index, (coords, download)) in downloads.into_iter().enumerate() {
+            println!("[maven-compat-download] {}/{} {}", index + 1, total, coords);
+            let jar_path = jar_paths.remove(&coords).ok_or_else(|| {
+                repository_conflict(
+                    coords.to_string(),
+                    "ダウンロード済み Jar のパスが見つかりません",
+                )
+            })?;
+            self.write_downloaded_jar(&jar_path, download)?;
+        }
+
+        Ok(())
+    }
+
+    fn validate_existing_jar(&self, path: &Path) -> Result<bool, ResolverError> {
+        if !path.exists() {
+            return Ok(false);
+        }
+
+        if let Some((algorithm, expected)) = self.read_local_checksum(path)? {
+            let bytes = fs::read(path).map_err(|error| {
+                repository_conflict(
+                    path.display().to_string(),
+                    format!("{} の読み込みに失敗しました: {error}", path.display()),
+                )
+            })?;
+            let actual = algorithm.compute(&bytes);
+            if actual == expected {
+                return Ok(true);
+            }
+        }
+
+        self.remove_local_artifact(path)?;
+        Ok(false)
+    }
+
+    fn read_local_checksum(
+        &self,
+        jar_path: &Path,
+    ) -> Result<Option<(ChecksumAlgorithm, String)>, ResolverError> {
+        for algorithm in [
+            ChecksumAlgorithm::Sha256,
+            ChecksumAlgorithm::Sha1,
+            ChecksumAlgorithm::Md5,
+        ] {
+            let checksum_path = jar_path.with_extension(format!("jar.{}", algorithm.extension()));
+            if !checksum_path.exists() {
+                continue;
+            }
+
+            let content = fs::read_to_string(&checksum_path).map_err(|error| {
+                repository_conflict(
+                    checksum_path.display().to_string(),
+                    format!(
+                        "{} の読み込みに失敗しました: {error}",
+                        checksum_path.display()
+                    ),
+                )
+            })?;
+
+            if let Some(value) = extract_local_checksum(&content) {
+                return Ok(Some((algorithm, value)));
+            }
+        }
+
+        Ok(None)
+    }
+
+    fn remove_local_artifact(&self, jar_path: &Path) -> Result<(), ResolverError> {
+        if jar_path.exists() {
+            fs::remove_file(jar_path).map_err(|error| {
+                repository_conflict(
+                    jar_path.display().to_string(),
+                    format!("{} の削除に失敗しました: {error}", jar_path.display()),
+                )
+            })?;
+        }
+
+        for ext in &["sha256", "sha1", "md5"] {
+            let checksum_path = jar_path.with_extension(format!("jar.{ext}"));
+            if checksum_path.exists() {
+                fs::remove_file(&checksum_path).map_err(|error| {
+                    repository_conflict(
+                        checksum_path.display().to_string(),
+                        format!("{} の削除に失敗しました: {error}", checksum_path.display()),
+                    )
+                })?;
+            }
+        }
+
+        Ok(())
+    }
+
+    fn verify_repository_state(
+        &self,
+        targets: &[(ArtifactCoordinates, PathBuf)],
+    ) -> Result<bool, ResolverError> {
+        if targets.is_empty() {
+            return Ok(true);
+        }
+
+        println!(
+            "[maven-compat-verify] {} artifacts scheduled for verification (repository: {})",
+            targets.len(),
+            self.local_repository.display()
+        );
+
+        let mut needs_download = false;
+        let total = targets.len();
+        for (index, (coords, jar_path)) in targets.iter().enumerate() {
+            match self.verify_single_jar(coords, jar_path, index + 1, total)? {
+                JarVerification::Valid => {}
+                JarVerification::NeedsDownload => needs_download = true,
+            }
+        }
+
+        if !needs_download {
+            println!(
+                "[maven-compat-verify] repository verification succeeded ({} artifacts)",
+                targets.len()
+            );
+        } else {
+            println!(
+                "[maven-compat-verify] integrity issues detected; invalid artifacts will be re-downloaded"
+            );
+        }
+
+        Ok(!needs_download)
+    }
+
+    fn verify_single_jar(
+        &self,
+        coords: &ArtifactCoordinates,
+        jar_path: &Path,
+        index: usize,
+        total: usize,
+    ) -> Result<JarVerification, ResolverError> {
+        if !jar_path.exists() {
+            println!(
+                "[maven-compat-verify] {}/{} missing {}",
+                index, total, coords
+            );
+            return Ok(JarVerification::NeedsDownload);
+        }
+
+        let Some((algorithm, expected)) = self.read_local_checksum(jar_path)? else {
+            println!(
+                "[maven-compat-verify] {}/{} checksum file missing for {}",
+                index, total, coords
+            );
+            self.remove_local_artifact(jar_path)?;
+            return Ok(JarVerification::NeedsDownload);
+        };
+
+        let bytes = fs::read(jar_path).map_err(|error| {
+            repository_conflict(
+                jar_path.display().to_string(),
+                format!("{} の読み込みに失敗しました: {error}", jar_path.display()),
+            )
+        })?;
+        let actual = algorithm.compute(&bytes);
+
+        if actual == expected {
+            if let Some(relative) = self.relative_repository_path(jar_path) {
+                println!(
+                    "[maven-compat-verify] {}/{} OK {} ({})",
+                    index, total, coords, relative
+                );
+            } else {
+                println!("[maven-compat-verify] {}/{} OK {}", index, total, coords);
+            }
+            return Ok(JarVerification::Valid);
+        }
+
+        println!(
+            "[maven-compat-verify] {}/{} checksum mismatch {} (expected {}, actual {})",
+            index, total, coords, expected, actual
+        );
+        self.remove_local_artifact(jar_path)?;
+        Ok(JarVerification::NeedsDownload)
+    }
+
+    fn relative_repository_path(&self, jar_path: &Path) -> Option<String> {
+        jar_path
+            .strip_prefix(&self.local_repository)
+            .ok()
+            .map(|path| path.to_string_lossy().replace('\\', "/"))
+    }
+
+    fn write_downloaded_jar(
+        &self,
+        jar_path: &Path,
+        download: ChecksumVerifiedJar,
+    ) -> Result<(), ResolverError> {
+        if let Some(parent) = jar_path.parent() {
+            fs::create_dir_all(parent).map_err(|error| {
+                repository_conflict(
+                    parent.display().to_string(),
+                    format!("{} の作成に失敗しました: {error}", parent.display()),
+                )
+            })?;
+        }
+
+        fs::write(jar_path, &download.jar.bytes).map_err(|error| {
+            repository_conflict(
+                jar_path.display().to_string(),
+                format!("{} への書き込みに失敗しました: {error}", jar_path.display()),
+            )
+        })?;
+
+        let checksum_path =
+            jar_path.with_extension(format!("jar.{}", download.algorithm.extension()));
+        let content = format!("{}\n", download.expected_checksum);
+        fs::write(&checksum_path, content).map_err(|error| {
+            repository_conflict(
+                checksum_path.display().to_string(),
+                format!(
+                    "{} への書き込みに失敗しました: {error}",
+                    checksum_path.display()
+                ),
+            )
+        })?;
+
+        Ok(())
+    }
+}
+
+fn handle_join_result(
+    joined: Result<
+        Result<(ArtifactCoordinates, ChecksumVerifiedJar), RegistryError>,
+        tokio::task::JoinError,
+    >,
+) -> Result<(ArtifactCoordinates, ChecksumVerifiedJar), RegistryError> {
+    match joined {
+        Ok(Ok(value)) => Ok(value),
+        Ok(Err(error)) => Err(error),
+        Err(join_error) => Err(RegistryError::InvalidResponse {
+            resource: "parallel-download".to_string(),
+            message: join_error.to_string(),
+        }),
+    }
+}
+
+async fn download_single(
+    coords: ArtifactCoordinates,
+    registries: Vec<Arc<MavenRegistry>>,
+) -> Result<(ArtifactCoordinates, ChecksumVerifiedJar), RegistryError> {
+    let algorithms = [
+        ChecksumAlgorithm::Sha256,
+        ChecksumAlgorithm::Sha1,
+        ChecksumAlgorithm::Md5,
+    ];
+
+    let mut last_error = None;
+    println!("[maven-compat-download-start] {}", coords);
+
+    for registry in registries {
+        match registry
+            .download_jar_with_algorithms(&coords, &algorithms)
+            .await
+        {
+            Ok(download) => return Ok((coords.clone(), download)),
+            Err(error) => match error {
+                RegistryError::ArtifactNotFound { resource, .. }
+                    if matches!(resource, ArtifactResource::Jar) =>
+                {
+                    last_error = Some(error);
+                    continue;
+                }
+                RegistryError::PackageNotFound { .. } | RegistryError::ChecksumMissing { .. } => {
+                    last_error = Some(error);
+                    continue;
+                }
+                other => return Err(other),
+            },
+        }
+    }
+
+    Err(
+        last_error.unwrap_or_else(|| RegistryError::ArtifactNotFound {
+            coordinates: coords.clone(),
+            resource: ArtifactResource::Jar,
+            status: StatusCode::NOT_FOUND,
+        }),
+    )
+}
+
+fn extract_local_checksum(text: &str) -> Option<String> {
+    text.lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .map(|line| {
+            line.split_whitespace()
+                .next()
+                .unwrap_or(line)
+                .to_ascii_lowercase()
+        })
+}
+
 #[derive(Debug, Default)]
 pub struct MavenCompat39Strategy;
 
@@ -94,12 +560,10 @@ impl MavenCompat39Strategy {
             ctx.project_root.as_path(),
             ctx.repositories.clone(),
             ctx.mirrors.clone(),
-            Arc::new(
-                DependencyCache::global().unwrap_or_else(|_| {
-                    DependencyCache::with_dir(ctx.project_root.join(".jv").join("cache"))
-                        .unwrap_or_else(|_| DependencyCache::global().expect("cache init"))
-                }),
-            ),
+            Arc::new(DependencyCache::global().unwrap_or_else(|_| {
+                DependencyCache::with_dir(ctx.project_root.join(".jv").join("cache"))
+                    .unwrap_or_else(|_| DependencyCache::global().expect("cache init"))
+            })),
         )
     }
 }
@@ -116,7 +580,11 @@ impl ResolverStrategy for MavenCompat39Strategy {
             deterministic: true,
             supports_offline: false,
             emits_conflict_reasons: false,
-            aliases: vec!["maven-compat".into(), "maven-compat-3.9".into(), "legacy".into()],
+            aliases: vec![
+                "maven-compat".into(),
+                "maven-compat-3.9".into(),
+                "legacy".into(),
+            ],
             conflict_policy: "first-wins".into(),
         }
     }
@@ -136,9 +604,19 @@ impl ResolverStrategy for MavenCompat39Strategy {
                 return Err(ResolverError::Conflict {
                     dependency: "maven-context".into(),
                     details: "MavenResolverContext が未設定です".into(),
-                })
+                });
             }
         };
+
+        fs::create_dir_all(&ctx.local_repository).map_err(|error| {
+            repository_conflict(
+                "local-repository",
+                format!(
+                    "{} の作成に失敗しました: {error}",
+                    ctx.local_repository.display()
+                ),
+            )
+        })?;
 
         let runtime = RuntimeBuilder::new_multi_thread()
             .enable_all()
@@ -147,12 +625,13 @@ impl ResolverStrategy for MavenCompat39Strategy {
                 dependency: "runtime".into(),
                 details: error.to_string(),
             })?;
-        let cache = Arc::new(
-            DependencyCache::global().map_err(|error| ResolverError::Conflict {
-                dependency: "cache".into(),
-                details: error.to_string(),
-            })?,
-        );
+        let cache =
+            Arc::new(
+                DependencyCache::global().map_err(|error| ResolverError::Conflict {
+                    dependency: "cache".into(),
+                    details: error.to_string(),
+                })?,
+            );
 
         let mut registries = Vec::new();
         for repo in &ctx.repositories {
@@ -164,6 +643,8 @@ impl ResolverStrategy for MavenCompat39Strategy {
             }
         }
 
+        let jar_downloader =
+            MavenJarDownloader::new(ctx.local_repository.clone(), registries.clone());
         let provider = self.build_provider(options.maven_context.as_ref());
         let direct = provider.direct_dependencies();
 
@@ -173,26 +654,41 @@ impl ResolverStrategy for MavenCompat39Strategy {
         for dep in &direct {
             if let Some((group, artifact)) = dep.name.split_once(':') {
                 let ver = dep.requirement.clone();
-                roots.push(ArtifactCoordinates::new(group.to_string(), artifact.to_string(), ver));
+                roots.push(ArtifactCoordinates::new(
+                    group.to_string(),
+                    artifact.to_string(),
+                    ver,
+                ));
             }
         }
 
-        let closure = resolver
-            .resolve_closure(&roots)
-            .map_err(|error| ResolverError::Conflict {
-                dependency: "resolver".into(),
-                details: error.to_string(),
-            })?;
+        let closure =
+            resolver
+                .resolve_closure(&roots)
+                .map_err(|error| ResolverError::Conflict {
+                    dependency: "resolver".into(),
+                    details: error.to_string(),
+                })?;
+
+        let targets = jar_downloader.artifact_targets(&closure);
+        jar_downloader.ensure_artifacts(&runtime, &targets)?;
+        let jar_locations: HashMap<ArtifactCoordinates, PathBuf> =
+            targets.iter().cloned().collect();
 
         let dependencies: Vec<ResolvedDependency> = closure
             .into_iter()
-            .map(|coords| ResolvedDependency {
-                name: format!("{}:{}", coords.group_id, coords.artifact_id),
-                requested: coords.version.clone(),
-                decision: VersionDecision::Exact(coords.version.clone()),
-                scope: DependencyScope::Main,
-                source: ResolutionSource::Registry,
-                local_artifact: None,
+            .map(|coords| {
+                let local = jar_locations
+                    .get(&coords)
+                    .map(|path| path.to_string_lossy().to_string());
+                ResolvedDependency {
+                    name: format!("{}:{}", coords.group_id, coords.artifact_id),
+                    requested: coords.version.clone(),
+                    decision: VersionDecision::Exact(coords.version.clone()),
+                    scope: DependencyScope::Main,
+                    source: ResolutionSource::Registry,
+                    local_artifact: local,
+                }
             })
             .collect();
 
@@ -248,12 +744,16 @@ mod pom_resolver {
     }
 
     /// Extract direct dependencies from a pom.xml (no transitive expansion).
-    pub fn parse_direct_dependencies(contents: &str) -> Result<Vec<RequestedDependency>, WrapperError> {
+    pub fn parse_direct_dependencies(
+        contents: &str,
+    ) -> Result<Vec<RequestedDependency>, WrapperError> {
         let model = PomModel::parse(contents)?;
         let mut deps = Vec::new();
         for dep in model.dependencies {
             let Some(group) = dep.group_id else { continue };
-            let Some(artifact) = dep.artifact_id else { continue };
+            let Some(artifact) = dep.artifact_id else {
+                continue;
+            };
             let Some(version) = dep.version else { continue };
             deps.push(RequestedDependency {
                 name: format!("{group}:{artifact}"),
@@ -296,7 +796,8 @@ mod pom_resolver {
             let mut ordered = IndexSet::new();
             let mut memo = HashMap::new();
             // Maven の nearest-wins 調停に合わせ、最初に現れた groupId/artifactId(+classifier) のバージョンを固定する。
-            let mut seen_versions: HashMap<(String, String, Option<String>), String> = HashMap::new();
+            let mut seen_versions: HashMap<(String, String, Option<String>), String> =
+                HashMap::new();
             for root in roots {
                 self.expand(
                     root.clone(),
@@ -311,7 +812,10 @@ mod pom_resolver {
             Ok(ordered.into_iter().collect())
         }
 
-        pub fn metadata_for(&self, coords: &ArtifactCoordinates) -> Result<PomMetadata, WrapperError> {
+        pub fn metadata_for(
+            &self,
+            coords: &ArtifactCoordinates,
+        ) -> Result<PomMetadata, WrapperError> {
             let mut memo = HashMap::new();
             let mut stack = HashSet::new();
             let effective = self.load_effective_pom(coords.clone(), &mut memo, &mut stack)?;
@@ -501,8 +1005,8 @@ mod pom_resolver {
                             "dependencyManagement import の groupId が未設定です".to_string(),
                         )
                     })?;
-                let artifact =
-                    resolve_property(entry.artifact_id.as_deref(), properties).ok_or_else(|| {
+                let artifact = resolve_property(entry.artifact_id.as_deref(), properties)
+                    .ok_or_else(|| {
                         WrapperError::OperationFailed(
                             "dependencyManagement import の artifactId が未設定です".to_string(),
                         )
@@ -538,7 +1042,9 @@ mod pom_resolver {
 
         fn fetch_pom(&self, coords: &ArtifactCoordinates) -> Result<String, WrapperError> {
             if let Some(cached) = self.cache.get_pom(coords).map_err(|error| {
-                WrapperError::OperationFailed(format!("POMキャッシュの読み込みに失敗しました: {error}"))
+                WrapperError::OperationFailed(format!(
+                    "POMキャッシュの読み込みに失敗しました: {error}"
+                ))
             })? {
                 return Ok(cached.content);
             }
@@ -670,8 +1176,9 @@ mod pom_resolver {
         let artifact_id = node_text(&node, "artifactId").ok_or_else(|| {
             WrapperError::OperationFailed("parent.artifactId が未指定です".to_string())
         })?;
-        let version = node_text(&node, "version")
-            .ok_or_else(|| WrapperError::OperationFailed("parent.version が未指定です".to_string()))?;
+        let version = node_text(&node, "version").ok_or_else(|| {
+            WrapperError::OperationFailed("parent.version が未指定です".to_string())
+        })?;
 
         Ok(PomParent {
             group_id,
@@ -950,8 +1457,8 @@ mod pom_resolver {
                             "dependencyManagement の groupId が未設定です".to_string(),
                         )
                     })?;
-                let artifact =
-                    resolve_property(entry.artifact_id.as_deref(), &properties).ok_or_else(|| {
+                let artifact = resolve_property(entry.artifact_id.as_deref(), &properties)
+                    .ok_or_else(|| {
                         WrapperError::OperationFailed(
                             "dependencyManagement の artifactId が未設定です".to_string(),
                         )
@@ -980,11 +1487,11 @@ mod pom_resolver {
                     Some(value) => value,
                     None => continue,
                 };
-                let artifact = match resolve_property(dependency.artifact_id.as_deref(), &properties)
-                {
-                    Some(value) => value,
-                    None => continue,
-                };
+                let artifact =
+                    match resolve_property(dependency.artifact_id.as_deref(), &properties) {
+                        Some(value) => value,
+                        None => continue,
+                    };
                 let version = match resolve_property(dependency.version.as_deref(), &properties) {
                     Some(value) => value,
                     None => {
@@ -1033,7 +1540,8 @@ mod pom_resolver {
                 let Some(version) = resolve_property(plugin.version.as_deref(), &properties) else {
                     continue;
                 };
-                plugin_management.insert((group.clone(), artifact.clone()), ManagedPlugin { version });
+                plugin_management
+                    .insert((group.clone(), artifact.clone()), ManagedPlugin { version });
             }
 
             Ok(Self {
@@ -1046,7 +1554,10 @@ mod pom_resolver {
         }
     }
 
-    fn resolve_property(value: Option<&str>, properties: &HashMap<String, String>) -> Option<String> {
+    fn resolve_property(
+        value: Option<&str>,
+        properties: &HashMap<String, String>,
+    ) -> Option<String> {
         let mut current = value?.trim().to_string();
         if current.is_empty() {
             return None;
