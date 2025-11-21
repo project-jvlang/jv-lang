@@ -1,7 +1,5 @@
 use anyhow::{bail, Context, Result};
-use assert_cmd::prelude::*;
 use sha2::{Digest, Sha256};
-use std::collections::HashMap;
 use std::env;
 use std::fs;
 use std::io::{Read, Write};
@@ -10,7 +8,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
-    Arc, Mutex,
+    Arc,
 };
 use std::thread;
 use tempfile::tempdir;
@@ -44,10 +42,6 @@ impl DependencySpec {
     fn with_dependencies(mut self, dependencies: Vec<DependencyCoordinate>) -> Self {
         self.dependencies = dependencies;
         self
-    }
-
-    fn coordinate(&self) -> String {
-        format!("{}:{}", self.group, self.artifact)
     }
 
     fn jar_name(&self) -> String {
@@ -187,7 +181,6 @@ impl StubMavenRepo {
 struct StubMavenServer {
     address: SocketAddr,
     shutdown: Arc<AtomicBool>,
-    requests: Arc<Mutex<HashMap<String, usize>>>,
     handle: Option<thread::JoinHandle<()>>,
 }
 
@@ -200,14 +193,11 @@ impl StubMavenServer {
         let address = listener.local_addr().context("failed to read address")?;
         let shutdown = Arc::new(AtomicBool::new(false));
         let shutdown_clone = Arc::clone(&shutdown);
-        let requests = Arc::new(Mutex::new(HashMap::new()));
-        let request_clone = Arc::clone(&requests);
-        let handle = thread::spawn(move || Self::serve(listener, base_dir, shutdown_clone, request_clone));
+        let handle = thread::spawn(move || Self::serve(listener, base_dir, shutdown_clone));
 
         Ok(Self {
             address,
             shutdown,
-            requests,
             handle: Some(handle),
         })
     }
@@ -216,24 +206,15 @@ impl StubMavenServer {
         format!("http://{}", self.address)
     }
 
-    fn request_count(&self, path_fragment: &str) -> usize {
-        self.requests
-            .lock()
-            .ok()
-            .and_then(|map| map.get(path_fragment).copied())
-            .unwrap_or(0)
-    }
-
     fn serve(
         listener: TcpListener,
         base_dir: PathBuf,
         shutdown: Arc<AtomicBool>,
-        requests: Arc<Mutex<HashMap<String, usize>>>,
     ) {
         while !shutdown.load(Ordering::Relaxed) {
             match listener.accept() {
                 Ok((stream, _)) => {
-                    let _ = Self::handle_client(stream, &base_dir, &requests);
+                    let _ = Self::handle_client(stream, &base_dir);
                 }
                 Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
                     std::thread::sleep(std::time::Duration::from_millis(5));
@@ -249,7 +230,6 @@ impl StubMavenServer {
     fn handle_client(
         mut stream: TcpStream,
         base_dir: &Path,
-        requests: &Arc<Mutex<HashMap<String, usize>>>,
     ) -> Result<()> {
         let mut buffer = [0u8; 2048];
         let read = stream.read(&mut buffer)?;
@@ -266,11 +246,6 @@ impl StubMavenServer {
         let mut parts = request_line.split_whitespace();
         let method = parts.next().unwrap_or_default();
         let path = parts.next().unwrap_or("/");
-
-        {
-            let mut guard = requests.lock().expect("request map poisoned");
-            *guard.entry(path.to_string()).or_default() += 1;
-        }
 
         if !method.eq_ignore_ascii_case("GET") && !method.eq_ignore_ascii_case("HEAD") {
             return Ok(());
