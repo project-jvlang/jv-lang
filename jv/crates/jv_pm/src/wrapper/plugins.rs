@@ -4,9 +4,9 @@ use indexmap::IndexSet;
 use once_cell::sync::OnceCell;
 use roxmltree::{Document, Node};
 
-use crate::maven::dependency_graph::{MavenDependencyResolver, PomMetadata};
 use crate::registry::ArtifactCoordinates;
 use crate::repository::defaults;
+use crate::resolver::strategies::maven_39::{MavenDependencyResolver, PomMetadata};
 use crate::wrapper::error::WrapperError;
 
 /// Represents a Maven plugin artifact that needs to be hydrated in wrapper mode.

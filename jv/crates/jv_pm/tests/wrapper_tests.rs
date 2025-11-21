@@ -125,6 +125,7 @@ fn wrapper_lockfile_writer_generates_sorted_lock_dependencies() {
                 decision: VersionDecision::Exact("1.0.0".to_string()),
                 scope: DependencyScope::Main,
                 source: ResolutionSource::Registry,
+                local_artifact: None,
             },
             ResolvedDependency {
                 name: "org.alpha:util".to_string(),
@@ -132,6 +133,7 @@ fn wrapper_lockfile_writer_generates_sorted_lock_dependencies() {
                 decision: VersionDecision::Exact("2.1.0".to_string()),
                 scope: DependencyScope::Main,
                 source: ResolutionSource::Registry,
+                local_artifact: None,
             },
         ],
         diagnostics: Vec::new(),
@@ -251,6 +253,7 @@ fn sample_resolved() -> ResolvedDependencies {
                 decision: VersionDecision::Exact("1.0.1".to_string()),
                 scope: DependencyScope::Main,
                 source: ResolutionSource::Registry,
+                local_artifact: None,
             },
             ResolvedDependency {
                 name: "org.example:test-kit".to_string(),
@@ -258,6 +261,7 @@ fn sample_resolved() -> ResolvedDependencies {
                 decision: VersionDecision::Exact("2.1.0".to_string()),
                 scope: DependencyScope::Dev,
                 source: ResolutionSource::Registry,
+                local_artifact: None,
             },
         ],
         diagnostics: Vec::new(),

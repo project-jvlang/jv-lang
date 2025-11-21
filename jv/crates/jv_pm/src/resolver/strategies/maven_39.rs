@@ -93,6 +93,23 @@ fn repository_conflict(subject: impl Into<String>, details: impl Into<String>) -
     }
 }
 
+fn registries_from_context(ctx: &MavenResolverContext) -> Vec<Arc<MavenRegistry>> {
+    let mut registries = Vec::new();
+    for repo in &ctx.repositories {
+        match MavenRegistry::new(&repo.url) {
+            Ok(registry) => registries.push(Arc::new(registry)),
+            Err(error) => {
+                tracing::warn!(
+                    url = %repo.url,
+                    error = ?error,
+                    "リポジトリ初期化に失敗したためスキップします"
+                );
+            }
+        }
+    }
+    registries
+}
+
 #[derive(Debug, Clone, Copy)]
 enum JarVerification {
     Valid,
@@ -156,7 +173,7 @@ impl MavenJarDownloader {
             }
 
             attempt += 1;
-            println!(
+            tracing::info!(
                 "[maven-compat-download-plan] attempt {attempt}: {}/{} artifacts pending",
                 to_download.len(),
                 targets.len()
@@ -180,7 +197,14 @@ impl MavenJarDownloader {
                 }
                 return Err(repository_conflict(
                     "artifact-download",
-                    "Jar のダウンロード確認に失敗しました",
+                    format!(
+                        "Jar のダウンロード確認に失敗しました (remaining: {})",
+                        remaining
+                            .iter()
+                            .map(|coords| coords.to_string())
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    ),
                 ));
             }
         }
@@ -245,7 +269,7 @@ impl MavenJarDownloader {
     ) -> Result<(), ResolverError> {
         let total = downloads.len();
         for (index, (coords, download)) in downloads.into_iter().enumerate() {
-            println!("[maven-compat-download] {}/{} {}", index + 1, total, coords);
+            tracing::info!("[maven-compat-download] {}/{} {}", index + 1, total, coords);
             let jar_path = jar_paths.remove(&coords).ok_or_else(|| {
                 repository_conflict(
                     coords.to_string(),
@@ -345,7 +369,7 @@ impl MavenJarDownloader {
             return Ok(true);
         }
 
-        println!(
+        tracing::info!(
             "[maven-compat-verify] {} artifacts scheduled for verification (repository: {})",
             targets.len(),
             self.local_repository.display()
@@ -361,12 +385,12 @@ impl MavenJarDownloader {
         }
 
         if !needs_download {
-            println!(
+            tracing::info!(
                 "[maven-compat-verify] repository verification succeeded ({} artifacts)",
                 targets.len()
             );
         } else {
-            println!(
+            tracing::warn!(
                 "[maven-compat-verify] integrity issues detected; invalid artifacts will be re-downloaded"
             );
         }
@@ -382,17 +406,21 @@ impl MavenJarDownloader {
         total: usize,
     ) -> Result<JarVerification, ResolverError> {
         if !jar_path.exists() {
-            println!(
+            tracing::warn!(
                 "[maven-compat-verify] {}/{} missing {}",
-                index, total, coords
+                index,
+                total,
+                coords
             );
             return Ok(JarVerification::NeedsDownload);
         }
 
         let Some((algorithm, expected)) = self.read_local_checksum(jar_path)? else {
-            println!(
+            tracing::warn!(
                 "[maven-compat-verify] {}/{} checksum file missing for {}",
-                index, total, coords
+                index,
+                total,
+                coords
             );
             self.remove_local_artifact(jar_path)?;
             return Ok(JarVerification::NeedsDownload);
@@ -408,19 +436,26 @@ impl MavenJarDownloader {
 
         if actual == expected {
             if let Some(relative) = self.relative_repository_path(jar_path) {
-                println!(
+                tracing::info!(
                     "[maven-compat-verify] {}/{} OK {} ({})",
-                    index, total, coords, relative
+                    index,
+                    total,
+                    coords,
+                    relative
                 );
             } else {
-                println!("[maven-compat-verify] {}/{} OK {}", index, total, coords);
+                tracing::info!("[maven-compat-verify] {}/{} OK {}", index, total, coords);
             }
             return Ok(JarVerification::Valid);
         }
 
-        println!(
+        tracing::warn!(
             "[maven-compat-verify] {}/{} checksum mismatch {} (expected {}, actual {})",
-            index, total, coords, expected, actual
+            index,
+            total,
+            coords,
+            expected,
+            actual
         );
         self.remove_local_artifact(jar_path)?;
         Ok(JarVerification::NeedsDownload)
@@ -498,7 +533,7 @@ async fn download_single(
     ];
 
     let mut last_error = None;
-    println!("[maven-compat-download-start] {}", coords);
+    tracing::info!("[maven-compat-download-start] {}", coords);
 
     for registry in registries {
         match registry
@@ -633,15 +668,7 @@ impl ResolverStrategy for MavenCompat39Strategy {
                 })?,
             );
 
-        let mut registries = Vec::new();
-        for repo in &ctx.repositories {
-            match MavenRegistry::new(&repo.url) {
-                Ok(registry) => registries.push(Arc::new(registry)),
-                Err(error) => {
-                    tracing::warn!(url = %repo.url, error = ?error, "リポジトリ初期化に失敗したためスキップします");
-                }
-            }
-        }
+        let registries = registries_from_context(ctx);
 
         let jar_downloader =
             MavenJarDownloader::new(ctx.local_repository.clone(), registries.clone());
@@ -709,6 +736,91 @@ impl ResolverStrategy for MavenCompat39Strategy {
             stats,
         })
     }
+}
+
+pub fn dependency_coordinates_for_jar(
+    dependency: &ResolvedDependency,
+) -> Option<ArtifactCoordinates> {
+    let version = match &dependency.decision {
+        VersionDecision::Exact(value) => value.clone(),
+        _ => return None,
+    };
+
+    let (group, artifact) = dependency.name.split_once(':')?;
+    Some(ArtifactCoordinates::new(
+        group.to_string(),
+        artifact.to_string(),
+        version,
+    ))
+}
+
+pub fn hydrate_resolved_dependencies_with_jars(
+    runtime: Option<&tokio::runtime::Runtime>,
+    context: &MavenResolverContext,
+    resolved: &mut ResolvedDependencies,
+) -> Result<(), ResolverError> {
+    if resolved.dependencies.is_empty() {
+        return Ok(());
+    }
+
+    fs::create_dir_all(&context.local_repository).map_err(|error| {
+        repository_conflict(
+            "local-repository",
+            format!(
+                "{} の作成に失敗しました: {error}",
+                context.local_repository.display()
+            ),
+        )
+    })?;
+
+    let mut coordinates = Vec::new();
+    let mut dependency_indexes = Vec::new();
+    for (index, dependency) in resolved.dependencies.iter().enumerate() {
+        if let Some(coords) = dependency_coordinates_for_jar(dependency) {
+            coordinates.push(coords);
+            dependency_indexes.push(index);
+        } else {
+            tracing::debug!(
+                dependency = %dependency.name,
+                "Jar ダウンロードをスキップします（座標またはバージョン未確定）"
+            );
+        }
+    }
+
+    if coordinates.is_empty() {
+        return Ok(());
+    }
+
+    let registries = registries_from_context(context);
+    let downloader = MavenJarDownloader::new(context.local_repository.clone(), registries.clone());
+
+    let runtime_guard = match runtime {
+        Some(_) => None,
+        None => Some(
+            RuntimeBuilder::new_multi_thread()
+                .enable_all()
+                .build()
+                .map_err(|error| ResolverError::Conflict {
+                    dependency: "runtime".into(),
+                    details: error.to_string(),
+                })?,
+        ),
+    };
+    let runtime_ref = runtime
+        .or_else(|| runtime_guard.as_ref())
+        .expect("runtime to exist");
+
+    let targets = downloader.artifact_targets(&coordinates);
+    downloader.ensure_artifacts(runtime_ref, &targets)?;
+    let jar_locations: HashMap<ArtifactCoordinates, PathBuf> = targets.into_iter().collect();
+
+    for (index, coords) in dependency_indexes.into_iter().zip(coordinates) {
+        if let Some(path) = jar_locations.get(&coords) {
+            resolved.dependencies[index].local_artifact = Some(path.to_string_lossy().to_string());
+        }
+    }
+
+    Ok(())
 }
 
 // -----------------------------------------------------------------------------

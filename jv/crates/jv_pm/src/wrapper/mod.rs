@@ -5,7 +5,6 @@ pub mod filter;
 pub mod integration;
 pub mod lockfile;
 pub mod metrics;
-pub mod pipeline;
 pub mod plugins;
 pub mod sync;
 
