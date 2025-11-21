@@ -2,8 +2,9 @@
 set -euo pipefail
 
 REPO_ROOT=$(cd "$(dirname "$0")/../.." && pwd)
-TARGET_DIR="$REPO_ROOT/target"
-PERF_ROOT="$TARGET_DIR/performance/jvpm-wrapper-timing"
+# NOTE: ビルド/実行は jv/target 配下を使用し、ログなどの副産物はリポジトリ直下の target/performance に分離する。
+TARGET_DIR="$REPO_ROOT/jv/target"
+PERF_ROOT="$REPO_ROOT/target/performance/jvpm-wrapper-timing"
 TIMESTAMP=$(date -u +%Y%m%dT%H%M%SZ)
 LOGFILE="$PERF_ROOT/measurements-$TIMESTAMP.log"
 
@@ -242,21 +243,45 @@ verify_wrapper_jars_from_list() {
         exit 1
     fi
 
+    local -a missing=()
     while IFS= read -r relative; do
         local jar_path="$run_dir/.jv/repository/$relative"
         if [[ ! -f "$jar_path" ]]; then
-            echo "Wrapper のローカルリポジトリに Jar がありません: $jar_path" >&2
-            exit 1
+            missing+=("$relative")
         fi
     done < "$jar_list"
-    local wrapper_count
-    wrapper_count=$(find "$run_dir/.jv/repository" -type f -name '*.jar' | wc -l | tr -d ' ')
-    local expected_count
+    # 追加/欠落をフルリストで確認
+    local tmp_wrapper_list
+    tmp_wrapper_list=$(mktemp)
+    find "$run_dir/.jv/repository" -type f -name '*.jar' -printf '%P\n' | sort > "$tmp_wrapper_list"
+    local missing_file extra_file
+    missing_file=$(mktemp)
+    extra_file=$(mktemp)
+    comm -23 "$jar_list" "$tmp_wrapper_list" > "$missing_file"
+    comm -13 "$jar_list" "$tmp_wrapper_list" > "$extra_file"
+
+    local wrapper_count expected_count missing_count extra_count
+    wrapper_count=$(wc -l < "$tmp_wrapper_list" | tr -d ' ')
     expected_count=$(wc -l < "$jar_list" | tr -d ' ')
-    if [[ "$wrapper_count" -ne "$expected_count" ]]; then
-        echo "Wrapper ローカルリポジトリの Jar 件数が一致しません (expected=${expected_count}, actual=${wrapper_count})" >&2
+    missing_count=$(wc -l < "$missing_file" | tr -d ' ')
+    extra_count=$(wc -l < "$extra_file" | tr -d ' ')
+
+    if [[ "$missing_count" -gt 0 ]]; then
+        echo "不足 Jar (${missing_count} 件):"
+        cat "$missing_file"
+    fi
+    if [[ "$extra_count" -gt 0 ]]; then
+        echo "過剰 Jar (${extra_count} 件):"
+        cat "$extra_file"
+    fi
+
+    rm -f "$tmp_wrapper_list" "$missing_file" "$extra_file"
+
+    if [[ "$missing_count" -gt 0 || "$extra_count" -gt 0 || "$wrapper_count" -ne "$expected_count" ]]; then
+        echo "Wrapper ローカルリポジトリが Maven 基準と一致しません (expected=${expected_count}, actual=${wrapper_count}, missing=${missing_count}, extra=${extra_count})" >&2
         exit 1
     fi
+
     echo "Wrapper リポジトリに Maven 取得 Jar をすべて確認しました (${wrapper_count} 件)"
 }
 
