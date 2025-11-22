@@ -1,6 +1,6 @@
 use super::*;
 
-pub(super) fn store_pom(
+pub(crate) fn store_pom(
     cache: &DependencyCache,
     coords: &ArtifactCoordinates,
     deps: &[(&str, &str, &str, Option<&str>, bool)],

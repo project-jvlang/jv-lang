@@ -1,5 +1,3 @@
-use super::*;
-
 mod common;
 mod download_plan;
 mod effective_pom;

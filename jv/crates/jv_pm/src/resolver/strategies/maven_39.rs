@@ -11,7 +11,6 @@ use crate::resolver::{
     ResolvedDependency, ResolverAlgorithmKind, ResolverError, ResolverOptions, ResolverStrategy,
     ResolverStrategyInfo, StrategyStability, VersionDecision,
 };
-use pom_resolver::ClosureOptions;
 use reqwest::StatusCode;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs;
@@ -1051,10 +1050,14 @@ pub fn hydrate_resolved_dependencies_with_jars(
 // Maven 3.9 POM 解析ロジック（元: maven/dependency_graph.rs）
 // -----------------------------------------------------------------------------
 
-pub use pom_resolver::{MavenDependencyResolver, PomMetadata};
+pub use pom_resolver::{
+    ClosureOptions, ConflictStrategy, MavenDependencyResolver, PomMetadata, compare_maven_versions,
+    version_satisfies_range,
+};
 
 mod pom_resolver {
     use std::borrow::Cow;
+    use std::cmp::Ordering;
     use std::collections::{HashMap, HashSet, VecDeque};
     use std::sync::Arc;
 
@@ -1065,6 +1068,225 @@ mod pom_resolver {
     use crate::registry::{ArtifactCoordinates, MavenRegistry, RegistryError};
     use crate::wrapper::error::WrapperError;
     use crate::{DependencyScope, RequestedDependency};
+    use semver::Version;
+
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    enum VersionToken {
+        Num(u64),
+        Qualifier(String),
+    }
+
+    fn normalize_qualifier(raw: &str) -> String {
+        match raw.to_ascii_lowercase().as_str() {
+            "a" => "alpha".to_string(),
+            "b" => "beta".to_string(),
+            "m" => "milestone".to_string(),
+            "cr" => "rc".to_string(),
+            "ga" | "final" | "release" => "".to_string(),
+            other => other.to_string(),
+        }
+    }
+
+    fn qualifier_rank(q: &str) -> (i32, String) {
+        let normalized = normalize_qualifier(q);
+        let rank = match normalized.as_str() {
+            "alpha" => 1,
+            "beta" => 2,
+            "milestone" => 3,
+            "rc" => 4,
+            "snapshot" => 5,
+            "" => 6,
+            "sp" => 7,
+            _ => 8,
+        };
+        (rank, normalized)
+    }
+
+    fn tokenize_version(input: &str) -> Vec<VersionToken> {
+        let mut tokens = Vec::new();
+        let mut current = String::new();
+        let mut current_is_digit: Option<bool> = None;
+
+        for ch in input.chars() {
+            if ch == '.' || ch == '-' {
+                if !current.is_empty() {
+                    tokens.push(if current_is_digit.unwrap_or(false) {
+                        VersionToken::Num(current.parse().unwrap_or(0))
+                    } else {
+                        VersionToken::Qualifier(current.to_ascii_lowercase())
+                    });
+                    current.clear();
+                }
+                current_is_digit = None;
+                continue;
+            }
+
+            let is_digit = ch.is_ascii_digit();
+            match current_is_digit {
+                None => {
+                    current_is_digit = Some(is_digit);
+                    current.push(ch);
+                }
+                Some(flag) if flag == is_digit => current.push(ch),
+                Some(_) => {
+                    if !current.is_empty() {
+                        tokens.push(if current_is_digit.unwrap_or(false) {
+                            VersionToken::Num(current.parse().unwrap_or(0))
+                        } else {
+                            VersionToken::Qualifier(current.to_ascii_lowercase())
+                        });
+                        current.clear();
+                    }
+                    current_is_digit = Some(is_digit);
+                    current.push(ch);
+                }
+            }
+        }
+
+        if !current.is_empty() {
+            tokens.push(if current_is_digit.unwrap_or(false) {
+                VersionToken::Num(current.parse().unwrap_or(0))
+            } else {
+                VersionToken::Qualifier(current.to_ascii_lowercase())
+            });
+        }
+
+        tokens
+    }
+
+    /// ComparableVersion 互換のバージョン比較。主要なプリリリース修飾子の優先度を Maven に揃える。
+    pub fn compare_maven_versions(lhs: &str, rhs: &str) -> Ordering {
+        match (Version::parse(lhs), Version::parse(rhs)) {
+            (Ok(a), Ok(b)) => a.cmp(&b),
+            _ => {
+                let left = tokenize_version(lhs);
+                let right = tokenize_version(rhs);
+                let max_len = left.len().max(right.len());
+
+                for idx in 0..max_len {
+                    let l = left.get(idx).cloned().unwrap_or(VersionToken::Num(0));
+                    let r = right.get(idx).cloned().unwrap_or(VersionToken::Num(0));
+                    match (l, r) {
+                        (VersionToken::Num(a), VersionToken::Num(b)) => {
+                            let cmp = a.cmp(&b);
+                            if cmp != Ordering::Equal {
+                                return cmp;
+                            }
+                        }
+                        (VersionToken::Num(_), VersionToken::Qualifier(_)) => {
+                            return Ordering::Greater;
+                        }
+                        (VersionToken::Qualifier(_), VersionToken::Num(_)) => {
+                            return Ordering::Less;
+                        }
+                        (VersionToken::Qualifier(a), VersionToken::Qualifier(b)) => {
+                            let (rank_a, name_a) = qualifier_rank(&a);
+                            let (rank_b, name_b) = qualifier_rank(&b);
+                            let cmp = rank_a.cmp(&rank_b);
+                            if cmp != Ordering::Equal {
+                                return cmp;
+                            }
+                            let cmp_name = name_a.cmp(&name_b);
+                            if cmp_name != Ordering::Equal {
+                                return cmp_name;
+                            }
+                        }
+                    }
+                }
+
+                Ordering::Equal
+            }
+        }
+    }
+
+    fn split_range_intervals(range: &str) -> Vec<String> {
+        let mut parts = Vec::new();
+        let mut start = 0usize;
+        let bytes = range.as_bytes();
+        let len = bytes.len();
+        let mut i = 0usize;
+        while i < len.saturating_sub(2) {
+            let current = bytes[i];
+            let next = bytes[i + 1];
+            let after = bytes[i + 2];
+            let is_separator = (current == b']' || current == b')')
+                && next == b','
+                && (after == b'[' || after == b'(');
+            if is_separator {
+                parts.push(range[start..=i].trim().to_string());
+                start = i + 1;
+            }
+            i += 1;
+        }
+        if start < len {
+            parts.push(range[start..].trim().to_string());
+        }
+        parts
+    }
+
+    /// Maven の括弧記法に近い範囲評価。`[1.0,2.0)`、`(,1.0],[1.2,)` などをサポートする。
+    pub fn version_satisfies_range(version: &str, range: &str) -> bool {
+        let intervals = split_range_intervals(range);
+        if intervals.is_empty() {
+            return false;
+        }
+
+        for interval in intervals {
+            let trimmed = interval.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+
+            // 単一バージョン指定
+            if !trimmed.starts_with(['[', '(']) || !trimmed.ends_with([']', ')']) {
+                if compare_maven_versions(version, trimmed) == Ordering::Equal {
+                    return true;
+                }
+                continue;
+            }
+
+            if trimmed.len() < 2 {
+                continue;
+            }
+
+            let lower_inclusive = trimmed.starts_with('[');
+            let upper_inclusive = trimmed.ends_with(']');
+            let body = &trimmed[1..trimmed.len() - 1];
+            let (lower_raw, upper_raw) = match body.split_once(',') {
+                Some((lhs, rhs)) => (lhs.trim(), rhs.trim()),
+                None => (body.trim(), ""),
+            };
+
+            let lower = if lower_raw.is_empty() {
+                None
+            } else {
+                Some(lower_raw)
+            };
+            let upper = if upper_raw.is_empty() {
+                None
+            } else {
+                Some(upper_raw)
+            };
+
+            if let Some(bound) = lower {
+                let cmp = compare_maven_versions(version, bound);
+                if cmp == Ordering::Less || (cmp == Ordering::Equal && !lower_inclusive) {
+                    continue;
+                }
+            }
+
+            if let Some(bound) = upper {
+                let cmp = compare_maven_versions(version, bound);
+                if cmp == Ordering::Greater || (cmp == Ordering::Equal && !upper_inclusive) {
+                    continue;
+                }
+            }
+
+            return true;
+        }
+
+        false
+    }
 
     /// Resolves the full Maven dependency graph (including transitives) for a set of
     /// root artifacts by reading and interpreting their POM files.
@@ -1100,8 +1322,21 @@ mod pom_resolver {
         Ok(deps)
     }
 
-    #[derive(Clone, Copy)]
-    pub(super) struct ClosureOptions {
+    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+    pub enum ConflictStrategy {
+        /// Maven のデフォルト: 最短経路（浅い深さ）を優先し、同一深さでは最初に遭遇したものを採用。
+        Nearest,
+        /// 最深経路を優先（FarthestConflictResolver 相当）。
+        Farthest,
+        /// バージョンの新しさを優先（NewestConflictResolver 相当）。
+        Newest,
+        /// バージョンの古さを優先（OldestConflictResolver 相当）。
+        Oldest,
+        /// 競合解決せず全バージョンを保持（プラグインなどツール系ダウンロード用）。
+        KeepAll,
+    }
+
+    pub struct ClosureOptions {
         include_optional: bool,
         /// When false, only compile/runtime scopes are traversed. When true, provided/test are also
         /// followed.
@@ -1109,23 +1344,55 @@ mod pom_resolver {
         /// When true, multiple versions of the same GA(+classifier) are kept (plugin/tooling paths
         /// can legitimately require different versions simultaneously).
         allow_multiple_versions: bool,
+        conflict_strategy: ConflictStrategy,
     }
 
     impl ClosureOptions {
-        pub(super) fn base() -> Self {
+        pub fn base() -> Self {
             Self {
                 include_optional: false,
                 allow_all_scopes: false,
                 allow_multiple_versions: false,
+                conflict_strategy: ConflictStrategy::Nearest,
             }
         }
 
         /// Plugin/tooling 用のダウンロード展開。provided/test/optional を含め、複数バージョン共存を許容する。
-        pub(super) fn plugin_download() -> Self {
+        pub fn plugin_download() -> Self {
             Self {
                 include_optional: true,
                 allow_all_scopes: true,
+                // Maven dependency:resolve 実績（commons-lang3 基準）では同一GAでも複数版が併存するため、
+                // plugin_download では複数版の共存を許容し、依存管理がある場合のみ正規化する。
                 allow_multiple_versions: true,
+                conflict_strategy: ConflictStrategy::KeepAll,
+            }
+        }
+
+        pub fn newest_conflict() -> Self {
+            Self {
+                include_optional: false,
+                allow_all_scopes: false,
+                allow_multiple_versions: false,
+                conflict_strategy: ConflictStrategy::Newest,
+            }
+        }
+
+        pub fn oldest_conflict() -> Self {
+            Self {
+                include_optional: false,
+                allow_all_scopes: false,
+                allow_multiple_versions: false,
+                conflict_strategy: ConflictStrategy::Oldest,
+            }
+        }
+
+        pub fn farthest_conflict() -> Self {
+            Self {
+                include_optional: false,
+                allow_all_scopes: false,
+                allow_multiple_versions: false,
+                conflict_strategy: ConflictStrategy::Farthest,
             }
         }
     }
@@ -1147,7 +1414,7 @@ mod pom_resolver {
         /// artifacts. The returned list preserves insertion order and de-duplicates
         /// coordinates.
         #[allow(dead_code)]
-        pub(super) fn resolve_closure(
+        pub fn resolve_closure(
             &self,
             roots: &[ArtifactCoordinates],
         ) -> Result<Vec<ArtifactCoordinates>, WrapperError> {
@@ -1155,7 +1422,7 @@ mod pom_resolver {
         }
 
         /// Resolves the dependency closure with configurable optional/scope handling.
-        pub(super) fn resolve_closure_with_options(
+        pub fn resolve_closure_with_options(
             &self,
             roots: &[ArtifactCoordinates],
             options: ClosureOptions,
@@ -1163,6 +1430,7 @@ mod pom_resolver {
             let include_optional = options.include_optional;
             let allow_all_scopes = options.allow_all_scopes;
             let allow_multiple_versions = options.allow_multiple_versions;
+            let conflict_strategy = options.conflict_strategy;
             let mut scope_counts: HashMap<String, usize> = HashMap::new();
             let mut edge_log_emitted = 0usize;
             let max_edge_log = 20usize;
@@ -1208,6 +1476,7 @@ mod pom_resolver {
                     coords.artifact_id.clone(),
                     coords.classifier.clone(),
                 );
+                let current_depth = depth;
                 if allow_multiple_versions {
                     let version_key = (
                         key.0.clone(),
@@ -1219,7 +1488,7 @@ mod pom_resolver {
                         continue;
                     }
                 } else if let Some((best_version, best_depth)) = ga_versions.get(&key) {
-                    if *best_version != coords.version || *best_depth < depth {
+                    if *best_version != coords.version || *best_depth != current_depth {
                         continue;
                     }
                 }
@@ -1304,6 +1573,7 @@ mod pom_resolver {
                         coords.artifact_id.clone(),
                         coords.classifier.clone(),
                     );
+                    let candidate_depth = current_depth + 1;
 
                     let managed_version = effective
                         .dependency_management
@@ -1315,9 +1585,11 @@ mod pom_resolver {
                         }
                     }
 
-                    if allow_multiple_versions {
+                    if allow_multiple_versions
+                        || matches!(conflict_strategy, ConflictStrategy::KeepAll)
+                    {
                         ordered.insert(coords.clone());
-                        queue.push_back((coords, next_exclusions, depth + 1));
+                        queue.push_back((coords, next_exclusions, candidate_depth));
                         if dependency.optional {
                             optional_enqueued += 1;
                             if optional_added_samples.len() < 10 {
@@ -1344,60 +1616,85 @@ mod pom_resolver {
                             edge_log_emitted += 1;
                         }
                     } else {
-                        let mut should_replace = false;
-                        match ga_versions.get(&key) {
-                            None => {
-                                should_replace = true;
-                            }
-                            Some((existing_version, existing_depth)) => {
-                                // dependencyManagement が指定されている場合はバージョンを強制的に刷新する。
-                                if let Some(managed) = managed_version.as_ref() {
-                                    if managed != existing_version {
+                        let mut should_replace = matches!(ga_versions.get(&key), None);
+                        if let Some((existing_version, existing_depth)) = ga_versions.get(&key) {
+                            let managed_override = managed_version
+                                .as_ref()
+                                .map(|managed| managed != existing_version)
+                                .unwrap_or(false);
+                            match conflict_strategy {
+                                ConflictStrategy::Nearest => {
+                                    if managed_override && candidate_depth <= *existing_depth {
                                         should_replace = true;
-                                        eprintln!(
-                                            "[maven-compat-debug] managed_override ga={}:{:?} existing={} managed={} depth={}->{}",
-                                            coords.group_id,
-                                            coords.artifact_id,
-                                            existing_version,
-                                            managed,
-                                            existing_depth,
-                                            depth
-                                        );
-                                    } else if *existing_depth > depth {
+                                    } else if candidate_depth < *existing_depth {
                                         should_replace = true;
+                                    } else if candidate_depth == *existing_depth {
+                                        if managed_override {
+                                            should_replace = true;
+                                        } else if existing_version != &coords.version {
+                                            continue;
+                                        }
+                                    } else {
+                                        continue;
                                     }
-                                } else if existing_version != &coords.version {
-                                    // 異なるバージョンは深さに関わらず置換して差分脱落を防ぐ
+                                }
+                                ConflictStrategy::Farthest => {
+                                    if managed_override && candidate_depth >= *existing_depth {
+                                        should_replace = true;
+                                    } else if candidate_depth > *existing_depth {
+                                        should_replace = true;
+                                    } else if candidate_depth == *existing_depth {
+                                        if managed_override {
+                                            should_replace = true;
+                                        } else if existing_version != &coords.version {
+                                            continue;
+                                        }
+                                    } else {
+                                        continue;
+                                    }
+                                }
+                                ConflictStrategy::Newest => {
+                                    let cmp =
+                                        compare_maven_versions(&coords.version, existing_version);
+                                    if managed_override {
+                                        should_replace = true;
+                                    } else if cmp.is_gt() {
+                                        should_replace = true;
+                                    } else if cmp.is_eq() && candidate_depth < *existing_depth {
+                                        should_replace = true;
+                                    } else {
+                                        continue;
+                                    }
+                                }
+                                ConflictStrategy::Oldest => {
+                                    let cmp =
+                                        compare_maven_versions(&coords.version, existing_version);
+                                    if managed_override {
+                                        should_replace = true;
+                                    } else if cmp.is_lt() {
+                                        should_replace = true;
+                                    } else if cmp.is_eq() && candidate_depth < *existing_depth {
+                                        should_replace = true;
+                                    } else {
+                                        continue;
+                                    }
+                                }
+                                ConflictStrategy::KeepAll => {
                                     should_replace = true;
-                                    eprintln!(
-                                        "[maven-compat-debug] replace_version ga={}:{:?} existing={} new={} depth={}->{}",
-                                        coords.group_id,
-                                        coords.artifact_id,
-                                        existing_version,
-                                        coords.version,
-                                        existing_depth,
-                                        depth
-                                    );
-                                } else if *existing_depth > depth {
-                                    // より浅い経路を優先
-                                    should_replace = true;
-                                } else if existing_version == &coords.version {
-                                    // 同一バージョンで深さも優先されない場合はスキップ
-                                    continue;
                                 }
                             }
                         }
 
                         if should_replace {
-                            // 既存の同一 GA (+classifier) を閉包から取り除いたうえで最新版を登録する。
                             ordered.retain(|item| {
                                 !(item.group_id == coords.group_id
                                     && item.artifact_id == coords.artifact_id
                                     && item.classifier == coords.classifier)
                             });
-                            ga_versions.insert(key.clone(), (coords.version.clone(), depth + 1));
+                            ga_versions
+                                .insert(key.clone(), (coords.version.clone(), candidate_depth));
                             ordered.insert(coords.clone());
-                            queue.push_back((coords, next_exclusions, depth + 1));
+                            queue.push_back((coords, next_exclusions, candidate_depth));
                             if dependency.optional {
                                 optional_enqueued += 1;
                                 if optional_added_samples.len() < 10 {
@@ -1426,7 +1723,7 @@ mod pom_resolver {
                         } else {
                             eprintln!(
                                 "[maven-compat-debug] retain_existing ga={}:{} version={} depth={}",
-                                coords.group_id, coords.artifact_id, coords.version, depth
+                                coords.group_id, coords.artifact_id, coords.version, current_depth
                             );
                         }
                     }
