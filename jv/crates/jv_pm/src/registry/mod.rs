@@ -1,5 +1,6 @@
 use md5;
 use sha1::Sha1;
+use std::error::Error as StdError;
 use std::fmt;
 use std::time::Duration;
 
@@ -360,6 +361,8 @@ impl MavenRegistry {
     ) -> Result<Self, RegistryError> {
         let client = Client::builder()
             .timeout(DEFAULT_TIMEOUT)
+            // Avoid HTTP/2 oddities against Maven Central; prefer HTTP/1.1.
+            .http1_only()
             .user_agent(format!("jv-pm/{}", env!("CARGO_PKG_VERSION")))
             .build()
             .map_err(|source| RegistryError::ClientBuild { source })?;
@@ -620,6 +623,13 @@ impl MavenRegistry {
                     sleep(delay).await;
                 }
                 Err(error) => {
+                    // Emit full error chain to aid diagnosing transport failures.
+                    let mut chain = format!("{error:?}");
+                    let mut curr = error.source();
+                    while let Some(src) = curr {
+                        chain.push_str(&format!(" | caused by: {src}"));
+                        curr = src.source();
+                    }
                     let retryable = error.is_timeout() || error.is_connect();
                     warn!(
                         attempt,
@@ -627,7 +637,7 @@ impl MavenRegistry {
                         target = %resource,
                         url = %url,
                         retryable,
-                        error = %error,
+                        error = %chain,
                         "HTTPリクエスト失敗"
                     );
                     if retryable && attempt < max_attempts {

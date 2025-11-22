@@ -49,9 +49,29 @@ impl MavenConfigSection {
         }
         if self.standard_plugins.is_empty() {
             self.standard_plugins = fallback_standard_plugins();
+        } else {
+            for fallback in fallback_standard_plugins() {
+                let missing = self.standard_plugins.iter().all(|plugin| {
+                    plugin.group_id != fallback.group_id
+                        || plugin.artifact_id != fallback.artifact_id
+                });
+                if missing {
+                    self.standard_plugins.push(fallback);
+                }
+            }
         }
         if self.managed_artifacts.is_empty() {
             self.managed_artifacts = fallback_managed_artifacts();
+        } else {
+            for fallback in fallback_managed_artifacts() {
+                let missing = self.managed_artifacts.iter().all(|artifact| {
+                    artifact.group_id != fallback.group_id
+                        || artifact.artifact_id != fallback.artifact_id
+                });
+                if missing {
+                    self.managed_artifacts.push(fallback);
+                }
+            }
         }
     }
 }

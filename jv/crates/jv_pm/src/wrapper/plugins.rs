@@ -98,7 +98,15 @@ pub fn discover_declared_plugins(
         })?;
 
     let mut properties = HashMap::new();
-    let mut plugin_versions: HashMap<(String, String), String> = HashMap::new();
+    let mut plugin_versions: HashMap<(String, String), String> = standard_plugins()
+        .iter()
+        .map(|plugin| {
+            (
+                (plugin.group_id.clone(), plugin.artifact_id.clone()),
+                plugin.version.clone(),
+            )
+        })
+        .collect();
 
     if let Some(parent) = project
         .children()

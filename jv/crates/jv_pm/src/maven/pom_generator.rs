@@ -163,12 +163,16 @@ impl<'a> PomGenerator<'a> {
     ) -> Result<Vec<DependencyEntry>, PomGenerationError> {
         let mut map: HashMap<(String, String), DependencyEntry> = HashMap::new();
 
-        for dependency in &self.resolved.dependencies {
-            let (group_id, artifact_id) =
-                self.parse_coordinates(&dependency.name, default_group)?;
-            let version = self.resolve_version(dependency, lock_versions)?;
-            let scope = Self::map_scope(dependency.scope);
-
+        for (name, requirement) in &self.manifest.package.dependencies {
+            let resolved_entry = self
+                .resolved
+                .dependencies
+                .iter()
+                .find(|dep| dep.name == *name);
+            let (group_id, artifact_id) = self.parse_coordinates(name, default_group)?;
+            let version =
+                self.resolve_manifest_version(name, requirement, resolved_entry, lock_versions)?;
+            let scope = resolved_entry.and_then(|dep| Self::map_scope(dep.scope));
             let key = (group_id.clone(), artifact_id.clone());
             map.entry(key)
                 .and_modify(|existing| {
@@ -236,23 +240,33 @@ impl<'a> PomGenerator<'a> {
         }
     }
 
-    fn resolve_version(
+    fn resolve_manifest_version(
         &self,
-        dependency: &ResolvedDependency,
+        dependency_name: &str,
+        requirement: &str,
+        resolved: Option<&ResolvedDependency>,
         lock_versions: &Option<HashMap<&str, &str>>,
     ) -> Result<String, PomGenerationError> {
         if let Some(map) = lock_versions.as_ref() {
-            if let Some(version) = map.get(dependency.name.as_str()) {
+            if let Some(version) = map.get(dependency_name) {
                 return Ok((*version).to_string());
             }
         }
 
-        match &dependency.decision {
-            VersionDecision::Exact(value) => Ok(value.clone()),
-            _ => Err(PomGenerationError::UnresolvedVersion {
-                name: dependency.name.clone(),
-            }),
+        if let Some(resolved) = resolved {
+            if let VersionDecision::Exact(value) = &resolved.decision {
+                return Ok(value.clone());
+            }
         }
+
+        let trimmed = requirement.trim();
+        if trimmed.is_empty() {
+            return Err(PomGenerationError::UnresolvedVersion {
+                name: dependency_name.to_string(),
+            });
+        }
+
+        Ok(trimmed.to_string())
     }
 
     fn map_scope(scope: DependencyScope) -> Option<String> {

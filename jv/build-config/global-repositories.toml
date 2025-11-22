@@ -20,56 +20,6 @@ description = "Apache Maven 4.0.0 (GA expected later this year)"
 
 [[maven.standard_plugins]]
 group_id = "org.apache.maven.plugins"
-artifact_id = "maven-clean-plugin"
-version = "3.2.0"
-
-[[maven.standard_plugins]]
-group_id = "org.apache.maven.plugins"
-artifact_id = "maven-resources-plugin"
-version = "3.3.1"
-
-[[maven.standard_plugins]]
-group_id = "org.apache.maven.plugins"
-artifact_id = "maven-compiler-plugin"
-version = "3.13.0"
-
-[[maven.standard_plugins]]
-group_id = "org.apache.maven.plugins"
-artifact_id = "maven-surefire-plugin"
-version = "3.2.5"
-
-[[maven.standard_plugins]]
-group_id = "org.apache.maven.plugins"
-artifact_id = "maven-jar-plugin"
-version = "3.4.1"
-
-[[maven.standard_plugins]]
-group_id = "org.apache.maven.plugins"
-artifact_id = "maven-install-plugin"
-version = "3.1.2"
-
-[[maven.standard_plugins]]
-group_id = "org.apache.maven.plugins"
-artifact_id = "maven-deploy-plugin"
-version = "3.1.2"
-
-[[maven.standard_plugins]]
-group_id = "org.apache.maven.plugins"
-artifact_id = "maven-site-plugin"
-version = "3.12.1"
-
-[[maven.standard_plugins]]
-group_id = "org.apache.maven.plugins"
-artifact_id = "maven-antrun-plugin"
-version = "3.1.0"
-
-[[maven.standard_plugins]]
-group_id = "org.apache.maven.plugins"
-artifact_id = "maven-assembly-plugin"
-version = "3.7.1"
-
-[[maven.standard_plugins]]
-group_id = "org.apache.maven.plugins"
 artifact_id = "maven-dependency-plugin"
 version = "3.7.0"
 

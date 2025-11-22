@@ -32,6 +32,7 @@ fn test_hydrate_resolved_dependencies_with_jars_empty() {
         local_repository: temp.path().join(".jv").join("repository"),
         repositories: Vec::new(),
         mirrors: Vec::new(),
+        base_dependencies: Vec::new(),
     };
 
     let mut resolved = empty_resolved();
@@ -74,6 +75,7 @@ fn test_hydrate_resolved_dependencies_with_jars_single() {
         local_repository: local_repo.clone(),
         repositories: Vec::new(),
         mirrors: Vec::new(),
+        base_dependencies: Vec::new(),
     };
 
     let dependency = ResolvedDependency {

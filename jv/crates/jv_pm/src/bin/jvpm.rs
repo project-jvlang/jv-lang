@@ -25,12 +25,12 @@ use jv_pm::wrapper::{
     sync::{self, WrapperUpdateSummary},
 };
 use jv_pm::{
-    self, AuthConfig, AuthType, DependencyCache, ExportError, ExportRequest, FilterConfig,
-    JavaProjectExporter, Lockfile, LockfileService, Manifest, MavenCoordinates, MavenMetadata,
-    MavenMirrorConfig, MavenRegistry, MavenRepositoryConfig, MirrorConfig, RegistryError,
-    RepositoryConfig, RepositoryManager, ResolutionStats, ResolvedDependencies, ResolvedDependency,
-    ResolverAlgorithmKind, ResolverDispatcher, ResolverOptions, ResolverStrategyInfo,
-    StrategyStability, repository,
+    self, AuthConfig, AuthType, DependencyCache, DependencyScope, ExportError, ExportRequest,
+    FilterConfig, JavaProjectExporter, Lockfile, LockfileService, Manifest, MavenCoordinates,
+    MavenMetadata, MavenMirrorConfig, MavenRegistry, MavenRepositoryConfig, MirrorConfig,
+    RegistryError, RepositoryConfig, RepositoryManager, RequestedDependency, ResolutionStats,
+    ResolvedDependencies, ResolvedDependency, ResolverAlgorithmKind, ResolverDispatcher,
+    ResolverOptions, ResolverStrategyInfo, StrategyStability, repository,
 };
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
@@ -1087,12 +1087,27 @@ fn resolve_with_lock(
 ) -> Result<(ResolvedDependencies, Lockfile, PathBuf)> {
     let dispatcher = ResolverDispatcher::with_default_strategies();
     let local_repository = ensure_local_repository(project_root)?;
+    let remote_repositories: Vec<MavenRepositoryConfig> = repositories
+        .into_iter()
+        .filter(|repo| !repo.url.starts_with("file://"))
+        .collect();
+    let base_dependencies: Vec<RequestedDependency> = manifest
+        .package
+        .dependencies
+        .iter()
+        .map(|(name, requirement)| RequestedDependency {
+            name: name.clone(),
+            requirement: requirement.clone(),
+            scope: DependencyScope::Main,
+        })
+        .collect();
 
     let ctx = MavenResolverContext {
         project_root: project_root.to_path_buf(),
         local_repository: local_repository.clone(),
-        repositories: repositories.clone(),
+        repositories: remote_repositories.clone(),
         mirrors: mirrors.clone(),
+        base_dependencies,
     };
     let options = options.clone().with_maven_context(ctx);
 
@@ -1123,13 +1138,22 @@ fn resolve_with_lock(
             },
         }
     } else {
-        dispatcher
-            .resolve_manifest(manifest, options)
-            .context("依存関係の解決に失敗しました")?
+        match dispatcher.resolve_manifest(manifest, options) {
+            Ok(resolved) => resolved,
+            Err(error) => {
+                eprintln!("[wrapper-debug] resolve_manifest error: {error:?}");
+                return Err(anyhow!(error).context("依存関係の解決に失敗しました"));
+            }
+        }
     };
 
-    let lockfile =
-        LockfileService::generate(manifest, &resolved).context("jv.lock の生成に失敗しました")?;
+    let lockfile = match LockfileService::generate(manifest, &resolved) {
+        Ok(lock) => lock,
+        Err(error) => {
+            eprintln!("[wrapper-debug] lockfile generation failed: {:?}", error);
+            return Err(error).context("jv.lock の生成に失敗しました");
+        }
+    };
 
     Ok((resolved, lockfile, local_repository))
 }

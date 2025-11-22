@@ -4,14 +4,16 @@ use crate::registry::{
     ArtifactCoordinates, ArtifactResource, ChecksumAlgorithm, ChecksumVerifiedJar, MavenRegistry,
     RegistryError,
 };
+use crate::repository::defaults::maven_standard_plugins;
 use crate::resolver::{
     DependencyProvider, DependencyScope, Manifest, MavenResolverContext, RequestedDependency,
     ResolutionDiagnostic, ResolutionSource, ResolutionStats, ResolvedDependencies,
     ResolvedDependency, ResolverAlgorithmKind, ResolverError, ResolverOptions, ResolverStrategy,
     ResolverStrategyInfo, StrategyStability, VersionDecision,
 };
+use pom_resolver::ClosureOptions;
 use reqwest::StatusCode;
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -28,6 +30,7 @@ pub struct MavenDependencyProvider3_9<'a> {
     repositories: Vec<MavenRepositoryConfig>,
     mirrors: Vec<MavenMirrorConfig>,
     _cache: Arc<DependencyCache>,
+    base_dependencies: Vec<RequestedDependency>,
 }
 
 impl<'a> MavenDependencyProvider3_9<'a> {
@@ -36,12 +39,14 @@ impl<'a> MavenDependencyProvider3_9<'a> {
         repositories: Vec<MavenRepositoryConfig>,
         mirrors: Vec<MavenMirrorConfig>,
         cache: Arc<DependencyCache>,
+        base_dependencies: Vec<RequestedDependency>,
     ) -> Self {
         Self {
             project_root,
             repositories,
             mirrors,
             _cache: cache,
+            base_dependencies,
         }
     }
 
@@ -67,6 +72,10 @@ impl<'a> DependencyProvider for MavenDependencyProvider3_9<'a> {
     }
 
     fn direct_dependencies(&self) -> Vec<RequestedDependency> {
+        if !self.base_dependencies.is_empty() {
+            return self.base_dependencies.clone();
+        }
+
         let pom_path = self.project_root.join("pom.xml");
         let contents = match fs::read_to_string(&pom_path) {
             Ok(text) => text,
@@ -165,6 +174,11 @@ impl MavenJarDownloader {
         let mut attempt = 0;
         loop {
             let (to_download, mut jar_paths) = self.build_download_plan(targets)?;
+            eprintln!(
+                "[maven-compat-debug] build_download_plan: targets={} to_download={}",
+                targets.len(),
+                to_download.len()
+            );
             if to_download.is_empty() {
                 if self.verify_repository_state(targets)? {
                     return Ok(());
@@ -224,7 +238,12 @@ impl MavenJarDownloader {
         let mut jar_paths = HashMap::new();
 
         for (coords, path) in targets {
+            if self.try_hydrate_from_maven_cache(coords, path)? {
+                tracing::info!(target = %coords, "hydrated from MAVEN_CACHE_DIR");
+                continue;
+            }
             if self.validate_existing_jar(path)? {
+                tracing::info!(target = %coords, path = %path.display(), "using existing jar");
                 continue;
             }
 
@@ -232,7 +251,71 @@ impl MavenJarDownloader {
             to_download.push(coords.clone());
         }
 
+        tracing::info!(
+            "download_plan: targets={} to_download={} hydrated_or_existing={}",
+            targets.len(),
+            to_download.len(),
+            targets.len().saturating_sub(to_download.len())
+        );
+
         Ok((to_download, jar_paths))
+    }
+
+    /// フォールバックとして、MAVEN_CACHE_DIR（標準の Maven ローカルリポジトリ）に
+    /// 既にダウンロード済みの Jar があればコピーして再利用する。
+    fn try_hydrate_from_maven_cache(
+        &self,
+        coords: &ArtifactCoordinates,
+        destination: &Path,
+    ) -> Result<bool, ResolverError> {
+        let Ok(cache_root) = std::env::var("MAVEN_CACHE_DIR") else {
+            return Ok(false);
+        };
+        let cache_root = PathBuf::from(cache_root);
+        let cache_path = cache_root
+            .join(coords.maven_coordinates().group_path())
+            .join(&coords.artifact_id)
+            .join(&coords.version)
+            .join(coords.jar_file_name());
+
+        if !cache_path.exists() {
+            return Ok(false);
+        }
+
+        let dest_parent = destination.parent().ok_or_else(|| {
+            repository_conflict(
+                destination.display().to_string(),
+                "親ディレクトリなし".to_string(),
+            )
+        })?;
+        fs::create_dir_all(dest_parent).map_err(|error| {
+            repository_conflict(
+                dest_parent.display().to_string(),
+                format!("{} の作成に失敗しました: {error}", dest_parent.display()),
+            )
+        })?;
+
+        fs::copy(&cache_path, destination).map_err(|error| {
+            repository_conflict(
+                destination.display().to_string(),
+                format!(
+                    "{} へのコピーに失敗しました (source: {}): {error}",
+                    destination.display(),
+                    cache_path.display()
+                ),
+            )
+        })?;
+
+        // 可能であればチェックサムもコピーして検証を通す
+        for ext in ["sha256", "sha1", "md5"] {
+            let source_checksum = cache_path.with_extension(format!("jar.{ext}"));
+            if source_checksum.exists() {
+                let dest_checksum = destination.with_extension(format!("jar.{ext}"));
+                let _ = fs::copy(&source_checksum, &dest_checksum);
+            }
+        }
+
+        Ok(true)
     }
 
     async fn download_all(
@@ -599,6 +682,7 @@ impl MavenCompat39Strategy {
                 DependencyCache::with_dir(ctx.project_root.join(".jv").join("cache"))
                     .unwrap_or_else(|_| DependencyCache::global().expect("cache init"))
             })),
+            ctx.base_dependencies.clone(),
         )
     }
 }
@@ -669,55 +753,195 @@ impl ResolverStrategy for MavenCompat39Strategy {
             );
 
         let registries = registries_from_context(ctx);
+        eprintln!(
+            "[maven-compat-debug] registries={} local_repository={} strategy={}",
+            registries.len(),
+            ctx.local_repository.display(),
+            info.name
+        );
 
         let jar_downloader =
             MavenJarDownloader::new(ctx.local_repository.clone(), registries.clone());
         let provider = self.build_provider(options.maven_context.as_ref());
-        let direct = provider.direct_dependencies();
+        // Wrapperモードでは base_dependencies を唯一のルートに固定し、追加のプラグイン由来ルート混入を防ぐ。
+        let direct = if !ctx.base_dependencies.is_empty() {
+            ctx.base_dependencies.clone()
+        } else {
+            provider.direct_dependencies()
+        };
+        eprintln!(
+            "[maven-compat-debug] direct_dependencies={} (base_only={}) base_dep_names=[{}]",
+            direct.len(),
+            !ctx.base_dependencies.is_empty(),
+            ctx.base_dependencies
+                .iter()
+                .map(|d| d.name.clone())
+                .collect::<Vec<_>>()
+                .join(",")
+        );
 
         let resolver = MavenDependencyResolver::new(&runtime, cache.clone(), registries.clone());
 
         let mut roots = Vec::new();
+        let mut base_names: HashSet<String> = HashSet::new();
+        let mut seen: HashSet<(String, String, Option<String>)> = HashSet::new();
         for dep in &direct {
             if let Some((group, artifact)) = dep.name.split_once(':') {
                 let ver = dep.requirement.clone();
-                roots.push(ArtifactCoordinates::new(
-                    group.to_string(),
-                    artifact.to_string(),
-                    ver,
-                ));
+                let coords = ArtifactCoordinates::new(group.to_string(), artifact.to_string(), ver);
+                base_names.insert(format!("{group}:{artifact}"));
+                let key = (
+                    coords.group_id.clone(),
+                    coords.artifact_id.clone(),
+                    coords.classifier.clone(),
+                );
+                if seen.insert(key) {
+                    roots.push(coords);
+                }
             }
         }
+        let mut plugin_roots = Vec::new();
+        for plugin in maven_standard_plugins() {
+            let coords = ArtifactCoordinates::new(
+                plugin.group_id.clone(),
+                plugin.artifact_id.clone(),
+                plugin.version.clone(),
+            );
+            let key = (
+                coords.group_id.clone(),
+                coords.artifact_id.clone(),
+                coords.classifier.clone(),
+            );
+            if seen.insert(key) {
+                plugin_roots.push(coords);
+            }
+        }
+        if roots.len() != direct.len() {
+            eprintln!(
+                "[maven-compat-debug] roots_dedup_mismatch roots={} direct={} (duplicates dropped)",
+                roots.len(),
+                direct.len()
+            );
+        }
+        let base_summary: Vec<String> = roots
+            .iter()
+            .map(|c| format!("{}:{}:{}", c.group_id, c.artifact_id, c.version))
+            .collect();
+        let plugin_summary: Vec<String> = plugin_roots
+            .iter()
+            .map(|c| format!("{}:{}:{}", c.group_id, c.artifact_id, c.version))
+            .collect();
+        eprintln!(
+            "[maven-compat-debug] roots_list=[{}] plugin_roots=[{}]",
+            base_summary.join(","),
+            plugin_summary.join(",")
+        );
+        let base_closure = resolver
+            .resolve_closure_with_options(&roots, ClosureOptions::base())
+            .map_err(|error| ResolverError::Conflict {
+                dependency: "resolver".into(),
+                details: error.to_string(),
+            })?;
+        let plugin_closure = resolver
+            .resolve_closure_with_options(&plugin_roots, ClosureOptions::plugin_download())
+            .map_err(|error| ResolverError::Conflict {
+                dependency: "resolver".into(),
+                details: error.to_string(),
+            })?;
 
-        let closure =
-            resolver
-                .resolve_closure(&roots)
-                .map_err(|error| ResolverError::Conflict {
-                    dependency: "resolver".into(),
-                    details: error.to_string(),
-                })?;
+        let mut download_plan: Vec<ArtifactCoordinates> = Vec::new();
+        let mut seen_download = HashSet::new();
+        for coords in base_closure.iter() {
+            if seen_download.insert((
+                coords.group_id.clone(),
+                coords.artifact_id.clone(),
+                coords.classifier.clone(),
+                coords.version.clone(),
+            )) {
+                download_plan.push(coords.clone());
+            }
+        }
+        for coords in plugin_closure.iter() {
+            if seen_download.insert((
+                coords.group_id.clone(),
+                coords.artifact_id.clone(),
+                coords.classifier.clone(),
+                coords.version.clone(),
+            )) {
+                download_plan.push(coords.clone());
+            }
+        }
+        let download_roots_summary = format!(
+            "base_roots={} plugin_roots={} base_closure={} plugin_closure={}",
+            roots.len(),
+            plugin_roots.len(),
+            base_closure.len(),
+            plugin_closure.len()
+        );
 
-        let targets = jar_downloader.artifact_targets(&closure);
+        eprintln!(
+            "[maven-compat-debug] download_plan_size={} roots_info={}",
+            download_plan.len(),
+            download_roots_summary
+        );
+        // サンプルでダウンロード計画の最初と最後の数件を出力（多すぎる場合は一部のみ）
+        if !download_plan.is_empty() {
+            let head: Vec<String> = download_plan
+                .iter()
+                .take(5)
+                .map(|c| format!("{}:{}:{}", c.group_id, c.artifact_id, c.version))
+                .collect();
+            let tail: Vec<String> = download_plan
+                .iter()
+                .rev()
+                .take(5)
+                .map(|c| format!("{}:{}:{}", c.group_id, c.artifact_id, c.version))
+                .collect();
+            eprintln!(
+                "[maven-compat-debug] download_plan_head=[{}] download_plan_tail=[{}]",
+                head.join(","),
+                tail.into_iter().rev().collect::<Vec<_>>().join(",")
+            );
+        }
+
+        let targets = jar_downloader.artifact_targets(&download_plan);
+        eprintln!(
+            "[maven-compat-debug] targets={} local_repo={}",
+            targets.len(),
+            ctx.local_repository.display()
+        );
         jar_downloader.ensure_artifacts(&runtime, &targets)?;
+        let present = targets.iter().filter(|(_, path)| path.exists()).count();
+        eprintln!(
+            "[maven-compat-debug] artifacts_present_after_download={}/{}",
+            present,
+            targets.len()
+        );
         let jar_locations: HashMap<ArtifactCoordinates, PathBuf> =
             targets.iter().cloned().collect();
 
-        let dependencies: Vec<ResolvedDependency> = closure
-            .into_iter()
-            .map(|coords| {
-                let local = jar_locations
-                    .get(&coords)
-                    .map(|path| path.to_string_lossy().to_string());
-                ResolvedDependency {
-                    name: format!("{}:{}", coords.group_id, coords.artifact_id),
-                    requested: coords.version.clone(),
-                    decision: VersionDecision::Exact(coords.version.clone()),
-                    scope: DependencyScope::Main,
-                    source: ResolutionSource::Registry,
-                    local_artifact: local,
-                }
-            })
-            .collect();
+        let mut seen = HashSet::new();
+        let mut dependencies: Vec<ResolvedDependency> = Vec::new();
+        for coords in base_closure.into_iter() {
+            let name = format!("{}:{}", coords.group_id, coords.artifact_id);
+            if !seen.insert(name.clone()) {
+                continue;
+            }
+            if !base_names.contains(&name) {
+                continue;
+            }
+            let local = jar_locations
+                .get(&coords)
+                .map(|path| path.to_string_lossy().to_string());
+            dependencies.push(ResolvedDependency {
+                name,
+                requested: coords.version.clone(),
+                decision: VersionDecision::Exact(coords.version.clone()),
+                scope: DependencyScope::Main,
+                source: ResolutionSource::Registry,
+                local_artifact: local,
+            });
+        }
 
         let stats = ResolutionStats::new(
             start.elapsed().as_millis(),
@@ -831,7 +1055,7 @@ pub use pom_resolver::{MavenDependencyResolver, PomMetadata};
 
 mod pom_resolver {
     use std::borrow::Cow;
-    use std::collections::{HashMap, HashSet};
+    use std::collections::{HashMap, HashSet, VecDeque};
     use std::sync::Arc;
 
     use indexmap::IndexSet;
@@ -876,6 +1100,36 @@ mod pom_resolver {
         Ok(deps)
     }
 
+    #[derive(Clone, Copy)]
+    pub(super) struct ClosureOptions {
+        include_optional: bool,
+        /// When false, only compile/runtime scopes are traversed. When true, provided/test are also
+        /// followed.
+        allow_all_scopes: bool,
+        /// When true, multiple versions of the same GA(+classifier) are kept (plugin/tooling paths
+        /// can legitimately require different versions simultaneously).
+        allow_multiple_versions: bool,
+    }
+
+    impl ClosureOptions {
+        pub(super) fn base() -> Self {
+            Self {
+                include_optional: false,
+                allow_all_scopes: false,
+                allow_multiple_versions: false,
+            }
+        }
+
+        /// Plugin/tooling 用のダウンロード展開。provided/test/optional を含め、複数バージョン共存を許容する。
+        pub(super) fn plugin_download() -> Self {
+            Self {
+                include_optional: true,
+                allow_all_scopes: true,
+                allow_multiple_versions: true,
+            }
+        }
+    }
+
     impl<'a> MavenDependencyResolver<'a> {
         pub fn new(
             runtime: &'a tokio::runtime::Runtime,
@@ -892,35 +1146,351 @@ mod pom_resolver {
         /// Returns the closure of every dependency reachable from the provided root
         /// artifacts. The returned list preserves insertion order and de-duplicates
         /// coordinates.
-        pub fn resolve_closure(
+        #[allow(dead_code)]
+        pub(super) fn resolve_closure(
             &self,
             roots: &[ArtifactCoordinates],
         ) -> Result<Vec<ArtifactCoordinates>, WrapperError> {
-            self.resolve_closure_with_optional(roots, false)
+            self.resolve_closure_with_options(roots, ClosureOptions::base())
         }
 
-        /// Resolves the dependency closure, optionally keeping dependencies marked as optional.
-        pub fn resolve_closure_with_optional(
+        /// Resolves the dependency closure with configurable optional/scope handling.
+        pub(super) fn resolve_closure_with_options(
             &self,
             roots: &[ArtifactCoordinates],
-            include_optional: bool,
+            options: ClosureOptions,
         ) -> Result<Vec<ArtifactCoordinates>, WrapperError> {
+            let include_optional = options.include_optional;
+            let allow_all_scopes = options.allow_all_scopes;
+            let allow_multiple_versions = options.allow_multiple_versions;
+            let mut scope_counts: HashMap<String, usize> = HashMap::new();
+            let mut edge_log_emitted = 0usize;
+            let max_edge_log = 20usize;
+            let mut pom_log_emitted = 0usize;
+            let mut optional_seen = 0usize;
+            let mut optional_enqueued = 0usize;
+            let mut skipped_scope = 0usize;
+            let mut optional_added_samples: Vec<String> = Vec::new();
             let mut ordered = IndexSet::new();
             let mut memo = HashMap::new();
-            // Maven の nearest-wins 調停に合わせ、最初に現れた groupId/artifactId(+classifier) のバージョンを固定する。
-            let mut seen_versions: HashMap<(String, String, Option<String>), String> =
+            // Maven の nearest-wins: 最短経路（層の浅い依存）を優先するため BFS で展開する。
+            // 依存管理（dependencyManagement）で指定された版は深さに関わらず優先する。
+            let mut ga_versions: HashMap<(String, String, Option<String>), (String, usize)> =
                 HashMap::new();
+            let mut seen_versions: HashSet<(String, String, Option<String>, String)> =
+                HashSet::new();
+            let mut queue: VecDeque<(ArtifactCoordinates, Vec<(String, String)>, usize)> =
+                VecDeque::new();
             for root in roots {
-                self.expand(
-                    root.clone(),
-                    &mut ordered,
-                    &mut memo,
-                    &[],
-                    include_optional,
-                    &mut HashSet::new(),
-                    &mut seen_versions,
-                )?;
+                let key = (
+                    root.group_id.clone(),
+                    root.artifact_id.clone(),
+                    root.classifier.clone(),
+                );
+                if allow_multiple_versions {
+                    ordered.insert(root.clone());
+                    queue.push_back((root.clone(), Vec::new(), 0));
+                } else {
+                    if let Some((existing_version, existing_depth)) = ga_versions.get(&key) {
+                        if existing_version == &root.version && *existing_depth <= 0 {
+                            continue;
+                        }
+                    }
+                    ga_versions.insert(key.clone(), (root.version.clone(), 0));
+                    ordered.insert(root.clone());
+                    queue.push_back((root.clone(), Vec::new(), 0));
+                }
             }
+
+            while let Some((coords, exclusions, depth)) = queue.pop_front() {
+                let key = (
+                    coords.group_id.clone(),
+                    coords.artifact_id.clone(),
+                    coords.classifier.clone(),
+                );
+                if allow_multiple_versions {
+                    let version_key = (
+                        key.0.clone(),
+                        key.1.clone(),
+                        key.2.clone(),
+                        coords.version.clone(),
+                    );
+                    if !seen_versions.insert(version_key) {
+                        continue;
+                    }
+                } else if let Some((best_version, best_depth)) = ga_versions.get(&key) {
+                    if *best_version != coords.version || *best_depth < depth {
+                        continue;
+                    }
+                }
+                let effective =
+                    self.load_effective_pom(coords.clone(), &mut memo, &mut HashSet::new())?;
+
+                if pom_log_emitted < max_edge_log {
+                    let samples: Vec<String> = effective
+                        .dependencies
+                        .iter()
+                        .take(5)
+                        .map(|dep| {
+                            format!(
+                                "{}:{}:{}@{:?}/opt={}",
+                                dep.coordinates.group_id,
+                                dep.coordinates.artifact_id,
+                                dep.coordinates.version,
+                                dep.scope,
+                                dep.optional
+                            )
+                        })
+                        .collect();
+                    eprintln!(
+                        "[maven-compat-debug] pom_deps coords={}:{}:{} depth={} count={} allow_all_scopes={} include_optional={} allow_multi={} samples=[{}]",
+                        coords.group_id,
+                        coords.artifact_id,
+                        coords.version,
+                        depth,
+                        effective.dependencies.len(),
+                        allow_all_scopes,
+                        include_optional,
+                        allow_multiple_versions,
+                        samples.join(",")
+                    );
+                    pom_log_emitted += 1;
+                }
+
+                for dependency in &effective.dependencies {
+                    let scope_label = dependency.scope.as_deref().unwrap_or("compile").to_string();
+                    *scope_counts.entry(scope_label.clone()).or_insert(0) += 1;
+
+                    if dependency.optional && !include_optional {
+                        optional_seen += 1;
+                        eprintln!(
+                            "[maven-compat-debug] skip_optional coords={}:{}:{}",
+                            dependency.coordinates.group_id,
+                            dependency.coordinates.artifact_id,
+                            dependency.coordinates.version
+                        );
+                        continue;
+                    }
+                    if !allow_all_scopes {
+                        if !matches!(
+                            dependency.scope.as_deref(),
+                            None | Some("compile") | Some("runtime")
+                        ) {
+                            skipped_scope += 1;
+                            eprintln!(
+                                "[maven-compat-debug] skip_scope coords={}:{}:{} scope={:?}",
+                                dependency.coordinates.group_id,
+                                dependency.coordinates.artifact_id,
+                                dependency.coordinates.version,
+                                dependency.scope
+                            );
+                            continue;
+                        }
+                    }
+                    if is_excluded(&dependency.coordinates, &exclusions) {
+                        continue;
+                    }
+
+                    let mut next_exclusions = exclusions.clone();
+                    next_exclusions.extend(
+                        dependency
+                            .exclusions
+                            .iter()
+                            .map(|ex| (ex.group_id.clone(), ex.artifact_id.clone())),
+                    );
+                    let mut coords = dependency.coordinates.clone();
+                    let key = (
+                        coords.group_id.clone(),
+                        coords.artifact_id.clone(),
+                        coords.classifier.clone(),
+                    );
+
+                    let managed_version = effective
+                        .dependency_management
+                        .get(&(coords.group_id.clone(), coords.artifact_id.clone()))
+                        .map(|managed| managed.version.clone());
+                    if let Some(version) = managed_version.as_ref() {
+                        if coords.version != *version {
+                            coords.version = version.clone();
+                        }
+                    }
+
+                    if allow_multiple_versions {
+                        ordered.insert(coords.clone());
+                        queue.push_back((coords, next_exclusions, depth + 1));
+                        if dependency.optional {
+                            optional_enqueued += 1;
+                            if optional_added_samples.len() < 10 {
+                                optional_added_samples.push(format!(
+                                    "{}:{}:{}",
+                                    dependency.coordinates.group_id,
+                                    dependency.coordinates.artifact_id,
+                                    dependency.coordinates.version
+                                ));
+                            }
+                        }
+                        if edge_log_emitted < max_edge_log {
+                            eprintln!(
+                                "[maven-compat-debug] enqueue_edge parent={}:{}:{} -> child={}:{}:{} scope={:?} optional={}",
+                                dependency.coordinates.group_id,
+                                dependency.coordinates.artifact_id,
+                                dependency.coordinates.version,
+                                dependency.coordinates.group_id,
+                                dependency.coordinates.artifact_id,
+                                dependency.coordinates.version,
+                                dependency.scope,
+                                dependency.optional
+                            );
+                            edge_log_emitted += 1;
+                        }
+                    } else {
+                        let mut should_replace = false;
+                        match ga_versions.get(&key) {
+                            None => {
+                                should_replace = true;
+                            }
+                            Some((existing_version, existing_depth)) => {
+                                // dependencyManagement が指定されている場合はバージョンを強制的に刷新する。
+                                if let Some(managed) = managed_version.as_ref() {
+                                    if managed != existing_version {
+                                        should_replace = true;
+                                        eprintln!(
+                                            "[maven-compat-debug] managed_override ga={}:{:?} existing={} managed={} depth={}->{}",
+                                            coords.group_id,
+                                            coords.artifact_id,
+                                            existing_version,
+                                            managed,
+                                            existing_depth,
+                                            depth
+                                        );
+                                    } else if *existing_depth > depth {
+                                        should_replace = true;
+                                    }
+                                } else if existing_version != &coords.version {
+                                    // 異なるバージョンは深さに関わらず置換して差分脱落を防ぐ
+                                    should_replace = true;
+                                    eprintln!(
+                                        "[maven-compat-debug] replace_version ga={}:{:?} existing={} new={} depth={}->{}",
+                                        coords.group_id,
+                                        coords.artifact_id,
+                                        existing_version,
+                                        coords.version,
+                                        existing_depth,
+                                        depth
+                                    );
+                                } else if *existing_depth > depth {
+                                    // より浅い経路を優先
+                                    should_replace = true;
+                                } else if existing_version == &coords.version {
+                                    // 同一バージョンで深さも優先されない場合はスキップ
+                                    continue;
+                                }
+                            }
+                        }
+
+                        if should_replace {
+                            // 既存の同一 GA (+classifier) を閉包から取り除いたうえで最新版を登録する。
+                            ordered.retain(|item| {
+                                !(item.group_id == coords.group_id
+                                    && item.artifact_id == coords.artifact_id
+                                    && item.classifier == coords.classifier)
+                            });
+                            ga_versions.insert(key.clone(), (coords.version.clone(), depth + 1));
+                            ordered.insert(coords.clone());
+                            queue.push_back((coords, next_exclusions, depth + 1));
+                            if dependency.optional {
+                                optional_enqueued += 1;
+                                if optional_added_samples.len() < 10 {
+                                    optional_added_samples.push(format!(
+                                        "{}:{}:{}",
+                                        dependency.coordinates.group_id,
+                                        dependency.coordinates.artifact_id,
+                                        dependency.coordinates.version
+                                    ));
+                                }
+                            }
+                            if edge_log_emitted < max_edge_log {
+                                eprintln!(
+                                    "[maven-compat-debug] enqueue_edge parent={}:{}:{} -> child={}:{}:{} scope={:?} optional={}",
+                                    dependency.coordinates.group_id,
+                                    dependency.coordinates.artifact_id,
+                                    dependency.coordinates.version,
+                                    dependency.coordinates.group_id,
+                                    dependency.coordinates.artifact_id,
+                                    dependency.coordinates.version,
+                                    dependency.scope,
+                                    dependency.optional
+                                );
+                                edge_log_emitted += 1;
+                            }
+                        } else {
+                            eprintln!(
+                                "[maven-compat-debug] retain_existing ga={}:{} version={} depth={}",
+                                coords.group_id, coords.artifact_id, coords.version, depth
+                            );
+                        }
+                    }
+                }
+            }
+
+            eprintln!(
+                "[maven-compat-debug] closure_finalize len={} optional_seen={} optional_enqueued={} skipped_scope={}",
+                ordered.len(),
+                optional_seen,
+                optional_enqueued,
+                skipped_scope
+            );
+            if !scope_counts.is_empty() {
+                let mut parts: Vec<String> = scope_counts
+                    .iter()
+                    .map(|(k, v)| format!("{k}:{v}"))
+                    .collect();
+                parts.sort();
+                eprintln!("[maven-compat-debug] scope_counts={}", parts.join(","));
+            }
+            if !optional_added_samples.is_empty() {
+                eprintln!(
+                    "[maven-compat-debug] optional_enqueued_samples=[{}]",
+                    optional_added_samples.join(",")
+                );
+            }
+            if allow_multiple_versions {
+                let mut coords: Vec<String> = ordered
+                    .iter()
+                    .map(|c| format!("{}:{}:{}@{}", c.group_id, c.artifact_id, c.version, 0))
+                    .collect();
+                coords.sort();
+                if coords.len() > 50 {
+                    coords.truncate(50);
+                }
+                eprintln!(
+                    "[maven-compat-debug] ga_versions size={} samples=[{}]",
+                    ordered.len(),
+                    coords.join(",")
+                );
+            } else if !ga_versions.is_empty() {
+                let mut versions: Vec<String> = ga_versions
+                    .iter()
+                    .map(|((group, artifact, classifier), (version, depth))| {
+                        let id = if let Some(classifier) = classifier {
+                            format!("{group}:{artifact}:{classifier}")
+                        } else {
+                            format!("{group}:{artifact}")
+                        };
+                        format!("{id}={version}@{depth}")
+                    })
+                    .collect();
+                versions.sort();
+                if versions.len() > 50 {
+                    versions.truncate(50);
+                }
+                eprintln!(
+                    "[maven-compat-debug] ga_versions size={} samples=[{}]",
+                    ga_versions.len(),
+                    versions.join(",")
+                );
+            }
+
             Ok(ordered.into_iter().collect())
         }
 
@@ -942,81 +1512,6 @@ mod pom_resolver {
                 properties: effective.properties.clone(),
                 plugin_management,
             })
-        }
-
-        fn expand(
-            &self,
-            coords: ArtifactCoordinates,
-            ordered: &mut IndexSet<ArtifactCoordinates>,
-            memo: &mut HashMap<ArtifactCoordinates, Arc<EffectivePom>>,
-            inherited_exclusions: &[(String, String)],
-            include_optional: bool,
-            stack: &mut HashSet<ArtifactCoordinates>,
-            seen_versions: &mut HashMap<(String, String, Option<String>), String>,
-        ) -> Result<(), WrapperError> {
-            if ordered.contains(&coords) {
-                return Ok(());
-            }
-
-            let key = (
-                coords.group_id.clone(),
-                coords.artifact_id.clone(),
-                coords.classifier.clone(),
-            );
-
-            if let Some(existing) = seen_versions.get(&key) {
-                if existing != &coords.version {
-                    // nearest-wins: 先に確定したバージョンを優先し、後続の異なるバージョンは展開しない。
-                    return Ok(());
-                }
-            } else {
-                seen_versions.insert(key, coords.version.clone());
-            }
-
-            if !stack.insert(coords.clone()) {
-                return Err(WrapperError::OperationFailed(format!(
-                    "依存グラフに循環が検出されました: {}",
-                    coords
-                )));
-            }
-
-            ordered.insert(coords.clone());
-            let effective = self.load_effective_pom(coords.clone(), memo, &mut HashSet::new())?;
-
-            for dependency in &effective.dependencies {
-                if dependency.optional && !include_optional {
-                    continue;
-                }
-                if !matches!(
-                    dependency.scope.as_deref(),
-                    None | Some("compile") | Some("runtime") | Some("provided")
-                ) {
-                    continue;
-                }
-                if is_excluded(&dependency.coordinates, inherited_exclusions) {
-                    continue;
-                }
-
-                let mut next_exclusions = inherited_exclusions.to_vec();
-                next_exclusions.extend(
-                    dependency
-                        .exclusions
-                        .iter()
-                        .map(|ex| (ex.group_id.clone(), ex.artifact_id.clone())),
-                );
-                self.expand(
-                    dependency.coordinates.clone(),
-                    ordered,
-                    memo,
-                    &next_exclusions,
-                    include_optional,
-                    stack,
-                    seen_versions,
-                )?;
-            }
-
-            stack.remove(&coords);
-            Ok(())
         }
 
         fn load_effective_pom(
@@ -1511,9 +2006,9 @@ mod pom_resolver {
     #[derive(Debug, Clone)]
     struct ManagedDependency {
         version: String,
-        _scope: Option<String>,
-        _optional: bool,
-        _classifier: Option<String>,
+        scope: Option<String>,
+        optional: bool,
+        classifier: Option<String>,
         _dep_type: Option<String>,
     }
 
@@ -1575,19 +2070,21 @@ mod pom_resolver {
                             "dependencyManagement の artifactId が未設定です".to_string(),
                         )
                     })?;
-                let version =
-                    resolve_property(entry.version.as_deref(), &properties).ok_or_else(|| {
-                        WrapperError::OperationFailed(format!(
-                            "{group}:{artifact} の dependencyManagement にバージョンがありません"
-                        ))
-                    })?;
+                let Some(version) = resolve_property(entry.version.as_deref(), &properties) else {
+                    tracing::warn!(
+                        group = %group,
+                        artifact = %artifact,
+                        "dependencyManagement エントリに version がありません。スキップします。"
+                    );
+                    continue;
+                };
                 dependency_management.insert(
                     (group.clone(), artifact.clone()),
                     ManagedDependency {
                         version,
-                        _scope: entry.scope,
-                        _optional: entry.optional,
-                        _classifier: entry.classifier,
+                        scope: entry.scope,
+                        optional: entry.optional,
+                        classifier: entry.classifier,
                         _dep_type: entry.dep_type,
                     },
                 );
@@ -1604,12 +2101,11 @@ mod pom_resolver {
                         Some(value) => value,
                         None => continue,
                     };
+                let managed = dependency_management.get(&(group.clone(), artifact.clone()));
                 let version = match resolve_property(dependency.version.as_deref(), &properties) {
                     Some(value) => value,
                     None => {
-                        if let Some(managed) =
-                            dependency_management.get(&(group.clone(), artifact.clone()))
-                        {
+                        if let Some(managed) = managed {
                             managed.version.clone()
                         } else if matches!(
                             dependency.scope.as_deref(),
@@ -1626,14 +2122,28 @@ mod pom_resolver {
                 };
 
                 let mut coords = ArtifactCoordinates::new(group, artifact, version);
-                if let Some(classifier) = dependency.classifier {
+                let classifier = dependency
+                    .classifier
+                    .clone()
+                    .or_else(|| managed.and_then(|value| value.classifier.clone()));
+                if let Some(classifier) = classifier {
                     coords = coords.with_classifier(classifier);
                 }
 
+                let scope = dependency
+                    .scope
+                    .clone()
+                    .or_else(|| managed.and_then(|value| value.scope.clone()));
+                let optional = if dependency.optional {
+                    true
+                } else {
+                    managed.map(|value| value.optional).unwrap_or(false)
+                };
+
                 resolved.push(ResolvedDependency {
                     coordinates: coords,
-                    scope: dependency.scope.clone(),
-                    optional: dependency.optional,
+                    scope,
+                    optional,
                     exclusions: dependency.exclusions.clone(),
                 });
             }
@@ -1719,4 +2229,10 @@ mod pom_resolver {
         result.push_str(rest);
         Ok(result)
     }
+
+    // -------------------------------------------------------------------------
+    // Tests
+    // -------------------------------------------------------------------------
+    #[cfg(test)]
+    mod tests;
 }

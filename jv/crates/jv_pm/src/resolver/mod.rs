@@ -195,6 +195,9 @@ pub struct MavenResolverContext {
     pub local_repository: PathBuf,
     pub repositories: Vec<MavenRepositoryConfig>,
     pub mirrors: Vec<MavenMirrorConfig>,
+    /// Direct dependencies supplied by the caller (e.g., manifest) before any pom.xml is written.
+    /// Maven strategies should prefer this list over reading pom.xml when it is present.
+    pub base_dependencies: Vec<RequestedDependency>,
 }
 
 impl ResolverOptions {
