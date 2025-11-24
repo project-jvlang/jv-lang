@@ -1,5 +1,7 @@
 use super::store_pom;
 use super::*;
+use crate::resolver::strategies::maven_39::pom_resolver::append_managed_artifacts;
+use std::collections::HashSet;
 use std::sync::Arc;
 use tempfile::tempdir;
 use tokio::runtime::Builder as RuntimeBuilder;
@@ -726,7 +728,7 @@ fn wrapper_base_closure_should_match_commons_lang3_fixture_but_drops_scopes() {
 }
 
 #[test]
-fn base_closure_excludes_provided_and_test_scopes() {
+fn base_closure_includes_provided_and_skips_test_scope() {
     let temp = tempdir().expect("temp dir");
     let cache = Arc::new(DependencyCache::with_dir(temp.path().join("cache")).expect("cache"));
     let runtime = RuntimeBuilder::new_current_thread()
@@ -804,11 +806,11 @@ fn base_closure_excludes_provided_and_test_scopes() {
         "base closure should include compile scope dep"
     );
     assert!(
-        !ids.contains(&format!(
+        ids.contains(&format!(
             "{}:{}:{}",
             provided.group_id, provided.artifact_id, provided.version
         )),
-        "base closure should exclude provided scope dep"
+        "base closure should include provided scope dep"
     );
     assert!(
         !ids.contains(&format!(
@@ -820,7 +822,7 @@ fn base_closure_excludes_provided_and_test_scopes() {
 }
 
 #[test]
-fn base_closure_deduplicates_ga_with_nearest() {
+fn base_closure_keeps_multiple_versions_with_keep_all_conflict() {
     let temp = tempdir().expect("temp dir");
     let cache = Arc::new(DependencyCache::with_dir(temp.path().join("cache")).expect("cache"));
     let runtime = RuntimeBuilder::new_current_thread()
@@ -845,7 +847,7 @@ fn base_closure_deduplicates_ga_with_nearest() {
         "2.0.0".to_string(),
     );
 
-    // root depends on v1; v1 depends on v2. nearest (depth) should keep v1 only.
+    // root depends on v1; v1 depends on v2. KeepAll/multi-version should retain both.
     store_pom(
         &cache,
         &root,
@@ -868,12 +870,18 @@ fn base_closure_deduplicates_ga_with_nearest() {
         .collect();
 
     assert!(
-        ids.contains(&format!("{}:{}:{}", v1.group_id, v1.artifact_id, v1.version)),
-        "nearest should keep shallow version"
+        ids.contains(&format!(
+            "{}:{}:{}",
+            v1.group_id, v1.artifact_id, v1.version
+        )),
+        "keep-all should keep shallow version"
     );
     assert!(
-        !ids.contains(&format!("{}:{}:{}", v2.group_id, v2.artifact_id, v2.version)),
-        "nearest should drop deeper version of same GA"
+        ids.contains(&format!(
+            "{}:{}:{}",
+            v2.group_id, v2.artifact_id, v2.version
+        )),
+        "keep-all should also retain deeper version of same GA"
     );
 }
 
@@ -969,9 +977,89 @@ fn wrapper_closure_matches_commons_lang3_fixture_multiple_versions() {
     );
 }
 
-/// RED: 現状の base オプションでは provided/test/複数版を落とすため、Maven 実績フィクスチャ 62 件と一致しないことを明示する。
+/// RED: plugin seeds を使わない現行挙動では、Maven baseline に含まれる標準プラグイン JAR が download_plan から欠落することを検出する。
 #[test]
-fn base_closure_mismatches_commons_lang3_fixture_red() {
+fn wrapper_download_plan_missing_standard_plugins_without_plugin_seeds_red() {
+    let fixture_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/maven_baseline_jars.txt");
+    let content = std::fs::read_to_string(&fixture_path).expect("fixture file should be readable");
+    let coords: Vec<ArtifactCoordinates> = content
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .map(parse_fixture_line)
+        .collect();
+
+    // commons-lang3 を root とし、他の座標は空POMで格納しておく
+    let root = ArtifactCoordinates::new(
+        "org.apache.commons".to_string(),
+        "commons-lang3".to_string(),
+        "3.14.0".to_string(),
+    );
+    let temp = tempdir().expect("temp dir");
+    let cache = Arc::new(DependencyCache::with_dir(temp.path().join("cache")).expect("cache"));
+    for coord in &coords {
+        let pom = if coord == &root {
+            "<project><modelVersion>4.0.0</modelVersion><dependencies></dependencies></project>"
+        } else {
+            "<project><modelVersion>4.0.0</modelVersion></project>"
+        };
+        cache.store_pom(coord, pom).expect("store pom");
+    }
+
+    let runtime = RuntimeBuilder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("runtime");
+    let resolver = MavenDependencyResolver::new(&runtime, cache.clone(), Vec::new());
+
+    // plugin seeds を投入しない現在の実装に合わせて download_plan を構築
+    let base_closure = resolver
+        .resolve_closure_with_options(&[root.clone()], ClosureOptions::plugin_download())
+        .expect("base closure");
+    let mut download_plan = base_closure.clone();
+    let mut seen: std::collections::HashSet<(String, String, Option<String>, String)> =
+        download_plan
+            .iter()
+            .map(|c| {
+                (
+                    c.group_id.clone(),
+                    c.artifact_id.clone(),
+                    c.classifier.clone(),
+                    c.version.clone(),
+                )
+            })
+            .collect();
+    append_managed_artifacts(
+        &mut download_plan,
+        crate::wrapper::plugins::managed_artifacts(),
+        &mut seen,
+    );
+
+    let set: std::collections::HashSet<String> = download_plan
+        .iter()
+        .map(|c| format!("{}:{}:{}", c.group_id, c.artifact_id, c.version))
+        .collect();
+
+    // baseline に含まれる標準プラグインの一部が欠落していることをREDで検出する
+    let missing_plugins: Vec<String> = vec![
+        "org.apache.maven.plugins:maven-compiler-plugin:3.13.0",
+        "org.apache.maven.plugins:maven-surefire-plugin:3.2.5",
+        "org.apache.maven.plugins:maven-jar-plugin:3.4.1",
+    ]
+    .into_iter()
+    .filter(|k| !set.contains(*k))
+    .map(|s| s.to_string())
+    .collect();
+
+    assert!(
+        !missing_plugins.is_empty(),
+        "standard plugins should be missing without plugin seeds, but all were present unexpectedly"
+    );
+}
+
+/// base オプションが Maven 実績フィクスチャ 62 件と一致することを確認する。
+#[test]
+fn base_closure_matches_commons_lang3_fixture() {
     let fixture_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/fixtures/maven_baseline_jars.txt");
     let content = std::fs::read_to_string(&fixture_path).expect("fixture file should be readable");
@@ -1057,7 +1145,7 @@ fn base_closure_mismatches_commons_lang3_fixture_red() {
 
     assert!(
         missing.is_empty() && extra.is_empty(),
-        "base closure should NOT match Maven fixture (RED): missing={missing:?}, extra={extra:?}"
+        "base closure should match Maven fixture: missing={missing:?}, extra={extra:?}"
     );
 }
 
@@ -1168,7 +1256,13 @@ fn plugin_download_includes_provided_and_multiple_versions_but_skips_test_for_co
 
     // root depends on: same GA older version (to check allow_multiple_versions), provided, test.
     let deps = [
-        (&*older.group_id, &*older.artifact_id, &*older.version, None, false),
+        (
+            &*older.group_id,
+            &*older.artifact_id,
+            &*older.version,
+            None,
+            false,
+        ),
         (
             &*provided.group_id,
             &*provided.artifact_id,
@@ -1463,6 +1557,171 @@ fn plugin_download_deduplicates_ga_by_nearest_version() {
 }
 
 #[test]
+fn plugin_runtime_download_skips_provided_scope_dependencies() {
+    // Maven 本体が提供する provided 依存はプラグイン実行時には取得しない。
+    let temp = tempdir().expect("temp dir");
+    let cache = Arc::new(DependencyCache::with_dir(temp.path().join("cache")).expect("cache"));
+    let runtime = RuntimeBuilder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("runtime");
+    let resolver = MavenDependencyResolver::new(&runtime, cache.clone(), Vec::new());
+
+    let plugin_root = ArtifactCoordinates::new(
+        "org.example".to_string(),
+        "tool".to_string(),
+        "1.0.0".to_string(),
+    );
+    let provided_dep = ArtifactCoordinates::new(
+        "org.example".to_string(),
+        "provided-lib".to_string(),
+        "1.0.0".to_string(),
+    );
+    let compile_dep = ArtifactCoordinates::new(
+        "org.example".to_string(),
+        "compile-lib".to_string(),
+        "1.0.0".to_string(),
+    );
+
+    store_pom(
+        &cache,
+        &plugin_root,
+        &[
+            (
+                &provided_dep.group_id,
+                &provided_dep.artifact_id,
+                &provided_dep.version,
+                Some("provided"),
+                false,
+            ),
+            (
+                &compile_dep.group_id,
+                &compile_dep.artifact_id,
+                &compile_dep.version,
+                None,
+                false,
+            ),
+        ],
+    );
+    store_pom(&cache, &provided_dep, &[]);
+    store_pom(&cache, &compile_dep, &[]);
+
+    let closure = resolver
+        .resolve_closure_with_options(&[plugin_root], ClosureOptions::plugin_runtime_nearest())
+        .expect("closure");
+    let ids: HashSet<String> = closure
+        .iter()
+        .map(|c| format!("{}:{}", c.group_id, c.artifact_id))
+        .collect();
+    assert!(
+        ids.contains("org.example:compile-lib"),
+        "compile-scope dependency should be kept"
+    );
+    assert!(
+        ids.contains("org.example:provided-lib"),
+        "provided-scope dependency should be included for plugin runtime (matches Maven plugin resolution)"
+    );
+}
+
+#[test]
+fn resolve_union_per_root_keeps_versions_without_global_explosion() {
+    // 異なる root が同一 GA の別バージョンを要求する場合、root ごとに最近接解決しつつ両方を保持する。
+    let temp = tempdir().expect("temp dir");
+    let cache = Arc::new(DependencyCache::with_dir(temp.path().join("cache")).expect("cache"));
+    let runtime = RuntimeBuilder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("runtime");
+    let resolver = MavenDependencyResolver::new(&runtime, cache.clone(), Vec::new());
+
+    let plugin_v1 = ArtifactCoordinates::new(
+        "org.example".to_string(),
+        "tool".to_string(),
+        "1.0.0".to_string(),
+    );
+    let plugin_v2 = ArtifactCoordinates::new(
+        "org.example".to_string(),
+        "tool".to_string(),
+        "2.0.0".to_string(),
+    );
+    let shared_v1 = ArtifactCoordinates::new(
+        "org.example".to_string(),
+        "shared".to_string(),
+        "1.0.0".to_string(),
+    );
+    let shared_v2 = ArtifactCoordinates::new(
+        "org.example".to_string(),
+        "shared".to_string(),
+        "2.0.0".to_string(),
+    );
+
+    // plugin それぞれが専用の shared バージョンを要求する。
+    store_pom(
+        &cache,
+        &plugin_v1,
+        &[(
+            &shared_v1.group_id,
+            &shared_v1.artifact_id,
+            &shared_v1.version,
+            None,
+            false,
+        )],
+    );
+    store_pom(
+        &cache,
+        &plugin_v2,
+        &[(
+            &shared_v2.group_id,
+            &shared_v2.artifact_id,
+            &shared_v2.version,
+            None,
+            false,
+        )],
+    );
+    store_pom(&cache, &shared_v1, &[]);
+    store_pom(&cache, &shared_v2, &[]);
+
+    // 単純にまとめて解決しても複数版を保持する（KeepAll + Nearestで GA 衝突を許容）。
+    let combined = resolver
+        .resolve_closure_with_options(
+            &[plugin_v1.clone(), plugin_v2.clone()],
+            ClosureOptions::plugin_download_nearest(),
+        )
+        .expect("combined");
+    let combined_shared: HashSet<_> = combined
+        .iter()
+        .filter(|c| c.group_id == "org.example" && c.artifact_id == "shared")
+        .map(|c| c.version.clone())
+        .collect();
+    assert_eq!(
+        combined_shared.len(),
+        2,
+        "both shared versions should be kept under KeepAll"
+    );
+
+    // root ごとに解決し直してユニオンすると両バージョンが残る。
+    let union = resolve_union_per_root(
+        &resolver,
+        &[plugin_v1.clone(), plugin_v2.clone()],
+        ClosureOptions::plugin_download_nearest(),
+    )
+    .expect("union");
+    let resolved: HashSet<String> = union
+        .iter()
+        .map(|c| format!("{}:{}:{}", c.group_id, c.artifact_id, c.version))
+        .collect();
+    assert_eq!(
+        resolved,
+        HashSet::from([
+            "org.example:tool:1.0.0".to_string(),
+            "org.example:tool:2.0.0".to_string(),
+            "org.example:shared:1.0.0".to_string(),
+            "org.example:shared:2.0.0".to_string()
+        ])
+    );
+}
+
+#[test]
 fn plugin_download_excludes_plugin_roots_from_download_plan() {
     // wrapper 実績との差分要因: plugin_roots を seeds に入れると 281件に膨張する。
     // download_plan_size が plugin_roots を含めない場合に 62 に収束することを期待する RED テスト。
@@ -1752,6 +2011,132 @@ fn plugin_download_baseline_count_matches_fixture() {
         coords.len(),
         closure.len()
     );
+}
+
+/// RED: プラグイン seed が不要な推移依存（ここでは古い commons-lang3 3.7.0）を巻き込むことを検出する。
+#[test]
+fn plugin_seed_brings_in_unexpected_transitive_versions_red() {
+    let temp = tempdir().expect("temp dir");
+    let cache = Arc::new(DependencyCache::with_dir(temp.path().join("cache")).expect("cache"));
+    let runtime = RuntimeBuilder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("runtime");
+    let resolver = MavenDependencyResolver::new(&runtime, cache.clone(), Vec::new());
+
+    // root: commons-lang3 3.14.0（dependency:resolve 基準）
+    let root = ArtifactCoordinates::new(
+        "org.apache.commons".to_string(),
+        "commons-lang3".to_string(),
+        "3.14.0".to_string(),
+    );
+    store_pom(&cache, &root, &[]);
+
+    // plugin seed: maven-compiler-plugin が古い commons-lang3 3.7.0 を依存に持つと仮定
+    let plugin = ArtifactCoordinates::new(
+        "org.apache.maven.plugins".to_string(),
+        "maven-compiler-plugin".to_string(),
+        "3.13.0".to_string(),
+    );
+    let old_lang = ArtifactCoordinates::new(
+        "org.apache.commons".to_string(),
+        "commons-lang3".to_string(),
+        "3.7.0".to_string(),
+    );
+    store_pom(
+        &cache,
+        &plugin,
+        &[(
+            &old_lang.group_id,
+            &old_lang.artifact_id,
+            &old_lang.version,
+            None,
+            false,
+        )],
+    );
+    store_pom(&cache, &old_lang, &[]);
+
+    // 実装では plugin_roots が seeds に含まれるため、plugin_download が余計な古い版を拾うと想定。
+    let plugin_closure = resolver
+        .resolve_closure_with_options(&[plugin.clone()], ClosureOptions::plugin_seed())
+        .expect("plugin closure");
+    let set: std::collections::HashSet<String> = plugin_closure
+        .iter()
+        .map(|c| format!("{}:{}:{}", c.group_id, c.artifact_id, c.version))
+        .collect();
+
+    assert!(
+        !set.contains(&format!(
+            "{}:{}:{}",
+            old_lang.group_id, old_lang.artifact_id, old_lang.version
+        )),
+        "plugin seeds should NOT introduce unrelated commons-lang3 3.7.0, but it was present: {set:?}"
+    );
+}
+
+/// RED: embedded managed_artifacts（commons-text 1.12.0）が download_plan に入らず missing を生むことを検出する。
+#[test]
+fn managed_artifacts_should_be_included_in_download_plan_red() {
+    let temp = tempdir().expect("temp dir");
+    let cache = Arc::new(DependencyCache::with_dir(temp.path().join("cache")).expect("cache"));
+    let runtime = RuntimeBuilder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("runtime");
+    let resolver = MavenDependencyResolver::new(&runtime, cache.clone(), Vec::new());
+
+    let root = ArtifactCoordinates::new(
+        "org.apache.commons".to_string(),
+        "commons-lang3".to_string(),
+        "3.14.0".to_string(),
+    );
+    store_pom(&cache, &root, &[]);
+
+    // managed_artifacts の POM を空で格納（ダウンロード不要で解決できるようにする）
+    let managed = crate::wrapper::plugins::managed_artifacts();
+    for coords in managed {
+        cache
+            .store_pom(
+                coords,
+                "<project><modelVersion>4.0.0</modelVersion></project>",
+            )
+            .expect("store managed pom");
+    }
+
+    let closure = resolver
+        .resolve_closure_with_options(&[root.clone()], ClosureOptions::plugin_download())
+        .expect("closure");
+
+    let mut download_plan = closure.clone();
+    let mut seen: std::collections::HashSet<(String, String, Option<String>, String)> =
+        download_plan
+            .iter()
+            .map(|c| {
+                (
+                    c.group_id.clone(),
+                    c.artifact_id.clone(),
+                    c.classifier.clone(),
+                    c.version.clone(),
+                )
+            })
+            .collect();
+    append_managed_artifacts(&mut download_plan, managed, &mut seen);
+
+    let set: std::collections::HashSet<String> = download_plan
+        .iter()
+        .map(|c| format!("{}:{}:{}", c.group_id, c.artifact_id, c.version))
+        .collect();
+
+    for coords in managed {
+        let key = format!(
+            "{}:{}:{}",
+            coords.group_id, coords.artifact_id, coords.version
+        );
+        assert!(
+            set.contains(&key),
+            "managed artifact {key} should be included in download plan but was missing: {set:?}"
+        );
+    }
 }
 
 #[test]

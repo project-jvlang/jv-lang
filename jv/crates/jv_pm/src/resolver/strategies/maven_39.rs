@@ -830,8 +830,11 @@ impl ResolverStrategy for MavenCompat39Strategy {
                 .collect::<Vec<_>>()
                 .join(",")
         );
-        let plugin_roots: Vec<ArtifactCoordinates> = Vec::new();
-        // plugin_roots は Maven dependency:resolve 実績には含まれないため seeds に含めない
+        // Maven baseline に含まれる標準プラグインを seeds として投入し、依存も展開する。
+        let plugin_roots: Vec<ArtifactCoordinates> = crate::wrapper::plugins::standard_plugins()
+            .iter()
+            .map(|p| p.to_artifact())
+            .collect();
         if roots.len() != direct.len() {
             eprintln!(
                 "[maven-compat-debug] roots_dedup_mismatch roots={} direct={} (duplicates dropped)",
@@ -849,17 +852,42 @@ impl ResolverStrategy for MavenCompat39Strategy {
             ""
         );
         // Maven dependency:resolve 実績に合わせ、wrapper seeds では provided/test を辿り、同一GAの複数版も保持する。
-        let base_closure = resolver
-            .resolve_closure_with_options(&roots, ClosureOptions::plugin_download())
-            .map_err(|error| ResolverError::Conflict {
-                dependency: "resolver".into(),
-                details: error.to_string(),
-            })?;
-        // plugin_roots を seeds に含めないため closure も空
-        let plugin_closure: Vec<ArtifactCoordinates> = Vec::new();
+        let base_closure = pom_resolver::resolve_union_per_root(
+            &resolver,
+            &roots,
+            ClosureOptions::plugin_download_nearest(),
+        )
+        .map_err(|error| ResolverError::Conflict {
+            dependency: "resolver".into(),
+            details: error.to_string(),
+        })?;
+        let mut plugin_closure: Vec<ArtifactCoordinates> = Vec::new();
+        let mut plugin_seen: HashSet<(String, String, Option<String>, String)> = HashSet::new();
+        for root in &plugin_roots {
+            let options = if root.group_id == "org.apache.maven.plugins"
+                && root.artifact_id == "maven-dependency-plugin"
+            {
+                ClosureOptions::plugin_execution_full()
+            } else {
+                ClosureOptions::plugin_runtime_nearest()
+            };
+            let closure = resolver
+                .resolve_closure_with_options(&[root.clone()], options)
+                .map_err(|error| ResolverError::Conflict {
+                    dependency: "resolver".into(),
+                    details: error.to_string(),
+                })?;
+            pom_resolver::append_artifacts(&mut plugin_closure, &closure, &mut plugin_seen);
+        }
 
         let mut download_plan: Vec<ArtifactCoordinates> = Vec::new();
         let mut seen_download = HashSet::new();
+        // managed_artifacts (dependencyManagement相当) を download_plan に強制的に含める
+        let managed: Vec<ArtifactCoordinates> = crate::wrapper::plugins::managed_artifacts()
+            .iter()
+            .map(|coord| coord.clone())
+            .collect();
+
         for coords in base_closure.iter() {
             if seen_download.insert((
                 coords.group_id.clone(),
@@ -870,6 +898,7 @@ impl ResolverStrategy for MavenCompat39Strategy {
                 download_plan.push(coords.clone());
             }
         }
+        // plugin seeds を targets に追加し、プラグイン依存も展開した結果を含める
         for coords in plugin_closure.iter() {
             if seen_download.insert((
                 coords.group_id.clone(),
@@ -880,6 +909,8 @@ impl ResolverStrategy for MavenCompat39Strategy {
                 download_plan.push(coords.clone());
             }
         }
+        pom_resolver::append_artifacts(&mut download_plan, &plugin_roots, &mut seen_download);
+        pom_resolver::append_managed_artifacts(&mut download_plan, &managed, &mut seen_download);
         let download_roots_summary = format!(
             "base_roots={} plugin_roots={} base_closure={} plugin_closure={}",
             roots.len(),
@@ -931,12 +962,9 @@ impl ResolverStrategy for MavenCompat39Strategy {
 
         let mut seen = HashSet::new();
         let mut dependencies: Vec<ResolvedDependency> = Vec::new();
-        for coords in base_closure.into_iter() {
+        for coords in base_closure.into_iter().chain(plugin_closure.into_iter()) {
             let name = format!("{}:{}", coords.group_id, coords.artifact_id);
             if !seen.insert(name.clone()) {
-                continue;
-            }
-            if !base_names.contains(&name) {
                 continue;
             }
             let local = jar_locations
@@ -1346,24 +1374,81 @@ mod pom_resolver {
         KeepAll,
     }
 
-pub struct ClosureOptions {
-    include_optional: bool,
-    include_provided: bool,
-    include_test: bool,
-    /// When true, multiple versions of the same GA(+classifier) are kept (plugin/tooling paths
-    /// can legitimately require different versions simultaneously).
-    allow_multiple_versions: bool,
-    conflict_strategy: ConflictStrategy,
-}
+    #[derive(Clone, Copy)]
+    pub struct ClosureOptions {
+        include_optional: bool,
+        include_provided: bool,
+        include_test: bool,
+        /// When true, multiple versions of the same GA(+classifier) are kept (plugin/tooling paths can legitimately require different versions simultaneously).
+        allow_multiple_versions: bool,
+        /// Optional depth制限（0 = roots のみ、1 = 1段目までなど）。
+        max_depth: Option<usize>,
+        /// When true, only the roots themselves are included; transitive dependencies are skipped.
+        skip_transitive: bool,
+        conflict_strategy: ConflictStrategy,
+    }
 
+    /// Adds managed (dependencyManagement-equivalent) artifacts into the download plan, avoiding duplicates.
+    pub(crate) fn append_managed_artifacts(
+        download_plan: &mut Vec<ArtifactCoordinates>,
+        managed: &[ArtifactCoordinates],
+        seen_download: &mut HashSet<(String, String, Option<String>, String)>,
+    ) {
+        for coords in managed {
+            if seen_download.insert((
+                coords.group_id.clone(),
+                coords.artifact_id.clone(),
+                coords.classifier.clone(),
+                coords.version.clone(),
+            )) {
+                download_plan.push(coords.clone());
+            }
+        }
+    }
+
+    /// Appends arbitrary artifacts into the download plan while deduplicating by GA+classifier+version.
+    pub(crate) fn append_artifacts(
+        download_plan: &mut Vec<ArtifactCoordinates>,
+        artifacts: &[ArtifactCoordinates],
+        seen_download: &mut HashSet<(String, String, Option<String>, String)>,
+    ) {
+        for coords in artifacts {
+            if seen_download.insert((
+                coords.group_id.clone(),
+                coords.artifact_id.clone(),
+                coords.classifier.clone(),
+                coords.version.clone(),
+            )) {
+                download_plan.push(coords.clone());
+            }
+        }
+    }
+
+    /// Resolves each root independently with the given options and returns the union (deduped).
+    pub(crate) fn resolve_union_per_root(
+        resolver: &MavenDependencyResolver,
+        roots: &[ArtifactCoordinates],
+        options: ClosureOptions,
+    ) -> Result<Vec<ArtifactCoordinates>, WrapperError> {
+        let mut aggregated = Vec::new();
+        let mut seen = HashSet::new();
+        for root in roots {
+            let closure = resolver.resolve_closure_with_options(&[root.clone()], options)?;
+            append_artifacts(&mut aggregated, &closure, &mut seen);
+        }
+        Ok(aggregated)
+    }
     impl ClosureOptions {
         pub fn base() -> Self {
             Self {
                 include_optional: false,
-                include_provided: false,
+                // Maven dependency:resolve は provided を含め、test/optional は除外し、同一GAの複数版も保持する。
+                include_provided: true,
                 include_test: false,
-                allow_multiple_versions: false,
-                conflict_strategy: ConflictStrategy::Nearest,
+                allow_multiple_versions: true,
+                max_depth: None,
+                skip_transitive: false,
+                conflict_strategy: ConflictStrategy::KeepAll,
             }
         }
 
@@ -1376,6 +1461,62 @@ pub struct ClosureOptions {
                 include_test: false,
                 // 同一GAの複数版（例: commons-lang3 3.14.0/3.8.1）が共存するため複数版を許容する。
                 allow_multiple_versions: true,
+                max_depth: None,
+                // プラグイン本体の依存も展開する。
+                skip_transitive: false,
+                conflict_strategy: ConflictStrategy::KeepAll,
+            }
+        }
+
+        /// プラグイン seed を最低限ダウンロードするためのオプション。root のみ取得し依存は展開しない。
+        pub fn plugin_seed() -> Self {
+            Self {
+                include_optional: false,
+                include_provided: true,
+                include_test: false,
+                allow_multiple_versions: true,
+                max_depth: Some(0),
+                skip_transitive: false,
+                conflict_strategy: ConflictStrategy::KeepAll,
+            }
+        }
+
+        /// Maven 本家と同じく「root 単位で最近接勝ち」を基準にし、GA 重複は 1 つに収束させる。
+        pub fn plugin_download_nearest() -> Self {
+            Self {
+                include_optional: false,
+                include_provided: true,
+                include_test: false,
+                // プラグイン間で同一GAの別バージョン（例: commons-lang3 3.14.0 vs 3.8.1）を両立させる
+                allow_multiple_versions: true,
+                max_depth: None,
+                skip_transitive: false,
+                conflict_strategy: ConflictStrategy::Nearest,
+            }
+        }
+
+        /// プラグイン実行時に Maven 本体が提供する provided 依存を除外した解決オプション。
+        pub fn plugin_runtime_nearest() -> Self {
+            Self {
+                include_optional: false,
+                include_provided: true,
+                include_test: false,
+                allow_multiple_versions: true,
+                max_depth: Some(1),
+                skip_transitive: false,
+                conflict_strategy: ConflictStrategy::KeepAll,
+            }
+        }
+
+        /// 実際に実行されるプラグイン用にフルの推移解決を行う。
+        pub fn plugin_execution_full() -> Self {
+            Self {
+                include_optional: false,
+                include_provided: true,
+                include_test: false,
+                allow_multiple_versions: true,
+                max_depth: None,
+                skip_transitive: false,
                 conflict_strategy: ConflictStrategy::KeepAll,
             }
         }
@@ -1386,6 +1527,8 @@ pub struct ClosureOptions {
                 include_provided: false,
                 include_test: false,
                 allow_multiple_versions: false,
+                max_depth: None,
+                skip_transitive: false,
                 conflict_strategy: ConflictStrategy::Newest,
             }
         }
@@ -1396,6 +1539,8 @@ pub struct ClosureOptions {
                 include_provided: false,
                 include_test: false,
                 allow_multiple_versions: false,
+                max_depth: None,
+                skip_transitive: false,
                 conflict_strategy: ConflictStrategy::Oldest,
             }
         }
@@ -1406,6 +1551,8 @@ pub struct ClosureOptions {
                 include_provided: false,
                 include_test: false,
                 allow_multiple_versions: false,
+                max_depth: None,
+                skip_transitive: false,
                 conflict_strategy: ConflictStrategy::Farthest,
             }
         }
@@ -1526,20 +1673,29 @@ pub struct ClosureOptions {
                             )
                         })
                         .collect();
-                eprintln!(
-                    "[maven-compat-debug] pom_deps coords={}:{}:{} depth={} count={} allow_provided={} allow_test={} include_optional={} allow_multi={} samples=[{}]",
-                    coords.group_id,
-                    coords.artifact_id,
-                    coords.version,
-                    depth,
-                    effective.dependencies.len(),
-                    include_provided,
-                    include_test,
-                    include_optional,
-                    allow_multiple_versions,
-                    samples.join(",")
-                );
+                    eprintln!(
+                        "[maven-compat-debug] pom_deps coords={}:{}:{} depth={} count={} allow_provided={} allow_test={} include_optional={} allow_multi={} samples=[{}]",
+                        coords.group_id,
+                        coords.artifact_id,
+                        coords.version,
+                        depth,
+                        effective.dependencies.len(),
+                        include_provided,
+                        include_test,
+                        include_optional,
+                        allow_multiple_versions,
+                        samples.join(",")
+                    );
                     pom_log_emitted += 1;
+                }
+
+                if let Some(limit) = options.max_depth {
+                    if current_depth >= limit {
+                        continue;
+                    }
+                }
+                if options.skip_transitive && current_depth > 0 {
+                    continue;
                 }
 
                 for dependency in &effective.dependencies {
