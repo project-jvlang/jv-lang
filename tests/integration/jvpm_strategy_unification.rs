@@ -1,4 +1,5 @@
-use anyhow::{bail, Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
+use std::collections::BTreeSet;
 use sha2::{Digest, Sha256};
 use std::env;
 use std::fs;
@@ -27,6 +28,7 @@ struct DependencyCoordinate {
     artifact: &'static str,
     version: &'static str,
     optional: bool,
+    scope: Option<&'static str>,
 }
 
 impl DependencySpec {
@@ -68,11 +70,17 @@ impl DependencyCoordinate {
             artifact,
             version,
             optional: false,
+            scope: None,
         }
     }
 
     fn optional(mut self) -> Self {
         self.optional = true;
+        self
+    }
+
+    fn with_scope(mut self, scope: &'static str) -> Self {
+        self.scope = Some(scope);
         self
     }
 }
@@ -168,6 +176,9 @@ impl StubMavenRepo {
                 buffer.push_str(&format!("      <version>{}</version>\n", dep.version));
                 if dep.optional {
                     buffer.push_str("      <optional>true</optional>\n");
+                }
+                if let Some(scope) = dep.scope {
+                    buffer.push_str(&format!("      <scope>{}</scope>\n", scope));
                 }
                 buffer.push_str("    </dependency>\n");
             }
@@ -364,10 +375,24 @@ fn write_global_config(home: &Path, repo_url: &str) -> Result<()> {
     Ok(())
 }
 
+fn write_maven_settings(home: &Path, repo_url: &str) -> Result<PathBuf> {
+    let settings_dir = home.join(".m2");
+    fs::create_dir_all(&settings_dir)
+        .with_context(|| format!("failed to create {}", settings_dir.display()))?;
+    let settings_path = settings_dir.join("settings.xml");
+    let settings = format!(
+        "<settings>\n  <mirrors>\n    <mirror>\n      <id>integration</id>\n      <url>{}</url>\n      <mirrorOf>*</mirrorOf>\n    </mirror>\n  </mirrors>\n  <profiles>\n    <profile>\n      <id>integration</id>\n      <repositories>\n        <repository>\n          <id>integration</id>\n          <url>{}</url>\n        </repository>\n      </repositories>\n    </profile>\n  </profiles>\n  <activeProfiles>\n    <activeProfile>integration</activeProfile>\n  </activeProfiles>\n</settings>\n",
+        repo_url, repo_url
+    );
+    fs::write(&settings_path, settings)
+        .with_context(|| format!("failed to write {}", settings_path.display()))?;
+    Ok(settings_path)
+}
+
 fn write_wrapper_pom(target: &Path) -> Result<()> {
     let pom = r#"<project xmlns="http://maven.apache.org/POM/4.0.0"
          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
+        xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
                              http://maven.apache.org/maven-v4_0_0.xsd">
   <modelVersion>4.0.0</modelVersion>
   <groupId>com.example</groupId>
@@ -376,6 +401,34 @@ fn write_wrapper_pom(target: &Path) -> Result<()> {
   <packaging>jar</packaging>
 </project>
 "#;
+    fs::write(target.join("pom.xml"), pom)
+        .with_context(|| format!("failed to write {}", target.join("pom.xml").display()))
+}
+
+fn write_dependency_pom(target: &Path, dependency: &DependencySpec) -> Result<()> {
+    fs::create_dir_all(target)
+        .with_context(|| format!("failed to create {}", target.display()))?;
+    let pom = format!(
+        r#"<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
+                             http://maven.apache.org/maven-v4_0_0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>com.example</groupId>
+  <artifactId>wrapper-project</artifactId>
+  <version>0.1.0</version>
+  <packaging>jar</packaging>
+  <dependencies>
+    <dependency>
+      <groupId>{}</groupId>
+      <artifactId>{}</artifactId>
+      <version>{}</version>
+    </dependency>
+  </dependencies>
+</project>
+"#,
+        dependency.group, dependency.artifact, dependency.version
+    );
     fs::write(target.join("pom.xml"), pom)
         .with_context(|| format!("failed to write {}", target.join("pom.xml").display()))
 }
@@ -411,6 +464,46 @@ fn lockfile_contains(path: &Path, needle: &str) -> Result<bool> {
     Ok(content.contains(needle))
 }
 
+fn collect_relative_jars(root: &Path) -> Result<Vec<String>> {
+    if !root.exists() {
+        return Ok(Vec::new());
+    }
+    let mut entries = Vec::new();
+    let mut stack = vec![root.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        for entry in fs::read_dir(&dir)
+            .with_context(|| format!("failed to read directory {}", dir.display()))?
+        {
+            let entry = entry?;
+            let path = entry.path();
+            if path.is_dir() {
+                stack.push(path);
+            } else if path.extension().and_then(|ext| ext.to_str()) == Some("jar") {
+                if let Ok(relative) = path.strip_prefix(root) {
+                    entries.push(relative.to_string_lossy().replace('\\', "/"));
+                }
+            }
+        }
+    }
+    entries.sort();
+    Ok(entries)
+}
+
+fn assert_jar_sets_match(expected: &[String], actual: &[String]) -> Result<()> {
+    let expected_set: BTreeSet<_> = expected.iter().cloned().collect();
+    let actual_set: BTreeSet<_> = actual.iter().cloned().collect();
+    let missing: Vec<_> = expected_set.difference(&actual_set).cloned().collect();
+    let extra: Vec<_> = actual_set.difference(&expected_set).cloned().collect();
+    if !missing.is_empty() || !extra.is_empty() {
+        bail!(
+            "jar sets differ: missing={:?}, extra={:?}",
+            missing,
+            extra
+        );
+    }
+    Ok(())
+}
+
 fn sample_specs() -> Vec<DependencySpec> {
     let commons_transitive = DependencySpec::new("org.apache.commons", "commons-collections", "4.5");
     let commons = DependencySpec::new("org.apache.commons", "commons-lang3", "3.14.0")
@@ -438,6 +531,42 @@ fn sample_specs() -> Vec<DependencySpec> {
     let opentest = DependencySpec::new("org.opentest4j", "opentest4j", "1.3.0");
 
     vec![commons, commons_transitive, junit, junit_api, opentest]
+}
+
+fn parity_specs() -> Vec<DependencySpec> {
+    let runtime_leaf =
+        DependencySpec::new("com.example", "runtime-leaf", "1.0.0");
+    let runtime_core = DependencySpec::new("com.example", "runtime-core", "1.0.0")
+        .with_dependencies(vec![DependencyCoordinate::new(
+            "com.example",
+            "runtime-leaf",
+            "1.0.0",
+        )]);
+    let provided_only =
+        DependencySpec::new("com.example", "provided-helper", "1.0.0");
+    let test_helper =
+        DependencySpec::new("com.example", "test-helper", "1.0.0");
+    let optional_helper =
+        DependencySpec::new("com.example", "optional-helper", "1.0.0");
+    let app = DependencySpec::new("com.example", "parity-app", "1.0.0")
+        .with_dependencies(vec![
+            DependencyCoordinate::new("com.example", "runtime-core", "1.0.0"),
+            DependencyCoordinate::new("com.example", "provided-helper", "1.0.0")
+                .with_scope("provided"),
+            DependencyCoordinate::new("com.example", "test-helper", "1.0.0")
+                .with_scope("test"),
+            DependencyCoordinate::new("com.example", "optional-helper", "1.0.0")
+                .optional(),
+        ]);
+
+    vec![
+        app,
+        runtime_core,
+        runtime_leaf,
+        provided_only,
+        test_helper,
+        optional_helper,
+    ]
 }
 
 #[test]
@@ -600,6 +729,107 @@ fn wrapper_pubgrub_strategy_downloads_jars() -> Result<()> {
         "junit api jar missing: {}",
         api_path.display()
     );
+
+    Ok(())
+}
+
+#[test]
+fn wrapper_default_matches_maven_dependency_resolve_jars() -> Result<()> {
+    let Some(jvpm_bin) = cargo_bin_path("jvpm") else {
+        eprintln!("skipping wrapper_default_matches_maven_dependency_resolve_jars: jvpm binary unavailable");
+        return Ok(());
+    };
+    let Some(mvn_bin) = maven_binary() else {
+        eprintln!("skipping wrapper_default_matches_maven_dependency_resolve_jars: maven binary unavailable");
+        return Ok(());
+    };
+
+    let home = tempdir().context("failed to create home tempdir")?;
+    let repo_dir = home.path().join("fake-maven");
+    let specs = parity_specs();
+    StubMavenRepo::create(&repo_dir, &specs)?;
+    let server = StubMavenServer::start(repo_dir)?;
+    write_global_config(home.path(), &server.base_url())?;
+    let settings = write_maven_settings(home.path(), &server.base_url())?;
+
+    let app = specs
+        .iter()
+        .find(|spec| spec.artifact == "parity-app")
+        .cloned()
+        .expect("parity-app spec missing");
+
+    let maven_repo = home.path().join(".m2").join("repository");
+    let maven_project = tempdir().context("failed to create maven tempdir")?;
+    write_dependency_pom(maven_project.path(), &app)?;
+    let mut mvn = Command::new(&mvn_bin);
+    configure_command(&mut mvn, maven_project.path(), home.path())?;
+    mvn.args([
+        "-B",
+        "-s",
+        settings
+            .to_str()
+            .ok_or_else(|| anyhow!("settings path not valid utf-8"))?,
+        &format!("-Dmaven.repo.local={}", maven_repo.display()),
+        "-DincludeProvided=true",
+        "-DincludeOptional=false",
+        "dependency:resolve",
+    ]);
+    let output = mvn
+        .output()
+        .context("failed to run maven dependency:resolve")?;
+    if !output.status.success() {
+        bail!(
+            "maven dependency:resolve failed: {}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    let maven_jars = collect_relative_jars(&maven_repo)?;
+    assert!(
+        maven_jars.iter().any(|path| path.contains("runtime-core")),
+        "runtime dependency missing from maven resolution: {maven_jars:?}"
+    );
+    assert!(
+        maven_jars.iter().any(|path| path.contains("runtime-leaf")),
+        "transitive dependency missing from maven resolution: {maven_jars:?}"
+    );
+    assert!(
+        maven_jars.iter().any(|path| path.contains("provided-helper")),
+        "provided scope jar missing from maven resolution: {maven_jars:?}"
+    );
+    assert!(
+        !maven_jars.iter().any(|path| path.contains("test-helper")),
+        "test scope jar unexpectedly present in maven resolution: {maven_jars:?}"
+    );
+    assert!(
+        !maven_jars
+            .iter()
+            .any(|path| path.contains("optional-helper")),
+        "optional dependency unexpectedly present in maven resolution: {maven_jars:?}"
+    );
+
+    let wrapper_project = tempdir().context("failed to create wrapper tempdir")?;
+    write_wrapper_pom(wrapper_project.path())?;
+    let mut add = Command::new(&jvpm_bin);
+    configure_command(&mut add, wrapper_project.path(), home.path())?;
+    add.args([
+        "add",
+        "--non-interactive",
+        "com.example:parity-app:1.0.0",
+    ]);
+    let output = add.output().context("failed to run jvpm add for parity-app")?;
+    if !output.status.success() {
+        bail!(
+            "jvpm add failed: {}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    let wrapper_repo = wrapper_project.path().join(".jv").join("repository");
+    let wrapper_jars = collect_relative_jars(&wrapper_repo)?;
+    assert_jar_sets_match(&maven_jars, &wrapper_jars)?;
 
     Ok(())
 }

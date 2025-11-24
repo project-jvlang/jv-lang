@@ -360,37 +360,6 @@ run_wrapper_scenario() {
     done
 }
 
-write_jv_manifest() {
-    local target_dir="$1"
-    cat <<EOF > "$target_dir/jv.toml"
-[package]
-name = "jv-wrapper-perf"
-version = "0.1.0"
-
-[package.dependencies]
-
-[project]
-entrypoint = "src/main.jv"
-
-[project.sources]
-include = ["src/**/*.jv"]
-
-[project.output]
-directory = "target"
-
-[[repositories]]
-name = "perf-repo"
-url = "$REPOSITORY_URL"
-priority = 5
-EOF
-    mkdir -p "$target_dir/src"
-    cat <<'EOF' > "$target_dir/src/main.jv"
-fun main() {
-    println("benchmark")
-}
-EOF
-}
-
 run_jv_scenario() {
     local label="$1"
     local dependency="$2"
@@ -405,7 +374,6 @@ run_jv_scenario() {
         if [[ "$run" -eq 1 ]]; then clean_caches; fi
         write_dependency_pom "$maven_run_dir"
         run_maven_with_verify "$run" "$maven_run_dir" "$label"
-        write_jv_manifest "$run_dir"
         cp "$maven_run_dir/maven-jars.txt" "$run_dir/maven-jars.txt"
         if [[ -n "$strategy" ]]; then
             run_and_log "jv add $dependency ($label) run #$run" "$run_dir" env JVPM_BIN="$JVPM_BIN" "$JV_BIN" add --non-interactive --strategy "$strategy" "$dependency"
